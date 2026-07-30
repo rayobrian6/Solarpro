@@ -1,0 +1,43 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.505Z",
+  "artifact": "braidon-ppc-spacing-language-scan",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§3 — one canonical SpacingAuthority; no unsupported maximum-spacing language",
+  "authority": {
+    "designSpacingIn": 48,
+    "maximumVerifiedSpacingIn": null,
+    "sourceDocument": null,
+    "applicableRoofZone": "Array attachment field (all roof planes)",
+    "loadConditions": "115 mph wind · 0 psf roof snow (ASCE 7-22)",
+    "verificationState": "unverified",
+    "designLabel": "DESIGN ATTACHMENT SPACING: 48 IN. O.C.",
+    "statusLabel": "PENDING STRUCTURAL VERIFICATION"
+  },
+  "before": {
+    "rootCause": "lib/drafting/sheetComposition.ts:504 sourced the value from a legacy field literally named `maxAllowedSpacing`, then operator input, then a racking rated max, then a hardcoded 48 — \"maximum allowed\" semantics in the FIELD NAME, with no verificationState. Every downstream `O.C. MAX` string was a faithful render of a mis-modelled field.",
+    "renderedOccurrences": {
+      "O.C. MAX": 5,
+      "48\" O.C. MAX": 3,
+      "4'-0\" ATTACH. O.C. MAX": 1
+    },
+    "note": "counts from the audited (6) package and the HEAD-at-baseline regen (both 5)"
+  },
+  "after": {
+    "O.C. MAX": 0,
+    "MAX/MAXIMUM near a spacing token": 0,
+    "spacing token near MAX/MAXIMUM": 0,
+    "allowable/approved spacing": 0,
+    "MAXIMUM ALLOWED (any context)": 0
+  },
+  "canonicalLineRendered": {
+    "designLabel": "DESIGN ATTACHMENT SPACING: 48 IN. O.C.",
+    "statusLabel": "PENDING STRUCTURAL VERIFICATION",
+    "designLineOccurrences": 5,
+    "pendingStatusOccurrences": 10
+  },
+  "unitConsistency": {
+    "rule": "PV-3 states the spacing in ONE unit (inches)",
+    "feetInchesFormOccurrences": 0
+  }
+}

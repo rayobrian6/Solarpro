@@ -71,6 +71,28 @@ add('derived.dcKw', (snap.derived.dcWattsStc / 1000).toFixed(2),
 add('project.ahj.adoptedCodes.nec', snap.project.ahj.adoptedCodes.nec,
   findAll(/NEC\s+(20\d\d)/g));
 
+// ── V11 (W4 §2) ACTIVATED — cross-sheet code-edition identity, BLOCKING ──────
+// Every sheet that prints a code edition tags it with data-code-edition="<kind>"
+// (title block on every sheet + cover + validation). The printed label must be
+// IDENTICAL across sheets AND equal the ONE snapshot codeAuthority projection —
+// no sheet may substitute a newer/older edition, and no edition may be printed
+// that the authority does not carry (PENDING when unknown). Any disagreement is
+// a blocking authority-bypass (non-zero exit).
+{
+  const FAMILY = { nec: 'NEC', ibc: 'IBC', irc: 'IRC', ifc: 'IFC', asce: 'ASCE' };
+  const ca = snap.codeAuthority ?? null;
+  for (const kind of Object.keys(FAMILY)) {
+    const ed = ca?.editions?.[kind]?.edition ?? null;
+    const expectedLabel = `${FAMILY[kind]} ${ed ?? 'PENDING'}`;
+    const instances = findAll(
+      new RegExp(`data-code-edition="${kind}">([^<]+)<`, 'g'),
+      (m) => m[1].trim());
+    // V11 is BLOCKING: printed editions must be present, identical, and match
+    // the authority projection exactly.
+    add(`codeAuthority.editions.${kind}`, expectedLabel, instances, true);
+  }
+}
+
 // wind speed
 add('structural.loads.windSpeedMph', snap.structural.loads.windSpeedMph,
   findAll(/(\d{2,3})\s*MPH/gi, m => Number(m[1])));

@@ -15,6 +15,8 @@ import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 
 // Permit engine imports (modularized)
 import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
+import { resolveSnapshotAuthorityInputs } from '@/lib/permit/snapshot/authorityInputs';
+import { PERMIT_ARTIFACT_PROFILE, type PlansetProfile } from '@/lib/permit/plansetProfile';
 import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
 import { applyAerialEdgeSnapRegistration } from '@/lib/permit/utils/aerialEdgeSnap';
@@ -99,6 +101,70 @@ import { canonicalToPermitRoofPlanes, isCanonicalUsableForPlanset } from '@/lib/
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';          // Ensure Node.js runtime (Buffer, child_process)
 export const maxDuration = 60;            // 60s — aerial API calls can take 10-15s total
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AAC WS-9 — PRIOR SNAPSHOT DIGEST (the engineering-review lookup key).
+//
+// A digest-bound approval can only be FOUND if something knows which digest to
+// look for, and the CURRENT digest does not exist until the build completes.
+// The prior artifact's digest is the correct lookup key: it is the set the
+// reviewer actually saw. Whether that approval still COVERS the set being built
+// is decided afterwards, by the existing `reviewedDigest === meta.digest` check
+// in certPages / validate / the issue-state gate. So this helper can never
+// clear anything on its own — it only makes a real approval visible.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * AAC WS-10 + post-AAC profile contract — pin the planset output profile on the
+ * input the artifact is built from. The PERMIT ARTIFACT defaults to
+ * 'design-review' (the compact set ending on PE-1 as the final engineer-review
+ * sheet, explicitly marked NOT FOR PERMIT SUBMISSION). Callers select any
+ * profile explicitly (body field or `?plansetProfile=full|permit|design-review`);
+ * a 'permit' (PERMIT_SUBMISSION) request while the engineering review is
+ * pending renders as an explicitly-marked NON-SUBMITTABLE PREVIEW — the system
+ * never silently emits a permit-submission package for an unreviewed snapshot.
+ * This is a COMPOSITION choice only — the snapshot, the release registry and
+ * the BOM are built identically under every profile.
+ */
+function applyPlansetProfile(input: PermitInput, req: NextRequest): void {
+  const carrier = input as unknown as { plansetProfile?: PlansetProfile };
+  const fromQuery = req.nextUrl?.searchParams?.get('plansetProfile');
+  const requested = carrier.plansetProfile
+    ?? (fromQuery === 'full' || fromQuery === 'permit' || fromQuery === 'design-review' ? fromQuery : undefined);
+  carrier.plansetProfile = requested ?? PERMIT_ARTIFACT_PROFILE;
+}
+
+/** Read the digest off an input that already carries a frozen snapshot. */
+function attachPriorSnapshotDigest(input: PermitInput): void {
+  const d = (input as unknown as { _snapshot?: { meta?: { digest?: string } } })._snapshot?.meta?.digest;
+  if (typeof d === 'string' && d.trim()) {
+    (input as unknown as Record<string, unknown>)._priorSnapshotDigest = d;
+  }
+}
+
+/** Read the prior digest from the stored permit_input.json. Fail-soft in every
+ *  direction: no projectId, no row, unparseable JSON or a DB failure all leave
+ *  the input untouched, and the review requirement then stays open. */
+async function attachPriorSnapshotDigestFromStore(input: PermitInput, projectId: string | undefined): Promise<void> {
+  if (!projectId || !isValidUUID(projectId)) return;
+  try {
+    const sql = await getDbReady();
+    const rows = await sql`
+      SELECT file_data FROM project_files
+      WHERE project_id = ${projectId} AND file_name = 'permit_input.json'
+      ORDER BY updated_at DESC NULLS LAST LIMIT 1
+    `;
+    const buf = (rows as { file_data?: Buffer }[])[0]?.file_data;
+    if (!buf) return;
+    const prior = JSON.parse(Buffer.from(buf).toString('utf8')) as { _snapshot?: { meta?: { digest?: string } } };
+    const d = prior?._snapshot?.meta?.digest;
+    if (typeof d === 'string' && d.trim()) {
+      (input as unknown as Record<string, unknown>)._priorSnapshotDigest = d;
+    }
+  } catch {
+    // fail-soft: an unreadable prior artifact is not an approval, and never a gate.
+  }
+}
 
 function isRoofPermitRequest(input: PermitInput): boolean {
   // Error 5n fix: layout.type, layout.groundArrays, layout.fenceSegments, and
@@ -214,8 +280,30 @@ export async function GET(req: NextRequest) {
           // Google-fallback aerials need the async edge-snap registration
           // computed before the (sync) render — see utils/aerialEdgeSnap.ts.
           await applyAerialEdgeSnapRegistration(savedInput);
-          const freshHtml = generatePermitHTML(savedInput);
-          console.log(`[permit/GET] Self-heal: regenerated v${savedVerNum || 0} -> v${PLANSET_ENGINE_VERSION} from permit_input.json`, { projectId });
+          // AAC WS-1 — GET/POST PARITY. This path used to call generatePermitHTML
+          // with NO snapshotAuthority, so a regenerated preview silently used the
+          // fail-soft defaults and could disagree with the POST artifact (audit
+          // §7.11 / §5 "two wiring gaps"). BOTH permit paths now run the SAME
+          // resolution lifecycle before the sync build. It never throws.
+          // AAC WS-9 — the PRIOR snapshot digest, so engineering-review-record@v1
+          // can look for a licensed approval bound to the set that was last
+          // produced. The build re-checks `reviewedDigest === meta.digest`, so a
+          // stale approval still fails closed; this only lets a CURRENT one be
+          // seen at all.
+          attachPriorSnapshotDigest(savedInput);
+          // Post-AAC profile contract — GET/POST parity for the OUTPUT PROFILE
+          // too: a stored input with no profile used to fall back to the engine
+          // default ('full'), so a self-healed preview could silently be a
+          // different package than the POST artifact. Pin the same artifact
+          // default; a profile stored on the input (an explicit caller choice)
+          // is respected.
+          if (!(savedInput as unknown as { plansetProfile?: string }).plansetProfile) {
+            (savedInput as unknown as { plansetProfile?: string }).plansetProfile = PERMIT_ARTIFACT_PROFILE;
+          }
+          const selfHealAuthority = await resolveSnapshotAuthorityInputs(savedInput);
+          const freshHtml = generatePermitHTML(savedInput, undefined, selfHealAuthority);
+          console.log(`[permit/GET] Self-heal: regenerated v${savedVerNum || 0} -> v${PLANSET_ENGINE_VERSION} from permit_input.json`
+            + ` (resolution: ${selfHealAuthority.resolution?.iterations ?? 0} iteration(s), stabilized=${selfHealAuthority.resolution?.stabilized ?? false})`, { projectId });
           html = freshHtml;
           // Persist the fresh copy (best-effort)
           try {
@@ -680,14 +768,59 @@ export async function POST(req: NextRequest) {
                 return db;
               };
               body.project.ahjName          = _ahjWins(body.project.ahjName, ar.ahjName, 'ahjName');
-              body.project.ahjWindSpeedMph  = _ahjWins(body.project.ahjWindSpeedMph, ar.windSpeedMph, 'windSpeedMph');
-              body.project.ahjGroundSnowPsf = _ahjWins(body.project.ahjGroundSnowPsf, ar.groundSnowLoadPsf, 'groundSnowPsf');
+              // ── AAC WS-4 (2026-07-27): THE TABLE NO LONGER WINS ON SITE HAZARDS ──
+              // Ray's 2026-07-01 "AHJ DB is the single source of truth" ruling is
+              // about AHJ POLICY (setbacks, fees, plan-check days, the enforced NEC
+              // year). Wind speed, ground snow and the seismic design category are
+              // NOT AHJ policy — they are SITE properties of a coordinate, and the
+              // curated ahj-national row carries them with no ordinance, no
+              // effective date and no hash. (The live AHJ registry client refuses to
+              // publish them for exactly this reason: ahjRegistry.ts:134-138.)
+              // Braidon proved the cost: the table would force 110 mph / 20 psf /
+              // SDC 'B'; the ASCE 7-22 + USGS retrieval returns 107.5 mph /
+              // 23.3 psf / SDC 'D'. So for these three the table is now a
+              // FILL-IF-EMPTY fallback, and where each value came from is STAMPED,
+              // so the WS-4 resolver can tell an authority that disagrees with the
+              // retrieval (⇒ OPERATOR_CONFIRMATION) from a sourceless default
+              // (⇒ superseded outright).
+              const _hadWind = body.project.ahjWindSpeedMph != null;
+              const _hadSnow = body.project.ahjGroundSnowPsf != null;
+              const _hadSdc  = project.seismicCategory != null && String(project.seismicCategory) !== '';
+              if (!_hadWind && ar.windSpeedMph != null) body.project.ahjWindSpeedMph = ar.windSpeedMph;
+              if (!_hadSnow && ar.groundSnowLoadPsf != null) body.project.ahjGroundSnowPsf = ar.groundSnowLoadPsf;
+              // Post-AAC seismic repair: the SDC table fill is DEAD. The curated
+              // row's category is unprovenanced (Braidon: table 'B' vs the verified
+              // USGS/ASCE retrieval 'D'), and unlike wind/snow the seismic
+              // fill-if-empty had NO retrieval override wired downstream — the 'B'
+              // seeded here printed on the cover as if resolved. The canonical
+              // seismic result now comes from resolveSeismicAuthority (retrieval
+              // record or the verified archived climate-hazard document) in
+              // generatePermit; with no authority the sheets print PENDING, never
+              // a substituted table value.
+              (body.project as Record<string, unknown>).environmentalValueProvenance = {
+                windSpeedMph: _hadWind ? 'operator-entered'
+                  : body.project.ahjWindSpeedMph != null ? 'unprovenanced-table' : 'absent',
+                groundSnowPsf: _hadSnow ? 'operator-entered'
+                  : body.project.ahjGroundSnowPsf != null ? 'unprovenanced-table' : 'absent',
+                seismicDesignCategory: _hadSdc ? 'operator-entered' : 'absent',
+                basis: 'Wind / ground snow are SITE properties of a coordinate, not AHJ policy. The curated '
+                  + 'ahj-national table has no adoption ordinance, no effective date and no hash, so it fills these '
+                  + 'only when the project carries nothing, and never overwrites an operator value. The SDC table '
+                  + 'fill is retired entirely (post-AAC seismic repair) — the canonical seismic result comes from '
+                  + 'resolveSeismicAuthority (retrieval record or verified archived climate-hazard document) or '
+                  + 'prints PENDING. The authority is the ASCE 7 hazard retrieval (environmental-load-authority@v1).',
+                tableOffered: {
+                  windSpeedMph: ar.windSpeedMph ?? null,
+                  groundSnowLoadPsf: ar.groundSnowLoadPsf ?? null,
+                  seismicDesignCategory: ar.seismicDesignCategory ?? null,
+                  record: ar.id ?? null,
+                },
+              };
               body.project.ahjRoofSetbackIn  = _ahjWins(body.project.ahjRoofSetbackIn, ar.roofSetbackInches, 'roofSetbackIn');
               body.project.ahjRidgeSetbackIn = _ahjWins(body.project.ahjRidgeSetbackIn, ar.ridgeSetbackInches, 'ridgeSetbackIn');
               body.project.ahjNecVersion    = _ahjWins(body.project.ahjNecVersion, ar.necVersion, 'necVersion');
               body.project.ahjPermitFee     = _ahjWins(body.project.ahjPermitFee, ar.typicalPermitFee, 'permitFee');
               body.project.ahjPlanCheckDays = _ahjWins(body.project.ahjPlanCheckDays, ar.typicalPlanCheckDays, 'planCheckDays');
-              project.seismicCategory       = _ahjWins(project.seismicCategory, ar.seismicDesignCategory, 'seismicCategory');
               if (!body.project.ahjSpecialRequirements || body.project.ahjSpecialRequirements.length === 0) {
                 body.project.ahjSpecialRequirements = [
                   ...(ar.specialRequirements || []),
@@ -1399,7 +1532,29 @@ export async function POST(req: NextRequest) {
 
     await applyAerialEdgeSnapRegistration(enrichedBody);
 
-    const html = generatePermitHTML(enrichedBody, storedSldSvg);
+    // W4 §8/§9/§12 — resolve the async document-registry + digest-invalidation
+    // authority (lib/documents + lib/reconciliation) BEFORE the sync render and
+    // thread it into the snapshot build. Fail-soft: never throws (a
+    // DB-unavailable read resolves to the not-satisfied default), so the RT-MINI
+    // blockers stay firing and ISSUED FOR PERMIT remains impossible until a
+    // verified document is archived (migrations 113/114 pending).
+    // AAC WS-9 — carry the PRIOR snapshot digest onto the input so the
+    // engineering-review resolver can look for a licensed approval bound to the
+    // set that was last produced for this project. This is a READ of the stored
+    // artifact only, it is fail-soft, and it can never satisfy the gate on its
+    // own: the build re-checks `reviewedDigest === meta.digest` against the
+    // digest it is about to freeze, so an approval of a superseded set is
+    // refused exactly as it must be.
+    await attachPriorSnapshotDigestFromStore(enrichedBody, projectId);
+    // ── AAC WS-10 — the PERMIT ARTIFACT defaults to the compact permit profile.
+    // The full internal package (RS-1 review status, the SCHED procurement
+    // continuations, APP-A, the certification placeholders, DS-n inline) is
+    // still generatable on demand: post `plansetProfile: 'full'`. The snapshot,
+    // the release registry, every requirement and the BOM are identical under
+    // both profiles — only the page composition differs.
+    applyPlansetProfile(enrichedBody, req);
+    const snapshotAuthority = await resolveSnapshotAuthorityInputs(enrichedBody);
+    const html = generatePermitHTML(enrichedBody, storedSldSvg, snapshotAuthority);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });
 
     // ── Save permit HTML to project_files for permit-preview GET endpoint ──────

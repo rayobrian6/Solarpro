@@ -12,13 +12,23 @@ import {
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { resolvePanelSpecs } from '../utils/panelSpecs';
-import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
+import { projectStructuralFromInput } from '../snapshot/structuralProjection';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { structuralBannerHtml } from '../utils/structuralBanner';
+import { resolveFireSetbackIn, arrayCoverageFrac, resolveFireSetbackBasis } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
 import { classifyPanel } from '../utils/subSystems';
 import { isHybridPlanset, primarySubKey, subScopedView, subScopedInput } from './subSystemSheets';
 import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../utils/branching';
+// §5 (BAR closeout 2026-07-25) — PV-1B is the AC BRANCH CIRCUIT LAYOUT, so the
+// open-air branch grounding method + its quantity must read the SAME canonical
+// authority E-1 / PV-4B project (gate 7: separate-EGC language on any sheet
+// requires the matching route + BOM quantity). Read-only projection.
+import { peekSnapshot } from '../snapshot/read';
+import { projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
+import { GROUNDING_PENDING_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -50,6 +60,7 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
   return `
   <div class="page">
     ${titleBlock(input, 'PV-1', 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS', pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: 'PV-1' })}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
@@ -79,6 +90,7 @@ export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: 
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SITE & GROUND ARRAY PLAN', pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: opts?.sheetId ?? 'PV-1' })}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
@@ -113,6 +125,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: opts?.sheetId ?? 'PV-1' })}
     ${composeDrawPage(comp, primarySvg, secondarySvg)}
   </div>`;
 }
@@ -129,8 +142,9 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 // uses via getPrimaryView(roof_plan), so PV-1 and PV-1B came out as literal
 // duplicates. Removed: PV-1B now renders its own schematicGridSvg below.
 
-export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: { sheetId?: string; titleSuffix?: string }): string {
+export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; titleSuffix?: string }): string {
   const { project, system } = input;
+  const _cpArr = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
   // CAD-sourced: use cad.totalPanels as authoritative count
   const cadTotalPanels = cad.totalPanels;
   const cadSystemType = cad.systemType;
@@ -438,7 +452,12 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     // the GROUND top-view colors modules by string (PV-1BG was a clone of PV-1G's
     // physical layout). Only string systems get a string map; micro = AC branches.
     const _groundCircuit = !_isMicro ? { strings: totalStrings, colors: stringColors } : null;
-    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, null, panelColorById, _groundCircuit);
+    // Pass the RenderContext (carries the PermitDesignSnapshot) so the circuit
+    // sheet draws modules as PURE PROJECTIONS of the canonical drawnPolygon
+    // (viewport∘DT-SITE) — the SAME 31 polygons/ids PV-1 draws — instead of the
+    // legacy locally-recreated rects. Without the snapshot the renderer falls
+    // back to the legacy rect (standalone preview only).
+    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, ctx ?? null, panelColorById, _groundCircuit);
     if (roofSvg && roofSvg.length > 500) {
       agDrawSvg = roofSvg;
     } else {
@@ -465,19 +484,45 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // panel-spec authority; single-system output is unchanged (no hybrid
   // carriage → legacy scalars).
   const _fsPanelDims = (() => {
-    const legacyL = (project.panelLengthIn as number) || 66;
-    const legacyW = (project.panelWidthIn as number) || 40;
+    // W3 §2 — module footprint for the fire-setback coverage test PROJECTS from
+    // the canonical snapshot module instance (exact catalog dims). The generic
+    // 66×40 fallback is deleted; per-sub hybrids still resolve the roof sub's
+    // own dims. No snapshot (standalone) → project scalars, never a made-up size.
+    const _spDims = projectStructuralFromInput(input);
+    const snapL = _spDims.moduleHeightIn, snapW = _spDims.moduleWidthIn;
+    const legacyL = (snapL ?? (project.panelLengthIn as number)) || 0;
+    const legacyW = (snapW ?? (project.panelWidthIn as number)) || 0;
     if (!isHybridPlanset(cad)) return { L: legacyL, W: legacyW };
     const ps = resolvePanelSpecs(input, cad, 'roof');
     if (!(ps.lengthIn > 0 && ps.widthIn > 0)) return { L: legacyL, W: legacyW };
     if (Math.abs(ps.lengthIn - legacyL) > 0.05 || Math.abs(ps.widthIn - legacyW) > 0.05) {
       console.warn(`[PV-1B] fire-setback coverage recomputed from roof-sub module dims: `
-        + `${legacyL}x${legacyW}in (project panel0 scalars) → ${ps.lengthIn}x${ps.widthIn}in (${ps.model})`);
+        + `${legacyL}x${legacyW}in (snapshot/project panel0) → ${ps.lengthIn}x${ps.widthIn}in (${ps.model})`);
     }
     return { L: ps.lengthIn, W: ps.widthIn };
   })();
   const _fsCovEarly = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2Early, _fsMeanPitch);
   const _fsInEarly = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCovEarly);
+
+  // The canonical open-air branch grounding authority (the SAME object E-1 / PV-4B
+  // print). Corrected 2026-07-25: the METHOD comes from the document-based
+  // three-outcome resolver, never from the cable conductor count. Under the live
+  // PENDING outcome PV-1B states the pending authority \u2014 it does not assert an EGC.
+  const _agGnd = projectOpenAirBranchGrounding(peekSnapshot(input));
+  const _agGndCallout = (!_isMicro || !_agGnd.present) ? []
+    : _agGnd.outcome === 'PENDING_MANUFACTURER_AUTHORITY'
+      ? [{ n: 5, label: 'Open-Air Branch Grounding',
+           sub: `${GROUNDING_PENDING_LABEL} \u2014 method NOT ESTABLISHED for the selected `
+              + `${_agGnd.authority?.selectedMicroinverterSku ?? 'micro'} + ${_agGnd.authority?.selectedCableAssemblySku ?? 'cable'}; `
+              + `candidate ${_agGnd.conductorSize ?? '\u2014'} ${_agGnd.bomFootageFt ?? '\u2014'} ft = DESIGN QTY, NOT ORDERABLE `
+              + `(${GROUNDING_AUTHORITY_BLOCKER_CODE}; see RS-1 / E-1 / PV-4B)` }]
+      : _agGnd.outcome === 'NO_SEPARATE_EGC_REQUIRED'
+        ? [{ n: 5, label: 'Open-Air Branch Grounding',
+             sub: `LISTED METHOD per ${_agGnd.authority?.documentId ?? 'the verified manufacturer document'} \u2014 no additional `
+                + `grounding conductor in the open-air branch section; module/racking bonding still required (see E-1 / PV-4B)` }]
+        : [{ n: 5, label: 'NEC 250.122 Branch EGC',
+             sub: `ADDITIONAL ${_agGnd.conductorSize ?? '#12'} ${_agGnd.conductorMaterial ?? 'Cu'} EGC open-air with each branch trunk `
+                + `per ${_agGnd.authority?.documentId ?? 'the verified manufacturer document'} \u2014 ${_agGnd.bomFootageFt ?? 'PENDING'} ft (BOM); see E-1 / PV-4B` }];
 
   // Callout notes for data zone
   const agCalloutRows = [
@@ -488,6 +533,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa71204.2 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
        sub: isRoof(cadSystemType) ? `${_fsInEarly}" ridge \xb7 18" hip/valley setback` : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
     { n: 4, label: 'DC Capacity', sub: `${system.totalDcKw?.toFixed(2) || '\u2014'} kW DC` },
+    ..._agGndCallout,
   ].map(c =>
     `<div class="callout-row">` +
     `<span class="callout-bubble">${c.n}</span>` +
@@ -501,13 +547,23 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // P0-2: same roof-sub module dims as the callout block above — never panel0.
   const _fsCov = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2, _fsMeanPitch);
   const _fsIn = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCov);
+  // \u00a715 \u2014 the setback GEOMETRY is a modeled design assumption; the authority
+  // BASIS stays PROVISIONAL until the AHJ + adopted IFC edition are verified.
+  // Never assert "per AHJ" against an unverified/pending IFC adoption.
+  const _fbArr = resolveFireSetbackBasis({ ifcEdition: _cpArr.ifc, verificationStatus: _cpArr.verificationStatus, ahjName: _cpArr.ahjName });
+  const _amendNote = _fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)'
+    : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)'
+    : (_fbArr.verified ? ' (per adopted AHJ amendment)' : ' (provisional \u2014 pending AHJ amendment verification)');
   const agSupplemental = isRoof(cadSystemType) ? `
-    <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
+    <div class="draw-zone-hdr">FIRE SETBACKS \u2014 ${_fbArr.verified ? escapeH(_fbArr.citation) : 'PROVISIONAL BASIS'}</div>
+    <div style="padding:2px 4px;font-size:6px;line-height:1.4;font-weight:700;color:${_fbArr.verified ? '#127a3e' : '#8a5a00'};background:${_fbArr.verified ? '#eefaf0' : '#fff7e6'};border:1px solid ${_fbArr.verified ? '#127a3e' : '#c9962a'};margin:0 0 3px;">
+      ${escapeH(_fbArr.basisLabel)} \u2014 setback dimensions below are MODELED per IFC \xa71204.2; ${_fbArr.verified ? 'adopted requirement confirmed.' : 'not yet confirmed as an adopted AHJ requirement.'}
+    </div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 ${_fsIn}" ridge fire setback \u2014 IFC 2021 \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
-      <div>\u2022 18" clear at hips/valleys \u2014 IFC 2021 \xa71204.2.1.2</div>
+      <div>\u2022 ${_fsIn}" ridge fire setback \u2014 IFC ${_fbArr.verified ? escapeH(_cpArr.ifc as string) : '(edition pending)'} \xa71204.2.1.1${_amendNote}</div>
+      <div>\u2022 18" clear at hips/valleys \u2014 IFC ${_fbArr.verified ? escapeH(_cpArr.ifc as string) : '(edition pending)'} \xa71204.2.1.2</div>
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
-      <div>\u2022 36" access pathway per AHJ</div>
+      <div>\u2022 36" access pathway \u2014 ${_fbArr.verified ? 'per adopted AHJ requirement' : 'modeled; pending AHJ / IFC verification'}</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>
       ${_isMicro && totalStrings > 5 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner 6C accepts 5; remaining branches land on AC subpanel, see E-1</div>` : ''}
     </div>` :
@@ -539,7 +595,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
   return `
   <div class="page">
-    ${titleBlock(input, opts?.sheetId ?? 'PV-1B', `ARRAY GEOMETRY & STRING LAYOUT${opts?.titleSuffix ?? ''}`, pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-1B', `${_isMicro ? 'AC BRANCH CIRCUIT LAYOUT' : 'ARRAY GEOMETRY & STRING LAYOUT'}${opts?.titleSuffix ?? ''}`, pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: opts?.sheetId ?? 'PV-1B' })}
     <!-- PIPELINE v47.343: PV-2B now uses draw-zone/data-zone layout -->
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->

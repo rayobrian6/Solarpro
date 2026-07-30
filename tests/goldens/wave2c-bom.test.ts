@@ -198,10 +198,17 @@ describe('Wave 2c — hybrid Enphase roof(48) + Solis ground(26) + EcoFlow fence
     // One conduit-fitting set, one grounding electrode system.
     expect(bom.items.filter(i => i.category === 'conduit_fitting' && i.stageId === 'ac')).toHaveLength(4);
     expect(bom.items.filter(i => i.partNumber === 'GR-5/8-8')).toHaveLength(1);
-    // Shared service lines carry NO subSystem stamp.
-    for (const i of bom.items.filter(x => x.stageId === 'ac' && x.category !== 'junction_box')) {
+    // Shared service lines (disconnect, taps, conduit fittings, service EGC) carry
+    // NO subSystem stamp. §13 (07-22): a micro sub's Q-Cable / AC trunk + its
+    // terminators/sealing caps are PER-SUB AC BRANCH equipment now filed in Stage 4
+    // (AC) — they legitimately carry their sub stamp and are excluded here.
+    const PER_SUB_AC = new Set(['junction_box', 'trunk_cable', 'terminator', 'sealing_cap']);
+    for (const i of bom.items.filter(x => x.stageId === 'ac' && !PER_SUB_AC.has(x.category))) {
       expect(i.subSystem, `${i.category} ${i.model}`).toBeUndefined();
     }
+    // §13 — the roof micro sub's Q-Cable trunk IS in Stage 4 (AC), sub-stamped.
+    const roofTrunk = bom.items.filter(i => i.stageId === 'ac' && i.category === 'trunk_cable' && i.subSystem === 'roof');
+    expect(roofTrunk.length).toBeGreaterThan(0);
   });
 
   it('Stage 5: roof racking scaled to the roof subset and stamped roof', () => {

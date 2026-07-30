@@ -1,0 +1,84 @@
+{
+  "section": "BAR §7 — sealing caps and terminators from TOPOLOGY, not branchCount",
+  "contract": "Model the objects separately: branch terminator (actual cable ends), occupied connector/drop, unused connector/drop, unused-connector sealing cap, branch starting/ending connector. Terminators = actual required cable-end objects. Sealing caps = actual unused connector/drop objects. Connectors = occupied drops. BOM + evidence list the source object IDs.",
+  "topology": {
+    "branchCount": 3,
+    "occupiedDrops": 31,
+    "perBranch": [
+      {
+        "branchId": "br-1",
+        "branchLabel": "B1",
+        "dropCount": 11,
+        "cableEndObjectId": "B1-END"
+      },
+      {
+        "branchId": "br-2",
+        "branchLabel": "B2",
+        "dropCount": 10,
+        "cableEndObjectId": "B2-END"
+      },
+      {
+        "branchId": "br-3",
+        "branchLabel": "B3",
+        "dropCount": 10,
+        "cableEndObjectId": "B3-END"
+      }
+    ]
+  },
+  "occupiedConnectors": {
+    "count": 31,
+    "basis": "31 modules = 31 microinverters = 31 occupied drops (B1 11 / B2 10 / B3 10), read from the branch objects — not a per-branch constant."
+  },
+  "terminators": {
+    "quantity": 3,
+    "sourceObjectIds": [
+      "B1-END",
+      "B2-END",
+      "B3-END"
+    ],
+    "basis": "one per branch cable FAR-END (the end away from the J-box transition) — the quantity happens to equal the branch count because each branch has exactly one far end, but it is DERIVED from the enumerated cable-end objects, not from branches.length.",
+    "renderedRow": [
+      "Terminator (branch end, single-use)",
+      "Terminator (branch end, single-use) — one per branch cable FAR-END (away from the J-box transition). Cable-end objects: B1-END, B2-END, B3-END"
+    ]
+  },
+  "sealingCaps": {
+    "state": "PENDING — quantity not established",
+    "quantityOrdered": null,
+    "priorState": "3 caps, justified as \"service-loop unused drops (1 per AC branch)\" — a per-branch constant with no topology behind it.",
+    "derivation": "Q Cable is procured BY DROP (Q-12-10-240, soldBy: drop): 31 drops ordered = 31 micros = 31 occupied drops ⇒ the drop-count procurement model establishes 0 surplus connectors. The resolver models no fixed-length cable sections, so the number of UNUSED connectors on the pieces actually cut cannot be established from the current authority.",
+    "honestOutcome": "Rather than invent a cap count, the row renders QUANTITY PENDING (topology-derived, NOT 1-per-branch) with its full derivation. Gate 9 accepts the recorded PENDING state and FAILS any topology-independent (per-branch) quantity.",
+    "renderedRow": [
+      "Sealing Cap (unused connector)",
+      "Sealing Cap (unused connector) — QUANTITY PENDING (topology-derived, NOT 1-per-branch): 31 drops ordered = 31 micros = 31 occupied drops; drop-count procurement establishes 0 surplus connectors (resolver models no fixed-section pieces). Field service-loop / dead-drop caps depend on cable routing — determine at field verification."
+    ],
+    "clearsWhen": "a fixed-section cable-piece inventory (or an operator-entered cut list) makes ordered-connectors − occupied-drops determinate."
+  },
+  "gates": [
+    {
+      "mode": "original",
+      "gate": 9,
+      "ok": true,
+      "detail": "chained bar-wse: 3/3 checks pass"
+    },
+    {
+      "mode": "original",
+      "gate": 10,
+      "ok": true,
+      "detail": "chained bar-wse: 2/2 checks pass"
+    },
+    {
+      "mode": "live",
+      "gate": 9,
+      "ok": true,
+      "detail": "chained bar-wse: 3/3 checks pass"
+    },
+    {
+      "mode": "live",
+      "gate": 10,
+      "ok": true,
+      "detail": "chained bar-wse: 2/2 checks pass"
+    }
+  ],
+  "boundary": "No fabricated source, grounding authority, fastener SKU or manufacturer evidence. Every state below is the state the code actually produced; honest PENDING/UNVERIFIED states are recorded as such, not resolved."
+}

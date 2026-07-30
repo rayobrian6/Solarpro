@@ -253,7 +253,7 @@
       "material": "Durable engraved or UV-resistant label; weatherproof at meter/service.",
       "location": "At the supply-side connection point and on the service equipment/meter-main.",
       "codeRefs": [
-        { "code": "NEC 2020", "section": "705.11 / 705.12(A)" },
+        { "code": "NEC 2020", "section": "705.11" },
         { "code": "NEC 2023", "section": "705.11" }
       ],
       "appliesWhen": "supply-side (line-side / service-side) interconnection"

@@ -12,7 +12,13 @@
 // ============================================================
 
 import type { EngineeringReport, DesignSnapshot } from './types';
-import { buildPermitCoverSheetArtifact } from '@/lib/permit/buildPermitCoverSheet';
+// W4 §4: the legacy buildPermitCoverSheet path is RETIRED (deleted). The
+// canonical cover (PV-0) is generated only through the PermitDesignSnapshot
+// planset (lib/permit/sections/coverSheet.ts → pageCoverSheet), stored as
+// `permit_planset.html` by POST /api/engineering/permit and previewed via
+// /api/engineering/permit-preview. The pipeline no longer emits a second,
+// snapshot-blind cover artifact (its vendor/EOR defaults, independent
+// PERMIT_SHEET_INDEX and hardcoded code editions are gone).
 
 export interface ArtifactBuildInput {
   report:     EngineeringReport;
@@ -362,7 +368,10 @@ export function buildAllArtifacts(input: ArtifactBuildInput): ArtifactFile[] {
       content:  buildSystemEstimateText(input),
       notes:    'System estimate — pipeline run',
     },
-    // ── Permit Cover Sheet (PV-0) ─────────────────────────────────────────
-    buildPermitCoverSheetArtifact(input.report, input.snapshot ?? null, clientSlug),
+    // ── Permit Cover Sheet (PV-0) — RETIRED (W4 §4) ───────────────────────
+    // The pipeline no longer emits a standalone snapshot-blind cover artifact.
+    // The canonical PV-0 cover comes only from the PermitDesignSnapshot planset
+    // (permit_planset.html). getTopographyState's permit-artifact check reads
+    // permit_planset (still listed), so the "permit exists" signal is preserved.
   ];
 }

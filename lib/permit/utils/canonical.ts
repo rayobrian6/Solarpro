@@ -273,9 +273,23 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   const jx     = input.compliance?.jurisdiction;
   const canonicalSite: CanonicalSite = {
     windSpeed:        Number(struct?.wind?.windSpeed) || Number(input.project.ahjWindSpeedMph) || Number(input.project.windSpeedMph) || 0,
-    groundSnowLoad:   Number(struct?.snow?.groundSnowLoad) || 0,
+    // BAR §2 — SYMMETRY with windSpeed above. An operator/AHJ-entered ground snow
+    // load must not be silently replaced by 0 when the compliance run has not been
+    // stored: the EnvironmentalLoadAuthority records that field as an OPERATOR
+    // OVERRIDE from `project.ahjGroundSnowPsf`, so the VALUE the sheets print has to
+    // come from the same place, or the record attributes an engine default (0 psf)
+    // to the operator. (Verification state is unaffected — an operator entry is
+    // still an OBSERVATION/OVERRIDE and still fires
+    // ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED.)
+    groundSnowLoad:   Number(struct?.snow?.groundSnowLoad) || Number(input.project.ahjGroundSnowPsf) || Number(input.project.groundSnowPsf) || 0,
     exposureCategory: struct?.wind?.exposureCategory       || input.project.exposureCategory || 'C',
-    seismicSDC:       struct?.seismic?.sdc              || 'D',
+    // Post-AAC seismic repair: the hardcoded 'D' fallback is DEAD (it disagreed
+    // with the fixtures' 'B' by construction — two invented defaults feeding two
+    // different sheets). The compliance-stage value passes through as INPUT data;
+    // when the canonical seismic authority resolves (resolveSeismicAuthority in
+    // generatePermit) it overwrites this; with neither, the surfaces print the
+    // pending marker instead of a substituted category.
+    seismicSDC:       struct?.seismic?.sdc              || 'PENDING',
     state:            jx?.state                            || '—',
     ahj:              jx?.ahj                              || '—',
   };

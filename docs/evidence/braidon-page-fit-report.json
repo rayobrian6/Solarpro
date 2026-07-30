@@ -1,0 +1,236 @@
+{
+  "generatedAt": "2026-07-24T20:35:04.730Z",
+  "artifact": "braidon-page-fit-report",
+  "method": "Playwright 17×11 (96dpi); per logical sheet, lowest NON-SVG descendant vs printable box (page height − bottom padding); SVG bleed excluded. §19: plus sub-sheet internal-clip scan — every hidden-overflow container vs its own descendants.",
+  "tolInches": 0.5,
+  "internalClipTolPx": 2,
+  "sheets": 21,
+  "clipped": 0,
+  "internalClipped": 0,
+  "missingTitleBlock": 0,
+  "perSheet": [
+    {
+      "index": 0,
+      "sheetId": "PV-0",
+      "belowByIn": -0.24,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 1,
+      "sheetId": "RS-1",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: NOT FOR PERMIT SUBMISSION — 14 OPEN RELEASE ",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 2,
+      "sheetId": "PV-1",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-draw layout-plan-dominant :: ROOF PLAN — 31 MOD @ 12.40 kWdc | COMPOSITIO",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 3,
+      "sheetId": "PV-1B",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "DIV :: CIRCUIT LAYOUT — 31 MODULES / 3 BRANCHES — R",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 4,
+      "sheetId": "PV-3",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-draw layout-plan-dominant :: ATTACHMENT DETAIL — ROOF TECH RT-MINI | 2x6 ",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 5,
+      "sheetId": "PV-4C",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: PENDING STRUCTURAL ENGINEERING REVIEW\n    NO",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 6,
+      "sheetId": "PV-4C.1",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: PENDING STRUCTURAL ENGINEERING REVIEW\n    NO",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 7,
+      "sheetId": "E-1",
+      "belowByIn": -0.07,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+      "internalWorstPx": 0,
+      "internalClips": [
+        {
+          "container": "DIV",
+          "containerBox": {
+            "scrollHeight": 850,
+            "clientHeight": 731
+          },
+          "element": "",
+          "overflowPx": 119,
+          "contentOverflowPx": 0,
+          "axis": "y",
+          "meaningful": false
+        }
+      ]
+    },
+    {
+      "index": 8,
+      "sheetId": "PV-4A",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: Electrical Compliance — NEC 2020\n      \n    ",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 9,
+      "sheetId": "PV-4B",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: Conductor Schedule — NEC 310.15 Ampacity Com",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 10,
+      "sheetId": "PV-5",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: ALL WARNING LABELS SHALL BE PERMANENTLY INST",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 11,
+      "sheetId": "PV-6",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: THE PLACARD BELOW SHALL BE PERMANENTLY INSTA",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 12,
+      "sheetId": "SCHED",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: Solar Modules — each module paired 1:1 with ",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 13,
+      "sheetId": "SCHED-2",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: Bill of Materials — Full Equipment Schedule ",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 14,
+      "sheetId": "SCHED-3",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: Bill of Materials — Full Equipment Schedule ",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 15,
+      "sheetId": "APP-A",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: PV Module — Electrical Specifications\n      ",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 16,
+      "sheetId": "DS-1",
+      "belowByIn": -0.24,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 17,
+      "sheetId": "DS-2",
+      "belowByIn": -0.24,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 18,
+      "sheetId": "DS-3",
+      "belowByIn": -0.24,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 19,
+      "sheetId": "CERT",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content :: ENGINEER OF RECORD CERTIFICATION\n      \n    ",
+      "internalWorstPx": 0,
+      "internalClips": []
+    },
+    {
+      "index": 20,
+      "sheetId": "PE-1",
+      "belowByIn": -0.19,
+      "clipped": false,
+      "hasTitleBlock": true,
+      "worstElement": "page-content pe-letter :: LETTER OF STRUCTURAL COMPLIANCE\n          So",
+      "internalWorstPx": 0,
+      "internalClips": []
+    }
+  ]
+}

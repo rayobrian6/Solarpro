@@ -1,0 +1,242 @@
+{
+  "generatedAtIso": "2026-07-25T12:00:00Z",
+  "snapshotId": "PDS-00A96E869214",
+  "digest": "00a96e8692142b8f57b2d7ed888bc50efca1a3073fac9d0d4ad84dc990001c31",
+  "section": "BAR §1 — blocker count reconciliation (rides on §2)",
+  "countBasisNote": "ABSOLUTE counts here are for the in-repo braidon ORIGINAL audit fixture built through the snapshot-only path (no BOM/electrical injection from the full generatePermitHTML pipeline), so they are LOWER than the live package's 17. The load-bearing, code-level claim is the DELTA: exactly ONE code is added (ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED), none is removed, and no duplicate wind/snow code exists. On the live Braidon design (operator-entered 110 mph / Exposure C / 20 psf) the same +1 delta takes the rendered count 17 → 18. Cross-surface multiset equality is asserted independently in tests/planset/environmental-load-authority-bar.test.ts against a rendered package.",
+  "before": {
+    "basis": "pre-§2: windAuthoritative = proj.ahjWindSpeedMph != null — an operator entry CLEARED the blocker",
+    "blockingCount": 13,
+    "advisoryCount": 0,
+    "blockingCodes": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "ENGINEERING-REVIEW-PENDING",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RAIL-QUANTITY-UNTRACEABLE",
+      "REACTIONS-UNTRACEABLE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ]
+  },
+  "after": {
+    "basis": "§2: EnvironmentalLoadAuthority.verificationStatus — operator entry is an OBSERVATION/OVERRIDE, never authority",
+    "blockingCount": 14,
+    "advisoryCount": 0,
+    "blockingCodes": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RAIL-QUANTITY-UNTRACEABLE",
+      "REACTIONS-UNTRACEABLE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ]
+  },
+  "delta": {
+    "added": [
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED"
+    ],
+    "removed": [],
+    "renamed": [
+      {
+        "from": "WIND-SNOW-AUTHORITY-UNRESOLVED",
+        "to": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+        "note": "single emitter; the new code SUBSUMES both branches (null/code-minimum-default AND operator-entered-without-provenance). No duplicate code exists."
+      }
+    ]
+  },
+  "environmentalLoadAuthority": {
+    "ultimateWindSpeedMph": 115,
+    "windSpeedBasis": "operator-entered",
+    "riskCategory": "II",
+    "exposureCategory": "C",
+    "groundSnowLoadPsf": 0,
+    "snowLoadBasis": "operator-entered",
+    "snowLoadSource": null,
+    "coordinates": {
+      "lat": 38.7061678,
+      "lng": -90.0461651
+    },
+    "addressUsed": "3 MELVIN DR APT A, GRANITE CITY, IL 62040",
+    "sourceDocumentId": null,
+    "sourceDataset": null,
+    "sourceVersionOrDate": null,
+    "lookupTimestampIso": null,
+    "operatorOverrides": [
+      "ultimateWindSpeedMph",
+      "groundSnowLoadPsf",
+      "exposureCategory",
+      "riskCategory"
+    ],
+    "verificationStatus": "unverified",
+    "projectOrAhj": null,
+    "evidenceRef": null,
+    "provenance": {
+      "source": "environmental-load authority gate (BAR §2)",
+      "note": "environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission."
+    }
+  },
+  "crossSurfaceMultiset": {
+    "registryBlocking": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RAIL-QUANTITY-UNTRACEABLE",
+      "REACTIONS-UNTRACEABLE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "backCompatBlockerList": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RAIL-QUANTITY-UNTRACEABLE",
+      "REACTIONS-UNTRACEABLE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "issueGateInput": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RAIL-QUANTITY-UNTRACEABLE",
+      "REACTIONS-UNTRACEABLE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "issueState": "PENDING ENGINEERING REVIEW",
+    "ready": false,
+    "equal": true
+  },
+  "finalizedBy": "BAR closer (rendered, both modes)",
+  "liveConfirmation": {
+    "claim": "The §2 authority change takes the LIVE rendered count 17 → 18. Confirmed by regenerating the live design at BAR HEAD.",
+    "auditTargetBefore": {
+      "html": "PermitPackage-BRAIDON M PILLA — Solar TEST (5).html",
+      "snapshotId": "PDS-937E0289544B",
+      "blockingCount": 17,
+      "advisoryCount": 0,
+      "note": "operator-entered 110 mph / Exposure C / 20 psf cleared WIND-SNOW-AUTHORITY-UNRESOLVED (windAuthoritative = field-non-null)"
+    },
+    "liveAfter": {
+      "snapshotId": "PDS-8910EFAC2AB8",
+      "digest": "8910efac2ab8468628a5e5cfac5f6119981d1ca59eca5bffcacc714d375ac6d1",
+      "blockingCount": 18,
+      "advisoryCount": 0,
+      "blockingCodes": [
+        "CODE-AUTHORITY-INCOMPLETE",
+        "CONDUIT-FILL-PENDING",
+        "DESIGNER-OF-RECORD-MISSING",
+        "ENGINEERING-REVIEW-PENDING",
+        "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "EQUIPMENT-IDENTITY-CONFLICT",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "PROJECT-AUTHORITY-UNVERIFIED",
+        "PROJECT-NAME-NONPRODUCTION",
+        "QCABLE-PROCUREMENT-INSUFFICIENT",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "ROUTE-LENGTH-ESTIMATE",
+        "TAP-CONDUCTOR-LENGTH-PENDING"
+      ],
+      "addedVsAuditTarget": [
+        "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED"
+      ],
+      "removedVsAuditTarget": []
+    },
+    "crossSurfaceMultiset": {
+      "original": {
+        "registry": "14 blocking / 0 advisory",
+        "rs1HeaderBlocking": 14,
+        "rs1RenderedRows": 14,
+        "coverBannerTotal": 14,
+        "evidenceJsonBlocking": 14,
+        "issueState": "PENDING ENGINEERING REVIEW",
+        "ready": false,
+        "equal": true
+      },
+      "live": {
+        "registry": "18 blocking / 0 advisory",
+        "rs1HeaderBlocking": 18,
+        "rs1RenderedRows": 18,
+        "coverBannerTotal": 18,
+        "evidenceJsonBlocking": 18,
+        "issueState": "PENDING ENGINEERING REVIEW",
+        "ready": false,
+        "equal": true
+      }
+    },
+    "fixtureAfter": {
+      "snapshotId": "PDS-CD0F6377533F",
+      "blockingCount": 14,
+      "blockingCodes": [
+        "CODE-AUTHORITY-INCOMPLETE",
+        "CONDUIT-FILL-PENDING",
+        "ENGINEERING-REVIEW-PENDING",
+        "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "PROJECT-AUTHORITY-UNVERIFIED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "ROUTE-LENGTH-ESTIMATE",
+        "TAP-CONDUCTOR-LENGTH-PENDING"
+      ],
+      "note": "the fixture never had operator wind/snow, so the SAME single emitter fires through its code-minimum-default branch — one code, both branches, no duplicate."
+    },
+    "gate1": [
+      {
+        "mode": "original",
+        "ok": true,
+        "detail": "registry=14 (blocking 14 / advisory 0) rs1Rows=14 rs1Header=14 rs1Summary=14/0 coverBanner=14 (listed 9 +6 more) listEq=true renderedEq=true issueGate=true issueState=PENDING ENGINEERING REVIEW"
+      },
+      {
+        "mode": "live",
+        "ok": true,
+        "detail": "registry=18 (blocking 18 / advisory 0) rs1Rows=18 rs1Header=18 rs1Summary=18/0 coverBanner=18 (listed 9 +10 more) listEq=true renderedEq=true issueGate=true issueState=PENDING ENGINEERING REVIEW"
+      }
+    ]
+  },
+  "boundary": "No fabricated source, grounding authority, fastener SKU or manufacturer evidence. Every state below is the state the code actually produced; honest PENDING/UNVERIFIED states are recorded as such, not resolved."
+}

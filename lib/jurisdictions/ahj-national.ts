@@ -22,6 +22,20 @@ export interface AhjRecord {
   address?: string;
   // NEC
   necVersion: '2017' | '2020' | '2023';
+  // ── AAC WS-3 (2026-07-27) — the OTHER adopted code editions ────────────────
+  // The curated/expanded tables carry NONE of these (they are `undefined` there,
+  // which is the honest state: this table has no adoption ordinance, no effective
+  // date and no hash, so it can never clear CODE-AUTHORITY-INCOMPLETE on its own).
+  // They are populated ONLY by a live SunSpec/Orange Button registry retrieval
+  // (mapRegistryToAhjRecord), whose response carries BuildingCode /
+  // ResidentialCode / FireCode — previously received and discarded.
+  ibcVersion?: string;
+  ircVersion?: string;
+  ifcVersion?: string;
+  /** the exact endpoint the editions were retrieved from (registry_live only). */
+  codeSourceUrl?: string;
+  /** ISO timestamp of the retrieval (registry_live only). */
+  codeRetrievedAtIso?: string;
   localAmendments: string[];
   // Permit
   permitRequired: boolean;
@@ -4694,15 +4708,64 @@ export function getAhjByCounty(stateCode: string, county: string): AhjRecord | n
 }
 
 /**
+ * KDP WS-12 — the MUNICIPAL record for an incorporated city, or null.
+ *
+ * Jurisdiction is not a search-relevance question: a municipal building
+ * department has authority inside its own corporate limits, and the county
+ * department has authority in UNINCORPORATED territory. So an exact city-name
+ * match must be preferred over any substring hit, and a county/unincorporated
+ * row must never be returned from a city lookup.
+ */
+export function getAhjByCity(stateCode: string, city: string): AhjRecord | null {
+  if (!stateCode || !city) return null;
+  const target = city.trim().toLowerCase();
+  if (!target) return null;
+  const municipal = getAhjsByState(stateCode).filter(
+    a => a.ahjType !== 'county' && a.city.toLowerCase() !== 'unincorporated',
+  );
+  return municipal.find(a => a.city.toLowerCase() === target)
+    // "GRANITE CITY" vs a record spelled "Granite City" is handled above; a
+    // prefix hit covers "St. Louis" / "Saint Louis"-class spellings without
+    // accepting an unrelated longer name ("Madison" must not match "Madisonville").
+    ?? municipal.find(a => target.startsWith(a.city.toLowerCase()) || a.city.toLowerCase().startsWith(target))
+    ?? null;
+}
+
+/** The city name a postal address carries, or null. */
+export function cityFromAddress(address: string | null | undefined): string | null {
+  if (!address) return null;
+  const parts = address.split(',').map(p => p.trim()).filter(Boolean)
+    .filter(p => !/^(usa|united states)$/i.test(p) && !/^[A-Z]{2}\s+\d{5}/.test(p));
+  let city = parts.length >= 1 ? parts[parts.length - 1] : null;
+  if (city && /^[A-Z]{2}$/.test(city) && parts.length >= 2) city = parts[parts.length - 2];
+  return city;
+}
+
+/**
  * Resolve an AHJ from an address, optionally helped by structured hints
  * (county/city/stateCode the caller already has from geocoding).
  *
- * Resolution order: county hint → city → county parsed from text → single-AHJ
- * state. Critically, it NO LONGER falls back to "the first AHJ in the state":
- * that silently returned Cook County / Chicago for EVERY unmatched Illinois
- * address (e.g. Wood River, which is Madison County), poisoning the planset's
- * wind/snow/utility/permit data. When it can't localize, it returns null and
- * the caller uses neutral code-minimum defaults instead of a wrong jurisdiction.
+ * Resolution order: CITY (incorporated municipality) → county hint → county
+ * parsed from text → single-AHJ state.
+ *
+ * KDP WS-12 — the county hint used to run FIRST, so every address inside an
+ * incorporated city resolved to the county's unincorporated record. The live
+ * Braidon project (3 Melvin Dr, GRANITE CITY, IL) has `il-madison-granite-city`
+ * in the dataset and its project record already stored "City of Granite City
+ * Building & Zoning", yet the snapshot bound `il-madison-county` / "Madison
+ * County Building & Zoning" — the wrong permit office, wrong phone, wrong fee
+ * schedule and wrong plan-check days, on a package that had the right answer.
+ *
+ * City-first PRESERVES the fix the county-first order was written for: an
+ * address in a town with no record of its own (Wood River, IL) finds no city
+ * match and still falls through to the county record, which is correct because
+ * the county does have jurisdiction there.
+ *
+ * Critically it still NEVER falls back to "the first AHJ in the state": that
+ * silently returned Cook County / Chicago for EVERY unmatched Illinois address,
+ * poisoning the planset's wind/snow/utility/permit data. When it can't localize
+ * it returns null and the caller uses neutral code-minimum defaults instead of
+ * a wrong jurisdiction.
  */
 export function getAhjByAddress(
   address: string,
@@ -4712,26 +4775,17 @@ export function getAhjByAddress(
   const stateCode = (hint?.stateCode || stateMatch?.[1] || '').toUpperCase();
   if (!stateCode) return null;
 
-  // 1) County hint — the most reliable geographic key (Wood River → Madison).
+  // 1) CITY — the incorporated municipality has jurisdiction inside its limits.
+  const city = hint?.city ?? cityFromAddress(address);
+  if (city) {
+    const byCity = getAhjByCity(stateCode, city);
+    if (byCity) return byCity;
+  }
+
+  // 2) County hint — correct for unincorporated territory (Wood River → Madison).
   if (hint?.county) {
     const byCounty = getAhjByCounty(stateCode, hint.county);
     if (byCounty) return byCounty;
-  }
-
-  // 2) City — hint, else parsed from the address (strip trailing country + "ST 12345").
-  let city = hint?.city ?? null;
-  if (!city && address) {
-    const parts = address.split(',').map(p => p.trim()).filter(Boolean)
-      .filter(p => !/^(usa|united states)$/i.test(p) && !/^[A-Z]{2}\s+\d{5}/.test(p));
-    city = parts.length >= 1 ? parts[parts.length - 1] : null;
-    if (city && /^[A-Z]{2}$/.test(city) && parts.length >= 2) city = parts[parts.length - 2];
-  }
-  if (city) {
-    // searchAhj returns ALL state records when the city doesn't match, so re-filter
-    // to an actual city-name hit before accepting it (never accept a non-match).
-    const cityLower = city.toLowerCase();
-    const exact = searchAhj({ stateCode, city }).filter(a => a.city.toLowerCase().includes(cityLower));
-    if (exact.length > 0) return exact[0];
   }
 
   // 3) County parsed from the address text ("... Madison County, IL ...").

@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.787Z",
+  "artifact": "braidon-racking-fastener-state",
+  "section": "§10/§12 exact racking + fastener state",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "purpose": "The exact racking assembly + fastener state. The rail is PENDING SELECTION (railSku null) — DS-4 IronRidge XR100 is OMITTED from the authoritative appendix and never used in calcs/BOM. The ONE canonical fastener assembly is projected identically on APP-A/PE-1/SCHED; it is UNVERIFIED (RT-MINI source not archived) so PE-1 prints PENDING VERIFIED FASTENER ASSEMBLY — no generic lag/stainless fallback.",
+  "racking": {
+    "mountModel": "RT-MINI",
+    "railSku": null,
+    "railSelected": false,
+    "screwLagModel": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole"
+  },
+  "ds4_authoritative_datasheet": {
+    "present": false,
+    "reason": "rail PENDING SELECTION — unselected datasheet omitted from the permit appendix (§10)"
+  },
+  "fastener": {
+    "model": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+    "verified": false,
+    "certLabel": "PENDING VERIFIED FASTENER ASSEMBLY",
+    "projectedIdenticallyOn": [
+      "APP-A",
+      "PE-1",
+      "SCHED"
+    ],
+    "genericFallbackRetired": true,
+    "evidenceThatWouldClear": "RT-MINI (RoofTech) structural capacity + fastener pull-out source document archived to the project; a manufacturer-listed fastener assembly SKU pinned into RackingAssembly."
+  },
+  "blockers": [
+    "PENDING-RACKING-ASSEMBLY-SELECTION",
+    "FASTENER-ASSEMBLY-UNVERIFIED",
+    "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+    "RACKING-CAPACITY-APPLICABILITY-GAP"
+  ]
+}

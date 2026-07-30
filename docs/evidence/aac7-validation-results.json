@@ -1,0 +1,233 @@
+{
+  "pass": "AAC-7 — closure validation results",
+  "generatedAt": "2026-07-29T00:13:41.223Z",
+  "tree": "dev + all AAC-0..7 work (pre-commit)",
+  "typecheck": {
+    "command": "npx tsc --noEmit",
+    "result": "PASS (0 errors)"
+  },
+  "build": {
+    "command": "npx next build",
+    "result": "PASS (exit 0)"
+  },
+  "lint": {
+    "command": "npm run lint (next lint)",
+    "result": "not repo-standard for this campaign — the repo standard checks are check:topology / check:engineering-boundaries / check:assisted-evidence-boundaries; see guards below"
+  },
+  "guards": {
+    "check:assisted-evidence-boundaries": "PASS",
+    "check:topology": "FAIL — PRE-EXISTING, unrelated files (documentProvenance/engineeringDecisionProvenance/survey evidence cycles); untouched by this campaign",
+    "check:engineering-boundaries": "FAIL — PRE-EXISTING, tests/planset/aerial-edge-snap.test.ts sharp() image_byte_analysis; untouched by this campaign"
+  },
+  "vitest": {
+    "tests/planset": "89 files / 1296 tests PASS",
+    "tests/golden-path.test.ts": "27 tests PASS",
+    "full": "398 files: 4 failed / 377 passed / 17 skipped · 9116 tests: 5 failed / 8622 passed / 489 skipped",
+    "fullFailuresAllPreExisting": [
+      "tests/phase1a-migration-governance.test.ts ×2 — Windows path separators (file.fullPath uses ); IDENTICAL on baseline a6a225ae (baseline fails 5 there, this tree fixes 3 of them)",
+      "tests/priority5-crew-calendar.test.ts ×1 — weekStart() timezone",
+      "lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts ×1 — spawnSync npm ENOENT (Windows shell)",
+      "lib/assistedEvidenceSources/ocrRuntimeAdapter.test.ts ×1 — spawnSync npm ENOENT (Windows shell)"
+    ]
+  },
+  "harnesses": {
+    "rgm@fixture": {
+      "harness": "planset-evidence-rgm",
+      "mode": "fixture",
+      "snapshotId": "PDS-3E74D0A499D1",
+      "pass": 17,
+      "total": 17,
+      "failing": [],
+      "summary": null
+    },
+    "rgm@insufficient": {
+      "harness": "planset-evidence-rgm",
+      "mode": "insufficient",
+      "snapshotId": "PDS-C4400770AF56",
+      "pass": 17,
+      "total": 17,
+      "failing": [],
+      "summary": null
+    },
+    "rgm@identity": {
+      "harness": "planset-evidence-rgm",
+      "mode": "identity",
+      "snapshotId": "PDS-1831A0351599",
+      "pass": 17,
+      "total": 17,
+      "failing": [],
+      "summary": null
+    },
+    "ecd@fixture": {
+      "harness": "planset-evidence-ecd",
+      "mode": "fixture",
+      "snapshotId": "PDS-3E74D0A499D1",
+      "pass": 24,
+      "total": 24,
+      "failing": [],
+      "summary": null
+    },
+    "ecd@insufficient": {
+      "harness": "planset-evidence-ecd",
+      "mode": "insufficient",
+      "snapshotId": "PDS-C4400770AF56",
+      "pass": 24,
+      "total": 24,
+      "failing": [],
+      "summary": null
+    },
+    "ecd@identity": {
+      "harness": "planset-evidence-ecd",
+      "mode": "identity",
+      "snapshotId": "PDS-1831A0351599",
+      "pass": 24,
+      "total": 24,
+      "failing": [],
+      "summary": null
+    },
+    "bar@original": {
+      "harness": "planset-evidence-bar (blocker & authority reconciliation, 14 permanent gates; 4/5/6/7/9/10/11 chained to bar-wse)",
+      "mode": "original",
+      "snapshotId": "PDS-3E74D0A499D1",
+      "pass": 14,
+      "total": 14,
+      "failing": [],
+      "summary": {
+        "total": 14,
+        "passed": 14,
+        "failed": [],
+        "allPass": true
+      }
+    },
+    "bar-wse": {
+      "harness": "planset-evidence-bar-wse (chained electrical authority)",
+      "mode": null,
+      "snapshotId": "PDS-3E74D0A499D1",
+      "pass": 40,
+      "total": 40,
+      "failing": [],
+      "summary": {
+        "ok": true
+      }
+    },
+    "ppc@fixture": {
+      "harness": "planset-evidence-ppc (projection / procurement authority, 18 permanent gates)",
+      "mode": "fixture",
+      "snapshotId": "PDS-3E74D0A499D1",
+      "pass": 18,
+      "total": 18,
+      "failing": [],
+      "summary": {
+        "total": 18,
+        "passed": 18,
+        "failed": [],
+        "allPass": true
+      }
+    },
+    "ep@original": {
+      "harness": "planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates + chained BAR WS-E)",
+      "mode": "original",
+      "snapshotId": "PDS-3E74D0A499D1",
+      "pass": 22,
+      "total": 22,
+      "failing": [],
+      "summary": {
+        "total": 22,
+        "passed": 22,
+        "failed": [],
+        "allPass": true
+      }
+    },
+    "co@live": {
+      "harness": "planset-evidence-co (final closeout rendered-truth, 20 permanent gates)",
+      "mode": "live",
+      "snapshotId": "PDS-3E74D0A499D1",
+      "pass": 20,
+      "total": 20,
+      "failing": [],
+      "summary": {
+        "total": 20,
+        "passed": 20,
+        "failed": [],
+        "allPass": true
+      }
+    }
+  },
+  "fullProfileRegenerationModes": {
+    "parity": true,
+    "rows": [
+      {
+        "mode": "engine-default",
+        "htmlSha256": "0767dd976840ec87a5e5b00bb9c4a69b0d48e7adbcdbf4137083fc312009c7e5",
+        "bytes": 1177179,
+        "snapshotDigest": "712d70cbf42aa35f464a2bca1a3f9c4ed9ad88a0512e0710fd0568c72d56f6f2",
+        "sheets": 24,
+        "registry": 14
+      },
+      {
+        "mode": "plansetProfile=full",
+        "htmlSha256": "0767dd976840ec87a5e5b00bb9c4a69b0d48e7adbcdbf4137083fc312009c7e5",
+        "bytes": 1177179,
+        "snapshotDigest": "712d70cbf42aa35f464a2bca1a3f9c4ed9ad88a0512e0710fd0568c72d56f6f2",
+        "sheets": 24,
+        "registry": 14
+      },
+      {
+        "mode": "permitOptions.plansetProfile=full",
+        "htmlSha256": "0767dd976840ec87a5e5b00bb9c4a69b0d48e7adbcdbf4137083fc312009c7e5",
+        "bytes": 1177179,
+        "snapshotDigest": "712d70cbf42aa35f464a2bca1a3f9c4ed9ad88a0512e0710fd0568c72d56f6f2",
+        "sheets": 24,
+        "registry": 14
+      },
+      {
+        "mode": "planSetOptions.plansetProfile=full",
+        "htmlSha256": "0767dd976840ec87a5e5b00bb9c4a69b0d48e7adbcdbf4137083fc312009c7e5",
+        "bytes": 1177179,
+        "snapshotDigest": "712d70cbf42aa35f464a2bca1a3f9c4ed9ad88a0512e0710fd0568c72d56f6f2",
+        "sheets": 24,
+        "registry": 14
+      }
+    ]
+  },
+  "livePageFit": {
+    "beforeNoLifecycle": "sheets=24 clipped=0 internal-clipped=1 (PV-4C 16.3px) clipped-h=0",
+    "run1Full": "sheets=25 clipped=0 internal-clipped=1 (PV-4C 26.4px) clipped-h=0",
+    "run1Permit": "sheets=14 clipped=0 internal-clipped=1 (PV-4C 26.4px) clipped-h=0",
+    "run2Permit": "sheets=14 clipped=0 internal-clipped=1 (PV-4C 26.4px) clipped-h=0",
+    "verdict": "PV-4C internal clip PRE-DATES the campaign (16.3px with NO lifecycle at all). See the closure document §9."
+  },
+  "liveIdempotence": {
+    "requirementSetsIdentical": true,
+    "gateSetsIdentical": true,
+    "sheetIndexesIdentical": true,
+    "newAuditRowsInRun2": 0,
+    "newInvalidationRowsInRun2": 0,
+    "auditRowsWrittenByRun1": 1,
+    "invalidationRowsWrittenByRun1": 2,
+    "mirrorRealigned": true
+  },
+  "liveStoreCounts": {
+    "before": {
+      "auditRows": 10,
+      "invalidationRows": 20,
+      "canonicalPanelId": "qcells-peak-duo-400",
+      "selectedEquipmentRoofPanelId": "rec-alpha-pure-405",
+      "engineeringConfigRoofPanelId": "rec-alpha-pure-405"
+    },
+    "afterRun1": {
+      "auditRows": 11,
+      "invalidationRows": 22,
+      "canonicalPanelId": "qcells-peak-duo-400",
+      "selectedEquipmentRoofPanelId": "qcells-peak-duo-400",
+      "engineeringConfigRoofPanelId": "qcells-peak-duo-400"
+    },
+    "afterRun2": {
+      "auditRows": 11,
+      "invalidationRows": 22,
+      "canonicalPanelId": "qcells-peak-duo-400",
+      "selectedEquipmentRoofPanelId": "qcells-peak-duo-400",
+      "engineeringConfigRoofPanelId": "qcells-peak-duo-400"
+    }
+  }
+}

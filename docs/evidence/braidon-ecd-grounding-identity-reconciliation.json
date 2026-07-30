@@ -1,0 +1,166 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.144Z",
+  "artifact": "grounding identity reconciliation — physical segments vs the grouped authority",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §6 (deliverable 7)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "before": {
+    "citation": "docs/ECD-ROOT-CAUSE-MAP.md §6",
+    "canonicalObjects": [
+      "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3"
+    ],
+    "renderedIdHistogram": {
+      "gnd-br-1": 8,
+      "gnd-br-2": 0,
+      "gnd-br-3": 0
+    },
+    "collapseSiteA": "electricalProjection.ts — the grouped PV-4B branch-EGC authority object was emitted with `g.groundingId`, i.e. the FIRST record's PHYSICAL id",
+    "collapseSiteB": "electricalProjection.ts — `_oaSegmentId` was computed ONCE from branchGnd[0] and stamped on EVERY E-1 branch section inside branches.forEach",
+    "consequence": "three canonical physical objects rendered as ONE identity; the uniqueness gate was unprovable because only one id was ever rendered."
+  },
+  "after": {
+    "groupAuthorityId": "gnd-branch-egc-authority",
+    "canonicalPhysicalObjects": [
+      {
+        "groundingId": "gnd-br-1",
+        "purpose": "branch-egc"
+      },
+      {
+        "groundingId": "gnd-br-2",
+        "purpose": "branch-egc"
+      },
+      {
+        "groundingId": "gnd-br-3",
+        "purpose": "branch-egc"
+      },
+      {
+        "groundingId": "gnd-feeder",
+        "purpose": "feeder-egc"
+      },
+      {
+        "groundingId": "gnd-gec",
+        "purpose": "gec"
+      }
+    ],
+    "projectedGroupAuthority": [
+      {
+        "groundingSegmentId": "gnd-branch-egc-authority",
+        "identityKind": "group-authority",
+        "groundingId": null,
+        "memberGroundingIds": [
+          "gnd-br-1",
+          "gnd-br-2",
+          "gnd-br-3"
+        ],
+        "branchScope": [
+          "B1",
+          "B2",
+          "B3"
+        ],
+        "bomLineId": "BOM-WIRE-A2BB72C0",
+        "bomLinePartNumber": "GRN-OPENAIR-12"
+      }
+    ],
+    "projectedPhysicalSegments": [
+      {
+        "groundingSegmentId": "gnd-feeder",
+        "identityKind": "physical-segment",
+        "purpose": "feeder-egc"
+      },
+      {
+        "groundingSegmentId": "gnd-gec",
+        "identityKind": "physical-segment",
+        "purpose": "gec"
+      }
+    ],
+    "e1Sections": [
+      {
+        "sectionId": "BRANCH_RUN",
+        "label": null,
+        "groundingSegmentId": "gnd-br-1",
+        "groundingAuthorityGroupId": "gnd-branch-egc-authority",
+        "bondingPendingAuthority": true
+      },
+      {
+        "sectionId": "BRANCH_RUN",
+        "label": null,
+        "groundingSegmentId": "gnd-br-2",
+        "groundingAuthorityGroupId": "gnd-branch-egc-authority",
+        "bondingPendingAuthority": true
+      },
+      {
+        "sectionId": "BRANCH_RUN",
+        "label": null,
+        "groundingSegmentId": "gnd-br-3",
+        "groundingAuthorityGroupId": "gnd-branch-egc-authority",
+        "bondingPendingAuthority": true
+      },
+      {
+        "sectionId": "BRANCH_HOMERUN_RUN",
+        "label": null,
+        "groundingSegmentId": "GRN-HOMERUN-RACEWAY-EGC",
+        "groundingAuthorityGroupId": null,
+        "bondingPendingAuthority": false
+      },
+      {
+        "sectionId": "COMBINER_TO_DISCO_RUN",
+        "label": null,
+        "groundingSegmentId": "GRN-COMBINER_TO_DISCO_RUN-EGC",
+        "groundingAuthorityGroupId": null,
+        "bondingPendingAuthority": false
+      },
+      {
+        "sectionId": "DISCO_TO_METER_RUN",
+        "label": null,
+        "groundingSegmentId": "GRN-DISCO_TO_METER_RUN-EGC",
+        "groundingAuthorityGroupId": null,
+        "bondingPendingAuthority": false
+      },
+      {
+        "sectionId": "svc-tap-conductors",
+        "label": null,
+        "groundingSegmentId": "GRN-SERVICE-BOND",
+        "groundingAuthorityGroupId": null,
+        "bondingPendingAuthority": false
+      }
+    ],
+    "renderedIdHistogram": {
+      "gnd-br-1": 1,
+      "gnd-br-2": 1,
+      "gnd-br-3": 1,
+      "GRN-HOMERUN-RACEWAY-EGC": 1,
+      "GRN-COMBINER_TO_DISCO_RUN-EGC": 1,
+      "GRN-DISCO_TO_METER_RUN-EGC": 1,
+      "GRN-SERVICE-BOND": 1,
+      "gnd-feeder": 2,
+      "gnd-branch-egc-authority": 1,
+      "gnd-gec": 1
+    },
+    "invariants": {
+      "physicalIdsUnique": true,
+      "groupAuthorityNotInThePhysicalSet": true,
+      "groupIdIsNotAPhysicalSegmentIdShape": true,
+      "renderedDistinctBranchIds": [
+        "gnd-br-1",
+        "gnd-br-2",
+        "gnd-br-3"
+      ],
+      "renderedCountEqualsEvidenceCount": true,
+      "everyGroupGovernedRowReconcilesToOneCanonicalObject": true,
+      "groupGovernedSectionCount": 3,
+      "ungovernedPhysicalSectionIds": [
+        "GRN-HOMERUN-RACEWAY-EGC",
+        "GRN-COMBINER_TO_DISCO_RUN-EGC",
+        "GRN-DISCO_TO_METER_RUN-EGC",
+        "GRN-SERVICE-BOND"
+      ]
+    },
+    "bomLinePointer": {
+      "before": "GroundingSegment.bomLineId was a PART NUMBER (`GRN-OPENAIR-<size>`) because no stable row id existed",
+      "after": "GroundingSegment.bomLineId is the REAL content-derived BOM row id (bomLineIdFor); the part number moved to its own field bomLinePartNumber",
+      "value": "BOM-WIRE-A2BB72C0"
+    }
+  }
+}

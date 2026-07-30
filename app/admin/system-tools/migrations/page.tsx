@@ -67,6 +67,10 @@ export default function MigrationConsolePage() {
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
   const tick = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Targeted authority-registry deployment (migrations 113 + 114) — per-migration
+  // verified state, shown after a successful run.
+  const [registry, setRegistry] = useState<Record<string, { ok: boolean; alreadyApplied: boolean; tablesPresent: boolean; ledger: string | null; detail: string }>>({});
+
   const logMsg = useCallback((msg: string, ok: boolean) => {
     setLog((l) => [{ t: new Date().toLocaleTimeString(), msg, ok }, ...l].slice(0, 40));
   }, []);
@@ -231,59 +235,57 @@ export default function MigrationConsolePage() {
         </div>
       </section>
 
-      {/* Targeted Nearmap recovery (current priority) */}
+      {/* Targeted authority-registry deployment (current priority) — migrations 113 + 114 */}
       <section className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-4">
         <div className="flex items-center gap-3 mb-1">
-          <h2 className="text-lg font-semibold text-white">Targeted Nearmap recovery — migration 108</h2>
+          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 → 117</h2>
           <Pill ok={null}>SCOPED</Pill>
         </div>
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm font-semibold px-3 py-2 mb-3">
-          Targeted Nearmap recovery only. Historical baseline remains incomplete.
+          Run <b>113 first</b>, verify it applied, <b>then 114</b>, <b>then 115</b>, <b>then 116</b>. <b>117 is independent</b> —
+          it may be run at any time, before or after the others. Each is idempotent (a second run is a safe no-op).
+          Targeted deployment only — the historical baseline remains incomplete and is NOT advanced.
         </div>
         <p className="text-xs text-slate-400 mb-3">
-          Runs <b>only</b> migration 108 (the <code>nearmap_ai_cache_lat_lng_idx</code> proximity index) through the canonical
-          runner under a bounded, 108-scoped permit. Server-side it verifies migration 102 is already applied (table +
-          <code> lat</code>/<code>lng</code> columns present), that the index is absent, and that 108 is idempotent and
-          non-destructive. It does <b>not</b> run 102, does <b>not</b> run any other migration, and does <b>not</b> mark the
-          historical baseline verified. Requires super_admin + MFA + fresh TOTP + reason + typed production confirmation +
-          production allowlist + <code>MIGRATION_ALLOW_PRODUCTION_EXECUTION=true</code>.
+          Each button runs <b>only</b> its one migration through the canonical runner under a bounded, identifier-scoped
+          permit. <b>113</b> creates <code>manufacturer_document_registry</code> (the versioned authority-document store).
+          <b> 114</b> creates <code>equipment_reconciliation_audit</code> + <code>snapshot_digest_invalidations</code> (the
+          immutable reconciliation-audit tables). <b>115</b> creates <code>personnel_roles</code> +
+          <code>project_personnel_assignments</code> (the designer / preparer / reviewer / engineer-of-record / approving-engineer
+          roles of record — until it exists the planset asks for the designer on every project).
+          <b> 116</b> creates <code>engineering_review_records</code> (the digest-bound engineering review that makes
+          ENGINEERING-REVIEW-PENDING clearable by a real licensed workflow; run after 115 — it enforces 115's reviewer roles).
+          <b> 117</b> creates <code>ahj_registry</code> — SolarPro's OWN central AHJ / adopted-code registry. The AHJ data the
+          app serves today is a bundled TypeScript table of ~4,000 records carrying an NEC year and nothing else: no
+          IBC/IRC/IFC adoption, no effective dates, no source URLs, no hashes — which is why every planset prints
+          <code>IBC/IRC/IFC PENDING</code>. This table makes SolarPro's own registry the first provider consulted and retains
+          retrievals + governed operator verifications centrally (research once, reuse for every project in that AHJ). It
+          seeds NO adoption: a copied in-code row is retained as <code>seeded-unprovenanced</code>, which the provider
+          refuses to serve as authority.
+          Server-side each is statically verified <b>idempotent CREATE-TABLE-only</b>
+          and <b>non-destructive</b> (no DROP / DELETE / TRUNCATE / ALTER / UPDATE / INSERT), creates exactly the expected
+          table(s), success is read back from the ledger + run history + the actual tables, and the window auto-relocks.
+          None runs any other migration, and none marks the historical baseline verified. Requires super_admin + MFA +
+          fresh TOTP + reason + typed production confirmation + production allowlist +
+          <code>MIGRATION_ALLOW_PRODUCTION_EXECUTION=true</code>.
         </p>
-        <button disabled={!!busy} onClick={() => openMutation('Execute targeted Nearmap recovery (migration 108)', !!rd?.isProduction, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
-          const r = await call('execute-nearmap-108', { totpCode, reason, productionConfirmation, idempotencyKey });
-          const cid = r.correlationId ? ` [${r.correlationId}]` : '';
-          const detail = r.success
-            ? (r.alreadyApplied ? 'index already present (no-op)' : `APPLIED · index=${r.indexPresentAfter ? 'present' : '?'} · relock=${r.relock?.lifecycleState ?? '—'}`)
-            : (r.error || 'failed');
-          logMsg(`Nearmap 108: ${detail}${cid}`, !!r.success);
-        })} className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-sm font-medium">Run migration 108…</button>
-      </section>
-
-      {/* Targeted data-authority backfill — migrations 109-112 */}
-      <section className="rounded-xl border border-sky-500/40 bg-sky-500/5 p-4 mb-4">
-        <div className="flex items-center gap-3 mb-1">
-          <h2 className="text-lg font-semibold text-white">Targeted data-authority backfill — migrations 109 → 112</h2>
-          <Pill ok={null}>SCOPED</Pill>
+        <div className="flex flex-wrap gap-2">
+          <RegistryButton id="113" label="Run migration 113…" tables="manufacturer_document_registry"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-registry-113" onResult={(v) => setRegistry((s) => ({ ...s, ['113']: v }))} result={registry['113']} />
+          <RegistryButton id="114" label="Run migration 114…" tables="equipment_reconciliation_audit + snapshot_digest_invalidations"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-reconciliation-114" onResult={(v) => setRegistry((s) => ({ ...s, ['114']: v }))} result={registry['114']} />
+          <RegistryButton id="115" label="Run migration 115…" tables="personnel_roles + project_personnel_assignments"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-personnel-115" onResult={(v) => setRegistry((s) => ({ ...s, ['115']: v }))} result={registry['115']} />
+          <RegistryButton id="116" label="Run migration 116…" tables="engineering_review_records"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-engineering-review-116" onResult={(v) => setRegistry((s) => ({ ...s, ['116']: v }))} result={registry['116']} />
+          <RegistryButton id="117" label="Run migration 117…" tables="ahj_registry"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-ahj-registry-117" onResult={(v) => setRegistry((s) => ({ ...s, ['117']: v }))} result={registry['117']} />
         </div>
-        <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm font-semibold px-3 py-2 mb-3">
-          Runs ONLY 109, 110, 111, 112 — in order, stop on first failure. Historical baseline remains incomplete.
-        </div>
-        <p className="text-xs text-slate-400 mb-3">
-          The DATA-AUTHORITY-AUDIT backfills: <b>109</b> subSystems-map inference for map-less hybrid projects ·
-          <b> 110</b> panel stamp-wattage normalizer (map is the wattage authority) · <b>111</b> system-size nameplate
-          backfill · <b>112</b> fence-line reconstruction. Server-side each is statically verified <b>UPDATE-only</b>
-          (no DDL / DELETE / INSERT) against allow-listed tables (<code>projects</code>, <code>layouts</code>), live
-          columns are verified, then each runs under its own bounded scoped permit through the canonical runner
-          (ledger + run history + audit). Idempotent — already-applied migrations are skipped. Does <b>not</b> require
-          the historical baseline, does <b>not</b> run anything else, and never marks the baseline verified. Requires
-          super_admin + MFA + fresh TOTP + reason + typed production confirmation.
-        </p>
-        <button disabled={!!busy} onClick={() => openMutation('Execute targeted data-authority backfill (109 → 112)', !!rd?.isProduction, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
-          const r = await call('execute-data-authority-109-112', { totpCode, reason, productionConfirmation, idempotencyKey });
-          const cid = r.correlationId ? ` [${r.correlationId}]` : '';
-          const per = (r.results ?? []).map((x: Json) =>
-            `${x.identifier}=${x.alreadyApplied ? 'already-applied' : (x.verifiedSuccess ? 'APPLIED' : `FAILED(${x.execution?.errorCode ?? x.execution?.status ?? '?'})`)}`).join(' · ');
-          logMsg(`Data-authority 109-112: ${r.success ? 'ALL APPLIED' : (r.error || 'stopped on failure')}${per ? ` — ${per}` : ''}${cid}`, !!r.success);
-        })} className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-sm font-medium">Run migrations 109 → 112…</button>
       </section>
 
       {/* Step actions */}
@@ -431,6 +433,44 @@ export default function MigrationConsolePage() {
 const btn = 'px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-sm font-medium';
 const btnAlt = 'px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-sm';
 const btnDanger = 'px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-sm font-medium';
+
+// One targeted-registry migration button (113 or 114) with its own confirm flow
+// (reason + TOTP + typed production confirmation via openMutation) and a
+// per-migration verified-state readout after a successful run.
+function RegistryButton({ id, label, tables, action, busy, isProd, openMutation, logMsg, onResult, result }: {
+  id: string; label: string; tables: string; action: string;
+  busy: boolean; isProd: boolean;
+  openMutation: (title: string, needsProd: boolean, run: (p: MutationRunParams) => Promise<void>) => void;
+  logMsg: (m: string, ok: boolean) => void;
+  onResult: (v: { ok: boolean; alreadyApplied: boolean; tablesPresent: boolean; ledger: string | null; detail: string }) => void;
+  result?: { ok: boolean; alreadyApplied: boolean; tablesPresent: boolean; ledger: string | null; detail: string };
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <button disabled={busy} onClick={() => openMutation(`Deploy migration ${id} (${tables})`, isProd, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
+        const r = await call(action, { totpCode, reason, productionConfirmation, idempotencyKey });
+        const cid = r.correlationId ? ` [${r.correlationId}]` : '';
+        const detail = r.success
+          ? (r.alreadyApplied ? 'table(s) already present (no-op)' : `APPLIED · tables=${r.tablesPresentAfter ? 'present' : '?'} · ledger=${r.ledger?.status ?? '—'} · relock=${r.relock?.lifecycleState ?? '—'}`)
+          : (r.error || 'failed');
+        logMsg(`Migration ${id}: ${detail}${cid}`, !!r.success);
+        onResult({
+          ok: !!r.success,
+          alreadyApplied: !!r.alreadyApplied,
+          tablesPresent: !!r.tablesPresentAfter,
+          ledger: r.ledger?.status ?? null,
+          detail,
+        });
+      })} className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-sm font-medium">{label}</button>
+      {result && (
+        <div className="flex items-center gap-1 text-[11px]">
+          <Pill ok={result.ok}>{result.ok ? (result.alreadyApplied ? 'ALREADY PRESENT' : 'APPLIED') : 'FAILED'}</Pill>
+          {result.ok && <span className="text-slate-400">tables {result.tablesPresent ? 'present' : '—'} · ledger {result.ledger ?? '—'}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Field({ label, value, good }: { label: string; value: React.ReactNode; good?: boolean }) {
   return (

@@ -6,11 +6,13 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
+import { PERMIT_LABELS_SHEET_TITLE } from '../sheetManifest';
 import { escapeH } from '../utils/drawing';
 import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } from '../utils/helpers';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { selectFieldLabels, type FieldLabel } from '../utils/fieldLabels';
-import { getDesignTemps } from '../utils/designTemps';
+import { getThermalDesignBasis } from '../utils/designTemps';
+import { projectMicroinverterDatasheet, type ProjectedValue } from '../snapshot/equipmentProjection';
 import { isSubSystemKey, type SubSystemKey } from '../utils/subSystems';
 import { resolvePanelSpecs, coldVocFactor, type ResolvedPanelSpecs } from '../utils/panelSpecs';
 import { hybridSheetSections } from './subSystemSheets';
@@ -20,12 +22,36 @@ import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
-import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
-import { getSnapshot } from '../snapshot/read';
+import {
+  getManufacturerAsset, DOCUMENT_APPLICABILITY_CHIP,
+  type DocumentApplicability, type DocumentApplicabilityState,
+} from '@/lib/manufacturer-assets-db';
+import { getSnapshot, peekSnapshot } from '../snapshot/read';
+// AAC WS-9 — the ONE document-applicability seam every sheet may use.
+import { sheetDocumentApplicability } from '../snapshot/documentAuthority';
+// ECD §8 — APP-A's closing conclusion is DERIVED from the release-gate registry.
+import { projectEquipmentListingConclusion } from '../snapshot/equipmentListingConclusion';
+// ECD §7 — the canonical bonding authority (the APP-A UL-listing row).
+import { projectRackingBondingAuthority } from '../snapshot/rackingBonding';
+import { projectStructuralFromInput, projectFastenerAssembly } from '../snapshot/structuralProjection';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+// PPC §10 — PV-5's rated-value basis line comes from THE issue-state language
+// accessor (digest-bound). It previously asserted "FROM THE APPROVED DESIGN" while
+// the package carried open blocking release items and no seal.
+import { projectIssueStateLanguageFromInput } from '../snapshot/projectAuthorityProjection';
 
-export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pageWarningLabels(
+  input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
+  opts?: { merged?: boolean },
+): string {
   const { compliance } = input;
-  const necVer = compliance.jurisdiction?.necVersion || '2020';
+  // W4 §2: NEC edition projects from the snapshot codeAuthority (single source).
+  const cp = projectCodeAuthorityFromInput(input);
+  const necVer = cp.nec ?? 'PENDING';
+  // PPC §10 — the ONE issue-state language set (digest-bound). Approved-design
+  // wording is reachable ONLY through this accessor and ONLY when a digest-bound
+  // engineering approval exists with zero open blocking release items.
+  const _issueLang = projectIssueStateLanguageFromInput(input);
   const _isRoof = isRoof(cad.systemType);
   const _isFence = isFence(cad.systemType);
   const _isGround = isGround(cad.systemType);
@@ -35,7 +61,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   // interconnection, battery and rapid-shutdown, resolved to this NEC edition.
   const labels = selectFieldLabels(input, cad);
   const requiredLabels = labels.filter(l => l.required);
-  const necYear = String(necVer).match(/20\d\d/)?.[0] || '2020';
+  const necYear = cp.nec ?? 'PENDING';
 
   // ── SITE-COMPUTED RATING LABELS (per sub-system) ─────────────────────────
   // The dataset's fill-in ratings labels (DC PV power source / AC disconnect)
@@ -46,14 +72,12 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   const { project, system } = input;
   const auth = buildConductorAuthority(input, cad);
   const _projX = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
-  const _stateAbbr = (() => {
-    if (_projX.state && /^[A-Za-z]{2}$/.test(_projX.state.trim())) return _projX.state.trim().toUpperCase();
-    const m = (_projX.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/);
-    return m ? m[1].toUpperCase() : undefined;
-  })();
-  const _temps = getDesignTemps(_projX.lat, _projX.lng, _stateAbbr);
-  // Explicit AHJ design-temp override wins over the ASHRAE state envelope.
-  const tMinC = project.designTempMin ?? _temps.ashraeExtremeLowC;
+  // W5 §4 — ONE thermal basis (singular; shared with APP-A + disconnect directory).
+  const _temps = getThermalDesignBasis({
+    lat: _projX.lat, lng: _projX.lng, state: _projX.state, address: _projX.address,
+    designTempMinOverrideC: project.designTempMin ?? null,
+  });
+  const tMinC = _temps.minDesignTempC;
 
   const _panelDb = (model?: string) => {
     const m = (model || '').toLowerCase().trim();
@@ -167,6 +191,11 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     'multiple-sources-of-power-directory',
   ]);
   const gridLabels = requiredLabels.filter(l => !SUPERSEDED.has(l.refId));
+  // TAC WS-13 — a superseded label is not DROPPED, it is delivered by another
+  // item ON THIS SHEET. The set above is static; only the members that actually
+  // apply to THIS system count, and each names where it went. This is what made
+  // the old header fail to add up: "N SITE-COMPUTED + M STANDARD" omitted them.
+  const _supersededApplicable = requiredLabels.filter(l => SUPERSEDED.has(l.refId));
 
   // Render each item as what it physically IS — a peel-and-stick field DECAL
   // (adhesive vinyl / reflective label) that gets applied to a specific piece
@@ -309,13 +338,17 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   }
 
   // 4-across card grid (site-computed rating cards lead, then generic decals).
-  function buildCardGrid(cells: string[]): string {
+  // AAC WS-10 — `perRow` narrows the grid when the label column shares the sheet
+  // with the merged plaque (3 wider cards instead of 4 narrow ones, so the
+  // CAUTION/WARNING signal words never clip horizontally).
+  function buildCardGrid(cells: string[], perRow = 4): string {
     let html = '';
-    for (let i = 0; i < cells.length; i += 4) {
-      const row = cells.slice(i, i + 4);
+    const _w = (100 / perRow).toFixed(4).replace(/\.?0+$/, '');
+    for (let i = 0; i < cells.length; i += perRow) {
+      const row = cells.slice(i, i + perRow);
       html += '<tr>';
-      for (const c of row) html += `<td style="width:25%;padding:5px 6px 13px;vertical-align:top;">${c}</td>`;
-      for (let p = row.length; p < 4; p++) html += '<td style="width:25%;padding:5px 6px 13px;"></td>';
+      for (const c of row) html += `<td style="width:${_w}%;padding:5px 6px 13px;vertical-align:top;">${c}</td>`;
+      for (let p = row.length; p < perRow; p++) html += `<td style="width:${_w}%;padding:5px 6px 13px;"></td>`;
       html += '</tr>';
     }
     return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tbody>${html}</tbody></table>`;
@@ -406,7 +439,12 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     const _row = (lbl: typeof labels[number], idx: number) =>
       `<tr style="${!lbl.required ? 'opacity:0.45;' : ''}background:${idx % 2 === 0 ? '#fff' : '#f5f5f5'};">` +
       `<td class="fw9 mono" style="font-size:6.8px;">${lbl.id}</td>` +
-      `<td style="font-family:monospace;font-size:6.4px;">${lbl.necRef}</td>` +
+      // ECD §9 / gate 16 — the placard CODE-REF cell is machine-tagged with the
+      // label's own topology classification, so the package-wide topology/citation
+      // gate can assert directly that no supply-side label carries a load-side-only
+      // citation (it previously had no tagged cell to read and the PV-5 placard
+      // schedule was outside the gate's reach).
+      `<td style="font-family:monospace;font-size:6.4px;" data-label-nec-ref="${escapeH(lbl.necRef)}" data-label-side="${escapeH(lbl.interconnectSide)}" data-label-required="${lbl.required ? 'true' : 'false'}">${lbl.necRef}</td>` +
       `<td style="text-align:center;font-weight:900;font-family:monospace;font-size:6.6px;">${lbl.required ? (SUPERSEDED.has(lbl.refId) ? 'YES*' : 'YES') : 'N/A'}</td>` +
       `<td style="font-size:6.6px;">${lbl.placement}</td>` +
       `</tr>`;
@@ -417,37 +455,64 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
       `<th>PLACEMENT LOCATION</th>` +
       `</tr></thead>`;
     return `<table class="equip-table" style="margin:0;">${_head}<tbody>${labels.map(_row).join('')}</tbody></table>` +
-      `<div style="font-size:6.2px;color:#555;margin-top:2px;">* Rendered on this sheet with site-computed ratings (DC/AC disconnect labels) or as the multiple-power-sources placard above.${_betaAssumed ? ' &nbsp;&dagger; Module Voc temperature coefficient unresolved in the equipment DB &mdash; conservative NEC 690.7 &times;1.25 applied; field-verify against the module datasheet.' : ''}</div>`;
+      `<div data-label-accounting="1" style="font-size:6.2px;color:#555;margin-top:2px;">`
+      + `${gridLabels.length} + ${_supersededApplicable.length} YES* = ${requiredLabels.length} of ${labels.length} apply, ${labels.length - requiredLabels.length} N/A. `
+      + `* Rendered on this sheet with site-computed ratings (DC/AC disconnect labels) or as the multiple-power-sources placard above.${_betaAssumed ? ' &nbsp;&dagger; Module Voc temperature coefficient unresolved in the equipment DB &mdash; conservative NEC 690.7 &times;1.25 applied; field-verify against the module datasheet.' : ''}</div>`;
   })();
+
+  // ── AAC WS-10 — MERGED PV-5 + PV-6 (the permit profile's ONE labels sheet) ──
+  // The PV-6 body (the permanent plaque = the NEC 705.10 power-source directory
+  // + the 690.56(B) disconnect-location plaque + the rapid-shutdown band + the
+  // placard specification) composes into the middle column. The only block that
+  // LEAVES the set is PV-5's own "MULTIPLE POWER SOURCES" table, because the
+  // plaque beside it IS that directory in its permanent, code-required form —
+  // a duplicate is removed, no requirement is.
+  const _merged = opts?.merged === true;
+  const _pv6Body = _merged
+    ? pageDisconnectDirectory(input, cad, pageNum, totalPages, { bodyOnly: true })
+    : '';
+  const _mergedPlacardRef = `
+          <div class="sec-hdr-dark" style="margin-bottom:4px;">
+            MULTIPLE POWER SOURCES &mdash; PERMANENT PLACARD (NEC 705.10)
+          </div>
+          <div style="border:var(--border);padding:5px 7px;font-size:7.4px;line-height:1.5;">
+            The permanent power-source directory / disconnect-location plaque required by NEC ${necYear} 705.10 and 690.56(B)
+            is the plaque detailed on this sheet (centre column) &mdash; it lists every source, every disconnecting means,
+            its rating and its location, and carries the rapid-shutdown placard. Install per the placard specification.
+          </div>`;
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-5', 'WARNING LABELS & REQUIRED PLACARDS', pageNum, totalPages)}
+    ${titleBlock(input, 'PV-5', _merged ? PERMIT_LABELS_SHEET_TITLE : 'WARNING LABELS & REQUIRED PLACARDS', pageNum, totalPages)}
     <div class="page-content">
 
       <div class="note-bar" style="margin-bottom:6px;">
         ALL WARNING LABELS SHALL BE PERMANENTLY INSTALLED, WEATHER-RESISTANT (UL 969), AND MEET MINIMUM CHARACTER HEIGHT REQUIREMENTS PER NEC ${necVer} &mdash;
         LETTERING MIN. 3/8" HEIGHT FOR FIELD-APPLIED LABELS, OR AS SPECIFIED BY MANUFACTURER FOR LISTED LABELS.
         COLOR: WHITE LETTERING ON RED BACKGROUND (${necVer === '2023' ? 'NEC 690.12(D)' : 'NEC 690.56'}) UNLESS OTHERWISE NOTED.
-        RATED VALUES ON THIS SHEET ARE SITE-COMPUTED FROM THE APPROVED DESIGN &mdash; DESIGN LOW TEMP ${tMinC}&deg;C (${escapeH(_temps.source).toUpperCase()}).
+        RATED VALUES ON THIS SHEET ARE ${escapeH(_issueLang.computedFromLabel)} &mdash; DESIGN LOW TEMP ${tMinC}&deg;C (${escapeH(_temps.source).toUpperCase()}).
       </div>
 
-      <div style="display:grid;grid-template-columns:59fr 41fr;gap:10px;align-items:start;">
+      <div style="display:grid;grid-template-columns:${_merged ? '33fr 35fr 32fr' : '59fr 41fr'};gap:10px;align-items:start;">
 
         <!-- LEFT: the label set -->
         <div>
           <div class="sec-hdr-dark" style="margin-bottom:4px;">
-            REQUIRED LABELS &mdash; ${ratingCards.length} SITE-COMPUTED + ${gridLabels.length} STANDARD (${requiredLabels.length} OF ${labels.length} DATASET LABELS APPLY)
+            REQUIRED LABELS &mdash; ${requiredLabels.length} OF ${labels.length} DATASET LABELS (${gridLabels.length} DECAL${gridLabels.length === 1 ? '' : 'S'} &middot; ${ratingCards.length} CARD${ratingCards.length === 1 ? '' : 'S'} &middot; ${_supersededApplicable.length} ON CARD/PLACARD)
           </div>
-          ${buildCardGrid(cardCells)}
-        </div>
+          ${buildCardGrid(cardCells, _merged ? 3 : 4)}
+
+        </div>${_merged ? `
+
+        <!-- CENTRE (merged profile): the permanent plaque — former PV-6 -->
+        <div data-merged-sheet="PV-6">${_pv6Body}</div>` : ''}
 
         <!-- RIGHT: multi-source placard / signage rules / QA tables -->
         <div>
-          <div class="sec-hdr-dark" style="margin-bottom:4px;">
+          ${_merged ? _mergedPlacardRef : `<div class="sec-hdr-dark" style="margin-bottom:4px;">
             MULTIPLE POWER SOURCES &mdash; PERMANENT PLACARD (NEC 705.10)
           </div>
-          ${placardHtml}
+          ${placardHtml}`}
 
           <div class="sec-hdr-dark" style="margin:6px 0 4px;">
             PERMANENT SIGNAGE NOTES
@@ -489,7 +554,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
               <div>
                 <div style="font-weight:900;font-size:7.4px;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1px solid #ccc;padding-bottom:2px;">STRUCTURAL / INSTALLATION</div>
                 <div style="margin-bottom:2px;">1. Contractor shall verify ${_isRoof ? 'roof framing type, size, spacing, and condition prior to installation' : _isFence ? 'fence post layout, spacing, and foundation conditions prior to installation' : 'ground mount pile layout, soil conditions, and site grades prior to installation'}.</div>
-                <div style="margin-bottom:2px;">2. Any deviation from the approved design shall be reported to the engineer of record.</div>
+                <div style="margin-bottom:2px;">2. Any deviation from ${escapeH(_issueLang.deviationReferenceLabel)} shall be reported to the engineer of record.</div>
                 <div style="margin-bottom:2px;">3. ${_isRoof ? 'All roof penetrations shall be waterproofed per roofing manufacturer requirements.' : 'All below-grade conduit and conductors shall be rated for wet/direct burial locations per NEC 300.5.'}</div>
                 <div style="margin-bottom:2px;">4. Module and racking installation per manufacturer instructions and UL 2703 listing.</div>
                 <div style="margin-bottom:2px;">5. Maintain fire-access pathways and ridge setbacks per IFC &sect;1204.2.1 as shown on PV-1.</div>
@@ -516,10 +581,15 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
 // interconnection method, rapid-shutdown and battery presence.
 // ═══════════════════════════════════════════════════════════════
 
-export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pageDisconnectDirectory(
+  input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
+  opts?: { bodyOnly?: boolean },
+): string {
   const { project, system, compliance } = input;
-  const necVerRaw = compliance.jurisdiction?.necVersion || '2020';
-  const is2023 = String(necVerRaw).includes('2023');
+  // W4 §2: NEC edition + edition-keyed clause selection project from codeAuthority.
+  const cp = projectCodeAuthorityFromInput(input);
+  const necVerRaw = cp.nec ?? 'PENDING';
+  const is2023 = cp.nec === '2023';
   const hasBattery = hasRealBattery(project);
   const isMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
   const isSupply = isSupplySideInterconnection(input);
@@ -550,10 +620,11 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   // Design-low temp for the ONE cold-Voc law (shared by the hybrid branch AND
   // the single-system fallback below — register P1-4).
   const _projT = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
-  const _st = (_projT.state && /^[A-Za-z]{2}$/.test(_projT.state.trim()))
-    ? _projT.state.trim().toUpperCase()
-    : ((_projT.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/)?.[1]?.toUpperCase());
-  const _tMin = project.designTempMin ?? getDesignTemps(_projT.lat, _projT.lng, _st).ashraeExtremeLowC;
+  // W5 §4 — ONE thermal basis (singular; shared with APP-A + warning labels).
+  const _tMin = getThermalDesignBasis({
+    lat: _projT.lat, lng: _projT.lng, state: _projT.state, address: _projT.address,
+    designTempMinOverrideC: project.designTempMin ?? null,
+  }).minDesignTempC;
   // SYSTEMIC ROOT #1: on a hybrid the whole system is NOT microinverter — the
   // string/optimizer subs carry real series DC. "MAX DC SYSTEM VOLTAGE" is the
   // largest cold-corrected string Voc across those subs, never "N/A" (which
@@ -607,8 +678,41 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   // combiner + gateway + AC disconnect in one box). Single-sourced.
   const bos = buildIntegratedEquipment(input, cad);
   const discos: Disco[] = [];
-  discos.push({ name: 'MAIN SERVICE DISCONNECT', rating: `${mainA} A${project.mainPanelBrand ? ` · ${project.mainPanelBrand}` : ''}`, loc: 'Exterior — at utility meter / service entrance' });
-  if (project.acDisconnect !== false) discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A${isSupply ? ' fused' : ''}` : 'PER PLAN', loc: bos.providesAcDisconnect ? 'Integral to the combiner (load-break) — exterior AC disconnect only if required by AHJ/utility' : 'Exterior, lockable — adjacent to utility meter' });
+  // ── W2a §service-topology — the disconnect roles PROJECT the canonical
+  // snapshot.serviceTopology objects (svc-service-disconnect, svc-fused-ocpd,
+  // svc-utility-disconnect, …). Each canonical device is ONE row with ONE role:
+  // the combiner's integral load-break (NEC 690.13, listed under the BOS device
+  // below) is NOT the same object as the supply-side FUSED tap OCPD (NEC 705.11)
+  // or the utility-accessible lockable disconnect. The old code merged the fused
+  // tap disconnect + the combiner load-break into a single "PV AC DISCONNECT"
+  // row — that conflation is the defect this replaces. ──
+  const _svcTopo = getSnapshot(input).electrical.serviceTopology ?? [];
+  const _svcObj = (t: string) => _svcTopo.find(o => o.type === t) ?? null;
+  const _svcDisco = _svcObj('service-disconnect');
+  discos.push({ name: 'MAIN SERVICE DISCONNECT', rating: `${_svcDisco?.ocpdRatingA ?? mainA} A${project.mainPanelBrand ? ` · ${project.mainPanelBrand}` : ''}`, loc: 'Exterior — at utility meter / service entrance' });
+  if (isSupply) {
+    // Supply-side (NEC 705.11). §9 (closeout 2026-07-23): the fused tap OCPD is,
+    // by determination from the design data, the SAME LISTED lockable device that
+    // serves as the utility-accessible disconnecting means — ONE row with a DUAL
+    // role (no phantom duplicate). A separate row prints ONLY when the project
+    // specifies a distinct utility-disconnect device (svc-utility-disconnect).
+    const _fused = _svcObj('fused-ocpd');
+    const _util = _svcObj('utility-disconnect');
+    const _fusedDual = _fused?.dualPurposeListing === true && _util == null;
+    discos.push({
+      name: _fusedDual
+        ? 'FUSED AC DISCONNECT — SUPPLY-SIDE TAP OCPD + UTILITY-ACCESSIBLE (LOCKABLE)'
+        : 'FUSED AC DISCONNECT — SUPPLY-SIDE TAP OCPD',
+      rating: `${_fused?.ocpdRatingA ?? acOcpd ?? '—'} A fused${_fusedDual ? ' · lockable' : ''} · NEC 705.11`,
+      loc: _fusedDual
+        ? 'At the supply-side tap (line side of the service disconnect) — single listed device serving both the 705.11 tap OCPD and the utility-accessible disconnecting means'
+        : 'At the supply-side tap — line side of the service disconnecting means',
+    });
+    if (_util) discos.push({ name: 'UTILITY-ACCESSIBLE AC DISCONNECT (LOCKABLE)', rating: `${_util.ocpdRatingA ?? acOcpd ?? '—'} A · lockable`, loc: 'Ahead of the point of interconnection — per serving-utility requirement' });
+    if (bos.providesAcDisconnect) discos.push({ name: 'PV SYSTEM AC DISCONNECT (COMBINER LOAD-BREAK)', rating: `${acOcpd ? `${acOcpd} A · ` : ''}NEC 690.13`, loc: 'Integral load-break in the AC combiner — the PV-system disconnecting means' });
+  } else if (project.acDisconnect !== false) {
+    discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A` : 'PER PLAN', loc: bos.providesAcDisconnect ? 'Integral to the combiner (load-break) — exterior AC disconnect only if required by AHJ/utility' : 'Exterior, lockable — adjacent to utility meter' });
+  }
   if (!isMicro && project.dcDisconnect !== false) discos.push({ name: 'PV DC / SYSTEM DISCONNECT', rating: `${maxDcV}`, loc: 'At the inverter' });
   // Integrated combiner / gateway — the AC aggregation + monitoring device.
   for (const d of bos.devices) {
@@ -666,11 +770,11 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
     `<td style="font-size:8px;">${escapeH(d.loc)}</td>` +
     `</tr>`).join('');
 
-  return `
-  <div class="page">
-    ${titleBlock(input, 'PV-6', 'DISCONNECT DIRECTORY & EMERGENCY PLACARD', pageNum, totalPages)}
-    <div class="page-content">
-
+  // AAC WS-10 — the sheet BODY, extracted so the permit profile can compose it
+  // onto the merged PV-5 labels/directory sheet without a second renderer (one
+  // source: the plaque, the directory rows and the spec table are identical in
+  // both profiles).
+  const _pv6Body = `
       <div class="note-bar" style="margin-bottom:7px;">
         THE PLACARD BELOW SHALL BE PERMANENTLY INSTALLED AT THE MAIN SERVICE DISCONNECT (ENGRAVED PHENOLIC OR UV-STABLE PRINTED ALUMINUM, HIGH-CONTRAST, READABLE AT EYE LEVEL).
         IT SATISFIES THE POWER-SOURCE DIRECTORY (NEC 705.10), THE PV DISCONNECT-LOCATION PLAQUE (NEC 690.56(B)), AND THE RAPID-SHUTDOWN BUILDING PLACARD (${rsdRef}).
@@ -737,7 +841,10 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
         <div style="border-top:3px solid #000;padding:5px 10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:7.5px;">
           <div><strong>INSTALLED BY:</strong> ${escapeH(project.designer || '____________________')}</div>
           <div><strong>EMERGENCY / MONITORING CONTACT:</strong> ____________________</div>
-          <div><strong>INSTALL DATE:</strong> ${escapeH(project.date || '______________')}</div>
+          <!-- §15(c): the install date must NOT be populated before installation.
+               The package/issue date (project.date) is NOT the install date —
+               leave it blank for field completion at install time. -->
+          <div><strong>INSTALL DATE:</strong> ______________ <span style="font-size:6px;color:#999;">(AT INSTALLATION)</span></div>
         </div>
       </div>
 
@@ -750,10 +857,18 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
           <tr class="bg-lt"><td class="fw7">Letter Height</td><td>Title / signal words min. 3/8" (9.5 mm); body text min. 3/16" (4.8 mm); high-contrast, non-handwritten.</td></tr>
           <tr><td class="fw7">Location</td><td>At the main service disconnect (readily visible, eye level). Group with all on-site power-source directories.</td></tr>
           <tr class="bg-lt"><td class="fw7">Color</td><td>CAUTION header per ANSI Z535 (black on safety yellow); the rapid-shutdown band is white on red as mandated by ${rsdRef}.</td></tr>
-          <tr><td class="fw7">Code Basis</td><td class="mono" style="font-size:8px;">NEC ${is2023 ? '2023' : necVerRaw} — 705.10 (power-source directory) · 690.56(B) (PV disconnect-location plaque) · ${rsdRef} (rapid-shutdown building placard)${hasBattery ? ' · 706 / IFC 1207 (ESS)' : ''}</td></tr>
+          <tr><td class="fw7">Code Basis</td><td class="mono" style="font-size:8px;">NEC ${necVerRaw} — 705.10 (power-source directory) · 690.56(B) (PV disconnect-location plaque) · ${rsdRef} (rapid-shutdown building placard)${hasBattery ? ' · 706 / IFC 1207 (ESS)' : ''}</td></tr>
         </tbody>
       </table>
+`;
 
+  if (opts?.bodyOnly) return _pv6Body;
+
+  return `
+  <div class="page">
+    ${titleBlock(input, 'PV-6', 'DISCONNECT DIRECTORY & EMERGENCY PLACARD', pageNum, totalPages)}
+    <div class="page-content">
+${_pv6Body}
     </div>
   </div>`;
 }
@@ -763,6 +878,7 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
 
 export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system } = input;
+  const cp = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
   const _isRoof = isRoof(cad.systemType);   // FIX v47.296
   const _isFence = isFence(cad.systemType);
   const _isGround = isGround(cad.systemType);
@@ -785,6 +901,21 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const _dbPanel = _dbFind(SOLAR_PANELS, panels?.panelModel);
   const _dbMicro = system.inverters?.[0]?.type === 'micro'
     ? _dbFind(MICROINVERTERS, system.inverters?.[0]?.model) : undefined;
+  // W5 §1 — APP-A microinverter datasheet table projects ONLY from the verified
+  // equipment/document record chain (equipment-db + manufacturer-assets-db),
+  // with per-value provenance. No hand-entered parallel spec values.
+  const _microProj = _dbMicro
+    ? projectMicroinverterDatasheet(system.inverters?.[0]?.model) : null;
+  // Render one provenance-stamped datasheet row. PENDING when the value is
+  // absent from the verified record (never a fabricated default).
+  const _mvRow = (label: string, pv: ProjectedValue<number | string | boolean | null>, fmt: (v: number | string | boolean) => string): string => {
+    const p = pv.provenance;
+    const disp = pv.value === null ? '<span style="color:#b00">PENDING</span>' : escapeH(fmt(pv.value));
+    return `<tr data-app-a-field="${escapeH(p.extractedFieldPath)}" data-verify="${p.verification}"`
+      + ` data-eq-id="${escapeH(p.equipmentRecordId ?? '')}" data-sku="${escapeH(p.sku ?? '')}"`
+      + ` data-doc-id="${escapeH(p.documentRecordId ?? '')}">`
+      + `<td class="il">${label}</td><td class="iv">${disp}</td></tr>`;
+  };
 
   // Get specs from the spec sheet DB
   const voc = panels?.panelVoc || project.panelVoc || _dbPanel?.voc || 41.6;
@@ -801,8 +932,12 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   // 67.8"×44.6"). The real datasheet dims also match what PV-1 draws (module
   // width is derived from design pitch ~44.5"), so this tightens cross-sheet
   // consistency rather than loosening it.
-  const panelLen = project.panelLengthIn || _dbPanel?.length || 66;
-  const panelWid = project.panelWidthIn || _dbPanel?.width  || 40;
+  // W3 §2 — exact catalog dims from the canonical snapshot module instance
+  // (single-sourced with PV-1/PV-3); DB record + project scalars are fallbacks
+  // for the standalone path, never a generic 66×40.
+  const _spSpec = projectStructuralFromInput(input);
+  const panelLen = _spSpec.moduleHeightIn ?? project.panelLengthIn ?? _dbPanel?.length ?? 66;
+  const panelWid = _spSpec.moduleWidthIn ?? project.panelWidthIn ?? _dbPanel?.width  ?? 40;
   const panelWt  = project.panelWeightLbs || _dbPanel?.weight || 44;
   // Module efficiency = manufacturer/CEC datasheet value when the DB record
   // resolves; only fall back to the geometric estimate (Pmax ÷ area) when it
@@ -815,7 +950,14 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   // use), matching the compatibility gate. The old blanket ×1.25 printed a
   // 62.3 V "max" beside a 60 V inverter DC limit on the same sheet.
   const VOC_TEMP_COEFF = _dbPanel?.tempCoeffVoc ?? -0.27;  // %/°C — manufacturer value when resolved; matches the printed spec row
-  const designTempMinC = project.designTempMin ?? -10;
+  // W5 §4 — ONE thermal basis (kills the APP-A −10 °C split vs ASHRAE −23 °C).
+  // Same singular basis the other compliance sheets consume; no renderer-local temp.
+  const _projA = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
+  const _thermA = getThermalDesignBasis({
+    lat: _projA.lat, lng: _projA.lng, state: _projA.state, address: _projA.address,
+    designTempMinOverrideC: project.designTempMin ?? null,
+  });
+  const designTempMinC = _thermA.minDesignTempC;
   const vocColdFactor = 1 + (VOC_TEMP_COEFF / 100) * (designTempMinC - 25);
   const NEC_SAFETY = 1.25;
   const vocMax = parseFloat((voc * vocColdFactor).toFixed(1));
@@ -976,20 +1118,23 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
           </div>
           `).join('') || '<p style="font-size:9px;color:#999">No inverter data</p>'}
 
-          ${_dbMicro ? `
-          <div class="section-title">Microinverter — Datasheet Reference</div>
-          <table class="info-table" style="margin-bottom:6px;">
-            <tr><td class="il">Peak AC Output</td><td class="iv">${_dbMicro.acOutputW} VA</td></tr>
-            <tr><td class="il">Max Continuous Output Current</td><td class="iv">${_dbMicro.acOutputCurrentMax} A @ ${_dbMicro.acOutputVoltage} V</td></tr>
-            <tr><td class="il">DC Input Power (Module STC Max)</td><td class="iv">${_dbMicro.dcInputWMax} W</td></tr>
-            <tr><td class="il">MPPT Voltage Range</td><td class="iv">${_dbMicro.mpptVoltageMin}–${_dbMicro.mpptVoltageMax} V</td></tr>
-            <tr><td class="il">Max DC Input Current</td><td class="iv">${_dbMicro.maxInputCurrent} A</td></tr>
-            ${_dbMicro.maxPerBranch20A ? `<tr><td class="il">Max Units / 20A Branch</td><td class="iv">${_dbMicro.maxPerBranch20A}</td></tr>` : ''}
-            <tr><td class="il">CEC Weighted Efficiency</td><td class="iv">${_dbMicro.cec_efficiency}%</td></tr>
-            <tr><td class="il">Rapid Shutdown</td><td class="iv">${_dbMicro.rapidShutdownCompliant ? 'Integrated — NEC 690.12 MLRS' : 'External MLRS required'}</td></tr>
-            <tr><td class="il">Unit Weight</td><td class="iv">${_dbMicro.weight} lbs</td></tr>
-            <tr><td class="il">Product Warranty</td><td class="iv">${_dbMicro.warranty}</td></tr>
-          </table>` : ''}
+          ${_microProj ? `
+          <div class="section-title">Microinverter — Datasheet Reference${_microProj.sku ? ` (${escapeH(_microProj.sku)})` : ''}</div>
+          <table class="info-table" style="margin-bottom:2px;" data-app-a-source="micro-datasheet" data-doc-verified="${_microProj.documentVerified}">
+            ${_mvRow('Peak AC Output', _microProj.fields.peakVa, v => `${v} VA`)}
+            ${_mvRow('Continuous AC Output', _microProj.fields.continuousVa, v => `${v} VA`)}
+            ${_mvRow('Max Continuous Output Current', _microProj.fields.maxContinuousCurrentA, v => `${v} A${_microProj!.fields.acVoltage.value !== null ? ` @ ${_microProj!.fields.acVoltage.value} V` : ''}`)}
+            ${_mvRow('DC Input Power (Module STC Max)', _microProj.fields.dcInputWMax, v => `${v} W`)}
+            ${_mvRow('MPPT Voltage Range', _microProj.fields.mpptMinV, v => `${v}–${_microProj!.fields.mpptMaxV.value ?? '—'} V`)}
+            ${_mvRow('Max DC Input Current', _microProj.fields.maxDcInputCurrentA, v => `${v} A`)}
+            ${_microProj.fields.maxUnitsPerBranch20A.value !== null ? _mvRow('Max Units / 20A Branch', _microProj.fields.maxUnitsPerBranch20A, v => `${v}`) : ''}
+            ${_mvRow('CEC Weighted Efficiency', _microProj.fields.cecEfficiency, v => `${v}%`)}
+            ${_mvRow('DC Connector', _microProj.fields.connector, v => `${v}`)}
+            ${_mvRow('Rapid Shutdown', _microProj.fields.rapidShutdown, v => v ? 'Integrated — NEC 690.12 MLRS' : 'External MLRS required')}
+            ${_mvRow('Unit Weight', _microProj.fields.weightLb, v => `${v} lbs`)}
+            ${_mvRow('Product Warranty', _microProj.fields.warranty, v => `${v}`)}
+          </table>
+          <div style="font-size:6.5px;color:#555;margin:0 0 6px 0;line-height:1.35;">${escapeH(_microProj.sourceLine)}</div>` : ''}
 
           <!-- Racking System Summary — from the SELECTED mounting system.
                The old static table printed IronRidge FlashFoot2 / 5/16" lag
@@ -1000,30 +1145,75 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             const _sysName = project._canonical?.mountSystem || project.mountingSystem
               || (_mSel ? `${_mSel.manufacturer} ${_mSel.model}` : '')
               || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100';
-            const _fr = (v: number) =>
-              v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
-            const _lagDia = _mSel?.mount?.fastenerDiameterIn ?? 0.375;
-            const _embed  = _mSel?.mount?.fastenerEmbedmentIn ?? 2.5;
-            const _lagLen = Math.ceil((_embed + 1.5) * 2) / 2;
+            // W6 — the rail + fastener are PROJECTED from the ONE canonical racking
+            // assembly record (structuralProjection), never a local string or a
+            // fabricated length formula. The record already carries the blocked-state
+            // language ("PENDING RACKING ASSEMBLY SELECTION …") when the rail SKU is
+            // unpinned, so APP-A stays in lockstep with the structural sheets.
+            const _ra = _spSpec.rackingAssembly;
+            // ECD §7 — the canonical bonding authority (requirement vs method).
+            const _bondA = projectRackingBondingAuthority(peekSnapshot(input));
+            const _railPinned = !!(_ra && _ra.railSku);
+            const _railState = _ra
+              ? (_railPinned ? 'verified' : 'pending')
+              : 'no-record';
+            // Rail profile: pinned rail with own dims → dims; otherwise the canonical
+            // record railModel (= PENDING RACKING ASSEMBLY SELECTION when unpinned).
+            const _railProfile = (_mSel?.rail && _railPinned)
+              ? `${escapeH(_mSel.rail.model)} (${_mSel.rail.heightIn}" × ${_mSel.rail.widthIn}")`
+              : (_ra?.railModel
+                  ? escapeH(_ra.railModel)
+                  : (_mSel?.systemType === 'rail_less' && _mSel?.mountTopology !== 'rail_paired'
+                      ? 'Rail-less / direct-attach'
+                      : 'PENDING RACKING ASSEMBLY SELECTION'));
+            // Mount topology (W6.4) — RT-MINI is rail_paired, never rail-less/direct.
+            const _mountTopo = _mSel?.mountTopology ?? _mSel?.systemType ?? '—';
+            // Fastener: the ONE canonical fastener assembly (§12) — projected
+            // identically onto PV-3 / PE-1 / SCHED. No fabricated "×4\" SS lag"
+            // length formula. PENDING VERIFIED FASTENER ASSEMBLY when unresolved.
+            const _fa = projectFastenerAssembly(input);
+            // §14 — canonical spacing authority (design vs maximum-verified).
+            const _spc = projectStructuralFromInput(input).spacingAuthority;
+            const _fastenerDisp = _fa.present ? escapeH(_fa.line) : 'PENDING VERIFIED FASTENER ASSEMBLY';
+            // §6 (BAR) — no fastener dimension (embedment/diameter/length) may render
+            // while the assembly is NON-ORDERABLE (unverified); the observed geometry
+            // is withheld until a verified fastener assembly is archived.
+            const _embedDisp = _fa.nonOrderable
+              ? 'PENDING VERIFIED FASTENER ASSEMBLY'
+              : _fa.embedmentIn != null
+                ? `Min. ${_fa.embedmentIn}" thread embedment into ${escapeH(_fa.substrate ?? 'rafter')}`
+                : 'Per verified racking assembly';
             return `
           <div class="section-title">Racking System</div>
-          <table class="info-table">
+          <table class="info-table" data-app-a-source="racking-assembly" data-rail-state="${_railState}">
             <tr><td class="il">System</td><td class="iv">${_sysName}</td></tr>
+            <tr><td class="il">Mount Topology</td><td class="iv" data-app-a-field="mountTopology">${escapeH(String(_mountTopo))}</td></tr>
             <tr><td class="il">Material</td><td class="iv">${_mSel?.rail?.materialAlloy || 'Aluminum — per manufacturer listing'}</td></tr>
-            <tr><td class="il">Rail Profile</td><td class="iv">${_mSel?.rail ? `${_mSel.rail.model} (${_mSel.rail.heightIn}" × ${_mSel.rail.widthIn}")` : (_mSel ? 'Rail-less / direct-attach' : 'Per manufacturer')}</td></tr>
-            <tr><td class="il">Max Attach Spacing</td><td class="iv">${(() => {
-              // Engineering-resolved spacing first (same chain as PV-3/PE-1) —
-              // the racking's rated 48" printed here beside PV-3's resolved 24".
-              const _spc = input.compliance?.structural?.attachment?.maxAllowedSpacing
-                || (project.attachmentSpacing as number | undefined)
-                || _mSel?.mount?.maxSpacingIn;
-              return _spc ? `${_spc}" O.C.` : 'Per PV-3 / structural calc';
+            <tr><td class="il">Rail Profile</td><td class="iv" data-app-a-field="railModel">${_railProfile}</td></tr>
+            <tr><td class="il">${_spc.verificationState === 'verified' ? 'Max Attach Spacing' : 'Attach Spacing (design)'}</td><td class="iv">${(() => {
+              // §14 — DESIGN spacing + verification state. "MAX" language renders
+              // ONLY when a verified source establishes it; otherwise the design
+              // value + PENDING STRUCTURAL VERIFICATION (never 48" as an allowable).
+              const _dsn = _spc.designSpacingIn
+                ?? input.compliance?.structural?.attachment?.maxAllowedSpacing
+                ?? (project.attachmentSpacing as number | undefined)
+                ?? _mSel?.mount?.maxSpacingIn;
+              const _val = _dsn ? `${_dsn}&quot; O.C.` : 'Per PV-3 / structural calc';
+              return _spc.verificationState === 'verified'
+                ? `${_val} (MAX ALLOWED &mdash; VERIFIED)`
+                : `${_val} <span style="color:#b45309;font-weight:bold;">&mdash; PENDING STRUCTURAL VERIFICATION</span>`;
             })()}</td></tr>
             ${_isRoof ? `<tr><td class="il">Attachment</td><td class="iv">${_mSel?.mount?.model || 'Per PV-3 attachment detail'}</td></tr>` : ''}
-            ${_isRoof ? `<tr><td class="il">Lag Bolt</td><td class="iv">${_fr(_lagDia)}" DIA × ${_lagLen}" Min. Stainless Steel</td></tr>` : ''}
-            ${_isRoof ? `<tr><td class="il">Embedment</td><td class="iv">Min. ${_embed}" thread embedment into rafter</td></tr>` : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}
-            <tr><td class="il">UL Listing</td><td class="iv">${_mSel?.mount?.ul2703Listed === false ? 'See manufacturer listing' : 'UL 2703'}${_mSel?.mount?.iccEsReport ? ` / ${_mSel.mount.iccEsReport}` : ''}</td></tr>
-            <tr><td class="il">Wind Rating</td><td class="iv">Per ASCE 7-22 (see PV-4C)</td></tr>
+            ${_isRoof ? `<tr><td class="il">Fastener</td><td class="iv" data-app-a-field="fastener">${_fastenerDisp}</td></tr>` : ''}
+            ${_isRoof ? `<tr><td class="il">Embedment</td><td class="iv">${escapeH(_embedDisp)}</td></tr>` : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}
+            <!-- ECD §7 — this row printed 'UL 2703' unless a flag explicitly said
+                 ul2703Listed === false: a FAIL-OPEN default that asserted a listing
+                 for any mount whose record simply says nothing. The bonding METHOD
+                 now projects the canonical bonding authority; the ICC-ES report
+                 reference (a real record field) still prints when present. -->
+            <tr><td class="il">Bonding Method</td><td class="iv" data-app-a-bonding-result="${escapeH(_bondA.result)}" style="color:${_bondA.verificationState === 'verified' ? '#0a5c23' : '#8a3f04'};font-weight:700;">${escapeH(_bondA.methodCompactLabel)}${_mSel?.mount?.iccEsReport ? ` <span style="color:#333;font-weight:400;">/ ${escapeH(String(_mSel.mount.iccEsReport))}</span>` : ''}</td></tr>
+            <tr><td class="il">Bonding Requirement</td><td class="iv">${escapeH(_bondA.requirementLabel)}</td></tr>
+            <tr><td class="il">Wind Rating</td><td class="iv">Per ${cp.asceLabel} (see PV-4C)</td></tr>
           </table>`;
           })()}
 
@@ -1032,6 +1222,8 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             // Resolve the actual sourced manufacturer datasheet/detail per selected
             // equipment id, and cite the real document (title · page · source). Falls
             // back to a generic "see manufacturer website" line when none on file.
+            // ECD §8 — the registry-derived listing conclusion (never a literal).
+            const _listing = projectEquipmentListingConclusion(peekSnapshot(input));
             const _fuzz = <T extends { model: string; id: string }>(list: T[], model?: string): T | undefined => {
               const m = (model || '').toLowerCase().trim(); if (!m) return undefined;
               return list.find(e => e.model.toLowerCase() === m)
@@ -1043,23 +1235,86 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               ?? _fuzz(MICROINVERTERS, _inv0?.model)?.id;
             const _batId = _fuzz(BATTERIES, (project._canonical as { battery?: { model?: string } })?.battery?.model
               || (project as { batteryModel?: string }).batteryModel)?.id;
-            const _cite = (label: string, a: ReturnType<typeof getManufacturerAsset>): string => {
+            // ── ECD §8 — DOCUMENT STATE CHIPS (was: a green scrape tick) ─────────
+            // Three separate facts used to be collapsed into one green '✓ on file':
+            //   1 the document EXISTS / is retained  (availability)
+            //   2 the source_url was fetched + confirmed  (a SCRAPE flag —
+            //     ManufacturerAsset.verified; it has no relationship to either of
+            //     the other two, and it is what drove the tick)
+            //   3 the document is APPLICABLE to the SELECTED product, and whether it
+            //     is AUTHORITATIVE for engineering values  (the only thing a
+            //     reviewer cares about)
+            // The ✓ is gone. Each row now renders the canonical DOCUMENT STATE chips
+            // from evaluateDocumentApplicability — and applicability is evaluated for
+            // ALL FIVE rows, not only Racking (the other four were structurally
+            // incapable of showing a state because `selectedModel` was never passed).
+            // ARCHIVED renders as a NEUTRAL availability chip: archived ≠ applicable.
+            const _chipStyle = (st: DocumentApplicabilityState): string =>
+              st === 'AUTHORITATIVE' || st === 'VERIFIED' || st === 'APPLICABLE'
+                ? 'background:#e8f5ec;border:1px solid #0a7a2f;color:#0a5c23;'
+                : st === 'ARCHIVED'
+                  // NEUTRAL — availability only. Never a positive applicability mark.
+                  ? 'background:#f2f2f2;border:1px solid #777;color:#333;'
+                  : st === 'PENDING_APPLICABILITY'
+                    ? 'background:#fdf3e3;border:1px solid #b45309;color:#8a3f04;'
+                    : 'background:#fdecea;border:1px solid #b00;color:#8a0000;';
+            const _chips = (appl: DocumentApplicability): string => appl.states.map(st =>
+              `<span data-ds-doc-state="${escapeH(st)}" style="${_chipStyle(st)}`
+              + `font-weight:700;padding:0 3px;border-radius:2px;font-size:7.5px;white-space:nowrap;">`
+              + `${escapeH(DOCUMENT_APPLICABILITY_CHIP[st])}</span>`).join(' ');
+            const _docRegion = peekSnapshot(input)?.equipmentDocumentAuthority ?? null;
+            const _cite = (label: string, a: ReturnType<typeof getManufacturerAsset>, selectedModel: string | null): string => {
               if (!a || (!a.sourceUrl && !a.imageUrl)) return '';
               const host = a.sourceUrl ? (() => { try { return new URL(a.sourceUrl!).hostname.replace(/^www\./, ''); } catch { return ''; } })() : '';
               const bits = [a.docTitle, a.pageRef, host].filter(Boolean).join(' · ');
-              const mark = a.verified ? '✓ on file' : 'on file';
-              return `<li><strong>${label}:</strong> ${a.brand} ${a.model} — ${bits || 'manufacturer datasheet'} <span style="color:#0a7a2f;font-weight:700;">(${mark})</span></li>`;
+              // ECD §8 — evaluated for EVERY row. `selectedModel` falls back to the
+              // asset's own model, which is the identity the asset was keyed by.
+              // AAC WS-9 RENDERER PURITY — the verdict is NOT decided here. It is
+              // projected from the frozen snapshot region (or, for a document the
+              // build did not pre-enumerate, decided by the snapshot layer from
+              // the SAME frozen registry facts). The old call passed `null` for
+              // registryFacts, which is exactly why AUTHORITATIVE was unreachable.
+              const _appl = sheetDocumentApplicability({
+                region: _docRegion, category: a.category as string, equipmentId: a.equipmentId,
+                selectedModel: selectedModel ?? a.model, asset: a,
+              });
+              const _applTag = !_appl.applicabilityVerified
+                ? ` <span data-ds-applicability="${escapeH(_appl.state)}" style="color:#b45309;font-weight:700;">`
+                  + `— the document covers `
+                  + `${escapeH(_appl.documentProduct ?? 'a different product version')}, NOT VERIFIED for the selected `
+                  + `${escapeH(String(selectedModel ?? a.model))} — NOT AUTHORITATIVE for installation requirements</span>`
+                : '';
+              // The authority statement is explicit on EVERY row: nothing in the asset
+              // library is archived + content-hash bound, so no row may read as the
+              // citable authority for an engineering value.
+              const _authTag = _appl.authoritative
+                ? ''
+                : ` <span data-ds-authoritative="false" style="color:#555;">— not authoritative for engineering values</span>`;
+              return `<li><strong>${label}:</strong> ${a.brand} ${a.model} — ${bits || 'manufacturer datasheet'} `
+                + `${_chips(_appl)}${_applTag}${_authTag}</li>`;
             };
             const rows = [
-              _cite('Module', getManufacturerAsset(_dbPanel?.id, 'module_spec')),
-              _cite('Inverter', getManufacturerAsset(_invId, 'inverter_spec') || getManufacturerAsset(_invId, 'microinverter_spec') || getManufacturerAsset(_invId, 'optimizer_spec')),
-              _cite('Battery', getManufacturerAsset(_batId, 'battery_spec')),
-              _cite('Racking', getManufacturerAsset(project.mountingSystemId, 'racking_detail')),
+              _cite('Module', getManufacturerAsset(_dbPanel?.id, 'module_spec'), _dbPanel?.model ?? null),
+              // The SELECTED identity is the DESIGN's inverter model — never a
+              // renderer-local equipment-db fuzzy find. `_dbMicro` is used only
+              // for its `.id` (the citation key + presence gating); reading a
+              // scalar off it here would originate a product SELECTION inside a
+              // verified-document surface, which the standing rule forbids
+              // (planset-evidence-rp gate 18, "no-renderer-local-product-selection").
+              _cite('Inverter', getManufacturerAsset(_invId, 'inverter_spec') || getManufacturerAsset(_invId, 'microinverter_spec') || getManufacturerAsset(_invId, 'optimizer_spec'),
+                _inv0?.model ?? null),
+              _cite('Battery', getManufacturerAsset(_batId, 'battery_spec'),
+                ((project._canonical as { battery?: { model?: string } })?.battery?.model
+                  || (project as { batteryModel?: string }).batteryModel) ?? null),
+              _cite('Racking', getManufacturerAsset(project.mountingSystemId, 'racking_detail'),
+                getMountingSystemById(project.mountingSystemId ?? '')?.model ?? null),
               // Brand-integrated AC combiner / gateway ("the brains") — datasheet
               // required for plan review; cited by device name (no image on file).
+              // NO document is on file, so it carries no positive mark at all.
               (() => {
                 const _d = buildIntegratedEquipment(input, cad).brains;
-                return _d ? `<li><strong>AC Combiner / Gateway:</strong> ${_d.brand} ${_d.model} — integrated ${_d.roleSummary.toLowerCase()} · manufacturer datasheet <span style="color:#555;font-weight:700;">(upon request)</span></li>` : '';
+                return _d ? `<li><strong>AC Combiner / Gateway:</strong> ${_d.brand} ${_d.model} — integrated ${_d.roleSummary.toLowerCase()} · manufacturer datasheet `
+                  + `<span data-ds-doc-state="PENDING_APPLICABILITY" style="background:#fdf3e3;border:1px solid #b45309;color:#8a3f04;font-weight:700;padding:0 3px;border-radius:2px;font-size:7.5px;white-space:nowrap;">NO DOCUMENT ON FILE</span></li>` : '';
               })(),
             ].filter(Boolean);
             const fallback = `• <strong>Module:</strong> ${modMfr} — see manufacturer website<br>• <strong>Inverter:</strong> ${invMfr} — see manufacturer website<br>`;
@@ -1069,7 +1324,16 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             The following manufacturer specification sheets / installation details are on file for this project and available upon AHJ request:
             ${rows.length ? `<ul style="margin:3px 0 4px 0;padding-left:16px;">${rows.join('')}</ul>` : `<br>${fallback}`}
             <strong>Racking structural calculations — SEE PV-4C.</strong><br>
-            All equipment is CEC Listed, UL Listed, and approved for grid interconnection.
+            <!-- ECD §8 / gate 14 — this line was the bare literal "All equipment is
+                 CEC Listed, UL Listed, and approved for grid interconnection.": a
+                 blanket approval, with no registry read, on a package carrying open
+                 equipment-identity, document-applicability, racking-selection and
+                 capacity-document requirements. It is now DERIVED from the canonical
+                 release-gate registry and can only turn positive when that scope is
+                 clear. The document-state chips above carry the per-document truth. -->
+            <span data-app-a-listing-conclusion="${escapeH(_listing.established ? 'ESTABLISHED' : 'NOT_ESTABLISHED')}" data-app-a-listing-open-codes="${escapeH(_listing.openCodes.join(','))}" style="font-weight:700;color:${_listing.established ? '#0a5c23' : '#8a3f04'};">${escapeH(_listing.sentence)}</span>${_listing.openCodes.length
+              ? `<br><span style="font-size:7.5px;color:#555;">Open requirements in this scope: <span class="mono">${escapeH(_listing.openCodes.join(' · '))}</span>${_listing.openAdvisoryCodes.length ? ` (advisory: <span class="mono">${escapeH(_listing.openAdvisoryCodes.join(' · '))}</span>)` : ''}</span>`
+              : ''}
           </div>`;
           })()}
         </div>

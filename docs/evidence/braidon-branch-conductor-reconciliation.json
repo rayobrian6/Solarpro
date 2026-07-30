@@ -1,0 +1,141 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.787Z",
+  "artifact": "braidon-branch-conductor-reconciliation",
+  "section": "§5 branch wire quantities vs BOM (CO-B, object-derived)",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "purpose": "THWN field conductors are derived from IN-CONDUIT route segments only: Hot = conductorsPerCircuit × sharedCircuitCount × oneWayFt × waste. EGC = one shared green per raceway (NEC 250.122(C)). The open-air Q-Cable branch trunk is billed as trunk_cable drops, never as THWN. No merged \"AC wiring\" branch+feeder+EGC row.",
+  "topology": "MICRO",
+  "waste": 1.15,
+  "openAirTrunk_billedAsTrunkCable": [
+    {
+      "id": "BRANCH_RUN",
+      "fn": "micro AC branch (Q-Cable trunk, open air 690.31(C))",
+      "oneWayFt": 58,
+      "billedAs": "trunk_cable (Q-Cable drops, NOT THWN) — open air 690.31(C)"
+    }
+  ],
+  "physicalRaceways": [
+    {
+      "id": "RW-BRANCH-HOMERUN",
+      "type": "PVC Sch 80",
+      "necArticle": "352",
+      "supportArticle": "352.30",
+      "sharedCircuitCount": 3,
+      "conductorCount": 7,
+      "currentCarryingCount": 6,
+      "size": "1-1/4\"",
+      "fillPct": 23.4
+    },
+    {
+      "id": "RW-COMBINER_TO_DISCO_RUN",
+      "type": "PVC Sch 80",
+      "necArticle": "352",
+      "supportArticle": "352.30",
+      "sharedCircuitCount": 1,
+      "conductorCount": 5,
+      "currentCarryingCount": 4,
+      "size": "1-1/4\"",
+      "fillPct": 29
+    },
+    {
+      "id": "RW-DISCO_TO_METER_RUN",
+      "type": "PVC Sch 80",
+      "necArticle": "352",
+      "supportArticle": "352.30",
+      "sharedCircuitCount": 1,
+      "conductorCount": 5,
+      "currentCarryingCount": 4,
+      "size": "1-1/4\"",
+      "fillPct": 29
+    }
+  ],
+  "B_segmentConductorCalc": [
+    {
+      "segmentId": "BRANCH_HOMERUN_RUN",
+      "physicalRacewayId": "RW-BRANCH-HOMERUN",
+      "raceway": "PVC Sch 80",
+      "tradeSize": "1-1/4\"",
+      "gauge": "#10 AWG",
+      "egcGauge": "#12 AWG",
+      "oneWayFt": 18,
+      "conductorsPerCircuit": 2,
+      "sharedCircuitCount": 3,
+      "hotConductors": 6,
+      "calc_hot": "ceil(18 × 6 × 1.15) = 125 ft",
+      "calc_egc": "ceil(18 × 1.15) = 21 ft",
+      "hotFt": 125,
+      "egcFt": 21
+    },
+    {
+      "segmentId": "COMBINER_TO_DISCO_RUN",
+      "physicalRacewayId": "RW-COMBINER_TO_DISCO_RUN",
+      "raceway": "PVC Sch 80",
+      "tradeSize": "1-1/4\"",
+      "gauge": "#6 AWG",
+      "egcGauge": "#10 AWG",
+      "oneWayFt": 20,
+      "conductorsPerCircuit": 3,
+      "sharedCircuitCount": 1,
+      "hotConductors": 3,
+      "calc_hot": "ceil(20 × 3 × 1.15) = 69 ft",
+      "calc_egc": "ceil(20 × 1.15) = 23 ft",
+      "hotFt": 69,
+      "egcFt": 23
+    },
+    {
+      "segmentId": "DISCO_TO_METER_RUN",
+      "physicalRacewayId": "RW-DISCO_TO_METER_RUN",
+      "raceway": "PVC Sch 80",
+      "tradeSize": "1-1/4\"",
+      "gauge": "#6 AWG",
+      "egcGauge": "#10 AWG",
+      "oneWayFt": 15,
+      "conductorsPerCircuit": 3,
+      "sharedCircuitCount": 1,
+      "hotConductors": 3,
+      "calc_hot": "ceil(15 × 3 × 1.15) = 52 ft",
+      "calc_egc": "ceil(15 × 1.15) = 18 ft",
+      "hotFt": 52,
+      "egcFt": 18
+    }
+  ],
+  "aggregationProof": {
+    "hotByGauge": [
+      {
+        "gauge": "#10 AWG",
+        "ft": 125,
+        "segmentIds": [
+          "BRANCH_HOMERUN_RUN"
+        ]
+      },
+      {
+        "gauge": "#6 AWG",
+        "ft": 121,
+        "segmentIds": [
+          "COMBINER_TO_DISCO_RUN",
+          "DISCO_TO_METER_RUN"
+        ]
+      }
+    ],
+    "egcByGauge": [
+      {
+        "gauge": "#12 AWG",
+        "ft": 21,
+        "segmentIds": [
+          "BRANCH_HOMERUN_RUN"
+        ]
+      },
+      {
+        "gauge": "#10 AWG",
+        "ft": 41,
+        "segmentIds": [
+          "COMBINER_TO_DISCO_RUN",
+          "DISCO_TO_METER_RUN"
+        ]
+      }
+    ]
+  },
+  "noOrphanWireRow": true
+}

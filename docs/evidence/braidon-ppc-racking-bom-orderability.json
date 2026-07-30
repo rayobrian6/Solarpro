@@ -1,0 +1,179 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.517Z",
+  "artifact": "braidon-ppc-racking-bom-orderability",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§5 — every pending racking component is NON-ORDERABLE and excluded from totals",
+  "rootCause": "FLAG-PROPAGATION LOSS across a type boundary, not a labeling gap. calcRackingBOM already set pending:true / orderable:false on every assembly-dependent row (structural-engine-v4 railUnpinned gate); emitRackingBOMInto DROPPED both flags because BOMLineItemV4 had no orderability field, so SCHED-3 printed bare quantities and an intact \"Roof Tech\" manufacturer on rows the engine had already ruled non-orderable.",
+  "classLabels": {
+    "A": "VERIFIED — ORDERABLE",
+    "B": "DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION",
+    "C": "CANDIDATE — NOT SELECTED",
+    "D": "EXCLUDED FROM TOTALS"
+  },
+  "frozenFixture": {
+    "canonicalRowCount": 10,
+    "countsByClass": {
+      "A": 0,
+      "B": 8,
+      "C": 1,
+      "D": 1
+    },
+    "orderableRowCount": 0,
+    "rows": [
+      {
+        "key": "rails",
+        "category": "rail",
+        "qty": 20,
+        "unit": "ea",
+        "procurementClass": "B",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "assembly-dependent on the unselected rail SKU (PENDING RACKING ASSEMBLY SELECTION)"
+      },
+      {
+        "key": "railSplices",
+        "category": "splice",
+        "qty": 16,
+        "unit": "ea",
+        "procurementClass": "B",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "assembly-dependent on the unselected rail SKU (PENDING RACKING ASSEMBLY SELECTION)"
+      },
+      {
+        "key": "mounts",
+        "category": "mount",
+        "qty": 64,
+        "unit": "ea",
+        "procurementClass": "B",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "no exact mount SKU is selected on the canonical racking assembly (mountSku is null)"
+      },
+      {
+        "key": "lagBolts",
+        "category": "lag_bolt",
+        "qty": 128,
+        "unit": "ea",
+        "procurementClass": "B",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "roof-attachment fastener assembly UNVERIFIED (FASTENER-ASSEMBLY-UNVERIFIED)"
+      },
+      {
+        "key": "mountingBolts",
+        "category": "mount_hardware",
+        "qty": 64,
+        "unit": "ea",
+        "procurementClass": "B",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "assembly-dependent on the unselected rail SKU (PENDING RACKING ASSEMBLY SELECTION)"
+      },
+      {
+        "key": "midClamps",
+        "category": "mid_clamp",
+        "qty": 58,
+        "unit": "ea",
+        "procurementClass": "B",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "assembly-dependent on the unselected rail SKU (PENDING RACKING ASSEMBLY SELECTION)"
+      },
+      {
+        "key": "endClamps",
+        "category": "end_clamp",
+        "qty": 8,
+        "unit": "ea",
+        "procurementClass": "B",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "assembly-dependent on the unselected rail SKU (PENDING RACKING ASSEMBLY SELECTION)"
+      },
+      {
+        "key": "bondingClips",
+        "category": "bonding",
+        "qty": 31,
+        "unit": "ea",
+        "procurementClass": "B",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "assembly-dependent on the unselected rail SKU (PENDING RACKING ASSEMBLY SELECTION)"
+      },
+      {
+        "key": "groundLugs",
+        "category": "ground_lug",
+        "qty": 16,
+        "unit": "ea",
+        "procurementClass": "C",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "no exact part selected"
+      },
+      {
+        "key": "flashingKits",
+        "category": "flashing",
+        "qty": 0,
+        "unit": "ea",
+        "procurementClass": "D",
+        "orderable": false,
+        "manufacturerDisplayAllowed": false,
+        "skuDisplayAllowed": false,
+        "nonOrderableReason": "modeled quantity is zero / not applicable to this assembly"
+      }
+    ]
+  },
+  "renderedProof": {
+    "pendingRackingRowOccurrences": 17,
+    "rtMini01AsSelectedSkuOccurrences": 0,
+    "note": "RT-MINI-01 came from the equipment registry racking LOT line — a separate emitter from the gated assembly rows. Ray's row-family ruling put the mount base in class B too, so the lot line now withholds its manufacturer and SKU; the quantity (1 lot) stays.",
+    "authoritativeProcurementTotal": 11,
+    "excludedLineItems": 37,
+    "totalLineItems": 48,
+    "excludedByClass": {
+      "non-orderable-design-quantity": 36,
+      "quantity-pending": 1
+    }
+  },
+  "verifiedSelectionAutoRegenerates": {
+    "rule": "a VERIFIED racking selection regenerates class A / orderable rows with no code change",
+    "syntheticInput": "railSku + mountSku pinned, assemblyVerification.overall = verified, no gaps",
+    "result": [
+      {
+        "key": "rails",
+        "procurementClass": "A",
+        "orderable": true,
+        "manufacturerDisplayAllowed": true,
+        "skuDisplayAllowed": true,
+        "nonOrderableReason": null
+      },
+      {
+        "key": "mounts",
+        "procurementClass": "A",
+        "orderable": true,
+        "manufacturerDisplayAllowed": true,
+        "skuDisplayAllowed": true,
+        "nonOrderableReason": null
+      },
+      {
+        "key": "lagBolts",
+        "procurementClass": "A",
+        "orderable": true,
+        "manufacturerDisplayAllowed": true,
+        "skuDisplayAllowed": true,
+        "nonOrderableReason": null
+      }
+    ],
+    "allClassA": true
+  }
+}

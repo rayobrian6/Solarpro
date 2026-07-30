@@ -4,11 +4,13 @@ import { roofProject } from '../../test-fixtures/roofProject';
 import { validatePermitDesignSnapshot, blockingViolations } from '@/lib/permit/snapshot/validate';
 import { computeSnapshotDigest, snapshotIdFromDigest, canonicalJson, deepFreeze } from '@/lib/permit/snapshot/digest';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
+import { buildRackingBondingAuthority } from '@/lib/permit/snapshot/rackingBonding';
+import { resolveProjectStateAuthority } from '@/lib/permit/snapshot/locationAuthority';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
 // Minimal valid snapshot for validator unit tests.
-function baseSnapshot(): PermitDesignSnapshot {
+export function baseSnapshot(): PermitDesignSnapshot {
   const mods = Array.from({ length: 31 }, (_, i) => ({
     moduleId: `m${i}`, planeKey: i < 19 ? 'P1' : 'P2', moduleRecordId: 'mod-1',
     lat: null, lng: null, row: 0, col: i, orientation: null,
@@ -17,7 +19,71 @@ function baseSnapshot(): PermitDesignSnapshot {
     deviceId: `mi-${m.moduleId}`, moduleId: m.moduleId, inverterRecordId: 'inv-1',
     branchId: i < 11 ? 'br-1' : i < 21 ? 'br-2' : 'br-3',
   }));
+  const _codeEd = (kind: 'nec'|'ibc'|'irc'|'ifc'|'asce', edition: string) =>
+    ({ kind, edition, standard: kind.toUpperCase(), source: 'ahj-record' as const,
+       provenance: { source: 'test' } });
   return {
+    // AAC WS-9 — the equipment-document authority region is decided once in the
+    // pure build; a hand-rolled test snapshot carries the empty map (no assets
+    // are being cited by this fixture).
+    equipmentDocumentAuthority: { entries: {}, registryFacts: {}, aliases: {} },
+    // W4 §1 — a VERIFIED code-authority record (test-only) so V11 passes with no
+    // CODE-AUTHORITY-INCOMPLETE blocker required.
+    codeAuthority: {
+      schemaVersion: '1.0.0', ahjName: 'Test AHJ', jurisdictionType: 'county',
+      stateCode: 'IL', stateName: 'Illinois', county: 'Test', city: 'Test',
+      ahjRecordId: 'il-test', utility: { name: null, id: null },
+      // KDP WS-12 — the binding carries HOW it matched.
+      ahjMatchMethod: 'explicit-record-id', incorporatedMunicipality: false,
+      supersededAhjRecordId: null,
+      editions: {
+        nec: _codeEd('nec', '2023'), ibc: _codeEd('ibc', '2021'), irc: _codeEd('irc', '2021'),
+        ifc: _codeEd('ifc', '2024'), asce: _codeEd('asce', '7-22'),
+      },
+      localAmendments: [], effectiveDate: null, expirationDate: null,
+      sourceDocument: 'Test adoption ordinance', officialSource: null, sourceRevision: null,
+      sourceDate: null, sourceHash: 'sha256:test', verificationStatus: 'verified',
+      verifiedBy: 'test-operator', verifiedAtIso: '2026-07-20', recordProvenance: 'curated',
+      applicabilityNotes: [], incompleteEditions: [], capturedAtIso: '2026-07-20',
+      provenance: { source: 'test' },
+    },
+    // W4 §3/§12 — minimal canonical project/cover authority (test fixture).
+    projectAuthority: {
+      schemaVersion: '1.0.0',
+      projectName: 'Test PV System', customer: 'Test Client',
+      installationAddress: '123 Test St', city: 'Test', stateCode: 'IL', zip: '60000',
+      stateName: 'Illinois',
+      stateAuthority: resolveProjectStateAuthority({ projectState: 'IL' }),
+      parcelApn: 'APN-TEST', ahjName: 'Test AHJ', utilityName: 'Test Utility',
+      systemType: 'ROOF MOUNT',
+      capacities: { dcKw: 12.4, acKw: 10.82, moduleCount: 31 },
+      equipmentSummary: {
+        moduleManufacturer: 'Q CELLS', moduleModel: 'Q.PEAK DUO BLK ML-G10+ 400W', moduleWatts: 400,
+        inverterManufacturer: 'Enphase', inverterModel: 'IQ8A', inverterType: 'MICROINVERTER',
+        mountManufacturer: null, mountModel: null,
+        batteryBrand: null, batteryModel: null, batteryCount: null, combinerLabel: null,
+      },
+      designer: 'Test Designer', contractor: null, issueDate: '2026-07-20',
+      // Clean fixture: fully-verified legal authority ⇒ no PROJECT-AUTHORITY-
+      // UNVERIFIED blocker required (keeps this snapshot at zero violations).
+      authorityVerification: {
+        address: 'verified', apn: 'verified', municipalBoundary: 'verified',
+        ahjName: 'verified', fireAuthority: 'verified',
+      },
+      authorityAnyUnverified: false,
+      engineerReviewStatus: 'PENDING — no approved engineering-review record',
+      issueState: 'PENDING ELECTRICAL REVIEW',
+      issueStateBasis: {
+        authorityGapDomains: ['electrical'], reviewCoversCurrentDigest: false, reviewStale: false,
+        reviewedDigest: null, reason: 'only electrical authority gaps remain',
+      },
+      issuedForPermitGate: { pass: false, preconditions: [] },
+      revisionHistory: [{ rev: 'A', description: 'PENDING ELECTRICAL REVIEW', date: '2026-07-20', by: 'Test Designer' }],
+      sheetIndex: [{ id: 'PV-0', title: 'COVER SHEET' }, { id: 'PV-1', title: 'SITE & ROOF PLAN' }],
+      governingCodesRef: { source: 'snapshot.codeAuthority', schemaVersion: '1.0.0', verificationStatus: 'verified', ahjName: 'Test AHJ' },
+      generalNotes: [], fieldProvenance: {}, capturedAtIso: '2026-07-20',
+      provenance: { source: 'test' },
+    },
     meta: { snapshotId: '', digest: '', schemaVersion: '1.0.0', engineVersion: 'test',
             generatedAtIso: '2026-07-20', projectId: null, designVersionId: null },
     sourceInputs: { clientElectrical: null, clientBackfeedBreakerA: null, clientWireGauge: null,
@@ -37,7 +103,7 @@ function baseSnapshot(): PermitDesignSnapshot {
         model: 'Q.PEAK DUO BLK ML-G10+ 400W', sku: null,
         datasheet: { revision: null, sourceUrl: null, capturedAtIso: null, assetId: null },
         verified: true, spec: { wattsStc: 400, voc: 41.6, isc: 12.26, vmp: null, imp: null,
-          tempCoeffVocPctC: -0.27, lengthIn: 70.9, widthIn: 41.7, weightLbs: 48, ulListing: null },
+          tempCoeffVocPctC: -0.27, lengthIn: 70.9, widthIn: 41.7, thicknessIn: 1.57, weightLbs: 48, ulListing: null },
         provenance: { source: 'equipment-db' } }],
       microInverters: [{ recordId: 'inv-1', catalogId: 'enphase-iq8a', manufacturer: 'Enphase',
         model: 'IQ8A', sku: null,
@@ -50,7 +116,10 @@ function baseSnapshot(): PermitDesignSnapshot {
     geometry: {
       roofPlanes: [{ planeId: 'P1', pitchDeg: 17, azimuthDeg: 180, moduleCount: 19 },
                    { planeId: 'P2', pitchDeg: 17, azimuthDeg: 90, moduleCount: 12 }],
-      modules: mods, provenance: { source: 'test' }, gaps: [],
+      modules: mods, moduleInstances: [], roofPlaneObjects: [],
+      coordinateSystem: { id: 'CS-SITE-PLAN-FT', units: 'ft', description: 'test' },
+      drawingTransforms: [],
+      provenance: { source: 'test' }, gaps: [],
     },
     electrical: {
       topology: 'MICRO', engineOfRecord: 'computeSystem',
@@ -73,11 +142,14 @@ function baseSnapshot(): PermitDesignSnapshot {
                 conduit: { raceway: 'EMT', tradeSizeIn: '1-1/4"', fillPct: 29 } },
       groundingObjects: [
         { groundingId: 'gnd-feeder', segmentId: 'COMBINER_TO_DISCO_RUN', purpose: 'feeder-egc',
+          segmentRole: 'FEEDER_EGC', calculatedMinimumSize: '#10 AWG', selectedDesignSize: null, selectionSource: 'nec-minimum', selectionReason: null, ocpdBasis: '60A feeder OCPD', sourceNode: 'combiner', destinationNode: 'disconnect', insulationState: 'insulated-green', installationMethod: 'in-raceway', routeId: 'COMBINER_TO_DISCO_RUN', rackingAssemblyId: null, bondingMethod: null, manufacturerEvidenceId: null, calculationId: 'calc:test', 
           required: true, method: 'conductor', conductorMaterial: 'Cu', conductorSize: '#10 AWG',
           sizingBasis: 'NEC 250.122 @ 60A feeder OCPD', associatedOcpdA: 60,
           associatedEquipment: 'AC feeder', manufacturerListingBasis: null,
           codeBasis: 'NEC 250.122', provenance: { source: 'test' } },
-        { groundingId: 'gnd-gec', segmentId: 'SERVICE', purpose: 'gec', required: false,
+        { groundingId: 'gnd-gec', segmentId: 'SERVICE', purpose: 'gec',
+          segmentRole: 'GEC', calculatedMinimumSize: null, selectedDesignSize: null, selectionSource: null, selectionReason: null, ocpdBasis: null, sourceNode: null, destinationNode: null, insulationState: null, installationMethod: null, routeId: null, rackingAssemblyId: null, bondingMethod: null, manufacturerEvidenceId: null, calculationId: null, 
+          required: false,
           method: 'none-required', conductorMaterial: null, conductorSize: null, sizingBasis: null,
           associatedOcpdA: null, associatedEquipment: 'Existing GES', manufacturerListingBasis: null,
           codeBasis: 'NEC 250.64', provenance: { source: 'test' } },
@@ -88,6 +160,27 @@ function baseSnapshot(): PermitDesignSnapshot {
           conductorGauge: '#6 AWG', conductorCallout: '#6 AWG THWN-2', egcGauge: '#10 AWG',
           voltageDropPct: 0.4, ocpdA: 60, tempDeratingFactor: 0.91, provenance: { source: 'test' } },
       ],
+      serviceTopology: [
+        { objectId: 'svc-tap-point', type: 'tap-point', label: 'Supply-side tap point', description: 'Line side',
+          conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
+          constraints: [], provenance: { source: 'test' } },
+        { objectId: 'svc-tap-conductors', type: 'tap-conductors', label: 'Tap conductors', description: 'tap → fused disco',
+          conductorSpec: '#6 AWG THWN-2', ocpdRatingA: null, lengthFt: null, lengthSource: 'unknown',
+          constraints: [{ code: 'NEC-705.11(C)-TAP-10FT', description: '≤10 ft', limitFt: 10, state: 'pending' }],
+          provenance: { source: 'test' } },
+        { objectId: 'svc-fused-ocpd', type: 'fused-ocpd', label: 'Fused AC disconnect', description: null,
+          conductorSpec: null, ocpdRatingA: 60, lengthFt: null, lengthSource: 'not-applicable',
+          constraints: [], provenance: { source: 'test' } },
+        { objectId: 'svc-utility-disconnect', type: 'utility-disconnect', label: 'Utility disconnect', description: null,
+          conductorSpec: null, ocpdRatingA: 60, lengthFt: null, lengthSource: 'not-applicable',
+          constraints: [], provenance: { source: 'test' } },
+        { objectId: 'svc-meter', type: 'meter', label: 'Utility meter', description: null,
+          conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
+          constraints: [], provenance: { source: 'test' } },
+        { objectId: 'svc-service-disconnect', type: 'service-disconnect', label: 'Main service disconnect', description: null,
+          conductorSpec: null, ocpdRatingA: 200, lengthFt: null, lengthSource: 'not-applicable',
+          constraints: [], provenance: { source: 'test' } },
+      ],
       poi: { method: 'SUPPLY_SIDE_TAP', busbarA: 200, mainBreakerA: 200, backfeedA: 60, rulePasses: true },
       parity: { legacyEngine: 'runElectricalCalc', legacyRan: true, checks: [], unresolved: [] },
       provenance: { source: 'test' }, gaps: [],
@@ -97,6 +190,32 @@ function baseSnapshot(): PermitDesignSnapshot {
       railTotalFt: null, railCount: null, spliceCount: null,
       loads: { windSpeedMph: 115, exposure: 'C', snowPsf: 20, source: 'structural-engine-v4' },
       governing: { utilization: 0.4, safetyFactor: 2.1, passes: true },
+      rackingAssembly: null,
+      // ECD §7 — the bonding authority is a REQUIRED canonical record; with no
+      // racking assembly it is the fail-closed PENDING outcome.
+      rackingBonding: buildRackingBondingAuthority({ assembly: null }),
+      rails: [], attachments: [], checks: [],
+      env: { ultimateWindSpeedMph: 115, windSpeedSource: 'test', exposureCategory: 'C', riskCategory: 'II',
+             groundSnowPsf: 20, roofSnowPsf: 14, buildingHeightFt: 15, componentCladdingZones: [],
+             upliftPressurePsf: null, downforcePressurePsf: null,
+             codeAuthority: { asceEdition: 'ASCE 7-22', source: 'pending-w4-ahj-authority' },
+             environmentalLoadAuthority: {
+               ultimateWindSpeedMph: 115, windSpeedBasis: 'operator-entered', riskCategory: 'II', exposureCategory: 'C',
+               groundSnowLoadPsf: 20, snowLoadBasis: 'operator-entered', snowLoadSource: null,
+               coordinates: null, addressUsed: null, sourceDocumentId: null, sourceDataset: null,
+               sourceVersionOrDate: null, lookupTimestampIso: null, operatorOverrides: ['ultimateWindSpeedMph', 'groundSnowLoadPsf'],
+               verificationStatus: 'unverified', projectOrAhj: null, evidenceRef: null, provenance: { source: 'test' } },
+             provenance: { source: 'test' } },
+      engine: { moduleDeadLoadLbs: null, rackingDeadLoadLbs: null, addedDeadLoadPsf: null,
+                distributedRoofLoadPsf: null, totalRailLoadLbsPerFt: null, governingUtilization: 0.4,
+                governingLimitState: 'attachment-uplift', passes: true, engineeringReviewRequired: false,
+                reviewReasons: [], provenance: { source: 'test' } },
+      framingObservation: null, framingCapacityAuthority: null,
+      bom: [], bomReconciliation: { ok: true, basis: 'no-structural-objects', checks: [] },
+      reactionReconciliation: { ok: true, present: false, attachmentCount: 0, reactionModelCount: null,
+        arrayAreaFt2: null, tributarySumFt2: null, appliedUpliftPsfAsd: null, appliedSnowPsf: null,
+        appliedDeadPsf: null, upliftReactionSumLbs: null, snowReactionSumLbs: null, deadReactionSumLbs: null,
+        tolerance: { lower: 0.98, upper: 1.5 }, checks: [], note: 'test' },
       provenance: { source: 'test' }, gaps: [],
     },
     derived: { moduleCount: 31, dcWattsStc: 12400, acWattsContinuous: 10819,
@@ -105,7 +224,7 @@ function baseSnapshot(): PermitDesignSnapshot {
     permitReadiness: { ready: false, blockers: [
       { code: 'ROUTE-LENGTH-ESTIMATE', message: 'cad-derived estimates' },
       { code: 'ENGINEERING-REVIEW-PENDING', message: 'no review record' },
-    ] },
+    ], registry: [] },
   };
 }
 

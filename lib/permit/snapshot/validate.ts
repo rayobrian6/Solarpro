@@ -12,7 +12,14 @@
 //     silently assumed. V12/V13 are render-level and enforced by a post-render
 //     assertion in generatePermit.
 // ═══════════════════════════════════════════════════════════════════════════
-import type { PermitDesignSnapshot, SnapshotViolation } from './types';
+import { CANONICAL_COORDINATE_SYSTEM_ID, type PermitDesignSnapshot, type SnapshotViolation, type CoordinateMeta } from './types';
+import { transformDigestOf } from './coordinateAuthority';
+import { deriveIssueState } from './projectAuthority';
+import { getMountingSystemById, classifyMountTopology } from '@/lib/mounting-hardware-db';
+// P13 WS-1 (V45) — conductor-area comparison for the minimum-vs-selected gate.
+import { meetsOrExceedsMinimum, conductorAreaRank } from './groundingDesignStandard';
+// V46 — the canonical location authority (state derived once, never a sentinel).
+import { parsePostalStateCode, isUnknownStateSentinel } from './locationAuthority';
 
 const SHEETS_ELECTRICAL = ['E-1', 'PV-4A', 'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'BOM'];
 
@@ -114,16 +121,114 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
   }
 
   // V9 — conductor identity across sheets (deferred until W2 projections; measured by evidence)
-  // V10 — BOM/structural quantity reconciliation (deferred until W3/W5 carry the objects)
-  if (s.structural.attachmentCount == null) {
-    add('V10', 'structural.attachmentCount', null, 'structural builder',
-      ['PV-3', 'PV-4C', 'SCHED-2'], 'attachment count not snapshot-carried (rackingBOM not persisted) — W3 gap', 'deferred');
+  // V10 — §11 ACTIVATED (W3): structural BOM quantities reconcile with the
+  // canonical objects. Object quantities are authority; any divergence from the
+  // §10 checklist or the V4 producer is a BLOCKING quantity-authority failure.
+  // (The DRAWN==snapshot render equalities — drawn module/rail/attachment counts
+  // — are enforced post-render by V12/V13 + the non-zero-exit evidence harness,
+  // since validate runs pre-render on the snapshot itself.)
+  {
+    const recon = s.structural.bomReconciliation;
+    if (recon && !recon.ok) {
+      add('V10', 'structural.bomReconciliation', recon.checks.filter(c => !c.ok).map(c => c.name),
+        'W3 §10 structural BOM', ['BOM', 'SCHED', 'SCHED-2', 'PV-3', 'PV-4C'],
+        `structural BOM does not reconcile with canonical objects: `
+        + recon.checks.filter(c => !c.ok).map(c => `${c.name}(exp ${c.expected}≠act ${c.actual})`).join(', '));
+    }
+    // Rail-based assembly must carry object-derived rail + mount rows.
+    if (s.structural.rails.length > 0) {
+      const bom = s.structural.bom ?? [];
+      if (!bom.some(r => r.key === 'rails') || !bom.some(r => r.key === 'mounts')) {
+        add('V10', 'structural.bom', bom.map(r => r.key), 'W3 §10 structural BOM',
+          ['BOM', 'SCHED', 'PV-3'], 'rail-based assembly carries rail/attachment objects but the structural BOM has no rail/mount row');
+      }
+      // Every BOM row must carry an auditable source (object IDs or aggregation).
+      const orphanRow = bom.find(r => r.sourceObjectIds === undefined && r.aggregation === undefined);
+      if (orphanRow) {
+        add('V10', `structural.bom[${orphanRow.key}]`, orphanRow.qty, 'W3 §10 structural BOM',
+          ['BOM', 'SCHED'], `BOM row '${orphanRow.key}' carries no source object IDs and no aggregation reference (§10 requires one)`);
+      }
+    }
   }
 
-  // V11 — code editions from AHJ authority (deferred to W4 projections; source flagged now)
-  if (s.project.ahj.codesSource === 'default') {
-    add('V11', 'project.ahj.adoptedCodes', s.project.ahj.adoptedCodes, 'default (no AHJ record)',
-      ['ALL SHEETS'], 'code editions defaulted — AHJ record missing; sheets must mark UNVERIFIED (W4)', 'deferred');
+  // ── V10R (§8) — ATTACHMENT-REACTION RECONCILIATION, BLOCKING ──────────────
+  // The canonical attachment reactions must reconcile with the applied load:
+  // object count == the engine reaction-model mount count, Σ tributary ≈ the
+  // array footprint, and Σ uplift/snow/dead reactions ≈ applied pressure × area
+  // (per limit state, documented tolerance). A non-closure means the printed
+  // per-attachment reaction is not traceable to the object set — it must block
+  // rather than render as an authoritative pass (Braidon: 636.48 ft² × 55.95 psf
+  // ÷ 64 never equalled the printed 369 lb/attachment).
+  {
+    const rr = s.structural.reactionReconciliation;
+    if (rr && rr.present && !rr.ok) {
+      const failed = rr.checks.filter(c => !c.ok);
+      add('V10R', 'structural.reactionReconciliation', failed.map(c => c.name),
+        'W3 §8 attachment-reaction reconciliation', ['PV-4C', 'SCHED', 'PE-1'],
+        `attachment reactions do not reconcile with the applied load: `
+        + failed.map(c => `${c.name}(exp ${c.expected}≠act ${c.actual}, ×${c.ratio})`).join(', '));
+    }
+    // Honest surfacing: a failed reconciliation MUST also be a permit-readiness
+    // blocker (never silently permit-ready).
+    if (rr && rr.present && !rr.ok
+        && !s.permitReadiness.blockers.some(b => b.code === 'STRUCTURAL-REACTION-RECONCILIATION-FAILED')) {
+      add('V10R', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+        'W3 §8 attachment-reaction reconciliation', ['PV-4C'],
+        'reactions do not reconcile but no STRUCTURAL-REACTION-RECONCILIATION-FAILED blocker present — the gap must actively block permit-ready');
+    }
+  }
+
+  // ── V11 (W4 §2) — CODE-AUTHORITY SINGLE SOURCE — ACTIVATED, BLOCKING ──────
+  // Every displayed code edition must come from the ONE snapshot codeAuthority
+  // record; the snapshot may not fabricate an edition the authority lacks; and
+  // an unverified/incomplete authority must be surfaced as a permit blocker
+  // (planset still renders for review). Cross-sheet identical editions +
+  // renderer literal-freedom are the RENDER-level half of V11, enforced by the
+  // data-code-edition harness + the source-scan test (like V12/V13). This
+  // validator owns the SNAPSHOT-level consistency half.
+  {
+    const ca = (s as unknown as { codeAuthority?: {
+      schemaVersion?: string; verificationStatus?: string; incompleteEditions?: string[];
+      localAmendments?: string[];
+      editions?: Record<string, { edition: string | null }>;
+    } }).codeAuthority;
+    if (!ca || !ca.schemaVersion || !ca.editions) {
+      add('V11', 'codeAuthority', ca ?? null, 'W4 code-authority builder',
+        ['ALL SHEETS'], 'snapshot carries no canonical codeAuthority record — every sheet would lack a single edition source (W4 §1)');
+    } else {
+      const kinds: ('nec' | 'ibc' | 'irc' | 'ifc' | 'asce')[] = ['nec', 'ibc', 'irc', 'ifc', 'asce'];
+      const adopted = s.project.ahj.adoptedCodes as Record<string, string>;
+      for (const k of kinds) {
+        const authEd = ca.editions[k]?.edition ?? null;
+        const printed = adopted?.[k] ?? null;
+        // Single source: adoptedCodes must mirror the authority exactly ('—' for null).
+        const expected = authEd ?? '—';
+        if (printed !== expected) {
+          add('V11', `project.ahj.adoptedCodes.${k}`, printed, 'W4 code-authority projection',
+            ['COVER', 'E-1', 'PV-4C', 'CERT', 'PE-1', 'TITLE-BLOCK'],
+            `adopted ${k.toUpperCase()} '${printed}' ≠ codeAuthority edition '${expected}' — editions must single-source from codeAuthority`);
+        }
+        // No fabrication: a null (unknown) authority edition may never print as a year.
+        if (authEd == null && printed != null && printed !== '—') {
+          add('V11', `project.ahj.adoptedCodes.${k}`, printed, 'W4 code-authority projection',
+            ['ALL SHEETS'],
+            `adopted ${k.toUpperCase()} '${printed}' fabricated — authority has no adoption for this code family (must be '—'/PENDING)`);
+        }
+      }
+      // Amendments attached to the applicable code record (single source).
+      if ((ca.localAmendments ?? []).join('|') !== (s.project.ahj.localAmendments ?? []).join('|')) {
+        add('V11', 'project.ahj.localAmendments', s.project.ahj.localAmendments, 'W4 code-authority record',
+          ['COVER', 'CERT'], 'project amendments diverge from the code-authority record — amendments must attach to the code record');
+      }
+      // Verification currency: unverified/incomplete ⇒ CODE-AUTHORITY-INCOMPLETE
+      // blocker MUST be present (honest surfacing, never silently permit-ready).
+      if (ca.verificationStatus !== 'verified'
+          && !s.permitReadiness.blockers.some(b => b.code === 'CODE-AUTHORITY-INCOMPLETE')) {
+        add('V11', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          'W4 code authority', ['PV-0', 'VAL-1'],
+          `code authority is ${ca.verificationStatus} but no CODE-AUTHORITY-INCOMPLETE blocker present — the gap must actively block permit-ready`);
+      }
+    }
   }
 
   // V12/V13 are render-level — enforced post-render in generatePermit.
@@ -165,6 +270,352 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
       'estimate-grade route lengths present but not reflected as a permit-readiness blocker');
   }
 
+  // ── §3 (07-22) ELECTRICAL VALUE INTEGRITY — no NaN/Infinity ever renders ─────
+  // V40 — a NaN/±Infinity in any displayed electrical number is a corrupt value
+  // that must NEVER reach a sheet (it printed 'undefined%' / 'NaN A' on Braidon).
+  // BLOCKING (hard) — distinct from an honest null (PENDING), which V41 governs.
+  {
+    const badNum = (x: unknown): boolean => typeof x === 'number' && !Number.isFinite(x);
+    const scan: { path: string; v: unknown }[] = [
+      { path: 'electrical.feeder.voltageDropPct', v: s.electrical.feeder.voltageDropPct },
+      { path: 'electrical.feeder.ocpdA', v: s.electrical.feeder.ocpdA },
+      { path: 'electrical.feeder.continuousA', v: s.electrical.feeder.continuousA },
+      { path: 'electrical.feeder.currentA', v: s.electrical.feeder.currentA },
+      { path: 'electrical.feeder.conduit.fillPct', v: s.electrical.feeder.conduit.fillPct },
+      ...s.electrical.branches.flatMap(b => [
+        { path: `electrical.branches[${b.label}].currentA`, v: b.currentA },
+        { path: `electrical.branches[${b.label}].continuousA`, v: b.continuousA },
+        { path: `electrical.branches[${b.label}].ocpdA`, v: b.ocpdA },
+      ]),
+      ...s.electrical.routeSegments.flatMap(r => [
+        { path: `electrical.routeSegments[${r.segmentId}].voltageDropPct`, v: r.voltageDropPct },
+        { path: `electrical.routeSegments[${r.segmentId}].oneWayFt`, v: r.oneWayFt },
+        { path: `electrical.routeSegments[${r.segmentId}].fillPct`, v: r.fillPct },
+        { path: `electrical.routeSegments[${r.segmentId}].ocpdA`, v: r.ocpdA },
+      ]),
+    ];
+    for (const { path, v } of scan) {
+      if (badNum(v)) {
+        add('V40', path, v, 'computeSystem / conductor authority', SHEETS_ELECTRICAL,
+          `electrical value is NaN/Infinity — a corrupt number may never render (fail closed, never PASS)`);
+        break;
+      }
+    }
+  }
+  // V41 — SEGMENT-PROJECTION CONSISTENCY: the feeder conduit raceway/size the
+  // sheets project (electrical.feeder.conduit) must MATCH the canonical feeder
+  // route segment's raceway/tradeSize. A divergence is the exact 3/4"-EMT-vs-
+  // 1-1/4"-PVC-vs-1"-EMT conflict this correction eliminates — every surface
+  // must project ONE raceway per segment.
+  {
+    const feederIds = new Set(['COMBINER_TO_DISCO_RUN', 'INV_TO_DISCO_RUN']);
+    const seg = s.electrical.routeSegments.find(r => feederIds.has(r.segmentId));
+    const fc = s.electrical.feeder.conduit;
+    if (seg && seg.raceway && fc.raceway && seg.raceway !== 'FREE_AIR'
+        && String(seg.raceway) !== String(fc.raceway)) {
+      add('V41', 'electrical.feeder.conduit.raceway', fc.raceway, 'snapshot builder',
+        ['E-1', 'PV-4B', 'SCHED', 'BOM'],
+        `feeder conduit raceway '${fc.raceway}' ≠ canonical segment '${seg.segmentId}' raceway '${seg.raceway}' — one raceway per segment (segment authority)`);
+    }
+    if (seg && seg.tradeSizeIn && fc.tradeSizeIn && String(seg.tradeSizeIn) !== String(fc.tradeSizeIn)) {
+      add('V41', 'electrical.feeder.conduit.tradeSizeIn', fc.tradeSizeIn, 'snapshot builder',
+        ['E-1', 'PV-4B', 'SCHED', 'BOM'],
+        `feeder conduit trade size '${fc.tradeSizeIn}' ≠ canonical segment '${seg.segmentId}' size '${seg.tradeSizeIn}' — one raceway size per segment`);
+    }
+  }
+  // ── §5 (07-22) V42 — SERVICE-TOPOLOGY OBJECT INTEGRITY ──────────────────────
+  // A supply-side (705.11) design MUST carry the full canonical service chain as
+  // separate objects, and NO object may render a compliant length-limit claim
+  // (e.g. the 10-ft tap rule) without a KNOWN length — an unmeasured tap run is
+  // PENDING, never a fabricated 'within 10 ft'.
+  {
+    const topo = s.electrical.serviceTopology ?? [];
+    const isSupply = s.project.interconnection.rule === '705.11'
+      || /SUPPLY|LINE/i.test(String(s.electrical.poi.method ?? ''));
+    if (isSupply) {
+      // §9 (closeout 2026-07-23): the utility-accessible disconnect may be a
+      // SEPARATE physical device OR the SAME listed fused AC disconnect serving a
+      // DUAL role (the residential norm). When the fused OCPD carries a
+      // dualPurposeListing covering the utility-accessible role, a standalone
+      // utility-disconnect object is CORRECTLY absent (modeling it would be a
+      // phantom duplicate device — gate 9). Otherwise it must be a separate object.
+      const _dualUtility = topo.some(o =>
+        o.type === 'fused-ocpd' && o.dualPurposeListing === true
+        && (o.utilityRole != null || (o.dualPurposeRoles ?? []).some(r => /utility/i.test(r))));
+      const required: import('./types').ServiceTopologyObject['type'][] =
+        _dualUtility
+          ? ['tap-point', 'tap-conductors', 'fused-ocpd', 'meter', 'service-disconnect']
+          : ['tap-point', 'tap-conductors', 'fused-ocpd', 'utility-disconnect', 'meter', 'service-disconnect'];
+      const present = new Set(topo.map(o => o.type));
+      const missing = required.filter(t => !present.has(t));
+      if (missing.length) {
+        add('V42', 'electrical.serviceTopology', missing, 'snapshot builder',
+          ['E-1', 'PV-4B'],
+          `supply-side (705.11) design is missing canonical service-topology object(s): ${missing.join(', ')} — each of tap point, tap conductors, fused OCPD, ${_dualUtility ? 'utility-accessible disconnect (dual-role on the fused OCPD)' : 'utility disconnect'}, meter and service disconnect must be represented`);
+      }
+      // §9 gate 9 — device-role graph must have no CONFLATION or DUPLICATE physical
+      // devices: a dual-purpose fused OCPD and a SEPARATE utility-disconnect object
+      // cannot both exist (that IS the phantom duplicate the audit flagged).
+      if (_dualUtility && present.has('utility-disconnect')) {
+        add('V43', 'electrical.serviceTopology', ['fused-ocpd(dual)', 'utility-disconnect'],
+          'snapshot builder', ['PV-6', 'E-1'],
+          'device-role conflation: the fused AC disconnect is modeled as a dual-purpose utility-accessible device AND a separate utility-disconnect object exists — one physical device may not appear twice (§9 gate 9)');
+      }
+      // §9 gate 9 — no two objects may share the SAME (type, ocpdRating) identity
+      // (a duplicated physical device). tap-point/meter carry no rating → skip.
+      const _byIdentity = new Map<string, number>();
+      for (const o of topo) {
+        if (o.ocpdRatingA == null) continue;
+        const k = `${o.type}|${o.ocpdRatingA}`;
+        _byIdentity.set(k, (_byIdentity.get(k) ?? 0) + 1);
+      }
+      for (const [k, n] of _byIdentity) {
+        if (n > 1) add('V43', 'electrical.serviceTopology', { identity: k, count: n },
+          'snapshot builder', ['PV-6'],
+          `duplicate physical device: ${n} service-topology objects share identity ${k} (§9 gate 9 — a single listed device must appear once)`);
+      }
+    }
+    // No object may claim a passing length-limit rule without a known length.
+    for (const o of topo) {
+      for (const c of o.constraints) {
+        if (c.limitFt != null && c.state === 'pass' && o.lengthFt == null) {
+          add('V42', `electrical.serviceTopology[${o.objectId}]`, { rule: c.code, length: o.lengthFt },
+            'snapshot builder', ['PV-4B', 'E-1'],
+            `object '${o.objectId}' claims constraint '${c.code}' PASSES but its length is unknown — a ≤${c.limitFt}-ft claim requires a known length (must be PENDING)`);
+        }
+      }
+    }
+  }
+
+  // ── W3 canonical STRUCTURAL invariants (snapshot-internal, blocking) ─────
+  const st = s.structural;
+  const gi = s.geometry.moduleInstances ?? [];
+  // V19 — module instance count == module count (when instances are carried)
+  if (gi.length > 0 && nModules > 0 && gi.length !== nModules) {
+    add('V19', 'geometry.moduleInstances.length', gi.length, 'W3 structural authority',
+      ['PV-1', 'PV-1B', 'PV-3'], `module instances (${gi.length}) ≠ module count (${nModules})`);
+  }
+  // V20 — every instance uses EXACT catalog dims (no generic size)
+  if (gi.length > 0 && mod0 && mod0.spec.widthIn != null && mod0.spec.lengthIn != null) {
+    for (const m of gi) {
+      if (m.widthIn !== mod0.spec.widthIn || m.heightIn !== mod0.spec.lengthIn) {
+        add('V20', `geometry.moduleInstances[${m.instanceId}]`, { w: m.widthIn, h: m.heightIn },
+          `equipment.modules[${mod0.model}]`, ['PV-1', 'PV-3', 'APP-A'],
+          `module footprint dims (${m.widthIn}×${m.heightIn}) ≠ catalog record (${mod0.spec.widthIn}×${mod0.spec.lengthIn}) — generic size forbidden`);
+        break;
+      }
+    }
+  }
+  // V21 — array area == Σ canonical module polygon areas (exact catalog footprint)
+  for (const m of gi) {
+    const expect = Math.round((m.widthIn * m.heightIn) / 144 * 1000) / 1000;
+    if (Math.abs(m.areaFt2 - expect) > 0.01) {
+      add('V21', `geometry.moduleInstances[${m.instanceId}].areaFt2`, m.areaFt2, 'W3 structural authority',
+        ['PV-1', 'NEW-ARRAY-AREA'], `instance area ${m.areaFt2} ≠ exact catalog footprint ${expect} ft²`);
+      break;
+    }
+  }
+  // V22 — rail ↔ attachment ↔ module referential integrity (when rails carried)
+  if (st.rails.length > 0) {
+    const railIds = new Set(st.rails.map(r => r.railId));
+    const attIds = new Set(st.attachments.map(a => a.attachmentId));
+    // §6/§11 — every attachment carries a rail AND a roof-plane reference.
+    for (const a of st.attachments) {
+      if (!a.railId || !a.roofPlaneId) {
+        add('V22', `structural.attachments[${a.attachmentId}]`, { railId: a.railId, roofPlaneId: a.roofPlaneId },
+          'W3 structural authority', ['PV-3', 'PV-4C', 'BOM'],
+          `attachment ${a.attachmentId} missing rail/roof-plane reference (referential integrity)`);
+        break;
+      }
+    }
+    // §5/§11 — every rail references ≥1 supported module and ≥1 attachment + a plane.
+    for (const r of st.rails) {
+      if (!r.roofPlaneId || r.supportedModuleIds.length === 0 || r.attachmentIds.length === 0) {
+        add('V22', `structural.rails[${r.railId}]`,
+          { plane: r.roofPlaneId, modules: r.supportedModuleIds.length, atts: r.attachmentIds.length },
+          'W3 structural authority', ['PV-3', 'BOM'],
+          `rail ${r.railId} missing plane / supported-module / attachment references (referential integrity)`);
+        break;
+      }
+    }
+    for (const a of st.attachments) {
+      if (!railIds.has(a.railId)) {
+        add('V22', `structural.attachments[${a.attachmentId}].railId`, a.railId, 'W3 structural authority',
+          ['PV-3', 'PV-4C', 'SCHED-2', 'BOM'], `attachment ${a.attachmentId} references unknown rail ${a.railId}`);
+        break;
+      }
+    }
+    let railAttSum = 0;
+    for (const r of st.rails) {
+      railAttSum += r.attachmentIds.length;
+      for (const aid of r.attachmentIds) {
+        if (!attIds.has(aid)) {
+          add('V22', `structural.rails[${r.railId}].attachmentIds`, aid, 'W3 structural authority',
+            ['PV-3', 'BOM'], `rail ${r.railId} references unknown attachment ${aid}`);
+          break;
+        }
+      }
+    }
+    if (railAttSum !== st.attachments.length) {
+      add('V22', 'structural.rails[].attachmentIds', railAttSum, 'W3 structural authority',
+        ['PV-3', 'BOM'], `Σ rail attachment refs (${railAttSum}) ≠ attachment objects (${st.attachments.length})`);
+    }
+    // every module supported by ≥1 rail
+    const supported = new Set(st.rails.flatMap(r => r.supportedModuleIds));
+    if (gi.length > 0) {
+      const orphan = gi.find(m => !supported.has(m.instanceId.replace(/^mi-/, '')) && !supported.has(m.instanceId));
+      if (orphan) {
+        add('V22', 'structural.rails[].supportedModuleIds', orphan.instanceId, 'W3 structural authority',
+          ['PV-3'], `module ${orphan.instanceId} is not supported by any canonical rail`);
+      }
+    }
+  }
+  // V23 — structural environmental values agree with the loads mirror (one source)
+  if (st.env.ultimateWindSpeedMph != null && st.loads.windSpeedMph != null
+      && st.env.ultimateWindSpeedMph !== st.loads.windSpeedMph) {
+    add('V23', 'structural.env.ultimateWindSpeedMph', st.env.ultimateWindSpeedMph, 'W3 structural authority',
+      ['PV-3', 'PV-4C', 'CERT', 'PE-1', 'COVER'],
+      `env wind ${st.env.ultimateWindSpeedMph} ≠ loads wind ${st.loads.windSpeedMph} — the 115-vs-90 disagreement must be single-sourced`);
+  }
+  // V24 — FRAMING HONESTY: an engineering-review-required result must NOT carry
+  // a fabricated framing pass, and must be reflected in permitReadiness.
+  if (st.engine.engineeringReviewRequired) {
+    const framing = st.checks.find(c => c.limitState === 'framing-capacity');
+    if (framing && framing.passes === true) {
+      add('V24', 'structural.checks[framing-capacity].passes', true, 'W3 structural engine',
+        ['PV-4C', 'CERT', 'PE-1'], 'framing check reports PASS while engineering review is required — fabricated truss capacity forbidden');
+    }
+    // FRAMING-AUTHORITY GATE — canonical code FRAMING-AUTHORITY-UNVERIFIED
+    // (successor to STRUCTURAL-FRAMING-UNVERIFIED; either satisfies the invariant).
+    if (!s.permitReadiness.blockers.some(b =>
+        b.code === 'FRAMING-AUTHORITY-UNVERIFIED' || b.code === 'STRUCTURAL-FRAMING-UNVERIFIED')) {
+      add('V24', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code), 'W3 structural authority',
+        ['PV-0', 'VAL-1'], 'engineering review required but no FRAMING-AUTHORITY-UNVERIFIED blocker present');
+    }
+  }
+  // V25 — REACTION HONESTY (§11): an attachment reaction exceeding its adjusted
+  // allowable capacity must NOT be reported as a passing check and must surface
+  // as a permit blocker — never a silent over-capacity. (§12: over-utilization
+  // blocks permit-ready; the planset still renders for review — so this is a
+  // consistency invariant, not a physics hard-throw.)
+  {
+    const over = st.attachments.find(a => a.upliftReactionLbs != null && a.allowableCapacityLbs != null
+      && a.upliftReactionLbs > a.allowableCapacityLbs);
+    if (over) {
+      const att = st.checks.find(c => c.limitState === 'attachment-uplift');
+      if (att && att.passes === true) {
+        add('V25', 'structural.checks[attachment-uplift].passes', true, 'W3 structural engine',
+          ['PV-3', 'PV-4C', 'PE-1'],
+          `attachment ${over.attachmentId} uplift ${over.upliftReactionLbs} > allowable ${over.allowableCapacityLbs} but the attachment check reports PASS — reaction exceeding capacity must not be hidden`);
+      }
+      if (!s.permitReadiness.blockers.some(b => b.code === 'STRUCTURAL-UTILIZATION-EXCEEDED')) {
+        add('V25', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code), 'W3 structural authority',
+          ['PV-0', 'VAL-1'],
+          `attachment reaction exceeds allowable capacity (${over.attachmentId}) but no STRUCTURAL-UTILIZATION-EXCEEDED blocker present`);
+      }
+    }
+  }
+
+  // V32 (W3.1 §4) — RACKING-CAPACITY PROVENANCE COVERAGE: every BLOCKING
+  // racking-capacity structural-authority gap on the assembly record must be
+  // surfaced as a permit-readiness blocker (RT-MINI source-not-archived +
+  // applicability). A blocking gap hidden from the blockers list is forbidden —
+  // the capacity gap must ACTIVELY block permit-ready, never apply generically.
+  {
+    const gaps = ((st.rackingAssembly as unknown as {
+      structuralAuthorityGaps?: { code: string; severity: string; message: string }[];
+    } | null)?.structuralAuthorityGaps) ?? [];
+    for (const g of gaps) {
+      if (g.severity === 'blocking' && !s.permitReadiness.blockers.some(b => b.code === g.code)) {
+        add('V32', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          'W3.1 §4 racking capacity provenance', ['PV-3', 'PV-4C', 'PV-0', 'VAL-1'],
+          `blocking racking-capacity gap '${g.code}' not surfaced as a permit-readiness blocker`);
+      }
+    }
+  }
+
+  // ── V36 (W4.1 §1) — MOUNTING-TOPOLOGY RESOLUTION ─────────────────────────
+  // A roof mount whose corrected topology is 'unknown' (neither verified rail-
+  // paired nor verified rail-less — e.g. an unconfirmed RT-MINI alias) must
+  // ACTIVELY block permit-ready: the MOUNT-TOPOLOGY-UNKNOWN blocker MUST be
+  // present. Topology is re-derived independently here from the equipment
+  // authority (classifyMountTopology) — the structural path is guarded on the
+  // topology VALUE, never the product name, so a mislabeled 'rail_less'
+  // systemType cannot silently reach the direct-mount engine.
+  {
+    const mountCatalogId = (s.equipment.mount as { catalogId?: string | null } | null)?.catalogId ?? null;
+    const mountSys = mountCatalogId ? getMountingSystemById(mountCatalogId) : undefined;
+    if (mountSys) {
+      const { topology } = classifyMountTopology(mountSys);
+      const isRoofMount = mountSys.category === 'roof_residential' || mountSys.category === 'roof_commercial';
+      const looksRoof = s.geometry.roofPlanes.length > 0 || st.rails.length > 0 || st.attachments.length > 0;
+      if (topology === 'unknown' && isRoofMount && looksRoof
+          && !s.permitReadiness.blockers.some(b => b.code === 'MOUNT-TOPOLOGY-UNKNOWN')) {
+        add('V36', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          'W4.1 mounting-topology authority', ['PV-0', 'PV-3', 'PV-4C', 'VAL-1'],
+          `mount '${mountSys.manufacturer} ${mountSys.model}' has an UNKNOWN mounting topology but no `
+          + `MOUNT-TOPOLOGY-UNKNOWN blocker is present — an unresolved mounting topology must actively block permit-ready`);
+      }
+    }
+  }
+
+  // ── W3.1 §2 canonical COORDINATE-AUTHORITY invariants (blocking) ─────────
+  {
+    const transforms = s.geometry.drawingTransforms ?? [];
+    const byId = new Map(transforms.map(t => [t.transformId, t]));
+    // Every physical object that carries a coordinate + the transform it names.
+    type Phys = { path: string; coord: CoordinateMeta | undefined };
+    const physicals: Phys[] = [
+      ...(s.geometry.moduleInstances ?? []).map(m => ({ path: `geometry.moduleInstances[${m.instanceId}]`, coord: (m as { coord?: CoordinateMeta }).coord })),
+      ...(s.geometry.roofPlaneObjects ?? []).map(p => ({ path: `geometry.roofPlaneObjects[${p.planeId}]`, coord: (p as { coord?: CoordinateMeta }).coord })),
+      ...(st.rails ?? []).map(r => ({ path: `structural.rails[${r.railId}]`, coord: (r as { coord?: CoordinateMeta }).coord })),
+      ...(st.attachments ?? []).map(a => ({ path: `structural.attachments[${a.attachmentId}]`, coord: (a as { coord?: CoordinateMeta }).coord })),
+    ];
+    // V26 — UNIFIED FRAME: every physical object shares the ONE canonical
+    // coordinate system (the pre-W3.1 module-vs-rail/attachment split is gone).
+    for (const p of physicals) {
+      if (p.coord && p.coord.coordinateSystemId !== CANONICAL_COORDINATE_SYSTEM_ID) {
+        add('V26', `${p.path}.coord.coordinateSystemId`, p.coord.coordinateSystemId, 'W3.1 coordinate authority',
+          ['PV-1', 'PV-3', 'PV-4C'], `physical object in '${p.coord.coordinateSystemId}' ≠ canonical '${CANONICAL_COORDINATE_SYSTEM_ID}' — coordinate frame split forbidden`);
+        break;
+      }
+    }
+    // V27 — COMPLETE COORDINATE METADATA + resolvable transform reference.
+    for (const p of physicals) {
+      const c = p.coord;
+      if (!c || !c.coordinateSystemId || !c.units || !c.sourceFrame || !c.transformId || !c.transformRevision || !c.transformProvenance) {
+        add('V27', `${p.path}.coord`, c ?? null, 'W3.1 coordinate authority',
+          ['PV-1', 'PV-3', 'BOM'], `physical object missing complete coordinate metadata (coordinateSystemId/units/sourceFrame/transformId/transformRevision/transformProvenance)`);
+        break;
+      }
+      const t = byId.get(c.transformId);
+      if (!t) {
+        add('V27', `${p.path}.coord.transformId`, c.transformId, 'W3.1 coordinate authority',
+          ['PV-1', 'PV-3'], `coordinate transformId '${c.transformId}' does not resolve in geometry.drawingTransforms`);
+        break;
+      }
+      if (t.revision !== c.transformRevision) {
+        add('V27', `${p.path}.coord.transformRevision`, c.transformRevision, 'W3.1 coordinate authority',
+          ['PV-1', 'PV-3'], `object transformRevision '${c.transformRevision}' ≠ referenced transform revision '${t.revision}'`);
+        break;
+      }
+    }
+    // V28 — TRANSFORM DIGEST INTEGRITY: the stored digest must equal a
+    // recomputation of the matrix/params (change ⇒ new digest), and the revision
+    // is bound to the digest (approval-invalidation basis).
+    for (const t of transforms) {
+      const recomputed = transformDigestOf(t.matrix, t.params);
+      if (t.transformDigest !== recomputed) {
+        add('V28', `geometry.drawingTransforms[${t.transformId}].transformDigest`, t.transformDigest, 'W3.1 coordinate authority',
+          ['EVIDENCE', 'PV-3'], `transformDigest '${t.transformDigest}' ≠ recomputed '${recomputed}' — transform parameters were mutated without redigest`);
+      }
+      if (t.fromCoordinateSystemId !== CANONICAL_COORDINATE_SYSTEM_ID) {
+        add('V28', `geometry.drawingTransforms[${t.transformId}].fromCoordinateSystemId`, t.fromCoordinateSystemId, 'W3.1 coordinate authority',
+          ['EVIDENCE'], `transform maps from '${t.fromCoordinateSystemId}' ≠ canonical '${CANONICAL_COORDINATE_SYSTEM_ID}'`);
+      }
+    }
+  }
+
   // V14 — pitch is degrees
   for (const p of s.geometry.roofPlanes) {
     if (p.pitchDeg != null && (p.pitchDeg < 0 || p.pitchDeg > 60)) {
@@ -183,6 +634,270 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
   } else if (_thNote.includes('not reported')) {
     add('V15', 'project.thermal', s.project.thermal.designTempMinC, 'designTemps.ts',
       ['PV-4A', 'PV-4B', 'APP-A', 'E-1'], _thNote, 'deferred');
+  }
+
+  // ═══ W4 §3/§12 — PROJECT / COVER AUTHORITY + ISSUE-STATE invariants ════════
+  {
+    const pa = (s as unknown as { projectAuthority?: PermitDesignSnapshot['projectAuthority'] }).projectAuthority;
+    const COVER_SHEETS = ['PV-0', 'CERT', 'PE-1'];
+    if (pa) {
+      const reviewObj = s.certification.engineeringReviewApproved;
+      const review = (reviewObj && typeof reviewObj === 'object')
+        ? { reviewedDigest: reviewObj.reviewedDigest } : null;
+      const hasCurrentReview = !!review && review.reviewedDigest === s.meta.digest;
+      const hasDesign = s.geometry.modules.length > 0 || s.derived.moduleCount > 0;
+
+      // V33 — ISSUE-STATE DERIVATION CONSISTENCY: the stored issue state must
+      // equal deriveIssueState() over the SAME permitReadiness blockers + review
+      // record. A stored state that does not derive from the blockers is a
+      // fabricated status (the "REV A: ISSUED FOR PERMIT" cover lie).
+      const expected = deriveIssueState({
+        hasDesign,
+        blockers: s.permitReadiness.blockers,
+        review,
+        currentDigest: s.meta.digest,
+        gatePasses: pa.issuedForPermitGate.pass,
+      });
+      if (expected.state !== pa.issueState) {
+        add('V33', 'projectAuthority.issueState', pa.issueState, 'buildProjectAuthority',
+          COVER_SHEETS, `stored issue state '${pa.issueState}' ≠ derived '${expected.state}' — the issue state must be DERIVED from permitReadiness blockers by domain, never fabricated`);
+      }
+
+      // V34 — ISSUED-FOR-PERMIT GATE INTEGRITY (§12).
+      // REVIEWED / PERMIT-READY / ISSUED FOR PERMIT require an approved review
+      // that references the CURRENT snapshot digest.
+      if ((pa.issueState === 'REVIEWED' || pa.issueState === 'PERMIT-READY' || pa.issueState === 'ISSUED FOR PERMIT')
+          && !hasCurrentReview) {
+        add('V34', 'projectAuthority.issueState', pa.issueState, 'buildProjectAuthority',
+          COVER_SHEETS, `issue state '${pa.issueState}' requires an approved engineering-review record referencing the current snapshot digest, but none is present`);
+      }
+      // ISSUED FOR PERMIT ⇒ the gate passes with EVERY precondition satisfied.
+      if (pa.issueState === 'ISSUED FOR PERMIT') {
+        const failed = pa.issuedForPermitGate.preconditions.filter(p => !p.satisfied).map(p => p.id);
+        if (!pa.issuedForPermitGate.pass || failed.length) {
+          add('V34', 'projectAuthority.issuedForPermitGate', { pass: pa.issuedForPermitGate.pass, failed },
+            'evaluateIssuedForPermitGate', COVER_SHEETS,
+            `ISSUED FOR PERMIT but the gate is not fully satisfied (unsatisfied: ${failed.join(', ') || 'gate.pass=false'})`);
+        }
+      }
+      // Digest-invalidation rule: a passing gate must reference the current digest.
+      if (pa.issuedForPermitGate.pass && !hasCurrentReview) {
+        add('V34', 'projectAuthority.issuedForPermitGate.pass', true, 'evaluateIssuedForPermitGate',
+          COVER_SHEETS, 'ISSUED-FOR-PERMIT gate reports pass but no review covers the current digest — a digest change invalidates prior approval unless a new review covers it');
+      }
+
+      // V35 — COVER / TITLE-BLOCK SINGLE-SOURCING (no independent values).
+      // Sheet index is the ACTUAL manifest (never an independent/hardcoded list).
+      if (hasDesign && pa.sheetIndex.length === 0) {
+        add('V35', 'projectAuthority.sheetIndex', pa.sheetIndex.length, 'computePlansetManifest',
+          ['PV-0'], 'sheet index is empty on a package with modules — the cover index must be the generated manifest, never an independent list');
+      }
+      // Governing codes is a REFERENCE only — NO edition literal (V11 rule).
+      const gcs = JSON.stringify(pa.governingCodesRef ?? {});
+      if (/\b20(1[0-9]|2[0-9])\b|\b7-(1[0-9]|2[0-9])\b/.test(gcs)) {
+        add('V35', 'projectAuthority.governingCodesRef', pa.governingCodesRef, 'buildProjectAuthority',
+          COVER_SHEETS, 'governing-codes reference carries a code edition literal — editions must live ONLY on snapshot.codeAuthority (V11)');
+      }
+      // Equipment summary is single-sourced from the versioned equipment records
+      // (no stale/independent equipment on the cover).
+      const modRec = s.equipment.modules[0];
+      if (modRec && pa.equipmentSummary.moduleModel && pa.equipmentSummary.moduleModel !== modRec.model) {
+        add('V35', 'projectAuthority.equipmentSummary.moduleModel', pa.equipmentSummary.moduleModel, 'buildProjectAuthority',
+          COVER_SHEETS, `cover module '${pa.equipmentSummary.moduleModel}' ≠ snapshot equipment record '${modRec.model}' — stale/independent equipment on the cover`);
+      }
+      const invRec = s.equipment.microInverters[0] ?? s.equipment.stringInverters[0];
+      if (invRec && pa.equipmentSummary.inverterModel && pa.equipmentSummary.inverterModel !== invRec.model) {
+        add('V35', 'projectAuthority.equipmentSummary.inverterModel', pa.equipmentSummary.inverterModel, 'buildProjectAuthority',
+          COVER_SHEETS, `cover inverter '${pa.equipmentSummary.inverterModel}' ≠ snapshot equipment record '${invRec.model}' — stale/independent equipment on the cover`);
+      }
+      // AHJ single-sourced from the code-authority record (one AHJ everywhere).
+      // Guard: a snapshot with no codeAuthority is a V11 concern, not V35.
+      if (s.codeAuthority && pa.ahjName !== s.codeAuthority.ahjName) {
+        add('V35', 'projectAuthority.ahjName', pa.ahjName, 'buildProjectAuthority',
+          COVER_SHEETS, `projectAuthority AHJ '${pa.ahjName}' ≠ codeAuthority AHJ '${s.codeAuthority.ahjName}' — AHJ must be single-sourced from the code authority`);
+      }
+
+      // ── V37 (§15d) — PRODUCTION IDENTITY GATE ────────────────────────────
+      // A project whose name still contains "TEST" or whose designer is blank
+      // may NEVER reach a production/issued state, and the ISSUED-FOR-PERMIT
+      // gate's project-identity precondition must reflect that.
+      const _nameHasTest = /\bTEST\b/i.test(String(pa.projectName ?? ''));
+      const _designerBlank = !pa.designer || !String(pa.designer).trim();
+      if (_nameHasTest || _designerBlank) {
+        const idPre = pa.issuedForPermitGate.preconditions.find(p => p.id === 'project-identity-valid');
+        if (idPre && idPre.satisfied) {
+          add('V37', 'projectAuthority.issuedForPermitGate[project-identity-valid]', true, 'evaluateIssuedForPermitGate',
+            COVER_SHEETS, `project name '${pa.projectName}' contains TEST or designer is blank, but the project-identity gate precondition is satisfied — a TEST/undesigned project must not pass the identity gate`);
+        }
+        if (pa.issueState === 'REVIEWED' || pa.issueState === 'PERMIT-READY' || pa.issueState === 'ISSUED FOR PERMIT') {
+          add('V37', 'projectAuthority.issueState', pa.issueState, 'buildProjectAuthority',
+            COVER_SHEETS, `issue state '${pa.issueState}' is a production/issued state but the project name contains TEST${_designerBlank ? ' and/or the designer is blank' : ''} — blocked (§15d)`);
+        }
+      }
+
+      // ── V38 (§14) — PROJECT-AUTHORITY VERIFICATION SURFACING ─────────────
+      // Any postally-inferred / unverified legal-authority field MUST surface a
+      // PROJECT-AUTHORITY-UNVERIFIED permit-readiness blocker (never silently
+      // treat a ZIP-inferred county/AHJ as verified).
+      if (pa.authorityAnyUnverified
+          && !s.permitReadiness.blockers.some(b => b.code === 'PROJECT-AUTHORITY-UNVERIFIED')) {
+        add('V38', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          '§14 project-authority verification', ['PV-0', 'CERT', 'VAL-1'],
+          'project legal authority has unverified-derived fields but no PROJECT-AUTHORITY-UNVERIFIED blocker present — postal inference must actively block permit-ready');
+      }
+
+      // ── V39 (§15b) — HUMAN UTILITY NAME, NEVER A SLUG ────────────────────
+      // projectAuthority.utilityName is the display name; a raw registry slug
+      // (lowercase, hyphenated, e.g. 'il-ameren-illinois') may never leak.
+      if (pa.utilityName && /^[a-z0-9]+(-[a-z0-9]+)+$/.test(String(pa.utilityName))) {
+        add('V39', 'projectAuthority.utilityName', pa.utilityName, 'buildProjectAuthority',
+          ['ALL SHEETS'], `utility name '${pa.utilityName}' is a raw registry slug — the human utility name must be single-sourced (utilityDisplayName)`);
+      }
+    }
+
+    // ── V44 (§15a) — MOJIBAKE / ENCODING INTEGRITY (BLOCKING) ──────────────
+    // No snapshot text field may carry a UTF-8 mojibake byte sequence or a
+    // Unicode replacement character — corrupt encoding must never reach a sheet.
+    // (The rendered-package scan is the render-level half; this owns the data.)
+    {
+      // Classic double-encoded markers + the replacement char. Kept narrow so a
+      // legitimate accented character is never falsely flagged.
+      const MOJIBAKE = /�|â€|Ã[ -¿]|Â[ -¿]/;
+      const texts: { path: string; v: unknown }[] = [
+        { path: 'projectAuthority.projectName', v: pa?.projectName },
+        { path: 'projectAuthority.customer', v: pa?.customer },
+        { path: 'projectAuthority.installationAddress', v: pa?.installationAddress },
+        { path: 'projectAuthority.utilityName', v: pa?.utilityName },
+        { path: 'projectAuthority.ahjName', v: pa?.ahjName },
+        { path: 'projectAuthority.equipmentSummary.moduleModel', v: pa?.equipmentSummary?.moduleModel },
+        { path: 'projectAuthority.equipmentSummary.inverterModel', v: pa?.equipmentSummary?.inverterModel },
+        { path: 'projectAuthority.equipmentSummary.combinerLabel', v: pa?.equipmentSummary?.combinerLabel },
+        ...(pa?.generalNotes ?? []).map((n, i) => ({ path: `projectAuthority.generalNotes[${i}]`, v: n })),
+      ];
+      for (const { path, v } of texts) {
+        if (typeof v === 'string' && MOJIBAKE.test(v)) {
+          add('V44', path, v, 'snapshot text authority', ['ALL SHEETS'],
+            `text field carries a mojibake / replacement-character sequence — corrupt encoding may never render (§15a)`);
+          break;
+        }
+      }
+    }
+  }
+
+  // ═══ V45 — P13 WS-1: THE CODE MINIMUM AND THE DESIGN SELECTION MAY NOT BE
+  // CONFLATED, AND THE INSTALLED CONDUCTOR MAY NEVER BE UNDER THE MINIMUM ═════
+  //
+  // Three ways a grounding record can lie, each refused here:
+  //   (a) the installed conductor is SMALLER than NEC 250.122 requires;
+  //   (b) the record claims the NEC minimum produced a size that differs from
+  //       calculatedMinimumSize (selectionSource 'nec-minimum' while the
+  //       installed size is not the minimum) — this is the "250.122 requires
+  //       #10" claim the campaign called out;
+  //   (c) a size larger than the minimum is installed with no stated selection
+  //       source/reason, leaving a reader to assume the code demanded it.
+  for (const g of (s.electrical.groundingObjects ?? [])) {
+    if (g.method !== 'conductor') continue;
+    const installed = g.conductorSize;
+    const minimum = g.calculatedMinimumSize;
+    if (!installed || !minimum) continue;
+    if (!meetsOrExceedsMinimum(installed, minimum)) {
+      add('V45', `electrical.groundingObjects[${g.groundingId}].conductorSize`, installed,
+        'grounding builder', SHEETS_ELECTRICAL,
+        `installed ${g.segmentRole} conductor ${installed} is SMALLER than the NEC 250.122 minimum ${minimum} `
+        + `at ${g.ocpdBasis ?? `${g.associatedOcpdA ?? '?'}A`}`);
+    }
+    const exceeds = conductorAreaRank(installed) > conductorAreaRank(minimum);
+    if (exceeds && g.selectionSource === 'nec-minimum') {
+      add('V45', `electrical.groundingObjects[${g.groundingId}].selectionSource`, g.selectionSource,
+        'grounding builder', SHEETS_ELECTRICAL,
+        `${g.segmentRole} installs ${installed} but claims selectionSource 'nec-minimum' while the 250.122 `
+        + `minimum is ${minimum} — the code table did not produce this size`);
+    }
+    if (exceeds && (!g.selectionSource || !g.selectionReason)) {
+      add('V45', `electrical.groundingObjects[${g.groundingId}].selectionReason`, g.selectionReason,
+        'grounding builder', SHEETS_ELECTRICAL,
+        `${g.segmentRole} installs ${installed} above the ${minimum} minimum with no stated selection `
+        + 'source/reason — a larger conductor must say who chose it and why');
+    }
+  }
+
+  // ═══ V46 — A KNOWN STATE MAY NOT BE LOST BETWEEN THE ADDRESS AND THE FROZEN
+  // SNAPSHOT ══════════════════════════════════════════════════════════════════
+  //
+  // Planset 14 printed `Unknown` in ~20 places on a project whose address ends
+  // "GRANITE CITY, IL 62040" and whose project record carries state='IL'. Nothing
+  // failed: the client-computed compliance.jurisdiction.state held the truthy
+  // sentinel 'Unknown', every fallback accepted it, and the canonical value sat
+  // unread two fields away. This invariant makes that silence impossible.
+  //
+  // It is a PROPERTY of the data, not of this project: a US postal address that
+  // carries a recognized two-letter state code must produce a state on the frozen
+  // record. An address that genuinely carries none leaves the record null, and
+  // null prints '—' — that is honest and is NOT a violation.
+  {
+    const pa = (s as unknown as { projectAuthority?: {
+      installationAddress: string | null; stateCode: string | null; stateName: string | null;
+      stateAuthority?: { conflicts: string[]; source: string };
+    } }).projectAuthority;
+    if (pa) {
+      const STATE_SHEETS = ['PV-0', 'PE-1', 'CERT', 'title-block (all sheets)'];
+      const postal = parsePostalStateCode(pa.installationAddress);
+      if (postal && !pa.stateCode) {
+        add('V46', 'projectAuthority.stateCode', pa.stateCode,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `the installation address "${pa.installationAddress}" carries the recognized state code `
+          + `${postal}, but the frozen project location reports no state — a known value was dropped `
+          + 'between the address and the snapshot');
+      }
+      // Both forms or neither: a code without a name means a projection somewhere
+      // has to invent the display string.
+      if (pa.stateCode && !pa.stateName) {
+        add('V46', 'projectAuthority.stateName', pa.stateName,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `stateCode=${pa.stateCode} is present but stateName is absent and could not be normalized`);
+      }
+      if (pa.stateName && !pa.stateCode) {
+        add('V46', 'projectAuthority.stateCode', pa.stateCode,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `stateName=${pa.stateName} is present but the canonical two-letter code is absent`);
+      }
+      // A sentinel must never survive normalization onto the record.
+      for (const [path, val] of [['stateCode', pa.stateCode], ['stateName', pa.stateName]] as const) {
+        if (isUnknownStateSentinel(val)) {
+          add('V46', `projectAuthority.${path}`, val, 'resolveProjectStateAuthority', STATE_SHEETS,
+            `the frozen project location carries the sentinel "${val}" — 'Unknown' is not a state`);
+        }
+      }
+      // Two sources that both named a state and named DIFFERENT ones. The winner
+      // is recorded; the loser is never silent.
+      //
+      // BLOCKING only for the AUTHORITATIVE sources — the project record, its
+      // postal address and the bound AHJ registry row. Those three disagreeing is
+      // a real location question an operator must settle.
+      //
+      // The posted `compliance.jurisdiction` is a CLIENT-COMPUTED artifact (the
+      // very field that shipped 'Unknown'), no sheet reads it any more, and
+      // generation repairs it in place — so a disagreement there is REPORTED, not
+      // blocking. Refusing to generate over a stale client field would be the
+      // same mistake in the other direction.
+      const conflicts = pa.stateAuthority?.conflicts ?? [];
+      const authoritative = conflicts.filter(c => !c.startsWith('compliance.jurisdiction='));
+      const advisory = conflicts.filter(c => c.startsWith('compliance.jurisdiction='));
+      if (authoritative.length) {
+        add('V46', 'projectAuthority.stateAuthority.conflicts', authoritative,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `the project state resolved to ${pa.stateCode} from ${pa.stateAuthority?.source}, but `
+          + `${authoritative.join(', ')} named a different state — an operator must reconcile the `
+          + 'location before this package can carry a jurisdiction');
+      }
+      if (advisory.length) {
+        add('V46', 'projectAuthority.stateAuthority.conflicts', advisory,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `the posted compliance jurisdiction (${advisory.join(', ')}) disagrees with the canonical `
+          + `state ${pa.stateCode}; the canonical value governs and the posted record was repaired`,
+          'deferred');
+      }
+    }
   }
 
   return v;

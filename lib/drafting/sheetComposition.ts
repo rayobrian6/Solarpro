@@ -18,9 +18,49 @@
 // ============================================================
 
 import type { CADModel } from '../cad/types';
-import { getMountingSystemById } from '../mounting-hardware-db';
+import { getMountingSystemById, classifyMountTopology } from '../mounting-hardware-db';
 import { getRackingById } from '../equipment-db';
-import { resolveFireSetbackIn, arrayCoverageFrac } from '../permit/utils/fireSetback';
+import { resolveFireSetbackIn, arrayCoverageFrac, resolveFireSetbackBasis } from '../permit/utils/fireSetback';
+import { projectCodeAuthority } from '../permit/snapshot/codeAuthorityProjection';
+// W3 §route-verification — the CONDUIT RUN callout projects the ONE canonical
+// route provenance authority (never a hardcoded "route field-verified" literal;
+// gate 2: no "field-verified" without a recorded field measurement).
+import { routeProvenanceLabel, projectCanonicalFeeder, projectRacewayDescriptor } from '../permit/snapshot/electricalProjection';
+import type { PermitDesignSnapshot } from '../permit/snapshot/types';
+// PPC §3/§4 — THE fix for the second rendering stack. PV-1/PV-3 no longer read a
+// flat `attachSpacing` (a field literally sourced from `maxAllowedSpacing`) nor raw
+// mounting-hardware-db fastener rows: they consume the CANONICAL attachment-
+// installation authority (SpacingAuthority + FastenerAssembly + document
+// applicability + mount/racking states). No MAX/allowable spacing and no exact
+// fastener instruction can be composed without verified authority.
+import {
+  projectAttachmentInstallationAuthority,
+  type AttachmentInstallationAuthority,
+} from '../permit/snapshot/structuralProjection';
+import { getManufacturerAsset } from '../manufacturer-assets-db';
+// AAC WS-9 — THE site design-load seam (no wind/snow literal in drafting).
+import { resolveSiteDesignLoads } from '../permit/snapshot/siteDesignLoads';
+// AAC WS-9 — the ONE document-applicability seam every sheet may use.
+import { sheetDocumentApplicability, type EquipmentDocumentAuthority } from '../permit/snapshot/documentAuthority';
+import { projectRackingBondingAuthority } from '../permit/snapshot/rackingBonding';
+
+// §3 (closeout 2026-07-23) — the PV-1/PV-3 conduit-run callout descriptor. Every
+// conduit description routes through the CANONICAL physical-raceway projection —
+// NEVER `project.conduitType || 'EMT'` (the fabricated EMT beside a PVC run). The
+// feeder conduit (the run PV-1/PV-3 draw) is the single source; absent raceway
+// authority prints an honest 'PENDING — SEE SCHEDULE', never a default 'EMT'.
+function canonicalConduitType(snap: PermitDesignSnapshot | null | undefined): string {
+  const feed = projectCanonicalFeeder(snap);
+  if (feed.raceway) {
+    return (feed.tradeSizeIn ? `${feed.raceway} ${feed.tradeSizeIn}` : feed.raceway).toUpperCase();
+  }
+  const desc = projectRacewayDescriptor(snap);
+  if (desc.present && desc.entries.length) {
+    const e = desc.entries[0];
+    return (e.tradeSizeIn ? `${e.racewayType} ${e.tradeSizeIn}` : e.racewayType).toUpperCase();
+  }
+  return 'PENDING — SEE SCHEDULE';
+}
 
 export type SysType = 'roof' | 'ground_mount' | 'solar_fence';
 export type ViewType = 'plan' | 'structural';
@@ -297,8 +337,21 @@ export function getFenceData(cad: CADModel, input?: Record<string, unknown>): {
     postSpacingFt: f?.postSpacingM ? mToFt(f.postSpacingM)  : ((p?.fencePostSpacingFt as number) || 8),
     embedFt:       f?.postEmbedM   ? mToFt(f.postEmbedM)    : ((p?.fencePostEmbedmentFt as number) || 2.5),
     railCount:     f?.railCount    ?? 2,
-    windSpeedMph:  (cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115,
+    // AAC WS-9 — ONE seam, and it states its own basis. No literal here.
+    windSpeedMph: resolveSiteDesignLoads({
+      snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
+      complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
+    }).windSpeedMph,
   };
+}
+
+/** W3 §7 — canonical wind speed from the validated snapshot env (single source).
+ *  Null when no snapshot is present (standalone preview); callers fall back to
+ *  the existing chain with a documented 115 code-minimum guard. */
+function snapWind(input?: Record<string, unknown>): number | null {
+  const w = (input as { _snapshot?: { structural?: { env?: { ultimateWindSpeedMph?: number } } } } | undefined)
+    ?._snapshot?.structural?.env?.ultimateWindSpeedMph;
+  return typeof w === 'number' && isFinite(w) ? w : null;
 }
 
 export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
@@ -343,9 +396,58 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
     })(),
     structureType: 'DRIVEN PYLON — PLP',
     setbackFt:     g?.setbackFt                ?? ((lay?.groundSetbackFt as number) || 5),
-    windSpeedMph:  (cw?.windSpeed as number)   || (p?.ahjWindSpeedMph as number)   || 115,
+    // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
+    // AAC WS-9 — ONE seam, basis-stated. No literal in the drafting layer.
+    windSpeedMph: resolveSiteDesignLoads({
+      snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
+      complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
+    }).windSpeedMph,
     snowPsf:       (p?.ahjGroundSnowPsf as number) || 0,
   };
+}
+
+/**
+ * KDP (structural math consistency) — THE roof-pitch authority.
+ *
+ * `cad.roof.planes[0].pitch` is the CAD plane's pitch in DEGREES, produced by
+ * canonicalBridge from the surveyed/derived roof geometry. `project.roofPitch`
+ * is the operator-entered figure and is NOT the same number: on the live Braidon
+ * project the CAD plane is 16.5176° (= 3.6:12) while `project.roofPitch` still
+ * reads 20 (= 4.4:12). The geometry the array was laid out on is the CAD plane,
+ * so it governs; the project field is the fallback for a package with no plane.
+ *
+ * The PV-3 cross-section used to read `project.roofPitch` AND round to a whole
+ * number, so one sheet printed "4:12 SLOPE" while the cover, the specs table,
+ * PV-4C and PE-1 all printed 3.6:12 from this function. Same value, same
+ * precision, everywhere — or the sheet is wrong.
+ *
+ * The degrees-vs-ratio heuristic is preserved verbatim: a value ≤ 12 is almost
+ * certainly already rise-per-12 (5:12); only 12 < x ≤ 90 is treated as degrees.
+ */
+export interface RoofPitchAuthority {
+  /** rise per 12 in., rounded to 0.1 — the printed figure */
+  ratio: number;
+  /** pitch in degrees when the source carried degrees, else null */
+  degrees: number | null;
+  /** the ONE display string every sheet prints, e.g. '3.6:12' */
+  pitchStr: string;
+  source: 'cad-plane' | 'project-input' | 'default';
+}
+export function resolveRoofPitch(
+  cad: CADModel | null | undefined,
+  input?: Record<string, unknown>,
+): RoofPitchAuthority {
+  const pl = cad?.roof?.planes?.[0] as { pitch?: number } | undefined;
+  const proj = (input?.project ?? {}) as Record<string, unknown>;
+  const fromPlane = typeof pl?.pitch === 'number' && isFinite(pl.pitch) ? pl.pitch : null;
+  const fromProject = typeof proj?.roofPitch === 'number' && isFinite(proj.roofPitch as number)
+    ? (proj.roofPitch as number) : null;
+  const raw = fromPlane ?? fromProject ?? 5;
+  const source: RoofPitchAuthority['source'] =
+    fromPlane != null ? 'cad-plane' : fromProject != null ? 'project-input' : 'default';
+  const isDegrees = raw > 12 && raw <= 90;
+  const ratio = isDegrees ? Math.round(Math.tan(raw * Math.PI / 180) * 12 * 10) / 10 : raw;
+  return { ratio, degrees: isDegrees ? raw : null, pitchStr: `${ratio}:12`, source };
 }
 
 export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
@@ -358,9 +460,12 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   rafterSize: string;
   rafterSpacing: number;
   isTruss: boolean;
-  attachSpacing: number;
-  lagSpec: string;
-  embedSpec: string;
+  /** PPC §3/§4 — the CANONICAL attachment authority. Replaces the old
+   *  `attachSpacing` (sourced from the legacy `maxAllowedSpacing` field, whose
+   *  NAME carried the max-allowed lie) and the raw `lagSpec` / `embedSpec`
+   *  strings. Emitters read `.spacingDesignLine` / `.spacingStatusLine` /
+   *  `.pendingLines` and NEVER compose a dimension of their own. */
+  attachment: AttachmentInstallationAuthority;
   azimuthLabel: string;
   conduitType: string;
   windSpeedMph: number;
@@ -374,20 +479,11 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   const cs  = ((c?.structural ?? {}) as Record<string, unknown>);
   const cw  = ((cs?.wind ?? {}) as Record<string, unknown>);
 
-  // pl?.pitch comes from canonicalBridge which stores pitchDegrees (e.g., 22°).
-  // The permit format requires rise-per-12-inches (e.g., 5:12), so we must convert
-  // degrees → ratio using tan(degrees) * 12.  A value already in rise-per-12
-  // (e.g., 5) would yield tan(5°)*12 ≈ 1.05 which is clearly wrong as a degree
-  // value, so we can detect the mismatch: if pitchNum ≤ 12 it is almost certainly
-  // already in degrees (roof pitches above 12:12 = 45° are extremely rare).
-  const rawPitch = (pl?.pitch ?? (p?.roofPitch as number) ?? 5);
-  // Align with the documented heuristic: values <=12 are almost certainly already
-  // a rise-per-12 ratio (e.g. 5:12); only 12<x<=90 is treated as degrees. The old
-  // <=90 threshold tan-converted a 5:12 ratio into a bogus 1:12.
-  const isDegrees = rawPitch > 12 && rawPitch <= 90;
-  const pitchRatio = isDegrees
-    ? Math.round(Math.tan(rawPitch * Math.PI / 180) * 12 * 10) / 10
-    : rawPitch;
+  // KDP — ONE pitch authority, shared with the PV-3 cross-section (see
+  // resolveRoofPitch below). This block used to be inline here AND duplicated
+  // with different inputs and different precision in drawRoofStructural.
+  const _pitchAuth = resolveRoofPitch(cad, input);
+  const pitchRatio = _pitchAuth.ratio;
 
   // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (per the IFC table behind
   // applyCodeBasis): ahjRidgeSetbackIn = the FIRE SETBACK on roof edges;
@@ -412,19 +508,39 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   const fireSetbackFt = Math.round((resolveFireSetbackIn(_fireIn, _covFrac) / 12) * 10) / 10;
   const pathwayFt     = (_pathwayIn && _pathwayIn > 0) ? Math.round((_pathwayIn / 12) * 10) / 10 : 3;
 
-  // Fastener spec from the SELECTED mounting system so PV-3 can never
-  // contradict APP-A/PE-1. Lag LENGTH must physically deliver the embedment:
-  // length ≥ embedment + ~1.5" of deck/flashing/foot stack-up — the old
-  // static '3" lag / 2-1/2" embedment' pair was impossible to build.
+  // PPC §3/§4 — the ONE attachment authority. The old block read
+  // mounting-hardware-db directly (`fastenerDiameterIn` / `fastenerEmbedmentIn`
+  // / `fastenerLengthIn` → `lagSpec` / `embedSpec`) and printed the result
+  // unconditionally, and sourced spacing from `compliance.structural.attachment
+  // .maxAllowedSpacing` — a field whose NAME asserted a maximum nobody verified.
+  // Both are replaced by the canonical projection; the descriptor now carries
+  // authority + verification state, not fabricated dimension strings.
   const _mountSel = (p?.mountingSystemId as string)
     ? getMountingSystemById(p.mountingSystemId as string)
     : undefined;
-  const _fracIn = (v: number) =>
-    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
-  const _lagDiaIn  = _mountSel?.mount?.fastenerDiameterIn ?? 0.375;
-  const _embedIn   = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
-  const _lagLenIn  = Math.ceil((_embedIn + 1.5) * 2) / 2;
-  const _ca = ((c?.structural ?? {}) as Record<string, any>)?.attachment;
+  const _snapRoof = (input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null;
+  const _mountIdRoof = (p?.mountingSystemId as string) ?? null;
+  const _rackAsset = _mountIdRoof ? getManufacturerAsset(_mountIdRoof, 'racking_detail') : null;
+  const _applRoof = _rackAsset
+    // AAC WS-9 RENDERER PURITY — the drafting stack projects the snapshot's
+    // decided verdict; with no snapshot (standalone preview) the snapshot layer
+    // answers with the honest no-facts evaluation, flagged as such.
+    ? sheetDocumentApplicability({
+        region: (input as { _snapshot?: { equipmentDocumentAuthority?: EquipmentDocumentAuthority } } | undefined)
+          ?._snapshot?.equipmentDocumentAuthority ?? null,
+        category: 'racking_detail', equipmentId: _mountIdRoof,
+        selectedModel: _mountSel?.model ?? _rackAsset.model, asset: _rackAsset,
+      })
+    : null;
+  const attachment = projectAttachmentInstallationAuthority(
+    _snapRoof, _mountIdRoof,
+    _rackAsset ? { model: _rackAsset.model, docTitle: _rackAsset.docTitle } : null,
+    _applRoof ? {
+      state: _applRoof.state,
+      applicabilityVerified: _applRoof.applicabilityVerified,
+      documentProduct: _applRoof.documentProduct,
+    } : null,
+  );
   const _mountName = ((input?.project as any)?._canonical?.mountSystem as string)
     || (p?.mountingSystem as string)
     || (_mountSel ? `${_mountSel.manufacturer} ${_mountSel.model}` : 'IRONRIDGE XR100');
@@ -460,16 +576,18 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     isTruss: ((c?.structural as any)?.rafter?.framingType === 'truss')
       || (((c?.structural as any)?.rafter?.bendingMoment === 0)
         && (((c?.structural as any)?.rafter?.allowableBendingMoment as number) || 0) > 0),
-    // Engineering-resolved spacing first (V4 mount layout — e.g. auto-resolved
-    // 36"), then the user's input, then the racking system's rated max.
-    attachSpacing: (_ca?.maxAllowedSpacing as number)
-      || (p?.attachmentSpacing as number)
-      || _mountSel?.mount?.maxSpacingIn
-      || 48,
-    lagSpec:       `${_fracIn(_lagDiaIn)}" DIA × ${_lagLenIn}" MIN SS`,
-    embedSpec:     `${_embedIn}" MIN THREAD EMBEDMENT`,
-    conduitType:   ((p?.conduitType as string) || 'EMT').toUpperCase(),
-    windSpeedMph:  (cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115,
+    // PPC §3/§4 — the canonical attachment authority (design spacing + status +
+    // fastener/document gating). NO renderer-local spacing or dimension source.
+    attachment,
+    // §3 — conduit description from the canonical physical-raceway projection
+    // (feeder conduit), never the renderer-local `|| 'EMT'` default (gate 4).
+    conduitType:   canonicalConduitType((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null),
+    // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
+    // AAC WS-9 — ONE seam, basis-stated. No literal in the drafting layer.
+    windSpeedMph: resolveSiteDesignLoads({
+      snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
+      complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
+    }).windSpeedMph,
     totalPanels:   cad.totalPanels ?? 0,
     dcKw:          (cad.totalDcKw ?? 0).toFixed(2),
   };
@@ -677,11 +795,49 @@ function roofComposition(
   // rail-less products (RT-APEX / E Mount AIR / explicit "rail-less") get the
   // direct-attach treatment. (RT-MINI research 2026-07-09, sourced.)
   const _railless = /RAIL-?LESS|RT[- ]?APEX|E[ -]?MOUNT ?AIR/i.test(d.mountSys);
-  const _attachDisplay = _railless ? '48" O.C. STAGGERED' : `${d.attachSpacing}" O.C. MAX`;
-  const _attachInto = _railless ? 'direct-attach mounts @ 48" O.C. staggered' : `L-foot @ ${d.attachSpacing}" O.C.`;
+  // PPC §3 — ONE spacing authority, rendered as a DESIGN value + its verification
+  // STATUS. The old expressions printed `${attachSpacing}" O.C. MAX` (and a
+  // hardcoded 48" on the rail-less branch) — an unverified maximum-allowed claim
+  // on PV-1 + PV-3 while the canonical authority said PENDING VERIFICATION.
+  const _att = d.attachment;
+  const _attachDisplay = _att.spacingShortLabel + (_railless ? ' STAGGERED' : '');
+  const _attachInto = _railless
+    ? `direct-attach mounts @ ${_att.spacingShortLabel} staggered`
+    : `L-foot @ ${_att.spacingShortLabel}`;
+  // PPC §4 — while the attachment authority is not fully verified NO exact
+  // fastener dimension / embedment / torque / pilot / coating / sealant string may
+  // be composed. The observed geometry stays in `_att.fastener` for regeneration.
+  const _exact = _att.exactInstructionsAllowed;
+  // ECD §7 — the canonical BONDING authority the PV-3 callouts project. Callout ⑦
+  // used to name a 'BONDING JUMPER' (a METHOD) with no authority behind it.
+  const _bond = projectRackingBondingAuthority(
+    (input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null);
+  const _fa = _att.fastener;
+  const _lagRow = _exact
+    ? `${_fa.diameterLabel ?? '—'}" DIA × ${_fa.lengthIn ?? '—'}" ${(_fa.fastenerType ?? '').toUpperCase()}`.trim()
+    : _att.fastenerStateLabel;
+  const _embedRow = _exact
+    ? `${_fa.embedmentIn ?? '—'}" MIN THREAD EMBEDMENT`
+    : 'NOT ESTABLISHED';
+  const _hardwareRow = _exact && _fa.material ? _fa.material.toUpperCase() : 'PENDING VERIFIED SELECTION';
   // Framing term matches the structural authority (PV-4C/PE-1/CERT) so the set
   // doesn't say "RAFTER" on PV-3 while the calcs certify a pre-engineered truss.
   const _frameLabel = d.isTruss ? 'TRUSS' : 'RAFTER';
+
+  // §11 — the attachment-base callout label is PROJECTED from the canonical mount
+  // TOPOLOGY (classifyMountTopology), NEVER inferred from the product name. The
+  // old name regex printed "DIRECT-ATTACH MOUNT" on RT-MINI, which is rail_paired
+  // (an L-foot/standoff base carrying a rail), contradicting the structural sheets.
+  const _mountSelC = (input?.project as { mountingSystemId?: string } | undefined)?.mountingSystemId
+    ? getMountingSystemById(String((input!.project as { mountingSystemId?: string }).mountingSystemId))
+    : undefined;
+  const _mountTopo = _mountSelC ? classifyMountTopology(_mountSelC).topology : 'unknown';
+  const _baseLabelP2 = _mountTopo === 'rail_paired' ? 'RAIL-PAIRED ROOF ATTACHMENT BASE'
+    : _mountTopo === 'rail_less' ? 'DIRECT-ATTACH MOUNT (RAIL-LESS)'
+    : 'MOUNT TOPOLOGY — PENDING VERIFICATION';
+  const _baseLabelP3 = _mountTopo === 'rail_paired' ? 'MOUNT BASE / RAIL ATTACHMENT'
+    : _mountTopo === 'rail_less' ? 'DIRECT-ATTACH FOOT'
+    : 'ATTACHMENT — PENDING VERIFICATION';
 
   const dataRows: DataRow[] = isPlan
     ? [
@@ -693,18 +849,22 @@ function roofComposition(
         { label: 'AZIMUTH',        value: d.azimuthLabel },
         { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' RIDGE · 18" HIP · ${d.pathwayFt}' PATHWAY`, bold: true },
         { label: 'FRAMING',        value: `${d.rafterSize} @ ${d.rafterSpacing}" O.C.` },
-        { label: 'ATTACH SPACING', value: _attachDisplay },
+        { label: 'DESIGN ATTACHMENT SPACING', value: _attachDisplay },
+        { label: 'SPACING STATUS', value: _att.spacingStatusLine, highlight: !_exact },
         { label: 'MODULES',        value: `${d.totalPanels} @ ${d.dcKw} kWdc`, bold: true },
       ]
     : [
         { label: 'MOUNTING SYS',   value: d.mountSys },
         { label: `${_frameLabel} SIZE`,    value: d.rafterSize },
         { label: `${_frameLabel} SPACING`, value: `${d.rafterSpacing}" O.C.` },
-        { label: 'ATTACH SPACING', value: _attachDisplay,   bold: true },
-        { label: 'LAG BOLT',       value: d.lagSpec },
-        { label: 'EMBEDMENT',      value: d.embedSpec,                      bold: true, highlight: true },
+        { label: 'DESIGN ATTACHMENT SPACING', value: _attachDisplay,   bold: true },
+        { label: 'SPACING STATUS', value: _att.spacingStatusLine, highlight: !_exact },
+        // PPC §4 — dimensionless while unverified (no diameter / length / embedment
+        // / coating may print without the five verified conditions).
+        { label: 'FASTENER ASSEMBLY', value: _lagRow },
+        { label: 'EMBEDMENT',      value: _embedRow,                        bold: true, highlight: !_exact },
         { label: 'ROOF TYPE',      value: d.roofType },
-        { label: 'HARDWARE',       value: '316 S.S. THROUGHOUT' },
+        { label: 'HARDWARE',       value: _hardwareRow },
         { label: 'WIND SPEED',     value: `${d.windSpeedMph} MPH Vult` },
         { label: 'DESIGN CODE',    value: 'ASCE 7-22 / NEC 690.43' },
       ];
@@ -712,26 +872,54 @@ function roofComposition(
   const callouts: CalloutItem[] = isPlan
     ? [
         { n: 1, label: 'PV MODULE ARRAY', sub: `${d.totalPanels} mod @ ${d.dcKw} kW DC` },
-        { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
+        // §15 — the setback DIMENSIONS are modeled; the authority BASIS is
+        // provisional until the AHJ identity + adopted IFC edition are verified
+        // (never "per AHJ" on an unverified assumption; drives off codeAuthority).
+        { n: 2, label: 'FIRE SETBACKS', sub: (() => {
+            const _cp = projectCodeAuthority((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null);
+            const _fb = resolveFireSetbackBasis({ ifcEdition: _cp.ifc, verificationStatus: _cp.verificationStatus, ahjName: _cp.ahjName });
+            return `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' pathway (MODELED) — ${_fb.calloutSuffix}`;
+          })() },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
-        { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
+        { n: 4, label: 'CONDUIT RUN', sub: `${routeProvenanceLabel((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null)} — ${d.conduitType}` },
         // 'truss'.toLowerCase()+'s' printed "trusss" on PV-1 — pluralize properly.
         { n: 5, label: 'ATTACHMENT ZONE', sub: `${_attachInto} into ${_frameLabel === 'TRUSS' ? 'trusses' : 'rafters'}` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
-        { n: 2, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'DIRECT-ATTACH MOUNT' : 'MOUNTING RAIL', sub: d.mountSys },
-        { n: 3, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'MOUNT BASE' : 'STANDOFF / L-FOOT', sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
-        { n: 4, label: 'FLASHING', sub: 'under all penetrations' },
+        { n: 2, label: _baseLabelP2, sub: d.mountSys },
+        // PPC §4 — callout ③ used to print the exact lag spec + embedment.
+        { n: 3, label: _baseLabelP3, sub: _exact
+            ? `${_lagRow} — ${_embedRow.toLowerCase()}`
+            : `fastener assembly ${_att.fastenerStateLabel.toLowerCase()} — installation details not established` },
+        { n: 4, label: 'FLASHING', sub: _exact
+            ? 'under all penetrations per the verified manufacturer document'
+            : 'flashing / sealant instructions pending verified document applicability' },
         { n: 5, label: `${_frameLabel} ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
-        { n: 6, label: d.conduitType + ' CONDUIT', sub: 'see conductor schedule' },
-        { n: 7, label: 'BONDING JUMPER', sub: 'NEC 690.43' },
+        { n: 6, label: /PENDING/.test(d.conduitType) ? 'CONDUIT' : d.conduitType + ' CONDUIT', sub: /PENDING/.test(d.conduitType) ? 'raceway authority pending — see conductor schedule' : 'see conductor schedule' },
+        // ECD §7 — callout ⑦ used to name a 'BONDING JUMPER' — a specific METHOD
+        // (discrete jumper hardware) — with no authority and no selected component,
+        // in the same array whose siblings ③④ correctly degrade to pending. It now
+        // projects the canonical bonding authority: the REQUIREMENT is the label,
+        // the METHOD is whatever the authority establishes.
+        { n: 7, label: 'BONDING', sub: `${_bond.methodShortLabel.toLowerCase()} · ${_bond.requirementCodeBasis}` },
       ];
+
+  // PPC §3 — the ONE canonical spacing line, printed verbatim on PV-1 AND PV-3,
+  // plus (PV-3) Ray's exact fastener PENDING block + the non-authoritative
+  // reference-detail banner. Any sheet-scoped gate reads these strings.
+  const generalNotes: string[] = isPlan
+    ? [_att.spacingLine]
+    : [_att.spacingLine, ..._att.pendingLines];
 
   return {
     systemType:     'roof',
     viewType,
-    sheetId:        isPlan ? 'PV-2' : 'PV-3',
+    // PPC §3 sub-finding — the plan composition is rendered by pageRoofPlan as
+    // **PV-1** (arrayPages.ts titleBlock); the old 'PV-2' declaration pointed every
+    // sheet-scoped gate at the wrong sheet. 'PV-2' only exists on the standalone
+    // CAD path (renderPlanSet.ts), which does not read this field for its title.
+    sheetId:        isPlan ? 'PV-1' : 'PV-3',
     primaryView:    isPlan ? 'roof_plan' : 'roof_cross_section',
     secondaryViews: isPlan ? ['setbacks', 'obstructions'] : ['attachment_detail' as SecondaryViewId],
     dataSections:   isPlan
@@ -742,11 +930,12 @@ function roofComposition(
     dataPct:        18,
     drawHeader:     isPlan
       ? `ROOF PLAN — ${d.totalPanels} MOD @ ${d.dcKw} kWdc | ${d.roofType} ROOF @ ${d.pitchStr} | AZ: ${d.azimuthLabel} | ${d.mountSys}`
-      : `ATTACHMENT DETAIL — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${_attachDisplay}`,
+      : `ATTACHMENT DETAIL (REFERENCE${_exact ? '' : ' — NON-AUTHORITATIVE'}) — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${_attachDisplay}${_exact ? '' : ' — PENDING STRUCTURAL VERIFICATION'}`,
     secondaryHeader: isPlan ? 'SETBACK & OBSTRUCTION OVERLAY' : 'ATTACHMENT DETAIL — NTS',
     dataTitle:      isPlan ? 'SYSTEM DATA' : 'ATTACHMENT SPECS',
     dataRows,
     callouts,
+    generalNotes,
     requires:       isPlan
       ? ['roof', 'roof.planes', 'roof.planes[0].polygon']
       : ['roof', 'roof.planes'],

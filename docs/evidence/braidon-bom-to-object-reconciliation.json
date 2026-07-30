@@ -1,0 +1,232 @@
+{
+  "generatedAt": "2026-07-27T16:47:06.019Z",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "engineVersion": "47420",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-76C0C5B56CEF (digest 76c0c5b56cef89d4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "role": "W4/W10 — every structural BOM row derives from canonical objects (objectCount/derivedFrom/provenance); reconciliation asserts row⇔object agreement.",
+  "structuralBom": [
+    {
+      "key": "rails",
+      "category": "rail",
+      "item": "PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION (stock sections)",
+      "qty": 20,
+      "unit": "ea",
+      "partNumber": "PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION",
+      "objectCount": 4,
+      "derivedFrom": "Σ ceil(rail.physicalLengthIn ÷ rail.stockLengthIn) over 4 canonical rail objects",
+      "aggregation": "rails:total-length÷stock"
+    },
+    {
+      "key": "railSplices",
+      "category": "splice",
+      "item": "PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION",
+      "qty": 16,
+      "unit": "ea",
+      "partNumber": "PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION",
+      "derivedFrom": "Σ rail.spliceCount over 4 rail objects (stock segmentation)"
+    },
+    {
+      "key": "mounts",
+      "category": "mount",
+      "item": "RT-MINI",
+      "qty": 64,
+      "unit": "ea",
+      "partNumber": "RT-MINI",
+      "derivedFrom": "one mount per canonical attachment object (64)"
+    },
+    {
+      "key": "lagBolts",
+      "category": "lag_bolt",
+      "item": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "qty": 128,
+      "unit": "ea",
+      "partNumber": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "objectCount": 64,
+      "derivedFrom": "Σ attachment.fastenerCount (installation method: l_foot_lag)",
+      "aggregation": "attachments:Σ fastenerCount"
+    },
+    {
+      "key": "mountingBolts",
+      "category": "mount_hardware",
+      "item": "Rail T-bolt / mount-to-rail bolt",
+      "qty": 64,
+      "unit": "ea",
+      "partNumber": null,
+      "derivedFrom": "one mount-to-rail bolt per attachment object (64)"
+    },
+    {
+      "key": "midClamps",
+      "category": "mid_clamp",
+      "item": "RT-MINI Mid Clamp",
+      "qty": 58,
+      "unit": "ea",
+      "partNumber": "RT-MINI Mid Clamp",
+      "derivedFrom": "Σ (modules_on_rail − 1) over rails = module adjacency (moduleInstances=31)"
+    },
+    {
+      "key": "endClamps",
+      "category": "end_clamp",
+      "item": "RT-MINI End Clamp",
+      "qty": 8,
+      "unit": "ea",
+      "partNumber": "RT-MINI End Clamp",
+      "derivedFrom": "2 end clamps per rail supporting modules (4 rails)"
+    },
+    {
+      "key": "bondingClips",
+      "category": "bonding",
+      "item": "RT-MINI Bond Clip",
+      "qty": 31,
+      "unit": "ea",
+      "partNumber": "RT-MINI Bond Clip",
+      "derivedFrom": "one UL 2703 bonding clip per module instance (31)"
+    },
+    {
+      "key": "groundLugs",
+      "category": "ground_lug",
+      "item": "Grounding Lug (NEC 690.47)",
+      "qty": 16,
+      "unit": "ea",
+      "partNumber": null,
+      "objectCount": 31,
+      "derivedFrom": "ceil(moduleInstances ÷ 2) = 16 (NEC 690.47)",
+      "aggregation": "moduleInstances:ceil(n÷2)"
+    },
+    {
+      "key": "flashingKits",
+      "category": "flashing",
+      "item": "Flashing Kit",
+      "qty": 0,
+      "unit": "ea",
+      "partNumber": null,
+      "derivedFrom": "0 — self-flashing mount or non-penetrating method ('l_foot_lag')"
+    }
+  ],
+  "bomReconciliation": {
+    "ok": true,
+    "basis": "object-vs-engine",
+    "checks": [
+      {
+        "name": "mounts-vs-attachment-objects",
+        "expected": 64,
+        "actual": 64,
+        "ok": true,
+        "basis": "attachment-object count"
+      },
+      {
+        "name": "fasteners-vs-attachment-method",
+        "expected": 128,
+        "actual": 128,
+        "ok": true,
+        "basis": "Σ attachment.fastenerCount"
+      },
+      {
+        "name": "bonding-vs-module-topology",
+        "expected": 31,
+        "actual": 31,
+        "ok": true,
+        "basis": "one per module"
+      },
+      {
+        "name": "rails-vs-rail-geometry",
+        "expected": 20,
+        "actual": 20,
+        "ok": true,
+        "basis": "Σ ceil(rail.len÷stock)"
+      },
+      {
+        "name": "splices-vs-rail-segmentation",
+        "expected": 16,
+        "actual": 16,
+        "ok": true,
+        "basis": "Σ rail.spliceCount"
+      },
+      {
+        "name": "midclamps-vs-module-adjacency",
+        "expected": 58,
+        "actual": 58,
+        "ok": true,
+        "basis": "Σ (modules_on_rail−1)"
+      },
+      {
+        "name": "endclamps-vs-rail-ends",
+        "expected": 8,
+        "actual": 8,
+        "ok": true,
+        "basis": "2 × rails"
+      },
+      {
+        "name": "rails-vs-v4-calcRackingBOM",
+        "expected": 20,
+        "actual": 20,
+        "ok": true,
+        "basis": "V4 calcRackingBOM.rails"
+      },
+      {
+        "name": "mounts-vs-v4-calcRackingBOM",
+        "expected": 64,
+        "actual": 64,
+        "ok": true,
+        "basis": "V4 calcRackingBOM.mounts"
+      },
+      {
+        "name": "splices-vs-v4-calcRackingBOM",
+        "expected": 16,
+        "actual": 16,
+        "ok": true,
+        "basis": "V4 calcRackingBOM.railSplices"
+      },
+      {
+        "name": "midclamps-vs-v4-calcRackingBOM",
+        "expected": 60,
+        "actual": 58,
+        "ok": true,
+        "basis": "V4 uniform-grid clamp count is a rectangular approximation; ragged real array → object adjacency (§10) is authority.midClamps"
+      },
+      {
+        "name": "endclamps-vs-v4-calcRackingBOM",
+        "expected": 8,
+        "actual": 8,
+        "ok": true,
+        "basis": "V4 uniform-grid clamp count is a rectangular approximation; ragged real array → object adjacency (§10) is authority.endClamps"
+      },
+      {
+        "name": "lagbolts-vs-v4-calcRackingBOM",
+        "expected": 128,
+        "actual": 128,
+        "ok": true,
+        "basis": "V4 calcRackingBOM.lagBolts"
+      },
+      {
+        "name": "bonding-vs-v4-calcRackingBOM",
+        "expected": 31,
+        "actual": 31,
+        "ok": true,
+        "basis": "V4 calcRackingBOM.bondingClips"
+      },
+      {
+        "name": "tbolts-vs-v4-calcRackingBOM",
+        "expected": 64,
+        "actual": 64,
+        "ok": true,
+        "basis": "V4 calcRackingBOM.mountingBolts"
+      },
+      {
+        "name": "groundlugs-vs-v4-calcRackingBOM",
+        "expected": 16,
+        "actual": 16,
+        "ok": true,
+        "basis": "V4 calcRackingBOM.groundLugs"
+      },
+      {
+        "name": "flashing-vs-v4-calcRackingBOM",
+        "expected": 0,
+        "actual": 0,
+        "ok": true,
+        "basis": "V4 calcRackingBOM.flashingKits"
+      }
+    ],
+    "note": "Mid/end-clamp V4 cross-check informational: real array is ragged (rails support unequal module counts), so object module-adjacency (§10 authority) governs, not the V4 uniform-grid figure."
+  }
+}

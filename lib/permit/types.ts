@@ -446,6 +446,37 @@ export interface PermitInput {
     /** Wave 2c per-sub stamp ('roof'|'ground'|'fence') — present only when the
      *  BOM was generated with per-subsystem inputs; SCHED groups by it. */
     subSystem?: string;
+    // ── PPC §5/§8/§9 PROCUREMENT ORDERABILITY (declared on all three carriers:
+    // RackingBOMRow → BOMLineItemV4 → PermitBOMItem/PermitInput['bom']). Declaring
+    // it here retires the renderer cast `(item as { nonOrderable?: boolean })` at
+    // structuralPages.ts — the smell that marked the dropped-flag boundary.
+    /** DESIGN/CANDIDATE quantity only — excluded from the authoritative procurement
+     *  total and from every orderable export. */
+    nonOrderable?: boolean;
+    /** why (governing blocker code + reason). */
+    nonOrderableReason?: string;
+    /** 'pending' ⇒ the quantity is NOT established; the cell may never print a bare
+     *  number and the row is excluded from procurement approval. */
+    quantityState?: 'established' | 'pending';
+    /** what the quantity cell prints while pending, e.g. '0 MODELED / FIELD
+     *  QUANTITY PENDING'. */
+    quantityStateLabel?: string;
+    // ── ECD §1/§2 (2026-07-26) — STABLE ROW IDENTITY + THE ONE PROCUREMENT
+    // STATE, declared on this carrier too (RackingBOMRow → BOMLineItemV4 →
+    // PermitBOMItem → PermitInput['bom'] — the audit rule is that an authority
+    // state crossing a type boundary must be DECLARED on every carrier, which
+    // is exactly what procurementClass failed to do).
+    /** content-derived stable row id — lib/bom/bomLineId.ts. */
+    bomLineId?: string;
+    /** THE per-row procurement authority record (bom-types-v4). Absent ⇒ the
+     *  row is unclassified and every consumer treats that fail-closed. */
+    procurement?: import('@/lib/bom-types-v4').ProcurementAuthorityRecord;
+    /** producer-declared facts the classifier consumes. */
+    quantitySource?: import('@/lib/bom-types-v4').BomQuantitySource;
+    affectedRouteIds?: string[];
+    affectedEquipmentIds?: string[];
+    authorityStateHint?: import('@/lib/bom-types-v4').ProcurementAuthorityState;
+    authorityStateHintReason?: string;
     // Legacy compat
     ulListing?: string;
   }>;
@@ -802,7 +833,10 @@ export const PERMIT_SHEET_INDEX: PermitSheetIndexEntry[] = [
   { id: 'SCHED', title: 'Equipment Schedule',           description: 'Equipment list, model numbers, electrical ratings, quantities, BOM' },
   { id: 'APP-A', title: 'Specification Sheets',         description: 'Module, inverter, and racking cut sheet references with NEC 690.8 calcs' },
   { id: 'CERT',  title: 'Engineering Certification',    description: 'Engineering stamp, certification statement, revision history, document control' },
-  { id: 'PE-1',  title: 'PE Structural Letter',         description: 'Licensed PE review letter with ASCE 7-22 analysis and structural attestation' },
+  // TAC WS-16 — the in-app navigator names the sheet SLOT. It is a licensed-PE
+  // REVIEW sheet; it becomes a letter of compliance only under a digest-bound
+  // approval (see utils/peLetterIdentity — the ONE source for the printed title).
+  { id: 'PE-1',  title: 'PE Structural Review',         description: 'Licensed PE structural review with ASCE 7-22 analysis; issues as a letter of compliance only under an approved, sealed review' },
   { id: 'E-1',   title: 'Single-Line Diagram',          description: 'Complete electrical SLD — IEEE/ANSI symbols, wire gauges, OCP ratings, grounding' },
   { id: 'VAL-1', title: 'Validation Summary',           description: 'Canonical validation summary and engineering readiness checks' },
   { id: 'APP-CAD', title: 'CAD Preview Appendix',       description: 'Preview-only CAD SVG appendix; non-authoritative and not a PV-1/PV-3 replacement' },

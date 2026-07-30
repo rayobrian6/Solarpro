@@ -1,0 +1,185 @@
+{
+  "generatedAt": "2026-07-27T16:47:06.019Z",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "engineVersion": "47420",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-76C0C5B56CEF (digest 76c0c5b56cef89d4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "role": "W7/W8 — one canonical load basis per check (ASD/LRFD, wind pressure basis, load combination, zone pressure, adjustments); the 3.0× band is retired for separate closure/envelope/lost-load/duplicate-area/count checks.",
+  "loads": {
+    "windSpeedMph": 115,
+    "exposure": "C",
+    "snowPsf": 0,
+    "source": "structural-engine-v4"
+  },
+  "governing": {
+    "utilization": 0.723,
+    "safetyFactor": 1.3838571901419954,
+    "passes": null
+  },
+  "env": {
+    "ultimateWindSpeedMph": 115,
+    "windSpeedSource": "code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority",
+    "exposureCategory": "C",
+    "riskCategory": null,
+    "groundSnowPsf": 0,
+    "roofSnowPsf": 0,
+    "buildingHeightFt": 15,
+    "componentCladdingZones": [
+      "corner"
+    ],
+    "upliftPressurePsf": 61.152,
+    "downforcePressurePsf": 61.152,
+    "codeAuthority": {
+      "asceEdition": "ASCE 7-22",
+      "source": "pending-w4-ahj-authority"
+    },
+    "environmentalLoadAuthority": {
+      "ultimateWindSpeedMph": 115,
+      "windSpeedBasis": "code-minimum-default",
+      "riskCategory": null,
+      "exposureCategory": "C",
+      "groundSnowLoadPsf": 0,
+      "snowLoadBasis": "code-minimum-default",
+      "snowLoadSource": null,
+      "coordinates": {
+        "lat": 38.7061678,
+        "lng": -90.0461651
+      },
+      "addressUsed": "3 MELVIN DR APT A, GRANITE CITY, IL 62040",
+      "sourceDocumentId": null,
+      "sourceDataset": null,
+      "sourceVersionOrDate": null,
+      "lookupTimestampIso": null,
+      "operatorOverrides": [],
+      "verificationStatus": "unverified",
+      "projectOrAhj": null,
+      "evidenceRef": null,
+      "provenance": {
+        "source": "environmental-load authority gate (BAR §2)",
+        "note": "environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission."
+      }
+    },
+    "provenance": {
+      "source": "W3 structural authority",
+      "note": "wind/snow/exposure = canonical ENVIRONMENTAL LOAD AUTHORITY (basis + verification state); roof pressures from structural-engine-v4; ASCE edition via code-authority interface (AHJ population = W4)"
+    }
+  },
+  "reactionReconciliation": {
+    "ok": true,
+    "present": true,
+    "attachmentCount": 64,
+    "reactionModelCount": 64,
+    "arrayAreaFt2": 636.461,
+    "tributarySumFt2": 756.288,
+    "appliedUpliftPsfAsd": 36.691,
+    "appliedSnowPsf": 0,
+    "appliedDeadPsf": 2.153,
+    "upliftReactionSumLbs": 27748.544,
+    "snowReactionSumLbs": 0,
+    "deadReactionSumLbs": 1628.416,
+    "tolerance": {
+      "lower": 0.98,
+      "upper": 2.05
+    },
+    "checks": [
+      {
+        "name": "attachment-count-vs-reaction-model",
+        "limitState": "count",
+        "expected": 64,
+        "actual": 64,
+        "ratio": 1,
+        "ok": true,
+        "basis": "canonical attachment objects === engine calcMountLayout mountCount (per-attachment reaction basis)"
+      },
+      {
+        "name": "tributary-lost-load-floor",
+        "limitState": "geometry",
+        "expected": 636.461,
+        "actual": 756.288,
+        "ratio": 1.188,
+        "ok": true,
+        "basis": "lost-load prevention: Σ attachment.tributaryAreaFt2 must COVER the module footprint (Σ ≥ array area). The uniform CONSERVATIVE SCREENING ENVELOPE charges a full interior tributary at every mount, so Σ ≥ area is intentional."
+      },
+      {
+        "name": "tributary-duplicate-area-guard",
+        "limitState": "geometry",
+        "expected": 1304.745,
+        "actual": 756.288,
+        "ratio": 1.188,
+        "ok": true,
+        "basis": "duplicate-area prevention: Σ tributary ≤ 2.05× array area. The screening envelope's end-mount overcount tops out at the all-end-mount 2× degenerate; a ratio above that signals duplicated attachment objects, not conservatism."
+      },
+      {
+        "name": "uplift-reactions-vs-applied",
+        "limitState": "attachment-uplift",
+        "expected": 23352.518,
+        "actual": 27748.544,
+        "ratio": 1.188,
+        "ok": true,
+        "basis": "Σ upliftReactionLbs envelopes 0.6·(net C&C uplift psf) × array area (screening envelope: ≥ applied, ≤ 2×)"
+      },
+      {
+        "name": "dead-reactions-vs-applied",
+        "limitState": "dead",
+        "expected": 1370.301,
+        "actual": 1628.416,
+        "ratio": 1.188,
+        "ok": true,
+        "basis": "Σ deadReactionLbs envelopes added dead-load psf × array area (screening envelope: ≥ applied, ≤ 2×)"
+      }
+    ],
+    "note": "Reactions reconcile under the CONSERVATIVE SCREENING ENVELOPE: 64 attachments, Σ design tributary 756.288 ft² covers the array footprint 636.461 ft² (×1.188). This is NOT an exact geometric closure: every mount — end mounts included — is charged a FULL interior tributary, so Σ ≥ area is intentional and documented. Validated by separate checks (lost-load floor Σ ≥ area; duplicate-area guard Σ ≤ 2.05× area; per-limit-state reaction envelope; object-count agreement) — not a single loose band."
+  },
+  "reconciliationChecks": [
+    {
+      "name": "attachment-count-vs-reaction-model",
+      "limitState": "count",
+      "expected": 64,
+      "actual": 64,
+      "ratio": 1,
+      "ok": true,
+      "basis": "canonical attachment objects === engine calcMountLayout mountCount (per-attachment reaction basis)"
+    },
+    {
+      "name": "tributary-lost-load-floor",
+      "limitState": "geometry",
+      "expected": 636.461,
+      "actual": 756.288,
+      "ratio": 1.188,
+      "ok": true,
+      "basis": "lost-load prevention: Σ attachment.tributaryAreaFt2 must COVER the module footprint (Σ ≥ array area). The uniform CONSERVATIVE SCREENING ENVELOPE charges a full interior tributary at every mount, so Σ ≥ area is intentional."
+    },
+    {
+      "name": "tributary-duplicate-area-guard",
+      "limitState": "geometry",
+      "expected": 1304.745,
+      "actual": 756.288,
+      "ratio": 1.188,
+      "ok": true,
+      "basis": "duplicate-area prevention: Σ tributary ≤ 2.05× array area. The screening envelope's end-mount overcount tops out at the all-end-mount 2× degenerate; a ratio above that signals duplicated attachment objects, not conservatism."
+    },
+    {
+      "name": "uplift-reactions-vs-applied",
+      "limitState": "attachment-uplift",
+      "expected": 23352.518,
+      "actual": 27748.544,
+      "ratio": 1.188,
+      "ok": true,
+      "basis": "Σ upliftReactionLbs envelopes 0.6·(net C&C uplift psf) × array area (screening envelope: ≥ applied, ≤ 2×)"
+    },
+    {
+      "name": "dead-reactions-vs-applied",
+      "limitState": "dead",
+      "expected": 1370.301,
+      "actual": 1628.416,
+      "ratio": 1.188,
+      "ok": true,
+      "basis": "Σ deadReactionLbs envelopes added dead-load psf × array area (screening envelope: ≥ applied, ≤ 2×)"
+    }
+  ],
+  "tolerance": {
+    "lower": 0.98,
+    "upper": 2.05
+  },
+  "note": "Reactions reconcile under the CONSERVATIVE SCREENING ENVELOPE: 64 attachments, Σ design tributary 756.288 ft² covers the array footprint 636.461 ft² (×1.188). This is NOT an exact geometric closure: every mount — end mounts included — is charged a FULL interior tributary, so Σ ≥ area is intentional and documented. Validated by separate checks (lost-load floor Σ ≥ area; duplicate-area guard Σ ≤ 2.05× area; per-limit-state reaction envelope; object-count agreement) — not a single loose band."
+}

@@ -23,6 +23,7 @@ import {
   SegmentScheduleRow,
   SegmentScheduleInput,
   RacewayType,
+  currentCarryingCountOf,
 } from './segment-schedule';
 
 import { buildSegments } from './segment-builder';
@@ -83,6 +84,7 @@ export type RunSegmentId =
   | 'DC_DISCO_TO_INV_RUN'
   | 'ROOF_RUN'
   | 'BRANCH_RUN'
+  | 'BRANCH_HOMERUN_RUN'       // §3/§4 — shared jbox→combiner conduit home-run (all branches bundled)
   | 'INV_TO_DISCO_RUN'
   | 'COMBINER_TO_DISCO_RUN'
   | 'DISCO_TO_METER_RUN'
@@ -96,8 +98,67 @@ export type RunSegmentId =
   | 'GENERATOR_TO_ATS_RUN'    // Generator output → ATS/BUI GEN terminals
   | 'ATS_TO_MSP_RUN';         // ATS LOAD output → MSP (standalone ATS only)
 
+// ─── Physical Raceway Authority (§3/§4 — post-campaign closeout 2026-07-23) ───
+// THE single canonical object for one PHYSICAL raceway (a run of conduit that
+// carries one or more circuits). A shared home-run raceway carries N branch
+// circuits bundled; an open-air Q-Cable section carries NO raceway (no object).
+// Every in-conduit RunSegment references its raceway via physicalRacewayId, and
+// the raceway object owns the shared-fill math + the NEC article (single source
+// the BOM §6/§7 pass consumes — never a renderer-local 'NEC 358' literal).
+export interface PhysicalRaceway {
+  physicalRacewayId: string;         // stable id (e.g. 'RW-BRANCH-HOMERUN')
+  racewayType: string;               // 'PVC Sch 80' | 'EMT' | 'PVC Sch 40' | 'RMC' | …
+  /** NEC article for the raceway TYPE — the ONLY source of the code citation.
+   *  EMT→358, PVC(Sch 40/80)→352, RMC→344, LFMC→350, FMC→348 (§7). */
+  necArticle: string;                // e.g. '352'
+  supportArticle: string;            // e.g. '352.30'
+  sharedCircuitCount: number;        // # branch/feeder circuits sharing this raceway
+  conductorCount: number;            // total conductors in the raceway (incl. EGC)
+  currentCarryingCount: number;      // CCC used for the ampacity derating
+  conductorAreaIn2: number | null;   // Σ conductor cross-sectional area
+  minimumCodeRacewaySize: string | null;   // smallest legal trade size at ≤40% fill
+  calculatedFillRacewaySize: string | null; // size the fill calc selected
+  selectedRacewaySize: string | null;       // the size actually specified on the sheets
+  fillPct: number | null;            // Σ area ÷ raceway internal area
+  upsizingReason: string | null;     // documented rationale when selected > minimum
+  deratingBasis: string | null;      // e.g. '6 CCC → 0.80 (NEC 310.15(C)(1))'
+  supportCondition: string | null;   // environmental / support conditions
+  provenance: string;                // where the object was built
+}
+
+/** §7 — map a raceway TYPE string to its governing NEC article + support rule.
+ *  The ONE source of raceway code citations; never a hardcoded '358' literal. */
+export function racewayNecArticle(racewayType: string | undefined | null): { article: string; supportArticle: string } {
+  const t = String(racewayType ?? '').toUpperCase();
+  if (t.includes('PVC')) return { article: '352', supportArticle: '352.30' }; // RNC (PVC Sch 40/80)
+  if (t.includes('RMC')) return { article: '344', supportArticle: '344.30' };
+  if (t.includes('IMC')) return { article: '342', supportArticle: '342.30' };
+  if (t.includes('LFMC')) return { article: '350', supportArticle: '350.30' };
+  if (t.includes('LFNC')) return { article: '356', supportArticle: '356.30' };
+  if (t.includes('FMC')) return { article: '348', supportArticle: '348.30' };
+  if (t.includes('EMT')) return { article: '358', supportArticle: '358.30' };
+  return { article: '300', supportArticle: '300.11' }; // generic wiring-method support fallback
+}
+
 export interface RunSegment {
   id: RunSegmentId;
+  // ── §3/§4 physical raceway authority (post-campaign closeout 2026-07-23) ────
+  /** the shared physical raceway this in-conduit segment rides (undefined ⇒
+   *  open-air / no raceway). Two segments with the SAME physicalRacewayId share
+   *  ONE conduit (bundled fill); a feeder-raceway change can never affect a
+   *  branch raceway unless they share this id. */
+  physicalRacewayId?: string;
+  /** the canonical raceway object (owns shared-fill math + NEC article). Present
+   *  only on the segment that DECLARES the raceway (the home-run carrier). */
+  physicalRaceway?: PhysicalRaceway;
+  /** # circuits sharing this segment's raceway (1 = dedicated; N = shared home-run). */
+  sharedCircuitCount?: number;
+  /** smallest legal trade size at ≤40% fill for the conductors in this raceway. */
+  minimumCodeRacewaySize?: string;
+  /** documented rationale when the selected raceway size exceeds the minimum. */
+  upsizingReason?: string | null;
+  /** what this physical section carries (single-sourced route description). */
+  electricalFunction?: string;
   /** Owning subsystem (contract §1.3 permit carriage). Absent on the legacy
    *  single-system path (N=1 keeps bare run ids — Invariant I-1); stamped by
    *  computeMultiSystem (Wave 2a) only when N>1. */
@@ -109,7 +170,13 @@ export interface RunSegment {
   sourceTerminal?: string;    // e.g. 'AC_OUT', 'BAT_AC_OUT', 'GEN_OUT'
   destTerminal?: string;      // e.g. 'BATTERY', 'GEN', 'GRID', 'MSP_BKFD'
   // Electrical
-  conductorCount: number;     // current-carrying conductors
+  /** The PHYSICAL phase+neutral conductors on this run (the EGC is carried
+   *  separately in `egcGauge`). This is what the BOM orders and what conduit
+   *  fill counts. TAC WS-3: it is NOT the current-carrying count — that is
+   *  derived from conductor ROLES by `currentCarryingOf` (NEC 310.15(E)(1)
+   *  excludes a 3-wire single-phase imbalance-only neutral; 310.15(E)(3)
+   *  excludes the EGC) and lands on the raceway as `currentCarryingCount`. */
+  conductorCount: number;
   wireGauge: string;          // e.g. '#10 AWG' — always standard AWG
   conductorMaterial: 'CU' | 'AL';
   insulation: string;         // 'THWN-2' | 'USE-2' | 'PV Wire'
@@ -130,6 +197,16 @@ export interface RunSegment {
   requiredAmpacity: number;   // A — continuous × 1.25 (NEC 690.8)
   effectiveAmpacity: number;  // A — after derating
   tempDeratingFactor: number;
+  /** TAC WS-2 — THE INPUTS the ambient correction factor was computed FROM.
+   *  `tempDeratingFactor` alone is an unverifiable number: the package printed
+   *  "× 0.96 (NEC 310.15(B)(1))" beside `ambientTempC: null`, on a feeder whose
+   *  margin was 1.25 A. The snapshot reads these off the segment (build.ts), so
+   *  they must be emitted here or the ampacity result fails closed. */
+  ambientTempC?: number | null;        // design ambient (ASHRAE 2% high, or AHJ override)
+  ambientSource?: string | null;       // e.g. 'ASHRAE 2% high (IL envelope)'
+  rooftopAdderC?: number | null;       // NEC 310.15(B)(3)(c) adder — ONLY on a pre-2017 adopted edition
+  rooftopAdderBasis?: string | null;   // why the adder does / does not apply (code-edition driven)
+  effectiveAmbientTempC?: number | null; // ambient + rooftop adder — the value the table row was chosen by
   conduitDeratingFactor: number;
   ocpdAmps: number;           // OCPD protecting this segment
   // Voltage drop
@@ -234,6 +311,9 @@ export interface ComputedSystem {
   runs: RunSegment[];         // ALL wiring runs — SLD reads from here
   runMap: Record<RunSegmentId, RunSegment>; // quick lookup
   segmentSchedule: SegmentScheduleRow[]; // canonical conductor bundle schedule
+  // §3/§4 — every PHYSICAL raceway as a first-class object (the BOM §6 pass
+  // iterates these; the shared home-run appears ONCE with sharedCircuitCount>1).
+  physicalRaceways: PhysicalRaceway[];
 
   // ── Conduit Schedule ─────────────────────────────────────────────────────
   conduitSchedule: ConduitScheduleRow[];
@@ -524,6 +604,32 @@ function getConduitDerating(conductorCount: number): number {
   if (conductorCount <= 30) return 0.45;
   if (conductorCount <= 40) return 0.40;
   return 0.35;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §4 AMPACITY SURFACE (BAR closeout 2026-07-25) — EXPOSE the existing NEC table
+// lookups + derating factors so the ONE canonical AmpacityAdjustmentResult
+// projection (lib/permit/snapshot/electricalProjection.ts) assembles the full
+// itemized chain from THESE functions instead of re-engineering the tables.
+// No logic is duplicated: each accessor delegates to the module-private table /
+// factor the wire-sizer already uses, so E-1's ampacity evidence and the sizer
+// can never disagree. "Expose, don't re-engine."
+// ═══════════════════════════════════════════════════════════════════════════
+/** NEC 310.16, 75 °C column (Cu, THWN-2 terminal-limited). null ⇒ gauge not in table. */
+export function ampacityTable75C(gauge: string): number | null {
+  return AMPACITY_TABLE_75C[gauge] ?? null;
+}
+/** NEC 310.16, 90 °C column (Cu) — the base for adjustment/correction before the 75 °C terminal cap. */
+export function ampacityTable90C(gauge: string): number | null {
+  return AMPACITY_TABLE_90C[gauge] ?? null;
+}
+/** NEC 310.15(B)(1) — ambient temperature correction factor (90 °C column). */
+export function ambientCorrectionFactor(ambientC: number): number {
+  return getTempDerating(ambientC);
+}
+/** NEC 310.15(C)(1) — conductor-count adjustment factor (>3 CCC in a raceway). */
+export function conductorCountAdjustmentFactor(currentCarryingCount: number): number {
+  return getConduitDerating(currentCarryingCount);
 }
 
 // NEC 240.6 — Standard OCPD sizes. P0-5c: delegates to
@@ -892,6 +998,29 @@ function autoSizeOpenAirWire(
 
 export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const issues: ValidationIssue[] = [];
+  // TAC WS-2 — stamp the design-ambient inputs for every segment this run
+  // emits, so the ampacity correction factor is never an unattributed number.
+  {
+    // Does the ADOPTED edition require a rooftop temperature adder? NEC
+    // 310.15(B)(3)(c) was deleted for PV by NEC 2017 690.31(A) and is absent
+    // from 2020/2023. Only a pre-2017 adopted edition reinstates it. An
+    // unknown edition does NOT invent one (the ampacity chain states the basis).
+    const _nec = String((input as { necEdition?: string | number }).necEdition ?? '').trim();
+    const _necYear = /^\d{4}$/.test(_nec) ? Number(_nec) : null;
+    const _applies = _necYear != null && _necYear < 2017;
+    _ambientStamp = {
+      ambientTempC: Number.isFinite(input.ambientTempC) ? input.ambientTempC : null,
+      ambientSource: (input as { ambientTempSource?: string }).ambientTempSource
+        ?? 'design temperature (ASHRAE 2% high / AHJ override) via getDesignTemps',
+      rooftopAdderC: Number.isFinite(input.rooftopTempAdderC) ? input.rooftopTempAdderC : null,
+      effectiveAmbientTempC: null,   // per-segment (adder applies only where required)
+      rooftopAdderApplies: _applies,
+      rooftopAdderBasis: _applies
+        ? `NEC ${_necYear} 310.15(B)(3)(c) rooftop adder applies to raceways on the roof surface`
+        : `no rooftop adder applied — NEC 310.15(B)(3)(c) was deleted for PV circuits by NEC 2017 690.31(A)`
+          + ` and is absent from the 2020/2023 editions${_necYear ? ` (adopted NEC ${_necYear})` : ' (adopted edition not established)'}`,
+    };
+  }
   // Wave 2a (contract §1.7): default TRUE — legacy callers emit the full
   // service tail exactly as before. computeMultiSystem sets FALSE per sub.
   const emitSharedServiceRuns = input.emitSharedServiceRuns !== false;
@@ -1318,6 +1447,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     DC_DISCO_TO_INV_RUN: rl.DC_DISCO_TO_INV_RUN ?? 10,
     ROOF_RUN: rl.ROOF_RUN ?? 30,
     BRANCH_RUN: rl.BRANCH_RUN ?? 50,
+    BRANCH_HOMERUN_RUN: (rl as Partial<Record<RunSegmentId, number>>).BRANCH_HOMERUN_RUN ?? rl.ARRAY_CONDUIT_RUN ?? 20,
     INV_TO_DISCO_RUN: rl.INV_TO_DISCO_RUN ?? 20,
     COMBINER_TO_DISCO_RUN: rl.COMBINER_TO_DISCO_RUN ?? 20,
     DISCO_TO_METER_RUN: rl.DISCO_TO_METER_RUN ?? 15,
@@ -1424,11 +1554,64 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       necReferences: ['NEC 690.8', 'NEC 690.8(B)', 'NEC 310.15'],
       conductorCallout: branchWire.conductorCallout,
       color: 'ac',
+      // §3 — BRANCH_RUN is the OPEN-AIR Q-Cable trunk (micro AC output → roof
+      // junction box). It carries NO raceway; the shared conduit home-run is a
+      // SEPARATE segment (BRANCH_HOMERUN_RUN). Stays open-air through back-pop.
+      electricalFunction: 'micro AC branch (Q-Cable trunk, open air 690.31(C))',
+      sharedCircuitCount: 1,
+    }));
+
+    // BRANCH_HOMERUN_RUN: the SHARED jbox→combiner conduit home-run. §3/§4 — all
+    // N branch circuits leave the roof junction box bundled in ONE physical
+    // raceway (e.g. 3 branches = 3×BLK + 3×RED + 1×GRN = 7×#10, 6 CCC → the
+    // smallest legal PVC Sch 80 is 1-1/4"). This is the ONLY branch segment that
+    // carries a raceway; the physicalRaceway authority object (with the shared-
+    // fill math + NEC article) is attached during back-population from the
+    // canonical JBOX_TO_COMBINER segment schedule row.
+    const _homerunConduitType = input.conduitType || 'PVC Sch 80';
+    runs.push(makeRunSegment('BRANCH_HOMERUN_RUN', 'BRANCH HOME-RUN (Shared Raceway)', 'ROOF JUNCTION BOX', 'AC COMBINER', {
+      sourceTerminal: 'JBOX_OUT',
+      destTerminal:   'IN',
+      conductorCount: 2,                 // per-circuit L1+L2 (bundle carries N circuits)
+      wireGauge: branchWire.gauge,
+      insulation: 'THWN-2',
+      egcGauge: branchWire.egcGauge,
+      neutralRequired: false,
+      isOpenAir: false,
+      systemVoltage: systemVoltageAC,
+      phase: '1Ø',
+      conduitType: _homerunConduitType,
+      conduitSize: branchWire.conduitSize,
+      conduitFillPct: branchWire.conduitFillPct,
+      onewayLengthFt: defaultRunLengths.ARRAY_CONDUIT_RUN,
+      continuousCurrent: acBranchCurrentA,
+      requiredAmpacity: acBranchCurrentA * 1.25,
+      effectiveAmpacity: branchWire.effectiveAmpacity,
+      tempDeratingFactor: branchWire.tempDerating,
+      conduitDeratingFactor: branchWire.conduitDerating,
+      ocpdAmps: acBranchOcpdAmps,
+      voltageDropPct: branchWire.voltageDropPct,
+      voltageDropVolts: branchWire.voltageDropVolts,
+      ampacityPass: branchWire.ampacityPass,
+      voltageDropPass: branchWire.voltageDropPass,
+      conduitFillPass: branchWire.conduitFillPct <= 40,
+      necReferences: ['NEC 690.31', 'NEC 690.8(B)', 'NEC 310.15'],
+      conductorCallout: branchWire.conductorCallout,
+      color: 'ac',
+      electricalFunction: 'branch home-run raceway (shared jbox→combiner conduit)',
+      physicalRacewayId: 'RW-BRANCH-HOMERUN',
+      sharedCircuitCount: acBranchCount,
     }));
 
     // COMBINER_TO_DISCO_RUN: AC combiner to AC disconnect
     // Microinverters produce 120/240V split-phase, requiring neutral for imbalance current per NEC 200.3
-    const microConductorCount = (input.topology === 'micro') ? 3 : 2; // L1 + L2 + N for micro, L1 + L2 for string
+    // L1 + L2 + N for micro (the neutral IS installed and procured), L1 + L2 for
+    // string. TAC WS-3: this stays the PHYSICAL phase+neutral count — the
+    // CURRENT-CARRYING count that NEC 310.15(C)(1) derating consumes is derived
+    // from it by excluding the imbalance-only neutral (see the raceway inventory
+    // and `currentCarryingOf` below). Keeping this physical is what lets the BOM
+    // continue to order all three conductors.
+    const microConductorCount = (input.topology === 'micro') ? 3 : 2;
     const combToDiscoWire = autoSizeWire(
       acOutputCurrentA,
       defaultRunLengths.COMBINER_TO_DISCO_RUN,
@@ -2102,9 +2285,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   //             INVERTER_TO_DISCO = AC feeder from inverter (INV_TO_DISCO_RUN)
   // METER_TO_MSP removed — no separate production meter per industry standard.
   // DISCO_TO_METER now maps directly to DISCO_TO_METER_RUN (AC Disco → MSP).
+  // §3/§4 CORRECTION (2026-07-23): the micro AC branch is TWO physical sections,
+  // not one. ARRAY_TO_JBOX (open-air Q-Cable trunk) back-populates BRANCH_RUN and
+  // stays open-air; JBOX_TO_COMBINER (the shared conduit) back-populates the NEW
+  // BRANCH_HOMERUN_RUN. Previously JBOX_TO_COMBINER was stamped onto the open-air
+  // BRANCH_RUN — merging two wiring methods so E-1 labeled the open-air home-run
+  // as in-conduit and PV-4B printed one "95 ft #12 in 1-1/4\" PVC" whole-branch
+  // string. ROOF_RUN (DC micro leads) keeps its own open-air sizing.
   const segTypeToRunId: Record<string, string> = isMicro ? {
-    'ARRAY_TO_JBOX':     'ROOF_RUN',
-    'JBOX_TO_COMBINER':  'BRANCH_RUN',
+    'ARRAY_TO_JBOX':     'BRANCH_RUN',
+    'JBOX_TO_COMBINER':  'BRANCH_HOMERUN_RUN',
     'COMBINER_TO_DISCO': 'COMBINER_TO_DISCO_RUN',
     'DISCO_TO_METER':    'DISCO_TO_METER_RUN',
     'MSP_TO_UTILITY':    'MSP_TO_UTILITY_RUN',
@@ -2149,6 +2339,37 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         seg.raceway === 'PVC_SCH80' ? 'PVC Sch 80' : run.conduitType
       );
       run.isOpenAir        = seg.raceway === 'OPEN_AIR';
+      // §3/§4 — build the PHYSICAL RACEWAY AUTHORITY object for the shared branch
+      // home-run from the canonical JBOX_TO_COMBINER row (bundled fill math), and
+      // record the minimum-code-size / selected-size provenance. calcConduitSize
+      // already picks the smallest legal trade size, so minimum == calculated ==
+      // selected here (no discretionary upsizing → upsizingReason null).
+      if (runId === 'BRANCH_HOMERUN_RUN' && seg.raceway !== 'OPEN_AIR') {
+        const _art = racewayNecArticle(run.conduitType);
+        const _ccc = seg.totalCurrentCarryingConductors;
+        const _condCount = seg.conductorBundle.reduce((s: number, c: ConductorBundle) => s + c.qty, 0);
+        run.physicalRacewayId = 'RW-BRANCH-HOMERUN';
+        run.minimumCodeRacewaySize = seg.conduitSize;
+        run.upsizingReason = null;
+        run.physicalRaceway = {
+          physicalRacewayId: 'RW-BRANCH-HOMERUN',
+          racewayType: run.conduitType,
+          necArticle: _art.article,
+          supportArticle: _art.supportArticle,
+          sharedCircuitCount: run.sharedCircuitCount ?? acBranchCount,
+          conductorCount: _condCount,
+          currentCarryingCount: _ccc,
+          conductorAreaIn2: isFinite(seg.totalConductorAreaIn2) ? +seg.totalConductorAreaIn2.toFixed(4) : null,
+          minimumCodeRacewaySize: seg.conduitSize,
+          calculatedFillRacewaySize: seg.conduitSize,
+          selectedRacewaySize: seg.conduitSize,
+          fillPct: isFinite(seg.fillPercent) ? +seg.fillPercent.toFixed(1) : null,
+          upsizingReason: null,
+          deratingBasis: `${_ccc} current-carrying conductors → ${(seg.conduitDeratingFactor ?? 1).toFixed(2)} adjustment (NEC 310.15(C)(1))`,
+          supportCondition: `${run.conduitType} secured per NEC ${_art.supportArticle}; roof junction box → AC combiner`,
+          provenance: `computeSystem JBOX_TO_COMBINER (${run.sharedCircuitCount ?? acBranchCount} branch circuits bundled — shared fill)`,
+        };
+      }
       run.ocpdAmps         = seg.ocpdAmps;
       run.continuousCurrent = seg.continuousCurrent;
       run.effectiveAmpacity = seg.effectiveAmpacity;
@@ -2176,7 +2397,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         if (run.color === 'ac' && !run.neutralRequired) {
           run.conductorCount = 2; // L1 + L2 only — no neutral per NEC 690.8
         } else {
-          run.conductorCount = seg.totalCurrentCarryingConductors;
+          // TAC WS-3 — `conductorCount` is the PHYSICAL phase+neutral count (it
+          // drives conduit fill and every BOM conductor quantity), so it takes
+          // the schedule's INSTALLED count. It used to take
+          // `totalCurrentCarryingConductors`, which was harmless only while the
+          // neutral was (incorrectly) flagged current-carrying — once roles
+          // excluded the imbalance-only neutral from DERATING, sourcing the
+          // physical count from the derating count silently under-ordered one
+          // conductor per run. Derating reads `currentCarryingCount` instead.
+          run.conductorCount = seg.totalInstalledPhaseNeutralConductors
+            ?? seg.totalCurrentCarryingConductors;
         }
       }
       // isUtilityOwned runs keep their original conductorCount (3 for L1+L2+N service)
@@ -2184,6 +2414,70 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   }
 
   console.log(`[DATA_PROPAGATION] Validated: ${runs.length} runSegments -> ${segmentSchedule.length} conduit rows -> ${runs.length} equipment items`);
+
+  // ── Physical Raceway Authority (§3/§4/§6) ─────────────────────────────────
+  // One object per PHYSICAL raceway. Runs that DECLARE a raceway (the shared
+  // branch home-run) contribute their attached authority object; every other
+  // in-conduit run is a DEDICATED raceway (sharedCircuitCount=1) synthesized
+  // here so the BOM §6 pass iterates a COMPLETE per-raceway set (no project-
+  // level "all runs" roll-up). Open-air runs carry NO raceway (skipped).
+  const physicalRaceways: PhysicalRaceway[] = [];
+  const _seenRacewayIds = new Set<string>();
+  for (const run of runs) {
+    if (run.physicalRaceway) {
+      if (!_seenRacewayIds.has(run.physicalRaceway.physicalRacewayId)) {
+        _seenRacewayIds.add(run.physicalRaceway.physicalRacewayId);
+        physicalRaceways.push(run.physicalRaceway);
+      }
+      continue;
+    }
+    if (run.isOpenAir || run.conduitType === 'NONE' || run.conduitSize === 'N/A' || run.isUtilityOwned) continue;
+    const _art = racewayNecArticle(run.conduitType);
+    const _rid = `RW-${run.id}`;
+    if (_seenRacewayIds.has(_rid)) continue;
+    _seenRacewayIds.add(_rid);
+    run.physicalRacewayId = run.physicalRacewayId ?? _rid;
+    physicalRaceways.push({
+      physicalRacewayId: _rid,
+      racewayType: run.conduitType,
+      necArticle: _art.article,
+      supportArticle: _art.supportArticle,
+      sharedCircuitCount: run.sharedCircuitCount ?? 1,
+      // ── TAC WS-3 — TWO COUNTS, DERIVED FROM ROLES ─────────────────────────
+      // `run.conductorCount` is the PHYSICAL phase+neutral count and ALREADY
+      // includes the neutral. Two defects lived here:
+      //   • `+ (neutralRequired ? 1 : 0)` double-counted the neutral, so a
+      //     2-hot + neutral + EGC feeder reported 4 conductors for fill; and
+      //   • that same inflated number was used as the CURRENT-CARRYING count,
+      //     applying an 0.80 310.15(C)(1) adjustment NEC does not require and
+      //     leaving the #6 feeder with a 1.25 A margin that would go negative
+      //     on a warmer ambient.
+      // NEC 310.15(E)(1) excludes the neutral of a 3-wire single-phase circuit
+      // carrying only the imbalance current; 310.15(E)(3) excludes the EGC.
+      // PHYSICAL count for fill = installed phase+neutral + the EGC.
+      // `run.conductorCount` ALREADY includes the neutral (it is the schedule's
+      // installed phase+neutral count), so the previous
+      // `+ (neutralRequired ? 1 : 0)` counted the neutral TWICE — a 240 V feeder
+      // of L1 + L2 + N + EGC was inventoried as 5 conductors.
+      conductorCount: run.conductorCount + 1,
+      // The DEFECT this workstream fixes: this same inflated physical expression
+      // was ALSO used as the current-carrying count, so a feeder of 2 hots +
+      // neutral + EGC reported 4 CCC and took an 0.80 310.15(C)(1) adjustment the
+      // code does not require (leaving the #6 feeder a 1.25 A margin that would
+      // go negative on a warmer ambient). CCC is now ROLE-derived.
+      currentCarryingCount: currentCarryingOf(run),
+      conductorAreaIn2: null,
+      minimumCodeRacewaySize: run.conduitSize,
+      calculatedFillRacewaySize: run.conduitSize,
+      selectedRacewaySize: run.conduitSize,
+      fillPct: isFinite(run.conduitFillPct) ? +run.conduitFillPct.toFixed(1) : null,
+      upsizingReason: null,
+      deratingBasis: `${run.conductorCount} current-carrying conductors (NEC 310.15(C)(1); a 3-wire single-phase `
+        + `neutral carrying only imbalance current is excluded per NEC 310.15(E)(1))`,
+      supportCondition: `${run.conduitType} secured per NEC ${_art.supportArticle}`,
+      provenance: `computeSystem ${run.id} (dedicated raceway)`,
+    });
+  }
 
   // ── Conduit Schedule ──────────────────────────────────────────────────────
   const conduitSchedule: ConduitScheduleRow[] = runs.filter(r => !r.isOpenAir && r.conduitType !== 'NONE' && r.conduitSize !== 'N/A').map((run, idx) => ({
@@ -2491,6 +2785,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     runs,
     runMap,
     segmentSchedule,
+    physicalRaceways,
     conduitSchedule,
     equipmentSchedule,
     bomQuantities,
@@ -2575,6 +2870,48 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
 // ─── Helper: Make RunSegment ──────────────────────────────────────────────────
 
+/** TAC WS-2 — the ambient inputs every segment is stamped with, set once per
+ *  computeSystem run from the design-temperature authority. Module-scoped so
+ *  makeRunSegment (called from ~20 sites) needs no signature change. */
+let _ambientStamp: {
+  ambientTempC: number | null; ambientSource: string | null;
+  rooftopAdderC: number | null; effectiveAmbientTempC: number | null;
+  /** TAC WS-2 — whether the adopted code edition REQUIRES a rooftop adder.
+   *  NEC 310.15(B)(3)(c) was deleted for PV circuits by NEC 2017 690.31(A) and
+   *  does not exist in the 2020/2023 editions, so this is false unless a
+   *  pre-2017 edition is adopted. Never inferred from geometry alone. */
+  rooftopAdderApplies: boolean;
+  rooftopAdderBasis: string | null;
+} = {
+  ambientTempC: null, ambientSource: null, rooftopAdderC: null, effectiveAmbientTempC: null,
+  rooftopAdderApplies: false, rooftopAdderBasis: null,
+};
+
+/**
+ * TAC WS-3 — THE ONE CURRENT-CARRYING-CONDUCTOR DERIVATION.
+ *
+ * `conductorCount` on a RunSegment is the PHYSICAL phase+neutral count (what the
+ * BOM orders). The count that NEC 310.15(C)(1) derating consumes is derived from
+ * it by ROLE, never asserted:
+ *   • 310.15(E)(3) — the EGC is never current-carrying (it is not in
+ *     `conductorCount` to begin with; the raceway inventory adds it for fill).
+ *   • 310.15(E)(1) — the neutral of a 3-wire circuit from a single-phase 3-wire
+ *     system, carrying only the imbalance current, is NOT current-carrying.
+ * A run whose bundle declares explicit roles is counted from the bundle, so a
+ * genuinely current-carrying grounded conductor is honoured rather than assumed.
+ */
+function currentCarryingOf(run: RunSegment): number {
+  const bundle = run.conductorBundle;
+  if (bundle && bundle.length > 0) {
+    const n = currentCarryingCountOf(bundle);
+    if (n > 0) return n;
+  }
+  // No role-tagged bundle: a required neutral on a single-phase run is the
+  // imbalance-only case (the only neutral topology this engine emits), so it is
+  // excluded. Never drops below 1.
+  return Math.max(1, run.conductorCount - (run.neutralRequired && run.phase === '1Ø' ? 1 : 0));
+}
+
 function makeRunSegment(
   id: RunSegmentId,
   label: string,
@@ -2586,6 +2923,32 @@ function makeRunSegment(
   const ampacityPass = fields.ampacityPass ?? true;
   const voltageDropPass = fields.voltageDropPass ?? true;
   const conduitFillPass = fields.conduitFillPass ?? true;
+  // TAC WS-2 — WHETHER A ROOFTOP ADDER APPLIES IS A CODE QUESTION, NOT A
+  // GUESS. NEC 310.15(B)(3)(c) (the +33 °C rooftop adder) was deleted for PV
+  // circuits by NEC 2017 690.31(A) and does not exist in the 2020/2023
+  // editions. It may only be applied on a pre-2017 adopted edition AND for a
+  // raceway actually on the roof surface. Absent an adopted edition that
+  // requires it, the adder is NOT applied and the reason is recorded — a
+  // silently-added 33 °C would move the correction factor two table rows.
+  //
+  // KDP WS-10 — THE BASIS IS NOW ALWAYS STATED. It used to be recorded only for
+  // segments that were both roof-located AND in a raceway, so every other segment
+  // shipped `rooftopAdderC: null, rooftopAdderBasis: null` — a bare null that
+  // reads as an unresolved required input rather than as a resolved code
+  // question. Each segment now carries the specific reason: the adder applies,
+  // or the adopted edition deleted it, or this conductor is not on the roof, or
+  // it is open-air rather than a raceway/cable on a roof surface.
+  const _roofLocated = /ROOF|BRANCH_HOMERUN|JBOX/i.test(String(id));
+  const _inRaceway = fields.isOpenAir !== true;
+  const _onRoof = _roofLocated && _inRaceway;
+  const _adder = (_onRoof && _ambientStamp.rooftopAdderApplies) ? _ambientStamp.rooftopAdderC : null;
+  const _adderBasis = _onRoof
+    ? _ambientStamp.rooftopAdderBasis
+    : !_roofLocated
+      ? 'no rooftop adder — this conductor is not installed on or above a roof surface'
+      : 'no rooftop adder — open-air conductor, not a raceway or cable on a roof surface'
+        + ` (NEC 310.15(B)(3)(c) addressed raceways/cables on rooftops; ${_ambientStamp.rooftopAdderApplies ? 'the adopted edition retains it for raceways' : 'and the adopted edition no longer contains it'})`;
+  const _amb = _ambientStamp.ambientTempC;
   return {
     id,
     label,
@@ -2595,6 +2958,11 @@ function makeRunSegment(
     systemVoltage: fields.systemVoltage ?? SYSTEM_VOLTAGE_AC,
     phase: fields.phase ?? '1Ø',
     overallPass: ampacityPass && voltageDropPass && conduitFillPass,
+    ambientTempC: _amb,
+    ambientSource: _ambientStamp.ambientSource,
+    rooftopAdderC: _adder,
+    rooftopAdderBasis: _adderBasis,
+    effectiveAmbientTempC: _amb != null ? _amb + (_adder ?? 0) : null,
     ...fields,
   };
 }

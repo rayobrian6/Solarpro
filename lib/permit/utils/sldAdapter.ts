@@ -17,6 +17,8 @@ import { getInverterById, getMicroinverterById, SOLAR_PANELS } from '@/lib/equip
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
+import { peekSnapshot } from '../snapshot/read';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectListedCableAssembly, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
 
 /** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
  *  model string — the SAME records the equipment pages read. Undefined when
@@ -59,6 +61,31 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const eq = getEquipmentContext(input, cad);
   const topology = topologyToLegacy(getInverterTopology(input, cad));
   const isMicro = topology === 'MICRO';
+
+  // §3 (07-22) — canonical feeder projection: E-1's conduit type/size, feeder
+  // voltage drop and run length come from the ONE feeder segment the snapshot
+  // carries (the SAME source PV-4A/PV-4B/SCHED read), so the SLD can never print
+  // '3/4" EMT' while the schedule prints '1-1/4" 3/4" EMT' at 1.11%-vs-0.37%.
+  const _snapFeed = projectCanonicalFeeder(peekSnapshot(input));
+  // W1b — the micro AC branch home-run raceway PROJECTS the canonical BRANCH_RUN
+  // segment so E-1 stops printing the '3/4" EMT' literal while PV-4B / SCHED /
+  // BOM project the real branch conduit (one segment authority, gate 3).
+  const _snapBranch = projectCanonicalBranch(peekSnapshot(input));
+  // §3/§4 — the SHARED jbox→combiner home-run raceway (all branches bundled).
+  // E-1's SEGMENT_2A conduit label reads THIS; the branch CONDUCTORS ride the
+  // open-air Q-Cable trunk (_snapBranch). Two physical sections, never merged.
+  const _snapHomerun = projectSharedBranchRaceway(peekSnapshot(input));
+  // §8 — the LISTED open-air branch wiring-method identity the legend must name.
+  // Micro topology draws the Q-Cable assembly (SEGMENT 1, 'ENPHASE Q CABLE
+  // (TC-ER)'); the legend derives from THIS, never the hardcoded 'PV Wire/THWN-2'.
+  const _snapAsm = projectListedCableAssembly(peekSnapshot(input));
+  // §5 — the canonical BRANCH EGC (NEC 250.122 on the BRANCH OCPD), read from the
+  // per-purpose grounding object — the SAME record the E-1 schedule, PV-1B/PV-4B
+  // notes and the BOM open-air EGC footage row project (one source, gate 7).
+  const _snapBranchEgc = (peekSnapshot(input)?.electrical?.groundingObjects ?? [])
+    .find(g => g.purpose === 'branch-egc')?.conductorSize
+    ?? projectCanonicalBranch(peekSnapshot(input)).egcGauge
+    ?? null;
 
   // ── Mount type — drives the PV-array glyph/labels in the renderer ──
   // (cad.systemType is canonical, e.g. 'solar_fence'; project.systemType is the
@@ -142,12 +169,19 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const deviceCount = isMicro ? totalPanels : undefined;
   // Branch rows come from the shared authority (same planner, same OCPD math)
   // so the SLD's conductor gauge tracks PV-4A/PV-4B instead of a hardcoded #10.
+  // §1 (closeout 2026-07-23) — the SVG branch/home-run gauge is the CANONICAL
+  // BRANCH_RUN conductor gauge (#10), NEVER the legacy microBranchRow wireGauge
+  // (wireGaugeForOcpd(20A) = #12 — the fictitious THWN branch this campaign kills).
+  // The listed trunk is drawn as 'ENPHASE Q CABLE (TC-ER)' open-air (SEGMENT 1);
+  // the shared jbox→combiner home-run (SEGMENT_2A) prints the physicalRaceway's
+  // full current-carrying inventory (6×#10 for a 3-branch design), not #12.
+  const _canonBranchGauge = _snapBranch.gauge ?? '#10 AWG';
   const microBranches = isMicro ? _auth.microBranches.map((b) => ({
     branchIndex: b.index,
     deviceCount: b.deviceCount,
     branchCurrentA: b.branchCurrentA,
     ocpdAmps: b.ocpdAmps,
-    conductorCallout: `${b.wireGauge} THWN-2`,
+    conductorCallout: `${_canonBranchGauge} THWN-2`,
     necReference: 'NEC 690.8(B)',
   })) : undefined;
 
@@ -182,7 +216,50 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     acOutputKw,
     acOutputAmps,
     acWireGauge,
-    acConduitType:           project.conduitType ?? 'EMT',
+    // §3 — canonical feeder raceway/size first (single source); project.conduitType
+    // is only the standalone-preview fallback (no snapshot).
+    acConduitType:           _snapFeed.raceway ?? project.conduitType ?? 'EMT',
+    acConduitSize:           _snapFeed.tradeSizeIn ?? project.conduitSize ?? undefined,
+    // W1b — canonical branch home-run raceway (single source for E-1's SEGMENT_2A).
+    branchConduitType:       _snapBranch.raceway ?? undefined,
+    branchConduitSize:       _snapBranch.tradeSizeIn ?? undefined,
+    branchIsOpenAir:         _snapBranch.raceway === 'FREE_AIR',
+    // §3/§4 — the shared home-run conduit (jbox→combiner). SEGMENT_2A prints this
+    // as the in-conduit section while the branch conductors are open-air Q-Cable.
+    homerunConduitType:      _snapHomerun.present ? (_snapHomerun.racewayType ?? undefined) : undefined,
+    homerunConduitSize:      _snapHomerun.present ? (_snapHomerun.tradeSizeIn ?? undefined) : undefined,
+    homerunSharedCircuits:   _snapHomerun.present ? (_snapHomerun.sharedCircuitCount ?? undefined) : undefined,
+    // §1 — the shared home-run's FULL current-carrying-conductor inventory (2×#10
+    // per branch × N) from the canonical physicalRaceway object, so E-1's SEGMENT_2A
+    // graphic prints '6×#10 THWN-2' (gate 2), never the fictitious single #12.
+    homerunCurrentCarryingCount: _snapHomerun.present ? (_snapHomerun.currentCarryingCount ?? undefined) : undefined,
+    homerunConductorGauge:   _snapHomerun.present ? (_snapHomerun.conductorGauge ?? undefined) : undefined,
+    // §8 — legend open-air identity = the listed Q-Cable assembly the sheet draws
+    // (micro only). The renderer's SEGMENT-1 label is the SAME assembly string.
+    openAirBranchWiringLabel: isMicro
+      ? (_snapAsm.present ? _snapAsm.assembly!.wiringMethodLabel
+          : /enphase/i.test(inverterMfr) ? 'ENPHASE Q CABLE (TC-ER)' : 'LISTED AC TRUNK CABLE (TC-ER)')
+      : undefined,
+    // §5 — the BRANCH-side EGCs come from their OWN canonical objects: the
+    // `branch-egc` grounding record (NEC 250.122 on the 20 A BRANCH OCPD → #12)
+    // and the shared home-run segment's own egcGauge. Previously both printed the
+    // FEEDER EGC (#10), so E-1 asserted a separate open-air EGC in a gauge no
+    // grounding object or BOM row carried (gate 7).
+    branchEgcGauge:          _snapBranchEgc ?? undefined,
+    // GROUNDING AUTHORITY (2026-07-25) — SEGMENT-1's open-air grounding line is the
+    // OUTCOME of the document-based grounding authority, not an unconditional EGC
+    // assertion. PENDING (the live state) prints a pending label; the E-1 note and
+    // RS-1 carry the full authority + the blocker.
+    openAirBranchEgcLabel: (() => {
+      if (!isMicro) return undefined;
+      const _g = projectOpenAirBranchGrounding(peekSnapshot(input));
+      if (!_g.present) return undefined;
+      if (_g.outcome === 'PENDING_MANUFACTURER_AUTHORITY') return 'EGC: PENDING MFR AUTHORITY';
+      if (_g.outcome === 'NO_SEPARATE_EGC_REQUIRED') return "NO ADD'L EGC — LISTED METHOD";
+      return `1×${(_g.conductorSize ?? '#12 AWG').replace(' AWG', '')} GRN EGC`;
+    })(),
+    homerunEgcGauge:         (_snapHomerun.present ? (_snapHomerun.egcGauge ?? undefined) : undefined)
+                               ?? _snapBranchEgc ?? undefined,
     acOCPD,
     mainPanelAmps:           mainAmps,
     // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot
@@ -207,11 +284,13 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     atsBrand:                project.atsBrand ?? undefined,
     atsAmpRating:            project.atsAmpRating ?? undefined,
     scale:                   'NOT TO SCALE',
-    acWireLength,
+    // §3 — feeder run length from the canonical segment (same value PV-4B prints).
+    acWireLength:            _snapFeed.oneWayFt ?? acWireLength,
     // Real engine results — without these the renderer's fallback schedule
-    // fabricated 32% fill / canned voltage drops.
-    acConduitFillPct:        compliance.electrical?.conduitFill?.fillPercent ?? undefined,
-    acVoltageDropPct:        compliance.electrical?.acVoltageDrop ?? undefined,
+    // fabricated 32% fill / canned voltage drops. §3: voltage drop is the
+    // canonical ROUTED value (0.37%), never the legacy flat-length 1.11%.
+    acConduitFillPct:        _snapFeed.fillPct ?? compliance.electrical?.conduitFill?.fillPercent ?? undefined,
+    acVoltageDropPct:        _snapFeed.voltageDropPct ?? compliance.electrical?.acVoltageDrop ?? undefined,
     // EGC from the shared authority — same value PV-4B prints (prefers the
     // engine groundingConductor, falls back to NEC 250.122 on the governing
     // OCPD). Never re-derive here.
@@ -610,6 +689,12 @@ export function synthesizeFleetFromSubEquipment(
  */
 export function generateLiveSLD(input: PermitInput, cad?: CADModel | null, opts?: { embedded?: boolean }): string {
   const sldInput = buildSLDInputFromPermit(input, cad);
-  if (opts?.embedded) sldInput.suppressTitleBlock = true;
+  if (opts?.embedded) {
+    sldInput.suppressTitleBlock = true;
+    // E-1 repair (post-AAC): the in-SVG conductor-schedule band re-derived the
+    // canonical physical sections that render once on PV-4B.1 — suppress it and
+    // crop the canvas so the schematic fills E-1's drawing wrapper.
+    sldInput.suppressScheduleBand = true;
+  }
   return renderSLDProfessional(sldInput);
 }

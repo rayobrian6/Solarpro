@@ -10,6 +10,15 @@ import { PLANSET_ENGINE_VERSION } from '../constants';
 import { isFence, isGround, isRoof, getEquipmentContext } from '@/lib/system';
 import { getInverterTopology, topologyToLegacy } from '@/lib/system/systemAccessors';
 import { topologyDisplayLabel } from '../utils/helpers';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { projectProjectStateFromInput, projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
+import { escapeH } from '../utils/drawing';
+// PPC §3 (latent) — VAL-1 read `canonical.structure.attachSpacingIn`, a SECOND
+// spacing source (`project.attachmentSpacing || 48` at canonical.ts) with no
+// verification state, so VAL-1 could state a spacing the structural authority has
+// not verified (and could disagree with PV-1/PV-3/PV-4C/APP-A/PE-1). It now projects
+// the ONE canonical spacing authority.
+import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -30,6 +39,12 @@ export function pageValidationSummary(
   // jurisdiction is OPTIONAL on PermitInput (types.ts) — AHJ enrichment can miss;
   // a bare cast crashed VAL-1 (and the whole planset) on `.ahj` when undefined.
   const jurisdiction = (compliance.jurisdiction ?? {}) as Record<string, any>;
+  const _cpVal = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
+  // PPC §3 — the ONE canonical attachment-spacing authority (design + status).
+  const _spcVal = projectStructuralFromInput(input).spacingAuthority;
+  const _spcValIn = _spcVal?.designSpacingIn ?? canonical.structure.attachSpacingIn;
+  const _spcValTag = _spcVal?.verificationState === 'verified' ? '' : ' (DESIGN — PENDING STRUCTURAL VERIFICATION)';
+  const _asce = _cpVal.asceLabel;
   const _isFence = isFence(sys);
   const _isGround = isGround(sys);
   const _isRoof = isRoof(sys);
@@ -106,14 +121,14 @@ export function pageValidationSummary(
       note:   'From compliance engine — 0 psf is valid for warm climates',
     },
     {
-      label:  _isFence ? 'Structural Method: Fence Post Embedment (ASCE 7-22 §29.4)'
-               : _isGround ? 'Structural Method: Ground Mount Pile/Pier (ASCE 7-22 §27)'
-               : 'Structural Method: Roof Lag Bolt Attachment (ASCE 7-22 §26/27)',
+      label:  _isFence ? `Structural Method: Fence Post Embedment (${_asce} §29.4)`
+               : _isGround ? `Structural Method: Ground Mount Pile/Pier (${_asce} §27)`
+               : `Structural Method: Roof Lag Bolt Attachment (${_asce} §26/27)`,
       value:  _isFence
                ? `qz=${qzDisp} | p=${windPressDisp} | F=${windForce} | M=${windMoment} | D_req=${reqEmbed} | D_prov=${provEmbed}`
                : _isGround
                ? `Pile depth: ${canonical.structure.pileDepthFt.toFixed(1)} ft | Spacing: ${canonical.structure.pileSpacingFt.toFixed(1)} ft O.C. | Tilt: ${canonical.structure.tiltDeg}°`
-               : `Rafter: ${canonical.structure.rafterSize} @ ${canonical.structure.rafterSpacingIn}" O.C. | Attachment: ${canonical.structure.attachSpacingIn}" O.C.`,
+               : `Rafter: ${canonical.structure.rafterSize} @ ${canonical.structure.rafterSpacingIn}" O.C. | Attachment: ${_spcValIn}" O.C.${_spcValTag}`,
       // Roof status reads the REAL structural result — this was hardcoded
       // 'PASS' and printed "ALL CHECKS PASSED" over a failing rafter check.
       status: _isFence ? (embedStatus as CheckStatus) : (() => {
@@ -397,9 +412,14 @@ export function pageValidationSummary(
         <div style="border:var(--border);padding:var(--xs);background:#f8f9fa;">
           <div style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:3px;">Jurisdiction</div>
           <div style="font-size:8px;line-height:1.4;">
-            <div>AHJ: <strong>${jurisdiction.ahj || '—'}</strong></div>
-            <div>State: <strong>${jurisdiction.state || '—'}</strong></div>
-            <div>NEC: <strong>${jurisdiction.necVersion || '—'}</strong></div>
+            <div>AHJ: <strong>${(() => { const _pa = projectProjectAuthorityFromInput(input);
+              // Single-sourced from the code authority, like every other sheet. The
+              // posted compliance.jurisdiction.ahj is the MAILING-city enrichment
+              // ("City of Granite City Building & Zoning") the boundary determination
+              // superseded; it must not reappear here beside the county authority.
+              return _pa.present ? _pa.tag('ahj') : escapeH(jurisdiction.ahj || '—'); })()}</strong></div>
+            <div>State: <strong>${projectProjectStateFromInput(input).tag('state-name')}</strong></div>
+            <div>NEC: <strong>${_cpVal.tag('nec')}</strong></div>
           </div>
         </div>
       </div>
@@ -549,7 +569,7 @@ export function pageValidationSummary(
 
       <!-- Structural Calculation Summary — fence-specific detail table -->
       ${_isFence ? `
-      <div class="section-title" style="margin-top:var(--sm);">Fence Structural Calculation Summary — ASCE 7-22 §29.4</div>
+      <div class="section-title" style="margin-top:var(--sm);">Fence Structural Calculation Summary — ${_asce} §29.4</div>
       <table class="equip-table" style="width:100%;">
         <thead><tr><th>Parameter</th><th>Formula</th><th>Input Values</th><th>Result</th></tr></thead>
         <tbody>
@@ -606,7 +626,7 @@ export function pageValidationSummary(
             ` : `
             <tr><td>Rafter</td><td class="cv">${canonical.structure.rafterSize}</td></tr>
             <tr><td>Rafter Spacing</td><td class="cv">${canonical.structure.rafterSpacingIn}" O.C.</td></tr>
-            <tr><td>Attach Spacing</td><td class="cv">${canonical.structure.attachSpacingIn}" O.C.</td></tr>
+            <tr><td>Attach Spacing</td><td class="cv">${_spcValIn}" O.C.${_spcValTag}</td></tr>
             `}
           </table>
         </div>

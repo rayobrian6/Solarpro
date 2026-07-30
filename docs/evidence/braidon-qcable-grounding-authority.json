@@ -1,0 +1,497 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.907Z",
+  "artifact": "braidon-qcable-grounding-authority",
+  "section": "Q-CABLE GROUNDING AUTHORITY CORRECTION (2026-07-25) — document-based three-outcome resolution, fail-closed",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "basis": "frozen in-repo acceptance fixture (tests/fixtures/braidon-original-audit-fixture.ts) rendered by the real permit engine — deterministic, no DB read",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "ruling": {
+    "author": "Ray",
+    "statement": "Conductor count alone is NOT manufacturer or code authority. A listed 2-conductor cable assembly serving a double-insulated (Class II) microinverter system may INTENTIONALLY require no separate equipment grounding conductor. The exact selected equipment documents control, and the resolution must be specific to the exact selected microinverter SKU, cable-assembly SKU, module, mounting/bonding system and project jurisdiction.",
+    "priorErrorClass": "The BAR pass resolved this as SEPARATE_EGC_REQUIRED from `conductorCount === 2` and labelled that inference \"manufacturerAuthority\". An engineering inference was presented as a manufacturer authority."
+  },
+  "manufacturerDocumentApplicabilityReport": {
+    "question": "Does any document archived in this repository EXPLICITLY state the equipment grounding / bonding method for the open-air branch section of the exact selected IQ8A-72-2-US + Q-12-10-240 (with the selected module, the selected mounting/bonding system, in this project jurisdiction)?",
+    "answer": "NO.",
+    "investigationRecord": {
+      "searchedStores": [
+        "lib/documents/registry.ts + lib/documents/types.ts (manufacturer_document_registry — the only store with hashes, revisions, verification state, supersession and extracted claims)",
+        "lib/migrations/113_manufacturer_document_registry.sql (DDL) — no seed, no insert script; the only product-specific ingestion route is app/api/admin/document-registry/rt-mini (Roof Tech structural)",
+        "lib/manufacturer-assets-db.ts + lib/data/manufacturer-assets/microinverters.json (manufacturer_assets — page-image catalog)",
+        "public/manufacturer-assets/ (PNG page crops only), scripts/.mfr-cache/pdfcache/ (index lists only ironridge-xr100-rail)",
+        "lib/data/equipment/trunk-cable-enphase.json + lib/equipment/trunkCable.ts (curated research record)",
+        "lib/equipment-db.ts enphase-iq8a record, lib/permit/snapshot/equipmentProjection.ts"
+      ],
+      "findings": [
+        "manufacturer_document_registry contains ZERO rows on a live design, and DOCUMENT_CLASSES has no microinverter / cable-assembly INSTALLATION-MANUAL class at all — only microinverter_datasheet and racking_installation_manual.",
+        "The only Enphase document records in-repo are DATASHEETS in manufacturer_assets: microinverter_spec:enphase-iq8a cites the five-model family sheet \"IQ8 Series Microinverters Data Sheet (North America)\", p.2 spec table, column IQ8A-72-2-US. No revision field, no SHA-256, no grounding statement.",
+        "There is NO document record of any kind for Q-12-10-240. Its authority is the curated JSON lib/data/equipment/trunk-cable-enphase.json, which cites an accessories datasheet (DSH-00247-1.0) that is itself not archived and not hashed.",
+        "Text search for grounding language (grounding, bonding, EGC, equipment ground, Class II, double insulat, no separate, 690.43, 250.134, QD-Cable, Engage, IQ Cable) returns ZERO manufacturer grounding statements. The strings \"two-wire, double-insulated\" are engine-authored (lib/permit/snapshot/build.ts brand regex + the curated JSON), not quoted from a manufacturer.",
+        "GroundingRecord.manufacturerListingBasis — the field designed to hold exactly this reference — is null on every Braidon grounding object.",
+        "The existing applicability mechanisms do not cover the Enphase micro documents: the product-VERSION gate (manufacturer-assets-db.evaluateDocumentApplicability) is mount/racking-only, and the exact-vs-family gate (equipmentProjection.resolveModuleDatasheetExactness) is module-only. The IQ8 FAMILY sheet is accepted for IQ8A on a fuzzy model match plus a hand-set verified boolean — it establishes no grounding method."
+      ],
+      "conclusion": "No exactly-applicable manufacturer grounding statement exists in this repository. The live outcome is therefore PENDING_MANUFACTURER_AUTHORITY — the fail-closed state, not a finding."
+    },
+    "resolverApplicabilityVerification": {
+      "documentPresent": false,
+      "documentVerified": false,
+      "documentCurrent": false,
+      "documentArchived": false,
+      "documentHashed": false,
+      "statesMethodExplicitly": false,
+      "sectionCited": false,
+      "scopeIsExactSku": false,
+      "microSkuExactMatch": false,
+      "cableSkuExactMatch": false,
+      "moduleCovered": false,
+      "mountingBondingCovered": false,
+      "jurisdictionCovered": false,
+      "verdict": "no-document",
+      "failures": [
+        "no manufacturer document establishing the equipment grounding/bonding method for the open-air microinverter branch / cable-assembly section is archived and verified in this repository"
+      ]
+    },
+    "exactSelectionTheAuthorityIsResolvedFor": {
+      "microinverterSku": "IQ8A-72-2-US",
+      "cableAssemblySku": "Q-12-10-240",
+      "moduleSku": null,
+      "mountingBondingSystem": "RT-MINI",
+      "projectJurisdiction": "Madison County Building & Zoning"
+    },
+    "documentsThatCanNEVEREstablishThisMethod": [
+      "the IQ8 five-model FAMILY datasheet (family scope ⇒ never exact-SKU applicability)",
+      "IQ-Commercial QD-Cable guidance (different product line + different cable SKU)",
+      "any other IQ8 variant document (IQ8PLUS / IQ8M / IQ8H / IQ8AC)",
+      "legacy Engage-cable rules",
+      "generic two-wire / conductor-count reasoning",
+      "an engineering opinion or a free-text note"
+    ]
+  },
+  "beforeAfter": {
+    "before": {
+      "result": "B — SEPARATE EQUIPMENT GROUNDING CONDUCTOR REQUIRED",
+      "basisAsClaimed": "manufacturerAuthority: \"Q-12-10-240 is a TWO-conductor assembly … ⇒ NO integrated equipment grounding conductor\"",
+      "basisInFact": "an inference from lib/equipment/trunkCable.ts `conductors: 2` — no manufacturer document, no hash, no section",
+      "renderedClaims": [
+        "E-1: \"Method = SEPARATE EQUIPMENT GROUNDING CONDUCTOR\"",
+        "PV-1B callout 5: \"SEPARATE #12 Cu EGC open-air with each branch trunk (Q-Cable = 2-cond., no integrated EGC)\"",
+        "PV-4B: \"2-conductor assembly, NO integrated EGC ⇒ SEPARATE #12 Cu EGC REQUIRED\"",
+        "E-1 SLD SEGMENT-1 label: \"1×#12 GRN EGC\"",
+        "BOM GRN-OPENAIR-12 — orderable"
+      ]
+    },
+    "after": {
+      "outcome": "PENDING_MANUFACTURER_AUTHORITY",
+      "verificationStatus": "pending-manufacturer-authority",
+      "renderLabel": "GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY",
+      "necBasis": "NEC 110.3(B) — the equipment grounding / bonding method must follow the listing and the manufacturer instructions for the exact installed equipment. That instruction is NOT established here, so NO NEC conclusion (neither a 250.122-sized additional conductor nor a 690.43(C) listed integrated method) may be asserted for this section.",
+      "groundingBondingMethod": "GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY",
+      "documentId": null,
+      "documentHash": null,
+      "documentSectionOrPage": null,
+      "equipmentInsulationClassification": "NOT ESTABLISHED — no verified document records the equipment insulation class / classification",
+      "cableConductorConstruction": "two-wire, double-insulated (factory-connectorized)",
+      "cableConductorCount": 2,
+      "conductorCountIsNonDeterminative": true,
+      "explanation": "The equipment grounding / bonding method for the open-air microinverter branch (cable-assembly) section is NOT ESTABLISHED. No manufacturer document in this repository states the method for the exact selected equipment, so NEITHER outcome may be asserted — not an additional grounding conductor, and not a listed no-additional-conductor method. Any conductor quantity shown for this section is a PROPOSED / DESIGN QUANTITY only (QCABLE-GROUNDING-AUTHORITY-UNVERIFIED; see RS-1). This is a fail-closed state, not a finding.",
+      "resolutionRequirement": "Archive and verify, through the document registry, the manufacturer installation document that EXPLICITLY states the equipment grounding / bonding method for the open-air branch section of the EXACT selected equipment (microinverter SKU + cable-assembly SKU + module SKU + mounting/bonding system) in this project jurisdiction: record its SHA-256, revision, current status, the exact section/page carrying the statement, and its own declared exact-SKU applicability. A family / series / product-line document (an IQ8 family datasheet, IQ-Commercial QD-Cable guidance, a legacy Engage rule), a conductor-count inference, or an engineering opinion can never clear this."
+    },
+    "threeOutcomeContract": {
+      "A": "NO_SEPARATE_EGC_REQUIRED — only from a verified, exactly-applicable document that states the listed method needs no additional conductor",
+      "B": "SEPARATE_EGC_REQUIRED — only from a verified, exactly-applicable document that states an additional EGC is required",
+      "C": "PENDING_MANUFACTURER_AUTHORITY — everything else (fail-closed). Today: C."
+    },
+    "structuralRule": "outcomeFromDocument(document, applicability) is the ONLY function that can return A or B, and its parameters are the document evidence + its applicability verification ONLY. No conductor count, conductor construction, brand or insulation string is in scope there, so a conductor-count inference is UNEXPRESSIBLE on the path that selects the outcome. The equipment facts are attached to the result afterwards as explicitly non-determinative data."
+  },
+  "bomBeforeAfter": {
+    "partNumber": "GRN-OPENAIR-12",
+    "before": {
+      "state": "orderable",
+      "manufacturer": "Southwire",
+      "justification": "separate EGC required because the assembly is 2-conductor (inference)"
+    },
+    "after": {
+      "state": "design-quantity-non-orderable",
+      "excludedFromProcurementTotals": true,
+      "manufacturer": "—",
+      "quantityFt": 162,
+      "quantityMeaning": "PROPOSED / DESIGN QUANTITY — retained so the exact orderable row regenerates the moment an applicable document is verified",
+      "lengthDerivation": {
+        "basis": "Σ per-branch BranchCablePath (same designed-installed geometry as the trunk)",
+        "designedInstalledFt": 140.5,
+        "lengthProvenance": "geometry-derived",
+        "wasteFactor": 1.15,
+        "formula": "Σ BranchCablePath designed-installed 140.5 ft × 1.15 waste = ceil ⇒ 162 ft",
+        "perBranch": [
+          {
+            "branchId": "br-1",
+            "designedInstalledLengthFt": 42.9
+          },
+          {
+            "branchId": "br-2",
+            "designedInstalledLengthFt": 58.3
+          },
+          {
+            "branchId": "br-3",
+            "designedInstalledLengthFt": 39.3
+          }
+        ]
+      },
+      "necReference": "NEC 110.3(B) — PENDING (no 250.122 sizing conclusion is asserted while the method is unestablished)"
+    },
+    "outcomeDrivenContract": {
+      "A": "row REMOVED from the authoritative BOM; the separate-EGC statements are removed from E-1 / PV-1B / PV-4B and an explanation is rendered; racking / module-frame bonding hardware is RETAINED",
+      "B": "row RETAINED and ORDERABLE, with the document citation, the NEC 250.122-derived size and the path-derived length reconciled on every surface",
+      "C": "row RETAINED as a PROPOSED / DESIGN QUANTITY — NON-ORDERABLE, excluded from procurement totals, blocking permit + procurement readiness (today)"
+    }
+  },
+  "groundingObjectGraph": {
+    "contract": "Five DISTINCT authority domains. The open-air grounding resolver governs exactly ONE of them; no domain inherits another's result.",
+    "domains": [
+      {
+        "domain": "open-air-micro-branch-cable-section",
+        "label": "Open-air microinverter branch (listed cable assembly) — GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY",
+        "authority": "manufacturer-document (this resolver)",
+        "required": "pending",
+        "basis": "NEC 110.3(B) — the listing + manufacturer instructions for the EXACT selected microinverter and cable assembly decide whether an additional equipment grounding conductor is installed in this section.",
+        "governedByOpenAirGroundingResolver": true,
+        "objectRefs": [
+          "electrical.openAirGroundingAuthority",
+          "electrical.groundingObjects[purpose='branch-egc']",
+          "electrical.branchCablePaths"
+        ],
+        "independenceNote": "This is the ONLY domain the open-air grounding resolver governs."
+      },
+      {
+        "domain": "home-run-raceway-egc",
+        "label": "Equipment grounding conductor inside the shared home-run raceway (PVC Sch 80 1-1/4\") — #12 AWG",
+        "authority": "NEC (wiring method)",
+        "required": true,
+        "basis": "INDEPENDENTLY REQUIRED per NEC 250.118 / 250.122 with sizing from the branch OCPD: these are FIELD-INSTALLED conductors in a raceway (THWN-2 in PVC), i.e. in-raceway wiring-method territory. A wiring-method EGC is required with the circuit conductors and its basis has NOTHING to do with the double-insulation / listed-assembly question that governs the open-air cable section. Retained under every open-air outcome.",
+        "governedByOpenAirGroundingResolver": false,
+        "objectRefs": [
+          "electrical.physicalRaceways[BRANCH-HOMERUN].egcGauge",
+          "electrical.routeSegments['BRANCH_HOMERUN_RUN'].egcGauge"
+        ],
+        "independenceNote": "NOT affected by the open-air grounding outcome — a raceway wiring method needs its own EGC regardless."
+      },
+      {
+        "domain": "racking-module-frame-bonding",
+        "label": "Module-frame + racking bonding — Roof Tech RT-MINI listed mounting assembly bonding path (UL 2703) — module frames + racking",
+        "authority": "listed-assembly (UL 2703) + NEC",
+        "required": true,
+        "basis": "NEC 690.43 / 250.136 (equipment bonding of module frames + racking) — evaluated on its OWN authority",
+        "governedByOpenAirGroundingResolver": false,
+        "objectRefs": [
+          "structural.rackingAssembly",
+          "BOM bonding hardware rows"
+        ],
+        "independenceNote": "The module-frame / racking bonding requirement is independent of the open-air cable-grounding question and is NOT resolved by this authority; its own listed-assembly verification governs (see the racking assembly authority)."
+      },
+      {
+        "domain": "grounding-electrode-conductor",
+        "label": "Grounding electrode conductor (GEC)",
+        "authority": "NEC (service/electrode)",
+        "required": false,
+        "basis": "NEC 250.64 / 690.47 — interconnected system bonds to the existing GES; no separate GEC added",
+        "governedByOpenAirGroundingResolver": false,
+        "objectRefs": [
+          "electrical.groundingObjects[purpose='gec']"
+        ],
+        "independenceNote": "Electrode-system domain — unrelated to equipment grounding of the array branch circuits."
+      },
+      {
+        "domain": "service-bonding",
+        "label": "Service / enclosure bonding at the point of interconnection",
+        "authority": "NEC (service/electrode)",
+        "required": true,
+        "basis": "NEC 250.24 / 250.92 / 690.47 — the interconnected equipment enclosures and the existing service bonding means; evaluated on the service topology objects, not on any array-side grounding question.",
+        "governedByOpenAirGroundingResolver": false,
+        "objectRefs": [
+          "electrical.serviceTopology",
+          "electrical.groundingObjects[purpose='raceway-bond']"
+        ],
+        "independenceNote": "Service-side domain — never inherits an array-side grounding outcome."
+      }
+    ],
+    "canonicalGroundingObjects": [
+      {
+        "groundingId": "gnd-br-1",
+        "segmentId": "BRANCH_RUN",
+        "purpose": "branch-egc",
+        "required": true,
+        "method": "conductor",
+        "conductorMaterial": "Cu",
+        "conductorSize": "#12 AWG",
+        "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+        "codeBasis": "NEC 250.122",
+        "manufacturerListingBasis": null
+      },
+      {
+        "groundingId": "gnd-br-2",
+        "segmentId": "BRANCH_RUN",
+        "purpose": "branch-egc",
+        "required": true,
+        "method": "conductor",
+        "conductorMaterial": "Cu",
+        "conductorSize": "#12 AWG",
+        "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+        "codeBasis": "NEC 250.122",
+        "manufacturerListingBasis": null
+      },
+      {
+        "groundingId": "gnd-br-3",
+        "segmentId": "BRANCH_RUN",
+        "purpose": "branch-egc",
+        "required": true,
+        "method": "conductor",
+        "conductorMaterial": "Cu",
+        "conductorSize": "#12 AWG",
+        "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+        "codeBasis": "NEC 250.122",
+        "manufacturerListingBasis": null
+      },
+      {
+        "groundingId": "gnd-feeder",
+        "segmentId": "COMBINER_TO_DISCO_RUN",
+        "purpose": "feeder-egc",
+        "required": true,
+        "method": "conductor",
+        "conductorMaterial": "Cu",
+        "conductorSize": "#10 AWG",
+        "sizingBasis": "NEC 250.122 @ 60A feeder OCPD",
+        "codeBasis": "NEC 250.122",
+        "manufacturerListingBasis": null
+      },
+      {
+        "groundingId": "gnd-gec",
+        "segmentId": "SERVICE",
+        "purpose": "gec",
+        "required": false,
+        "method": "none-required",
+        "conductorMaterial": null,
+        "conductorSize": null,
+        "sizingBasis": null,
+        "codeBasis": "NEC 250.64 / 690.47 — interconnected system bonds to the existing GES; no separate GEC added",
+        "manufacturerListingBasis": null
+      }
+    ],
+    "inRacewayHomeRunEgc": {
+      "keptDeliberately": true,
+      "segmentId": "BRANCH_HOMERUN_RUN",
+      "egcGauge": "#12 AWG",
+      "independentBasis": "These are FIELD-INSTALLED conductors in a raceway (THWN-2 in PVC) — in-raceway wiring-method territory. NEC 250.118 / 250.122 require an equipment grounding conductor with the circuit conductors, sized from the branch OCPD. That requirement does not depend on the listing / double-insulation question that governs the open-air listed-cable-assembly section, so it stands under EVERY open-air outcome."
+    },
+    "rackingModuleFrameBonding": {
+      "required": true,
+      "method": "Roof Tech RT-MINI listed mounting assembly bonding path (UL 2703) — module frames + racking",
+      "codeBasis": "NEC 690.43 / 250.136 (equipment bonding of module frames + racking) — evaluated on its OWN authority",
+      "independentOfCableGrounding": true,
+      "hardwareRetained": true,
+      "mountingBondingSystem": "RT-MINI",
+      "verificationNote": "The module-frame / racking bonding requirement is independent of the open-air cable-grounding question and is NOT resolved by this authority; its own listed-assembly verification governs (see the racking assembly authority)."
+    }
+  },
+  "renderedVerification": {
+    "perSheet": [
+      {
+        "sheet": "RS-1.2",
+        "statesPendingAuthority": false,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "PV-1B",
+        "statesPendingAuthority": true,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "E-1",
+        "statesPendingAuthority": true,
+        "statesPendingSldLabel": true,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "PV-4A",
+        "statesPendingAuthority": false,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "PV-4B",
+        "statesPendingAuthority": true,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "SCHED-3",
+        "statesPendingAuthority": false,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "SCHED-4",
+        "statesPendingAuthority": false,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "APP-A",
+        "statesPendingAuthority": false,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      }
+    ],
+    "pendingLabelOccurrences": 10,
+    "nonOrderableLabelOccurrences": 0,
+    "blockerCodeOccurrences": 15,
+    "forbiddenClaimsPresent": {
+      "separate EGC required (any form)": false,
+      "no EGC required (any form)": false,
+      "conductor-count justification (\"NO integrated EGC\")": false,
+      "Q-Cable provides integrated grounding": false,
+      "grounding PASS / VERIFIED claim": false
+    },
+    "failClosed": true
+  },
+  "blockerRegistryReconciliation": {
+    "newCode": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+    "severity": "blocking",
+    "domain": "electrical",
+    "severityPolicyImpact": {
+      "safety": true,
+      "codeCompliance": true,
+      "procurement": true,
+      "engineeringApproval": true,
+      "permitAcceptance": true
+    },
+    "beforeAfterDelta": {
+      "basisNote": "Counts are for the in-repo frozen Braidon acceptance fixture rendered through the full permit engine (scripts/braidon-fixture-regen.ts). The load-bearing claim is the DELTA: exactly ONE code is ADDED, none is removed, and no existing blocker is weakened.",
+      "before": {
+        "blockingCount": 14,
+        "advisoryCount": 0
+      },
+      "after": {
+        "blockingCount": 15,
+        "advisoryCount": 0
+      },
+      "added": [
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+      ],
+      "removed": [],
+      "weakened": []
+    },
+    "activeCount": 15,
+    "blockingCount": 15,
+    "advisoryCount": 0,
+    "activeCodes": [
+      "ROUTE-LENGTH-ESTIMATE",
+      "CONDUIT-FILL-PENDING",
+      "TAP-CONDUCTOR-LENGTH-PENDING",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "CODE-AUTHORITY-INCOMPLETE",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "ENGINEERING-REVIEW-PENDING"
+    ],
+    "entry": {
+      "code": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "severity": "blocking",
+      "justification": "",
+      "domain": "electrical",
+      "authorityPath": "electrical.openAirGroundingAuthority",
+      "affectedSheets": [
+        "E-1",
+        "PV-1B",
+        "PV-4B",
+        "SCHED",
+        "RS-1"
+      ],
+      "explanation": "Open-air branch grounding method NOT ESTABLISHED for the selected IQ8A-72-2-US + Q-12-10-240 (no applicable manufacturer document) — candidate 162 ft EGC is a design quantity, non-orderable.",
+      "resolutionAction": "Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this.",
+      "payload": {
+        "outcome": "PENDING_MANUFACTURER_AUTHORITY",
+        "selectedMicroinverterSku": "IQ8A-72-2-US",
+        "selectedCableAssemblySku": "Q-12-10-240",
+        "selectedModuleSku": null,
+        "selectedMountingBondingSystem": "RT-MINI",
+        "projectJurisdiction": "Madison County Building & Zoning",
+        "equipmentInsulationClassification": "NOT ESTABLISHED — no verified document records the equipment insulation class / classification",
+        "cableConductorConstruction": "two-wire, double-insulated (factory-connectorized)",
+        "cableConductorCount": 2,
+        "conductorCountIsNonDeterminative": true,
+        "documentId": null,
+        "documentHash": null,
+        "documentSectionOrPage": null,
+        "applicabilityVerification": {
+          "documentPresent": false,
+          "documentVerified": false,
+          "documentCurrent": false,
+          "documentArchived": false,
+          "documentHashed": false,
+          "statesMethodExplicitly": false,
+          "sectionCited": false,
+          "scopeIsExactSku": false,
+          "microSkuExactMatch": false,
+          "cableSkuExactMatch": false,
+          "moduleCovered": false,
+          "mountingBondingCovered": false,
+          "jurisdictionCovered": false,
+          "verdict": "no-document",
+          "failures": [
+            "no manufacturer document establishing the equipment grounding/bonding method for the open-air microinverter branch / cable-assembly section is archived and verified in this repository"
+          ]
+        },
+        "necBasis": "NEC 110.3(B) — the equipment grounding / bonding method must follow the listing and the manufacturer instructions for the exact installed equipment. That instruction is NOT established here, so NO NEC conclusion (neither a 250.122-sized additional conductor nor a 690.43(C) listed integrated method) may be asserted for this section.",
+        "rackingModuleBondingRequirement": {
+          "required": true,
+          "method": "Roof Tech RT-MINI listed mounting assembly bonding path (UL 2703) — module frames + racking",
+          "codeBasis": "NEC 690.43 / 250.136 (equipment bonding of module frames + racking) — evaluated on its OWN authority",
+          "independentOfCableGrounding": true,
+          "hardwareRetained": true,
+          "mountingBondingSystem": "RT-MINI",
+          "verificationNote": "The module-frame / racking bonding requirement is independent of the open-air cable-grounding question and is NOT resolved by this authority; its own listed-assembly verification governs (see the racking assembly authority)."
+        },
+        "candidateQuantityFt": 162,
+        "bomRowState": "design-quantity-non-orderable",
+        "verificationStatus": "pending-manufacturer-authority",
+        "affectedSegmentIds": [
+          "BRANCH_RUN"
+        ],
+        "affectedBranchIds": [
+          "br-1",
+          "br-2",
+          "br-3"
+        ],
+        "resolutionRequirement": "Archive and verify, through the document registry, the manufacturer installation document that EXPLICITLY states the equipment grounding / bonding method for the open-air branch section of the EXACT selected equipment (microinverter SKU + cable-assembly SKU + module SKU + mounting/bonding system) in this project jurisdiction: record its SHA-256, revision, current status, the exact section/page carrying the statement, and its own declared exact-SKU applicability. A family / series / product-line document (an IQ8 family datasheet, IQ-Commercial QD-Cable guidance, a legacy Engage rule), a conductor-count inference, or an engineering opinion can never clear this."
+      },
+      "provenance": {
+        "source": "electrical.openAirGroundingAuthority",
+        "ref": "Q-12-10-240"
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false,
+      "resolutionAuditRef": null
+    },
+    "clearedOnlyBy": "a VERIFIED, archived, hashed, CURRENT manufacturer installation document whose OWN declared applicability names the exact selected micro SKU + cable SKU + module + mounting/bonding system and this jurisdiction, with the exact section/page carrying the statement. Never by a conductor count, a family document or an engineering opinion."
+  },
+  "boundary": "No fabricated manufacturer document, grounding statement, hash or section reference. The applicability report records what does and does not exist in this repository. The live outcome is the honest PENDING state the code actually produced. Synthetic documents exist ONLY inside tests/planset/qcable-grounding-authority.test.ts, are labelled SYNTHETIC TEST DOCUMENT, and never reach a rendered package."
+}

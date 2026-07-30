@@ -1,0 +1,210 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.473Z",
+  "artifact": "braidon-ppc-grounding-object-graph",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§7 — every rendered grounding conductor is a canonical GroundingSegment",
+  "contract": "six domains stay six objects: open-air Q-Cable grounding; shared PVC home-run EGC; feeder EGC; service bonding; module/racking bonding; GEC. Nothing borrows another object's size, raceway or length.",
+  "canonicalObjectCount": 3,
+  "canonicalObjects": [
+    {
+      "groundingSegmentId": "gnd-branch-egc-authority",
+      "groundingId": null,
+      "identityKind": "group-authority",
+      "groundingAuthorityGroupId": "gnd-branch-egc-authority",
+      "branchScope": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "memberGroundingIds": [
+        "gnd-br-1",
+        "gnd-br-2",
+        "gnd-br-3"
+      ],
+      "purpose": "branch-egc",
+      "label": "Open-air branch (listed cable assembly) equipment grounding — GROUP AUTHORITY",
+      "fromDeviceId": "B1/B2/B3 MICROINVERTERS",
+      "toDeviceId": "ROOF J-BOX (branch transition)",
+      "associatedSegmentId": "BRANCH_RUN",
+      "associatedCircuitIds": [
+        "br-1",
+        "br-2",
+        "br-3"
+      ],
+      "conductorSize": null,
+      "conductorMaterial": null,
+      "insulationType": null,
+      "method": "pending",
+      "physicalRacewayId": null,
+      "racewayLabel": "FREE AIR — NEC 690.31(C)",
+      "lengthFt": null,
+      "lengthSource": "not-established",
+      "necBasis": "NEC 110.3(B) — the equipment grounding / bonding method must follow the listing and the manufacturer instructions for the exact installed equipment. That instruction is NOT established here, so NO NEC conclusion (neither a 250.122-sized additional conductor nor a 690.43(C) listed integrated method) may be asserted for this section.",
+      "authorityState": "pending-manufacturer-authority",
+      "installedConductorAsserted": false,
+      "bomLineId": "BOM-WIRE-A2BB72C0",
+      "bomLinePartNumber": "GRN-OPENAIR-12",
+      "bomRowState": "design-quantity-non-orderable",
+      "provenance": "electrical.openAirGroundingAuthority + groundingObjects[gnd-br-1, gnd-br-2, gnd-br-3] + QCABLE-ASSEMBLY"
+    },
+    {
+      "groundingSegmentId": "gnd-feeder",
+      "groundingId": "gnd-feeder",
+      "identityKind": "physical-segment",
+      "groundingAuthorityGroupId": null,
+      "branchScope": [],
+      "memberGroundingIds": [],
+      "purpose": "feeder-egc",
+      "label": "Feeder equipment grounding conductor (in raceway)",
+      "fromDeviceId": "AC COMBINER",
+      "toDeviceId": "AC DISCONNECT",
+      "associatedSegmentId": "COMBINER_TO_DISCO_RUN",
+      "associatedCircuitIds": [
+        "COMBINER_TO_DISCO_RUN"
+      ],
+      "conductorSize": "#10 AWG",
+      "conductorMaterial": "Cu",
+      "insulationType": "THWN-2",
+      "method": "conductor",
+      "physicalRacewayId": "RW-COMBINER_TO_DISCO_RUN",
+      "racewayLabel": "PVC Sch 80 1-1/4\"",
+      "lengthFt": 20,
+      "lengthSource": "route-one-way",
+      "necBasis": "NEC 250.122",
+      "authorityState": "nec-derived",
+      "installedConductorAsserted": true,
+      "bomLineId": null,
+      "bomRowState": "orderable",
+      "provenance": "groundingObjects['gnd-feeder'] + routeSegments['COMBINER_TO_DISCO_RUN'] + physicalRaceways['RW-COMBINER_TO_DISCO_RUN']"
+    },
+    {
+      "groundingSegmentId": "gnd-gec",
+      "groundingId": "gnd-gec",
+      "identityKind": "physical-segment",
+      "groundingAuthorityGroupId": null,
+      "branchScope": [],
+      "memberGroundingIds": [],
+      "purpose": "gec",
+      "label": "Grounding electrode conductor (GEC)",
+      "fromDeviceId": "Existing service grounding electrode system",
+      "toDeviceId": "Existing service grounding electrode system",
+      "associatedSegmentId": "SERVICE",
+      "associatedCircuitIds": [],
+      "conductorSize": null,
+      "conductorMaterial": null,
+      "insulationType": null,
+      "method": "none-required",
+      "physicalRacewayId": null,
+      "racewayLabel": null,
+      "lengthFt": null,
+      "lengthSource": "not-established",
+      "necBasis": "NEC 250.64 / 690.47 — interconnected system bonds to the existing GES; no separate GEC added",
+      "authorityState": "not-required",
+      "installedConductorAsserted": false,
+      "bomLineId": null,
+      "bomRowState": "no-row",
+      "provenance": "groundingObjects['gnd-gec']"
+    }
+  ],
+  "renderedIdEnumeration": {
+    "distinctRenderedIds": [
+      "GRN-COMBINER_TO_DISCO_RUN-EGC",
+      "GRN-DISCO_TO_METER_RUN-EGC",
+      "GRN-HOMERUN-RACEWAY-EGC",
+      "GRN-SERVICE-BOND",
+      "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3",
+      "gnd-branch-egc-authority",
+      "gnd-feeder",
+      "gnd-gec"
+    ],
+    "distinctRenderedIdCount": 10,
+    "canonicalGroundingSegments": [
+      "gnd-branch-egc-authority",
+      "gnd-feeder",
+      "gnd-gec"
+    ],
+    "e1PhysicalScheduleBondingRows": [
+      {
+        "sectionId": "BRANCH_RUN",
+        "groundingSegmentId": "gnd-br-1",
+        "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
+        "pendingAuthority": true
+      },
+      {
+        "sectionId": "BRANCH_RUN",
+        "groundingSegmentId": "gnd-br-2",
+        "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
+        "pendingAuthority": true
+      },
+      {
+        "sectionId": "BRANCH_RUN",
+        "groundingSegmentId": "gnd-br-3",
+        "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
+        "pendingAuthority": true
+      },
+      {
+        "sectionId": "BRANCH_HOMERUN_RUN",
+        "groundingSegmentId": "GRN-HOMERUN-RACEWAY-EGC",
+        "bonding": "#12 AWG Cu EGC in raceway (NEC 250.122)",
+        "pendingAuthority": false
+      },
+      {
+        "sectionId": "COMBINER_TO_DISCO_RUN",
+        "groundingSegmentId": "GRN-COMBINER_TO_DISCO_RUN-EGC",
+        "bonding": "#10 AWG Cu EGC in raceway (NEC 250.122)",
+        "pendingAuthority": false
+      },
+      {
+        "sectionId": "DISCO_TO_METER_RUN",
+        "groundingSegmentId": "GRN-DISCO_TO_METER_RUN-EGC",
+        "bonding": "#10 AWG Cu EGC in raceway (NEC 250.122)",
+        "pendingAuthority": false
+      },
+      {
+        "sectionId": "svc-tap-conductors",
+        "groundingSegmentId": "GRN-SERVICE-BOND",
+        "bonding": "EGC with the service conductors (NEC 250.122) — service/enclosure bonding domain",
+        "pendingAuthority": false
+      }
+    ],
+    "projectedNotYetCanonical": [
+      "GRN-COMBINER_TO_DISCO_RUN-EGC",
+      "GRN-DISCO_TO_METER_RUN-EGC",
+      "GRN-HOMERUN-RACEWAY-EGC",
+      "GRN-SERVICE-BOND",
+      "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3"
+    ],
+    "note": "the canonical GroundingSegment objects are the electrical.groundingObjects projection; the additional rendered ids are PROJECTED per-raceway / service-bond ids emitted by the E-1 sectioned schedule from routeSegments. Each carries its own raceway, length, NEC basis and BOM derivation, so no row asserts anything it cannot support — but they are not yet first-class GroundingRecords (see knownFollowUp)."
+  },
+  "invariants": {
+    "everyObjectHasAnId": true,
+    "idsUnique": true,
+    "physicalIdsUnique": true,
+    "groupAuthorityNotCountedPhysical": true,
+    "groupAuthorityIdIsNotAPhysicalSegmentId": true,
+    "branchEgcGroupMembers": [
+      "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3"
+    ],
+    "distinctPhysicalBranchIdsRendered": [
+      "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3"
+    ],
+    "openAirAssertsNoInstalledConductor": true,
+    "openAirHasNoBorrowedRaceway": true,
+    "everyObjectStatesANecBasis": true
+  },
+  "knownFollowUp": {
+    "id": "HOME-RUN-EGC-PROMOTION",
+    "statement": "The in-raceway home-run EGC renders as the PROJECTED id GRN-HOMERUN-RACEWAY-EGC, derived from routeSegments[BRANCH_HOMERUN_RUN].egcGauge — it is NOT yet a first-class GroundingRecord in electrical.groundingObjects. It reconciles (own id, own raceway, own length, own NEC basis, own BOM line) and asserts nothing it cannot support, so it satisfies gate 10 today.",
+    "whyNotNow": "Promoting it adds a canonical grounding record, which changes the snapshot digest. Deliberately deferred: a digest change late in a corrective pass would invalidate every acceptance artifact this pass produced.",
+    "nextAction": "Promote to a first-class GroundingRecord (purpose: raceway-homerun-egc) in build.ts alongside the other grounding objects, then delete the projected fallback in projectGroundingSegments."
+  }
+}

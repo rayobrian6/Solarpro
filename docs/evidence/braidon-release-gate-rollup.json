@@ -1,0 +1,2121 @@
+{
+  "artifact": "docs/evidence/braidon-release-gate-rollup.json",
+  "directive": "docs/RELEASE-GATE-MODEL-DIRECTIVE.md",
+  "pass": "RGM (hierarchical release-gate model) — RGM-2 rendering + closure stage",
+  "generatedAt": "2026-07-27T02:00:25.472Z",
+  "modelVersion": "1.0.0",
+  "snapshotId": "PDS-0D1F9ADCF211",
+  "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7",
+  "issueState": "PENDING ENGINEERING REVIEW",
+  "permitReadinessReady": false,
+  "releaseSummary": {
+    "openGateCount": 7,
+    "unresolvedRequirementCount": 15,
+    "advisoryCount": 0,
+    "permitReady": false,
+    "procurementReady": false,
+    "engineeringReviewReady": false
+  },
+  "releaseGates": [
+    {
+      "gateId": "RG-1",
+      "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+      "title": "PROJECT & AHJ AUTHORITY",
+      "description": "Project identity, legal jurisdiction, adopted code editions and production naming are not confirmed from official sources. These are ADMINISTRATIVE / CODE-AUTHORITY confirmations — not engineering failures: no calculation is wrong because of them, but the set cannot be released or accepted with unverified identity.",
+      "gateCategory": "ADMINISTRATIVE_CODE_AUTHORITY",
+      "status": "OPEN",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": false,
+        "administrativeRelease": false
+      },
+      "requirementCodes": [
+        "CODE-AUTHORITY-INCOMPLETE",
+        "PROJECT-AUTHORITY-UNVERIFIED"
+      ],
+      "unresolvedRequirementCodes": [
+        "CODE-AUTHORITY-INCOMPLETE",
+        "PROJECT-AUTHORITY-UNVERIFIED"
+      ],
+      "clearedRequirementCodes": [],
+      "unresolvedCount": 2,
+      "totalRequirementCount": 2,
+      "primaryResolutionAction": "Archive + verify the AHJ adoption ordinance (W4-D); no edition inference.",
+      "responsibleRole": "admin",
+      "evidenceReferences": [
+        "authority:codeAuthority.editions",
+        "provenance:snapshot build (permitReadiness)",
+        "authority:projectAuthority"
+      ],
+      "affectedSheets": [
+        "PV-0",
+        "CERT",
+        "PE-1"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "gateId": "RG-2",
+      "gateCode": "EQUIPMENT_RECONCILIATION",
+      "title": "EQUIPMENT RECONCILIATION",
+      "description": "ONE equipment-reconciliation workflow: the stored module identity and the exact-wattage source document must agree before any sheet, schedule or BOM can claim a module of record. Operator reconciliation only — the engine never auto-resolves a stored-identity conflict.",
+      "gateCategory": "EQUIPMENT_AUTHORITY",
+      "status": "OPEN",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "requirementCodes": [
+        "MODULE-EXACT-DATASHEET-PENDING"
+      ],
+      "unresolvedRequirementCodes": [
+        "MODULE-EXACT-DATASHEET-PENDING"
+      ],
+      "clearedRequirementCodes": [],
+      "unresolvedCount": 1,
+      "totalRequirementCount": 1,
+      "primaryResolutionAction": "Attach the exact 400 W module datasheet (or a single-wattage crop).",
+      "responsibleRole": "operator",
+      "evidenceReferences": [
+        "authority:equipment-db(module) → manufacturer-assets-db#module_spec:qcells-peak-duo-400",
+        "provenance:equipmentProjection#qcells-peak-duo-400"
+      ],
+      "affectedSheets": [
+        "DS-1"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "gateId": "RG-3",
+      "gateCode": "ENVIRONMENTAL_LOAD_AUTHORITY",
+      "title": "ENVIRONMENTAL LOAD AUTHORITY",
+      "description": "The design wind speed, exposure category, risk category and ground snow load are not established from an archived climate-hazard source for this exact site. Operator-entered values are an OBSERVATION / OVERRIDE and drive the PRELIMINARY analysis — they are never verified design criteria.",
+      "gateCategory": "STRUCTURAL_AUTHORITY",
+      "status": "OPEN",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "requirementCodes": [
+        "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED"
+      ],
+      "unresolvedRequirementCodes": [
+        "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED"
+      ],
+      "clearedRequirementCodes": [],
+      "unresolvedCount": 1,
+      "totalRequirementCount": 1,
+      "primaryResolutionAction": "Resolve the design wind speed, exposure category, risk category and ground snow load from an ARCHIVED climate-hazard source for this exact site (ASCE 7 Hazard-Tool report or the AHJ climate/design-criteria ordinance): archive the document through the document registry (hash + verified state), record its dataset, version/date, the coordinates/address looked up, and the lookup timestamp, and confirm its CURRENCY (no automatic staleness rule exists — verification requires a recorded currency review). Operator-entered values are an OBSERVATION/OVERRIDE and can never clear this; a code-minimum default is preliminary only.",
+      "responsibleRole": "operator",
+      "evidenceReferences": [
+        "authority:structural.env.environmentalLoadAuthority",
+        "provenance:structuralAuthority"
+      ],
+      "affectedSheets": [
+        "PV-0",
+        "PV-4C",
+        "PE-1",
+        "RS-1"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "title": "STRUCTURAL ASSEMBLY AUTHORITY",
+      "description": "ONE root structural gate: the framing capacity authority, the exact racking assembly selection, the roof-attachment fastener assembly and the capacity / applicability source documents are a single chain of unestablished structural authority — NOT independent unrelated failures. Capacity is NOT YET ESTABLISHED from a verified source; no capacity has been shown to FAIL.",
+      "gateCategory": "STRUCTURAL_AUTHORITY",
+      "status": "OPEN",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "requirementCodes": [
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY"
+      ],
+      "unresolvedRequirementCodes": [
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY"
+      ],
+      "clearedRequirementCodes": [],
+      "unresolvedCount": 6,
+      "totalRequirementCount": 6,
+      "primaryResolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "responsibleRole": "operator",
+      "evidenceReferences": [
+        "authority:structural (structural-engine-v4 objects)",
+        "provenance:structuralAuthority",
+        "provenance:rackingAssembly.structuralAuthorityGaps",
+        "authority:snapshot (document)"
+      ],
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "gateId": "RG-5",
+      "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "title": "ELECTRICAL FIELD & CALCULATION CLOSURE",
+      "description": "Field-measured / computed electrical inputs are still open. Each unresolved input blocks a SPECIFIC result (below) — it does not invalidate the electrical design as a whole, and a route-length estimate does not block results that do not materially depend on route length. ROUTE-LENGTH-ESTIMATE affects: Voltage-drop results and the procurement conductor / raceway FOOTAGE (length-dependent results only). Ampacity, OCPD sizing, terminal ratings and equipment selection do not depend on route length and are NOT blocked by this requirement. CONDUIT-FILL-PENDING affects: The conduit-FILL result itself (NEC Ch.9 Table 1) and any derating that depends on it. A PENDING fill must never be presented as a passing zero-error result on PV-4A / PV-4B. TAP-CONDUCTOR-LENGTH-PENDING affects: The NEC 705.11(C) ≤10-ft tap-length VERIFICATION only. The tap conductor ampacity / OCPD and the interconnection method are established independently and are not blocked by this requirement.",
+      "gateCategory": "ELECTRICAL_CLOSURE",
+      "status": "OPEN",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "requirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE",
+        "CONDUIT-FILL-PENDING",
+        "TAP-CONDUCTOR-LENGTH-PENDING"
+      ],
+      "unresolvedRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE",
+        "CONDUIT-FILL-PENDING",
+        "TAP-CONDUCTOR-LENGTH-PENDING"
+      ],
+      "clearedRequirementCodes": [],
+      "unresolvedCount": 3,
+      "totalRequirementCount": 3,
+      "primaryResolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority).",
+      "responsibleRole": "operator",
+      "evidenceReferences": [
+        "authority:electrical.routeSegments[].lengthSource",
+        "provenance:snapshot build (permitReadiness)",
+        "authority:electrical.feeder.conduit.fillPct",
+        "authority:electrical.serviceTopology[svc-tap-conductors].constraints"
+      ],
+      "affectedSheets": [
+        "PV-1",
+        "PV-4B",
+        "E-1",
+        "SCHED",
+        "PV-4A",
+        "PV-6"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "gateId": "RG-6",
+      "gateCode": "QCABLE_SYSTEM_CLOSURE",
+      "title": "Q-CABLE SYSTEM CLOSURE",
+      "description": "ONE root gate over the listed cable-assembly system: the ordered cable footage must reach the drawn installed path, and the open-air branch grounding/bonding method must be established by a verified, exactly-applicable manufacturer document. Separate children, one system closure. QCABLE-GROUNDING-AUTHORITY-UNVERIFIED affects: The equipment-grounding method, the NEC 250.122 / 690.43(C) conclusion and the candidate EGC quantity (design quantity, non-orderable) — a conductor count can never establish it.",
+      "gateCategory": "PROCUREMENT_CLOSURE",
+      "status": "OPEN",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "requirementCodes": [
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+      ],
+      "unresolvedRequirementCodes": [
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+      ],
+      "clearedRequirementCodes": [],
+      "unresolvedCount": 1,
+      "totalRequirementCount": 1,
+      "primaryResolutionAction": "Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this.",
+      "responsibleRole": "operator",
+      "evidenceReferences": [
+        "authority:electrical.openAirGroundingAuthority",
+        "provenance:electrical.openAirGroundingAuthority#Q-12-10-240"
+      ],
+      "affectedSheets": [
+        "E-1",
+        "PV-1B",
+        "PV-4B",
+        "SCHED",
+        "RS-1"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "gateId": "RG-7",
+      "gateCode": "PROFESSIONAL_RELEASE",
+      "title": "PROFESSIONAL RELEASE",
+      "description": "WORKFLOW requirements, not engineering defects: a designer / engineer-of-record must be assigned, and an approved engineering-review record must cover the CURRENT snapshot digest. Derived from the ABSENCE of a digest-bound approval record — never from issue-state wording.",
+      "gateCategory": "PROFESSIONAL_WORKFLOW",
+      "status": "OPEN",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": false,
+        "administrativeRelease": true
+      },
+      "requirementCodes": [
+        "ENGINEERING-REVIEW-PENDING"
+      ],
+      "unresolvedRequirementCodes": [
+        "ENGINEERING-REVIEW-PENDING"
+      ],
+      "clearedRequirementCodes": [],
+      "unresolvedCount": 1,
+      "totalRequirementCount": 1,
+      "primaryResolutionAction": "Obtain an approved engineering-review record covering the current snapshot digest (D-6).",
+      "responsibleRole": "engineer-of-record",
+      "evidenceReferences": [
+        "authority:certification.engineeringReviewApproved",
+        "provenance:snapshot build (permitReadiness)"
+      ],
+      "affectedSheets": [
+        "CERT",
+        "PE-1"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "gateId": "RG-UNMAPPED",
+      "gateCode": "UNMAPPED_REQUIREMENT",
+      "title": "UNMAPPED RELEASE REQUIREMENT",
+      "description": "One or more ACTIVE release requirements are not assigned to a root release gate by the canonical map. The release-gate model cannot characterise them, so they are treated as blocking EVERY release axis until they are mapped. An unknown requirement is never dropped and never softened.",
+      "gateCategory": "UNMAPPED",
+      "status": "CLEARED",
+      "releaseImpact": {
+        "permitSubmission": false,
+        "procurement": false,
+        "engineeringReview": false,
+        "construction": false,
+        "administrativeRelease": false
+      },
+      "requirementCodes": [],
+      "unresolvedRequirementCodes": [],
+      "clearedRequirementCodes": [],
+      "unresolvedCount": 0,
+      "totalRequirementCount": 0,
+      "primaryResolutionAction": "",
+      "responsibleRole": "operator",
+      "evidenceReferences": [],
+      "affectedSheets": [],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    }
+  ],
+  "releaseRequirements": [
+    {
+      "requirementCode": "CODE-AUTHORITY-INCOMPLETE",
+      "gateId": "RG-1",
+      "title": "Adopted code editions not established from an archived AHJ adoption document",
+      "findingType": "PENDING_AUTHORITY",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Code authority is incomplete for Madison County Building & Zoning — unknown adopted edition for IBC, IRC, IFC (printed PENDING — no inference). Archive + verify the adoption document (W4-D) before permit-ready.",
+      "resolutionAction": "Archive + verify the AHJ adoption ordinance (W4-D); no edition inference.",
+      "responsibleRole": "admin",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": false,
+        "administrativeRelease": false
+      },
+      "authorityPath": "codeAuthority.editions",
+      "evidenceReferences": [
+        "authority:codeAuthority.editions",
+        "provenance:snapshot build (permitReadiness)"
+      ],
+      "affectedSheets": [
+        "PV-0",
+        "CERT",
+        "PE-1"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "PROJECT-AUTHORITY-UNVERIFIED"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "PROJECT-AUTHORITY-UNVERIFIED",
+      "gateId": "RG-1",
+      "title": "Project legal authority (address, APN, boundary, AHJ, fire) not verified from an official source",
+      "findingType": "PENDING_AUTHORITY",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Project legal authority (address, APN, municipal boundary, AHJ and fire authority) is operator-posted / postally inferred and not verified from an official source — county/city/AHJ must not be assumed from postal code alone. Verify via the document registry before permit-ready.",
+      "resolutionAction": "Verify address / APN / municipal boundary / AHJ / fire authority via the document registry (no postal inference).",
+      "responsibleRole": "admin",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": false,
+        "construction": false,
+        "administrativeRelease": false
+      },
+      "authorityPath": "projectAuthority",
+      "evidenceReferences": [
+        "authority:projectAuthority",
+        "provenance:snapshot build (permitReadiness)"
+      ],
+      "affectedSheets": [
+        "PV-0",
+        "CERT"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "CODE-AUTHORITY-INCOMPLETE"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "MODULE-EXACT-DATASHEET-PENDING",
+      "gateId": "RG-2",
+      "title": "Exact-wattage module datasheet not on file (family/range page only)",
+      "findingType": "PENDING_DOCUMENT",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Module Q.PEAK DUO BLK ML-G10+ 400W (400 W): the on-file document is the 385–405 W family datasheet, not the exact 400 W sheet.",
+      "resolutionAction": "Attach the exact 400 W module datasheet (or a single-wattage crop).",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "equipment-db(module) → manufacturer-assets-db#module_spec:qcells-peak-duo-400",
+      "evidenceReferences": [
+        "authority:equipment-db(module) → manufacturer-assets-db#module_spec:qcells-peak-duo-400",
+        "provenance:equipmentProjection#qcells-peak-duo-400"
+      ],
+      "affectedSheets": [
+        "DS-1"
+      ],
+      "affectedObjects": [
+        "qcells-peak-duo-400"
+      ],
+      "relatedRequirementCodes": [],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "gateId": "RG-3",
+      "title": "Wind / exposure / risk / snow criteria not established from an archived climate-hazard source",
+      "findingType": "PENDING_AUTHORITY",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Environmental load authority UNVERIFIED — wind code-minimum default, snow code-minimum default, exposure/risk carry no archived climate-hazard source; values are PRELIMINARY design criteria, not verified.",
+      "resolutionAction": "Resolve the design wind speed, exposure category, risk category and ground snow load from an ARCHIVED climate-hazard source for this exact site (ASCE 7 Hazard-Tool report or the AHJ climate/design-criteria ordinance): archive the document through the document registry (hash + verified state), record its dataset, version/date, the coordinates/address looked up, and the lookup timestamp, and confirm its CURRENCY (no automatic staleness rule exists — verification requires a recorded currency review). Operator-entered values are an OBSERVATION/OVERRIDE and can never clear this; a code-minimum default is preliminary only.",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "structural.env.environmentalLoadAuthority",
+      "evidenceReferences": [
+        "authority:structural.env.environmentalLoadAuthority",
+        "provenance:structuralAuthority"
+      ],
+      "affectedSheets": [
+        "PV-0",
+        "PV-4C",
+        "PE-1",
+        "RS-1"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "FRAMING-AUTHORITY-UNVERIFIED",
+      "gateId": "RG-4",
+      "title": "Framing CAPACITY authority not established (operator-entered geometry is observation, not capacity)",
+      "findingType": "PENDING_AUTHORITY",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "EXISTING FRAMING CAPACITY NOT VERIFIED — no project-specific structural authority (archived truss design drawing / manufacturer capacity calc / stamped analysis, or a licensed-engineer review bound to the current snapshot digest) establishes the existing framing capacity. Operator-entered / observed framing geometry is OBSERVATION only and does NOT verify capacity; the code-default rafter/truss capacity is NOT engineering authority. A project-specific structural review is required before permit submission.",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "evidenceReferences": [
+        "authority:structural (structural-engine-v4 objects)",
+        "provenance:structuralAuthority"
+      ],
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "gateId": "RG-4",
+      "title": "Exact racking assembly (rail / splice SKU) not selected",
+      "findingType": "PENDING_SELECTION",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "No verified exact racking assembly — rail/splice SKU is unpinned (PENDING SELECTION); PENDING RACKING ASSEMBLY SELECTION, NOT FOR PERMIT SUBMISSION. Pin the exact rail/splice SKU, archive the capacity/compatibility authority, and resolve span/cantilever source before permit-ready.",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "responsibleRole": "designer",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "evidenceReferences": [
+        "authority:structural (structural-engine-v4 objects)",
+        "provenance:structuralAuthority"
+      ],
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "FASTENER-ASSEMBLY-UNVERIFIED",
+      "gateId": "RG-4",
+      "title": "Roof-attachment fastener assembly withdrawal-capacity authority not established",
+      "findingType": "PENDING_AUTHORITY",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Roof-attachment fastener assembly UNVERIFIED — withdrawal-capacity source not archived / capacity gated. Mount-base authority, independent of rail selection (related to but distinct from PENDING-RACKING-ASSEMBLY-SELECTION).",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "evidenceReferences": [
+        "authority:structural (structural-engine-v4 objects)",
+        "provenance:structuralAuthority"
+      ],
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "gateId": "RG-4",
+      "title": "Racking capacity source document not archived — capacity not yet established",
+      "findingType": "PENDING_DOCUMENT",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "The RT-MINI 600 lb ASD allowable cites a Roof Tech PE structural letter that is NOT archived in-repo (documentHash null). ESR-3575 is a flashing report that excludes structural capacity. The value cannot be verified against a source of record. Supplied document did NOT clear it — missing/unmatched: document.",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "evidenceReferences": [
+        "authority:structural (structural-engine-v4 objects)",
+        "provenance:rackingAssembly.structuralAuthorityGaps"
+      ],
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "gateId": "RG-4",
+      "title": "Archived capacity source does not cover the exact selected assembly / jurisdiction",
+      "findingType": "PENDING_AUTHORITY",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer paired rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically.",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "evidenceReferences": [
+        "authority:structural (structural-engine-v4 objects)",
+        "provenance:rackingAssembly.structuralAuthorityGaps"
+      ],
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "gateId": "RG-4",
+      "title": "Cited manufacturer document covers a different product version than the selected mount",
+      "findingType": "PENDING_DOCUMENT",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Manufacturer document applicability UNVERIFIED — cited RT-MINI II covers a different product version than the selected mount RT-MINI; no verified alias evidence. Provide the version-exact document.",
+      "resolutionAction": "Resolve the missing authority before permit-ready.",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": false,
+        "administrativeRelease": false
+      },
+      "authorityPath": "snapshot (document)",
+      "evidenceReferences": [
+        "authority:snapshot (document)",
+        "provenance:structuralAuthority"
+      ],
+      "affectedSheets": [],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "FRAMING-AUTHORITY-UNVERIFIED",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "ROUTE-LENGTH-ESTIMATE",
+      "gateId": "RG-5",
+      "title": "Run lengths are CAD-derived estimates, not routed or field-measured",
+      "findingType": "FIELD_VERIFICATION",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status",
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority).",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "electrical.routeSegments[].lengthSource",
+      "evidenceReferences": [
+        "authority:electrical.routeSegments[].lengthSource",
+        "provenance:snapshot build (permitReadiness)"
+      ],
+      "affectedSheets": [
+        "PV-1",
+        "PV-4B",
+        "E-1",
+        "SCHED"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "CONDUIT-FILL-PENDING",
+        "TAP-CONDUCTOR-LENGTH-PENDING"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "CONDUIT-FILL-PENDING",
+      "gateId": "RG-5",
+      "title": "Feeder conduit fill not computed",
+      "findingType": "FIELD_VERIFICATION",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Feeder conduit fill is PENDING (not computed) — it must never be presented as a passing zero-error result on PV-4A/PV-4B",
+      "resolutionAction": "Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "electrical.feeder.conduit.fillPct",
+      "evidenceReferences": [
+        "authority:electrical.feeder.conduit.fillPct",
+        "provenance:snapshot build (permitReadiness)"
+      ],
+      "affectedSheets": [
+        "PV-4A",
+        "PV-4B"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE",
+        "TAP-CONDUCTOR-LENGTH-PENDING"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "TAP-CONDUCTOR-LENGTH-PENDING",
+      "gateId": "RG-5",
+      "title": "Supply-side tap-conductor length not measured",
+      "findingType": "FIELD_VERIFICATION",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Supply-side tap-conductor length is not measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a length)",
+      "resolutionAction": "Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "electrical.serviceTopology[svc-tap-conductors].constraints",
+      "evidenceReferences": [
+        "authority:electrical.serviceTopology[svc-tap-conductors].constraints",
+        "provenance:snapshot build (permitReadiness)"
+      ],
+      "affectedSheets": [
+        "PV-4B",
+        "PV-6",
+        "E-1"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE",
+        "CONDUIT-FILL-PENDING"
+      ],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "gateId": "RG-6",
+      "title": "Open-air branch grounding / bonding method not established by an exactly-applicable document",
+      "findingType": "PENDING_AUTHORITY",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "Open-air branch grounding method NOT ESTABLISHED for the selected IQ8A-72-2-US + Q-12-10-240 (no applicable manufacturer document) — candidate 162 ft EGC is a design quantity, non-orderable.",
+      "resolutionAction": "Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this.",
+      "responsibleRole": "operator",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": true,
+        "engineeringReview": true,
+        "construction": true,
+        "administrativeRelease": false
+      },
+      "authorityPath": "electrical.openAirGroundingAuthority",
+      "evidenceReferences": [
+        "authority:electrical.openAirGroundingAuthority",
+        "provenance:electrical.openAirGroundingAuthority#Q-12-10-240"
+      ],
+      "affectedSheets": [
+        "E-1",
+        "PV-1B",
+        "PV-4B",
+        "SCHED",
+        "RS-1"
+      ],
+      "affectedObjects": [
+        "br-1",
+        "br-2",
+        "br-3",
+        "BRANCH_RUN",
+        "Q-12-10-240"
+      ],
+      "relatedRequirementCodes": [],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    },
+    {
+      "requirementCode": "ENGINEERING-REVIEW-PENDING",
+      "gateId": "RG-7",
+      "title": "No approved engineering-review record covering the current snapshot digest",
+      "findingType": "PROFESSIONAL_RELEASE",
+      "status": "OPEN",
+      "severity": "blocking",
+      "explanation": "No approved engineering-review record covering this snapshot digest (D-6)",
+      "resolutionAction": "Obtain an approved engineering-review record covering the current snapshot digest (D-6).",
+      "responsibleRole": "engineer-of-record",
+      "releaseImpact": {
+        "permitSubmission": true,
+        "procurement": false,
+        "engineeringReview": true,
+        "construction": false,
+        "administrativeRelease": true
+      },
+      "authorityPath": "certification.engineeringReviewApproved",
+      "evidenceReferences": [
+        "authority:certification.engineeringReviewApproved",
+        "provenance:snapshot build (permitReadiness)"
+      ],
+      "affectedSheets": [
+        "CERT",
+        "PE-1"
+      ],
+      "affectedObjects": [],
+      "relatedRequirementCodes": [],
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "snapshotDigest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7"
+    }
+  ],
+  "requirementToGateMap": {
+    "CODE-AUTHORITY-INCOMPLETE": {
+      "gateId": "RG-1",
+      "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "PROJECT-AUTHORITY-UNVERIFIED": {
+      "gateId": "RG-1",
+      "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "PROJECT-NAME-NONPRODUCTION": {
+      "gateId": "RG-1",
+      "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+      "findingType": "ADMINISTRATIVE_HOLD"
+    },
+    "EQUIPMENT-IDENTITY-CONFLICT": {
+      "gateId": "RG-2",
+      "gateCode": "EQUIPMENT_RECONCILIATION",
+      "findingType": "TECHNICAL_CONFLICT"
+    },
+    "MODULE-EXACT-DATASHEET-PENDING": {
+      "gateId": "RG-2",
+      "gateCode": "EQUIPMENT_RECONCILIATION",
+      "findingType": "PENDING_DOCUMENT"
+    },
+    "EQUIPMENT-DOCUMENT-UNVERIFIED": {
+      "gateId": "RG-2",
+      "gateCode": "EQUIPMENT_RECONCILIATION",
+      "findingType": "ADVISORY"
+    },
+    "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED": {
+      "gateId": "RG-3",
+      "gateCode": "ENVIRONMENTAL_LOAD_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "WIND-SNOW-AUTHORITY-UNRESOLVED": {
+      "gateId": "RG-3",
+      "gateCode": "ENVIRONMENTAL_LOAD_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "FRAMING-AUTHORITY-UNVERIFIED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "PENDING-RACKING-ASSEMBLY-SELECTION": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_SELECTION"
+    },
+    "FASTENER-ASSEMBLY-UNVERIFIED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_DOCUMENT"
+    },
+    "RACKING-CAPACITY-APPLICABILITY-GAP": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "EQUIPMENT-DOCUMENT-APPLICABILITY": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_DOCUMENT"
+    },
+    "ATTACHMENT-CAPACITY-SOURCE-MISSING": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_DOCUMENT"
+    },
+    "FASTENER-CONFIG-MISSING": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_SELECTION"
+    },
+    "MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "TECHNICAL_CONFLICT"
+    },
+    "MOUNT-TOPOLOGY-UNKNOWN": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_SELECTION"
+    },
+    "DIRECT-MOUNT-GEOMETRY-MISSING": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "REACTIONS-UNTRACEABLE": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "VERIFIED_DEFICIENCY"
+    },
+    "RAIL-QUANTITY-UNTRACEABLE": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "VERIFIED_DEFICIENCY"
+    },
+    "STRUCTURAL-UTILIZATION-EXCEEDED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "VERIFIED_DEFICIENCY"
+    },
+    "STRUCTURAL-BOM-RECONCILIATION-FAILED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "VERIFIED_DEFICIENCY"
+    },
+    "STRUCTURAL-REACTION-RECONCILIATION-FAILED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "VERIFIED_DEFICIENCY"
+    },
+    "SITE-GEOMETRY-MISSING": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "MODULE-DIMENSIONS-UNVERIFIED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_DOCUMENT"
+    },
+    "RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "STRUCTURAL-FRAMING-UNVERIFIED": {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "ROUTE-LENGTH-ESTIMATE": {
+      "gateId": "RG-5",
+      "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "findingType": "FIELD_VERIFICATION"
+    },
+    "CONDUIT-FILL-PENDING": {
+      "gateId": "RG-5",
+      "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "findingType": "FIELD_VERIFICATION"
+    },
+    "TAP-CONDUCTOR-LENGTH-PENDING": {
+      "gateId": "RG-5",
+      "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "findingType": "FIELD_VERIFICATION"
+    },
+    "FEEDER-RACEWAY-AUTHORITY": {
+      "gateId": "RG-5",
+      "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "findingType": "PENDING_SELECTION"
+    },
+    "BRANCH-RACEWAY-AUTHORITY": {
+      "gateId": "RG-5",
+      "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "RACEWAY-SEGMENT-CONFLICT": {
+      "gateId": "RG-5",
+      "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "findingType": "TECHNICAL_CONFLICT"
+    },
+    "QCABLE-PROCUREMENT-INSUFFICIENT": {
+      "gateId": "RG-6",
+      "gateCode": "QCABLE_SYSTEM_CLOSURE",
+      "findingType": "VERIFIED_DEFICIENCY"
+    },
+    "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED": {
+      "gateId": "RG-6",
+      "gateCode": "QCABLE_SYSTEM_CLOSURE",
+      "findingType": "PENDING_AUTHORITY"
+    },
+    "DESIGNER-OF-RECORD-MISSING": {
+      "gateId": "RG-7",
+      "gateCode": "PROFESSIONAL_RELEASE",
+      "findingType": "ADMINISTRATIVE_HOLD"
+    },
+    "ENGINEERING-REVIEW-PENDING": {
+      "gateId": "RG-7",
+      "gateCode": "PROFESSIONAL_RELEASE",
+      "findingType": "PROFESSIONAL_RELEASE"
+    }
+  },
+  "readinessAxes": {
+    "permitSubmission": {
+      "ready": false,
+      "openGateIds": [
+        "RG-1",
+        "RG-2",
+        "RG-3",
+        "RG-4",
+        "RG-5",
+        "RG-6",
+        "RG-7"
+      ],
+      "openGateCodes": [
+        "PROJECT_AND_AHJ_AUTHORITY",
+        "EQUIPMENT_RECONCILIATION",
+        "ENVIRONMENTAL_LOAD_AUTHORITY",
+        "STRUCTURAL_ASSEMBLY_AUTHORITY",
+        "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+        "QCABLE_SYSTEM_CLOSURE",
+        "PROFESSIONAL_RELEASE"
+      ]
+    },
+    "procurement": {
+      "ready": false,
+      "openGateIds": [
+        "RG-2",
+        "RG-4",
+        "RG-5",
+        "RG-6"
+      ],
+      "openGateCodes": [
+        "EQUIPMENT_RECONCILIATION",
+        "STRUCTURAL_ASSEMBLY_AUTHORITY",
+        "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+        "QCABLE_SYSTEM_CLOSURE"
+      ]
+    },
+    "engineeringReview": {
+      "ready": false,
+      "openGateIds": [
+        "RG-1",
+        "RG-2",
+        "RG-3",
+        "RG-4",
+        "RG-5",
+        "RG-6",
+        "RG-7"
+      ],
+      "openGateCodes": [
+        "PROJECT_AND_AHJ_AUTHORITY",
+        "EQUIPMENT_RECONCILIATION",
+        "ENVIRONMENTAL_LOAD_AUTHORITY",
+        "STRUCTURAL_ASSEMBLY_AUTHORITY",
+        "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+        "QCABLE_SYSTEM_CLOSURE",
+        "PROFESSIONAL_RELEASE"
+      ]
+    },
+    "construction": {
+      "ready": false,
+      "openGateIds": [
+        "RG-2",
+        "RG-3",
+        "RG-4",
+        "RG-5",
+        "RG-6"
+      ],
+      "openGateCodes": [
+        "EQUIPMENT_RECONCILIATION",
+        "ENVIRONMENTAL_LOAD_AUTHORITY",
+        "STRUCTURAL_ASSEMBLY_AUTHORITY",
+        "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+        "QCABLE_SYSTEM_CLOSURE"
+      ]
+    },
+    "administrativeRelease": {
+      "ready": false,
+      "openGateIds": [
+        "RG-7"
+      ],
+      "openGateCodes": [
+        "PROFESSIONAL_RELEASE"
+      ]
+    }
+  },
+  "issueStatePredicates": {
+    "designReview": true,
+    "readyForEngineeringReview": false,
+    "readyForPermitSubmission": false,
+    "procurementReady": false,
+    "administrativeReleaseReady": false,
+    "professionalReleaseComplete": false
+  },
+  "gateRollup": [
+    {
+      "gateId": "RG-1",
+      "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+      "status": "OPEN",
+      "unresolvedCount": 2,
+      "totalRequirementCount": 2
+    },
+    {
+      "gateId": "RG-2",
+      "gateCode": "EQUIPMENT_RECONCILIATION",
+      "status": "OPEN",
+      "unresolvedCount": 1,
+      "totalRequirementCount": 1
+    },
+    {
+      "gateId": "RG-3",
+      "gateCode": "ENVIRONMENTAL_LOAD_AUTHORITY",
+      "status": "OPEN",
+      "unresolvedCount": 1,
+      "totalRequirementCount": 1
+    },
+    {
+      "gateId": "RG-4",
+      "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "status": "OPEN",
+      "unresolvedCount": 6,
+      "totalRequirementCount": 6
+    },
+    {
+      "gateId": "RG-5",
+      "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "status": "OPEN",
+      "unresolvedCount": 3,
+      "totalRequirementCount": 3
+    },
+    {
+      "gateId": "RG-6",
+      "gateCode": "QCABLE_SYSTEM_CLOSURE",
+      "status": "OPEN",
+      "unresolvedCount": 1,
+      "totalRequirementCount": 1
+    },
+    {
+      "gateId": "RG-7",
+      "gateCode": "PROFESSIONAL_RELEASE",
+      "status": "OPEN",
+      "unresolvedCount": 1,
+      "totalRequirementCount": 1
+    },
+    {
+      "gateId": "RG-UNMAPPED",
+      "gateCode": "UNMAPPED_REQUIREMENT",
+      "status": "CLEARED",
+      "unresolvedCount": 0,
+      "totalRequirementCount": 0
+    }
+  ],
+  "headline": "7 OPEN RELEASE GATES / 15 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION",
+  "findingTreatments": {
+    "rootGate": {
+      "cls": "root-gate-hold",
+      "fill": "#111111",
+      "borderWidth": "5px",
+      "borderStyle": "solid",
+      "borderColor": "#000000",
+      "chipWeight": "900",
+      "chipStyle": "normal",
+      "chipDecoration": "none",
+      "chipSpacing": "0.8px",
+      "ink": "#ffffff"
+    },
+    "classes": [
+      {
+        "cls": "root-gate-hold",
+        "fill": "#111111",
+        "borderWidth": "5px",
+        "borderStyle": "solid",
+        "borderColor": "#000000",
+        "chipWeight": "900",
+        "chipStyle": "normal",
+        "chipDecoration": "none",
+        "chipSpacing": "0.8px",
+        "ink": "#ffffff"
+      },
+      {
+        "cls": "strong",
+        "fill": "#e4e4e4",
+        "borderWidth": "5px",
+        "borderStyle": "double",
+        "borderColor": "#000000",
+        "chipWeight": "900",
+        "chipStyle": "normal",
+        "chipDecoration": "underline",
+        "chipSpacing": "0.5px",
+        "ink": "#7f1d1d"
+      },
+      {
+        "cls": "pending",
+        "fill": "#f5f5f5",
+        "borderWidth": "3px",
+        "borderStyle": "dashed",
+        "borderColor": "#333333",
+        "chipWeight": "700",
+        "chipStyle": "normal",
+        "chipDecoration": "none",
+        "chipSpacing": "0.3px",
+        "ink": "#7c2d12"
+      },
+      {
+        "cls": "field",
+        "fill": "#ffffff",
+        "borderWidth": "3px",
+        "borderStyle": "dotted",
+        "borderColor": "#333333",
+        "chipWeight": "700",
+        "chipStyle": "italic",
+        "chipDecoration": "none",
+        "chipSpacing": "0.3px",
+        "ink": "#1e3a5f"
+      },
+      {
+        "cls": "administrative",
+        "fill": "#efefef",
+        "borderWidth": "4px",
+        "borderStyle": "groove",
+        "borderColor": "#444444",
+        "chipWeight": "700",
+        "chipStyle": "normal",
+        "chipDecoration": "none",
+        "chipSpacing": "1.4px",
+        "ink": "#334155"
+      },
+      {
+        "cls": "review-workflow",
+        "fill": "#f9f9f9",
+        "borderWidth": "4px",
+        "borderStyle": "ridge",
+        "borderColor": "#444444",
+        "chipWeight": "700",
+        "chipStyle": "italic",
+        "chipDecoration": "none",
+        "chipSpacing": "1.4px",
+        "ink": "#3730a3"
+      },
+      {
+        "cls": "advisory",
+        "fill": "#fdfdfd",
+        "borderWidth": "2px",
+        "borderStyle": "solid",
+        "borderColor": "#999999",
+        "chipWeight": "400",
+        "chipStyle": "italic",
+        "chipDecoration": "none",
+        "chipSpacing": "0px",
+        "ink": "#7c5b12"
+      }
+    ],
+    "byFindingType": {
+      "TECHNICAL_CONFLICT": "strong",
+      "VERIFIED_DEFICIENCY": "strong",
+      "PENDING_SELECTION": "pending",
+      "PENDING_DOCUMENT": "pending",
+      "PENDING_AUTHORITY": "pending",
+      "FIELD_VERIFICATION": "field",
+      "ADMINISTRATIVE_HOLD": "administrative",
+      "PROFESSIONAL_RELEASE": "review-workflow",
+      "ADVISORY": "advisory"
+    }
+  },
+  "modelVerification": {
+    "ok": true,
+    "errors": []
+  },
+  "requirementMultisetReconciliation": {
+    "registryRecordCount": 15,
+    "activeRegistryCodeCount": 15,
+    "requirementCount": 15,
+    "openRequirementCount": 15,
+    "activeRegistryCodes": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "CONDUIT-FILL-PENDING",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "openRequirementCodes": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "CONDUIT-FILL-PENDING",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "equal": true,
+    "perGate": [
+      {
+        "gateId": "RG-1",
+        "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+        "status": "OPEN",
+        "unresolved": 2,
+        "total": 2,
+        "codes": [
+          "CODE-AUTHORITY-INCOMPLETE",
+          "PROJECT-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "gateId": "RG-2",
+        "gateCode": "EQUIPMENT_RECONCILIATION",
+        "status": "OPEN",
+        "unresolved": 1,
+        "total": 1,
+        "codes": [
+          "MODULE-EXACT-DATASHEET-PENDING"
+        ]
+      },
+      {
+        "gateId": "RG-3",
+        "gateCode": "ENVIRONMENTAL_LOAD_AUTHORITY",
+        "status": "OPEN",
+        "unresolved": 1,
+        "total": 1,
+        "codes": [
+          "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "gateId": "RG-4",
+        "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+        "status": "OPEN",
+        "unresolved": 6,
+        "total": 6,
+        "codes": [
+          "FRAMING-AUTHORITY-UNVERIFIED",
+          "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "FASTENER-ASSEMBLY-UNVERIFIED",
+          "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+          "RACKING-CAPACITY-APPLICABILITY-GAP",
+          "EQUIPMENT-DOCUMENT-APPLICABILITY"
+        ]
+      },
+      {
+        "gateId": "RG-5",
+        "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+        "status": "OPEN",
+        "unresolved": 3,
+        "total": 3,
+        "codes": [
+          "ROUTE-LENGTH-ESTIMATE",
+          "CONDUIT-FILL-PENDING",
+          "TAP-CONDUCTOR-LENGTH-PENDING"
+        ]
+      },
+      {
+        "gateId": "RG-6",
+        "gateCode": "QCABLE_SYSTEM_CLOSURE",
+        "status": "OPEN",
+        "unresolved": 1,
+        "total": 1,
+        "codes": [
+          "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "gateId": "RG-7",
+        "gateCode": "PROFESSIONAL_RELEASE",
+        "status": "OPEN",
+        "unresolved": 1,
+        "total": 1,
+        "codes": [
+          "ENGINEERING-REVIEW-PENDING"
+        ]
+      },
+      {
+        "gateId": "RG-UNMAPPED",
+        "gateCode": "UNMAPPED_REQUIREMENT",
+        "status": "CLEARED",
+        "unresolved": 0,
+        "total": 0,
+        "codes": []
+      }
+    ]
+  },
+  "antiVacuity": {
+    "ok": true,
+    "probes": [
+      {
+        "id": "all-seven-gates-open-3-2-1-6-3-2-2",
+        "ok": true,
+        "detail": "distribution=3/2/1/6/3/2/2 headline=\"7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION\""
+      },
+      {
+        "id": "one-structural-child-clears-gate-stays-open",
+        "ok": true,
+        "detail": "RG-4 OPEN 5/6 · summary 7/18"
+      },
+      {
+        "id": "all-structural-children-clear-gate-clears",
+        "ok": true,
+        "detail": "RG-4 CLEARED 0/6 · summary 6/13"
+      },
+      {
+        "id": "not-applicable-requirement-with-authority",
+        "ok": true,
+        "detail": "PROJECT-NAME-NONPRODUCTION=NOT_APPLICABLE RG-1 2/3"
+      },
+      {
+        "id": "professional-approval-clears-only-rg7",
+        "ok": true,
+        "detail": "RG-7 CLEARED · summary 6/17"
+      },
+      {
+        "id": "administrative-only-hold-isolates-its-axis",
+        "ok": true,
+        "detail": "axes permit=false procurement=true admin=false"
+      },
+      {
+        "id": "procurement-only-hold-isolates-its-axis",
+        "ok": true,
+        "detail": "axes permit=false procurement=false admin=true"
+      },
+      {
+        "id": "no-active-requirements-yields-a-clean-model",
+        "ok": true,
+        "detail": "gates=8 open=0 permitReady=true"
+      },
+      {
+        "id": "unknown-code-fails-closed-and-fails-the-harness",
+        "ok": true,
+        "detail": "UNMAPPED OPEN 1 · verification errors=1"
+      }
+    ]
+  },
+  "renderedTruthGates": {
+    "fixture": {
+      "mode": "fixture",
+      "snapshotId": "PDS-0D1F9ADCF211",
+      "digest": "0d1f9adcf211589b85bdea4ff260edd680023f8c9c3d120cf407f7759c9600b7",
+      "sheetCount": 23,
+      "reviewStatusSheets": [
+        "RS-1",
+        "RS-1.1",
+        "RS-1.2"
+      ],
+      "headline": "7 OPEN RELEASE GATES / 15 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION",
+      "releaseSummary": {
+        "openGateCount": 7,
+        "unresolvedRequirementCount": 15,
+        "advisoryCount": 0,
+        "permitReady": false,
+        "procurementReady": false,
+        "engineeringReviewReady": false
+      },
+      "gateRollup": [
+        {
+          "gateId": "RG-1",
+          "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 2,
+          "totalRequirementCount": 2
+        },
+        {
+          "gateId": "RG-2",
+          "gateCode": "EQUIPMENT_RECONCILIATION",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-3",
+          "gateCode": "ENVIRONMENTAL_LOAD_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-4",
+          "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 6,
+          "totalRequirementCount": 6
+        },
+        {
+          "gateId": "RG-5",
+          "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+          "status": "OPEN",
+          "unresolvedCount": 3,
+          "totalRequirementCount": 3
+        },
+        {
+          "gateId": "RG-6",
+          "gateCode": "QCABLE_SYSTEM_CLOSURE",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-7",
+          "gateCode": "PROFESSIONAL_RELEASE",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-UNMAPPED",
+          "gateCode": "UNMAPPED_REQUIREMENT",
+          "status": "CLEARED",
+          "unresolvedCount": 0,
+          "totalRequirementCount": 0
+        }
+      ],
+      "rendered": {
+        "rs1HeadlineGates": 7,
+        "rs1HeadlineRequirements": 15,
+        "coverGateCount": 7,
+        "coverRequirementCount": 15,
+        "coverListedGates": [
+          "RG-1",
+          "RG-2",
+          "RG-3",
+          "RG-4",
+          "RG-5",
+          "RG-6",
+          "RG-7"
+        ]
+      },
+      "gates": [
+        {
+          "gate": 1,
+          "id": "every-active-blocker-is-exactly-one-requirement",
+          "ok": true,
+          "detail": "registry=15 rendered=15 model=15 multisetEqual=true duplicatedRenders=0"
+        },
+        {
+          "gate": 2,
+          "id": "exactly-one-primary-gate-per-requirement",
+          "ok": true,
+          "detail": "rows=15 violations=0 modelVerification=true"
+        },
+        {
+          "gate": 3,
+          "id": "the-seven-expected-root-gates-render",
+          "ok": true,
+          "detail": "renderedGateRows=[RG-1, RG-2, RG-3, RG-4, RG-5, RG-6, RG-7] modelCodes=7 unmappedRendered=0"
+        },
+        {
+          "gate": 4,
+          "id": "rendered-counts-equal-the-model-and-the-registry",
+          "ok": true,
+          "detail": "rendered 7 gates / 15 requirements / 0 advisories · registry 15 blocking / 0 advisory · directive 19-code probe=true (distribution=3/2/1/6/3/2/2 headline=\"7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION\")"
+        },
+        {
+          "gate": 5,
+          "id": "gate-child-counts-total-the-requirement-count",
+          "ok": true,
+          "detail": "Σ rendered gate children=15 rows=15 headline=15 violations=0"
+        },
+        {
+          "gate": 6,
+          "id": "no-silent-suppression-every-requirement-and-gate-renders",
+          "ok": true,
+          "detail": "registry=15 missingCodes=0 missingResolutionText=0 openGates=7 missingGroups=0"
+        },
+        {
+          "gate": 7,
+          "id": "no-requirement-is-counted-or-rendered-twice",
+          "ok": true,
+          "detail": "codesWithCountMismatch=0 continuationGroups=0 duplicatedRowsInContinuations=0"
+        },
+        {
+          "gate": 8,
+          "id": "administrative-holds-are-not-engineering-failures",
+          "ok": true,
+          "detail": "administrativeRows=0 violations=0"
+        },
+        {
+          "gate": 9,
+          "id": "professional-release-is-not-a-technical-defect",
+          "ok": true,
+          "detail": "professionalRows=1 violations=0"
+        },
+        {
+          "gate": 10,
+          "id": "pending-authority-is-never-a-verified-failure",
+          "ok": true,
+          "detail": "pendingRows=11 violations=0"
+        },
+        {
+          "gate": 11,
+          "id": "cover-and-rs1-state-the-same-gate-and-requirement-counts",
+          "ok": true,
+          "detail": "cover 7 gates / 15 requirements (listed 7) · rs1 7 / 15 · model 7 / 15"
+        },
+        {
+          "gate": 12,
+          "id": "issue-state-readiness-matches-the-gate-impacts",
+          "ok": true,
+          "detail": "issueState=PENDING ENGINEERING REVIEW ready=false permitReady=false predicates designReview=true readyForEngineeringReview=false readyForPermitSubmission=false renderedIssueState=\"PENDING ENGINEERING REVIEW\""
+        },
+        {
+          "gate": 13,
+          "id": "evidence-equals-rendered-zero-mismatches",
+          "ok": true,
+          "detail": "0 mismatch(es) across 7 gate rows + 15 requirement rows"
+        },
+        {
+          "gate": 14,
+          "id": "snapshot-identity-identical-across-all-sheets",
+          "ok": true,
+          "detail": "sheets=23 withId=23 withDigest=23 idMismatch=0 digestMismatch=0 manifest=23 manifestEqPages=true snapshot=PDS-0D1F9ADCF211"
+        },
+        {
+          "gate": 15,
+          "id": "rs1-and-its-continuations-fit-the-printable-page",
+          "ok": true,
+          "detail": "rsSheets=[RS-1, RS-1.1, RS-1.2] clipped=[none] pagefitExit=0"
+        },
+        {
+          "gate": 16,
+          "id": "page-fit-horizontal-and-vertical-clipping-zero",
+          "ok": true,
+          "detail": "pagefit exit=0 · [pagefit] sheets=23 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0"
+        },
+        {
+          "gate": 17,
+          "id": "black-and-white-legibility-of-the-finding-type-treatments",
+          "ok": true,
+          "detail": "declaredClasses=[root-gate-hold, strong, pending, field, administrative, review-workflow, advisory] pairsChecked=21 renderedClasses=[pending, field, review-workflow] collisions=0 undeclared=0 grayscale=written to C:/Users/Ray/AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/rgm-after/grayscale"
+        }
+      ],
+      "vacuityNotes": [
+        "gate 4 (this input carries 15 of the directive's 19 Braidon requirements; the 19-code condition is covered by the model probe)",
+        "gate 8 (no ADMINISTRATIVE_HOLD requirement active on this input)"
+      ],
+      "pass": true
+    },
+    "insufficient": {
+      "mode": "insufficient",
+      "snapshotId": "PDS-603E517094E2",
+      "digest": "603e517094e2c8fb5650d5c1a759efa5db858992cccade19c44f7e62dbb2a1cb",
+      "sheetCount": 23,
+      "reviewStatusSheets": [
+        "RS-1",
+        "RS-1.1",
+        "RS-1.2"
+      ],
+      "headline": "7 OPEN RELEASE GATES / 16 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION",
+      "releaseSummary": {
+        "openGateCount": 7,
+        "unresolvedRequirementCount": 16,
+        "advisoryCount": 0,
+        "permitReady": false,
+        "procurementReady": false,
+        "engineeringReviewReady": false
+      },
+      "gateRollup": [
+        {
+          "gateId": "RG-1",
+          "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 2,
+          "totalRequirementCount": 2
+        },
+        {
+          "gateId": "RG-2",
+          "gateCode": "EQUIPMENT_RECONCILIATION",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-3",
+          "gateCode": "ENVIRONMENTAL_LOAD_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-4",
+          "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 6,
+          "totalRequirementCount": 6
+        },
+        {
+          "gateId": "RG-5",
+          "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+          "status": "OPEN",
+          "unresolvedCount": 3,
+          "totalRequirementCount": 3
+        },
+        {
+          "gateId": "RG-6",
+          "gateCode": "QCABLE_SYSTEM_CLOSURE",
+          "status": "OPEN",
+          "unresolvedCount": 2,
+          "totalRequirementCount": 2
+        },
+        {
+          "gateId": "RG-7",
+          "gateCode": "PROFESSIONAL_RELEASE",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-UNMAPPED",
+          "gateCode": "UNMAPPED_REQUIREMENT",
+          "status": "CLEARED",
+          "unresolvedCount": 0,
+          "totalRequirementCount": 0
+        }
+      ],
+      "rendered": {
+        "rs1HeadlineGates": 7,
+        "rs1HeadlineRequirements": 16,
+        "coverGateCount": 7,
+        "coverRequirementCount": 16,
+        "coverListedGates": [
+          "RG-1",
+          "RG-2",
+          "RG-3",
+          "RG-4",
+          "RG-5",
+          "RG-6",
+          "RG-7"
+        ]
+      },
+      "gates": [
+        {
+          "gate": 1,
+          "id": "every-active-blocker-is-exactly-one-requirement",
+          "ok": true,
+          "detail": "registry=16 rendered=16 model=16 multisetEqual=true duplicatedRenders=0"
+        },
+        {
+          "gate": 2,
+          "id": "exactly-one-primary-gate-per-requirement",
+          "ok": true,
+          "detail": "rows=16 violations=0 modelVerification=true"
+        },
+        {
+          "gate": 3,
+          "id": "the-seven-expected-root-gates-render",
+          "ok": true,
+          "detail": "renderedGateRows=[RG-1, RG-2, RG-3, RG-4, RG-5, RG-6, RG-7] modelCodes=7 unmappedRendered=0"
+        },
+        {
+          "gate": 4,
+          "id": "rendered-counts-equal-the-model-and-the-registry",
+          "ok": true,
+          "detail": "rendered 7 gates / 16 requirements / 0 advisories · registry 16 blocking / 0 advisory · directive 19-code probe=true (distribution=3/2/1/6/3/2/2 headline=\"7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION\")"
+        },
+        {
+          "gate": 5,
+          "id": "gate-child-counts-total-the-requirement-count",
+          "ok": true,
+          "detail": "Σ rendered gate children=16 rows=16 headline=16 violations=0"
+        },
+        {
+          "gate": 6,
+          "id": "no-silent-suppression-every-requirement-and-gate-renders",
+          "ok": true,
+          "detail": "registry=16 missingCodes=0 missingResolutionText=0 openGates=7 missingGroups=0"
+        },
+        {
+          "gate": 7,
+          "id": "no-requirement-is-counted-or-rendered-twice",
+          "ok": true,
+          "detail": "codesWithCountMismatch=0 continuationGroups=0 duplicatedRowsInContinuations=0"
+        },
+        {
+          "gate": 8,
+          "id": "administrative-holds-are-not-engineering-failures",
+          "ok": true,
+          "detail": "administrativeRows=0 violations=0"
+        },
+        {
+          "gate": 9,
+          "id": "professional-release-is-not-a-technical-defect",
+          "ok": true,
+          "detail": "professionalRows=1 violations=0"
+        },
+        {
+          "gate": 10,
+          "id": "pending-authority-is-never-a-verified-failure",
+          "ok": true,
+          "detail": "pendingRows=11 violations=0"
+        },
+        {
+          "gate": 11,
+          "id": "cover-and-rs1-state-the-same-gate-and-requirement-counts",
+          "ok": true,
+          "detail": "cover 7 gates / 16 requirements (listed 7) · rs1 7 / 16 · model 7 / 16"
+        },
+        {
+          "gate": 12,
+          "id": "issue-state-readiness-matches-the-gate-impacts",
+          "ok": true,
+          "detail": "issueState=PENDING ENGINEERING REVIEW ready=false permitReady=false predicates designReview=true readyForEngineeringReview=false readyForPermitSubmission=false renderedIssueState=\"PENDING ENGINEERING REVIEW\""
+        },
+        {
+          "gate": 13,
+          "id": "evidence-equals-rendered-zero-mismatches",
+          "ok": true,
+          "detail": "0 mismatch(es) across 7 gate rows + 16 requirement rows"
+        },
+        {
+          "gate": 14,
+          "id": "snapshot-identity-identical-across-all-sheets",
+          "ok": true,
+          "detail": "sheets=23 withId=23 withDigest=23 idMismatch=0 digestMismatch=0 manifest=23 manifestEqPages=true snapshot=PDS-603E517094E2"
+        },
+        {
+          "gate": 15,
+          "id": "rs1-and-its-continuations-fit-the-printable-page",
+          "ok": true,
+          "detail": "rsSheets=[RS-1, RS-1.1, RS-1.2] clipped=[none] pagefitExit=0"
+        },
+        {
+          "gate": 16,
+          "id": "page-fit-horizontal-and-vertical-clipping-zero",
+          "ok": true,
+          "detail": "pagefit exit=0 · [pagefit] sheets=23 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0"
+        },
+        {
+          "gate": 17,
+          "id": "black-and-white-legibility-of-the-finding-type-treatments",
+          "ok": true,
+          "detail": "declaredClasses=[root-gate-hold, strong, pending, field, administrative, review-workflow, advisory] pairsChecked=21 renderedClasses=[pending, field, strong, review-workflow] collisions=0 undeclared=0 grayscale=written to C:/Users/Ray/AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/rgm-after/grayscale"
+        }
+      ],
+      "vacuityNotes": [
+        "gate 4 (this input carries 16 of the directive's 19 Braidon requirements; the 19-code condition is covered by the model probe)",
+        "gate 8 (no ADMINISTRATIVE_HOLD requirement active on this input)"
+      ],
+      "pass": true
+    },
+    "identity": {
+      "mode": "identity",
+      "snapshotId": "PDS-AA9EE5F3999A",
+      "digest": "aa9ee5f3999a2d9ea77a825fa6daf167fdd3afc98a274e697b46000d1d0e4382",
+      "sheetCount": 23,
+      "reviewStatusSheets": [
+        "RS-1",
+        "RS-1.1",
+        "RS-1.2"
+      ],
+      "headline": "7 OPEN RELEASE GATES / 17 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION",
+      "releaseSummary": {
+        "openGateCount": 7,
+        "unresolvedRequirementCount": 17,
+        "advisoryCount": 0,
+        "permitReady": false,
+        "procurementReady": false,
+        "engineeringReviewReady": false
+      },
+      "gateRollup": [
+        {
+          "gateId": "RG-1",
+          "gateCode": "PROJECT_AND_AHJ_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 3,
+          "totalRequirementCount": 3
+        },
+        {
+          "gateId": "RG-2",
+          "gateCode": "EQUIPMENT_RECONCILIATION",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-3",
+          "gateCode": "ENVIRONMENTAL_LOAD_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-4",
+          "gateCode": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+          "status": "OPEN",
+          "unresolvedCount": 6,
+          "totalRequirementCount": 6
+        },
+        {
+          "gateId": "RG-5",
+          "gateCode": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+          "status": "OPEN",
+          "unresolvedCount": 3,
+          "totalRequirementCount": 3
+        },
+        {
+          "gateId": "RG-6",
+          "gateCode": "QCABLE_SYSTEM_CLOSURE",
+          "status": "OPEN",
+          "unresolvedCount": 1,
+          "totalRequirementCount": 1
+        },
+        {
+          "gateId": "RG-7",
+          "gateCode": "PROFESSIONAL_RELEASE",
+          "status": "OPEN",
+          "unresolvedCount": 2,
+          "totalRequirementCount": 2
+        },
+        {
+          "gateId": "RG-UNMAPPED",
+          "gateCode": "UNMAPPED_REQUIREMENT",
+          "status": "CLEARED",
+          "unresolvedCount": 0,
+          "totalRequirementCount": 0
+        }
+      ],
+      "rendered": {
+        "rs1HeadlineGates": 7,
+        "rs1HeadlineRequirements": 17,
+        "coverGateCount": 7,
+        "coverRequirementCount": 17,
+        "coverListedGates": [
+          "RG-1",
+          "RG-2",
+          "RG-3",
+          "RG-4",
+          "RG-5",
+          "RG-6",
+          "RG-7"
+        ]
+      },
+      "gates": [
+        {
+          "gate": 1,
+          "id": "every-active-blocker-is-exactly-one-requirement",
+          "ok": true,
+          "detail": "registry=17 rendered=17 model=17 multisetEqual=true duplicatedRenders=0"
+        },
+        {
+          "gate": 2,
+          "id": "exactly-one-primary-gate-per-requirement",
+          "ok": true,
+          "detail": "rows=17 violations=0 modelVerification=true"
+        },
+        {
+          "gate": 3,
+          "id": "the-seven-expected-root-gates-render",
+          "ok": true,
+          "detail": "renderedGateRows=[RG-1, RG-2, RG-3, RG-4, RG-5, RG-6, RG-7] modelCodes=7 unmappedRendered=0"
+        },
+        {
+          "gate": 4,
+          "id": "rendered-counts-equal-the-model-and-the-registry",
+          "ok": true,
+          "detail": "rendered 7 gates / 17 requirements / 0 advisories · registry 17 blocking / 0 advisory · directive 19-code probe=true (distribution=3/2/1/6/3/2/2 headline=\"7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION\")"
+        },
+        {
+          "gate": 5,
+          "id": "gate-child-counts-total-the-requirement-count",
+          "ok": true,
+          "detail": "Σ rendered gate children=17 rows=17 headline=17 violations=0"
+        },
+        {
+          "gate": 6,
+          "id": "no-silent-suppression-every-requirement-and-gate-renders",
+          "ok": true,
+          "detail": "registry=17 missingCodes=0 missingResolutionText=0 openGates=7 missingGroups=0"
+        },
+        {
+          "gate": 7,
+          "id": "no-requirement-is-counted-or-rendered-twice",
+          "ok": true,
+          "detail": "codesWithCountMismatch=0 continuationGroups=0 duplicatedRowsInContinuations=0"
+        },
+        {
+          "gate": 8,
+          "id": "administrative-holds-are-not-engineering-failures",
+          "ok": true,
+          "detail": "administrativeRows=2 violations=0"
+        },
+        {
+          "gate": 9,
+          "id": "professional-release-is-not-a-technical-defect",
+          "ok": true,
+          "detail": "professionalRows=1 violations=0"
+        },
+        {
+          "gate": 10,
+          "id": "pending-authority-is-never-a-verified-failure",
+          "ok": true,
+          "detail": "pendingRows=11 violations=0"
+        },
+        {
+          "gate": 11,
+          "id": "cover-and-rs1-state-the-same-gate-and-requirement-counts",
+          "ok": true,
+          "detail": "cover 7 gates / 17 requirements (listed 7) · rs1 7 / 17 · model 7 / 17"
+        },
+        {
+          "gate": 12,
+          "id": "issue-state-readiness-matches-the-gate-impacts",
+          "ok": true,
+          "detail": "issueState=PENDING ENGINEERING REVIEW ready=false permitReady=false predicates designReview=true readyForEngineeringReview=false readyForPermitSubmission=false renderedIssueState=\"PENDING ENGINEERING REVIEW\""
+        },
+        {
+          "gate": 13,
+          "id": "evidence-equals-rendered-zero-mismatches",
+          "ok": true,
+          "detail": "0 mismatch(es) across 7 gate rows + 17 requirement rows"
+        },
+        {
+          "gate": 14,
+          "id": "snapshot-identity-identical-across-all-sheets",
+          "ok": true,
+          "detail": "sheets=23 withId=23 withDigest=23 idMismatch=0 digestMismatch=0 manifest=23 manifestEqPages=true snapshot=PDS-AA9EE5F3999A"
+        },
+        {
+          "gate": 15,
+          "id": "rs1-and-its-continuations-fit-the-printable-page",
+          "ok": true,
+          "detail": "rsSheets=[RS-1, RS-1.1, RS-1.2] clipped=[none] pagefitExit=0"
+        },
+        {
+          "gate": 16,
+          "id": "page-fit-horizontal-and-vertical-clipping-zero",
+          "ok": true,
+          "detail": "pagefit exit=0 · [pagefit] sheets=23 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0"
+        },
+        {
+          "gate": 17,
+          "id": "black-and-white-legibility-of-the-finding-type-treatments",
+          "ok": true,
+          "detail": "declaredClasses=[root-gate-hold, strong, pending, field, administrative, review-workflow, advisory] pairsChecked=21 renderedClasses=[pending, administrative, field, review-workflow] collisions=0 undeclared=0 grayscale=written to C:/Users/Ray/AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/rgm-after/grayscale"
+        }
+      ],
+      "vacuityNotes": [
+        "gate 4 (this input carries 17 of the directive's 19 Braidon requirements; the 19-code condition is covered by the model probe)"
+      ],
+      "pass": true
+    }
+  },
+  "honestState": {
+    "permitReady": false,
+    "procurementReady": false,
+    "engineeringReviewReady": false,
+    "statement": "Nothing was cleared, nothing was weakened and no authority was fabricated by this pass. The registry remains canonical; the gate model is a deterministic projection of it. BRAIDON is NOT FOR PERMIT SUBMISSION."
+  }
+}

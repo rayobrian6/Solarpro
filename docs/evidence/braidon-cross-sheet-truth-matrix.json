@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.787Z",
+  "artifact": "braidon-cross-sheet-truth-matrix",
+  "section": "18-section closeout outcomes (canonical → all sheets)",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "purpose": "One canonical value per fact, projected identically across every sheet that shows it.",
+  "matrix": {
+    "feeder conduit (E-1/PV-4A/PV-4B/SCHED/BOM)": "PVC Sch 80 1-1/4\"",
+    "branch home-run raceway": "PVC Sch 80",
+    "open-air branch trunk": "FREE_AIR",
+    "physical raceway count": 3,
+    "service-topology objects": 8,
+    "dual-purpose fused disconnect": true,
+    "RT-MINI mount label": "RAIL-PAIRED ROOF ATTACHMENT BASE",
+    "fastener (APP-A/PE-1/SCHED)": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+    "fastener verified": false,
+    "rail selected": false,
+    "DS-4 authoritative datasheet": false,
+    "framing review required": true,
+    "screening-envelope ratio": 1.188271,
+    "issue state": "PENDING ENGINEERING REVIEW",
+    "active blockers": 15,
+    "blocking blockers": 15,
+    "sheet count == manifest": 24
+  }
+}

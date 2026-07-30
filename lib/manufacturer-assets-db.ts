@@ -153,3 +153,267 @@ export function getManufacturerAsset(
 export function getManufacturerAssetsByCategory(category: ManufacturerAssetCategory | string): ManufacturerAsset[] {
   return MANUFACTURER_ASSETS.filter(a => a.category === category);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §12 (CO-C) — PRODUCT-VERSION DOCUMENT APPLICABILITY GATE
+// ───────────────────────────────────────────────────────────────────────────
+// getManufacturerAsset resolves an asset by equipmentId/category only, with NO
+// SKU↔document version applicability check. The `racking_detail:rooftech-mini`
+// record keys model "RT-MINI" but its document is the "RT-MINI II Installation
+// Manual" — a DIFFERENT product version. Citing it as the attachment authority
+// for a selected RT-MINI is unproven.
+//
+// This pure evaluator compares the SELECTED equipment model to the product the
+// document ACTUALLY covers (parsed from the asset's own docTitle). Applicability
+// is 'verified' ONLY when they match exactly OR a VERIFIED cross-reference/alias
+// evidence record is supplied. Absent that, it is 'unverified' — the caller emits
+// the EQUIPMENT-DOCUMENT-APPLICABILITY blocker and labels the sheet
+// non-authoritative. No alias record is fabricated here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface DocumentApplicabilityAlias {
+  /** the SKU/model the alias evidence confirms the document applies to. */
+  selectedModel: string;
+  /** the document product the alias maps FROM (e.g. 'RT-MINI II'). */
+  documentProduct: string;
+  /** true only when this alias is a VERIFIED registry evidence record. */
+  verified: boolean;
+  /** the evidence source (verified registry document id / label). */
+  evidenceRef: string | null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ECD §8 — DOCUMENT STATE MODEL (docs/ENGINE-CLOSURE-DIRECTIVE.md §8).
+//
+// The binary `state: 'verified' | 'unverified'` could not express the fact APP-A
+// was printing wrong: a document can be HELD ON FILE and still not be applicable
+// to, or authoritative for, the selected product. ARCHIVED ≠ APPLICABLE. The
+// distinction is now STRUCTURAL, not prose:
+//
+//   ARCHIVED              a retained copy of the document exists (availability
+//                         ONLY — it says nothing about applicability). Never the
+//                         primary verdict; it renders as a companion chip.
+//   APPLICABLE            the document covers the SELECTED product version
+//                         (identity match — the determination this module makes).
+//   VERIFIED              applicability established by a VERIFIED cross-reference
+//                         / alias evidence record.
+//   AUTHORITATIVE         applicable/verified AND archived with a content hash —
+//                         the only state that may be cited for engineering values.
+//   SUPERSEDED            the document itself has been replaced (registry status).
+//   NOT_APPLICABLE        the document does not cover the selected product.
+//   PENDING_APPLICABILITY applicability is not established (the RT-MINI case).
+//
+// Nothing here is inferred from a product NAME: SUPERSEDED comes only from a
+// registry status supplied by the caller, and AUTHORITATIVE only from a real
+// archived+hashed record. Absent those inputs the fields are honest nulls/false.
+// ═══════════════════════════════════════════════════════════════════════════
+export type DocumentApplicabilityState =
+  | 'ARCHIVED'
+  | 'APPLICABLE'
+  | 'VERIFIED'
+  | 'AUTHORITATIVE'
+  | 'SUPERSEDED'
+  | 'NOT_APPLICABLE'
+  | 'PENDING_APPLICABILITY';
+
+export const DOCUMENT_APPLICABILITY_STATES: readonly DocumentApplicabilityState[] = [
+  'ARCHIVED', 'APPLICABLE', 'VERIFIED', 'AUTHORITATIVE',
+  'SUPERSEDED', 'NOT_APPLICABLE', 'PENDING_APPLICABILITY',
+] as const;
+
+/** The states that constitute an ESTABLISHED applicability determination. */
+export const APPLICABILITY_ESTABLISHED_STATES: readonly DocumentApplicabilityState[] =
+  ['APPLICABLE', 'VERIFIED', 'AUTHORITATIVE'] as const;
+
+/** ECD §8 — the registry facts about a document, when the caller has them.
+ *  `lib/documents/registry.ts` is the source (archivedInRepo + sha256 + status);
+ *  it is async/DB-backed, so this pure evaluator takes the facts as an argument
+ *  and NEVER guesses them. Omitted ⇒ no archive, no hash, no status known. */
+export interface DocumentRegistryFacts {
+  archivedInRepo: boolean;
+  sha256: string | null;
+  status: 'current' | 'superseded' | 'draft' | 'withdrawn' | null;
+}
+
+export interface DocumentApplicability {
+  /** ECD §8 — the PRIMARY applicability verdict (never 'ARCHIVED': availability
+   *  is not a verdict). */
+  state: DocumentApplicabilityState;
+  /** ECD §8 — every state that is true of this document, in chip order. Includes
+   *  'ARCHIVED' when a retained copy exists. RT-MINI renders
+   *  ['ARCHIVED','PENDING_APPLICABILITY']. */
+  states: DocumentApplicabilityState[];
+  /** ECD §8 — the ONE boolean the gating conditions consume (was `state ===
+   *  'verified'`). True only for APPLICABLE / VERIFIED / AUTHORITATIVE, or when
+   *  there is no document at all to gate. */
+  applicabilityVerified: boolean;
+  /** a retained copy of the document exists (the ARCHIVED fact). Availability
+   *  ONLY — never rendered as a positive applicability mark. */
+  archived: boolean;
+  /** the document is referenced by URL but no copy is retained. */
+  referencedNotArchived: boolean;
+  /** ManufacturerAsset.verified — a SCRAPE/URL-availability flag ("the source_url
+   *  was fetched + confirmed"). It has NO relationship to applicability; it is
+   *  surfaced under its true name so it can never stand in for one again (it used
+   *  to drive APP-A's green '✓ on file' tick). */
+  sourceUrlConfirmed: boolean;
+  /** true only when the document may be cited AS THE AUTHORITY for engineering
+   *  values: applicability established + archived + content-hash bound. */
+  authoritative: boolean;
+  /** the selected equipment model the document is being cited for. */
+  selectedModel: string | null;
+  /** the product the document actually covers, parsed from its docTitle. */
+  documentProduct: string | null;
+  /** the verified cross-reference/alias evidence that cleared it, or null. */
+  crossReferenceEvidence: string | null;
+  reason: string;
+}
+
+/** ECD §8 — a short human chip label per state (APP-A renders these). */
+export const DOCUMENT_APPLICABILITY_CHIP: Record<DocumentApplicabilityState, string> = {
+  ARCHIVED: 'ARCHIVED (ON FILE)',
+  APPLICABLE: 'APPLICABLE',
+  VERIFIED: 'APPLICABILITY VERIFIED',
+  AUTHORITATIVE: 'AUTHORITATIVE',
+  SUPERSEDED: 'SUPERSEDED',
+  NOT_APPLICABLE: 'NOT APPLICABLE',
+  PENDING_APPLICABILITY: 'APPLICABILITY PENDING',
+};
+
+const _normP = (s: string | null | undefined): string =>
+  (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// A trailing PRODUCT-VERSION differentiator: a Roman numeral (II/III/IV/…), a
+// decimal / "vN.N" version, or "Gen N" / "Mk N". A BARE integer (XR100, RM10) is
+// a MODEL number, not a version, and is deliberately NOT matched — so naming
+// variance between a model and its manual title never reads as a version mismatch.
+const _VERSION_TOKEN = '(?:I{2,3}|IV|VI{0,3}|IX|X|v\\d+(?:\\.\\d+)?|\\d+\\.\\d+|Gen\\s*\\d+|Mk\\s*\\d+)';
+
+/** Parse the product identity the document ACTUALLY covers from its title,
+ *  anchored on the asset's own model plus any trailing VERSION differentiator the
+ *  title appends (word-bounded). Returns the asset model unchanged when the title
+ *  does not restate the product with an added version — so a document that simply
+ *  has a different marketing title is NOT treated as a different product. */
+function documentProductFromAsset(asset: ManufacturerAsset): string | null {
+  const title = asset.docTitle ?? '';
+  const base = asset.model ?? '';
+  if (!base) return title ? title : null;
+  const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(esc + '(?:\\s+' + _VERSION_TOKEN + '(?=\\s|$|[^A-Za-z0-9]))?', 'i').exec(title);
+  return m ? m[0].replace(/\s+/g, ' ').trim() : base;
+}
+
+/**
+ * Evaluate whether a manufacturer document (asset) is applicable to a SELECTED
+ * equipment model. Pure/deterministic.
+ *
+ * The ONLY thing this gate flags is a genuine PRODUCT-VERSION conflation: the
+ * asset's own document names a DIFFERENT version than the asset's model (the
+ * `racking_detail:rooftech-mini` record keys model "RT-MINI" but its document is
+ * the "RT-MINI II Installation Manual"). Mere naming variance between a model and
+ * its manual title (e.g. mount "IronRidge XR100" ↔ "XR Flush Mount Installation
+ * Manual") is NOT a version mismatch and stays applicable. A verified alias
+ * evidence record (never fabricated) is the only path to VERIFIED when the
+ * versions genuinely differ.
+ *
+ * ECD §8 — the verdict is now one of the seven DOCUMENT STATES. The applicability
+ * LOGIC is unchanged (`applicabilityVerified` is bit-for-bit the old
+ * `state === 'verified'`); what is new is that AVAILABILITY (archived / scrape-
+ * confirmed URL) is reported as its own fact and can never be mistaken for an
+ * applicability determination, and that AUTHORITATIVE requires a real archived,
+ * hash-bound registry record.
+ */
+export function evaluateDocumentApplicability(
+  selectedModel: string | null | undefined,
+  asset: ManufacturerAsset | null | undefined,
+  aliasEvidence?: DocumentApplicabilityAlias | null,
+  registryFacts?: DocumentRegistryFacts | null,
+): DocumentApplicability {
+  // ── availability facts (never applicability) ──────────────────────────────
+  const _retained = !!asset?.imageUrl || registryFacts?.archivedInRepo === true;
+  const _referenced = !!asset?.sourceUrl;
+  const _hashBound = !!registryFacts?.sha256
+    && /^[0-9a-f]{64}$/i.test(String(registryFacts.sha256));
+  const _superseded = registryFacts?.status === 'superseded'
+    || registryFacts?.status === 'withdrawn';
+
+  /** Assemble the record from the applicability verdict + the availability facts. */
+  const _mk = (
+    verdict: Exclude<DocumentApplicabilityState, 'ARCHIVED'>,
+    applicabilityVerified: boolean,
+    fields: { documentProduct: string | null; crossReferenceEvidence: string | null; reason: string },
+  ): DocumentApplicability => {
+    // AUTHORITATIVE is a STRICTER verdict than APPLICABLE/VERIFIED: it additionally
+    // requires that the cited document is archived AND content-hash bound. Nothing
+    // in the asset library alone can reach it.
+    const authoritative = applicabilityVerified && !_superseded && _retained && _hashBound;
+    const primary: Exclude<DocumentApplicabilityState, 'ARCHIVED'> = _superseded
+      ? 'SUPERSEDED'
+      : authoritative ? 'AUTHORITATIVE' : verdict;
+    // ARCHIVED is a COMPANION chip, never the verdict — archived ≠ applicable.
+    const states: DocumentApplicabilityState[] = _retained ? ['ARCHIVED', primary] : [primary];
+    return {
+      state: primary,
+      states,
+      applicabilityVerified: _superseded ? false : applicabilityVerified,
+      archived: _retained,
+      referencedNotArchived: _referenced && !_retained,
+      sourceUrlConfirmed: !!asset?.verified,
+      authoritative,
+      selectedModel: selectedModel ?? null,
+      documentProduct: fields.documentProduct,
+      crossReferenceEvidence: fields.crossReferenceEvidence,
+      reason: _superseded
+        ? `${fields.reason} The registry records this document as ${registryFacts?.status}; a superseded document is not applicable authority.`
+        : fields.reason,
+    };
+  };
+
+  if (!asset) {
+    // No document exists, so there is no document row and nothing to gate. This
+    // preserves the pre-ECD gating behaviour exactly (the five-condition install
+    // gate separately requires an archived hash-bound document, so nothing leaks).
+    return _mk('PENDING_APPLICABILITY', true, {
+      documentProduct: null, crossReferenceEvidence: null,
+      reason: 'No manufacturer document on file — nothing to gate.',
+    });
+  }
+  const documentProduct = documentProductFromAsset(asset);
+  const assetModel = _normP(asset.model);
+  const docProduct = _normP(documentProduct);
+  // The document names the SAME product version as the asset's model ⇒ no version
+  // conflation ⇒ applicable (naming variance is fine; the equipment id keyed it).
+  if (!assetModel || !docProduct || assetModel === docProduct) {
+    return _mk('APPLICABLE', true, {
+      documentProduct, crossReferenceEvidence: null,
+      reason: 'The on-file document matches the asset product version (no version conflation).',
+    });
+  }
+  // The asset's document is a DIFFERENT version than the asset's model. If the
+  // SELECTED mount is the asset's BASE product (not the document's version) and no
+  // verified alias evidence bridges them, applicability is PENDING.
+  const sel = _normP(selectedModel);
+  const selMatchesBase = !!sel && (sel === assetModel || sel.includes(assetModel) || assetModel.includes(sel));
+  const selIsDocVersion = !!sel && sel === docProduct;
+  if (aliasEvidence && aliasEvidence.verified
+    && _normP(aliasEvidence.selectedModel) === sel
+    && _normP(aliasEvidence.documentProduct) === docProduct) {
+    return _mk('VERIFIED', true, {
+      documentProduct,
+      crossReferenceEvidence: aliasEvidence.evidenceRef ?? 'verified alias evidence record',
+      reason: 'A verified cross-reference/alias evidence record establishes applicability across product versions.',
+    });
+  }
+  if (selMatchesBase && !selIsDocVersion) {
+    return _mk('PENDING_APPLICABILITY', false, {
+      documentProduct, crossReferenceEvidence: null,
+      reason: `The on-file document covers ${documentProduct ?? 'a different product version'}, a different product `
+        + `version than the selected ${selectedModel ?? asset.model}, and no verified cross-reference/alias evidence establishes applicability.`,
+    });
+  }
+  // Selected model already matches the document's version, or is unrelated — no gate.
+  return _mk('APPLICABLE', true, {
+    documentProduct, crossReferenceEvidence: null,
+    reason: 'The selected model matches the document product version.',
+  });
+}

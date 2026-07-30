@@ -1,0 +1,754 @@
+{
+  "ok": true,
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "topology": "MICRO",
+  "gatesRun": 40,
+  "gatesFailed": 0,
+  "results": [
+    {
+      "gate": 0,
+      "name": "E-1 exports the BAR WS-E canonical evidence stamp",
+      "pass": true,
+      "detail": "snapshotId=PDS-76C0C5B56CEF"
+    },
+    {
+      "gate": 0,
+      "name": "the exported stamp binds to THIS snapshot",
+      "pass": true,
+      "detail": "stamp=PDS-76C0C5B56CEF snapshot=PDS-76C0C5B56CEF"
+    },
+    {
+      "gate": 4,
+      "name": "every rendered section exports an ampacity object",
+      "pass": true,
+      "detail": "7 sections"
+    },
+    {
+      "gate": 4,
+      "name": "each ampacity result carries EVERY directive field",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "gate": 4,
+      "name": "the shared >3-CCC raceway itemizes the count adjustment AND the ambient correction",
+      "pass": true,
+      "detail": "BRANCH_HOMERUN_RUN: 6CCC ×0.8 amb×0.96 | COMBINER_TO_DISCO_RUN: 4CCC ×0.8 amb×0.96 | DISCO_TO_METER_RUN: 4CCC ×0.8 amb×0.96"
+    },
+    {
+      "gate": 4,
+      "name": "corrected == base × countAdj × ambient, and final == min(corrected, 75 °C terminal)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "no sheet prints a bare \"derate 0.NN\" scalar cell",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the retired unquantified \"TEMPERATURE DERATING NOTE\" prose is gone",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the ampacity evidence block renders on E-1 + PV-4A + PV-4B",
+      "pass": true,
+      "detail": "3 occurrences"
+    },
+    {
+      "gate": 4,
+      "name": "the rendered chain cites 310.16",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the rendered chain cites 310.15(C)(1)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the rendered chain cites 310.15(B)(1)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the rendered chain cites 110.14(C)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the rendered count/ambient factors EQUAL the exported canonical factors",
+      "pass": true,
+      "detail": "count=0.8 ambient=0.96"
+    },
+    {
+      "gate": 5,
+      "name": "no ampacity result claims PASS on a missing input",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "gate": 5,
+      "name": "every incomplete ampacity result is PENDING",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "gate": 6,
+      "name": "the grounding authority resolves to exactly ONE of the three legal outcomes",
+      "pass": true,
+      "detail": "outcome=PENDING_MANUFACTURER_AUTHORITY"
+    },
+    {
+      "gate": 6,
+      "name": "the outcome is SKU-specific (exact micro + cable SKU, or PENDING because a SKU is unknown)",
+      "pass": true,
+      "detail": "micro=IQ8A-72-2-US cable=Q-12-10-240 outcome=PENDING_MANUFACTURER_AUTHORITY"
+    },
+    {
+      "gate": 6,
+      "name": "outcome A/B is asserted ONLY with a verified, exactly-applicable document",
+      "pass": true,
+      "detail": "outcome=PENDING_MANUFACTURER_AUTHORITY docBacked=false doc=none"
+    },
+    {
+      "gate": 6,
+      "name": "the cable conductor count is recorded as NON-DETERMINATIVE",
+      "pass": true,
+      "detail": "conductorCount=2 nonDeterminative=true"
+    },
+    {
+      "gate": 6,
+      "name": "the result carries its authority + NEC basis",
+      "pass": true,
+      "detail": "NEC 110.3(B) — the equipment grounding / bonding method must follow the listing and the manufacturer instructions for the exact installed equipment. That instruction is NOT established here, so NO NEC conclusion (neither a 250.122-sized additional conductor nor a 690.43(C) listed integrated method) may be asserted for this section."
+    },
+    {
+      "gate": 6,
+      "name": "no sheet claims the Q-Cable provides integrated equipment grounding",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 7,
+      "name": "the pending outcome renders the PENDING MANUFACTURER AUTHORITY label",
+      "pass": true,
+      "detail": "label occurrences=10"
+    },
+    {
+      "gate": 7,
+      "name": "NO sheet asserts a separate/additional EGC requirement while pending",
+      "pass": true,
+      "detail": "none"
+    },
+    {
+      "gate": 7,
+      "name": "NO sheet asserts that no EGC is required while pending",
+      "pass": true,
+      "detail": "none"
+    },
+    {
+      "gate": 7,
+      "name": "the blocking QCABLE-GROUNDING-AUTHORITY-UNVERIFIED code is shown",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 7,
+      "name": "the candidate EGC quantity is a NON-ORDERABLE candidate design quantity",
+      "pass": true,
+      "detail": "bomRowState=design-quantity-non-orderable candidateLabelClauses=true"
+    },
+    {
+      "gate": 7,
+      "name": "no PASS / VERIFIED grounding claim is rendered for this section",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 7,
+      "name": "module-frame / racking bonding remains an independent, stated requirement",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 7,
+      "name": "the five grounding domains are separated and only the open-air one is governed by this resolver",
+      "pass": true,
+      "detail": "domains=open-air-micro-branch-cable-section,home-run-raceway-egc,racking-module-frame-bonding,grounding-electrode-conductor,service-bonding"
+    },
+    {
+      "gate": 9,
+      "name": "occupied drops == one per micro/module (the topology basis)",
+      "pass": true,
+      "detail": "drops=31 modules=31"
+    },
+    {
+      "gate": 10,
+      "name": "one cable-end object per branch is enumerated (terminator basis)",
+      "pass": true,
+      "detail": "3 cable-end objects"
+    },
+    {
+      "gate": 9,
+      "name": "no BOM/sheet text justifies sealing caps as \"1 per AC branch\"",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 9,
+      "name": "the sealing-cap quantity is stated as topology-derived (or honest PENDING)",
+      "pass": true,
+      "detail": "cap row carries its ordered-vs-occupied derivation"
+    },
+    {
+      "gate": 10,
+      "name": "terminators are justified by cable-end objects, not a per-branch constant",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 11,
+      "name": "the stale \"Open Air — PV Wire/THWN-2\" legend literal is GONE on a micro sheet",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 11,
+      "name": "the open-air legend entry names the LISTED assembly actually drawn",
+      "pass": true,
+      "detail": "ENPHASE Q CABLE (TC-ER)"
+    },
+    {
+      "gate": 11,
+      "name": "the in-conduit THWN-2 legend entry appears only when such a segment exists",
+      "pass": true,
+      "detail": "hasInConduit=true"
+    },
+    {
+      "gate": 11,
+      "name": "no DC-in-conduit legend entry on a design with no DC-in-conduit segment",
+      "pass": true,
+      "detail": "hasDcInConduit=false"
+    },
+    {
+      "gate": 11,
+      "name": "no generic \"PV Wire\" legend entry on an all-micro sheet",
+      "pass": true,
+      "detail": null
+    }
+  ],
+  "artifacts": {
+    "sharedRacewayAmpacity": {
+      "sectionId": "BRANCH_HOMERUN_RUN",
+      "fillApplicable": true,
+      "present": true,
+      "conductorMaterial": "Cu",
+      "insulation": "THWN-2",
+      "insulationRatingC": 90,
+      "conductorSize": "#10 AWG",
+      "baseTableAmpacityA": 40,
+      "baseTableTempC": 90,
+      "terminalTempLimitC": 75,
+      "terminalTableAmpacityA": 35,
+      "currentCarryingCount": 6,
+      "countAdjustmentFactor": 0.8,
+      "countAdjustmentBasis": "6 CCC → 0.80 (NEC 310.15(C)(1))",
+      "ambientTempC": null,
+      "rooftopAdderC": null,
+      "effectiveAmbientTempC": null,
+      "ambientCorrectionFactor": 0.96,
+      "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+      "correctedAmpacityA": 30.72,
+      "finalAllowableAmpacityA": 30.72,
+      "finalAllowableBasis": "min(corrected 30.72 A [90 °C base], 35 A [75 °C terminal, NEC 110.14(C)]) = 30.72 A",
+      "requiredContinuousA": 20,
+      "requiredContinuousBasis": "each #10 carries one branch; governing = max branch continuous (20A-OCPD branch, ×1.25 basis)",
+      "ocpdA": 20,
+      "state": "PASS",
+      "necReferences": [
+        "NEC 310.16",
+        "NEC 310.15(B)(1)",
+        "NEC 310.15(C)(1)",
+        "NEC 110.14(C)",
+        "NEC 690.8(B)"
+      ],
+      "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+    },
+    "ampacityBySection": [
+      {
+        "sectionId": "BRANCH_RUN",
+        "fillApplicable": false,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#12 AWG",
+        "baseTableAmpacityA": 30,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 25,
+        "currentCarryingCount": 2,
+        "countAdjustmentFactor": 1,
+        "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 28.8,
+        "finalAllowableAmpacityA": 25,
+        "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+        "requiredContinuousA": 20,
+        "requiredContinuousBasis": "branch continuous = 16A op × 1.25 (NEC 690.8(A))",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+      },
+      {
+        "sectionId": "BRANCH_RUN",
+        "fillApplicable": false,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#12 AWG",
+        "baseTableAmpacityA": 30,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 25,
+        "currentCarryingCount": 2,
+        "countAdjustmentFactor": 1,
+        "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 28.8,
+        "finalAllowableAmpacityA": 25,
+        "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+        "requiredContinuousA": 18.174999999999997,
+        "requiredContinuousBasis": "branch continuous = 14.54A op × 1.25 (NEC 690.8(A))",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+      },
+      {
+        "sectionId": "BRANCH_RUN",
+        "fillApplicable": false,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#12 AWG",
+        "baseTableAmpacityA": 30,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 25,
+        "currentCarryingCount": 2,
+        "countAdjustmentFactor": 1,
+        "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 28.8,
+        "finalAllowableAmpacityA": 25,
+        "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+        "requiredContinuousA": 18.174999999999997,
+        "requiredContinuousBasis": "branch continuous = 14.54A op × 1.25 (NEC 690.8(A))",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+      },
+      {
+        "sectionId": "BRANCH_HOMERUN_RUN",
+        "fillApplicable": true,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#10 AWG",
+        "baseTableAmpacityA": 40,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 35,
+        "currentCarryingCount": 6,
+        "countAdjustmentFactor": 0.8,
+        "countAdjustmentBasis": "6 CCC → 0.80 (NEC 310.15(C)(1))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 30.72,
+        "finalAllowableAmpacityA": 30.72,
+        "finalAllowableBasis": "min(corrected 30.72 A [90 °C base], 35 A [75 °C terminal, NEC 110.14(C)]) = 30.72 A",
+        "requiredContinuousA": 20,
+        "requiredContinuousBasis": "each #10 carries one branch; governing = max branch continuous (20A-OCPD branch, ×1.25 basis)",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      },
+      {
+        "sectionId": "COMBINER_TO_DISCO_RUN",
+        "fillApplicable": true,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#6 AWG",
+        "baseTableAmpacityA": 75,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 65,
+        "currentCarryingCount": 4,
+        "countAdjustmentFactor": 0.8,
+        "countAdjustmentBasis": "4 CCC → 0.80 (NEC 310.15(C)(1))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 57.6,
+        "finalAllowableAmpacityA": 57.6,
+        "finalAllowableBasis": "min(corrected 57.60 A [90 °C base], 65 A [75 °C terminal, NEC 110.14(C)]) = 57.60 A",
+        "requiredContinuousA": 56.34895833333333,
+        "requiredContinuousBasis": "feeder continuous = PV output × 1.25 (NEC 690.8(A))",
+        "ocpdA": 60,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      },
+      {
+        "sectionId": "DISCO_TO_METER_RUN",
+        "fillApplicable": true,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#6 AWG",
+        "baseTableAmpacityA": 75,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 65,
+        "currentCarryingCount": 4,
+        "countAdjustmentFactor": 0.8,
+        "countAdjustmentBasis": "4 CCC → 0.80 (NEC 310.15(C)(1))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 57.6,
+        "finalAllowableAmpacityA": 57.6,
+        "finalAllowableBasis": "min(corrected 57.60 A [90 °C base], 65 A [75 °C terminal, NEC 110.14(C)]) = 57.60 A",
+        "requiredContinuousA": null,
+        "requiredContinuousBasis": "segment continuous current",
+        "ocpdA": 60,
+        "state": "PENDING",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      },
+      {
+        "sectionId": "svc-tap-conductors",
+        "fillApplicable": false,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#6 AWG",
+        "baseTableAmpacityA": 75,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 65,
+        "currentCarryingCount": null,
+        "countAdjustmentFactor": null,
+        "countAdjustmentBasis": null,
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": null,
+        "ambientCorrectionBasis": null,
+        "correctedAmpacityA": null,
+        "finalAllowableAmpacityA": null,
+        "finalAllowableBasis": null,
+        "requiredContinuousA": null,
+        "requiredContinuousBasis": "supply-side tap — sizing per service authority (PENDING)",
+        "ocpdA": null,
+        "state": "PENDING",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      }
+    ],
+    "openAirBranchGrounding": {
+      "present": true,
+      "required": null,
+      "outcome": "PENDING_MANUFACTURER_AUTHORITY",
+      "authority": {
+        "appliesTo": "open-air-microinverter-branch-cable-section",
+        "selectedMicroinverterSku": "IQ8A-72-2-US",
+        "selectedCableAssemblySku": "Q-12-10-240",
+        "selectedModuleSku": null,
+        "selectedMountingBondingSystem": "RT-MINI",
+        "projectJurisdiction": "Madison County Building & Zoning",
+        "equipmentInsulationClassification": "NOT ESTABLISHED — no verified document records the equipment insulation class / classification",
+        "cableConductorConstruction": "two-wire, double-insulated (factory-connectorized)",
+        "cableConductorCount": 2,
+        "conductorCountIsNonDeterminative": true,
+        "nonDeterminativeNote": "The cable conductor count and conductor-construction prose are RECORDED for transparency and are explicitly NON-DETERMINATIVE: a listed two-conductor assembly serving a double-insulated (Class II) microinverter system may intentionally require no additional equipment grounding conductor. Conductor count alone can never select an outcome — only a verified, exactly-applicable manufacturer document can.",
+        "groundingBondingMethod": "GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY",
+        "statedGroundingMethod": null,
+        "documentId": null,
+        "documentHash": null,
+        "documentTitle": null,
+        "documentRevision": null,
+        "documentClass": null,
+        "documentSectionOrPage": null,
+        "documentStatedText": null,
+        "applicabilityVerification": {
+          "documentPresent": false,
+          "documentVerified": false,
+          "documentCurrent": false,
+          "documentArchived": false,
+          "documentHashed": false,
+          "statesMethodExplicitly": false,
+          "sectionCited": false,
+          "scopeIsExactSku": false,
+          "microSkuExactMatch": false,
+          "cableSkuExactMatch": false,
+          "moduleCovered": false,
+          "mountingBondingCovered": false,
+          "jurisdictionCovered": false,
+          "verdict": "no-document",
+          "failures": [
+            "no manufacturer document establishing the equipment grounding/bonding method for the open-air microinverter branch / cable-assembly section is archived and verified in this repository"
+          ]
+        },
+        "necBasis": "NEC 110.3(B) — the equipment grounding / bonding method must follow the listing and the manufacturer instructions for the exact installed equipment. That instruction is NOT established here, so NO NEC conclusion (neither a 250.122-sized additional conductor nor a 690.43(C) listed integrated method) may be asserted for this section.",
+        "rackingModuleBondingRequirement": {
+          "required": true,
+          "method": "Roof Tech RT-MINI listed mounting assembly bonding path (UL 2703) — module frames + racking",
+          "codeBasis": "NEC 690.43 / 250.136 (equipment bonding of module frames + racking) — evaluated on its OWN authority",
+          "independentOfCableGrounding": true,
+          "hardwareRetained": true,
+          "mountingBondingSystem": "RT-MINI",
+          "verificationNote": "The module-frame / racking bonding requirement is independent of the open-air cable-grounding question and is NOT resolved by this authority; its own listed-assembly verification governs (see the racking assembly authority)."
+        },
+        "outcome": "PENDING_MANUFACTURER_AUTHORITY",
+        "verificationStatus": "pending-manufacturer-authority",
+        "renderLabel": "GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY",
+        "blockerCode": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "blocking": true,
+        "conductorMaterial": "Cu",
+        "conductorSizeNecDerived": "#12 AWG",
+        "conductorSizingBasis": "NEC 250.122 @ 20A branch OCPD",
+        "branchIds": [
+          "br-1",
+          "br-2",
+          "br-3"
+        ],
+        "segmentIds": [
+          "BRANCH_RUN"
+        ],
+        "pathBasis": "Σ per-branch BranchCablePath (same designed-installed geometry as the trunk)",
+        "designedInstalledFt": 140.5,
+        "lengthProvenance": "geometry-derived",
+        "wasteFactor": 1.15,
+        "quantityFt": 162,
+        "bomRowState": "design-quantity-non-orderable",
+        "excludedFromProcurementTotals": true,
+        "explanation": "The equipment grounding / bonding method for the open-air microinverter branch (cable-assembly) section is NOT ESTABLISHED. No manufacturer document in this repository states the method for the exact selected equipment, so NEITHER outcome may be asserted — not an additional grounding conductor, and not a listed no-additional-conductor method. Any conductor quantity shown for this section is a PROPOSED / DESIGN QUANTITY only (QCABLE-GROUNDING-AUTHORITY-UNVERIFIED; see RS-1). This is a fail-closed state, not a finding.",
+        "resolutionRequirement": "Archive and verify, through the document registry, the manufacturer installation document that EXPLICITLY states the equipment grounding / bonding method for the open-air branch section of the EXACT selected equipment (microinverter SKU + cable-assembly SKU + module SKU + mounting/bonding system) in this project jurisdiction: record its SHA-256, revision, current status, the exact section/page carrying the statement, and its own declared exact-SKU applicability. A family / series / product-line document (an IQ8 family datasheet, IQ-Commercial QD-Cable guidance, a legacy Engage rule), a conductor-count inference, or an engineering opinion can never clear this.",
+        "provenance": {
+          "source": "resolveOpenAirGroundingAuthority (document-based three-outcome resolution)",
+          "note": "outcome selected by outcomeFromDocument(document, applicability) ONLY — equipment facts are non-determinative; document=none applicability=no-document"
+        }
+      },
+      "renderLabel": "GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY",
+      "bomRowState": "design-quantity-non-orderable",
+      "nonOrderable": true,
+      "groundingMethod": "pending",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "segmentIds": [
+        "BRANCH_RUN"
+      ],
+      "branchIds": [
+        "br-1",
+        "br-2",
+        "br-3"
+      ],
+      "pathBasis": "Σ per-branch BranchCablePath (same designed-installed geometry as the trunk)",
+      "designedInstalledFt": 140.5,
+      "lengthProvenance": "geometry-derived",
+      "wasteFactor": 1.15,
+      "bomFootageFt": 162,
+      "sourceAuthority": "NOT ESTABLISHED — no manufacturer document establishing the equipment grounding/bonding method for the open-air microinverter branch / cable-assembly section is archived and verified in this repository",
+      "codeBasis": "NEC 110.3(B) — the equipment grounding / bonding method must follow the listing and the manufacturer instructions for the exact installed equipment. That instruction is NOT established here, so NO NEC conclusion (neither a 250.122-sized additional conductor nor a 690.43(C) listed integrated method) may be asserted for this section.",
+      "equipmentCompatibility": "open-air branch section = ENPHASE Q CABLE (TC-ER) (TC-ER, free-air 690.31(C))",
+      "verificationState": "PENDING MANUFACTURER AUTHORITY — fail-closed; no grounding conclusion is drawn for this section",
+      "provenance": "electrical.openAirGroundingAuthority (resolveOpenAirGroundingAuthority (document-based three-outcome resolution)); groundingObjects[purpose=branch-egc] × 3 branches"
+    },
+    "groundingOutcome": "PENDING_MANUFACTURER_AUTHORITY",
+    "groundingDomainGraph": [
+      {
+        "domain": "open-air-micro-branch-cable-section",
+        "label": "Open-air microinverter branch (listed cable assembly) — GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY",
+        "authority": "manufacturer-document (this resolver)",
+        "required": "pending",
+        "basis": "NEC 110.3(B) — the listing + manufacturer instructions for the EXACT selected microinverter and cable assembly decide whether an additional equipment grounding conductor is installed in this section.",
+        "governedByOpenAirGroundingResolver": true,
+        "objectRefs": [
+          "electrical.openAirGroundingAuthority",
+          "electrical.groundingObjects[purpose='branch-egc']",
+          "electrical.branchCablePaths"
+        ],
+        "independenceNote": "This is the ONLY domain the open-air grounding resolver governs."
+      },
+      {
+        "domain": "home-run-raceway-egc",
+        "label": "Equipment grounding conductor inside the shared home-run raceway (PVC Sch 80 1-1/4\") — #12 AWG",
+        "authority": "NEC (wiring method)",
+        "required": true,
+        "basis": "INDEPENDENTLY REQUIRED per NEC 250.118 / 250.122 with sizing from the branch OCPD: these are FIELD-INSTALLED conductors in a raceway (THWN-2 in PVC), i.e. in-raceway wiring-method territory. A wiring-method EGC is required with the circuit conductors and its basis has NOTHING to do with the double-insulation / listed-assembly question that governs the open-air cable section. Retained under every open-air outcome.",
+        "governedByOpenAirGroundingResolver": false,
+        "objectRefs": [
+          "electrical.physicalRaceways[BRANCH-HOMERUN].egcGauge",
+          "electrical.routeSegments['BRANCH_HOMERUN_RUN'].egcGauge"
+        ],
+        "independenceNote": "NOT affected by the open-air grounding outcome — a raceway wiring method needs its own EGC regardless."
+      },
+      {
+        "domain": "racking-module-frame-bonding",
+        "label": "Module-frame + racking bonding — Roof Tech RT-MINI listed mounting assembly bonding path (UL 2703) — module frames + racking",
+        "authority": "listed-assembly (UL 2703) + NEC",
+        "required": true,
+        "basis": "NEC 690.43 / 250.136 (equipment bonding of module frames + racking) — evaluated on its OWN authority",
+        "governedByOpenAirGroundingResolver": false,
+        "objectRefs": [
+          "structural.rackingAssembly",
+          "BOM bonding hardware rows"
+        ],
+        "independenceNote": "The module-frame / racking bonding requirement is independent of the open-air cable-grounding question and is NOT resolved by this authority; its own listed-assembly verification governs (see the racking assembly authority)."
+      },
+      {
+        "domain": "grounding-electrode-conductor",
+        "label": "Grounding electrode conductor (GEC)",
+        "authority": "NEC (service/electrode)",
+        "required": false,
+        "basis": "NEC 250.64 / 690.47 — interconnected system bonds to the existing GES; no separate GEC added",
+        "governedByOpenAirGroundingResolver": false,
+        "objectRefs": [
+          "electrical.groundingObjects[purpose='gec']"
+        ],
+        "independenceNote": "Electrode-system domain — unrelated to equipment grounding of the array branch circuits."
+      },
+      {
+        "domain": "service-bonding",
+        "label": "Service / enclosure bonding at the point of interconnection",
+        "authority": "NEC (service/electrode)",
+        "required": true,
+        "basis": "NEC 250.24 / 250.92 / 690.47 — the interconnected equipment enclosures and the existing service bonding means; evaluated on the service topology objects, not on any array-side grounding question.",
+        "governedByOpenAirGroundingResolver": false,
+        "objectRefs": [
+          "electrical.serviceTopology",
+          "electrical.groundingObjects[purpose='raceway-bond']"
+        ],
+        "independenceNote": "Service-side domain — never inherits an array-side grounding outcome."
+      }
+    ],
+    "connectorTopology": {
+      "branchCount": 3,
+      "occupiedDrops": 31,
+      "perBranch": [
+        {
+          "branchId": "br-1",
+          "branchLabel": "B1",
+          "dropCount": 11,
+          "cableEndObjectId": "B1-END"
+        },
+        {
+          "branchId": "br-2",
+          "branchLabel": "B2",
+          "dropCount": 10,
+          "cableEndObjectId": "B2-END"
+        },
+        {
+          "branchId": "br-3",
+          "branchLabel": "B3",
+          "dropCount": 10,
+          "cableEndObjectId": "B3-END"
+        }
+      ]
+    },
+    "legend": {
+      "openAirWiringMethod": {
+        "assemblyId": "QCABLE-ASSEMBLY",
+        "wiringMethodLabel": "ENPHASE Q CABLE (TC-ER)",
+        "sku": "Q-12-10-240",
+        "conductorCount": 2,
+        "insulationListing": "THHN/THWN-2 conductors; UL 9703 (cable assemblies) / UL 3003 (raw cable); permitted in free air per NEC 690.31(C)"
+      },
+      "staleLiteralPresent": false,
+      "hasInConduitSegment": true,
+      "hasDcInConduitSegment": false
+    }
+  }
+}

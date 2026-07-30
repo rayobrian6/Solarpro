@@ -11,7 +11,12 @@ import { getDesignTemps } from './utils/designTemps';
 import { buildComputeSystemShadow } from './utils/computedRuns';
 import { mapComputedSystemToCompliance } from './snapshot/computeSystemProjection';
 import { validatePermitDesignSnapshot, blockingViolations, SnapshotValidationError } from './snapshot/validate';
+import {
+  resolveProjectStateAuthority, normalizeStateCode, isUnknownStateSentinel,
+} from './snapshot/locationAuthority';
 import { deepFreeze } from './snapshot/digest';
+import { scanRenderedObjectIds, checkRenderedIdCoverage, parsePlacementManifests, checkRenderParity } from './snapshot/coordinateAuthority';
+import type { PermitDesignSnapshot } from './snapshot/types';
 import { escapeH } from './utils/drawing';
 import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
@@ -36,9 +41,10 @@ import type { ElectricalCompliance } from './types';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
+import { pageReviewStatus, reviewStatusContPageCount } from './sections/reviewStatus';
 import { pageArrayPrimary, pageArrayGeometry, pageGroundArrayPlan, pageFencePlan } from './sections/arrayPages';
-import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
-import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
+import { pageStructuralPrimary, pageStructural, pageStructuralRoofContinuation, roofStructuralHasContinuation, pageEquipmentSchedule, pageEquipmentScheduleCont, schedContPageCount, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
+import { pageNECCompliance, pageConductorSchedule, pageConductorScheduleCont, hasPhysicalSectionSchedule, pageSingleLineDiagram } from './sections/electricalPages';
 import { pageWarningLabels, pageDisconnectDirectory, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter, pagePELetterRoof, pagePELetterGround, pagePELetterFence } from './sections/certPages';
 import {
@@ -47,6 +53,10 @@ import {
   type HybridSectionRef,
 } from './sections/subSystemSheets';
 import { hybridSheetId } from './sheetManifest';
+// TAC WS-18 — cross-sheet references resolved against the ACTIVE sheet index.
+import { activeSheetIds, normalizeAbsentSheetReferences, findDanglingSheetReferences } from './utils/sheetRef';
+import { resolvePlansetProfile, certificationIsCompleted, isCompactProfile } from './plansetProfile';
+import { resolveSeismicAuthority } from './snapshot/environmentalAuthority';
 import { pageValidationSummary } from './sections/validationPage';
 import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
 import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
@@ -54,7 +64,16 @@ import { inlineManufacturerAssets } from './utils/inlineManufacturerAssets';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
 
-export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): string {
+export function generatePermitHTML(
+  input: PermitInput,
+  storedSldSvg?: string,
+  // W4 §8/§9/§12 closer wiring — the async-resolved document + ledger authority
+  // (lib/permit/snapshot/authorityInputs.resolveSnapshotAuthorityInputs), passed
+  // by the async POST route. Omitted (harness/tests/self-heal) ⇒ the sync build
+  // uses the fail-soft defaults (no document; docs-archived unresolved), so the
+  // snapshot digest is unchanged. Never makes generation async.
+  snapshotAuthority?: import('./snapshot/authorityInputs').SnapshotAuthorityInputs | null,
+): string {
   const { project } = input;
 
   // ── PermitDesignSnapshot req. 6: capture RAW client-posted values before any
@@ -65,6 +84,38 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     totalDcKw: input.system?.totalDcKw ?? null,
     totalAcKw: input.system?.totalAcKw ?? null,
   };
+
+  // ── CANONICAL STATE, DERIVED ONCE, BEFORE ANYTHING READS IT ───────────────
+  // `compliance.jurisdiction` is a CLIENT-COMPUTED record frozen into the posted
+  // permit_input. When the client's getJurisdictionInfo() ran without an address
+  // it wrote the literal sentinel state:'Unknown' / stateCode:'UNKNOWN' — and the
+  // sentinel is truthy, so the route's `if (!state) state = sc` repair and every
+  // renderer's `|| '—'` fallback walked straight past it. That is how Planset 14
+  // printed "Unknown" ~20 times for a project whose address is
+  // "3 MELVIN DR APT A, GRANITE CITY, IL 62040" and whose record says IL.
+  //
+  // Sheets now read the canonical projection, not this record. It is repaired
+  // anyway — a frozen input that carries a sentinel beside the real value IS the
+  // stale-value-beside-current-value failure mode, and downstream/legacy readers
+  // (and the artifact a reviewer inspects) must not see it. The repair only ever
+  // REPLACES an unrecognized value; a recognized state is left exactly as posted.
+  {
+    const j = input.compliance?.jurisdiction as
+      { state?: string | null; stateCode?: string | null } | undefined;
+    if (j) {
+      const _st = resolveProjectStateAuthority({
+        projectState: (project as { state?: string | null }).state ?? null,
+        address: project.address ?? null,
+        complianceState: j.state ?? null,
+      });
+      if (_st.stateCode && normalizeStateCode(j.state) !== _st.stateCode) {
+        console.warn('[PLANSET] canonical state repair: compliance.jurisdiction.state',
+          JSON.stringify(j.state), '→', _st.stateName, `(${_st.basis})`);
+        j.state = _st.stateName;
+      }
+      if (_st.stateCode && normalizeStateCode(j.stateCode) !== _st.stateCode) j.stateCode = _st.stateCode;
+    }
+  }
 
   // ── P0-9: planset DATE = GENERATION date (server-side authority) ──────────
   // config.date is a design label only — a stale client date must never print
@@ -355,6 +406,71 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     }
   }
 
+  // ── AAC WS-4 — THE AUTHORITY IS THE CALCULATION'S INPUT, NOT JUST ITS LABEL ──
+  // The directive: "Displayed AND calculated values derive from it." Before this,
+  // a retrieved hazard value reached `environmentalLoadAuthority` (the DISPLAY)
+  // while the STRUCTURAL ENGINE kept running on `canonical.site.windSpeed`, which
+  // the compliance stage had already seeded with a code default. The two then
+  // disagreed and V23 caught it — the invariant was right and the wiring was
+  // wrong.
+  //
+  // Applied ONLY when a resolved environmental authority exists, so a run with no
+  // lifecycle (harness / test / GET without a bundle) is byte-identical and the
+  // curated-table path is untouched. The GOVERNING value is used, which is the
+  // retrieval's value, or an operator override, or — while two authorities
+  // disagree — the more conservative of the two.
+  const _envGov = snapshotAuthority?.environmentalRetrieval?.governing ?? null;
+  const _envSrc = snapshotAuthority?.environmentalSource ?? null;
+  const _authWind = _envGov?.windSpeedMph ?? (_envSrc?.windSpeedMph ?? null);
+  const _authSnow = _envGov?.groundSnowLoadPsf ?? (_envSrc?.groundSnowPsf ?? null);
+  if (_authWind != null && Number.isFinite(_authWind) && canonical.site.windSpeed !== _authWind) {
+    console.log('[CANONICAL] Wind speed from the ENVIRONMENTAL LOAD AUTHORITY:',
+      canonical.site.windSpeed, '→', _authWind, 'mph');
+    canonical.site.windSpeed = _authWind;
+    input.project.windSpeedMph = _authWind;
+  }
+  if (_authSnow != null && Number.isFinite(_authSnow) && canonical.site.groundSnowLoad !== _authSnow) {
+    console.log('[CANONICAL] Ground snow from the ENVIRONMENTAL LOAD AUTHORITY:',
+      canonical.site.groundSnowLoad, '→', _authSnow, 'psf');
+    canonical.site.groundSnowLoad = _authSnow;
+    input.project.groundSnowPsf = _authSnow;
+  }
+  // ── Post-AAC seismic repair — THE canonical resolved seismic result ────────
+  // One resolution (resolveSeismicAuthority): the retrieval record wins, then
+  // the VERIFIED archived climate-hazard document's seismic claims (the
+  // regeneration path — the archived-document deferral produces no retrieval
+  // record, which is exactly how the cover kept printing the stale 'B' while
+  // the closure report said 'D'). When established, EVERY downstream surface
+  // (canonical → structural engine, project.seismicCategory → cover,
+  // compliance.structural.seismic.sdc → CERT/PE-1) is stamped with the SAME
+  // value, and the result rides the input for evidence tagging. When NOT
+  // established nothing is substituted — the sheets print the pending state.
+  {
+    const _envRet = snapshotAuthority?.environmentalRetrieval ?? null;
+    const _seis = resolveSeismicAuthority({
+      retrievalSeismic: _envRet ? {
+        seismicSdc: _envRet.returnedValues.seismicSdc,
+        seismicSs: _envRet.returnedValues.seismicSs,
+        seismicS1: _envRet.returnedValues.seismicS1,
+        siteClass: _envRet.queryInputs.siteClass,
+        sourceHash: _envRet.sourceHash,
+      } : null,
+      sourceEvidence: _envSrc,
+    });
+    (input as unknown as Record<string, unknown>)._seismicAuthority = _seis;
+    if (_seis.established && _seis.sdc) {
+      if (canonical.site.seismicSDC !== _seis.sdc) {
+        console.log('[CANONICAL] Seismic design category from the', _seis.source, 'authority:',
+          canonical.site.seismicSDC, '→', _seis.sdc, `(${_seis.sourceRef})`);
+      }
+      canonical.site.seismicSDC = _seis.sdc;
+      input.project.seismicCategory = _seis.sdc;
+      if (input.compliance?.structural?.seismic) {
+        input.compliance.structural.seismic.sdc = _seis.sdc;
+      }
+    }
+  }
+
   // ── Build layout dimensions from CAD (REQUIRED before validation gate) ──────────
   try {
     canonical.layoutDimensions = buildLayoutDimensions(canonical, cad, input.project);
@@ -405,6 +521,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         try { _byKey[r.key] = runStructuralCalcV4(r.input); }
         catch (e) { console.warn(`[PLANSET] structural '${r.key}' run failed:`, (e as Error)?.message); }
       }
+      // W3: stash the canonical V4 runs (result + the exact input each ran with)
+      // so buildPermitDesignSnapshot can build snapshot-owned rail/attachment/
+      // check objects from the SAME engine result — not a re-run, not sheet math.
+      (input as unknown as Record<string, unknown>)._structuralRuns = {
+        byKey: _byKey,
+        inputs: Object.fromEntries(_runs.map(r => [r.key, r.input])),
+      };
       if (cad.hybrid) {
         if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
         const sh = (input.compliance.structural ?? {}) as Record<string, unknown>;
@@ -467,7 +590,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       s.attachment = s.attachment || {};
       // Same single-engine rule as wind: V4 overwrites when it produced values.
       if (ml?.safetyFactor)      s.attachment.safetyFactor = ml.safetyFactor;
-      if (ml?.upliftPerMountLbs) s.attachment.lagBoltCapacity = ml.upliftPerMountLbs * (ml.safetyFactor || 2);
+      // W3 §9 — lag-bolt capacity is the ENGINE's published allowable
+      // (mountCapacityLbs), NOT uplift × (safetyFactor || 2). The old `|| 2`
+      // injected a renderer-side multiplier outside the engine; the canonical
+      // attachment-uplift check (snapshot) now owns capacity/demand/SF.
+      if (ml?.mountCapacityLbs != null) s.attachment.lagBoltCapacity = ml.mountCapacityLbs;
+      else if (ml?.upliftPerMountLbs && ml?.safetyFactor) s.attachment.lagBoltCapacity = ml.upliftPerMountLbs * ml.safetyFactor;
       if (ml?.mountSpacingIn)    s.attachment.maxAllowedSpacing = ml.mountSpacingIn;
       if (ml?.upliftPerMountLbs) s.attachment.totalUpliftPerAttachment = ml.upliftPerMountLbs;
       if (!s.totalDeadLoadPsf)   s.totalDeadLoadPsf = ra.pvDeadLoadPsf + ra.roofDeadLoadPsf;
@@ -1014,9 +1142,74 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // any sheet renders; deep-frozen (immutable); stamped (id + schema + digest)
   // into every title block. Sheets become projections wave-by-wave (W2–W6);
   // scripts/planset-evidence.mjs measures sheet agreement in the meantime.
+  let _permitSnapshot: import('./snapshot/types').PermitDesignSnapshot | null = null;
   {
     const snapshot = buildPermitDesignSnapshot(input, cad, {
       projectId: (input as { projectId?: string }).projectId ?? null,
+      // W4 §8/§9/§12 — thread the async-resolved document + ledger authority into
+      // the pure build (fail-soft null defaults when the route did not resolve it).
+      capacityDocument: snapshotAuthority?.capacityDocument ?? null,
+      projectJurisdiction: snapshotAuthority?.projectJurisdiction ?? null,
+      manufacturerDocumentsArchived: snapshotAuthority?.manufacturerDocumentsArchived ?? null,
+      digestInvalidatedByLedger: snapshotAuthority?.digestInvalidatedByLedger ?? false,
+      // FRAMING-AUTHORITY GATE — verified framing-capacity document (or null ⇒
+      // FRAMING-AUTHORITY-UNVERIFIED keeps firing). Fail-soft.
+      framingCapacityDocument: snapshotAuthority?.framingCapacityDocument ?? null,
+      framingProjectApplicabilityKey: snapshotAuthority?.framingProjectApplicabilityKey ?? null,
+      // §Q — async-resolved Q-Cable procurement-deficit resolution solutions
+      // (operator selection + verified lib/documents record). Empty today ⇒
+      // QCABLE-PROCUREMENT-INSUFFICIENT stays firing when the design is short.
+      cableExtensionSolutions: snapshotAuthority?.cableExtensionSolutions ?? [],
+      // §Q — DOCUMENTED service-loop allowance (stricter-only; null ⇒ allowance 0).
+      qcableServiceLoopAllowance: snapshotAuthority?.qcableServiceLoopAllowance ?? null,
+      // BAR §2 — async-resolved VERIFIED climate-hazard source (ASCE 7 Hazard-Tool
+      // report / AHJ climate ordinance extract). null ⇒ operator-entered wind/snow
+      // stay OBSERVATION/OVERRIDE ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires.
+      environmentalSource: snapshotAuthority?.environmentalSource ?? null,
+      // AAC WS-1 — the two sockets the build ALREADY accepted and nobody ever
+      // resolved (audit §5 "two wiring gaps"). They are threaded now, so the
+      // owning resolvers (AAC-4 grounding ingestion / AAC-5 framing review
+      // record) plug in without touching this call site. Both null today ⇒
+      // byte-identical snapshot.
+      groundingDocumentEvidence: snapshotAuthority?.groundingDocumentEvidence ?? null,
+      framingEngineerReview: snapshotAuthority?.framingEngineerReview ?? null,
+      framingReviewDigest: snapshotAuthority?.framingReviewDigest ?? null,
+      // AAC WS-1 — the per-requirement resolution state, attached to each
+      // registry record's payload and rendered by the EXISTING RS-1 payload
+      // machinery. Absent (harness / tests / no lifecycle) ⇒ payloads and the
+      // digest are unchanged.
+      resolutionStates: snapshotAuthority?.resolution?.states ?? null,
+      // AAC WS-2 / WS-6 — the automatic-resolution AUTHORITY records: the
+      // canonical equipment identity (+ superseded audit history + the
+      // reconciliation audit id), the per-module exact-datasheet coverage, and
+      // the configured personnel (designer only). They are the evidence for the
+      // requirements the lifecycle CLEARED — a cleared requirement emits no
+      // blocker, so the payload trail alone would lose it. All null on a
+      // no-lifecycle / no-DB run ⇒ the snapshot field is omitted ⇒ digest
+      // unchanged.
+      canonicalEquipment: snapshotAuthority?.canonicalEquipment ?? null,
+      moduleDatasheetBinding: snapshotAuthority?.moduleDatasheetBinding ?? null,
+      projectPersonnel: snapshotAuthority?.projectPersonnel ?? null,
+      // AAC WS-3 / WS-4 — the RETRIEVED authority records. All null on a
+      // no-lifecycle / no-network run ⇒ the snapshot field is omitted ⇒ digest
+      // unchanged and every requirement stays exactly as unresolved as before.
+      projectLegalAuthority: snapshotAuthority?.projectLegalAuthority ?? null,
+      codeAdoptionAuthority: snapshotAuthority?.codeAdoptionAuthority ?? null,
+      environmentalRetrieval: snapshotAuthority?.environmentalRetrieval ?? null,
+      // AAC WS-8 / WS-9 — the STRUCTURAL SEPARATION authorities. Each is null on
+      // a no-lifecycle / no-network / no-DB run, so the snapshot field is
+      // omitted and the digest is unchanged; the racking, rail and framing
+      // requirements then stay exactly as unresolved as they were before.
+      //   • structuralDocumentRetrieval — what was fetched, hashed and archived
+      //   • documentRegistryFacts       — makes the AUTHORITATIVE verdict reachable
+      //   • rackingAssemblySelection    — the rail trace (design fact, not a document)
+      //   • framingRetrieval            — the honest AUTO→PROFESSIONAL transition
+      //   • engineeringReview           — the digest-bound licensed approval, READ only
+      structuralDocumentRetrieval: snapshotAuthority?.structuralDocumentRetrieval ?? null,
+      documentRegistryFacts: snapshotAuthority?.documentRegistryFacts ?? null,
+      rackingAssemblySelection: snapshotAuthority?.rackingAssemblySelection ?? null,
+      framingRetrieval: snapshotAuthority?.framingRetrieval ?? null,
+      engineeringReview: snapshotAuthority?.engineeringReview ?? null,
     });
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);
@@ -1028,7 +1221,41 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     deepFreeze(snapshot);
     (input as unknown as { _snapshot?: unknown })._snapshot = snapshot;
     (input as unknown as { _snapshotViolations?: unknown })._snapshotViolations = violations;
+    _permitSnapshot = snapshot;
     console.log(`[SNAPSHOT] ${snapshot.meta.snapshotId} schema ${snapshot.meta.schemaVersion} digest ${snapshot.meta.digest.slice(0, 16)}… — ${violations.length} finding(s), 0 blocking`);
+  }
+
+  // ── BOM pass 2 — snapshot-aware (2026-07-25, grounding-authority correction) ─
+  // generateBOMForPermit PROJECTS canonical snapshot authorities through
+  // peekSnapshot (the open-air grounding authority, the fastener assembly, the
+  // canonical feeder). Pass 1 above runs BEFORE the snapshot exists because the
+  // snapshot's sheet index needs the BOM row count for SCHED pagination — so every
+  // snapshot-derived row was silently DROPPED from the rendered package (the
+  // open-air branch EGC row never reached SCHED even though E-1/PV-4B stated it).
+  // Re-running the BOM here, with the snapshot attached, is the fixed point: the
+  // snapshot-derived rows depend on the snapshot, never on the sheet index, so a
+  // third pass would be identical. If the second pass were to change the SCHED page
+  // count the manifest inside the frozen snapshot would disagree with the rendered
+  // pages, so that condition is asserted loudly rather than silently accepted.
+  try {
+    const _bomBefore = input.bom ?? [];
+    const _schedPagesBefore = schedContPageCount(_bomBefore);
+    const _bomAfter = generateBOMForPermit(input, cad);
+    if (_bomAfter.length > 0) {
+      const _schedPagesAfter = schedContPageCount(_bomAfter);
+      if (_schedPagesAfter !== _schedPagesBefore) {
+        console.error('[generatePermitHTML] BOM pass 2 changed the SCHED continuation page count '
+          + `(${_schedPagesBefore} → ${_schedPagesAfter}) — the snapshot sheet index would disagree with the `
+          + 'rendered pages. Keeping pass-1 pagination; investigate the snapshot-derived BOM rows.');
+      }
+      input.bom = _bomAfter;
+      input.decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
+        bomItems: input.bom,
+        decisionBundle: decisionProvenance,
+      });
+    }
+  } catch (bomErr2: unknown) {
+    console.warn('[generatePermitHTML] snapshot-aware BOM pass failed (non-critical):', (bomErr2 as Error)?.message ?? bomErr2);
   }
 
   const engineeringStateRegistry = buildEngineeringStateRegistry({
@@ -1061,6 +1288,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     engineeringStateRegistry,
     invalidationLineage,
     staleStateMetadata: staleMetadataForState(engineeringStateRegistry.stateRecords.find((record: any) => record.stateId === 'state:renderContext:renderContext:primary') ?? engineeringStateRegistry.stateRecords[0]),
+    snapshot: _permitSnapshot,
   });
 
   // APP-CAD (non-authoritative CAD preview appendix) removed from the deliverable
@@ -1072,8 +1300,14 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // NOT part of the AHJ deliverable. Opt back in for internal review runs.
   const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
     || input.planSetOptions?.includeInternalValidation === true;
-  // Long BOMs paginate onto SCHED-2 instead of clipping at the page edge.
-  const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
+  // Long BOMs paginate onto SCHED-2 … SCHED-(N+1) instead of clipping at the
+  // page edge. schedContPageCount MUST mirror computePlansetManifest so page
+  // count == sheet index. (W9/§15 multi-page BOM continuation.)
+  const _schedContCount = schedContPageCount(input.bom);
+  // RGM §5 — RS-1.n review-status continuation count. Read from the SNAPSHOT's
+  // registry (attached above), which is exactly what computePlansetManifest sees,
+  // so page count == sheet index.
+  const _rsContCount = reviewStatusContPageCount(_permitSnapshot?.permitReadiness?.registry ?? []);
 
   // ── Wave 5B: hybrid per-sub sheet loop ────────────────────────────────
   // A hybrid design gets ONE detail set PER sub-system alongside the primary
@@ -1086,6 +1320,9 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   const _w5Sections = hybridSheetSections(cad);
   const _w5Hybrid = isHybridPlanset(cad);
   const _w5Primary = primarySubKey(cad);
+  // W9/§15 — PV-4C.1 roof-structural continuation (single-system roof only).
+  // MUST mirror computePlansetManifest's includePv4cCont so page count == index.
+  const _pv4cCont = !_w5Hybrid && roofStructuralHasContinuation(cad.systemType);
   const _w5Extras: HybridSectionRef[] = _w5Hybrid ? _w5Sections.slice(1) : [];
   /** Scoped input whose compliance.structural is the SUB's own V4 run —
    *  kills the "94 modules on the fence PE letter" class of lie. */
@@ -1122,19 +1359,40 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 
   // Dynamic page assembly — numbering derives from the list, so conditional
   // sheets can never desync pageNum/TOTAL or the cover index again.
+  // ── AAC WS-10 — the OUTPUT PROFILE. 'full' (default) is the pre-WS-10
+  // internal package, byte-identical. 'permit' is the AHJ submittal: RS-1(.n),
+  // the SCHED continuations, APP-A and the unsigned CERT/PE-1 placeholders drop
+  // out of the drawing set, PV-6 composes onto PV-5, and DS-n move to the
+  // manufacturer attachment appendix. buildSheetManifest branches identically,
+  // so page count == sheet index under BOTH profiles.
+  const _profile = resolvePlansetProfile(input);
+  const _permitProfile = _profile === 'permit';
+  const _designReview = _profile === 'design-review';
+  // Post-AAC profile contract: 'permit' and 'design-review' share the compact
+  // drawing-set composition; they differ only in the certification tail (the
+  // design-review package ENDS on PE-1 in its current pending state).
+  const _compact = isCompactProfile(_profile);
+  const _certDone = certificationIsCompleted(input);
   const pageFns: Array<(n: number, t: number) => string> = [
     (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
+    ...(_compact ? [] : [(n: number, t: number) => pageReviewStatus(input, cad, n, t)]),  // RS-1: Review status — root gate table + child requirements (RGM §5)
+    // RGM §5: RS-1.1 … RS-1.n — formal continuations of the review-status
+    // registry. The count comes from the SAME layout function the sheet manifest
+    // uses (reviewStatusContPageCount over the snapshot registry), so the cover
+    // index and the rendered page set can never disagree.
+    ...(_compact ? [] : Array.from({ length: _rsContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageReviewStatus(input, cad, n, t, ci))),
     // PV-1 (standalone site plan) folded into the array sheet 2026-07-08 —
     // the roof/array drawing now carries the integrated site context (parcel,
     // street, driveway, service equipment). Renamed PV-2→PV-1, PV-2B→PV-1B.
     (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-1: Site & Roof / Ground / Fence (cad.systemType; hybrid = roof-scoped w/ overlays)
     ...(_w5Extras.map(_w5PlanPage)),                                   // PV-1G / PV-1F: per-sub plan/elevation (hybrid only)
     (n, t) => _w5Hybrid
-      ? pageArrayGeometry(subScopedInput(input, cad, _w5Primary), subScopedView(cad, _w5Primary), n, t,
+      ? pageArrayGeometry(subScopedInput(input, cad, _w5Primary), subScopedView(cad, _w5Primary), n, t, renderCtx,
           { titleSuffix: ` — ${SUB_LABEL[_w5Primary]}` })
-      : pageArrayGeometry(input, cad, n, t),                           // PV-1B: Array geometry (hybrid = primary sub scoped)
+      : pageArrayGeometry(input, cad, n, t, renderCtx),               // PV-1B: Array geometry (hybrid = primary sub scoped)
     ..._w5Extras.map(sec => (n: number, t: number) =>
-      pageArrayGeometry(subScopedInput(input, cad, sec.key), subScopedView(cad, sec.key), n, t,
+      pageArrayGeometry(subScopedInput(input, cad, sec.key), subScopedView(cad, sec.key), n, t, renderCtx,
         { sheetId: hybridSheetId('PV-1B', sec.key), titleSuffix: ` — ${SUB_LABEL[sec.key]}` })), // PV-1BG / PV-1BF
     // ── Reading order (Ray 2026-07-20, mirrors buildSheetManifest): plans →
     // STRUCTURAL → ELECTRICAL (E-1 leads) → labels — one discipline at a time,
@@ -1148,23 +1406,64 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     (n, t) => _w5Hybrid
       ? pageStructural(_w5StructuralInput(_w5Primary), subScopedView(cad, _w5Primary), n, t)
       : pageStructural(input, cad, n, t),                              // PV-4C: Structural calcs (hybrid = primary sub scoped)
+    // W9/§15: PV-4C.1 — formal continuation of the roof structural calc sheet
+    // (single-system roof only; manifest gates it identically via
+    // roofStructuralHasContinuation so page count == sheet index).
+    ...(_pv4cCont ? [(n: number, t: number) => pageStructuralRoofContinuation(input, cad, n, t)] : []),
     (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD — the electrical section's key sheet, first
     (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
     (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
-    (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
-    (n, t) => pageDisconnectDirectory(input, cad, n, t),              // PV-6: Disconnect directory + emergency placard (system-aware)
+    // PV-4B.1 — the canonical physical section schedule + full ampacity chain +
+    // open-air grounding note (post-AAC E-1 repair: these render ONCE, on the
+    // conductor-schedule family, never under the E-1 diagram). Micro topologies
+    // only — mirrors computePlansetManifest's includePv4b1 exactly.
+    ...(hasPhysicalSectionSchedule(input, cad)
+      ? [(n: number, t: number) => pageConductorScheduleCont(input, cad, n, t)] : []),
+    // PV-5: Labels (system-aware). WS-10 compact profiles: PV-6's plaque composes
+    // onto this ONE sheet (see pageWarningLabels `merged`).
+    (n, t) => pageWarningLabels(input, cad, n, t, _compact ? { merged: true } : undefined),
+    ...(_compact ? [] : [(n: number, t: number) => pageDisconnectDirectory(input, cad, n, t)]),  // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
-    ...(includeSchedCont ? [(n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t)] : []),  // SCHED-2: BOM continuation
-    (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)
-    // DS-n: full-page REAL manufacturer datasheets (module/inverter/battery),
-    // one per selected-equipment id that has an image on file (manufacturer_assets).
-    ...equipmentDatasheetPageFns(input, cad),
-    (n, t) => pageEngineerCert(input, cad, n, t),                      // CERT (all)
-    (n, t) => _w5Hybrid
-      ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
-      : pagePELetter(input, cad, n, t),                                // PE-1 (hybrid = primary sub letter, subset params)
-    ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))), // PE-1G / PE-1F
-    ...(includeInternalValidation ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
+    ...(_compact ? [] : Array.from({ length: _schedContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci))),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
+    ...(_compact ? [] : [(n: number, t: number) => pageSpecSheetReference(input, cad, n, t)]),   // APP-A (all)
+    // DS-n (FULL profile): full-page REAL manufacturer datasheets, inline after
+    // APP-A exactly as before. The compact profiles emit them at the END as the
+    // manufacturer attachment appendix (below).
+    ...(_compact ? [] : equipmentDatasheetPageFns(input, cad)),
+    // CERT / PE-1 — the certification sheets. WS-10 + post-AAC profile contract:
+    //   full          — always, in their CURRENT state (unsigned placeholder incl.);
+    //   permit        — ONLY when a digest-bound approval covers this snapshot; an
+    //                   unsigned placeholder must never ride a submission package;
+    //   design-review — NOT here: PE-1 is appended as the FINAL sheet (below).
+    // The requirement the placeholder represents stays in the registry either way.
+    ...((!_compact || (_permitProfile && _certDone)) ? [
+      (n: number, t: number) => pageEngineerCert(input, cad, n, t),    // CERT (all)
+      (n: number, t: number) => (_w5Hybrid
+        ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
+        : pagePELetter(input, cad, n, t)),                             // PE-1 (hybrid = primary sub letter, subset params)
+      ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))), // PE-1G / PE-1F
+    ] : []),
+    ...(includeInternalValidation && !_compact ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
+    // ── MANUFACTURER ATTACHMENT APPENDIX (compact profiles) ──────────────────
+    // The DS-n manufacturer pages follow the drawing set as an appendix — the
+    // manifest tags them section:'appendix' so the cover indexes them under
+    // their own heading rather than numbering them as drawing sheets.
+    ...(_compact ? equipmentDatasheetPageFns(input, cad) : []),
+    // ── DESIGN_REVIEW certification tail ─────────────────────────────────────
+    // PE-1 is the FINAL engineer-review sheet of the design-review package — the
+    // set ends on the review document. It renders in its CURRENT state: unsigned,
+    // PENDING ENGINEERING REVIEW, no certification asserted, digest-bound, and
+    // marked NOT FOR PERMIT SUBMISSION. CERT joins only once a digest-bound
+    // approval exists (certPages verifies the digest itself — nothing here can
+    // invent an approval).
+    ...(_designReview ? [
+      ...(_certDone ? [(n: number, t: number) => pageEngineerCert(input, cad, n, t)] : []),
+      (n: number, t: number) => (_w5Hybrid
+        ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
+        : pagePELetter(input, cad, n, t)),
+      ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))),
+    ] : []),
   ];
   const TOTAL = pageFns.length + (includeCADAppendixPreview ? 1 : 0);
   const pages = pageFns.map((f, i) => f(i + 1, TOTAL));
@@ -1174,6 +1473,32 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       pages.push(pageCADAppendixPreview(input, cad, TOTAL, TOTAL));    // APP-CAD: non-authoritative CAD preview appendix
     } catch (appendixErr: unknown) {
       console.warn('[generatePermitHTML] CAD appendix preview omitted (non-critical):', appendixErr instanceof Error ? appendixErr.message : appendixErr);
+    }
+  }
+
+  // ═══ TAC WS-18 — CROSS-SHEET REFERENCES resolved against THIS package ═════
+  // A compact profile drops RS-1(.n): the release registry lives in the project
+  // review record, not in the deliverable. Every prose pointer at a sheet the
+  // package does not contain degrades to that record — once, here, over the
+  // assembled sheets, so a snapshot-baked row reason and a page body cannot
+  // drift. Tags, attributes and comments are untouched (the merge provenance
+  // stamps and title-block sheet ids survive verbatim).
+  const _activeSheetIds = activeSheetIds(input);
+  for (let i = 0; i < pages.length; i++) {
+    pages[i] = normalizeAbsentSheetReferences(pages[i], _activeSheetIds);
+  }
+  {
+    // FAIL CLOSED: anything still pointing at an omitted sheet is a NEW surface
+    // inventing a dangling reference. The package must not ship telling a
+    // reviewer to consult a sheet it does not include.
+    const dangling = findDanglingSheetReferences(pages.join('\n'), _activeSheetIds);
+    if (dangling.length) {
+      throw new SnapshotValidationError(dangling.map(d => ({
+        invariant: 'V36', authorityPath: 'projectAuthority.sheetIndex', offendingValue: d.sheetId,
+        sourceRecord: 'cross-sheet reference', affectedProjections: [d.sheetId],
+        message: `package references sheet ${d.sheetId}, which this profile does not generate: "${d.context}"`,
+        enforcement: 'blocking' as const,
+      })));
     }
   }
 
@@ -1191,6 +1516,65 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         message: `sheet ${pn} does not carry the snapshot stamp`, enforcement: 'blocking' as const,
       })));
     }
+    // ═══ V47 — NO SHEET MAY PRINT A SENTINEL FOR A KNOWN STATE, AND NO TWO
+    // SHEETS MAY PRINT DIFFERENT STATES ════════════════════════════════════════
+    // V46 proves the frozen record holds the state; this proves the PAGES do.
+    // Planset 14's regression lived entirely in the projection layer — the record
+    // was right and 16 title blocks still said "Unknown" — so the render side
+    // needs its own check. Every state projection is tagged
+    // data-project-field="state-name|state-code"; they must agree, and none may
+    // be an 'Unknown'-class sentinel while the snapshot knows the state.
+    {
+      const _paRec = (input as unknown as { _snapshot?: { projectAuthority?: {
+        stateCode: string | null; stateName: string | null } } })._snapshot?.projectAuthority;
+      const _printed = new Map<string, Set<string>>();
+      for (const [, field, value] of pages.join('\n')
+        .matchAll(/data-project-field="(state-name|state-code)"[^>]*>([^<]*)</g)) {
+        (_printed.get(field) ?? _printed.set(field, new Set()).get(field)!).add(value.trim());
+      }
+      const _stateViol: import('./snapshot/types').SnapshotViolation[] = [];
+      for (const [field, values] of _printed) {
+        const known = field === 'state-code' ? _paRec?.stateCode : _paRec?.stateName;
+        for (const val of values) {
+          if (isUnknownStateSentinel(val)) {
+            _stateViol.push({
+              invariant: 'V47', authorityPath: `projectAuthority.${field === 'state-code' ? 'stateCode' : 'stateName'}`,
+              offendingValue: val, sourceRecord: 'sheet render (data-project-field)',
+              affectedProjections: [field],
+              message: `a sheet printed the sentinel "${val}" for ${field}`,
+              enforcement: 'blocking' as const,
+            });
+          } else if (known && val !== known && val !== '—') {
+            _stateViol.push({
+              invariant: 'V47', authorityPath: `projectAuthority.${field === 'state-code' ? 'stateCode' : 'stateName'}`,
+              offendingValue: val, sourceRecord: 'sheet render (data-project-field)',
+              affectedProjections: [field],
+              message: `a sheet printed ${field}="${val}" while the canonical record says "${known}"`,
+              enforcement: 'blocking' as const,
+            });
+          } else if (known && val === '—') {
+            _stateViol.push({
+              invariant: 'V47', authorityPath: `projectAuthority.${field === 'state-code' ? 'stateCode' : 'stateName'}`,
+              offendingValue: val, sourceRecord: 'sheet render (data-project-field)',
+              affectedProjections: [field],
+              message: `a sheet printed "—" for ${field} while the canonical record says "${known}" — a `
+                + 'renderer silently substituted an unknown for a known value',
+              enforcement: 'blocking' as const,
+            });
+          }
+        }
+        if (values.size > 1) {
+          _stateViol.push({
+            invariant: 'V47', authorityPath: `projectAuthority.${field === 'state-code' ? 'stateCode' : 'stateName'}`,
+            offendingValue: [...values], sourceRecord: 'sheet render (data-project-field)',
+            affectedProjections: [field],
+            message: `sheets display conflicting ${field} values: ${[...values].map(x => `"${x}"`).join(', ')}`,
+            enforcement: 'blocking' as const,
+          });
+        }
+      }
+      if (_stateViol.length) throw new SnapshotValidationError(_stateViol);
+    }
     const v13Missing = pages
       .map((p, i) => (/tb-sheet-id">\s*(CERT|PE-1[GF]?)\s*</.test(p)
         && !p.includes('PENDING ENGINEERING REVIEW') ? i + 1 : -1))
@@ -1201,6 +1585,61 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
         message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
       })));
+    }
+    // ═══ V29 — RENDER-PARITY (W3.1 §2 (d)): no rendered physical object without
+    // a canonical object ID. Every data-object-id drawn on a sheet MUST resolve
+    // to a snapshot physical object (module/rail/attachment). Renderers may not
+    // invent object identity. (Sub-inch DRAWN-coordinate parity is enforced via
+    // the placement-manifest checker in the evidence harness; the renderer's
+    // regularization/plan-rotation warp is a recorded geometry.gaps item, so
+    // the live blocking check here is ID coverage.)
+    const snapFull = (input as unknown as { _snapshot?: PermitDesignSnapshot })._snapshot;
+    if (snapFull?.meta?.snapshotId) {
+      const joined = pages.join('\n');
+      // V29 (d) — every rendered data-object-id resolves to a canonical object.
+      const renderedIds = scanRenderedObjectIds(joined);
+      if (renderedIds.length) {
+        const { orphanRenderedIds, ok } = checkRenderedIdCoverage(snapFull, renderedIds);
+        if (!ok) {
+          throw new SnapshotValidationError([{
+            invariant: 'V29', authorityPath: 'geometry.moduleInstances', offendingValue: orphanRenderedIds.slice(0, 8),
+            sourceRecord: 'drafting/templates/roof.ts (data-object-id)', affectedProjections: ['PV-1', 'PV-1B', 'PV-2'],
+            message: `${orphanRenderedIds.length} rendered physical object(s) carry a data-object-id with no canonical snapshot object: ${orphanRenderedIds.slice(0, 8).join(', ')}`,
+            enforcement: 'blocking' as const,
+          }]);
+        }
+      }
+      // V30/V31 (a/b/c/e) — RENDER-PARITY: structural objects (rails, attachment
+      // feet, splices) drawn as PURE PROJECTIONS of the canonical coordinates.
+      // For every emitted placement manifest, checkRenderParity asserts
+      // sheetXY == viewport∘DT-SITE(canonical) within 0.5 sheet units (V31),
+      // that the renderer consumed the snapshot coordinate (no re-derivation),
+      // and that no canonical structural object is omitted (V30, requireCoverage).
+      const manifests = parsePlacementManifests(joined);
+      const parityViol = manifests.flatMap(m => {
+        // Structural coverage (V30 no-omission) is required only on sheets that
+        // actually RENDER structural objects (PV-1, the structural plan). The
+        // PV-1B circuit sheet legitimately draws NO rails/feet — it is a branch
+        // map — so demanding structural coverage there would false-fire; parity
+        // (V31) still applies to whatever structural objects a manifest DOES draw.
+        const hasStructural = m.entries.some(e => e.kind === 'rail' || e.kind === 'attachment' || e.kind === 'splice');
+        return [
+          // structural objects: parity always; no-omission only where drawn
+          ...checkRenderParity(snapFull, m, { kinds: ['rail', 'attachment', 'splice'], requireCoverage: hasStructural, tolSheet: 0.5 }),
+          // modules: drawn == transform(canonical drawnPolygon) parity, enforced on
+          // EVERY manifest that carries modules (PV-1 AND the PV-1B circuit sheet).
+          // Coverage is the geo-valid drawn subset — annotated "N of M shown".
+          ...checkRenderParity(snapFull, m, { kinds: ['module'], requireCoverage: false, tolSheet: 0.5 }),
+        ].map(v => ({ sheet: m.sheetId, v }));
+      });
+      if (parityViol.length) {
+        throw new SnapshotValidationError(parityViol.slice(0, 12).map(({ sheet, v }) => ({
+          invariant: v.code === 'CANONICAL-OBJECT-OMITTED' ? 'V30' : 'V31',
+          authorityPath: `placementManifest[${sheet}].${v.objectId ?? '?'}`, offendingValue: v.delta ?? v.detail,
+          sourceRecord: 'drafting/templates/roof.ts (placement manifest)', affectedProjections: [sheet],
+          message: `${v.code}: ${v.detail}`, enforcement: 'blocking' as const,
+        })));
+      }
     }
   }
 
@@ -1336,6 +1775,46 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 
   /* Column stack: vertical flex with canonical gap */
   .col-stack       { display: flex; flex-direction: column; gap: var(--gap-section); }
+
+  /* ── PV-0 cover-scoped vertical compaction (W9/§15 page-fit) ──────────────
+     The cover carries ~15 information sections across two columns; at the
+     default section gap + body padding both columns overran the fixed 11in
+     page and overflow:hidden silently clipped the vicinity map / project-info
+     tail. This scope tightens ONLY the cover's vertical rhythm (gaps, section
+     padding, table cell padding) so every section — map + address included —
+     fits within the printable box. No other sheet is affected. */
+  /* §19 (closeout 2026-07-23): the left column (8 sections ending in the
+     flex:1 CONSTRUCTION NOTES) summed ~9px taller than the grid row, so the
+     bottom of CONSTRUCTION NOTES was silently clipped inside .page-body's
+     hidden overflow (invisible to the page-box pagefit scan). Tighten the
+     cover's vertical rhythm at the component level — col-stack gap 3→2px and
+     sec-body padding 3→2px — to give the notes room to reflow instead of
+     clipping. Cover-scoped only; no global tolerance. */
+  .cover-compact .col-stack { gap: 2px; }
+  .cover-compact .page-body { margin-top: 5px; }
+  .cover-compact .sec-body { padding: 2px; }
+  .cover-compact .sec-hdr { padding: 1px var(--xs); }
+  /* The SHEET INDEX is the left column's GROWING section (one row per sheet —
+     the set size varies per project). Tightening its row padding scales the
+     saving with sheet count, so CONSTRUCTION NOTES keeps its room as the set
+     grows, rather than clipping (§19). */
+  .cover-compact .sheet-index-table td { padding: 1px var(--xs); line-height: 1.15; }
+  .cover-compact .sheet-index-table th { padding: 2px var(--xs); }
+  .cover-compact .note-txt { line-height: 1.2; }
+  .cover-compact .note-row { margin-bottom: 0; }
+  .cover-compact .info-table { font-size: 7.2px; }
+  .cover-compact .info-table .il,
+  .cover-compact .info-table .iv { padding-top: 1px; padding-bottom: 1px; font-size: 7px; }
+  /* §19 (EP closeout 2026-07-24) — the ENGINEERING SUMMARY embeds the full
+     project address, whose length varies per project; a long live address wraps
+     1–2 extra lines and pushed the bottom of CONSTRUCTION NOTES ~10px past the
+     left column's hidden-overflow box on the live Braidon set (invisible to the
+     page-box scan, caught by the sub-sheet internal-clip scan). Tighten the
+     effective note density (the earlier duplicate rules set 1.2/0; these final
+     rules previously loosened them back to 1.3/1px) so CONSTRUCTION NOTES reflows
+     instead of clipping. Cover-scoped; content-scaling; no global tolerance. */
+  .cover-compact .note-row { margin-bottom: 0; }
+  .cover-compact .note-txt { line-height: 1.18; }
 
   /* ── Page footer ────────────────────────────────────────────────────────── */
   .page-footer {
@@ -1854,7 +2333,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   /* ── NEC rules summary bar ──────────────────────────────────────────────── */
-  .rules-summary { display: flex; flex-direction: row; border: var(--border); border-bottom: none; margin-bottom: var(--xs); overflow: hidden; }
+  /* PPC gate 17 — flex-shrink:0. As a shrinkable flex item in the page-content
+     column this tile row was squeezed to clientHeight 0 (its numbers CLIPPED away
+     entirely) the moment PV-4A carried one more electrical blocker line. A status
+     summary that silently disappears under content pressure is the same class of
+     defect as a clipped page conclusion. */
+  .rules-summary { display: flex; flex-direction: row; flex-shrink: 0; border: var(--border); border-bottom: none; margin-bottom: var(--xs); overflow: hidden; }
   .rs { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--xs) var(--sm); border-right: var(--border); flex: 1; }
   .rs:last-child { border-right: none; }
   .rs-val { font-size: var(--f-3xl); font-weight: 900; color: #000; font-family: var(--mono); }
@@ -1964,14 +2448,30 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .cert-field { margin-bottom: var(--xs); }
   .cf-val { font-size: var(--f-xl); font-weight: 600; color: #000; border-bottom: var(--border-hvy); padding-bottom: 3px; min-height: 22px; }
   .cf-lbl { font-size: var(--f-sm); color: #555; margin-top: 2px; text-transform: uppercase; }
+
+  /* ── CERT-scoped vertical compaction (W9/§15 page-fit) ──────────────────────
+     The signature-field column (8 PREPARED-BY blanks) governed the cert-grid
+     height and, with the pending-review gate banner, pushed the LIMITATION /
+     footer legal text past the fixed page (clipped under overflow:hidden). This
+     scope tightens ONLY the CERT sheet's blank-field rhythm + placeholder
+     spacing so the full legal footer prints. No other sheet is affected; no
+     certification content is removed. */
+  /* §19 (EP closeout 2026-07-24) — the live CERT date/footer row sat ~3px past
+     .page-content's hidden-overflow box; tighten the per-field vertical rhythm a
+     touch more so the full legal cert-footer prints. Cert-scoped; no content removed. */
+  .cert-compact .cert-field { margin-bottom: 2px; }
+  .cert-compact .cf-val { min-height: 14px; padding-bottom: 2px; }
+  .cert-compact .cf-lbl { margin-top: 1px; }
+  .cert-compact .cert-statement { padding: var(--xs); }
+  .cert-compact .cert-header { margin-bottom: 3px; }
   .stamp-box { border: var(--border-hvy); min-height: 96px; display: flex; align-items: center; justify-content: center; width: 100%; text-align: center; }
   .cert-footer {
     font-size: var(--f-sm);
     color: #555;
     text-align: center;
     border-top: var(--border);
-    padding-top: var(--xs);
-    margin-top: var(--md);
+    padding-top: 3px;
+    margin-top: var(--xs);
   }
   .notes-box { background: #fff; border: var(--border); padding: var(--xs); font-size: var(--f-lg); color: #000; }
 
@@ -2013,8 +2513,23 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .cv0-key { width: 110px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
 
   /* ── SLD page ───────────────────────────────────────────────────────────── */
-  .sld-page { padding: var(--xl); height: 11in; }
-  .sld-page svg { max-width: 100%; max-height: calc(11in - 0.9in); object-fit: contain; }
+  /* Post-AAC E-1 repair. E-1 is the dedicated SLD sheet again (the physical
+     schedule / ampacity chain / grounding note render once on PV-4B.1), so the
+     page is a deterministic drawing viewport:
+       - .sld-page keeps .page's flex column and reserves the same 1.72in
+         title-block strip on the right;
+       - .sld-wrap is the drawing box — flex:1 + min-height:0 means it is ALWAYS
+         exactly the remaining page height (never a flex-shrunk strip, never
+         derived from the SVG's own attributes);
+       - the SVG fills the box via width/height:100%; its viewBox +
+         preserveAspectRatio="xMidYMid meet" keep the whole bounding box inside
+         the wrapper with aspect preserved — nothing is cropped or distorted.
+     The old rules sized the SVG by max-height while its WRAPPER stayed
+     flex-shrinkable: siblings grew, the wrapper shrank to ~267px, the ~993px
+     SVG centered inside it and overflow:hidden severed the diagram. */
+  .sld-page { padding: var(--xl) calc(var(--xl) + 1.72in) var(--xl) var(--xl); height: 11in; }
+  .sld-wrap { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .sld-wrap svg { width: 100%; height: 100%; display: block; }
 
   /* ── Two-column layout helper (legacy) ──────────────────────────────────── */
   .two-col-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-section); width: 100%; overflow: hidden; }

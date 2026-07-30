@@ -1,0 +1,1949 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.151Z",
+  "artifact": "EXCLUDED / NON-ORDERABLE rows — visible in design review, never in an order export",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §12 gate 19 (deliverable 13)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "producer": "lib/permit/utils/bomForPermit.ts — nonOrderableProcurementExport(items)",
+  "contract": "every row NOT in the authoritative export appears here exactly once, with its state and the reason it is held. The two artifacts partition the population: 11 + 37 = 48.",
+  "modes": [
+    {
+      "mode": "fixture",
+      "snapshotId": "PDS-76C0C5B56CEF",
+      "snapshotDigest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+      "openRequirementCount": 15,
+      "count": 37,
+      "byState": {
+        "ESTIMATED_FIELD_VERIFY": [
+          "BOM-CONDUIT-53ECBDFB",
+          "BOM-CONDUIT-50EF884E",
+          "BOM-CONDUIT-5DD72106",
+          "BOM-CONDUIT-FITTIN-93035ECF",
+          "BOM-CONDUIT-FITTIN-CB9521E6",
+          "BOM-CONDUIT-FITTIN-4BFE7670",
+          "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "BOM-CONDUIT-FITTIN-0386B98D",
+          "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "BOM-CONDUIT-FITTIN-543CCC59",
+          "BOM-CONDUIT-FITTIN-FA9244EF",
+          "BOM-CONDUIT-FITTIN-3DC6898A",
+          "BOM-CONDUIT-FITTIN-C3781B2C",
+          "BOM-CONDUIT-FITTIN-4885951A",
+          "BOM-CONDUIT-FITTIN-B94C6F27",
+          "BOM-CONDUIT-FITTIN-4739A6D1",
+          "BOM-CONDUIT-FITTIN-5493777A",
+          "BOM-CONDUIT-FITTIN-A712AA50",
+          "BOM-WIRE-76BA4CB6",
+          "BOM-WIRE-63C1988D",
+          "BOM-WIRE-39F4F285",
+          "BOM-WIRE-9DD6602F"
+        ],
+        "CANDIDATE_NON_ORDERABLE": [
+          "BOM-SOLAR-PANEL-18288B26",
+          "BOM-CONNECTOR-F3079FAD",
+          "BOM-CONNECTOR-25827044",
+          "BOM-CONNECTOR-927432B3",
+          "BOM-WIRE-A2BB72C0",
+          "BOM-END-CLAMP-13A30B67",
+          "BOM-GROUNDING-E88FBCB4",
+          "BOM-L-FOOT-FAB71BDE",
+          "BOM-LAG-BOLT-9CFFDF3A",
+          "BOM-MID-CLAMP-B749FB5D",
+          "BOM-MOUNT-HARDWARE-DAA27818",
+          "BOM-RACKING-CF2D76C3",
+          "BOM-RAIL-64125916",
+          "BOM-SPLICE-8AA70D50"
+        ],
+        "QUANTITY_PENDING": [
+          "BOM-SEALING-CAP-B0BCE2B6"
+        ],
+        "EXCLUDED_NOT_APPLICABLE": []
+      },
+      "rows": [
+        {
+          "bomLineId": "BOM-SOLAR-PANEL-18288B26",
+          "category": "solar_panel",
+          "model": "Q.PEAK DUO BLK ML-G10+ 400W",
+          "partNumber": "Q.PEAK DUO BLK ML-G10+400",
+          "quantity": 31,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "OPEN procurement-impacting requirement(s): MODULE-EXACT-DATASHEET-PENDING",
+          "quantitySource": "count-derived",
+          "blockingRequirementCodes": [
+            "MODULE-EXACT-DATASHEET-PENDING"
+          ],
+          "resolutionAction": "Attach the exact 400 W module datasheet (or a single-wattage crop)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-53ECBDFB",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 21,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-50EF884E",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 23,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-5DD72106",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 18,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-93035ECF",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-CB9521E6",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4BFE7670",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 4,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-0386B98D",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-543CCC59",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-FA9244EF",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 4,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-3DC6898A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-C3781B2C",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4885951A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-B94C6F27",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4739A6D1",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 3,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-5493777A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-A712AA50",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-F3079FAD",
+          "category": "connector",
+          "model": "IQ Field-Wireable Connector (Male)",
+          "partNumber": "Q-CONN-10M",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, and bind it to this BOM line."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-25827044",
+          "category": "connector",
+          "model": "IQ Field-Wireable Connector (Female)",
+          "partNumber": "Q-CONN-10F",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, and bind it to this BOM line."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-927432B3",
+          "category": "connector",
+          "model": "Insulated Multi-Tap Connector (350 kcmil–#6) — CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+          "partNumber": "IPLD350-3",
+          "quantity": 3,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY · EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE · 8 unresolved facts (see RS-1)",
+          "quantitySource": "per-installation-constant",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "Establish the missing authority for this product, then re-derive the row."
+        },
+        {
+          "bomLineId": "BOM-SEALING-CAP-B0BCE2B6",
+          "category": "sealing_cap",
+          "model": "Q Cable Sealing Cap (unused connector)",
+          "partNumber": "Q-SEAL-10",
+          "quantity": 0,
+          "unit": "ea",
+          "authorityState": "QUANTITY_PENDING",
+          "exclusionClass": "quantity-pending",
+          "reason": "quantity-state authority (the modeled count is not the established field quantity)",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "0 MODELED / FIELD QUANTITY PENDING"
+        },
+        {
+          "bomLineId": "BOM-WIRE-76BA4CB6",
+          "category": "wire",
+          "model": "#6 AWG THWN-2",
+          "partNumber": "THWN2-6",
+          "quantity": 121,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-63C1988D",
+          "category": "wire",
+          "model": "#10 AWG THWN-2",
+          "partNumber": "THWN2-10",
+          "quantity": 125,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-39F4F285",
+          "category": "wire",
+          "model": "#10 AWG THWN-2 Green EGC",
+          "partNumber": "THWN2-GRN-10",
+          "quantity": 41,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-9DD6602F",
+          "category": "wire",
+          "model": "#12 AWG THWN-2 Green EGC",
+          "partNumber": "THWN2-GRN-12",
+          "quantity": 21,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-A2BB72C0",
+          "category": "wire",
+          "model": "#12 AWG Cu Green EGC — open-air branch — CANDIDATE DESIGN QUANTITY — NON-ORDERABLE / NOT PART OF THE APPROVED INSTALLATION / PENDING EXACT MANUFACTURER AUTHORITY",
+          "partNumber": "GRN-OPENAIR-12",
+          "quantity": 162,
+          "unit": "ft",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "DESIGN QUANTITY ONLY — pending verified authority (see RS-1)",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+          ],
+          "resolutionAction": "Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this."
+        },
+        {
+          "bomLineId": "BOM-END-CLAMP-13A30B67",
+          "category": "end_clamp",
+          "model": "End clamp — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 8,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-GROUNDING-E88FBCB4",
+          "category": "grounding",
+          "model": "Module-frame bonding (UL 2703) — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 31,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-L-FOOT-FAB71BDE",
+          "category": "l_foot",
+          "model": "L-foot / mount-to-rail adapter — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 64,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-LAG-BOLT-9CFFDF3A",
+          "category": "lag_bolt",
+          "model": "Roof attachment fastener — DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY",
+          "partNumber": "PENDING-FASTENER-VERIFICATION",
+          "quantity": 128,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "DESIGN QUANTITY ONLY — pending verified authority (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "FASTENER-ASSEMBLY-UNVERIFIED"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-MID-CLAMP-B749FB5D",
+          "category": "mid_clamp",
+          "model": "Mid clamp — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 60,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-MOUNT-HARDWARE-DAA27818",
+          "category": "mount_hardware",
+          "model": "Rail T-bolt / mount-to-rail bolt — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 64,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-RACKING-CF2D76C3",
+          "category": "racking",
+          "model": "RT-MINI Flush Mount",
+          "partNumber": "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "quantity": 1,
+          "unit": "lot",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — the mount-base assembly is not selected (the canonical racking record carries mountSku: null); the product MODEL is not a verified purchase SKU. DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-RAIL-64125916",
+          "category": "rail",
+          "model": "Rail — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 20,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-SPLICE-8AA70D50",
+          "category": "splice",
+          "model": "Rail splice — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 16,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        }
+      ]
+    },
+    {
+      "mode": "insufficient",
+      "snapshotId": "PDS-4B328A574DB9",
+      "snapshotDigest": "4b328a574db9ef3afc6fefd1736124c54ec58b2afb71e9e57bbdb61111dc25d0",
+      "openRequirementCount": 16,
+      "count": 38,
+      "byState": {
+        "ESTIMATED_FIELD_VERIFY": [
+          "BOM-CONDUIT-53ECBDFB",
+          "BOM-CONDUIT-50EF884E",
+          "BOM-CONDUIT-5DD72106",
+          "BOM-CONDUIT-FITTIN-93035ECF",
+          "BOM-CONDUIT-FITTIN-CB9521E6",
+          "BOM-CONDUIT-FITTIN-4BFE7670",
+          "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "BOM-CONDUIT-FITTIN-0386B98D",
+          "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "BOM-CONDUIT-FITTIN-543CCC59",
+          "BOM-CONDUIT-FITTIN-FA9244EF",
+          "BOM-CONDUIT-FITTIN-3DC6898A",
+          "BOM-CONDUIT-FITTIN-C3781B2C",
+          "BOM-CONDUIT-FITTIN-4885951A",
+          "BOM-CONDUIT-FITTIN-B94C6F27",
+          "BOM-CONDUIT-FITTIN-4739A6D1",
+          "BOM-CONDUIT-FITTIN-5493777A",
+          "BOM-CONDUIT-FITTIN-A712AA50",
+          "BOM-WIRE-76BA4CB6",
+          "BOM-WIRE-63C1988D",
+          "BOM-WIRE-39F4F285",
+          "BOM-WIRE-9DD6602F"
+        ],
+        "CANDIDATE_NON_ORDERABLE": [
+          "BOM-SOLAR-PANEL-18288B26",
+          "BOM-CONNECTOR-F3079FAD",
+          "BOM-CONNECTOR-25827044",
+          "BOM-CONNECTOR-927432B3",
+          "BOM-TRUNK-CABLE-A6A231DB",
+          "BOM-WIRE-A2BB72C0",
+          "BOM-END-CLAMP-13A30B67",
+          "BOM-GROUNDING-E88FBCB4",
+          "BOM-L-FOOT-FAB71BDE",
+          "BOM-LAG-BOLT-9CFFDF3A",
+          "BOM-MID-CLAMP-B749FB5D",
+          "BOM-MOUNT-HARDWARE-DAA27818",
+          "BOM-RACKING-CF2D76C3",
+          "BOM-RAIL-64125916",
+          "BOM-SPLICE-8AA70D50"
+        ],
+        "QUANTITY_PENDING": [
+          "BOM-SEALING-CAP-B0BCE2B6"
+        ],
+        "EXCLUDED_NOT_APPLICABLE": []
+      },
+      "rows": [
+        {
+          "bomLineId": "BOM-SOLAR-PANEL-18288B26",
+          "category": "solar_panel",
+          "model": "Q.PEAK DUO BLK ML-G10+ 400W",
+          "partNumber": "Q.PEAK DUO BLK ML-G10+400",
+          "quantity": 31,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "OPEN procurement-impacting requirement(s): MODULE-EXACT-DATASHEET-PENDING",
+          "quantitySource": "count-derived",
+          "blockingRequirementCodes": [
+            "MODULE-EXACT-DATASHEET-PENDING"
+          ],
+          "resolutionAction": "Attach the exact 400 W module datasheet (or a single-wattage crop)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-53ECBDFB",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 21,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-50EF884E",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 23,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-5DD72106",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 18,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-93035ECF",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-CB9521E6",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4BFE7670",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 4,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-0386B98D",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-543CCC59",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-FA9244EF",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 4,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-3DC6898A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-C3781B2C",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4885951A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-B94C6F27",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4739A6D1",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 3,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-5493777A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-A712AA50",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-F3079FAD",
+          "category": "connector",
+          "model": "IQ Field-Wireable Connector (Male)",
+          "partNumber": "Q-CONN-10M",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [
+            "QCABLE-PROCUREMENT-INSUFFICIENT"
+          ],
+          "resolutionAction": "Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. \"Jumpers required\" by assertion does NOT clear this."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-25827044",
+          "category": "connector",
+          "model": "IQ Field-Wireable Connector (Female)",
+          "partNumber": "Q-CONN-10F",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [
+            "QCABLE-PROCUREMENT-INSUFFICIENT"
+          ],
+          "resolutionAction": "Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. \"Jumpers required\" by assertion does NOT clear this."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-927432B3",
+          "category": "connector",
+          "model": "Insulated Multi-Tap Connector (350 kcmil–#6) — CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+          "partNumber": "IPLD350-3",
+          "quantity": 3,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY · EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE · 8 unresolved facts (see RS-1)",
+          "quantitySource": "per-installation-constant",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "Establish the missing authority for this product, then re-derive the row."
+        },
+        {
+          "bomLineId": "BOM-SEALING-CAP-B0BCE2B6",
+          "category": "sealing_cap",
+          "model": "Q Cable Sealing Cap (unused connector)",
+          "partNumber": "Q-SEAL-10",
+          "quantity": 0,
+          "unit": "ea",
+          "authorityState": "QUANTITY_PENDING",
+          "exclusionClass": "quantity-pending",
+          "reason": "quantity-state authority (the modeled count is not the established field quantity)",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "0 MODELED / FIELD QUANTITY PENDING"
+        },
+        {
+          "bomLineId": "BOM-TRUNK-CABLE-A6A231DB",
+          "category": "trunk_cable",
+          "model": "IQ Q-Cable (portrait)",
+          "partNumber": "Q-12-10-240",
+          "quantity": 31,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "STATUS: NON-ORDERABLE · REASON: QCABLE-PROCUREMENT-INSUFFICIENT · DESIGNED-INSTALLED 140.5 FT · ALLOWANCE 26 FT (rgm-harness-synthetic-allowance-authority) · THRESHOLD 166.5 FT · CURRENT BASE 152 FT · DEFICIT 14.5 FT · EXTENSION SOLUTION NOT SELECTED",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [
+            "QCABLE-PROCUREMENT-INSUFFICIENT"
+          ],
+          "resolutionAction": "Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. \"Jumpers required\" by assertion does NOT clear this."
+        },
+        {
+          "bomLineId": "BOM-WIRE-76BA4CB6",
+          "category": "wire",
+          "model": "#6 AWG THWN-2",
+          "partNumber": "THWN2-6",
+          "quantity": 121,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-63C1988D",
+          "category": "wire",
+          "model": "#10 AWG THWN-2",
+          "partNumber": "THWN2-10",
+          "quantity": 125,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-39F4F285",
+          "category": "wire",
+          "model": "#10 AWG THWN-2 Green EGC",
+          "partNumber": "THWN2-GRN-10",
+          "quantity": 41,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-9DD6602F",
+          "category": "wire",
+          "model": "#12 AWG THWN-2 Green EGC",
+          "partNumber": "THWN2-GRN-12",
+          "quantity": 21,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-A2BB72C0",
+          "category": "wire",
+          "model": "#12 AWG Cu Green EGC — open-air branch — CANDIDATE DESIGN QUANTITY — NON-ORDERABLE / NOT PART OF THE APPROVED INSTALLATION / PENDING EXACT MANUFACTURER AUTHORITY",
+          "partNumber": "GRN-OPENAIR-12",
+          "quantity": 162,
+          "unit": "ft",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "DESIGN QUANTITY ONLY — pending verified authority (see RS-1)",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+          ],
+          "resolutionAction": "Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this."
+        },
+        {
+          "bomLineId": "BOM-END-CLAMP-13A30B67",
+          "category": "end_clamp",
+          "model": "End clamp — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 8,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-GROUNDING-E88FBCB4",
+          "category": "grounding",
+          "model": "Module-frame bonding (UL 2703) — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 31,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-L-FOOT-FAB71BDE",
+          "category": "l_foot",
+          "model": "L-foot / mount-to-rail adapter — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 64,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-LAG-BOLT-9CFFDF3A",
+          "category": "lag_bolt",
+          "model": "Roof attachment fastener — DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY",
+          "partNumber": "PENDING-FASTENER-VERIFICATION",
+          "quantity": 128,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "DESIGN QUANTITY ONLY — pending verified authority (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "FASTENER-ASSEMBLY-UNVERIFIED"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-MID-CLAMP-B749FB5D",
+          "category": "mid_clamp",
+          "model": "Mid clamp — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 60,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-MOUNT-HARDWARE-DAA27818",
+          "category": "mount_hardware",
+          "model": "Rail T-bolt / mount-to-rail bolt — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 64,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-RACKING-CF2D76C3",
+          "category": "racking",
+          "model": "RT-MINI Flush Mount",
+          "partNumber": "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "quantity": 1,
+          "unit": "lot",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — the mount-base assembly is not selected (the canonical racking record carries mountSku: null); the product MODEL is not a verified purchase SKU. DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-RAIL-64125916",
+          "category": "rail",
+          "model": "Rail — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 20,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-SPLICE-8AA70D50",
+          "category": "splice",
+          "model": "Rail splice — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 16,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        }
+      ]
+    },
+    {
+      "mode": "identity",
+      "snapshotId": "PDS-949E2B4125A5",
+      "snapshotDigest": "949e2b4125a5890552558e8ac21ed202c370b1308a2a060f4264a3038c400fd4",
+      "openRequirementCount": 17,
+      "count": 37,
+      "byState": {
+        "ESTIMATED_FIELD_VERIFY": [
+          "BOM-CONDUIT-53ECBDFB",
+          "BOM-CONDUIT-50EF884E",
+          "BOM-CONDUIT-5DD72106",
+          "BOM-CONDUIT-FITTIN-93035ECF",
+          "BOM-CONDUIT-FITTIN-CB9521E6",
+          "BOM-CONDUIT-FITTIN-4BFE7670",
+          "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "BOM-CONDUIT-FITTIN-0386B98D",
+          "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "BOM-CONDUIT-FITTIN-543CCC59",
+          "BOM-CONDUIT-FITTIN-FA9244EF",
+          "BOM-CONDUIT-FITTIN-3DC6898A",
+          "BOM-CONDUIT-FITTIN-C3781B2C",
+          "BOM-CONDUIT-FITTIN-4885951A",
+          "BOM-CONDUIT-FITTIN-B94C6F27",
+          "BOM-CONDUIT-FITTIN-4739A6D1",
+          "BOM-CONDUIT-FITTIN-5493777A",
+          "BOM-CONDUIT-FITTIN-A712AA50",
+          "BOM-WIRE-76BA4CB6",
+          "BOM-WIRE-63C1988D",
+          "BOM-WIRE-39F4F285",
+          "BOM-WIRE-9DD6602F"
+        ],
+        "CANDIDATE_NON_ORDERABLE": [
+          "BOM-SOLAR-PANEL-18288B26",
+          "BOM-CONNECTOR-F3079FAD",
+          "BOM-CONNECTOR-25827044",
+          "BOM-CONNECTOR-927432B3",
+          "BOM-WIRE-A2BB72C0",
+          "BOM-END-CLAMP-13A30B67",
+          "BOM-GROUNDING-E88FBCB4",
+          "BOM-L-FOOT-FAB71BDE",
+          "BOM-LAG-BOLT-9CFFDF3A",
+          "BOM-MID-CLAMP-B749FB5D",
+          "BOM-MOUNT-HARDWARE-DAA27818",
+          "BOM-RACKING-CF2D76C3",
+          "BOM-RAIL-64125916",
+          "BOM-SPLICE-8AA70D50"
+        ],
+        "QUANTITY_PENDING": [
+          "BOM-SEALING-CAP-B0BCE2B6"
+        ],
+        "EXCLUDED_NOT_APPLICABLE": []
+      },
+      "rows": [
+        {
+          "bomLineId": "BOM-SOLAR-PANEL-18288B26",
+          "category": "solar_panel",
+          "model": "Q.PEAK DUO BLK ML-G10+ 400W",
+          "partNumber": "Q.PEAK DUO BLK ML-G10+400",
+          "quantity": 31,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "OPEN procurement-impacting requirement(s): MODULE-EXACT-DATASHEET-PENDING",
+          "quantitySource": "count-derived",
+          "blockingRequirementCodes": [
+            "MODULE-EXACT-DATASHEET-PENDING"
+          ],
+          "resolutionAction": "Attach the exact 400 W module datasheet (or a single-wattage crop)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-53ECBDFB",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 21,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-50EF884E",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 23,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-5DD72106",
+          "category": "conduit",
+          "model": "1-1/4\" PVC Sch 80 Conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 18,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-93035ECF",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-CB9521E6",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4BFE7670",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 4,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-0386B98D",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-543CCC59",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-FA9244EF",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 4,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-3DC6898A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-C3781B2C",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4885951A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Coupling",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-B94C6F27",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 Connector",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-4739A6D1",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 One-Hole Strap",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 3,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-5493777A",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" Insulated Bushing",
+          "partNumber": "BUSH-INS-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONDUIT-FITTIN-A712AA50",
+          "category": "conduit_fitting",
+          "model": "1-1/4\" PVC Sch 80 90° Sweep",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-F3079FAD",
+          "category": "connector",
+          "model": "IQ Field-Wireable Connector (Male)",
+          "partNumber": "Q-CONN-10M",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, and bind it to this BOM line."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-25827044",
+          "category": "connector",
+          "model": "IQ Field-Wireable Connector (Female)",
+          "partNumber": "Q-CONN-10F",
+          "quantity": 1,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, and bind it to this BOM line."
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-927432B3",
+          "category": "connector",
+          "model": "Insulated Multi-Tap Connector (350 kcmil–#6) — CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+          "partNumber": "IPLD350-3",
+          "quantity": 3,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY · EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE · 8 unresolved facts (see RS-1)",
+          "quantitySource": "per-installation-constant",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "Establish the missing authority for this product, then re-derive the row."
+        },
+        {
+          "bomLineId": "BOM-SEALING-CAP-B0BCE2B6",
+          "category": "sealing_cap",
+          "model": "Q Cable Sealing Cap (unused connector)",
+          "partNumber": "Q-SEAL-10",
+          "quantity": 0,
+          "unit": "ea",
+          "authorityState": "QUANTITY_PENDING",
+          "exclusionClass": "quantity-pending",
+          "reason": "quantity-state authority (the modeled count is not the established field quantity)",
+          "quantitySource": "topology-derived",
+          "blockingRequirementCodes": [],
+          "resolutionAction": "0 MODELED / FIELD QUANTITY PENDING"
+        },
+        {
+          "bomLineId": "BOM-WIRE-76BA4CB6",
+          "category": "wire",
+          "model": "#6 AWG THWN-2",
+          "partNumber": "THWN2-6",
+          "quantity": 121,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-63C1988D",
+          "category": "wire",
+          "model": "#10 AWG THWN-2",
+          "partNumber": "THWN2-10",
+          "quantity": 125,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-39F4F285",
+          "category": "wire",
+          "model": "#10 AWG THWN-2 Green EGC",
+          "partNumber": "THWN2-GRN-10",
+          "quantity": 41,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-9DD6602F",
+          "category": "wire",
+          "model": "#12 AWG THWN-2 Green EGC",
+          "partNumber": "THWN2-GRN-12",
+          "quantity": 21,
+          "unit": "ft",
+          "authorityState": "ESTIMATED_FIELD_VERIFY",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither routed nor field-measured; budgeting quantity only",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "ROUTE-LENGTH-ESTIMATE"
+          ],
+          "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+        },
+        {
+          "bomLineId": "BOM-WIRE-A2BB72C0",
+          "category": "wire",
+          "model": "#12 AWG Cu Green EGC — open-air branch — CANDIDATE DESIGN QUANTITY — NON-ORDERABLE / NOT PART OF THE APPROVED INSTALLATION / PENDING EXACT MANUFACTURER AUTHORITY",
+          "partNumber": "GRN-OPENAIR-12",
+          "quantity": 162,
+          "unit": "ft",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "DESIGN QUANTITY ONLY — pending verified authority (see RS-1)",
+          "quantitySource": "route-derived",
+          "blockingRequirementCodes": [
+            "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+          ],
+          "resolutionAction": "Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this."
+        },
+        {
+          "bomLineId": "BOM-END-CLAMP-13A30B67",
+          "category": "end_clamp",
+          "model": "End clamp — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 8,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-GROUNDING-E88FBCB4",
+          "category": "grounding",
+          "model": "Module-frame bonding (UL 2703) — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 31,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-L-FOOT-FAB71BDE",
+          "category": "l_foot",
+          "model": "L-foot / mount-to-rail adapter — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 64,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-LAG-BOLT-9CFFDF3A",
+          "category": "lag_bolt",
+          "model": "Roof attachment fastener — DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY",
+          "partNumber": "PENDING-FASTENER-VERIFICATION",
+          "quantity": 128,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "DESIGN QUANTITY ONLY — pending verified authority (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "FASTENER-ASSEMBLY-UNVERIFIED"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-MID-CLAMP-B749FB5D",
+          "category": "mid_clamp",
+          "model": "Mid clamp — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 60,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-MOUNT-HARDWARE-DAA27818",
+          "category": "mount_hardware",
+          "model": "Rail T-bolt / mount-to-rail bolt — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 64,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-RACKING-CF2D76C3",
+          "category": "racking",
+          "model": "RT-MINI Flush Mount",
+          "partNumber": "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "quantity": 1,
+          "unit": "lot",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — the mount-base assembly is not selected (the canonical racking record carries mountSku: null); the product MODEL is not a verified purchase SKU. DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-RAIL-64125916",
+          "category": "rail",
+          "model": "Rail — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 20,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        },
+        {
+          "bomLineId": "BOM-SPLICE-8AA70D50",
+          "category": "splice",
+          "model": "Rail splice — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION",
+          "partNumber": "TBD",
+          "quantity": 16,
+          "unit": "ea",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "exclusionClass": "non-orderable-design-quantity",
+          "reason": "PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)",
+          "quantitySource": "geometry-derived",
+          "blockingRequirementCodes": [
+            "PENDING-RACKING-ASSEMBLY-SELECTION"
+          ],
+          "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS."
+        }
+      ]
+    }
+  ]
+}

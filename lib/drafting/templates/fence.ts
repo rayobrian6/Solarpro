@@ -43,6 +43,10 @@ import {
 } from '../callouts';
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+import { projectStructural } from '../../permit/snapshot/structuralProjection';
+// AAC WS-9 — THE site design-load seam (no wind/snow literal in drafting).
+import { resolveSiteDesignLoads } from '../../permit/snapshot/siteDesignLoads';
+import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { getRackingById } from '../../equipment-db';
 
@@ -139,6 +143,7 @@ export function drawFencePlan(
   circuit?: { spans: Array<{ count: number }> } | null,
 ): string {
   const { layout, engineering } = input;
+  const _asceFp = projectCodeAuthority(ctx?.snapshot).asceLabel;   // W4 §2 code editions
 
   // ── CAD segments (STEP 4: CAD is the ONLY source of truth) ──
   const cadFence = cad?.fence;
@@ -519,12 +524,17 @@ export function drawFencePlan(
     // Wind arrow — with the DESIGN VALUE (Ray "next level" item 3: load
     // arrows carry their real ASCE figures at the member they act on).
     const wY = (panTop + grade) / 2;
-    const _windMph = (engineering as { windSpeedMph?: number }).windSpeedMph
-      ?? (input.project as { ahjWindSpeedMph?: number })?.ahjWindSpeedMph ?? 115;
+    // AAC WS-9 — ONE seam. The literal 115 no longer exists in the drafting
+    // layer; when the value IS the code-minimum guard the seam says so.
+    const _windMph = resolveSiteDesignLoads({
+      snapshot: ctx?.snapshot ?? null,
+      complianceWindMph: (engineering as { windSpeedMph?: number }).windSpeedMph,
+      ahjWindMph: (input.project as { ahjWindSpeedMph?: number })?.ahjWindSpeedMph,
+    }).windSpeedMph;
     els.push(`<line x1="${(rightPost + 44).toFixed(1)}" y1="${wY.toFixed(1)}" x2="${(rightPost + 10).toFixed(1)}" y2="${wY.toFixed(1)}" stroke="#c00" stroke-width="1.6"/>`);
     els.push(drawArrowhead(rightPost + 10, wY, 180, 6, '#c00'));
     els.push(drawText(rightPost + 48, wY - 3, `WIND ${_windMph} MPH Vult`, { anchor: 'start', fontSize: 6.5, fontWeight: 'bold', fill: '#c00' }));
-    els.push(drawText(rightPost + 48, wY + 5, 'ASCE 7-22 §29', { anchor: 'start', fontSize: 5.2, fill: '#c00' }));
+    els.push(drawText(rightPost + 48, wY + 5, `${_asceFp} §29`, { anchor: 'start', fontSize: 5.2, fill: '#c00' }));
     // Dimensions
     els.push(drawText(leftPost - 9, (panTop + grade - clrPx) / 2, `${panelHtFt.toFixed(1)}' PANEL`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#1a4a8a', rotate: -90 }));
     els.push(drawText(rightPost + 10, grade + embedPx / 2, `${embedFt.toFixed(1)}' EMBED`, { anchor: 'start', fontSize: 6.8, fontWeight: 'bold', fill: '#333' }));
@@ -556,7 +566,7 @@ export function drawFencePlan(
       `Foundation: 2-7/8"⌀ × ${SOLFENCE_SECTION.innerPostLenIn}" inner steel post driven ${embedFt.toFixed(1)}' min — NO concrete; 4"⌀ outer post.`,
       'Field-verify post size + driven depth to refusal per geotech.',
       'Bond all posts, rails + frames to EGC — min #6 AWG Cu (NEC 250.166).',
-      'Wind design per ASCE 7-22; verify exposure category on site.',
+      `Wind design per ${_asceFp}; verify exposure category on site.`,
       'All dimensions NTS — verify in field.',
     ];
     let sny = npTop + 20;
@@ -681,6 +691,7 @@ export function drawFenceElevation(
   ctx?: RenderContext | null,
 ): string {
   const { layout, engineering, project } = input;
+  const _asceEl = projectCodeAuthority(ctx?.snapshot).asceLabel;   // W4 §2 code editions
 
   // ── STEP 4: CAD is the ONLY source of truth ──
   const cadFence = cad?.fence;
@@ -708,11 +719,16 @@ export function drawFenceElevation(
   const _canonWind     = Number((project as unknown as {
     _canonical?: { site?: { windSpeed?: number } };
   })?._canonical?.site?.windSpeed) || 0;
-  const windSpeedMph   = engineering.windSpeedMph
-    ?? (_canonWind > 0 ? _canonWind : undefined)
-    ?? project?.ahjWindSpeedMph
-    ?? 115;   // same last-resort default as getFenceData — never a private 90
-  const groundSnowPsf  = engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
+  // AAC WS-9 — ONE seam for both values, with an explicit basis. The private
+  // `?? 115` / `?? 0` tails are gone: a guard value now identifies itself.
+  const _siteLoads     = resolveSiteDesignLoads({
+    snapshot: null,
+    complianceWindMph: engineering.windSpeedMph ?? (_canonWind > 0 ? _canonWind : undefined),
+    complianceSnowPsf: engineering.groundSnowPsf,
+    ahjWindMph: project?.ahjWindSpeedMph, ahjSnowPsf: project?.ahjGroundSnowPsf,
+  });
+  const windSpeedMph   = _siteLoads.windSpeedMph;
+  const groundSnowPsf  = _siteLoads.groundSnowPsf;
   // Wave 6.1 (punch 1a): fence-system name from the sub's own equipment —
   // never the raw project-wide mountingSystem scalar (roof racking leak).
   const mountSys       = resolveFenceMountName(project as unknown as Record<string, unknown>).toUpperCase();
@@ -1105,7 +1121,7 @@ export function drawFenceElevation(
     { n: 3, label: `FOUNDATION — 2-7/8"⌀ × ${SOLFENCE_SECTION.innerPostLenIn}" INNER STEEL POST, DRIVEN ${ftToFtIn(postEmbedFt)} MIN.` },
     { n: 4, label: `PANEL HEIGHT — ${ftToFtIn(panelHeightFt)} A.G.` },
     { n: 5, label: `MID RAIL ${SOLFENCE_SECTION.midRailTallIn}"×${SOLFENCE_SECTION.midRailDeepIn}" + 4"×4" POST STIFFENERS` },
-    { n: 6, label: `WIND LOAD — ${windSpeedMph} MPH (ASCE 7-22)` },
+    { n: 6, label: `WIND LOAD — ${windSpeedMph} MPH (${_asceEl})` },
     { n: 7, label: `DEAD LOAD — ${((panelLenIn * panelWidIn / 144) * 3.5).toFixed(0)} LBS/PANEL EST.` },
   ];
 
@@ -1138,7 +1154,7 @@ export function drawFenceElevation(
     { text: `MODULES: 90° VERTICAL, SIDE-BY-SIDE`, bold: false },
     { text: `RAILS: ${railCount}× + MID RAIL 2"×1"`, bold: false },
     { text: `RATED: ${solfenceRatings().windMph} MPH WIND / ${solfenceRatings().snowPsf} PSF`, bold: false },
-    { text: `REF: NEC 690 / ASCE 7-22`, bold: false },
+    { text: `REF: NEC 690 / ${_asceEl}`, bold: false },
     { text: `INSTALLER TO VERIFY POST SIZE + DRIVEN DEPTH`, bold: true, red: true },
   ];
   notes.forEach((note, ni) => {
@@ -1192,6 +1208,7 @@ export function drawFenceStructural(
   ctx?: RenderContext | null,
 ): string {
   const { engineering, project, layout } = input;
+  const _asceSt = projectCodeAuthority(ctx?.snapshot).asceLabel;   // W4 §2 code editions
   const cadFence = cad?.fence;
   const postSpacingFt = cadFence ? metersToFt(cadFence.postSpacingM) : (layout.fencePostSpacingFt ?? 8);
   const postEmbedFt   = cadFence ? metersToFt(cadFence.postEmbedM)   : (layout.fencePostEmbedmentFt ?? 3.5);
@@ -1200,7 +1217,11 @@ export function drawFenceStructural(
   const totalLengthFt = cadFence ? metersToFt(cadFence.totalLengthM) : (layout.fenceTotalLengthFt ?? 0);
   const totalPanels   = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw          = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
-  const windSpeedMph  = engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? 115;
+  // AAC WS-9 — ONE seam, basis-stated. No literal in the drafting layer.
+  const windSpeedMph  = resolveSiteDesignLoads({
+    snapshot: ctx?.snapshot ?? null,
+    complianceWindMph: engineering.windSpeedMph, ahjWindMph: project?.ahjWindSpeedMph,
+  }).windSpeedMph;
   const mountSys      = resolveFenceMountName(project as unknown as Record<string, unknown>).toUpperCase();
   const panelLenIn    = project?.panelLengthIn ?? 66;
   const panelWidIn    = project?.panelWidthIn  ?? 40;
@@ -1390,7 +1411,7 @@ export function drawFenceStructural(
     { n: 3, label: `MID RAIL ${SF.midRailTallIn}"×${SF.midRailDeepIn}" + 4"×4" POST STIFFENERS` },
     { n: 4, label: `MODULE — CHANNELS + 4-SCREW MID RAIL` },
     { n: 5, label: `BONDING — #6 AWG Cu EGC (NEC 250.169/690.43)` },
-    { n: 6, label: `WIND — ${windSpeedMph} MPH Vult (ASCE 7-22 §29.4)` },
+    { n: 6, label: `WIND — ${windSpeedMph} MPH Vult (${_asceSt} §29.4)` },
     { n: 7, label: `RATED — ${ratings.windMph} MPH WIND / ${ratings.snowPsf} PSF (MFR)` },
   ];
   const rowH = 19;

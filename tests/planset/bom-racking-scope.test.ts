@@ -174,32 +174,48 @@ describe('(c) open-air runs (conduitType NONE) never bill conduit or fittings', 
     conduitType: 'NONE', conduitSize: 'N/A', isOpenAir: true,
   };
 
-  it('emits no NONE/N-A conduit line item and excludes open-air footage from fitting counts', () => {
+  it('emits no NONE/N-A conduit line item and excludes open-air footage from the per-raceway conduit + fittings', () => {
     const bom = generateBOMV4({ ...baseInput, runs: [emtRun, openAirRun] });
 
-    // No junk conduit line ('"N/A" NONE Conduit — NONE-N-A').
+    // No junk conduit line ('"N/A" NONE Conduit — NONE-N-A'), and no "all runs".
     const conduits = bom.items.filter(i => i.category === 'conduit');
     expect(conduits.some(i => i.partNumber.startsWith('NONE'))).toBe(false);
     expect(conduits.some(i => i.model.includes('NONE'))).toBe(false);
+    expect(conduits.every(i => !/—\s*all runs/i.test(i.description ?? ''))).toBe(true);
 
-    // The real EMT run still bills: 40 ft × 1.15 = 46 ft (AC stage).
-    const acConduit = bom.items.find(i => i.stageId === 'ac' && i.category === 'conduit');
-    expect(acConduit?.quantity).toBe(46);
+    // §6 — the real EMT run bills ONE per-physical-raceway AC conduit row (its
+    // own physicalRacewayId), 40 ft × 1.15 = 46 ft; the open-air run adds NO
+    // conduit. (A separate DC home-run conduit line exists on the string DC
+    // stage — that is pre-existing and cites the PV wiring-method article.)
+    const acConduits = conduits.filter(i => i.stageId === 'ac');
+    expect(acConduits.length).toBe(1);
+    const acConduit = acConduits[0];
+    expect(acConduit.quantity).toBe(46);
+    expect(acConduit.description).toMatch(/RW-INV_TO_DISCO_RUN/);
+    expect(acConduit.necReference).toMatch(/NEC 358/); // §7 — EMT article
 
-    // Fittings derive from 46 ft only (NOT 46 + 58 = 104):
-    //   connectors/couplings/straps = max(n, ceil(46/10)) = 5, bushings = 2.
+    // §6 — fittings derive from the 46-ft EMT raceway ONLY (open-air excluded):
+    //   connectors = 2 (both ends), couplings = ceil(46/10)-1 = 4,
+    //   straps = ceil(46/10)+1 = 6, bushings = 2, 90° sweep allowance = 2.
     const fitting = (pnPrefix: string) =>
       bom.items.find(i => i.category === 'conduit_fitting' && i.partNumber.startsWith(pnPrefix));
-    expect(fitting('EMT-CONN')?.quantity).toBe(5);
-    expect(fitting('EMT-COUP')?.quantity).toBe(5);
-    expect(fitting('EMT-STRAP')?.quantity).toBe(5);
+    expect(fitting('EMT-CONN')?.quantity).toBe(2);
+    expect(fitting('EMT-COUP')?.quantity).toBe(4);
+    expect(fitting('EMT-STRAP')?.quantity).toBe(6);
     expect(fitting('BUSH-INS')?.quantity).toBe(2);
+    // every fitting cites the EMT support article (§7) — never a template 352
+    for (const f of bom.items.filter(i => i.category === 'conduit_fitting'
+        && /EMT/.test(i.model))) expect(f.necReference).not.toMatch(/352/);
 
-    // The open-air run's WIRE still bills — only the raceway is suppressed.
-    const tenAwg = bom.items.find(i =>
-      i.stageId === 'ac' && i.category === 'wire' && i.partNumber === 'THWN2-10');
-    expect(tenAwg).toBeDefined();
-    expect(tenAwg!.quantity).toBeGreaterThanOrEqual(Math.ceil(50 * 2 * 1.15));
+    // §5 — the open-air Q-Cable trunk is NEVER billed as THWN field conductor
+    // (it is trunk cable). The old model double-billed it as #10 THWN alongside
+    // the trunk drops; the reconciliation now records it as an open-air segment.
+    expect(bom.branchWireReconciliation?.openAirTrunkSegments).toContain('BRANCH_RUN');
+    const openAirThwn = bom.items.find(i =>
+      i.category === 'wire' && (i.description ?? '').includes('BRANCH_RUN'));
+    expect(openAirThwn).toBeUndefined();
+    // the in-conduit EMT run's own conductors DO bill (hot #8 + shared EGC #10).
+    expect(bom.items.some(i => i.category === 'wire' && i.model.startsWith('#8 AWG THWN-2'))).toBe(true);
   });
 });
 
@@ -233,8 +249,9 @@ describe('(d) legacy single-system BOMs (no subSystemCounts) are byte-identical'
       'mid_clamp|IronRidge|UFO Mid Clamp|UFO-MID-01|36|ea',
       'end_clamp|IronRidge|UFO End Clamp|UFO-END-01|8|ea',
       'splice|IronRidge|XR100 Splice|XR-100-SPLICE|4|ea',
-      'grounding|Erico/Harger|5/8" × 8 ft Copper-Clad Ground Rod|GR-5/8-8|1|ea',
-      'grounding|Erico/Harger|5/8" Ground Rod Acorn Clamp|GRC-5/8|1|ea',
+      // §7 (07-22): the auto ground rod + acorn clamp are REMOVED — a grid-tied
+      // interconnection bonds to the existing GES (NEC 250.64 / 690.47), it does
+      // not add a new electrode unless input.requiresGroundingElectrode is set.
     ]);
   });
 
@@ -248,8 +265,9 @@ describe('(d) legacy single-system BOMs (no subSystemCounts) are byte-identical'
       'mid_clamp|IronRidge|UFO Mid Clamp|UFO-MID-01|36|ea',
       'end_clamp|IronRidge|UFO End Clamp|UFO-END-01|8|ea',
       'grounding|Wiley Electronics|WEEB Lug 6.7|WEEB-LUG-6.7|20|ea',
-      'grounding|Erico/Harger|5/8" × 8 ft Copper-Clad Ground Rod|GR-5/8-8|1|ea',
-      'grounding|Erico/Harger|5/8" Ground Rod Acorn Clamp|GRC-5/8|1|ea',
+      // §7 (07-22): auto ground rod + acorn clamp REMOVED (bonds to existing GES;
+      // no new electrode unless requiresGroundingElectrode). Module bonding
+      // (WEEB Lug) stays — it is frame-to-rail bonding, not an electrode.
     ]);
   });
 });

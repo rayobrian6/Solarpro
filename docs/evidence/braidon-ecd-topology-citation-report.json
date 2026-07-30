@@ -1,0 +1,179 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.148Z",
+  "artifact": "package-wide topology / code-citation report",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §9 (deliverable 10)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "designTopology": {
+    "interconnectionMethod": "SUPPLY_SIDE_TAP",
+    "governingArticle": "NEC 705.11 (supply-side / line-side tap)",
+    "necEdition": {
+      "kind": "nec",
+      "edition": "2020",
+      "standard": "NEC (NFPA 70)",
+      "source": "ahj-record",
+      "provenance": {
+        "source": "ahj-national",
+        "ref": "ahj-national:il-madison-county",
+        "note": "adopted NEC edition — unverified (no archived adoption ordinance)"
+      }
+    }
+  },
+  "before": {
+    "citation": "docs/ECD-ROOT-CAUSE-MAP.md §9",
+    "renderedLabel": "NEC 2020 705.11 / 705.12(A) on the PV-5 placard schedule (×2)",
+    "dataSource": "lib/data/placards/field-placards-research.json — placard 'line-side-tap-warning', NEC-2020 codeRef section \"705.11 / 705.12(A)\"",
+    "classifier": "lib/permit/utils/fieldLabels.ts — necSectionSide() carried an explicit special case `if (/705\\.12\\(A\\)/) return 'supply'` (705.12(A) was the 2017 supply-side reference), so filterSectionByTopology KEPT both halves on a supply-side design.",
+    "defect": "a citation stamped with the 2020 edition, in which 705.12 is the LOAD-SIDE article — a wrong-edition AND wrong-side citation."
+  },
+  "after": {
+    "fixSites": [
+      "lib/data/placards/field-placards-research.json — the NEC-2020 codeRef no longer carries 705.12(A)",
+      "lib/permit/utils/fieldLabels.ts — the 705.12(A) → 'supply' special case is DELETED; every 705.12 subdivision (including (A)) is load-side for labelling, so no future placard row can reintroduce it through either path"
+    ],
+    "gateScope": "the package-wide topology/citation gate now covers the PV-5 placard CODE-REF cells (machine-tagged data-label-nec-ref / data-label-side / data-label-required) in addition to E-1 / PV-4A / PV-4B / SCHED / warning-label text.",
+    "labels": [
+      {
+        "refId": "rapid-shutdown-building-placard",
+        "necRef": "NEC 2020 690.56(C)",
+        "side": "general",
+        "required": true,
+        "placement": "At each service equipment location to which the PV system(s) are connected, or an approved readily visible location (main service disconnect / meter-main)."
+      },
+      {
+        "refId": "rapid-shutdown-array-boundary-label",
+        "necRef": "NEC 2020 690.56(C)(2)",
+        "side": "general",
+        "required": true,
+        "placement": "On the rapid-shutdown initiation device and/or at the array boundary where conductor-control type must be identified."
+      },
+      {
+        "refId": "rapid-shutdown-switch-initiator-label",
+        "necRef": "NEC 2020 690.56(C)(3)",
+        "side": "general",
+        "required": true,
+        "placement": "On or within 1 m (3 ft) of the rapid-shutdown switch / initiation device."
+      },
+      {
+        "refId": "pv-system-dc-disconnect",
+        "necRef": "NEC 2020 690.13(B)",
+        "side": "general",
+        "required": false,
+        "placement": "On the DC / PV system disconnecting means enclosure."
+      },
+      {
+        "refId": "energized-in-open-position-warning",
+        "necRef": "NEC 2020 690.13(B) / 690.15",
+        "side": "general",
+        "required": true,
+        "placement": "On PV system disconnecting means where line and load terminals may be energized in the open position (typical of PV disconnects fed from both directions)."
+      },
+      {
+        "refId": "do-not-touch-terminals-warning",
+        "necRef": "NEC 2020 690.13(B)",
+        "side": "general",
+        "required": false,
+        "placement": "On DC disconnects, combiner boxes, and inverter DC input where energized terminals are accessible."
+      },
+      {
+        "refId": "photovoltaic-power-source-conduit",
+        "necRef": "NEC 2020 690.31(D)",
+        "side": "general",
+        "required": false,
+        "placement": "On exposed raceways, cable trays, cable assemblies, enclosures, combiner/junction box covers, and at intervals not exceeding 10 ft (3 m) and at turns/above-below penetrations."
+      },
+      {
+        "refId": "dc-photovoltaic-power-source-ratings",
+        "necRef": "NEC 2020 690.53",
+        "side": "general",
+        "required": false,
+        "placement": "On the DC PV system disconnecting means or the PV electronic power conversion equipment (inverter/optimizer)."
+      },
+      {
+        "refId": "ac-point-of-connection-disconnect",
+        "necRef": "NEC 2020 690.54 / 705.10",
+        "side": "general",
+        "required": true,
+        "placement": "On the AC disconnecting means at the point of interconnection."
+      },
+      {
+        "refId": "ac-disconnect-marking",
+        "necRef": "NEC 2020 690.13 / 705.20",
+        "side": "general",
+        "required": true,
+        "placement": "On the exterior AC disconnect switch (typically near the utility meter)."
+      },
+      {
+        "refId": "backfeed-breaker-do-not-relocate",
+        "necRef": "",
+        "side": "load-side-only",
+        "required": false,
+        "placement": "On the distribution equipment (main panel/subpanel) adjacent to the back-fed breaker from the PV/power source."
+      },
+      {
+        "refId": "dual-power-source-inverter-output",
+        "necRef": "NEC 2020 705.10",
+        "side": "general",
+        "required": true,
+        "placement": "On the main service panel / meter-main and any panel fed by more than one source."
+      },
+      {
+        "refId": "multiple-sources-of-power-directory",
+        "necRef": "NEC 2020 705.10",
+        "side": "general",
+        "required": true,
+        "placement": "At each service equipment location or an approved readily visible location."
+      },
+      {
+        "refId": "line-side-tap-warning",
+        "necRef": "NEC 2020 705.11",
+        "side": "supply-side-only",
+        "required": true,
+        "placement": "At the supply-side connection point and on the service equipment/meter-main."
+      },
+      {
+        "refId": "photovoltaic-system-connected",
+        "necRef": "NEC 2020 705.10",
+        "side": "general",
+        "required": true,
+        "placement": "On the utility meter / service disconnect."
+      },
+      {
+        "refId": "ess-disconnect",
+        "necRef": "NEC 2020 706.15 / 706.16",
+        "side": "general",
+        "required": false,
+        "placement": "On the ESS disconnecting means."
+      },
+      {
+        "refId": "ess-master-placard",
+        "necRef": "NEC 2020 706  ·  IFC PENDING 1207",
+        "side": "general",
+        "required": false,
+        "placement": "At each external access point to the ESS and at the main service disconnect."
+      },
+      {
+        "refId": "grounding-electrode-conductor-marking",
+        "necRef": "NEC 2020 250.119 / 690.43 / 690.47",
+        "side": "general",
+        "required": true,
+        "placement": "At grounding electrode conductor terminations, array equipment-ground bonding points, and irreversible ground connections."
+      },
+      {
+        "refId": "inverter-listing-label",
+        "necRef": "NEC 2020 690.4 / 690.56 / 110.21(B)",
+        "side": "general",
+        "required": true,
+        "placement": "On the inverter / power conversion equipment enclosure."
+      }
+    ],
+    "counts": {
+      "total": 19,
+      "supplySideOnly": 1,
+      "loadSideOnly": 1,
+      "general": 17,
+      "requiredLabelsCitingALoadSideArticle": 0
+    },
+    "remaining705_12Mentions": "Every remaining 705.12 mention in the package is an explicitly NEGATED contrast (\"the 120% busbar rule (NEC 705.12(B)) does not apply to supply-side connections\" / \"N/A\" / \"applies only load-side\"). None is rendered as this design's governing interconnection article."
+  }
+}
