@@ -55,6 +55,8 @@ import { buildRackingBondingAuthority } from './rackingBonding';
 // kept as separate, separately-sourced facts.
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import { ARRAY_RACK_BONDING_DESIGN_SIZE, conductorAreaRank } from './groundingDesignStandard';
+// P13 — archived Enphase IQ8-series product-grounding evidence (hash-bound).
+import { enphaseProductGroundingEvidence } from './enphaseProductGroundingEvidence';
 import { buildComputeSystemShadow } from '../utils/computedRuns';
 import { collectEquipmentDocumentBlockers } from './equipmentProjection';
 import { classifyBlockerSeverity } from './severityPolicy';
@@ -1314,9 +1316,22 @@ export function buildPermitDesignSnapshot(
           cableConductorCount: listedCableAssembly?.conductorCount ?? null,
           equipmentInsulationClassification: null,   // no in-repo document records one
         },
-        // no grounding document is resolved on a live design today (lib/documents
-        // has no microinverter/cable-assembly installation-manual record) ⇒ PENDING.
-        documentEvidence: opts?.groundingDocumentEvidence ?? null,
+        // P13 — the ARCHIVED, HASH-BOUND Enphase IQ8 Series Installation and
+        // Operation Manual (IOM-00068-3.0-EN, sha256 65167d4d…) retrieved from the
+        // official documentation centre. It names the exact selected SKUs in its
+        // own bytes (§8.4 IQ8A-72-2-US; §6.4/§8 Q-12-10-240, part 840-00387), and
+        // §2.2 states the method EXPLICITLY: the listed models "do not require
+        // grounding electrode conductors (GEC), equipment grounding conductors
+        // (EGC), or grounded conductors (neutral)"; the microinverter carries a
+        // Class II double-insulated rating with integrated GFP.
+        //
+        // FAIL-CLOSED BY CONSTRUCTION: the accessor returns null unless the
+        // SELECTED model is one the document lists AND the connector architecture
+        // matches, so a different micro (IQ8AC, IQ7) or the MC4 architecture keeps
+        // this PENDING. An explicitly-supplied resolver evidence wins if present.
+        documentEvidence: opts?.groundingDocumentEvidence
+          ?? enphaseProductGroundingEvidence(
+            (microInverters[0]?.model ?? null) as string | null),
         conductorMaterial: _branchEgcObjs[0]?.conductorMaterial ?? 'Cu',
         conductorSizeNecDerived: _branchEgcObjs[0]?.conductorSize ?? null,
         conductorSizingBasis: _branchEgcObjs[0]?.sizingBasis ?? null,
