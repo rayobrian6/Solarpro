@@ -23,6 +23,7 @@
 // of §9 are tested against a PROCUREMENT-INSUFFICIENT INPUT built here. The
 // frozen fixture is never modified.
 // ═══════════════════════════════════════════════════════════════════════════
+import { claimed } from '@/lib/permit/snapshot/groundingAuthority';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
@@ -184,6 +185,7 @@ describe('§1 — E-1 open-air branch bonding projects the grounding authority',
     selection: {
       microSku: 'SYNTH-MICRO-1', cableSku: 'SYNTH-CABLE-1', moduleSku: 'SYNTH-MODULE-1',
       mountingBondingSystem: 'SYNTH-MOUNT-1', jurisdiction: 'SYNTHETIC TEST JURISDICTION',
+      connectorArchitecture: 'SYNTH-ARCH-1',
     },
     equipmentFacts: {
       cableConductorConstruction: 'two-wire, double-insulated', cableConductorCount: 2,
@@ -204,9 +206,10 @@ describe('§1 — E-1 open-air branch bonding projects the grounding authority',
     status: 'current', sectionOrPage: '§SYNTH-1', statedGroundingMethod: m,
     statedText: 'SYNTHETIC TEST TEXT', equipmentClassification: 'SYNTHETIC: Class II',
     applicability: {
-      microinverterSkus: ['SYNTH-MICRO-1'], cableAssemblySkus: ['SYNTH-CABLE-1'],
-      moduleSkus: ['SYNTH-MODULE-1'], mountingBondingSystems: ['SYNTH-MOUNT-1'],
-      jurisdictions: ['SYNTHETIC TEST JURISDICTION'], scope: 'exact-sku',
+      microinverterSkus: claimed('SYNTH-MICRO-1'), cableAssemblySkus: claimed('SYNTH-CABLE-1'),
+      moduleSkus: claimed('SYNTH-MODULE-1'), mountingBondingSystems: claimed('SYNTH-MOUNT-1'),
+      jurisdictions: claimed('SYNTHETIC TEST JURISDICTION'),
+      connectorArchitectures: claimed('SYNTH-ARCH-1'), scope: 'exact-sku',
       productLine: 'SYNTHETIC (test fixture)',
     },
   });

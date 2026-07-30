@@ -90,17 +90,153 @@ export const GROUNDING_NON_ORDERABLE_LABEL =
 /** Exactly what the document declares its grounding statement covers. Every list
  *  is EXACT SKUs / system identifiers as printed in the document — never a family
  *  wildcard. `scope` records how the document itself frames its coverage. */
+/**
+ * P13 — PER-DIMENSION EVIDENCE COVERAGE.
+ *
+ * The previous contract was a bare `string[]` per dimension, so THREE different
+ * situations were indistinguishable — and all three read as "not covered":
+ *   • the document deliberately does not address this dimension,
+ *   • the document addresses it and names something ELSE,
+ *   • we simply do not know what it covers.
+ *
+ * That is why no Enphase document could ever establish IQ8A product grounding:
+ * an empty `mountingBondingSystems` (Enphase does not document Roof Tech racking,
+ * and says so) was treated exactly like a mismatch. Making an empty array mean
+ * "not applicable" would have been the opposite error — it would let missing or
+ * unparsed data silently clear a dimension.
+ *
+ * So the disposition is now EXPLICIT and each one fails or passes deliberately:
+ *   CLAIMED        the document claims coverage; at least one claimed value MUST
+ *                  match the selected subject. A mismatched positive claim FAILS
+ *                  CLOSED even when the dimension is not required for the purpose
+ *                  — this is what keeps RT-MINI II evidence from establishing
+ *                  RT-MINI authority.
+ *   NOT_APPLICABLE the dimension is outside the document's evidentiary purpose.
+ *                  Requires a reason. Excluded from the verdict — and it
+ *                  establishes NOTHING about that dimension.
+ *   UNKNOWN        missing / unparsed / ambiguous. FAILS CLOSED, always.
+ * An ABSENT coverage record is treated as UNKNOWN.
+ */
+export type EvidenceCoverage =
+  | { disposition: 'CLAIMED'; values: string[] }
+  | { disposition: 'NOT_APPLICABLE'; reason: string }
+  | { disposition: 'UNKNOWN'; reason: string };
+
+/** What an evidence record is FOR. The purpose decides which dimensions are
+ *  REQUIRED; it never decides whether a positive claim may mismatch. */
+export type EvidencePurpose =
+  | 'IQ8A_PRODUCT_GROUNDING'
+  | 'QCABLE_INSTALLATION'
+  | 'RACKING_BONDING'
+  | 'UNSPECIFIED';
+
+/** The dimensions a coverage claim can address. */
+export type EvidenceDimension =
+  | 'microinverterSkus' | 'cableAssemblySkus' | 'moduleSkus'
+  | 'mountingBondingSystems' | 'jurisdictions' | 'connectorArchitectures';
+
+/**
+ * Which dimensions MUST be CLAIMED-and-matching for a given evidence purpose.
+ * This is the five-factor specificity contract, made purpose-aware rather than
+ * globally weakened: a product-grounding manual must still prove the exact micro
+ * SKU, the exact cable SKU, the connector architecture and the region — it is
+ * simply not required to document another manufacturer's racking.
+ */
+export const REQUIRED_DIMENSIONS: Record<EvidencePurpose, readonly EvidenceDimension[]> = {
+  IQ8A_PRODUCT_GROUNDING: ['microinverterSkus', 'cableAssemblySkus', 'connectorArchitectures', 'jurisdictions'],
+  QCABLE_INSTALLATION: ['cableAssemblySkus', 'connectorArchitectures', 'jurisdictions'],
+  // Racking bonding must prove the mounting system AND the module it bonds.
+  RACKING_BONDING: ['mountingBondingSystems', 'moduleSkus', 'jurisdictions'],
+  // Unknown purpose ⇒ the strictest historical contract.
+  UNSPECIFIED: ['microinverterSkus', 'cableAssemblySkus', 'moduleSkus', 'mountingBondingSystems', 'jurisdictions'],
+};
+
 export interface GroundingApplicabilityClaim {
-  microinverterSkus: string[];
-  cableAssemblySkus: string[];
-  moduleSkus: string[];
-  mountingBondingSystems: string[];
+  microinverterSkus: EvidenceCoverage;
+  cableAssemblySkus: EvidenceCoverage;
+  moduleSkus: EvidenceCoverage;
+  mountingBondingSystems: EvidenceCoverage;
   /** jurisdictions / code bases the statement is written against. */
-  jurisdictions: string[];
+  jurisdictions: EvidenceCoverage;
+  /** the branch cabling / connector architecture the statement applies to. */
+  connectorArchitectures: EvidenceCoverage;
   /** ONLY 'exact-sku' can establish authority for a selected SKU. */
   scope: 'exact-sku' | 'family' | 'series' | 'product-line' | 'unspecified';
   /** the product line the document belongs to ('IQ8 residential', 'IQ Commercial'…). */
   productLine: string | null;
+}
+
+/** Convenience constructors so call sites read as intent. */
+export const claimed = (...values: string[]): EvidenceCoverage => ({ disposition: 'CLAIMED', values });
+export const notApplicable = (reason: string): EvidenceCoverage => ({ disposition: 'NOT_APPLICABLE', reason });
+export const unknownCoverage = (reason: string): EvidenceCoverage => ({ disposition: 'UNKNOWN', reason });
+
+/** The outcome of testing ONE dimension against the selected subject. */
+export interface DimensionVerdict {
+  dimension: EvidenceDimension;
+  disposition: EvidenceCoverage['disposition'] | 'ABSENT';
+  /** true ⇒ this dimension is satisfied (matched, or excluded by purpose). */
+  ok: boolean;
+  /** true ⇒ the document positively claimed coverage and it MATCHED. */
+  matched: boolean;
+  failure: string | null;
+}
+
+/**
+ * Test one dimension. `required` comes from the evidence purpose.
+ *
+ * A mismatched CLAIM fails whether or not the dimension is required — a document
+ * that names the wrong product is wrong evidence, not irrelevant evidence.
+ */
+export function verifyDimension(
+  dimension: EvidenceDimension,
+  coverage: EvidenceCoverage | null | undefined,
+  selected: string | null | undefined,
+  required: boolean,
+  label: string = dimension,
+): DimensionVerdict {
+  const base = { dimension, matched: false };
+  if (!coverage) {
+    return { ...base, disposition: 'ABSENT', ok: false,
+      failure: `the document records no coverage state for ${label} (absent ⇒ UNKNOWN, fail-closed)` };
+  }
+  if (coverage.disposition === 'UNKNOWN') {
+    return { ...base, disposition: 'UNKNOWN', ok: false,
+      failure: `coverage for ${label} is UNKNOWN — ${coverage.reason || 'no reason recorded'} (fail-closed)` };
+  }
+  if (coverage.disposition === 'NOT_APPLICABLE') {
+    const hasReason = !!(coverage.reason && coverage.reason.trim());
+    if (!hasReason) {
+      return { ...base, disposition: 'NOT_APPLICABLE', ok: false,
+        failure: `${label} is marked NOT_APPLICABLE with no stated reason — a scope disclaimer must say why` };
+    }
+    if (required) {
+      return { ...base, disposition: 'NOT_APPLICABLE', ok: false,
+        failure: `${label} is REQUIRED for this evidence purpose but the document disclaims it (${coverage.reason})` };
+    }
+    // Outside the document's purpose, and it establishes nothing about it.
+    return { ...base, disposition: 'NOT_APPLICABLE', ok: true, failure: null };
+  }
+  // CLAIMED
+  const values = coverage.values ?? [];
+  if (values.length === 0) {
+    return { ...base, disposition: 'CLAIMED', ok: false,
+      failure: `${label} is marked CLAIMED but lists no values — an empty positive claim proves nothing` };
+  }
+  const sel = norm(selected);
+  if (!sel) {
+    return { ...base, disposition: 'CLAIMED', ok: false,
+      failure: `${label}: nothing is selected on the project to verify the claim against` };
+  }
+  const matched = values.some(v => norm(v) === sel
+    // a document may declare blanket coverage of the code base it is written against
+    || norm(v) === 'ALL US NEC JURISDICTIONS');
+  if (!matched) {
+    return { ...base, disposition: 'CLAIMED', ok: false,
+      failure: `the document CLAIMS ${label} coverage of [${values.join(', ')}] which does NOT include the `
+        + `selected '${selected ?? '—'}' — wrong product/system/jurisdiction, not merely uncovered` };
+  }
+  return { dimension, disposition: 'CLAIMED', ok: true, matched: true, failure: null };
 }
 
 /** A resolved manufacturer document that MIGHT establish the grounding method.
@@ -108,6 +244,9 @@ export interface GroundingApplicabilityClaim {
 export interface GroundingDocumentEvidence {
   documentId: string;
   documentClass: string;
+  /** P13 — what this evidence is FOR. Decides which dimensions are REQUIRED
+   *  (REQUIRED_DIMENSIONS). Absent ⇒ 'UNSPECIFIED' ⇒ the strictest contract. */
+  purpose?: EvidencePurpose;
   title: string | null;
   revision: string | null;
   /** SHA-256 of the archived file. Required — an unhashed document is unverifiable. */
@@ -136,6 +275,10 @@ export interface GroundingSelection {
   moduleSku: string | null;
   mountingBondingSystem: string | null;
   jurisdiction: string | null;
+  /** P13 — the project's branch cabling / connector architecture. A document for
+   *  the integrated-MC4 architecture cannot establish the method for a
+   *  drop-connector Q-Cable branch, and vice versa. */
+  connectorArchitecture?: string | null;
 }
 
 /** Equipment facts RECORDED on the result for transparency. Explicitly
@@ -165,6 +308,10 @@ export interface GroundingApplicabilityVerification {
   moduleCovered: boolean;
   mountingBondingCovered: boolean;
   jurisdictionCovered: boolean;
+  /** P13 — the evidence purpose that decided which dimensions were REQUIRED. */
+  evidencePurpose?: EvidencePurpose;
+  /** P13 — the per-dimension disposition + outcome, for the evidence artifact. */
+  dimensionVerdicts?: DimensionVerdict[];
   verdict: 'applicable' | 'not-applicable' | 'no-document';
   /** every unmet condition, human-readable (rendered on RS-1 / the evidence set). */
   failures: string[];
@@ -209,7 +356,8 @@ export function verifyGroundingDocumentApplicability(
       documentArchived: false, documentHashed: false, statesMethodExplicitly: false,
       sectionCited: false, scopeIsExactSku: false, microSkuExactMatch: false,
       cableSkuExactMatch: false, moduleCovered: false, mountingBondingCovered: false,
-      jurisdictionCovered: false, verdict: 'no-document',
+      jurisdictionCovered: false, evidencePurpose: 'UNSPECIFIED', dimensionVerdicts: [],
+      verdict: 'no-document',
       failures: [
         'no manufacturer document establishing the equipment grounding/bonding method for the '
         + 'open-air microinverter branch / cable-assembly section is archived and verified in this repository',
@@ -239,33 +387,47 @@ export function verifyGroundingDocumentApplicability(
       + 'statement can never establish the method for a selected SKU (no family-level assumption)',
     );
   }
-  const microSkuExactMatch = exactlyCovers(ap?.microinverterSkus, sel.microSku);
-  if (!microSkuExactMatch) {
-    failures.push(`the document does not explicitly cover the selected microinverter '${sel.microSku ?? '—'}' `
-      + `(covers: ${(ap?.microinverterSkus ?? []).join(', ') || 'none'})`);
-  }
-  const cableSkuExactMatch = exactlyCovers(ap?.cableAssemblySkus, sel.cableSku);
-  if (!cableSkuExactMatch) {
-    failures.push(`the document does not explicitly cover the selected cable assembly '${sel.cableSku ?? '—'}' `
-      + `(covers: ${(ap?.cableAssemblySkus ?? []).join(', ') || 'none'})`);
-  }
-  const moduleCovered = exactlyCovers(ap?.moduleSkus, sel.moduleSku);
-  if (!moduleCovered) {
-    failures.push(`the document does not explicitly cover the selected module '${sel.moduleSku ?? '—'}'`);
-  }
-  const mountingBondingCovered = exactlyCovers(ap?.mountingBondingSystems, sel.mountingBondingSystem);
-  if (!mountingBondingCovered) {
-    failures.push(`the document does not explicitly cover the selected mounting / bonding system '${sel.mountingBondingSystem ?? '—'}'`);
-  }
-  const jurisdictionCovered = coversJurisdiction(ap?.jurisdictions, sel.jurisdiction);
-  if (!jurisdictionCovered) {
-    failures.push(`the document's stated jurisdiction/code basis does not cover the project jurisdiction '${sel.jurisdiction ?? '—'}'`);
-  }
+  // ── P13 — PER-DIMENSION COVERAGE, REQUIRED-SET DRIVEN BY THE EVIDENCE PURPOSE ─
+  // Required dimensions must be CLAIMED and match. Non-required dimensions may be
+  // NOT_APPLICABLE (with a reason) — but a positive CLAIM that MISMATCHES fails
+  // closed either way, so wrong-generation evidence can never pass.
+  const purpose: EvidencePurpose = doc.purpose ?? 'UNSPECIFIED';
+  const required = new Set<EvidenceDimension>(REQUIRED_DIMENSIONS[purpose] ?? REQUIRED_DIMENSIONS.UNSPECIFIED);
+  const selectedFor: Record<EvidenceDimension, string | null> = {
+    microinverterSkus: sel.microSku ?? null,
+    cableAssemblySkus: sel.cableSku ?? null,
+    moduleSkus: sel.moduleSku ?? null,
+    mountingBondingSystems: sel.mountingBondingSystem ?? null,
+    jurisdictions: sel.jurisdiction ?? null,
+    connectorArchitectures: sel.connectorArchitecture ?? null,
+  };
+  const LABEL: Record<EvidenceDimension, string> = {
+    microinverterSkus: 'the selected microinverter',
+    cableAssemblySkus: 'the selected cable assembly',
+    moduleSkus: 'the selected module',
+    mountingBondingSystems: 'the selected mounting / bonding system',
+    jurisdictions: 'the project jurisdiction / code basis',
+    connectorArchitectures: 'the selected connector architecture',
+  };
+  const ALL_DIMENSIONS: EvidenceDimension[] = ['microinverterSkus', 'cableAssemblySkus', 'moduleSkus',
+    'mountingBondingSystems', 'jurisdictions', 'connectorArchitectures'];
+  const dimensionVerdicts: DimensionVerdict[] = ALL_DIMENSIONS.map(d =>
+    verifyDimension(d, ap?.[d], selectedFor[d], required.has(d), LABEL[d]));
+  for (const dv of dimensionVerdicts) if (dv.failure) failures.push(dv.failure);
+
+  const verdictOf = (d: EvidenceDimension) => dimensionVerdicts.find(x => x.dimension === d)!;
+  const microSkuExactMatch = verdictOf('microinverterSkus').matched;
+  const cableSkuExactMatch = verdictOf('cableAssemblySkus').matched;
+  const moduleCovered = verdictOf('moduleSkus').matched;
+  const mountingBondingCovered = verdictOf('mountingBondingSystems').matched;
+  const jurisdictionCovered = verdictOf('jurisdictions').matched;
 
   return {
     documentPresent: true, documentVerified, documentCurrent, documentArchived, documentHashed,
     statesMethodExplicitly, sectionCited, scopeIsExactSku,
     microSkuExactMatch, cableSkuExactMatch, moduleCovered, mountingBondingCovered, jurisdictionCovered,
+    evidencePurpose: purpose,
+    dimensionVerdicts,
     verdict: failures.length === 0 ? 'applicable' : 'not-applicable',
     failures,
   };

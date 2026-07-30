@@ -42,6 +42,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { GroundingDocumentEvidence } from './groundingAuthority';
+import { claimed, notApplicable } from './groundingAuthority';
 
 /** SHA-256 of the archived IQ8 Series IOM bytes. The integrity anchor: if the
  *  published file changes, this no longer matches and authority must re-verify. */
@@ -84,6 +85,7 @@ export function enphaseProductGroundingEvidence(
   return {
     documentId: IQ8_SERIES_IOM_DOCUMENT_ID,
     documentClass: 'manufacturer-installation-and-operation-manual',
+    purpose: 'IQ8A_PRODUCT_GROUNDING',
     title: 'IQ8, IQ8+, IQ8M, IQ8A, and IQ8H Microinverters — Installation and Operation Manual',
     revision: '3.0 (May 2026)',
     documentHash: IQ8_SERIES_IOM_SHA256,
@@ -105,19 +107,23 @@ export function enphaseProductGroundingEvidence(
       // EXACT SKUs the archived document itself names — verified against the
       // parsed bytes, not against a family name:
       //   §8.4  "IQ8A-72-2-US Microinverter specifications"
-      //   §6.4  "Cable model … Q-12-10-240 … 1.3 m (50") Portrait"
-      //   §8    "Part number 840-00387  Model Q-12-10-240  Maximum voltage 277 VAC"
-      microinverterSkus: ['IQ8-60-2-US', 'IQ8PLUS-72-2-US', 'IQ8M-72-2-US', 'IQ8A-72-2-US', 'IQ8H-240-72-2-US'],
-      cableAssemblySkus: ['Q-12-10-240', 'Q-12-17-240', 'Q-12-20-200'],
-      // The grounding statement is written against the MICROINVERTER + its cable
-      // system and is module-agnostic; the document constrains modules only by
-      // requiring PV Wire / PV Cable labelled DC leads for GFP support.
-      moduleSkus: [],
-      // EXPRESSLY EMPTY. §2.2 defers mounting-bracket/racking bonding to the AHJ
-      // and to UL 2703 hardware, so this document cannot establish a racking
-      // bonding method for any mounting system.
-      mountingBondingSystems: [],
-      jurisdictions: ['North America', 'NEC', 'CSA C22.1'],
+      //   §6.4 / §8  "Q-12-10-240 … 1.3 m (50") Portrait"; part number 840-00387
+      microinverterSkus: claimed('IQ8-60-2-US', 'IQ8PLUS-72-2-US', 'IQ8M-72-2-US', 'IQ8A-72-2-US', 'IQ8H-240-72-2-US'),
+      cableAssemblySkus: claimed('Q-12-10-240', 'Q-12-17-240', 'Q-12-20-200'),
+      connectorArchitectures: claimed(IQ8_SERIES_IOM_CONNECTOR_ARCHITECTURE),
+      jurisdictions: claimed('ALL US NEC JURISDICTIONS', 'North America', 'NEC', 'CSA C22.1'),
+      // NOT_APPLICABLE — outside this document's evidentiary purpose. This is a
+      // scope disclaimer with a stated reason; it establishes NOTHING about
+      // racking bonding, does not clear the rail selection, and never populates
+      // gnd-array-bond.bondingMethod.
+      mountingBondingSystems: notApplicable(
+        'This evidence establishes IQ8A PRODUCT grounding requirements. §2.2 expressly leaves bonding of the '
+        + 'mounting bracket to the racking to the AHJ and to UL 2703 mounting hardware, so the document does '
+        + 'not — and cannot — document another manufacturer\'s racking system.'),
+      moduleSkus: notApplicable(
+        'The grounding statement concerns the microinverter and its cable system and is module-agnostic. The '
+        + 'document constrains modules only by requiring DC leads labelled PV Wire / PV Cable to support the '
+        + 'integrated GFP; that is an installation condition, not document applicability.'),
       // Justified: the exact selected SKUs appear verbatim in the archived bytes.
       scope: 'exact-sku',
       productLine: 'IQ8 residential (IQ/Q-Cable drop-connector architecture)',

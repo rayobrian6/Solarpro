@@ -23,6 +23,7 @@
 // such. None of it is committed as real manufacturer evidence, and none of it
 // reaches a rendered package — the live outcome stays PENDING.
 // ═══════════════════════════════════════════════════════════════════════════
+import { claimed, notApplicable, unknownCoverage } from '@/lib/permit/snapshot/groundingAuthority';
 import { describe, expect, it, beforeAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -60,6 +61,8 @@ const SELECTION: GroundingSelection = {
   moduleSku: 'Q.PEAK DUO BLK ML-G10+ 400',
   mountingBondingSystem: 'RT-MINI',
   jurisdiction: 'Madison County Building & Zoning',
+  // P13 — the project's branch cabling architecture is now a verified dimension.
+  connectorArchitecture: 'iq-q-cable-drop-connector',
 };
 
 /** A SYNTHETIC, clearly-fake exactly-applicable document. */
@@ -81,11 +84,14 @@ function syntheticExactDoc(
     statedText: 'SYNTHETIC TEST TEXT — used only to prove the resolver requires an explicit document statement.',
     equipmentClassification: 'SYNTHETIC: Class II double-insulated (test fixture)',
     applicability: {
-      microinverterSkus: ['IQ8A-72-2-US'],
-      cableAssemblySkus: ['Q-12-10-240'],
-      moduleSkus: ['Q.PEAK DUO BLK ML-G10+ 400'],
-      mountingBondingSystems: ['RT-MINI'],
-      jurisdictions: ['Madison County Building & Zoning'],
+      // P13 — coverage dispositions are EXPLICIT. This synthetic doc CLAIMS every
+      // dimension, so it exercises the strictest path: each claim must match.
+      microinverterSkus: claimed('IQ8A-72-2-US'),
+      cableAssemblySkus: claimed('Q-12-10-240'),
+      moduleSkus: claimed('Q.PEAK DUO BLK ML-G10+ 400'),
+      mountingBondingSystems: claimed('RT-MINI'),
+      jurisdictions: claimed('Madison County Building & Zoning'),
+      connectorArchitectures: claimed('iq-q-cable-drop-connector'),
       scope: 'exact-sku',
       productLine: 'SYNTHETIC IQ8 residential (test fixture)',
     },
@@ -110,11 +116,12 @@ function syntheticCommercialQdDoc(): GroundingDocumentEvidence {
     statedText: 'SYNTHETIC TEST TEXT — commercial QD-Cable guidance.',
     equipmentClassification: 'SYNTHETIC: Class II (test fixture)',
     applicability: {
-      microinverterSkus: ['IQ8P-3P-72-M-US', 'IQ8H-208-72-2-US'],
-      cableAssemblySkus: ['QD-CABLE-3P-2M'],
-      moduleSkus: ['Q.PEAK DUO BLK ML-G10+ 400'],
-      mountingBondingSystems: ['RT-MINI'],
-      jurisdictions: ['Madison County Building & Zoning'],
+      microinverterSkus: claimed('IQ8P-3P-72-M-US', 'IQ8H-208-72-2-US'),
+      cableAssemblySkus: claimed('QD-CABLE-3P-2M'),
+      moduleSkus: claimed('Q.PEAK DUO BLK ML-G10+ 400'),
+      mountingBondingSystems: claimed('RT-MINI'),
+      jurisdictions: claimed('Madison County Building & Zoning'),
+      connectorArchitectures: claimed('qd-cable-3-phase'),
       scope: 'product-line',
       productLine: 'SYNTHETIC IQ Commercial (test fixture)',
     },
@@ -273,35 +280,35 @@ describe('4 — a missing or mismatched document resolves to PENDING (C), fail-c
     {
       name: 'different micro SKU (IQ8PLUS instead of IQ8A)',
       doc: syntheticExactDoc('no-additional-equipment-grounding-conductor', {
-        applicability: { ...syntheticExactDoc(null).applicability, microinverterSkus: ['IQ8PLUS-72-2-US'] },
+        applicability: { ...syntheticExactDoc(null).applicability, microinverterSkus: claimed('IQ8PLUS-72-2-US') },
       }),
       failMatch: /selected microinverter/i,
     },
     {
       name: 'different cable SKU',
       doc: syntheticExactDoc('additional-equipment-grounding-conductor', {
-        applicability: { ...syntheticExactDoc(null).applicability, cableAssemblySkus: ['Q-12-17-240'] },
+        applicability: { ...syntheticExactDoc(null).applicability, cableAssemblySkus: claimed('Q-12-17-240') },
       }),
       failMatch: /selected cable assembly/i,
     },
     {
       name: 'module not covered',
       doc: syntheticExactDoc('no-additional-equipment-grounding-conductor', {
-        applicability: { ...syntheticExactDoc(null).applicability, moduleSkus: ['SOME-OTHER-MODULE-400'] },
+        applicability: { ...syntheticExactDoc(null).applicability, moduleSkus: claimed('SOME-OTHER-MODULE-400') },
       }),
       failMatch: /selected module/i,
     },
     {
       name: 'mounting / bonding system not covered',
       doc: syntheticExactDoc('no-additional-equipment-grounding-conductor', {
-        applicability: { ...syntheticExactDoc(null).applicability, mountingBondingSystems: ['RT-MINI II'] },
+        applicability: { ...syntheticExactDoc(null).applicability, mountingBondingSystems: claimed('RT-MINI II') },
       }),
       failMatch: /mounting \/ bonding system/i,
     },
     {
       name: 'jurisdiction not covered',
       doc: syntheticExactDoc('no-additional-equipment-grounding-conductor', {
-        applicability: { ...syntheticExactDoc(null).applicability, jurisdictions: ['City of Phoenix'] },
+        applicability: { ...syntheticExactDoc(null).applicability, jurisdictions: claimed('City of Phoenix') },
       }),
       failMatch: /project jurisdiction/i,
     },

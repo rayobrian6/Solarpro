@@ -1309,6 +1309,20 @@ export function buildPermitDesignSnapshot(
           mountingBondingSystem: (mountDb as { id?: string; model?: string } | null)?.model
             ?? (mountDb as { id?: string } | null)?.id ?? null,
           jurisdiction: codeAuthority.ahjName ?? null,
+          // P13 — the branch cabling architecture is a verified applicability
+          // dimension (a document written for the integrated-MC4 architecture
+          // cannot establish the method for a drop-connector Q-Cable branch).
+          //
+          // NOT YET DERIVED FROM THE SELECTED CABLE. Populating it flips the live
+          // Braidon open-air outcome PENDING -> NO_SEPARATE_EGC_REQUIRED on the
+          // archived IOM-00068-3.0-EN evidence (verified: 16 -> 15 requirements,
+          // racking/rail requirements correctly unaffected). Eight existing tests
+          // assert the LIVE package is PENDING and must be repointed at a
+          // synthetic pending snapshot first, preserving the property they guard
+          // (a pending package renders the non-assertion label on every branch
+          // row). Left null so the suite stays green and that flip lands as its
+          // own reviewed change.
+          connectorArchitecture: null,
         },
         equipmentFacts: {
           // RECORDED, NON-DETERMINATIVE (never reaches the outcome selector).
