@@ -47,10 +47,27 @@ export const REGISTRY_DEPLOYMENT: Record<string, { expectedTables: string[] }> =
   // same statically-verified, identifier-scoped permit. Run AFTER 115: the
   // reviewer role vocabulary it enforces is migration 115's.
   '116': { expectedTables: ['engineering_review_records'] },
+  // TAC WS-19 (2026-07-29) — SolarPro's OWN central AHJ / adopted-code registry.
+  // The "AHJ registry" the app serves today is the bundled TypeScript table
+  // lib/jurisdictions/ahj-national.ts: ~4,000 records that carry an NEC year and
+  // NOTHING ELSE — no IBC/IRC/IFC adoption, no effective dates, no source URLs,
+  // no hashes — so it can never clear CODE-AUTHORITY-INCOMPLETE, and the only
+  // other provider was an EXTERNAL registry behind AHJ_REGISTRY_TOKEN. This table
+  // makes SolarPro's own Neon registry the first provider consulted and retains
+  // retrievals + governed operator verifications centrally (research once →
+  // retain → version with evidence → reuse for every project in that AHJ).
+  //
+  // Same migration shape as 113-116: pure additive CREATE TABLE / CREATE INDEX
+  // IF NOT EXISTS, no ALTER, no DO block, no seeded rows and — critically — no
+  // seeded ADOPTION (a copied in-code row is retained as
+  // provenance='seeded-unprovenanced', which the provider REFUSES to serve as
+  // authority). So it goes through the same statically-verified,
+  // identifier-scoped permit. Independent of 113-116; order does not matter.
+  '117': { expectedTables: ['ahj_registry'] },
 };
 
 /** The migration identifiers this module governs, in ceremony order. */
-export const REGISTRY_SEQUENCE = ['113', '114', '115', '116'] as const;
+export const REGISTRY_SEQUENCE = ['113', '114', '115', '116', '117'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;

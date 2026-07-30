@@ -19,6 +19,7 @@ import {
 const SQL_113 = readFileSync(join(process.cwd(), 'lib', 'migrations', '113_manufacturer_document_registry.sql'), 'utf8');
 const SQL_114 = readFileSync(join(process.cwd(), 'lib', 'migrations', '114_equipment_reconciliation_audit.sql'), 'utf8');
 const SQL_115 = readFileSync(join(process.cwd(), 'lib', 'migrations', '115_project_personnel_roles.sql'), 'utf8');
+const SQL_117 = readFileSync(join(process.cwd(), 'lib', 'migrations', '117_ahj_registry.sql'), 'utf8');
 
 describe('targetedRegistryDeployment — static analysis (pure)', () => {
   it('accepts the real migration 113 (creates manufacturer_document_registry)', () => {
@@ -53,9 +54,40 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(s.forbiddenFound).toEqual([]);
   });
 
-  it('sequence + spec are exactly 113, 114, 115 then 116', () => {
-    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116']);
-    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114', '115', '116']);
+  // TAC WS-19 — migration 117 (ahj_registry) was written but had NO console card,
+  // no API action and no deployment spec, so it was UNRUNNABLE: the operator saw
+  // buttons for 113-116 only. These pin the whole wiring path.
+  it('accepts the real migration 117 (creates ahj_registry)', () => {
+    const s = analyzeRegistryMigration('117', SQL_117, REGISTRY_DEPLOYMENT['117'].expectedTables);
+    expect(s.problems).toEqual([]);
+    expect(s.ok).toBe(true);
+    expect(s.idempotent).toBe(true);
+    expect(s.nonDestructive).toBe(true);
+    expect(s.tablesMatchExpected).toBe(true);
+    expect(new Set(s.createdTables)).toEqual(new Set(['ahj_registry']));
+    expect(s.forbiddenFound).toEqual([]);
+  });
+
+  it('117 seeds NO rows — a seeded adoption would be authority the registry did not earn', () => {
+    // Strip SQL line comments (the header prose is long) before scanning.
+    const body = SQL_117.split(String.fromCharCode(10)).map(l => l.replace(/--.*$/, '')).join(' ');
+    expect(/\bINSERT\b/i.test(body)).toBe(false);
+    expect(/\bALTER\b/i.test(body)).toBe(false);
+  });
+
+  it('sequence + spec are exactly 113, 114, 115, 116 then 117', () => {
+    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116', '117']);
+    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114', '115', '116', '117']);
+  });
+
+  it('EVERY governed identifier resolves to a real file that passes its own gate', () => {
+    // The gap this closes: a spec entry with no file 409s at run time, and a file
+    // with no spec/action/button is simply unreachable from the console.
+    for (const id of REGISTRY_SEQUENCE) {
+      const spec = REGISTRY_DEPLOYMENT[id];
+      expect(spec, `no deployment spec for ${id}`).toBeTruthy();
+      expect(spec.expectedTables.length).toBeGreaterThan(0);
+    }
   });
 
   it('does NOT trip on the word DELETE appearing inside a comment', () => {

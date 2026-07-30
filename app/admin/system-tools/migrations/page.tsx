@@ -238,12 +238,13 @@ export default function MigrationConsolePage() {
       {/* Targeted authority-registry deployment (current priority) — migrations 113 + 114 */}
       <section className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-4">
         <div className="flex items-center gap-3 mb-1">
-          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 + 114 + 115</h2>
+          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 → 117</h2>
           <Pill ok={null}>SCOPED</Pill>
         </div>
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm font-semibold px-3 py-2 mb-3">
-          Run <b>113 first</b>, verify it applied, <b>then 114</b>, <b>then 115</b>. Each is idempotent (a second run is a safe
-          no-op). Targeted deployment only — the historical baseline remains incomplete and is NOT advanced.
+          Run <b>113 first</b>, verify it applied, <b>then 114</b>, <b>then 115</b>, <b>then 116</b>. <b>117 is independent</b> —
+          it may be run at any time, before or after the others. Each is idempotent (a second run is a safe no-op).
+          Targeted deployment only — the historical baseline remains incomplete and is NOT advanced.
         </div>
         <p className="text-xs text-slate-400 mb-3">
           Each button runs <b>only</b> its one migration through the canonical runner under a bounded, identifier-scoped
@@ -252,10 +253,19 @@ export default function MigrationConsolePage() {
           immutable reconciliation-audit tables). <b>115</b> creates <code>personnel_roles</code> +
           <code>project_personnel_assignments</code> (the designer / preparer / reviewer / engineer-of-record / approving-engineer
           roles of record — until it exists the planset asks for the designer on every project).
+          <b> 116</b> creates <code>engineering_review_records</code> (the digest-bound engineering review that makes
+          ENGINEERING-REVIEW-PENDING clearable by a real licensed workflow; run after 115 — it enforces 115's reviewer roles).
+          <b> 117</b> creates <code>ahj_registry</code> — SolarPro's OWN central AHJ / adopted-code registry. The AHJ data the
+          app serves today is a bundled TypeScript table of ~4,000 records carrying an NEC year and nothing else: no
+          IBC/IRC/IFC adoption, no effective dates, no source URLs, no hashes — which is why every planset prints
+          <code>IBC/IRC/IFC PENDING</code>. This table makes SolarPro's own registry the first provider consulted and retains
+          retrievals + governed operator verifications centrally (research once, reuse for every project in that AHJ). It
+          seeds NO adoption: a copied in-code row is retained as <code>seeded-unprovenanced</code>, which the provider
+          refuses to serve as authority.
           Server-side each is statically verified <b>idempotent CREATE-TABLE-only</b>
           and <b>non-destructive</b> (no DROP / DELETE / TRUNCATE / ALTER / UPDATE / INSERT), creates exactly the expected
           table(s), success is read back from the ledger + run history + the actual tables, and the window auto-relocks.
-          Neither runs any other migration, and neither marks the historical baseline verified. Requires super_admin + MFA +
+          None runs any other migration, and none marks the historical baseline verified. Requires super_admin + MFA +
           fresh TOTP + reason + typed production confirmation + production allowlist +
           <code>MIGRATION_ALLOW_PRODUCTION_EXECUTION=true</code>.
         </p>
@@ -272,6 +282,9 @@ export default function MigrationConsolePage() {
           <RegistryButton id="116" label="Run migration 116…" tables="engineering_review_records"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-engineering-review-116" onResult={(v) => setRegistry((s) => ({ ...s, ['116']: v }))} result={registry['116']} />
+          <RegistryButton id="117" label="Run migration 117…" tables="ahj_registry"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-ahj-registry-117" onResult={(v) => setRegistry((s) => ({ ...s, ['117']: v }))} result={registry['117']} />
         </div>
       </section>
 

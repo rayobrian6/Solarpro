@@ -427,7 +427,9 @@ describe('AAC WS-9 · engineering review clears ONLY with a digest match AND a l
   });
 
   it('migration 116 is governed exactly like 113-115, and creates one table', () => {
-    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116']);
+    // 117 (ahj_registry) joined the governed set — this test is about 116's
+    // governance, so assert 116 IS governed rather than pinning the set's length.
+    expect(REGISTRY_SEQUENCE).toContain('116');
     expect(REGISTRY_DEPLOYMENT['116'].expectedTables).toEqual(['engineering_review_records']);
     const raw = readFileSync(join(process.cwd(), 'lib/migrations/116_engineering_review_records.sql'), 'utf8');
     expect(raw).toMatch(/CREATE TABLE IF NOT EXISTS engineering_review_records/);

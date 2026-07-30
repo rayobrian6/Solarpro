@@ -244,6 +244,7 @@ export async function POST(req: NextRequest) {
     'execute-reconciliation-114', // mutation: TARGETED deployment of ONLY migration 114 (reconciliation audit + digest invalidations)
     'execute-personnel-115',    // mutation: TARGETED deployment of ONLY migration 115 (personnel roles of record — AAC WS-6)
     'execute-engineering-review-116', // mutation: TARGETED deployment of ONLY migration 116 (digest-bound engineering review — AAC WS-8/WS-9)
+    'execute-ahj-registry-117', // mutation: TARGETED deployment of ONLY migration 117 (SolarPro's own central AHJ / adopted-code registry — TAC WS-19)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -316,7 +317,12 @@ export async function POST(req: NextRequest) {
   // the same pure additive CREATE-TABLE-only shape, through the same static gate.
   const isPersonnel115 = action === 'execute-personnel-115';
   const isEngineeringReview116 = action === 'execute-engineering-review-116';
-  const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115 || isEngineeringReview116;
+  // TAC WS-19 — migration 117 (ahj_registry): SolarPro's own central AHJ /
+  // adopted-code registry. Same pure additive CREATE-TABLE-only shape, through
+  // the same static gate and the same identifier-scoped permit.
+  const isAhjRegistry117 = action === 'execute-ahj-registry-117';
+  const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115
+    || isEngineeringReview116 || isAhjRegistry117;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
@@ -623,7 +629,8 @@ export async function POST(req: NextRequest) {
       const identifier = isRegistry113 ? '113'
         : isReconciliation114 ? '114'
         : isPersonnel115 ? '115'
-        : '116';
+        : isEngineeringReview116 ? '116'
+        : '117';
       const spec = REGISTRY_DEPLOYMENT[identifier];
       const reason = (body?.reason as string | undefined)?.trim();
       if (!reason) {
