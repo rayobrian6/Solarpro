@@ -116,21 +116,54 @@ export async function findAhjRegistryRow(q: {
     SELECT * FROM ahj_registry WHERE UPPER(state_code) = ${state}
   `;
   const all = (rows as Record<string, unknown>[]).map(rowToRecord);
+  return matchRegistryRows(all, { county: q.county, city: q.city });
+}
+
+/**
+ * PURE row matching — which registry row governs a jurisdiction query.
+ *
+ * A COUNTY-LEVEL row is one with no municipality of its own. The AHJ dataset this
+ * registry is seeded from spells that as the SENTINEL city "Unincorporated"
+ * rather than as a blank, so a `!row.city` test alone missed every seeded county
+ * row: `il-madison-county` (city='Unincorporated') was unfindable by the ONLY
+ * query an unincorporated parcel makes ({stateCode:'IL', county:'Madison
+ * County'}), and the internal provider reported NO_COVERAGE with "no registry
+ * row" while the row sat right there. A blank city means the same thing and is
+ * still accepted.
+ *
+ * Extracted as a pure function so this can be tested without a database — the
+ * defect above shipped precisely because the matching was only reachable through
+ * a live query.
+ */
+export function isCountyLevelRow(r: AhjRegistryRow): boolean {
+  const c = norm(r.city);
+  return !c || c === 'unincorporated';
+}
+
+export function matchRegistryRows(
+  all: AhjRegistryRow[],
+  q: { county?: string | null; city?: string | null },
+): { match: AhjRegistryRow | null; allMatches: AhjRegistryRow[]; matchMethod: string | null } {
   const county = norm(q.county);
   const city = norm(q.city);
-  // city-level authority first (incorporated parcel), then county authority.
-  const cityMatches = city ? all.filter(r => norm(r.city) === city) : [];
+  // City-level authority first (incorporated parcel), then county authority. The
+  // sentinel is excluded from the city branch so a query can never match a county
+  // row as if it were a municipality.
+  const cityMatches = city && city !== 'unincorporated'
+    ? all.filter(r => !isCountyLevelRow(r) && norm(r.city) === city)
+    : [];
   if (cityMatches.length) {
     return { match: cityMatches[0], allMatches: cityMatches, matchMethod: 'state+city' };
   }
   const countyMatches = county
-    ? all.filter(r => norm(r.county) === county && !norm(r.city))
+    ? all.filter(r => norm(r.county) === county && isCountyLevelRow(r))
     : [];
   if (countyMatches.length) {
     return { match: countyMatches[0], allMatches: countyMatches, matchMethod: 'state+county' };
   }
   return { match: null, allMatches: [], matchMethod: null };
 }
+
 
 /** A row is ADOPTION AUTHORITY only when it carries the evidence envelope the
  *  code-authority gate demands: an evidence-bearing provenance, a source, a
