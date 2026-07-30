@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
+import { unresolvedProcurementAuthority } from '../fixtures/synthetic-unresolved-procurement';
 import { roofProject } from '../../test-fixtures/roofProject';
 import {
   buildQCableTopology, evaluateQCableSolutions, evaluateBranchReassignment,
@@ -521,7 +522,7 @@ describe('C — the conduit-fill authority', () => {
       routeSegments: [], physicalRaceways: [], feederRacewayResolved: true,
       isMicro: false, branchRacewayAmbiguous: false, branchRacewayReasons: [],
       racewaySegmentConflicts: [], qcableTopology: null, qcableEvaluation: null,
-      procurementSufficiency: null,
+      procurementSufficiency: null, qcableProcurement: null,
     });
     const st = out.states['CONDUIT-FILL-PENDING'];
     expect(st.cleared).toBe(true);
@@ -541,7 +542,7 @@ describe('C — the conduit-fill authority', () => {
       routeSegments: [], physicalRaceways: [], feederRacewayResolved: true,
       isMicro: false, branchRacewayAmbiguous: false, branchRacewayReasons: [],
       racewaySegmentConflicts: [], qcableTopology: null, qcableEvaluation: null,
-      procurementSufficiency: null,
+      procurementSufficiency: null, qcableProcurement: null,
     });
     const st = out.states['CONDUIT-FILL-PENDING'];
     expect(st.cleared).toBe(false);
@@ -576,7 +577,11 @@ describe('C — the conduit-fill authority', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 describe('the built package: WS-7 clears the fill, WS-5 evaluates the option space', () => {
   const input: any = clone(braidonOriginalAuditFixture);
-  const html = generatePermitHTML(input);
+  // WS-2 — the option-space evaluation is what the engine produces while the
+  // procurement is UNRESOLVED. The live design now resolves it from archived
+  // manufacturer authority, so that state is manufactured here by refusing the
+  // field-termination authority (tests/fixtures/synthetic-unresolved-procurement).
+  const html = generatePermitHTML(input, undefined, unresolvedProcurementAuthority() as any);
   const snap = input._snapshot as PermitDesignSnapshot;
   const el = snap.electrical as unknown as Record<string, any>;
 

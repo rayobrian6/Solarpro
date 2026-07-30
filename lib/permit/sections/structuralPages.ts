@@ -1839,10 +1839,26 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // meaningful, fail-closed case). When sufficient, SCHED stays unchanged (no extra
   // line ⇒ no page-fit regression); the base cable quantity + "sanity OK" note
   // already print on PV-4B's LISTED AC TRUNK CABLE ASSEMBLY block.
-  const _schedTrunkBomNote = (_schedAsm.present && _schedPS?.insufficient)
-    ? `<div style="padding:1px 4px;font-size:6.4px;line-height:1.15;border:var(--border);border-top:none;background:#fdecec;">
-        <strong>AC TRUNK CABLE (BOM):</strong> base cable quantity <span class="mono">${_schedPS.procurementLengthFt ?? '—'} ft</span> = CURRENT BASE CABLE QUANTITY &mdash; <strong style="color:#b00">PROCUREMENT INSUFFICIENCY: short of the ${_schedPS.totalDesignedInstalledFt} ft designed-installed path by ${_schedPS.deficitFt} ft. NON-ORDERABLE / PENDING SOLUTION</strong> (verified listed cable-extension required; QCABLE-PROCUREMENT-INSUFFICIENT, see RS-1).</div>`
-    : '';
+  // WS-2 — the AC-trunk note now states the RESOLVED PROCUREMENT when one exists.
+  // A measured shortfall with a designed purchase is not "PENDING SOLUTION"; and
+  // the installed requirement is never printed as a purchase quantity.
+  const _schedQP = _schedSnap?.electrical?.qcableProcurement ?? null;
+  const _schedTrunkBomNote = (() => {
+    if (!_schedAsm.present) return '';
+    if (_schedQP?.present && _schedQP.compatibilityStatus === 'VERIFIED') {
+      const _alloc = _schedQP.branchAllocations.filter(a => a.allocatedSections > 0)
+        .map(a => `${escapeH(a.branchLabel)} +${a.allocatedSections}×${_schedQP.stockUnitLengthFt && _schedQP.stockUnitConnectorSections
+          ? (Math.round((_schedQP.stockUnitLengthFt / _schedQP.stockUnitConnectorSections) * 100) / 100) : '—'} ft`).join(', ');
+      return `<div style="padding:1px 4px;font-size:6.4px;line-height:1.15;border:var(--border);border-top:none;background:#eef7ee;">
+        <strong>AC TRUNK CABLE (PROCUREMENT):</strong> INSTALLED requirement <span class="mono">${_schedQP.topologyConstrainedInstalledDeficitFt} ft</span> additional on a per-branch basis (${_alloc || 'none'}) &mdash; an INSTALLED length, not an order quantity.
+        ORDER: <span class="mono">${escapeH(String(_schedQP.stockUnitsRequired ?? '—'))} × ${escapeH(_schedQP.stockUnitDescription ?? _schedQP.selectedStockSku ?? '—')}</span>
+        covering all ${_schedQP.totalSectionsRequired} connector section(s) (${_schedQP.baseSectionsOrdered} base + ${_schedQP.additionalSectionsRequired} allocated); ${_schedQP.additionalStockUnitsRequired === 0 ? 'no additional package beyond the base order' : `${_schedQP.additionalStockUnitsRequired} package(s) beyond the base order`}.
+        Expected remaining stock <span class="mono">${_schedQP.expectedRemainingStockFt ?? '—'} ft</span>. Method: cut listed cable + IQ Field Wireable Connector pair per ${escapeH(_schedQP.evidenceIds[0] ?? 'the archived manual')}.</div>`;
+    }
+    if (!_schedPS?.insufficient) return '';
+    return `<div style="padding:1px 4px;font-size:6.4px;line-height:1.15;border:var(--border);border-top:none;background:#fdecec;">
+        <strong>AC TRUNK CABLE (BOM):</strong> base cable quantity <span class="mono">${_schedPS.procurementLengthFt ?? '—'} ft</span> = CURRENT BASE CABLE QUANTITY &mdash; <strong style="color:#b00">PROCUREMENT INSUFFICIENCY: short of the ${_schedPS.totalDesignedInstalledFt} ft designed-installed path by ${_schedPS.deficitFt} ft. NON-ORDERABLE / PENDING SOLUTION</strong> (verified listed cable-extension required; QCABLE-PROCUREMENT-INSUFFICIENT, see RS-1).</div>`;
+  })();
   // GROUNDING AUTHORITY (2026-07-25) — SCHED renders the open-air branch grounding
   // OUTCOME through the BOM ROW ITSELF (the schedule's procurement surface): while
   // the outcome is PENDING the candidate EGC row carries the non-orderable design-
@@ -1969,7 +1985,15 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
     const _routeSt = routeVerificationStatus(_schedSnap);
     const _routeVerified = _routeSt === 'field-measured' || _routeSt === 'field-verified' || _routeSt === 'as-built-verified';
     const _gnd = projectOpenAirBranchGrounding(_schedSnap);
-    const _gndPending = _gnd.verificationState !== 'verified';
+    const _schedQPCell = _schedSnap.electrical?.qcableProcurement ?? null;
+    const _schedQPResolved = _schedQPCell?.present === true && _schedQPCell.compatibilityStatus === 'VERIFIED';
+    // WS-2 SCHED REPAIR. This tested `verificationState !== 'verified'`, but that
+    // field is a PROSE SENTENCE ('verified manufacturer document (exact-SKU
+    // applicability confirmed)'), so the test was true for EVERY outcome and SCHED
+    // printed "GROUNDING AUTHORITY: PENDING MANUFACTURER AUTHORITY" even after the
+    // IQ8A product-grounding question closed on the archived IOM. The predicate is
+    // now the OUTCOME itself — a value, not a sentence.
+    const _gndPending = _gnd.outcome === 'PENDING_MANUFACTURER_AUTHORITY';
     const _paths = _schedSnap.electrical?.branchCablePaths ?? [];
     const _affected = new Set(_schedPS?.insufficient ? (_schedPS.affectedBranchIds ?? []) : []);
     const _amber = (t: string) => `<strong style="color:#b45309">${t}</strong>`;
@@ -1984,7 +2008,19 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
     const _routeCellShared = _routeVerified
       ? `ROUTE AUTHORITY: VERIFIED (${escapeH(routeVerificationLabel(_routeSt))})`
       : `ROUTE AUTHORITY: ${_amber('PENDING')} &mdash; ${escapeH(routeVerificationLabel(_routeSt))}`;
-    const _gndCellShared = `GROUNDING AUTHORITY: ${_gndPending ? _amber('PENDING MANUFACTURER AUTHORITY') : 'VERIFIED'}`;
+    // WS-2 SCHED REPAIR — the grounding line states the SEPARATED authorities.
+    // "All pending" was false once the product question closed; "all verified"
+    // would be equally false while racking bonding is unresolved. Each domain
+    // states its own result, from its own object.
+    const _bondPending = (_schedSnap.electrical?.groundingObjects ?? [])
+      .some(g => g.groundingId === 'gnd-array-bond' && g.bondingMethod == null);
+    const _gndCellShared = _gndPending
+      ? `GROUNDING &mdash; IQ8A PRODUCT: ${_amber('PENDING MANUFACTURER AUTHORITY')}`
+        + ` &middot; ARRAY/RACKING BONDING: ${_bondPending ? _amber('METHOD PENDING') : 'ESTABLISHED'} (separate authority)`
+      : `GROUNDING &mdash; IQ8A PRODUCT: NO SEPARATE EGC REQUIRED (verified manufacturer document`
+        + `${_gnd.authority?.documentId ? ` ${escapeH(_gnd.authority.documentId)}` : ''})`
+        + ` &middot; ARRAY/RACKING BONDING: ${_bondPending ? _amber('METHOD PENDING') : 'ESTABLISHED'} (separate authority &mdash; UL 2703 assembly)`
+        + ` &middot; RACEWAY BONDING: per route-segment material`;
     // Rendered as compact per-branch LINES inside the existing interpretation box —
     // SCHED is the densest sheet in the set and a separate titled table pushed the
     // page conclusion 115px past the printable box (page-fit gate 17).
@@ -1992,12 +2028,27 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       const _label = `B${b.index}`;
       const _path = _paths.find(pp => pp.branchLabel === _label) ?? _paths[b.index - 1] ?? null;
       const _prov = _path?.lengthProvenance ?? null;
-      const _procCell = 'PROCUREMENT SUFFICIENCY: ' + (!_schedPS?.insufficient
-        ? 'NOT AFFECTED'
-        : ((_affected.has(_path?.branchId ?? '') || _affected.size === 0)
-            ? _amber('AFFECTED &mdash; QCABLE-PROCUREMENT-INSUFFICIENT')
-            : 'NOT AFFECTED'));
-      const _release = (_routeVerified && !_gndPending && !_schedPS?.insufficient && !_schedHasBlockers)
+      // WS-2 — a branch that WAS short is no longer "AFFECTED — <requirement
+      // code>" once the procurement design answers it: the requirement is closed,
+      // so naming it here would cite a requirement that is not open. A resolved
+      // branch states its own ALLOCATION instead; an unanswered one keeps the
+      // blocker citation exactly as before.
+      const _qpAlloc = _schedQPCell?.branchAllocations
+        .find(a => a.branchId === (_path?.branchId ?? '')) ?? null;
+      const _procCell = 'PROCUREMENT SUFFICIENCY: ' + (
+        _schedQPResolved
+          ? (_qpAlloc && _qpAlloc.allocatedSections > 0
+              ? `RESOLVED &mdash; +${_qpAlloc.allocatedSections} section(s) allocated (${_qpAlloc.allocatedNewUsableLengthFt} ft installed)`
+              : (_qpAlloc && _qpAlloc.nonRedistributableSurplusFt > 0
+                  ? `RESOLVED &mdash; ${_qpAlloc.nonRedistributableSurplusFt} ft surplus, NOT redistributable`
+                  : 'RESOLVED &mdash; covered by the ordered cable'))
+          : (!_schedPS?.insufficient
+              ? 'NOT AFFECTED'
+              : ((_affected.has(_path?.branchId ?? '') || _affected.size === 0)
+                  ? _amber('AFFECTED &mdash; QCABLE-PROCUREMENT-INSUFFICIENT')
+                  : 'NOT AFFECTED')));
+      const _release = (_routeVerified && !_gndPending && !_bondPending
+        && (_schedQPResolved || !_schedPS?.insufficient) && !_schedHasBlockers)
         ? 'RELEASED' : _amber('BLOCKED');
       // The two SCHEDULE-LEVEL authorities (route verification state, grounding
       // outcome) are stated ONCE in the header, not repeated verbatim on every
@@ -2013,6 +2064,28 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
     }).join('');
     // Header line: scope + the two schedule-level authorities + the honesty caveats.
     const _b = _rows.map(r => `B${r.index}`).join(', ');
+    // WS-2 — THE canonical apportionment sentence, projected from the procurement
+    // resolution. Both deficits are stated (they answer different questions), the
+    // governing one is named, and the non-redistributable surplus is stated as
+    // such so nobody nets it against a short branch.
+    const _qp = _schedSnap.electrical?.qcableProcurement ?? null;
+    const _schedQCableApportionment = (() => {
+      if (!_qp?.present) return 'the &Sigma; Q-Cable deficit is not apportioned on this design';
+      const _short = _qp.branchAllocations.filter(a => a.shortageFt > 0);
+      const _surp = _qp.branchAllocations.filter(a => a.nonRedistributableSurplusFt > 0);
+      if (_short.length === 0 && _surp.length === 0) {
+        return 'Q-Cable: every branch is covered by the ordered cable';
+      }
+      const _alloc = _short.map(a => `${escapeH(a.branchLabel)} ${a.shortageFt} ft`).join(' + ');
+      const _surplusTxt = _surp.length
+        ? ` The ${_qp.nonRedistributableSurplusFt} ft surplus on `
+          + `${_surp.map(a => escapeH(a.branchLabel)).join(', ')} is NOT redistributable under the current `
+          + 'branch topology (a Q-Cable branch is one continuous run).'
+        : '';
+      return `Q-Cable: aggregate installed-length deficit ${_qp.aggregateInstalledDeficitFt} ft; the GOVERNING `
+        + `topology-constrained requirement is ${_qp.topologyConstrainedInstalledDeficitFt} ft, allocated as `
+        + `${_alloc}.${_surplusTxt}`;
+    })();
     return `<div style="margin-top:1px;font-size:6px;line-height:1.15;">`
       + `<div><strong>BRANCH RELEASE STATUS &mdash; authorities beyond the ${escapeH(SCHED_RATING_COL)} column</strong>`
       + ` &middot; ${_routeCellShared} (schedule-level: ONE ${escapeH(BRANCH_RUN_SEGMENT_LABEL)} segment for ${escapeH(_b)}`
@@ -2021,7 +2094,11 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       // TAC WS-18 — "blockers: RS-1" degraded to a bare noun phrase once the
       // reference pass rewrote the sheet id; state the pointer as a sentence so
       // it reads correctly whether it resolves to a sheet or to the record.
-      + `<span style="color:#555;"> &middot; the &Sigma; Q-Cable deficit is NOT apportioned per branch &middot; open blockers: see RS-1</span></div>`
+      // WS-2 SCHED REPAIR — this said "the Σ Q-Cable deficit is NOT apportioned per
+      // branch", which stopped being true the moment the package began calculating
+      // per-branch shortfalls. It now states the canonical allocation, from the
+      // procurement resolution's own numbers; no literal is typed here.
+      + `<span style="color:#555;"> &middot; ${_schedQCableApportionment} &middot; open blockers: see RS-1</span></div>`
       + _lines
       + `</div>`;
   })();

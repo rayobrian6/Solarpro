@@ -980,7 +980,13 @@ export function generateBOMForPermit(
   // insufficient) while the row states STATUS / REASON / DESIGNED-INSTALLED /
   // CURRENT BASE / DEFICIT / EXTENSION SOLUTION NOT SELECTED.
   const _psBom = peekSnapshot(input)?.electrical?.procurementSufficiency ?? null;
-  if (_psBom?.insufficient) {
+  // WS-2 — the canonical procurement design. When it is VERIFIED the measured
+  // shortfall HAS an answer (per-branch allocation + a package to buy), so the
+  // trunk row is no longer non-orderable and 5f.3 below states the resolution
+  // instead. A footage was never an order quantity; a package is.
+  const _qpBom = peekSnapshot(input)?.electrical?.qcableProcurement ?? null;
+  const _qpResolvedBom = _qpBom?.present === true && _qpBom.compatibilityStatus === 'VERIFIED';
+  if (_psBom?.insufficient && !_qpResolvedBom) {
     const _selKind = (_psBom.resolutionOptions ?? []).find(o => o.selected)?.kind ?? null;
     const _extTxt = _selKind
       ? `EXTENSION SOLUTION: ${_selKind}`
@@ -1015,6 +1021,88 @@ export function generateBOMForPermit(
         + `branches on RS-1. ${it.description ?? ''}`;
       it.derivedFrom = `procurement sufficiency authority (verification=${_psBom.verificationStatus}) — base cable quantity, non-orderable`;
       log.push(`[bomForPermit] §9 trunk_cable row NON-ORDERABLE: base ${_psBom.procurementLengthFt} ft short of ${_psBom.totalDesignedInstalledFt} ft by ${_psBom.deficitFt} ft (${_extTxt})`);
+    }
+  }
+
+  // ── 5f.3 WS-2 — THE BOM CONSUMES THE CANONICAL PROCUREMENT RESOLUTION ───────
+  // Every quantity below comes from `electrical.qcableProcurement`, which derived
+  // it from an ACTUAL branch modification and an archived per-unit rule. The BOM
+  // does not recompute a purchase, and it never prints an installed footage as an
+  // order quantity.
+  if (_qpResolvedBom && _qpBom) {
+    const _ev = _qpBom.evidenceIds[0] ?? 'the archived manufacturer manual';
+    // (a) the trunk row states the RESOLVED order, in the manufacturer's package.
+    for (const it of merged) {
+      if (it.category !== 'trunk_cable') continue;
+      it.nonOrderable = false;
+      it.nonOrderableReason = undefined;
+      it.description =
+        `ORDER ${_qpBom.stockUnitsRequired ?? '—'} × ${_qpBom.stockUnitDescription ?? _qpBom.selectedStockSku ?? '—'} `
+        + `covering ${_qpBom.totalSectionsRequired} connector section(s) `
+        + `(${_qpBom.baseSectionsOrdered} base + ${_qpBom.additionalSectionsRequired} allocated to the short branches; `
+        + `${_qpBom.additionalStockUnitsRequired === 0
+          ? 'no additional package beyond the base order'
+          : `${_qpBom.additionalStockUnitsRequired} package(s) beyond the base order`}). `
+        + `INSTALLED additional requirement ${_qpBom.topologyConstrainedInstalledDeficitFt} ft per-branch `
+        + `(${_qpBom.branchAllocations.filter(a => a.shortageFt > 0).map(a => `${a.branchLabel} ${a.shortageFt} ft`).join(' + ') || 'none'}) `
+        + `— an INSTALLED length, never an order quantity. Expected remaining stock `
+        + `${_qpBom.expectedRemainingStockFt ?? '—'} ft. Method: cut listed cable + IQ Field Wireable Connector `
+        + `pair per ${_ev}. ${it.description ?? ''}`;
+      it.derivedFrom = `qcableProcurement (${_qpBom.resolutionId}) — resolved procurement design`;
+      log.push(`[bomForPermit] WS-2 trunk_cable ORDERABLE: ${_qpBom.stockUnitsRequired} package(s), `
+        + `${_qpBom.additionalSectionsRequired} additional section(s), remainder ${_qpBom.expectedRemainingStockFt} ft`);
+    }
+    // (b) accessories: quantity, orderability and basis from the resolution.
+    const _accBySku = new Map<string, { qty: number; purpose: string[]; section: string }>();
+    for (const a of _qpBom.accessories) {
+      const cur = _accBySku.get(a.sku) ?? { qty: 0, purpose: [], section: a.evidenceSection };
+      cur.qty += a.quantity; cur.purpose.push(a.purpose);
+      _accBySku.set(a.sku, cur);
+    }
+    for (const [sku, agg] of _accBySku) {
+      const row = merged.find(r => String(r.partNumber ?? '') === sku);
+      const _basis = `WS-2 canonical procurement: ${agg.purpose.join('; ')} — per ${_ev} ${agg.section}`;
+      if (row) {
+        row.quantity = agg.qty;
+        row.nonOrderable = false;
+        row.nonOrderableReason = undefined;
+        row.quantityState = 'established';
+        // The v4 engine emitted the field-wireable connectors with a
+        // CANDIDATE_NON_ORDERABLE hint ("no verified CableExtensionSolution
+        // selects a field-wireable connector solution"). That was true when the
+        // ONLY route to the method was an operator-selected extension product;
+        // the archived manufacturer manual now states the method for this exact
+        // cable and names these exact SKUs, so the hint is stale and is cleared
+        // — the row is established by evidence, not by an absent selection.
+        row.authorityStateHint = undefined;
+        row.authorityStateHintReason = undefined;
+        row.quantitySource = 'topology-derived';
+        row.derivedFrom = _basis;
+        // The prior description carried PENDING-quantity prose ("MODELED / FIELD
+        // QUANTITY PENDING"). Prepending the established basis in front of it
+        // would leave an ESTABLISHED row claiming its own quantity is pending —
+        // the exact certain-zero-beside-a-pending-claim defect PPC gate 11 exists
+        // to catch. The stale clause is REMOVED, not buried.
+        const _priorDesc = String(row.description ?? '')
+          .replace(/\(?\s*(?:MODELED\s*\/\s*)?(?:FIELD\s+)?QUANTITY PENDING[^.]*\.?\s*\)?/gi, '')
+          .replace(/\s{2,}/g, ' ').trim();
+        row.description = `${_basis}. ${_priorDesc}`.trim();
+      } else {
+        const proto = merged.find(r => r.category === 'trunk_cable');
+        merged.push({
+          ...(proto ?? {} as PermitBOMItem),
+          category: 'cable_support', manufacturer: 'Enphase',
+          model: _qpBom.accessories.find(a => a.sku === sku)?.description ?? sku,
+          partNumber: sku, quantity: agg.qty, unit: 'ea',
+          nonOrderable: false, nonOrderableReason: undefined,
+          quantityState: 'established',
+          authorityStateHint: undefined, authorityStateHintReason: undefined,
+          quantitySource: 'topology-derived',
+          bomLineId: undefined,
+          description: _basis, derivedFrom: _basis,
+        } as PermitBOMItem);
+      }
+      log.push(`[bomForPermit] WS-2 accessory ${sku} × ${agg.qty} (established)`);
     }
   }
 
@@ -1304,6 +1392,13 @@ const CATEGORY_QUANTITY_BASIS: Record<string, BomQuantitySource> = {
   trunk_cable:      'topology-derived',
   terminator:       'topology-derived',
   sealing_cap:      'topology-derived',
+  // WS-2 — cable support hardware. Its quantity is the installed cable path
+  // divided by the manufacturer's documented maximum support spacing, which is a
+  // topology derivation like every other Q-Cable accessory. Without this entry
+  // the category was UNMAPPED and the row failed closed as non-orderable — the
+  // correct default, and the reason it is being mapped deliberately rather than
+  // by widening the fallback.
+  cable_support:    'topology-derived',
   // ── unresolved route geometry (ECD §3) ───────────────────────────────────
   wire:             'route-derived',
   conduit:          'route-derived',

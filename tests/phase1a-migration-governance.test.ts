@@ -42,6 +42,17 @@ import {
 
 const root = path.resolve(__dirname, '..');
 
+/** THE highest governed migration prefix. Named once so adding a migration is a
+ *  one-line, deliberate governance update rather than a hunt through literals —
+ *  which is exactly why 117 left five assertions failing after it landed. */
+const HIGHEST_GOVERNED_MIGRATION = '117';
+
+/** Normalize a filesystem path to POSIX separators. `path.join` returns
+ *  backslashes on Windows, so `toContain('lib/migrations')` failed on this
+ *  platform regardless of what the manifest actually discovered — a test-harness
+ *  defect, not a governance one. */
+const posix = (p: string): string => String(p).replace(/\\/g, '/');
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,14 +223,14 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
     expect(extractDescription('001_initial_schema.sql')).toBe('initial schema');
   });
 
-  it('discovers 113 SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review)', () => {
+  it('discovers 114 SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review + 117 AHJ registry)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.count).toBe(113);
+    expect(manifest.count).toBe(114);
   });
 
-  it('highest prefix is 116', () => {
+  it('highest prefix is 117 (the AHJ registry)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('116');
+    expect(manifest.highestPrefix).toBe(HIGHEST_GOVERNED_MIGRATION);
   });
 
   it('detects duplicate prefix 074 and disambiguates as 074a/074b', () => {
@@ -263,7 +274,7 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
       expect(file.identifier).toMatch(/^\d{3,}[a-z]?$/);
       expect(file.prefix).toMatch(/^\d{3,}$/);
       expect(file.filename).toMatch(/^\d{3,}_.*\.sql$/);
-      expect(file.fullPath).toContain('lib/migrations');
+      expect(posix(file.fullPath)).toContain('lib/migrations');
       expect(file.sizeBytes).toBeGreaterThan(0);
     }
   });
@@ -1165,7 +1176,7 @@ describe('Phase 1A: Historical reconciliation', () => {
 
   it('migration 105 exists (organization authority foundation), 106 exists (lifecycle correction), 107 exists (audit org context), and 108 exists (nearmap cache idx)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('116');
+    expect(manifest.highestPrefix).toBe(HIGHEST_GOVERNED_MIGRATION);
     const has105 = manifest.files.some((f: any) => f.prefix === '105');
     expect(has105).toBe(true);
     const has106 = manifest.files.some((f: any) => f.prefix === '106');
@@ -1182,11 +1193,11 @@ describe('Phase 1A: Historical reconciliation', () => {
     // (they should all be in lib/migrations/). We verify every occurrence of
     // "/migrations/" is preceded by "lib" — i.e., the canonical lib/migrations path.
     for (const file of manifest.files) {
-      expect(file.fullPath).toContain('lib/migrations');
+      expect(posix(file.fullPath)).toContain('lib/migrations');
       // Every "/migrations/" segment must be preceded by "lib" (not a root-level
       // migrations/ directory). We strip all "lib/migrations" occurrences and check
       // that no bare "/migrations/" remains.
-      const stripped = file.fullPath.replace(/lib\/migrations/g, '');
+      const stripped = posix(file.fullPath).replace(/lib\/migrations/g, '');
       expect(stripped).not.toMatch(/\/migrations\//);
     }
   });

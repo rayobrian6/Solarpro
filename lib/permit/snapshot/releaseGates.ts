@@ -707,6 +707,41 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'selections disagree.',
   },
 
+  // ── RG-6 QCABLE_SYSTEM_CLOSURE — WS-2 SCOPED PROCUREMENT RESIDUALS ─────────
+  // WS-2 replaced the one broad Q-Cable blocker with a scoped requirement per
+  // genuinely unresolved fact. Each names ONE thing, so a missing accessory SKU
+  // can never masquerade as "the whole cable procurement is unresolved".
+  'QCABLE-STOCK-PACKAGING-UNVERIFIED': {
+    gateId: 'RG-6', findingType: 'PENDING_DOCUMENT',
+    title: 'The purchasable package for the selected Q-Cable is not established',
+    affects:
+      'The purchase quantity and the expected remainder. The installed per-branch allocation is unaffected — what is '
+      + 'missing is the manufacturer PACKAGE (connector sections per box), without which no order quantity may be stated.',
+    resolutionMode: 'AUTO_DERIVED',
+    resolverId: 'qcable-procurement@v1', resolverPhase: 'WS-2 (delivered)', resolverStage: 'derived',
+    modeBasis: 'The packaging is read from the cable table in the archived manufacturer manual (connector count per box). '
+      + 'A cable the archived table does not list has no established purchase unit, and a footage may not be substituted '
+      + 'for one.',
+  },
+  'QCABLE-FIELD-CONNECTOR-SKU-MISSING': {
+    gateId: 'RG-6', findingType: 'PENDING_DOCUMENT',
+    title: 'A required Q-Cable field-termination accessory has no established SKU',
+    affects:
+      'The BOM accessory lines for the field-terminated joins. The cable allocation itself is established; the join '
+      + 'hardware is not.',
+    resolutionMode: 'AUTO_DERIVED',
+    resolverId: 'qcable-procurement@v1', resolverPhase: 'WS-2 (delivered)', resolverStage: 'derived',
+    modeBasis: 'Accessory SKUs and their per-unit quantity rules are read from the archived manufacturer manual; an '
+      + 'accessory the manual does not name is not established and may not be ordered.',
+  },
+  'QCABLE-TERMINATOR-COMPATIBILITY-UNVERIFIED': {
+    gateId: 'RG-6', findingType: 'PENDING_DOCUMENT',
+    title: 'Q-Cable terminator compatibility with the selected assembly is not established',
+    affects: 'The branch-end terminator lines in the BOM. Cable length and allocation are unaffected.',
+    resolutionMode: 'AUTO_DERIVED',
+    resolverId: 'qcable-procurement@v1', resolverPhase: 'WS-2 (delivered)', resolverStage: 'derived',
+    modeBasis: 'The terminator SKU and its documented per-branch-circuit quantity are read from the archived manual.',
+  },
   // ── RG-6 QCABLE_SYSTEM_CLOSURE (2) ────────────────────────────────────────
   // A MEASURED shortfall (Σ geometric installed path vs drop-based procurement
   // footage) — a verified deficiency, not a pending value.

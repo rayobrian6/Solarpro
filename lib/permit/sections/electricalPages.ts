@@ -1078,14 +1078,26 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         // deficits with their own operands — renders on PV-4B.1. The retired line
         // paired the AGGREGATE operands with the PER-BRANCH deficit, so the
         // subtraction it displayed did not evaluate to the number it printed.
-        const _insuffBlock = _short
-          ? ` <strong style="color:#b00">⚠ QCABLE-PROCUREMENT-INSUFFICIENT (BLOCKING):</strong>`
-            + `<span style="color:#b00"> short by <span class="mono">${_ps!.deficitFt} ft</span> on the`
-            + ` ${_ps!.deficitBasis === 'topology-constrained' ? 'PER-BRANCH (governing)' : 'aggregate-footage'} basis;`
-            + ` min. additional purchase <span class="mono">${_ps!.requiredAdditionalPurchasableLengthFt} ft</span>.`
-            + ` Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE QUANTITY only — NON-ORDERABLE / PENDING a VERIFIED listed extension.`
-            + ` Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. Full derivation: PV-4B.1.</span>`
-          : '';
+        // WS-2 — when the procurement RESOLUTION is verified this states the
+        // ORDER (packages), not a pending shortfall, and it never prints the
+        // installed requirement as a purchase quantity.
+        const _qpInline = _snap?.electrical?.qcableProcurement ?? null;
+        const _qpOk = _qpInline?.present === true && _qpInline.compatibilityStatus === 'VERIFIED';
+        const _insuffBlock = _qpOk
+          ? ` <strong>Q-CABLE PROCUREMENT:</strong>`
+            + ` installed additional requirement <span class="mono">${_qpInline!.topologyConstrainedInstalledDeficitFt} ft</span>`
+            + ` on the PER-BRANCH (governing) basis — an installed length, not an order quantity.`
+            + ` ORDER <span class="mono">${_qpInline!.stockUnitsRequired ?? '—'} × ${_qpInline!.stockUnitDescription ?? _qpInline!.selectedStockSku ?? '—'}</span>`
+            + ` (${_qpInline!.totalSectionsRequired} section(s); remaining stock`
+            + ` <span class="mono">${_qpInline!.expectedRemainingStockFt ?? '—'} ft</span>). Full derivation: PV-4B.1.`
+          : _short
+            ? ` <strong style="color:#b00">⚠ QCABLE-PROCUREMENT-INSUFFICIENT (BLOCKING):</strong>`
+              + `<span style="color:#b00"> short by <span class="mono">${_ps!.deficitFt} ft</span> on the`
+              + ` ${_ps!.deficitBasis === 'topology-constrained' ? 'PER-BRANCH (governing)' : 'aggregate-footage'} basis;`
+              + ` min. additional INSTALLED length <span class="mono">${_ps!.requiredAdditionalPurchasableLengthFt} ft</span>.`
+              + ` Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE QUANTITY only — NON-ORDERABLE / PENDING a VERIFIED listed extension.`
+              + ` Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. Full derivation: PV-4B.1.</span>`
+            : '';
         // Compact one-line authority + reconciliation note (the per-branch designed
         // lengths already print in the branch rows; the full per-branch math lives on
         // E-1's sectioned schedule + the evidence artifact). Keeps PV-4B page-fit.
@@ -1657,18 +1669,35 @@ function renderQCableProcurementDerivation(
       + `<td class="tr" style="color:${sur > 0 ? '#b45309' : '#333'}">${sur > 0 ? `${sur} ft (non-redistributable)` : '—'}</td>`
       + `</tr>`;
   }).join('');
+  // WS-2 — ONE per-branch table. The sufficiency derivation and the procurement
+  // resolution carried the same six per-branch facts in two stacked tables, which
+  // overflowed this sheet's printable box by 164 px (pagefit W9). The allocation
+  // is now a COLUMN on the measurement it answers, which is also how it reads.
+  const _qpT = snap?.electrical?.qcableProcurement ?? null;
+  const _allocOf = (branchId: string) =>
+    _qpT?.branchAllocations.find(a => a.branchId === branchId) ?? null;
+  const rowsWithAllocation = (ps.perBranch ?? []).map((p, i) => {
+    const a = _allocOf(p.branchId);
+    const cell = a && a.allocatedSections > 0
+      ? `${a.allocatedSections} × section = ${a.allocatedNewUsableLengthFt} ft`
+      : '—';
+    return rows.split('</tr>')[i] !== undefined
+      ? `${rows.split('</tr>')[i]}<td class="tr mono">${cell}</td></tr>`
+      : '';
+  }).join('');
   return `
     <div style="margin:6px 12px 10px;">
-      <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">Q-CABLE PROCUREMENT SUFFICIENCY — PER-BRANCH DERIVATION (GOVERNING BASIS: ${String(ps.deficitBasis ?? 'none').toUpperCase()})</div>
+      <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">Q-CABLE PROCUREMENT — PER-BRANCH DERIVATION &amp; ALLOCATION (GOVERNING BASIS: ${String(ps.deficitBasis ?? 'none').toUpperCase()})</div>
       <table class="equip-table" style="width:100%;table-layout:fixed;">
         <thead><tr style="white-space:normal;">
-          <th style="width:10%;">Branch</th><th style="width:10%;">Drops</th>
-          <th style="width:20%;">Required installed length (cable path)</th>
-          <th style="width:20%;">Usable allocated cable (drops × pitch × waste)</th>
-          <th style="width:20%;">Branch deficit</th>
-          <th style="width:20%;">Surplus on this branch</th>
+          <th style="width:8%;">Branch</th><th style="width:8%;">Drops</th>
+          <th style="width:17%;">Required installed length (cable path)</th>
+          <th style="width:17%;">Usable allocated cable (drops × pitch × waste)</th>
+          <th style="width:16%;">Branch deficit</th>
+          <th style="width:17%;">Surplus on this branch</th>
+          <th style="width:17%;">New cable allocated</th>
         </tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rowsWithAllocation}</tbody>
       </table>
       <div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fafafa;line-height:1.3;">
         ${ps.deficitArithmeticNote
@@ -1678,9 +1707,46 @@ function renderQCableProcurementDerivation(
         between branches. The AGGREGATE FOOTAGE deficit is the pure subtraction (designed + allowance − procured); the
         TOPOLOGY-CONSTRAINED deficit is Σ of the individual branch shortfalls. When a non-short branch holds surplus,
         the topology figure is the larger and GOVERNING one — an aggregate total can never demonstrate branch
-        sufficiency. <strong>Minimum additional purchasable length: ${n(ps.requiredAdditionalPurchasableLengthFt)} ft</strong>
-        (a verified listed cable-extension solution, or a documented re-branching of the affected runs, is required —
-        speculative jumpers do not clear this).
+        sufficiency.
+      </div>
+      ${_qcableProcurementBlock(snap)}
+    </div>`;
+}
+
+/** WS-2 — the PROCUREMENT RESOLUTION block on PV-4B.1: the per-branch allocation,
+ *  the purchase in the manufacturer's own package unit, the remainder and the
+ *  accessories. Every value is PROJECTED from `electrical.qcableProcurement`; this
+ *  renderer computes nothing. Absent resolution ⇒ the honest pending sentence. */
+function _qcableProcurementBlock(
+  snap: import('../snapshot/types').PermitDesignSnapshot | null | undefined,
+): string {
+  const qp = snap?.electrical?.qcableProcurement ?? null;
+  if (!qp?.present) {
+    return `<div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fff7ed;line-height:1.3;">
+      <strong>PROCUREMENT RESOLUTION:</strong> NOT ESTABLISHED — a verified listed cable-extension solution, or a
+      documented re-branching of the affected runs, is required; speculative jumpers do not clear this.</div>`;
+  }
+  // PV-4B.1 has roughly one line of printable slack. The resolution therefore
+  // renders as ONE allocation table + TWO dense summary lines — an accessory
+  // TABLE and a per-candidate rejection block overflowed the printable box by
+  // 164 px (pagefit W9). Nothing is dropped: every accessory and its quantity is
+  // stated inline, and the full objects are on the snapshot + the review record.
+  const accLine = qp.accessories
+    .reduce((m: Map<string, number>, a) => m.set(a.sku, (m.get(a.sku) ?? 0) + a.quantity), new Map<string, number>());
+  const acc = [...accLine].map(([sku, q]) => `${escapeH(sku)} × ${q}`).join(' &middot; ');
+  // SKU + the one-clause reason only; the full basis is on the snapshot object
+  // and the review record (this sheet has ~0.6in of slack — pagefit W9).
+  const rejected = qp.rejectedStockCandidates
+    .map(rj => `${escapeH(rj.sku)} NOT USED — no archived manufacturer document names it`).join('; ');
+  return `
+    <div style="margin-top:4px;">
+      <div style="background:#000;color:#fff;font-weight:900;font-size:7.5px;letter-spacing:0.7px;padding:2px 6px;">Q-CABLE PROCUREMENT RESOLUTION — INSTALLED vs PURCHASED (${escapeH(qp.compatibilityStatus)})</div>
+      <div style="border:var(--border);border-top:none;padding:1px 6px;font-size:6.2px;color:#333;background:#f2f8f2;line-height:1.2;">
+        <strong>INSTALLED (governing, per-branch): ${qp.topologyConstrainedInstalledDeficitFt} ft</strong> — an installed length, <strong>not</strong> an order quantity &middot;
+        <strong>ORDER: ${qp.stockUnitsRequired ?? '—'} × ${escapeH(qp.stockUnitDescription ?? qp.selectedStockSku ?? '—')}</strong>
+        = ${qp.totalSectionsRequired} section(s) (${qp.baseSectionsOrdered} base + ${qp.additionalSectionsRequired} allocated${qp.additionalStockUnitsRequired === 0 ? ', no extra package' : `, +${qp.additionalStockUnitsRequired} package(s)`}),
+        ${qp.totalStockPurchasedFt ?? '—'} ft purchased, remaining <strong>${qp.expectedRemainingStockFt ?? '—'} ft</strong> &middot;
+        <strong>Accessories:</strong> ${acc || '—'} &middot; <strong>Method:</strong> cut listed cable + IQ Field Wireable Connector pair per ${escapeH(qp.evidenceIds[0] ?? 'the archived manual')}${rejected ? ` &middot; ${rejected}` : ''}
       </div>
     </div>`;
 }

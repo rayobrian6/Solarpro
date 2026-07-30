@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
+import { unresolvedProcurementAuthority } from '../fixtures/synthetic-unresolved-procurement';
 import { deriveBranchCablePaths } from '@/lib/bom/deriveRunLengths';
 import {
   buildProcurementSufficiency,
@@ -79,7 +80,12 @@ const VERIFIED_SOLUTION = (deficit: number): CableExtensionSolution => ({
 describe('§Q test 1 — the fixture clears in AGGREGATE but FAILS per branch', () => {
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-24T12:00:00Z';
-  generatePermitHTML(input);
+  // WS-2: this suite is about the UNRESOLVED state — the measured shortfall and
+  // what a package may say while it has no procurement design. The live package
+  // now HAS one (archived IOM field-termination authority), so the unresolved
+  // state is manufactured by refusing that authority. Nothing here is weakened;
+  // the fail-closed path is exercised deliberately instead of incidentally.
+  generatePermitHTML(input, undefined, unresolvedProcurementAuthority() as any);
   const snap = input._snapshot;
   const ps = snap.electrical.procurementSufficiency;
 
@@ -221,7 +227,7 @@ describe('§Q test 5 — unverified note cannot clear the deficit', () => {
 function buildInsufficientRender() {
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-24T12:00:00Z';
-  generatePermitHTML(input);
+  generatePermitHTML(input, undefined, unresolvedProcurementAuthority() as any);
   const cad = generateCADLayout(input);
   const snap = clone(input._snapshot);   // frozen — clone before mutating
   const paths = [PATH('br-1', 'B1', 13, 64.0, 64), PATH('br-2', 'B2', 13, 63.2, 63), PATH('br-3', 'B3', 5, 39.3, 25)];
@@ -273,7 +279,10 @@ describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insuff
     // the basis is NAMED, so an aggregate figure can never be read as a
     // per-branch one (or vice versa).
     expect(pv4b).toMatch(/PER-BRANCH \(governing\)|aggregate-footage/);
-    expect(pv4b).toContain('min. additional purchase');
+    // WS-2 wording: "purchase" was wrong on this line — the number is an
+    // INSTALLED length (a footage is not a purchase quantity), so the unresolved
+    // sentence now says "min. additional INSTALLED length".
+    expect(pv4b).toContain('min. additional INSTALLED length');
   });
   // ── UPDATED by the PPC corrective pass (§9), 2026-07-26 ────────────────────
   // The retired assertions targeted a STANDALONE note ('AC TRUNK CABLE (BOM): …

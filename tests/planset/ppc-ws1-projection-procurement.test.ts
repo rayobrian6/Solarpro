@@ -29,6 +29,7 @@ import { generatePermitHTML } from '@/lib/permit';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import { pendingGroundingAuthority } from '../fixtures/synthetic-pending-grounding';
+import { unresolvedProcurementAuthority } from '../fixtures/synthetic-unresolved-procurement';
 import { roofProject } from '../../test-fixtures/roofProject';
 import {
   projectE1PhysicalSchedule, projectGroundingSegments, projectOpenAirBranchGrounding,
@@ -149,12 +150,18 @@ let PENDING_PKG: { input: any; cad: any; snap: PermitDesignSnapshot };
 beforeAll(() => {
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-26T12:00:00Z';
-  generatePermitHTML(input);
+  // WS-2 — §8/§9 are about what a package may say while the Q-Cable procurement
+  // is UNRESOLVED (pending caps, a non-orderable base quantity, the deficit
+  // payload). The live design now resolves it from archived manufacturer
+  // authority, so the unresolved state is manufactured by refusing that
+  // authority rather than by weakening the assertions.
+  generatePermitHTML(input, undefined, unresolvedProcurementAuthority() as any);
   PKG = { input, cad: generateCADLayout(input), snap: input._snapshot };
 
   const pInput: any = clone(braidonOriginalAuditFixture);
   pInput.generatedAtIso = '2026-07-26T12:00:00Z';
-  generatePermitHTML(pInput, undefined, pendingGroundingAuthority('wrongConnectorArchitecture') as any);
+  generatePermitHTML(pInput, undefined,
+    { ...pendingGroundingAuthority('wrongConnectorArchitecture'), ...unresolvedProcurementAuthority() } as any);
   PENDING_PKG = { input: pInput, cad: generateCADLayout(pInput), snap: pInput._snapshot };
 });
 
@@ -587,7 +594,8 @@ function insufficientInput() {
   // also built PENDING on grounding (synthetic wrong-architecture document — see
   // PENDING_PKG). Without it the grounding blocker is correctly absent and the
   // "each template renders only for its own blocker" assertion would be vacuous.
-  generatePermitHTML(input, undefined, pendingGroundingAuthority('wrongConnectorArchitecture') as any);
+  generatePermitHTML(input, undefined,
+    { ...pendingGroundingAuthority('wrongConnectorArchitecture'), ...unresolvedProcurementAuthority() } as any);
   const cad = generateCADLayout(input);
   const snap: any = clone(input._snapshot);
   // live-shaped geometry: designed 166.5 ft vs procurement 152 ft ⇒ 14.5 ft short

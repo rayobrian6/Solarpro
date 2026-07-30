@@ -1172,6 +1172,10 @@ export function generatePermitHTML(
       // record) plug in without touching this call site. Both null today ⇒
       // byte-identical snapshot.
       groundingDocumentEvidence: snapshotAuthority?.groundingDocumentEvidence ?? null,
+      // WS-2 — `undefined` must survive as undefined (the archived accessor);
+      // only an EXPLICIT null refuses the authority, so `??` would defeat it.
+      qcableFieldTerminationAuthority: snapshotAuthority
+        ? snapshotAuthority.qcableFieldTerminationAuthority : undefined,
       framingEngineerReview: snapshotAuthority?.framingEngineerReview ?? null,
       framingReviewDigest: snapshotAuthority?.framingReviewDigest ?? null,
       // AAC WS-1 — the per-requirement resolution state, attached to each

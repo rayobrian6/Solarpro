@@ -41,6 +41,8 @@ import { resolveTrunkCablePlan, findTrunkCableSystem } from '@/lib/equipment/tru
 import { deriveBranchCablePaths } from '@/lib/bom/deriveRunLengths';
 // AAC WS-5 — the deterministic Q-Cable topology + procurement SOLUTION engine.
 import { buildQCableTopology, evaluateQCableSolutions } from './qcableTopology';
+import { resolveQCableProcurement } from './qcableProcurement';
+import { enphaseFieldTerminationAuthority } from './enphaseFieldTerminationEvidence';
 // AAC WS-7 — the conduit-fill completeness + result authority (NEC Ch.9 T1).
 import { evaluateConduitFillAuthority, type ConduitFillEvaluation } from './conduitFillAuthority';
 // AAC WS-5/WS-7 — the SYNC design-geometry resolver stage (framework contract).
@@ -157,6 +159,12 @@ export function buildPermitDesignSnapshot(
      *  document ⇒ the outcome is PENDING_MANUFACTURER_AUTHORITY and
      *  QCABLE-GROUNDING-AUTHORITY-UNVERIFIED fires (the honest live outcome). */
     groundingDocumentEvidence?: GroundingDocumentEvidence | null;
+    /** WS-2 — THE Q-Cable field-termination authority socket. `undefined` ⇒ use
+     *  the archived accessor (the live behaviour). An explicit `null` REFUSES it,
+     *  so a caller can exercise the fail-closed path without forcing this project
+     *  to be unresolved. Same shape of socket as groundingDocumentEvidence. */
+    qcableFieldTerminationAuthority?:
+      import('./enphaseFieldTerminationEvidence').EnphaseFieldTerminationAuthority | null;
     /** AAC WS-1 — the per-requirement RequirementResolutionState produced by the
      *  async resolution lifecycle, keyed by requirement code. Attached to each
      *  registry record's PAYLOAD (rendered by the existing RS-1 payload
@@ -1030,6 +1038,9 @@ export function buildPermitDesignSnapshot(
    *  evaluation. Procurement, the BOM and every sheet length consume THESE. */
   let qcableTopology: import('./types').QCableTopology | null = null;
   let qcableEvaluation: import('./types').QCableSolutionEvaluation | null = null;
+  /** WS-2 — THE canonical procurement design derived from the topology + the
+   *  archived field-termination authority. */
+  let qcableProcurement: import('./qcableProcurement').QCableProcurementResolution | null = null;
   /** the EXACT selected micro SKU/model the grounding authority must be resolved
    *  for (never a family label) — hoisted out of the micro block below. */
   let _selectedMicroSku: string | null = null;
@@ -1196,6 +1207,29 @@ export function buildPermitDesignSnapshot(
     if (listedCableAssembly && _adopted && procurementSufficiency?.procurementLengthFt != null) {
       listedCableAssembly.cableLengthFt = Math.round(procurementSufficiency.procurementLengthFt);
     }
+
+    // ═══ WS-2 — THE CANONICAL PROCUREMENT RESOLUTION ═════════════════════════
+    // The gate above MEASURES the shortage. This RESOLVES it: per-branch
+    // allocation (never netted across branches), the purchase expressed in the
+    // manufacturer's own package unit, the remainder, and every accessory derived
+    // from an actual branch modification — all from the archived, hash-bound
+    // IOM-00068-3.0-EN field-termination authority. With no authority covering
+    // the selected micro + architecture the resolution is INCOMPLETE and the
+    // requirement stays open, fail-closed.
+    qcableProcurement = resolveQCableProcurement({
+      topology: qcableTopology,
+      assembly: listedCableAssembly,
+      system: _trunkSystem,
+      // `undefined` (the normal case) ⇒ the archived accessor. An explicit null
+      // from a caller refuses the authority and exercises the fail-closed path.
+      authority: opts?.qcableFieldTerminationAuthority !== undefined
+        ? opts.qcableFieldTerminationAuthority
+        : enphaseFieldTerminationAuthority(
+          (microInverters[0]?.model ?? null) as string | null,
+          listedCableAssembly?.connectorArchitecture ?? null,
+        ),
+      sufficiency: procurementSufficiency,
+    });
 
     // §7/§10 — patch the canonical BRANCH_RUN route segment length taxonomy so
     // PV-4B/E-1 project the geometric designed-installed length (not the 68-ft
@@ -1486,6 +1520,7 @@ export function buildPermitDesignSnapshot(
     racewaySegmentConflicts: _racewaySegmentConflicts,
     qcableTopology,
     qcableEvaluation,
+    qcableProcurement,
     procurementSufficiency,
   });
   const _resolutionStates = mergeResolutionStates(opts?.resolutionStates ?? null, _derivedResolution.states);
@@ -1521,6 +1556,9 @@ export function buildPermitDesignSnapshot(
       // not established by any verified, exactly-applicable manufacturer document.
       'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'electrical.openAirGroundingAuthority', sheets: ['E-1', 'PV-1B', 'PV-4B', 'SCHED'], resolution: 'Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this.' },
       'QCABLE-PROCUREMENT-INSUFFICIENT': { severity: 'blocking', authorityPath: 'electrical.procurementSufficiency', sheets: ['PV-4B', 'SCHED', 'E-1'], resolution: 'Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. "Jumpers required" by assertion does NOT clear this.' },
+      'QCABLE-STOCK-PACKAGING-UNVERIFIED': { severity: 'blocking', authorityPath: 'electrical.qcableProcurement.stockUnitConnectorSections', sheets: ['PV-4B', 'SCHED', 'BOM'], resolution: 'Archive the manufacturer document that tables the purchasable package (connector sections per box) for the selected cable, or select a cable the archived table already lists.' },
+      'QCABLE-FIELD-CONNECTOR-SKU-MISSING': { severity: 'blocking', authorityPath: 'electrical.qcableProcurement.accessories', sheets: ['PV-4B', 'SCHED', 'BOM'], resolution: 'Archive the manufacturer document naming the field-termination accessory for the selected cable assembly; an accessory with no established SKU may not be ordered.' },
+      'QCABLE-TERMINATOR-COMPATIBILITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'electrical.qcableProcurement.accessories', sheets: ['PV-4B', 'SCHED', 'BOM'], resolution: 'Establish the terminator SKU and its documented per-branch-circuit quantity from an archived manufacturer document for the selected cable assembly.' },
       // §2 (BAR) — the environmental-load authority gate. Subsumes the retired
       // WIND-SNOW-AUTHORITY-UNRESOLVED (null / code-minimum-default case) AND the
       // operator-entered-without-provenance case. Cleared ONLY by a verified,
@@ -1666,7 +1704,33 @@ export function buildPermitDesignSnapshot(
     // FAIL-CLOSED blocker (procurement + engineering approval + permit acceptance),
     // never a FIELD-VERIFY/"jumpers required" note. Only a VERIFIED
     // CableExtensionSolution clears it (none wired on live ⇒ it stays firing).
-    if (procurementSufficiency?.insufficient) {
+    // WS-2 — a MEASURED shortage is answered by a RESOLVED procurement design.
+    // When resolveQCableProcurement returns VERIFIED, the purchase exists: the
+    // per-branch allocation, the stock item in the manufacturer's own package
+    // unit, the integer package count, the remainder and every accessory are all
+    // established from the archived IOM. The broad blocker then has nothing left
+    // to say and is replaced by whatever scoped residual (if any) the resolution
+    // itself raises — never by silence, and never by a rename.
+    const _qpResolved = qcableProcurement?.present === true
+      && qcableProcurement.compatibilityStatus === 'VERIFIED';
+    if (qcableProcurement?.present && qcableProcurement.residuals.length > 0) {
+      for (const res of qcableProcurement.residuals) {
+        if (res.code === 'QCABLE-PROCUREMENT-INSUFFICIENT') continue;  // handled below
+        push(res.code, res.message, {
+          payload: {
+            selectedCableAssemblySku: qcableProcurement.selectedCableAssemblySku,
+            connectorArchitecture: qcableProcurement.connectorArchitecture,
+            topologyConstrainedInstalledDeficitFt: qcableProcurement.topologyConstrainedInstalledDeficitFt,
+            selectedStockSku: qcableProcurement.selectedStockSku,
+            stockUnitDescription: qcableProcurement.stockUnitDescription,
+            unresolved: qcableProcurement.unresolved,
+            evidenceIds: qcableProcurement.evidenceIds,
+          },
+          provenance: { source: 'electrical.qcableProcurement', ref: qcableProcurement.resolutionId },
+        });
+      }
+    }
+    if (procurementSufficiency?.insufficient && !_qpResolved) {
       const ps = procurementSufficiency;
       // Concise one-line explanation (banner/cover render this); the full per-branch
       // + resolution detail lives in resolutionAction + payload, shown on RS-1.
@@ -2080,6 +2144,7 @@ export function buildPermitDesignSnapshot(
       listedCableAssembly,
       branchCablePaths,
       procurementSufficiency,
+      qcableProcurement,
       // AAC WS-5 — THE deterministic Q-Cable topology object (ordered drops,
       // transitions, cable ends, dead drops, installed vs procurement length,
       // geometry coverage, field-dependent portion). Every consumer reads THIS.

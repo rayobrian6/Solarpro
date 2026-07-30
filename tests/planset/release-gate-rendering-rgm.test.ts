@@ -19,6 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit/index';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import { pendingGroundingAuthority } from '../fixtures/synthetic-pending-grounding';
+import { unresolvedProcurementAuthority } from '../fixtures/synthetic-unresolved-procurement';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 import {
   projectReleaseGates, releaseHeadline, releasePackageLine, topConfirmedConflict,
@@ -49,6 +50,14 @@ const PKG = render();
  *  its real archived evidence. */
 const PENDING_PKG = render(undefined, pendingGroundingAuthority('wrongConnectorArchitecture'));
 const MODEL = projectReleaseGates(PKG.snap);
+/** WS-2 — a package whose Q-Cable procurement is UNRESOLVED, so RG-6's
+ *  requirement is open and its schema-keyed payload, its confirmed-condition
+ *  line and its gate are all on the sheet to be inspected. The live design now
+ *  RESOLVES that requirement from archived manufacturer authority; refusing the
+ *  authority is how the unresolved rendering is exercised without asserting that
+ *  this project must stay short of cable. */
+const UNRESOLVED_PKG = render(undefined, unresolvedProcurementAuthority());
+const UNRESOLVED_MODEL = projectReleaseGates(UNRESOLVED_PKG.snap);
 // the SHEET wrapper only — `.page-content` must not split a sheet.
 const SHEET_SPLIT = /<div class="page(?=[ "])/;
 /** a rendered sheet, COMMENT-STRIPPED: a comment that documents a RETIRED claim
@@ -162,8 +171,9 @@ describe('RGM §5 — every requirement renders in full beneath its ONE primary 
     // the aggregate-only gate used to hide), so its own schema-keyed component
     // renders too. The rule under test is that each component is keyed by the
     // requirement's DECLARED schema, and that a code without one renders none.
-    expect(rs).toContain('data-blocker-payload-schema="qcable-procurement-deficit"');
-    expect(rs).not.toContain('data-blocker-payload-schema="undefined"');
+    const rsUnresolved = rsAll(UNRESOLVED_PKG.html);
+    expect(rsUnresolved).toContain('data-blocker-payload-schema="qcable-procurement-deficit"');
+    expect(rsUnresolved).not.toContain('data-blocker-payload-schema="undefined"');
   });
 
   it('the payload-schema table stays in lockstep with the requirement declarations', () => {
@@ -358,11 +368,20 @@ describe('RGM §6 — the cover states RELEASE STATUS in gate semantics', () => 
   // cover never fabricates a conflict, and never duplicates the registry) is
   // preserved by pinning it to the single most-severe confirmed condition.
   it('the confirmed-condition line names EXACTLY the one confirmed condition', () => {
-    const top = topConfirmedConflict(MODEL);
+    // read from the UNRESOLVED package: the confirmed condition IS the Q-Cable
+    // deficit, and on the live design that condition is now resolved.
+    const top = topConfirmedConflict(UNRESOLVED_MODEL);
     expect(top).toBeTruthy();
     expect(top!.requirementCode).toBe('QCABLE-PROCUREMENT-INSUFFICIENT');
-    expect(cover).toContain('MOST SEVERE CONFIRMED CONDITION');
-    expect(cover).toContain(top!.requirementCode);
+    const unresolvedCover = pageOf(UNRESOLVED_PKG.html, 'PV-0');
+    expect(unresolvedCover).toContain('MOST SEVERE CONFIRMED CONDITION');
+    expect(unresolvedCover).toContain(top!.requirementCode);
+  });
+
+  it('with NO confirmed condition the cover states none — it never invents one', () => {
+    // the live design: the deficit is resolved, so there is nothing to name.
+    expect(topConfirmedConflict(MODEL)).toBeNull();
+    expect(cover).not.toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
   });
 
   it('the cover never duplicates the registry (only the confirmed condition is named)', () => {
@@ -413,7 +432,11 @@ describe('RGM boundaries — the redesign clears nothing and weakens nothing', (
   it('Braidon is still NOT permit-ready, with every requirement preserved', () => {
     expect(PKG.snap.permitReadiness.ready).toBe(false);
     expect(MODEL.summary.permitReady).toBe(false);
-    expect(MODEL.summary.openGateCount).toBe(7);
+    // WS-2 closed RG-6's requirement on the live design (7 → 6 open gates). The
+    // property this test guards is that the RGM REDESIGN clears nothing, so the
+    // gate count is asserted on the package where nothing was resolved.
+    expect(UNRESOLVED_MODEL.summary.openGateCount).toBe(7);
+    expect(MODEL.summary.openGateCount).toBe(6);
     expect(MODEL.summary.unresolvedRequirementCount)
       .toBe(PKG.snap.permitReadiness.registry.filter(r => !r.resolved && r.severity === 'blocking').length);
     expect(PKG.html).toContain('NOT FOR PERMIT SUBMISSION');

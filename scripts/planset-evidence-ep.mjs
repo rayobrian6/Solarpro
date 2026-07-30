@@ -326,8 +326,17 @@ rcheck('qcableDropCount', dropSum, dropSum === 0 || new RegExp(`\\b${dropSum}\\b
 // the snapshot carries them.
 const _ps = el.procurementSufficiency || null;
 const _qcableBlocker = registryCodes.includes('QCABLE-PROCUREMENT-INSUFFICIENT');
-rcheck('qcableProcurementInsufficient', _ps ? !!_ps.insufficient : false,
-  _ps ? (!!_ps.insufficient === _qcableBlocker) : !_qcableBlocker, { rs1BlockerPresent: _qcableBlocker });
+// WS-2 — the MEASUREMENT (_ps.insufficient: the ordered base cable is short of
+// the as-routed path) and the ANSWER (electrical.qcableProcurement: the
+// per-branch allocation + the package to buy) are different facts. The
+// requirement is open only when the shortfall is UNANSWERED, so every check
+// below compares against that, not against the measurement alone.
+const _qp = el.qcableProcurement || null;
+const _qcableResolved = _qp?.present === true && _qp.compatibilityStatus === 'VERIFIED';
+const _qcableUnanswered = !!_ps?.insufficient && !_qcableResolved;
+rcheck('qcableProcurementInsufficient', _qcableUnanswered,
+  _ps ? (_qcableUnanswered === _qcableBlocker) : !_qcableBlocker,
+  { rs1BlockerPresent: _qcableBlocker, qcableResolved: _qcableResolved });
 rcheck('qcableDeficitFt', _ps ? _ps.deficitFt : 0,
   !_ps || !_ps.insufficient || new RegExp(`${_ps.deficitFt}\\s*ft`).test(html));
 const blockingCount = registry.filter(r => r.severity === 'blocking').length;
@@ -365,13 +374,13 @@ const g21_perBranchPopulated = g21_present && Array.isArray(_ps.perBranch) && _p
 const g21_deficitAttributed = !g21_present || !_ps.insufficient
   || (Array.isArray(_ps.affectedBranchIds) && _ps.affectedBranchIds.length > 0
       && _ps.affectedBranchIds.every(id => _ps.perBranch.some(b => b.branchId === id)));
-const g21_consistent = g21_present && (!!_ps.insufficient === _qcableBlocker);
+const g21_consistent = g21_present && (_qcableUnanswered === _qcableBlocker);
 // TAC WS-1 — anchor on the requirement CODE + the governing deficit + the
 // NAMED basis, not on a prose phrase ('PROCUREMENT INSUFFICIENCY' was compacted
 // so PV-4B keeps its printable slack; the full two-basis derivation renders on
 // PV-4B.1). The gate additionally requires that the governing BASIS is stated,
 // so an aggregate figure can never be read as a per-branch one.
-const g21_renderedWhenShort = !g21_present || !_ps.insufficient
+const g21_renderedWhenShort = !g21_present || !_qcableUnanswered
   || (new RegExp(`${_ps.deficitFt}\\s*ft`).test(html)
       && /NON-ORDERABLE/i.test(html)
       && /QCABLE-PROCUREMENT-INSUFFICIENT/.test(html)

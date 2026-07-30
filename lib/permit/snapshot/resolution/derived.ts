@@ -47,6 +47,7 @@ export const DERIVED_RESOLVER_IDS = [
   'raceway-authority@v1',
   'qcable-topology@v1',
   'qcable-solution@v1',
+  'qcable-procurement@v1',
 ] as const;
 export type DerivedResolverId = (typeof DERIVED_RESOLVER_IDS)[number];
 
@@ -102,6 +103,9 @@ export interface DerivedResolutionContext {
   qcableEvaluation: QCableSolutionEvaluation | null;
   /** the sufficiency authority AFTER the evaluation was consumed. */
   procurementSufficiency: ProcurementSufficiency | null;
+  /** WS-2 — THE canonical procurement design (branch allocation, purchase unit,
+   *  accessories). A VERIFIED resolution is what answers a measured shortage. */
+  qcableProcurement: import('../qcableProcurement').QCableProcurementResolution | null;
 }
 
 const ROUTE_GEOMETRY_SOURCES: RouteSegmentRecord['lengthSource'][] = ['cad-route', 'field-measurement'];
@@ -299,6 +303,54 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
       failureReason: cleared ? null : (ev.unresolvedReason ?? 'no complete solution established'),
       retryability: cleared ? 'NON_RETRYABLE' : 'REQUIRES_INPUT',
       operatorAction: cleared ? null : (recommended?.requiresAction ?? null),
+      confidence: cleared ? 1 : 0,
+    });
+  }
+
+  // ── WS-2 · qcable-procurement@v1 (AUTO_DERIVED, owner of the SCOPED codes) ──
+  // The procurement RESOLUTION owns the narrow codes that replaced the one broad
+  // Q-Cable blocker. Each is cleared by the same object that raises it, so a
+  // missing accessory SKU and an unestablished package never share one verdict.
+  if (ctx.qcableProcurement) {
+    const qp = ctx.qcableProcurement;
+    const SCOPED = [
+      'QCABLE-STOCK-PACKAGING-UNVERIFIED',
+      'QCABLE-FIELD-CONNECTOR-SKU-MISSING',
+      'QCABLE-TERMINATOR-COMPATIBILITY-UNVERIFIED',
+    ];
+    const cleared = qp.present && qp.compatibilityStatus === 'VERIFIED';
+    attempts.push({
+      resolverId: 'qcable-procurement@v1',
+      mode: 'AUTO_DERIVED',
+      requirementCodes: SCOPED,
+      owns: true,
+      result: cleared ? 'RESOLVED' : 'FAILED',
+      clearance: {
+        cleared,
+        missing: cleared ? [] : qp.residuals.map(r => r.code),
+        reasons: cleared ? [] : qp.unresolved,
+      },
+      sourceQueried:
+        'archived Enphase field-termination authority (IOM-00068-3.0-EN) + the canonical Q-Cable topology '
+        + '+ the brand trunk-cable catalog packaging',
+      sourceRefs: [
+        `provenance:electrical.qcableProcurement#${qp.resolutionId}`,
+        ...qp.evidenceIds.map(e => `evidence:${e}`),
+      ],
+      inputs: {
+        selectedStockSku: qp.selectedStockSku,
+        stockUnitConnectorSections: qp.stockUnitConnectorSections,
+        stockUnitsRequired: qp.stockUnitsRequired,
+        additionalSectionsRequired: qp.additionalSectionsRequired,
+        totalUsableInstalledFt: qp.totalUsableInstalledFt,
+        expectedRemainingStockFt: qp.expectedRemainingStockFt,
+        accessoryLines: qp.accessories.length,
+        compatibilityStatus: qp.compatibilityStatus,
+      },
+      failureReason: cleared ? null : (qp.unresolved[0] ?? 'the procurement design is incomplete'),
+      retryability: cleared ? 'NON_RETRYABLE' : 'REQUIRES_INPUT',
+      operatorAction: cleared ? null
+        : 'Archive the manufacturer document that establishes the missing packaging / accessory fact.',
       confidence: cleared ? 1 : 0,
     });
   }

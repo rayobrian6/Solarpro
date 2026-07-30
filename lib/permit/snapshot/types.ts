@@ -1611,6 +1611,10 @@ export interface PermitDesignSnapshot {
      *  and every sheet length CONSUME it (one derivation). Null for non-micro /
      *  unknown trunk brand. */
     qcableTopology?: QCableTopology | null;
+    /** WS-2 — THE canonical procurement design (installed vs purchased vs
+     *  remainder, branch allocation, accessories). Renderers PROJECT this; no
+     *  sheet recalculates a purchase. */
+    qcableProcurement?: import('./qcableProcurement').QCableProcurementResolution | null;
     /** AAC WS-7 (2026-07-27): the COMPUTED NEC Chapter 9 Table 1 conduit-fill
      *  authority for the canonical feeder raceway — raceway identity, conductor
      *  set, insulation, adopted code edition, the percentage and the ≤40 %

@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   generateMetadataRuntimeCandidates,
@@ -99,7 +100,15 @@ describe('Controlled metadata runtime adapter pilot', () => {
   });
 
   it('passes the assisted evidence boundary guard with runtime import containment', () => {
-    const output = execFileSync('npm', ['run', 'check:assisted-evidence-boundaries'], { encoding: 'utf8' });
+    // Invoke the guard SCRIPT directly rather than through the `npm` shim:
+    // execFileSync does not resolve `npm.cmd` on Windows, so this failed with
+    // spawnSync ENOENT on every Windows run regardless of what the guard
+    // actually reported. Same script, same assertion, no platform shim.
+    const output = execFileSync(
+      process.execPath,
+      [path.join(process.cwd(), 'scripts', 'check-assisted-evidence-boundaries.js')],
+      { encoding: 'utf8' },
+    );
     expect(output).toContain('Assisted evidence boundary guard passed');
   });
 });

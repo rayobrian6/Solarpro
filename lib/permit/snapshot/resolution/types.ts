@@ -250,6 +250,10 @@ export interface SnapshotAuthorityInputs {
    *  open-air branch grounding/bonding method for the EXACT selected equipment.
    *  build.ts:111-117 accepts it; nothing resolved it before this wiring. */
   groundingDocumentEvidence?: GroundingDocumentEvidence | null;
+  /** WS-2 — the Q-Cable field-termination authority socket (see build.ts).
+   *  Omitted ⇒ the archived accessor; explicit null ⇒ refused. */
+  qcableFieldTerminationAuthority?:
+    import('../enphaseFieldTerminationEvidence').EnphaseFieldTerminationAuthority | null;
   /** FRAMING path B — a digest-bound engineer review of the framing capacity.
    *  build.ts:92-93 accepts both; generatePermit never passed them. */
   framingEngineerReview?: FramingEngineerReviewEvidence | null;

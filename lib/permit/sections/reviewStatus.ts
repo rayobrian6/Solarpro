@@ -115,6 +115,11 @@ export type BlockerPayloadSchema =
 export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
   // ── the TWO schema-typed payloads ─────────────────────────────────────────
   'QCABLE-PROCUREMENT-INSUFFICIENT': 'qcable-procurement-deficit',
+  // WS-2 scoped residuals — each is a narrow, generically-rendered fact; only
+  // the broad deficit has a bespoke payload template.
+  'QCABLE-STOCK-PACKAGING-UNVERIFIED': 'generic',
+  'QCABLE-FIELD-CONNECTOR-SKU-MISSING': 'generic',
+  'QCABLE-TERMINATOR-COMPATIBILITY-UNVERIFIED': 'generic',
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': 'qcable-grounding-authority',
   // ── electrical ────────────────────────────────────────────────────────────
   'ROUTE-LENGTH-ESTIMATE': 'generic',
