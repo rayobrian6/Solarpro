@@ -2841,7 +2841,18 @@ const LEGACY_ID_MAP: Record<string, string> = {
   'schletter-classic':  'schletter-classic',
   'esdec-flatfix':      'esdec-flatfix',
   'rail-based':         'ironridge-xr100',
-  'rail-less':          'rooftech-mini',
+  // P13 WS-4 — 'rail-less' USED TO MAP TO 'rooftech-mini', which is RAIL-PAIRED
+  // (module → rail → RT-MINI pad → roof; see that record's mountTopology and the
+  // W4.1 §1 directive on it). So a rail-less request silently bound a rail-paired
+  // product, whose record then reports its rail as PENDING SELECTION — turning an
+  // architecture keyword into a permanent "rail unselected" release blocker on a
+  // job that never wanted a rail.
+  //
+  // It is NOT remapped to a rail-less product either: the verified rail-less
+  // records in this catalog are brand-specific (Tesla Panel Mount comp-rafter /
+  // tile), and binding a generic architecture keyword to one manufacturer is the
+  // same class of silent inference. An unmapped id falls through unchanged and is
+  // resolved by an explicit selection, which is the honest outcome.
   'ballasted':          'panelclaw-polar-bear',
   'ground-mount':       'ground-dual-post-driven',
   'tracker':            'nextracker-nr3',

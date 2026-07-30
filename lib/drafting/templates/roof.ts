@@ -1668,12 +1668,21 @@ export function drawRoofPlan(
       // PPC §3 — the ONE canonical spacing line, verbatim, on PV-1.
       `3C. ${_attP.spacingDesignLine}`,
       `   STATUS: ${_attP.spacingStatusLine}.`,
+      // P13 WS-4 — the DECK-MOUNT clause is GONE. It instructed the installer to
+      // deck-mount "where no rafter falls in range" on every railed job,
+      // unconditionally: the deck-foot placement mechanism was retired (see
+      // _deckMountUsed = false, so no deck foot is ever drawn and the legend
+      // carries no deck swatch), PV-3 and PV-4C describe a rafter design, and the
+      // canonical assembly's attachmentMode is 'rafter' (2 structural wood screws
+      // — the RT-MINI DECK condition is a different 5-screw design with its own
+      // capacity and its own manufacturer instructions). A deck attachment is a
+      // deliberate design with its own authority, never a field fallback.
       ...(!isRailless
         ? [
             `3B. RAILS ON FEET @ ${_ocLabelP} STAGGERED,`,
             '   FEET ON RAFTERS; RAILS AT 25%/75% OF',
-            '   MODULE. END OVERHANG ≤ 18" — DECK-MOUNT',
-            '   (◻) WHERE NO RAFTER FALLS IN RANGE.',
+            '   MODULE. END OVERHANG ≤ 18". ATTACH TO',
+            '   FRAMING ONLY — NO DECK-ONLY ATTACHMENT.',
           ]
         : []),
       ...(_encroachCount > 0

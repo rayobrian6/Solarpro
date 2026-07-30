@@ -1128,11 +1128,36 @@ export interface RoofPlaneObject {
  *  ALLOWABLE from mounting-hardware-db (RT-MINI: 600 lb PE-letter allowable — the
  *  900 lb "ultimate" registry entries are NOT authority; the discrepancy is
  *  recorded in `notes`). */
+/** P13 WS-4 — how modules attach to the mount. Rail-paired systems need a rail
+ *  SKU; rail-less systems must NEVER have one invented for them. */
+export type RackingArchitecture = 'rail-paired' | 'rail-less' | 'unresolved';
+
+/** P13 WS-4 — what the fastener penetrates. The RT-MINI rafter condition is 2
+ *  structural wood screws; the DECK condition is a 5-screw pattern with its own
+ *  capacity and its own manufacturer instructions. They are different designs
+ *  with different authority and may never be shown interchangeably. */
+export type AttachmentMode = 'rafter' | 'structural-deck' | 'unresolved';
+
 export interface RackingAssemblyRecord {
   assemblyId: string;
   recordRevision: string;           // content hash — assembly change ⇒ digest change
   mountManufacturer: string; mountModel: string; mountSku: string | null;
   railManufacturer: string | null; railModel: string | null; railSku: string | null;
+  // ── P13 WS-4 — the architecture / attachment facts the catalog DOES carry ────
+  // These were derivable from mounting-hardware-db all along and were not
+  // projected, so downstream surfaces inferred them (or printed a deck-mount
+  // instruction the design never made). `mountSku`/`railSku` stay null because no
+  // SolarPro source carries an orderable part number — that is a real gap, and it
+  // is NOT the same fact as "the mount is unselected".
+  architectureType: RackingArchitecture;
+  architectureBasis: string | null;
+  attachmentMode: AttachmentMode;
+  attachmentModeBasis: string | null;
+  /** fasteners per mount for the SELECTED attachment mode (rafter 2 / deck 5) */
+  fastenersPerMount: number | null;
+  /** the manufacturer maximum this design's spacing was taken from */
+  attachmentSpacingSourceIn: number | null;
+  attachmentSpacingSource: string | null;
   lFootOrAdapter: string | null;
   tBoltFastener: string | null;
   midClamp: string | null; endClamp: string | null; splice: string | null;

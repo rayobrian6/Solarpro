@@ -580,10 +580,41 @@ export function buildRackingAssembly(
     assemblyId: `assembly-${system.id}`,
     mountManufacturer: mountBrand,
     mountModel: mount.model,
+    // P13 WS-4 — NO SolarPro source carries an orderable part number for either
+    // the mount or the rail (mounting-hardware-db has no sku field at all), so
+    // these stay null. That is a real catalogue gap and it is NOT the same fact
+    // as "the mount is unselected": the mount MODEL is known and pinned above.
     mountSku: null,
     railManufacturer: railBrand,
     railModel: railDisplay,
     railSku: null,
+    // ── P13 WS-4 — architecture + attachment mode, projected from the catalog ──
+    // mounting-hardware-db already carried mountTopology, fastenersPerMount and
+    // maxSpacingIn. Nothing downstream consumed them, so PV-1 printed a
+    // deck-mount instruction this design never made and the 48" spacing had no
+    // stated source. Product-name inference is PROHIBITED — every value here is
+    // read from the record, never from the model string.
+    architectureType: system.mountTopology === 'rail_paired' || isRailBased
+      ? 'rail-paired'
+      : system.mountTopology === 'rail_less' ? 'rail-less' : 'unresolved',
+    architectureBasis: system.mountTopologyBasis
+      ?? (isRailBased ? `mounting-hardware-db systemType='${system.systemType}'` : null),
+    // The RT-MINI RAFTER condition is 2 structural wood screws; the DECK
+    // condition is a 5-screw pattern with its own capacity and its own
+    // manufacturer instructions. The catalog's fastenersPerMount states which
+    // design this record is. A deck design must be selected explicitly and carry
+    // deck-specific authority — it is never a fallback "where no rafter falls".
+    attachmentMode: mount.fastenersPerMount === 2 ? 'rafter'
+      : mount.fastenersPerMount === 5 ? 'structural-deck' : 'unresolved',
+    attachmentModeBasis: mount.fastenersPerMount != null
+      ? `mounting-hardware-db mount.fastenersPerMount=${mount.fastenersPerMount} `
+        + `(${mount.fastenersPerMount === 2 ? 'rafter attachment' : mount.fastenersPerMount === 5 ? 'structural-deck attachment' : 'pattern not recognised'})`
+      : null,
+    fastenersPerMount: mount.fastenersPerMount ?? null,
+    attachmentSpacingSourceIn: mount.maxSpacingIn ?? null,
+    attachmentSpacingSource: mount.maxSpacingIn != null
+      ? `mounting-hardware-db mount.maxSpacingIn=${mount.maxSpacingIn}" (manufacturer maximum)`
+      : null,
     lFootOrAdapter: /l_foot/i.test(mount.attachmentMethod) ? `${mountBrand} L-Foot` : null,
     tBoltFastener: isRailBased ? 'Rail T-bolt / mount-to-rail bolt' : null,
     midClamp: hw.midClamp ?? null,
