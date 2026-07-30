@@ -191,6 +191,11 @@ export function pageWarningLabels(
     'multiple-sources-of-power-directory',
   ]);
   const gridLabels = requiredLabels.filter(l => !SUPERSEDED.has(l.refId));
+  // TAC WS-13 — a superseded label is not DROPPED, it is delivered by another
+  // item ON THIS SHEET. The set above is static; only the members that actually
+  // apply to THIS system count, and each names where it went. This is what made
+  // the old header fail to add up: "N SITE-COMPUTED + M STANDARD" omitted them.
+  const _supersededApplicable = requiredLabels.filter(l => SUPERSEDED.has(l.refId));
 
   // Render each item as what it physically IS — a peel-and-stick field DECAL
   // (adhesive vinyl / reflective label) that gets applied to a specific piece
@@ -450,7 +455,9 @@ export function pageWarningLabels(
       `<th>PLACEMENT LOCATION</th>` +
       `</tr></thead>`;
     return `<table class="equip-table" style="margin:0;">${_head}<tbody>${labels.map(_row).join('')}</tbody></table>` +
-      `<div style="font-size:6.2px;color:#555;margin-top:2px;">* Rendered on this sheet with site-computed ratings (DC/AC disconnect labels) or as the multiple-power-sources placard above.${_betaAssumed ? ' &nbsp;&dagger; Module Voc temperature coefficient unresolved in the equipment DB &mdash; conservative NEC 690.7 &times;1.25 applied; field-verify against the module datasheet.' : ''}</div>`;
+      `<div data-label-accounting="1" style="font-size:6.2px;color:#555;margin-top:2px;">`
+      + `${gridLabels.length} + ${_supersededApplicable.length} YES* = ${requiredLabels.length} of ${labels.length} apply, ${labels.length - requiredLabels.length} N/A. `
+      + `* Rendered on this sheet with site-computed ratings (DC/AC disconnect labels) or as the multiple-power-sources placard above.${_betaAssumed ? ' &nbsp;&dagger; Module Voc temperature coefficient unresolved in the equipment DB &mdash; conservative NEC 690.7 &times;1.25 applied; field-verify against the module datasheet.' : ''}</div>`;
   })();
 
   // ── AAC WS-10 — MERGED PV-5 + PV-6 (the permit profile's ONE labels sheet) ──
@@ -491,9 +498,10 @@ export function pageWarningLabels(
         <!-- LEFT: the label set -->
         <div>
           <div class="sec-hdr-dark" style="margin-bottom:4px;">
-            REQUIRED LABELS &mdash; ${ratingCards.length} SITE-COMPUTED + ${gridLabels.length} STANDARD (${requiredLabels.length} OF ${labels.length} DATASET LABELS APPLY)
+            REQUIRED LABELS &mdash; ${requiredLabels.length} OF ${labels.length} DATASET LABELS (${gridLabels.length} DECAL${gridLabels.length === 1 ? '' : 'S'} &middot; ${ratingCards.length} CARD${ratingCards.length === 1 ? '' : 'S'} &middot; ${_supersededApplicable.length} ON CARD/PLACARD)
           </div>
           ${buildCardGrid(cardCells, _merged ? 3 : 4)}
+
         </div>${_merged ? `
 
         <!-- CENTRE (merged profile): the permanent plaque — former PV-6 -->

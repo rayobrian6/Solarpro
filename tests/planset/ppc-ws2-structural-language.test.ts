@@ -353,8 +353,14 @@ describe('PPC §10 (gate 14) — pending issue state cannot render approved-desi
     expect(t).toContain('SITE-COMPUTED FROM THE CURRENT DESIGN-REVIEW SNAPSHOT — NOT YET APPROVED');
     expect(t).not.toMatch(/APPROVED DESIGN/i);
     expect(t).not.toMatch(/approved plans|engineer approved|permit approved|construction approved/i);
-    // the label COUNT line ("1 SITE-COMPUTED + N STANDARD") must survive untouched
-    expect(t).toMatch(/SITE-COMPUTED \+ \d+ STANDARD/);
+    // The label COUNT line must survive the pending-state sweep.
+    // TAC WS-13 — the old header ("N SITE-COMPUTED + M STANDARD (R OF D DATASET
+    // LABELS APPLY)") stated two true numbers that did not add up: the labels
+    // superseded by the rating cards / the power-source placard were subtracted
+    // from the decal count and then left uncounted. Assert the applicability
+    // count AND the reconciliation that closes the arithmetic.
+    expect(t).toMatch(/\d+ OF \d+ DATASET LABELS \(\d+ DECALS?/);
+    expect(t).toMatch(/\d+ \+ \d+ YES\* = \d+ of \d+ apply, \d+ N\/A/);
   });
 
   it('the accessor DOES permit approved wording once a digest-bound approval clears', () => {

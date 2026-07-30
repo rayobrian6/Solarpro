@@ -607,8 +607,15 @@ const stateCountsRendered = [...noB64.matchAll(/data-procurement-state-count="([
   const hits = hasBlocking ? Object.entries(CLASSES).filter(([, re]) => re.test(t)).map(([k]) => k) : [];
   const honest = !hasBlocking
     || flat(pv5).includes('SITE-COMPUTED FROM THE CURRENT DESIGN-REVIEW SNAPSHOT — NOT YET APPROVED');
-  // the legitimate label COUNT line must survive
-  const countLine = /SITE-COMPUTED \+ \d+ STANDARD/.test(flat(pv5));
+  // The legitimate label COUNT line must survive a pending-state sweep.
+  // TAC WS-13 — the shape changed and the STRICTER form is now asserted. The old
+  // header ("N SITE-COMPUTED + M STANDARD (R OF D DATASET LABELS APPLY)") stated
+  // two true numbers that did not add up: the labels superseded by the rating
+  // cards / the power-source placard were subtracted from the decal count and
+  // then left uncounted. Require the applicability count AND the reconciliation
+  // line that closes the arithmetic, so the defect cannot come back.
+  const countLine = /\d+ OF \d+ DATASET LABELS \(\d+ DECALS?/.test(flat(pv5))
+    && /\d+ \+ \d+ YES\* = \d+ of \d+ apply, \d+ N\/A/.test(flat(pv5));
   gate(14, 'pending-issue-state-cannot-render-approved-design',
     hits.length === 0 && honest && countLine,
     `blocking=${blockingCodes.length} issueState=${pa?.issueState ?? '—'} approvedLanguageHits=${hits.join(',') || 'none'} `

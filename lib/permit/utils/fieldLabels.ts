@@ -19,6 +19,7 @@ import { buildConductorAuthority } from './conductorAuthority';
 import { getDesignTemps } from './designTemps';
 import { SOLAR_PANELS } from '@/lib/equipment-db';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';   // §11 — editions single-sourced
+import { peekSnapshot } from '../snapshot/read';   // TAC WS-13 — canonical grounding objects
 
 interface RawLabel {
   id: string;
@@ -59,6 +60,13 @@ interface Ctx {
   hasBattery: boolean;
   rapidShutdown: boolean;
   acDisconnect: boolean;
+  /** TAC WS-13 — does THIS design add a grounding electrode conductor? Read from
+   *  the canonical grounding object (build.ts `gnd-gec`), the same record PV-4B
+   *  prints from. A grid-tied interconnection bonds to the EXISTING service
+   *  grounding electrode system and adds no GEC, so a label asserting one exists
+   *  ("GROUNDING ELECTRODE CONDUCTOR — DO NOT DISCONNECT") contradicted PV-4B on
+   *  the same package. */
+  gecRequired: boolean;
 }
 
 // §16 — INTERCONNECTION-SIDE classification. The design's canonical topology
@@ -107,8 +115,36 @@ const REQUIRED_WHEN: Record<string, (c: Ctx) => boolean> = {
   'photovoltaic-system-connected': () => true,
   'ess-disconnect': c => c.hasBattery,
   'ess-master-placard': c => c.hasBattery,
+  // TAC WS-13 — the 250.119 grounding/bonding IDENTIFICATION requirement always
+  // applies (equipment grounding conductors and array bonding points exist on
+  // every system), so this row stays required. What was unconditional and WRONG
+  // is its TEXT and its citation: see LABEL_VARIANT below, which drops the GEC
+  // assertion and the 690.47 grounding-electrode citation when the design adds
+  // no grounding electrode conductor.
   'grounding-electrode-conductor-marking': () => true,
   'inverter-listing-label': () => true,
+};
+
+/** TAC WS-13 — a label whose WORDING or CITATION depends on a design fact.
+ *  Returning null keeps the dataset row verbatim. */
+interface LabelVariant { text?: string; necSections?: string }
+const LABEL_VARIANT: Record<string, (c: Ctx) => LabelVariant | null> = {
+  // The dataset row is the grounding/bonding conductor IDENTIFICATION label
+  // (250.119 / 690.43 / 690.47), but its printed text names a grounding
+  // ELECTRODE conductor and tells the field not to disconnect it. On a grid-tied
+  // interconnection that bonds to the existing GES no such conductor is added —
+  // PV-4B says so explicitly — so the text asserted a conductor that does not
+  // exist and cited 690.47 (grounding electrode systems) as its authority. With
+  // no GEC the requirement that DOES apply is identification of the equipment
+  // grounding and bonding conductors: 250.119 (identification) + 690.43 (array
+  // equipment grounding/bonding). 690.47 prints only when a GEC exists.
+  'grounding-electrode-conductor-marking': c => (c.gecRequired ? null : {
+    // Kept to the same printed length as the dataset row it replaces — the decal
+    // card sits in a 3-column grid on the merged labels sheet with no slack for
+    // an extra wrapped line (pagefit internal-clip gate).
+    text: 'EQUIPMENT GROUNDING & BONDING — DO NOT DISCONNECT',
+    necSections: '250.119 / 690.43',
+  }),
 };
 
 // §16 — NEC 705 section clauses are SIDE-SPECIFIC. On a supply-side (705.11)
@@ -230,12 +266,20 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
   const _cp = projectCodeAuthorityFromInput(input);
   const isMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
   const isSupply = isSupplySideInterconnection(input);
+  // TAC WS-13 — the canonical GEC record (build.ts pushes an explicit
+  // required:false / method:'none-required' object for a grid-tied
+  // interconnection). Absent snapshot ⇒ false, which matches that design rule AND
+  // selects the wording that is true either way (equipment grounding and bonding
+  // conductors exist on every system; a GEC does not).
+  const _gecObj = peekSnapshot(input)?.electrical?.groundingObjects
+    ?.find(g => g.purpose === 'gec') ?? null;
   const ctx: Ctx = {
     isMicro,
     isSupply,
     hasBattery: hasRealBattery(project),
     rapidShutdown: !!project.rapidShutdown,
     acDisconnect: project.acDisconnect !== false,
+    gecRequired: _gecObj ? _gecObj.required === true : false,
   };
 
   // Live values for the fill-in ratings labels (single-sourced).
@@ -287,7 +331,13 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
     const side = labelInterconnectSide(l.id);
     const conditionRequired = (REQUIRED_WHEN[l.id] ?? (() => true))(ctx);
     const required = conditionRequired && sideApplies(side, isSupply);
-    const filledText = FILLS[l.id] ? fillBlanks(l.text, FILLS[l.id]) : l.text;
+    // TAC WS-13 — design-dependent wording / citation before the fill-in pass.
+    const variant = (LABEL_VARIANT[l.id] ?? (() => null))(ctx);
+    const _text = variant?.text ?? l.text;
+    const _codeRefs = variant?.necSections
+      ? l.codeRefs.map(c => (/NEC/i.test(c.code) ? { ...c, section: variant.necSections as string } : c))
+      : l.codeRefs;
+    const filledText = FILLS[l.id] ? fillBlanks(_text, FILLS[l.id]) : _text;
     const textLines = filledText.split('\n').map(s => s.trim()).filter(Boolean);
     // Ensure the ANSI signal word leads the lines so the renderer styles it.
     const sig = (l.signalWord || '').toUpperCase();
@@ -296,7 +346,7 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
     return {
       id: `L-${n}`,
       refId: l.id,
-      necRef: resolveRef(l.codeRefs, year, _cp.ifc, isSupply),
+      necRef: resolveRef(_codeRefs, year, _cp.ifc, isSupply),
       placement: l.location,
       lines,
       bg: l.colors.background || '#ffffff',
