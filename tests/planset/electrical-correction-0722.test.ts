@@ -39,7 +39,7 @@ function snap(electrical: Partial<PermitDesignSnapshot['electrical']>,
 describe('§3 SEGMENT AUTHORITY — canonical feeder projection (electricalProjection)', () => {
   const canonical = snap({
     conductors: [{ conductorId: 'c-1', gauge: '#6 AWG', material: 'Cu', insulation: 'THWN-2', count: null, ampacityA: 75, provenance: { source: 't' } }],
-    groundingObjects: [{ groundingId: 'gnd-feeder', segmentId: 'COMBINER_TO_DISCO_RUN', purpose: 'feeder-egc', required: true, method: 'conductor', conductorMaterial: 'Cu', conductorSize: '#10 AWG', sizingBasis: '', associatedOcpdA: 60, associatedEquipment: '', manufacturerListingBasis: null, codeBasis: 'NEC 250.122', provenance: { source: 't' } }],
+    groundingObjects: [{ groundingId: 'gnd-feeder', segmentId: 'COMBINER_TO_DISCO_RUN', purpose: 'feeder-egc', segmentRole: 'FEEDER_EGC', calculatedMinimumSize: '#10 AWG', selectedDesignSize: null, selectionSource: 'nec-minimum', selectionReason: null, ocpdBasis: '60A feeder OCPD', sourceNode: 'combiner', destinationNode: 'disconnect', insulationState: 'insulated-green', installationMethod: 'in-raceway', routeId: 'COMBINER_TO_DISCO_RUN', rackingAssemblyId: null, bondingMethod: null, manufacturerEvidenceId: null, calculationId: 'calc:test', required: true, method: 'conductor', conductorMaterial: 'Cu', conductorSize: '#10 AWG', sizingBasis: '', associatedOcpdA: 60, associatedEquipment: '', manufacturerListingBasis: null, codeBasis: 'NEC 250.122', provenance: { source: 't' } }],
     feeder: { conductorId: 'c-1', ocpdA: 60, continuousA: 45.1, currentA: 36.1, voltageDropPct: 0.37,
               conduit: { raceway: 'EMT', tradeSizeIn: '1"', fillPct: 28.5 } },
     routeSegments: [{ segmentId: 'COMBINER_TO_DISCO_RUN', from: 'COMBINER', to: 'AC DISCO', oneWayFt: 60,

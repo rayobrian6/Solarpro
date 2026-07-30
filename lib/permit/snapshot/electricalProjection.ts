@@ -474,6 +474,9 @@ const _PURPOSE_LABEL: Record<string, string> = {
   'gec': 'Grounding electrode conductor (GEC)',
   'integrated-listed-method': 'Listed integrated grounding method',
   'module-racking-bonding': 'Module-frame + racking bonding (UL 2703)',
+  // P13 WS-1 — the array/racking bonding EGC: the conductor from the bonded
+  // module/racking system to the rooftop equipment-ground point.
+  'array-rack-bonding-egc': 'Array / racking bonding equipment grounding conductor',
 };
 
 /** ECD §6 — the id of the ONE grouped branch-EGC authority node. It is deliberately
@@ -553,6 +556,11 @@ export function projectGroundingSegments(
         // PENDING ⇒ NO size is asserted; (A) ⇒ no conductor exists; (B) ⇒ the
         // authority's NEC-derived size.
         conductorSize: pending || noRow ? null : oa.conductorSize,
+        // P13 WS-1 — a GROUP-AUTHORITY node is a manufacturer-authority result,
+        // not a 250.122 table computation, so it carries no minimum/selection
+        // split. The physical member segments each carry their own.
+        calculatedMinimumSize: null, selectedDesignSize: null,
+        selectionSource: null, selectionReason: null, segmentRole: null,
         conductorMaterial: pending || noRow ? null : (oa.conductorMaterial === 'Al' ? 'Al' : 'Cu'),
         insulationType: pending
           ? null
@@ -603,14 +611,29 @@ export function projectGroundingSegments(
       memberGroundingIds: [],
       purpose: g.purpose,
       label: _PURPOSE_LABEL[g.purpose] ?? g.purpose,
-      fromDeviceId: seg?.from ?? (g.associatedEquipment ?? '—'),
-      toDeviceId: seg?.to ?? (g.associatedEquipment ?? '—'),
+      // P13 WS-1 — the record's OWN endpoints win. A bonding conductor that runs
+      // from the bonded racking system to the rooftop junction box must not be
+      // labelled with the route segment's endpoints ("PV ARRAY→MICROINVERTERS"),
+      // which describe a different circuit that merely shares the route.
+      fromDeviceId: g.sourceNode ?? seg?.from ?? (g.associatedEquipment ?? '—'),
+      toDeviceId: g.destinationNode ?? seg?.to ?? (g.associatedEquipment ?? '—'),
       associatedSegmentId: g.segmentId,
       associatedCircuitIds: seg ? [seg.segmentId] : [],
       conductorSize: g.method === 'conductor' ? g.conductorSize : null,
+      // P13 WS-1 — the code MINIMUM and the DESIGN SELECTION travel to the sheet
+      // as separate facts. A renderer that prints one number can therefore never
+      // attribute a design choice to NEC 250.122.
+      calculatedMinimumSize: g.method === 'conductor' ? g.calculatedMinimumSize : null,
+      selectedDesignSize: g.method === 'conductor' ? g.selectedDesignSize : null,
+      selectionSource: g.selectionSource,
+      selectionReason: g.selectionReason,
+      segmentRole: g.segmentRole,
       conductorMaterial: g.conductorMaterial,
       insulationType: g.method === 'conductor'
-        ? (g.purpose === 'gec' ? 'bare Cu' : (seg?.insulation ?? 'THWN-2 green'))
+        // P13 WS-1 — the record states bare vs insulated; an array bonding
+        // conductor is bare and must not inherit the raceway conductor's THWN-2.
+        ? (g.insulationState === 'bare' ? `bare ${g.conductorMaterial ?? 'Cu'}`
+          : g.purpose === 'gec' ? 'bare Cu' : (seg?.insulation ?? 'THWN-2 green'))
         : (g.method === 'raceway' ? 'raceway as the equipment grounding conductor (NEC 250.118)' : null),
       method: g.method,
       physicalRacewayId: inRaceway ? (seg?.physicalRacewayId ?? null) : null,

@@ -372,6 +372,7 @@ export function renderGroundingSegmentRows(
     'gec': 'Grounding electrode conductor',
     'integrated-listed-method': 'Listed integrated method',
     'module-racking-bonding': 'Module / racking bonding',
+    'array-rack-bonding-egc': 'Array / racking bonding EGC',
   };
   const rows = segments.map(gs => {
     // The conductor cell NEVER asserts an installed conductor for a PENDING
@@ -386,7 +387,17 @@ export function renderGroundingSegmentRows(
           ? 'NOT REQUIRED — bonded to existing GES'
           : gs.method === 'raceway'
             ? 'raceway as EGC (250.118)'
-            : `${gs.conductorSize ?? 'PENDING'} ${gs.conductorMaterial ?? ''}`.trim();
+            // P13 WS-1 — when the INSTALLED conductor is larger than the NEC
+            // 250.122 minimum, BOTH facts print. A single number here let a
+            // reader attribute a design choice to the code table ("250.122
+            // requires #10" for a 20 A branch, where the table says #12).
+            : (gs.selectedDesignSize
+                && gs.calculatedMinimumSize
+                && gs.selectedDesignSize !== gs.calculatedMinimumSize)
+              ? `${escapeH(gs.selectedDesignSize)} ${escapeH(gs.conductorMaterial ?? '')}`.trim()
+                + ` <span style="color:#555">(NEC 250.122 min ${escapeH(gs.calculatedMinimumSize)}; `
+                + `${escapeH(gs.selectionSource === 'project-design-standard' ? 'design std' : String(gs.selectionSource ?? 'selected'))})</span>`
+              : `${gs.conductorSize ?? 'PENDING'} ${gs.conductorMaterial ?? ''}`.trim();
     const lengthCell = gs.lengthFt != null
       ? `${gs.lengthFt} ft`
       : (gs.method === 'none-required' || gs.method === 'integrated-listed' ? 'n/a' : 'NOT EST.');

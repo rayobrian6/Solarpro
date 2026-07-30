@@ -51,6 +51,10 @@ import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manuf
 import { buildEquipmentDocumentAuthority } from './documentAuthority';
 // ECD §7 (WS-2) — racking BONDING authority (requirement vs method).
 import { buildRackingBondingAuthority } from './rackingBonding';
+// P13 WS-1 — the NEC 250.122 table + the array/racking bonding DESIGN standard,
+// kept as separate, separately-sourced facts.
+import { getEGCSize } from '@/lib/manufacturer-specs';
+import { ARRAY_RACK_BONDING_DESIGN_SIZE, conductorAreaRank } from './groundingDesignStandard';
 import { buildComputeSystemShadow } from '../utils/computedRuns';
 import { collectEquipmentDocumentBlockers } from './equipmentProjection';
 import { classifyBlockerSeverity } from './severityPolicy';
@@ -363,35 +367,93 @@ export function buildPermitDesignSnapshot(
     'computeSystem feeder segment', feederRun?.effectiveAmpacity ?? auth.acFeeder.ampacityA ?? null);
 
   // ═══ W2.1 GROUNDING OBJECTS — per segment + purpose (no "system EGC") ═══
+  //
+  // P13 WS-1 - every record now carries its ROLE, its ENDPOINTS, and the code
+  // MINIMUM separately from the DESIGN SELECTION. _gndAtMinimum supplies the
+  // honest defaults (selection == the NEC minimum) so a record that does NOT
+  // apply a design standard cannot accidentally imply one.
   const groundingObjects: import('./types').GroundingRecord[] = [];
+  /** Build a grounding record whose INSTALLED size IS the NEC 250.122 minimum. */
+  const _gndAtMinimum = (r: {
+    groundingId: string; segmentId: string;
+    purpose: import('./types').GroundingRecord['purpose'];
+    segmentRole: import('./types').GroundingSegmentRole;
+    size: string | null; ocpdA: number | null; ocpdBasis: string;
+    sourceNode: string; destinationNode: string;
+    insulationState: import('./types').GroundingRecord['insulationState'];
+    installationMethod: import('./types').GroundingRecord['installationMethod'];
+    routeId: string | null; associatedEquipment: string; provenanceSource: string;
+  }): import('./types').GroundingRecord => ({
+    groundingId: r.groundingId, segmentId: r.segmentId, purpose: r.purpose,
+    segmentRole: r.segmentRole,
+    required: true, method: 'conductor', conductorMaterial: 'Cu',
+    conductorSize: r.size,
+    // The selection IS the minimum here - stated explicitly rather than left to
+    // be inferred from equality.
+    calculatedMinimumSize: r.size,
+    selectedDesignSize: null,
+    selectionSource: 'nec-minimum',
+    selectionReason: null,
+    sizingBasis: `NEC 250.122 @ ${r.ocpdBasis}`,
+    associatedOcpdA: r.ocpdA, ocpdBasis: r.ocpdBasis,
+    associatedEquipment: r.associatedEquipment,
+    sourceNode: r.sourceNode, destinationNode: r.destinationNode,
+    insulationState: r.insulationState, installationMethod: r.installationMethod,
+    routeId: r.routeId,
+    rackingAssemblyId: null, bondingMethod: null, manufacturerEvidenceId: null,
+    manufacturerListingBasis: null, codeBasis: 'NEC 250.122',
+    calculationId: `calc:egc-250.122:${r.groundingId}`,
+    provenance: { source: r.provenanceSource },
+  });
   if (isMicro && branchRun) {
-    branches.forEach((b) => groundingObjects.push({
-      groundingId: `gnd-${b.branchId}`, segmentId: 'BRANCH_RUN', purpose: 'branch-egc',
-      required: true, method: 'conductor', conductorMaterial: 'Cu',
-      conductorSize: branchRun.egcGauge ?? null,
-      sizingBasis: `NEC 250.122 @ ${b.ocpdA}A branch OCPD`,
-      associatedOcpdA: b.ocpdA, associatedEquipment: `AC branch ${b.label}`,
-      manufacturerListingBasis: null, codeBasis: 'NEC 250.122',
-      provenance: { source: 'computeSystem BRANCH_RUN' },
-    }));
+    branches.forEach((b) => groundingObjects.push(_gndAtMinimum({
+      groundingId: `gnd-${b.branchId}`, segmentId: 'BRANCH_RUN',
+      purpose: 'branch-egc', segmentRole: 'BRANCH_EGC',
+      size: branchRun.egcGauge ?? null,
+      ocpdA: b.ocpdA, ocpdBasis: `${b.ocpdA}A branch OCPD`,
+      // The AC BRANCH CIRCUIT equipment grounding conductor - NOT a
+      // "microinverter EGC". No claim is made here about whether the selected
+      // Enphase equipment requires a separate product grounding conductor; that
+      // is the openAirGroundingAuthority question, on its own evidence.
+      sourceNode: `AC branch ${b.label} (microinverter output)`,
+      destinationNode: 'Rooftop junction box equipment-ground bus',
+      insulationState: 'insulated-green', installationMethod: 'free-air',
+      routeId: 'BRANCH_RUN',
+      associatedEquipment: `AC branch ${b.label}`,
+      provenanceSource: 'computeSystem BRANCH_RUN',
+    })));
   }
   if (feederRun) {
-    groundingObjects.push({
-      groundingId: 'gnd-feeder', segmentId: String(feederRun.id), purpose: 'feeder-egc',
-      required: true, method: 'conductor', conductorMaterial: 'Cu',
-      conductorSize: feederRun.egcGauge ?? null,
-      sizingBasis: `NEC 250.122 @ ${feederRun.ocpdAmps ?? cs?.acOcpdAmps ?? '?'}A feeder OCPD`,
-      associatedOcpdA: feederRun.ocpdAmps ?? cs?.acOcpdAmps ?? null,
+    groundingObjects.push(_gndAtMinimum({
+      groundingId: 'gnd-feeder', segmentId: String(feederRun.id),
+      purpose: 'feeder-egc', segmentRole: 'FEEDER_EGC',
+      size: feederRun.egcGauge ?? null,
+      ocpdA: feederRun.ocpdAmps ?? cs?.acOcpdAmps ?? null,
+      ocpdBasis: `${feederRun.ocpdAmps ?? cs?.acOcpdAmps ?? '?'}A feeder OCPD`,
+      sourceNode: 'PV AC combiner panel equipment-ground bus',
+      destinationNode: 'AC disconnect → point of interconnection ground bus',
+      insulationState: 'insulated-green', installationMethod: 'in-raceway',
+      routeId: String(feederRun.id),
       associatedEquipment: 'AC feeder (combiner → disconnect → POI)',
-      manufacturerListingBasis: null, codeBasis: 'NEC 250.122',
-      provenance: { source: 'computeSystem feeder segment' },
-    });
+      provenanceSource: 'computeSystem feeder segment',
+    }));
     const raceway = String(feederRun.conduitType ?? '').toUpperCase();
     if (raceway.includes('EMT')) {
       groundingObjects.push({
         groundingId: 'gnd-raceway', segmentId: String(feederRun.id), purpose: 'raceway-bond',
+        segmentRole: 'RACEWAY_BOND',
         required: true, method: 'raceway', conductorMaterial: null, conductorSize: null,
-        sizingBasis: null, associatedOcpdA: null, associatedEquipment: 'EMT raceway + listed fittings',
+        calculatedMinimumSize: null, selectedDesignSize: null,
+        selectionSource: null, selectionReason: null,
+        sizingBasis: null, associatedOcpdA: null, ocpdBasis: null,
+        associatedEquipment: 'EMT raceway + listed fittings',
+        sourceNode: 'PV AC combiner panel enclosure',
+        destinationNode: 'AC disconnect enclosure',
+        insulationState: null, installationMethod: 'integral-to-assembly',
+        routeId: String(feederRun.id),
+        rackingAssemblyId: null, bondingMethod: 'listed metallic raceway + fittings',
+        manufacturerEvidenceId: null,
+        calculationId: null,
         manufacturerListingBasis: null,
         codeBasis: 'NEC 250.118(4) — EMT is a permitted equipment grounding conductor; bonding via listed fittings',
         provenance: { source: 'computeSystem feeder segment (raceway type)' },
@@ -399,9 +461,16 @@ export function buildPermitDesignSnapshot(
     }
   }
   groundingObjects.push({
-    groundingId: 'gnd-gec', segmentId: 'SERVICE', purpose: 'gec',
+    groundingId: 'gnd-gec', segmentId: 'SERVICE', purpose: 'gec', segmentRole: 'GEC',
     required: false, method: 'none-required', conductorMaterial: null, conductorSize: null,
-    sizingBasis: null, associatedOcpdA: null, associatedEquipment: 'Existing service grounding electrode system',
+    calculatedMinimumSize: null, selectedDesignSize: null,
+    selectionSource: null, selectionReason: null,
+    sizingBasis: null, associatedOcpdA: null, ocpdBasis: null,
+    associatedEquipment: 'Existing service grounding electrode system',
+    sourceNode: null, destinationNode: null,
+    insulationState: null, installationMethod: null, routeId: null,
+    rackingAssemblyId: null, bondingMethod: null, manufacturerEvidenceId: null,
+    calculationId: null,
     manufacturerListingBasis: null,
     codeBasis: 'NEC 250.64 / 690.47 — interconnected system bonds to the existing GES; no separate GEC added',
     provenance: { source: 'design rule', note: 'explicit not-required record — never an invented conductor' },
@@ -849,6 +918,101 @@ export function buildPermitDesignSnapshot(
     documentRegistryFacts: opts?.documentRegistryFacts ?? null,
     rackingAssemblySelection: opts?.rackingAssemblySelection ?? null,
   });
+
+  // ═══ P13 WS-1 — THE ARRAY / RACKING BONDING EGC ════════════════════════════
+  //
+  // THE GAP THIS CLOSES: the package modelled the AC branch EGC, the feeder EGC,
+  // the raceway bond and the (not-required) GEC — and NOTHING for the path that
+  // actually bonds the bonded module/racking system to the rooftop equipment-
+  // ground. So the planset could not explain its own array bonding path, and the
+  // #10 conductor the design installs had no object to belong to.
+  //
+  // THE TWO SIZES ARE DIFFERENT FACTS AND ARE STORED SEPARATELY:
+  //   calculatedMinimumSize — what NEC 250.122 requires at the branch OCPD. For a
+  //                           20 A branch that is #12 Cu. This is the CODE answer.
+  //   selectedDesignSize    — what the project design standard installs (#10 Cu).
+  //                           Larger than the minimum, which 250.122 permits.
+  // No sheet may say the code table produced #10. The snapshot validator refuses
+  // a record whose installed size is SMALLER than the calculated minimum.
+  //
+  // Topology modelled (module frames → racking → bonding EGC → rooftop JB → the
+  // equipment-ground path already modelled by the branch/feeder EGCs → service).
+  // Nothing here asserts a microinverter PRODUCT grounding requirement: that is
+  // openAirGroundingAuthority's question, decided on its own manufacturer
+  // evidence, and it stays untouched.
+  {
+    const _ra = structAuth.rackingAssembly as unknown as {
+      assemblyId?: string | null; ul2703ListingBasis?: string | null;
+      groundingBonding?: string | null;
+      assemblyVerification?: { overall?: string };
+    } | null;
+    // The governing OCPD for the array bonding conductor is the BRANCH OCPD (the
+    // largest overcurrent device ahead of the bonded equipment), not the feeder's.
+    const _branchOcpd = branches.length
+      ? Math.max(...branches.map(b => Number(b.ocpdA) || 0))
+      : (cs?.acOcpdAmps ?? null);
+    const _minimum = _branchOcpd ? getEGCSize(_branchOcpd) : null;
+    // The company/project design standard for array + racking bonding. Recorded
+    // as a DESIGN SELECTION with its own source — never as a code result.
+    //
+    // A DESIGN STANDARD IS A FLOOR, NOT A CEILING. On a larger array the code
+    // minimum can EXCEED the standard (an 80 A ground-mount branch requires #8,
+    // above the #10 standard) — installing the standard there would be an
+    // under-sized equipment grounding conductor. The installed conductor is
+    // therefore the LARGER of the two, and the selection source follows suit.
+    // (V45 refuses the alternative, which is how this was caught.)
+    const _standard = ARRAY_RACK_BONDING_DESIGN_SIZE;
+    const _standardExceeds = _minimum !== null
+      && conductorAreaRank(_standard) > conductorAreaRank(_minimum);
+    const _designStandard = _minimum === null ? _standard : (_standardExceeds ? _standard : _minimum);
+    const _exceedsMinimum = _standardExceeds;
+    const _bondingPending = (_ra?.assemblyVerification?.overall ?? 'pending') !== 'verified';
+    groundingObjects.push({
+      groundingId: 'gnd-array-bond',
+      segmentId: 'ROOF_RUN',
+      purpose: 'array-rack-bonding-egc',
+      segmentRole: 'ARRAY_RACK_BONDING_EGC',
+      required: true,
+      method: 'conductor',
+      conductorMaterial: 'Cu',
+      // INSTALLED = the design selection (which is ≥ the code minimum).
+      conductorSize: _designStandard,
+      calculatedMinimumSize: _minimum,
+      selectedDesignSize: _exceedsMinimum ? _designStandard : null,
+      selectionSource: _exceedsMinimum ? 'project-design-standard' : 'nec-minimum',
+      selectionReason: _exceedsMinimum
+        ? `project design standard installs ${_designStandard} for array/racking bonding — larger than the `
+          + `NEC 250.122 minimum of ${_minimum}, which the code permits (250.122 sets a MINIMUM). `
+          + 'The larger conductor is a durability/handling choice, not a code requirement.'
+        : null,
+      sizingBasis: _minimum
+        ? (_exceedsMinimum
+            ? `NEC 250.122 minimum ${_minimum} @ ${_branchOcpd}A branch OCPD; installed ${_designStandard} per project design standard`
+            : `NEC 250.122 ${_minimum} @ ${_branchOcpd}A branch OCPD (governs — exceeds the ${_standard} project standard)`)
+        : null,
+      associatedOcpdA: _branchOcpd,
+      ocpdBasis: _branchOcpd ? `${_branchOcpd}A branch OCPD (largest device ahead of the bonded array)` : null,
+      associatedEquipment: 'Bonded module frames + racking system',
+      sourceNode: 'Bonded module frames and racking system (listed bonding method)',
+      destinationNode: 'Rooftop junction box equipment-ground bus',
+      insulationState: 'bare',
+      installationMethod: 'free-air',
+      routeId: 'ROOF_RUN',
+      rackingAssemblyId: _ra?.assemblyId ?? null,
+      // The METHOD by which frames/rails are bonded is the racking assembly's
+      // authority. While that assembly is unverified this stays null rather than
+      // asserting UL 2703 integration the record cannot substantiate.
+      bondingMethod: _bondingPending ? null : (_ra?.groundingBonding ?? null),
+      manufacturerEvidenceId: _bondingPending ? null : (_ra?.ul2703ListingBasis ?? null),
+      manufacturerListingBasis: _bondingPending ? null : (_ra?.ul2703ListingBasis ?? null),
+      codeBasis: 'NEC 690.43 (array equipment bonding) sized per NEC 250.122',
+      calculationId: 'calc:egc-250.122:gnd-array-bond',
+      provenance: {
+        source: 'P13 WS-1 array/racking bonding topology (branch OCPD + project design standard)',
+        ref: _ra?.assemblyId ?? null,
+      },
+    });
+  }
 
   // ═══ §6/§7 (closeout 07-23) LISTED CABLE ASSEMBLY + GEOMETRIC CABLE PATHS ══
   // The micro AC branch trunk is a manufacturer-LISTED factory-connectorized

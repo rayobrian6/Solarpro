@@ -105,19 +105,76 @@ export interface BranchRecord {
 /** W2.1 — grounding is modeled PER SEGMENT AND PURPOSE. There is no single
  *  "system EGC". A listed integrated grounding method that requires no
  *  separate conductor is represented EXPLICITLY, never as an invented gauge. */
+/** P13 WS-1 — the semantic ROLE of a grounding/bonding path. The role is what a
+ *  sheet, a schedule and a BOM line agree on; it can never be inferred from a
+ *  conductor size. EGC, bonding conductor and GEC are DISTINCT roles and may not
+ *  cross-map (a GEC is not an EGC that happens to reach an electrode). */
+export type GroundingSegmentRole =
+  | 'ARRAY_RACK_BONDING_EGC'   // bonded module/racking system → rooftop bonding point
+  | 'BRANCH_EGC'               // AC branch circuit equipment grounding conductor
+  | 'FEEDER_EGC'               // AC feeder equipment grounding conductor
+  | 'RACEWAY_BOND'             // the raceway itself is the EGC (NEC 250.118)
+  | 'SERVICE_BOND'             // bonding at/ahead of the service disconnect
+  | 'GEC'                      // grounding ELECTRODE conductor (250.66) — not an EGC
+  | 'INTEGRATED_LISTED_METHOD';// a listed assembly provides the path (UL 2703 etc.)
+
 export interface GroundingRecord {
   groundingId: string;
   segmentId: string;                 // canonical run/segment this applies to
-  purpose: 'branch-egc' | 'feeder-egc' | 'raceway-bond' | 'gec' | 'integrated-listed-method';
+  purpose: 'branch-egc' | 'feeder-egc' | 'raceway-bond' | 'gec' | 'integrated-listed-method'
+    | 'array-rack-bonding-egc';
+  /** P13 WS-1 — the canonical semantic role (see GroundingSegmentRole). */
+  segmentRole: GroundingSegmentRole;
   required: boolean;                 // false ⇒ explicitly not required (with basis)
   method: 'conductor' | 'raceway' | 'integrated-listed' | 'none-required';
   conductorMaterial: 'Cu' | 'Al' | null;
-  conductorSize: string | null;      // null when method !== 'conductor'
+  /** THE INSTALLED size — what is ordered, drawn and inspected. Equal to
+   *  `selectedDesignSize` when a design standard applies, else the calculated
+   *  minimum. null when method !== 'conductor'. */
+  conductorSize: string | null;
+  // ── P13 WS-1: THE CODE MINIMUM AND THE DESIGN SELECTION ARE DIFFERENT FACTS ──
+  // Conflating them produced the campaign's worst class of claim: a planset that
+  // says "NEC 250.122 requires #10" for a 20 A branch, when the table requires
+  // #12 and #10 is the installer's design standard. Both are legitimate; only one
+  // is the code table's answer. They are stored — and rendered — separately, and
+  // the snapshot validator refuses a record where the installed size is smaller
+  // than the calculated minimum.
+  /** what NEC 250.122 actually requires at `associatedOcpdA` */
+  calculatedMinimumSize: string | null;
+  /** what the project/company design standard selected (≥ the minimum), or null
+   *  when no standard applies and the minimum governs */
+  selectedDesignSize: string | null;
+  /** where the SELECTED size came from — never 'nec-250-122' unless the selection
+   *  IS the table minimum */
+  selectionSource: 'nec-minimum' | 'project-design-standard' | 'manufacturer-requirement'
+    | 'operator-selection' | null;
+  /** why the selection differs from the minimum, in one sentence */
+  selectionReason: string | null;
   sizingBasis: string | null;        // e.g. 'NEC 250.122 @ 20A OCPD'
   associatedOcpdA: number | null;
+  /** the OCPD whose rating drove the minimum, described (e.g. '20 A branch OCPD') */
+  ocpdBasis: string | null;
   associatedEquipment: string | null;
+  // ── endpoints: a conductor with no ends cannot be drawn, ordered or inspected ─
+  sourceNode: string | null;
+  destinationNode: string | null;
+  /** bare / insulated — a bonding conductor is commonly bare, an EGC in a raceway
+   *  is commonly green-insulated; the BOM line differs. */
+  insulationState: 'bare' | 'insulated-green' | 'insulated-other' | null;
+  /** free-air, in-raceway, or integral to the assembly */
+  installationMethod: 'free-air' | 'in-raceway' | 'integral-to-assembly' | null;
+  /** the canonical route segment this conductor physically follows, when it has one */
+  routeId: string | null;
+  /** the racking assembly whose bonding method this path depends on */
+  rackingAssemblyId: string | null;
+  /** the assembly's bonding method label at snapshot time */
+  bondingMethod: string | null;
+  /** the manufacturer document establishing the bonding method, when one is bound */
+  manufacturerEvidenceId: string | null;
   manufacturerListingBasis: string | null;  // record ref when integrated-listed
   codeBasis: string;                 // e.g. 'NEC 250.122', 'NEC 250.118(4)'
+  /** stable id for the sizing calculation, so a sheet cell can cite it */
+  calculationId: string | null;
   provenance: Provenance;
 }
 
@@ -178,6 +235,16 @@ export interface GroundingSegment {
    *  authority has not established one (PENDING). NEVER borrowed from another
    *  object (the feeder-EGC-relabelled-as-array-EGC defect). */
   conductorSize: string | null;
+  /** P13 WS-1 — the NEC 250.122 MINIMUM and the DESIGN SELECTION, projected
+   *  separately so a rendered row can state both. When they differ the sheet
+   *  must show "calculated minimum X · selected design Y", never one number
+   *  attributed to the code table. Null on rows where no conductor is sized. */
+  calculatedMinimumSize: string | null;
+  selectedDesignSize: string | null;
+  selectionSource: GroundingRecord['selectionSource'];
+  selectionReason: string | null;
+  /** the canonical semantic role, carried through to the rendered row. */
+  segmentRole: GroundingSegmentRole | null;
   conductorMaterial: 'Cu' | 'Al' | null;
   /** insulation / conductor type ('bare', 'THWN-2 green', 'integral to the listed
    *  cable assembly', …). null ⇒ not established. */

@@ -16,6 +16,8 @@ import { CANONICAL_COORDINATE_SYSTEM_ID, type PermitDesignSnapshot, type Snapsho
 import { transformDigestOf } from './coordinateAuthority';
 import { deriveIssueState } from './projectAuthority';
 import { getMountingSystemById, classifyMountTopology } from '@/lib/mounting-hardware-db';
+// P13 WS-1 (V45) — conductor-area comparison for the minimum-vs-selected gate.
+import { meetsOrExceedsMinimum, conductorAreaRank } from './groundingDesignStandard';
 
 const SHEETS_ELECTRICAL = ['E-1', 'PV-4A', 'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'BOM'];
 
@@ -777,6 +779,43 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
           break;
         }
       }
+    }
+  }
+
+  // ═══ V45 — P13 WS-1: THE CODE MINIMUM AND THE DESIGN SELECTION MAY NOT BE
+  // CONFLATED, AND THE INSTALLED CONDUCTOR MAY NEVER BE UNDER THE MINIMUM ═════
+  //
+  // Three ways a grounding record can lie, each refused here:
+  //   (a) the installed conductor is SMALLER than NEC 250.122 requires;
+  //   (b) the record claims the NEC minimum produced a size that differs from
+  //       calculatedMinimumSize (selectionSource 'nec-minimum' while the
+  //       installed size is not the minimum) — this is the "250.122 requires
+  //       #10" claim the campaign called out;
+  //   (c) a size larger than the minimum is installed with no stated selection
+  //       source/reason, leaving a reader to assume the code demanded it.
+  for (const g of (s.electrical.groundingObjects ?? [])) {
+    if (g.method !== 'conductor') continue;
+    const installed = g.conductorSize;
+    const minimum = g.calculatedMinimumSize;
+    if (!installed || !minimum) continue;
+    if (!meetsOrExceedsMinimum(installed, minimum)) {
+      add('V45', `electrical.groundingObjects[${g.groundingId}].conductorSize`, installed,
+        'grounding builder', SHEETS_ELECTRICAL,
+        `installed ${g.segmentRole} conductor ${installed} is SMALLER than the NEC 250.122 minimum ${minimum} `
+        + `at ${g.ocpdBasis ?? `${g.associatedOcpdA ?? '?'}A`}`);
+    }
+    const exceeds = conductorAreaRank(installed) > conductorAreaRank(minimum);
+    if (exceeds && g.selectionSource === 'nec-minimum') {
+      add('V45', `electrical.groundingObjects[${g.groundingId}].selectionSource`, g.selectionSource,
+        'grounding builder', SHEETS_ELECTRICAL,
+        `${g.segmentRole} installs ${installed} but claims selectionSource 'nec-minimum' while the 250.122 `
+        + `minimum is ${minimum} — the code table did not produce this size`);
+    }
+    if (exceeds && (!g.selectionSource || !g.selectionReason)) {
+      add('V45', `electrical.groundingObjects[${g.groundingId}].selectionReason`, g.selectionReason,
+        'grounding builder', SHEETS_ELECTRICAL,
+        `${g.segmentRole} installs ${installed} above the ${minimum} minimum with no stated selection `
+        + 'source/reason — a larger conductor must say who chose it and why');
     }
   }
 
