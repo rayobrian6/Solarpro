@@ -32,6 +32,9 @@ export function baseSnapshot(): PermitDesignSnapshot {
       schemaVersion: '1.0.0', ahjName: 'Test AHJ', jurisdictionType: 'county',
       stateCode: 'IL', stateName: 'Illinois', county: 'Test', city: 'Test',
       ahjRecordId: 'il-test', utility: { name: null, id: null },
+      // KDP WS-12 — the binding carries HOW it matched.
+      ahjMatchMethod: 'explicit-record-id', incorporatedMunicipality: false,
+      supersededAhjRecordId: null,
       editions: {
         nec: _codeEd('nec', '2023'), ibc: _codeEd('ibc', '2021'), irc: _codeEd('irc', '2021'),
         ifc: _codeEd('ifc', '2024'), asce: _codeEd('asce', '7-22'),

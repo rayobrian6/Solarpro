@@ -20,7 +20,7 @@ import {
   type PermitReadinessBlocker,
 } from './types';
 import { computeSnapshotDigest, snapshotIdFromDigest, deepFreeze } from './digest';
-import { buildCodeAuthority, resolveAhjRecord } from './codeAuthority';
+import { buildCodeAuthority, resolveAhjRecordTraced } from './codeAuthority';
 import {
   buildProjectAuthority, classifyBlockerDomain,
   type IssueStateReview, type IssuedForPermitGateInput,
@@ -486,6 +486,11 @@ export function buildPermitDesignSnapshot(
       // chain in the package derated by a factor with no stated temperature).
       ambientTempC: isFinite(r.ambientTempC) ? r.ambientTempC : null,
       rooftopAdderC: isFinite(r.rooftopAdderC) ? r.rooftopAdderC : null,
+      // KDP WS-10 — the adder's BASIS travels with the segment. A null adder with
+      // no basis reads as an unresolved required input; the basis proves it is a
+      // resolved code question (deleted from the adopted edition / not a rooftop
+      // conductor / open-air rather than a raceway on a roof).
+      rooftopAdderBasis: (r as { rooftopAdderBasis?: string | null }).rooftopAdderBasis ?? null,
       ambientSource: r.ambientSource ?? null,
       effectiveAmbientTempC: isFinite(r.effectiveAmbientTempC) ? r.effectiveAmbientTempC : null,
       tempDeratingFactor: isFinite(r.tempDeratingFactor) ? r.tempDeratingFactor : null,
@@ -1062,15 +1067,34 @@ export function buildPermitDesignSnapshot(
   // `verified` (no archived adoption ordinance) — the honest state that drives
   // CODE-AUTHORITY-INCOMPLETE below and PENDING editions on the sheets.
   const _capturedIso = (input as any).generatedAtIso ?? proj.date ?? '';
-  const _ahjRecord = resolveAhjRecord({
+  // KDP WS-12 — resolve from the identity the project ALREADY carries, in
+  // most-specific-first order, and record HOW it matched. The stored
+  // `ahjName` / `compliance.jurisdiction.ahj` is a server enrichment written
+  // from this same dataset, so it is an identity hint, not decoration: without
+  // it (and with county ahead of city) the live Braidon site inside Granite City
+  // bound the county's UNINCORPORATED record.
+  const _ahjResolution = resolveAhjRecordTraced({
     ahjRecordId: proj.ahjRecordId ?? proj.ahjId ?? null,
+    ahjName: (compliance?.jurisdiction as any)?.ahj ?? proj.ahjName ?? null,
     stateCode: typeof proj.state === 'string' ? proj.state : null,
     county: proj.county ?? null,
     city: proj.city ?? null,
     address: proj.address ?? null,
+    // The official boundary determination OUTRANKS the stored name and the postal
+    // city — a Granite City mailing address can sit in unincorporated Madison
+    // County, and only the boundary layer knows which.
+    boundary: opts?.projectLegalAuthority
+      ? {
+          resolved: opts.projectLegalAuthority.fields.municipalBoundary.state === 'verified',
+          unincorporated: opts.projectLegalAuthority.unincorporated,
+          incorporatedPlace: opts.projectLegalAuthority.normalized.incorporatedPlace,
+        }
+      : null,
   });
+  const _ahjRecord = _ahjResolution.record;
   const codeAuthority = buildCodeAuthority({
     ahjRecord: _ahjRecord,
+    ahjResolution: _ahjResolution,
     necVersionEnriched: (compliance?.jurisdiction as any)?.necVersion ?? proj.ahjNecVersion ?? null,
     ahjNameHint: (compliance?.jurisdiction as any)?.ahj ?? proj.ahjName ?? null,
     stateCodeHint: typeof proj.state === 'string' ? proj.state : null,

@@ -2930,8 +2930,24 @@ function makeRunSegment(
   // raceway actually on the roof surface. Absent an adopted edition that
   // requires it, the adder is NOT applied and the reason is recorded — a
   // silently-added 33 °C would move the correction factor two table rows.
-  const _onRoof = /ROOF|BRANCH_HOMERUN|JBOX/i.test(String(id)) && fields.isOpenAir !== true;
+  //
+  // KDP WS-10 — THE BASIS IS NOW ALWAYS STATED. It used to be recorded only for
+  // segments that were both roof-located AND in a raceway, so every other segment
+  // shipped `rooftopAdderC: null, rooftopAdderBasis: null` — a bare null that
+  // reads as an unresolved required input rather than as a resolved code
+  // question. Each segment now carries the specific reason: the adder applies,
+  // or the adopted edition deleted it, or this conductor is not on the roof, or
+  // it is open-air rather than a raceway/cable on a roof surface.
+  const _roofLocated = /ROOF|BRANCH_HOMERUN|JBOX/i.test(String(id));
+  const _inRaceway = fields.isOpenAir !== true;
+  const _onRoof = _roofLocated && _inRaceway;
   const _adder = (_onRoof && _ambientStamp.rooftopAdderApplies) ? _ambientStamp.rooftopAdderC : null;
+  const _adderBasis = _onRoof
+    ? _ambientStamp.rooftopAdderBasis
+    : !_roofLocated
+      ? 'no rooftop adder — this conductor is not installed on or above a roof surface'
+      : 'no rooftop adder — open-air conductor, not a raceway or cable on a roof surface'
+        + ` (NEC 310.15(B)(3)(c) addressed raceways/cables on rooftops; ${_ambientStamp.rooftopAdderApplies ? 'the adopted edition retains it for raceways' : 'and the adopted edition no longer contains it'})`;
   const _amb = _ambientStamp.ambientTempC;
   return {
     id,
@@ -2945,7 +2961,7 @@ function makeRunSegment(
     ambientTempC: _amb,
     ambientSource: _ambientStamp.ambientSource,
     rooftopAdderC: _adder,
-    rooftopAdderBasis: _onRoof ? _ambientStamp.rooftopAdderBasis : null,
+    rooftopAdderBasis: _adderBasis,
     effectiveAmbientTempC: _amb != null ? _amb + (_adder ?? 0) : null,
     ...fields,
   };

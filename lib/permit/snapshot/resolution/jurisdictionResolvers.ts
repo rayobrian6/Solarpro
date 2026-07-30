@@ -136,9 +136,21 @@ export const projectAuthorityResolver: RequirementResolver = {
       };
     }
 
+    // KDP WS-12 — resolve the AHJ record UNDER the boundary determination this
+    // retrieval just produced. `res.value` carries the official incorporated /
+    // unincorporated finding, so the record is DERIVED from the evidence rather
+    // than guessed from geography and then audited against it. Without this the
+    // municipal-first hint chain could bind a city record to a parcel the Census
+    // place layer puts outside every municipality — which the reconciliation
+    // below would then (correctly) raise as a conflict requiring an operator.
     const ahjRecord = resolveAhjRecord({
       ahjRecordId: str(p.ahjRecordId) ?? str(p.ahjId),
       stateCode: posted.stateCode, county: posted.county, city: posted.city, address: posted.address,
+      boundary: {
+        resolved: res.value.boundaryLayersResolved === true,
+        unincorporated: res.value.unincorporated,
+        incorporatedPlace: res.value.incorporatedPlace,
+      },
     });
     const record = buildProjectLegalAuthority({
       identity: res.value, posted, ahjRecord, confidence: res.confidence, resolverId: 'project-authority@v1',
@@ -152,6 +164,33 @@ export const projectAuthorityResolver: RequirementResolver = {
     if (!posted.apn && record.fields.apn.state === 'verified' && record.fields.apn.value) { p.apn = record.fields.apn.value; propagated.push('apn'); }
     if (num(p.lat) == null && record.normalized.lat != null) { p.lat = record.normalized.lat; propagated.push('lat'); }
     if (num(p.lng) == null && record.normalized.lng != null) { p.lng = record.normalized.lng; propagated.push('lng'); }
+    // KDP WS-12 — a STALE AHJ NAME beside a live boundary determination.
+    //
+    // The project record is enriched with an AHJ name derived from the MAILING
+    // address, and a mailing city is not a jurisdiction: the live Census
+    // determination for the Braidon parcel returns no incorporated place at all
+    // (minor civil division "Nameoki township"), so Madison County is the AHJ of
+    // record — while `project.ahjName` still said "City of Granite City Building
+    // & Zoning". Both values then travelled through the package: one on the
+    // project record, the other on the code authority.
+    //
+    // This is NOT the "never overwrite an operator value" case. The stored name
+    // is a machine enrichment, the boundary determination is official evidence
+    // for the same field, and the ahjName reconciliation above already raises a
+    // genuine city-vs-county disagreement as confirmationRequired. So where the
+    // boundary layer resolved AND the bound record disagrees with the stored
+    // name, the record wins and the correction is recorded rather than silent.
+    if (record.fields.municipalBoundary.state === 'verified' && ahjRecord?.ahjName) {
+      const _stored = str(p.ahjName);
+      const _n = (x: string) => x.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (_stored && _n(_stored) !== _n(ahjRecord.ahjName)) {
+        p.ahjName = ahjRecord.ahjName;
+        p.ahjRecordId = ahjRecord.id;
+        propagated.push(`ahjName (superseded "${_stored}" — ${record.boundaryEvidence})`);
+      } else if (!_stored) {
+        p.ahjName = ahjRecord.ahjName; p.ahjRecordId = ahjRecord.id; propagated.push('ahjName');
+      }
+    }
 
     const refs = [
       `authority:project-legal#${record.sourceHash.slice(0, 16)}`,

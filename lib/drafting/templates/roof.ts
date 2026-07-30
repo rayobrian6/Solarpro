@@ -55,6 +55,9 @@ import {
 import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
+// KDP (structural math consistency) — THE roof-pitch authority, shared with the
+// specs table / cover / PV-4C / PE-1 so no sheet prints a different pitch.
+import { resolveRoofPitch } from '../sheetComposition';
 // §6 ROUTE PROVENANCE (07-22): the trench/conduit annotation must NOT claim
 // "ROUTE FIELD-VERIFIED" while run lengths are CAD-derived estimates — it prints
 // "CAD-DERIVED ESTIMATE — FIELD VERIFY", driven by the snapshot's lengthSource.
@@ -2029,13 +2032,15 @@ export function drawRoofStructural(
 ): string {
   const { project, engineering } = input;
 
-  // project.roofPitch is in DEGREES (e.g. 20). Convert to rise-per-12 for the
-  // slope label + section geometry — was rendering "20:12" for a 4:12 roof.
-  const _rawPitch  = project.roofPitch          || 5;
-  const pitchNum   = (_rawPitch > 12 && _rawPitch <= 90)
-    ? Math.round(Math.tan(_rawPitch * Math.PI / 180) * 12)
-    : _rawPitch;
-  const pitchStr   = pitchNum + ':12';
+  // KDP (structural math consistency) — the pitch comes from THE pitch authority
+  // (resolveRoofPitch), the same function the cover / specs table / PV-4C / PE-1
+  // read. This block used to take `project.roofPitch` (the operator-entered 20°)
+  // instead of the CAD plane the array was actually laid out on (16.52°), and
+  // rounded to a whole number instead of 0.1 — so this sheet printed
+  // "4:12 SLOPE" beside five other sheets printing 3.6:12, on one package.
+  const _pitchAuth = resolveRoofPitch(cad, input as unknown as Record<string, unknown>);
+  const pitchNum   = _pitchAuth.ratio;
+  const pitchStr   = _pitchAuth.pitchStr;
   const rafterSz   = project.rafterSize         || '2x6';
   const rafterSp   = project.rafterSpacing      || 24;
   // SINGLE-SOURCE with the specs table (sheetComposition getRoofData): the

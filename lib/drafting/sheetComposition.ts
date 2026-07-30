@@ -406,6 +406,50 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
   };
 }
 
+/**
+ * KDP (structural math consistency) — THE roof-pitch authority.
+ *
+ * `cad.roof.planes[0].pitch` is the CAD plane's pitch in DEGREES, produced by
+ * canonicalBridge from the surveyed/derived roof geometry. `project.roofPitch`
+ * is the operator-entered figure and is NOT the same number: on the live Braidon
+ * project the CAD plane is 16.5176° (= 3.6:12) while `project.roofPitch` still
+ * reads 20 (= 4.4:12). The geometry the array was laid out on is the CAD plane,
+ * so it governs; the project field is the fallback for a package with no plane.
+ *
+ * The PV-3 cross-section used to read `project.roofPitch` AND round to a whole
+ * number, so one sheet printed "4:12 SLOPE" while the cover, the specs table,
+ * PV-4C and PE-1 all printed 3.6:12 from this function. Same value, same
+ * precision, everywhere — or the sheet is wrong.
+ *
+ * The degrees-vs-ratio heuristic is preserved verbatim: a value ≤ 12 is almost
+ * certainly already rise-per-12 (5:12); only 12 < x ≤ 90 is treated as degrees.
+ */
+export interface RoofPitchAuthority {
+  /** rise per 12 in., rounded to 0.1 — the printed figure */
+  ratio: number;
+  /** pitch in degrees when the source carried degrees, else null */
+  degrees: number | null;
+  /** the ONE display string every sheet prints, e.g. '3.6:12' */
+  pitchStr: string;
+  source: 'cad-plane' | 'project-input' | 'default';
+}
+export function resolveRoofPitch(
+  cad: CADModel | null | undefined,
+  input?: Record<string, unknown>,
+): RoofPitchAuthority {
+  const pl = cad?.roof?.planes?.[0] as { pitch?: number } | undefined;
+  const proj = (input?.project ?? {}) as Record<string, unknown>;
+  const fromPlane = typeof pl?.pitch === 'number' && isFinite(pl.pitch) ? pl.pitch : null;
+  const fromProject = typeof proj?.roofPitch === 'number' && isFinite(proj.roofPitch as number)
+    ? (proj.roofPitch as number) : null;
+  const raw = fromPlane ?? fromProject ?? 5;
+  const source: RoofPitchAuthority['source'] =
+    fromPlane != null ? 'cad-plane' : fromProject != null ? 'project-input' : 'default';
+  const isDegrees = raw > 12 && raw <= 90;
+  const ratio = isDegrees ? Math.round(Math.tan(raw * Math.PI / 180) * 12 * 10) / 10 : raw;
+  return { ratio, degrees: isDegrees ? raw : null, pitchStr: `${ratio}:12`, source };
+}
+
 export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   pitchStr: string;
   azimuthDeg: number;
@@ -435,20 +479,11 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   const cs  = ((c?.structural ?? {}) as Record<string, unknown>);
   const cw  = ((cs?.wind ?? {}) as Record<string, unknown>);
 
-  // pl?.pitch comes from canonicalBridge which stores pitchDegrees (e.g., 22°).
-  // The permit format requires rise-per-12-inches (e.g., 5:12), so we must convert
-  // degrees → ratio using tan(degrees) * 12.  A value already in rise-per-12
-  // (e.g., 5) would yield tan(5°)*12 ≈ 1.05 which is clearly wrong as a degree
-  // value, so we can detect the mismatch: if pitchNum ≤ 12 it is almost certainly
-  // already in degrees (roof pitches above 12:12 = 45° are extremely rare).
-  const rawPitch = (pl?.pitch ?? (p?.roofPitch as number) ?? 5);
-  // Align with the documented heuristic: values <=12 are almost certainly already
-  // a rise-per-12 ratio (e.g. 5:12); only 12<x<=90 is treated as degrees. The old
-  // <=90 threshold tan-converted a 5:12 ratio into a bogus 1:12.
-  const isDegrees = rawPitch > 12 && rawPitch <= 90;
-  const pitchRatio = isDegrees
-    ? Math.round(Math.tan(rawPitch * Math.PI / 180) * 12 * 10) / 10
-    : rawPitch;
+  // KDP — ONE pitch authority, shared with the PV-3 cross-section (see
+  // resolveRoofPitch below). This block used to be inline here AND duplicated
+  // with different inputs and different precision in drawRoofStructural.
+  const _pitchAuth = resolveRoofPitch(cad, input);
+  const pitchRatio = _pitchAuth.ratio;
 
   // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (per the IFC table behind
   // applyCodeBasis): ahjRidgeSetbackIn = the FIRE SETBACK on roof edges;

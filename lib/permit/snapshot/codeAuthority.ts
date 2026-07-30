@@ -22,6 +22,8 @@ import type { Provenance } from './types';
 import type { AhjRecord } from '@/lib/jurisdictions/ahj-national';
 import {
   getAhjById, getAhjByCounty, getAhjByAddress,
+  // KDP WS-12 — municipal-first jurisdiction resolution.
+  getAhjByCity, cityFromAddress, getAhjsByState,
 } from '@/lib/jurisdictions/ahj-national';
 import type { CodeAdoptionAuthorityRecord } from './resolution/jurisdictionAuthority';
 
@@ -68,6 +70,13 @@ export interface CodeAuthorityRecord {
   county: string | null;
   city: string | null;
   ahjRecordId: string | null;                 // ahj-national id when resolved
+  /** KDP WS-12 — HOW the record was bound + whether the site is inside an
+   *  incorporated municipality. Recorded so a jurisdiction binding is auditable
+   *  instead of an unexplained name on a title block, and so a change of
+   *  precedence (county-first → municipal-first) leaves evidence. */
+  ahjMatchMethod: AhjMatchMethod;
+  incorporatedMunicipality: boolean | null;
+  supersededAhjRecordId: string | null;
   utility: { name: string | null; id: string | null };
   // ── adopted editions (each individually sourced; null when unknown) ───────
   editions: Record<CodeEditionKind, CodeEdition>;
@@ -118,33 +127,135 @@ function normalizeAsceEdition(raw: string | null | undefined): string | null {
   return m ? m[0] : null;
 }
 
-/** Resolve the best available AhjRecord from whatever identity hints the project
- *  carries (record id → county → address). Returns null when no local AHJ can be
- *  confidently localized — NEVER a "first record in the state" guess. */
-export function resolveAhjRecord(hints: {
+/** KDP WS-12 — how the bound AHJ record was reached, for the authority trace. */
+export type AhjMatchMethod =
+  | 'explicit-record-id'
+  | 'stored-ahj-name'
+  | 'incorporated-city'
+  | 'county-unincorporated'
+  | 'address-parse'
+  | 'unresolved';
+
+export interface AhjResolution {
+  record: AhjRecord | null;
+  matchMethod: AhjMatchMethod;
+  /** true when the site sits inside an incorporated municipality that has its
+   *  own AHJ record; false when the county (unincorporated) record governs. */
+  incorporated: boolean | null;
+  /** the alternative record the previous precedence would have chosen, when it
+   *  differs — recorded so a binding change is auditable rather than silent. */
+  supersededRecordId: string | null;
+}
+
+/**
+ * Resolve the best available AhjRecord from the identity the project ALREADY
+ * carries. Returns null when no local AHJ can be confidently localized — NEVER
+ * a "first record in the state" guess.
+ *
+ * KDP WS-12 — PRECEDENCE IS MOST-SPECIFIC-FIRST, and it changed:
+ *
+ *   explicit record id → the AHJ NAME the project already stored →
+ *   incorporated city → address parse → county (unincorporated)
+ *
+ * County used to run second, ahead of every city and ahead of the stored name.
+ * On the live Braidon project that bound `il-madison-county` / "Madison County
+ * Building & Zoning" to a site at 3 Melvin Dr, GRANITE CITY — while the SAME
+ * input already carried `project.ahjName = "City of Granite City Building &
+ * Zoning"`, `compliance.jurisdiction.ahj` with the same value, and a dataset row
+ * `il-madison-granite-city`. Three independent copies of the right answer, and
+ * the snapshot printed the wrong permit office.
+ *
+ * The county record is still exactly right for unincorporated territory, which
+ * is what it describes (`city: 'Unincorporated'`), so it remains the fallback.
+ */
+export function resolveAhjRecordTraced(hints: {
   ahjRecordId?: string | null;
+  ahjName?: string | null;
   stateCode?: string | null;
   county?: string | null;
   city?: string | null;
   address?: string | null;
-}): AhjRecord | null {
+  /** KDP WS-12 — the OFFICIAL municipal-boundary determination, when the resolver
+   *  chain produced one. A postal city is not a jurisdiction: "GRANITE CITY, IL"
+   *  is a mailing address that can sit in unincorporated Madison County. So when
+   *  a boundary layer HAS been resolved it governs record selection outright —
+   *  unincorporated ⇒ the county record, inside place P ⇒ P's municipal record —
+   *  and the stored name / postal city may not override it. This is the same fact
+   *  projectLegalAuthority already reconciles after the fact; feeding it in means
+   *  the record is DERIVED from the evidence instead of being audited against it. */
+  boundary?: {
+    resolved: boolean;
+    unincorporated: boolean | null;
+    incorporatedPlace: string | null;
+  } | null;
+}): AhjResolution {
+  const state = hints.stateCode ?? null;
+  const b = hints.boundary;
+  if (b?.resolved && state) {
+    // Official determination present — it decides, and the trace says so.
+    const _legacyB = (hints.county ? getAhjByCounty(state, hints.county) : null)?.id ?? null;
+    const finish = (record: AhjRecord | null, method: AhjMatchMethod, inc: boolean | null): AhjResolution => ({
+      record, matchMethod: method, incorporated: inc,
+      supersededRecordId: record && _legacyB && _legacyB !== record.id ? _legacyB : null,
+    });
+    if (b.unincorporated === true) {
+      const byCounty = hints.county ? getAhjByCounty(state, hints.county) : null;
+      if (byCounty) return finish(byCounty, 'county-unincorporated', false);
+    } else if (b.unincorporated === false && b.incorporatedPlace) {
+      // Use the OFFICIAL place name, not the postal city line.
+      const byPlace = getAhjByCity(state, b.incorporatedPlace);
+      if (byPlace) return finish(byPlace, 'incorporated-city', true);
+    }
+    // Boundary resolved but no matching record — fall through to the hint chain.
+  }
+  // What the pre-WS-12 precedence would have chosen, for the audit trail.
+  const _legacy = (state && hints.county ? getAhjByCounty(state, hints.county) : null)?.id ?? null;
+  const done = (record: AhjRecord | null, matchMethod: AhjMatchMethod): AhjResolution => ({
+    record,
+    matchMethod,
+    incorporated: record ? (record.ahjType !== 'county' && record.city.toLowerCase() !== 'unincorporated') : null,
+    supersededRecordId: record && _legacy && _legacy !== record.id ? _legacy : null,
+  });
+
   if (hints.ahjRecordId) {
     const byId = getAhjById(hints.ahjRecordId);
-    if (byId) return byId;
+    if (byId) return done(byId, 'explicit-record-id');
   }
-  if (hints.stateCode && hints.county) {
-    const byCounty = getAhjByCounty(hints.stateCode, hints.county);
-    if (byCounty) return byCounty;
+  // The stored AHJ NAME is an already-resolved server enrichment — the app wrote
+  // it from this same dataset. Honour it before re-deriving from geography.
+  if (hints.ahjName && state) {
+    const target = hints.ahjName.trim().toLowerCase();
+    const byName = getAhjsByState(state).find(a => a.ahjName.trim().toLowerCase() === target);
+    if (byName) return done(byName, 'stored-ahj-name');
+  }
+  // Incorporated municipality — jurisdiction inside its own corporate limits.
+  const city = hints.city ?? cityFromAddress(hints.address);
+  if (state && city) {
+    const byCity = getAhjByCity(state, city);
+    if (byCity) return done(byCity, 'incorporated-city');
   }
   if (hints.address) {
     const byAddr = getAhjByAddress(hints.address, {
-      stateCode: hints.stateCode ?? undefined,
+      stateCode: state ?? undefined,
       county: hints.county ?? undefined,
       city: hints.city ?? undefined,
     });
-    if (byAddr) return byAddr;
+    if (byAddr) {
+      return done(byAddr, byAddr.ahjType === 'county' || byAddr.city.toLowerCase() === 'unincorporated'
+        ? 'county-unincorporated' : 'address-parse');
+    }
   }
-  return null;
+  // Unincorporated fallback — the county record describes exactly this case.
+  if (state && hints.county) {
+    const byCounty = getAhjByCounty(state, hints.county);
+    if (byCounty) return done(byCounty, 'county-unincorporated');
+  }
+  return done(null, 'unresolved');
+}
+
+/** Back-compat surface: the record only. */
+export function resolveAhjRecord(hints: Parameters<typeof resolveAhjRecordTraced>[0]): AhjRecord | null {
+  return resolveAhjRecordTraced(hints).record;
 }
 
 export interface CodeAuthorityBuildArgs {
@@ -155,6 +266,10 @@ export interface CodeAuthorityBuildArgs {
   necVersionEnriched?: string | null;
   /** display AHJ name when no full record resolved. */
   ahjNameHint?: string | null;
+  /** KDP WS-12 — the traced resolution that produced `ahjRecord`, so the record
+   *  carries HOW it was bound (and what the previous precedence would have
+   *  picked) rather than just the resulting name. */
+  ahjResolution?: AhjResolution | null;
   stateCodeHint?: string | null;
   /** the ASCE edition the STRUCTURAL ENGINE actually ran its calculations under
    *  (structural.env.codeAuthority.asceEdition). This is a computational BASIS,
@@ -293,6 +408,10 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
     county: rec?.county ?? null,
     city: rec?.city ?? null,
     ahjRecordId: rec?.id ?? null,
+    ahjMatchMethod: args.ahjResolution?.matchMethod ?? (rec ? 'address-parse' : 'unresolved'),
+    incorporatedMunicipality: args.ahjResolution?.incorporated
+      ?? (rec ? (rec.ahjType !== 'county' && rec.city.toLowerCase() !== 'unincorporated') : null),
+    supersededAhjRecordId: args.ahjResolution?.supersededRecordId ?? null,
     utility: { name: args.utilityName ?? rec?.utilityName ?? null, id: args.utilityId ?? null },
     editions,
     localAmendments: adopt?.localAmendments ?? rec?.localAmendments ?? [],
