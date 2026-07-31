@@ -13,6 +13,7 @@ import {
 } from '@/lib/auth';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { isProduction } from '@/lib/env';
 import { auditAuth, auditSecurity } from '@/lib/auditLog';
 import { isMFARequiredButNotEnabled } from '@/lib/mfa';
 
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
         });
         res.cookies.set(COOKIE_NAME, token, {
           httpOnly: true,
-          secure:   process.env.NODE_ENV === 'production',
+          secure:   isProduction(),
           sameSite: 'lax',
           path:     '/',
           maxAge:   COOKIE_MAX_AGE,
@@ -241,7 +242,7 @@ export async function POST(req: NextRequest) {
       );
       enrollResponse.cookies.set(MFA_ENROLLMENT_PENDING_COOKIE, enrollToken, {
         httpOnly: true,
-        secure:   process.env.NODE_ENV === 'production',
+        secure:   isProduction(),
         sameSite: 'lax' as const,
         path:     '/api/auth/mfa',
         maxAge:   MFA_ENROLLMENT_PENDING_MAX_AGE,
@@ -276,7 +277,7 @@ export async function POST(req: NextRequest) {
       );
       mfaResponse.cookies.set(MFA_PENDING_COOKIE, mfaToken, {
         httpOnly: true,
-        secure:   process.env.NODE_ENV === 'production',
+        secure:   isProduction(),
         sameSite: 'lax' as const,
         path:     '/api/auth/mfa',
         maxAge:   MFA_PENDING_MAX_AGE,
@@ -316,7 +317,7 @@ export async function POST(req: NextRequest) {
 
     const cookieOptions = {
       httpOnly: true,
-      secure:   process.env.NODE_ENV === 'production',
+      secure:   isProduction(),
       sameSite: 'lax' as const,
       path:     '/',
       maxAge:   COOKIE_MAX_AGE, // 30 days in seconds
