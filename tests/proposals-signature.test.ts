@@ -46,7 +46,7 @@ function makeRequest(): Request {
   });
 }
 
-const routeParams = { params: { id: 'prop-abc' } };
+const routeParams = { params: Promise.resolve({ id: 'prop-abc' }) };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

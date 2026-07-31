@@ -94,7 +94,7 @@ const validBody = {
 };
 
 /** Route param object */
-const routeParams = { params: { id: 'prop-123' } };
+const routeParams = { params: Promise.resolve({ id: 'prop-123' }) };
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
