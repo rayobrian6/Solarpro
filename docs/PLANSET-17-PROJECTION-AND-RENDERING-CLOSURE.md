@@ -343,3 +343,140 @@ Push                            origin/dev 0 ahead / 0 behind at f944906a
 ```
 
 **WS-5 remains blocked** on D4.
+
+---
+
+# D4 — CANONICAL FONT AND AUTHORITATIVE RENDERING MIGRATION
+
+**Starting commit** `cfb1022e` → **ending commit** `97468283`.
+**STATUS: COMPLETE.** D1, D2 and D3 verified intact by test, not by assumption.
+
+## D4.1 — Font pack manifest
+
+Pack `1.0.0`, five faces. Digests are of the **decoded WOFF2 bytes**, never the
+base64 text — a hash of the base64 would be a checksum of source formatting, not
+of the font.
+
+| Face | Family | Weight | Bytes | SHA-256 (16) | Glyphs |
+|---|---|---|---|---|---|
+| SolarProSans-Regular | SolarPro Sans | 400 | 42,848 | `104c466f3f6ef346` | 540 |
+| SolarProSans-Bold | SolarPro Sans | 700 | 43,124 | `dc8b48ccf4262a94` | 540 |
+| SolarProMono-Regular | SolarPro Mono | 400 | 37,184 | `2ef72944aa95c444` | 520 |
+| SolarProMono-Bold | SolarPro Mono | 700 | 37,140 | `a2fc1f9aeccbae05` | 520 |
+| SolarProSymbols-Regular | SolarPro Symbols | 400 | 58,344 | `cb90952664e6be04` | 949 |
+
+Total 218,604 bytes → 291,472 base64. Upstream Liberation `2.1.5` (SIL OFL 1.1,
+tarball `7191c669…`) and DejaVu `2.37` (`fa9ca4d1…`), both re-downloaded and
+**hash-verified against the recorded digests** during this pass.
+
+## D4.5 — The symbol inventory was incomplete
+
+Scanning **all three profiles** rather than one found **37** distinct non-ASCII
+codepoints, not 32. Two were uncovered:
+
+- `‖` U+2016 — Liberation **Mono** lacks it (Sans has it)
+- `⬡` U+2B21 — **neither** Liberation face carries it
+
+The symbol subset now backstops *either* face and includes the U+2B00 block.
+Every block starts at **U+2000**, which is what guarantees the face carries no
+Latin letter, digit, space or ASCII punctuation — verified: 0 of each, minimum
+codepoint `0x2000`.
+
+**Routing was genuinely broken, with every other gate green.** `SolarPro Symbols`
+reported `unloaded` because nothing referenced it, and canvas fell back to a
+**host** font for ⇒ ▶ ◀ ⚠ ⚡ ✓. The face is now appended *after* the canonical
+family in `--sans` / `--mono` and in every SVG attribute: it cannot win a Latin
+glyph, so it cannot move metrics, but the symbols resolve from embedded bytes.
+
+## D4.4 — Migration inventory
+
+| | before | after |
+|---|---|---|
+| Source host-font declarations (`lib/**`, excl. email) | 169 | **0** |
+| Artifact `@font-face` | 0 | **5** |
+| Artifact `SolarPro Sans` refs | 0 | 178 |
+| Artifact `SolarPro Mono` refs | 0 | 56 |
+| Artifact `SolarPro Symbols` refs | 0 | present in both stacks |
+| Artifact Helvetica / Courier / bare monospace / bare sans-serif | 3 / 1 / 53 / 0 | **0 / 0 / 0 / 0** |
+| Artifact `Arial` | 177 | **1 — prose only** |
+
+The single surviving `Arial` is the NEC placard specification (*"Arial or similar
+non-bold font"*) — engineering content about a physical label, not a rendering
+dependency. The scanner matches `font-family` **declarations**, not substrings.
+
+## D4.7 / D4.8 — The gate inverted
+
+`pagination-w9` used to assert the **host** resolved Arial to a metric-compatible
+face. After embedding that is wrong in both directions: a host with no Arial is
+now the supported case, and a host that *has* Arial would mask a broken embed by
+measuring the system face. It now measures the embedded faces with no fallback,
+and checks each face individually — `fonts.status === 'loaded'` alone is not
+sufficient. CI installs **no fonts at all**, deliberately: a bare host is the
+strongest test, because a regressed embed has nothing to fall back to.
+
+```text
+document.fonts.check  400/700 SolarPro Sans · 400/700 SolarPro Mono · 400 Symbols → all true
+SolarPro Sans 400  571.73px  (= Arial, unchanged)
+SolarPro Mono 400  672.11px  (= Courier New, unchanged)
+```
+
+## D4.9 — Authoritative PDF
+
+`generatePdf` verifies the five faces and their metrics after
+`document.fonts.ready`, before printing. **A failure throws `CanonicalFontError`
+rather than returning null** — and that distinction is load-bearing: the
+puppeteer path's own `try/catch` turns every failure into `null`, and `null`
+means *fall through to wkhtmltopdf*. I introduced exactly that bug while writing
+this and caught it before commit. wkhtmltopdf is now preview-only, returns
+`authoritative:false / previewOnly:true` with `NON_AUTHORITATIVE_NOTICE`, and
+callers producing a release artifact pass `authoritativeOnly` to refuse it.
+
+## D4.10 / D4.12 — Version and geometry
+
+`PLANSET_ENGINE_VERSION` 47420 → **47500**, plus `renderingPackVersion`,
+`fontPackVersion` and font-face digests as artifact meta. The bump **is** the
+invalidation — without it the route keeps serving stored host-font artifacts.
+
+```text
+Sheet counts   design-review 19 → 19 · permit 18 → 18 · full 25 → 25   (unchanged)
+Page clipping  0 · internal clipping 0 · on all three profiles
+Artifact size  1,807,959 → 2,105,290 bytes  (+16.4%)
+Open gates 5 · Unresolved requirements 14 · unchanged
+```
+
+Geometry did not move because Liberation is metric-compatible by design. That was
+the reason for choosing it, and it is now demonstrated rather than assumed.
+
+## D4 — Validation (true exit codes)
+
+| Check | Result | Exit |
+|---|---|---|
+| Full suite | **8995 passed / 0 failed** (489 skipped, 399 files) | 0 |
+| Lint | 0 errors | 0 |
+| Typecheck | clean | 0 |
+| Production build | Compiled successfully · 90/90 pages | 0 |
+| Page-fit ×3 profiles | clipped=0 internal=0 | 0 |
+| Authoritative PDFs ×3 | generated, font gate passed | 0 |
+| `d4-canonical-font-pack` | passed | 0 |
+| `pagination-w9` | passed | 0 |
+
+Harnesses, unchanged at the true baseline — `bar-wse` 36/36 (0) · `bar` 12/14 (2)
+· `co` 20/20 (0) · `ep` 21/22 (2) · `ppc` 18/18 (0) · `rgm` 17/17 (0) · `rp`
+20/20 (0) · `ecd`/`w3`/`w4` failing (2, pre-existing).
+
+**Visual inspection** (Chromium print render): PV-0, PV-1, PV-4B, SCHED, SCHED-2,
+SCHED-4, E-1, PE-1. No tofu, no substituted glyphs, no title-block overflow. E-1's
+SVG callouts are legible and still show the WS-3-corrected `IN 1-1/4" PVC Sch 80`.
+SCHED-2 carries the `RW-COMBINER_TO_DISCO_RUN` / `RW-DISCO_TO_METER_RUN` fittings
+D3 recovered. Screenshots in `test-output/d4-sheets/`, PDFs in `test-output/d4-*/`.
+
+## D1 / D2 / D3 — verified intact, by test
+
+- **D1** — no profile prints `5 of 6 electrical run`; the utility-owned run stays
+  excluded.
+- **D2** — the probe is **negation-safe**: it rejects a POSITIVE claim
+  (`DC EGC minimum: #10 AWG`, with `#` optional since fixtures render `10 AWG`)
+  while requiring the correct sentence *"no project-wide EGC minimum applies"*.
+  Non-vacuity asserted in both directions.
+- **D3** — all 48 canonical BOM rows render exactly once on every profile; the
+  compact profiles render the same row set as the internal package.
