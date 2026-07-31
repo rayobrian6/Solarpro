@@ -1,30 +1,59 @@
 {
-  "version": 1,
-  "generated_at": "2026-07-30T22:00:00Z",
-  "frameworks": ["SOC 2", "ISO 27001", "ISO 27701", "ISO 27017"],
+  "version": 2,
+  "generated_at": "2026-07-31T00:02:00Z — neon/roles.json added under A.5.18 (Access rights).",
+  "frameworks": [
+    "SOC 2",
+    "ISO 27001",
+    "ISO 27701",
+    "ISO 27017"
+  ],
   "_meta": {
     "sprint": "Sprint 1",
     "source": "C:/Users/carpe/.mavis/agents/compliance-lead/workspace/CONTROL_MATRIX.md",
     "control_count_target": 78,
     "control_count_actual": 84,
     "control_count_note": "The matrix summary cites 78 controls; the actual unique control IDs extracted from the Control ID column by the validate-compliance-manifest.mjs parser are 84. The 6-row gap is the ISO 27701 6.2.x sub-controls (6.2.1, 6.2.2, 6.2.3, 6.2.4) which are joint rows with A.5.34 in the matrix. They are kept as separate manifest keys so the Vanta/Drata importer receives the full ISO 27701 control list.",
-    "evidence_pipeline": "Cloudflare R2 (solarpro-compliance-evidence bucket), collector scripts under compliance/collectors/*.mjs run on GitHub Actions schedules per compliance/schedules/*.yml",
-    "platform_portability": "Manifest schema mirrors the Vanta 'Build Integrations API' and Drata 'Compliance-as-Code' control->evidence-source map. Manifest keys (CCx.y, A.5.x, A.8.x, 6.x.y) are the canonical control IDs in the source frameworks; no translation layer is required at import time."
+    "evidence_pipeline": "Git-based evidence store (compliance/evidence/<integration>/<YYYY-MM-DD>/). Collector scripts under compliance/collectors/*.mjs run on GitHub Actions schedules per compliance/workflows/{hourly,daily,weekly}.yml. R2 (the design-doc plan) was replaced per James 2026-07-30 \"no money yet\" call; see HANDOFF_COMPLIANCE_COLLECTORS.md §\"Storage adaptation\" for rationale.",
+    "platform_portability": "Manifest schema mirrors the Vanta 'Build Integrations API' and Drata 'Compliance-as-Code' control->evidence-source map. Manifest keys (CCx.y, A.5.x, A.8.x, 6.x.y) are the canonical control IDs in the source frameworks; no translation layer is required at import time.",
+    "evidence_pipeline_storage": "git",
+    "evidence_pipeline_layout": "compliance/evidence/<integration>/<YYYY-MM-DD>/<filename>",
+    "evidence_pipeline_updated": "2026-07-31T00:00:00Z",
+    "evidence_pipeline_fixup": "2026-07-31T00:00:00Z — added 11 missing path_pattern entries for collector outputs; migrated monitoring/ -> compliance/monitoring/ (11 entries).",
+    "evidence_pipeline_fixup2": "2026-07-31T00:01:00Z — auditor-access path migrated, neon/branches.json added.",
+    "evidence_pipeline_fixup3": "2026-07-31T00:02:00Z — neon/roles.json added under A.5.18 (Access rights)."
   },
   "controls": {
     "CC1.1": {
       "title": "Demonstrates commitment to integrity and ethical values",
-      "framework": ["SOC 2 CC1.1", "ISO 27001 A.5.1", "ISO 27001 A.5.2"],
+      "framework": [
+        "SOC 2 CC1.1",
+        "ISO 27001 A.5.1",
+        "ISO 27001 A.5.2"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "compliance/policies/01-information-security.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/14-code-of-conduct.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "AGENTS.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "compliance/policies/01-information-security.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/14-code-of-conduct.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "AGENTS.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC1.2": {
       "title": "Board of directors / management demonstrates independence and exercises oversight",
-      "framework": ["SOC 2 CC1.2"],
+      "framework": [
+        "SOC 2 CC1.2"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "No board charter or management review cadence is documented in the repo. Required for SOC 2 Type 2. Owner: James + Raymond (CISO). Remediation: write management review document + charter; 1 week policy work per CONTROL_MATRIX.md CC1.2 row.",
@@ -32,199 +61,514 @@
     },
     "CC1.3": {
       "title": "Establishes structures, reporting lines, and authorities for information security roles",
-      "framework": ["SOC 2 CC1.3", "ISO 27001 A.5.2"],
+      "framework": [
+        "SOC 2 CC1.3",
+        "ISO 27001 A.5.2"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/organizations/authorization.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/db/{date}/users-summary.json", "collector": "db-internal.mjs", "cadence": "daily" },
-        { "path_pattern": "compliance/policies/15-onboarding-offboarding.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/organizations/authorization.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/users-summary.json",
+          "collector": "db-internal.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/policies/15-onboarding-offboarding.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC1.4": {
       "title": "Demonstrates commitment to competence (security training, secure coding)",
-      "framework": ["SOC 2 CC1.4", "ISO 27001 A.5.2", "ISO 27001 A.5.35"],
+      "framework": [
+        "SOC 2 CC1.4",
+        "ISO 27001 A.5.2",
+        "ISO 27001 A.5.35"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "AGENTS.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/16-security-awareness-training.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "AGENTS.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/16-security-awareness-training.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC1.5": {
       "title": "Holds individuals accountable for their internal control responsibilities",
-      "framework": ["SOC 2 CC1.5", "ISO 27001 A.5.1"],
+      "framework": [
+        "SOC 2 CC1.5",
+        "ISO 27001 A.5.1"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "CC2.1": {
       "title": "Obtains / generates relevant quality information to support functioning of internal control",
-      "framework": ["SOC 2 CC2.1", "ISO 27001 A.5.34"],
+      "framework": [
+        "SOC 2 CC2.1",
+        "ISO 27001 A.5.34"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/ledger.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" }
+        {
+          "path_pattern": "lib/migrations/ledger.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        }
       ]
     },
     "CC2.2": {
       "title": "Internally communicates information necessary to support the functioning of internal control",
-      "framework": ["SOC 2 CC2.2", "ISO 27001 A.5.10"],
+      "framework": [
+        "SOC 2 CC2.2",
+        "ISO 27001 A.5.10"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "docs/HANDOFF_2026-07-30.md", "collector": "manual", "cadence": "on-demand" },
-        { "path_pattern": "AGENTS.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "docs/HANDOFF_2026-07-30.md",
+          "collector": "manual",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "AGENTS.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        }
       ]
     },
     "CC2.3": {
       "title": "Communicates with external parties about security responsibilities and events",
-      "framework": ["SOC 2 CC2.3", "ISO 27001 A.5.10", "ISO 27001 A.5.34"],
+      "framework": [
+        "SOC 2 CC2.3",
+        "ISO 27001 A.5.10",
+        "ISO 27001 A.5.34"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/google-workspace/{date}/admin-roles.json", "collector": "google-workspace.mjs", "cadence": "daily" },
-        { "path_pattern": "compliance/policies/08-incident-response.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/admin-roles.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/policies/08-incident-response.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC2.4": {
       "title": "Documents operating procedures and stores them where accessible",
-      "framework": ["SOC 2 CC2.4", "ISO 27001 A.5.37"],
+      "framework": [
+        "SOC 2 CC2.4",
+        "ISO 27001 A.5.37"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "tests/targetedRegistryDeployment.test.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/07-change-management.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "tests/targetedRegistryDeployment.test.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/07-change-management.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC3.1": {
       "title": "Specifies objectives, identifies risks, and analyzes risks",
-      "framework": ["SOC 2 CC3.1", "ISO 27001 A.5.7"],
+      "framework": [
+        "SOC 2 CC3.1",
+        "ISO 27001 A.5.7"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": ".mavis/agents/compliance-lead/workspace/CONTROL_MATRIX.md", "collector": "manual", "cadence": "quarterly" },
-        { "path_pattern": "compliance/policies/28-risk-assessment.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": ".mavis/agents/compliance-lead/workspace/CONTROL_MATRIX.md",
+          "collector": "manual",
+          "cadence": "quarterly"
+        },
+        {
+          "path_pattern": "compliance/policies/28-risk-assessment.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC3.2": {
       "title": "Identifies and analyzes risk related to the achievement of objectives across the entity",
-      "framework": ["SOC 2 CC3.2", "ISO 27001 A.5.7"],
+      "framework": [
+        "SOC 2 CC3.2",
+        "ISO 27001 A.5.7"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": ".mavis/agents/compliance-lead/workspace/CONTROL_MATRIX.md", "collector": "manual", "cadence": "quarterly" },
-        { "path_pattern": "compliance/policies/28-risk-assessment.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": ".mavis/agents/compliance-lead/workspace/CONTROL_MATRIX.md",
+          "collector": "manual",
+          "cadence": "quarterly"
+        },
+        {
+          "path_pattern": "compliance/policies/28-risk-assessment.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC3.3": {
       "title": "Considers the potential for fraud in assessing risks",
-      "framework": ["SOC 2 CC3.3", "ISO 27001 A.5.7"],
+      "framework": [
+        "SOC 2 CC3.3",
+        "ISO 27001 A.5.7"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/db/{date}/webhook-deliveries.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "compliance/policies/28-risk-assessment.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/webhook-deliveries.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/policies/28-risk-assessment.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC3.4": {
       "title": "Identifies and assesses changes that could significantly impact the system of internal control",
-      "framework": ["SOC 2 CC3.4", "ISO 27001 A.5.7"],
+      "framework": [
+        "SOC 2 CC3.4",
+        "ISO 27001 A.5.7"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/manifest.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "scripts/check-dependency-topology.js", "collector": "manual", "cadence": "on-demand" }
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/manifest.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "scripts/check-dependency-topology.js",
+          "collector": "manual",
+          "cadence": "on-demand"
+        }
       ]
     },
     "CC4.1": {
       "title": "Selects, develops, and performs ongoing or separate evaluations to ascertain whether components of internal control are present and functioning",
-      "framework": ["SOC 2 CC4.1", "ISO 27001 A.8.16", "ISO 27001 A.8.32"],
+      "framework": [
+        "SOC 2 CC4.1",
+        "ISO 27001 A.8.16",
+        "ISO 27001 A.8.32"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" },
-        { "path_pattern": "compliance/monitoring/weekly-{date}.md", "collector": "compliance-monitoring.mjs", "cadence": "weekly" },
-        { "path_pattern": ".audit-missing-rl.txt", "collector": "manual", "cadence": "on-demand" },
-        { "path_pattern": ".audit-env-inventory.txt", "collector": "manual", "cadence": "on-demand" }
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.md",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        },
+        {
+          "path_pattern": ".audit-missing-rl.txt",
+          "collector": "manual",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": ".audit-env-inventory.txt",
+          "collector": "manual",
+          "cadence": "on-demand"
+        }
       ]
     },
     "CC4.2": {
       "title": "Evaluates and communicates internal control deficiencies in a timely manner",
-      "framework": ["SOC 2 CC4.2", "ISO 27001 A.8.15"],
+      "framework": [
+        "SOC 2 CC4.2",
+        "ISO 27001 A.8.15"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        }
       ]
     },
     "CC5.1": {
       "title": "Selects and develops control activities that contribute to mitigation of risks",
-      "framework": ["SOC 2 CC5.1", "ISO 27001 A.5.36"],
+      "framework": [
+        "SOC 2 CC5.1",
+        "ISO 27001 A.5.36"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "CC5.2": {
       "title": "Selects and develops general technology controls to support achievement of objectives",
-      "framework": ["SOC 2 CC5.2", "ISO 27001 A.5.36", "ISO 27001 A.5.37"],
+      "framework": [
+        "SOC 2 CC5.2",
+        "ISO 27001 A.5.36",
+        "ISO 27001 A.5.37"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "next.config.js", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/07-change-management.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "next.config.js",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/07-change-management.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC5.3": {
       "title": "Deploys controls through policies and procedures",
-      "framework": ["SOC 2 CC5.3", "ISO 27001 A.5.37"],
+      "framework": [
+        "SOC 2 CC5.3",
+        "ISO 27001 A.5.37"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/01-information-security.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/01-information-security.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "CC6.1": {
       "title": "Implements logical access security software, infrastructure, and architectures over identified assets",
-      "framework": ["SOC 2 CC6.1", "ISO 27001 A.5.15", "ISO 27001 A.5.18", "ISO 27001 A.8.2"],
+      "framework": [
+        "SOC 2 CC6.1",
+        "ISO 27001 A.5.15",
+        "ISO 27001 A.5.18",
+        "ISO 27001 A.8.2"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/organizations/authorization.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/github/{date}/branch-protection.json", "collector": "github.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/google-workspace/{date}/users-mfa.json", "collector": "google-workspace.mjs", "cadence": "daily" }
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/organizations/authorization.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/branch-protection.json",
+          "collector": "github.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/users-mfa.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "CC6.2": {
       "title": "Prior authorization for issuance of new user IDs, passwords, and roles",
-      "framework": ["SOC 2 CC6.2", "ISO 27001 A.5.18"],
+      "framework": [
+        "SOC 2 CC6.2",
+        "ISO 27001 A.5.18"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "app/api/auth/register/route.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" }
+        {
+          "path_pattern": "app/api/auth/register/route.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        }
       ]
     },
     "CC6.3": {
       "title": "Removes access to information assets when appropriate (termination, role change)",
-      "framework": ["SOC 2 CC6.3", "ISO 27001 A.5.18", "ISO 27001 A.5.16"],
+      "framework": [
+        "SOC 2 CC6.3",
+        "ISO 27001 A.5.18",
+        "ISO 27001 A.5.16"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "migrations/094_*.sql", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "middleware.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/organizations/authorization.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "migrations/094_*.sql",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "middleware.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/organizations/authorization.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "CC6.4": {
       "title": "Restricts physical access to protected information assets",
-      "framework": ["SOC 2 CC6.4", "ISO 27001 A.5.15", "ISO 27001 A.5.18", "ISO 27001 A.8.2", "ISO 27017 A.8.1"],
+      "framework": [
+        "SOC 2 CC6.4",
+        "ISO 27001 A.5.15",
+        "ISO 27001 A.5.18",
+        "ISO 27001 A.8.2",
+        "ISO 27017 A.8.1"
+      ],
       "current_state": "Not Applicable",
       "not_applicable": true,
       "not_applicable_reason": "Cloud-only architecture: Solarpro has no on-prem footprint. Physical access controls for compute/storage reside at Vercel, Neon, Render, and Cloudflare; their SOC 2 Type 2 reports are collected as evidence under CC9.2 / A.5.23 (vendor management) instead.",
@@ -232,7 +576,10 @@
     },
     "CC6.5": {
       "title": "Discontinues logical and physical protection only when no longer required",
-      "framework": ["SOC 2 CC6.5", "ISO 27001 A.5.18"],
+      "framework": [
+        "SOC 2 CC6.5",
+        "ISO 27001 A.5.18"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "Audits do not address asset retirement / data-deletion lifecycle. Recommend a separate data-lifecycle audit before SOC 2 Type 2. Remediation: document retention + deletion policy + add scheduled jobs for stale surveys per CONTROL_MATRIX.md CC6.5 row; 1-2 weeks.",
@@ -240,85 +587,259 @@
     },
     "CC6.6": {
       "title": "Implements logical access security measures to authorize, authenticate, and encrypt connections",
-      "framework": ["SOC 2 CC6.6", "ISO 27001 A.5.15", "ISO 27001 A.5.17", "ISO 27001 A.8.5", "ISO 27001 A.8.24"],
+      "framework": [
+        "SOC 2 CC6.6",
+        "ISO 27001 A.5.15",
+        "ISO 27001 A.5.17",
+        "ISO 27001 A.8.5",
+        "ISO 27001 A.8.24"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "evidence/github/{date}/branch-protection.json", "collector": "github.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/google-workspace/{date}/users-mfa.json", "collector": "google-workspace.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/render/{date}/events.json", "collector": "render.mjs", "cadence": "hourly" },
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "compliance/evidence/github/{date}/branch-protection.json",
+          "collector": "github.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/users-mfa.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/events.json",
+          "collector": "render.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/members.json",
+          "collector": "render.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "CC6.7": {
       "title": "Restricts the transmission, movement, and removal of information to authorized users",
-      "framework": ["SOC 2 CC6.7", "ISO 27001 A.5.10", "ISO 27001 A.8.12"],
+      "framework": [
+        "SOC 2 CC6.7",
+        "ISO 27001 A.5.10",
+        "ISO 27001 A.8.12"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/db/{date}/webhook-deliveries.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "app/api/survey/submit/route.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/vendors/openai/dpa.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/anthropic/dpa.pdf", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "compliance/evidence/db/{date}/webhook-deliveries.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "app/api/survey/submit/route.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/vendors/openai/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/anthropic/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC6.8": {
       "title": "Prevents or detects and acts upon the introduction of unauthorized or malicious software",
-      "framework": ["SOC 2 CC6.8", "ISO 27001 A.8.7"],
+      "framework": [
+        "SOC 2 CC6.8",
+        "ISO 27001 A.8.7"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/github/{date}/dependabot-alerts.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/github/{date}/secret-scanning.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "sam2-service/Dockerfile", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "compliance/evidence/github/{date}/dependabot-alerts.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/secret-scanning.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "sam2-service/Dockerfile",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "CC7.1": {
       "title": "Detects and responds to security events, vulnerabilities, and anomalies",
-      "framework": ["SOC 2 CC7.1", "ISO 27001 A.5.7", "ISO 27001 A.5.24", "ISO 27001 A.5.25", "ISO 27001 A.8.16", "ISO 27001 A.8.8"],
+      "framework": [
+        "SOC 2 CC7.1",
+        "ISO 27001 A.5.7",
+        "ISO 27001 A.5.24",
+        "ISO 27001 A.5.25",
+        "ISO 27001 A.8.16",
+        "ISO 27001 A.8.8"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "evidence/github/{date}/dependabot-alerts.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/github/{date}/secret-scanning.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/google-workspace/{date}/login-audit.json", "collector": "google-workspace.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/render/{date}/events.json", "collector": "render.mjs", "cadence": "hourly" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "compliance/evidence/github/{date}/dependabot-alerts.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/secret-scanning.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/login-audit.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/events.json",
+          "collector": "render.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        }
       ]
     },
     "CC7.2": {
       "title": "Monitors system components and the operation of those components for anomalies",
-      "framework": ["SOC 2 CC7.2", "ISO 27001 A.8.15", "ISO 27001 A.8.16"],
+      "framework": [
+        "SOC 2 CC7.2",
+        "ISO 27001 A.8.15",
+        "ISO 27001 A.8.16"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/render/{date}/events.json", "collector": "render.mjs", "cadence": "hourly" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" },
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/events.json",
+          "collector": "render.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        },
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "CC7.3": {
       "title": "Evaluates security events to determine whether they should be classified as incidents",
-      "framework": ["SOC 2 CC7.3", "ISO 27001 A.5.25", "ISO 27001 A.5.26", "ISO 27001 A.5.28"],
+      "framework": [
+        "SOC 2 CC7.3",
+        "ISO 27001 A.5.25",
+        "ISO 27001 A.5.26",
+        "ISO 27001 A.5.28"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/08-incident-response.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/08-incident-response.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC7.4": {
       "title": "Responds to identified security incidents (containment, eradication, recovery)",
-      "framework": ["SOC 2 CC7.4", "ISO 27001 A.5.26", "ISO 27001 A.5.28"],
+      "framework": [
+        "SOC 2 CC7.4",
+        "ISO 27001 A.5.26",
+        "ISO 27001 A.5.28"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "app/api/admin/debug/auth-status", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "app/api/admin/repair-account", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/08-incident-response.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "app/api/admin/debug/auth-status",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "app/api/admin/repair-account",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/08-incident-response.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "CC7.5": {
       "title": "Recovers from identified security incidents and improves the response process",
-      "framework": ["SOC 2 CC7.5", "ISO 27001 A.5.27", "ISO 27001 A.5.29"],
+      "framework": [
+        "SOC 2 CC7.5",
+        "ISO 27001 A.5.27",
+        "ISO 27001 A.5.29"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "No post-incident review cadence documented; Neon PITR status unverified. Remediation: document PIR process + secret rotation cadence + verify Neon PITR per CONTROL_MATRIX.md CC7.5 row; 1 week.",
@@ -326,74 +847,225 @@
     },
     "CC8.1": {
       "title": "Authorizes, designs, develops, acquires, configures, documents, tests, and implements changes",
-      "framework": ["SOC 2 CC8.1", "ISO 27001 A.8.9", "ISO 27001 A.8.25", "ISO 27001 A.8.28", "ISO 27001 A.8.32"],
+      "framework": [
+        "SOC 2 CC8.1",
+        "ISO 27001 A.8.9",
+        "ISO 27001 A.8.25",
+        "ISO 27001 A.8.28",
+        "ISO 27001 A.8.32"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/ledger.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/github/{date}/recent-prs.json", "collector": "github.mjs", "cadence": "weekly" },
-        { "path_pattern": "evidence/vercel/{date}/deployments.json", "collector": "vercel.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/render/{date}/deploys.json", "collector": "render.mjs", "cadence": "daily" },
-        { "path_pattern": "compliance/policies/07-change-management.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/ledger.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/commit-signing-sample.json",
+          "collector": "github.mjs",
+          "cadence": "weekly",
+          "workflow": "compliance/workflows/weekly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/vercel/{date}/deployments.json",
+          "collector": "vercel.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/deploys.json",
+          "collector": "render.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/policies/07-change-management.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/evidence/vercel/{date}/projects.json",
+          "collector": "vercel.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "CC9.1": {
       "title": "Identifies, selects, and develops risk mitigation activities for risks arising from potential business disruptions",
-      "framework": ["SOC 2 CC9.1", "ISO 27001 A.5.31", "ISO 27001 A.8.23"],
+      "framework": [
+        "SOC 2 CC9.1",
+        "ISO 27001 A.5.31",
+        "ISO 27001 A.8.23"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/neon/{date}/pitr.json", "collector": "neon.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/render/{date}/events.json", "collector": "render.mjs", "cadence": "hourly" },
-        { "path_pattern": "vercel.json", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/09-business-continuity-disaster-recovery.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "compliance/evidence/neon/{date}/pitr.json",
+          "collector": "neon.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/events.json",
+          "collector": "render.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "vercel.json",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/09-business-continuity-disaster-recovery.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/evidence/neon/{date}/project.json",
+          "collector": "neon.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "CC9.2": {
       "title": "Assesses and manages vendor and business partner risks",
-      "framework": ["SOC 2 CC9.2", "ISO 27001 A.5.19", "ISO 27001 A.5.20", "ISO 27001 A.5.21", "ISO 27001 A.5.23", "ISO 27017 A.5.23"],
+      "framework": [
+        "SOC 2 CC9.2",
+        "ISO 27001 A.5.19",
+        "ISO 27001 A.5.20",
+        "ISO 27001 A.5.21",
+        "ISO 27001 A.5.23",
+        "ISO 27017 A.5.23"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "compliance/vendors.csv", "collector": "manual", "cadence": "quarterly" },
-        { "path_pattern": "compliance/policies/18-vendor-risk-management.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/{vendor}/soc2-report.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/{vendor}/dpa.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/{vendor}/review-{YYYY-Q#}.md", "collector": "manual", "cadence": "quarterly" }
+        {
+          "path_pattern": "compliance/vendors.csv",
+          "collector": "manual",
+          "cadence": "quarterly"
+        },
+        {
+          "path_pattern": "compliance/policies/18-vendor-risk-management.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/{vendor}/soc2-report.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/{vendor}/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/{vendor}/review-{YYYY-Q#}.md",
+          "collector": "manual",
+          "cadence": "quarterly"
+        }
       ]
     },
     "A.5.1": {
       "title": "Policies for information security",
-      "framework": ["ISO 27001 A.5.1", "SOC 2 CC1.1"],
+      "framework": [
+        "ISO 27001 A.5.1",
+        "SOC 2 CC1.1"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "compliance/policies/01-information-security.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "AGENTS.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "AI-AGENT-README.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "compliance/policies/01-information-security.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "AGENTS.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "AI-AGENT-README.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "A.5.2": {
       "title": "Information security roles and responsibilities",
-      "framework": ["ISO 27001 A.5.2", "SOC 2 CC1.3", "SOC 2 CC1.4"],
+      "framework": [
+        "ISO 27001 A.5.2",
+        "SOC 2 CC1.3",
+        "SOC 2 CC1.4"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/organizations/authorization.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/15-onboarding-offboarding.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "evidence/google-workspace/{date}/admin-roles.json", "collector": "google-workspace.mjs", "cadence": "daily" }
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/organizations/authorization.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/15-onboarding-offboarding.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/admin-roles.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.5.7": {
       "title": "Threat intelligence (collect and analyze threat data)",
-      "framework": ["ISO 27001 A.5.7", "SOC 2 CC3.x"],
+      "framework": [
+        "ISO 27001 A.5.7",
+        "SOC 2 CC3.x"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/github/{date}/dependabot-alerts.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/github/{date}/secret-scanning.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "compliance/evidence/github/{date}/dependabot-alerts.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/secret-scanning.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        }
       ]
     },
     "A.5.10": {
       "title": "Acceptable use of information and other associated assets",
-      "framework": ["ISO 27001 A.5.10", "SOC 2 CC2.2", "SOC 2 CC2.3"],
+      "framework": [
+        "ISO 27001 A.5.10",
+        "SOC 2 CC2.2",
+        "SOC 2 CC2.3"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "Audits silent on employee acceptable-use policy. Required for SOC 2. Remediation: write AUP and add to onboarding per CONTROL_MATRIX.md A.5.10 row; 1 week.",
@@ -401,103 +1073,292 @@
     },
     "A.5.12": {
       "title": "Classification of information",
-      "framework": ["ISO 27001 A.5.12"],
+      "framework": [
+        "ISO 27001 A.5.12"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/03-data-classification-handling.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/03-data-classification-handling.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "A.5.15": {
       "title": "Access control",
-      "framework": ["ISO 27001 A.5.15", "SOC 2 CC6.1", "SOC 2 CC6.6"],
+      "framework": [
+        "ISO 27001 A.5.15",
+        "SOC 2 CC6.1",
+        "SOC 2 CC6.6"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/organizations/authorization.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/github/{date}/branch-protection.json", "collector": "github.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/google-workspace/{date}/users-mfa.json", "collector": "google-workspace.mjs", "cadence": "daily" }
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/organizations/authorization.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/branch-protection.json",
+          "collector": "github.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/users-mfa.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.5.16": {
       "title": "Identity management",
-      "framework": ["ISO 27001 A.5.16", "SOC 2 CC6.3"],
+      "framework": [
+        "ISO 27001 A.5.16",
+        "SOC 2 CC6.3"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/db/{date}/users-summary.json", "collector": "db-internal.mjs", "cadence": "daily" }
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/users-summary.json",
+          "collector": "db-internal.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/vercel/{date}/members.json",
+          "collector": "vercel.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/token-audit.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "weekly",
+          "workflow": "compliance/workflows/weekly.yml"
+        }
       ]
     },
     "A.5.17": {
       "title": "Authentication information",
-      "framework": ["ISO 27001 A.5.17", "SOC 2 CC6.6"],
+      "framework": [
+        "ISO 27001 A.5.17",
+        "SOC 2 CC6.6"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "next.config.js", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": ".env.example", "collector": "manual", "cadence": "quarterly" },
-        { "path_pattern": "evidence/github/{date}/org-members.json", "collector": "github.mjs", "cadence": "daily" }
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "next.config.js",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": ".env.example",
+          "collector": "manual",
+          "cadence": "quarterly"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/members.json",
+          "collector": "github.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.5.18": {
       "title": "Access rights",
-      "framework": ["ISO 27001 A.5.18", "SOC 2 CC6.1", "SOC 2 CC6.2", "SOC 2 CC6.3", "SOC 2 CC6.5"],
+      "framework": [
+        "ISO 27001 A.5.18",
+        "SOC 2 CC6.1",
+        "SOC 2 CC6.2",
+        "SOC 2 CC6.3",
+        "SOC 2 CC6.5"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/organizations/authorization.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "middleware.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/organizations/authorization.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "middleware.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/neon/{date}/roles.json",
+          "collector": "neon.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.5.23": {
       "title": "Information security for use of cloud services",
-      "framework": ["ISO 27001 A.5.23", "ISO 27017 A.5.23", "SOC 2 CC9.2"],
+      "framework": [
+        "ISO 27001 A.5.23",
+        "ISO 27017 A.5.23",
+        "SOC 2 CC9.2"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "compliance/vendors.csv", "collector": "manual", "cadence": "quarterly" },
-        { "path_pattern": "compliance/policies/18-vendor-risk-management.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/25-cloud-services-security.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/26-shared-responsibility-matrix.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/vercel/soc2-report.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/neon/soc2-report.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/render/soc2-report.pdf", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "compliance/vendors.csv",
+          "collector": "manual",
+          "cadence": "quarterly"
+        },
+        {
+          "path_pattern": "compliance/policies/18-vendor-risk-management.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/25-cloud-services-security.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/26-shared-responsibility-matrix.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/vercel/soc2-report.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/neon/soc2-report.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/render/soc2-report.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "A.5.24": {
       "title": "Information security incident management planning",
-      "framework": ["ISO 27001 A.5.24", "SOC 2 CC7.1"],
+      "framework": [
+        "ISO 27001 A.5.24",
+        "SOC 2 CC7.1"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "compliance/policies/08-incident-response.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "compliance/policies/08-incident-response.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "A.5.25": {
       "title": "Assessment and decision on information security events",
-      "framework": ["ISO 27001 A.5.25", "SOC 2 CC7.3"],
+      "framework": [
+        "ISO 27001 A.5.25",
+        "SOC 2 CC7.3"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/08-incident-response.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/08-incident-response.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "A.5.26": {
       "title": "Response to information security incidents",
-      "framework": ["ISO 27001 A.5.26", "SOC 2 CC7.4"],
+      "framework": [
+        "ISO 27001 A.5.26",
+        "SOC 2 CC7.4"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "app/api/admin/debug/auth-status", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "app/api/admin/repair-account", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/08-incident-response.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "app/api/admin/debug/auth-status",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "app/api/admin/repair-account",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/08-incident-response.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "A.5.27": {
       "title": "Learning from information security incidents",
-      "framework": ["ISO 27001 A.5.27", "SOC 2 CC7.5"],
+      "framework": [
+        "ISO 27001 A.5.27",
+        "SOC 2 CC7.5"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "No formal post-incident review (PIR) cadence documented. Remediation: write PIR process and quarterly review schedule per CONTROL_MATRIX.md A.5.27 row; 1 week.",
@@ -505,89 +1366,240 @@
     },
     "A.5.28": {
       "title": "Collection of evidence (forensic readiness)",
-      "framework": ["ISO 27001 A.5.28", "SOC 2 CC7.4"],
+      "framework": [
+        "ISO 27001 A.5.28",
+        "SOC 2 CC7.4"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/db/{date}/webhook-deliveries.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/auditor-access/{date}/access.ndjson", "collector": "auditor-access.mjs", "cadence": "on-demand" }
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/webhook-deliveries.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/auditor-access/{date}/access.ndjson",
+          "collector": "auditor-access.mjs",
+          "cadence": "on-demand"
+        }
       ]
     },
     "A.5.29": {
       "title": "Information security during disruption",
-      "framework": ["ISO 27001 A.5.29", "SOC 2 CC7.5"],
+      "framework": [
+        "ISO 27001 A.5.29",
+        "SOC 2 CC7.5"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "compliance/policies/09-business-continuity-disaster-recovery.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "evidence/neon/{date}/pitr.json", "collector": "neon.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/render/{date}/events.json", "collector": "render.mjs", "cadence": "hourly" }
+        {
+          "path_pattern": "compliance/policies/09-business-continuity-disaster-recovery.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/evidence/neon/{date}/pitr.json",
+          "collector": "neon.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/events.json",
+          "collector": "render.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/neon/{date}/consumption.json",
+          "collector": "neon.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.5.30": {
       "title": "ICT readiness for business continuity",
-      "framework": ["ISO 27001 A.5.30", "SOC 2 CC9.1"],
+      "framework": [
+        "ISO 27001 A.5.30",
+        "SOC 2 CC9.1"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/neon/{date}/pitr.json", "collector": "neon.mjs", "cadence": "daily" },
-        { "path_pattern": "compliance/policies/09-business-continuity-disaster-recovery.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "compliance/evidence/neon/{date}/pitr.json",
+          "collector": "neon.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/policies/09-business-continuity-disaster-recovery.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        }
       ]
     },
     "A.5.31": {
       "title": "Legal, statutory, regulatory and contractual requirements",
-      "framework": ["ISO 27001 A.5.31", "SOC 2 CC3.x"],
+      "framework": [
+        "ISO 27001 A.5.31",
+        "SOC 2 CC3.x"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/permit/snapshot/", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/29-statement-of-applicability.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/permit/snapshot/",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/29-statement-of-applicability.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "A.5.34": {
       "title": "Privacy and protection of PII",
-      "framework": ["ISO 27001 A.5.34", "ISO 27701 6.5.x", "SOC 2 CC6.7"],
+      "framework": [
+        "ISO 27001 A.5.34",
+        "ISO 27701 6.5.x",
+        "SOC 2 CC6.7"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/survey/", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "app/api/survey/submit/route.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/21-privacy-policy-external.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/23-data-retention-disposal.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/openai/dpa.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/anthropic/dpa.pdf", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/survey/",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "app/api/survey/submit/route.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/21-privacy-policy-external.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/23-data-retention-disposal.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/openai/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/anthropic/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/organizations-summary.json",
+          "collector": "db-internal.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.5.35": {
       "title": "Independent review of information security",
-      "framework": ["ISO 27001 A.5.35", "SOC 2 CC1.4"],
+      "framework": [
+        "ISO 27001 A.5.35",
+        "SOC 2 CC1.4"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": ".mavis/agents/compliance-lead/workspace/CONTROL_MATRIX.md", "collector": "manual", "cadence": "quarterly" },
-        { "path_pattern": ".mavis/v2/assets/audit_*_2026-07-30.md", "collector": "manual", "cadence": "quarterly" }
+        {
+          "path_pattern": ".mavis/agents/compliance-lead/workspace/CONTROL_MATRIX.md",
+          "collector": "manual",
+          "cadence": "quarterly"
+        },
+        {
+          "path_pattern": ".mavis/v2/assets/audit_*_2026-07-30.md",
+          "collector": "manual",
+          "cadence": "quarterly"
+        }
       ]
     },
     "A.5.36": {
       "title": "Compliance with policies, rules and standards for information security",
-      "framework": ["ISO 27001 A.5.36", "SOC 2 CC5.x"],
+      "framework": [
+        "ISO 27001 A.5.36",
+        "SOC 2 CC5.x"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        }
       ]
     },
     "A.5.37": {
       "title": "Documented operating procedures",
-      "framework": ["ISO 27001 A.5.37", "SOC 2 CC2.4", "SOC 2 CC5.2"],
+      "framework": [
+        "ISO 27001 A.5.37",
+        "SOC 2 CC2.4",
+        "SOC 2 CC5.2"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "tests/targetedRegistryDeployment.test.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/01-information-security.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "tests/targetedRegistryDeployment.test.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/01-information-security.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "A.8.1": {
       "title": "User endpoint devices",
-      "framework": ["ISO 27001 A.8.1", "ISO 27017 A.8.1", "SOC 2 CC6.4"],
+      "framework": [
+        "ISO 27001 A.8.1",
+        "ISO 27017 A.8.1",
+        "SOC 2 CC6.4"
+      ],
       "current_state": "Not Applicable",
       "not_applicable": true,
       "not_applicable_reason": "Solarpro is a fully cloud-hosted SaaS. The team uses personal laptops under the Bring Your Own Device model; no corporate-managed endpoints exist. Endpoint controls are the responsibility of the cloud provider (Vercel, Neon, Render) under their SOC 2 reports (collected as evidence under CC9.2 / A.5.23).",
@@ -595,104 +1607,305 @@
     },
     "A.8.2": {
       "title": "Privileged access rights",
-      "framework": ["ISO 27001 A.8.2", "SOC 2 CC6.1"],
+      "framework": [
+        "ISO 27001 A.8.2",
+        "SOC 2 CC6.1"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/google-workspace/{date}/admin-roles.json", "collector": "google-workspace.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/github/{date}/org-members.json", "collector": "github.mjs", "cadence": "daily" }
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/admin-roles.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/members.json",
+          "collector": "github.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.8.3": {
       "title": "Information access restriction",
-      "framework": ["ISO 27001 A.8.3", "SOC 2 CC6.x"],
+      "framework": [
+        "ISO 27001 A.8.3",
+        "SOC 2 CC6.x"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/organizations/authorization.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "lib/organizations/authorization.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "A.8.5": {
       "title": "Secure authentication",
-      "framework": ["ISO 27001 A.8.5", "SOC 2 CC6.6"],
+      "framework": [
+        "ISO 27001 A.8.5",
+        "SOC 2 CC6.6"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/adminAuth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/github/{date}/branch-protection.json", "collector": "github.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/google-workspace/{date}/users-mfa.json", "collector": "google-workspace.mjs", "cadence": "daily" }
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/adminAuth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/branch-protection.json",
+          "collector": "github.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/users-mfa.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.8.7": {
       "title": "Protection against malware",
-      "framework": ["ISO 27001 A.8.7", "SOC 2 CC6.8"],
+      "framework": [
+        "ISO 27001 A.8.7",
+        "SOC 2 CC6.8"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/github/{date}/dependabot-alerts.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/github/{date}/secret-scanning.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "sam2-service/Dockerfile", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "compliance/evidence/github/{date}/dependabot-alerts.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/secret-scanning.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "sam2-service/Dockerfile",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "A.8.8": {
       "title": "Management of technical vulnerabilities",
-      "framework": ["ISO 27001 A.8.8", "SOC 2 CC7.1"],
+      "framework": [
+        "ISO 27001 A.8.8",
+        "SOC 2 CC7.1"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "evidence/github/{date}/dependabot-alerts.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/github/{date}/secret-scanning.json", "collector": "github.mjs", "cadence": "hourly" },
-        { "path_pattern": "package.json", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "compliance/evidence/github/{date}/dependabot-alerts.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/secret-scanning.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "package.json",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        }
       ]
     },
     "A.8.9": {
       "title": "Configuration management",
-      "framework": ["ISO 27001 A.8.9", "SOC 2 CC8.1"],
+      "framework": [
+        "ISO 27001 A.8.9",
+        "SOC 2 CC8.1"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "next.config.js", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": ".env.example", "collector": "manual", "cadence": "quarterly" },
-        { "path_pattern": "evidence/vercel/{date}/env-vars.json", "collector": "vercel.mjs", "cadence": "daily" },
-        { "path_pattern": "evidence/render/{date}/env-vars.json", "collector": "render.mjs", "cadence": "daily" }
+        {
+          "path_pattern": "next.config.js",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": ".env.example",
+          "collector": "manual",
+          "cadence": "quarterly"
+        },
+        {
+          "path_pattern": "compliance/evidence/vercel/{date}/env-vars.json",
+          "collector": "vercel.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/env-vars.json",
+          "collector": "render.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/neon/{date}/branches.json",
+          "collector": "neon.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        }
       ]
     },
     "A.8.12": {
       "title": "Data leakage prevention",
-      "framework": ["ISO 27001 A.8.12", "SOC 2 CC6.7"],
+      "framework": [
+        "ISO 27001 A.8.12",
+        "SOC 2 CC6.7"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "lib/survey/", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "app/api/survey/submit/route.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/vendors/openai/dpa.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/anthropic/dpa.pdf", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/survey/",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "app/api/survey/submit/route.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/vendors/openai/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/anthropic/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/drive-sharing.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "weekly",
+          "workflow": "compliance/workflows/weekly.yml"
+        }
       ]
     },
     "A.8.15": {
       "title": "Logging",
-      "framework": ["ISO 27001 A.8.15", "SOC 2 CC4.2", "SOC 2 CC7.2"],
+      "framework": [
+        "ISO 27001 A.8.15",
+        "SOC 2 CC4.2",
+        "SOC 2 CC7.2"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/db/{date}/webhook-deliveries.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "lib/auditLog.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/webhook-deliveries.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "lib/auditLog.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "A.8.16": {
       "title": "Monitoring activities",
-      "framework": ["ISO 27001 A.8.16", "SOC 2 CC4.1", "SOC 2 CC7.2"],
+      "framework": [
+        "ISO 27001 A.8.16",
+        "SOC 2 CC4.1",
+        "SOC 2 CC7.2"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "evidence/db/{date}/audit-log.ndjson", "collector": "db-internal.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/render/{date}/events.json", "collector": "render.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/google-workspace/{date}/login-audit.json", "collector": "google-workspace.mjs", "cadence": "hourly" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/events.json",
+          "collector": "render.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/login-audit.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/failed-login-spike.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        }
       ]
     },
     "A.8.20": {
       "title": "Networks security",
-      "framework": ["ISO 27001 A.8.20", "ISO 27017 A.8.20"],
+      "framework": [
+        "ISO 27001 A.8.20",
+        "ISO 27017 A.8.20"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "Audits silent on network segmentation between Vercel, Neon, and Render. Remediation: document network topology + firewall rules; enable Neon IP allowlist for production per CONTROL_MATRIX.md A.8.20 row; 1-2 weeks.",
@@ -700,17 +1913,37 @@
     },
     "A.8.21": {
       "title": "Security of network services",
-      "framework": ["ISO 27001 A.8.21", "ISO 27017 A.8.21", "SOC 2 CC6.6"],
+      "framework": [
+        "ISO 27001 A.8.21",
+        "ISO 27017 A.8.21",
+        "SOC 2 CC6.6"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "lib/rateLimiter.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/google-workspace/{date}/login-audit.json", "collector": "google-workspace.mjs", "cadence": "hourly" },
-        { "path_pattern": "monitoring/weekly-{date}.json", "collector": "compliance-monitoring.mjs", "cadence": "weekly" }
+        {
+          "path_pattern": "lib/rateLimiter.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/google-workspace/{date}/login-audit.json",
+          "collector": "google-workspace.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/monitoring/weekly-{date}.json",
+          "collector": "compliance-monitoring.mjs",
+          "cadence": "weekly"
+        }
       ]
     },
     "A.8.22": {
       "title": "Segregation of networks",
-      "framework": ["ISO 27001 A.8.22", "ISO 27017 A.8.22"],
+      "framework": [
+        "ISO 27001 A.8.22",
+        "ISO 27017 A.8.22"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "Cloud-only architecture; segregation is the Vercel/Neon/Render/Cloudflare topology. Remediation: document network segregation boundaries per CONTROL_MATRIX.md A.8.22 row; 1 week.",
@@ -718,7 +1951,10 @@
     },
     "A.8.23": {
       "title": "Web filtering",
-      "framework": ["ISO 27001 A.8.23", "ISO 27017 A.8.23"],
+      "framework": [
+        "ISO 27001 A.8.23",
+        "ISO 27017 A.8.23"
+      ],
       "current_state": "Not Applicable",
       "not_applicable": true,
       "not_applicable_reason": "Solarpro is a SaaS application, not a corporate network gateway. Web filtering at the network layer is the responsibility of the cloud provider (Cloudflare WAF + Vercel Edge Network) and is covered by their SOC 2 reports collected as evidence under CC9.2 / A.5.23.",
@@ -726,83 +1962,220 @@
     },
     "A.8.24": {
       "title": "Use of cryptography",
-      "framework": ["ISO 27001 A.8.24", "SOC 2 CC6.6"],
+      "framework": [
+        "ISO 27001 A.8.24",
+        "SOC 2 CC6.6"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "next.config.js", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/06-encryption-key-management.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": ".env.example", "collector": "manual", "cadence": "quarterly" }
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "next.config.js",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/06-encryption-key-management.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": ".env.example",
+          "collector": "manual",
+          "cadence": "quarterly"
+        }
       ]
     },
     "A.8.25": {
       "title": "Secure development life cycle",
-      "framework": ["ISO 27001 A.8.25", "SOC 2 CC8.1"],
+      "framework": [
+        "ISO 27001 A.8.25",
+        "SOC 2 CC8.1"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "AGENTS.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/07-change-management.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "AGENTS.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/07-change-management.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "A.8.28": {
       "title": "Secure coding",
-      "framework": ["ISO 27001 A.8.28", "SOC 2 CC8.1"],
+      "framework": [
+        "ISO 27001 A.8.28",
+        "SOC 2 CC8.1"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "tsconfig.json", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": ".eslintrc.json", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/manifest.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/auth.ts", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "tsconfig.json",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": ".eslintrc.json",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/manifest.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/auth.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "A.8.32": {
       "title": "Change management",
-      "framework": ["ISO 27001 A.8.32", "SOC 2 CC4.1", "SOC 2 CC8.1"],
+      "framework": [
+        "ISO 27001 A.8.32",
+        "SOC 2 CC4.1",
+        "SOC 2 CC8.1"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "lib/migrations/runner.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "lib/migrations/ledger.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "evidence/github/{date}/recent-prs.json", "collector": "github.mjs", "cadence": "weekly" },
-        { "path_pattern": "evidence/vercel/{date}/deployments.json", "collector": "vercel.mjs", "cadence": "hourly" },
-        { "path_pattern": "evidence/render/{date}/deploys.json", "collector": "render.mjs", "cadence": "daily" },
-        { "path_pattern": "compliance/policies/07-change-management.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/migrations/runner.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "lib/migrations/ledger.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/evidence/github/{date}/commit-signing-sample.json",
+          "collector": "github.mjs",
+          "cadence": "weekly",
+          "workflow": "compliance/workflows/weekly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/vercel/{date}/deployments.json",
+          "collector": "vercel.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/render/{date}/deploys.json",
+          "collector": "render.mjs",
+          "cadence": "daily",
+          "workflow": "compliance/workflows/daily.yml"
+        },
+        {
+          "path_pattern": "compliance/policies/07-change-management.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "6.2.1 / A.5.34": {
       "title": "Identify and document PII; determine PII controller / processor status",
-      "framework": ["ISO 27701 6.2.1", "ISO 27001 A.5.34", "SOC 2 CC6.7"],
+      "framework": [
+        "ISO 27701 6.2.1",
+        "ISO 27001 A.5.34",
+        "SOC 2 CC6.7"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/survey/", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/21-privacy-policy-external.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/24-privacy-impact-assessment.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/survey/",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/21-privacy-policy-external.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/24-privacy-impact-assessment.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "6.2.2 / A.5.34": {
       "title": "Identify and document PII processing purposes",
-      "framework": ["ISO 27701 6.2.2", "ISO 27001 A.5.34"],
+      "framework": [
+        "ISO 27701 6.2.2",
+        "ISO 27001 A.5.34"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "compliance/policies/24-privacy-impact-assessment.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "lib/survey/", "collector": "source-code", "cadence": "on-demand" }
+        {
+          "path_pattern": "compliance/policies/24-privacy-impact-assessment.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "lib/survey/",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        }
       ]
     },
     "6.2.3 / A.5.34": {
       "title": "Identify PII processors and sub-processors; document their obligations",
-      "framework": ["ISO 27701 6.2.3", "ISO 27001 A.5.34"],
+      "framework": [
+        "ISO 27701 6.2.3",
+        "ISO 27001 A.5.34"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "compliance/vendors.csv", "collector": "manual", "cadence": "quarterly" },
-        { "path_pattern": "compliance/vendors/openai/dpa.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/anthropic/dpa.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/19-third-party-service-providers.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "compliance/vendors.csv",
+          "collector": "manual",
+          "cadence": "quarterly"
+        },
+        {
+          "path_pattern": "compliance/vendors/openai/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/anthropic/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/19-third-party-service-providers.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "6.2.4 / A.5.34": {
       "title": "Identify legal basis for PII processing",
-      "framework": ["ISO 27701 6.2.4", "ISO 27001 A.5.34"],
+      "framework": [
+        "ISO 27701 6.2.4",
+        "ISO 27001 A.5.34"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "Audits silent on GDPR Art. 6 legal basis. Remediation: document legal basis (legitimate interest + contract for survey; consent for marketing) per CONTROL_MATRIX.md 6.2.4 row; 1 week.",
@@ -810,36 +2183,79 @@
     },
     "6.3.x": {
       "title": "Data subject rights (access, correction, deletion, portability)",
-      "framework": ["ISO 27701 6.3.x"],
+      "framework": [
+        "ISO 27701 6.3.x"
+      ],
       "current_state": "Implemented",
       "evidence_sources": [
-        { "path_pattern": "app/api/auth/delete-account/route.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/22-data-subject-rights.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "app/api/auth/delete-account/route.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/22-data-subject-rights.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "6.4.x": {
       "title": "PII minimization, accuracy, storage limitation",
-      "framework": ["ISO 27701 6.4.x", "ISO 27001 A.5.34"],
+      "framework": [
+        "ISO 27701 6.4.x",
+        "ISO 27001 A.5.34"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "app/api/survey/submit/route.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/23-data-retention-disposal.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "app/api/survey/submit/route.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/23-data-retention-disposal.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "6.5.x": {
       "title": "PII sharing, transfer, disclosure",
-      "framework": ["ISO 27701 6.5.x", "ISO 27001 A.5.34", "SOC 2 CC6.7"],
+      "framework": [
+        "ISO 27701 6.5.x",
+        "ISO 27001 A.5.34",
+        "SOC 2 CC6.7"
+      ],
       "current_state": "Gap",
       "evidence_sources": [
-        { "path_pattern": "lib/survey/", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/vendors/openai/dpa.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/vendors/anthropic/dpa.pdf", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/19-third-party-service-providers.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/survey/",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/vendors/openai/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/vendors/anthropic/dpa.pdf",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/19-third-party-service-providers.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "6.6.x": {
       "title": "PII breach notification (72h)",
-      "framework": ["ISO 27701 6.6.x"],
+      "framework": [
+        "ISO 27701 6.6.x"
+      ],
       "current_state": "Not assessed",
       "not_assessed": true,
       "not_assessed_note": "No formal breach-notification runbook. Remediation: write 72h breach-notification runbook (GDPR Art. 33/34) per CONTROL_MATRIX.md 6.6.x row; 1 week.",
@@ -847,21 +2263,46 @@
     },
     "6.7.x": {
       "title": "PII de-identification / anonymization at rest",
-      "framework": ["ISO 27701 6.7.x"],
+      "framework": [
+        "ISO 27701 6.7.x"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/03-data-classification-handling.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/siteSurveys/unifiedGeometry/authority.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/03-data-classification-handling.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     },
     "6.8.x": {
       "title": "PII controller / processor obligations",
-      "framework": ["ISO 27701 6.8.x", "ISO 27001 A.5.34"],
+      "framework": [
+        "ISO 27701 6.8.x",
+        "ISO 27001 A.5.34"
+      ],
       "current_state": "Partial",
       "evidence_sources": [
-        { "path_pattern": "lib/organizations/authorization.ts", "collector": "source-code", "cadence": "on-demand" },
-        { "path_pattern": "compliance/policies/15-onboarding-offboarding.md", "collector": "manual", "cadence": "annual" },
-        { "path_pattern": "compliance/policies/16-security-awareness-training.md", "collector": "manual", "cadence": "annual" }
+        {
+          "path_pattern": "lib/organizations/authorization.ts",
+          "collector": "source-code",
+          "cadence": "on-demand"
+        },
+        {
+          "path_pattern": "compliance/policies/15-onboarding-offboarding.md",
+          "collector": "manual",
+          "cadence": "annual"
+        },
+        {
+          "path_pattern": "compliance/policies/16-security-awareness-training.md",
+          "collector": "manual",
+          "cadence": "annual"
+        }
       ]
     }
   }

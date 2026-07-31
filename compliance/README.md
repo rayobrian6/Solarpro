@@ -6,9 +6,72 @@ pipeline. It maps every control in
 prove we satisfy it, and is the first file imported by Vanta/Drata if
 Solarpro ever migrates to a hosted compliance platform.
 
-> **Status:** Sprint 1 (manifest + CI lint). Collector scripts
-> (`compliance/collectors/*.mjs`) land in Sprint 1 alongside this work
-> per [`SELF_BUILT_SETUP.md` §2](../.mavis/agents/compliance-lead/workspace/SELF_BUILT_SETUP.md).
+> **Status:** Sprint 1 — manifest + 6 collectors + 3 GitHub Actions
+> workflows + 2 unit tests. All live on `feat/compliance-collectors`,
+> awaiting James's review and push. See `HANDOFF_COMPLIANCE_COLLECTORS.md`.
+
+---
+
+## Storage decision (2026-07-30): git, not R2
+
+**The design doc (`SELF_BUILT_SETUP.md` §1) assumed Cloudflare R2 as the
+evidence store. As of 2026-07-30 (James's "no money yet" call) the store
+is the git repo itself.** Specifically:
+
+- Evidence is written to `compliance/evidence/<integration>/<YYYY-MM-DD>/<filename>`
+  by the collector scripts.
+- The 3 GitHub Actions workflows (hourly / daily / weekly) commit the
+  evidence to the repo on schedule.
+- The `manifest.json` `path_pattern` field is now templated as
+  `compliance/evidence/<integration>/{date}/<filename>` (the old R2
+  `evidence/<integration>/{date}/...` paths were migrated in this
+  commit).
+- The Terraform / R2 setup at `compliance/infra/r2-setup/` is now
+  reference-only — the design remains valid for a year-2 migration if
+  James wants to switch back to R2, but no R2 bucket is created.
+
+### Why git, not R2
+
+- **Zero hosting cost.** GitHub Actions free tier (2,000 min/mo) covers
+  ~5 hourly + 5 daily + 1 weekly workflow with ~300 min/mo of usage.
+  Evidence lives in the repo we already pay for.
+- **Auditor access is just `git clone`.** No HMAC tokens, no
+  Next.js proxy, no time-bounded subpath. The auditor's read access is
+  the same as James's read access to the repo.
+- **Free audit trail.** Every evidence write is a git commit. The
+  author + commit SHA + message are the audit metadata. No extra
+  log-and-archive step.
+- **No data loss on a botched overwrite.** Git's own history replaces
+  R2 versioning. Recovery is `git checkout <sha>`.
+
+### Cost
+
+- GitHub Actions: ~300 min/mo (well under the 2,000 min free tier).
+- Repo storage: ~50 MB/yr of evidence (negligible).
+- R2: $0 (no bucket; Terraform retained as design doc, not active).
+- **Total: $0/mo** for the lifetime of the program. R2 was already
+  under $5/mo at scale; the savings vs. R2 are $0–$60/yr.
+
+### Trade-offs accepted
+
+- **No R2 lifecycle (IA at 90d, expire at 7y).** Git history grows.
+  Mitigated by `compliance/workflows/weekly.yml` rotating the
+  `weekly-report.md` (the human-readable roll-up) and by archiving the
+  old evidence outside git if repo size becomes an issue in year 3+.
+- **No auditor-scoped access token.** The auditor sees the full repo.
+  Acceptable for a SOC 2 / ISO 27001 audit where the auditor is
+  engaged under NDA; not acceptable for sharing with a third party
+  without an NDA. The `compliance/AUDITOR_GUIDE.md` documents this.
+
+### Migration back to R2 (if James changes his mind)
+
+The Terraform at `compliance/infra/r2-setup/` is the recipe. Run it,
+mint the two API tokens, set `COMPLIANCE_R2_TOKEN` and
+`COMPLIANCE_R2_AUDITOR_TOKEN` as GitHub Actions secrets, and replace
+the local `writeEvidence()` calls with R2 PUTs. The manifest's
+`path_pattern` already lives in the `compliance/evidence/...` namespace
+that maps 1:1 onto the R2 `evidence/...` bucket prefix (just strip the
+`compliance/` prefix when uploading). Estimated effort: 1 day.
 
 ---
 
@@ -23,21 +86,30 @@ Solarpro ever migrates to a hosted compliance platform.
 | `vendors.csv` | Vendor risk register (15 criticality-rated vendors; signed DPAs and SOC 2 reports). |
 | `vendors/<vendor>/` | Per-vendor subdirectories holding the SOC 2 report, DPA, and quarterly review notes. |
 | `uar/<YYYY-Q#>/report.md` | Quarterly user access review (UAR) reports. |
-| `monitoring/weekly-<YYYY-MM-DD>.md` | Weekly monitoring digests. |
+| `monitoring/weekly-<YYYY-MM-DD>.md` | Weekly monitoring digests (committed by the weekly workflow). |
 | `trust.json` | Public posture data consumed by `app/trust/page.tsx`. |
-| `AUDITOR_GUIDE.md` | How an auditor reads the evidence (token issuance, R2 layout, control walk). |
+| `AUDITOR_GUIDE.md` | How an auditor reads the evidence (token issuance, control walk, evidence layout). |
+| `collectors/` | The 6 evidence collectors + `common.mjs` (shared helpers). |
+| `workflows/` | The 3 GitHub Actions workflows (hourly, daily, weekly). |
+| `evidence/<integration>/<YYYY-MM-DD>/` | The collected evidence. Created by the collectors at runtime. |
+| `infra/r2-setup/` | R2 Terraform (reference-only; not active in 2026-07-30 git-based build). |
+| `__tests__/` | 2 vitest unit tests for the collectors. |
 
 ---
 
 ## The manifest
 
-`manifest.json` is a JSON object with this shape:
+`manifest.json` is a JSON object with this shape (current version 2,
+post-2026-07-30 R2-to-git migration):
 
 ```json
 {
-  "version": 1,
-  "generated_at": "2026-07-30T22:00:00Z",
+  "version": 2,
+  "generated_at": "2026-07-31T00:02:00Z",
   "frameworks": ["SOC 2", "ISO 27001", "ISO 27701", "ISO 27017"],
+  "_meta": {
+    "evidence_pipeline": "Git-based evidence store (compliance/evidence/<integration>/<YYYY-MM-DD>/). Collector scripts under compliance/collectors/*.mjs run on GitHub Actions schedules per compliance/workflows/{hourly,daily,weekly}.yml. R2 (the design-doc plan) was replaced per James 2026-07-30 'no money yet' call."
+  },
   "controls": {
     "CC1.1": {
       "title": "Demonstrates commitment to integrity and ethical values",
@@ -46,10 +118,35 @@ Solarpro ever migrates to a hosted compliance platform.
       "evidence_sources": [
         { "path_pattern": "compliance/policies/01-information-security.md", "collector": "manual", "cadence": "annual" }
       ]
+    },
+    "CC7.1": {
+      "title": "Detects and responds to security events, vulnerabilities, and anomalies",
+      "framework": ["SOC 2 CC7.1", "ISO 27001 A.5.7", "..."],
+      "current_state": "Gap",
+      "evidence_sources": [
+        {
+          "path_pattern": "compliance/evidence/github/{date}/dependabot-alerts.json",
+          "collector": "github.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        },
+        {
+          "path_pattern": "compliance/evidence/db/{date}/audit-log.ndjson",
+          "collector": "db-internal.mjs",
+          "cadence": "hourly",
+          "workflow": "compliance/workflows/hourly.yml"
+        }
+      ]
     }
   }
 }
 ```
+
+The `workflow` field on each evidence_source entry is a self-documenting
+pointer to which GitHub Actions workflow produces that cadence. It is
+advisory (the CI lint does not enforce it) but it makes the auditor's
+"how is this evidence generated?" question trivial to answer without
+reading code.
 
 ### Current state values
 
@@ -165,15 +262,84 @@ For an existing control that needs more evidence:
 
 1. **Create `compliance/collectors/<name>.mjs`** (plain Node 20 ESM,
    no TypeScript build step). Use `compliance/collectors/common.mjs`
-   for shared R2 upload, manifest update, and retry helpers.
-2. **Add a schedule workflow** at
-   `compliance/schedules/<cadence>.yml` referencing the collector.
+   for shared write/retry/hash helpers.
+2. **Add a workflow entry** to one of the 3 existing workflows
+   at `compliance/workflows/{hourly,daily,weekly}.yml` (preferred)
+   OR create a new cadence workflow there. The workflow passes the
+   right env vars and runs `node compliance/collectors/<name>.mjs`.
 3. **Reference the collector** by name in `manifest.json`. The first
    time you do, the CI lint will fail with
    `collector "<name>.mjs" is not in the known collector set` — that's
    the signal to add it to `VALID_COLLECTORS` in
    `scripts/validate-compliance-manifest.mjs`. Do that in the same PR
    that adds the script.
+4. **Add a unit test** to `compliance/__tests__/validate-collector-output.test.mjs`
+   that lists your new collector's expected (integration, filename) pairs.
+   The test will fail until the manifest agrees with the collector's
+   output paths.
+
+---
+
+## The 6 collectors (and the 3 workflows that run them)
+
+| Collector | Cadence | Output (per day) | Env vars required |
+|---|---|---|---|
+| `github.mjs` | hourly (Dependabot + secret scanning), daily (+ branch protection + members + 2FA), weekly (+ commit-signing sample) | `compliance/evidence/github/<date>/{branch-protection,members,dependabot-alerts,secret-scanning,commit-signing-sample}.json` | `GITHUB_TOKEN` |
+| `vercel.mjs` | hourly (deployments), daily (+ projects + env-vars + members), weekly (+ 7d deployment history) | `compliance/evidence/vercel/<date>/{projects,deployments,env-vars,members}.json` | `VERCEL_TOKEN` (+ optional `VERCEL_TEAM_ID`, `VERCEL_PROJECT`) |
+| `render.mjs` | hourly (service events), daily (+ deploys + env-vars + members) | `compliance/evidence/render/<date>/{deploys,events,env-vars,members}.json` | `RENDER_API_KEY` (+ optional `RENDER_OWNER_ID`, `RENDER_SERVICE_IDS`) |
+| `neon.mjs` | daily (project + branches + roles + PITR + consumption) | `compliance/evidence/neon/<date>/{project,branches,roles,pitr,consumption}.json` | `NEON_API_KEY`, `NEON_PROJECT_ID` |
+| `google-workspace.mjs` | hourly (failed-login spike), daily (users + MFA + admin roles), weekly (+ login-audit + drive-sharing + token-audit) | `compliance/evidence/google-workspace/<date>/{users-mfa,admin-roles,failed-login-spike,login-audit,drive-sharing,token-audit}.json` | `GOOGLE_WORKSPACE_TOKEN` (OAuth 2.0 with admin scopes) |
+| `db-internal.mjs` | hourly (audit-log + webhook-deliveries new rows), daily (full tables + users + orgs summary) | `compliance/evidence/db/<date>/{audit-log,webhook-deliveries}.ndjson` + `{users,organizations}-summary.json` | `DATABASE_URL` (read-only role `compliance_ro`) |
+
+### Schedule
+
+| Workflow | Cron (UTC) | What it does |
+|---|---|---|
+| `compliance/workflows/hourly.yml` | `7 * * * *` (every hour at :07) | Calls `github.mjs`, `google-workspace.mjs`, `db-internal.mjs` in `hourly` mode. Commits the evidence diff. |
+| `compliance/workflows/daily.yml` | `0 6 * * *` (06:00 UTC daily) | Calls `github.mjs`, `vercel.mjs`, `render.mjs`, `neon.mjs`, `google-workspace.mjs` in `daily` mode. Commits the evidence diff. |
+| `compliance/workflows/weekly.yml` | `0 6 * * 0` (06:00 UTC Sunday) | All 6 collectors in `weekly` mode. Composes `compliance/monitoring/weekly-<date>.md` (human-readable roll-up). Emails James via Resend. Commits evidence + report. |
+
+### Local dry-run
+
+Every collector can be run locally with `DRY_RUN=1` for a sanity check
+without hitting real APIs. The dry-run mode emits valid JSON (or empty
+NDJSON for the audit-log collector) but does NOT write any file to
+disk. Useful for verifying the manifest's path_pattern matches what the
+collector actually produces.
+
+```bash
+# From the repo root:
+DRY_RUN=1 node compliance/collectors/github.mjs daily
+DRY_RUN=1 node compliance/collectors/vercel.mjs daily
+DRY_RUN=1 node compliance/collectors/render.mjs daily
+DRY_RUN=1 node compliance/collectors/neon.mjs daily
+DRY_RUN=1 node compliance/collectors/google-workspace.mjs daily
+DRY_RUN=1 node compliance/collectors/db-internal.mjs hourly
+```
+
+In non-DRY_RUN mode (the default in the GitHub Actions workflows), the
+collector writes the file to disk and returns the repo-relative path it
+wrote. The workflow then commits the diff.
+
+### Required GitHub Actions secrets
+
+| Secret | Used by | Notes |
+|---|---|---|
+| `COMPLIANCE_GITHUB_TOKEN` | hourly, daily, weekly | Fine-grained PAT, scope: `repo`, `admin:org`, `security_events` |
+| `COMPLIANCE_VERCEL_TOKEN` | daily, weekly | Vercel API token, project + team scope |
+| `COMPLIANCE_VERCEL_TEAM_ID` | daily, weekly | Optional; the team id (read from Vercel dashboard) |
+| `COMPLIANCE_RENDER_API_KEY` | hourly, daily, weekly | Render API key (read-only) |
+| `COMPLIANCE_RENDER_OWNER_ID` | hourly, daily, weekly | Optional; the Render team / owner id |
+| `COMPLIANCE_NEON_API_KEY` | daily, weekly | Neon API key |
+| `COMPLIANCE_NEON_PROJECT_ID` | daily, weekly | The Neon project id |
+| `COMPLIANCE_GOOGLE_WORKSPACE_TOKEN` | hourly, daily, weekly | OAuth 2.0 access token with admin.directory.* + admin.reports.audit.readonly scopes. Minted by a service account. |
+| `COMPLIANCE_DATABASE_URL` | hourly, daily, weekly | The connection string for the read-only `compliance_ro` role. Created in Sprint 1. |
+| `RESEND_API_KEY` | weekly (email) | Already in repo secrets; used for the weekly email |
+
+The 2 unit tests in `compliance/__tests__/` are run by
+`.github/workflows/compliance-manifest-lint.yml` (the existing CI lint
+from `chore/compliance-manifest`). The new vitest include pattern in
+`vitest.config.ts` covers `compliance/__tests__/**/*.test.mjs`.
 
 ---
 
