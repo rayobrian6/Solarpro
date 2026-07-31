@@ -1,4 +1,4 @@
-# Solarpro Policy Library
+﻿# Solarpro Policy Library
 
 This directory holds Solarpro's information security and privacy policies. Policies are **versioned in git**, **drafted in markdown**, and **signed off** by Raymond O'Brien (CISO) and James Carpenter (CEO) before they take effect.
 
@@ -15,6 +15,18 @@ These five are the foundation. Every other policy references them.
 | 03 | Access Control Policy | [03-access-control.md](./03-access-control.md) | Raymond O'Brien (CISO) | James Carpenter | 2026-08-15 | 2027-08-15 | SOC 2 CC6.1, CC6.2, CC6.3 · ISO 27001 A.5.15, A.5.16, A.5.18, A.8.2, A.8.5 |
 | 04 | Data Classification & Handling Policy | [04-data-classification-handling.md](./04-data-classification-handling.md) | Raymond O'Brien (CISO) | James Carpenter | 2026-08-15 | 2027-08-15 | SOC 2 CC6.7, CC6.8 · ISO 27001 A.5.12, A.5.13 · ISO 27701 PII controls |
 | 05 | Incident Response Plan | [05-incident-response.md](./05-incident-response.md) | Raymond O'Brien (CISO) | James Carpenter | 2026-08-15 | 2027-08-15 | SOC 2 CC7.3, CC7.4, CC7.5 · ISO 27001 A.5.24–A.5.29 |
+
+## Sprint 1 — Operations cluster (drafted 2026-08-15, awaiting signature)
+
+These five are the operations layer. They cover how changes ship, how vulnerabilities are managed, what gets logged, how data is recovered, and how third parties are managed. They close three of the 2026-07-30 P0 audit findings: the Next 14 CVE finding (07), the 207 empty `} catch {}` finding (08), and the open Tier 1 DPA finding (10).
+
+| # | Policy | File | Owner | Approver | Last reviewed | Next review | Controls |
+|---|---|---|---|---|---|---|---|
+| 06 | Change Management Policy | [06-change-management.md](./06-change-management.md) | Raymond O'Brien (CISO) | James Carpenter | 2026-08-15 | 2027-08-15 | SOC 2 CC8.1 · ISO 27001 A.8.9, A.8.25, A.8.28, A.8.32 |
+| 07 | Vulnerability Management Policy | [07-vulnerability-management.md](./07-vulnerability-management.md) | Raymond O'Brien (CISO) | James Carpenter | 2026-08-15 | 2027-08-15 | SOC 2 CC7.1 · ISO 27001 A.8.8, A.8.16 |
+| 08 | Logging & Monitoring Policy | [08-logging-monitoring.md](./08-logging-monitoring.md) | Raymond O'Brien (CISO) | James Carpenter | 2026-08-15 | 2027-08-15 | SOC 2 CC7.2 · ISO 27001 A.8.15, A.8.16 |
+| 09 | Backup & Recovery Policy | [09-backup-recovery.md](./09-backup-recovery.md) | Raymond O'Brien (CISO) | James Carpenter | 2026-08-15 | 2027-08-15 | SOC 2 CC9.1 · ISO 27001 A.8.13 |
+| 10 | Vendor Risk Management Policy | [10-vendor-risk-management.md](./10-vendor-risk-management.md) | Raymond O'Brien (CISO) | James Carpenter | 2026-08-15 | 2027-08-15 | SOC 2 CC9.2 · ISO 27001 A.5.19, A.5.20, A.5.21, A.5.23 · ISO 27017 A.5.23 |
 
 ## How to use this library
 
@@ -35,13 +47,13 @@ See [`REVIEW_PROCESS.md`](./REVIEW_PROCESS.md). The summary:
 
 ## Status legend
 
-- **Drafted** — written, not yet signed. Current status of all 5 foundation policies.
+- **Drafted** — written, not yet signed. Current status of all 10 policies (5 foundation + 5 operations).
 - **Signed** — both signatures collected. Effective date applies.
 - **Superseded** — replaced by a newer version. The file stays in git for the audit trail.
 
 ## Sprint 2 — to be drafted
 
-The full 30-policy target is in `compliance/PROGRAM.md` §5. The remaining 25 are scoped for Sprint 2 (2026-09-03 → 2026-10-15). See `HANDOFF_COMPLIANCE_POLICIES_V1.md` for the specific list and the gap to the auditor.
+The full 30-policy target is in `compliance/PROGRAM.md` §5. 10 of 30 are now drafted (5 foundation + 5 operations). The remaining 20 are scoped for Sprint 2 (2026-09-03 → 2026-10-15). See `HANDOFF_COMPLIANCE_POLICIES_V2_OPS.md` for the remaining 20, the gap to the auditor, and the CISO-review process.
 
 ## Related documents
 
@@ -49,3 +61,5 @@ The full 30-policy target is in `compliance/PROGRAM.md` §5. The remaining 25 ar
 - `compliance/PROGRAM.md` — program plan and Sprint timeline.
 - `compliance/SELF_BUILT_SETUP.md` — evidence collection architecture.
 - `compliance/policies/REVIEW_PROCESS.md` — how policies get reviewed and approved.
+- `HANDOFF_COMPLIANCE_POLICIES_V1.md` — Sprint 1 foundation handoff.
+- `HANDOFF_COMPLIANCE_POLICIES_V2_OPS.md` — Sprint 1 operations handoff (this batch).
