@@ -67,6 +67,32 @@ describe('conductor authority — single source of truth', () => {
     const snap = (input as { _snapshot?: PermitDesignSnapshot })._snapshot!;
     // the retired project-wide claim is gone
     expect(html).not.toMatch(/Equipment grounding conductor \(EGC\):\s*#[\d/]+ AWG bare Cu min/);
+
+    // ── D2 (Planset 17) — this test's TITLE promised "no surface prints a
+    // project-wide EGC minimum", but the only assertion for that clause was the
+    // regex above, which targets the RETIRED 2026-07-26 wording. It passed while
+    // PV-0 printed `DC EGC minimum: #10 AWG per NEC 690.45.` in every profile —
+    // a green that proved nothing. The live probe follows.
+    //
+    // The '#' is OPTIONAL on purpose: the fixtures set wireGauge '10 AWG' (no
+    // hash) so the interpolated form rendered `10 AWG`, while the live artifacts
+    // hit the `|| '#10 AWG'` fallback. A probe written for one form misses the
+    // other, so this matches both.
+    const PROJECT_WIDE_EGC = /(?:DC\s+)?EGC\s+minimum\s*:?\s*#?[\d/]+\s*AWG/i;
+    expect(html, 'a project-wide EGC minimum is printed somewhere in the package').not.toMatch(PROJECT_WIDE_EGC);
+
+    // NON-VACUITY — the probe must actually fire on the defect it retires,
+    // in BOTH rendered forms. Without this the assertion above could be a
+    // regex that can never match anything.
+    expect('DC EGC minimum: #10 AWG per NEC 690.45.').toMatch(PROJECT_WIDE_EGC);
+    expect('DC EGC minimum: 10 AWG per NEC 690.45.').toMatch(PROJECT_WIDE_EGC);
+    // …and must NOT fire on the correct replacement wording
+    expect('no project-wide EGC minimum applies').not.toMatch(PROJECT_WIDE_EGC);
+    expect('NO SEPARATE EGC REQUIRED').not.toMatch(PROJECT_WIDE_EGC);
+
+    // the replacement states the segment-specific truth and points at the schedule
+    expect(html).toContain('no project-wide EGC minimum applies');
+    expect(html).toContain('PV-4B');
     // note 2 is explicitly scoped to the in-raceway objects, each sized on its own run
     expect(html).toContain('IN-RACEWAY EGCs');
     expect(html).toContain('not a project-wide minimum');

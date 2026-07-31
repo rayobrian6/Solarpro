@@ -486,6 +486,54 @@ const _PURPOSE_LABEL: Record<string, string> = {
  *  an installed path — it is never counted as a physical grounding segment. */
 export const BRANCH_EGC_AUTHORITY_GROUP_ID = 'gnd-branch-egc-authority';
 
+/** ── THE CANONICAL GROUNDING SUMMARY (Planset 17 D2) ──────────────────────
+ *  Grounding on a PV package is SEGMENT-SPECIFIC. There is no project-wide EGC
+ *  minimum, and printing one is a false statement about a life-safety conductor:
+ *  a single gauge presented as "the minimum" simultaneously over-states the
+ *  branch (whose canonical EGC is #12) and mis-attributes the feeder's #10 to
+ *  the whole package — while the selected microinverter's own product authority
+ *  may require no separate EGC at all.
+ *
+ *  This is the ONE object a general note may summarise from. It derives every
+ *  value from the canonical grounding objects and never re-sizes anything. */
+export interface GroundingSummaryProjection {
+  /** the manufacturer product-grounding conclusion, verbatim from the authority. */
+  productGroundingOutcome: string | null;
+  /** always true for a PV package — stated explicitly so a renderer cannot
+   *  quietly assume otherwise. */
+  segmentSpecificSizing: true;
+  /** always false — the fact this object exists to assert. */
+  projectWideMinimumApplies: false;
+  /** where a reader goes for the per-segment numbers. */
+  scheduleSheetRefs: readonly string[];
+  /** the canonical per-domain sizes, for a note that wants to enumerate rather
+   *  than merely point. Null where the authority has not established one. */
+  branchEgcSize: string | null;
+  feederEgcSize: string | null;
+  arrayBondCalculatedMinimum: string | null;
+  arrayBondSelectedDesign: string | null;
+}
+
+export function projectGroundingSummary(
+  snap: PermitDesignSnapshot | null | undefined,
+): GroundingSummaryProjection {
+  const oa = projectOpenAirBranchGrounding(snap) as unknown as { outcome?: string | null };
+  const segs = projectGroundingSegments(snap);
+  const byRole = (role: string): GroundingSegment | undefined =>
+    segs.find(s => String((s as unknown as { domain?: string }).domain ?? s.segmentRole ?? '') === role);
+  const arrayBond = byRole('array-rack-bonding-egc');
+  return {
+    productGroundingOutcome: oa?.outcome ?? null,
+    segmentSpecificSizing: true,
+    projectWideMinimumApplies: false,
+    scheduleSheetRefs: ['PV-4B', 'PV-4B.1'],
+    branchEgcSize: projectSharedBranchRaceway(snap).egcGauge ?? null,
+    feederEgcSize: projectCanonicalFeeder(snap).egcGauge ?? null,
+    arrayBondCalculatedMinimum: arrayBond?.calculatedMinimumSize ?? null,
+    arrayBondSelectedDesign: arrayBond?.selectedDesignSize ?? arrayBond?.conductorSize ?? null,
+  };
+}
+
 export function projectGroundingSegments(
   snap: PermitDesignSnapshot | null | undefined,
 ): GroundingSegment[] {
