@@ -62,10 +62,8 @@ const ALLOWED_CATEGORIES: PreviewCategory[] = [
 const DEFAULT_LIMIT = 12;
 const MAX_LIMIT = 24;
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

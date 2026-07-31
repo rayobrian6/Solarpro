@@ -41,10 +41,8 @@ const NON_APPLY_CATEGORIES = new Set<SurveyEvidenceCategory>([
 ]);
 const MAX_APPLY = 120;
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user)

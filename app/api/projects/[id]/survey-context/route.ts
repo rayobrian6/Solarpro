@@ -16,10 +16,8 @@ import { getUserFromRequest } from '@/lib/auth';
 import { isValidUUID } from '@/lib/db-neon';
 import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) {

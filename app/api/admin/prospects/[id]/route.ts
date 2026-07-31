@@ -16,10 +16,8 @@ import {
   type ProspectStage,
 } from "@/lib/network/installerProspects";
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const admin = await requireAdminApi(req);
   if (!admin) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });

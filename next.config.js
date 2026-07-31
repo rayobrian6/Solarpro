@@ -130,16 +130,17 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_VERSION: BUILD_VERSION,
   },
+  // Next 15: serverComponentsExternalPackages moved from experimental to top-level
+  // (https://nextjs.org/docs/app/api-reference/config/next-config-js/serverExternalPackages)
+  serverExternalPackages: [
+    'pdf2pic', 'openai', 'pdf-parse', 'pdfjs-dist',
+    'tesseract.js', 'tesseract.js-core',
+    'sharp',                 // native bindings — must not be bundled by webpack
+    'exif-reader',           // native EXIF parsing
+    'puppeteer-core',        // Puppeteer PDF generation
+    '@sparticuz/chromium-min', // Sparticuz Chromium for Vercel serverless
+  ],
   experimental: {
-    // Optional server-only packages — skip webpack bundling, resolved at runtime
-    serverComponentsExternalPackages: [
-      'pdf2pic', 'openai', 'pdf-parse', 'pdfjs-dist',
-      'tesseract.js', 'tesseract.js-core',
-      'sharp',                 // native bindings — must not be bundled by webpack
-      'exif-reader',           // native EXIF parsing
-      'puppeteer-core',        // Puppeteer PDF generation
-      '@sparticuz/chromium-min', // Sparticuz Chromium for Vercel serverless
-    ],
     // Ship the manufacturer-asset PNGs into the permit serverless functions so
     // generatePermitHTML can read + base64-inline them at render time on Vercel
     // (public/ is CDN-served, not in the function fs by default). Enables the

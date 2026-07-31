@@ -10,7 +10,7 @@ import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
 import { evaluateContractorEligibility } from "@/lib/network/contractorEligibility";
 import { logNetworkEvent } from "@/lib/network/attributionTracker";
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // ---------------------------------------------------------------------------
 // POST /api/network/opportunities/[id]/claim
@@ -18,7 +18,8 @@ type Params = { params: { id: string } };
 // DB-level UNIQUE index prevents race conditions — two contractors hitting
 // this simultaneously will result in one 409 and one 201.
 // ---------------------------------------------------------------------------
-export async function POST(req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, props: Params) {
+  const params = await props.params;
   const user = getUserFromRequest(req);
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -365,7 +366,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 // DELETE /api/network/opportunities/[id]/claim
 // Release a claim — puts the opportunity back to open.
 // ---------------------------------------------------------------------------
-export async function DELETE(req: NextRequest, { params }: Params) {
+export async function DELETE(req: NextRequest, props: Params) {
+  const params = await props.params;
   const user = getUserFromRequest(req);
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

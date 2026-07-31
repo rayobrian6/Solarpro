@@ -17,10 +17,8 @@ import type { SiteSurveyFile } from '@/lib/db/surveys';
 import { inferSurveyEvidenceCategoryFromText } from '@/lib/survey/evidence/manifest';
 import type { SurveyEvidenceObstructionData } from '@/lib/survey/evidence/manifest';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) {

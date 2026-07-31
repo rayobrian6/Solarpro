@@ -29,10 +29,8 @@ import { computeProgress } from '@/lib/siteSurveys/geometryReconstruction/asyncJ
 // Pipeline stages in order (from asyncJobManager)
 const STAGE_ORDER = ['queued', 'segmentation', 'mask_cleanup', 'line_extraction', 'vanishing_point_estimation', 'plane_extraction', 'depth_estimation', 'multi_view_fusion', 'completed'] as const;
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const surveyId = params?.surveyId ?? 'unknown';
   const jobId = req.nextUrl.searchParams.get('jobId');
 

@@ -40,10 +40,8 @@ export const maxDuration = 30;
  *
  * In legacy mode (feature flag off), falls back to checking users.org_id.
  */
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = getUserFromRequest(req);
   if (!user) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

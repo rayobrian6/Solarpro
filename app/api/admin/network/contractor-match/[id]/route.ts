@@ -18,10 +18,11 @@ import { logNetworkEvent } from "@/lib/network/attributionTracker";
 import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // ── GET: Retrieve existing match results ─────────────────────────────────────
-export async function GET(req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, props: Params) {
+  const params = await props.params;
   try {
     const admin = await requireAdminApi(req);
     if (!admin)
@@ -93,7 +94,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // ── POST: Run matching ───────────────────────────────────────────────────────
-export async function POST(req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, props: Params) {
+  const params = await props.params;
   const rlGuard = await rateLimitGuard(req, 'admin');
   if (rlGuard.blocked) return rlGuard.response;
 

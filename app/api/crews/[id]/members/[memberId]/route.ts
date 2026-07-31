@@ -14,10 +14,8 @@ type Params = { id: string; memberId: string };
  * DELETE /api/crews/[id]/members/[memberId]
  * Removes a member from a crew. Ownership is verified via crew.user_id.
  */
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Params },
-) {
+export async function DELETE(req: NextRequest, props: { params: Promise<Params> }) {
+  const params = await props.params;
   try {
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
@@ -58,10 +56,8 @@ export async function DELETE(
  * Partial update for a crew member. All fields optional; at least one required.
  * Body: UpdateCrewMemberBody (name?, role?, phone?, email?, certifications?, is_lead?, notes?)
  */
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Params },
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<Params> }) {
+  const params = await props.params;
   try {
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {

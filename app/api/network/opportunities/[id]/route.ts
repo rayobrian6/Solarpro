@@ -8,14 +8,15 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // ---------------------------------------------------------------------------
 // GET /api/network/opportunities/[id]
 // Full opportunity detail.
 // Pre-claim: address is hidden. Post-claim (by claimer): full address shown.
 // ---------------------------------------------------------------------------
-export async function GET(req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, props: Params) {
+  const params = await props.params;
   const user = getUserFromRequest(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -77,7 +78,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 // PATCH /api/network/opportunities/[id]
 // Creator can update listing_notes, asking_price, or withdraw the opportunity.
 // ---------------------------------------------------------------------------
-export async function PATCH(req: NextRequest, { params }: Params) {
+export async function PATCH(req: NextRequest, props: Params) {
+  const params = await props.params;
   const rlGuard = await rateLimitGuard(req, 'standard');
   if (rlGuard.blocked) return rlGuard.response;
 

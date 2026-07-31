@@ -80,7 +80,7 @@ export function isAdminRole(role?: string | null): role is 'admin' | 'super_admi
  */
 export async function requireAdmin(): Promise<AdminUser> {
   // Next.js 14: cookies() is synchronous — no await
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get('solarpro_session')?.value;
 
   if (!token) {
