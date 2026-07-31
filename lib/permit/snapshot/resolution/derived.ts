@@ -151,7 +151,18 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
   // ── route-length@v1 (AUTO_DERIVED for the geometry-derived segments;
   //    FIELD_VERIFICATION residual for the runs genuinely absent from CAD) ────
   {
-    const segs = ctx.routeSegments;
+    // ── D1 (Planset 17) — scope to PROJECT-OWNED runs ──────────────────────
+    // This is the SECOND, independent derivation of the same fact (build.ts
+    // carries the first). It has to be scoped in step with it: the two sentences
+    // surface on DIFFERENT profiles — build.ts's via the per-sheet release banner
+    // on the permit set, this one on the full/internal set — so fixing only one
+    // ships a permit package that reads correctly beside an internal package
+    // that contradicts it.
+    //
+    // Fail-closed: a record with no applicability decision counts as REQUIRED.
+    const allSegs = ctx.routeSegments;
+    const segs = allSegs.filter(s => (s.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
+    const excluded = allSegs.filter(s => (s.routeAuthorityApplicability ?? 'REQUIRED') !== 'REQUIRED');
     const resolved = segs.filter(s => ROUTE_GEOMETRY_SOURCES.includes(s.lengthSource));
     const residual = segs.filter(s => !ROUTE_GEOMETRY_SOURCES.includes(s.lengthSource));
     const cleared = segs.length > 0 && residual.length === 0;
@@ -166,10 +177,13 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
         cleared,
         missing: residual.map(s => `electrical.routeSegments[${s.segmentId}].lengthSource (${s.electricalFunction ?? 'run'})`),
         reasons: cleared ? [] : [
-          `${resolved.length} of ${segs.length} segment(s) are derived from real geometry`
+          `${resolved.length} of ${segs.length} PROJECT-OWNED segment(s) are derived from real geometry`
           + (resolved.length ? ` (${resolved.map(s => s.segmentId).join(', ')})` : '')
           + `; ${residual.length} run(s) have no routed geometry in the CAD model and require a field-measured route: `
-          + residual.map(s => `${s.segmentId} — ${s.electricalFunction ?? 'run'}`).join('; '),
+          + residual.map(s => `${s.segmentId} — ${s.electricalFunction ?? 'run'}`).join('; ')
+          + (excluded.length
+            ? `. ${excluded.length} run(s) EXCLUDED from project route authority: ${excluded.map(s => `${s.segmentId} — ${s.routeOwnership === 'UTILITY_OWNED' ? 'utility-owned service equipment' : 'not applicable'}`).join('; ')}`
+            : ''),
         ],
       },
       sourceQueried: 'canonical layout geometry (module coordinates / branch cable paths) + computeSystem run model',
@@ -178,6 +192,9 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
         segmentCount: segs.length,
         geometryDerivedSegments: resolved.map(s => s.segmentId).join(', ') || null,
         residualSegments: residual.map(s => s.segmentId).join(', ') || null,
+        // D1 — published so the excluded population is auditable, not merely absent
+        excludedSegments: excluded.map(s => s.segmentId).join(', ') || null,
+        excludedSegmentCount: excluded.length,
       },
       failureReason: cleared ? null
         : `${residual.length} run(s) genuinely absent from the CAD route model: ${residual.map(s => s.segmentId).join(', ')}`,

@@ -105,23 +105,42 @@ describe('WS-3 — the legacy hard-coded raceway is gone from the archive', () =
 describe('WS-3 — the raceway set is complete and correctly scoped', () => {
   const raceways = snap.electrical.physicalRaceways ?? [];
 
-  it('every in-conduit, in-scope segment resolves to a physical raceway', () => {
-    // MSP → utility is UTILITY-OWNED service equipment, deliberately excluded
-    // from the PV raceway set (computed-system.ts skips `run.isUtilityOwned`),
-    // so it carries no raceway object and no BOM conduit. That exclusion is
-    // correct and is asserted below rather than silently tolerated here.
+  // ── D1 (Planset 17) — REWRITTEN. ────────────────────────────────────────
+  // The previous version of these two tests keyed the exclusion on a
+  // `/MSP_TO_UTILITY/` NAME REGEX — the exact product-name topology inference
+  // the standing rules prohibit — and the second carried `if (!utility) return;`,
+  // a silent early return that made the whole assertion evaporate if the id ever
+  // changed while still reporting green. They now resolve the segment by its
+  // explicit canonical OWNERSHIP field and fail when it is absent.
+  it('every in-conduit segment REQUIRING project route authority resolves to a physical raceway', () => {
     const orphans = inConduit
-      .filter(s => !/MSP_TO_UTILITY/.test(s.segmentId))
+      .filter(s => (s.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED')
       .filter(s => !s.physicalRacewayId)
       .map(s => s.segmentId);
-    expect(orphans, `in-conduit segments with no physicalRacewayId: ${orphans.join(', ')}`).toEqual([]);
+    expect(orphans, `project-owned in-conduit segments with no physicalRacewayId: ${orphans.join(', ')}`).toEqual([]);
   });
 
-  it('the utility-owned service run is excluded from the PV raceway set', () => {
-    const utility = segments.find(s => /MSP_TO_UTILITY/.test(s.segmentId));
-    if (!utility) return;
-    expect(utility.physicalRacewayId).toBeNull();
-    expect(raceways.map(r => r.physicalRacewayId).some(id => /MSP_TO_UTILITY/.test(id))).toBe(false);
+  it('every segment carries an explicit ownership and applicability decision', () => {
+    const undecided = segments
+      .filter(s => !s.routeOwnership || !s.routeAuthorityApplicability)
+      .map(s => s.segmentId);
+    expect(undecided, `segments with no explicit ownership/applicability: ${undecided.join(', ')}`).toEqual([]);
+  });
+
+  it('the utility-owned service run is excluded from the PV raceway set — by its OWN field, not its name', () => {
+    const utility = segments.filter(s => s.routeOwnership === 'UTILITY_OWNED');
+    // no silent early return: this design HAS a utility service connection, and
+    // if it ever stops having one that is a topology change worth failing on.
+    expect(utility.length, 'no UTILITY_OWNED segment found — the service connection vanished from topology').toBeGreaterThan(0);
+    for (const u of utility) {
+      expect(u.routeAuthorityApplicability, `${u.segmentId} is utility-owned but not EXCLUDED`).toBe('EXCLUDED');
+      expect(u.routeApplicabilityReason, `${u.segmentId} excluded with no stated reason`).toBeTruthy();
+      expect(u.physicalRacewayId, `${u.segmentId} must own no project raceway`).toBeNull();
+      // it stays in topology, with its endpoints intact
+      expect(u.from, `${u.segmentId} lost its source equipment`).toBeTruthy();
+      expect(u.to, `${u.segmentId} lost its destination equipment`).toBeTruthy();
+      expect(raceways.some(r => r.physicalRacewayId.includes(u.segmentId))).toBe(false);
+    }
   });
 
   it('each physical raceway carries a fill at or under the NEC Ch.9 T1 limit', () => {

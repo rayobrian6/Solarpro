@@ -561,8 +561,27 @@ export function buildPermitDesignSnapshot(
         ].filter(Boolean).join('\n')
       : null;
 
+    // ── D1 (Planset 17) — OWNERSHIP CROSSES THE SNAPSHOT BOUNDARY ──────────
+    // The engine has always known this: `isUtilityOwned: true` is set on the
+    // MSP → utility run by computed-system.ts:1886 AND segment-builder.ts:582,
+    // and the BOM/raceway layers honour it (computed-system.ts:2434 skips it
+    // when building physicalRaceways). But the run→record mapper never copied
+    // it, so the fact DIED HERE — and the two route counters downstream then
+    // treated all six segments as one homogeneous population and reported
+    // "5 of 6 electrical run(s) … require a field-measured route", directing the
+    // operator to field-measure a run the installer does not own.
+    //
+    // Carried explicitly rather than re-derived: consumers must not infer
+    // exclusion from a missing raceway object (a project run with no raceway is
+    // a DEFECT, not an exclusion) nor from the segment id.
+    const _utilityOwned = r.isUtilityOwned === true;
     return {
       segmentId: String(r.id), from: String(r.fromLabel ?? r.from ?? ''), to: String(r.toLabel ?? r.to ?? ''),
+      routeOwnership: _utilityOwned ? 'UTILITY_OWNED' : 'PROJECT_OWNED',
+      routeAuthorityApplicability: _utilityOwned ? 'EXCLUDED' : 'REQUIRED',
+      routeApplicabilityReason: _utilityOwned
+        ? 'Utility-owned service equipment — routed, owned and maintained by the serving utility; not within the PV project scope for route measurement, raceway authority or procurement.'
+        : null,
       // §3 — prefer the engine's explicit electrical function (the sectioned
       // branch model tags open-air Q-Cable vs shared home-run raceway).
       electricalFunction: r.electricalFunction ?? _elecFunction(String(r.id), _isOpenAir),
@@ -1660,13 +1679,22 @@ export function buildPermitDesignSnapshot(
     // remains is the feeder / home-run / service runs whose physical route no
     // record carries — named segment by segment, never "all run lengths".
     {
-      const _residual = routeSegments.filter(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement');
-      const _derivedSegs = routeSegments.filter(r => r.lengthSource === 'cad-route' || r.lengthSource === 'field-measurement');
+      // ── D1 — PROJECT route authority applies to PROJECT-OWNED runs only ────
+      // Fail-closed: an unpopulated record counts as the installer's.
+      const _projectRoutes = routeSegments.filter(r =>
+        (r.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
+      const _excludedRoutes = routeSegments.filter(r =>
+        (r.routeAuthorityApplicability ?? 'REQUIRED') !== 'REQUIRED');
+      const _residual = _projectRoutes.filter(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement');
+      const _derivedSegs = _projectRoutes.filter(r => r.lengthSource === 'cad-route' || r.lengthSource === 'field-measurement');
       if (_residual.length > 0) {
         push('ROUTE-LENGTH-ESTIMATE',
-          `${_residual.length} of ${routeSegments.length} electrical run(s) have no routed geometry in the CAD model and require a field-measured route: `
+          `${_residual.length} of ${_projectRoutes.length} PROJECT-OWNED electrical run(s) have no routed geometry in the CAD model and require a field-measured route: `
             + `${_residual.map(r => `${r.segmentId} (${r.electricalFunction ?? 'run'})`).join(', ')}`
-            + (_derivedSegs.length ? `. ${_derivedSegs.length} run(s) ARE geometry-derived and are not blocked: ${_derivedSegs.map(r => r.segmentId).join(', ')}.` : ''),
+            + (_derivedSegs.length ? `. ${_derivedSegs.length} run(s) ARE geometry-derived and are not blocked: ${_derivedSegs.map(r => r.segmentId).join(', ')}.` : '')
+            + (_excludedRoutes.length
+              ? ` ${_excludedRoutes.length} run(s) are EXCLUDED from project route authority: ${_excludedRoutes.map(r => `${r.segmentId} (${r.routeOwnership === 'UTILITY_OWNED' ? 'utility-owned service equipment' : 'not applicable'})`).join(', ')}.`
+              : ''),
           {
             payload: {
               residualSegmentIds: _residual.map(r => r.segmentId),

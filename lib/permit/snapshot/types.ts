@@ -296,9 +296,32 @@ export type RouteVerificationState =
  *  conductor/conduit/length/fill/VD/current for a given segmentId. Fields added
  *  in the 07-22 repair pass are optional so existing serialization/digest is
  *  unchanged until the build populates them. */
+/** D1 (Planset 17) — WHO OWNS THIS RUN.
+ *  Utility-owned service equipment (the main-panel → utility-meter run) is not
+ *  the installer's to route, measure, procure or modify. It must stay visible in
+ *  the electrical topology and be excluded from every PROJECT authority. */
+export type RouteOwnership = 'PROJECT_OWNED' | 'UTILITY_OWNED';
+
+/** D1 — whether PROJECT route authority applies to this run.
+ *  EXCLUDED is a DECISION, carried explicitly, never inferred from a missing
+ *  raceway object or from a segment-name regex. */
+export type RouteAuthorityApplicability = 'REQUIRED' | 'EXCLUDED' | 'NOT_APPLICABLE';
+
 export interface RouteSegmentRecord {
   segmentId: string;                 // engine RunSegment id (e.g. 'COMBINER_TO_DISCO_RUN')
   from: string; to: string;
+  /** D1 — ownership, from the engine's own `isUtilityOwned` assertion (set by
+   *  computed-system.ts and segment-builder.ts). Optional so hand-built
+   *  RouteSegmentRecord literals in tests keep compiling; every consumer reads it
+   *  FAIL-CLOSED as `?? 'PROJECT_OWNED'`, so an unpopulated record is treated as
+   *  the installer's responsibility rather than silently excused. */
+  routeOwnership?: RouteOwnership;
+  /** D1 — whether project route authority applies. Utility-owned runs are
+   *  EXCLUDED: no field measurement, no raceway object, no procurement, and no
+   *  contribution to project route completeness. */
+  routeAuthorityApplicability?: RouteAuthorityApplicability;
+  /** D1 — why, in one sentence, for the reader of the sheet. */
+  routeApplicabilityReason?: string | null;
   /** what this physical section carries — e.g. 'micro AC branch (Q-Cable trunk)',
    *  'branch home-run', 'roof junction box', 'combiner feeder',
    *  'combiner→disconnect', 'disconnect→tap', 'tap conductors',
