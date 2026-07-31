@@ -1550,6 +1550,8 @@ export default function LandingPage() {
             <div>
               <h4 className="text-white font-semibold text-sm mb-3">Resources</h4>
               <ul className="space-y-2 text-xs text-slate-500">
+                <li><Link href="/trust" className="hover:text-slate-300 transition-colors">Trust Center</Link></li>
+                <li><Link href="/compliance" className="hover:text-slate-300 transition-colors">Security &amp; Compliance</Link></li>
                 <li><a href="https://seia.org" target="_blank" rel="noopener noreferrer" className="hover:text-slate-300 transition-colors">SEIA</a></li>
                 <li><a href="https://dsire.org" target="_blank" rel="noopener noreferrer" className="hover:text-slate-300 transition-colors">State Incentives (DSIRE)</a></li>
                 <li><a href="https://pvwatts.nrel.gov" target="_blank" rel="noopener noreferrer" className="hover:text-slate-300 transition-colors">NREL PVWatts</a></li>
