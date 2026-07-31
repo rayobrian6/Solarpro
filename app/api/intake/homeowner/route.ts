@@ -2,7 +2,10 @@
  * /api/intake/homeowner/route.ts
  *
  * Public homeowner form submissions — no auth required.
- * Rate-limited: 3 submissions per 15 minutes per IP.
+ * Rate-limited: 'public_lead' (5 submissions per 15 minutes per IP) via
+ * the canonical @/lib/rateLimiter. See lib/rateLimiter.ts CONFIG for the
+ * per-key budget.
+ *
  * Looks up funnel config from intake_funnels table.
  *
  * Canonical review-first flow for /free-solar-estimate:
@@ -29,69 +32,46 @@ import {
   storeUtilityBillAttachment,
 } from '@/lib/intake/utilityBillAttachment';
 import { runUtilityBillIntelligenceAsync } from '@/lib/intake/utilityBillIntelligence';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
   const db = await getDbReady();
   return (db as any)(strings, ...values);
 }
 
-// ── In-memory rate limiter (3 per 15 min per IP)
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-const RATE_LIMIT_MAX = 3;
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(ip: string): { allowed: boolean; remaining: number; resetAt: number } {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (!entry || now > entry.resetAt) {
-    const resetAt = now + RATE_LIMIT_WINDOW_MS;
-    rateLimitMap.set(ip, { count: 1, resetAt });
-    return { allowed: true, remaining: RATE_LIMIT_MAX - 1, resetAt };
-  }
-
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return { allowed: false, remaining: 0, resetAt: entry.resetAt };
-  }
-
-  entry.count += 1;
-  return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count, resetAt: entry.resetAt };
-}
-
-// Clean up stale entries every 1000 requests
-let cleanupCounter = 0;
-function maybeCleanupRateLimitMap(): void {
-  if (++cleanupCounter % 1000 === 0) {
-    const now = Date.now();
-    for (const [key, val] of rateLimitMap.entries()) {
-      if (now > val.resetAt) rateLimitMap.delete(key);
-    }
-  }
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || req.headers.get('x-real-ip')
-    || 'unknown';
+  const ip = getClientIp(req);
   const userAgent = req.headers.get('user-agent') || null;
   const referer = req.headers.get('referer') || null;
 
-  maybeCleanupRateLimitMap();
-
-  // ── Rate limit
-  const rateCheck = checkRateLimit(ip);
+  // ── Rate limit (canonical limiter; 'public_lead' = 5/15m)
+  //
+  // SECURITY: the previous version of this file defined a LOCAL function
+  // also named `checkRateLimit` which shadowed the import below. The local
+  // function was an in-memory LRU that (a) reset on every serverless cold
+  // start, (b) had no Upstash Redis backing, (c) had no fail-mode
+  // handling, and (d) could not be monitored via the canonical
+  // `__getRateLimiterMetrics()` telemetry. Replacing it with the canonical
+  // import gives the route the same fail-closed protections as the rest
+  // of the site (see lib/rateLimiter.ts: in-memory fallback when Upstash
+  // errors, in-memory cap at 50k entries, metrics counter).
+  const rateCheck = await checkRateLimit('public_lead', ip);
   if (!rateCheck.allowed) {
     return NextResponse.json(
       { error: 'Too many requests. Please try again later.' },
       {
         status: 429,
         headers: {
-          'X-RateLimit-Limit': String(RATE_LIMIT_MAX),
+          'X-RateLimit-Limit': '5',
           'X-RateLimit-Remaining': '0',
-          'X-RateLimit-Reset': String(Math.ceil(rateCheck.resetAt / 1000)),
-          'Retry-After': String(Math.ceil((rateCheck.resetAt - Date.now()) / 1000)),
+          'X-RateLimit-Reset': String(rateCheck.reset ?? Math.ceil(Date.now() / 1000)),
+          'Retry-After': String(
+            rateCheck.reset
+              ? Math.max(1, Math.ceil((rateCheck.reset - Date.now()) / 1000))
+              : 60,
+          ),
         },
       }
     );
@@ -272,9 +252,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     {
       status: 200,
       headers: {
-        'X-RateLimit-Limit': String(RATE_LIMIT_MAX),
-        'X-RateLimit-Remaining': String(rateCheck.remaining),
-        'X-RateLimit-Reset': String(Math.ceil(rateCheck.resetAt / 1000)),
+        'X-RateLimit-Limit': '5',
+        'X-RateLimit-Remaining': String(rateCheck.remaining ?? 0),
+        'X-RateLimit-Reset': String(
+          rateCheck.reset ? Math.ceil(rateCheck.reset / 1000) : Math.ceil(Date.now() / 1000),
+        ),
       },
     }
   );

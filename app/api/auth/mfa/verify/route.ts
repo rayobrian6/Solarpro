@@ -17,6 +17,7 @@ import { getDbWithRetry } from '@/lib/db-ready';
 import { verifyTOTPCode, decryptTOTPSecret, verifyRecoveryCode } from '@/lib/mfa';
 import { auditAuth, auditSecurity } from '@/lib/auditLog';
 import { getClientIp, checkRateLimit } from '@/lib/rateLimiter';
+import { isProduction } from '@/lib/env';
 
 // ─── POST /api/auth/mfa/verify ────────────────────────────────────────────
 // Verify a TOTP code or recovery code for an MFA-enrolled user.
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest) {
             data: { user: { ...sessionUser, role: dbUser.role } },
           });
           response.cookies.set(COOKIE_NAME, token, {
-            httpOnly: true, secure: process.env.NODE_ENV === 'production',
+            httpOnly: true, secure: isProduction(),
             sameSite: 'lax' as const, path: '/', maxAge: COOKIE_MAX_AGE,
           });
           // Clear MFA pending cookie
@@ -214,7 +215,7 @@ export async function POST(req: NextRequest) {
       data: { user: { ...sessionUser, role: dbUser.role } },
     });
     response.cookies.set(COOKIE_NAME, token, {
-      httpOnly: true, secure: process.env.NODE_ENV === 'production',
+      httpOnly: true, secure: isProduction(),
       sameSite: 'lax' as const, path: '/', maxAge: COOKIE_MAX_AGE,
     });
     // Clear MFA pending cookie (single-use)

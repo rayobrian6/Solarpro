@@ -32,6 +32,7 @@ import {
 } from '@/lib/mfa';
 import { auditAuth } from '@/lib/auditLog';
 import { getClientIp, checkRateLimit } from '@/lib/rateLimiter';
+import { isProduction } from '@/lib/env';
 
 const TOTP_DIGITS = 6;
 
@@ -270,7 +271,7 @@ export async function PUT(req: NextRequest) {
       const token = signToken(sessionUser);
       response.cookies.set(COOKIE_NAME, token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction(),
         sameSite: 'lax' as const,
         path: '/',
         maxAge: COOKIE_MAX_AGE,
