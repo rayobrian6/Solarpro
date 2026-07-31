@@ -283,7 +283,7 @@ export function drawSVGOpen(
   return '<svg viewBox="0 0 ' + width + ' ' + height +
     '" preserveAspectRatio="xMidYMid meet"' +
     ' xmlns="http://www.w3.org/2000/svg"' +
-    ' style="font-family:Arial,sans-serif;display:block;">' +
+    ' style="font-family:"SolarPro Sans","SolarPro Symbols";display:block;">' +
     defs;
 }
 

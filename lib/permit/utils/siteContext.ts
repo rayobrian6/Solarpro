@@ -184,7 +184,7 @@ export function buildSiteContextInset(input: SiteContextInsetInput, box: InsetBo
   // Frame + header
   els.push(`<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
   els.push(`<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${hdrH}" fill="#111"/>`);
-  els.push(`<text x="${box.x + 6}" y="${box.y + 11}" font-family="Arial" font-size="8" font-weight="700" fill="#fff" letter-spacing="0.5">SITE / PLOT PLAN — APPROXIMATE (NOT A SURVEY)</text>`);
+  els.push(`<text x="${box.x + 6}" y="${box.y + 11}" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="700" fill="#fff" letter-spacing="0.5">SITE / PLOT PLAN — APPROXIMATE (NOT A SURVEY)</text>`);
 
   // Everything geometric is clipped to the draw window so a large parcel spilling
   // beyond the frame is trimmed cleanly instead of drawing a tangle.
@@ -197,14 +197,14 @@ export function buildSiteContextInset(input: SiteContextInsetInput, box: InsetBo
     const pah = projectToLocalM(convexHullLatLng(panels), origin);
     clip.push(`<polygon points="${polyStr(pah)}" fill="rgba(23,58,161,0.28)" stroke="#173aa1" stroke-width="1"/>`);
     const cx = pah.reduce((s, p) => s + toX(p), 0) / pah.length, cy = pah.reduce((s, p) => s + toY(p), 0) / pah.length;
-    clip.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" font-family="Arial" font-size="6.5" font-weight="700" fill="#173aa1" text-anchor="middle">PV ARRAY</text>`);
+    clip.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" font-weight="700" fill="#173aa1" text-anchor="middle">PV ARRAY</text>`);
   }
   const kindTag: Record<string, string> = { utility_meter: 'UM', msp: 'MSP', ac_disconnect: 'AC' };
   for (const e of eqPts) {
     if (!inWin(e)) continue;
     const x = toX(e), y = toY(e);
     clip.push(`<rect x="${(x - 4).toFixed(1)}" y="${(y - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="#111" stroke-width="0.8"/>`);
-    clip.push(`<text x="${x.toFixed(1)}" y="${(y + 2).toFixed(1)}" font-family="Arial" font-size="5" font-weight="700" fill="#111" text-anchor="middle">${kindTag[e.kind] ?? '?'}</text>`);
+    clip.push(`<text x="${x.toFixed(1)}" y="${(y + 2).toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="5" font-weight="700" fill="#111" text-anchor="middle">${kindTag[e.kind] ?? '?'}</text>`);
   }
   // Parcel edge dimensions ONLY for a simple lot with edges fully in view — skip
   // on complex/large parcels (an apartment lot) to avoid a clutter of labels.
@@ -213,7 +213,7 @@ export function buildSiteContextInset(input: SiteContextInsetInput, box: InsetBo
     for (let i = 0; i < pPar.length; i++) {
       const a = pPar[i], b = pPar[(i + 1) % pPar.length];
       if (!inWin(a) || !inWin(b) || edgeFt[i] < 8) continue;
-      clip.push(`<text x="${((toX(a) + toX(b)) / 2).toFixed(1)}" y="${((toY(a) + toY(b)) / 2).toFixed(1)}" font-family="Arial" font-size="6" fill="#111" text-anchor="middle" stroke="#fff" stroke-width="1.6" paint-order="stroke">${edgeFt[i].toFixed(0)}'</text>`);
+      clip.push(`<text x="${((toX(a) + toX(b)) / 2).toFixed(1)}" y="${((toY(a) + toY(b)) / 2).toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6" fill="#111" text-anchor="middle" stroke="#fff" stroke-width="1.6" paint-order="stroke">${edgeFt[i].toFixed(0)}'</text>`);
     }
   }
   els.push(`<g clip-path="url(#${clipId})">${clip.join('')}</g>`);
@@ -223,14 +223,14 @@ export function buildSiteContextInset(input: SiteContextInsetInput, box: InsetBo
     const sp = latLngToXY(input.streetPin.lat, input.streetPin.lng, origin.lat, origin.lng);
     const sx = Math.max(box.x + pad + 4, Math.min(box.x + box.w - pad - 4, toX(sp)));
     const sy = Math.max(box.y + hdrH + 10, Math.min(box.y + box.h - ftrH - 4, toY(sp)));
-    els.push(`<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" font-family="Arial" font-size="6.5" font-weight="700" fill="#555" text-anchor="middle" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(input.streetName)}</text>`);
+    els.push(`<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" font-weight="700" fill="#555" text-anchor="middle" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(input.streetName)}</text>`);
   }
 
   // North arrow (top-right of the draw area)
   const nax = box.x + box.w - 15, nay = box.y + hdrH + 15;
   els.push(`<line x1="${nax}" y1="${nay + 8}" x2="${nax}" y2="${nay - 6}" stroke="#111" stroke-width="1"/>`);
   els.push(`<path d="M ${nax} ${nay - 9} L ${nax - 3} ${nay - 3} L ${nax + 3} ${nay - 3} Z" fill="#111"/>`);
-  els.push(`<text x="${nax}" y="${nay - 11}" font-family="Arial" font-size="6" font-weight="700" fill="#111" text-anchor="middle">N</text>`);
+  els.push(`<text x="${nax}" y="${nay - 11}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6" font-weight="700" fill="#111" text-anchor="middle">N</text>`);
 
   // Footer — 3 clean rows: setbacks · scale bar + APN · provenance
   const fy = box.y + box.h - ftrH;
@@ -238,17 +238,17 @@ export function buildSiteContextInset(input: SiteContextInsetInput, box: InsetBo
   const sbBits: string[] = [];
   if (buildingSetback != null) sbBits.push(`BLDG→P/L ~${buildingSetback.toFixed(0)}'`);
   if (arraySetback != null) sbBits.push(`ARRAY→P/L ~${arraySetback.toFixed(0)}'`);
-  els.push(`<text x="${box.x + 6}" y="${fy + 10}" font-family="Arial" font-size="6" font-weight="700" fill="#111">${sbBits.join('   ')}${sbBits.length ? '   ' : ''}(APPROXIMATE — BASED ON COUNTY GIS)</text>`);
+  els.push(`<text x="${box.x + 6}" y="${fy + 10}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6" font-weight="700" fill="#111">${sbBits.join('   ')}${sbBits.length ? '   ' : ''}(APPROXIMATE — BASED ON COUNTY GIS)</text>`);
   const barPx = Math.max(10 * (scale * M_TO_FT), 14);
   const bx = box.x + 6, by = fy + 22;
   els.push(`<line x1="${bx}" y1="${by}" x2="${(bx + barPx).toFixed(1)}" y2="${by}" stroke="#111" stroke-width="1.4"/>`);
   els.push(`<line x1="${bx}" y1="${by - 3}" x2="${bx}" y2="${by + 3}" stroke="#111" stroke-width="1"/>`);
   els.push(`<line x1="${(bx + barPx).toFixed(1)}" y1="${by - 3}" x2="${(bx + barPx).toFixed(1)}" y2="${by + 3}" stroke="#111" stroke-width="1"/>`);
-  els.push(`<text x="${(bx + barPx + 4).toFixed(1)}" y="${by + 2.5}" font-family="Arial" font-size="6" fill="#111">10 FT</text>`);
+  els.push(`<text x="${(bx + barPx + 4).toFixed(1)}" y="${by + 2.5}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6" fill="#111">10 FT</text>`);
   const apn = input.parcel?.apn ? `APN ${esc(String(input.parcel.apn))}` : '';
   const src = input.parcel?.source ? esc(String(input.parcel.source)) : 'COUNTY GIS';
-  if (apn) els.push(`<text x="${box.x + box.w - 6}" y="${fy + 10}" font-family="Arial" font-size="5.5" fill="#555" text-anchor="end">${apn}</text>`);
-  els.push(`<text x="${box.x + box.w / 2}" y="${fy + 32}" font-family="Arial" font-size="5.5" fill="#555" text-anchor="middle">APPROXIMATE PROPERTY LINE — ${src} — VERIFY</text>`);
+  if (apn) els.push(`<text x="${box.x + box.w - 6}" y="${fy + 10}" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.5" fill="#555" text-anchor="end">${apn}</text>`);
+  els.push(`<text x="${box.x + box.w / 2}" y="${fy + 32}" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.5" fill="#555" text-anchor="middle">APPROXIMATE PROPERTY LINE — ${src} — VERIFY</text>`);
 
   // Provider-supplied site features — ONLY approved + permit-renderable ones.
   const featEls: string[] = [];

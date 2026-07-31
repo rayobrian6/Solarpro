@@ -370,7 +370,7 @@ describe('pageValidationSummary survey evidence rendering', () => {
     expect(html).toContain('evidence items: 2');
     expect(html).toContain('main_service_panel: 7 | meter: 7 | roof_plane: 7 | overview: 7');
     expect(html).not.toContain('28 canonical evidence item(s)');
-    expect(html).not.toContain('<td style="font-family:monospace;font-size:7px;color:#000;">28</td>');
+    expect(html).not.toContain('<td style="font-family:"SolarPro Mono","SolarPro Symbols";font-size:7px;color:#000;">28</td>');
   });
 
   it('renders missing field evidence as missing instead of crashing', () => {

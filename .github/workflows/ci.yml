@@ -178,29 +178,32 @@ jobs:
           retention-days: 3
 
   # ─────────────────────────────────────────────────────────────────
-  # Job 6: Planset page-fit (CONTROLLED RENDERING ENVIRONMENT)
+  # Job 6: Planset page-fit (CANONICAL EMBEDDED FONTS)
   #
-  # The planset embeds NO @font-face and asks for Arial / Courier New, so page
-  # geometry is only meaningful on a host that resolves those families to
-  # metric-compatible faces. Liberation Sans / Liberation Mono are the
-  # metric-compatible substitutes; without them fontconfig resolves "Arial" to
-  # DejaVu Sans (~12% wider), text rewraps taller, and the page-fit scan reports
-  # PHANTOM clipping that describes the runner rather than the sheet. That is
-  # exactly the 2026-07-31 false report (PV-0 +10.0px / PV-4B +15.7px /
-  # SCHED +31.9px against an artifact that measures clean).
+  # D4 — the planset now EMBEDS its fonts. Every text surface (CSS, tables,
+  # title blocks and every SVG text node) resolves to the canonical
+  # "SolarPro Sans" / "SolarPro Mono" / "SolarPro Symbols" faces carried inside
+  # the artifact as WOFF2, so page geometry no longer depends on what this
+  # runner has installed.
   #
-  # Therefore this job is version-pinned end to end:
+  # This job therefore installs NO fonts, deliberately. A bare host is the
+  # supported case and the strongest test: if the embed regressed, there is
+  # nothing for the text to fall back to and the gate fails loudly. Installing
+  # Liberation here would MASK a broken embed by measuring the system face.
+  #
+  # Still pinned end to end, because determinism is the point:
   #   • runner image  — ubuntu-24.04, NOT ubuntu-latest
   #   • node          — 20
   #   • npm deps      — npm ci (package-lock.json pins playwright 1.61.1)
   #   • chromium      — installed by that pinned playwright, not the system one
-  #   • fonts         — fonts-liberation, resolved version recorded below
+  #   • fonts         — EMBEDDED in the artifact, hash-verified by the suite
   #
-  # The suite itself asserts print media, the 17x11 envelope AND the font metric
-  # fingerprint before measuring, and fails as a SETUP error if any is wrong.
+  # The suite asserts print media, the 17x11 envelope, that all five canonical
+  # faces are loaded (per-face document.fonts.check — 'status: loaded' alone is
+  # not sufficient) and their metric fingerprint, before measuring anything.
   # ─────────────────────────────────────────────────────────────────
   page-fit:
-    name: Planset Page-Fit (print media, pinned fonts)
+    name: Planset Page-Fit (print media, embedded canonical fonts)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -217,40 +220,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Metric-compatible with Arial / Courier New. Pin the exact version once a
-      # run has reported it below; the runner image is pinned so it is stable.
-      - name: Install Liberation fonts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fonts-liberation fontconfig
-          sudo fc-cache -f
-
-      - name: Record pinned rendering environment
+      # D4 — NO HOST FONTS ARE INSTALLED, ON PURPOSE.
+      # Before the canonical font pack this job installed fonts-liberation and
+      # hard-failed unless `fc-match Arial` resolved to a metric-compatible face.
+      # After embedding, that gate is wrong in both directions: a host with NO
+      # Arial is now the SUPPORTED case, and a host that HAS Arial would mask a
+      # broken embed by measuring the system face instead of the embedded one.
+      #
+      # So this runner deliberately installs nothing. The artifact must carry its
+      # own faces; the suite verifies the embedded bytes and their metrics.
+      - name: Record the (deliberately bare) font environment
         run: |
           {
-            echo "### Page-fit rendering environment"
+            echo "### Page-fit rendering environment (D4 — embedded fonts)"
             echo '```text'
-            echo "runner image     : ubuntu-24.04"
-            echo "fonts-liberation : $(dpkg-query -W -f='${Version}' fonts-liberation)"
-            echo "fontconfig       : $(dpkg-query -W -f='${Version}' fontconfig)"
-            echo "playwright       : $(node -p "require('playwright/package.json').version")"
-            echo "Arial resolves to      : $(fc-match Arial)"
-            echo "Courier New resolves to: $(fc-match 'Courier New')"
+            echo "runner image      : ubuntu-24.04"
+            echo "host fonts        : NOT installed — the artifact embeds its own"
+            echo "Arial resolves to : $(fc-match Arial 2>/dev/null || echo '(fontconfig absent)')"
+            echo "playwright        : $(node -p "require('playwright/package.json').version")"
             echo '```'
+            echo "A host-font substitution must NOT be able to make this job pass:"
+            echo "the gate measures the embedded SolarPro faces, not the system's."
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # Fail loudly HERE if the metric-compatible faces are absent, so the cause
-      # is named at setup time rather than surfacing as a layout number later.
-      - name: Verify font resolution
-        run: |
-          for f in "Arial" "Courier New"; do
-            resolved=$(fc-match "$f" | sed 's/:.*//')
-            echo "$f -> $resolved"
-            case "$resolved" in
-              LiberationSans*|LiberationMono*|Arial*|Courier*) ;;
-              *) echo "::error::'$f' resolved to '$resolved' — not a metric-compatible face. Page-fit numbers from this host would be meaningless."; exit 1 ;;
-            esac
-          done
 
       - name: Install pinned Chromium
         run: npx playwright install --with-deps chromium

@@ -78,13 +78,20 @@ FACES = [
 # the fingerprint pins. The CSS stack is 'SolarPro Sans', 'SolarPro Symbols' —
 # the second family is reached only for glyphs the first does not have.
 SYMBOL_FACE = ('SolarProSymbols-Regular', 'DejaVuSans.ttf', 'SolarPro Symbols', '400', 'normal')
+
+# Every block here starts at U+2000 or above. That is deliberate and load-bearing:
+# it is what GUARANTEES the symbol face carries no Latin letter, digit, space or
+# ASCII punctuation, so it can never win ordinary text shaping no matter where it
+# sits in a fallback chain. Asserted by test, not merely intended.
 SYMBOL_BLOCKS = [
+    (0x2000, 0x206F),   # General Punctuation — ‖ U+2016 (Liberation MONO lacks it)
     (0x2190, 0x21FF),   # Arrows — ⇒
-    (0x2200, 0x22FF),   # Math operators
+    (0x2200, 0x22FF),   # Math operators — ≈
     (0x2500, 0x257F),   # Box drawing
     (0x25A0, 0x25FF),   # Geometric shapes — ▶ ◀
     (0x2600, 0x26FF),   # Misc symbols — ⚠ ⚡
     (0x2700, 0x27BF),   # Dingbats — ✓
+    (0x2B00, 0x2BFF),   # Misc Symbols & Arrows — ⬡ U+2B21 (NEITHER Liberation face has it)
 ]
 DEJAVU_RELEASE = 'dejavu-fonts-ttf-2.37'
 DEJAVU_URL = 'https://github.com/dejavu-fonts/dejavu-fonts'
@@ -189,9 +196,16 @@ def main():
         src_sha = hashlib.sha256(raw).hexdigest()
         dv = TTFont(src)
         dv_have = set(dv.getBestCmap().keys())
+        # Backstop EITHER Liberation face. Subsetting against Sans alone left
+        # U+2016 uncovered for Mono (Sans has it, Mono does not), so a mono cell
+        # containing it would have fallen through to a HOST font — the exact
+        # dependency this pack removes. Include a codepoint when EITHER face
+        # lacks it; Sans/Mono still win every glyph they do carry.
+        mono_ref = TTFont(os.path.join(src_dir, 'LiberationMono-Regular.ttf'))
+        mono_have = set(mono_ref.getBestCmap().keys())
         sym_wanted = sorted(
             cp for lo, hi in SYMBOL_BLOCKS for cp in range(lo, hi + 1)
-            if cp not in lib_have and cp in dv_have
+            if (cp not in lib_have or cp not in mono_have) and cp in dv_have
         )
         opts = subset.Options()
         opts.flavor = 'woff2'

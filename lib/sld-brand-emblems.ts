@@ -305,7 +305,7 @@ export function emitBrandEmblem(
     `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="3" ry="3" ` +
     `fill="${style.fill}" stroke="${stroke}" stroke-width="0.8"/>` +
     `<text x="${cx.toFixed(1)}" y="${baseline.toFixed(1)}" text-anchor="middle" ` +
-    `font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" ` +
+    `font-family="SolarPro Sans, SolarPro Symbols" font-size="${fontSize}" ` +
     `font-weight="${bold ? '700' : '400'}" ` +
     `${italic ? 'font-style="italic" ' : ''}` +
     `fill="${style.ink}">${safeWordmark}</text>` +

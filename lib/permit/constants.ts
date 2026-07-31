@@ -713,8 +713,23 @@ const PDF_PAGE_CONFIG = {
 // threads in rafter), rebalanced proportions (bigger hardware, thin separated
 // layers). This is now the FALLBACK; the plan (Ray-approved) is to EMBED real
 // MANUFACTURER attachment details from a DB asset library keyed by racking brand.
-const PLANSET_ENGINE_VERSION = 47420;
+// D4 (2026-07-31) — CANONICAL EMBEDDED FONT PACK 1.0.0.
+// 47420 → 47500. Every artifact's bytes changed: the stylesheet now carries five
+// embedded WOFF2 faces and every text surface (CSS, tables, title blocks and all
+// SVG text) resolves to "SolarPro Sans" / "SolarPro Mono" / "SolarPro Symbols"
+// instead of host Arial / Courier New. The BUMP IS THE INVALIDATION — without it
+// the permit route keeps serving stored artifacts that reference host fonts, and
+// a reviewer cannot tell a host-font artifact from a canonical one.
+//
+// Engineering values are unchanged. Liberation is metric-compatible with
+// Arial/Courier New (571.73 / 672.11px on the canonical probe string, identical
+// before and after), so this reproduces the accepted geometry rather than
+// reflowing it — verified: 19/18/25 sheets, zero clipping, unchanged.
+const PLANSET_ENGINE_VERSION = 47500;
 
+/** The rendering pack this engine emits. Recorded in artifact + snapshot
+ *  metadata so an old host-font artifact is distinguishable from a canonical
+ *  one by data, not by inspection. */
+const RENDERING_PACK_VERSION = '1.0.0';
 
-
-export { PDF_PAGE_CONFIG, PLANSET_ENGINE_VERSION };
+export { PDF_PAGE_CONFIG, PLANSET_ENGINE_VERSION, RENDERING_PACK_VERSION };

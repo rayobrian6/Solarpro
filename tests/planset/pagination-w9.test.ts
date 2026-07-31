@@ -225,32 +225,46 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
       expect(envelope.toolbarHidden, `${envMsg} — #sp-toolbar visible under print (display=${envelope.toolbarDisplay})`).toBe(true);
       expect(envelope.sheetsTransformNone, `${envMsg} — #sp-sheets carries a screen transform: ${envelope.sheetsTransform}`).toBe(true);
 
-      // ── ENVIRONMENT GATE: the requested fonts must resolve METRICALLY ─────
-      // The package embeds no @font-face. On a host without Arial / Courier New
-      // (or a metric-compatible Liberation substitute) the browser resolves a
-      // different face, dense text blocks rewrap taller, and this scan reports a
-      // LAYOUT clip that is really a MISSING FONT. This fails as a SETUP error,
-      // by name, rather than letting a phantom overflow be attributed to sheet
-      // design. Presence alone is insufficient — fontconfig will resolve "Arial"
-      // to DejaVu Sans, which is present, non-generic and ~12% wider.
+      // ── D4 GATE: the EMBEDDED canonical faces must be loaded and correct ──
+      // Before the font pack this asserted that the HOST resolved Arial to a
+      // metric-compatible face. After embedding that is the wrong test in both
+      // directions: a host with no Arial is now the SUPPORTED case, and a host
+      // that HAS Arial would mask a broken embed by measuring the system face.
+      // So it now measures the embedded faces with NO fallback in the stack —
+      // a missing or corrupt face measures as the generic default and fails.
       const fonts = await detectFontAvailability(page);
+      const faceState = (fonts as { __faces: { status: string; size: number; loaded: string[]; checks: Record<string, boolean> } }).__faces;
+
+      // per-face load check — document.fonts.status alone is NOT sufficient,
+      // a substituted or malformed face can still leave it 'loaded'.
+      for (const [face, ok] of Object.entries(faceState.checks)) {
+        expect(ok,
+          `\n${envMsg}\nEMBEDDED FONT NOT LOADED — document.fonts.check(${face}) === false.\n` +
+          `  fonts.status : ${faceState.status} (${faceState.size} faces)\n` +
+          `  faces        : ${faceState.loaded.join(', ')}\n` +
+          `The artifact must carry every canonical face as embedded WOFF2. A face that is ` +
+          `absent or unused falls through to a HOST font, which is exactly the dependency ` +
+          `the pack exists to remove.`,
+        ).toBe(true);
+      }
+
       for (const [label, m] of Object.entries(fonts as Record<string, {
         stack: string; widthPx: number; expectedPx: number; deltaPct: number;
         metricCompatible: boolean; genericSerifPx: number; genericMonospacePx: number;
       }>)) {
+        if (label === '__faces') continue;
         expect(m.metricCompatible,
           `\n${envMsg}\n` +
-          `RENDERING ENVIRONMENT NOT SET UP — font metrics for ${label} do not match the reference.\n` +
+          `EMBEDDED FONT METRICS WRONG — ${label} does not match the canonical reference.\n` +
           `  stack            : ${m.stack}\n` +
           `  measured         : ${m.widthPx}px\n` +
           `  expected         : ${m.expectedPx}px  (±${FONT_METRIC_TOLERANCE_PCT}%)\n` +
           `  deviation        : ${m.deltaPct}%\n` +
           `  generic serif    : ${m.genericSerifPx}px\n` +
           `  generic monospace: ${m.genericMonospacePx}px\n` +
-          `This is an ENVIRONMENT/SETUP failure, NOT sheet clipping. The planset embeds no @font-face; ` +
-          `a non-metric-compatible face rewraps text and yields overflow numbers that describe THIS MACHINE. ` +
-          `Install fonts-liberation (Liberation Sans + Liberation Mono are metric-compatible with Arial + Courier New) ` +
-          `and re-run. Do not adjust any sheet layout on the strength of a measurement taken here.`,
+          `This is a FONT PACK failure, not sheet clipping. The artifact embeds the canonical ` +
+          `WOFF2 bytes; if their metrics do not match, the embed is corrupt or the wrong face ` +
+          `is winning. Do NOT adjust any sheet layout on the strength of a measurement taken here.`,
         ).toBe(true);
       }
 

@@ -444,8 +444,8 @@ export function pageWarningLabels(
       // gate can assert directly that no supply-side label carries a load-side-only
       // citation (it previously had no tagged cell to read and the PV-5 placard
       // schedule was outside the gate's reach).
-      `<td style="font-family:monospace;font-size:6.4px;" data-label-nec-ref="${escapeH(lbl.necRef)}" data-label-side="${escapeH(lbl.interconnectSide)}" data-label-required="${lbl.required ? 'true' : 'false'}">${lbl.necRef}</td>` +
-      `<td style="text-align:center;font-weight:900;font-family:monospace;font-size:6.6px;">${lbl.required ? (SUPERSEDED.has(lbl.refId) ? 'YES*' : 'YES') : 'N/A'}</td>` +
+      `<td style="font-family:"SolarPro Mono","SolarPro Symbols";font-size:6.4px;" data-label-nec-ref="${escapeH(lbl.necRef)}" data-label-side="${escapeH(lbl.interconnectSide)}" data-label-required="${lbl.required ? 'true' : 'false'}">${lbl.necRef}</td>` +
+      `<td style="text-align:center;font-weight:900;font-family:"SolarPro Mono","SolarPro Symbols";font-size:6.6px;">${lbl.required ? (SUPERSEDED.has(lbl.refId) ? 'YES*' : 'YES') : 'N/A'}</td>` +
       `<td style="font-size:6.6px;">${lbl.placement}</td>` +
       `</tr>`;
     const _head = `<thead><tr>` +

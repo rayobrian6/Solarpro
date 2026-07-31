@@ -65,10 +65,10 @@ function buildSurveyDerivedCadBridgeSvg(input: PermitInput, cad: CADModel, surve
   const bridgeStatus = `${surveyEvidence.completeness.toUpperCase()} · ${readiness.replace(/_/g, ' ').toUpperCase()}`;
   const roofSvg = roofPlanes.length
     ? roofPlanes.map((plane, index) => renderBridgeRoofPlane(plane, index, tx, ty)).join('')
-    : '<rect x="66" y="154" width="270" height="132" fill="#f8fafc" stroke="#991b1b" stroke-width="2" stroke-dasharray="8 5"/><text x="86" y="222" font-family="Arial,sans-serif" font-size="12" font-weight="900" fill="#991b1b">NO CAD ROOF GEOMETRY AVAILABLE</text>';
+    : '<rect x="66" y="154" width="270" height="132" fill="#f8fafc" stroke="#991b1b" stroke-width="2" stroke-dasharray="8 5"/><text x="86" y="222" font-family="SolarPro Sans, SolarPro Symbols" font-size="12" font-weight="900" fill="#991b1b">NO CAD ROOF GEOMETRY AVAILABLE</text>';
   const panelSvg = panels.map(panel => renderBridgePanel(panel, tx, ty, bounds.scale)).join('');
-  const obstructionSvg = (cad.obstructions ?? []).slice(0, 8).map(obs => `<g><circle cx="${tx(obs.x)}" cy="${ty(obs.y)}" r="${Math.max(5, obs.totalRadiusM * bounds.scale)}" fill="#fff7ed" stroke="#92400e" stroke-width="1.5" stroke-dasharray="4 3"/><text x="${tx(obs.x) + 8}" y="${ty(obs.y) - 8}" font-family="Arial,sans-serif" font-size="8" font-weight="700" fill="#92400e">${escapeText(obs.type)}</text></g>`).join('');
-  const electricalSvg = (cad.electricalNodes ?? []).slice(0, 6).map(node => `<g><rect x="${tx(node.x) - 8}" y="${ty(node.y) - 8}" width="16" height="16" fill="#fff" stroke="#991b1b" stroke-width="2"/><text x="${tx(node.x) + 12}" y="${ty(node.y) + 4}" font-family="Arial,sans-serif" font-size="8" font-weight="700" fill="#991b1b">${escapeText(node.type)}</text></g>`).join('');
+  const obstructionSvg = (cad.obstructions ?? []).slice(0, 8).map(obs => `<g><circle cx="${tx(obs.x)}" cy="${ty(obs.y)}" r="${Math.max(5, obs.totalRadiusM * bounds.scale)}" fill="#fff7ed" stroke="#92400e" stroke-width="1.5" stroke-dasharray="4 3"/><text x="${tx(obs.x) + 8}" y="${ty(obs.y) - 8}" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="700" fill="#92400e">${escapeText(obs.type)}</text></g>`).join('');
+  const electricalSvg = (cad.electricalNodes ?? []).slice(0, 6).map(node => `<g><rect x="${tx(node.x) - 8}" y="${ty(node.y) - 8}" width="16" height="16" fill="#fff" stroke="#991b1b" stroke-width="2"/><text x="${tx(node.x) + 12}" y="${ty(node.y) + 4}" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="700" fill="#991b1b">${escapeText(node.type)}</text></g>`).join('');
   const conduitSvg = (cad.conduitRoutes ?? []).slice(0, 4).map(route => {
     const d = route.waypoints.map((pt, index) => `${index === 0 ? 'M' : 'L'} ${tx(pt.x)} ${ty(pt.y)}`).join(' ');
     return d ? `<path d="${d}" fill="none" stroke="#6d28d9" stroke-width="2" stroke-dasharray="8 5"><title>${escapeText(route.routeMethod)} · ${route.totalLengthM.toFixed(1)}m</title></path>` : '';
@@ -79,14 +79,14 @@ function buildSurveyDerivedCadBridgeSvg(input: PermitInput, cad: CADModel, surve
     <rect width="430" height="720" fill="#ffffff"/>
     <rect x="14" y="14" width="402" height="692" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
     <rect x="26" y="28" width="378" height="50" fill="#111827"/>
-    <text x="38" y="58" font-family="Arial,sans-serif" font-size="18" font-weight="900" fill="#ffffff">SITE-SURVEY CAD BRIDGE</text>
-    <text x="38" y="73" font-family="Arial,sans-serif" font-size="8" font-weight="700" fill="#bfdbfe">ACTUAL PERMIT APPENDIX VISUAL FROM HYDRATED SURVEY EVIDENCE + CAD MODEL</text>
+    <text x="38" y="58" font-family="SolarPro Sans, SolarPro Symbols" font-size="18" font-weight="900" fill="#ffffff">SITE-SURVEY CAD BRIDGE</text>
+    <text x="38" y="73" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="700" fill="#bfdbfe">ACTUAL PERMIT APPENDIX VISUAL FROM HYDRATED SURVEY EVIDENCE + CAD MODEL</text>
     <rect x="26" y="92" width="378" height="280" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
     <g opacity="0.22">${Array.from({ length: 8 }, (_, i) => `<line x1="${44 + i * 44}" y1="106" x2="${44 + i * 44}" y2="356" stroke="#94a3b8" stroke-width="0.7"/>`).join('')}${Array.from({ length: 6 }, (_, i) => `<line x1="40" y1="${120 + i * 40}" x2="390" y2="${120 + i * 40}" stroke="#94a3b8" stroke-width="0.7"/>`).join('')}</g>
-    <text x="38" y="114" font-family="Arial,sans-serif" font-size="9" font-weight="900" fill="#166534">SOURCE SURVEY ${escapeText(sourceSurveyId)}</text>
-    <text x="38" y="128" font-family="Arial,sans-serif" font-size="8" font-weight="700" fill="#475569">PROJECT ${escapeText(sourceProjectId)}</text>
+    <text x="38" y="114" font-family="SolarPro Sans, SolarPro Symbols" font-size="9" font-weight="900" fill="#166534">SOURCE SURVEY ${escapeText(sourceSurveyId)}</text>
+    <text x="38" y="128" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="700" fill="#475569">PROJECT ${escapeText(sourceProjectId)}</text>
     ${roofSvg}${panelSvg}${obstructionSvg}${conduitSvg}${electricalSvg}
-    <text x="38" y="390" font-family="Arial,sans-serif" font-size="12" font-weight="900" fill="#0f172a">SURVEY-DERIVED SIGNALS VISIBLE IN THIS PLANSET</text>
+    <text x="38" y="390" font-family="SolarPro Sans, SolarPro Symbols" font-size="12" font-weight="900" fill="#0f172a">SURVEY-DERIVED SIGNALS VISIBLE IN THIS PLANSET</text>
     ${bridgeRow(38, 418, 'SURVEY', sourceSurveyId)}
     ${bridgeRow(38, 440, 'EVIDENCE', evidenceLine)}
     ${bridgeRow(38, 462, 'STATUS', bridgeStatus)}
@@ -95,11 +95,11 @@ function buildSurveyDerivedCadBridgeSvg(input: PermitInput, cad: CADModel, surve
     ${bridgeRow(38, 528, 'ARRAY', panelCountLabel)}
     ${bridgeRow(38, 550, 'ELECTRICAL', field.hasElectricalData ? `MSP ${valueOr(field.mainPanelRatingAmps, 'n/a')}A · bus ${valueOr(field.busbarRatingAmps, 'n/a')}A · ${valueOr(field.interconnectionPoint, 'n/a')}` : 'Electrical field evidence not complete')}
     <rect x="26" y="584" width="378" height="76" fill="#ecfdf5" stroke="#166534" stroke-width="1.5"/>
-    <text x="38" y="608" font-family="Arial,sans-serif" font-size="11" font-weight="900" fill="#166534">VISUAL PROOF OF WIRING</text>
-    <text x="38" y="628" font-family="Arial,sans-serif" font-size="9" fill="#14532d">This appendix is rendered only when EngineeringSurveyEvidence reaches generatePermitHTML().</text>
-    <text x="38" y="646" font-family="Arial,sans-serif" font-size="9" fill="#14532d">It combines survey IDs/counts/field signals with the current CAD roof/panel model.</text>
+    <text x="38" y="608" font-family="SolarPro Sans, SolarPro Symbols" font-size="11" font-weight="900" fill="#166534">VISUAL PROOF OF WIRING</text>
+    <text x="38" y="628" font-family="SolarPro Sans, SolarPro Symbols" font-size="9" fill="#14532d">This appendix is rendered only when EngineeringSurveyEvidence reaches generatePermitHTML().</text>
+    <text x="38" y="646" font-family="SolarPro Sans, SolarPro Symbols" font-size="9" fill="#14532d">It combines survey IDs/counts/field signals with the current CAD roof/panel model.</text>
     <rect x="26" y="672" width="378" height="22" fill="#fee2e2" stroke="#991b1b" stroke-width="1"/>
-    <text x="215" y="687" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" font-weight="900" fill="#991b1b">PREVIEW ONLY · NON-AUTHORITATIVE · DOES NOT ALTER PERMIT CALCS</text>
+    <text x="215" y="687" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="9" font-weight="900" fill="#991b1b">PREVIEW ONLY · NON-AUTHORITATIVE · DOES NOT ALTER PERMIT CALCS</text>
   </svg>`;
 }
 
@@ -107,7 +107,7 @@ function renderBridgeRoofPlane(plane: CADRoofPlane, index: number, tx: (x: numbe
   const polygon = plane.polygon.length ? plane.polygon : plane.usablePolygon;
   const d = polygon.map((pt, pointIndex) => `${pointIndex === 0 ? 'M' : 'L'} ${tx(pt.x)} ${ty(pt.y)}`).join(' ') + ' Z';
   const c = centroid(polygon);
-  return `<g><path d="${d}" fill="#ffffff" stroke="#111827" stroke-width="2.4"/><path d="${d}" fill="none" stroke="#166534" stroke-width="1.2" stroke-dasharray="5 4" transform="translate(4 4)"/><text x="${tx(c.x)}" y="${ty(c.y) - 7}" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="900" fill="#111827">${escapeText(plane.id || `RP-${index + 1}`)}</text><text x="${tx(c.x)}" y="${ty(c.y) + 7}" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="700" fill="#475569">PITCH ${plane.pitch}° / AZ ${plane.azimuth}°</text></g>`;
+  return `<g><path d="${d}" fill="#ffffff" stroke="#111827" stroke-width="2.4"/><path d="${d}" fill="none" stroke="#166534" stroke-width="1.2" stroke-dasharray="5 4" transform="translate(4 4)"/><text x="${tx(c.x)}" y="${ty(c.y) - 7}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" font-weight="900" fill="#111827">${escapeText(plane.id || `RP-${index + 1}`)}</text><text x="${tx(c.x)}" y="${ty(c.y) + 7}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="700" fill="#475569">PITCH ${plane.pitch}° / AZ ${plane.azimuth}°</text></g>`;
 }
 
 function renderBridgePanel(panel: CADPanel, tx: (x: number) => number, ty: (y: number) => number, scale: number): string {
@@ -144,7 +144,7 @@ function centroid(points: Array<{ x: number; y: number }>): { x: number; y: numb
 }
 
 function bridgeRow(x: number, y: number, label: string, value: string): string {
-  return `<text x="${x}" y="${y}" font-family="Arial,sans-serif" font-size="8" font-weight="900" fill="#64748b">${escapeText(label)}</text><text x="${x + 74}" y="${y}" font-family="Arial,sans-serif" font-size="8" font-weight="700" fill="#0f172a">${escapeText(truncate(value, 54))}</text>`;
+  return `<text x="${x}" y="${y}" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="900" fill="#64748b">${escapeText(label)}</text><text x="${x + 74}" y="${y}" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="700" fill="#0f172a">${escapeText(truncate(value, 54))}</text>`;
 }
 
 function valueOr(value: string | number | null | undefined, fallback: string): string {

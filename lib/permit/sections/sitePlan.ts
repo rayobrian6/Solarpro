@@ -328,10 +328,10 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
             const mx = (s.ax + s.bx) / 2, my = (s.ay + s.by) / 2;
             let ang = Math.atan2(s.by - s.ay, s.bx - s.ax) * 180 / Math.PI;
             if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-            parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5 * fk).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8.5 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(1.5 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="${(2.4 * fk).toFixed(1)}" paint-order="stroke">PROPERTY LINE</text>`;
+            parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5 * fk).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(8.5 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(1.5 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="${(2.4 * fk).toFixed(1)}" paint-order="stroke">PROPERTY LINE</text>`;
             const _ft = _edgeFt(s.i);
             if (isFinite(_ft) && _ft > 5) {
-              parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my + 12 * fk).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8 * fk).toFixed(1)}" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="${(2.2 * fk).toFixed(1)}" paint-order="stroke">${_ft.toFixed(1)}'</text>`;
+              parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my + 12 * fk).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(8 * fk).toFixed(1)}" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="${(2.2 * fk).toFixed(1)}" paint-order="stroke">${_ft.toFixed(1)}'</text>`;
             }
           }
         }
@@ -417,8 +417,8 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         const cy = pts.reduce((s: number, p: any) => s + p.y, 0) / pts.length;
         parts.push(`<polygon points="${d}" fill="rgba(22,101,52,0.20)" stroke="#37c871" stroke-width="1.3" stroke-dasharray="5 3"/>`);
         if (i === 0) {
-          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy - 4).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8 * fk).toFixed(1)}" font-weight="900" fill="#eafff2" stroke="#14532d" stroke-width="${(2.2 * fk).toFixed(1)}" paint-order="stroke">TREE CANOPY</text>`);
-          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(5.6 * fk).toFixed(1)}" font-weight="bold" fill="#eafff2" stroke="#14532d" stroke-width="${(1.8 * fk).toFixed(1)}" paint-order="stroke">CONCEALED — FIELD VERIFY</text>`);
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy - 4).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(8 * fk).toFixed(1)}" font-weight="900" fill="#eafff2" stroke="#14532d" stroke-width="${(2.2 * fk).toFixed(1)}" paint-order="stroke">TREE CANOPY</text>`);
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(5.6 * fk).toFixed(1)}" font-weight="bold" fill="#eafff2" stroke="#14532d" stroke-width="${(1.8 * fk).toFixed(1)}" paint-order="stroke">CONCEALED — FIELD VERIFY</text>`);
         }
       });
       canopySvg = parts.join('');
@@ -452,7 +452,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         }
         sx = Math.max(cropX + 60 * fk, Math.min(cropX + cropW - 60 * fk, sx));
         sy = Math.max(cropY + 26 * fk, Math.min(cropY + cropH - 20 * fk, sy));
-        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(13 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(3 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="${(3 * fk).toFixed(1)}" paint-order="stroke">${escapeH(streetName)}</text>`;
+        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(13 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(3 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="${(3 * fk).toFixed(1)}" paint-order="stroke">${escapeH(streetName)}</text>`;
       }
     }
 
@@ -496,14 +496,14 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3 * fk).toFixed(1)}" stroke="#111" stroke-width="${(1.1 * fk).toFixed(2)}"/>`);
           // wall tag: white square + code
           parts.push(`<rect x="${(p.x - 6 * fk).toFixed(1)}" y="${(p.y - 6 * fk).toFixed(1)}" width="${(12 * fk).toFixed(1)}" height="${(12 * fk).toFixed(1)}" fill="#fff" stroke="#111" stroke-width="${(1.3 * fk).toFixed(2)}"/>`);
-          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${((meta.tag.length > 2 ? 5.6 : 7) * fk).toFixed(1)}" font-weight="900" fill="#111">${meta.tag}</text>`);
+          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3 * fk).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${((meta.tag.length > 2 ? 5.6 : 7) * fk).toFixed(1)}" font-weight="900" fill="#111">${meta.tag}</text>`);
           // margin label on an opaque plate — halo text alone sat straight on
           // the neighbor's parked cars and read as sloppy overlay.
           const anchor = colRight ? 'end' : 'start';
           const _plateX = colRight ? colX - _nameW - 4 * fk : colX - 4 * fk;
           parts.push(`<rect x="${_plateX.toFixed(1)}" y="${(ly - 10 * fk).toFixed(1)}" width="${(_nameW + 8 * fk).toFixed(1)}" height="${(23 * fk).toFixed(1)}" rx="2" fill="rgba(255,255,255,0.90)" stroke="#c9ced6" stroke-width="0.6"/>`);
-          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1 * fk).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="${(9.5 * fk).toFixed(1)}" font-weight="900" fill="#111">${meta.name}</text>`);
-          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9 * fk).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="${(6.8 * fk).toFixed(1)}" font-weight="bold" fill="#333">${prov}</text>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1 * fk).toFixed(1)}" text-anchor="${anchor}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(9.5 * fk).toFixed(1)}" font-weight="900" fill="#111">${meta.name}</text>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9 * fk).toFixed(1)}" text-anchor="${anchor}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(6.8 * fk).toFixed(1)}" font-weight="bold" fill="#333">${prov}</text>`);
           ly += 30 * fk;
         });
         eqSvg = parts.join('');
@@ -530,14 +530,14 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
       <g>
         <rect x="${fx.toFixed(1)}" y="${fy.toFixed(1)}" width="${plateW.toFixed(1)}" height="${(26 * fk).toFixed(1)}" rx="2" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="${fk.toFixed(2)}"/>
         ${[0,1,2,3].map(i => `<rect x="${(fx + 8 * fk + i*seg).toFixed(1)}" y="${(fy + 8 * fk).toFixed(1)}" width="${seg.toFixed(1)}" height="${(7 * fk).toFixed(1)}" fill="${i % 2 ? '#fff' : '#111'}" stroke="#111" stroke-width="${(0.8 * fk).toFixed(2)}"/>`).join('')}
-        <text x="${(fx + 8 * fk).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">0</text>
-        <text x="${(fx + 8 * fk + scalePx/2).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">10</text>
-        <text x="${(fx + 8 * fk + scalePx).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">20 FT</text>
+        <text x="${(fx + 8 * fk).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">0</text>
+        <text x="${(fx + 8 * fk + scalePx/2).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">10</text>
+        <text x="${(fx + 8 * fk + scalePx).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">20 FT</text>
       </g>
       <g transform="translate(${(cropX + cropW - 30 * fk).toFixed(1)},${(cropY + 30 * fk).toFixed(1)}) scale(${fk.toFixed(3)})">
         <circle cx="0" cy="0" r="19" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1.5"/>
         <polygon points="0,-13 5,8 0,3 -5,8" fill="#111"/>
-        <text x="0" y="-22" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.75)" stroke-width="2.4" paint-order="stroke">N</text>
+        <text x="0" y="-22" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="13" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.75)" stroke-width="2.4" paint-order="stroke">N</text>
       </g>
       <rect x="${(cropX + 1.5).toFixed(1)}" y="${(cropY + 1.5).toFixed(1)}" width="${(cropW - 3).toFixed(1)}" height="${(cropH - 3).toFixed(1)}" fill="none" stroke="#111" stroke-width="${(2 * fk).toFixed(2)}"/>`;
 

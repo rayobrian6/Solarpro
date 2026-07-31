@@ -390,10 +390,10 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
       </table>
       <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.5;border:var(--border);border-top:none;background:#f0f4f8;">
         <strong>WIND LOAD FORMULA (${asce} §29.4) — ALL VALUES FROM CANONICAL:</strong><br/>
-        <span style="font-family:monospace;">qz = 0.00256 × Kz(${Kz}) × Kzt(${Kzt}) × Kd(${Kd}) × V²(${windSpeed}²) = <strong>${velPressure} psf</strong></span><br/>
-        <span style="font-family:monospace;">p = qz × Cf(${Cf}) = <strong>${windPresDisp} psf</strong> &nbsp;|&nbsp; Area/Post = H(${panelHFt} ft) × S(${postSpacing} ft) = ${(panHN*postSpN).toFixed(2)} ft²</span><br/>
-        <span style="font-family:monospace;">F = p × Area = <strong>${windLoadPost} lbs</strong> &nbsp;|&nbsp; M = F × H/2 = <strong>${overturnMoment} ft-lbs</strong></span><br/>
-        <span style="font-family:monospace;">D_req = 1.5 × ∛(M / (q_soil × b)) = <strong>${reqEmbedDisp} ft</strong> &nbsp;|&nbsp; D_prov = <strong>${postEmbed} ft</strong> → <strong style="color:${embedColor};">${embedStatus}</strong></span><br/>
+        <span style="font-family:"SolarPro Mono","SolarPro Symbols";">qz = 0.00256 × Kz(${Kz}) × Kzt(${Kzt}) × Kd(${Kd}) × V²(${windSpeed}²) = <strong>${velPressure} psf</strong></span><br/>
+        <span style="font-family:"SolarPro Mono","SolarPro Symbols";">p = qz × Cf(${Cf}) = <strong>${windPresDisp} psf</strong> &nbsp;|&nbsp; Area/Post = H(${panelHFt} ft) × S(${postSpacing} ft) = ${(panHN*postSpN).toFixed(2)} ft²</span><br/>
+        <span style="font-family:"SolarPro Mono","SolarPro Symbols";">F = p × Area = <strong>${windLoadPost} lbs</strong> &nbsp;|&nbsp; M = F × H/2 = <strong>${overturnMoment} ft-lbs</strong></span><br/>
+        <span style="font-family:"SolarPro Mono","SolarPro Symbols";">D_req = 1.5 × ∛(M / (q_soil × b)) = <strong>${reqEmbedDisp} ft</strong> &nbsp;|&nbsp; D_prov = <strong>${postEmbed} ft</strong> → <strong style="color:${embedColor};">${embedStatus}</strong></span><br/>
         V = ${windSpeed} mph &nbsp;|&nbsp; Exposure ${exposure} &nbsp;|&nbsp; Soil resistance = ${soilRes} psf &nbsp;|&nbsp; Total fence: ${fenceLenFt} ft
       </div>` : ''}
 
@@ -449,7 +449,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
             <td class="mono f-lg">${rule.asceReference || rule.ruleId}</td>
             <td>${rule.title}</td>
             <td style="font-size:9px;color:#333">${rule.message}</td>
-            <td style="font-family:monospace;font-size:9px;text-align:right">${rule.value !== undefined ? `${rule.value}${rule.limit !== undefined ? ` / ${rule.limit}` : ''}` : '—'}</td>
+            <td style="font-family:"SolarPro Mono","SolarPro Symbols";font-size:9px;text-align:right">${rule.value !== undefined ? `${rule.value}${rule.limit !== undefined ? ` / ${rule.limit}` : ''}` : '—'}</td>
             <td style="text-align:center;font-weight:bold;color:${statusColor(rule.severity)}">${statusLabel(rule.severity)}</td>
           </tr>`).join('')}
         </tbody>
@@ -675,7 +675,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
             <td class="mono f-lg">${rule.asceReference || rule.ruleId}</td>
             <td>${rule.title}</td>
             <td style="font-size:9px;color:#333">${rule.message}</td>
-            <td style="font-family:monospace;font-size:9px;text-align:right">${rule.value !== undefined ? `${rule.value}${rule.limit !== undefined ? ` / ${rule.limit}` : ''}` : '—'}</td>
+            <td style="font-family:"SolarPro Mono","SolarPro Symbols";font-size:9px;text-align:right">${rule.value !== undefined ? `${rule.value}${rule.limit !== undefined ? ` / ${rule.limit}` : ''}` : '—'}</td>
             <td style="text-align:center;font-weight:bold;color:${statusColor(rule.severity)}">${statusLabel(rule.severity)}</td>
           </tr>`).join('')}
         </tbody>
@@ -942,7 +942,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <div class="section-title">Standard Detail — Roof Attachment (Fastener per Racking Assembly, Typical)</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:var(--xs);">
         <div style="text-align:center;">
-          <svg viewBox="0 0 300 240" width="212" height="170" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
+          <svg viewBox="0 0 300 240" width="212" height="170" style="display:block;margin:0 auto;font-family:"SolarPro Sans","SolarPro Symbols";">
             <defs><pattern id="rt-woodhatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#c8a56f" stroke-width="0.6"/></pattern></defs>
             <!-- rafter (wood, hatched) -->
             <rect x="20" y="134" width="260" height="60" fill="#efe0c4" stroke="#7a5a2e" stroke-width="1.4"/>
@@ -1070,7 +1070,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <td class="mono f-lg">${rule.asceReference || rule.ruleId}</td>
             <td>${rule.title}</td>
             <td style="font-size:9px;color:#333">${rule.message}</td>
-            <td style="font-family:monospace;font-size:9px;text-align:right">${rule.value !== undefined ? `${rule.value}${rule.limit !== undefined ? ` / ${rule.limit}` : ''}` : '—'}</td>
+            <td style="font-family:"SolarPro Mono","SolarPro Symbols";font-size:9px;text-align:right">${rule.value !== undefined ? `${rule.value}${rule.limit !== undefined ? ` / ${rule.limit}` : ''}` : '—'}</td>
             <td style="text-align:center;font-weight:bold;color:${statusColor(rule.severity)}">${statusLabel(rule.severity)}</td>
           </tr>`).join('')}
         </tbody>

@@ -54,7 +54,7 @@ export function drawDimension(
     svg += `<line x1="${x1.toFixed(1)}" y1="${(y1-tick).toFixed(1)}" x2="${x1.toFixed(1)}" y2="${(y1+tick).toFixed(1)}" stroke="${col}" stroke-width="0.8"/>`;
     svg += `<line x1="${x2.toFixed(1)}" y1="${(y2-tick).toFixed(1)}" x2="${x2.toFixed(1)}" y2="${(y2+tick).toFixed(1)}" stroke="${col}" stroke-width="0.8"/>`;
     // label above line
-    svg += `<text x="${mx.toFixed(1)}" y="${(my-off).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${fs}" fill="${col}" font-weight="bold">${label}</text>`;
+    svg += `<text x="${mx.toFixed(1)}" y="${(my-off).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${fs}" fill="${col}" font-weight="bold">${label}</text>`;
   } else {
     // up arrow
     svg += `<polygon points="${x1.toFixed(1)},${y1.toFixed(1)} ${(x1-3).toFixed(1)},${(y1+arr).toFixed(1)} ${(x1+3).toFixed(1)},${(y1+arr).toFixed(1)}" fill="${col}"/>`;
@@ -64,7 +64,7 @@ export function drawDimension(
     svg += `<line x1="${(x1-tick).toFixed(1)}" y1="${y1.toFixed(1)}" x2="${(x1+tick).toFixed(1)}" y2="${y1.toFixed(1)}" stroke="${col}" stroke-width="0.8"/>`;
     svg += `<line x1="${(x2-tick).toFixed(1)}" y1="${y2.toFixed(1)}" x2="${(x2+tick).toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="0.8"/>`;
     // label to right
-    svg += `<text x="${(mx+off).toFixed(1)}" y="${my.toFixed(1)}" text-anchor="start" font-family="Arial,sans-serif" font-size="${fs}" fill="${col}" font-weight="bold" dominant-baseline="middle">${label}</text>`;
+    svg += `<text x="${(mx+off).toFixed(1)}" y="${my.toFixed(1)}" text-anchor="start" font-family="SolarPro Sans, SolarPro Symbols" font-size="${fs}" fill="${col}" font-weight="bold" dominant-baseline="middle">${label}</text>`;
   }
 
   return svg;
@@ -130,17 +130,17 @@ export function buildSchemSVG(
       xmlns="http://www.w3.org/2000/svg">
       <rect width="${svgW}" height="${svgH}" fill="#e8edf3"/>
       <rect x="40" y="40" width="${svgW-80}" height="${svgH-80}" fill="none" stroke="#374151" stroke-width="1" stroke-dasharray="8,4"/>
-      <text x="${svgW/2}" y="${svgH/2 - 20}" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#999" font-weight="700">ROOF PLAN — GPS DATA REQUIRED</text>
-      <text x="${svgW/2}" y="${svgH/2 + 2}" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#999">Complete 3D layout in Design Studio to generate roof plan</text>
-      <text x="${svgW/2}" y="${svgH/2 + 20}" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#999">Address: ${addr}</text>
+      <text x="${svgW/2}" y="${svgH/2 - 20}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="13" fill="#999" font-weight="700">ROOF PLAN — GPS DATA REQUIRED</text>
+      <text x="${svgW/2}" y="${svgH/2 + 2}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" fill="#999">Complete 3D layout in Design Studio to generate roof plan</text>
+      <text x="${svgW/2}" y="${svgH/2 + 20}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" fill="#999">Address: ${addr}</text>
       <g transform="translate(50, ${svgH - 50})">
         <circle cx="0" cy="0" r="21" fill="white" stroke="#374151" stroke-width="1.8"/>
         <polygon points="0,-15 5,9 0,3 -5,9" fill="#000"/>
         <polygon points="0,15 5,-9 0,-3 -5,-9" fill="#999"/>
-        <text x="0" y="-19" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="900" fill="#000">N</text>
-        <text x="0" y="31" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#374151">S</text>
-        <text x="-29" y="5" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#374151">W</text>
-        <text x="29" y="5" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#374151">E</text>
+        <text x="0" y="-19" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="12" font-weight="900" fill="#000">N</text>
+        <text x="0" y="31" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" fill="#374151">S</text>
+        <text x="-29" y="5" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" fill="#374151">W</text>
+        <text x="29" y="5" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" fill="#374151">E</text>
       </g>
     </svg>`;
   }
@@ -192,7 +192,7 @@ export function buildSchemSVG(
 
   // Street label (top centre, outside property boundary)
   svgInner += `<text x="${svgCx.toFixed(1)}" y="${(propY - 8).toFixed(1)}" text-anchor="middle"
-    font-family="Arial,sans-serif" font-size="11" font-weight="900" fill="#000" letter-spacing="3">${city || 'PROJECT STREET'}</text>`;
+    font-family="SolarPro Sans, SolarPro Symbols" font-size="11" font-weight="900" fill="#000" letter-spacing="3">${city || 'PROJECT STREET'}</text>`;
 
   // ── Roof planes: define SVG clipPaths for hatch clipping ──────────────────
   validPlanes.slice(0, 12).forEach((plane, pi) => {
@@ -310,12 +310,12 @@ export function buildSchemSVG(
       { label: 'RAKE',   stroke: '#333', sw: 2.0, dash: '' },
     ];
     svgInner += `<rect x="${(legX-6).toFixed(1)}" y="${(legY-14).toFixed(1)}" width="142" height="${(legItems.length * 17 + 20).toFixed(1)}" rx="3" fill="rgba(255,255,255,0.93)" stroke="#999" stroke-width="0.8"/>`;
-    svgInner += `<text x="${(legX+65).toFixed(1)}" y="${(legY-2).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" font-weight="900" fill="#000" letter-spacing="1">EDGE TYPE LEGEND</text>`;
+    svgInner += `<text x="${(legX+65).toFixed(1)}" y="${(legY-2).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="7.5" font-weight="900" fill="#000" letter-spacing="1">EDGE TYPE LEGEND</text>`;
     legItems.forEach((item, li) => {
       const iy = legY + li * 17 + 8;
       const dashAttr = item.dash ? ` stroke-dasharray="${item.dash}"` : '';
       svgInner += `<line x1="${legX.toFixed(1)}" y1="${iy.toFixed(1)}" x2="${(legX+36).toFixed(1)}" y2="${iy.toFixed(1)}" stroke="${item.stroke}" stroke-width="${item.sw}" stroke-linecap="round"${dashAttr}/>`;
-      svgInner += `<text x="${(legX+44).toFixed(1)}" y="${(iy+3.5).toFixed(1)}" font-family="Arial,sans-serif" font-size="8" fill="#000">${item.label}</text>`;
+      svgInner += `<text x="${(legX+44).toFixed(1)}" y="${(iy+3.5).toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" fill="#000">${item.label}</text>`;
     });
   }
 
@@ -365,7 +365,7 @@ export function buildSchemSVG(
     const tagY = by1 - tagH - 4;
     svgInner += `<rect x="${tagX.toFixed(1)}" y="${tagY.toFixed(1)}" width="${tagW.toFixed(1)}" height="${tagH}" rx="2" fill="rgba(30,64,175,0.92)"/>`;
     svgInner += `<text x="${(tagX+tagW/2).toFixed(1)}" y="${(tagY+9.5).toFixed(1)}" text-anchor="middle"
-      font-family="Arial,sans-serif" font-size="7.5" font-weight="700" fill="white">${labelTxt}</text>`;
+      font-family="SolarPro Sans, SolarPro Symbols" font-size="7.5" font-weight="700" fill="white">${labelTxt}</text>`;
     arrIdx++;
   });
 
@@ -380,7 +380,7 @@ export function buildSchemSVG(
     svgInner += `<rect x="${(cx2-17).toFixed(1)}" y="${(cy2-13).toFixed(1)}" width="34" height="15" rx="3"
       fill="rgba(255,255,255,0.93)" stroke="rgba(100,116,139,0.6)" stroke-width="0.6"/>`;
     svgInner += `<text x="${cx2.toFixed(1)}" y="${(cy2-2).toFixed(1)}" text-anchor="middle"
-      font-family="Arial,sans-serif" font-size="8.5" font-weight="700" fill="#000">${pitchStr}</text>`;
+      font-family="SolarPro Sans, SolarPro Symbols" font-size="8.5" font-weight="700" fill="#000">${pitchStr}</text>`;
   });
 
   // ── Scale bar (bottom centre, 10m reference) ──────────────────────────────
@@ -393,13 +393,13 @@ export function buildSchemSVG(
       <line x1="${scaleX0.toFixed(1)}" y1="${scaleY}" x2="${(scaleX0+scalePx).toFixed(1)}" y2="${scaleY}" stroke="#374151" stroke-width="2"/>
       <line x1="${scaleX0.toFixed(1)}" y1="${(scaleY-4)}" x2="${scaleX0.toFixed(1)}" y2="${(scaleY+4)}" stroke="#374151" stroke-width="1.5"/>
       <line x1="${(scaleX0+scalePx).toFixed(1)}" y1="${(scaleY-4)}" x2="${(scaleX0+scalePx).toFixed(1)}" y2="${(scaleY+4)}" stroke="#374151" stroke-width="1.5"/>
-      <text x="${(scaleX0-4).toFixed(1)}" y="${(scaleY+4)}" text-anchor="end" font-family="Arial,sans-serif" font-size="7.5" fill="#374151">0</text>
-      <text x="${(scaleX0+scalePx+4).toFixed(1)}" y="${(scaleY+4)}" text-anchor="start" font-family="Arial,sans-serif" font-size="7.5" fill="#374151">10m</text>
-      <text x="${(scaleX0+scalePx/2).toFixed(1)}" y="${(scaleY-6)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" fill="#374151">SCALE: 1/8&quot;=1&apos;-0&quot; (NTS)</text>
+      <text x="${(scaleX0-4).toFixed(1)}" y="${(scaleY+4)}" text-anchor="end" font-family="SolarPro Sans, SolarPro Symbols" font-size="7.5" fill="#374151">0</text>
+      <text x="${(scaleX0+scalePx+4).toFixed(1)}" y="${(scaleY+4)}" text-anchor="start" font-family="SolarPro Sans, SolarPro Symbols" font-size="7.5" fill="#374151">10m</text>
+      <text x="${(scaleX0+scalePx/2).toFixed(1)}" y="${(scaleY-6)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="7" fill="#374151">SCALE: 1/8&quot;=1&apos;-0&quot; (NTS)</text>
     </g>`;
   } else {
     svgInner += `<text x="${svgCx.toFixed(1)}" y="${svgH - 7}" text-anchor="middle"
-      font-family="Arial,sans-serif" font-size="8" fill="#374151">SCALE: NTS — FIELD VERIFY ALL DIMENSIONS</text>`;
+      font-family="SolarPro Sans, SolarPro Symbols" font-size="8" fill="#374151">SCALE: NTS — FIELD VERIFY ALL DIMENSIONS</text>`;
   }
 
   // ── North compass rose (bottom-left) ──────────────────────────────────────
@@ -408,17 +408,17 @@ export function buildSchemSVG(
       <circle cx="0" cy="0" r="22" fill="white" stroke="#374151" stroke-width="1.8"/>
       <polygon points="0,-16 5,9 0,3 -5,9" fill="#000"/>
       <polygon points="0,16 5,-9 0,-3 -5,-9" fill="#999"/>
-      <text x="0" y="-20" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="900" fill="#000">N</text>
-      <text x="0" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#374151">S</text>
-      <text x="-30" y="5" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#374151">W</text>
-      <text x="30" y="5" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#374151">E</text>
+      <text x="0" y="-20" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="12" font-weight="900" fill="#000">N</text>
+      <text x="0" y="32" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" fill="#374151">S</text>
+      <text x="-30" y="5" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" fill="#374151">W</text>
+      <text x="30" y="5" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" fill="#374151">E</text>
     </g>`;
 
   // ── Module badge (bottom-right) ───────────────────────────────────────────
   svgInner += `
     <rect x="${(svgW - 230).toFixed(1)}" y="${(svgH - 34).toFixed(1)}" width="224" height="22" rx="4" fill="rgba(30,64,175,0.92)"/>
     <text x="${(svgW - 118).toFixed(1)}" y="${(svgH - 19).toFixed(1)}" text-anchor="middle"
-      font-family="Arial,sans-serif" font-size="10.5" font-weight="bold" fill="white">${totalPanels} MODULES — ${totalDcKw?.toFixed(2) || '—'} kW DC</text>`;
+      font-family="SolarPro Sans, SolarPro Symbols" font-size="10.5" font-weight="bold" fill="white">${totalPanels} MODULES — ${totalDcKw?.toFixed(2) || '—'} kW DC</text>`;
 
   return `<svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}"
     style="display:block;background:#e8edf3;border:1.5px solid #374151;max-width:100%;"

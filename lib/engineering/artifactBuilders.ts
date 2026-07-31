@@ -158,7 +158,7 @@ export function buildSldSvgFromReport(input: ArtifactBuildInput): string {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500"
-     font-family="Arial, sans-serif" font-size="11">
+     font-family="SolarPro Sans, SolarPro Symbols" font-size="11">
   <rect width="800" height="500" fill="#0f172a"/>
 
   <!-- Title -->

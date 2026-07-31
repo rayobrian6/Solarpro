@@ -116,7 +116,7 @@ function p_text(x: number, y: number, text: string,
   const { sz = 11, fill = T.BLACK, anchor = 'middle', bold = false, italic = false } = opts;
   const weight = bold ? 'bold' : 'normal';
   const style  = italic ? 'italic' : 'normal';
-  return `<text x="${x}" y="${y}" font-family="monospace" font-size="${sz}" fill="${fill}" text-anchor="${anchor}" dominant-baseline="middle" font-weight="${weight}" font-style="${style}">${text}</text>`;
+  return `<text x="${x}" y="${y}" font-family="SolarPro Mono, SolarPro Symbols" font-size="${sz}" fill="${fill}" text-anchor="${anchor}" dominant-baseline="middle" font-weight="${weight}" font-style="${style}">${text}</text>`;
 }
 
 // ─── Realistic Cabinet Helper ─────────────────────────────────────────────────

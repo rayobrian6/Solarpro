@@ -312,7 +312,7 @@ export function pageInterconnection(
   `;
 
   const body = `
-    <div class="page" style="padding:12px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:9px;line-height:1.4;max-width:770px;margin:0 auto;">
+    <div class="page" style="padding:12px;font-family:"SolarPro Sans",Helvetica,Arial,sans-serif;font-size:9px;line-height:1.4;max-width:770px;margin:0 auto;">
       ${header}
       ${utilityBox}
       ${mainContent}

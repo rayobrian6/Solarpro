@@ -422,13 +422,13 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     xmlns="http://www.w3.org/2000/svg">
     <rect width="${AG_VB_W}" height="${AG_VB_H}" fill="#fafbfc"/>
     <rect width="${AG_VB_W}" height="26" fill="#000"/>
-    <text x="10" y="17" font-size="11" fill="#fff" font-weight="700" font-family="Arial,sans-serif">ARRAY GRID — ${totalPanels} MODULES / ${totalStrings} ${circuitLabel} — ${displaySystemType(cadSystemType)}</text>
-    <text x="${AG_VB_W - 20}" y="18" text-anchor="end" font-size="12" fill="#fff" font-weight="700" font-family="Arial,sans-serif">N↑</text>
-    <g font-family="Arial,sans-serif">
+    <text x="10" y="17" font-size="11" fill="#fff" font-weight="700" font-family="SolarPro Sans, SolarPro Symbols">ARRAY GRID — ${totalPanels} MODULES / ${totalStrings} ${circuitLabel} — ${displaySystemType(cadSystemType)}</text>
+    <text x="${AG_VB_W - 20}" y="18" text-anchor="end" font-size="12" fill="#fff" font-weight="700" font-family="SolarPro Sans, SolarPro Symbols">N↑</text>
+    <g font-family="SolarPro Sans, SolarPro Symbols">
       ${agCells || `<text x="${AG_VB_W/2}" y="${AG_VB_H/2}" text-anchor="middle" font-size="16" fill="#999">No panel position data — schematic only</text>`}
     </g>
     <rect x="80" y="${AG_VB_H - 18}" width="120" height="5" fill="#aaa" rx="1"/>
-    <text x="80" y="${AG_VB_H - 5}" font-size="8" fill="#777" font-family="Arial,sans-serif">SCHEMATIC (NOT TO SCALE — NTS)</text>
+    <text x="80" y="${AG_VB_H - 5}" font-size="8" fill="#777" font-family="SolarPro Sans, SolarPro Symbols">SCHEMATIC (NOT TO SCALE — NTS)</text>
   </svg>`;
 
   // ── v65: PV-2B now renders the REAL ROOF with modules colored by AC branch ──

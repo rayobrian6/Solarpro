@@ -86,9 +86,30 @@ export async function preparePrintPage(page) {
  *  reproduce these widths; DejaVu and the bare CSS generics do not (the generic
  *  `monospace` measures 615.78 — 8.4% short of Courier New), so a fallback is
  *  detectable rather than silently mis-measured. */
+/** D4 — the fingerprint now validates the EMBEDDED canonical faces, not host
+ *  fonts. Before the font pack, asking for Arial and checking its metrics was
+ *  the only way to detect substitution. After embedding it is the wrong test in
+ *  both directions: a host with no Arial is now the SUPPORTED case, and a host
+ *  that HAS Arial would mask a broken embed by measuring the system face.
+ *
+ *  The expected widths are unchanged (571.73 / 672.11) because Liberation is
+ *  metric-compatible with Arial / Courier New by design — which is precisely why
+ *  embedding it reproduced the accepted geometry instead of reflowing it. They
+ *  are now measured FROM THE EMBEDDED BYTES with no fallback in the stack, so a
+ *  missing or corrupt face measures as the generic default and fails. */
 export const FONT_METRIC_REFERENCE = [
-  { label: 'sans (Arial / Liberation Sans)', stack: `Arial, 'Helvetica Neue', sans-serif`, expectedPx: 571.73 },
-  { label: 'mono (Courier New / Liberation Mono)', stack: `'Courier New', Courier, monospace`, expectedPx: 672.11 },
+  { label: 'SolarPro Sans 400 (embedded)', stack: `"SolarPro Sans"`, expectedPx: 571.73 },
+  { label: 'SolarPro Mono 400 (embedded)', stack: `"SolarPro Mono"`, expectedPx: 672.11 },
+];
+
+/** The faces the artifact must actually have LOADED — `document.fonts.status`
+ *  alone is not sufficient, a substituted face can still report 'loaded'. */
+export const REQUIRED_FONT_FACES = [
+  '400 16px "SolarPro Sans"',
+  '700 16px "SolarPro Sans"',
+  '400 16px "SolarPro Mono"',
+  '700 16px "SolarPro Mono"',
+  '400 16px "SolarPro Symbols"',
 ];
 
 /** Allowed deviation from the fingerprint. Metric-compatible families reproduce
@@ -119,6 +140,18 @@ export async function detectFontAvailability(page, reference = FONT_METRIC_REFER
     const S = 'MMMMMMWWWWiiiill1234567890 The quick brown fox jumps over the lazy dog';
     const widthOf = (stack) => { ctx.font = `16px ${stack}`; return ctx.measureText(S).width; };
     const out = {};
+    // D4 — the embedded faces must be LOADED, checked per face. A malformed or
+    // substituted face can leave document.fonts.status === 'loaded'.
+    out.__faces = {
+      status: document.fonts.status,
+      size: document.fonts.size,
+      loaded: [...document.fonts].map(f => `${f.family}/${f.weight}/${f.status}`),
+      checks: Object.fromEntries([
+        '400 16px "SolarPro Sans"', '700 16px "SolarPro Sans"',
+        '400 16px "SolarPro Mono"', '700 16px "SolarPro Mono"',
+        '400 16px "SolarPro Symbols"',
+      ].map(f => [f, document.fonts.check(f)])),
+    };
     for (const { label, stack, expectedPx } of ref) {
       const w = widthOf(stack);
       const deltaPct = ((w - expectedPx) / expectedPx) * 100;

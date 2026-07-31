@@ -484,10 +484,10 @@ function pv4aBranchRatingTable(
     return `<tr style="background:${i % 2 ? '#f5f5f5' : '#fff'}">`
       + `<td class="fw9 mono">B${b.index}</td>`
       + `<td>${b.deviceCount} × microinverter</td>`
-      + `<td style="text-align:right;font-family:monospace">${b.branchCurrentA.toFixed(1)} A</td>`
-      + `<td style="text-align:right;font-family:monospace">${b.continuousA.toFixed(1)} A</td>`
-      + `<td style="text-align:center;font-family:monospace">${b.ocpdAmps} A</td>`
-      + `<td style="text-align:center;font-family:monospace">${mfrLimit > 0 ? `${mfrLimit} · ${mfrOcpdLimit}A` : '—'}</td>`
+      + `<td style="text-align:right;font-family:"SolarPro Mono","SolarPro Symbols"">${b.branchCurrentA.toFixed(1)} A</td>`
+      + `<td style="text-align:right;font-family:"SolarPro Mono","SolarPro Symbols"">${b.continuousA.toFixed(1)} A</td>`
+      + `<td style="text-align:center;font-family:"SolarPro Mono","SolarPro Symbols"">${b.ocpdAmps} A</td>`
+      + `<td style="text-align:center;font-family:"SolarPro Mono","SolarPro Symbols"">${mfrLimit > 0 ? `${mfrLimit} · ${mfrOcpdLimit}A` : '—'}</td>`
       + `<td class="center">${complianceBadge(compliance)}</td>`
       + `</tr>`;
   }).join('');
@@ -719,11 +719,11 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
               `<tr style="background:${i % 2 ? '#f5f5f5' : '#fff'}">` +
               `<td class="fw9 mono">${s.label}</td>` +
               `<td>DC string</td>` +
-              `<td style="text-align:right;font-family:monospace">${s.ampacityA != null ? s.ampacityA.toFixed(2) + ' A' : '—'}</td>` +
-              `<td style="text-align:center;font-family:monospace">${s.ocpdAmps != null ? s.ocpdAmps + ' A' : '—'}</td>` +
+              `<td style="text-align:right;font-family:"SolarPro Mono","SolarPro Symbols"">${s.ampacityA != null ? s.ampacityA.toFixed(2) + ' A' : '—'}</td>` +
+              `<td style="text-align:center;font-family:"SolarPro Mono","SolarPro Symbols"">${s.ocpdAmps != null ? s.ocpdAmps + ' A' : '—'}</td>` +
               `<td>${s.wireGauge} USE-2/PV Wire</td>` +
-              `<td style="text-align:right;font-family:monospace">${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>` +
-              `<td style="text-align:right;font-family:monospace">${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>` +
+              `<td style="text-align:right;font-family:"SolarPro Mono","SolarPro Symbols"">${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>` +
+              `<td style="text-align:right;font-family:"SolarPro Mono","SolarPro Symbols"">${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>` +
               `</tr>`).join('');
             return `
       <div class="section-title">DC String Schedule — ${subSectionLabel(sub)} — NEC 690.8(A)</div>
@@ -1315,7 +1315,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
       <div class="section-title">Grounding & Bonding Detail — NEC 690.43, 250.166</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:2px;align-items:center;">
         <div style="text-align:center;">
-          <svg viewBox="0 0 300 198" width="128" height="84" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
+          <svg viewBox="0 0 300 198" width="128" height="84" style="display:block;margin:0 auto;font-family:"SolarPro Sans","SolarPro Symbols";">
             <!-- PV module frames (aluminum, white with inner frame line) -->
             <g stroke="#1a2230" stroke-width="1.1" fill="#ffffff">
               <rect x="22" y="14" width="66" height="34" rx="1"/>

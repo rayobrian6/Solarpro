@@ -5,7 +5,7 @@
 
 import type { PermitInput, CanonicalInput } from './types';
 import type { CADModel } from '@/lib/cad/types';
-import { PLANSET_ENGINE_VERSION } from './constants';
+import { PLANSET_ENGINE_VERSION, RENDERING_PACK_VERSION } from './constants';
 import { buildPermitDesignSnapshot } from './snapshot/build';
 import { getDesignTemps } from './utils/designTemps';
 import { buildComputeSystemShadow } from './utils/computedRuns';
@@ -63,6 +63,7 @@ import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
 import { inlineManufacturerAssets } from './utils/inlineManufacturerAssets';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
+import { fontFaceCss, fontFaceIdentities, FONT_PACK_VERSION } from './fonts/fontPack';
 
 export function generatePermitHTML(
   input: PermitInput,
@@ -1659,8 +1660,21 @@ export function generatePermitHTML(
 <head>
 <meta charset="UTF-8">
 <meta name="planset-version" content="${PLANSET_ENGINE_VERSION}">
+${''/* D4 — the rendering environment, recorded IN the artifact. A reader (or a
+     gate) can tell a canonical-font artifact from a host-font one by data
+     rather than by inspecting glyphs. The face digests are of the DECODED
+     WOFF2 bytes, so they identify the fonts, not the base64 formatting. */}
+<meta name="rendering-pack-version" content="${RENDERING_PACK_VERSION}">
+<meta name="font-pack-version" content="${FONT_PACK_VERSION}">
+<meta name="font-faces" content="${escapeH(fontFaceIdentities().map(f => `${f.family}/${f.weight}/${f.sha256.slice(0, 16)}/${f.byteLength}`).join(' '))}">
 <title>Permit Package — ${escapeH(String(project.projectName ?? ''))}</title>
 <style>
+  /* ── D4 · THE CANONICAL EMBEDDED FONT PACK ────────────────────────────────
+     The exact WOFF2 bytes that render this document, inlined so its geometry is
+     independent of what the rendering host has installed. Emitted only after the
+     bytes verify against the manifest (fontPack.ts throws otherwise) — an
+     artifact that references unverified fonts is not authoritative. */
+${fontFaceCss()}
   /* ═══════════════════════════════════════════════════════════════════════════
      SOLARPRO ENGINEERING DOCUMENT SYSTEM — CANONICAL STYLESHEET v47.270
      CAD-standard. Rigid grid. Zero rounded corners. Zero UI colors.
@@ -1712,8 +1726,14 @@ export function generatePermitHTML(
     --f-3xl:13.5px;
     --f-4xl:18px;
 
-    --mono: 'Courier New', Courier, monospace;
-    --sans: Arial, 'Helvetica Neue', sans-serif;
+    /* D4 — the canonical families. No host fallback: authoritative rendering
+       must FAIL on a missing face rather than silently degrade to whatever the
+       machine happens to have. The symbols family is applied deliberately, per
+       element, never appended to the sans/mono chain (it must not participate
+       in ordinary text shaping). */
+    --mono: "SolarPro Mono", "SolarPro Symbols";
+    --sans: "SolarPro Sans", "SolarPro Symbols";
+    --symbols: "SolarPro Symbols";
 
     /* Vertical rhythm — space between major content blocks */
     --gap-section: var(--md);   /* default gap between .sec blocks */
@@ -2654,7 +2674,7 @@ export function generatePermitHTML(
       position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
       display: flex; align-items: center; gap: 6px; justify-content: center;
       background: #23262b; color: #e8eaed; padding: 6px 10px;
-      font-family: Arial, sans-serif; font-size: 13px;
+      font-family:"SolarPro Sans"; font-size: 13px;
       box-shadow: 0 1px 6px rgba(0,0,0,0.5); user-select: none;
     }
     #sp-toolbar button {
