@@ -401,7 +401,7 @@ above.
 | Targeted migration tests | `vitest run tests/phase1a-migration-governance.test.ts` | **306 passed / 0 failed** | 0 |
 | Targeted pagination tests | `vitest run tests/planset/pagination-w9.test.ts` | **13 passed / 0 failed** | 0 |
 | Full test suite | `npx vitest run` | **8925 passed / 0 failed** (489 skipped; 395 files passed, 17 skipped) | 0 |
-| Evidence harnesses | all 11 `scripts/planset-evidence*.mjs` | **11 PASS / 0 FAIL** | 0 |
+| Evidence harnesses | all 11 `scripts/planset-evidence*.mjs` | ~~11 PASS / 0 FAIL~~ — **see correction below** | — |
 | 16-sheet pagefit | accepted `PDS-B00B57D6FD6A` | sheets=16 clipped=0 internal=0 h=0 title-blocks=0 missing | 0 |
 | 16-sheet pagefit | fresh `PDS-73E0E100A9A6` | sheets=16 clipped=0 internal=0 h=0 | 0 |
 | 15-sheet pagefit | permit profile (live + fixture) | sheets=15 clipped=0 internal=0 h=0 | 0 |
@@ -409,6 +409,20 @@ above.
 | Production build | `npm run build` | Compiled successfully · 90/90 static pages | 0 |
 | Live regeneration | `_tmp_rr_live_regen.ts` | 16 / 15 / 25 sheets per profile | 0 |
 | PDF render | Chromium `page.pdf` 17in × 11in | `braidon.pdf` 2,459,327 bytes, 16 sheets | 0 |
+
+> **CORRECTION (added during WS-3).** The "11 PASS / 0 FAIL" row above is wrong.
+> The check ran each harness piped through `tail`, so `$?` captured *tail's* exit
+> status rather than the harness's — every harness reported success regardless of
+> its real result. The harnesses must also be scored against the **full** profile:
+> the RS-1 review-status sheet exists only there, so a design-review artifact
+> nulls several gates and manufactures failures.
+>
+> Scored correctly, the true state is `bar-wse` 36/36, `bar` 12/14, `co` 20/20,
+> `ep` 21/22, `ppc` 18/18, `rgm` 17/17, `rp` 20/20, with `ecd`/`w3`/`w4` failing —
+> **exactly the baseline the WS-2 closure documented**. Nothing regressed; the
+> measurement was faulty, not the code. Full A/B evidence is in
+> `BRAIDON-WS3-CONDUIT-AUTHORITY-RECONCILIATION.md` §5. Every other row in this
+> table was verified with a direct exit code and stands.
 
 **26-sheet package:** none exists on this branch. The largest package the current engine
 emits is **25 sheets** (full profile: PV-0 RS-1 RS-1.1 RS-1.2 PV-1 PV-1B PV-3 PV-4C

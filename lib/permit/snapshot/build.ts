@@ -517,6 +517,50 @@ export function buildPermitDesignSnapshot(
              : String(r.conduitType ?? '').toUpperCase().includes('EMT') ? '358'
              : String(r.conduitType ?? '').toUpperCase().includes('RMC') ? '344'
              : null));
+
+    // ── WS-3 — THE CALLOUT IS DERIVED FROM THIS RECORD'S OWN RACEWAY ────────
+    // The engine's `run.conductorCallout` is a legacy concatenation that carries
+    // a SECOND, hard-coded raceway: every in-conduit run arrived here reading
+    // `IN 1-1/4" 3/4" EMT` — two trade sizes, and `EMT` contradicting the same
+    // record's `raceway: 'PVC Sch 80'`. `projectCanonicalFeeder` already refused
+    // that string and rebuilt the sheets' callout from canonical parts
+    // (electricalProjection.ts §3), which is why nothing corrupt PRINTS — but
+    // the snapshot is the digest-bound archive of record, and it was storing a
+    // conduit statement that contradicted its own raceway authority. Fixing it
+    // downstream left the authority itself wrong.
+    //
+    // So it is derived HERE, from the very fields this record publishes, and the
+    // legacy string is never trusted. When the canonical parts are absent the
+    // callout is null: a missing statement is honest, a contradicting one is not.
+    const _calloutRaceway = _isOpenAir ? null : (r.conduitType ?? null);
+    const _calloutSize = _isOpenAir ? null : (r.conduitSize ?? null);
+    const _calloutGauge = r.wireGauge ?? null;
+    const _calloutEgc = r.egcGauge ?? null;
+    // The callout describes WHAT IS IN THE RACEWAY, so its conductor count is the
+    // RACEWAY's, not the segment's. `run.conductorCount` is PER CIRCUIT: the
+    // shared branch home-run reports 2 while three branch circuits share that
+    // raceway — 6 current-carrying #10s plus one #12 EGC, which is exactly what
+    // the raceway authority publishes (conductorCount 7, currentCarrying 6).
+    // Deriving from the segment alone would trade a wrong RACEWAY for a wrong
+    // CONDUCTOR COUNT. Total minus the single EGC gives the hot/neutral count
+    // the callout names; segments with no raceway object (utility-owned service
+    // equipment) keep their own count.
+    const _rwConductorTotal = isFinite(r.physicalRaceway?.conductorCount) ? r.physicalRaceway.conductorCount : null;
+    const _segConductorCount = isFinite(r.conductorCount) ? r.conductorCount : null;
+    const _calloutCount = (!_isOpenAir && _rwConductorTotal != null)
+      ? Math.max(1, _rwConductorTotal - (r.egcGauge ? 1 : 0))
+      : _segConductorCount;
+    const _calloutInsul = r.insulation ?? (_isOpenAir && isMicro ? 'TC-ER' : (r.isDc ? 'USE-2' : 'THWN-2'));
+    const _derivedCallout: string | null = (_calloutGauge && _calloutCount != null)
+      ? [
+          `${_calloutCount}×${_calloutGauge} ${_calloutInsul}`,
+          _calloutEgc ? `1×${_calloutEgc} GRN EGC` : null,
+          _isOpenAir
+            ? 'OPEN AIR — NEC 690.31'
+            : (_calloutRaceway && _calloutSize ? `IN ${_calloutSize} ${_calloutRaceway}` : null),
+        ].filter(Boolean).join('\n')
+      : null;
+
     return {
       segmentId: String(r.id), from: String(r.fromLabel ?? r.from ?? ''), to: String(r.toLabel ?? r.to ?? ''),
       // §3 — prefer the engine's explicit electrical function (the sectioned
@@ -549,7 +593,7 @@ export function buildPermitDesignSnapshot(
       conductorMaterial: 'Cu',
       insulation: r.insulation ?? (_isOpenAir && isMicro ? 'TC-ER' : (r.isDc ? 'USE-2' : 'THWN-2')),
       neutralPresent: typeof r.neutralPresent === 'boolean' ? r.neutralPresent : null,
-      conductorCallout: r.conductorCallout ?? null,
+      conductorCallout: _derivedCallout,
       egcGauge: r.egcGauge ?? null,
       bondingMethod: r.egcGauge ? 'conductor' : (String(r.conduitType ?? '').toUpperCase().includes('EMT') ? 'raceway' : null),
       operatingCurrentA: _opA,
