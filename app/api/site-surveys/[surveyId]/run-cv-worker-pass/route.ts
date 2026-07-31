@@ -7,4 +7,6 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export { POST, GET } from '../open-source-photo-vision-pass/route';
+export { /* @next-codemod-error `POST` export is re-exported. Check if this component uses `params` or `searchParams`*/
+POST, /* @next-codemod-error `GET` export is re-exported. Check if this component uses `params` or `searchParams`*/
+GET } from '../open-source-photo-vision-pass/route';

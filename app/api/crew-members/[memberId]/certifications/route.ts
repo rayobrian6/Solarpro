@@ -13,7 +13,8 @@ type Params = { memberId: string };
 const MAX_CERTS_PER_MEMBER = CREW_LIMITS.MAX_CERTS_PER_MEMBER;
 
 /** GET /api/crew-members/[memberId]/certifications — list a member's certs (soonest expiry first). */
-export async function GET(req: NextRequest, { params }: { params: Params }) {
+export async function GET(req: NextRequest, props: { params: Promise<Params> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -43,7 +44,8 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
 }
 
 /** POST /api/crew-members/[memberId]/certifications — add a cert to the vault. */
-export async function POST(req: NextRequest, { params }: { params: Params }) {
+export async function POST(req: NextRequest, props: { params: Promise<Params> }) {
+  const params = await props.params;
   try {
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });

@@ -7,7 +7,7 @@ export const metadata = { title: 'SolarPro Admin' };
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // Step 1: Get cookie — Next.js 14 cookies() is synchronous
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get('solarpro_session')?.value;
 
   console.log('[AdminLayout] token present:', !!token);

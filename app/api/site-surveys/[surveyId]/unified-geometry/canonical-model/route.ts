@@ -39,10 +39,8 @@ import { getContradictionReportsBySurvey } from '@/lib/db/geometryReconstruction
 import type { DepthContradictionReport } from '@/lib/siteSurveys/geometryReconstruction/types';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) {

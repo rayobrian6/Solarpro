@@ -22,10 +22,8 @@ export const maxDuration = 30; // bumped from 15 — getDbReady cold-start headr
  *
  * Errors: 404 (not found), 503 (db down)
  */
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const { id } = params;
 
   if (!id || typeof id !== 'string') {

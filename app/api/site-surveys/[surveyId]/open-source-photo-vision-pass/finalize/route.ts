@@ -291,10 +291,8 @@ async function runLabelUpdateStage(
 // POST — Run finalization for a completed job
 // ---------------------------------------------------------------------------
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const finalizeStart = Date.now();
   const surveyId = params?.surveyId ?? 'unknown';
 

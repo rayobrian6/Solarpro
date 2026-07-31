@@ -8,7 +8,7 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/leads/[id]/convert
@@ -25,7 +25,8 @@ type Params = { params: { id: string } };
 //
 // Returns: { success, clientId, projectId }
 // ---------------------------------------------------------------------------
-export async function POST(req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, props: Params) {
+  const params = await props.params;
   const rlGuard = await rateLimitGuard(req, 'admin');
   if (rlGuard.blocked) return rlGuard.response;
 

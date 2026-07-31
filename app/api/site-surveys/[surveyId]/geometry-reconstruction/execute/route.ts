@@ -84,10 +84,8 @@ function startHeartbeatTimer(jobId: string, getCurrentStage: () => string): () =
   return () => clearInterval(timer);
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const surveyId = params?.surveyId ?? 'unknown';
   const tRouteStart = Date.now();
 

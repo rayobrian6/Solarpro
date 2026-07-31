@@ -40,10 +40,8 @@ import { generateMockArtifacts } from '@/lib/siteSurveys/geometryReconstruction/
 import type { GeometryReconstructionInput, SourcePhoto } from '@/lib/siteSurveys/geometryReconstruction/types';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const surveyId = params?.surveyId ?? 'unknown';
   console.log(`[POST geometry-reconstruction/start] surveyId=${surveyId}`);
 

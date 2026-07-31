@@ -8,12 +8,13 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // ---------------------------------------------------------------------------
 // GET /api/admin/leads/[id]
 // ---------------------------------------------------------------------------
-export async function GET(req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, props: Params) {
+  const params = await props.params;
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
@@ -52,7 +53,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 // ---------------------------------------------------------------------------
 // PATCH /api/admin/leads/[id] — update status and/or notes
 // ---------------------------------------------------------------------------
-export async function PATCH(req: NextRequest, { params }: Params) {
+export async function PATCH(req: NextRequest, props: Params) {
+  const params = await props.params;
   const rlGuard = await rateLimitGuard(req, 'admin');
   if (rlGuard.blocked) return rlGuard.response;
 

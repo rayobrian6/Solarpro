@@ -59,8 +59,9 @@ export const maxDuration = 30;
  */
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string; userId: string } }
+  props: { params: Promise<{ id: string; userId: string }> }
 ) {
+  const params = await props.params;
   const rlGuard = await rateLimitGuard(req, 'standard');
   if (rlGuard.blocked) return rlGuard.response;
 
@@ -203,8 +204,9 @@ export async function PATCH(
  */
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string; userId: string } }
+  props: { params: Promise<{ id: string; userId: string }> }
 ) {
+  const params = await props.params;
   const rlGuard = await rateLimitGuard(req, 'standard');
   if (rlGuard.blocked) return rlGuard.response;
 

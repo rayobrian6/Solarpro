@@ -37,7 +37,7 @@ export const metadata = {
 };
 
 export default async function EngineeringIntelligencePage() {
-  const token = cookies().get('solarpro_session')?.value;
+  const token = (await cookies()).get('solarpro_session')?.value;
   const sessionUser = token ? verifyToken(token) : null;
   const projectList = await loadProjectPickerRecords(sessionUser?.id);
   const model = buildEngineeringIntelligenceWorkspace();

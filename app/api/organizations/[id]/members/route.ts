@@ -40,10 +40,8 @@ export const maxDuration = 30;
  * Returns the list of members for the given organization. Requires
  * the member:view permission (members and above).
  */
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = getUserFromRequest(req);
   if (!user) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -113,10 +111,8 @@ export async function GET(
  *
  * When ENTERPRISE_ORG_MEMBERSHIP_WRITE_ENABLED is off, returns 501.
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const rlGuard = await rateLimitGuard(req, 'standard');
   if (rlGuard.blocked) return rlGuard.response;
 

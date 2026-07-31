@@ -18,10 +18,8 @@ import { getSiteSurveyById, getSiteSurveyFiles, isValidUUID } from '@/lib/db-neo
 import { buildProfessionalSurveyReadinessReport } from '@/lib/siteSurvey/professionalSurveyReadinessReport';
 import { analyzeSurveyPhotosOpenSource } from '@/lib/siteSurvey/photoIntelligence';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

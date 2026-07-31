@@ -21,7 +21,8 @@ const ACTION_STAGE: Record<string, ProspectStage> = {
   sold: "signed_up",
 };
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const rlGuard = await rateLimitGuard(req, 'standard');
   if (rlGuard.blocked) return rlGuard.response;
 
