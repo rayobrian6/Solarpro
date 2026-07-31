@@ -1,0 +1,94 @@
+{
+  "last_updated": "2026-07-30T22:00:00Z",
+  "frameworks": [
+    {
+      "id": "soc2-type1",
+      "name": "SOC 2 Type 1",
+      "status": "in_progress",
+      "target": "Q4 2026",
+      "evidence": "Audit scheduled for October 2026; all P0 controls operating; 10 policies approved; 84 controls documented in self-built matrix"
+    },
+    {
+      "id": "soc2-type2",
+      "name": "SOC 2 Type 2",
+      "status": "planned",
+      "target": "Q2-Q3 2027",
+      "evidence": "Observation period begins immediately after Type 1 report issuance; will run for the standard 6-month window."
+    },
+    {
+      "id": "iso27001",
+      "name": "ISO 27001:2022",
+      "status": "in_progress",
+      "target": "Q3-Q4 2027",
+      "evidence": "ISMS framework established; risk register and asset inventory complete; 80% control overlap with SOC 2."
+    },
+    {
+      "id": "iso27701",
+      "name": "ISO 27701:2019 (Privacy)",
+      "status": "in_progress",
+      "target": "Q3-Q4 2027",
+      "evidence": "PII mapping in flight; data subject rights workflows designed; privacy impact assessment template approved."
+    },
+    {
+      "id": "iso27017",
+      "name": "ISO 27017:2015 (Cloud)",
+      "status": "in_progress",
+      "target": "Q3-Q4 2027",
+      "evidence": "Shared-responsibility matrix drafted for Vercel/Neon/Render/Cloudflare; cloud-specific controls documented."
+    }
+  ],
+  "subprocessors": [
+    {
+      "name": "Vercel",
+      "purpose": "Hosting",
+      "data": "Application data, logs"
+    },
+    {
+      "name": "Neon",
+      "purpose": "Database",
+      "data": "Customer data"
+    },
+    {
+      "name": "Render",
+      "purpose": "ML inference",
+      "data": "Image bytes (transient)"
+    },
+    {
+      "name": "OpenAI",
+      "purpose": "Vision classification",
+      "data": "Image bytes (transient, no retention per API terms)"
+    },
+    {
+      "name": "Anthropic",
+      "purpose": "Vision analysis",
+      "data": "Image bytes (transient, no retention per API terms)"
+    },
+    {
+      "name": "Google Maps / Solar API",
+      "purpose": "Geocoding + roof data",
+      "data": "Address, lat/lng"
+    },
+    {
+      "name": "Stripe",
+      "purpose": "Payments",
+      "data": "Card tokens (not raw cards)"
+    },
+    {
+      "name": "Resend",
+      "purpose": "Transactional email",
+      "data": "Email addresses"
+    }
+  ],
+  "policies": [
+    "Information Security",
+    "Acceptable Use",
+    "Access Control",
+    "Data Classification & Handling",
+    "Incident Response",
+    "Change Management",
+    "Vulnerability Management",
+    "Logging & Monitoring",
+    "Backup & Recovery",
+    "Vendor Risk Management"
+  ]
+}
