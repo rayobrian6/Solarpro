@@ -1,18 +1,20 @@
 # PLANSET 17 — PROJECTION AND RENDERING CLOSURE
 
-**Date:** 2026-07-31 · **Branch:** `dev` · **Starting commit:** `1d2d7922` · **Ending commit:** `f944906a`
+**Date:** 2026-07-31 · **Branch:** `dev` · **Starting commit:** `1d2d7922` · **Ending commit:** `35b830bc`
 
-> **STATUS: D1, D2 and D3 are CLOSED, verified in a regenerated artifact, and pushed.**
-> **D4 (wiring the canonical font pack) is NOT implemented** — the pack is built and hashed,
-> but no `@font-face` is emitted and 179 source sites still request host fonts.
-> **WS-5 remains blocked** until D4 lands and a re-baselined artifact proves the full result.
+> **STATUS: D1, D2, D3 and D4 are ALL CLOSED, verified in regenerated artifacts, and pushed.**
+> **WS-5 is unblocked.**
 
 | Defect | Status | Commit |
 |---|---|---|
 | D2 — false project-wide `#10 AWG` EGC minimum | **CLOSED**, artifact-proven | `b108164b` |
 | D3 — SCHED omitted 38 of 48 BOM rows | **CLOSED**, artifact-proven | `f088e72a` |
 | D1 — utility-owned run counted as field work | **CLOSED**, artifact-proven | `f944906a` |
-| D4 — canonical font pack wiring | **built, not wired** | `9c6d9103` (pack only) |
+| D4 — canonical font pack wired, HTML + SVG + PDF | **CLOSED**, artifact-proven | `97468283` |
+
+Final state: **19 / 18 / 25 sheets · 5 gates · 14 requirements · 0 advisories · zero clipping**.
+Full suite **8995 / 0**, lint 0 errors, typecheck clean, production build 90/90 pages,
+authoritative Chromium PDFs generated for all three profiles with the font gate passing.
 
 ---
 
