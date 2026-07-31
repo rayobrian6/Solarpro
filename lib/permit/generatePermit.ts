@@ -1428,8 +1428,15 @@ export function generatePermitHTML(
     (n, t) => pageWarningLabels(input, cad, n, t, _compact ? { merged: true } : undefined),
     ...(_compact ? [] : [(n: number, t: number) => pageDisconnectDirectory(input, cad, n, t)]),  // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
-    ...(_compact ? [] : Array.from({ length: _schedContCount }, (_unused, ci) =>
-      (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci))),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
+    // D3 (Planset 17) — SCHED continuations render on EVERY profile. The
+    // `_compact ? []` gate here was the other half of the omission fixed in
+    // sheetManifest.ts: it suppressed the continuation PAGES while the primary
+    // sheet capped at SCHED_BOM_ROWS_FIRST, so 38 of 48 procurement rows were
+    // dropped from the permit and design-review artifacts with no page to
+    // carry them. Both halves must move together or the sheet index and the
+    // page assembly disagree (V12/V35).
+    ...Array.from({ length: _schedContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci)),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
     ...(_compact ? [] : [(n: number, t: number) => pageSpecSheetReference(input, cad, n, t)]),   // APP-A (all)
     // DS-n (FULL profile): full-page REAL manufacturer datasheets, inline after
     // APP-A exactly as before. The compact profiles emit them at the END as the

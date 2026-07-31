@@ -2273,9 +2273,16 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           : `<span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>`}
       </div>`}
 
-      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST, { bySub: _schedHybrid,
-        ...(isCompactProfile(resolvePlansetProfile(input)) ? { continuationLabel: (from: number, to: number) =>
-          `ITEMS ${from}–${to} — FULL PROCUREMENT BILL OF MATERIALS IN THE PROJECT RECORD (SNAPSHOT-BOUND; NOT A PERMIT DOCUMENT)` } : {}) })}
+      ${''/* D3 (Planset 17) — the compact profiles used to override the
+           continuation label with "ITEMS n–m — FULL PROCUREMENT BILL OF
+           MATERIALS IN THE PROJECT RECORD (SNAPSHOT-BOUND; NOT A PERMIT
+           DOCUMENT)", because they carried no SCHED continuation sheet to point
+           at. That sentence was true about where the rows lived and false about
+           the schedule being complete: 38 of 48 lines were simply absent from
+           the artifact a reviewer holds. Now that the continuations render on
+           every profile the default label applies — it names the next SHEET,
+           which is where the rows actually are. */}
+      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST, { bySub: _schedHybrid })}
 
 
       <!-- System-Specific Hardware Schedule -->
