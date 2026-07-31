@@ -1,0 +1,2460 @@
+{
+  "generatedAt": "2026-07-29T00:04:39.502Z",
+  "liveProject": {
+    "id": "4030b664-bebe-433b-a11c-cda05ead2f7d",
+    "name": "BRAIDON M PILLA — Solar"
+  },
+  "storeCounts": {
+    "before": {
+      "auditRows": 10,
+      "invalidationRows": 20,
+      "canonicalPanelId": "qcells-peak-duo-400",
+      "selectedEquipmentRoofPanelId": "rec-alpha-pure-405",
+      "engineeringConfigRoofPanelId": "rec-alpha-pure-405"
+    },
+    "afterRun1": {
+      "auditRows": 11,
+      "invalidationRows": 22,
+      "canonicalPanelId": "qcells-peak-duo-400",
+      "selectedEquipmentRoofPanelId": "qcells-peak-duo-400",
+      "engineeringConfigRoofPanelId": "qcells-peak-duo-400"
+    },
+    "afterRun2": {
+      "auditRows": 11,
+      "invalidationRows": 22,
+      "canonicalPanelId": "qcells-peak-duo-400",
+      "selectedEquipmentRoofPanelId": "qcells-peak-duo-400",
+      "engineeringConfigRoofPanelId": "qcells-peak-duo-400"
+    }
+  },
+  "before": {
+    "snapshotId": "PDS-E93FD65256AB",
+    "digest": "e93fd65256ab71b9fa99f9cf6582de35f40b6d27643dfbd7ae293c9df4361d1b",
+    "gates": [
+      {
+        "code": "PROJECT_AND_AHJ_AUTHORITY",
+        "status": "OPEN",
+        "reqs": [
+          "CODE-AUTHORITY-INCOMPLETE",
+          "PROJECT-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "code": "EQUIPMENT_RECONCILIATION",
+        "status": "OPEN",
+        "reqs": [
+          "EQUIPMENT-IDENTITY-CONFLICT",
+          "MODULE-EXACT-DATASHEET-PENDING"
+        ]
+      },
+      {
+        "code": "ENVIRONMENTAL_LOAD_AUTHORITY",
+        "status": "OPEN",
+        "reqs": [
+          "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "code": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+        "status": "OPEN",
+        "reqs": [
+          "FRAMING-AUTHORITY-UNVERIFIED",
+          "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+          "RACKING-CAPACITY-APPLICABILITY-GAP",
+          "EQUIPMENT-DOCUMENT-APPLICABILITY"
+        ]
+      },
+      {
+        "code": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+        "status": "OPEN",
+        "reqs": [
+          "ROUTE-LENGTH-ESTIMATE",
+          "TAP-CONDUCTOR-LENGTH-PENDING"
+        ]
+      },
+      {
+        "code": "QCABLE_SYSTEM_CLOSURE",
+        "status": "OPEN",
+        "reqs": [
+          "QCABLE-PROCUREMENT-INSUFFICIENT",
+          "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "code": "PROFESSIONAL_RELEASE",
+        "status": "OPEN",
+        "reqs": [
+          "DESIGNER-OF-RECORD-MISSING",
+          "ENGINEERING-REVIEW-PENDING"
+        ]
+      }
+    ],
+    "openGates": 7,
+    "open": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "DESIGNER-OF-RECORD-MISSING",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "EQUIPMENT-IDENTITY-CONFLICT",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "openCount": 16,
+    "registryCount": 16,
+    "moduleOfRecord": "qcells-peak-duo-400"
+  },
+  "run1": {
+    "tag": "run1",
+    "snapshotId": "PDS-8FD283BF20AE",
+    "digest": "8fd283bf20ae3b569908cac09330fc48a5146307bf9d92e82d0e8b339d19e73d",
+    "gates": [
+      {
+        "code": "PROJECT_AND_AHJ_AUTHORITY",
+        "status": "OPEN",
+        "reqs": [
+          "CODE-AUTHORITY-INCOMPLETE",
+          "PROJECT-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "code": "EQUIPMENT_RECONCILIATION",
+        "status": "OPEN",
+        "reqs": [
+          "MODULE-EXACT-DATASHEET-PENDING"
+        ]
+      },
+      {
+        "code": "ENVIRONMENTAL_LOAD_AUTHORITY",
+        "status": "CLEARED",
+        "reqs": []
+      },
+      {
+        "code": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+        "status": "OPEN",
+        "reqs": [
+          "FRAMING-AUTHORITY-UNVERIFIED",
+          "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+          "RACKING-CAPACITY-APPLICABILITY-GAP",
+          "EQUIPMENT-DOCUMENT-APPLICABILITY"
+        ]
+      },
+      {
+        "code": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+        "status": "OPEN",
+        "reqs": [
+          "ROUTE-LENGTH-ESTIMATE",
+          "TAP-CONDUCTOR-LENGTH-PENDING"
+        ]
+      },
+      {
+        "code": "QCABLE_SYSTEM_CLOSURE",
+        "status": "OPEN",
+        "reqs": [
+          "QCABLE-PROCUREMENT-INSUFFICIENT",
+          "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "code": "PROFESSIONAL_RELEASE",
+        "status": "OPEN",
+        "reqs": [
+          "DESIGNER-OF-RECORD-MISSING",
+          "ENGINEERING-REVIEW-PENDING"
+        ]
+      }
+    ],
+    "openGates": 6,
+    "open": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "DESIGNER-OF-RECORD-MISSING",
+      "ENGINEERING-REVIEW-PENDING",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "openCount": 14,
+    "registryCount": 14,
+    "moduleOfRecord": "qcells-peak-duo-400",
+    "fullSheets": [
+      "PV-0",
+      "RS-1",
+      "RS-1.1",
+      "RS-1.2",
+      "RS-1.3",
+      "PV-1",
+      "PV-1B",
+      "PV-3",
+      "PV-4C",
+      "PV-4C.1",
+      "E-1",
+      "PV-4A",
+      "PV-4B",
+      "PV-5",
+      "PV-6",
+      "SCHED",
+      "SCHED-2",
+      "SCHED-3",
+      "SCHED-4",
+      "APP-A",
+      "DS-1",
+      "DS-2",
+      "DS-3",
+      "CERT",
+      "PE-1"
+    ],
+    "permitSheets": [
+      "PV-0",
+      "PV-1",
+      "PV-1B",
+      "PV-3",
+      "PV-4C",
+      "PV-4C.1",
+      "E-1",
+      "PV-4A",
+      "PV-4B",
+      "PV-5",
+      "SCHED",
+      "DS-1",
+      "DS-2",
+      "DS-3"
+    ],
+    "fullBytes": 1954907,
+    "permitBytes": 1740582,
+    "fullSha": "845dce6d76cd207708e164702b9f2cf2540944678be7aeed2d2fea4c0bd15415",
+    "permitSha": "02d0ac36c10d8953ae57e4334303a2cdfe5fad3c3b2eb27ae98c04622e03d586",
+    "lifecycle": {
+      "iterations": 1,
+      "stabilized": true,
+      "bound": 3,
+      "invariantViolations": [],
+      "executionOrder": [
+        "project-authority-key@v1",
+        "digest-invalidation-ledger@v1",
+        "canonical-equipment-selection@v1",
+        "module-datasheet-binding@v1",
+        "project-personnel-designer@v1",
+        "racking-assembly-selection@v1",
+        "engineering-review-record@v1",
+        "project-authority@v1",
+        "code-authority@v1",
+        "racking-capacity-document@v1",
+        "framing-capacity-document@v1",
+        "climate-hazard-document@v1",
+        "environmental-load-authority@v1",
+        "cable-extension-solutions@v1",
+        "racking-documents@v1",
+        "framing-capacity-retrieval@v1"
+      ],
+      "evidenceCount": 31,
+      "invalidations": 6
+    },
+    "canonicalEquipment": {
+      "field": "module",
+      "canonical": {
+        "catalogId": "qcells-peak-duo-400",
+        "manufacturer": "Q CELLS",
+        "model": "Q.PEAK DUO BLK ML-G10+ 400W",
+        "ratedWatts": 400,
+        "tier": "project",
+        "rank": 50,
+        "actor": "reconciliation",
+        "atIso": "2026-07-28T23:14:03.489Z",
+        "path": "projects.selected_equipment.panelId",
+        "explicit": false
+      },
+      "superseded": [
+        {
+          "path": "engineering_config.subSystems.roof.panelId",
+          "value": "rec-alpha-pure-405",
+          "label": "REC Group Alpha Pure-R 405W",
+          "tier": "subsystem",
+          "actor": "engineering",
+          "atIso": "2026-07-17T16:16:47.549Z",
+          "supersededBecause": "outranked (subsystem/10 < project/50) and its currency is not contradicted (2026-07-17T16:16:47.549Z vs canonical 2026-07-28T23:14:03.489Z)"
+        },
+        {
+          "path": "permit-input#project.subSystems.roof.panelId",
+          "value": "rec-alpha-pure-405",
+          "label": "REC Group Alpha Pure-R 405W",
+          "tier": "subsystem",
+          "actor": "engineering",
+          "atIso": "2026-07-17T16:16:47.549Z",
+          "supersededBecause": "outranked (subsystem/10 < project/50) and its currency is not contradicted (2026-07-17T16:16:47.549Z vs canonical 2026-07-28T23:14:03.489Z)"
+        },
+        {
+          "path": "projects.selected_equipment.subSystems.roof.panelId",
+          "value": "rec-alpha-pure-405",
+          "label": "REC Group Alpha Pure-R 405W",
+          "tier": "subsystem",
+          "actor": "engineering",
+          "atIso": "2026-07-17T16:16:47.549Z",
+          "supersededBecause": "outranked (subsystem/10 < project/50) and its currency is not contradicted (2026-07-17T16:16:47.549Z vs canonical 2026-07-28T23:14:03.489Z)"
+        }
+      ],
+      "corroboratingPaths": [
+        "permit-input#system.inverters[].strings[].panelModel"
+      ],
+      "consideredPaths": [
+        "projects.selected_equipment.panelId",
+        "permit-input#system.inverters[].strings[].panelModel",
+        "engineering_config.subSystems.roof.panelId",
+        "permit-input#project.subSystems.roof.panelId",
+        "projects.selected_equipment.subSystems.roof.panelId"
+      ],
+      "divergent": true,
+      "operatorConfirmationRequired": false,
+      "basis": "canonical = projects.selected_equipment.panelId = 'qcells-peak-duo-400' (tier project, rank 50, generated via reconciliation at 2026-07-28T23:14:03.489Z); 1 corroborating, 3 superseded, 0 genuinely active",
+      "reconciliation": {
+        "auditId": "ebf0a515-ac8f-4c67-aec2-dfa5cd64a042",
+        "actor": "system-resolver",
+        "reason": "AAC WS-2 automatic reconciliation: canonical = projects.selected_equipment.panelId = 'qcells-peak-duo-400' (tier project, rank 50, generated via reconciliation at 2026-07-28T23:14:03.489Z); 1 corroborating, 3 superseded, 0 genuinely active",
+        "reconciledAtIso": "2026-07-29T00:04:15.029Z",
+        "invalidationCount": 2
+      },
+      "rebuiltRecords": [
+        "project.subSystems.roof.panelId",
+        "engineering_config.subSystems.roof.panelId",
+        "projects.selected_equipment.subSystems.roof.panelId"
+      ]
+    },
+    "states": [
+      {
+        "code": "CODE-AUTHORITY-INCOMPLETE",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "code-authority@v1",
+        "attempted": [
+          "code-authority@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "https://ahjregistry.myorangebutton.com/api/v1/ahj/: AHJ_REGISTRY_TOKEN is not set — the SunSpec/Orange Button AHJ Registry was NOT queried."
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "code-authority@v1",
+            "outcome": "FAILED",
+            "source": "https://ahjregistry.myorangebutton.com/api/v1/ahj/",
+            "refs": [
+              "provenance:https://ahjregistry.myorangebutton.com/api/v1/ahj/"
+            ],
+            "failure": "https://ahjregistry.myorangebutton.com/api/v1/ahj/: AHJ_REGISTRY_TOKEN is not set — the SunSpec/Orange Button AHJ Registry was NOT queried.",
+            "auditRef": null,
+            "operatorAction": "Set AHJ_REGISTRY_TOKEN (free token from support@sunspec.org) in the deployment environment, then regenerate — the adopted NEC/IBC/IRC/IFC editions are retrieved automatically. Until then no adoption authority exists for this jurisdiction and the sourceless AHJ table may not substitute for one.",
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "PROJECT-AUTHORITY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "project-authority@v1",
+        "attempted": [
+          "project-authority@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "apn: the posted APN was not confirmed against a parcel source (no ATTOM key / no parcel record) — never inferred"
+        ],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "project-authority@v1",
+            "outcome": "FAILED",
+            "source": "https://geocoding.geo.census.gov/geocoder/geographies/address",
+            "refs": [
+              "authority:project-legal#38fb560e070167c8",
+              "provenance:https://geocoding.geo.census.gov/geocoder/geographies/address",
+              "sha256:38fb560e070167c8"
+            ],
+            "failure": "the retrieval did not verify every legal-identity field: apn: the posted APN was not confirmed against a parcel source (no ATTOM key / no parcel record) — never inferred",
+            "auditRef": null,
+            "operatorAction": "Set ATTOM_API_KEY so the parcel/APN can be confirmed against the assessor record, then regenerate.",
+            "confidence": 0.9
+          }
+        ]
+      },
+      {
+        "code": "PROJECT-NAME-NONPRODUCTION",
+        "mode": "OPERATOR_CONFIRMATION",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      },
+      {
+        "code": "EQUIPMENT-IDENTITY-CONFLICT",
+        "mode": "AUTO_DERIVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "canonical-equipment-selection@v1",
+        "attempted": [
+          "canonical-equipment-selection@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": true,
+        "auditRef": "AAC-RESOLVER:canonical-equipment-selection@v1 authority:equipment_reconciliation_audit#ebf0a515-ac8f-4c67-aec2-dfa5cd64a042 provenance:projects.selected_equipment.panelId @2026-07-29T00:04:14.568Z",
+        "reasons": [],
+        "retryability": "NON_RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "canonical-equipment-selection@v1",
+            "outcome": "RESOLVED",
+            "source": "equipment_reconciliation_audit + snapshot_digest_invalidations (migration 114)",
+            "refs": [
+              "authority:equipment_reconciliation_audit#ebf0a515-ac8f-4c67-aec2-dfa5cd64a042",
+              "provenance:projects.selected_equipment.panelId"
+            ],
+            "failure": null,
+            "auditRef": "AAC-RESOLVER:canonical-equipment-selection@v1 authority:equipment_reconciliation_audit#ebf0a515-ac8f-4c67-aec2-dfa5cd64a042 provenance:projects.selected_equipment.panelId @2026-07-29T00:04:14.568Z",
+            "operatorAction": null,
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "MODULE-EXACT-DATASHEET-PENDING",
+        "mode": "AUTO_DERIVED",
+        "residual": "AUTO_RETRIEVED",
+        "resolver": "module-datasheet-binding@v1",
+        "attempted": [
+          "module-datasheet-binding@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "Q.PEAK DUO BLK ML-G10+ 400W: the on-file series document 'Qcells Q.PEAK DUO BLK ML-G10+ 385-405W Datasheet' covers 385-405 W and the selected 400 W falls INSIDE that range — the exact-wattage column exists in this document but no registry binding names it"
+        ],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "module-datasheet-binding@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113) · manufacturer-assets-db",
+            "refs": [
+              "provenance:module-datasheet-lookup#Q.PEAK DUO BLK ML-G10+ 400W:RANGE-COVERED"
+            ],
+            "failure": "Q.PEAK DUO BLK ML-G10+ 400W: no VERIFIED, current module_datasheet is registered for this model (RANGE-COVERED)",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "EQUIPMENT-DOCUMENT-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "environmental-load-authority@v1",
+        "attempted": [
+          "climate-hazard-document@v1",
+          "environmental-load-authority@v1"
+        ],
+        "result": "SKIPPED",
+        "cleared": true,
+        "auditRef": "AAC-RESOLVER:climate-hazard-document@v1 (deferred to by environmental-load-authority@v1: an archived, currency-reviewed source already covers this site, so no live retrieval was performed) document:cedb14f7-917a-539b-a68a-f08f08b64d13 sha256:cedb14f7917ad39b @2026-07-29T00:04:14.568Z",
+        "reasons": [],
+        "retryability": "NON_RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "climate-hazard-document@v1",
+            "outcome": "RESOLVED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "document:cedb14f7-917a-539b-a68a-f08f08b64d13",
+              "sha256:cedb14f7917ad39b"
+            ],
+            "failure": null,
+            "auditRef": "AAC-RESOLVER:climate-hazard-document@v1 document:cedb14f7-917a-539b-a68a-f08f08b64d13 sha256:cedb14f7917ad39b @2026-07-29T00:04:14.568Z",
+            "operatorAction": null,
+            "confidence": 1
+          },
+          {
+            "resolver": "environmental-load-authority@v1",
+            "outcome": "SKIPPED",
+            "source": "manufacturer_document_registry (climate_hazard_dataset)",
+            "refs": [
+              "document:cedb14f7-917a-539b-a68a-f08f08b64d13",
+              "sha256:cedb14f7917ad39b"
+            ],
+            "failure": null,
+            "auditRef": "AAC-RESOLVER:climate-hazard-document@v1 (deferred to by environmental-load-authority@v1: an archived, currency-reviewed source already covers this site, so no live retrieval was performed) document:cedb14f7-917a-539b-a68a-f08f08b64d13 sha256:cedb14f7917ad39b @2026-07-29T00:04:14.568Z",
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "WIND-SNOW-AUTHORITY-UNRESOLVED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-3) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "FRAMING-AUTHORITY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "PROFESSIONAL_APPROVAL",
+        "resolver": "framing-capacity-document@v1",
+        "attempted": [
+          "framing-capacity-document@v1",
+          "framing-capacity-retrieval@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "Every retrievable framing-capacity class is building-specific and unpublished: a truss design drawing belongs to the original builder, and a manufacturer calculation exists only where an engineered product was used. For an existing stick-framed residence the automatic tier has nothing to reach, so the requirement transitions to PROFESSIONAL_APPROVAL — a licensed structural judgement over the observed framing. Operator-entered framing geometry stays OBSERVATION and can never clear it."
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "framing-capacity-document@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no matching verified framing-capacity document",
+            "auditRef": null,
+            "operatorAction": "Archive + verify the source document through the document registry (file + SHA-256 + revision + current status + extracted claims + jurisdiction).",
+            "confidence": 0
+          },
+          {
+            "resolver": "framing-capacity-retrieval@v1",
+            "outcome": "FAILED",
+            "source": "published framing-capacity document classes (truss_design_drawing | manufacturer_structural_calc | stamped_structural_analysis)",
+            "refs": [
+              "provenance:framing-retrieval#not-available-publicly"
+            ],
+            "failure": "NOT-AVAILABLE-PUBLICLY: no framing-capacity document for this building is publicly retrievable; the residual is PROFESSIONAL_APPROVAL",
+            "auditRef": null,
+            "operatorAction": "Either archive an existing truss design drawing / manufacturer structural calculation for this building through the document registry, or obtain a stamped structural analysis and record it as a digest-bound engineering review.",
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "mode": "AUTO_DERIVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "racking-assembly-selection@v1",
+        "attempted": [
+          "racking-assembly-selection@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "Roof Tech RT-MINI is a mixed-manufacturer mount that carries no rail of its own, and no rail is recorded in any project, design or equipment store (all three probed). The rail is GENUINELY UNSELECTED: choosing between compatible manufacturers is a design + procurement decision, not a derivation, so the engine does not make it. 4 catalog rail(s) satisfy the mount's documented compatibility statement, of which 4 cover the 48\" attachment spacing"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-assembly-selection@v1",
+            "outcome": "FAILED",
+            "source": "mounting-hardware-db catalog rails screened against the mount's documented compatibility statement",
+            "refs": [
+              "assembly:candidate-rail#IronRidge XR100",
+              "assembly:candidate-rail#IronRidge XR1000",
+              "assembly:candidate-rail#Unirac SME Rail",
+              "assembly:candidate-rail#Unirac SolarMount Rail"
+            ],
+            "failure": "Roof Tech RT-MINI is a mixed-manufacturer mount that carries no rail of its own, and no rail is recorded in any project, design or equipment store (all three probed). The rail is GENUINELY UNSELECTED: choosing between compatible manufacturers is a design + procurement decision, not a derivation, so the engine does not make it. 4 catalog rail(s) satisfy the mount's documented compatibility statement, of which 4 cover the 48\" attachment spacing",
+            "auditRef": null,
+            "operatorAction": "Pin the rail/splice for the RT-MINI assembly. Eligible listed rails (span-screened against the 48\" attachment spacing): IronRidge XR100, IronRidge XR1000, Unirac SME Rail, Unirac SolarMount Rail. The catalog holds no rail part numbers, so the orderable SKU comes from the distributor line item.",
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "FASTENER-ASSEMBLY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "racking-documents@v1",
+        "attempted": [
+          "racking-capacity-document@v1",
+          "racking-documents@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference).",
+          "the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-capacity-document@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no matching verified capacity document",
+            "auditRef": null,
+            "operatorAction": "Archive + verify the source document through the document registry (file + SHA-256 + revision + current status + extracted claims + jurisdiction).",
+            "confidence": 0
+          },
+          {
+            "resolver": "racking-documents@v1",
+            "outcome": "RESOLVED",
+            "source": "http-document-retrieval → manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "sha256:73a74973091ca698",
+              "provenance:https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+              "sha256:2f6035586e948758",
+              "provenance:https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf"
+            ],
+            "failure": "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference). · the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against",
+            "auditRef": null,
+            "operatorAction": "Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then archives itself on the next generation.",
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "racking-documents@v1",
+        "attempted": [
+          "racking-capacity-document@v1",
+          "racking-documents@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference).",
+          "the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-capacity-document@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no matching verified capacity document",
+            "auditRef": null,
+            "operatorAction": "Archive + verify the source document through the document registry (file + SHA-256 + revision + current status + extracted claims + jurisdiction).",
+            "confidence": 0
+          },
+          {
+            "resolver": "racking-documents@v1",
+            "outcome": "RESOLVED",
+            "source": "http-document-retrieval → manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "sha256:73a74973091ca698",
+              "provenance:https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+              "sha256:2f6035586e948758",
+              "provenance:https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf"
+            ],
+            "failure": "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference). · the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against",
+            "auditRef": null,
+            "operatorAction": "Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then archives itself on the next generation.",
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "racking-documents@v1",
+        "attempted": [
+          "racking-capacity-document@v1",
+          "racking-documents@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference).",
+          "the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-capacity-document@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no matching verified capacity document",
+            "auditRef": null,
+            "operatorAction": "Archive + verify the source document through the document registry (file + SHA-256 + revision + current status + extracted claims + jurisdiction).",
+            "confidence": 0
+          },
+          {
+            "resolver": "racking-documents@v1",
+            "outcome": "RESOLVED",
+            "source": "http-document-retrieval → manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "sha256:73a74973091ca698",
+              "provenance:https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+              "sha256:2f6035586e948758",
+              "provenance:https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf"
+            ],
+            "failure": "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference). · the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against",
+            "auditRef": null,
+            "operatorAction": "Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then archives itself on the next generation.",
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "racking-documents@v1",
+        "attempted": [
+          "racking-documents@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference).",
+          "the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-documents@v1",
+            "outcome": "RESOLVED",
+            "source": "http-document-retrieval → manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "sha256:73a74973091ca698",
+              "provenance:https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+              "sha256:2f6035586e948758",
+              "provenance:https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf"
+            ],
+            "failure": "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference). · the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against",
+            "auditRef": null,
+            "operatorAction": "Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then archives itself on the next generation.",
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "ATTACHMENT-CAPACITY-SOURCE-MISSING",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "FASTENER-CONFIG-MISSING",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "MOUNT-TOPOLOGY-UNKNOWN",
+        "mode": "OPERATOR_CONFIRMATION",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      },
+      {
+        "code": "DIRECT-MOUNT-GEOMETRY-MISSING",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "REACTIONS-UNTRACEABLE",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "RAIL-QUANTITY-UNTRACEABLE",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "STRUCTURAL-UTILIZATION-EXCEEDED",
+        "mode": "PROFESSIONAL_APPROVAL",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      },
+      {
+        "code": "STRUCTURAL-BOM-RECONCILIATION-FAILED",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "STRUCTURAL-REACTION-RECONCILIATION-FAILED",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "SITE-GEOMETRY-MISSING",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "MODULE-DIMENSIONS-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-2) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "STRUCTURAL-FRAMING-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "PROFESSIONAL_APPROVAL",
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "ROUTE-LENGTH-ESTIMATE",
+        "mode": "AUTO_DERIVED",
+        "residual": "FIELD_VERIFICATION",
+        "resolver": "route-length@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "CONDUIT-FILL-PENDING",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "conduit-fill@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "TAP-CONDUCTOR-LENGTH-PENDING",
+        "mode": "FIELD_VERIFICATION",
+        "residual": "AUTO_DERIVED",
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      },
+      {
+        "code": "FEEDER-RACEWAY-AUTHORITY",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "raceway-authority@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "BRANCH-RACEWAY-AUTHORITY",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "raceway-authority@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "RACEWAY-SEGMENT-CONFLICT",
+        "mode": "AUTO_DERIVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "raceway-authority@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "QCABLE-PROCUREMENT-INSUFFICIENT",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "qcable-solution@v1",
+        "attempted": [
+          "cable-extension-solutions@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "no listed cable-extension product is selected (project.cableExtensionSkus is empty), so there is no extension DOCUMENT for this resolver to resolve. The alternate-stock / raw-stock / dead-drop / rebranch option space IS evaluated deterministically — by qcable-solution@v1, which owns QCABLE-PROCUREMENT-INSUFFICIENT and states the governing unresolved reason"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "cable-extension-solutions@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no verified cable-extension solution resolvable",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "PROFESSIONAL_APPROVAL",
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-4) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "DESIGNER-OF-RECORD-MISSING",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "project-personnel-designer@v1",
+        "attempted": [
+          "project-personnel-designer@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the personnel-roles store could not be read — no designer of record is established, and no vendor default may be substituted"
+        ],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "project-personnel-designer@v1",
+            "outcome": "FAILED",
+            "source": "personnel_roles + project_personnel_assignments (migration 115)",
+            "refs": [],
+            "failure": "resolveProjectPersonnel: 42P01 relation \"personnel_roles\" does not exist [table absent — migration 113/114 not run]",
+            "auditRef": null,
+            "operatorAction": "Run migration 115 through the governed console (Admin → System Tools → Migrations), then set the designer in System Config (Admin → Personnel).",
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "ENGINEERING-REVIEW-PENDING",
+        "mode": "PROFESSIONAL_APPROVAL",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      }
+    ]
+  },
+  "run2": {
+    "tag": "run2",
+    "snapshotId": "PDS-5891E0B1CD1D",
+    "digest": "5891e0b1cd1dc99f8412f6825f05c640ffb6673e5b170a834ac3eec2ba994047",
+    "gates": [
+      {
+        "code": "PROJECT_AND_AHJ_AUTHORITY",
+        "status": "OPEN",
+        "reqs": [
+          "CODE-AUTHORITY-INCOMPLETE",
+          "PROJECT-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "code": "EQUIPMENT_RECONCILIATION",
+        "status": "OPEN",
+        "reqs": [
+          "MODULE-EXACT-DATASHEET-PENDING"
+        ]
+      },
+      {
+        "code": "ENVIRONMENTAL_LOAD_AUTHORITY",
+        "status": "CLEARED",
+        "reqs": []
+      },
+      {
+        "code": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+        "status": "OPEN",
+        "reqs": [
+          "FRAMING-AUTHORITY-UNVERIFIED",
+          "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+          "RACKING-CAPACITY-APPLICABILITY-GAP",
+          "EQUIPMENT-DOCUMENT-APPLICABILITY"
+        ]
+      },
+      {
+        "code": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+        "status": "OPEN",
+        "reqs": [
+          "ROUTE-LENGTH-ESTIMATE",
+          "TAP-CONDUCTOR-LENGTH-PENDING"
+        ]
+      },
+      {
+        "code": "QCABLE_SYSTEM_CLOSURE",
+        "status": "OPEN",
+        "reqs": [
+          "QCABLE-PROCUREMENT-INSUFFICIENT",
+          "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+        ]
+      },
+      {
+        "code": "PROFESSIONAL_RELEASE",
+        "status": "OPEN",
+        "reqs": [
+          "DESIGNER-OF-RECORD-MISSING",
+          "ENGINEERING-REVIEW-PENDING"
+        ]
+      }
+    ],
+    "openGates": 6,
+    "open": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "DESIGNER-OF-RECORD-MISSING",
+      "ENGINEERING-REVIEW-PENDING",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "openCount": 14,
+    "registryCount": 14,
+    "moduleOfRecord": "qcells-peak-duo-400",
+    "fullSheets": [
+      "PV-0",
+      "RS-1",
+      "RS-1.1",
+      "RS-1.2",
+      "RS-1.3",
+      "PV-1",
+      "PV-1B",
+      "PV-3",
+      "PV-4C",
+      "PV-4C.1",
+      "E-1",
+      "PV-4A",
+      "PV-4B",
+      "PV-5",
+      "PV-6",
+      "SCHED",
+      "SCHED-2",
+      "SCHED-3",
+      "SCHED-4",
+      "APP-A",
+      "DS-1",
+      "DS-2",
+      "DS-3",
+      "CERT",
+      "PE-1"
+    ],
+    "permitSheets": [
+      "PV-0",
+      "PV-1",
+      "PV-1B",
+      "PV-3",
+      "PV-4C",
+      "PV-4C.1",
+      "E-1",
+      "PV-4A",
+      "PV-4B",
+      "PV-5",
+      "SCHED",
+      "DS-1",
+      "DS-2",
+      "DS-3"
+    ],
+    "fullBytes": 1954907,
+    "permitBytes": 1740582,
+    "fullSha": "4f041b692687a35247b6b5842f14bb37ac5f4b274774ad9b06bcff8341921e77",
+    "permitSha": "92e767098cdbcd27748bd72a39b8638ffc54358489ef2f54d7c51e7619977048",
+    "lifecycle": {
+      "iterations": 1,
+      "stabilized": true,
+      "bound": 3,
+      "invariantViolations": [],
+      "executionOrder": [
+        "project-authority-key@v1",
+        "digest-invalidation-ledger@v1",
+        "canonical-equipment-selection@v1",
+        "module-datasheet-binding@v1",
+        "project-personnel-designer@v1",
+        "racking-assembly-selection@v1",
+        "engineering-review-record@v1",
+        "project-authority@v1",
+        "code-authority@v1",
+        "racking-capacity-document@v1",
+        "framing-capacity-document@v1",
+        "climate-hazard-document@v1",
+        "environmental-load-authority@v1",
+        "cable-extension-solutions@v1",
+        "racking-documents@v1",
+        "framing-capacity-retrieval@v1"
+      ],
+      "evidenceCount": 31,
+      "invalidations": 0
+    },
+    "canonicalEquipment": {
+      "field": "module",
+      "canonical": {
+        "catalogId": "qcells-peak-duo-400",
+        "manufacturer": "Q CELLS",
+        "model": "Q.PEAK DUO BLK ML-G10+ 400W",
+        "ratedWatts": 400,
+        "tier": "project",
+        "rank": 50,
+        "actor": "reconciliation",
+        "atIso": "2026-07-29T00:04:15.029Z",
+        "path": "projects.selected_equipment.panelId",
+        "explicit": false
+      },
+      "superseded": [
+        {
+          "path": "permit-input#project.subSystems.roof.panelId",
+          "value": "rec-alpha-pure-405",
+          "label": "REC Group Alpha Pure-R 405W",
+          "tier": "subsystem",
+          "actor": "engineering",
+          "atIso": "2026-07-17T16:16:47.549Z",
+          "supersededBecause": "outranked (subsystem/10 < project/50) and its currency is not contradicted (2026-07-17T16:16:47.549Z vs canonical 2026-07-29T00:04:15.029Z)"
+        }
+      ],
+      "corroboratingPaths": [
+        "permit-input#system.inverters[].strings[].panelModel",
+        "engineering_config.subSystems.roof.panelId",
+        "projects.selected_equipment.subSystems.roof.panelId"
+      ],
+      "consideredPaths": [
+        "projects.selected_equipment.panelId",
+        "permit-input#system.inverters[].strings[].panelModel",
+        "engineering_config.subSystems.roof.panelId",
+        "projects.selected_equipment.subSystems.roof.panelId",
+        "permit-input#project.subSystems.roof.panelId"
+      ],
+      "divergent": true,
+      "operatorConfirmationRequired": false,
+      "basis": "canonical = projects.selected_equipment.panelId = 'qcells-peak-duo-400' (tier project, rank 50, generated via reconciliation at 2026-07-29T00:04:15.029Z); 3 corroborating, 1 superseded, 0 genuinely active",
+      "reconciliation": null,
+      "rebuiltRecords": [
+        "project.subSystems.roof.panelId"
+      ]
+    },
+    "states": [
+      {
+        "code": "CODE-AUTHORITY-INCOMPLETE",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "code-authority@v1",
+        "attempted": [
+          "code-authority@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "https://ahjregistry.myorangebutton.com/api/v1/ahj/: AHJ_REGISTRY_TOKEN is not set — the SunSpec/Orange Button AHJ Registry was NOT queried."
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "code-authority@v1",
+            "outcome": "FAILED",
+            "source": "https://ahjregistry.myorangebutton.com/api/v1/ahj/",
+            "refs": [
+              "provenance:https://ahjregistry.myorangebutton.com/api/v1/ahj/"
+            ],
+            "failure": "https://ahjregistry.myorangebutton.com/api/v1/ahj/: AHJ_REGISTRY_TOKEN is not set — the SunSpec/Orange Button AHJ Registry was NOT queried.",
+            "auditRef": null,
+            "operatorAction": "Set AHJ_REGISTRY_TOKEN (free token from support@sunspec.org) in the deployment environment, then regenerate — the adopted NEC/IBC/IRC/IFC editions are retrieved automatically. Until then no adoption authority exists for this jurisdiction and the sourceless AHJ table may not substitute for one.",
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "PROJECT-AUTHORITY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "project-authority@v1",
+        "attempted": [
+          "project-authority@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "apn: the posted APN was not confirmed against a parcel source (no ATTOM key / no parcel record) — never inferred"
+        ],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "project-authority@v1",
+            "outcome": "FAILED",
+            "source": "https://geocoding.geo.census.gov/geocoder/geographies/address",
+            "refs": [
+              "authority:project-legal#38fb560e070167c8",
+              "provenance:https://geocoding.geo.census.gov/geocoder/geographies/address",
+              "sha256:38fb560e070167c8"
+            ],
+            "failure": "the retrieval did not verify every legal-identity field: apn: the posted APN was not confirmed against a parcel source (no ATTOM key / no parcel record) — never inferred",
+            "auditRef": null,
+            "operatorAction": "Set ATTOM_API_KEY so the parcel/APN can be confirmed against the assessor record, then regenerate.",
+            "confidence": 0.9
+          }
+        ]
+      },
+      {
+        "code": "PROJECT-NAME-NONPRODUCTION",
+        "mode": "OPERATOR_CONFIRMATION",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      },
+      {
+        "code": "EQUIPMENT-IDENTITY-CONFLICT",
+        "mode": "AUTO_DERIVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "canonical-equipment-selection@v1",
+        "attempted": [
+          "canonical-equipment-selection@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": true,
+        "auditRef": "AAC-RESOLVER:canonical-equipment-selection@v1 provenance:projects.selected_equipment.panelId authority:canonical-equipment#qcells-peak-duo-400 @2026-07-29T00:04:24.336Z",
+        "reasons": [],
+        "retryability": "NON_RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "canonical-equipment-selection@v1",
+            "outcome": "RESOLVED",
+            "source": "projects.selected_equipment + engineering_config.subSystems (migration 101 / §1.1 map)",
+            "refs": [
+              "provenance:projects.selected_equipment.panelId",
+              "authority:canonical-equipment#qcells-peak-duo-400"
+            ],
+            "failure": null,
+            "auditRef": "AAC-RESOLVER:canonical-equipment-selection@v1 provenance:projects.selected_equipment.panelId authority:canonical-equipment#qcells-peak-duo-400 @2026-07-29T00:04:24.336Z",
+            "operatorAction": null,
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "MODULE-EXACT-DATASHEET-PENDING",
+        "mode": "AUTO_DERIVED",
+        "residual": "AUTO_RETRIEVED",
+        "resolver": "module-datasheet-binding@v1",
+        "attempted": [
+          "module-datasheet-binding@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "Q.PEAK DUO BLK ML-G10+ 400W: the on-file series document 'Qcells Q.PEAK DUO BLK ML-G10+ 385-405W Datasheet' covers 385-405 W and the selected 400 W falls INSIDE that range — the exact-wattage column exists in this document but no registry binding names it"
+        ],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "module-datasheet-binding@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113) · manufacturer-assets-db",
+            "refs": [
+              "provenance:module-datasheet-lookup#Q.PEAK DUO BLK ML-G10+ 400W:RANGE-COVERED"
+            ],
+            "failure": "Q.PEAK DUO BLK ML-G10+ 400W: no VERIFIED, current module_datasheet is registered for this model (RANGE-COVERED)",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "EQUIPMENT-DOCUMENT-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "environmental-load-authority@v1",
+        "attempted": [
+          "climate-hazard-document@v1",
+          "environmental-load-authority@v1"
+        ],
+        "result": "SKIPPED",
+        "cleared": true,
+        "auditRef": "AAC-RESOLVER:climate-hazard-document@v1 (deferred to by environmental-load-authority@v1: an archived, currency-reviewed source already covers this site, so no live retrieval was performed) document:cedb14f7-917a-539b-a68a-f08f08b64d13 sha256:cedb14f7917ad39b @2026-07-29T00:04:24.336Z",
+        "reasons": [],
+        "retryability": "NON_RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "climate-hazard-document@v1",
+            "outcome": "RESOLVED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "document:cedb14f7-917a-539b-a68a-f08f08b64d13",
+              "sha256:cedb14f7917ad39b"
+            ],
+            "failure": null,
+            "auditRef": "AAC-RESOLVER:climate-hazard-document@v1 document:cedb14f7-917a-539b-a68a-f08f08b64d13 sha256:cedb14f7917ad39b @2026-07-29T00:04:24.336Z",
+            "operatorAction": null,
+            "confidence": 1
+          },
+          {
+            "resolver": "environmental-load-authority@v1",
+            "outcome": "SKIPPED",
+            "source": "manufacturer_document_registry (climate_hazard_dataset)",
+            "refs": [
+              "document:cedb14f7-917a-539b-a68a-f08f08b64d13",
+              "sha256:cedb14f7917ad39b"
+            ],
+            "failure": null,
+            "auditRef": "AAC-RESOLVER:climate-hazard-document@v1 (deferred to by environmental-load-authority@v1: an archived, currency-reviewed source already covers this site, so no live retrieval was performed) document:cedb14f7-917a-539b-a68a-f08f08b64d13 sha256:cedb14f7917ad39b @2026-07-29T00:04:24.336Z",
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "WIND-SNOW-AUTHORITY-UNRESOLVED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-3) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "FRAMING-AUTHORITY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "PROFESSIONAL_APPROVAL",
+        "resolver": "framing-capacity-document@v1",
+        "attempted": [
+          "framing-capacity-document@v1",
+          "framing-capacity-retrieval@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "Every retrievable framing-capacity class is building-specific and unpublished: a truss design drawing belongs to the original builder, and a manufacturer calculation exists only where an engineered product was used. For an existing stick-framed residence the automatic tier has nothing to reach, so the requirement transitions to PROFESSIONAL_APPROVAL — a licensed structural judgement over the observed framing. Operator-entered framing geometry stays OBSERVATION and can never clear it."
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "framing-capacity-document@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no matching verified framing-capacity document",
+            "auditRef": null,
+            "operatorAction": "Archive + verify the source document through the document registry (file + SHA-256 + revision + current status + extracted claims + jurisdiction).",
+            "confidence": 0
+          },
+          {
+            "resolver": "framing-capacity-retrieval@v1",
+            "outcome": "FAILED",
+            "source": "published framing-capacity document classes (truss_design_drawing | manufacturer_structural_calc | stamped_structural_analysis)",
+            "refs": [
+              "provenance:framing-retrieval#not-available-publicly"
+            ],
+            "failure": "NOT-AVAILABLE-PUBLICLY: no framing-capacity document for this building is publicly retrievable; the residual is PROFESSIONAL_APPROVAL",
+            "auditRef": null,
+            "operatorAction": "Either archive an existing truss design drawing / manufacturer structural calculation for this building through the document registry, or obtain a stamped structural analysis and record it as a digest-bound engineering review.",
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "mode": "AUTO_DERIVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "racking-assembly-selection@v1",
+        "attempted": [
+          "racking-assembly-selection@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "Roof Tech RT-MINI is a mixed-manufacturer mount that carries no rail of its own, and no rail is recorded in any project, design or equipment store (all three probed). The rail is GENUINELY UNSELECTED: choosing between compatible manufacturers is a design + procurement decision, not a derivation, so the engine does not make it. 4 catalog rail(s) satisfy the mount's documented compatibility statement, of which 4 cover the 48\" attachment spacing"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-assembly-selection@v1",
+            "outcome": "FAILED",
+            "source": "mounting-hardware-db catalog rails screened against the mount's documented compatibility statement",
+            "refs": [
+              "assembly:candidate-rail#IronRidge XR100",
+              "assembly:candidate-rail#IronRidge XR1000",
+              "assembly:candidate-rail#Unirac SME Rail",
+              "assembly:candidate-rail#Unirac SolarMount Rail"
+            ],
+            "failure": "Roof Tech RT-MINI is a mixed-manufacturer mount that carries no rail of its own, and no rail is recorded in any project, design or equipment store (all three probed). The rail is GENUINELY UNSELECTED: choosing between compatible manufacturers is a design + procurement decision, not a derivation, so the engine does not make it. 4 catalog rail(s) satisfy the mount's documented compatibility statement, of which 4 cover the 48\" attachment spacing",
+            "auditRef": null,
+            "operatorAction": "Pin the rail/splice for the RT-MINI assembly. Eligible listed rails (span-screened against the 48\" attachment spacing): IronRidge XR100, IronRidge XR1000, Unirac SME Rail, Unirac SolarMount Rail. The catalog holds no rail part numbers, so the orderable SKU comes from the distributor line item.",
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "FASTENER-ASSEMBLY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "racking-documents@v1",
+        "attempted": [
+          "racking-capacity-document@v1",
+          "racking-documents@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference).",
+          "the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-capacity-document@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no matching verified capacity document",
+            "auditRef": null,
+            "operatorAction": "Archive + verify the source document through the document registry (file + SHA-256 + revision + current status + extracted claims + jurisdiction).",
+            "confidence": 0
+          },
+          {
+            "resolver": "racking-documents@v1",
+            "outcome": "RESOLVED",
+            "source": "http-document-retrieval → manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "sha256:73a74973091ca698",
+              "provenance:https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+              "sha256:2f6035586e948758",
+              "provenance:https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf"
+            ],
+            "failure": "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference). · the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against",
+            "auditRef": null,
+            "operatorAction": "Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then archives itself on the next generation.",
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "racking-documents@v1",
+        "attempted": [
+          "racking-capacity-document@v1",
+          "racking-documents@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference).",
+          "the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-capacity-document@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no matching verified capacity document",
+            "auditRef": null,
+            "operatorAction": "Archive + verify the source document through the document registry (file + SHA-256 + revision + current status + extracted claims + jurisdiction).",
+            "confidence": 0
+          },
+          {
+            "resolver": "racking-documents@v1",
+            "outcome": "RESOLVED",
+            "source": "http-document-retrieval → manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "sha256:73a74973091ca698",
+              "provenance:https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+              "sha256:2f6035586e948758",
+              "provenance:https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf"
+            ],
+            "failure": "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference). · the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against",
+            "auditRef": null,
+            "operatorAction": "Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then archives itself on the next generation.",
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "racking-documents@v1",
+        "attempted": [
+          "racking-capacity-document@v1",
+          "racking-documents@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference).",
+          "the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-capacity-document@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no matching verified capacity document",
+            "auditRef": null,
+            "operatorAction": "Archive + verify the source document through the document registry (file + SHA-256 + revision + current status + extracted claims + jurisdiction).",
+            "confidence": 0
+          },
+          {
+            "resolver": "racking-documents@v1",
+            "outcome": "RESOLVED",
+            "source": "http-document-retrieval → manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "sha256:73a74973091ca698",
+              "provenance:https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+              "sha256:2f6035586e948758",
+              "provenance:https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf"
+            ],
+            "failure": "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference). · the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against",
+            "auditRef": null,
+            "operatorAction": "Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then archives itself on the next generation.",
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": "racking-documents@v1",
+        "attempted": [
+          "racking-documents@v1"
+        ],
+        "result": "RESOLVED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference).",
+          "the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "racking-documents@v1",
+            "outcome": "RESOLVED",
+            "source": "http-document-retrieval → manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [
+              "sha256:73a74973091ca698",
+              "provenance:https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+              "sha256:2f6035586e948758",
+              "provenance:https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf"
+            ],
+            "failure": "the only published stamped capacity letter covers RT-MINI II, and the selected mount is RT-MINI. The document is now retrieved, hashed and (registry permitting) archived, so the remaining question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the RT-MINI II letter governs the hardware actually installed, or select RT-MINI II. No cross-reference exists to make automatically (see crossReference). · the documents were retrieved and hashed but could not be ARCHIVED — the registry table is unavailable, so no verified registry record exists to clear against",
+            "auditRef": null,
+            "operatorAction": "Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then archives itself on the next generation.",
+            "confidence": 1
+          }
+        ]
+      },
+      {
+        "code": "ATTACHMENT-CAPACITY-SOURCE-MISSING",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "FASTENER-CONFIG-MISSING",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "MOUNT-TOPOLOGY-UNKNOWN",
+        "mode": "OPERATOR_CONFIRMATION",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      },
+      {
+        "code": "DIRECT-MOUNT-GEOMETRY-MISSING",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "REACTIONS-UNTRACEABLE",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "RAIL-QUANTITY-UNTRACEABLE",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "STRUCTURAL-UTILIZATION-EXCEEDED",
+        "mode": "PROFESSIONAL_APPROVAL",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      },
+      {
+        "code": "STRUCTURAL-BOM-RECONCILIATION-FAILED",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "STRUCTURAL-REACTION-RECONCILIATION-FAILED",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_DERIVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "SITE-GEOMETRY-MISSING",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "MODULE-DIMENSIONS-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-2) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "STRUCTURAL-FRAMING-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "PROFESSIONAL_APPROVAL",
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-5) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "ROUTE-LENGTH-ESTIMATE",
+        "mode": "AUTO_DERIVED",
+        "residual": "FIELD_VERIFICATION",
+        "resolver": "route-length@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "CONDUIT-FILL-PENDING",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "conduit-fill@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "TAP-CONDUCTOR-LENGTH-PENDING",
+        "mode": "FIELD_VERIFICATION",
+        "residual": "AUTO_DERIVED",
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      },
+      {
+        "code": "FEEDER-RACEWAY-AUTHORITY",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "raceway-authority@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "BRANCH-RACEWAY-AUTHORITY",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "raceway-authority@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "RACEWAY-SEGMENT-CONFLICT",
+        "mode": "AUTO_DERIVED",
+        "residual": "OPERATOR_CONFIRMATION",
+        "resolver": "raceway-authority@v1",
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": []
+      },
+      {
+        "code": "QCABLE-PROCUREMENT-INSUFFICIENT",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "qcable-solution@v1",
+        "attempted": [
+          "cable-extension-solutions@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "no listed cable-extension product is selected (project.cableExtensionSkus is empty), so there is no extension DOCUMENT for this resolver to resolve. The alternate-stock / raw-stock / dead-drop / rebranch option space IS evaluated deterministically — by qcable-solution@v1, which owns QCABLE-PROCUREMENT-INSUFFICIENT and states the governing unresolved reason"
+        ],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": [
+          {
+            "resolver": "cable-extension-solutions@v1",
+            "outcome": "FAILED",
+            "source": "manufacturer_document_registry (lib/documents/registry, migration 113)",
+            "refs": [],
+            "failure": "no verified cable-extension solution resolvable",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "mode": "AUTO_RETRIEVED",
+        "residual": "PROFESSIONAL_APPROVAL",
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "aac-lifecycle@v1",
+            "outcome": "NOT_ATTEMPTED",
+            "source": null,
+            "refs": [],
+            "failure": "RESOLVER-NOT-IMPLEMENTED: this requirement is declared AUTO_RETRIEVED, but its owning resolver is not registered yet (planned: AAC-4) — it is NOT final and has not yet been attempted.",
+            "auditRef": null,
+            "operatorAction": null,
+            "confidence": null
+          }
+        ]
+      },
+      {
+        "code": "DESIGNER-OF-RECORD-MISSING",
+        "mode": "AUTO_DERIVED",
+        "residual": null,
+        "resolver": "project-personnel-designer@v1",
+        "attempted": [
+          "project-personnel-designer@v1"
+        ],
+        "result": "FAILED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [
+          "the personnel-roles store could not be read — no designer of record is established, and no vendor default may be substituted"
+        ],
+        "retryability": "RETRYABLE",
+        "evidence": [
+          {
+            "resolver": "project-personnel-designer@v1",
+            "outcome": "FAILED",
+            "source": "personnel_roles + project_personnel_assignments (migration 115)",
+            "refs": [],
+            "failure": "resolveProjectPersonnel: 42P01 relation \"personnel_roles\" does not exist [table absent — migration 113/114 not run]",
+            "auditRef": null,
+            "operatorAction": "Run migration 115 through the governed console (Admin → System Tools → Migrations), then set the designer in System Config (Admin → Personnel).",
+            "confidence": 0
+          }
+        ]
+      },
+      {
+        "code": "ENGINEERING-REVIEW-PENDING",
+        "mode": "PROFESSIONAL_APPROVAL",
+        "residual": null,
+        "resolver": null,
+        "attempted": [],
+        "result": "NOT_ATTEMPTED",
+        "cleared": false,
+        "auditRef": null,
+        "reasons": [],
+        "retryability": "REQUIRES_INPUT",
+        "evidence": []
+      }
+    ]
+  },
+  "idempotent": {
+    "requirementSetsIdentical": true,
+    "gateSetsIdentical": true,
+    "sheetIndexesIdentical": true,
+    "newAuditRowsInRun2": 0,
+    "newInvalidationRowsInRun2": 0,
+    "auditRowsWrittenByRun1": 1,
+    "invalidationRowsWrittenByRun1": 2,
+    "mirrorRealigned": true
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "generatedAtIso": "2026-07-25T12:00:00Z",
+  "snapshotId": "PDS-AF12292512C4",
+  "digest": "af12292512c44da3f4ddb9c879aaead1c74d72e55cd88ed8cbd0c1fc06c37ca8",
+  "blockingCount": 14,
+  "blockingCodes": [
+    "CODE-AUTHORITY-INCOMPLETE",
+    "CONDUIT-FILL-PENDING",
+    "ENGINEERING-REVIEW-PENDING",
+    "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+    "EQUIPMENT-DOCUMENT-APPLICABILITY",
+    "FASTENER-ASSEMBLY-UNVERIFIED",
+    "FRAMING-AUTHORITY-UNVERIFIED",
+    "MODULE-EXACT-DATASHEET-PENDING",
+    "PENDING-RACKING-ASSEMBLY-SELECTION",
+    "PROJECT-AUTHORITY-UNVERIFIED",
+    "RACKING-CAPACITY-APPLICABILITY-GAP",
+    "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+    "ROUTE-LENGTH-ESTIMATE",
+    "TAP-CONDUCTOR-LENGTH-PENDING"
+  ],
+  "rs1HeaderCount": 14,
+  "issueState": "PENDING ENGINEERING REVIEW",
+  "environmentalLoadAuthority": {
+    "ultimateWindSpeedMph": 115,
+    "windSpeedBasis": "operator-entered",
+    "riskCategory": "II",
+    "exposureCategory": "C",
+    "groundSnowLoadPsf": 0,
+    "snowLoadBasis": "operator-entered",
+    "snowLoadSource": null,
+    "coordinates": {
+      "lat": 38.7061678,
+      "lng": -90.0461651
+    },
+    "addressUsed": "3 MELVIN DR APT A, GRANITE CITY, IL 62040",
+    "sourceDocumentId": null,
+    "sourceDataset": null,
+    "sourceVersionOrDate": null,
+    "lookupTimestampIso": null,
+    "operatorOverrides": [
+      "ultimateWindSpeedMph",
+      "groundSnowLoadPsf",
+      "exposureCategory",
+      "riskCategory"
+    ],
+    "verificationStatus": "unverified",
+    "projectOrAhj": null,
+    "evidenceRef": null,
+    "provenance": {
+      "source": "environmental-load authority gate (BAR §2)",
+      "note": "environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission."
+    }
+  },
+  "windSpeedSource": "OPERATOR-ENTERED — NOT VERIFIED (observation/override; no archived climate-hazard source)",
+  "gates": [
+    {
+      "label": "§1 registry BLOCKING == back-compat list (issue-gate input)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§1 every BLOCKING code rendered on RS-1",
+      "pass": true,
+      "detail": "all present"
+    },
+    {
+      "label": "§1 RS-1 header count == registry blocking count",
+      "pass": true,
+      "detail": "rs1=14 registry=14"
+    },
+    {
+      "label": "§1 cover banner count == registry blocking count",
+      "pass": true,
+      "detail": "cover=n/a"
+    },
+    {
+      "label": "§2 ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED on RS-1",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§2 retired WIND-SNOW-AUTHORITY-UNRESOLVED absent from package",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§2 PV-4C wind value carries the provenance tag",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§2 PV-4C snow value carries the provenance tag",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§2 PV-4C conclusion prints the full SOURCE line",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§2 PE-1 Site Loading Parameters print the SOURCE line",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§2 env authority record is unverified with operator-entered basis",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§2 windSpeedSource no longer claims \"canonical project/AHJ wind authority\"",
+      "pass": true,
+      "detail": "OPERATOR-ENTERED — NOT VERIFIED (observation/override; no archived climate-hazard source)"
+    },
+    {
+      "label": "§3 SCHED renders COMPLIANCE NOT YET ESTABLISHED",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§3 SCHED points to RS-1",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§3 hardcoded UL-listed/complies sentence gone",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§3 wire-sizing VERIFIED badge suppressed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§6 SCHED-3 fastener row flagged non-orderable",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§6 fastener row prints the DESIGN QUANTITY / NON-ORDERABLE label",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§6 no fastener diameter/embedment displayed on the schedule row",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "label": "§6 APP-A embedment withheld while unverified",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "allPass": true
+}

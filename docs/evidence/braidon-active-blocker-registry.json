@@ -1,0 +1,314 @@
+{
+  "generatedAt": "2026-07-27T16:47:06.019Z",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "engineVersion": "47420",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-76C0C5B56CEF (digest 76c0c5b56cef89d4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "role": "W10 — canonical PermitReadinessBlocker registry (every active release blocker). RS-1 renders ALL of these; the harness gate 14 proves none is omitted.",
+  "ready": false,
+  "activeCount": 15,
+  "blockingCount": 15,
+  "advisoryCount": 0,
+  "registry": [
+    {
+      "code": "ROUTE-LENGTH-ESTIMATE",
+      "severity": "blocking",
+      "domain": "electrical",
+      "authorityPath": "electrical.routeSegments[].lengthSource",
+      "affectedSheets": [
+        "PV-1",
+        "PV-4B",
+        "E-1",
+        "SCHED"
+      ],
+      "explanation": "Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status",
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority).",
+      "provenance": {
+        "source": "snapshot build (permitReadiness)",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "CONDUIT-FILL-PENDING",
+      "severity": "blocking",
+      "domain": "electrical",
+      "authorityPath": "electrical.feeder.conduit.fillPct",
+      "affectedSheets": [
+        "PV-4A",
+        "PV-4B"
+      ],
+      "explanation": "Feeder conduit fill is PENDING (not computed) — it must never be presented as a passing zero-error result on PV-4A/PV-4B",
+      "resolutionAction": "Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.",
+      "provenance": {
+        "source": "snapshot build (permitReadiness)",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "TAP-CONDUCTOR-LENGTH-PENDING",
+      "severity": "blocking",
+      "domain": "electrical",
+      "authorityPath": "electrical.serviceTopology[svc-tap-conductors].constraints",
+      "affectedSheets": [
+        "PV-4B",
+        "PV-6",
+        "E-1"
+      ],
+      "explanation": "Supply-side tap-conductor length is not measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a length)",
+      "resolutionAction": "Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).",
+      "provenance": {
+        "source": "snapshot build (permitReadiness)",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "severity": "blocking",
+      "domain": "electrical",
+      "authorityPath": "electrical.openAirGroundingAuthority",
+      "affectedSheets": [
+        "E-1",
+        "PV-1B",
+        "PV-4B",
+        "SCHED",
+        "RS-1"
+      ],
+      "explanation": "Open-air branch grounding method NOT ESTABLISHED for the selected IQ8A-72-2-US + Q-12-10-240 (no applicable manufacturer document) — candidate 162 ft EGC is a design quantity, non-orderable.",
+      "resolutionAction": "Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this.",
+      "provenance": {
+        "source": "electrical.openAirGroundingAuthority",
+        "ref": "Q-12-10-240"
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "FRAMING-AUTHORITY-UNVERIFIED",
+      "severity": "blocking",
+      "domain": "structural",
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "explanation": "EXISTING FRAMING CAPACITY NOT VERIFIED — no project-specific structural authority (archived truss design drawing / manufacturer capacity calc / stamped analysis, or a licensed-engineer review bound to the current snapshot digest) establishes the existing framing capacity. Operator-entered / observed framing geometry is OBSERVATION only and does NOT verify capacity; the code-default rafter/truss capacity is NOT engineering authority. A project-specific structural review is required before permit submission.",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "provenance": {
+        "source": "structuralAuthority",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "severity": "blocking",
+      "domain": "structural",
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "explanation": "No verified exact racking assembly — rail/splice SKU is unpinned (PENDING SELECTION); PENDING RACKING ASSEMBLY SELECTION, NOT FOR PERMIT SUBMISSION. Pin the exact rail/splice SKU, archive the capacity/compatibility authority, and resolve span/cantilever source before permit-ready.",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "provenance": {
+        "source": "structuralAuthority",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "FASTENER-ASSEMBLY-UNVERIFIED",
+      "severity": "blocking",
+      "domain": "structural",
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "explanation": "Roof-attachment fastener assembly UNVERIFIED — withdrawal-capacity source not archived / capacity gated. Mount-base authority, independent of rail selection (related to but distinct from PENDING-RACKING-ASSEMBLY-SELECTION).",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "provenance": {
+        "source": "structuralAuthority",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "severity": "blocking",
+      "domain": "document",
+      "authorityPath": "snapshot (document)",
+      "affectedSheets": [],
+      "explanation": "Manufacturer document applicability UNVERIFIED — cited RT-MINI II covers a different product version than the selected mount RT-MINI; no verified alias evidence. Provide the version-exact document.",
+      "resolutionAction": "Resolve the missing authority before permit-ready.",
+      "provenance": {
+        "source": "structuralAuthority",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "severity": "blocking",
+      "domain": "structural",
+      "authorityPath": "structural.env.environmentalLoadAuthority",
+      "affectedSheets": [
+        "PV-0",
+        "PV-4C",
+        "PE-1",
+        "RS-1"
+      ],
+      "explanation": "Environmental load authority UNVERIFIED — wind code-minimum default, snow code-minimum default, exposure/risk carry no archived climate-hazard source; values are PRELIMINARY design criteria, not verified.",
+      "resolutionAction": "Resolve the design wind speed, exposure category, risk category and ground snow load from an ARCHIVED climate-hazard source for this exact site (ASCE 7 Hazard-Tool report or the AHJ climate/design-criteria ordinance): archive the document through the document registry (hash + verified state), record its dataset, version/date, the coordinates/address looked up, and the lookup timestamp, and confirm its CURRENCY (no automatic staleness rule exists — verification requires a recorded currency review). Operator-entered values are an OBSERVATION/OVERRIDE and can never clear this; a code-minimum default is preliminary only.",
+      "provenance": {
+        "source": "structuralAuthority",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "severity": "blocking",
+      "domain": "structural",
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "explanation": "The RT-MINI 600 lb ASD allowable cites a Roof Tech PE structural letter that is NOT archived in-repo (documentHash null). ESR-3575 is a flashing report that excludes structural capacity. The value cannot be verified against a source of record. Supplied document did NOT clear it — missing/unmatched: document.",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "provenance": {
+        "source": "rackingAssembly.structuralAuthorityGaps",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "severity": "blocking",
+      "domain": "structural",
+      "authorityPath": "structural (structural-engine-v4 objects)",
+      "affectedSheets": [
+        "PV-4C",
+        "PV-3",
+        "PE-1",
+        "CERT"
+      ],
+      "explanation": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer paired rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically.",
+      "resolutionAction": "Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.",
+      "provenance": {
+        "source": "rackingAssembly.structuralAuthorityGaps",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "CODE-AUTHORITY-INCOMPLETE",
+      "severity": "blocking",
+      "domain": "code",
+      "authorityPath": "codeAuthority.editions",
+      "affectedSheets": [
+        "PV-0",
+        "CERT",
+        "PE-1"
+      ],
+      "explanation": "Code authority is incomplete for Madison County Building & Zoning — unknown adopted edition for IBC, IRC, IFC (printed PENDING — no inference). Archive + verify the adoption document (W4-D) before permit-ready.",
+      "resolutionAction": "Archive + verify the AHJ adoption ordinance (W4-D); no edition inference.",
+      "provenance": {
+        "source": "snapshot build (permitReadiness)",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "PROJECT-AUTHORITY-UNVERIFIED",
+      "severity": "blocking",
+      "domain": "document",
+      "authorityPath": "projectAuthority",
+      "affectedSheets": [
+        "PV-0",
+        "CERT"
+      ],
+      "explanation": "Project legal authority (address, APN, municipal boundary, AHJ and fire authority) is operator-posted / postally inferred and not verified from an official source — county/city/AHJ must not be assumed from postal code alone. Verify via the document registry before permit-ready.",
+      "resolutionAction": "Verify address / APN / municipal boundary / AHJ / fire authority via the document registry (no postal inference).",
+      "provenance": {
+        "source": "snapshot build (permitReadiness)",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "MODULE-EXACT-DATASHEET-PENDING",
+      "severity": "blocking",
+      "domain": "document",
+      "authorityPath": "equipment-db(module) → manufacturer-assets-db#module_spec:qcells-peak-duo-400",
+      "affectedSheets": [
+        "DS-1"
+      ],
+      "explanation": "Module Q.PEAK DUO BLK ML-G10+ 400W (400 W): the on-file document is the 385–405 W family datasheet, not the exact 400 W sheet.",
+      "resolutionAction": "Attach the exact 400 W module datasheet (or a single-wattage crop).",
+      "provenance": {
+        "source": "equipmentProjection",
+        "ref": "qcells-peak-duo-400"
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    },
+    {
+      "code": "ENGINEERING-REVIEW-PENDING",
+      "severity": "blocking",
+      "domain": "review",
+      "authorityPath": "certification.engineeringReviewApproved",
+      "affectedSheets": [
+        "CERT",
+        "PE-1"
+      ],
+      "explanation": "No approved engineering-review record covering this snapshot digest (D-6)",
+      "resolutionAction": "Obtain an approved engineering-review record covering the current snapshot digest (D-6).",
+      "provenance": {
+        "source": "snapshot build (permitReadiness)",
+        "ref": null
+      },
+      "createdAtIso": "7/27/2026",
+      "createdVersion": "47420",
+      "resolved": false
+    }
+  ]
+}

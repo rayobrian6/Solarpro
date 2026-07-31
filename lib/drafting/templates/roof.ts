@@ -27,6 +27,17 @@ import type { DraftingInput } from '../types';
 import type { DesignIntent } from '../designIntent';
 import type { CADModel } from '../../cad/types';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+import { projectStructural, projectAttachmentInstallationAuthority } from '../../permit/snapshot/structuralProjection';
+// ECD §7 — the canonical BONDING authority (requirement vs method). PV-3's
+// hardware schedule used to hardcode 'UL 2703 INTEGRATED — NEC 690.43' in BOTH
+// the verified AND the assembly-PENDING branch.
+import { projectRackingBondingAuthority } from '../../permit/snapshot/rackingBonding';
+import { getManufacturerAsset } from '../../manufacturer-assets-db';
+// AAC WS-9 — the ONE document-applicability seam every sheet may use.
+import { sheetDocumentApplicability, type EquipmentDocumentAuthority } from '../../permit/snapshot/documentAuthority';
+import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
+import { applyAffine, fitAffine, emitPlacementManifestComment } from '../../permit/snapshot/coordinateAuthority';
+import type { PlacementEntry } from '../../permit/snapshot/types';
 import { getLayoutForSystem } from '../layoutEngine';
 import {
   drawSVGOpen, drawSVGClose, drawBackground, drawTitleBar,
@@ -44,6 +55,13 @@ import {
 import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
+// KDP (structural math consistency) — THE roof-pitch authority, shared with the
+// specs table / cover / PV-4C / PE-1 so no sheet prints a different pitch.
+import { resolveRoofPitch } from '../sheetComposition';
+// §6 ROUTE PROVENANCE (07-22): the trench/conduit annotation must NOT claim
+// "ROUTE FIELD-VERIFIED" while run lengths are CAD-derived estimates — it prints
+// "CAD-DERIVED ESTIMATE — FIELD VERIFY", driven by the snapshot's lengthSource.
+import { routeProvenanceLabel, branchLayoutCaption, projectCanonicalBranch } from '../../permit/snapshot/electricalProjection';
 import {
   computeFitWindow, drawSiteContextEls, type SiteContext,
   computePlanTiltDeg, choosePlanRotationDeg, rotateFakePt, rotateAzimuthDeg,
@@ -135,6 +153,17 @@ function planViewAreaFt2(ring: Array<{ lat: number; lng: number }>): number {
 // STEP 4: All geometry from CADModel (via fake-degree encoding).
 // ─────────────────────────────────────────────────────────────────────────────
 
+// W3.1 §2 — tag a drawn module with its CANONICAL object id so the render-parity
+// harness can verify (d) no rendered physical object without a canonical ID and
+// (e) coverage. The id matches snapshot.geometry.moduleInstances[].instanceId
+// (`mi-<panelId>`). Only emitted for safe-charactered ids (never fabricated).
+function canonicalObjIdAttr(p: { id?: unknown } | null | undefined): string {
+  const raw = p?.id;
+  if (raw == null) return '';
+  const s = String(raw);
+  return /^[\w.:-]+$/.test(s) ? ` data-object-id="mi-${s}"` : '';
+}
+
 export function drawRoofPlan(
   input: DraftingInput,
   intent?: DesignIntent | null,
@@ -146,8 +175,17 @@ export function drawRoofPlan(
 
   const totalPanels = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw        = cad?.totalDcKw   ?? engineering.totalDcKw   ?? (totalPanels * (engineering.panelWatts || 400) / 1000);
-  const panelLenIn  = project.panelLengthIn   || 66;
-  const panelWidIn  = project.panelWidthIn    || 40;
+  // ── W3 §2 — module footprint dims PROJECT from the canonical snapshot module
+  // instance (exact catalog dims). The generic 66×40 fallback is DELETED; when
+  // no snapshot is present (standalone preview) the project scalars are the
+  // last resort, never a made-up module size. panelLenIn = long dim (height),
+  // panelWidIn = width — matching the snapshot ModuleInstance convention.
+  const _sp = projectStructural(ctx?.snapshot);
+  // 0 when truly unknown (never 66/40): the snapshot fires MODULE-DIMENSIONS-
+  // UNVERIFIED and the review banner prints — the drawing degrades honestly
+  // rather than presenting a fabricated module size as real.
+  const panelLenIn  = _sp.moduleHeightIn ?? project.panelLengthIn ?? 0;
+  const panelWidIn  = _sp.moduleWidthIn  ?? project.panelWidthIn  ?? 0;
   const mountSys    = ((((project as any)._canonical?.mountSystem as string)
     || project.mountingSystem
     || 'IRONRIDGE XR100')).toUpperCase();
@@ -165,13 +203,35 @@ export function drawRoofPlan(
   const pitchNum    = project.roofPitch       || 5;
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
-  const attachSp    = (project as any).resolvedAttachSpacingIn
-    || project.attachmentSpacing
-    || 48;
-  // Railed systems (incl. RT-MINI) run RAIL FEET @ 48" O.C. STAGGERED — feet
-  // share rafters at 4 ft O.C. under a continuous rail, NOT one per module. The
-  // drawn feet + the attachment callout both use this so the plan matches labor.
-  const railFootOcIn = 48;
+  // W3 §4/§6 — attachment O.C. spacing PROJECTS from the canonical snapshot
+  // (engine-RESOLVED spacing on the rail/attachment objects), never the invented
+  // 48" literal. Feet are then geo-registered onto the real rafter grid at this
+  // canonical O.C.; their COUNT reconciles with snapshot.structural.attachments
+  // (V22). When no snapshot is present the resolved project value is the last
+  // resort (still engine-resolved, not a sheet literal).
+  const attachSp    = _sp.attachmentSpacingIn
+    ?? (project as any).resolvedAttachSpacingIn
+    ?? project.attachmentSpacing
+    ?? null;
+  // Railed systems (incl. RT-MINI) run RAIL FEET at the canonical O.C. STAGGERED —
+  // feet share rafters under a continuous rail, NOT one per module. The drawn feet
+  // + the attachment callout both use the projected spacing so the plan matches
+  // the engine-resolved layout and the BOM.
+  const railFootOcIn = _sp.attachmentSpacingIn
+    ?? (project as any).resolvedAttachSpacingIn
+    ?? project.attachmentSpacing
+    ?? 48;
+  // PPC §3 — PV-1's spacing ANNOTATIONS project the canonical spacing authority
+  // (design value + verification state). The numeric above stays the GEOMETRY
+  // driver (where feet are drawn); every printed spacing string comes from here,
+  // so PV-1 can no longer state a spacing the structural authority has not verified.
+  const _attP = projectAttachmentInstallationAuthority(
+    ctx?.snapshot ?? null,
+    ((project as any).mountingSystemId as string | undefined) ?? null,
+  );
+  /** '(DESIGN)' / '(VERIFIED)' suffixed short spacing label, e.g. '48" O.C. (DESIGN)'. */
+  const _ocLabelP = _attP.spacingShortLabel;
+  const _spacingPendingP = _attP.spacing.verificationState !== 'verified';
   // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (Ray, 2026-07-01): per the
   // IFC code table behind applyCodeBasis, ahjRidgeSetbackIn is the FIRE SETBACK
   // (drawn as a band on every edge) and ahjRoofSetbackIn is the ACCESS PATHWAY
@@ -711,7 +771,7 @@ export function drawRoofPlan(
           const mx = (bestSeg[0] + bestSeg[2]) / 2, my = (bestSeg[1] + bestSeg[3]) / 2;
           let ang = Math.atan2(bestSeg[3] - bestSeg[1], bestSeg[2] - bestSeg[0]) * 180 / Math.PI;
           if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-          tEls.push(`<text x="${mx.toFixed(1)}" y="${(my - 3.5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#3a3f46" stroke="#fff" stroke-width="1.6" paint-order="stroke">(N) TRENCH — ROUTE FIELD-VERIFIED</text>`);
+          tEls.push(`<text x="${mx.toFixed(1)}" y="${(my - 3.5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#3a3f46" stroke="#fff" stroke-width="1.6" paint-order="stroke">(N) TRENCH — ${routeProvenanceLabel(ctx?.snapshot)}</text>`);
         }
       });
       if (tEls.length) {
@@ -919,6 +979,45 @@ export function drawRoofPlan(
   const panLenPx = Math.max((panelLenIn / 12) * scale * 0.97, 6);
   const panWidPx = Math.max((panelWidIn / 12) * scale * 0.97, 4);
 
+  // W3.1 §2 — CANONICAL PROJECTION CONTEXT. When a validated snapshot is present,
+  // module outlines, rails, attachment feet and splice markers are drawn as PURE
+  // PROJECTIONS of their canonical coordinates: viewport ∘ DT-SITE(canonical),
+  // where the viewport (registration-ft → sheet-px, scale/paper/flip ONLY) is fit
+  // by least squares from DT-SITE(drawnPolygon centroid) → toX/toY(raw lng/lat).
+  // The renderer no longer regularizes/geo-registers modules — the display
+  // straightening lives in the snapshot's drawnPolygon; positions stay RAW
+  // canonical (no panel moved). A single placement manifest is emitted for the
+  // post-render checkRenderParity (V30/V31, blocking).
+  const _placementEntries: PlacementEntry[] = [];
+  let _projVp: { a: number; b: number; c: number; d: number; e: number; f: number } | null = null;
+  let _projDTM: { a: number; b: number; c: number; d: number; e: number; f: number } | null = null;
+  const _miByRawId = new Map<string, any>();
+  if (ctx?.snapshot) {
+    const _snap = ctx.snapshot;
+    const _dt = (_snap.geometry.drawingTransforms ?? []).find((t: any) => t.transformId === 'DT-SITE') ?? null;
+    if (_dt) {
+      const _rawById = new Map(validPanels.map((p: any) => [String(p.id), p]));
+      const _src: Array<{ x: number; y: number }> = [], _dst: Array<{ x: number; y: number }> = [];
+      for (const mi of _snap.geometry.moduleInstances) {
+        const rawId = String(mi.instanceId).replace(/^mi-/, '');
+        _miByRawId.set(rawId, mi);
+        const rp: any = _rawById.get(rawId);
+        const poly = (mi.drawnPolygon ?? mi.polygon)?.points ?? [];
+        if (!rp || !poly.length) continue;
+        const cen = { x: poly.reduce((s: number, q: any) => s + q.x, 0) / poly.length, y: poly.reduce((s: number, q: any) => s + q.y, 0) / poly.length };
+        _src.push(applyAffine(_dt.matrix, cen));
+        _dst.push({ x: toX(rp.lng), y: toY(rp.lat) });
+      }
+      const vp = fitAffine(_src, _dst);
+      if (vp) { _projVp = vp; _projDTM = _dt.matrix; }
+    }
+  }
+  const _projectCanon = (xy: { x: number; y: number }) => applyAffine(_projVp!, applyAffine(_projDTM!, xy));
+  const _canonCentroid = (poly: { points: Array<{ x: number; y: number }> }) => ({
+    x: poly.points.reduce((s, q) => s + q.x, 0) / poly.points.length,
+    y: poly.points.reduce((s, q) => s + q.y, 0) / poly.points.length,
+  });
+
   // PV-1B circuit sheet: map each branch color → its circuit number (1-based), in
   // the order arrayPages assigned them (first appearance = B1..Bn = legend order).
   const branchIndexByColor = new Map<string, number>();
@@ -955,145 +1054,112 @@ export function drawRoofPlan(
       ? `<g transform="rotate(${rot.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">` : '<g>';
 
     const branchColor = panelColorById?.get(p.id);
-    if (branchColor) {
-      // PV-1B circuit sheet (Cannon-style): a CLEAN uniform module outline — the
-      // thin colored CIRCUIT wires (drawn below) carry branch identity, not a
-      // garish solid fill. A small circuit number in the branch color ties each
-      // module to its circuit. Drawn UPRIGHT (outside the rotate group) so the
-      // number stays readable on E/W (rotated) planes.
-      const cNum = (branchIndexByColor.get(branchColor) ?? 0) + 1;
-      // Small circuit tag, capped so it never dominates the module (a big number
-      // read as a module label, not a circuit id). Sits just below the module's
-      // top edge, upright, clear of the center wire line.
-      const numFs = Math.max(Math.min(Math.min(pw, ph) * 0.22, 9), 4.2);
-      const tagY = py - ph * 0.5 + numFs + 1.5;
-      els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/></g>`);
-      els.push(`<text x="${px.toFixed(1)}" y="${tagY.toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}" opacity="0.9">${cNum}</text>`);
-      // IQ8 microinverter mounted UNDER the module (Enphase micro system) — a small
-      // dark device box in the module's lower area, outlined in its branch color.
-      // The AC branch wire daisy-chains these micros in series to the JB, so the
-      // sheet shows the module-level electronics + the string attached to each.
-      const micW = Math.max(Math.min(pw, ph) * 0.44, 4);
-      const micH = Math.max(Math.min(pw, ph) * 0.16, 1.8);
-      const micCy = py + ph * 0.20;
-      els.push(`<rect x="${(px - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
-    } else {
-      // ── System-aware rail + foot logic ──
-      // RAILED (RT-MINI, IronRidge, most): continuous row rails + feet at framing
-      // crossings — drawn in the per-plane pass AFTER this loop (so rails run the
-      // full row and feet land on rafters at O.C., not one per module).
-      // RAIL-LESS (RT-APEX / E Mount AIR / S-5 / EcoFasten): 4 direct mounts under
-      // the module's long-side frame edges at the quarter points, X SNAPPED to the
-      // framing grid (mounts bolt into rafters/chords).
-      const hostIdx = hostPlaneIdx(p);
-      const grid = hostIdx >= 0 ? framingGrids[hostIdx] : null;
-      const snapX = (x: number): number => {
-        if (!grid || rot !== 0 || grid.fAz !== 0) return x;
-        const s = grid.bcx + Math.round((x - grid.bcx) / grid.spacingPx) * grid.spacingPx;
-        return Math.max(x0 + 1, Math.min(x0 + pw - 1, s));
-      };
-      const fy1 = y0 + ph * 0.25, fy2 = y0 + ph * 0.75;
-      let hardware = '';
-      if (isRailless) {
-        // Rail-less: 4 direct mounts at the module's frame quarter points.
-        const mx1 = snapX(x0 + pw * 0.25), mx2 = snapX(x0 + pw * 0.75);
-        for (const mxp of [mx1, mx2]) for (const myp of [fy1, fy2]) {
-          hardware += `<rect x="${(mxp - 1.4).toFixed(1)}" y="${(myp - 1.4).toFixed(1)}" width="2.8" height="2.8" fill="#2a5db0" stroke="#173a7a" stroke-width="0.4"/>`;
-        }
-      } else {
-        // Railed: continuous rails + rafter feet drawn in the per-plane pass below.
+    // ── Module outline (system-agnostic) ──
+    // W3.1/W4 §2 — the module outline is a PURE PROJECTION of the canonical
+    // drawnPolygon (viewport∘DT-SITE) on EVERY sheet: PV-1 (structural) AND the
+    // PV-1B circuit sheet draw the SAME 31 canonical polygons with the SAME ids,
+    // so the two sheets never disagree on where a module is. The renderer never
+    // recreates a rectangle from generic dims when the snapshot is present.
+    // Only the STYLING differs: PV-1B strokes each module in its BRANCH color
+    // with a light branch-colored fill (borders stay crisp on the white roof),
+    // while the thin circuit wires + micro symbols (below) overlay — never
+    // replace — the module layer. No snapshot (standalone preview / unit tests)
+    // ⇒ legacy rect fallback, for both modes.
+    const _mi = (_projVp && _projDTM) ? _miByRawId.get(String(p.id)) : null;
+    const _canonPoly: Array<{ x: number; y: number }> | null =
+      _mi && _mi.drawnPolygon?.points?.length ? _mi.drawnPolygon.points.map((c: any) => _projectCanon(c)) : null;
+    const cNum = branchColor ? (branchIndexByColor.get(branchColor) ?? 0) + 1 : 0;
+    if (_canonPoly && _mi) {
+      const ptsStr = _canonPoly.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+      const stroke = branchColor ?? '#2c4a75';
+      // branch-colored LIGHT fill on the circuit sheet; opaque near-white on the
+      // structural sheet (that sheet's fill carries no circuit meaning).
+      const fillAttr = branchColor
+        ? `fill="${branchColor}" fill-opacity="0.14"`
+        : `fill="#fdfdfd"`;
+      els.push(`<polygon data-object-id="${_mi.instanceId}" points="${ptsStr}" ${fillAttr} stroke="${stroke}" stroke-width="${branchColor ? '1.1' : '0.8'}"/>`);
+      _placementEntries.push({
+        objectId: _mi.instanceId, kind: 'module',
+        canonicalXY: _canonCentroid(_mi.drawnPolygon),
+        sheetXY: { x: _canonPoly.reduce((s, c) => s + c.x, 0) / _canonPoly.length, y: _canonPoly.reduce((s, c) => s + c.y, 0) / _canonPoly.length },
+      });
+      if (branchColor) {
+        // circuit tag + IQ8 micro symbol OVERLAY the branch-colored module,
+        // placed from the PROJECTED polygon bbox so they track the canonical
+        // geometry (upright) on every plane, incl. rotated E/W faces.
+        const xs = _canonPoly.map(c => c.x), ys = _canonPoly.map(c => c.y);
+        const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
+        const bw = bx1 - bx0, bh = by1 - by0, bcx = (bx0 + bx1) / 2;
+        const numFs = Math.max(Math.min(Math.min(bw, bh) * 0.30, 9), 4.2);
+        els.push(`<text x="${bcx.toFixed(1)}" y="${(by0 + numFs + 1.5).toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}">${cNum}</text>`);
+        const micW = Math.max(Math.min(bw, bh) * 0.50, 4);
+        const micH = Math.max(Math.min(bw, bh) * 0.18, 1.8);
+        const micCy = by0 + bh * 0.62;
+        els.push(`<rect x="${(bcx - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
       }
-      els.push(
-        `${gOpen}` +
-        `<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
-        hardware +
-        `</g>`);
+    } else {
+      // No snapshot geometry (standalone preview / unit tests): legacy local
+      // rect, same styling split as the projected path above.
+      const stroke = branchColor ?? '#2c4a75';
+      const fillAttr = branchColor ? `fill="${branchColor}" fill-opacity="0.14"` : `fill="#fdfdfd"`;
+      els.push(`${gOpen}<rect${canonicalObjIdAttr(p)} x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" ${fillAttr} stroke="${stroke}" stroke-width="${branchColor ? '1.1' : '0.8'}"/></g>`);
+      if (branchColor) {
+        const numFs = Math.max(Math.min(Math.min(pw, ph) * 0.22, 9), 4.2);
+        els.push(`<text x="${px.toFixed(1)}" y="${(py - ph * 0.5 + numFs + 1.5).toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}">${cNum}</text>`);
+        const micW = Math.max(Math.min(pw, ph) * 0.44, 4);
+        const micH = Math.max(Math.min(pw, ph) * 0.16, 1.8);
+        const micCy = py + ph * 0.20;
+        els.push(`<rect x="${(px - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
+      }
     }
   });
 
-  // ── RT-Mini foot + rail attachment — cantilever logic (Ray 2026-07-08) ──────
-  // Two rail lines per panel row at the 25% / 75% points of the module (25% down
-  // from the top, 25% up from the bottom): equal cantilevers top & bottom, the
-  // 50% span between carries the load efficiently. Feet land ON rafters at 48"
-  // O.C., STAGGERED (both rails start on the same rafter; the top rail then jumps
-  // 24" and runs 48" O.C., the bottom rail runs straight 48" O.C. — not a foot
-  // per module). END CANTILEVER: the overhang from the outermost foot to the end
-  // of the end panel must be ≤ 18" or that panel droops; if no rafter falls within
-  // 18" of the edge, a DECK-MOUNTED foot (open ◻ marker) is added there instead.
-  let _deckMountUsed = false;
-  if (!isRailless && !isBranchColorMode) {
-    const FT = scale;                       // 1 ft in px (1 fake-degree unit = 1 ft)
-    const quarterUp = panLenPx * 0.25;      // rail at 25% down from top / up from bottom
-    const cantMaxPx = 1.5 * FT;             // 18" max overhang from outer foot to panel end
-    const halfPanU = panWidPx / 2;          // panel half-width across the eave (portrait)
-    const endInsetPx = Math.min(cantMaxPx * 0.6, 0.5 * FT);   // deck foot ~6" from the edge
-    regPlanes.forEach((rp: any, ri: number) => {
-      const pp = regPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices ?? []));
-      if (!pp.length) return;
-      // plane fall-line basis in screen space: v = eave→ridge, u = along the eave
-      const az = (typeof rp.azimuth === 'number' && isFinite(rp.azimuth)) ? rp.azimuth : 180;
-      const c0lng = rp.vertices.reduce((s: number, v: any) => s + v.lng, 0) / rp.vertices.length;
-      const c0lat = rp.vertices.reduce((s: number, v: any) => s + v.lat, 0) / rp.vertices.length;
-      let vdx = toX(c0lng + Math.sin(az * Math.PI / 180)) - toX(c0lng);
-      let vdy = toY(c0lat + Math.cos(az * Math.PI / 180)) - toY(c0lat);
-      const vl = Math.hypot(vdx, vdy) || 1; vdx /= vl; vdy /= vl;
-      const udx = -vdy, udy = vdx;
-      const uOf = (x: number, y: number) => x * udx + y * udy;
-      const vOf = (x: number, y: number) => x * vdx + y * vdy;
-      const grid = framingGrids[ri];
-      // rails sit at 25/75% of the module's PLAN (foreshortened) height so
-      // they stay inside the drawn rects on pitched planes
-      const quarterUpP = quarterUp * planeCosP[ri];
-      const rafStep = grid ? grid.spacingPx : 2 * FT;        // rafter spacing (24" default)
-      const uPhase = grid ? uOf(grid.bcx, grid.bcy) : 0;     // rafter phase (feet land ON rafters)
-      const stride = Math.max(2, Math.round((railFootOcIn / 12 * FT) / rafStep)); // rafters between feet (48"/24"=2)
-      const stagStride = Math.max(1, Math.floor(stride / 2));                       // 24" stagger = 1 rafter
-      const rowsMap = new Map<number, any[]>();
-      pp.forEach((p: any) => { const r = p.row ?? 0; if (!rowsMap.has(r)) rowsMap.set(r, []); rowsMap.get(r)!.push(p); });
-      const rails: string[] = [], rFeet: string[] = [], dFeet: string[] = [];
-      const P = (u: number, v: number) => ({ x: u * udx + v * vdx, y: u * udy + v * vdy });
-      const rafterFoot = (u: number, v: number) => { const q = P(u, v); rFeet.push(`<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="1.15" fill="#2a5db0"/>`); };
-      const deckFoot = (u: number, v: number) => { const q = P(u, v); dFeet.push(`<rect x="${(q.x - 1.5).toFixed(1)}" y="${(q.y - 1.5).toFixed(1)}" width="3" height="3" fill="#fff" stroke="#b45309" stroke-width="0.9"/>`); _deckMountUsed = true; };
-      rowsMap.forEach((rowPanels) => {
-        const us = rowPanels.map((p: any) => uOf(toX(p.lng), toY(p.lat)));
-        const vs = rowPanels.map((p: any) => vOf(toX(p.lng), toY(p.lat)));
-        const vMid = vs.reduce((a: number, b: number) => a + b, 0) / vs.length;
-        const uEdgeL = Math.min(...us) - halfPanU, uEdgeR = Math.max(...us) + halfPanU;   // panel-row extent
-        const vBot = vMid - quarterUpP, vTop = vMid + quarterUpP;                          // 25% / 75% rails
-        // rail lines span the panels (they cantilever past the end feet)
-        for (const vLine of [vBot, vTop]) {
-          const a = P(uEdgeL, vLine), b = P(uEdgeR, vLine);
-          rails.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#5a6478" stroke-width="0.8"/>`);
-        }
-        // rafter feet at 48" O.C. — both rails start on the first rafter inside the row
-        const uStart = uPhase + Math.ceil((uEdgeL - uPhase) / rafStep) * rafStep;
-        const botUs: number[] = [], topUs: number[] = [];
-        for (let u = uStart; u <= uEdgeR + 0.5; u += stride * rafStep) if (u >= uEdgeL - 0.5) botUs.push(u);
-        if (uStart >= uEdgeL - 0.5 && uStart <= uEdgeR + 0.5) topUs.push(uStart);
-        for (let u = uStart + stagStride * rafStep; u <= uEdgeR + 0.5; u += stride * rafStep) if (u >= uEdgeL - 0.5) topUs.push(u);
-        for (const u of botUs) rafterFoot(u, vBot);
-        for (const u of topUs) rafterFoot(u, vTop);
-        // END CANTILEVER guard per rail: overhang to the panel edge ≤ 18", else a
-        // rafter within 18" if one exists, else a deck-mounted foot at the edge.
-        for (const [lineUs, vLine] of [[botUs, vBot], [topUs, vTop]] as Array<[number[], number]>) {
-          const s = [...lineUs].sort((a, b) => a - b);
-          // LEFT end
-          if (!s.length || s[0] - uEdgeL > cantMaxPx) {
-            const r = uPhase + Math.ceil((uEdgeL - uPhase) / rafStep) * rafStep;
-            if (r - uEdgeL <= cantMaxPx && (!s.length || r < s[0] - 0.5)) rafterFoot(r, vLine);
-            else deckFoot(uEdgeL + endInsetPx, vLine);
-          }
-          // RIGHT end
-          if (!s.length || uEdgeR - s[s.length - 1] > cantMaxPx) {
-            const r = uPhase + Math.floor((uEdgeR - uPhase) / rafStep) * rafStep;
-            if (uEdgeR - r <= cantMaxPx && (!s.length || r > s[s.length - 1] + 0.5)) rafterFoot(r, vLine);
-            else deckFoot(uEdgeR - endInsetPx, vLine);
-          }
-        }
+  // ── W3.1 §2 — RAILS · ATTACHMENTS · SPLICES as PURE PROJECTIONS of the
+  // canonical snapshot coordinates. The former procedural rafter-grid foot
+  // generation is DELETED: rail lines, attachment feet and splice markers are
+  // now placed by applying the snapshot-carried DrawingTransform (DT-SITE) then a
+  // viewport affine fit ONLY from the drawn module anchors (scale/paper/flip) —
+  // the renderer no longer geo-registers or re-derives structural positions.
+  // Every drawn object is tagged with its canonical data-object-id and emitted in
+  // a placement manifest; generatePermit's post-render checkRenderParity enforces
+  // drawn == transform(canonical) (+ no-omission) as a BLOCKING invariant.
+  const _deckMountUsed = false;   // deck-foot heuristic retired with procedural placement
+  // W4 §10 — snapshot-DRIVEN structural placement for EVERY roof system: railed
+  // arrays draw canonical rails + attachment feet + splices; rail-less/direct-
+  // mount arrays have EMPTY rails and draw canonical direct-mount attachment
+  // feet. Both are pure projections (viewport∘DT-SITE) with manifest parity —
+  // the `isRailless` name flag no longer gates PV-1 mount placement.
+  if (!isBranchColorMode && _projVp && _projDTM && ctx?.snapshot) {
+    const snap = ctx.snapshot;
+    const cAtts = snap.structural.attachments ?? [];
+    const cRails = snap.structural.rails ?? [];
+    const project = _projectCanon;   // viewport∘DT-SITE, fit up-front from module anchors
+    const railEls: string[] = [], feetEls: string[] = [], spliceEls: string[] = [];
+    for (const r of cRails) {
+      const a = project(r.startXY), b = project(r.endXY);
+      railEls.push(`<line data-object-id="${r.railId}" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#5a6478" stroke-width="0.8"/>`);
+      _placementEntries.push({ objectId: r.railId, kind: 'rail',
+        canonicalXY: { x: (r.startXY.x + r.endXY.x) / 2, y: (r.startXY.y + r.endXY.y) / 2 },
+        sheetXY: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } });
+      (r.splicePointsXY ?? []).forEach((sp: { x: number; y: number }, k: number) => {
+        const s = project(sp); const sid = `splice-${r.railId}-${k + 1}`;
+        spliceEls.push(`<rect data-object-id="${sid}" x="${(s.x - 1.4).toFixed(1)}" y="${(s.y - 1.4).toFixed(1)}" width="2.8" height="2.8" fill="none" stroke="#b45309" stroke-width="0.8"/>`);
+        _placementEntries.push({ objectId: sid, kind: 'splice', canonicalXY: sp, sheetXY: s });
       });
-      if (rails.length || rFeet.length || dFeet.length)
-        els.push(`<g clip-path="url(#sb${_svgNs}c${ri})">${rails.join('')}${rFeet.join('')}${dFeet.join('')}</g>`);
-    });
+    }
+    for (const at of cAtts) {
+      const q = project(at.xy);
+      feetEls.push(`<circle data-object-id="${at.attachmentId}" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="1.15" fill="#2a5db0"/>`);
+      _placementEntries.push({ objectId: at.attachmentId, kind: 'attachment', canonicalXY: at.xy, sheetXY: q });
+    }
+    els.push(`<g class="pv1-structural">${railEls.join('')}${feetEls.join('')}${spliceEls.join('')}</g>`);
+  }
+  // §2 — emit ONE placement manifest for this sheet (modules + rails + feet +
+  // splices) for the post-render checkRenderParity (V30/V31, blocking).
+  if (_projVp && _placementEntries.length) {
+    els.push(emitPlacementManifestComment({
+      sheetId: isBranchColorMode ? 'PV-1B' : 'PV-1', transformId: 'DT-SITE', viewport: _projVp, entries: _placementEntries,
+    }));
   }
 
   // ── Setback hatch OVER the modules + encroachment accounting ──
@@ -1599,12 +1665,24 @@ export function drawRoofPlan(
           ],
       '3. ATTACHMENT SUBJECT TO FRAMING',
       '   LOCATION — SEE PV-3.',
+      // PPC §3 — the ONE canonical spacing line, verbatim, on PV-1.
+      `3C. ${_attP.spacingDesignLine}`,
+      `   STATUS: ${_attP.spacingStatusLine}.`,
+      // P13 WS-4 — the DECK-MOUNT clause is GONE. It instructed the installer to
+      // deck-mount "where no rafter falls in range" on every railed job,
+      // unconditionally: the deck-foot placement mechanism was retired (see
+      // _deckMountUsed = false, so no deck foot is ever drawn and the legend
+      // carries no deck swatch), PV-3 and PV-4C describe a rafter design, and the
+      // canonical assembly's attachmentMode is 'rafter' (2 structural wood screws
+      // — the RT-MINI DECK condition is a different 5-screw design with its own
+      // capacity and its own manufacturer instructions). A deck attachment is a
+      // deliberate design with its own authority, never a field fallback.
       ...(!isRailless
         ? [
-            `3B. RAILS ON FEET @ ${railFootOcIn}" O.C. STAGGERED,`,
+            `3B. RAILS ON FEET @ ${_ocLabelP} STAGGERED,`,
             '   FEET ON RAFTERS; RAILS AT 25%/75% OF',
-            '   MODULE. END OVERHANG ≤ 18" — DECK-MOUNT',
-            '   (◻) WHERE NO RAFTER FALLS IN RANGE.',
+            '   MODULE. END OVERHANG ≤ 18". ATTACH TO',
+            '   FRAMING ONLY — NO DECK-ONLY ATTACHMENT.',
           ]
         : []),
       ...(_encroachCount > 0
@@ -1725,7 +1803,7 @@ export function drawRoofPlan(
     const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="3.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="3.5" cy="1.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="1.8" r="1" fill="#2a5db0"/>`, label: 'PV MODULE + ATTACHMENT PTS' },
-      ...(!isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + RAFTER FOOT @ ${railFootOcIn}" O.C.` }] : [{ swatch: `<rect x="4" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/><rect x="9" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/>`, label: 'DIRECT-ATTACH MOUNTS (RAIL-LESS)' }]),
+      ...(!isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + RAFTER FOOT @ ${_ocLabelP}` }] : [{ swatch: `<rect x="4" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/><rect x="9" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/>`, label: 'DIRECT-ATTACH MOUNTS (RAIL-LESS)' }]),
       ...(_deckMountUsed ? [{ swatch: `<rect x="4.5" y="-2.5" width="5" height="5" fill="#fff" stroke="#b45309" stroke-width="1"/>`, label: 'DECK-MOUNTED FOOT (NO RAFTER)' }] : []),
       ...(_encroachCount > 0 ? [{
         swatch: `<rect x="4" y="-3.5" width="6" height="6" fill="none" stroke="#cc0000" stroke-width="1" transform="rotate(45 7 -0.5)"/>`,
@@ -1820,7 +1898,14 @@ export function drawRoofPlan(
     els.push(`<line x1="${(jbX - 3.5).toFixed(1)}" y1="${(jbY - 3.5).toFixed(1)}" x2="${(jbX + 3.5).toFixed(1)}" y2="${(jbY + 3.5).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
     const cEndX = roofMaxX - 8, cEndY = roofMaxY - 6;
     els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
-    const _jbLines = [`(N) JUNCTION BOX + 3/4" ${condType}`, `CONDUIT — ROUTE FIELD-VERIFIED`];
+    // W1b — the JB conduit stub PROJECTS the canonical branch run raceway/size
+    // (the branch home-run from the JB), never a hardcoded 3/4" + project conduit
+    // type, so PV-1 agrees with E-1 / PV-4B on the branch conduit (gate 3).
+    const _jbBranch = projectCanonicalBranch(ctx?.snapshot);
+    const _jbConduit = _jbBranch.raceway === 'FREE_AIR'
+      ? 'FREE AIR (Q-CABLE)'
+      : (_jbBranch.raceway && _jbBranch.tradeSizeIn ? `${_jbBranch.tradeSizeIn} ${_jbBranch.raceway}` : `3/4" ${condType}`);
+    const _jbLines = [`(N) JUNCTION BOX + ${_jbConduit}`, `CONDUIT — ${routeProvenanceLabel(ctx?.snapshot)}`];
     const _jbTextW = Math.max(..._jbLines.map(l => l.length)) * 3.5;
     const _rightGap = (W - zones.dims.right) - roofMaxX;
     if (_rightGap >= _jbTextW + 18) {
@@ -1832,8 +1917,9 @@ export function drawRoofPlan(
     // roofMaxY+24..+40; the callout used to print through the dim line)
     txtCallout(Math.max(botP.x - 40, dz.x + 4), roofMaxY + 48, 'start',
       [!isRailless
-        ? `(N) ${mountSys} RAIL FEET @ ${railFootOcIn}" O.C. STAGGERED`
-        : `(N) ${mountSys} DIRECT MOUNTS @ ${attachSp}" O.C.`,
+        ? `(N) ${mountSys} RAIL FEET @ ${_ocLabelP} STAGGERED`
+        : `(N) ${mountSys} DIRECT MOUNTS @ ${_ocLabelP}`,
+       ...(_spacingPendingP ? ['SPACING: PENDING STRUCTURAL VERIFICATION'] : []),
        `INTO FRAMING — SEE PV-3`],
       botP.x - 2, botP.y + 4);
   }
@@ -1869,10 +1955,14 @@ export function drawRoofPlan(
   // explains the module shading (useful) rather than repeating the sheet title. ──
   if (isBranchColorMode) {
     els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
-      // Wording note: the planset-structural golden guards against any on-map
-      // legend overlay by asserting the literal "BRANCH LEGEND" never appears
-      // in this SVG — reference the rail table without tripping it.
-      'IQ8 MICROINVERTER (▪) UNDER EACH MODULE · WIRED IN SERIES PER AC BRANCH (COLORED) · DASHED = HOMERUN TO JB · SEE LEGEND IN DATA RAIL', {
+      // W3 §topology-description — the caption PROJECTS the ONE canonical
+      // topology accessor (branchLayoutCaption). Micros are CONNECTED IN
+      // PARALLEL on the AC branch / Q-Cable — never the old "WIRED IN SERIES"
+      // literal (gate 1: series language is prohibited on a micro AC-branch
+      // sheet). Brand-aware (Enphase ⇒ Q Cable). The planset-structural golden
+      // still guards against the on-map "BRANCH LEGEND" literal — this keys the
+      // device symbol + dashing and references the rail table only.
+      branchLayoutCaption(ctx?.snapshot), {
         anchor: 'start', fontSize: 6.5, fill: '#555', italic: true,
       }));
   }
@@ -1951,13 +2041,15 @@ export function drawRoofStructural(
 ): string {
   const { project, engineering } = input;
 
-  // project.roofPitch is in DEGREES (e.g. 20). Convert to rise-per-12 for the
-  // slope label + section geometry — was rendering "20:12" for a 4:12 roof.
-  const _rawPitch  = project.roofPitch          || 5;
-  const pitchNum   = (_rawPitch > 12 && _rawPitch <= 90)
-    ? Math.round(Math.tan(_rawPitch * Math.PI / 180) * 12)
-    : _rawPitch;
-  const pitchStr   = pitchNum + ':12';
+  // KDP (structural math consistency) — the pitch comes from THE pitch authority
+  // (resolveRoofPitch), the same function the cover / specs table / PV-4C / PE-1
+  // read. This block used to take `project.roofPitch` (the operator-entered 20°)
+  // instead of the CAD plane the array was actually laid out on (16.52°), and
+  // rounded to a whole number instead of 0.1 — so this sheet printed
+  // "4:12 SLOPE" beside five other sheets printing 3.6:12, on one package.
+  const _pitchAuth = resolveRoofPitch(cad, input as unknown as Record<string, unknown>);
+  const pitchNum   = _pitchAuth.ratio;
+  const pitchStr   = _pitchAuth.pitchStr;
   const rafterSz   = project.rafterSize         || '2x6';
   const rafterSp   = project.rafterSpacing      || 24;
   // SINGLE-SOURCE with the specs table (sheetComposition getRoofData): the
@@ -1966,29 +2058,76 @@ export function drawRoofStructural(
   const _mSelD = (project as any).mountingSystemId
     ? getMountingSystemById((project as any).mountingSystemId as string)
     : undefined;
-  const attachSp   = (project as any).resolvedAttachSpacingIn
-    || project.attachmentSpacing
-    || _mSelD?.mount?.maxSpacingIn
-    || 48;
+  // W3 §4 — attachment O.C. PROJECTS from the canonical snapshot (engine-
+  // resolved spacing), never a sheet literal; PV-3 and PV-1 now agree.
+  const _spD = projectStructural(ctx?.snapshot);
+  const _cpRf = projectCodeAuthority(ctx?.snapshot);   // W4 §2 code editions
+  // PPC §3/§4 — PV-3 now consumes the CANONICAL attachment-installation authority
+  // (spacing + fastener assembly + document applicability + mount/racking states).
+  // Previously this function read `_mSelD.mount.fastener*` straight out of
+  // mounting-hardware-db and printed exact dims / torque / pilot / coating
+  // unconditionally — while FASTENER-ASSEMBLY-UNVERIFIED and
+  // EQUIPMENT-DOCUMENT-APPLICABILITY were both blocking.
+  const _attD = (() => {
+    const _mid = (project as any).mountingSystemId as string | undefined;
+    const _asset = _mid ? getManufacturerAsset(_mid, 'racking_detail') : null;
+    // AAC WS-9 RENDERER PURITY — projected from the frozen snapshot region.
+    const _appl = _asset ? sheetDocumentApplicability({
+      region: (ctx?.snapshot as { equipmentDocumentAuthority?: EquipmentDocumentAuthority } | undefined)
+        ?.equipmentDocumentAuthority ?? null,
+      category: 'racking_detail', equipmentId: _mid,
+      selectedModel: _mSelD?.model ?? _asset.model, asset: _asset,
+    }) : null;
+    return projectAttachmentInstallationAuthority(
+      ctx?.snapshot ?? null, _mid ?? null,
+      _asset ? { model: _asset.model, docTitle: _asset.docTitle } : null,
+      _appl ? {
+        state: _appl.state,
+        applicabilityVerified: _appl.applicabilityVerified,
+        documentProduct: _appl.documentProduct,
+      } : null,
+    );
+  })();
+  /** true ⇒ the five verified conditions hold and exact instructions may print. */
+  const _exactD = _attD.exactInstructionsAllowed;
+  // ECD §7 — the ONE bonding authority PV-3 may state a METHOD from. The
+  // REQUIREMENT (NEC 250.134 / 690.43) is separate and always rendered.
+  const _bondD = projectRackingBondingAuthority(ctx?.snapshot ?? null);
+  const attachSp   = _spD.attachmentSpacingIn
+    ?? (project as any).resolvedAttachSpacingIn
+    ?? project.attachmentSpacing
+    ?? _mSelD?.mount?.maxSpacingIn
+    ?? 48;
   const mountSys   = (((project as any)._canonical?.mountSystem as string)
     || project.mountingSystem
     || (_mSelD ? `${_mSelD.manufacturer} ${_mSelD.model}` : 'IRONRIDGE XR100')).toUpperCase();
   // RT-MINI is an L-FOOT + RAIL base (railed), NOT rail-less — only genuine
   // rail-less products get the direct-mount detail. (Matches roof-plan + BOM.)
   const isRaillessD = /RAIL-?LESS|RT[- ]?APEX|E[ -]?MOUNT ?AIR/i.test(mountSys);
-  const _fracD = (v: number) =>
-    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
-  const _lagDiaD  = _mSelD?.mount?.fastenerDiameterIn ?? 0.375;
-  const _embedD   = _mSelD?.mount?.fastenerEmbedmentIn ?? 2.5;
-  const _lagLenD  = Math.ceil((_embedD + 1.5) * 2) / 2;
-  const lagLabelD = `${_fracD(_lagDiaD)}" DIA × ${_lagLenD}" SS LAG`;
+  // PPC §4 — fastener FACTS come from the canonical assembly, and are RENDERABLE
+  // only when the five verified conditions hold. `_embedD` is retained as the
+  // SVG-geometry driver (the section is drawn to the observed embedment) but its
+  // LABELS print PENDING while unverified — mirroring PV-4C.1.
+  const _embedD   = _attD.fastener.embedmentIn ?? _mSelD?.mount?.fastenerEmbedmentIn ?? 2.5;
+  const _embedLblD = _exactD ? `${_embedD}" MIN EMBED` : 'EMBEDMENT: PENDING';
+  const lagLabelD = _exactD
+    ? [
+        _attD.fastener.diameterLabel ? `${_attD.fastener.diameterLabel}" DIA` : null,
+        _attD.fastener.lengthIn != null ? `× ${_attD.fastener.lengthIn}"` : null,
+        (_attD.fastener.fastenerType ?? '').toUpperCase() || null,
+      ].filter(Boolean).join(' ')
+    : `FASTENER ASSEMBLY: ${_attD.fastenerStateLabel}`;
   const roofType   = (project.roofType          || 'SHINGLE').toUpperCase();
-  const panelLenIn = project.panelLengthIn      || 66;
-  const panelWidIn = project.panelWidthIn       || 40;
+  // W3 §2 — exact catalog module dims from the snapshot (no generic 66×40).
+  const panelLenIn = _spD.moduleHeightIn ?? project.panelLengthIn ?? 0;
+  const panelWidIn = _spD.moduleWidthIn  ?? project.panelWidthIn  ?? 0;
   const panelWt    = project.panelWeightLbs     || 45;
   const condType   = (project.conduitType       || 'EMT').toUpperCase();
-  const windSpeedMph   = engineering.windSpeedMph  ?? project?.ahjWindSpeedMph  ?? 90;
-  const groundSnowPsf  = engineering.groundSnowPsf ?? project?.ahjGroundSnowPsf ?? 0;
+  // W3 §7 — THE 115-vs-90 FIX. Wind/snow PROJECT from the single-sourced
+  // snapshot env; the `?? 90` sheet default is DELETED. Every sheet prints the
+  // same value the cover / PV-4C / PE-1 print. em-dash-safe display below.
+  const windSpeedMph   = _spD.windSpeedMph ?? engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? null;
+  const groundSnowPsf  = _spD.groundSnowPsf ?? engineering.groundSnowPsf ?? project?.ahjGroundSnowPsf ?? null;
   const totalPanels    = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw           = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
 
@@ -2290,7 +2429,7 @@ export function drawRoofStructural(
   // extension lines from bolt to dim line
   els.push(`<line x1="${_edX.toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${(_boltX - 2).toFixed(1)}" y2="${_rafTop.toFixed(1)}" stroke="#cc0000" stroke-width="${DIM}"/>`);
   els.push(`<line x1="${_edX.toFixed(1)}" y1="${_tipY.toFixed(1)}" x2="${(_boltX - 2).toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="${DIM}"/>`);
-  els.push(drawText(_edX - 3, (_rafTop + _tipY) / 2 + 2, `${_embedD}" MIN EMBED`, { anchor: 'end', fontSize: 5.4, fontWeight: 'bold', fill: '#cc0000' }));
+  els.push(drawText(_edX - 3, (_rafTop + _tipY) / 2 + 2, _embedLblD, { anchor: 'end', fontSize: 5.4, fontWeight: 'bold', fill: '#cc0000' }));
 
   // rail-less character note (left of assembly, small italic)
   els.push(drawText(_cx - roofW * 0.42, deckTop - 30, isRaillessD ? 'LOW-PROFILE — NO RAIL' : 'RAIL-MOUNTED', { anchor: 'start', fontSize: 5.2, italic: true, fill: '#555' }));
@@ -2301,7 +2440,9 @@ export function drawRoofStructural(
     { ax: _cx + _clEar - 3,     ay: _clampAnchorY,               text: `${_label2}` },
     { ax: _cx + _plW / 2 - 2,   ay: _plTop + 1.5,                text: 'MOUNT BASE PLATE + T-BOLT' },
     { ax: _boltX + _headW / 2,  ay: _headTop + 2.5,              text: `${lagLabelD}` },
-    { ax: _cx + _butW / 2 - 4,  ay: _padTop + 1.5,               text: 'ALPHASEAL BUTYL FLASHING (SELF-SEAL)' },
+    // PPC §4 — the hardcoded product name ('ALPHASEAL BUTYL') is a manufacturer
+    // instruction/product assertion; it may print only under verified applicability.
+    { ax: _cx + _butW / 2 - 4,  ay: _padTop + 1.5,               text: _exactD ? 'ALPHASEAL BUTYL FLASHING (SELF-SEAL)' : 'MOUNT BASE FLASHING — PENDING VERIFIED SELECTION' },
     { ax: _rlx + roofW - 8,     ay: deckTop + _shH / 2,          text: `${roofType} SHINGLE / UNDERLAYMENT` },
     { ax: _rlx + roofW - 8,     ay: _rafTop + _rafH / 2,         text: `SHEATHING (5/8" OSB) + ${rafterSz} RAFTER @ ${rafterSp}" O.C.` },
   ];
@@ -2320,10 +2461,10 @@ export function drawRoofStructural(
   els.push(drawWindArrow(
     secX + roofRun + 40, midPanY,
     40, 'left',
-    `WIND ${windSpeedMph} MPH`
+    `WIND ${windSpeedMph ?? '—'} MPH`
   ));
   // Snow (vertical, pointing down onto panel)
-  if (groundSnowPsf > 0) {
+  if (groundSnowPsf != null && groundSnowPsf > 0) {
     els.push(drawWindArrow(
       detX + detW / 2, detY - 24,
       20, 'down',
@@ -2348,15 +2489,18 @@ export function drawRoofStructural(
   // Row 2 — attachment spacing at its true scaled length, on the next row
   // (+68 clears row 1's relocated line + label — at +44 the two labels
   // printed on top of each other).
+  // PPC §3 — the DESIGN attachment spacing + its verification state, in INCHES
+  // (the old label printed `4'-0" ATTACH. O.C. MAX`: an unverified maximum, in a
+  // unit that contradicted the `48"` the specs table printed inches away).
   els.push(drawOverallDimension(
     secX + bayW, secX + bayW + Math.min(attachSp * IN_PX, roofRun - bayW),
     roofBaseY + 68, 16,
-    ftToFtIn(attachSp / 12) + ' ATTACH. O.C. MAX'
+    `${_attD.spacingShortLabel} DESIGN ATTACH. O.C.`
   ));
 
   // L3 — Lag embedment (vertical, left)
   els.push(drawVerticalDimension(
-    secX + 5, roofBaseY, roofBaseY - 30, 10, `${_embedD}" MIN. EMBED`
+    secX + 5, roofBaseY, roofBaseY - 30, 10, _exactD ? `${_embedD}" MIN. EMBED` : 'EMBEDMENT: PENDING'
   ));
 
   // ── FASTENER & HARDWARE SCHEDULE + ROOFING NOTES (below the section) ──
@@ -2366,25 +2510,60 @@ export function drawRoofStructural(
     const hby = roofBaseY + 100;
     const hbw = (dz.width - 24) / 2;
     const hbx1 = secX, hbx2 = secX + hbw + 24;
-    const _torque = _lagDiaD <= 0.3125 ? '8–12 FT-LBS' : '15–20 FT-LBS';
-    const _pilot = _lagDiaD <= 0.3125 ? '7/32"' : '1/4"';
-    const hwRows: Array<[string, string]> = [
-      ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
-      ['LAG BOLT', `${lagLabelD}, 316 SS`],
-      ['EMBEDMENT', `${_embedD}" MIN INTO RAFTER`],
-      ['PILOT HOLE', `${_pilot} DIA — RAFTER CENTER`],
-      ['DRIVE TORQUE', `${_torque} — NO OVERDRIVE`],
-      ['FLASHING', 'MFR FLASHING — ALL PENETRATIONS'],
-      ['BONDING', 'UL 2703 INTEGRATED — NEC 690.43'],
-    ];
-    const rfNotes = [
-      `1. FLASH ALL PENETRATIONS PER MOUNTING MFR MANUAL.`,
-      `2. SEALANT AT EVERY LAG — ${roofType}-COMPATIBLE.`,
-      `3. ATTACH TO FRAMING ONLY — NEVER SHEATHING ALONE.`,
-      `4. NO ATTACHMENT AT SPLICES; 1-1/2" MIN EDGE DISTANCE.`,
-      `5. REPAIR DAMAGED ROOFING BEFORE MOUNTING.`,
-      `6. VERIFY ROOFING MFR WARRANTY COMPATIBILITY.`,
-    ];
+    // PPC §4 — the FABRICATED derivations are DELETED. The old code invented a
+    // drive torque and a pilot-hole diameter from the fastener DIAMETER
+    // (`_lagDiaD <= 0.3125 ? '8–12 FT-LBS' : '15–20 FT-LBS'` and
+    // `? '7/32"' : '1/4"'`) with no source at all — and the pilot line
+    // CONTRADICTED the snapshot, which records `pilotHoleRequired: false`
+    // ('no pilot hole') for the selected RT-MINI. Torque / pilot / coating are now
+    // rendered ONLY from the verified canonical assembly, and the assembly carries
+    // no torque field, so they print PENDING until a verified source exists.
+    const hwRows: Array<[string, string]> = _exactD
+      ? [
+        ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
+        ['FASTENER', lagLabelD],
+        ['EMBEDMENT', `${_embedD}" MIN INTO RAFTER`],
+        ['PILOT HOLE', _attD.fastener.pilotRuleLabel.toUpperCase()],
+        ['MATERIAL / COATING', (_attD.fastener.material ?? 'PER MANUFACTURER DOCUMENT').toUpperCase()],
+        ['FLASHING', 'PER THE VERIFIED MANUFACTURER DOCUMENT'],
+        // ECD §7 — PROJECTED, never a literal: the method label the canonical
+        // bonding authority establishes (integrated-listed / separate components /
+        // pending). The REQUIREMENT row below it is code and always prints.
+        ['BONDING METHOD', _bondD.methodCompactLabel],
+        ['BONDING REQUIREMENT', `PER ${_bondD.requirementCodeBasis}`],
+      ]
+      : [
+        ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
+        ['FASTENER ASSEMBLY', _attD.fastenerStateLabel],
+        ['INSTALLATION DETAILS', 'NOT ESTABLISHED'],
+        ['EMBEDMENT / TORQUE / PILOT', 'WITHHELD — NO VERIFIED SOURCE'],
+        ['MATERIAL / COATING', 'WITHHELD — NO VERIFIED SOURCE'],
+        // ECD §7 — THE defect: this branch (assembly PENDING) asserted
+        // 'UL 2703 INTEGRATED' on the same table that withholds embedment, torque,
+        // pilot and coating for want of a verified source. It now projects the
+        // same authority as the verified branch, which yields
+        // 'BONDING REQUIRED — METHOD PENDING VERIFIED ASSEMBLY' here.
+        ['BONDING METHOD', _bondD.methodCompactLabel],
+        ['BONDING REQUIREMENT', `PER ${_bondD.requirementCodeBasis}`],
+      ];
+    const rfNotes = _exactD
+      ? [
+        `1. FLASH ALL PENETRATIONS PER MOUNTING MFR MANUAL.`,
+        `2. SEALANT AT EVERY FASTENER — ${roofType}-COMPATIBLE.`,
+        `3. ATTACH TO FRAMING ONLY — NEVER SHEATHING ALONE.`,
+        `4. NO ATTACHMENT AT SPLICES; 1-1/2" MIN EDGE DISTANCE.`,
+        `5. REPAIR DAMAGED ROOFING BEFORE MOUNTING.`,
+        `6. VERIFY ROOFING MFR WARRANTY COMPATIBILITY.`,
+      ]
+      // While unverified: NO sealant / edge-distance / manufacturer-manual
+      // instruction (they are exactly the instructions the unapplicable document
+      // would have supplied). The general-practice statements that assert no
+      // dimension and cite no document remain.
+      : [
+        ..._attD.pendingLines.map((l, i) => `${i + 1}. ${l}`),
+        `${_attD.pendingLines.length + 1}. ATTACH TO FRAMING ONLY — NEVER SHEATHING ALONE.`,
+        `${_attD.pendingLines.length + 2}. REPAIR DAMAGED ROOFING BEFORE MOUNTING.`,
+      ];
     const rowH = 15, hdrH = 14;
     // Left: hardware schedule table
     els.push(`<rect x="${hbx1}" y="${hby}" width="${hbw}" height="${hdrH}" fill="#000"/>`);
@@ -2418,15 +2597,26 @@ export function drawRoofStructural(
   const noteY = noteHdrY + 18;
 
   // ROOF-SPECIFIC NOTES (no fence/ground terms)
+  // PPC §3/§4 — the fastener/coating/embedment notes are AUTHORITY-GATED, and the
+  // spacing note prints the DESIGN value + its verification STATUS (never
+  // `4'-0" O.C. MAX`). The coating claim ('316 SS OR HOT-DIP GALVANIZED') is
+  // withheld while `FastenerAssembly.material` is an honest null.
   const notes = [
     'VERIFY RAFTER SIZE + SPACING IN FIELD.',
-    'ALL HARDWARE: 316 SS OR HOT-DIP GALVANIZED.',
-    `MIN. LAG THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
-    `LAG BOLT: ${lagLabelD}.`,
-    `ATTACH. SPACING: ${ftToFtIn(attachSp / 12)} O.C. MAX.`,
-    `WIND LOAD: ${windSpeedMph} MPH — REF: ASCE 7-22`,
+    ...(_exactD
+      ? [
+        `ALL HARDWARE: ${(_attD.fastener.material ?? 'PER MANUFACTURER DOCUMENT').toUpperCase()}.`,
+        `MIN. THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
+        `FASTENER: ${lagLabelD}.`,
+      ]
+      : [
+        `FASTENER ASSEMBLY: ${_attD.fastenerStateLabel}.`,
+        'INSTALLATION DETAILS: NOT ESTABLISHED.',
+      ]),
+    `${_attD.spacingDesignLine} — ${_attD.spacingStatusLine}.`,
+    `WIND LOAD: ${windSpeedMph ?? '—'} MPH — REF: ${_cpRf.asceLabel}`,
     `${totalPanels} MODULES — ${dcKw.toFixed(2)} kW DC`,
-    'REF: NEC 690.43 / IBC 1609 / ASCE 7-22',
+    `REF: NEC 690.43 / IBC 1609 / ${_cpRf.asceLabel}`,
   ];
   notes.forEach((note, i) => {
     els.push(drawText(schedLeft, noteY + 10 + i * 9, note, {
@@ -2440,9 +2630,15 @@ export function drawRoofStructural(
   // structural attachment sheet; it lives on the electrical/system sheets.)
 
   // Scale note
+  // PPC §4 — the detail itself stays drawn (the geometry is real), but while the
+  // assembly/document authority is unverified it is banner-marked NON-AUTHORITATIVE
+  // so no installer can build from it.
   els.push(drawText(zones.dims.left, H - 8,
-    'CROSS-SECTION SCHEMATIC — VERIFY RAFTER SIZE, SPACING + EMBEDMENT IN FIELD — NTS', {
-      anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
+    _exactD
+      ? 'CROSS-SECTION SCHEMATIC — VERIFY RAFTER SIZE, SPACING + EMBEDMENT IN FIELD — NTS'
+      : `CROSS-SECTION REFERENCE FIGURE — ${_attD.referenceDetailBanner} — NTS`, {
+      anchor: 'start', fontSize: 6.5, fill: _exactD ? '#888' : '#b00', italic: true,
+      fontWeight: _exactD ? 'normal' : 'bold',
     }));
 
   els.push(drawSVGClose());

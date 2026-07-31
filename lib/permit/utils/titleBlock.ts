@@ -7,6 +7,51 @@ import type { PermitInput } from '../types';
 import { utilityDisplayName, resolveEquipment } from './helpers';
 import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { projectProjectAuthorityFromInput, projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
+import { projectRacewayDescriptor } from '../snapshot/electricalProjection';
+import type { PermitDesignSnapshot } from '../snapshot/types';
+import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { projectFastenerAssembly } from '../snapshot/structuralProjection';
+
+/** §10 — the ONE verified fastener installation spec for the SELECTED mounting
+ *  system (single source = mounting-hardware-db hardware.lagBolt + embedment).
+ *  Replaces the hardcoded "3/8" lag" note so every sheet prints the same spec
+ *  the PV-3 detail, PE-1 and BOM print (RT-MINI: 2× 5/16" (8mm) wood screw,
+ *  ~3.5" (90mm), no pilot hole). Falls back to the listed installation
+ *  instructions when no mount is resolved — never a fabricated diameter. */
+function roofAttachmentNote(input: PermitInput): string {
+  const mountingSystemId = (input.project as { mountingSystemId?: string }).mountingSystemId;
+  const m = mountingSystemId ? getMountingSystemById(mountingSystemId) : undefined;
+  // §6 (BAR) — while the FastenerAssembly is NOT verified the assembly is
+  // NON-ORDERABLE: no manufacturer/SKU/diameter/length/coating/embedment may
+  // print on ANY sheet, general construction notes included. The note stays
+  // installable (it points at PV-3 + the listed instructions) and names the
+  // blocking authority instead of a dimension we cannot substantiate.
+  if (projectFastenerAssembly(input).nonOrderable) {
+    return `Roof attachments shall be installed per the selected mounting system's listed installation instructions `
+      + `and the PV-3 attachment detail; corrosion-resistant hardware throughout. Fastener manufacturer / model / `
+      + `diameter / length / coating / embedment WITHHELD &mdash; FASTENER-ASSEMBLY-UNVERIFIED (see RS-1).`;
+  }
+  if (!m) {
+    return `Roof attachments shall be installed per manufacturer instructions and attachment detail on sheet PV-3. `
+      + `Fasteners per the selected mounting system's listed installation instructions and PV-3 attachment detail; `
+      + `use corrosion-resistant hardware throughout.`;
+  }
+  // TAC WS-4/WS-5 — this note is the LAST surface that read mounting-hardware-db
+  // directly (a diameter + "embedment into rafter" string assembled from raw DB
+  // literals, bypassing both the fastener verdict and the canonical embedment
+  // substrate). It now projects the SAME canonical assembly every other sheet
+  // consumes: dimensions print only when the ONE fastener predicate says
+  // verified, and the substrate is the structural member, never a roof covering.
+  const _fa = projectFastenerAssembly(input);
+  const spec = _fa.line;
+  const embed = _fa.embedmentIn != null && _fa.substrate
+    ? `, minimum ${_fa.embedmentIn}" embedment into ${_fa.substrate}`
+    : '';
+  return `Roof attachments shall be installed per manufacturer instructions and attachment detail on sheet PV-3. `
+    + `Fastener: ${spec}${embed}. Use corrosion-resistant hardware per the manufacturer's listed installation instructions.`;
+}
 
 
 // ─── Title Block (shared across all pages) ───────────────────────────────────
@@ -19,17 +64,23 @@ export function titleBlock(
   totalPages: number
 ): string {
   const { project, compliance, system } = input;
-  // Some AHJ records carry 'NEC 2023' rather than '2023' — strip the prefix so
-  // the code line never prints 'NEC NEC 2023' (critique/red-line item).
-  const necVer  = (compliance.jurisdiction?.necVersion || '2023').replace(/^NEC\s+/i, '');
-  const ibcVer  = '2021';
-  const ircVer  = '2021';
-  const ifcVer  = necVer === '2023' ? '2024' : '2021';
-  const state   = compliance.jurisdiction?.state || '—';
-  const ahj     = compliance.jurisdiction?.ahj   || project.ahj || '—';
-  // FIX v47.341: Convert utility slug to display name in title block
-  const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
-  const apn     = project.apn || '—';
+  // W4 §2: EVERY code edition on the title block projects from the ONE snapshot
+  // codeAuthority record — no sheet-local literal, no NEC→IFC inference. Unknown
+  // adoptions render PENDING. The editions are TAGGED (data-code-edition) so the
+  // evidence harness can prove cross-sheet identity + literal-freedom.
+  const cp = projectCodeAuthorityFromInput(input);
+  // W4 §3: AHJ / utility / APN / module / inverter / issue status project from the
+  // ONE snapshot projectAuthority record and are TAGGED (data-project-field) so
+  // the truth matrix can prove cross-sheet identity + single-sourcing on EVERY
+  // sheet's title block. (_snapshot propagates through subScopedInput's spread.)
+  const pa = projectProjectAuthorityFromInput(input);
+  // THE canonical state (both forms derived once, frozen on the snapshot). The
+  // title block used to read compliance.jurisdiction.state, which is where the
+  // 'Unknown' sentinel entered all 16 sheets of Planset 14.
+  const st      = projectProjectStateFromInput(input);
+  const ahj     = pa.ahj ?? compliance.jurisdiction?.ahj ?? project.ahj ?? '—';
+  const utility = pa.utility ?? utilityDisplayName(project.utilityName || project.utilityMeter || '') ?? '—';
+  const apn     = pa.apn ?? project.apn ?? '—';
 
   // Resolve module and inverter models for title block.
   // HYBRID (Ray 2026-07-16): inverters[0] leaked whichever subsystem sorted
@@ -91,25 +142,26 @@ export function titleBlock(
       <div class="tbs-firm-sub">SOLAR PERMIT PLANSETS</div>
     </div>
     <div class="tbs-block">
-      <div class="tb-project">${escapeH(project.projectName || 'SOLAR PV SYSTEM')}</div>
-      <div class="tb-address">${escapeH(project.address || '—')}</div>
-      <div class="tb-client">CLIENT: ${escapeH(project.clientName || '—')}</div>
-      <div class="tb-meta">APN: ${apn}</div>
-      <div class="tb-meta">UTILITY: ${utility}</div>
-      <div class="tb-meta">AHJ: ${ahj} | ${state}</div>
+      <div class="tb-project">${pa.present ? pa.tag('project-name') : escapeH(project.projectName || 'SOLAR PV SYSTEM')}</div>
+      <div class="tb-address">${pa.present ? pa.tag('address') : escapeH(project.address || '—')}</div>
+      <div class="tb-client">CLIENT: ${pa.present ? pa.tag('customer') : escapeH(project.clientName || '—')}</div>
+      <div class="tb-meta">APN: ${pa.present ? pa.tag('apn') : escapeH(apn)}</div>
+      <div class="tb-meta">UTILITY: ${pa.present ? pa.tag('utility') : escapeH(utility)}</div>
+      <div class="tb-meta">AHJ: ${pa.present ? pa.tag('ahj') : escapeH(ahj)} | ${st.tag('state-name')}</div>
+      <div class="tb-meta">ISSUE: ${pa.present ? pa.tag('issue-status') : 'PENDING'}</div>
     </div>
     <table class="tb-table">
       <tr><td class="tbl">DESIGNER</td><td class="tbv">${escapeH(project.designer || '—')}</td></tr>
       <tr><td class="tbl">DATE</td><td class="tbv">${escapeH(String(project.date ?? ''))}</td></tr>
       <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
-      <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
-      <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
+      <tr><td class="tbl">MODULE</td><td class="tbv">${_distinctSubs.size > 1 ? moduleDisplay : (pa.moduleDisplay ? pa.tag('module-model') : moduleDisplay)}</td></tr>
+      <tr><td class="tbl">INVERTER</td><td class="tbv">${_distinctSubs.size > 1 ? inverterDisplay : (pa.inverterDisplay ? pa.tag('inverter-model') : inverterDisplay)}</td></tr>
       <tr><td class="tbl">SCALE</td><td class="tbv">${/^(PV-1|PV-1B|PV-3)$/.test(sheetId) ? 'AS NOTED' : 'NTS'}</td></tr>
     </table>
     <div class="tbs-rev-hdr">REVISIONS</div>
     <table class="tb-table">
-      <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; ${escapeH(String(project.date ?? ''))}</td></tr>
-    </table>
+      <tr><td class="tbl">REV A</td><td class="tbv">${pa.present ? escapeH(pa.display('issue-status')) : 'PENDING'} &mdash; ${escapeH(String(pa.issueDate ?? project.date ?? ''))}</td></tr>
+    </table>${''/* W4 §1: REV A description = DERIVED issue state (projectAuthority) — never a hardcoded issued state while pending review. */}
     <div class="tbs-seal">
       <div class="tbs-seal-caption">PE SEAL</div>
       <div class="pe-seal-box">&nbsp;</div>
@@ -118,7 +170,7 @@ export function titleBlock(
     <div class="tbs-sheetname">
       <div class="tbs-sn-label">SHEET NAME</div>
       <div class="tb-sheet-title">${pageTitle}</div>
-      <div class="tb-codes">NEC ${necVer} &middot; IBC ${ibcVer} &middot; IRC ${ircVer} &middot; IFC ${ifcVer} &middot; ASCE 7-22</div>
+      <div class="tb-codes">${cp.tag('nec')} &middot; ${cp.tag('ibc')} &middot; ${cp.tag('irc')} &middot; ${cp.tag('ifc')} &middot; ${cp.tag('asce')}</div>
       <div class="tb-size">ANSI B &mdash; 11&Prime; &times; 17&Prime; &nbsp;|&nbsp; SHEET ${pageNum} OF ${totalPages}</div>
     </div>
     <div class="tbs-id">
@@ -138,22 +190,36 @@ function _snapshotStampHtml(input: PermitInput): string {
   if (!m?.snapshotId || !m?.digest) {
     return `<div class="tb-snapshot" style="font-size:5.5px;color:#a00;padding:1px 4px;border-top:1px solid #000;">SNAPSHOT: UNSTAMPED — NOT AN AUTHORITY-VERIFIED SHEET</div>`;
   }
+  // W4 §3: snapshot id + digest are TAGGED (data-project-field) so the truth
+  // matrix extracts the identical snapshot identity printed on every sheet.
   return `<div class="tb-snapshot" style="font-size:5.5px;color:#333;padding:1px 4px;border-top:1px solid #000;line-height:1.35;">`
-    + `SNAPSHOT ${escapeH(m.snapshotId)} &middot; SCHEMA ${escapeH(m.schemaVersion ?? '')}<br/>`
-    + `SHA-256 ${escapeH((m.digest ?? '').slice(0, 20))}&hellip;</div>`;
+    + `SNAPSHOT <span data-project-field="snapshot-id">${escapeH(m.snapshotId)}</span> &middot; SCHEMA ${escapeH(m.schemaVersion ?? '')}<br/>`
+    + `SHA-256 <span data-project-field="digest">${escapeH((m.digest ?? '').slice(0, 20))}</span>&hellip;</div>`;
 }
 
 // ─── Construction Notes (NEC-specific, system-config-aware) ──────────────────
 
 export function buildConstructionNotes(input: PermitInput): string[] {
   const { project, compliance } = input;
-  // Strip any 'NEC ' prefix so notes never read 'NEC NEC 2023' and the IFC
-  // cycle matches the title block / cover (all derive from the same version).
-  const necVer = (compliance.jurisdiction?.necVersion || '2023').replace(/^NEC\s+/i, '');
-  const ibcVer = '2021';
-  const ifcVer = necVer === '2023' ? '2024' : '2021';
+  // W4 §2: code editions in the general notes project from the ONE snapshot
+  // codeAuthority record (same source as the title block / cover). Unknown
+  // adoptions read PENDING — never a sheet-local literal or NEC→IFC inference.
+  const cp = projectCodeAuthorityFromInput(input);
+  const necVer = cp.nec ?? 'PENDING';
+  const ibcVer = cp.ibc ?? 'PENDING';
+  const ircVer = cp.irc ?? 'PENDING';
+  const ifcVer = cp.ifc ?? 'PENDING';
+  const asceVer = cp.asce ?? 'PENDING';
+  // §17 (closeout 2026-07-23) — do NOT assert conformance to a PENDING edition.
+  // Separate the analysis basis (NEC/ASCE — the editions the engine ran under)
+  // from the AHJ-adopted IBC/IRC/IFC editions (a jurisdictional authority status,
+  // verified before submission). When adopted editions are unknown they read
+  // PENDING VERIFICATION, never "conform to PENDING IBC".
+  const _adopted = [ibcVer, ircVer, ifcVer].every(v => v === 'PENDING')
+    ? 'the AHJ-adopted IBC / IRC / IFC editions (PENDING VERIFICATION)'
+    : `the AHJ-adopted IBC ${ibcVer} / IRC ${ircVer} / IFC ${ifcVer} editions`;
   const notes: string[] = [
-    `All work shall conform to NEC ${necVer}, ${ibcVer} IBC, ${ibcVer} IRC, ${ifcVer} IFC, ASCE 7-22, applicable state amendments, and AHJ requirements. All equipment shall be listed and labeled per NEC 110.3(B).`,
+    `Analysis basis: NEC ${necVer} and ASCE ${asceVer}. All work shall additionally conform to ${_adopted}, applicable state amendments, and AHJ requirements once verified. All equipment shall be listed and labeled per NEC 110.3(B).`,
     `Solar PV wiring shall comply with NEC Article 690. DC wiring methods shall be per NEC 690.31. PV source and output circuit conductors shall be identified at all access points per NEC 690.31(B).`,
     // Interconnection note follows the ACTUAL method — the load-side backfeed
     // boilerplate on a supply-side-tap job re-introduced the exact set-wide
@@ -165,13 +231,25 @@ export function buildConstructionNotes(input: PermitInput): string[] {
       ? `Rapid shutdown system required per NEC 690.12. Module-level rapid shutdown (MLRS) shall reduce array conductors to \u2264 30V within 30 seconds. Initiator shall be located at utility meter per NEC 690.56(B).`
       : `Rapid shutdown initiator shall be installed per NEC 690.12. Array boundary conductors shall be de-energized to \u2264 30V within 30 seconds of initiation.`,
     `All conductors shall be sized per NEC 310.15. Temperature correction (NEC 310.15(B)(1)) and conduit fill derating (NEC 310.15(C)(1)) shall be applied. PV conductor ampacity minimum 125% of maximum circuit current per NEC 690.8(B).`,
-    `Conduit type: ${project.conduitType || 'EMT'}. All conduit supports per NEC 358.30 (EMT) or NEC 352.30 (PVC). Conduit fill shall not exceed 40% per NEC Chapter 9, Table 1.`,
+    // §2/§7 (closeout 2026-07-23): the conduit note DERIVES from the actual
+    // physical raceway objects via the ONE canonical route-description accessor —
+    // never `project.conduitType || 'EMT'` (which printed EMT beside a PVC run)
+    // and never the mixed "358.30 (EMT) or 352.30 (PVC)" citation. A PVC run cites
+    // the PVC article (352), an EMT run cites 358; absent raceways print PENDING.
+    projectRacewayDescriptor(
+      (input as unknown as { _snapshot?: PermitDesignSnapshot })._snapshot ?? null
+    ).noteText,
     `Equipment grounding conductor (EGC) shall be sized per NEC 250.122. All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: ${project.wireGauge || '#10 AWG'} per NEC 690.45.`,
     `${project.acDisconnect ? 'AC disconnect switch required and shown on SLD' : 'AC disconnect — see SLD for requirements'}. Disconnect shall be within sight of inverter, accessible, and rated for available fault current per NEC 690.15.`,
-    `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC 705.12 and manufacturer requirements.`,
+    // PPC §6 — the inverter-output citation is TOPOLOGY-DEPENDENT. It printed NEC
+    // 705.12 (load-side) unconditionally, including on 705.11 supply-side designs —
+    // the same defect the interconnection note above already avoids.
+    `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC ${project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? '705.11' : '705.12'} and manufacturer requirements.`,
     `Photovoltaic source circuit conductors shall be marked or tagged "PHOTOVOLTAIC POWER SOURCE" at all accessible locations per NEC 690.31(B). Markings shall be sunlight-resistant and moisture-resistant.`,
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
-    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
+    // PPC §6 — 705.12(B)(2)(3)(e) is a LOAD-SIDE marking clause; on a supply-side
+    // (705.11) design the applicable interconnection marking clause is 705.10 / 705.11.
+    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC ${project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? '705.10 / 705.11' : '705.12(B)(2)(3)(e)'}, and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
     // Statutory site/clearance notes \u2014 migrated from the retired PV-1 site sheet
     // (2026-07-08 fold) so they persist in the set's general notes.
     `All electrical equipment \u2014 inverters, disconnects, main service panel, and junction/combiner boxes \u2014 shall be located a minimum of 3 ft from the gas meter supply and demand piping.`,
@@ -185,11 +263,11 @@ export function buildConstructionNotes(input: PermitInput): string[] {
         ]
       : input.project?.systemType === 'ground' || input.project?.systemType === 'ground_mount'
       ? [
-          `Ground mount pile/pier foundations shall be installed per structural engineer specifications and attachment detail on sheet PV-3. Embedment depth per geotechnical requirements and ASCE 7-22.`,
+          `Ground mount pile/pier foundations shall be installed per structural engineer specifications and attachment detail on sheet PV-3. Embedment depth per geotechnical requirements and ASCE ${asceVer}.`,
           `All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: #10 AWG per NEC 690.45. Ground array grounding per NEC 690.47 and 250.166.`,
         ]
       : [
-          `Roof attachments shall be installed per manufacturer instructions and attachment detail on sheet PV-3. Lag bolts minimum 3/8" diameter, minimum 2.5" embedment into rafter. Use stainless steel hardware throughout.`,
+          roofAttachmentNote(input),
           `Flashing shall be installed under all roof penetrations and sealed with approved sealant per manufacturer instructions. Verify roof framing at each attachment point. No attachments to sheathing only.`,
         ]),
     `Module-to-rail torque shall be per rail manufacturer specification. Rail splices installed per manufacturer details. All exposed hardware shall be stainless steel or corrosion-resistant equivalent per NEC 110.3(B).`,

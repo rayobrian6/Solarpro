@@ -168,7 +168,10 @@ describe('wave 5B — hybrid cover sheet', () => {
 // ═════ 3. Electrical sheets — per-sub schedules from conductorAuthority ═════
 describe('wave 5B — hybrid electrical sheets', () => {
   it('PV-4A renders one circuit schedule per sub with the sub\'s OWN equipment', () => {
-    expect(hybridHtml).toMatch(/AC Branch Circuit Schedule — ROOF — 4 MODULES — Enphase IQ8M \(MICRO\)/);
+    // §5 (closeout 2026-07-23) — PV-4A's micro branch table is now the option-B
+    // RATING SUMMARY (no conductor/raceway column); the sectioned physical
+    // schedule lives on E-1.
+    expect(hybridHtml).toMatch(/AC Branch Circuit Rating Summary — ROOF — 4 MODULES — Enphase IQ8M \(MICRO\)/);
     expect(hybridHtml).toMatch(/DC String Schedule — GROUND — 4 MODULES — Solis S6-GR1P6K \(STRING\)/);
     expect(hybridHtml).toMatch(/DC String Schedule — FENCE — 4 MODULES — SolFence SF-OPT-3800 \(OPTIMIZER\)/);
   });

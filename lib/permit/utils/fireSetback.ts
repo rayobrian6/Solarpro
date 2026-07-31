@@ -17,6 +17,56 @@ export function resolveFireSetbackIn(
   return arrayCoverageFrac > 0.33 ? 36 : (ahjRidgeSetbackIn || 18);
 }
 
+// ─── Fire-setback authority BASIS (closeout 2026-07-23 §15) ──────────────────
+// The setback GEOMETRY (3' ridge / 18" hip / pathway) is a modeled design-review
+// assumption; it becomes an ADOPTED AHJ requirement only when the jurisdiction's
+// identity AND its adopted IFC edition are verified. PV-1/PV-1B used to append
+// "IFC §1204.2 per AHJ" unconditionally — describing an unverified assumption as
+// an AHJ requirement, and directly contradicting the same sheet's "IFC PENDING"
+// title block. This helper projects the honest basis wording from the canonical
+// codeAuthority IFC verification state so every fire-setback note agrees.
+//
+// Separates the three claims the directive requires be kept distinct:
+//   • modeled geometry      — the setback dimensions the drawing shows
+//   • assumed design basis   — the provisional IFC §1204.2 basis (unverified)
+//   • verified requirement   — an AHJ-adopted IFC edition (only when verified)
+
+export interface FireSetbackBasis {
+  /** true only when the AHJ identity + adopted IFC edition are both verified. */
+  verified: boolean;
+  /** short section citation, edition-correct when verified else PENDING. */
+  citation: string;
+  /** the basis banner phrase (provisional vs adopted authority). */
+  basisLabel: string;
+  /** compact inline suffix for callouts (no leading separator). */
+  calloutSuffix: string;
+}
+
+export function resolveFireSetbackBasis(args: {
+  /** adopted IFC edition token (e.g. '2021') or null when unknown. */
+  ifcEdition: string | null | undefined;
+  /** codeAuthority verification status ('verified'|'unverified'|'incomplete'|'absent'). */
+  verificationStatus: string | null | undefined;
+  /** resolved AHJ name, or null when the jurisdiction is unresolved. */
+  ahjName: string | null | undefined;
+}): FireSetbackBasis {
+  const verified = args.verificationStatus === 'verified' && !!args.ifcEdition && !!args.ahjName;
+  if (verified) {
+    return {
+      verified: true,
+      citation: `IFC ${args.ifcEdition} §1204.2`,
+      basisLabel: `ADOPTED FIRE SETBACK REQUIREMENT — ${args.ahjName} (IFC ${args.ifcEdition} §1204.2)`,
+      calloutSuffix: `IFC ${args.ifcEdition} §1204.2 — ${args.ahjName} ADOPTED`,
+    };
+  }
+  return {
+    verified: false,
+    citation: `IFC §1204.2 — EDITION PENDING VERIFICATION`,
+    basisLabel: `PROVISIONAL FIRE SETBACK BASIS — PENDING AHJ / IFC VERIFICATION`,
+    calloutSuffix: `PROVISIONAL BASIS — PENDING AHJ / IFC VERIFICATION`,
+  };
+}
+
 /** Plan-view array coverage fraction from CAD aggregates.
  *
  * BASIS (slope-space fix, 2026-07-12): roofPlanAreaFt2 is a PLAN area

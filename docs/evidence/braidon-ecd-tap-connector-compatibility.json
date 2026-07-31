@@ -1,0 +1,202 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.142Z",
+  "artifact": "supply-side tap connector compatibility report",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §5 (deliverable 6)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "authorityRecord": "SupplySideTapConnectionAuthority (lib/permit/snapshot/supplySideTap.ts)",
+  "before": {
+    "emitter": "lib/bom-engine-v4.ts — the isSupplySideTap branch, qty 3 (\"L1+L2+N = 3\"), required=true, data-bom-orderable=\"true\", INSIDE the 36 and inside the export",
+    "caveat": "the only representation of the unknown was PROSE inside the row's own description string: \"Verify lug range against actual service conductor size.\" — an instruction, on an orderable row, with no authority object behind it. A second, dead-for-this-design legacy emitter carried the same literal."
+  },
+  "modes": [
+    {
+      "mode": "fixture",
+      "snapshotId": "PDS-76C0C5B56CEF",
+      "snapshotDigest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+      "openRequirementCount": 15,
+      "authority": {
+        "interconnectionMethod": "SUPPLY_SIDE_TAP",
+        "existingServiceConductorMaterial": null,
+        "existingServiceConductorSize": null,
+        "existingServiceConductorInsulation": null,
+        "existingServiceConductorCount": null,
+        "existingServiceConductorSource": null,
+        "tapConductorMaterial": "Cu",
+        "tapConductorSize": "#6 AWG",
+        "tapConductorLengthFt": null,
+        "tapConductorLengthAuthority": "unknown",
+        "connectorManufacturer": "NSI Polaris",
+        "connectorSku": "IPLD350-3",
+        "listedConductorRange": "350 kcmil–#6 AWG",
+        "connectorPorts": 3,
+        "lugRangeCompatibility": null,
+        "enclosureCompatibility": null,
+        "installationSpaceVerified": null,
+        "connectionMethod": "insulated multi-tap (insulation-piercing-free set-screw connector)",
+        "manufacturerDocumentId": null,
+        "listingEvidence": null,
+        "verificationStatus": "unverified",
+        "unresolvedFacts": [
+          "existing service-entrance conductor SIZE not surveyed",
+          "existing service-entrance conductor MATERIAL not surveyed",
+          "existing service-entrance conductor INSULATION not surveyed",
+          "existing service-entrance conductor COUNT not surveyed",
+          "connector LISTED RANGE (350 kcmil–#6 AWG) not verified against the existing conductor",
+          "connector ENCLOSURE / installation-space compatibility not verified",
+          "tap-conductor LENGTH not measured (NEC 705.11(C) ≤10 ft)",
+          "connector manufacturer LISTING DOCUMENT not archived"
+        ],
+        "candidateLabel": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+        "provenance": {
+          "source": "supplySideTapConnectionAuthority",
+          "ref": "svc-tap-conductors",
+          "note": "Existing service-conductor facts are recorded ONLY from an explicit survey; nothing is inferred from service ampacity, panel rating or the connector product name."
+        }
+      },
+      "rows": [
+        {
+          "bomLineId": "BOM-CONNECTOR-927432B3",
+          "partNumber": "IPLD350-3",
+          "model": "Insulated Multi-Tap Connector (350 kcmil–#6) — CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+          "quantity": 3,
+          "unit": "ea",
+          "description": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY. Insulated multi-tap connector for the supply-side tap of the service-entrance conductors (1 per conductor: L1/L2/N). EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE. Unresolved: existing service-entrance conductor SIZE not surveyed; existing service-entrance conductor MATERIAL not surveyed; existing service-entrance conductor INSULATION not surveyed; existing service-entrance conductor COUNT not surveyed; connector LISTED RANGE (350 kcmil–#6 AWG) not verified against the existing conductor; connector ENCLOSURE / installation-space compatibility not verified; tap-conductor LENGTH not measured (NEC 705.11(C) ≤10 ft); connector manufacturer LISTING DOCUMENT not archived. Design quantity only — EXCLUDED from the authoritative procurement total and from every export; retained on the design-review schedule.",
+          "derivedFrom": "supply-side tap connection authority (verification=unverified) — candidate connector, non-orderable",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY · EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE · 8 unresolved facts (see RS-1)",
+          "resolutionAction": "Establish the missing authority for this product, then re-derive the row.",
+          "inAuthoritativeExport": false
+        }
+      ]
+    },
+    {
+      "mode": "insufficient",
+      "snapshotId": "PDS-4B328A574DB9",
+      "snapshotDigest": "4b328a574db9ef3afc6fefd1736124c54ec58b2afb71e9e57bbdb61111dc25d0",
+      "openRequirementCount": 16,
+      "authority": {
+        "interconnectionMethod": "SUPPLY_SIDE_TAP",
+        "existingServiceConductorMaterial": null,
+        "existingServiceConductorSize": null,
+        "existingServiceConductorInsulation": null,
+        "existingServiceConductorCount": null,
+        "existingServiceConductorSource": null,
+        "tapConductorMaterial": "Cu",
+        "tapConductorSize": "#6 AWG",
+        "tapConductorLengthFt": null,
+        "tapConductorLengthAuthority": "unknown",
+        "connectorManufacturer": "NSI Polaris",
+        "connectorSku": "IPLD350-3",
+        "listedConductorRange": "350 kcmil–#6 AWG",
+        "connectorPorts": 3,
+        "lugRangeCompatibility": null,
+        "enclosureCompatibility": null,
+        "installationSpaceVerified": null,
+        "connectionMethod": "insulated multi-tap (insulation-piercing-free set-screw connector)",
+        "manufacturerDocumentId": null,
+        "listingEvidence": null,
+        "verificationStatus": "unverified",
+        "unresolvedFacts": [
+          "existing service-entrance conductor SIZE not surveyed",
+          "existing service-entrance conductor MATERIAL not surveyed",
+          "existing service-entrance conductor INSULATION not surveyed",
+          "existing service-entrance conductor COUNT not surveyed",
+          "connector LISTED RANGE (350 kcmil–#6 AWG) not verified against the existing conductor",
+          "connector ENCLOSURE / installation-space compatibility not verified",
+          "tap-conductor LENGTH not measured (NEC 705.11(C) ≤10 ft)",
+          "connector manufacturer LISTING DOCUMENT not archived"
+        ],
+        "candidateLabel": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+        "provenance": {
+          "source": "supplySideTapConnectionAuthority",
+          "ref": "svc-tap-conductors",
+          "note": "Existing service-conductor facts are recorded ONLY from an explicit survey; nothing is inferred from service ampacity, panel rating or the connector product name."
+        }
+      },
+      "rows": [
+        {
+          "bomLineId": "BOM-CONNECTOR-927432B3",
+          "partNumber": "IPLD350-3",
+          "model": "Insulated Multi-Tap Connector (350 kcmil–#6) — CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+          "quantity": 3,
+          "unit": "ea",
+          "description": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY. Insulated multi-tap connector for the supply-side tap of the service-entrance conductors (1 per conductor: L1/L2/N). EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE. Unresolved: existing service-entrance conductor SIZE not surveyed; existing service-entrance conductor MATERIAL not surveyed; existing service-entrance conductor INSULATION not surveyed; existing service-entrance conductor COUNT not surveyed; connector LISTED RANGE (350 kcmil–#6 AWG) not verified against the existing conductor; connector ENCLOSURE / installation-space compatibility not verified; tap-conductor LENGTH not measured (NEC 705.11(C) ≤10 ft); connector manufacturer LISTING DOCUMENT not archived. Design quantity only — EXCLUDED from the authoritative procurement total and from every export; retained on the design-review schedule.",
+          "derivedFrom": "supply-side tap connection authority (verification=unverified) — candidate connector, non-orderable",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY · EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE · 8 unresolved facts (see RS-1)",
+          "resolutionAction": "Establish the missing authority for this product, then re-derive the row.",
+          "inAuthoritativeExport": false
+        }
+      ]
+    },
+    {
+      "mode": "identity",
+      "snapshotId": "PDS-949E2B4125A5",
+      "snapshotDigest": "949e2b4125a5890552558e8ac21ed202c370b1308a2a060f4264a3038c400fd4",
+      "openRequirementCount": 17,
+      "authority": {
+        "interconnectionMethod": "SUPPLY_SIDE_TAP",
+        "existingServiceConductorMaterial": null,
+        "existingServiceConductorSize": null,
+        "existingServiceConductorInsulation": null,
+        "existingServiceConductorCount": null,
+        "existingServiceConductorSource": null,
+        "tapConductorMaterial": "Cu",
+        "tapConductorSize": "#6 AWG",
+        "tapConductorLengthFt": null,
+        "tapConductorLengthAuthority": "unknown",
+        "connectorManufacturer": "NSI Polaris",
+        "connectorSku": "IPLD350-3",
+        "listedConductorRange": "350 kcmil–#6 AWG",
+        "connectorPorts": 3,
+        "lugRangeCompatibility": null,
+        "enclosureCompatibility": null,
+        "installationSpaceVerified": null,
+        "connectionMethod": "insulated multi-tap (insulation-piercing-free set-screw connector)",
+        "manufacturerDocumentId": null,
+        "listingEvidence": null,
+        "verificationStatus": "unverified",
+        "unresolvedFacts": [
+          "existing service-entrance conductor SIZE not surveyed",
+          "existing service-entrance conductor MATERIAL not surveyed",
+          "existing service-entrance conductor INSULATION not surveyed",
+          "existing service-entrance conductor COUNT not surveyed",
+          "connector LISTED RANGE (350 kcmil–#6 AWG) not verified against the existing conductor",
+          "connector ENCLOSURE / installation-space compatibility not verified",
+          "tap-conductor LENGTH not measured (NEC 705.11(C) ≤10 ft)",
+          "connector manufacturer LISTING DOCUMENT not archived"
+        ],
+        "candidateLabel": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+        "provenance": {
+          "source": "supplySideTapConnectionAuthority",
+          "ref": "svc-tap-conductors",
+          "note": "Existing service-conductor facts are recorded ONLY from an explicit survey; nothing is inferred from service ampacity, panel rating or the connector product name."
+        }
+      },
+      "rows": [
+        {
+          "bomLineId": "BOM-CONNECTOR-927432B3",
+          "partNumber": "IPLD350-3",
+          "model": "Insulated Multi-Tap Connector (350 kcmil–#6) — CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY",
+          "quantity": 3,
+          "unit": "ea",
+          "description": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY. Insulated multi-tap connector for the supply-side tap of the service-entrance conductors (1 per conductor: L1/L2/N). EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE. Unresolved: existing service-entrance conductor SIZE not surveyed; existing service-entrance conductor MATERIAL not surveyed; existing service-entrance conductor INSULATION not surveyed; existing service-entrance conductor COUNT not surveyed; connector LISTED RANGE (350 kcmil–#6 AWG) not verified against the existing conductor; connector ENCLOSURE / installation-space compatibility not verified; tap-conductor LENGTH not measured (NEC 705.11(C) ≤10 ft); connector manufacturer LISTING DOCUMENT not archived. Design quantity only — EXCLUDED from the authoritative procurement total and from every export; retained on the design-review schedule.",
+          "derivedFrom": "supply-side tap connection authority (verification=unverified) — candidate connector, non-orderable",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY · EXISTING SERVICE CONDUCTOR: NOT SURVEYED · CONNECTOR LISTED RANGE: 350 kcmil–#6 AWG · LUG-RANGE COMPATIBILITY: NOT EVALUABLE · 8 unresolved facts (see RS-1)",
+          "resolutionAction": "Establish the missing authority for this product, then re-derive the row.",
+          "inAuthoritativeExport": false
+        }
+      ]
+    }
+  ],
+  "twoWay": "The rule is two-way. bom-engine-v4 is a PRE-snapshot engine and stamps the candidate hint unconditionally; bomForPermit's post-pass now CLEARS that hint when the authority's verificationStatus is \"verified\", so a surveyed, listing-verified tap promotes the row through the classifier's normal path instead of being held at CANDIDATE forever.",
+  "designReviewVisibility": "The row stays on the design-review schedule with its SKU and its code-established quantity of 3 visible; it is excluded from the authoritative total and from every export, and it carries the mandated label \"CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY\"."
+}

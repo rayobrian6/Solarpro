@@ -365,15 +365,40 @@ export function authorizeMigration(params: {
 /**
  * The hard allowlist of migration identifiers that may be run via a bounded
  * TARGETED recovery permit (bypassing the global EXECUTION_ENABLED window).
- * This is intentionally a narrow escape hatch:
- *   - 108: the Nearmap proximity index (dependency 102 verified applied).
- *   - 109-112: the DATA-AUTHORITY-AUDIT backfills (2026-07-19) — statically
- *     verified UPDATE-only/data-only against allow-listed tables by
- *     lib/migrations/targetedDataAuthority.ts before any permit is issued.
- * NOTHING else — not 102, not any historical migration, not "all pending" —
- * can be run through the targeted path.
+ * This is intentionally a narrow escape hatch and holds ONLY the currently
+ * runnable targets:
+ *   - 113: manufacturer_document_registry — the versioned authority-document
+ *     store (W4 §8). Statically verified idempotent CREATE-TABLE-only and
+ *     non-destructive by lib/migrations/targetedRegistryDeployment.ts before any
+ *     permit is issued.
+ *   - 114: equipment_reconciliation_audit + snapshot_digest_invalidations — the
+ *     immutable reconciliation-audit tables (W4 §7). Same static gate.
+ *   - 115: personnel_roles + project_personnel_assignments — the AAC WS-6 roles
+ *     of record (designer / preparer / reviewer / engineer of record / approving
+ *     engineer). Same static gate. Until it is run, the designer resolver reports
+ *     a RETRYABLE store-unavailable failure naming this exact step; it never
+ *     substitutes a vendor name.
+ *   - 116: engineering_review_records — the digest-bound engineering review
+ *     (AAC WS-8/WS-9) that makes ENGINEERING-REVIEW-PENDING clearable by a real
+ *     licensed workflow. Same static gate. Run after 115 (its reviewer-role
+ *     vocabulary is 115's).
+ *   - 117: ahj_registry — SolarPro's own central AHJ / adopted-code registry
+ *     (TAC WS-19). Same static gate. Independent of 113-116. Creates one table +
+ *     three indexes, all IF NOT EXISTS, and seeds NO rows.
+ * NOTHING else — not any historical migration, not "all pending" — can be run
+ * through the targeted path. (The retired 108 Nearmap-index and 109-112
+ * data-authority targeted cards were removed 2026-07-21; their identifiers are
+ * no longer runnable through this escape hatch.)
+ *
+ * ⚠ THIS SET IS THE FOURTH AND LAST GATE a targeted identifier must pass, and it
+ * is the one that is easy to miss: an identifier can have a deployment spec, an
+ * API action AND a console button and still be UNRUNNABLE — the permit is
+ * rejected here, the lifecycle gate then refuses execution, and the operator sees
+ * MIGRATION_BASELINE_REQUIRED with no hint that an allowlist was the cause. That
+ * is exactly what happened to 117. The registry-parity test asserts this set and
+ * REGISTRY_DEPLOYMENT/REGISTRY_SEQUENCE agree, so the four gates cannot drift again.
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['108', '109', '110', '111', '112']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['113', '114', '115', '116', '117']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;

@@ -1,0 +1,92 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.681Z",
+  "artifact": "braidon-length-taxonomy-report",
+  "section": "§10 design vs calc vs procurement length taxonomy",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "purpose": "Every printed length identifies its meaning: geometricDesignLength (route-drawing), calculationLength (VD/fill sheets), procurementLength (BOM), with waste factor, provenance and verification state, keyed to a segment id. No sheet mixes an unlabeled number. The contested Q-Cable branch carries the full taxonomy; the remaining runs carry oneWayFt + lengthSource (single design length, labeled at the cell).",
+  "segments": [
+    {
+      "segmentId": "ROOF_RUN",
+      "electricalFunction": "electrical run",
+      "geometricDesignLengthFt": null,
+      "calculationLengthFt": null,
+      "procurementLengthFt": null,
+      "oneWayFt": 25,
+      "wasteFactor": null,
+      "lengthProvenance": "cad-derived-estimate",
+      "verificationState": "cad-derived-estimate"
+    },
+    {
+      "segmentId": "BRANCH_RUN",
+      "electricalFunction": "micro AC branch (Q-Cable trunk, open air 690.31(C))",
+      "geometricDesignLengthFt": 140.5,
+      "calculationLengthFt": 58,
+      "procurementLengthFt": 152,
+      "oneWayFt": 58,
+      "wasteFactor": 1.15,
+      "lengthProvenance": "geometry-derived",
+      "verificationState": "cad-derived-estimate"
+    },
+    {
+      "segmentId": "BRANCH_HOMERUN_RUN",
+      "electricalFunction": "branch home-run raceway (shared jbox→combiner conduit)",
+      "geometricDesignLengthFt": null,
+      "calculationLengthFt": null,
+      "procurementLengthFt": null,
+      "oneWayFt": 18,
+      "wasteFactor": null,
+      "lengthProvenance": "cad-derived-estimate",
+      "verificationState": "cad-derived-estimate"
+    },
+    {
+      "segmentId": "COMBINER_TO_DISCO_RUN",
+      "electricalFunction": "combiner/inverter feeder → disconnect",
+      "geometricDesignLengthFt": null,
+      "calculationLengthFt": null,
+      "procurementLengthFt": null,
+      "oneWayFt": 20,
+      "wasteFactor": null,
+      "lengthProvenance": "cad-derived-estimate",
+      "verificationState": "cad-derived-estimate"
+    },
+    {
+      "segmentId": "DISCO_TO_METER_RUN",
+      "electricalFunction": "electrical run",
+      "geometricDesignLengthFt": null,
+      "calculationLengthFt": null,
+      "procurementLengthFt": null,
+      "oneWayFt": 15,
+      "wasteFactor": null,
+      "lengthProvenance": "cad-derived-estimate",
+      "verificationState": "cad-derived-estimate"
+    },
+    {
+      "segmentId": "MSP_TO_UTILITY_RUN",
+      "electricalFunction": "service equipment connection",
+      "geometricDesignLengthFt": null,
+      "calculationLengthFt": null,
+      "procurementLengthFt": null,
+      "oneWayFt": 5,
+      "wasteFactor": null,
+      "lengthProvenance": "cad-derived-estimate",
+      "verificationState": "cad-derived-estimate"
+    }
+  ],
+  "branchQcableTaxonomy": {
+    "geometricDesignLengthFt": 140.5,
+    "calculationLengthFt": 58,
+    "procurementLengthFt": 152,
+    "wasteFactor": 1.15,
+    "provenance": "geometry-derived",
+    "verificationState": "cad-derived-estimate",
+    "note": "design (geometry-derived per-branch path) ≠ calc (per-run one-way) ≠ procurement (Σ drops × pitch × waste) — the three meanings are explicit, never conflated"
+  },
+  "renderedLabelsPresent": {
+    "CAD_derived": true,
+    "PROCUREMENT": true,
+    "DESIGN": true,
+    "CALC": true
+  }
+}

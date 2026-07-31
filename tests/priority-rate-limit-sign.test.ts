@@ -2,11 +2,17 @@
  * Tests for:
  *   Rate limiting on POST /api/proposals/[id]/sign
  *   — verifies the public e-signature endpoint has rate limiting
- *   — verifies the 'proposal-sign' key exists in lib/rateLimiter.ts
+ *   — verifies the 'proposal-sign' key is in the CONFIG map (single source
+ *     of truth since the 2026-08 fail-mode refactor)
  *   — verifies the local getClientIp was removed (uses imported one)
  *   — verifies checkRateLimit is called before body parsing
  *
  * All tests are source-code scanning (no DB / Redis connection needed).
+ *
+ * UPDATED 2026-08 for the rate-limiter fail-mode refactor. The previous
+ * version of this test scanned for top-level constants like
+ * `_proposalSignLimiter = makeLimiter(...)`. After the refactor, the
+ * per-key limits live in the CONFIG map; we scan that instead.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -20,38 +26,46 @@ function readSrc(rel: string): string {
   return fs.readFileSync(path.join(root, rel), 'utf8');
 }
 
-// ─── rateLimiter.ts: 'proposal-sign' key ─────────────────────────────────────
-describe("rateLimiter.ts — 'proposal-sign' key", () => {
+// ─── rateLimiter.ts: 'proposal-sign' key in CONFIG ───────────────────────────
+describe("rateLimiter.ts — 'proposal-sign' key in CONFIG", () => {
   const src = readSrc('lib/rateLimiter.ts');
-
-  it('defines _proposalSignLimiter', () => {
-    expect(src).toContain('_proposalSignLimiter');
-  });
-
-  it("_proposalSignLimiter uses makeLimiter", () => {
-    const match = src.match(/_proposalSignLimiter\s*=\s*makeLimiter\((\d+)/);
-    expect(match).not.toBeNull();
-    // Should be a tight limit (≤ 10 requests)
-    const limit = parseInt(match![1], 10);
-    expect(limit).toBeLessThanOrEqual(10);
-  });
 
   it("LimiterKey union includes 'proposal-sign'", () => {
     expect(src).toContain("'proposal-sign'");
   });
 
-  it("LIMITERS map maps 'proposal-sign' to _proposalSignLimiter", () => {
-    // Both should appear in the same section of the file
-    expect(src).toContain("'proposal-sign':");
-    expect(src).toContain('_proposalSignLimiter');
+  it("CONFIG map has a 'proposal-sign' entry with a tight limit (≤ 10 requests)", () => {
+    // Match either form:  'proposal-sign': { requests: N, ... }
+    // or                   'proposal-sign':   { requests: N, ... }
+    const match = src.match(/'proposal-sign'\s*:\s*\{\s*requests:\s*(\d+)/);
+    expect(match).not.toBeNull();
+    const limit = parseInt(match![1], 10);
+    expect(limit).toBeLessThanOrEqual(10);
+    expect(limit).toBeGreaterThan(0);
   });
 
-  it("'proposal-sign' limiter uses a per-IP window (15 m or 60 s)", () => {
-    const match = src.match(/_proposalSignLimiter\s*=\s*makeLimiter\(\d+,\s*'([^']+)'\)/);
+  it("CONFIG['proposal-sign'] has a 15-minute window (900_000 ms)", () => {
+    // The previous behavior was 5 / 15m. Keep that contract.
+    // Capture the windowMs expression up to the next comma or closing brace,
+    // then normalize whitespace before comparing.
+    const match = src.match(
+      /'proposal-sign'\s*:\s*\{\s*requests:\s*\d+,\s*windowMs:\s*([^,}]+?)\s*[,\}]/
+    );
     expect(match).not.toBeNull();
-    // Must be time-windowed
-    const window = match![1];
-    expect(window).toMatch(/^\d+ [sm]$/);
+    const expr = match![1].replace(/\s+/g, '');
+    // 15 minutes = 15 * 60_000 = 900_000 (or equivalent expression)
+    const accepts = [
+      '900000',
+      '15*60_000',
+      '15*60000',
+      '15*60*1000',
+    ];
+    expect(accepts).toContain(expr);
+  });
+
+  it("CONFIG map is built into LIMITERS at module load", () => {
+    expect(src).toContain('CONFIG');
+    expect(src).toContain('LIMITERS');
   });
 });
 

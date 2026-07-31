@@ -28,6 +28,7 @@ import {
   type InterconnectionProfile,
 } from '@/lib/utilityInterconnection';
 import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
+import { projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
 
 // ─── HTML Escape Helper ──────────────────────────────────────────────────────
 function esc(s: string | null | undefined): string {
@@ -47,7 +48,11 @@ function resolveUtilityId(input: PermitInput): string | null {
   const utilityName = input.project.utilityName ?? input.utility?.utilityName;
   if (!utilityName) return null;
   const nameLower = utilityName.toLowerCase();
-  const state = ((input.compliance?.jurisdiction?.state) || '').toUpperCase();
+  // THE canonical 2-LETTER CODE. This read compliance.jurisdiction.state and
+  // uppercased it, so it compared 'ILLINOIS' (or 'UNKNOWN') against profiles keyed
+  // 'IL' and silently matched nothing — every Illinois project fell to the generic
+  // PTO roadmap.
+  const state = projectProjectStateFromInput(input).code ?? '';
   // Match against PROPOSAL_UTILITY_PROFILES with state + name pattern
   const stateProfiles = state
     ? PROPOSAL_UTILITY_PROFILES.filter(p => p.state === state)
@@ -245,7 +250,7 @@ export function pageInterconnection(
 ): string {
   const { project, compliance } = input;
   const utilityNameRaw = project.utilityName ?? input.utility?.utilityName ?? 'Unknown Utility';
-  const stateCode = (compliance?.jurisdiction?.state ?? '').toUpperCase();
+  const stateCode = projectProjectStateFromInput(input).code ?? '';
 
   // Resolve utility profile from registry
   const utilityId = resolveUtilityId(input);

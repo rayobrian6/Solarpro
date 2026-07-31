@@ -60,8 +60,9 @@ describe('planset structural/golden coverage — Design Studio to permit guardra
     const pv1b = sheetPage(html, 'PV-1B');
 
     expect(pv1).toContain('ROOF PLAN');
-    expect(pv1b).toContain('ARRAY GEOMETRY');
-    expect(pv1b).toContain('STRING LAYOUT');
+    // §4 (07-22): roofProject is a microinverter system, so PV-1B is titled
+    // "AC BRANCH CIRCUIT LAYOUT" (micro = AC branch circuits, not DC strings).
+    expect(pv1b).toContain('AC BRANCH CIRCUIT LAYOUT');
 
     const pv1Svg = normalizedSvg(firstSvg(pv1));
     const pv1bSvg = normalizedSvg(firstSvg(pv1b));

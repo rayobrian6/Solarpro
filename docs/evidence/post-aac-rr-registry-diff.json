@@ -1,0 +1,200 @@
+{
+  "generatedAtIso": "2026-07-29T15:35:29.516Z",
+  "artifact": "post-aac-regression-repair — requirement registry diff (closure 14 vs artifact/live 15)",
+  "closureRun": {
+    "source": "docs/evidence/aac7-braidon-live-closure.json run2",
+    "snapshotId": "PDS-5891E0B1CD1D",
+    "digest": "5891e0b1cd1dc99f8412f6825f05c640ffb6673e5b170a834ac3eec2ba994047",
+    "openCount": 14
+  },
+  "liveArtifact": {
+    "file": "PermitPackage-BRAIDON M PILLA — Solar TEST (10).html",
+    "snapshotId": "PDS-09C1A0EE7178",
+    "renderedHeadline": "6 OPEN RELEASE GATES / 15 UNRESOLVED REQUIREMENTS",
+    "renderedGateCounts": {
+      "PROJECT & AHJ AUTHORITY": 3,
+      "EQUIPMENT RECONCILIATION": 1,
+      "STRUCTURAL ASSEMBLY AUTHORITY": 5,
+      "ELECTRICAL FIELD & CALCULATION CLOSURE": 2,
+      "Q-CABLE SYSTEM CLOSURE": 2,
+      "PROFESSIONAL RELEASE": 2
+    },
+    "note": "The artifact registry is not persisted (snapshotId is a content hash); its per-gate counts are machine-read from the rendered release-status block and match the regeneration from the same stored input exactly."
+  },
+  "liveRegeneration": {
+    "snapshotId": "PDS-645E80A22090",
+    "headline": "6 OPEN RELEASE GATES / 15 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION",
+    "openCount": 15
+  },
+  "onlyInClosure": [],
+  "onlyInArtifactAndLive": [
+    "PROJECT-NAME-NONPRODUCTION"
+  ],
+  "rows": [
+    {
+      "requirementId": "CODE-AUTHORITY-INCOMPLETE",
+      "gate": "PROJECT_AND_AHJ_AUTHORITY",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "DESIGNER-OF-RECORD-MISSING",
+      "gate": "PROFESSIONAL_RELEASE",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "ENGINEERING-REVIEW-PENDING",
+      "gate": "PROFESSIONAL_RELEASE",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "gate": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "FRAMING-AUTHORITY-UNVERIFIED",
+      "gate": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "MODULE-EXACT-DATASHEET-PENDING",
+      "gate": "EQUIPMENT_RECONCILIATION",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "gate": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "PROJECT-AUTHORITY-UNVERIFIED",
+      "gate": "PROJECT_AND_AHJ_AUTHORITY",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "PROJECT-NAME-NONPRODUCTION",
+      "gate": "PROJECT_AND_AHJ_AUTHORITY",
+      "statusAtClosureRun": "NOT EMITTED (cleared/not fired)",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "The closure headline (6/14) was measured against the RENAMED projects.name (\"BRAIDON M PILLA — Solar\", aac6 afterWithLiveProjectName). The (10).html artifact and this regeneration are generated from the STORED posted permit input, whose projectName is still \"BRAIDON M PILLA — Solar TEST\" (printed on the artifact title block); the \\bTEST\\b nonproduction-name detector (build.ts registry) fires on it. Gate RG-1 is already open (CODE-AUTHORITY-INCOMPLETE, PROJECT-AUTHORITY-UNVERIFIED), so gates stay 6 while requirements go 14 → 15. Clears when the package is regenerated from the app with the renamed project (operator action; never auto-renamed)."
+    },
+    {
+      "requirementId": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "gate": "QCABLE_SYSTEM_CLOSURE",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "gate": "QCABLE_SYSTEM_CLOSURE",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "gate": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "gate": "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "ROUTE-LENGTH-ESTIMATE",
+      "gate": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    },
+    {
+      "requirementId": "TAP-CONDUCTOR-LENGTH-PENDING",
+      "gate": "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "statusAtClosureRun": "OPEN",
+      "statusInArtifactSnapshot_PDS_09C1A0EE7178": "OPEN",
+      "statusInLiveRegeneration": "OPEN",
+      "resolver": null,
+      "resolutionAttempt": null,
+      "evidenceId": null,
+      "reasonForDelta": "identical in both runs"
+    }
+  ]
+}

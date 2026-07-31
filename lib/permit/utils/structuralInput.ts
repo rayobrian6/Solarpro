@@ -58,7 +58,14 @@ export function buildStructuralInputForPermit(
     const depthFt = depthM * 3.28084;
     return Math.round((_effFraming === 'truss' ? depthFt : depthFt / 2) * 10) / 10;
   })();
-  const rafterSpFt = input.project.rafterSpan || _geomSpanFt || 12;
+  // W8 — no bare fabricated 12-ft span literal. Prefer the operator's verified
+  // span, then the roof-geometry-derived span. When NEITHER exists the framing is
+  // UNVERIFIED regardless (the snapshot framing authority reads the RAW project
+  // field = null via isFramingVerified), so this last-resort nominal only feeds
+  // the NON-AUTHORITATIVE V4 estimate and is never certified as a framing pass —
+  // named, not a magic number, so it can never masquerade as project authority.
+  const NON_AUTHORITATIVE_NOMINAL_SPAN_FT = 12;
+  const rafterSpFt = input.project.rafterSpan || _geomSpanFt || NON_AUTHORITATIVE_NOMINAL_SPAN_FT;
 
   // Single source for the array layout: the design's real placed modules
   // (scoped to the sub-system for hybrids — unscoped, the roof run would size

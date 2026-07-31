@@ -815,7 +815,13 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     id: 'enphase-iq8a',
     manufacturer: 'Enphase',
     model: 'IQ8A Microinverter',
-    partNumber: 'IQ8A-72-M-US',
+    // §12 (2026-07-22) — single canonical Enphase SKU. Was 'IQ8A-72-M-US', the
+    // lone outlier: the verified manufacturer-assets-db datasheet entry
+    // (microinverter_spec:enphase-iq8a, verified:true, pageRef "column
+    // IQ8A-72-2-US"), lib/equipment/specSheets.ts and system/inverterCapabilities
+    // all carry IQ8A-72-2-US. Reconciled to that exact SKU (basis: in-repo
+    // verified datasheet evidence) so the package can never print two SKUs.
+    partNumber: 'IQ8A-72-2-US',
     category: 'microinverter',
     topologyType: 'MICROINVERTER',
     electricalSpecs: {
@@ -2617,12 +2623,12 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
       },
       {
         category: 'rail',
-        description: 'Rail — 2 rails per module row (IronRidge XR100/XR1000, Pegasus, or compatible)',
+        description: 'Rail — 2 rails per module row (IronRidge XR100/XR1000, Pegasus)',
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'XR100 Rail 168"',
-        defaultPartNumber: 'XR-100-168B', necReference: 'IBC 2021',
-        notes: '2 rails per string row (portrait). Compatible: IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent aluminum extruded rail.',
+        defaultPartNumber: 'XR-100-168B', necReference: 'UL 2703',
+        notes: '2 rails per string row (portrait). IronRidge XR100/XR1000 aluminum extruded rail; alternates Pegasus, UniRac SFM.',
       },
       {
         category: 'mid_clamp',
@@ -2630,7 +2636,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: '(modules - strings) * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'UFO Mid Clamp',
-        defaultPartNumber: 'UFO-MID-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UFO-MID-01', necReference: 'UL 2703',
       },
       {
         category: 'end_clamp',
@@ -2638,7 +2644,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 4',
         defaultManufacturer: 'IronRidge', defaultModel: 'UFO End Clamp',
-        defaultPartNumber: 'UFO-END-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UFO-END-01', necReference: 'UL 2703',
       },
       {
         category: 'grounding',
@@ -2652,7 +2658,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     notesTemplates: [
       'Roof Tech RT-MINI — flashed pad standoff system, rail-based attachment',
       'Assembly: RT-MINI pad (2 lag bolts into rafter) → L-foot → standard rail → mid/end clamps',
-      'Compatible rails: IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent',
+      'Rails: IronRidge XR100/XR1000, Pegasus, UniRac SFM',
       'ICC-ES ESR-3575 / UL 2703, ASCE 7-22 compliant, 150 mph wind, 45 psf snow',
       'Max 48" pad spacing, max 72" rail span (L-foot to L-foot)',
     ],
@@ -2726,7 +2732,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: '(modules - strings) * 2',
         defaultManufacturer: 'PLP', defaultModel: 'POWER DRIVE Pre-Assembled Mid Clamp',
-        defaultPartNumber: 'PD-MID-CLAMP', necReference: 'IBC 2021',
+        defaultPartNumber: 'PD-MID-CLAMP', necReference: 'UL 2703',
       },
       {
         category: 'end_clamp',
@@ -2734,7 +2740,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 4',
         defaultManufacturer: 'PLP', defaultModel: 'POWER DRIVE Pre-Assembled End Clamp',
-        defaultPartNumber: 'PD-END-CLAMP', necReference: 'IBC 2021',
+        defaultPartNumber: 'PD-END-CLAMP', necReference: 'UL 2703',
       },
       {
         category: 'conduit',
@@ -2800,7 +2806,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         conditional: 'roofType === shingle || roofType === tile',
         quantityRule: 'perAttachment',
         defaultManufacturer: 'QuickMount PV', defaultModel: 'Classic Mount Flashing',
-        defaultPartNumber: 'QM-CLASSIC-1', necReference: 'IBC 2021',
+        defaultPartNumber: 'QM-CLASSIC-1', necReference: 'UL 2703',
       },
       {
         category: 'rail',
@@ -2808,7 +2814,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'XR100 Rail 168"',
-        defaultPartNumber: 'XR-100-168B', necReference: 'IBC 2021',
+        defaultPartNumber: 'XR-100-168B', necReference: 'UL 2703',
         notes: '2 rails per string row, 168" (14ft) standard length',
       },
       {
@@ -2817,7 +2823,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: '(modules - strings) * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'UFO Mid Clamp',
-        defaultPartNumber: 'UFO-MID-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UFO-MID-01', necReference: 'UL 2703',
       },
       {
         category: 'end_clamp',
@@ -2825,7 +2831,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 4',
         defaultManufacturer: 'IronRidge', defaultModel: 'UFO End Clamp',
-        defaultPartNumber: 'UFO-END-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UFO-END-01', necReference: 'UL 2703',
       },
       {
         category: 'splice',
@@ -2833,7 +2839,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: false, quantityRule: 'formula',
         quantityFormula: 'strings * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'XR100 Splice',
-        defaultPartNumber: 'XR-100-SPLICE', necReference: 'IBC 2021',
+        defaultPartNumber: 'XR-100-SPLICE', necReference: 'UL 2703',
       },
     ],
     compatibilityRules: [],
@@ -2883,7 +2889,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         conditional: 'roofType === shingle || roofType === tile',
         quantityRule: 'perAttachment',
         defaultManufacturer: 'QuickMount PV', defaultModel: 'Classic Mount Flashing',
-        defaultPartNumber: 'QM-CLASSIC-1', necReference: 'IBC 2021',
+        defaultPartNumber: 'QM-CLASSIC-1', necReference: 'UL 2703',
       },
       {
         category: 'rail',
@@ -2891,7 +2897,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'XR1000 Rail 168"',
-        defaultPartNumber: 'XR-1000-168B', necReference: 'IBC 2021',
+        defaultPartNumber: 'XR-1000-168B', necReference: 'UL 2703',
       },
       {
         category: 'mid_clamp',
@@ -2899,7 +2905,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: '(modules - strings) * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'UFO Mid Clamp',
-        defaultPartNumber: 'UFO-MID-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UFO-MID-01', necReference: 'UL 2703',
       },
       {
         category: 'end_clamp',
@@ -2907,7 +2913,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 4',
         defaultManufacturer: 'IronRidge', defaultModel: 'UFO End Clamp',
-        defaultPartNumber: 'UFO-END-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UFO-END-01', necReference: 'UL 2703',
       },
     ],
     compatibilityRules: [],
@@ -2960,7 +2966,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: '(modules - strings) * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'UFO Mid Clamp',
-        defaultPartNumber: 'UFO-MID-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UFO-MID-01', necReference: 'UL 2703',
       },
       {
         category: 'end_clamp',
@@ -2968,7 +2974,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 4',
         defaultManufacturer: 'IronRidge', defaultModel: 'UFO End Clamp',
-        defaultPartNumber: 'UFO-END-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UFO-END-01', necReference: 'UL 2703',
       },
     ],
     compatibilityRules: [],
@@ -3018,7 +3024,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         conditional: 'roofType === shingle || roofType === tile',
         quantityRule: 'perAttachment',
         defaultManufacturer: 'QuickMount PV', defaultModel: 'Classic Mount Flashing',
-        defaultPartNumber: 'QM-CLASSIC-1', necReference: 'IBC 2021',
+        defaultPartNumber: 'QM-CLASSIC-1', necReference: 'UL 2703',
       },
       {
         category: 'rail',
@@ -3026,7 +3032,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 2',
         defaultManufacturer: 'SnapNrack', defaultModel: 'Series 100 Rail 168"',
-        defaultPartNumber: 'SNR-100-168', necReference: 'IBC 2021',
+        defaultPartNumber: 'SNR-100-168', necReference: 'UL 2703',
       },
       {
         category: 'mid_clamp',
@@ -3034,7 +3040,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: '(modules - strings) * 2',
         defaultManufacturer: 'SnapNrack', defaultModel: 'Series 100 Mid Clamp',
-        defaultPartNumber: 'SNR-MID-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'SNR-MID-01', necReference: 'UL 2703',
       },
       {
         category: 'end_clamp',
@@ -3042,7 +3048,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 4',
         defaultManufacturer: 'SnapNrack', defaultModel: 'Series 100 End Clamp',
-        defaultPartNumber: 'SNR-END-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'SNR-END-01', necReference: 'UL 2703',
       },
     ],
     compatibilityRules: [],
@@ -3094,7 +3100,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         quantityRule: 'formula',
         quantityFormula: 'modules * 4',
         defaultManufacturer: 'SnapNrack', defaultModel: 'Ultra-Light Flashing',
-        defaultPartNumber: 'SNR-UL-FLASH', necReference: 'IBC 2021',
+        defaultPartNumber: 'SNR-UL-FLASH', necReference: 'UL 2703',
       },
     ],
     compatibilityRules: [],
@@ -3144,7 +3150,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         conditional: 'roofType === shingle || roofType === tile',
         quantityRule: 'perAttachment',
         defaultManufacturer: 'QuickMount PV', defaultModel: 'Classic Mount Flashing',
-        defaultPartNumber: 'QM-CLASSIC-1', necReference: 'IBC 2021',
+        defaultPartNumber: 'QM-CLASSIC-1', necReference: 'UL 2703',
       },
       {
         category: 'rail',
@@ -3152,7 +3158,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 2',
         defaultManufacturer: 'Unirac', defaultModel: 'SunFrame Rail 168"',
-        defaultPartNumber: 'UR-SF-168', necReference: 'IBC 2021',
+        defaultPartNumber: 'UR-SF-168', necReference: 'UL 2703',
       },
       {
         category: 'mid_clamp',
@@ -3160,7 +3166,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: '(modules - strings) * 2',
         defaultManufacturer: 'Unirac', defaultModel: 'SunFrame Mid Clamp',
-        defaultPartNumber: 'UR-MID-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UR-MID-01', necReference: 'UL 2703',
       },
       {
         category: 'end_clamp',
@@ -3168,7 +3174,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 4',
         defaultManufacturer: 'Unirac', defaultModel: 'SunFrame End Clamp',
-        defaultPartNumber: 'UR-END-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'UR-END-01', necReference: 'UL 2703',
       },
     ],
     compatibilityRules: [],
@@ -3349,7 +3355,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         quantityRule: 'formula',
         quantityFormula: 'modules * 4',
         defaultManufacturer: 'EcoFasten', defaultModel: 'Rock-It Flashing',
-        defaultPartNumber: 'EF-ROCKIT-FLASH', necReference: 'IBC 2021',
+        defaultPartNumber: 'EF-ROCKIT-FLASH', necReference: 'UL 2703',
         notes: 'Integrated EPDM flashing included with Rock-It mount',
       },
       {
@@ -3471,7 +3477,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'formula',
         quantityFormula: 'ceil(attachments / 20)',
         defaultManufacturer: 'Generic', defaultModel: 'Butyl Tape 1/8" × 1/2"',
-        defaultPartNumber: 'BUTYL-TAPE-01', necReference: 'IBC 2021',
+        defaultPartNumber: 'BUTYL-TAPE-01', necReference: 'UL 2703',
       },
     ],
     compatibilityRules: [],

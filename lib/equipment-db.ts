@@ -112,7 +112,8 @@ export interface Microinverter {
   manufacturer: string;
   model: string;
   category: 'microinverter';
-  acOutputW: number;
+  acOutputW: number;            // VA — MAX CONTINUOUS apparent power (datasheet "Max continuous output power")
+  acOutputVaPeak?: number;      // VA — PEAK apparent power (datasheet "Peak output power"); distinct from acOutputW
   dcInputWMax: number;
   maxDcVoltage: number; // V
   mpptVoltageMin: number; // V
@@ -135,6 +136,8 @@ export interface Microinverter {
   // Used instead of NEC 125% calculation when manufacturer specifies it explicitly
   maxPerBranch20A?: number; // max devices on a 20A branch per manufacturer datasheet
   maxPerBranch30A?: number; // max devices on a 30A branch per manufacturer datasheet
+  partNumber?: string;      // manufacturer SKU / ordering part number (e.g. 'IQ8A-72-2-US') — the canonical exact SKU
+  connectorType?: string;   // DC input connector requirement per datasheet (e.g. 'MC4')
   isNew?: boolean; // UI badge flag
   // Ecosystem metadata (additive; optional)
   ecosystemBrand?: string;
@@ -2037,16 +2040,24 @@ export const MICROINVERTERS: Microinverter[] = [
     manufacturer: 'Enphase',
     model: 'IQ8A',
     category: 'microinverter',
-    // IQ8A: 349W AC output, 1.46A nominal — designed for high-power modules up to 460W DC
-    acOutputW: 349, dcInputWMax: 500,  // IQ8A pairs to ~500W modules (was 460, copy-pasted from IQ8M)
+    // W5 (repair pass 2026-07-22): reconciled to the embedded verified document —
+    // IQ8 Series Microinverters Data Sheet (NA), p.2 spec table, column IQ8A-72-2-US
+    // (manufacturer-assets-db 'microinverter_spec:enphase-iq8a', verified). Was the
+    // hand-entered 349W-mislabelled-peak / 1.46A / 96.5% CEC / 2.2 lb parallel DB.
+    // Datasheet: peak 366 VA · max continuous 349 VA · 1.45 A max continuous @240V ·
+    // peak eff 97.6% · CEC 97.5% · weight 2.38 lb (1080 g) · MC4 · module pairing 295–500W.
+    acOutputW: 349,            // MAX CONTINUOUS VA (datasheet)
+    acOutputVaPeak: 366,       // PEAK VA (datasheet)
+    dcInputWMax: 500,          // module pairing top of range (295–500 W)
     maxDcVoltage: 60, mpptVoltageMin: 16, mpptVoltageMax: 60,
     maxInputCurrent: 15.0,
-    acOutputVoltage: 240, acOutputCurrentMax: 1.46,
-    efficiency: 97.0, cec_efficiency: 96.5,
-    weight: 2.2,
+    acOutputVoltage: 240, acOutputCurrentMax: 1.45,   // A — max continuous output current @240V
+    efficiency: 97.6, cec_efficiency: 97.5,           // peak / CEC-weighted (datasheet)
+    weight: 2.38,                                      // lb (1080 g)
+    partNumber: 'IQ8A-72-2-US', connectorType: 'MC4',
     warranty: '25yr', ulListing: 'UL 1741-SA / IEEE 1547',
     rapidShutdownCompliant: true,
-    datasheetUrl: 'https://enphase.com/store/microinverters/iq8-series',
+    datasheetUrl: 'https://enphase.com/sites/default/files/2021-10/IQ8-Series-DS-US.pdf',
     modulesPerDevice: 1,
     isNew: true,
     // v47.397 — ecosystem fields
@@ -2383,9 +2394,9 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     midClampGapIn: 0.4,   // compatible-rail mid-clamp — typical, verify vs datasheet
     weight: 0.6, material: 'Aluminum / EPDM',
     warranty: '20yr', ulListing: 'ICC-ES ESR-3575 / UL 2703',
-    attachmentMethod: 'Flashed pad with 2 lag bolts into rafter → L-foot bolt → compatible rail (IronRidge XR100/XR1000, Pegasus, or equivalent)',
-    hardware: 'RT-MINI flashed pad, integrated EPDM flashing, 5/16" × 3" lag bolts (×2 per pad), L-foot, compatible rail',
-    installNotes: 'Rail-based system. 2 lag bolts per RT-MINI pad into rafter. L-foot mounts to pad bolt. Standard rail (IronRidge, Pegasus, or compatible) attaches to L-foot. ICC-ES ESR-3575 rated.',
+    attachmentMethod: 'Flashed pad with 2 lag bolts into rafter → L-foot bolt → paired rail; rail SKU PENDING SELECTION (IronRidge XR100/XR1000 or Pegasus)',
+    hardware: 'RT-MINI flashed pad, integrated EPDM flashing, 5/16" × 3" lag bolts (×2 per pad), L-foot, paired rail (SKU PENDING SELECTION)',
+    installNotes: 'Rail-based system. 2 lag bolts per RT-MINI pad into rafter. L-foot mounts to pad bolt. Listed rail (IronRidge or Pegasus; SKU PENDING SELECTION) attaches to L-foot. ICC-ES ESR-3575 rated.',
     // v47.406 datasheet fix: Roof Tech RT Mini II brochure (design.roof-tech.us manufacturer design portal)
     datasheetUrl: 'https://design.roof-tech.us/PDF/Brochures/Mini_II_Brochure.pdf',
     // Discrete load model: uplift evaluated per attachment point (each RT-MINI pad)

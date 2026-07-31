@@ -1,0 +1,158 @@
+{
+  "section": "BAR §2 — environmental load authority (wind / snow / exposure / risk)",
+  "contract": "An operator-entered or AHJ-typed value is an OBSERVATION/OVERRIDE and may drive the PRELIMINARY analysis; it can NEVER be presented as verified design criteria. Verification requires a VERIFIED + ARCHIVED + currency-reviewed climate-hazard source (ASCE 7 Hazard Tool report / AHJ climate ordinance) covering wind AND snow AND exposure/risk for THIS project. A generic code minimum is PRELIMINARY only.",
+  "emitter": "lib/permit/snapshot/environmentalAuthority.ts (pure) ← lib/permit/snapshot/structuralAuthority.ts buildEnv ← lib/permit/snapshot/build.ts",
+  "asyncSourceResolution": {
+    "resolver": "lib/documents/registry.ts resolveClimateHazardDocument",
+    "threadedBy": "lib/permit/snapshot/authorityInputs.ts resolveSnapshotAuthorityInputs → generatePermit opts.environmentalSource → build.ts → buildStructuralAuthority",
+    "liveResult": null,
+    "liveResultMeaning": "no archived, currency-reviewed climate-hazard document exists for this project today ⇒ fail-soft null ⇒ the honest UNVERIFIED state. Nothing is fabricated to clear the blocker."
+  },
+  "blocker": {
+    "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+    "severity": "blocking",
+    "domain": "structural",
+    "subsumes": "WIND-SNOW-AUTHORITY-UNRESOLVED (retired; the new code covers BOTH the null/code-default branch AND the operator-entered-without-provenance branch that the old code never reached)"
+  },
+  "byMode": [
+    {
+      "mode": "original",
+      "snapshotId": "PDS-CD0F6377533F",
+      "digest": "cd0f6377533f404ff20ebd80817124c77d60c95699add1cd72d64c8fd64023b1",
+      "sheetCount": 21,
+      "source": "frozen tests/fixtures/braidon-original-audit-fixture (zero mutable DB input)",
+      "environmentalLoadAuthority": {
+        "ultimateWindSpeedMph": 115,
+        "windSpeedBasis": "code-minimum-default",
+        "riskCategory": null,
+        "exposureCategory": "C",
+        "groundSnowLoadPsf": 0,
+        "snowLoadBasis": "code-minimum-default",
+        "snowLoadSource": null,
+        "coordinates": {
+          "lat": 38.7061678,
+          "lng": -90.0461651
+        },
+        "addressUsed": "3 MELVIN DR APT A, GRANITE CITY, IL 62040",
+        "sourceDocumentId": null,
+        "sourceDataset": null,
+        "sourceVersionOrDate": null,
+        "lookupTimestampIso": null,
+        "operatorOverrides": [],
+        "verificationStatus": "unverified",
+        "projectOrAhj": null,
+        "evidenceRef": null,
+        "provenance": {
+          "source": "environmental-load authority gate (BAR §2)",
+          "note": "environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission."
+        }
+      },
+      "structuralEnvAsRendered": {
+        "ultimateWindSpeedMph": 115,
+        "windSpeedSource": "code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority",
+        "exposureCategory": "C",
+        "riskCategory": null,
+        "groundSnowPsf": 0,
+        "roofSnowPsf": 0
+      },
+      "renderedStateTags": [
+        {
+          "id": "pv-4c-wind",
+          "text": "CODE DEFAULT / NOT VERIFIED"
+        },
+        {
+          "id": "pv-4c-snow",
+          "text": "CODE DEFAULT / NOT VERIFIED"
+        },
+        {
+          "id": "pv-4c-conclusion",
+          "text": "SOURCE: CODE-MINIMUM DEFAULT — NOT VERIFIED"
+        },
+        {
+          "id": "pe-1",
+          "text": "SOURCE: CODE-MINIMUM DEFAULT — NOT VERIFIED"
+        }
+      ],
+      "blockerOnRs1": true,
+      "gate2": {
+        "ok": true,
+        "detail": "record=true status=unverified windBasis=code-minimum-default snowBasis=code-minimum-default taggedSurfaces=4 missing=none tagsWithoutState=none stateAgrees=true blockerWhenUnverified=true noFalseLabel=true retiredCodeGone=true"
+      }
+    },
+    {
+      "mode": "live",
+      "snapshotId": "PDS-8910EFAC2AB8",
+      "digest": "8910efac2ab8468628a5e5cfac5f6119981d1ca59eca5bffcacc714d375ac6d1",
+      "sheetCount": 21,
+      "source": "live Neon design 4030b664-bebe-433b-a11c-cda05ead2f7d (BRAIDON M PILLA — Solar TEST), regenerated through resolveSnapshotAuthorityInputs + generatePermitHTML",
+      "environmentalLoadAuthority": {
+        "ultimateWindSpeedMph": 110,
+        "windSpeedBasis": "operator-entered",
+        "riskCategory": null,
+        "exposureCategory": "C",
+        "groundSnowLoadPsf": 20,
+        "snowLoadBasis": "operator-entered",
+        "snowLoadSource": null,
+        "coordinates": {
+          "lat": 38.7061678,
+          "lng": -90.0461651
+        },
+        "addressUsed": "3 MELVIN DR APT A, GRANITE CITY, IL 62040",
+        "sourceDocumentId": null,
+        "sourceDataset": null,
+        "sourceVersionOrDate": null,
+        "lookupTimestampIso": null,
+        "operatorOverrides": [
+          "ultimateWindSpeedMph",
+          "groundSnowLoadPsf",
+          "exposureCategory"
+        ],
+        "verificationStatus": "unverified",
+        "projectOrAhj": "City of Granite City Building & Zoning",
+        "evidenceRef": null,
+        "provenance": {
+          "source": "environmental-load authority gate (BAR §2)",
+          "note": "environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission."
+        }
+      },
+      "structuralEnvAsRendered": {
+        "ultimateWindSpeedMph": 110,
+        "windSpeedSource": "OPERATOR-ENTERED — NOT VERIFIED (observation/override; no archived climate-hazard source)",
+        "exposureCategory": "C",
+        "riskCategory": null,
+        "groundSnowPsf": 20,
+        "roofSnowPsf": 13.422
+      },
+      "renderedStateTags": [
+        {
+          "id": "pv-4c-wind",
+          "text": "OPERATOR-ENTERED / NOT VERIFIED"
+        },
+        {
+          "id": "pv-4c-snow",
+          "text": "OPERATOR-ENTERED / NOT VERIFIED"
+        },
+        {
+          "id": "pv-4c-conclusion",
+          "text": "SOURCE: OPERATOR-ENTERED — NOT VERIFIED"
+        },
+        {
+          "id": "pe-1",
+          "text": "SOURCE: OPERATOR-ENTERED — NOT VERIFIED"
+        }
+      ],
+      "blockerOnRs1": true,
+      "gate2": {
+        "ok": true,
+        "detail": "record=true status=unverified windBasis=operator-entered snowBasis=operator-entered taggedSurfaces=4 missing=none tagsWithoutState=none stateAgrees=true blockerWhenUnverified=true noFalseLabel=true retiredCodeGone=true"
+      }
+    }
+  ],
+  "valueAuthoritySymmetryFix": {
+    "finding": "On the live design the AHJ/operator ground snow load (20 psf) was silently replaced by 0 psf whenever no stored compliance run accompanied the request: buildCanonical took windSpeed from struct→ahjWindSpeedMph→windSpeedMph but took groundSnowLoad from struct ONLY. The EnvironmentalLoadAuthority still recorded groundSnowLoadPsf as an OPERATOR OVERRIDE, so the record attributed an engine default to the operator.",
+    "fix": "lib/permit/utils/canonical.ts — groundSnowLoad now falls back to project.ahjGroundSnowPsf → project.groundSnowPsf, symmetric with windSpeed.",
+    "effect": "live now renders 110 mph / Exposure C / 20 psf ground / 13.4 psf roof — the SAME values as the audit target — with the basis the record claims. Verification state unchanged (still operator-entered ⇒ unverified ⇒ blocking)."
+  },
+  "tests": "tests/planset/environmental-load-authority-bar.test.ts — verified source, operator override, missing source, stale source (no currency review).",
+  "boundary": "No fabricated source, grounding authority, fastener SKU or manufacturer evidence. Every state below is the state the code actually produced; honest PENDING/UNVERIFIED states are recorded as such, not resolved."
+}

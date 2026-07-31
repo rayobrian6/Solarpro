@@ -1,0 +1,1122 @@
+{
+  "harness": "planset-evidence-ecd",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §12 (24 final software-closure gates)",
+  "mode": "fixture",
+  "html": "C:\\Users\\Ray\\AppData\\Local\\Temp\\claude\\C--Users-Ray-Solarpro-Claude\\abc83935-37f8-4ff5-8978-4ba2c1156198\\scratchpad\\PermitPackage-BRAIDON-ecd.html",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "sheetCount": 24,
+  "sheetIds": [
+    "PV-0",
+    "RS-1",
+    "RS-1.1",
+    "RS-1.2",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "PV-4C.1",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "SCHED-3",
+    "SCHED-4",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "CERT",
+    "PE-1"
+  ],
+  "releaseRegistry": {
+    "blocking": 15,
+    "advisory": 0,
+    "codes": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "CONDUIT-FILL-PENDING",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ]
+  },
+  "procurementStateMatrix": {
+    "totalRowCount": 48,
+    "VERIFIED_ORDERABLE": 11,
+    "ESTIMATED_FIELD_VERIFY": 22,
+    "CANDIDATE_NON_ORDERABLE": 14,
+    "QUANTITY_PENDING": 1,
+    "EXCLUDED_NOT_APPLICABLE": 0,
+    "authoritativeExportCount": 11,
+    "procurementReady": false,
+    "countsReconcile": true
+  },
+  "rendered": {
+    "populationTotal": 48,
+    "rowsShownHere": [
+      47
+    ],
+    "rowsScheduledAbove": 1,
+    "procurementTotal": 11,
+    "procurementExcluded": 37,
+    "procurementReady": "false",
+    "stateCounts": {
+      "VERIFIED_ORDERABLE": 11,
+      "ESTIMATED_FIELD_VERIFY": 22,
+      "CANDIDATE_NON_ORDERABLE": 14,
+      "QUANTITY_PENDING": 1,
+      "EXCLUDED_NOT_APPLICABLE": 0
+    },
+    "openProcurementCodes": [
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "ROUTE-LENGTH-ESTIMATE"
+    ],
+    "bomRowTags": 48
+  },
+  "modelEvidence": {
+    "routeDependency": {
+      "code": "ROUTE-LENGTH-ESTIMATE",
+      "open": true,
+      "rows": 23
+    },
+    "cableExtension": {
+      "solutions": 0,
+      "connectorRows": [
+        {
+          "id": "BOM-CONNECTOR-F3079FAD",
+          "state": "CANDIDATE_NON_ORDERABLE",
+          "promoted": false
+        },
+        {
+          "id": "BOM-CONNECTOR-25827044",
+          "state": "CANDIDATE_NON_ORDERABLE",
+          "promoted": false
+        }
+      ]
+    },
+    "supplySideTap": {
+      "verification": "unverified",
+      "unresolvedFacts": 8
+    },
+    "grounding": {
+      "groupAuthorityId": "gnd-branch-egc-authority",
+      "canonicalBranchIds": [
+        "gnd-br-1",
+        "gnd-br-2",
+        "gnd-br-3"
+      ],
+      "physical": [
+        {
+          "id": "gnd-feeder",
+          "purpose": "feeder-egc",
+          "kind": "physical-segment"
+        },
+        {
+          "id": "gnd-gec",
+          "purpose": "gec",
+          "kind": "physical-segment"
+        }
+      ],
+      "group": [
+        {
+          "id": "gnd-branch-egc-authority",
+          "members": [
+            "gnd-br-1",
+            "gnd-br-2",
+            "gnd-br-3"
+          ],
+          "kind": "group-authority"
+        }
+      ],
+      "e1Sections": [
+        {
+          "sectionId": "BRANCH_RUN",
+          "label": null,
+          "groundingSegmentId": "gnd-br-1",
+          "groundingAuthorityGroupId": "gnd-branch-egc-authority",
+          "bondingPendingAuthority": true
+        },
+        {
+          "sectionId": "BRANCH_RUN",
+          "label": null,
+          "groundingSegmentId": "gnd-br-2",
+          "groundingAuthorityGroupId": "gnd-branch-egc-authority",
+          "bondingPendingAuthority": true
+        },
+        {
+          "sectionId": "BRANCH_RUN",
+          "label": null,
+          "groundingSegmentId": "gnd-br-3",
+          "groundingAuthorityGroupId": "gnd-branch-egc-authority",
+          "bondingPendingAuthority": true
+        },
+        {
+          "sectionId": "BRANCH_HOMERUN_RUN",
+          "label": null,
+          "groundingSegmentId": "GRN-HOMERUN-RACEWAY-EGC",
+          "groundingAuthorityGroupId": null,
+          "bondingPendingAuthority": false
+        },
+        {
+          "sectionId": "COMBINER_TO_DISCO_RUN",
+          "label": null,
+          "groundingSegmentId": "GRN-COMBINER_TO_DISCO_RUN-EGC",
+          "groundingAuthorityGroupId": null,
+          "bondingPendingAuthority": false
+        },
+        {
+          "sectionId": "DISCO_TO_METER_RUN",
+          "label": null,
+          "groundingSegmentId": "GRN-DISCO_TO_METER_RUN-EGC",
+          "groundingAuthorityGroupId": null,
+          "bondingPendingAuthority": false
+        },
+        {
+          "sectionId": "svc-tap-conductors",
+          "label": null,
+          "groundingSegmentId": "GRN-SERVICE-BOND",
+          "groundingAuthorityGroupId": null,
+          "bondingPendingAuthority": false
+        }
+      ]
+    },
+    "bonding": {
+      "result": "METHOD_PENDING_ASSEMBLY_SELECTION",
+      "verificationState": "pending",
+      "bondingRequired": true
+    },
+    "documents": {
+      "established": false,
+      "openCodes": [
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+      ]
+    }
+  },
+  "pageFit": {
+    "exit": 0,
+    "summary": "[pagefit] sheets=24 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0",
+    "report": {
+      "generatedAt": "2026-07-27T16:47:28.152Z",
+      "artifact": "braidon-page-fit-report",
+      "method": "Playwright 17×11 (96dpi); per logical sheet, lowest NON-SVG descendant vs printable box (page height − bottom padding); SVG bleed excluded. §19: plus sub-sheet internal-clip scan — every hidden-overflow container vs its own descendants. PPC gate 17: plus the HORIZONTAL twin of both passes — rightmost non-SVG descendant vs the printable width, and every horizontal clip container by scrollWidth − clientWidth.",
+      "axes": [
+        "vertical",
+        "horizontal"
+      ],
+      "tolInches": 0.5,
+      "tolInchesHorizontal": 0.5,
+      "internalClipTolPx": 2,
+      "sheets": 24,
+      "clipped": 0,
+      "internalClipped": 0,
+      "clippedHorizontal": 0,
+      "internalClippedHorizontal": 0,
+      "missingTitleBlock": 0,
+      "perSheet": [
+        {
+          "index": 0,
+          "sheetId": "PV-0",
+          "belowByIn": -0.24,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "col-stack :: PROJECT INFORMATION\n          \n            \n",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 1,
+          "sheetId": "RS-1",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: 7 OPEN RELEASE GATES / 15 UNRESOLVED REQUIRE",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "DIV :: OPEN RELEASE GATES\n            7\n          \n",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 2,
+          "sheetId": "RS-1.1",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: 7 OPEN RELEASE GATES / 15 UNRESOLVED REQUIRE",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "page-content :: 7 OPEN RELEASE GATES / 15 UNRESOLVED REQUIRE",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 3,
+          "sheetId": "RS-1.2",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: 7 OPEN RELEASE GATES / 15 UNRESOLVED REQUIRE",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "page-content :: 7 OPEN RELEASE GATES / 15 UNRESOLVED REQUIRE",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 4,
+          "sheetId": "PV-1",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-draw layout-plan-dominant :: ROOF PLAN — 31 MOD @ 12.40 kWdc | COMPOSITIO",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "struct-review-banner :: PENDING STRUCTURAL ENGINEERING REVIEW\n    NO",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 5,
+          "sheetId": "PV-1B",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "DIV :: CIRCUIT LAYOUT — 31 MODULES / 3 BRANCHES — R",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "struct-review-banner :: PENDING STRUCTURAL ENGINEERING REVIEW\n    NO",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 6,
+          "sheetId": "PV-3",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-draw layout-plan-dominant :: ATTACHMENT DETAIL (REFERENCE — NON-AUTHORITA",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "struct-review-banner :: PENDING STRUCTURAL ENGINEERING REVIEW\n    NO",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 7,
+          "sheetId": "PV-4C",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: PENDING STRUCTURAL ENGINEERING REVIEW\n    NO",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "struct-card :: Snow Analysis — ASCE 7-22 §7\n          \n    ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 8,
+          "sheetId": "PV-4C.1",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: PENDING STRUCTURAL ENGINEERING REVIEW\n    NO",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "page-content :: PENDING STRUCTURAL ENGINEERING REVIEW\n    NO",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 9,
+          "sheetId": "E-1",
+          "belowByIn": -0.07,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "DIV :: SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM\n3 ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": [
+            {
+              "container": "DIV",
+              "containerBox": {
+                "scrollHeight": 610,
+                "clientHeight": 251
+              },
+              "element": "",
+              "overflowPx": 359,
+              "contentOverflowPx": 0,
+              "axis": "y",
+              "meaningful": false
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "sheetId": "PV-4A",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: Electrical Compliance — NEC 2020\n      \n    ",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "iv :: 10.82 kW",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 11,
+          "sheetId": "PV-4B",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: Conductor Schedule — NEC 310.15 Ampacity Com",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "iv :: 1-1/4\"",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 12,
+          "sheetId": "PV-5",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: ALL WARNING LABELS SHALL BE PERMANENTLY INST",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "DIV :: MULTIPLE POWER SOURCES — PERMANENT PLACARD (",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 13,
+          "sheetId": "PV-6",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: THE PLACARD BELOW SHALL BE PERMANENTLY INSTA",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "page-content :: THE PLACARD BELOW SHALL BE PERMANENTLY INSTA",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 14,
+          "sheetId": "SCHED",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: Solar Modules — each module paired 1:1 with ",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "page-content :: Solar Modules — each module paired 1:1 with ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 15,
+          "sheetId": "SCHED-2",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: Bill of Materials — Full Equipment Schedule ",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "page-content :: Bill of Materials — Full Equipment Schedule ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 16,
+          "sheetId": "SCHED-3",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: Bill of Materials — Full Equipment Schedule ",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "page-content :: Bill of Materials — Full Equipment Schedule ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 17,
+          "sheetId": "SCHED-4",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: Bill of Materials — Full Equipment Schedule ",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "page-content :: Bill of Materials — Full Equipment Schedule ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 18,
+          "sheetId": "APP-A",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: PV Module — Electrical Specifications\n      ",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "col-right :: Inverter — Specifications\n          \n       ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 19,
+          "sheetId": "DS-1",
+          "belowByIn": -0.24,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "DIV :: EXACT MODULE DOCUMENT PENDING — family datas",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 20,
+          "sheetId": "DS-2",
+          "belowByIn": -0.24,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "DIV :: SOURCE: IQ8 Series Microinverters Data Sheet",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 21,
+          "sheetId": "DS-3",
+          "belowByIn": -0.24,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "title-block :: SOLARPROENGINEERING\n      SOLAR PERMIT PLANS",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "DIV :: DOCUMENT APPLICABILITY UNVERIFIED — RT-MINI ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 22,
+          "sheetId": "CERT",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content :: ENGINEER OF RECORD CERTIFICATION\n      \n    ",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "DIV :: WET STAMP AREA\n          \n            \n     ",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        },
+        {
+          "index": 23,
+          "sheetId": "PE-1",
+          "belowByIn": -0.19,
+          "clipped": false,
+          "hasTitleBlock": true,
+          "worstElement": "page-content pe-letter :: LETTER OF STRUCTURAL COMPLIANCE\n          So",
+          "rightByIn": 0,
+          "clippedHorizontal": false,
+          "worstElementHorizontal": "f-sm :: RE: 3 MELVIN DR APT A, GRANITE CITY, IL 6204",
+          "internalWorstPx": 0,
+          "internalWorstPxHorizontal": 0,
+          "internalClips": []
+        }
+      ]
+    }
+  },
+  "gates": [
+    {
+      "gate": 1,
+      "id": "bom-total-equals-the-unique-final-row-ids",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "duplicate-row-id-is-detected",
+        "ok": true,
+        "detail": "synthetic duplicate → unique=48/49 duplicateIds=1 · real audit 48/48 duplicates=0 missing=0"
+      },
+      "detail": "rendered ids=48 distinct=48 · population total=48 · model total=48 · audit 48/48 dup=0 missing=0",
+      "evidence": {
+        "duplicatesRendered": [],
+        "missingFromRender": []
+      }
+    },
+    {
+      "gate": 2,
+      "id": "exactly-one-procurement-state-per-row",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "unclassified-row-fails-closed",
+        "ok": true,
+        "detail": "unclassified → CANDIDATE_NON_ORDERABLE orderable=false; every real row carries exactly one declared state"
+      },
+      "detail": "distinct rendered rows=48 conflicts=0 · data-bom-orderable=true ×11 vs VERIFIED_ORDERABLE table rows=11",
+      "evidence": {
+        "conflicts": []
+      }
+    },
+    {
+      "gate": 3,
+      "id": "the-five-state-counts-sum-to-the-total",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "five-state-counter-reconciles-on-a-one-per-state-population",
+        "ok": true,
+        "detail": "probe counts sum=5/5 reconcile=true · real reconcile=true"
+      },
+      "detail": "model Σ=48/48 reconcile=true · rendered Σ=48 (VERIFIED_ORDERABLE=11 ESTIMATED_FIELD_VERIFY=22 CANDIDATE_NON_ORDERABLE=14 QUANTITY_PENDING=1 EXCLUDED_NOT_APPLICABLE=0) matchesModel=true",
+      "evidence": null
+    },
+    {
+      "gate": 4,
+      "id": "no-row-is-counted-or-rendered-twice",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "content-derived-ids-separate-same-family-rows",
+        "ok": true,
+        "detail": "same-family ids differ=true stable=true conduit rows=3 distinct ids=48/48"
+      },
+      "detail": "state buckets disjoint=true · table rows=47 duplicates=0 · Σ rows-shown-here=47 + scheduled-above=1 = 48 of 48",
+      "evidence": {
+        "doubles": [],
+        "tableDupes": []
+      }
+    },
+    {
+      "gate": 5,
+      "id": "no-row-disappears-from-the-evidence-or-the-exports",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "no-row-disappears-orderable-plus-excluded-covers-the-population",
+        "ok": true,
+        "detail": "orderable=11 + excluded=37 = 48 of 48"
+      },
+      "detail": "population=48 · rendered=48 missing=0 · export(11) + excluded(37) = 48 missing=0",
+      "evidence": {
+        "notRendered": [],
+        "notInArtifacts": []
+      }
+    },
+    {
+      "gate": 6,
+      "id": "route-derived-estimated-rows-are-never-verified-orderable",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "route-estimated-rows-are-blocked-by-the-open-requirement-not-by-a-constant",
+        "ok": true,
+        "detail": "route-derived rows=23 (estimated=22) none orderable · with ROUTE-LENGTH-ESTIMATE closed → 22/22 promote"
+      },
+      "detail": "route-derived rows model=23 rendered=23 · orderable=0/0 · ESTIMATED rendered=22 with \"EST — FIELD VERIFY\" labels=22",
+      "evidence": {
+        "orderableRouteRows": []
+      }
+    },
+    {
+      "gate": 7,
+      "id": "the-open-route-requirement-affects-and-names-its-dependent-rows",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-open-route-requirement-is-named-on-every-row-it-holds",
+        "ok": true,
+        "detail": "ROUTE-LENGTH-ESTIMATE open=true · 22/23 route rows name it; 1 held by a stronger authority [QCABLE-GROUNDING-AUTHORITY-UNVERIFIED]"
+      },
+      "detail": "ROUTE-LENGTH-ESTIMATE in registry=true · rows naming it model=22 rendered=22 · in SCHED summary=true · summary codes=[FASTENER-ASSEMBLY-UNVERIFIED, MODULE-EXACT-DATASHEET-PENDING, PENDING-RACKING-ASSEMBLY-SELECTION, QCABLE-GROUNDING-AUTHORITY-UNVERIFIED, ROUTE-LENGTH-ESTIMATE]",
+      "evidence": null
+    },
+    {
+      "gate": 8,
+      "id": "the-connector-rows-are-non-orderable-without-a-verified-selected-solution",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "a-verified-selected-solution-promotes-the-connector-row",
+        "ok": true,
+        "detail": "Q-CONN rows=2 · synthetic verified solution promotes=true · real promotes=false (no CableExtensionSolution exists for this design)"
+      },
+      "detail": "Q-CONN rows=2 state=CANDIDATE_NON_ORDERABLE · CableExtensionSolutions=0 · promotion=false/false",
+      "evidence": {
+        "missing": [
+          {
+            "id": "BOM-CONNECTOR-F3079FAD",
+            "missing": [
+              "no CableExtensionSolution exists for this design"
+            ]
+          },
+          {
+            "id": "BOM-CONNECTOR-25827044",
+            "missing": [
+              "no CableExtensionSolution exists for this design"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "gate": 9,
+      "id": "the-connector-rows-never-resolve-the-length-deficit",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-connector-rows-exist-and-are-outside-every-export",
+        "ok": true,
+        "detail": "Q-CONN ids=[BOM-CONNECTOR-F3079FAD, BOM-CONNECTOR-25827044] in export=0"
+      },
+      "detail": "deficit sentences scanned=0 · sentences naming a connector=0 · resolution claim=false · authority resolution options naming a connector=0",
+      "evidence": {
+        "leaked": [],
+        "authorityLeak": []
+      }
+    },
+    {
+      "gate": 10,
+      "id": "the-tap-connector-is-non-orderable-without-verified-compatibility",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "a-verified-tap-authority-promotes-the-connector-row",
+        "ok": true,
+        "detail": "IPLD rows=1 real tap=unverified (8 unresolved facts, 0 blocking codes) → CANDIDATE_NON_ORDERABLE · verified authority, hint still set → CANDIDATE_NON_ORDERABLE · verified authority, hint cleared → VERIFIED_ORDERABLE"
+      },
+      "detail": "tap authority verification=unverified unresolvedFacts=8 · IPLD rows=1 rendered=1 all CANDIDATE · mandated label rendered=true · retired caveat present=false",
+      "evidence": null
+    },
+    {
+      "gate": 11,
+      "id": "physical-grounding-segment-identities-are-unique",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "at-least-three-distinct-physical-branch-grounding-identities-exist",
+        "ok": true,
+        "detail": "canonical branch-egc records=3 · E-1 physical branch ids=[gnd-br-1, gnd-br-2, gnd-br-3] · all physical identities unique=true (5)"
+      },
+      "detail": "canonical physical ids=9 unique=9 · rendered distinct branch ids=[gnd-br-1, gnd-br-2, gnd-br-3] vs canonical [gnd-br-1, gnd-br-2, gnd-br-3]",
+      "evidence": {
+        "renderedIdHistogram": {
+          "gnd-br-1": 1,
+          "gnd-br-2": 1,
+          "gnd-br-3": 1,
+          "GRN-HOMERUN-RACEWAY-EGC": 1,
+          "GRN-COMBINER_TO_DISCO_RUN-EGC": 1,
+          "GRN-DISCO_TO_METER_RUN-EGC": 1,
+          "GRN-SERVICE-BOND": 1,
+          "gnd-feeder": 2,
+          "gnd-branch-egc-authority": 1,
+          "gnd-gec": 1
+        }
+      }
+    },
+    {
+      "gate": 12,
+      "id": "the-grouped-authority-is-never-counted-as-a-physical-segment",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-group-authority-node-exists-and-owns-a-non-physical-identity",
+        "ok": true,
+        "detail": "group nodes=1 id=gnd-branch-egc-authority members=3 physical=2"
+      },
+      "detail": "group id=gnd-branch-egc-authority · in physical set=false · rendered as group-authority=true · sections referencing it=4",
+      "evidence": null
+    },
+    {
+      "gate": 13,
+      "id": "a-pending-racking-assembly-cannot-assert-integrated-ul-2703-bonding",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "a-verified-assembly-reaches-the-integrated-listed-bonding-outcome",
+        "ok": true,
+        "detail": "synthetic verified assembly → INTEGRATED_LISTED_BONDING_VERIFIED · real → METHOD_PENDING_ASSEMBLY_SELECTION (bondingRequired=true)"
+      },
+      "detail": "bonding result=METHOD_PENDING_ASSEMBLY_SELECTION verification=pending · banned assertions=0 · pending method label rendered=true · general NEC requirement preserved=true · result tags=2",
+      "evidence": {
+        "hits": []
+      }
+    },
+    {
+      "gate": 14,
+      "id": "app-a-cannot-state-a-blanket-approval-while-requirements-are-open",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-listing-conclusion-is-registry-derived-both-ways",
+        "ok": true,
+        "detail": "empty registry → established=true · real → established=false openCodes=7 · null snapshot → false"
+      },
+      "detail": "conclusion=NOT_ESTABLISHED (model established=false) · banned blanket sentences=0 · open in-scope codes rendered=7 model=7",
+      "evidence": {
+        "bannedGlobal": []
+      }
+    },
+    {
+      "gate": 15,
+      "id": "archived-is-availability-only-and-never-implies-applicability",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "archived-is-availability-only-and-authoritative-needs-an-archived-hash",
+        "ok": true,
+        "detail": "RT-MINI real → ARCHIVED+PENDING_APPLICABILITY · alias+archived+hash → AUTHORITATIVE · alias+archived, NO hash → VERIFIED (authoritative=false) · registry superseded → SUPERSEDED"
+      },
+      "detail": "document chips=[ARCHIVED, APPLICABLE, ARCHIVED, APPLICABLE, ARCHIVED, PENDING_APPLICABILITY, PENDING_APPLICABILITY] unknown=0 · rows checked=4 violations=0 · RT-MINI archived=true applicabilityVerified=false state=PENDING_APPLICABILITY authoritative=false",
+      "evidence": {
+        "bad": [],
+        "unknown": []
+      }
+    },
+    {
+      "gate": 16,
+      "id": "a-supply-side-design-never-renders-a-load-side-only-citation",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-load-side-only-population-is-non-empty-and-fully-suppressed",
+        "ok": true,
+        "detail": "load-side-only labels=1 (all not-required=true) · supply-side refs=[NEC 2020 705.11]"
+      },
+      "detail": "label rows rendered=19 model=19 · violations=0 · package-wide 705.12 hits=0 · supply-side refs=[NEC 2020 705.11]",
+      "evidence": {
+        "bad": [],
+        "sheetHits": []
+      }
+    },
+    {
+      "gate": 17,
+      "id": "the-summary-counts-derive-from-the-row-states",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "at-least-three-procurement-states-are-populated",
+        "ok": true,
+        "detail": "populated states=[VERIFIED_ORDERABLE, ESTIMATED_FIELD_VERIFY, CANDIDATE_NON_ORDERABLE, QUANTITY_PENDING] total=48"
+      },
+      "detail": "retired renderer-local claims=0 · state-derived summary blocks=1 · rendered total=11/excluded=37/ready=false vs model 11/37/false",
+      "evidence": {
+        "retired": []
+      }
+    },
+    {
+      "gate": 18,
+      "id": "the-authoritative-export-contains-only-verified-orderable-rows",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-export-is-non-empty-and-strictly-verified-orderable",
+        "ok": true,
+        "detail": "export rows=11 == authoritativeExportCount=11"
+      },
+      "detail": "export rows=11 · non-A rows in export=0 · non-exportable=0 · rendered authoritative total=11",
+      "evidence": {
+        "bad": [],
+        "notExportable": []
+      }
+    },
+    {
+      "gate": 19,
+      "id": "non-orderable-rows-are-visible-in-review-and-never-in-an-order-export",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-excluded-set-is-non-empty-and-disjoint-from-the-export",
+        "ok": true,
+        "detail": "excluded=37 disjoint=true"
+      },
+      "detail": "excluded rows=37 · leaked into the export=0 · not rendered=0 · without a state/reason=0",
+      "evidence": {
+        "leaked": [],
+        "invisible": []
+      }
+    },
+    {
+      "gate": 20,
+      "id": "the-release-gate-architecture-is-unchanged-seven-gates-n-requirements-zero-advisories",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-release-registry-is-non-empty-and-fully-blocking",
+        "ok": true,
+        "detail": "registry 15 blocking / 0 advisory"
+      },
+      "detail": "RS-1 7 gates / 15 requirements / 0 advisories · cover 7 / 15 (listed 7) · registry 15 blocking / 0 advisory · root gate rows=[RG-1, RG-2, RG-3, RG-4, RG-5, RG-6, RG-7]",
+      "evidence": null
+    },
+    {
+      "gate": 21,
+      "id": "snapshot-identity-is-identical-across-every-sheet",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-package-declares-a-multi-sheet-manifest",
+        "ok": true,
+        "detail": "manifest sheets=24"
+      },
+      "detail": "sheets=24 withId=24 withDigest=24 idMismatch=0 digestMismatch=0 · manifest=24 manifestEqPages=true · snapshot=PDS-76C0C5B56CEF",
+      "evidence": null
+    },
+    {
+      "gate": 22,
+      "id": "horizontal-page-fit-clipping-is-zero",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-package-has-dense-sheets-to-measure",
+        "ok": true,
+        "detail": "bom rows=48"
+      },
+      "detail": "pagefit exit=0 · [pagefit] sheets=24 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0",
+      "evidence": null
+    },
+    {
+      "gate": 23,
+      "id": "vertical-page-fit-clipping-is-zero",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-package-has-dense-sheets-to-measure",
+        "ok": true,
+        "detail": "bom rows=48"
+      },
+      "detail": "pagefit exit=0 · [pagefit] sheets=24 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0",
+      "evidence": null
+    },
+    {
+      "gate": 24,
+      "id": "report-equals-rendered-zero-mismatches",
+      "ok": true,
+      "renderedOk": true,
+      "antiVacuity": {
+        "id": "the-report-equals-rendered-comparison-has-a-populated-corpus",
+        "ok": true,
+        "detail": "bom rows=48 grounding objects=3 E-1 sections=7 labels=19"
+      },
+      "detail": "0 mismatch(es) across 48 BOM rows + 10 counters + 3 grounding identities + 19 labels",
+      "evidence": {
+        "mismatches": []
+      }
+    }
+  ],
+  "antiVacuity": {
+    "ok": true,
+    "probes": [
+      {
+        "gate": 1,
+        "id": "duplicate-row-id-is-detected",
+        "ok": true,
+        "detail": "synthetic duplicate → unique=48/49 duplicateIds=1 · real audit 48/48 duplicates=0 missing=0"
+      },
+      {
+        "gate": 2,
+        "id": "unclassified-row-fails-closed",
+        "ok": true,
+        "detail": "unclassified → CANDIDATE_NON_ORDERABLE orderable=false; every real row carries exactly one declared state"
+      },
+      {
+        "gate": 3,
+        "id": "five-state-counter-reconciles-on-a-one-per-state-population",
+        "ok": true,
+        "detail": "probe counts sum=5/5 reconcile=true · real reconcile=true"
+      },
+      {
+        "gate": 4,
+        "id": "content-derived-ids-separate-same-family-rows",
+        "ok": true,
+        "detail": "same-family ids differ=true stable=true conduit rows=3 distinct ids=48/48"
+      },
+      {
+        "gate": 5,
+        "id": "no-row-disappears-orderable-plus-excluded-covers-the-population",
+        "ok": true,
+        "detail": "orderable=11 + excluded=37 = 48 of 48"
+      },
+      {
+        "gate": 6,
+        "id": "route-estimated-rows-are-blocked-by-the-open-requirement-not-by-a-constant",
+        "ok": true,
+        "detail": "route-derived rows=23 (estimated=22) none orderable · with ROUTE-LENGTH-ESTIMATE closed → 22/22 promote"
+      },
+      {
+        "gate": 7,
+        "id": "the-open-route-requirement-is-named-on-every-row-it-holds",
+        "ok": true,
+        "detail": "ROUTE-LENGTH-ESTIMATE open=true · 22/23 route rows name it; 1 held by a stronger authority [QCABLE-GROUNDING-AUTHORITY-UNVERIFIED]"
+      },
+      {
+        "gate": 8,
+        "id": "a-verified-selected-solution-promotes-the-connector-row",
+        "ok": true,
+        "detail": "Q-CONN rows=2 · synthetic verified solution promotes=true · real promotes=false (no CableExtensionSolution exists for this design)"
+      },
+      {
+        "gate": 9,
+        "id": "the-connector-rows-exist-and-are-outside-every-export",
+        "ok": true,
+        "detail": "Q-CONN ids=[BOM-CONNECTOR-F3079FAD, BOM-CONNECTOR-25827044] in export=0"
+      },
+      {
+        "gate": 10,
+        "id": "a-verified-tap-authority-promotes-the-connector-row",
+        "ok": true,
+        "detail": "IPLD rows=1 real tap=unverified (8 unresolved facts, 0 blocking codes) → CANDIDATE_NON_ORDERABLE · verified authority, hint still set → CANDIDATE_NON_ORDERABLE · verified authority, hint cleared → VERIFIED_ORDERABLE"
+      },
+      {
+        "gate": 11,
+        "id": "at-least-three-distinct-physical-branch-grounding-identities-exist",
+        "ok": true,
+        "detail": "canonical branch-egc records=3 · E-1 physical branch ids=[gnd-br-1, gnd-br-2, gnd-br-3] · all physical identities unique=true (5)"
+      },
+      {
+        "gate": 12,
+        "id": "the-group-authority-node-exists-and-owns-a-non-physical-identity",
+        "ok": true,
+        "detail": "group nodes=1 id=gnd-branch-egc-authority members=3 physical=2"
+      },
+      {
+        "gate": 13,
+        "id": "a-verified-assembly-reaches-the-integrated-listed-bonding-outcome",
+        "ok": true,
+        "detail": "synthetic verified assembly → INTEGRATED_LISTED_BONDING_VERIFIED · real → METHOD_PENDING_ASSEMBLY_SELECTION (bondingRequired=true)"
+      },
+      {
+        "gate": 14,
+        "id": "the-listing-conclusion-is-registry-derived-both-ways",
+        "ok": true,
+        "detail": "empty registry → established=true · real → established=false openCodes=7 · null snapshot → false"
+      },
+      {
+        "gate": 15,
+        "id": "archived-is-availability-only-and-authoritative-needs-an-archived-hash",
+        "ok": true,
+        "detail": "RT-MINI real → ARCHIVED+PENDING_APPLICABILITY · alias+archived+hash → AUTHORITATIVE · alias+archived, NO hash → VERIFIED (authoritative=false) · registry superseded → SUPERSEDED"
+      },
+      {
+        "gate": 16,
+        "id": "the-load-side-only-population-is-non-empty-and-fully-suppressed",
+        "ok": true,
+        "detail": "load-side-only labels=1 (all not-required=true) · supply-side refs=[NEC 2020 705.11]"
+      },
+      {
+        "gate": 17,
+        "id": "at-least-three-procurement-states-are-populated",
+        "ok": true,
+        "detail": "populated states=[VERIFIED_ORDERABLE, ESTIMATED_FIELD_VERIFY, CANDIDATE_NON_ORDERABLE, QUANTITY_PENDING] total=48"
+      },
+      {
+        "gate": 18,
+        "id": "the-export-is-non-empty-and-strictly-verified-orderable",
+        "ok": true,
+        "detail": "export rows=11 == authoritativeExportCount=11"
+      },
+      {
+        "gate": 19,
+        "id": "the-excluded-set-is-non-empty-and-disjoint-from-the-export",
+        "ok": true,
+        "detail": "excluded=37 disjoint=true"
+      },
+      {
+        "gate": 20,
+        "id": "the-release-registry-is-non-empty-and-fully-blocking",
+        "ok": true,
+        "detail": "registry 15 blocking / 0 advisory"
+      },
+      {
+        "gate": 21,
+        "id": "the-package-declares-a-multi-sheet-manifest",
+        "ok": true,
+        "detail": "manifest sheets=24"
+      },
+      {
+        "gate": 22,
+        "id": "the-package-has-dense-sheets-to-measure",
+        "ok": true,
+        "detail": "bom rows=48"
+      },
+      {
+        "gate": 23,
+        "id": "the-package-has-dense-sheets-to-measure",
+        "ok": true,
+        "detail": "bom rows=48"
+      },
+      {
+        "gate": 24,
+        "id": "the-report-equals-rendered-comparison-has-a-populated-corpus",
+        "ok": true,
+        "detail": "bom rows=48 grounding objects=3 E-1 sections=7 labels=19"
+      }
+    ]
+  },
+  "vacuityNotes": [
+    "gate 9 (no rendered deficit statement on this input — see insufficient mode)"
+  ],
+  "pass": true,
+  "generatedAt": "2026-07-27T16:47:28.233Z"
+}

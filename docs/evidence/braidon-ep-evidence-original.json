@@ -1,0 +1,360 @@
+{
+  "generatedAt": "2026-07-26T20:39:48.427Z",
+  "harness": "planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates + chained BAR WS-E)",
+  "mode": "original",
+  "htmlPath": "_tmp_ppc_fixture.html",
+  "snapshotId": "PDS-E17B052701C1",
+  "digest": "e17b052701c1e589be1fcdbbe9ee16d373b0fd13f8c21c8e1eda4f12a27a8add",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "sheetCount": 21,
+  "sheetIds": [
+    "PV-0",
+    "RS-1",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "PV-4C.1",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "SCHED-3",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "CERT",
+    "PE-1"
+  ],
+  "manifestIds": [
+    "PV-0",
+    "RS-1",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "PV-4C.1",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "SCHED-3",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "CERT",
+    "PE-1"
+  ],
+  "topology": "MICRO",
+  "supplySide": true,
+  "hasEmtRaceway": false,
+  "physicalRaceways": [
+    {
+      "id": "RW-BRANCH-HOMERUN",
+      "type": "PVC Sch 80",
+      "size": "1-1/4\"",
+      "ccc": 6,
+      "cnt": 7,
+      "nec": "352"
+    },
+    {
+      "id": "RW-COMBINER_TO_DISCO_RUN",
+      "type": "PVC Sch 80",
+      "size": "1-1/4\"",
+      "ccc": 4,
+      "cnt": 5,
+      "nec": "352"
+    },
+    {
+      "id": "RW-DISCO_TO_METER_RUN",
+      "type": "PVC Sch 80",
+      "size": "1-1/4\"",
+      "ccc": 4,
+      "cnt": 5,
+      "nec": "352"
+    }
+  ],
+  "listedCableAssembly": {
+    "sku": "Q-12-10-240",
+    "manufacturer": "Enphase",
+    "dropCount": 31,
+    "connectorSpacingFt": 4.25
+  },
+  "qcableReconcile": {
+    "dropSum": 31,
+    "procSum": 152,
+    "recompute": 152,
+    "moduleInstances": 31,
+    "branchModuleSum": 31
+  },
+  "activeBlockers": [
+    "ROUTE-LENGTH-ESTIMATE",
+    "CONDUIT-FILL-PENDING",
+    "TAP-CONDUCTOR-LENGTH-PENDING",
+    "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+    "FRAMING-AUTHORITY-UNVERIFIED",
+    "PENDING-RACKING-ASSEMBLY-SELECTION",
+    "FASTENER-ASSEMBLY-UNVERIFIED",
+    "EQUIPMENT-DOCUMENT-APPLICABILITY",
+    "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+    "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+    "RACKING-CAPACITY-APPLICABILITY-GAP",
+    "CODE-AUTHORITY-INCOMPLETE",
+    "PROJECT-AUTHORITY-UNVERIFIED",
+    "MODULE-EXACT-DATASHEET-PENDING",
+    "ENGINEERING-REVIEW-PENDING"
+  ],
+  "blockingCount": 15,
+  "evidenceEqualsRendered": {
+    "reconciled": [
+      {
+        "name": "snapshotId",
+        "reportVal": "PDS-E17B052701C1",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "PDS-E17B052701C1"
+        ]
+      },
+      {
+        "name": "digestPrefix",
+        "reportVal": "e17b052701c1",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "e17b052701c1e589be1f"
+        ]
+      },
+      {
+        "name": "feederConduit",
+        "reportVal": "PVC Sch 80 1-1/4\"",
+        "matchedInRendered": true
+      },
+      {
+        "name": "qcableSku",
+        "reportVal": "Q-12-10-240",
+        "matchedInRendered": true
+      },
+      {
+        "name": "qcableDropCount",
+        "reportVal": "31",
+        "matchedInRendered": true
+      },
+      {
+        "name": "qcableProcurementInsufficient",
+        "reportVal": "false",
+        "matchedInRendered": true,
+        "rs1BlockerPresent": false
+      },
+      {
+        "name": "qcableDeficitFt",
+        "reportVal": "0",
+        "matchedInRendered": true
+      },
+      {
+        "name": "blockingBlockerCount",
+        "reportVal": "15",
+        "matchedInRendered": true,
+        "rs1Rendered": null
+      },
+      {
+        "name": "moduleModel",
+        "reportVal": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W",
+        "matchedInRendered": true
+      }
+    ],
+    "mismatches": []
+  },
+  "gates": [
+    {
+      "gate": 1,
+      "id": "e1-canonical-section-ids",
+      "ok": true,
+      "detail": "header=true missingIds=none snapSectioned=true",
+      "evidence": {
+        "g1_missing": []
+      }
+    },
+    {
+      "gate": 2,
+      "id": "e1-conductor-count-equals-raceway-inventory",
+      "ok": true,
+      "detail": "hrCcc=6 =2×branches(3)=true svg'6#10'=true svgNo#12=true ccc==cnt-1(all)=true",
+      "evidence": null
+    },
+    {
+      "gate": 3,
+      "id": "e1-no-pass-with-pending",
+      "ok": true,
+      "detail": "e1SchedFound=true noSectionPASS=true pendingShown=true sectionPassCount=0 ampacityVerdicts=2",
+      "evidence": null
+    },
+    {
+      "gate": 4,
+      "id": "no-emt-literal-without-emt-raceway",
+      "ok": true,
+      "detail": "emtRacewayObject=false liveEmtLiterals=0",
+      "evidence": null
+    },
+    {
+      "gate": 5,
+      "id": "pv4a-blocker-multiset-equals-rs1-subset",
+      "ok": true,
+      "detail": "elecCodes=4 missingOnRendered=none tapExactCode=true",
+      "evidence": {
+        "g5_missing": []
+      }
+    },
+    {
+      "gate": 6,
+      "id": "qcable-never-generic-thwn2",
+      "ok": true,
+      "detail": "assembly=true sku'Q-12-10-240'=true qcableLabel=true genericBranchRows=0",
+      "evidence": {
+        "g6_genericBranch": []
+      }
+    },
+    {
+      "gate": 7,
+      "id": "qcable-lengths-equal-bom",
+      "ok": true,
+      "detail": "dropSum=31 modInst=31 branchSum=31 recompute=ceil(31×4.25×1.15)=152 procSum=152 procMatch=true bomDrops=true bomFootage=true",
+      "evidence": null
+    },
+    {
+      "gate": 8,
+      "id": "no-unbacked-module-dc-row",
+      "ok": true,
+      "detail": "micro=true dcSegment=false dcRows=0",
+      "evidence": []
+    },
+    {
+      "gate": 9,
+      "id": "supply-side-never-complies-while-tap-pending",
+      "ok": true,
+      "detail": "supplySide=true tapPending=true bareComplies=0 methodSelected=true installPendingShown=true",
+      "evidence": null
+    },
+    {
+      "gate": 10,
+      "id": "length-taxonomy-labeled",
+      "ok": true,
+      "detail": "taxonomyFields=true designLabel=true procLabel=true",
+      "evidence": {
+        "geo": 140.5,
+        "calc": 58,
+        "proc": 152,
+        "prov": "geometry-derived"
+      }
+    },
+    {
+      "gate": 11,
+      "id": "no-unselected-racking-orderable",
+      "ok": true,
+      "detail": "railPending=true pendingShown=true orderableLeaks=none",
+      "evidence": {
+        "g11_orderableLeaks": []
+      }
+    },
+    {
+      "gate": 12,
+      "id": "equipment-document-applicability",
+      "ok": true,
+      "detail": "applicabilityBlocker=true ds3MarkedNonAuthoritative=true",
+      "evidence": null
+    },
+    {
+      "gate": 13,
+      "id": "visible-pending-authority-in-registry",
+      "ok": true,
+      "detail": "fastenerPendingVisible=true FASTENER-ASSEMBLY-UNVERIFIED-in-registry=true",
+      "evidence": null
+    },
+    {
+      "gate": 14,
+      "id": "unverified-spacing-never-max-allowed",
+      "ok": true,
+      "detail": "maxAllowedWording=false designSpacing+pending=true",
+      "evidence": null
+    },
+    {
+      "gate": 15,
+      "id": "unverified-fire-basis-never-ahj-requirement",
+      "ok": true,
+      "detail": "provisionalBasisShown=true barePerAHJ=false",
+      "evidence": null
+    },
+    {
+      "gate": 16,
+      "id": "no-load-side-only-labels-on-supply-side",
+      "ok": true,
+      "detail": "supplySide=true loadSideOnlyClauseCited=false backfedRowMarkedNA=true backfedBreakerApplicability=null",
+      "evidence": null
+    },
+    {
+      "gate": 17,
+      "id": "pending-adopted-codes-not-compliance-authority",
+      "ok": true,
+      "detail": "basisSplit=true conflatedDesignedPer=false",
+      "evidence": null
+    },
+    {
+      "gate": 18,
+      "id": "rs-pagination-complete",
+      "ok": true,
+      "detail": "rs1InManifest=true missingCodes=none enlarged8.7px=true needsCont=false contOk=true",
+      "evidence": {
+        "g18_allCodes": []
+      }
+    },
+    {
+      "gate": 19,
+      "id": "geometry-page-fit-incl-internal-clips",
+      "ok": true,
+      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0",
+      "evidence": null
+    },
+    {
+      "gate": 20,
+      "id": "evidence-equals-rendered",
+      "ok": true,
+      "detail": "reconciled=9 mismatches=0",
+      "evidence": []
+    },
+    {
+      "gate": 21,
+      "id": "qcable-procurement-sufficiency",
+      "ok": true,
+      "detail": "mode=original present=true insufficient=false blocker=false designed=140.5 proc=152 deficit=0 consistent=true renderedWhenShort=true allowanceHonest=true modeOk=true",
+      "evidence": {
+        "insufficient": false,
+        "deficitFt": 0,
+        "verificationStatus": "sufficient"
+      }
+    },
+    {
+      "gate": 22,
+      "id": "bar-wse-electrical-authority-chained",
+      "ok": true,
+      "detail": "bar-wse exit=0 · [bar-wse] 40/40 gates passed → docs/evidence/braidon-ep-evidence-original.bar-wse.json",
+      "evidence": {
+        "out": "docs/evidence/braidon-ep-evidence-original.bar-wse.json",
+        "gatesRun": 40,
+        "gatesFailed": 0,
+        "failures": []
+      }
+    }
+  ],
+  "summary": {
+    "total": 22,
+    "passed": 22,
+    "failed": [],
+    "allPass": true
+  }
+}

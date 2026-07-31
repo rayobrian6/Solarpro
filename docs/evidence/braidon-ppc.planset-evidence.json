@@ -1,0 +1,742 @@
+{
+  "generatedAt": "2026-07-27T16:47:48.749Z",
+  "harness": "planset-evidence-ppc (projection / procurement authority, 18 permanent gates)",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "mode": "fixture",
+  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/PermitPackage-BRAIDON-ecd.html",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "sheetCount": 24,
+  "sheetIds": [
+    "PV-0",
+    "RS-1",
+    "RS-1.1",
+    "RS-1.2",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "PV-4C.1",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "SCHED-3",
+    "SCHED-4",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "CERT",
+    "PE-1"
+  ],
+  "blockerRegistry": {
+    "blockingCount": 15,
+    "advisoryCount": 0,
+    "blockingCodes": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "CONDUIT-FILL-PENDING",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "advisoryCodes": [],
+    "issueState": "PENDING ENGINEERING REVIEW",
+    "ready": false
+  },
+  "procurementSufficiency": {
+    "insufficient": false,
+    "totalDesignedInstalledFt": 140.5,
+    "requiredServiceLoopAllowanceFt": 0,
+    "allowanceProvenance": "no-allowance-authority-recorded",
+    "thresholdFt": 140.5,
+    "procurementLengthFt": 152,
+    "deficitFt": 0,
+    "verificationStatus": "sufficient"
+  },
+  "openAirGrounding": {
+    "outcome": "PENDING_MANUFACTURER_AUTHORITY",
+    "verificationStatus": "pending-manufacturer-authority",
+    "bomRowState": "design-quantity-non-orderable"
+  },
+  "procurementApproval": {
+    "renderedAuthoritativeTotal": 11,
+    "renderedExcluded": 37,
+    "renderedPartial": "true",
+    "renderedPopulationTotal": 48,
+    "populationRowCount": 48,
+    "blockedRowCount": 37,
+    "renderedStateCounts": [
+      {
+        "state": "VERIFIED_ORDERABLE",
+        "count": 11
+      },
+      {
+        "state": "ESTIMATED_FIELD_VERIFY",
+        "count": 22
+      },
+      {
+        "state": "CANDIDATE_NON_ORDERABLE",
+        "count": 14
+      },
+      {
+        "state": "QUANTITY_PENDING",
+        "count": 1
+      },
+      {
+        "state": "EXCLUDED_NOT_APPLICABLE",
+        "count": 0
+      }
+    ],
+    "taggedBomRows": 47
+  },
+  "pageFit": {
+    "axes": [
+      "vertical",
+      "horizontal"
+    ],
+    "sheets": 24,
+    "clipped": 0,
+    "internalClipped": 0,
+    "clippedHorizontal": 0,
+    "internalClippedHorizontal": 0
+  },
+  "reportEqualsRendered": {
+    "mismatches": []
+  },
+  "vacuityNotes": [
+    "gate 3 deficit component (no procurement deficit on this input)",
+    "gate 12 (no procurement deficit on this input)"
+  ],
+  "gates": [
+    {
+      "gate": 1,
+      "id": "pending-grounding-cannot-assert-installed-egc",
+      "ok": true,
+      "detail": "groundingOutcome=PENDING_MANUFACTURER_AUTHORITY assertions=0 scannerProbes=3/3 mandatedRenderPresent=true",
+      "evidence": {
+        "assertions": [],
+        "scannerNonVacuous": {
+          "retiredLiteral": true,
+          "paraphraseWithSize": true,
+          "predicateOnly": true
+        }
+      }
+    },
+    {
+      "gate": 2,
+      "id": "candidate-egc-non-orderable",
+      "ok": true,
+      "detail": "bomRowState=design-quantity-non-orderable excludedFromTotals=true clauses={\"candidate\":true,\"nonOrderable\":true,\"notApproved\":true,\"pendingExact\":true} renderedOpenAirEgcRows=1 orderableAmongThem=0",
+      "evidence": {
+        "clauses": {
+          "candidate": true,
+          "nonOrderable": true,
+          "notApproved": true,
+          "pendingExact": true
+        },
+        "orderableEgcRows": []
+      }
+    },
+    {
+      "gate": 3,
+      "id": "blocker-detail-matches-canonical-payload-schema",
+      "ok": true,
+      "detail": "renderedRows=15 registry=15 declaredCodes=38 undeclared=none wrong=none deficitBoxes=0 (expected 0) emptyTemplate=false schemasRendered=qcable-grounding-authority",
+      "evidence": {
+        "expected": {
+          "QCABLE-PROCUREMENT-INSUFFICIENT": "qcable-procurement-deficit",
+          "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED": "qcable-grounding-authority",
+          "ROUTE-LENGTH-ESTIMATE": "generic",
+          "FEEDER-RACEWAY-AUTHORITY": "generic",
+          "BRANCH-RACEWAY-AUTHORITY": "generic",
+          "RACEWAY-SEGMENT-CONFLICT": "generic",
+          "CONDUIT-FILL-PENDING": "generic",
+          "TAP-CONDUCTOR-LENGTH-PENDING": "generic",
+          "FRAMING-AUTHORITY-UNVERIFIED": "generic",
+          "PENDING-RACKING-ASSEMBLY-SELECTION": "generic",
+          "FASTENER-ASSEMBLY-UNVERIFIED": "generic",
+          "FASTENER-CONFIG-MISSING": "generic",
+          "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED": "generic",
+          "ATTACHMENT-CAPACITY-SOURCE-MISSING": "generic",
+          "MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED": "generic",
+          "MOUNT-TOPOLOGY-UNKNOWN": "generic",
+          "DIRECT-MOUNT-GEOMETRY-MISSING": "generic",
+          "REACTIONS-UNTRACEABLE": "generic",
+          "RAIL-QUANTITY-UNTRACEABLE": "generic",
+          "STRUCTURAL-UTILIZATION-EXCEEDED": "generic",
+          "STRUCTURAL-BOM-RECONCILIATION-FAILED": "generic",
+          "STRUCTURAL-REACTION-RECONCILIATION-FAILED": "generic",
+          "SITE-GEOMETRY-MISSING": "generic",
+          "MODULE-DIMENSIONS-UNVERIFIED": "generic",
+          "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED": "generic",
+          "RACKING-CAPACITY-APPLICABILITY-GAP": "generic",
+          "RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED": "generic",
+          "EQUIPMENT-IDENTITY-CONFLICT": "generic",
+          "EQUIPMENT-DOCUMENT-APPLICABILITY": "generic",
+          "EQUIPMENT-DOCUMENT-UNVERIFIED": "generic",
+          "MODULE-EXACT-DATASHEET-PENDING": "generic",
+          "CODE-AUTHORITY-INCOMPLETE": "generic",
+          "PROJECT-AUTHORITY-UNVERIFIED": "generic",
+          "PROJECT-NAME-NONPRODUCTION": "generic",
+          "DESIGNER-OF-RECORD-MISSING": "generic",
+          "ENGINEERING-REVIEW-PENDING": "generic",
+          "WIND-SNOW-AUTHORITY-UNRESOLVED": "generic",
+          "STRUCTURAL-FRAMING-UNVERIFIED": "generic"
+        },
+        "rows": [
+          {
+            "code": "CODE-AUTHORITY-INCOMPLETE",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "PROJECT-AUTHORITY-UNVERIFIED",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "MODULE-EXACT-DATASHEET-PENDING",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "FRAMING-AUTHORITY-UNVERIFIED",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "PENDING-RACKING-ASSEMBLY-SELECTION",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "FASTENER-ASSEMBLY-UNVERIFIED",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "ROUTE-LENGTH-ESTIMATE",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "CONDUIT-FILL-PENDING",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "TAP-CONDUCTOR-LENGTH-PENDING",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+            "schema": "qcable-grounding-authority",
+            "hasDeficitBox": false,
+            "hasGroundingBox": true,
+            "hasGenericBox": false
+          },
+          {
+            "code": "ENGINEERING-REVIEW-PENDING",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          }
+        ],
+        "wrong": [],
+        "undeclared": []
+      }
+    },
+    {
+      "gate": 4,
+      "id": "no-unsupported-max-spacing-language",
+      "ok": true,
+      "detail": "spacingVerified=false classHits=none canonicalLine=true statusLine=true pv1=true pv3=true unitSplitOnPv3=false",
+      "evidence": {
+        "spacingAuthority": null,
+        "hits": []
+      }
+    },
+    {
+      "gate": 5,
+      "id": "pending-fastener-renders-no-exact-instruction",
+      "ok": true,
+      "detail": "fastenerUnverified=true leaks=none missingPendingLines=none",
+      "evidence": {
+        "leaks": [],
+        "fastenerVerification": "verified"
+      }
+    },
+    {
+      "gate": 6,
+      "id": "unverified-rtmini-ii-cannot-authorize",
+      "ok": true,
+      "detail": "documentApplicabilityBlocker=true mentions=14 unqualified=0 applicabilityLine=true referenceDetailBanner=true",
+      "evidence": {
+        "unqualified": []
+      }
+    },
+    {
+      "gate": 7,
+      "id": "pending-racking-excluded-from-procurement-totals",
+      "ok": true,
+      "detail": "railUnpinned=true pendingRackingRows=8 orderableAmongThem=0 mfrOrSkuLeaks=0 authoritativeTotal=11 excluded=37 taggedExcludedRows=37 partial=true",
+      "evidence": {
+        "skuLeaks": [],
+        "pendingRackingCategories": 8
+      }
+    },
+    {
+      "gate": 8,
+      "id": "generic-pass-cannot-hide-branch-blockers",
+      "ok": true,
+      "detail": "scheduleFound=true ratingColumn=true qualifiedPass=true barePassBadge=false releaseMatrix=true missingAuthorities=none overallBlocked=true perBranchDeficitApportioned=false",
+      "evidence": {
+        "missingAuthorities": []
+      }
+    },
+    {
+      "gate": 9,
+      "id": "supply-side-renders-no-load-side-only-citation",
+      "ok": true,
+      "detail": "interconnectionRule=705.11 supplySide=true leaks=none notApplicableStatementsPreserved=true",
+      "evidence": {
+        "leaks": []
+      }
+    },
+    {
+      "gate": 10,
+      "id": "every-grounding-row-carries-a-grounding-segment-id",
+      "ok": true,
+      "detail": "taggedIds=11 distinct=10 emptyIds=0 groundingSubjectRows=1 untagged=0 legacyProjectLevelRow=false canonicalBlockRendered=true classProbeFired=true",
+      "evidence": {
+        "ids": [
+          "gnd-br-1",
+          "gnd-br-2",
+          "gnd-br-3",
+          "GRN-HOMERUN-RACEWAY-EGC",
+          "GRN-COMBINER_TO_DISCO_RUN-EGC",
+          "GRN-DISCO_TO_METER_RUN-EGC",
+          "GRN-SERVICE-BOND",
+          "gnd-feeder",
+          "gnd-branch-egc-authority",
+          "gnd-gec"
+        ],
+        "untagged": [],
+        "groundingSubjectRowLabels": [
+          "Feeder EGC (in raceway)"
+        ],
+        "classProbeFired": true
+      }
+    },
+    {
+      "gate": 11,
+      "id": "pending-caps-cannot-render-a-certain-zero",
+      "ok": true,
+      "detail": "capRows=1 pendingTagged=1 certainZeroWithPendingProse=0 establishedRowsClaimingPending=0 pendingLabelRendered=true",
+      "evidence": {
+        "capRows": [
+          {
+            "quantityState": "pending",
+            "orderable": "false",
+            "text": " 27 Stage 4 — AC Wiring sealing cap Enphase Q Cable Sealing Cap (unused connector) Q Cable Sealing Cap (unused connector) — QUANTITY PENDING (topology-derived, "
+          }
+        ]
+      }
+    },
+    {
+      "gate": 12,
+      "id": "insufficient-qcable-row-is-non-orderable",
+      "ok": true,
+      "detail": "procurementInsufficient=false deficitFt=0 trunkRows=1 orderableAmongThem=1 missingRowState=none cableIdentityKept=true",
+      "evidence": {
+        "trunkRows": [
+          {
+            "orderable": "true",
+            "text": " 29 Stage 4 — AC Wiring trunk cable Enphase IQ Q-Cable (portrait) AC trunk — 1 drop per micro @ 4.25 ft pitch (≈152 ft procurement = drops×pitch×waste; NOT the geometric cable-path length), continuous per branch × 3 Q-12"
+          }
+        ],
+        "missing": []
+      }
+    },
+    {
+      "gate": 13,
+      "id": "procurement-exports-exclude-every-blocked-row",
+      "ok": true,
+      "detail": "taggedTableRows=47 populationRows=48 blocked=37 renderedPopulationTotal=48 renderedOrderableTotal=11 renderedExcluded=37 stateCounts=VERIFIED_ORDERABLE=11 ESTIMATED_FIELD_VERIFY=22 CANDIDATE_NON_ORDERABLE=14 QUANTITY_PENDING=1 EXCLUDED_NOT_APPLICABLE=0 Σ=48 partitionExact=true everyBlockedRowStatesItsState=true exportStatement=true",
+      "evidence": {
+        "blocked": [
+          {
+            "bomLineId": "BOM-CONDUIT-53ECBDFB",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-50EF884E",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-5DD72106",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-93035ECF",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-CB9521E6",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-4BFE7670",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-C2CE8B2F",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-0386B98D",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-4FCAE76A",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-543CCC59",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-FA9244EF",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-3DC6898A",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-C3781B2C",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-4885951A",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-B94C6F27",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-4739A6D1",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-5493777A",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-A712AA50",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONNECTOR-F3079FAD",
+            "state": "CANDIDATE_NON_ORDERABLE"
+          },
+          {
+            "bomLineId": "BOM-CONNECTOR-25827044",
+            "state": "CANDIDATE_NON_ORDERABLE"
+          }
+        ]
+      }
+    },
+    {
+      "gate": 14,
+      "id": "pending-issue-state-cannot-render-approved-design",
+      "ok": true,
+      "detail": "blocking=15 issueState=PENDING ENGINEERING REVIEW approvedLanguageHits=none pv5HonestBasis=true labelCountLinePreserved=true",
+      "evidence": {
+        "hits": []
+      }
+    },
+    {
+      "gate": 15,
+      "id": "blocker-counts-identical-across-surfaces",
+      "ok": true,
+      "detail": "registry=15 (blocking 15/advisory 0) rs1Rows=15 rs1Requirements=15 rs1Gates=7 rs1Summary=15/0 coverRequirements=15 coverGates=7 (listed 7) {\"listEqRegistry\":true,\"rs1EqRegistry\":true,\"rs1HeaderEq\":true,\"rs1SummaryEq\":true,\"coverEq\":true,\"issueGate\":true}",
+      "evidence": {
+        "blockingCodes": [
+          "CODE-AUTHORITY-INCOMPLETE",
+          "CONDUIT-FILL-PENDING",
+          "ENGINEERING-REVIEW-PENDING",
+          "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+          "EQUIPMENT-DOCUMENT-APPLICABILITY",
+          "FASTENER-ASSEMBLY-UNVERIFIED",
+          "FRAMING-AUTHORITY-UNVERIFIED",
+          "MODULE-EXACT-DATASHEET-PENDING",
+          "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "PROJECT-AUTHORITY-UNVERIFIED",
+          "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+          "RACKING-CAPACITY-APPLICABILITY-GAP",
+          "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+          "ROUTE-LENGTH-ESTIMATE",
+          "TAP-CONDUCTOR-LENGTH-PENDING"
+        ],
+        "advisoryCodes": [],
+        "missingFromRs1": [],
+        "extraOnRs1": []
+      }
+    },
+    {
+      "gate": 16,
+      "id": "snapshot-identity-identical-across-sheets",
+      "ok": true,
+      "detail": "sheets=24 withStamp=24 idMismatch=0 digestMismatch=0 manifest=24 manifestEqPages=true snapshot=PDS-76C0C5B56CEF",
+      "evidence": {
+        "idMismatch": [],
+        "digestMismatch": [],
+        "sheetIds": [
+          "PV-0",
+          "RS-1",
+          "RS-1.1",
+          "RS-1.2",
+          "PV-1",
+          "PV-1B",
+          "PV-3",
+          "PV-4C",
+          "PV-4C.1",
+          "E-1",
+          "PV-4A",
+          "PV-4B",
+          "PV-5",
+          "PV-6",
+          "SCHED",
+          "SCHED-2",
+          "SCHED-3",
+          "SCHED-4",
+          "APP-A",
+          "DS-1",
+          "DS-2",
+          "DS-3",
+          "CERT",
+          "PE-1"
+        ]
+      }
+    },
+    {
+      "gate": 17,
+      "id": "page-fit-detects-horizontal-and-vertical-clipping",
+      "ok": true,
+      "detail": "pagefit exit=0 axes=vertical+horizontal sheets=24 clippedV=0 internalV=0 clippedH=0 internalH=0 horizontalDetectionProbeFired=true",
+      "evidence": {
+        "pageFit": {
+          "sheets": 24,
+          "clipped": 0,
+          "internalClipped": 0,
+          "clippedHorizontal": 0,
+          "internalClippedHorizontal": 0,
+          "tolInches": 0.5,
+          "tolInchesHorizontal": 0.5,
+          "worst": [
+            {
+              "sheetId": "PV-0",
+              "belowByIn": -0.24,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "RS-1",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "RS-1.1",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "RS-1.2",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-1",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-1B",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-3",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-4C",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-4C.1",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "E-1",
+              "belowByIn": -0.07,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-4A",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-4B",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-5",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PV-6",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "SCHED",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "SCHED-2",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "SCHED-3",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "SCHED-4",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "APP-A",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "DS-1",
+              "belowByIn": -0.24,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "DS-2",
+              "belowByIn": -0.24,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "DS-3",
+              "belowByIn": -0.24,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "CERT",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "PE-1",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            }
+          ]
+        },
+        "horizontalDetectionProbeFired": true
+      }
+    },
+    {
+      "gate": 18,
+      "id": "report-equals-rendered-zero-mismatches",
+      "ok": true,
+      "detail": "0 mismatch(es)",
+      "evidence": {
+        "mismatches": []
+      }
+    }
+  ],
+  "summary": {
+    "total": 18,
+    "passed": 18,
+    "failed": [],
+    "allPass": true
+  }
+}

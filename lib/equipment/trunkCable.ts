@@ -34,6 +34,42 @@ export interface TrunkCableSpec {
   conductors: number;
   /** Purchasable unit in the real channel. Drops = connector sections. */
   soldBy: 'drop' | 'ft';
+  /** AAC WS-5 — the SELECTION default for this orientation (what
+   *  resolveTrunkCablePlan picks). The remaining listed variants stay in the
+   *  catalog as the ALTERNATE-STOCK option space the Q-Cable procurement engine
+   *  evaluates (audit §2.16: "the catalog already holds seven cable variants;
+   *  trunkCable.ts reaches two"). */
+  isDefaultForOrientation?: boolean;
+  /** connectors per purchasable box/reel (datasheet). null ⇒ not published. */
+  connectorCountPerBox?: number | null;
+  /** the module class the manufacturer states the pitch is intended for. */
+  forCells?: string | null;
+  /** datasheet / distributor source for this variant. */
+  source?: string;
+}
+
+/** Raw (unconnectorized) cable stock — the source for field-fabricated jumpers
+ *  built with the field-wireable connector pair. Present only where the brand
+ *  publishes one. */
+export interface TrunkRawCableSpec {
+  sku: string;
+  description: string;
+  gaugeAwg: number;
+  lengthFt: number | null;
+  source: string;
+}
+
+/** The manufacturer's DOCUMENTED rule for what happens at a transition and at an
+ *  unused molded connector. The Q-Cable procurement engine may only treat a dead
+ *  drop as cappable when the brand publishes this rule — never by assumption. */
+export interface TrunkSpliceInstallRule {
+  /** continuous cable + service loop at row transitions (no field splice). */
+  continuousCableWithServiceLoop: boolean;
+  /** every unused molded connector is closed with a listed sealing cap. */
+  sealingCapPerUnusedConnector: boolean;
+  splicesPerRowTransition: number;
+  splicesPerRoofPlaneBridge: number;
+  source: string;
 }
 
 export interface TrunkAccessorySku {
@@ -41,9 +77,42 @@ export interface TrunkAccessorySku {
   description: string;
 }
 
+/**
+ * THE canonical branch-cabling / connector ARCHITECTURE identifier.
+ *
+ * P13 — a manufacturer document is written for ONE branch architecture, and a
+ * document for a different architecture cannot establish the grounding method
+ * for this one. Enphase publishes two IQ8 installation manuals: the Q-Cable
+ * drop-connector manual (IOM-00068-3.0-EN) and a separate "…with integrated MC4
+ * connectors" manual — same microinverter family, different wiring system,
+ * different document. So the architecture is EQUIPMENT IDENTITY and belongs on
+ * the same canonical object that supplies the cable SKU, the branch system, the
+ * connector family, the terminator, the field-wireable connector compatibility
+ * and the procurement inputs. It is never inferred from a product NAME, a
+ * display string or a document title.
+ *
+ *   'iq-q-cable-drop-connector' — Enphase IQ/Q-Cable: a continuous trunk with
+ *      molded drop connectors, one per micro. THE architecture this project uses.
+ *   'integrated-mc4'            — micros terminated in integrated MC4 leads. A
+ *      DIFFERENT architecture with its own manual; never equivalent.
+ *   'ap-ac-bus-drop-connector' / 'hoymiles-ac-trunk-modular' /
+ *   'nep-bdm-molded-t-trunk'    — the other catalogued brands' own systems.
+ */
+export type TrunkConnectorArchitecture =
+  | 'iq-q-cable-drop-connector'
+  | 'integrated-mc4'
+  | 'ap-ac-bus-drop-connector'
+  | 'hoymiles-ac-trunk-modular'
+  | 'nep-bdm-molded-t-trunk';
+
 export interface TrunkCableSystem {
   brand: string;                 // matched against the micro manufacturer
   ecosystem: string;             // display name, e.g. 'IQ Q-Cable', 'AC Bus'
+  /** THE branch cabling architecture this trunk system IS. Carried here because
+   *  this is the object that already defines the branch system, the connector
+   *  family and the terminator — the architecture is not a separate opinion
+   *  about the equipment, it is the equipment. */
+  connectorArchitecture: TrunkConnectorArchitecture;
   cables: TrunkCableSpec[];
   connectors: {
     male: TrunkAccessorySku;     // field-wireable splice, male side
@@ -57,6 +126,11 @@ export interface TrunkCableSystem {
   deviceBranchLimits?: Record<string, number>;
   branchOcpdA: number;
   notes?: string[];
+  /** AAC WS-5 — raw cable stock (jumper fabrication), where published. */
+  rawCable?: TrunkRawCableSpec | null;
+  /** AAC WS-5 — the DOCUMENTED transition / unused-connector rule. Absent ⇒ the
+   *  procurement engine may NOT treat a dead drop as cappable for this brand. */
+  spliceInstallRule?: TrunkSpliceInstallRule | null;
 }
 
 // ── Catalog (sourced 2026-07-10; see lib/data/equipment/trunk-cable-*.json) ──
@@ -65,10 +139,33 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'Enphase',
     ecosystem: 'IQ Q-Cable',
+    connectorArchitecture: 'iq-q-cable-drop-connector',
+    // AAC WS-5 — the FULL listed variant set from
+    // lib/data/equipment/trunk-cable-enphase.json (datasheet DSH-00247-1.0).
+    // The two `isDefaultForOrientation` entries are what the resolver SELECTS
+    // (unchanged behaviour); the remaining five are the alternate-stock option
+    // space the Q-Cable procurement engine evaluates against a deficit.
     cables: [
-      { sku: 'Q-12-10-240', orientation: 'portrait',  connectorSpacingFt: 4.25, gaugeAwg: 12, conductors: 2, soldBy: 'drop' },
-      { sku: 'Q-12-17-240', orientation: 'landscape', connectorSpacingFt: 6.56, gaugeAwg: 12, conductors: 2, soldBy: 'drop' },
+      { sku: 'Q-12-10-240', orientation: 'portrait',  connectorSpacingFt: 4.25, gaugeAwg: 12, conductors: 2, soldBy: 'drop', isDefaultForOrientation: true,  connectorCountPerBox: 240, forCells: '60/72-cell modules, portrait orientation', source: 'DSH-00247-1.0 (1.3 m); distributor 51" O.C.' },
+      { sku: 'Q-12-12-240', orientation: 'portrait',  connectorSpacingFt: 4.9,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 240, forCells: 'wider portrait / larger modules', source: 'DSH-00247-1.0 (1.5 m)' },
+      { sku: 'Q-12-17-240', orientation: 'landscape', connectorSpacingFt: 6.56, gaugeAwg: 12, conductors: 2, soldBy: 'drop', isDefaultForOrientation: true,  connectorCountPerBox: 240, forCells: '60/72-cell modules, landscape orientation', source: 'DSH-00247-1.0 (2.0 m); distributor 78.7" O.C.' },
+      { sku: 'Q-12-18-240', orientation: 'landscape', connectorSpacingFt: 6.9,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 240, forCells: 'wider landscape / larger modules', source: 'DSH-00247-1.0 (2.1 m)' },
+      { sku: 'Q-12-20-200', orientation: 'landscape', connectorSpacingFt: 7.5,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 200, forCells: 'large-format landscape modules', source: 'DSH-00247-1.0 (2.3 m)' },
+      { sku: 'Q-12-22-200', orientation: 'landscape', connectorSpacingFt: 8.2,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 200, forCells: 'large-format landscape modules', source: 'DSH-00247-1.0 (2.5 m)' },
+      { sku: 'Q-12-25-200', orientation: 'landscape', connectorSpacingFt: 9.1,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 200, forCells: 'large-format landscape modules', source: 'DSH-00247-1.0 (2.8 m)' },
     ],
+    rawCable: {
+      sku: 'Q-12-RAW-300', description: '300 m of 12 AWG cable with NO connectors — jumper stock used with the field-wireable connector pair',
+      gaugeAwg: 12, lengthFt: Math.round(300 * 3.28084), source: 'DSH-00247-1.0',
+    },
+    spliceInstallRule: {
+      continuousCableWithServiceLoop: true,
+      sealingCapPerUnusedConnector: true,
+      splicesPerRowTransition: 0,
+      splicesPerRoofPlaneBridge: 1,
+      source: 'Enphase IQ Cable accessories Data Sheet DSH-00247-1.0 (spliceInstallRule) — '
+        + 'row transitions use continuous cable + a service loop; every unused molded connector is closed with a Q-SEAL-10 sealing cap.',
+    },
     connectors: {
       male:       { sku: 'Q-CONN-10M', description: 'IQ Field-Wireable Connector (Male)' },
       female:     { sku: 'Q-CONN-10F', description: 'IQ Field-Wireable Connector (Female)' },
@@ -87,6 +184,7 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'APsystems',
     ecosystem: 'AC Bus',
+    connectorArchitecture: 'ap-ac-bus-drop-connector',
     cables: [
       // One molded drop per micro at a fixed ~2.4 m pitch — no orientation variants.
       { sku: 'DS3-AC-BUS', orientation: 'fixed', connectorSpacingFt: 7.9, gaugeAwg: 10, conductors: 3, soldBy: 'drop' },
@@ -109,6 +207,7 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'Hoymiles',
     ecosystem: 'AC Trunk (HMS)',
+    connectorArchitecture: 'hoymiles-ac-trunk-modular',
     cables: [
       // Bulk reel, pre-molded connectors, field-cut. 2 m pitch = the common variant
       // (1 m 12AWG and 4.2 m 10AWG reels also exist). 2P+PE, 600 V, IP68, UL 6703.
@@ -130,6 +229,7 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'NEP',
     ecosystem: 'BDM Trunk',
+    connectorArchitecture: 'nep-bdm-molded-t-trunk',
     cables: [
       // BDM-800 "Trunk Version": molded-T continuous trunk, portrait/landscape
       // variants. Confirmed SKU = landscape 12 AWG (4.4 m between Ts, 12 T/roll);
@@ -171,6 +271,10 @@ export interface TrunkPlanInput {
    */
   spliceAtRows?: boolean;
   rowCount?: number;                   // used only when spliceAtRows
+  /** §13 — canonical AC-branch count (plane-aware planMicroBranches). When set,
+   *  branchCount (and therefore terminators/sealingCaps) uses THIS instead of the
+   *  flat ceil(deviceCount / perModelMax) heuristic. */
+  branchCountOverride?: number;
 }
 
 export interface TrunkPlan {
@@ -188,6 +292,45 @@ export interface TrunkPlan {
   sealingCaps: number;                 // 1 per branch (service-loop unused drops)
 }
 
+/** The brand system for a micro manufacturer (case-insensitive), or null. */
+export function findTrunkCableSystem(brand: string | null | undefined): TrunkCableSystem | null {
+  const brandKey = (brand ?? '').trim().toLowerCase();
+  if (!brandKey) return null;
+  return TRUNK_CABLE_SYSTEMS.find(s => brandKey.includes(s.brand.toLowerCase())
+    || s.brand.toLowerCase().includes(brandKey)) ?? null;
+}
+
+/**
+ * AAC WS-5 — every LISTED cable variant of a system that can physically serve an
+ * array whose module centre-to-centre pitch is `modulePitchFt`.
+ *
+ * THE APPLICABILITY RULE (physical, not a preference): the molded connector
+ * pitch must REACH the next module, i.e. `connectorSpacingFt >= modulePitchFt`.
+ * A shorter pitch cannot span the gap; a longer pitch is installable (the excess
+ * is absorbed as slack / a service loop per the manufacturer's own transition
+ * rule) but wastes cable, so `orientationMatch` is reported and the ranking
+ * prefers the variant the manufacturer states for this orientation. Nothing is
+ * excluded silently: every variant is returned with its verdict.
+ */
+export function listTrunkCableVariants(
+  system: TrunkCableSystem,
+  opts: { orientation: TrunkOrientation; modulePitchFt?: number | null },
+): { cable: TrunkCableSpec; applicable: boolean; orientationMatch: boolean; reason: string | null }[] {
+  const pitchNeeded = typeof opts.modulePitchFt === 'number' && Number.isFinite(opts.modulePitchFt) && opts.modulePitchFt > 0
+    ? opts.modulePitchFt : null;
+  return system.cables.map(cable => {
+    const orientationMatch = cable.orientation === opts.orientation || cable.orientation === 'fixed';
+    const reaches = pitchNeeded == null ? true : cable.connectorSpacingFt >= pitchNeeded;
+    return {
+      cable,
+      applicable: reaches,
+      orientationMatch,
+      reason: reaches ? null
+        : `connector pitch ${cable.connectorSpacingFt} ft is SHORTER than the ${pitchNeeded!.toFixed(2)} ft module centre-to-centre pitch — the cable cannot reach the next module`,
+    };
+  });
+}
+
 export function resolveTrunkCablePlan(input: TrunkPlanInput): TrunkPlan | null {
   const brandKey = (input.brand || '').trim().toLowerCase();
   const system = TRUNK_CABLE_SYSTEMS.find(s => brandKey.includes(s.brand.toLowerCase())
@@ -195,7 +338,11 @@ export function resolveTrunkCablePlan(input: TrunkPlanInput): TrunkPlan | null {
   if (!system || input.deviceCount <= 0) return null;
 
   const orientation: TrunkOrientation = input.orientation === 'landscape' ? 'landscape' : 'portrait';
-  const cable = system.cables.find(c => c.orientation === orientation)
+  // AAC WS-5 — the catalog now carries EVERY listed variant, so the SELECTION
+  // pins the datasheet default for the orientation explicitly (previously the
+  // array held exactly one entry per orientation and `find` was unambiguous).
+  const cable = system.cables.find(c => c.orientation === orientation && c.isDefaultForOrientation)
+    ?? system.cables.find(c => c.orientation === orientation)
     ?? system.cables.find(c => c.orientation === 'fixed')
     ?? system.cables[0];
 
@@ -203,7 +350,11 @@ export function resolveTrunkCablePlan(input: TrunkPlanInput): TrunkPlan | null {
   const modelKey = Object.keys(system.deviceBranchLimits ?? {})
     .find(k => (input.model ?? '').toUpperCase().includes(k.toUpperCase()));
   const perBranch = modelKey ? system.deviceBranchLimits![modelKey] : system.maxDevicesPerBranch;
-  const branchCount = Math.max(1, Math.ceil(input.deviceCount / perBranch));
+  // §13 — the canonical plane-aware branch count wins when supplied; the flat
+  // ceil(devices / perModelMax) heuristic is only the standalone fallback.
+  const heuristicBranchCount = Math.max(1, Math.ceil(input.deviceCount / perBranch));
+  const branchCount = (typeof input.branchCountOverride === 'number' && input.branchCountOverride > 0)
+    ? input.branchCountOverride : heuristicBranchCount;
 
   const dropCount = input.deviceCount;
   const approxFeet = Math.ceil(dropCount * cable.connectorSpacingFt * 1.15);

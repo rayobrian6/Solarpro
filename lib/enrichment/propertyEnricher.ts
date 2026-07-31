@@ -58,6 +58,24 @@ export interface PropertyEnrichmentResult {
   market_value: number | null
   last_sale_date: string | null
   last_sale_price: number | null
+  // ── AAC WS-3 (2026-07-27) — MUNICIPAL BOUNDARY EVIDENCE ────────────────────
+  // The permit path needs to know WHICH jurisdiction the parcel sits in, not just
+  // which county. The Census geographies response already carries an
+  // "Incorporated Places" layer; the ABSENCE of that layer for a matched address
+  // is positive evidence that the site is UNINCORPORATED (and therefore that the
+  // COUNTY, not the nearest city, is the AHJ). These fields were being dropped.
+  // Optional so every existing construction site of this interface still compiles.
+  /** the incorporated municipality the parcel is inside, or null when the
+   *  geocoder matched the address and returned NO place ⇒ unincorporated. */
+  incorporated_place?: string | null
+  /** minor civil division / township (Census "County Subdivisions"). */
+  county_subdivision?: string | null
+  state_fips?: string | null
+  county_fips?: string | null
+  place_fips?: string | null
+  /** true only when the provider actually resolved the place layer, so "no place"
+   *  (unincorporated) is distinguishable from "the layer was never queried". */
+  boundary_layers_resolved?: boolean
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -146,9 +164,20 @@ async function enrichFromCensus(input: PropertyEnrichmentInput): Promise<Propert
     const geo = match.geographies
     const tract = geo?.['Census Tracts']?.[0]
     const county = geo?.['Counties']?.[0]
+    // AAC WS-3 — the boundary layers the response already contained and this
+    // function used to discard. A matched address with NO "Incorporated Places"
+    // entry is UNINCORPORATED; that is evidence, not an absence of evidence.
+    const place = geo?.['Incorporated Places']?.[0] ?? geo?.['Census Designated Places']?.[0]
+    const cousub = geo?.['County Subdivisions']?.[0]
 
     return {
       provider_used: 'census_geocoder',
+      incorporated_place: place?.NAME ?? null,
+      county_subdivision: cousub?.NAME ?? null,
+      state_fips: county?.STATE ?? null,
+      county_fips: county?.COUNTY ?? null,
+      place_fips: place?.GEOID ?? null,
+      boundary_layers_resolved: true,
       latitude: coords?.y || null,
       longitude: coords?.x || null,
       formatted_address: match.matchedAddress || null,

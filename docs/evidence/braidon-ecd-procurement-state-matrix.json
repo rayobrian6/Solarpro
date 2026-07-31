@@ -1,0 +1,282 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.140Z",
+  "artifact": "procurement authority state matrix — the five states across the three acceptance modes",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §2/§10 (deliverable 2)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "states": [
+    {
+      "state": "VERIFIED_ORDERABLE",
+      "label": "VERIFIED — ORDERABLE"
+    },
+    {
+      "state": "ESTIMATED_FIELD_VERIFY",
+      "label": "ESTIMATED — FIELD VERIFY"
+    },
+    {
+      "state": "CANDIDATE_NON_ORDERABLE",
+      "label": "CANDIDATE — NOT SELECTED / NOT ORDERABLE"
+    },
+    {
+      "state": "QUANTITY_PENDING",
+      "label": "QUANTITY NOT ESTABLISHED"
+    },
+    {
+      "state": "EXCLUDED_NOT_APPLICABLE",
+      "label": "EXCLUDED — NOT APPLICABLE"
+    }
+  ],
+  "matrix": [
+    {
+      "mode": "fixture",
+      "snapshotId": "PDS-76C0C5B56CEF",
+      "snapshotDigest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+      "openRequirementCount": 15,
+      "totalRowCount": 48,
+      "VERIFIED_ORDERABLE": 11,
+      "ESTIMATED_FIELD_VERIFY": 22,
+      "CANDIDATE_NON_ORDERABLE": 14,
+      "QUANTITY_PENDING": 1,
+      "EXCLUDED_NOT_APPLICABLE": 0,
+      "sum": 48,
+      "countsReconcile": true,
+      "authoritativeExportCount": 11,
+      "procurementReady": false,
+      "openProcurementRequirementCodes": [
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "rowIdsByState": {
+        "VERIFIED_ORDERABLE": [
+          "BOM-MICROINVERTER-DB738142",
+          "BOM-COMBINER-8B4AE5B9",
+          "BOM-DISCONNECT-734DA08D",
+          "BOM-FUSE-0AB918C4",
+          "BOM-JUNCTION-BOX-C7BE7F80",
+          "BOM-TERMINATOR-0BC4A1B6",
+          "BOM-TRUNK-CABLE-A6A231DB",
+          "BOM-LABEL-ED258158",
+          "BOM-LABEL-0C5761C8",
+          "BOM-LABEL-78C82337",
+          "BOM-LABEL-AD02AF22"
+        ],
+        "ESTIMATED_FIELD_VERIFY": [
+          "BOM-CONDUIT-53ECBDFB",
+          "BOM-CONDUIT-50EF884E",
+          "BOM-CONDUIT-5DD72106",
+          "BOM-CONDUIT-FITTIN-93035ECF",
+          "BOM-CONDUIT-FITTIN-CB9521E6",
+          "BOM-CONDUIT-FITTIN-4BFE7670",
+          "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "BOM-CONDUIT-FITTIN-0386B98D",
+          "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "BOM-CONDUIT-FITTIN-543CCC59",
+          "BOM-CONDUIT-FITTIN-FA9244EF",
+          "BOM-CONDUIT-FITTIN-3DC6898A",
+          "BOM-CONDUIT-FITTIN-C3781B2C",
+          "BOM-CONDUIT-FITTIN-4885951A",
+          "BOM-CONDUIT-FITTIN-B94C6F27",
+          "BOM-CONDUIT-FITTIN-4739A6D1",
+          "BOM-CONDUIT-FITTIN-5493777A",
+          "BOM-CONDUIT-FITTIN-A712AA50",
+          "BOM-WIRE-76BA4CB6",
+          "BOM-WIRE-63C1988D",
+          "BOM-WIRE-39F4F285",
+          "BOM-WIRE-9DD6602F"
+        ],
+        "CANDIDATE_NON_ORDERABLE": [
+          "BOM-SOLAR-PANEL-18288B26",
+          "BOM-CONNECTOR-F3079FAD",
+          "BOM-CONNECTOR-25827044",
+          "BOM-CONNECTOR-927432B3",
+          "BOM-WIRE-A2BB72C0",
+          "BOM-END-CLAMP-13A30B67",
+          "BOM-GROUNDING-E88FBCB4",
+          "BOM-L-FOOT-FAB71BDE",
+          "BOM-LAG-BOLT-9CFFDF3A",
+          "BOM-MID-CLAMP-B749FB5D",
+          "BOM-MOUNT-HARDWARE-DAA27818",
+          "BOM-RACKING-CF2D76C3",
+          "BOM-RAIL-64125916",
+          "BOM-SPLICE-8AA70D50"
+        ],
+        "QUANTITY_PENDING": [
+          "BOM-SEALING-CAP-B0BCE2B6"
+        ],
+        "EXCLUDED_NOT_APPLICABLE": []
+      }
+    },
+    {
+      "mode": "insufficient",
+      "snapshotId": "PDS-4B328A574DB9",
+      "snapshotDigest": "4b328a574db9ef3afc6fefd1736124c54ec58b2afb71e9e57bbdb61111dc25d0",
+      "openRequirementCount": 16,
+      "totalRowCount": 48,
+      "VERIFIED_ORDERABLE": 10,
+      "ESTIMATED_FIELD_VERIFY": 22,
+      "CANDIDATE_NON_ORDERABLE": 15,
+      "QUANTITY_PENDING": 1,
+      "EXCLUDED_NOT_APPLICABLE": 0,
+      "sum": 48,
+      "countsReconcile": true,
+      "authoritativeExportCount": 10,
+      "procurementReady": false,
+      "openProcurementRequirementCodes": [
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "QCABLE-PROCUREMENT-INSUFFICIENT",
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "rowIdsByState": {
+        "VERIFIED_ORDERABLE": [
+          "BOM-MICROINVERTER-DB738142",
+          "BOM-COMBINER-8B4AE5B9",
+          "BOM-DISCONNECT-734DA08D",
+          "BOM-FUSE-0AB918C4",
+          "BOM-JUNCTION-BOX-C7BE7F80",
+          "BOM-TERMINATOR-0BC4A1B6",
+          "BOM-LABEL-ED258158",
+          "BOM-LABEL-0C5761C8",
+          "BOM-LABEL-78C82337",
+          "BOM-LABEL-AD02AF22"
+        ],
+        "ESTIMATED_FIELD_VERIFY": [
+          "BOM-CONDUIT-53ECBDFB",
+          "BOM-CONDUIT-50EF884E",
+          "BOM-CONDUIT-5DD72106",
+          "BOM-CONDUIT-FITTIN-93035ECF",
+          "BOM-CONDUIT-FITTIN-CB9521E6",
+          "BOM-CONDUIT-FITTIN-4BFE7670",
+          "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "BOM-CONDUIT-FITTIN-0386B98D",
+          "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "BOM-CONDUIT-FITTIN-543CCC59",
+          "BOM-CONDUIT-FITTIN-FA9244EF",
+          "BOM-CONDUIT-FITTIN-3DC6898A",
+          "BOM-CONDUIT-FITTIN-C3781B2C",
+          "BOM-CONDUIT-FITTIN-4885951A",
+          "BOM-CONDUIT-FITTIN-B94C6F27",
+          "BOM-CONDUIT-FITTIN-4739A6D1",
+          "BOM-CONDUIT-FITTIN-5493777A",
+          "BOM-CONDUIT-FITTIN-A712AA50",
+          "BOM-WIRE-76BA4CB6",
+          "BOM-WIRE-63C1988D",
+          "BOM-WIRE-39F4F285",
+          "BOM-WIRE-9DD6602F"
+        ],
+        "CANDIDATE_NON_ORDERABLE": [
+          "BOM-SOLAR-PANEL-18288B26",
+          "BOM-CONNECTOR-F3079FAD",
+          "BOM-CONNECTOR-25827044",
+          "BOM-CONNECTOR-927432B3",
+          "BOM-TRUNK-CABLE-A6A231DB",
+          "BOM-WIRE-A2BB72C0",
+          "BOM-END-CLAMP-13A30B67",
+          "BOM-GROUNDING-E88FBCB4",
+          "BOM-L-FOOT-FAB71BDE",
+          "BOM-LAG-BOLT-9CFFDF3A",
+          "BOM-MID-CLAMP-B749FB5D",
+          "BOM-MOUNT-HARDWARE-DAA27818",
+          "BOM-RACKING-CF2D76C3",
+          "BOM-RAIL-64125916",
+          "BOM-SPLICE-8AA70D50"
+        ],
+        "QUANTITY_PENDING": [
+          "BOM-SEALING-CAP-B0BCE2B6"
+        ],
+        "EXCLUDED_NOT_APPLICABLE": []
+      }
+    },
+    {
+      "mode": "identity",
+      "snapshotId": "PDS-949E2B4125A5",
+      "snapshotDigest": "949e2b4125a5890552558e8ac21ed202c370b1308a2a060f4264a3038c400fd4",
+      "openRequirementCount": 17,
+      "totalRowCount": 48,
+      "VERIFIED_ORDERABLE": 11,
+      "ESTIMATED_FIELD_VERIFY": 22,
+      "CANDIDATE_NON_ORDERABLE": 14,
+      "QUANTITY_PENDING": 1,
+      "EXCLUDED_NOT_APPLICABLE": 0,
+      "sum": 48,
+      "countsReconcile": true,
+      "authoritativeExportCount": 11,
+      "procurementReady": false,
+      "openProcurementRequirementCodes": [
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "rowIdsByState": {
+        "VERIFIED_ORDERABLE": [
+          "BOM-MICROINVERTER-DB738142",
+          "BOM-COMBINER-8B4AE5B9",
+          "BOM-DISCONNECT-734DA08D",
+          "BOM-FUSE-0AB918C4",
+          "BOM-JUNCTION-BOX-C7BE7F80",
+          "BOM-TERMINATOR-0BC4A1B6",
+          "BOM-TRUNK-CABLE-A6A231DB",
+          "BOM-LABEL-ED258158",
+          "BOM-LABEL-0C5761C8",
+          "BOM-LABEL-78C82337",
+          "BOM-LABEL-AD02AF22"
+        ],
+        "ESTIMATED_FIELD_VERIFY": [
+          "BOM-CONDUIT-53ECBDFB",
+          "BOM-CONDUIT-50EF884E",
+          "BOM-CONDUIT-5DD72106",
+          "BOM-CONDUIT-FITTIN-93035ECF",
+          "BOM-CONDUIT-FITTIN-CB9521E6",
+          "BOM-CONDUIT-FITTIN-4BFE7670",
+          "BOM-CONDUIT-FITTIN-C2CE8B2F",
+          "BOM-CONDUIT-FITTIN-0386B98D",
+          "BOM-CONDUIT-FITTIN-4FCAE76A",
+          "BOM-CONDUIT-FITTIN-543CCC59",
+          "BOM-CONDUIT-FITTIN-FA9244EF",
+          "BOM-CONDUIT-FITTIN-3DC6898A",
+          "BOM-CONDUIT-FITTIN-C3781B2C",
+          "BOM-CONDUIT-FITTIN-4885951A",
+          "BOM-CONDUIT-FITTIN-B94C6F27",
+          "BOM-CONDUIT-FITTIN-4739A6D1",
+          "BOM-CONDUIT-FITTIN-5493777A",
+          "BOM-CONDUIT-FITTIN-A712AA50",
+          "BOM-WIRE-76BA4CB6",
+          "BOM-WIRE-63C1988D",
+          "BOM-WIRE-39F4F285",
+          "BOM-WIRE-9DD6602F"
+        ],
+        "CANDIDATE_NON_ORDERABLE": [
+          "BOM-SOLAR-PANEL-18288B26",
+          "BOM-CONNECTOR-F3079FAD",
+          "BOM-CONNECTOR-25827044",
+          "BOM-CONNECTOR-927432B3",
+          "BOM-WIRE-A2BB72C0",
+          "BOM-END-CLAMP-13A30B67",
+          "BOM-GROUNDING-E88FBCB4",
+          "BOM-L-FOOT-FAB71BDE",
+          "BOM-LAG-BOLT-9CFFDF3A",
+          "BOM-MID-CLAMP-B749FB5D",
+          "BOM-MOUNT-HARDWARE-DAA27818",
+          "BOM-RACKING-CF2D76C3",
+          "BOM-RAIL-64125916",
+          "BOM-SPLICE-8AA70D50"
+        ],
+        "QUANTITY_PENDING": [
+          "BOM-SEALING-CAP-B0BCE2B6"
+        ],
+        "EXCLUDED_NOT_APPLICABLE": []
+      }
+    }
+  ],
+  "modeDeltas": {
+    "insufficient − fixture": "QCABLE-PROCUREMENT-INSUFFICIENT opens (16 requirements vs 15) and the listed Q-Cable trunk assembly row leaves VERIFIED_ORDERABLE for CANDIDATE_NON_ORDERABLE: 11 → 10 orderable, 14 → 15 candidate.",
+    "identity − fixture": "PROJECT-NAME-NONPRODUCTION + DESIGNER-OF-RECORD-MISSING open (17 requirements vs 15). Both are ADMINISTRATIVE holds with no procurement-axis impact, so every row state is unchanged."
+  }
+}

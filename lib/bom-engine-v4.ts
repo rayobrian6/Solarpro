@@ -26,11 +26,14 @@ import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
 import { getPanelById, getMicroinverterById, getInverterById } from './equipment-db';
 
-import type { RunSegment } from './computed-system';
+import { racewayNecArticle, type RunSegment } from './computed-system';
 import type { RackingBOM } from './structural-engine-v4';
 import { getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 // MASTER TASK: deriveStructuralBOM removed from V4 — now called in API route merge layer
-import type { BOMLineItemV4, BOMStageId, BOMSystemType } from './bom-types-v4';
+import type {
+  BOMLineItemV4, BOMStageId, BOMSystemType,
+  BomQuantitySource, ProcurementAuthorityState,
+} from './bom-types-v4';
 // Wave 2c (docs/ARCHITECTURE-per-subsystem-equipment.md §1.7): per-sub-system
 // equipment map — Stages 1–3 run PER SUB, Stage 4 (service AC) runs ONCE.
 import type { SubSystemKey, SubSystemEquipment } from './system/subSystemEquipment';
@@ -52,6 +55,10 @@ export interface BOMGenerationInputV4 {
   // System sizing
   moduleCount: number;
   deviceCount?: number;       // micro: ceil(panelCount / modulesPerDevice); if omitted falls back to moduleCount
+  /** §13 — canonical AC-branch count from the plane-aware branch plan
+   *  (snapshot.electrical.branches.length). Governs micro terminator/cap qty so
+   *  3 branches never materialize 4 terminators. Undefined ⇒ resolver heuristic. */
+  branchCount?: number;
   stringCount: number;
   inverterCount: number;
   systemKw: number;
@@ -166,6 +173,14 @@ export interface BOMGenerationInputV4 {
   requiresACDisconnect?: boolean;
   requiresDCDisconnect?: boolean;
   requiresRapidShutdown?: boolean;
+  /** §7 GROUNDING AUTHORITY (post-campaign correction 07-22): a grid-tied PV
+   *  interconnection bonds to the EXISTING service grounding electrode system
+   *  (NEC 250.64 / 690.47) — it does NOT add a new electrode. A ground rod +
+   *  acorn clamp + #6 GEC are materialized ONLY when an authoritative design
+   *  input requires a NEW electrode (e.g. a detached structure / no existing
+   *  GES). Undefined/false ⇒ no auto electrode hardware (the canonical
+   *  groundingObjects record GEC as none-required). */
+  requiresGroundingElectrode?: boolean;
 
   // Labels (NEC 690.31, 690.54, 690.56)
   requiresWarningLabels?: boolean;
@@ -235,6 +250,14 @@ export interface BOMGenerationResultV4 {
   derivationLog: BOMDerivationEntry[];
   warnings: string[];
   complianceNotes: string[];
+  /** §5 closeout — machine-readable branch/feeder conductor reconciliation
+   *  (per-segment conductor-by-conductor calc + per-gauge aggregation proof).
+   *  Present only on the object-derived (runs-fed) path; the closer packages it
+   *  as the B1/B2/B3 evidence artifact. */
+  branchWireReconciliation?: BranchWireReconciliation;
+  /** §6 closeout — the physical raceways the conduit BOM iterated (each row is
+   *  labeled with its physicalRacewayId; no project-level "all runs" roll-up). */
+  physicalRaceways?: DerivedRaceway[];
 }
 
 export interface BOMStageResult {
@@ -283,6 +306,305 @@ function runHasNoConduit(r: RunSegment): boolean {
     || t === 'FREE AIR' || t === 'FREE_AIR' || t === 'OPEN AIR' || t === 'OPEN_AIR';
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// §5/§6/§7 CLOSEOUT (2026-07-23) — object-derived branch/raceway BOM
+// The BOM no longer prices AC conductors from one flat `acWireLength` scalar nor
+// rolls every conduit into one "— all runs" line. It iterates the canonical
+// PHYSICAL RACEWAYS (CO-A: ComputedSystem.physicalRaceways / RunSegment
+// .physicalRacewayId) and derives per-segment conductor footage with the
+// shared-circuit-count semantics. Every emitted row carries its source segment
+// IDs / physicalRacewayId, and every code citation comes from the raceway TYPE
+// authority (racewayNecArticle) — never a hardcoded 'NEC 358'.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const _WASTE = 1.15; // fitting/termination waste allowance (matches legacy)
+
+/** One physical raceway derived from the run graph (the shared branch home-run
+ *  appears ONCE with sharedCircuitCount>1 — its conduit is counted a single
+ *  time even though it carries N branch circuits). */
+interface DerivedRaceway {
+  physicalRacewayId: string;
+  racewayType: string;        // 'PVC Sch 80' | 'EMT' | …
+  sizeIn: string;             // trade size, no inch mark ('1-1/4')
+  necArticle: string;         // '352' | '358' | … (from raceway type)
+  supportArticle: string;     // '352.30' | '358.30' | …
+  sharedCircuitCount: number;
+  lengthFt: number;           // Σ member run one-way lengths × waste (whole ft)
+  segmentIds: string[];
+  /** ECD §3 — member segments that carry NO one-way length. A missing length is
+   *  an UNKNOWN, never a default: the old `?? 30` fabricated 30 ft of conduit
+   *  inside a length-authority chain. Non-empty ⇒ every row derived from this
+   *  raceway is QUANTITY_PENDING, not an estimate and not orderable. */
+  lengthUnknownSegmentIds: string[];
+}
+
+/** Group in-conduit runs into their physical raceways. Open-air (Q-Cable /
+ *  free-air) and utility-owned runs carry NO raceway and are skipped. Uses the
+ *  run's attached PhysicalRaceway authority object where present (the declaring
+ *  home-run carrier), else synthesizes the article from the raceway TYPE — the
+ *  SAME single source computeSystem uses (racewayNecArticle). */
+function derivePhysicalRacewaysFromRuns(runs: RunSegment[]): DerivedRaceway[] {
+  const byId = new Map<string, DerivedRaceway>();
+  const order: string[] = [];
+  for (const r of runs) {
+    if (r.isUtilityOwned || runHasNoConduit(r)) continue;
+    const rid = r.physicalRacewayId ?? `RW-${r.id}`;
+    const type = String(r.physicalRaceway?.racewayType ?? r.conduitType ?? 'EMT').trim();
+    const art = r.physicalRaceway
+      ? { article: r.physicalRaceway.necArticle, supportArticle: r.physicalRaceway.supportArticle }
+      : racewayNecArticle(type);
+    const size = String(r.physicalRaceway?.selectedRacewaySize ?? r.conduitSize ?? '3/4')
+      .trim().replace(/"$/, '');
+    const shared = r.physicalRaceway?.sharedCircuitCount ?? r.sharedCircuitCount ?? 1;
+    // ECD §3 — NO FABRICATED LENGTH. `?? 30` used to substitute 30 ft for an
+    // absent one-way length inside a length-AUTHORITY chain; an unknown length
+    // now contributes NOTHING and is recorded, so the derived rows classify
+    // QUANTITY_PENDING instead of printing an invented footage.
+    const _oneWay = typeof r.onewayLengthFt === 'number' && Number.isFinite(r.onewayLengthFt)
+      ? r.onewayLengthFt : null;
+    const lenFt = _oneWay == null ? 0 : Math.ceil(_oneWay * _WASTE);
+    const ex = byId.get(rid);
+    if (ex) {
+      ex.lengthFt += lenFt;
+      if (!ex.segmentIds.includes(String(r.id))) ex.segmentIds.push(String(r.id));
+      if (_oneWay == null && !ex.lengthUnknownSegmentIds.includes(String(r.id))) ex.lengthUnknownSegmentIds.push(String(r.id));
+      ex.sharedCircuitCount = Math.max(ex.sharedCircuitCount, shared);
+    } else {
+      byId.set(rid, {
+        physicalRacewayId: rid, racewayType: type, sizeIn: size,
+        necArticle: art.article, supportArticle: art.supportArticle,
+        sharedCircuitCount: shared, lengthFt: lenFt, segmentIds: [String(r.id)],
+        lengthUnknownSegmentIds: _oneWay == null ? [String(r.id)] : [],
+      });
+      order.push(rid);
+    }
+  }
+  return order.map(id => byId.get(id)!);
+}
+
+/** §6/§7 — emit one physical raceway's conduit material + its matching fittings
+ *  (couplings, connectors, straps/supports, bushings, bends, PVC expansion where
+ *  applicable). Every row is labeled with the physicalRacewayId + source
+ *  segments, and cites the raceway's OWN NEC article (never a template '358'). */
+function emitRacewayConduitBom(rw: DerivedRaceway): BOMLineItemV4[] {
+  const out: BOMLineItemV4[] = [];
+  const { sizeIn: size, racewayType: type, lengthFt: ft } = rw;
+  const typeTag = type.replace(/\s+/g, '-');
+  const sizeTag = size.replace(/\//g, '-').replace(/"/g, '');
+  const idTag = rw.physicalRacewayId.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const src = rw.segmentIds.join(', ');
+  const necConduit = `NEC ${rw.necArticle}`;
+  const necSupport = `NEC ${rw.supportArticle}`;
+  const sharedNote = rw.sharedCircuitCount > 1
+    ? ` — shared home-run (${rw.sharedCircuitCount} branch circuits, conduit counted once)`
+    : '';
+
+  // ── ECD §3 (W1-D) — EVERY row this emitter produces is ROUTE-DERIVED. The
+  // conduit footage is Σ unresolved route-segment length; the couplings, straps
+  // and expansion fitting are functions OF that footage; the connectors,
+  // bushings and sweeps exist per raceway END / per rough-in allowance, which
+  // only the routed geometry establishes. Declared as a FACT here (the V4 engine
+  // is pre-snapshot and cannot know whether ROUTE-LENGTH-ESTIMATE is open);
+  // classifyProcurementAuthority is the single consumer that turns the fact plus
+  // the open requirement into ESTIMATED_FIELD_VERIFY. If any member segment
+  // carries no length at all, the quantity is UNKNOWN, not an estimate.
+  const _routeTag = {
+    quantitySource: (rw.lengthUnknownSegmentIds.length ? 'unknown' : 'route-derived') as BomQuantitySource,
+    affectedRouteIds: [rw.physicalRacewayId, ...rw.segmentIds],
+  };
+
+  // Conduit material — per raceway (kills the project-level "all runs" roll-up)
+  out.push(addItem('ac', 'conduit', 'Generic', `${size}" ${type} Conduit`,
+    `${typeTag}-${sizeTag}-${idTag}`,
+    `${size}" ${type} conduit — ${rw.physicalRacewayId} [${src}]${sharedNote}`,
+    ft, 'ft', necConduit, `${rw.physicalRacewayId}: Σ segment length × ${_WASTE}`, `[${src}] × ${_WASTE}`, true,
+    undefined, undefined, undefined, undefined, _routeTag));
+
+  // Couplings — join 10-ft sticks
+  const coupQty = Math.max(1, Math.ceil(ft / 10) - 1);
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} Coupling`,
+    `${typeTag}-COUP-${sizeTag}-${idTag}`,
+    `${size}" ${type} coupling — ${rw.physicalRacewayId} (joins conduit sticks)`,
+    coupQty, 'ea', necSupport, `${rw.physicalRacewayId}: ceil(${ft}/10)-1`, `ceil(${ft}/10)-1`, true,
+    undefined, undefined, undefined, undefined, _routeTag));
+
+  // Terminal connectors — both raceway ends
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} Connector`,
+    `${typeTag}-CONN-${sizeTag}-${idTag}`,
+    `${size}" ${type} terminal connector — ${rw.physicalRacewayId} (both raceway ends per NEC 300.15)`,
+    2, 'ea', 'NEC 300.15', `${rw.physicalRacewayId}: both terminations`, '2', true,
+    undefined, undefined, undefined, undefined, _routeTag));
+
+  // Straps / supports — ≤10 ft + within 3 ft of each box (raceway-type support rule)
+  const strapQty = Math.max(2, Math.ceil(ft / 10) + 1);
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} One-Hole Strap`,
+    `${typeTag}-STRAP-${sizeTag}-${idTag}`,
+    `${size}" ${type} one-hole strap — ${rw.physicalRacewayId} support per ${necSupport} (≤10 ft + within 3 ft of boxes)`,
+    strapQty, 'ea', necSupport, `${rw.physicalRacewayId}: ceil(${ft}/10)+1`, `ceil(${ft}/10)+1`, true,
+    undefined, undefined, undefined, undefined, _routeTag));
+
+  // Insulated throat bushings — both ends
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" Insulated Bushing`,
+    `BUSH-INS-${sizeTag}-${idTag}`,
+    `${size}" insulated throat bushing — ${rw.physicalRacewayId} (protects conductors at each raceway end per NEC 300.15)`,
+    2, 'ea', 'NEC 300.15', `${rw.physicalRacewayId}: both terminations`, '2', true,
+    undefined, undefined, undefined, undefined, _routeTag));
+
+  // Bends / sweeps — rough-in allowance (exact count pending field routing)
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} 90° Sweep`,
+    `${typeTag}-ELL-${sizeTag}-${idTag}`,
+    `${size}" ${type} 90° sweep/elbow — ${rw.physicalRacewayId} (rough-in allowance; exact bend count pending field routing)`,
+    2, 'ea', necSupport, `${rw.physicalRacewayId}: rough-in allowance`, '2', true,
+    undefined, undefined, undefined, undefined, _routeTag));
+
+  // PVC expansion fitting — NEC 352.44 thermal, applicable on longer exposed PVC runs
+  if (/PVC/i.test(type) && ft >= 25) {
+    out.push(addItem('ac', 'conduit_fitting', 'Carlon', `${size}" PVC Expansion Fitting`,
+      `PVC-EXP-${sizeTag}-${idTag}`,
+      `${size}" PVC expansion coupling — ${rw.physicalRacewayId} (NEC 352.44 thermal expansion, exposed run ≥ 25 ft)`,
+      1, 'ea', 'NEC 352.44', `${rw.physicalRacewayId}: PVC exposed run ≥ 25 ft`, '1', true,
+      undefined, undefined, undefined, undefined, _routeTag));
+  }
+  return out;
+}
+
+/** §5 — per-conductor calc row for the machine-readable reconciliation evidence. */
+interface BranchWireCalcRow {
+  segmentId: string;
+  physicalRacewayId: string | null;
+  gauge: string;
+  egcGauge: string;
+  conductorsPerCircuit: number;
+  sharedCircuitCount: number;
+  oneWayFt: number;
+  hotConductors: number;   // conductorsPerCircuit × sharedCircuitCount
+  hotFt: number;           // ceil(oneWayFt × hotConductors × waste)
+  egcFt: number;           // ceil(oneWayFt × 1 × waste) — one shared EGC per raceway
+}
+
+interface BranchWireReconciliation {
+  waste: number;
+  segments: BranchWireCalcRow[];
+  hotByGauge: { gauge: string; ft: number; segmentIds: string[] }[];
+  egcByGauge: { gauge: string; ft: number; segmentIds: string[] }[];
+  openAirTrunkSegments: string[]; // billed as trunk cable, NOT THWN
+}
+
+/** §5 — derive AC field-conductor quantities from the actual in-conduit route
+ *  segments. Open-air Q-Cable trunk sections are EXCLUDED (billed as trunk
+ *  cable). Hots = conductorsPerCircuit × sharedCircuitCount × length; the EGC is
+ *  one shared conductor per raceway (NEC 250.122(C)). Hots and EGCs are kept as
+ *  SEPARATE rows (green EGC ≠ black hot) so a #10 branch hot is never merged
+ *  with a #10 feeder EGC into one undifferentiated "AC wiring" line. */
+function emitAcConductorBom(runs: RunSegment[]): { items: BOMLineItemV4[]; evidence: BranchWireReconciliation } {
+  const hotMap = new Map<string, { ft: number; segs: string[]; unknown: string[] }>();
+  const egcMap = new Map<string, { ft: number; segs: string[]; unknown: string[] }>();
+  const calc: BranchWireCalcRow[] = [];
+  const openAir: string[] = [];
+
+  for (const r of runs) {
+    if (r.isUtilityOwned) continue;
+    // Open-air AC sections (the Q-Cable trunk) are billed as trunk cable, never
+    // THWN field conductor — record them so the reconciliation is auditable.
+    if (runHasNoConduit(r)) { openAir.push(String(r.id)); continue; }
+    const gauge = r.wireGauge ?? '#10 AWG';
+    const egcGauge = r.egcGauge ?? '#10 AWG';
+    // TAC WS-3 — PROCUREMENT reads `conductorCount` (the physical phase+neutral
+    // count), NOT the current-carrying count used for 310.15(C)(1) derating: a
+    // 3-wire single-phase neutral is installed and billed while not being a CCC,
+    // so sourcing this from the derating count would under-order one conductor.
+    const perCircuit = r.conductorCount ?? 2;
+    const shared = r.sharedCircuitCount ?? r.physicalRaceway?.sharedCircuitCount ?? 1;
+    // ECD §3 — NO FABRICATED LENGTH (was `?? 30`). An unresolved one-way length
+    // contributes 0 ft and is RECORDED, so the gauge's row classifies
+    // QUANTITY_PENDING rather than shipping an invented conductor footage.
+    const _len = typeof r.onewayLengthFt === 'number' && Number.isFinite(r.onewayLengthFt)
+      ? r.onewayLengthFt : null;
+    const lenOneWay = _len ?? 0;
+    const hotConductors = perCircuit * shared;
+    const hotFt = Math.ceil(lenOneWay * hotConductors * _WASTE);
+    const egcFt = Math.ceil(lenOneWay * 1 * _WASTE);
+    const h = hotMap.get(gauge);
+    if (h) {
+      h.ft += hotFt;
+      if (!h.segs.includes(String(r.id))) h.segs.push(String(r.id));
+      if (_len == null && !h.unknown.includes(String(r.id))) h.unknown.push(String(r.id));
+    } else hotMap.set(gauge, { ft: hotFt, segs: [String(r.id)], unknown: _len == null ? [String(r.id)] : [] });
+    const e = egcMap.get(egcGauge);
+    if (e) {
+      e.ft += egcFt;
+      if (!e.segs.includes(String(r.id))) e.segs.push(String(r.id));
+      if (_len == null && !e.unknown.includes(String(r.id))) e.unknown.push(String(r.id));
+    } else egcMap.set(egcGauge, { ft: egcFt, segs: [String(r.id)], unknown: _len == null ? [String(r.id)] : [] });
+    calc.push({
+      segmentId: String(r.id), physicalRacewayId: r.physicalRacewayId ?? null,
+      gauge, egcGauge, conductorsPerCircuit: perCircuit, sharedCircuitCount: shared,
+      oneWayFt: lenOneWay, hotConductors, hotFt, egcFt,
+    });
+  }
+
+  const gaugeNum = (g: string) => parseInt(g.replace('#', '').replace(' AWG', '')) || 99;
+  const items: BOMLineItemV4[] = [];
+  // ECD §3 — AC field conductor footage is Σ UNRESOLVED ROUTE LENGTH: declared
+  // route-derived at source so the classifier (never a description regex) can
+  // reclassify it while ROUTE-LENGTH-ESTIMATE is open.
+  for (const [gauge, { ft, segs, unknown }] of [...hotMap.entries()].sort((a, b) => gaugeNum(a[0]) - gaugeNum(b[0]))) {
+    const gn = gauge.replace('#', '').replace(' AWG', '');
+    items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`, `THWN2-${gn}`,
+      `${gauge} THWN-2 — AC circuit conductors (${segs.join(', ')})`,
+      ft, 'ft', 'NEC 310.15', `Σ length × conductorsPerCircuit × sharedCircuitCount × ${_WASTE}`, `[${segs.join(', ')}]`, true,
+      undefined, undefined, undefined, undefined,
+      { quantitySource: unknown.length ? 'unknown' : 'route-derived', affectedRouteIds: segs }));
+  }
+  for (const [gauge, { ft, segs, unknown }] of [...egcMap.entries()].sort((a, b) => gaugeNum(a[0]) - gaugeNum(b[0]))) {
+    const gn = gauge.replace('#', '').replace(' AWG', '');
+    items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2 Green EGC`, `THWN2-GRN-${gn}`,
+      `${gauge} green THWN-2 equipment grounding conductor — one per raceway, NEC 250.122(C) (${segs.join(', ')})`,
+      ft, 'ft', 'NEC 250.122', `Σ length × 1 × ${_WASTE} (one shared EGC per raceway)`, `[${segs.join(', ')}]`, true,
+      undefined, undefined, undefined, undefined,
+      { quantitySource: unknown.length ? 'unknown' : 'route-derived', affectedRouteIds: segs }));
+  }
+
+  const evidence: BranchWireReconciliation = {
+    waste: _WASTE,
+    segments: calc,
+    hotByGauge: [...hotMap.entries()].map(([gauge, v]) => ({ gauge, ft: v.ft, segmentIds: v.segs })),
+    egcByGauge: [...egcMap.entries()].map(([gauge, v]) => ({ gauge, ft: v.ft, segmentIds: v.segs })),
+    openAirTrunkSegments: openAir,
+  };
+  return { items, evidence };
+}
+
+// ─── ECD §5 (W1-F) — the supply-side tap connector row, at BOTH emitters ─────
+// The row used to carry its own caveat as prose inside the description string
+// ("Verify lug range against actual service conductor size") while being counted
+// as an authoritative orderable line. The caveat is now an AUTHORITY:
+// electrical.supplySideTapConnection (lib/permit/snapshot/supplySideTap.ts)
+// records what the existing service conductors are — honestly null, because they
+// have not been surveyed — and the classifier turns that into the row's state
+// and its rendered CANDIDATE label. The description here states only the
+// PHYSICAL FACT of what the connector is for; it makes no verification claim and
+// issues no instruction. Both emitters (legacy whole-system :~1660 and per-sub
+// :~2910) share these constants so the string cannot diverge again.
+const SUPPLY_SIDE_TAP_CONNECTOR_DESCRIPTION =
+  'Insulated multi-tap connector for the supply-side tap of the service-entrance conductors '
+  + '(1 per conductor: L1/L2/N).';
+
+const SUPPLY_SIDE_TAP_CONNECTOR_HINT: {
+  authorityStateHint: ProcurementAuthorityState;
+  authorityStateHintReason: string;
+  quantitySource: BomQuantitySource;
+} = {
+  authorityStateHint: 'CANDIDATE_NON_ORDERABLE',
+  authorityStateHintReason:
+    'CANDIDATE CONNECTOR — the existing service-entrance conductor has not been surveyed, so the '
+    + "connector's listed conductor range cannot be verified against it. Not a selected product; "
+    + 'excluded from the authoritative procurement total and from every export.',
+  // 1 per ungrounded/grounded conductor is a code-established per-installation
+  // constant — the quantity is not in question; the CONNECTOR SELECTION is.
+  quantitySource: 'per-installation-constant',
+};
+
 // ─── ID Generator ─────────────────────────────────────────────────────────────
 
 let _idCounter = 0;
@@ -324,6 +646,39 @@ const SUB_SYSTEM_EMIT_ORDER: readonly SubSystemKey[] = ['roof', 'ground', 'fence
 // Emits the structural engine's real rackingBOM lines. NB: rb.mounts is covered
 // by the racking "lot"/attachment lines and rb.groundLugs is subsumed by the
 // per-module bonding clips — both omitted to avoid double-counting.
+// --- PPC S5 -- the MOUNT-BASE ("racking lot") line's procurement state --------
+// Ray's row-family ruling: the mount base is class B too while the racking
+// assembly is unselected. The registry racking lot line printed
+// `Roof Tech - RT-MINI-01 - 1 lot` with `data-bom-orderable="true"` -- an
+// authoritative selected SKU -- while the canonical racking record itself carries
+// `mountSku: null` and calcRackingBOM had already ruled every assembly-dependent
+// row PENDING. `rb.mounts.pending` is the single source for "the assembly is not
+// pinned"; when it is set the lot line withholds its manufacturer and SKU and is
+// excluded from the authoritative procurement total. The QUANTITY (1 lot) is real
+// and stays.
+function _rackingLotState(rb: { mounts?: { pending?: boolean; orderable?: boolean } } | undefined): {
+  pending: boolean;
+  mfr: (m: string) => string;
+  sku: (p: string) => string;
+  orderability: { nonOrderable: boolean; nonOrderableReason: string } | undefined;
+} {
+  const pending = rb?.mounts?.pending === true || rb?.mounts?.orderable === false;
+  return {
+    pending,
+    mfr: (m: string) => (pending ? '—' : m),
+    sku: (partNumber: string) => (pending ? 'PENDING-RACKING-ASSEMBLY-SELECTION' : partNumber),
+    orderability: pending
+      ? {
+          nonOrderable: true,
+          nonOrderableReason:
+            'PENDING-RACKING-ASSEMBLY-SELECTION — the mount-base assembly is not selected (the canonical '
+            + 'racking record carries mountSku: null); the product MODEL is not a verified purchase SKU. '
+            + 'DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)',
+        }
+      : undefined,
+  };
+}
+
 function emitRackingBOMInto(
   items: BOMLineItemV4[],
   log: BOMDerivationEntry[],
@@ -331,24 +686,45 @@ function emitRackingBOMInto(
   mfr: string,
   subSystem?: BOMSystemType,
 ): void {
-  const emitRB = (category: string, r: { qty: number; unit?: string; description: string; partNumber: string } | undefined, nec: string) => {
+  // PPC §5 ROOT FIX — PROPAGATE the classification instead of discarding it.
+  // calcRackingBOM() already sets `pending:true, orderable:false` on every
+  // assembly-dependent row while the rail SKU is unpinned (structural-engine-v4
+  // `railUnpinned` gate). This emitter's destructured parameter type did not even
+  // mention those fields, so the flags died at the type boundary and SCHED-3
+  // printed bare quantities plus an intact manufacturer on rows the engine had
+  // already ruled NON-ORDERABLE. The manufacturer is now withheld on a pending row
+  // as well — a pending assembly has no selected manufacturer to name.
+  const emitRB = (
+    category: string,
+    r: { qty: number; unit?: string; description: string; partNumber: string | null; pending?: boolean; orderable?: boolean } | undefined,
+    nec: string,
+  ) => {
     if (!r || r.qty <= 0) return;
-    items.push(addItem('structural', category, mfr,
+    const _pending = r.pending === true || r.orderable === false;
+    items.push(addItem('structural', category, _pending ? '—' : mfr,
       r.description, r.partNumber ?? 'TBD', r.description,
       Math.ceil(r.qty), 'ea', nec, 'structuralEngine.rackingBOM', 'calcRackingBOM', true,
-      undefined, undefined, undefined, subSystem));
+      undefined, undefined, undefined, subSystem,
+      _pending
+        ? {
+            nonOrderable: true,
+            nonOrderableReason:
+              'PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; '
+              + 'DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)',
+          }
+        : undefined));
     log.push({ stageId: 'structural', category, item: r.partNumber,
       quantity: Math.ceil(r.qty), derivedFrom: 'structuralEngine.rackingBOM',
-      formula: 'calcRackingBOM', necReference: nec });
+      formula: `calcRackingBOM${_pending ? ' (PENDING RACKING ASSEMBLY SELECTION — non-orderable)' : ''}`, necReference: nec });
   };
-  emitRB('rail', rb.rails, 'IBC 2021');
-  emitRB('splice', rb.railSplices, 'IBC 2021');
+  emitRB('rail', rb.rails, 'UL 2703');
+  emitRB('splice', rb.railSplices, 'UL 2703');
   emitRB('l_foot', rb.lFeet, 'ASCE 7-22');
   emitRB('lag_bolt', rb.lagBolts, 'ASCE 7-22');
-  emitRB('mount_hardware', rb.mountingBolts, 'IBC 2021');
-  emitRB('mid_clamp', rb.midClamps, 'IBC 2021');
-  emitRB('end_clamp', rb.endClamps, 'IBC 2021');
-  emitRB('flashing', rb.flashingKits, 'IBC 2021');
+  emitRB('mount_hardware', rb.mountingBolts, 'UL 2703');
+  emitRB('mid_clamp', rb.midClamps, 'UL 2703');
+  emitRB('end_clamp', rb.endClamps, 'UL 2703');
+  emitRB('flashing', rb.flashingKits, 'UL 2703');
   emitRB('grounding', rb.bondingClips, 'UL 2703');
 }
 
@@ -384,6 +760,9 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   const log: BOMDerivationEntry[] = [];
   const warnings: string[] = [];
   const complianceNotes: string[] = [];
+  // §5/§6 closeout — machine-readable evidence (attached to the result below).
+  let _branchWireReconciliation: BranchWireReconciliation | undefined;
+  let _physicalRaceways: DerivedRaceway[] | undefined;
 
   // Resolve topology
   const topoCtx: TopologyManagerContext = {
@@ -398,7 +777,24 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   };
   const topoResult = resolveTopology(topoCtx);
   const topology = topoResult.topology;
-  const norm = normalizeTopologyV4(topology);
+  let norm = normalizeTopologyV4(topology);
+  // ── W4a — the caller's DESIGN topologyType is AUTHORITY over the id-round-trip
+  // resolver. resolveTopology() falls to STRING_INVERTER whenever
+  // getRegistryEntryV4(inverterId) misses (topology-manager.ts:426-427); on a
+  // PURE-MICRO design that silently flipped `isMicro` false and emitted phantom
+  // "#10/#12 AWG USE-2 — DC roof wiring" rows + a DC disconnect for a DC string
+  // circuit that PHYSICALLY DOES NOT EXIST (gate 6). When the design declares a
+  // micro topology but the resolver returned a DC/string topology, honor the
+  // design and record the resolver miss (never silent). ──
+  if (input.topologyType) {
+    const _declared = normalizeTopologyV4(input.topologyType);
+    const _declaredMicro = _declared === 'MICROINVERTER' || _declared === 'AC_MODULE';
+    const _resolvedMicro = norm === 'MICROINVERTER' || norm === 'AC_MODULE' || norm === 'AC_COUPLED_BATTERY';
+    if (_declaredMicro && !_resolvedMicro) {
+      warnings.push(`[V4 topology] resolver returned ${norm} but the design declares ${_declared}; honoring the design topology — NO DC string wiring/conduit/disconnect emitted (pure micro AC branch). Verify inverter registry id "${input.inverterId}".`);
+      norm = _declared;
+    }
+  }
 
   // FIX v57.2: For microinverter topology, stringCount=0 (no DC strings).
   // Structural rail/clamp formulas use 'strings' as a proxy for "rows of modules".
@@ -536,6 +932,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const trunkDeviceCount = input.deviceCount ?? input.moduleCount;
     const microBrand = inverterEntry?.manufacturer ?? microDb?.manufacturer ?? 'Enphase';
     const microModel = inverterEntry?.model ?? microDb?.model;
+    // §13 — the AC-branch COUNT that governs terminator/cap quantities is the
+    // ACTUAL branch-cable topology (the plane-aware planMicroBranches result the
+    // snapshot carries as electrical.branches), NOT the resolver's flat
+    // ceil(devices / perModelMax) heuristic which yielded branches+1 on Braidon
+    // (3 real branches → 4 terminators). Absent ⇒ resolver heuristic (unchanged).
+    const branchCountOverride = (typeof input.branchCount === 'number' && input.branchCount > 0)
+      ? input.branchCount : undefined;
     const plan = resolveTrunkCablePlan({
       brand: microBrand,
       model: microModel,
@@ -546,48 +949,114 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       subArrayCount: input.subArrayCount,
       // Installer preference: cut at rows instead of service-looping.
       spliceAtRows: input.spliceAtRows,
+      // Canonical AC-branch count (terminators/caps derive from THIS).
+      branchCountOverride,
     });
 
     if (plan) {
       const { system, cable } = plan;
       const orientLabel = cable.orientation === 'fixed' ? '' : ` (${cable.orientation})`;
-      items.push(addItem('dc', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
-        cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft), continuous per branch × ${plan.branchCount}`,
+      // §13 — Enphase Q-Cable / AC trunk is AC BRANCH-CIRCUIT equipment (240 V AC
+      // output of each microinverter), NOT DC. It files under Stage 4 — AC. The
+      // terminator/sealing-cap COUNT derives from the ACTUAL AC-branch topology
+      // (branchCount below), never a branches+1 heuristic.
+      items.push(addItem('ac', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
+        cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft procurement = drops×pitch×waste; NOT the geometric cable-path length), continuous per branch × ${plan.branchCount}`,
         plan.dropCount, 'ea', 'NEC 690.31', 'one connector-drop per device', `${trunkDeviceCount} drops`, true));
-      log.push({ stageId: 'dc', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
+      log.push({ stageId: 'ac', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
         quantity: plan.dropCount, derivedFrom: 'trunkCable resolver (drops)', formula: `${trunkDeviceCount} drops ≈ ${plan.approxFeet} ft`, necReference: 'NEC 690.31' });
 
       if (plan.splicePairs > 0) {
-        items.push(addItem('dc', 'connector', system.brand, system.connectors.male.description,
-          system.connectors.male.sku, `${system.connectors.male.description} — trunk jump (${plan.spliceBasis})`,
-          plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
-        items.push(addItem('dc', 'connector', system.brand, system.connectors.female.description,
-          system.connectors.female.sku, `${system.connectors.female.description} — trunk jump (${plan.spliceBasis})`,
-          plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
-        log.push({ stageId: 'dc', category: 'connector', item: 'Field-wireable splice (M/F pair)',
+        // ── ECD §4 (W1-E) — the field-wireable trunk connectors are a CANDIDATE,
+        // never a selected product. No CableExtensionSolution is selected for
+        // this design, so nothing establishes that THESE connectors are the
+        // listed field-splice method for the selected cable assembly. They were
+        // previously emitted with no state at all ⇒ counted ORDERABLE and shipped
+        // inside the procurement export. The rendered `derivedFrom` also carried
+        // INSTALLATION INTENT ("rows use continuous cable + service loop
+        // (cheapest)") — an installation decision the design has not made. Both
+        // are corrected here: the derivation states the COUNT BASIS only, and the
+        // state hint makes the row non-orderable until a verified, selected
+        // CableExtensionSolution names its bomLineId (see the promotion contract
+        // in lib/permit/utils/bomForPermit.ts).
+        const _connCount = `${plan.splicePairs} splice pair(s) — count basis: ${plan.splicePairs} required trunk jump(s)`;
+        const _connHint = {
+          authorityStateHint: 'CANDIDATE_NON_ORDERABLE' as ProcurementAuthorityState,
+          authorityStateHintReason:
+            'CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution '
+            + 'selects a field-wireable connector solution for the selected cable assembly, so this connector is '
+            + 'not established as the listed splice method. Design quantity only; excluded from the authoritative '
+            + 'procurement total and from every export. It does NOT resolve any cable-length deficit.',
+          quantitySource: 'topology-derived' as BomQuantitySource,
+        };
+        items.push(addItem('ac', 'connector', system.brand, system.connectors.male.description,
+          system.connectors.male.sku, `${system.connectors.male.description} — trunk jump`,
+          plan.splicePairs, 'ea', 'NEC 690.31', _connCount, `${plan.splicePairs}`, false,
+          undefined, undefined, undefined, undefined, _connHint));
+        items.push(addItem('ac', 'connector', system.brand, system.connectors.female.description,
+          system.connectors.female.sku, `${system.connectors.female.description} — trunk jump`,
+          plan.splicePairs, 'ea', 'NEC 690.31', _connCount, `${plan.splicePairs}`, false,
+          undefined, undefined, undefined, undefined, _connHint));
+        log.push({ stageId: 'ac', category: 'connector', item: 'Field-wireable splice (M/F pair)',
           quantity: plan.splicePairs, derivedFrom: plan.spliceBasis, formula: `${plan.splicePairs}`, necReference: 'NEC 690.31' });
       }
 
-      items.push(addItem('dc', 'terminator', system.brand, system.connectors.terminator.description,
-        system.connectors.terminator.sku, `${system.connectors.terminator.description} — 1 per branch end`,
-        plan.terminators, 'ea', 'NEC 690.31', '1 per branch', `${plan.branchCount} branches`, true));
-      log.push({ stageId: 'dc', category: 'terminator', item: system.connectors.terminator.description,
-        quantity: plan.terminators, derivedFrom: '1 per branch', formula: `${plan.branchCount}`, necReference: 'NEC 690.31' });
+      // §7 (BAR closeout 2026-07-25) — CAPS/TERMINATORS FROM TOPOLOGY, not a
+      // per-branch constant. TERMINATORS = actual cable-end objects: exactly one
+      // per branch FAR-END (the end away from the J-box transition) = branchCount.
+      // That IS what the topology says, so the quantity is correct — but it is now
+      // derived from the cable-end objects (listed per id), never "1 per branch".
+      const _termEndIds = Array.from({ length: plan.branchCount }, (_, i) => `B${i + 1}-END`);
+      items.push(addItem('ac', 'terminator', system.brand, system.connectors.terminator.description,
+        system.connectors.terminator.sku, `${system.connectors.terminator.description} — one per branch cable FAR-END (away from the J-box transition). Cable-end objects: ${_termEndIds.join(', ')}`,
+        plan.terminators, 'ea', 'NEC 690.31', 'actual cable-end objects (one per branch far-end)', `${_termEndIds.length} branch ends: ${_termEndIds.join(', ')}`, true));
+      log.push({ stageId: 'ac', category: 'terminator', item: system.connectors.terminator.description,
+        quantity: plan.terminators, derivedFrom: 'actual cable-end objects (branch far-ends)', formula: `${_termEndIds.join(', ')}`, necReference: 'NEC 690.31' });
 
       if (system.connectors.sealingCap) {
-        items.push(addItem('dc', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
-          system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — service-loop unused drops (1 per branch)`,
-          plan.sealingCaps, 'ea', 'NEC 690.31', '1 per branch', `${plan.branchCount}`, false));
+        // §7 — SEALING CAPS = actual UNUSED-connector objects, derived from the
+        // cable-piece connector inventory minus the occupied drops. The Q-Cable is
+        // sold BY DROP (soldBy:'drop'); the resolver orders exactly deviceCount
+        // drops (dropCount = deviceCount), so every ordered drop is occupied by a
+        // micro — the drop-count procurement establishes ZERO surplus connectors,
+        // and the resolver models no fixed-section pieces that would leave a
+        // surplus. Therefore the unused-connector count is NOT established by the
+        // procurement model → PENDING (field service-loop / dead-drop caps depend
+        // on cable routing not modeled). NEVER the old 1-per-branch guess.
+        const _orderedDrops = plan.dropCount;
+        const _occupiedDrops = trunkDeviceCount;          // one drop per micro
+        const _establishedUnused = Math.max(0, _orderedDrops - _occupiedDrops); // 0 on a drop-count order
+        // PPC §8 — the description said QUANTITY PENDING while the quantity
+        // argument was a computed hard 0, so SCHED-2 printed "Q-SEAL-10 | 0 | ea":
+        // "zero MODELED" rendered as "zero REQUIRED". The modeled value is retained
+        // (it is the honest surplus the drop-count order establishes) but the row
+        // now carries quantityState:'pending', so the cell prints
+        // "0 MODELED / FIELD QUANTITY PENDING" and the row is EXCLUDED from
+        // procurement approval. A hard certain zero is legal only once the exact
+        // cable-piece topology proves every drop/occupied/unused/end/cap object.
+        items.push(addItem('ac', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
+          system.connectors.sealingCap.sku,
+          `${system.connectors.sealingCap.description} — QUANTITY PENDING (topology-derived, NOT 1-per-branch): ${_orderedDrops} drops ordered = ${_occupiedDrops} micros = ${_occupiedDrops} occupied drops; drop-count procurement establishes ${_establishedUnused} surplus connectors (resolver models no fixed-section pieces). Field service-loop / dead-drop caps depend on cable routing — determine at field verification.`,
+          _establishedUnused, 'ea', 'NEC 690.31',
+          'topology: ordered drops − occupied drops (drop-count basis; field caps PENDING)',
+          `${_orderedDrops} ordered − ${_occupiedDrops} occupied = ${_establishedUnused} established; field caps PENDING`, false,
+          undefined, undefined, undefined, undefined,
+          {
+            quantityState: 'pending',
+            quantityStateLabel: `${_establishedUnused} MODELED / FIELD QUANTITY PENDING`,
+          }));
+        log.push({ stageId: 'ac', category: 'sealing_cap', item: system.connectors.sealingCap.description,
+          quantity: _establishedUnused, derivedFrom: 'topology: ordered − occupied drops (field caps PENDING)', formula: `${_orderedDrops}-${_occupiedDrops}=${_establishedUnused}`, necReference: 'NEC 690.31' });
       }
     } else {
-      // Unknown micro brand — generic trunk line so the wire never silently vanishes.
-      const genericSections = Math.ceil(trunkDeviceCount / 13);
-      items.push(addItem('dc', 'trunk_cable', microBrand, 'AC Trunk Cable (brand TBD)',
+      // Unknown micro brand — generic AC trunk line so the wire never silently vanishes.
+      const genericSections = branchCountOverride ?? Math.ceil(trunkDeviceCount / 13);
+      items.push(addItem('ac', 'trunk_cable', microBrand, 'AC Trunk Cable (brand TBD)',
         'TRUNK-TBD', `AC trunk cable — 1 drop per micro (${trunkDeviceCount} devices, brand not in trunk catalog)`,
         trunkDeviceCount, 'ea', 'NEC 690.31', 'one drop per device', `${trunkDeviceCount}`, true));
-      items.push(addItem('dc', 'terminator', microBrand, 'Trunk Terminator (brand TBD)',
-        'TERM-TBD', 'Trunk terminator — 1 per branch end', genericSections, 'ea', 'NEC 690.31', '1 per branch', `${genericSections}`, true));
-      log.push({ stageId: 'dc', category: 'trunk_cable', item: 'AC Trunk (brand TBD)',
+      items.push(addItem('ac', 'terminator', microBrand, 'Trunk Terminator (brand TBD)',
+        'TERM-TBD', 'Trunk terminator — 1 per AC branch end', genericSections, 'ea', 'NEC 690.31', '1 per AC branch', `${genericSections}`, true));
+      log.push({ stageId: 'ac', category: 'trunk_cable', item: 'AC Trunk (brand TBD)',
         quantity: trunkDeviceCount, derivedFrom: 'generic fallback (brand not in trunkCable catalog)', formula: `${trunkDeviceCount}`, necReference: 'NEC 690.31' });
     }
 
@@ -861,7 +1330,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       junctionBoxQty = Math.ceil((input.deviceCount ?? input.moduleCount) / 16);
     }
     if (junctionBoxQty > 0) {
-      items.push(addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box (or approved equal)',
+      items.push(addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box',
         '0786-41', 'Roof-flashed PV junction box — transitions open-air PV wire to conduit',
         junctionBoxQty, 'ea', 'NEC 690.31', 'runSegments.to=JUNCTION BOX', 'ceil(deviceCount/16)', true));
       log.push({ stageId: 'ac', category: 'junction_box', item: 'PV Junction Box',
@@ -888,137 +1357,93 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const dcRunIds = new Set(['ROOF_RUN', 'DC_STRING_RUN', 'DC_DISCO_TO_INV_RUN']);
     const dcBomRuns = allBomRuns.filter(r => dcRunIds.has(r.id));
     const acBomRuns = allBomRuns.filter(r => !dcRunIds.has(r.id));
+    // ── W4a — on a PURE micro the module→micro DC connection (ROOF_RUN) is the
+    // module's FACTORY leads / MC4 connectors, NOT installer-run USE-2 DC roof
+    // wiring. Emitting ROOF_RUN as bulk "#10/#12 USE-2 — DC roof wiring" invented
+    // a field-run DC home run for a circuit that ships integral to the module
+    // (gate 6: no DC string materials in pure micro topology without a real DC
+    // string segment). Exclude ROOF_RUN from the micro DC-wire rows; a genuine DC
+    // string segment (DC_STRING_RUN / DC_DISCO_TO_INV_RUN — string/optimizer only)
+    // is unaffected. ──
+    const MICRO_FACTORY_LEAD_IDS = new Set(['ROOF_RUN']);
+    const dcFieldRuns = isMicro ? dcBomRuns.filter(r => !MICRO_FACTORY_LEAD_IDS.has(r.id)) : dcBomRuns;
+    if (isMicro && dcBomRuns.length > 0 && dcFieldRuns.length === 0) {
+      complianceNotes.push('Module-to-microinverter DC connection uses the module’s factory-integrated leads/MC4 connectors (NEC 690.31) — no separately-run DC roof conductor; the field wiring is the AC branch (Q-Cable trunk).');
+    }
 
     // ── Group DC runs by wire gauge → one line item per gauge (micro only, matches calcBOMFromSegments) ──
     // Key insight: EGC can be a DIFFERENT gauge than DC conductors
-    if (isMicro && dcBomRuns.length > 0) {
-      const dcGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
-      
-      for (const r of dcBomRuns) {
+    if (isMicro && dcFieldRuns.length > 0) {
+      const dcGaugeMap = new Map<string, { qty: number; runIds: string[]; unknown: string[] }>();
+
+      for (const r of dcFieldRuns) {
         const gauge: string = r.wireGauge ?? '#10 AWG';
         const egcGauge: string = r.egcGauge ?? '#10 AWG';
         const conductors: number = r.conductorCount ?? 2;
-        const length: number = r.onewayLengthFt ?? 30;
-        
-        // Add DC conductor quantity (gauge = wireGauge)
-        const dcQty = Math.ceil(length * conductors * 1.15);
-        const dcExisting = dcGaugeMap.get(gauge);
-        if (dcExisting) {
-          dcExisting.qty += dcQty;
-          dcExisting.runIds.push(r.id);
-        } else {
-          dcGaugeMap.set(gauge, { qty: dcQty, runIds: [r.id] });
-        }
-        
-        // Add EGC quantity (gauge = egcGauge, may differ from wireGauge)
-        const egcQty = Math.ceil(length * 1 * 1.15);
-        const egcExisting = dcGaugeMap.get(egcGauge);
-        if (egcExisting) {
-          egcExisting.qty += egcQty;
-          if (!egcExisting.runIds.includes(r.id)) {
-            egcExisting.runIds.push(r.id);
+        // ECD §3 — NO FABRICATED LENGTH (was `?? 30`): an unresolved run length
+        // contributes 0 ft and is recorded so the row classifies QUANTITY_PENDING.
+        const _len = typeof r.onewayLengthFt === 'number' && Number.isFinite(r.onewayLengthFt)
+          ? r.onewayLengthFt : null;
+        const length: number = _len ?? 0;
+        const _mark = (k: string, add: number) => {
+          const ex = dcGaugeMap.get(k);
+          if (ex) {
+            ex.qty += add;
+            if (!ex.runIds.includes(r.id)) ex.runIds.push(r.id);
+            if (_len == null && !ex.unknown.includes(r.id)) ex.unknown.push(r.id);
+          } else {
+            dcGaugeMap.set(k, { qty: add, runIds: [r.id], unknown: _len == null ? [r.id] : [] });
           }
-        } else {
-          dcGaugeMap.set(egcGauge, { qty: egcQty, runIds: [r.id] });
-        }
+        };
+        // DC conductor quantity (gauge = wireGauge) + EGC (may differ).
+        _mark(gauge, Math.ceil(length * conductors * 1.15));
+        _mark(egcGauge, Math.ceil(length * 1 * 1.15));
       }
-      
-      for (const [gauge, { qty, runIds }] of dcGaugeMap.entries()) {
+
+      for (const [gauge, { qty, runIds, unknown }] of dcGaugeMap.entries()) {
         const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
         items.push(addItem('dc', 'wire', 'Southwire', `${gauge} USE-2/THWN-2`,
           `USE2-${gaugeNum}`,
           `${gauge} USE-2 — DC roof wiring (open-air, panels to microinverters)`,
           qty, 'ft', 'NEC 690.31',
           'Sum(length x conductors x 1.15)',
-          `${gauge} DC runs x 1.15`, true));
+          `${gauge} DC runs x 1.15`, true,
+          undefined, undefined, undefined, undefined,
+          { quantitySource: unknown.length ? 'unknown' : 'route-derived', affectedRouteIds: runIds.map(String) }));
         log.push({ stageId: 'dc', category: 'wire', item: `${gauge} USE-2`,
           quantity: qty, derivedFrom: runIds.join(', '),
           formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 690.31' });
       }
     }
 
-    // ── Group AC runs by wire gauge → one line item per gauge (matches calcBOMFromSegments) ──
-    // Produces separate line items for #10, #8, #6, #4 AWG matching summary cards
-    // Key insight: EGC can be a DIFFERENT gauge than hot conductors
-    // - Hot/neutral: length × conductorCount × 1.15 of wireGauge
-    // - EGC: length × 1 × 1.15 of egcGauge (may differ from wireGauge)
-    const wireGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
-    
-    for (const r of acBomRuns) {
-      const gauge: string = r.wireGauge ?? input.acWireGauge ?? '#8 AWG';
-      const egcGauge: string = r.egcGauge ?? '#10 AWG';
-      const conductors: number = r.conductorCount ?? 3;
-      const length: number = r.onewayLengthFt ?? 50;
-      
-      // Add hot/neutral conductor quantity (gauge = wireGauge)
-      const hotQty = Math.ceil(length * conductors * 1.15);
-      const hotExisting = wireGaugeMap.get(gauge);
-      if (hotExisting) {
-        hotExisting.qty += hotQty;
-        hotExisting.runIds.push(r.id);
-      } else {
-        wireGaugeMap.set(gauge, { qty: hotQty, runIds: [r.id] });
-      }
-      
-      // Add EGC quantity (gauge = egcGauge, may differ from wireGauge)
-      // EGC is always 1 conductor per run
-      const egcQty = Math.ceil(length * 1 * 1.15);
-      const egcExisting = wireGaugeMap.get(egcGauge);
-      if (egcExisting) {
-        egcExisting.qty += egcQty;
-        if (!egcExisting.runIds.includes(r.id)) {
-          egcExisting.runIds.push(r.id);
-        }
-      } else {
-        wireGaugeMap.set(egcGauge, { qty: egcQty, runIds: [r.id] });
+    // ── §5 — AC circuit conductors from the ACTUAL route segments ────────────
+    // Open-air Q-Cable trunk sections are excluded (billed as trunk cable); hots
+    // scale by conductorsPerCircuit × sharedCircuitCount (the shared home-run
+    // carries N branches in ONE raceway); the shared EGC is one per raceway.
+    // Hots and EGCs stay SEPARATE rows — no undifferentiated "AC wiring" merge.
+    {
+      const _ac = emitAcConductorBom(acBomRuns);
+      _branchWireReconciliation = _ac.evidence;
+      for (const it of _ac.items) {
+        items.push(it);
+        log.push({ stageId: 'ac', category: 'wire', item: it.model,
+          quantity: it.quantity, derivedFrom: it.formula,
+          formula: it.derivedFrom, necReference: it.necReference });
       }
     }
 
-    // Emit one wire line item per gauge (sorted: smaller AWG number = larger wire = first)
-    const sortedGauges = [...wireGaugeMap.entries()].sort((a, b) => {
-      const numA = parseInt(a[0].replace('#', '').replace(' AWG', '')) || 99;
-      const numB = parseInt(b[0].replace('#', '').replace(' AWG', '')) || 99;
-      return numA - numB;
-    });
-
-    for (const [gauge, { qty, runIds }] of sortedGauges) {
-      const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
-      const runLabel = runIds.join(', ');
-      items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`,
-        `THWN2-${gaugeNum}`,
-        `${gauge} THWN-2 — AC wiring (${runLabel})`,
-        qty, 'ft', 'NEC 310.15 / 250.122',
-        `Sum(length x conductors x 1.15)`,
-        `${gauge} wire runs x 1.15`, true));
-      log.push({ stageId: 'ac', category: 'wire', item: `${gauge} THWN-2`,
-        quantity: qty, derivedFrom: runLabel,
-        formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 310.15 / 250.122' });
-    }
-
-    // ── Group ALL runs by conduit type+size → one conduit line item per type/size ──
-    // Open-air runs (conduitType 'NONE' / isOpenAir) carry no raceway — skip them.
-    const conduitMap = new Map<string, { qty: number; type: string; size: string }>();
-    for (const r of allBomRuns) {
-      if (runHasNoConduit(r)) continue;
-      const cType: string = r.conduitType ?? input.conduitType ?? 'EMT';
-      const cSize: string = (r.conduitSize ?? `${input.conduitSizeInch ?? '3/4'}"`).replace('"', '');
-      const key = `${cType}-${cSize}`;
-      const qty = Math.ceil((r.onewayLengthFt ?? 30) * 1.15);
-      const existing = conduitMap.get(key);
-      if (existing) {
-        existing.qty += qty;
-      } else {
-        conduitMap.set(key, { qty, type: cType, size: cSize });
+    // ── §6/§7 — conduit + fittings PER PHYSICAL RACEWAY (no "— all runs" roll-up;
+    // the shared branch home-run is counted ONCE; each raceway cites its OWN NEC
+    // article from the raceway type — never a template 'NEC 358'). ────────────
+    {
+      const _raceways = derivePhysicalRacewaysFromRuns(allBomRuns);
+      _physicalRaceways = _raceways;
+      for (const rw of _raceways) {
+        for (const it of emitRacewayConduitBom(rw)) items.push(it);
+        log.push({ stageId: 'ac', category: 'conduit', item: `${rw.sizeIn}" ${rw.racewayType} (${rw.physicalRacewayId})`,
+          quantity: rw.lengthFt, derivedFrom: rw.segmentIds.join(', '),
+          formula: `${rw.physicalRacewayId}: Σ segment length × ${_WASTE}`, necReference: `NEC ${rw.necArticle}` });
       }
-    }
-
-    for (const [, { qty, type, size }] of conduitMap.entries()) {
-      items.push(addItem('ac', 'conduit', 'Generic', `${size}" ${type} Conduit`,
-        `${type}-${size.replace('/', '-')}`,
-        `${size}" ${type} conduit — all runs`,
-        qty, 'ft', 'NEC 358',
-        'Sum(allRuns.length x 1.15)',
-        `${size}" ${type} x 1.15`, true));
     }
 
   } else {
@@ -1045,57 +1470,59 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       'acWireLength x 1.15', `${input.acWireLength} x 1.15`, true));
   }
 
-  // ── Conduit Fittings (NEC 300.15 / 358.30) ─────────────────────────────────
-  // Auto-derived from total conduit length across all runs.
-  // Rule of thumb: 1 connector + 1 coupling per 10 ft of conduit.
-  {
-    const totalConduitFt = (() => {
-      if (input.runs && input.runs.length > 0) {
-        return input.runs
-          // Utility-owned and open-air (no-conduit) runs carry no raceway —
-          // they must not inflate connector/coupling/bushing/strap counts.
-          .filter(r => !r.isUtilityOwned && !runHasNoConduit(r))
-          .reduce((sum: number, r) =>
-            sum + Math.ceil((r.onewayLengthFt ?? 30) * 1.15), 0);
-      }
-      return conduitLength(input.acWireLength);
-    })();
+  // ── Conduit Fittings — FLAT FALLBACK ONLY (no runs) ─────────────────────────
+  // When runs ARE present the §6 per-physical-raceway pass above already emitted
+  // each raceway's own conduit + fittings (couplings/connectors/straps/bushings/
+  // bends), labeled with its physicalRacewayId and citing its raceway-type NEC
+  // article. This flat block only covers the design-studio fallback path where
+  // no sized runs exist (env-based single AC home run).
+  if (!(input.runs && input.runs.length > 0)) {
+    const _fitGroups = new Map<string, { size: string; type: string; ft: number }>();
+    if (_fitGroups.size === 0) {
+      const size = input.conduitSizeInch ?? '3/4';
+      const type = input.conduitType ?? 'EMT';
+      _fitGroups.set(`${size}|${type}`, { size, type, ft: conduitLength(input.acWireLength) });
+    }
 
-    const conduitType = input.conduitType ?? 'EMT';
-    const conduitSize = input.conduitSizeInch ?? '3/4';
+    let _fitTotal = 0;
+    for (const { size: conduitSize, type: conduitType, ft: totalConduitFt } of _fitGroups.values()) {
+      const _typeTag = conduitType.replace(/\s+/g, '-');
+      const _sizeTag = conduitSize.replace('/', '-').replace(/"/g, '');
+      // Connectors — 1 per 10 ft (termination at each end + mid-run joins)
+      const connQty = Math.max(2, Math.ceil(totalConduitFt / 10));
+      items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Connector`,
+        `${_typeTag}-CONN-${_sizeTag}`,
+        `${conduitSize}" ${conduitType} set-screw connector — NEC 300.15`,
+        connQty, 'ea', 'NEC 300.15 / 358.30', 'ceil(runConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
 
-    // Connectors — 1 per 10 ft (termination at each end + mid-run joins)
-    const connQty = Math.max(2, Math.ceil(totalConduitFt / 10));
-    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Connector`,
-      `${conduitType}-CONN-${conduitSize.replace('/', '-')}`,
-      `${conduitSize}" ${conduitType} set-screw connector — NEC 300.15`,
-      connQty, 'ea', 'NEC 300.15 / 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+      // Couplings — 1 per 10 ft (joins 10-ft sticks)
+      const couplingQty = Math.max(1, Math.ceil(totalConduitFt / 10));
+      items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Coupling`,
+        `${_typeTag}-COUP-${_sizeTag}`,
+        `${conduitSize}" ${conduitType} coupling — joins conduit sticks`,
+        couplingQty, 'ea', 'NEC 358.30', 'ceil(runConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
 
-    // Couplings — 1 per 10 ft (joins 10-ft sticks)
-    const couplingQty = Math.max(1, Math.ceil(totalConduitFt / 10));
-    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Coupling`,
-      `${conduitType}-COUP-${conduitSize.replace('/', '-')}`,
-      `${conduitSize}" ${conduitType} coupling — joins conduit sticks`,
-      couplingQty, 'ea', 'NEC 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+      // Insulated bushings — 1 per conduit termination end (min 2 per run segment)
+      const bushingQty = Math.max(2, Math.ceil(totalConduitFt / 50) * 2);
+      items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" Insulated Bushing`,
+        `BUSH-INS-${_sizeTag}`,
+        `${conduitSize}" insulated throat bushing — protects conductors at conduit end per NEC 300.15`,
+        bushingQty, 'ea', 'NEC 300.15', 'ceil(runConduitFt/50)*2', `ceil(${totalConduitFt}/50)*2`, true));
 
-    // Insulated bushings — 1 per conduit termination end (min 2 per run segment)
-    const bushingQty = Math.max(2, Math.ceil(totalConduitFt / 50) * 2);
-    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" Insulated Bushing`,
-      `BUSH-INS-${conduitSize.replace('/', '-')}`,
-      `${conduitSize}" insulated throat bushing — protects conductors at conduit end per NEC 300.15`,
-      bushingQty, 'ea', 'NEC 300.15', 'ceil(totalConduitFt/50)*2', `ceil(${totalConduitFt}/50)*2`, true));
+      // One-hole straps — 1 per 10 ft (NEC 358.30 support every 10 ft)
+      const strapQty = Math.max(2, Math.ceil(totalConduitFt / 10));
+      items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} One-Hole Strap`,
+        `${_typeTag}-STRAP-${_sizeTag}`,
+        `${conduitSize}" ${conduitType} one-hole strap — NEC 358.30 support every 10 ft`,
+        strapQty, 'ea', 'NEC 358.30', 'ceil(runConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
 
-    // One-hole straps — 1 per 10 ft (NEC 358.30 support every 10 ft)
-    const strapQty = Math.max(2, Math.ceil(totalConduitFt / 10));
-    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} One-Hole Strap`,
-      `${conduitType}-STRAP-${conduitSize.replace('/', '-')}`,
-      `${conduitSize}" ${conduitType} one-hole strap — NEC 358.30 support every 10 ft`,
-      strapQty, 'ea', 'NEC 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+      _fitTotal += connQty + couplingQty + bushingQty + strapQty;
+    }
 
     log.push({ stageId: 'ac', category: 'conduit_fitting', item: 'Conduit Fittings Set',
-      quantity: connQty + couplingQty + bushingQty + strapQty,
-      derivedFrom: 'totalConduitFt',
-      formula: 'connectors + couplings + bushings + straps derived from total conduit footage',
+      quantity: _fitTotal,
+      derivedFrom: 'per-raceway run conduit footage',
+      formula: 'connectors + couplings + bushings + straps derived per raceway (matching each segment)',
       necReference: 'NEC 300.15 / 358.30' });
   }
 
@@ -1261,8 +1688,9 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // connectors on the service-entrance conductors — L1 + L2 + N = 3.
     items.push(addItem('ac', 'connector', 'NSI Polaris',
       'Insulated Multi-Tap Connector (350 kcmil–#6)',
-      'IPLD350-3', 'Polaris-style insulated tap connector — supply-side tap of service-entrance conductor (1 per conductor: L1/L2/N). Verify lug range against actual service conductor size.',
-      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true));
+      'IPLD350-3', SUPPLY_SIDE_TAP_CONNECTOR_DESCRIPTION,
+      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true,
+      undefined, undefined, undefined, undefined, SUPPLY_SIDE_TAP_CONNECTOR_HINT));
     log.push({ stageId: 'ac', category: 'connector', item: 'Polaris Insulated Multi-Tap',
       quantity: 3, derivedFrom: 'supply-side tap (L1/L2/N)', formula: '3', necReference: 'NEC 705.11(C)' });
     complianceNotes.push(
@@ -1308,15 +1736,19 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // splices, bolts or clamps (SCHED-2 showed grounding only). The structural
     // engine's rackingBOM is self-sufficient (manufacturer + real quantities), so
     // emit the racking system + hardware from it instead of vanishing.
-    items.push(addItem('structural', 'racking', _roofRB.manufacturer, _roofRB.systemModel,
-      _roofRB.mounts.partNumber ?? _roofRB.systemModel,
-      `${_roofRB.manufacturer} ${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`,
-      1, 'lot', 'IBC 2021', 'perSystem', '1', true));
-    items.push(addItem('structural', 'attachment', _roofRB.manufacturer,
-      _roofRB.mounts.description, _roofRB.mounts.partNumber ?? 'TBD', _roofRB.mounts.description,
-      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
+    const _lot = _rackingLotState(_roofRB);
+    items.push(addItem('structural', 'racking', _lot.mfr(_roofRB.manufacturer), _roofRB.systemModel,
+      _lot.sku(_roofRB.mounts.partNumber ?? _roofRB.systemModel),
+      `${_lot.pending ? '' : `${_roofRB.manufacturer} `}${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`
+      + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
+      1, 'lot', 'UL 2703', 'perSystem', '1', true,
+      undefined, undefined, undefined, undefined, _lot.orderability));
+    items.push(addItem('structural', 'attachment', _lot.mfr(_roofRB.manufacturer),
+      _roofRB.mounts.description, _lot.sku(_roofRB.mounts.partNumber ?? 'TBD'), _roofRB.mounts.description,
+      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true,
+      undefined, undefined, undefined, undefined, _lot.orderability));
     log.push({ stageId: 'structural', category: 'racking', item: _roofRB.systemModel,
-      quantity: 1, derivedFrom: 'structuralEngine.rackingBOM (no registry entry)', formula: '1', necReference: 'IBC 2021' });
+      quantity: 1, derivedFrom: 'structuralEngine.rackingBOM (no registry entry)', formula: '1', necReference: 'UL 2703' });
     emitRackingBOM(_roofRB, _roofRB.manufacturer);
   }
 
@@ -1363,10 +1795,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       formula: '0', necReference: rackingEntry.iccEsReport });
   } else if (rackingEntry) {
     // Primary racking system
-    items.push(addItem('structural', 'racking', rackingEntry.manufacturer, rackingEntry.model,
-      rackingEntry.partNumber ?? rackingEntry.id,
-      `${rackingEntry.manufacturer} ${rackingEntry.model} — ${_suppressRailFormulas ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`,
-      1, 'lot', rackingEntry.iccEsReport ?? 'IBC 2021', 'perSystem', '1', true));
+    const _lot = _rackingLotState(_roofRB);
+    items.push(addItem('structural', 'racking', _lot.mfr(rackingEntry.manufacturer), rackingEntry.model,
+      _lot.sku(rackingEntry.partNumber ?? rackingEntry.id),
+      `${_lot.pending ? '' : `${rackingEntry.manufacturer} `}${rackingEntry.model} — ${_suppressRailFormulas ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`
+      + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
+      1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem', '1', true,
+      undefined, undefined, undefined, undefined, _lot.orderability));
     log.push({ stageId: 'structural', category: 'racking', item: rackingEntry.model,
       quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: rackingEntry.iccEsReport });
 
@@ -1432,7 +1867,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
             acc.defaultModel ?? acc.description,
             acc.defaultPartNumber ?? 'TBD',
             acc.description,
-            qty, 'ea', acc.necReference ?? 'IBC 2021',
+            qty, 'ea', acc.necReference ?? 'UL 2703',
             acc.quantityFormula ?? acc.quantityRule,
             acc.quantityFormula ?? acc.quantityRule,
             acc.required));
@@ -1446,9 +1881,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     }
   }
 
-  // ── Grounding Electrode System (NEC 250.52 / 690.43 / 250.66) ───────────────
-  // EGC: Equipment Grounding Conductor — runs inside conduit alongside AC conductors
-  {
+  // ── Equipment Grounding Conductor — FLAT FALLBACK ONLY (no runs) ────────────
+  // §5 closeout: when sized runs are present, the per-segment EGC is emitted ONCE
+  // per raceway by emitAcConductorBom (one shared green EGC per raceway,
+  // NEC 250.122(C)) — this flat `acWireLength × 1.15` row was the SECOND,
+  // independent EGC emitter that double-billed grounding on two bases. It now
+  // only covers the design-studio fallback path (no per-segment conductors).
+  if (!(input.runs && input.runs.length > 0)) {
     const egcLength = conduitLength(input.acWireLength);
     // EGC gauge: NEC 250.122 — based on OCPD size
     const ocpdForEgc = input.acOCPD > 0 ? input.acOCPD : nextStandardBreaker(
@@ -1465,8 +1904,12 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   }
 
   // Ground Rod & GEC — NEC 250.52(A)(5) / 250.66
-  // Required for grounding electrode system unless existing ground rod on site
-  {
+  // §7 (07-22): a grid-tied PV interconnection bonds to the EXISTING service
+  // grounding electrode system (NEC 250.64 / 690.47) — NO new electrode. Only
+  // materialize a ground rod + acorn clamp + GEC when an authoritative design
+  // input requires a NEW electrode. Previously this ran unconditionally and put
+  // a phantom 5/8"×8ft rod + acorn + #6 GEC on every microinverter package.
+  if (input.requiresGroundingElectrode === true) {
     // Ground rod: 8-ft copper-clad per NEC 250.52(A)(5)
     items.push(addItem('structural', 'grounding', 'Erico/Harger', '5/8" × 8 ft Copper-Clad Ground Rod',
       'GR-5/8-8',
@@ -1541,10 +1984,15 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   // ── STAGE 7: LABELS ──────────────────────────────────────────────────────────
 
   if (input.requiresWarningLabels !== false) {
-    // NEC 690.31 — DC conductor labels
-    items.push(addItem('labels', 'label', 'HellermannTyton', 'DC Conductor Label Set',
-      'LABEL-DC-SET', 'DC conductor warning labels per NEC 690.31',
-      input.stringCount * 2, 'ea', 'NEC 690.31', 'stringCount × 2', 'strings * 2', true));
+    // NEC 690.31 — DC conductor labels. §13: a microinverter design has NO DC
+    // source/output circuits (each module is paired 1:1 with a micro; the only
+    // DC is the factory MC4 module lead). A "DC Conductor Label Set" sized on a
+    // phantom stringCount is a string-system artifact — omit it for micro.
+    if (!isMicro) {
+      items.push(addItem('labels', 'label', 'HellermannTyton', 'DC Conductor Label Set',
+        'LABEL-DC-SET', 'DC conductor warning labels per NEC 690.31',
+        input.stringCount * 2, 'ea', 'NEC 690.31', 'stringCount × 2', 'strings * 2', true));
+    }
 
     // NEC 690.54 — Equipment labels
     items.push(addItem('labels', 'label', 'HellermannTyton', 'PV System Warning Label',
@@ -1623,15 +2071,15 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       'Wire nuts / Wago levers, assorted', 1, '1 assortment per job');
     if (isSupplySideTap) {
       ts('connector', 'NSI Polaris', 'Insulated Multi-Tap Connector (spare)', 'IPLD350-3',
-        'Spare Polaris tap (drop/strip mistakes are one-way)', 1, 'supply-side: 1 spare');
+        'Spare CANDIDATE Polaris tap (connector selection not verified — see the supply-side tap connection authority)', 1, 'supply-side: 1 spare');
     }
 
     // Micro trunk spares — cut ends and damaged drops are field realities.
     if (isMicro && _tsTrunkSections > 0) {
       ts('connector', 'Enphase', 'Q Field-Wireable Connector, Male (spare)', 'Q-CONN-10M',
-        'Spare trunk field splice, male', 1, 'micro: 1 spare');
+        'Spare CANDIDATE trunk field splice, male (no verified cable-extension solution selects this connector)', 1, 'micro: 1 spare');
       ts('connector', 'Enphase', 'Q Field-Wireable Connector, Female (spare)', 'Q-CONN-10F',
-        'Spare trunk field splice, female', 1, 'micro: 1 spare');
+        'Spare CANDIDATE trunk field splice, female (no verified cable-extension solution selects this connector)', 1, 'micro: 1 spare');
       ts('sealing_cap', 'Enphase', 'Q Cable Sealing Cap (spares)', 'Q-SEAL-10',
         'Spare sealing caps for unused/opened drops', Math.max(2, _tsTrunkSections), 'max(2, 1 per branch)');
       ts('terminator', 'Enphase', 'Q Cable Terminator (spare)', 'Q-TERM-10',
@@ -1710,6 +2158,8 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     derivationLog: log,
     warnings,
     complianceNotes,
+    ...(_branchWireReconciliation ? { branchWireReconciliation: _branchWireReconciliation } : {}),
+    ...(_physicalRaceways ? { physicalRaceways: _physicalRaceways } : {}),
   };
 }
 
@@ -1757,6 +2207,9 @@ function generateBOMV4PerSubSystem(
   const log: BOMDerivationEntry[] = [];
   const warnings: string[] = [];
   const complianceNotes: string[] = [];
+  // §5/§6 closeout — machine-readable evidence (attached to the result below).
+  let _branchWireReconciliation: BranchWireReconciliation | undefined;
+  let _physicalRaceways: DerivedRaceway[] | undefined;
   const counts = input.subSystemCounts!;
 
   /** Push a line, stamping the owning sub-system when the context is sub-scoped. */
@@ -1929,49 +2382,67 @@ function generateBOMV4PerSubSystem(
       }
     }
 
-    // ── Stage 2 — DC / trunk (this sub's own brand rules) ──
+    // ── Stage 4 — AC trunk / Q-Cable (this sub's own brand rules) ──
+    // §13 (07-22): a micro sub's Q-Cable / AC trunk + terminators + sealing caps
+    // are AC BRANCH-CIRCUIT equipment (Stage 4 — AC), consistent with the
+    // single-system path — never filed under DC.
     if (s.isMicro) {
       const plan = s.trunkPlan;
       if (plan) {
         const { system, cable } = plan;
         const orientLabel = cable.orientation === 'fixed' ? '' : ` (${cable.orientation})`;
-        push(key, addItem('dc', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
-          cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft), continuous per branch × ${plan.branchCount} — ${key} sub-system`,
+        push(key, addItem('ac', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
+          cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft procurement = drops×pitch×waste; NOT the geometric cable-path length), continuous per branch × ${plan.branchCount} — ${key} sub-system`,
           plan.dropCount, 'ea', 'NEC 690.31', `${key} sub-system: one connector-drop per device`, `${s.deviceCount} drops`, true));
-        log.push({ stageId: 'dc', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
+        log.push({ stageId: 'ac', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
           quantity: plan.dropCount, derivedFrom: `trunkCable resolver (${key} sub-system drops)`, formula: `${s.deviceCount} drops ≈ ${plan.approxFeet} ft`, necReference: 'NEC 690.31' });
 
         if (plan.splicePairs > 0) {
-          push(key, addItem('dc', 'connector', system.brand, system.connectors.male.description,
+          push(key, addItem('ac', 'connector', system.brand, system.connectors.male.description,
             system.connectors.male.sku, `${system.connectors.male.description} — trunk jump (${plan.spliceBasis})`,
             plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
-          push(key, addItem('dc', 'connector', system.brand, system.connectors.female.description,
+          push(key, addItem('ac', 'connector', system.brand, system.connectors.female.description,
             system.connectors.female.sku, `${system.connectors.female.description} — trunk jump (${plan.spliceBasis})`,
             plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
-          log.push({ stageId: 'dc', category: 'connector', item: 'Field-wireable splice (M/F pair)',
+          log.push({ stageId: 'ac', category: 'connector', item: 'Field-wireable splice (M/F pair)',
             quantity: plan.splicePairs, derivedFrom: plan.spliceBasis, formula: `${plan.splicePairs}`, necReference: 'NEC 690.31' });
         }
 
-        push(key, addItem('dc', 'terminator', system.brand, system.connectors.terminator.description,
-          system.connectors.terminator.sku, `${system.connectors.terminator.description} — 1 per branch end — ${key} sub-system`,
-          plan.terminators, 'ea', 'NEC 690.31', '1 per branch', `${plan.branchCount} branches`, true));
-        log.push({ stageId: 'dc', category: 'terminator', item: system.connectors.terminator.description,
-          quantity: plan.terminators, derivedFrom: `1 per branch (${key})`, formula: `${plan.branchCount}`, necReference: 'NEC 690.31' });
+        // §7 (BAR closeout 2026-07-25) — terminators = actual cable-end objects
+        // (one per branch FAR-END), listed by id; not "1 per branch" by fiat.
+        const _termEndIds = Array.from({ length: plan.branchCount }, (_, i) => `${key}-B${i + 1}-END`);
+        push(key, addItem('ac', 'terminator', system.brand, system.connectors.terminator.description,
+          system.connectors.terminator.sku, `${system.connectors.terminator.description} — one per branch cable FAR-END — ${key} sub-system. Cable-end objects: ${_termEndIds.join(', ')}`,
+          plan.terminators, 'ea', 'NEC 690.31', 'actual cable-end objects (one per branch far-end)', `${_termEndIds.join(', ')}`, true));
+        log.push({ stageId: 'ac', category: 'terminator', item: system.connectors.terminator.description,
+          quantity: plan.terminators, derivedFrom: `actual cable-end objects (branch far-ends, ${key})`, formula: `${_termEndIds.join(', ')}`, necReference: 'NEC 690.31' });
 
         if (system.connectors.sealingCap) {
-          push(key, addItem('dc', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
-            system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — service-loop unused drops (1 per branch) — ${key} sub-system`,
-            plan.sealingCaps, 'ea', 'NEC 690.31', '1 per branch', `${plan.branchCount}`, false));
+          // §7 — caps = actual unused-connector objects (PENDING): drop-count order
+          // = one drop per micro ⇒ all occupied ⇒ 0 established surplus; field caps
+          // depend on routing not modeled → PENDING. Never 1-per-branch.
+          const _orderedDrops = plan.dropCount;
+          const _occupiedDrops = s.deviceCount;
+          const _establishedUnused = Math.max(0, _orderedDrops - _occupiedDrops);
+          // PPC §8 (per-sub twin) — a PENDING quantity never renders as a certain 0.
+          push(key, addItem('ac', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
+            system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — QUANTITY PENDING (topology-derived, NOT 1-per-branch) — ${key} sub-system: ${_orderedDrops} drops ordered = ${_occupiedDrops} micros occupied; ${_establishedUnused} surplus connectors established. Field service-loop / dead-drop caps determine at field verification.`,
+            _establishedUnused, 'ea', 'NEC 690.31', 'topology: ordered − occupied drops (field caps PENDING)', `${_orderedDrops}-${_occupiedDrops}=${_establishedUnused}`, false,
+            undefined, undefined, undefined, undefined,
+            {
+              quantityState: 'pending',
+              quantityStateLabel: `${_establishedUnused} MODELED / FIELD QUANTITY PENDING`,
+            }));
         }
       } else {
-        // Unknown micro brand — generic trunk so the wire never silently vanishes.
+        // Unknown micro brand — generic AC trunk so the wire never silently vanishes.
         const genericSections = Math.ceil(s.deviceCount / 13);
-        push(key, addItem('dc', 'trunk_cable', s.brand, 'AC Trunk Cable (brand TBD)',
+        push(key, addItem('ac', 'trunk_cable', s.brand, 'AC Trunk Cable (brand TBD)',
           'TRUNK-TBD', `AC trunk cable — 1 drop per micro (${s.deviceCount} devices, ${key} sub-system, brand not in trunk catalog)`,
           s.deviceCount, 'ea', 'NEC 690.31', 'one drop per device', `${s.deviceCount}`, true));
-        push(key, addItem('dc', 'terminator', s.brand, 'Trunk Terminator (brand TBD)',
-          'TERM-TBD', 'Trunk terminator — 1 per branch end', genericSections, 'ea', 'NEC 690.31', '1 per branch', `${genericSections}`, true));
-        log.push({ stageId: 'dc', category: 'trunk_cable', item: 'AC Trunk (brand TBD)',
+        push(key, addItem('ac', 'terminator', s.brand, 'Trunk Terminator (brand TBD)',
+          'TERM-TBD', 'Trunk terminator — 1 per AC branch end', genericSections, 'ea', 'NEC 690.31', '1 per AC branch', `${genericSections}`, true));
+        log.push({ stageId: 'ac', category: 'trunk_cable', item: 'AC Trunk (brand TBD)',
           quantity: s.deviceCount, derivedFrom: `generic fallback (${s.brand} not in trunkCable catalog)`, formula: `${s.deviceCount}`, necReference: 'NEC 690.31' });
       }
     } else if (!subsWithDcRuns.has(key)) {
@@ -2104,7 +2575,7 @@ function generateBOMV4PerSubSystem(
       }
       if (jbQty === 0) jbQty = Math.ceil(s.deviceCount / 16);
       if (jbQty > 0) {
-        push(key, addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box (or approved equal)',
+        push(key, addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box',
           '0786-41', `Flashed PV junction box — transitions open-air PV wire to conduit (${key} sub-system)`,
           jbQty, 'ea', 'NEC 690.31', `${key} runSegments / ceil(deviceCount/16)`, 'ceil(deviceCount/16)', true));
         complianceNotes.push(`NEC 690.31: ${jbQty} junction box(es) — ${key} sub-system open-air PV wire to conduit`);
@@ -2254,20 +2725,25 @@ function generateBOMV4PerSubSystem(
 
   if (input.runs && input.runs.length > 0) {
     const allBomRuns = input.runs.filter(r => !r.isUtilityOwned);
-    const dcBomRuns = allBomRuns.filter(r => DC_RUN_IDS.has(baseRunId(r)));
+    // W4a — ROOF_RUN is the micro module→microinverter connection = the module's
+    // FACTORY leads/MC4 connectors (string roofs use DC_STRING_RUN), never a
+    // field-run DC conductor. Exclude it from bulk DC-wire emission (gate 6);
+    // real DC string segments (DC_STRING_RUN / DC_DISCO_TO_INV_RUN) still emit.
+    const dcBomRuns = allBomRuns.filter(r => DC_RUN_IDS.has(baseRunId(r)) && baseRunId(r) !== 'ROOF_RUN');
     const acBomRuns = allBomRuns.filter(r => !DC_RUN_IDS.has(baseRunId(r)));
 
     // DC runs — grouped per (owning sub, gauge); stamped when the sub is known.
     if (dcBomRuns.length > 0) {
-      const dcGaugeMap = new Map<string, { sub: SubSystemKey | undefined; gauge: string; qty: number; runIds: string[] }>();
-      const addDc = (sub: SubSystemKey | undefined, gauge: string, qty: number, runId: string) => {
+      const dcGaugeMap = new Map<string, { sub: SubSystemKey | undefined; gauge: string; qty: number; runIds: string[]; unknown: string[] }>();
+      const addDc = (sub: SubSystemKey | undefined, gauge: string, qty: number, runId: string, lengthUnknown: boolean) => {
         const k = `${sub ?? ''}|${gauge}`;
         const existing = dcGaugeMap.get(k);
         if (existing) {
           existing.qty += qty;
           if (!existing.runIds.includes(runId)) existing.runIds.push(runId);
+          if (lengthUnknown && !existing.unknown.includes(runId)) existing.unknown.push(runId);
         } else {
-          dcGaugeMap.set(k, { sub, gauge, qty, runIds: [runId] });
+          dcGaugeMap.set(k, { sub, gauge, qty, runIds: [runId], unknown: lengthUnknown ? [runId] : [] });
         }
       };
       for (const r of dcBomRuns) {
@@ -2275,70 +2751,51 @@ function generateBOMV4PerSubSystem(
         const gauge: string = r.wireGauge ?? '#10 AWG';
         const egcGauge: string = r.egcGauge ?? '#10 AWG';
         const conductors: number = r.conductorCount ?? 2;
-        const length: number = r.onewayLengthFt ?? 30;
-        addDc(sub, gauge, Math.ceil(length * conductors * 1.15), String(r.id));
-        addDc(sub, egcGauge, Math.ceil(length * 1 * 1.15), String(r.id));
+        // ECD §3 — NO FABRICATED LENGTH (was `?? 30`).
+        const _len = typeof r.onewayLengthFt === 'number' && Number.isFinite(r.onewayLengthFt)
+          ? r.onewayLengthFt : null;
+        const length: number = _len ?? 0;
+        addDc(sub, gauge, Math.ceil(length * conductors * 1.15), String(r.id), _len == null);
+        addDc(sub, egcGauge, Math.ceil(length * 1 * 1.15), String(r.id), _len == null);
       }
-      for (const { sub, gauge, qty, runIds } of dcGaugeMap.values()) {
+      for (const { sub, gauge, qty, runIds, unknown } of dcGaugeMap.values()) {
         const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
         push(sub, addItem('dc', 'wire', 'Southwire', `${gauge} USE-2/THWN-2`,
           `USE2-${gaugeNum}`,
           `${gauge} USE-2 — DC wiring (${runIds.join(', ')})${sub ? ` — ${sub} sub-system` : ''}`,
-          qty, 'ft', 'NEC 690.31', 'Sum(length x conductors x 1.15)', `${gauge} DC runs x 1.15`, true));
+          qty, 'ft', 'NEC 690.31', 'Sum(length x conductors x 1.15)', `${gauge} DC runs x 1.15`, true,
+          undefined, undefined, undefined, undefined,
+          { quantitySource: unknown.length ? 'unknown' : 'route-derived', affectedRouteIds: runIds }));
         log.push({ stageId: 'dc', category: 'wire', item: `${gauge} USE-2${sub ? ` (${sub})` : ''}`,
           quantity: qty, derivedFrom: runIds.join(', '), formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 690.31' });
       }
     }
 
-    // AC runs — ONE line per gauge across the whole system (single POI set).
-    const wireGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
-    for (const r of acBomRuns) {
-      const gauge: string = r.wireGauge ?? input.acWireGauge ?? '#8 AWG';
-      const egcGauge: string = r.egcGauge ?? '#10 AWG';
-      const conductors: number = r.conductorCount ?? 3;
-      const length: number = r.onewayLengthFt ?? 50;
-      const hotQty = Math.ceil(length * conductors * 1.15);
-      const hotExisting = wireGaugeMap.get(gauge);
-      if (hotExisting) { hotExisting.qty += hotQty; hotExisting.runIds.push(String(r.id)); }
-      else wireGaugeMap.set(gauge, { qty: hotQty, runIds: [String(r.id)] });
-      const egcQty = Math.ceil(length * 1 * 1.15);
-      const egcExisting = wireGaugeMap.get(egcGauge);
-      if (egcExisting) {
-        egcExisting.qty += egcQty;
-        if (!egcExisting.runIds.includes(String(r.id))) egcExisting.runIds.push(String(r.id));
-      } else wireGaugeMap.set(egcGauge, { qty: egcQty, runIds: [String(r.id)] });
-    }
-    const sortedGauges = [...wireGaugeMap.entries()].sort((a, b) => {
-      const numA = parseInt(a[0].replace('#', '').replace(' AWG', '')) || 99;
-      const numB = parseInt(b[0].replace('#', '').replace(' AWG', '')) || 99;
-      return numA - numB;
-    });
-    for (const [gauge, { qty, runIds }] of sortedGauges) {
-      const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
-      const runLabel = runIds.join(', ');
-      push(undefined, addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`,
-        `THWN2-${gaugeNum}`, `${gauge} THWN-2 — AC wiring (${runLabel})`,
-        qty, 'ft', 'NEC 310.15 / 250.122', 'Sum(length x conductors x 1.15)', `${gauge} wire runs x 1.15`, true));
-      log.push({ stageId: 'ac', category: 'wire', item: `${gauge} THWN-2`,
-        quantity: qty, derivedFrom: runLabel, formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 310.15 / 250.122' });
+    // §5 — AC circuit conductors from the ACTUAL route segments (open-air Q-Cable
+    // excluded / billed as trunk cable; hots scale by conductorsPerCircuit ×
+    // sharedCircuitCount; the shared EGC is one per raceway; hots and EGCs are
+    // SEPARATE rows — no undifferentiated "AC wiring" merge).
+    {
+      const _ac = emitAcConductorBom(acBomRuns);
+      _branchWireReconciliation = _ac.evidence;
+      for (const it of _ac.items) {
+        push(undefined, it);
+        log.push({ stageId: 'ac', category: 'wire', item: it.model,
+          quantity: it.quantity, derivedFrom: it.formula, formula: it.derivedFrom, necReference: it.necReference });
+      }
     }
 
-    // Conduit — ONE line per type+size across all runs (open-air runs skipped).
-    const conduitMap = new Map<string, { qty: number; type: string; size: string }>();
-    for (const r of allBomRuns) {
-      if (runHasNoConduit(r)) continue;
-      const cType: string = r.conduitType ?? input.conduitType ?? 'EMT';
-      const cSize: string = (r.conduitSize ?? `${input.conduitSizeInch ?? '3/4'}"`).replace('"', '');
-      const k = `${cType}-${cSize}`;
-      const qty = Math.ceil((r.onewayLengthFt ?? 30) * 1.15);
-      const existing = conduitMap.get(k);
-      if (existing) existing.qty += qty;
-      else conduitMap.set(k, { qty, type: cType, size: cSize });
-    }
-    for (const { qty, type, size } of conduitMap.values()) {
-      push(undefined, addItem('ac', 'conduit', 'Generic', `${size}" ${type} Conduit`,
-        `${type}-${size.replace('/', '-')}`, `${size}" ${type} conduit — all runs`,
-        qty, 'ft', 'NEC 358', 'Sum(allRuns.length x 1.15)', `${size}" ${type} x 1.15`, true));
+    // §6/§7 — conduit + fittings PER PHYSICAL RACEWAY (no "— all runs"; the shared
+    // branch home-run counted ONCE; each raceway cites its OWN NEC article).
+    {
+      const _raceways = derivePhysicalRacewaysFromRuns(allBomRuns);
+      _physicalRaceways = _raceways;
+      for (const rw of _raceways) {
+        for (const it of emitRacewayConduitBom(rw)) push(undefined, it);
+        log.push({ stageId: 'ac', category: 'conduit', item: `${rw.sizeIn}" ${rw.racewayType} (${rw.physicalRacewayId})`,
+          quantity: rw.lengthFt, derivedFrom: rw.segmentIds.join(', '),
+          formula: `${rw.physicalRacewayId}: Σ segment length × ${_WASTE}`, necReference: `NEC ${rw.necArticle}` });
+      }
     }
   } else {
     // No runs provided — flat aggregate AC home run (legacy fallback shape).
@@ -2356,14 +2813,12 @@ function generateBOMV4PerSubSystem(
       acConduitQty, 'ft', 'NEC 358', 'acWireLength x 1.15', `${input.acWireLength} x 1.15`, true));
   }
 
-  // Conduit fittings — derived once from total raceway footage (all subs).
-  {
+  // Conduit fittings — FLAT FALLBACK ONLY (no runs). When runs are present the
+  // §6 per-physical-raceway pass already emitted each raceway's own conduit +
+  // fittings (labeled with its physicalRacewayId, citing its raceway-type NEC
+  // article) — running this project-level roll-up too would double-bill fittings.
+  if (!(input.runs && input.runs.length > 0)) {
     const totalConduitFt = (() => {
-      if (input.runs && input.runs.length > 0) {
-        return input.runs
-          .filter(r => !r.isUtilityOwned && !runHasNoConduit(r))
-          .reduce((sum: number, r) => sum + Math.ceil((r.onewayLengthFt ?? 30) * 1.15), 0);
-      }
       // env-based: AC home run + each string sub's DC raceway footage.
       return conduitLength(input.acWireLength)
         + subs.filter(s => !s.isMicro && s.modules > 0 && !subsWithDcRuns.has(s.key))
@@ -2490,8 +2945,9 @@ function generateBOMV4PerSubSystem(
   } else if (isSupplySideTap) {
     push(undefined, addItem('ac', 'connector', 'NSI Polaris',
       'Insulated Multi-Tap Connector (350 kcmil–#6)', 'IPLD350-3',
-      'Polaris-style insulated tap connector — supply-side tap of service-entrance conductor (1 per conductor: L1/L2/N). Verify lug range against actual service conductor size.',
-      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true));
+      SUPPLY_SIDE_TAP_CONNECTOR_DESCRIPTION,
+      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true,
+      undefined, undefined, undefined, undefined, SUPPLY_SIDE_TAP_CONNECTOR_HINT));
     complianceNotes.push(
       'NEC 705.11: Supply-side tap — no backfed breaker in load center. ' +
       'Connection is utility-side (before main breaker) via insulated multi-tap connectors; ' +
@@ -2523,13 +2979,17 @@ function generateBOMV4PerSubSystem(
   })();
 
   if (!rackingEntry && _roofRB) {
-    push('roof', addItem('structural', 'racking', _roofRB.manufacturer, _roofRB.systemModel,
-      _roofRB.mounts.partNumber ?? _roofRB.systemModel,
-      `${_roofRB.manufacturer} ${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`,
-      1, 'lot', 'IBC 2021', 'perSystem', '1', true));
-    push('roof', addItem('structural', 'attachment', _roofRB.manufacturer,
-      _roofRB.mounts.description, _roofRB.mounts.partNumber ?? 'TBD', _roofRB.mounts.description,
-      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
+    const _lot = _rackingLotState(_roofRB);
+    push('roof', addItem('structural', 'racking', _lot.mfr(_roofRB.manufacturer), _roofRB.systemModel,
+      _lot.sku(_roofRB.mounts.partNumber ?? _roofRB.systemModel),
+      `${_lot.pending ? '' : `${_roofRB.manufacturer} `}${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`
+      + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
+      1, 'lot', 'UL 2703', 'perSystem', '1', true,
+      undefined, undefined, undefined, 'roof', _lot.orderability));
+    push('roof', addItem('structural', 'attachment', _lot.mfr(_roofRB.manufacturer),
+      _roofRB.mounts.description, _lot.sku(_roofRB.mounts.partNumber ?? 'TBD'), _roofRB.mounts.description,
+      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true,
+      undefined, undefined, undefined, 'roof', _lot.orderability));
     emitRackingBOMInto(items, log, _roofRB, _roofRB.manufacturer, 'roof');
   } else if (rackingEntry && roofModules <= 0) {
     log.push({ stageId: 'structural', category: 'racking', item: rackingEntry.model,
@@ -2537,10 +2997,13 @@ function generateBOMV4PerSubSystem(
       formula: '0', necReference: rackingEntry.iccEsReport });
   } else if (rackingEntry) {
     const suppressRail = RAIL_LESS_ROOF_RACKING.has(rackingEntry.id) && !_roofRB;
-    push('roof', addItem('structural', 'racking', rackingEntry.manufacturer, rackingEntry.model,
-      rackingEntry.partNumber ?? rackingEntry.id,
-      `${rackingEntry.manufacturer} ${rackingEntry.model} — ${suppressRail ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`,
-      1, 'lot', rackingEntry.iccEsReport ?? 'IBC 2021', 'perSystem (roof sub-system)', '1', true));
+    const _lot = _rackingLotState(_roofRB);
+    push('roof', addItem('structural', 'racking', _lot.mfr(rackingEntry.manufacturer), rackingEntry.model,
+      _lot.sku(rackingEntry.partNumber ?? rackingEntry.id),
+      `${_lot.pending ? '' : `${rackingEntry.manufacturer} `}${rackingEntry.model} — ${suppressRail ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`
+      + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
+      1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem (roof sub-system)', '1', true,
+      undefined, undefined, undefined, 'roof', _lot.orderability));
     if (_roofRB) {
       emitRackingBOMInto(items, log, _roofRB, rackingEntry.manufacturer, 'roof');
     } else {
@@ -2583,7 +3046,7 @@ function generateBOMV4PerSubSystem(
             acc.defaultManufacturer ?? rackingEntry.manufacturer,
             acc.defaultModel ?? acc.description,
             acc.defaultPartNumber ?? 'TBD', acc.description,
-            qty, 'ea', acc.necReference ?? 'IBC 2021',
+            qty, 'ea', acc.necReference ?? 'UL 2703',
             acc.quantityFormula ?? acc.quantityRule,
             acc.quantityFormula ?? acc.quantityRule, acc.required));
           log.push({ stageId: 'structural', category: acc.category,
@@ -2602,10 +3065,15 @@ function generateBOMV4PerSubSystem(
       ((input.acOutputKw ?? input.systemKw) * 1000) / (input.acVoltage ?? 240) * 1.25
     );
     const egcGauge = ocpdForEgc <= 60 ? '#10 AWG' : ocpdForEgc <= 100 ? '#8 AWG' : '#6 AWG';
-    push(undefined, addItem('structural', 'wire', 'Southwire', `${egcGauge} THWN-2 Green EGC`,
-      `THWN2-GRN-${egcGauge.replace('#', '').replace(' AWG', '')}`,
-      `${egcGauge} green THWN-2 equipment grounding conductor — NEC 250.122`,
-      egcLength, 'ft', 'NEC 690.43 / 250.122', 'acWireLength × 1.15', `${input.acWireLength} × 1.15`, true));
+    // §5 closeout — the flat acWireLength×1.15 EGC row is the design-studio
+    // fallback only. When sized runs exist, emitAcConductorBom already emits the
+    // per-raceway shared green EGC (NEC 250.122(C)); this line would double-bill.
+    if (!(input.runs && input.runs.length > 0)) {
+      push(undefined, addItem('structural', 'wire', 'Southwire', `${egcGauge} THWN-2 Green EGC`,
+        `THWN2-GRN-${egcGauge.replace('#', '').replace(' AWG', '')}`,
+        `${egcGauge} green THWN-2 equipment grounding conductor — NEC 250.122`,
+        egcLength, 'ft', 'NEC 690.43 / 250.122', 'acWireLength × 1.15', `${input.acWireLength} × 1.15`, true));
+    }
     push(undefined, addItem('structural', 'grounding', 'Erico/Harger', '5/8" × 8 ft Copper-Clad Ground Rod',
       'GR-5/8-8', '5/8" × 8 ft copper-clad steel ground rod — NEC 250.52(A)(5)',
       1, 'ea', 'NEC 250.52(A)(5)', 'perSystem', '1', true));
@@ -2683,7 +3151,7 @@ function generateBOMV4PerSubSystem(
       'Wire nuts / Wago levers, assorted', 1, '1 assortment per job');
     if (isSupplySideTap) {
       ts(undefined, 'connector', 'NSI Polaris', 'Insulated Multi-Tap Connector (spare)', 'IPLD350-3',
-        'Spare Polaris tap (drop/strip mistakes are one-way)', 1, 'supply-side: 1 spare');
+        'Spare CANDIDATE Polaris tap (connector selection not verified — see the supply-side tap connection authority)', 1, 'supply-side: 1 spare');
     }
 
     // Micro trunk spares — one set PER PRESENT BRAND GROUP, using THAT brand's
@@ -2694,9 +3162,9 @@ function generateBOMV4PerSubSystem(
       const stamp: BOMSystemType | undefined = group.length === 1 ? group[0].key : undefined;
       const branches = group.reduce((n, s) => n + (s.trunkPlan?.branchCount ?? 0), 0);
       ts(stamp, 'connector', sys.brand, `${sys.connectors.male.description} (spare)`, sys.connectors.male.sku,
-        'Spare trunk field splice, male', 1, `${sys.brand} micro: 1 spare`);
+        'Spare CANDIDATE trunk field splice, male (no verified cable-extension solution selects this connector)', 1, `${sys.brand} micro: 1 spare`);
       ts(stamp, 'connector', sys.brand, `${sys.connectors.female.description} (spare)`, sys.connectors.female.sku,
-        'Spare trunk field splice, female', 1, `${sys.brand} micro: 1 spare`);
+        'Spare CANDIDATE trunk field splice, female (no verified cable-extension solution selects this connector)', 1, `${sys.brand} micro: 1 spare`);
       if (sys.connectors.sealingCap) {
         ts(stamp, 'sealing_cap', sys.brand, `${sys.connectors.sealingCap.description} (spares)`, sys.connectors.sealingCap.sku,
           'Spare sealing caps for unused/opened drops', Math.max(2, branches), 'max(2, 1 per branch)');
@@ -2767,6 +3235,8 @@ function generateBOMV4PerSubSystem(
     derivationLog: log,
     warnings,
     complianceNotes,
+    ...(_branchWireReconciliation ? { branchWireReconciliation: _branchWireReconciliation } : {}),
+    ...(_physicalRaceways ? { physicalRaceways: _physicalRaceways } : {}),
   };
 }
 
@@ -2790,7 +3260,24 @@ function addItem(
   totalCost?: number,
   /** Wave 2c: owning sub-system — set ONLY by sub-scoped emission contexts.
    *  Conditionally spread so legacy lines stay byte-identical when serialized. */
-  subSystem?: BOMSystemType
+  subSystem?: BOMSystemType,
+  /** PPC §5/§8/§9 — procurement orderability / quantity state. Conditionally
+   *  spread: a row that passes nothing here serializes exactly as before.
+   *  ECD W1-B/W1-D/W1-E/W1-F extends it with the PRODUCER-side procurement
+   *  facts (quantity source, affected route/equipment ids, and an explicit
+   *  state hint where the producer itself knows the row is not a selected,
+   *  verified product). The classifier in bomForPermit is the sole consumer. */
+  orderability?: {
+    nonOrderable?: boolean;
+    nonOrderableReason?: string;
+    quantityState?: 'established' | 'pending';
+    quantityStateLabel?: string;
+    quantitySource?: BomQuantitySource;
+    affectedRouteIds?: string[];
+    affectedEquipmentIds?: string[];
+    authorityStateHint?: ProcurementAuthorityState;
+    authorityStateHintReason?: string;
+  },
 ): BOMLineItemV4 {
   return {
     id: nextId(),
@@ -2811,6 +3298,15 @@ function addItem(
     unitCost,
     totalCost,
     ...(subSystem !== undefined ? { subSystem } : {}),
+    ...(orderability?.nonOrderable !== undefined ? { nonOrderable: orderability.nonOrderable } : {}),
+    ...(orderability?.nonOrderableReason !== undefined ? { nonOrderableReason: orderability.nonOrderableReason } : {}),
+    ...(orderability?.quantityState !== undefined ? { quantityState: orderability.quantityState } : {}),
+    ...(orderability?.quantityStateLabel !== undefined ? { quantityStateLabel: orderability.quantityStateLabel } : {}),
+    ...(orderability?.quantitySource !== undefined ? { quantitySource: orderability.quantitySource } : {}),
+    ...(orderability?.affectedRouteIds !== undefined ? { affectedRouteIds: orderability.affectedRouteIds } : {}),
+    ...(orderability?.affectedEquipmentIds !== undefined ? { affectedEquipmentIds: orderability.affectedEquipmentIds } : {}),
+    ...(orderability?.authorityStateHint !== undefined ? { authorityStateHint: orderability.authorityStateHint } : {}),
+    ...(orderability?.authorityStateHintReason !== undefined ? { authorityStateHintReason: orderability.authorityStateHintReason } : {}),
   };
 }
 

@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-07-27T16:47:06.019Z",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "engineVersion": "47420",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-76C0C5B56CEF (digest 76c0c5b56cef89d4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "role": "W10 — equipment-reconciliation audit evidence. STATE: NO reconciliation record exists. The REC-405 vs Qcells-400 identity conflict is ACTIVE and UNRESOLVED (no operator reconciliation occurred; migration 110/114 written but not run by Ray).",
+  "reconciliationRecordExists": false,
+  "conflictActive": false,
+  "conflict": null,
+  "statement": "NONE EXISTS — the equipment-identity conflict is surfaced (RS-1 + banner union + issue-state gate) and requires OPERATOR reconciliation; it is NEVER auto-resolved and is not hidden by any renderer."
+}

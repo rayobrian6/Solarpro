@@ -4,6 +4,8 @@ import { getEGCSize } from '@/lib/manufacturer-specs';
 import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
 import { generatePermitHTML } from '@/lib/permit';
 import { roofProject } from '../../test-fixtures/roofProject';
+import { projectSharedBranchRaceway, projectCanonicalFeeder } from '@/lib/permit/snapshot/electricalProjection';
+import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 
 // EL-2 / EL-4: one shared conductor authority. Every sheet (PV-4A, PV-4B, E-1,
 // BOM) reads buildConductorAuthority() so branch OCPD, conductor gauge and the
@@ -50,15 +52,32 @@ describe('conductor authority — single source of truth', () => {
     expect(auth.egc.gauge).toBe('#6 AWG');
   });
 
-  it('renders one EGC value across PV-4B grounding note and detail SVG (no divergence)', () => {
-    const html = generatePermitHTML(clone());
-    // Grounding note line: "Equipment grounding conductor (EGC): #N AWG bare Cu min."
-    const note = html.match(/Equipment grounding conductor \(EGC\):\s*(#[\d/]+ AWG)/);
-    // Detail SVG label: "#N AWG Cu · 250.122"
-    const svg = html.match(/(#[\d/]+ AWG) Cu · 250\.122/);
-    expect(note).toBeTruthy();
+  // ── UPDATED by the PPC corrective pass (§1b), 2026-07-26 ────────────────────
+  // The retired assertion required the grounding NOTE and the detail SVG to print
+  // ONE project-wide EGC value. That premise was itself the defect: both surfaces
+  // read the FEEDER grounding object and presented its gauge as a project-wide
+  // "EGC minimum" ("Equipment grounding conductor (EGC): #N AWG bare Cu min."),
+  // collapsing two of the SIX distinct grounding objects the directive requires
+  // kept separate. The single-source requirement is preserved but re-based on the
+  // correct object: each surface reads the grounding object for ITS OWN domain,
+  // and the two surfaces that describe the IN-RACEWAY domain must agree.
+  it('renders DOMAIN-SCOPED EGC values — the in-raceway note and the detail SVG read the SAME raceway object, and no surface prints a project-wide EGC minimum', () => {
+    const input = clone();
+    const html = generatePermitHTML(input);
+    const snap = (input as { _snapshot?: PermitDesignSnapshot })._snapshot!;
+    // the retired project-wide claim is gone
+    expect(html).not.toMatch(/Equipment grounding conductor \(EGC\):\s*#[\d/]+ AWG bare Cu min/);
+    // note 2 is explicitly scoped to the in-raceway objects, each sized on its own run
+    expect(html).toContain('IN-RACEWAY EGCs');
+    expect(html).toContain('not a project-wide minimum');
+    // the detail SVG label reads the SAME canonical raceway grounding object
+    const svg = html.match(/(#[\d/]+ AWG) Cu · 250\.118\/250\.122/);
     expect(svg).toBeTruthy();
-    expect(note![1]).toBe(svg![1]); // both sourced from the authority → identical
+    const rwEgc = projectSharedBranchRaceway(snap).egcGauge ?? projectCanonicalFeeder(snap).egcGauge;
+    expect(rwEgc).toBeTruthy();
+    expect(svg![1]).toBe(rwEgc);
+    const noteIdx = html.indexOf('IN-RACEWAY EGCs');
+    expect(html.slice(noteIdx, noteIdx + 400)).toContain(rwEgc!);
     // the old non-standard double-continuous EGC math must be gone from source output
     expect(html).not.toContain('1.25 * 1.25');
   });

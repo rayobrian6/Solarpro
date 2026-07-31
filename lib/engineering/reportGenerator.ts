@@ -303,7 +303,7 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
     interconnectionType,
     interconnectionMethod: interconnectionType === 'load-side' ? 'Backfeed Breaker' : 'Supply-Side Tap',
     rapidShutdownRequired,
-    rapidShutdownDevice: rapidShutdownRequired ? 'Tigo TS4-A-2F or equivalent' : 'N/A',
+    rapidShutdownDevice: rapidShutdownRequired ? 'Tigo TS4-A-2F' : 'N/A',
     necVersion,
     complianceNotes,
     // Survey-sourced fields (Phase 4 — optional, omitted when physicalData absent)

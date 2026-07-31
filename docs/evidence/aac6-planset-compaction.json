@@ -1,0 +1,295 @@
+{
+  "pass": "AAC-6 — WS-10 planset compaction",
+  "generatedAt": "2026-07-28T23:07:25.793Z",
+  "fixture": {
+    "full": {
+      "file": "_tmp_aac6_profile_full.html",
+      "sheets": 24,
+      "sheetIds": [
+        "PV-0",
+        "RS-1",
+        "RS-1.1",
+        "RS-1.2",
+        "PV-1",
+        "PV-1B",
+        "PV-3",
+        "PV-4C",
+        "PV-4C.1",
+        "E-1",
+        "PV-4A",
+        "PV-4B",
+        "PV-5",
+        "PV-6",
+        "SCHED",
+        "SCHED-2",
+        "SCHED-3",
+        "SCHED-4",
+        "APP-A",
+        "DS-1",
+        "DS-2",
+        "DS-3",
+        "CERT",
+        "PE-1"
+      ],
+      "total": 178,
+      "perPhrase": {
+        "PENDING ENGINEERING REVIEW": 57,
+        "NOT FOR PERMIT SUBMISSION": 30,
+        "RELEASE STATUS": 11,
+        "UNRESOLVED": 50,
+        "RELEASE GATE": 17,
+        "BLOCKER": 13
+      },
+      "perSheet": {
+        "PV-0": 24,
+        "RS-1": 25,
+        "RS-1.1": 14,
+        "RS-1.2": 13,
+        "PV-1": 8,
+        "PV-1B": 8,
+        "PV-3": 8,
+        "PV-4C": 8,
+        "PV-4C.1": 8,
+        "E-1": 3,
+        "PV-4A": 3,
+        "PV-4B": 3,
+        "PV-5": 2,
+        "PV-6": 2,
+        "SCHED": 6,
+        "SCHED-2": 3,
+        "SCHED-3": 6,
+        "SCHED-4": 6,
+        "APP-A": 3,
+        "DS-1": 2,
+        "DS-2": 2,
+        "DS-3": 2,
+        "CERT": 12,
+        "PE-1": 7
+      },
+      "sheetsCarryingAny": 24
+    },
+    "permit": {
+      "file": "_tmp_aac6_profile_permit.html",
+      "sheets": 14,
+      "sheetIds": [
+        "PV-0",
+        "PV-1",
+        "PV-1B",
+        "PV-3",
+        "PV-4C",
+        "PV-4C.1",
+        "E-1",
+        "PV-4A",
+        "PV-4B",
+        "PV-5",
+        "SCHED",
+        "DS-1",
+        "DS-2",
+        "DS-3"
+      ],
+      "total": 74,
+      "perPhrase": {
+        "PENDING ENGINEERING REVIEW": 31,
+        "NOT FOR PERMIT SUBMISSION": 12,
+        "RELEASE STATUS": 6,
+        "UNRESOLVED": 10,
+        "RELEASE GATE": 6,
+        "BLOCKER": 9
+      },
+      "perSheet": {
+        "PV-0": 19,
+        "PV-1": 8,
+        "PV-1B": 8,
+        "PV-3": 8,
+        "PV-4C": 8,
+        "PV-4C.1": 2,
+        "E-1": 3,
+        "PV-4A": 3,
+        "PV-4B": 3,
+        "PV-5": 2,
+        "SCHED": 6,
+        "DS-1": 2,
+        "DS-2": 2,
+        "DS-3": 0
+      },
+      "sheetsCarryingAny": 13
+    }
+  },
+  "liveProject": {
+    "full": {
+      "file": "_tmp_aac6_live_full.html",
+      "sheets": 25,
+      "sheetIds": [
+        "PV-0",
+        "RS-1",
+        "RS-1.1",
+        "RS-1.2",
+        "RS-1.3",
+        "PV-1",
+        "PV-1B",
+        "PV-3",
+        "PV-4C",
+        "PV-4C.1",
+        "E-1",
+        "PV-4A",
+        "PV-4B",
+        "PV-5",
+        "PV-6",
+        "SCHED",
+        "SCHED-2",
+        "SCHED-3",
+        "SCHED-4",
+        "APP-A",
+        "DS-1",
+        "DS-2",
+        "DS-3",
+        "CERT",
+        "PE-1"
+      ],
+      "total": 209,
+      "perPhrase": {
+        "PENDING ENGINEERING REVIEW": 59,
+        "NOT FOR PERMIT SUBMISSION": 31,
+        "RELEASE STATUS": 12,
+        "UNRESOLVED": 54,
+        "RELEASE GATE": 18,
+        "BLOCKER": 35
+      },
+      "perSheet": {
+        "PV-0": 24,
+        "RS-1": 30,
+        "RS-1.1": 18,
+        "RS-1.2": 20,
+        "RS-1.3": 15,
+        "PV-1": 8,
+        "PV-1B": 8,
+        "PV-3": 8,
+        "PV-4C": 8,
+        "PV-4C.1": 8,
+        "E-1": 3,
+        "PV-4A": 3,
+        "PV-4B": 3,
+        "PV-5": 2,
+        "PV-6": 2,
+        "SCHED": 6,
+        "SCHED-2": 3,
+        "SCHED-3": 6,
+        "SCHED-4": 6,
+        "APP-A": 3,
+        "DS-1": 2,
+        "DS-2": 2,
+        "DS-3": 2,
+        "CERT": 12,
+        "PE-1": 7
+      },
+      "sheetsCarryingAny": 25
+    },
+    "permit": {
+      "file": "_tmp_aac6_live_permit.html",
+      "sheets": 14,
+      "sheetIds": [
+        "PV-0",
+        "PV-1",
+        "PV-1B",
+        "PV-3",
+        "PV-4C",
+        "PV-4C.1",
+        "E-1",
+        "PV-4A",
+        "PV-4B",
+        "PV-5",
+        "SCHED",
+        "DS-1",
+        "DS-2",
+        "DS-3"
+      ],
+      "total": 74,
+      "perPhrase": {
+        "PENDING ENGINEERING REVIEW": 31,
+        "NOT FOR PERMIT SUBMISSION": 12,
+        "RELEASE STATUS": 6,
+        "UNRESOLVED": 10,
+        "RELEASE GATE": 6,
+        "BLOCKER": 9
+      },
+      "perSheet": {
+        "PV-0": 19,
+        "PV-1": 8,
+        "PV-1B": 8,
+        "PV-3": 8,
+        "PV-4C": 8,
+        "PV-4C.1": 2,
+        "E-1": 3,
+        "PV-4A": 3,
+        "PV-4B": 3,
+        "PV-5": 2,
+        "SCHED": 6,
+        "DS-1": 2,
+        "DS-2": 2,
+        "DS-3": 0
+      },
+      "sheetsCarryingAny": 13
+    },
+    "fullProfileThreeModeParity": {
+      "parity": true,
+      "modes": [
+        {
+          "digest": "e93fd65256ab71b9fa99f9cf6582de35f40b6d27643dfbd7ae293c9df4361d1b",
+          "bytes": 1942067
+        },
+        {
+          "digest": "e93fd65256ab71b9fa99f9cf6582de35f40b6d27643dfbd7ae293c9df4361d1b",
+          "bytes": 1942067
+        },
+        {
+          "digest": "e93fd65256ab71b9fa99f9cf6582de35f40b6d27643dfbd7ae293c9df4361d1b",
+          "bytes": 1942067
+        }
+      ]
+    },
+    "registryIdenticalAcrossProfilesSameAuthorityBundle": true,
+    "bomIdenticalAcrossProfiles": true,
+    "openGates": [
+      "PROJECT_AND_AHJ_AUTHORITY",
+      "EQUIPMENT_RECONCILIATION",
+      "STRUCTURAL_ASSEMBLY_AUTHORITY",
+      "ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE",
+      "QCABLE_SYSTEM_CLOSURE",
+      "PROFESSIONAL_RELEASE"
+    ],
+    "openRequirements": [
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING",
+      "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "CODE-AUTHORITY-INCOMPLETE",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "DESIGNER-OF-RECORD-MISSING",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "ENGINEERING-REVIEW-PENDING"
+    ],
+    "bomParityBasis": "snapshot.structural.bom (the snapshot-bound quantity source the equipment schedule projects) compared across profiles from ONE resolved authority bundle — identical, non-vacuous (rows present).",
+    "registryParityNote": "Registry/blockers/ready/BOM are identical across profiles when ONE authority bundle feeds both. Two SEPARATE live lifecycle runs can differ (14 vs 15 requirements) because the first run writes equipment_reconciliation_audit + selected_equipment and the second reads the changed state — a live-DB effect, not a profile effect."
+  },
+  "fullProfileByteIdentity": {
+    "baselineFromAac5Report": {
+      "digest": "712d70cbf42aa35f464a2bca1a3f9c4ed9ad88a0512e0710fd0568c72d56f6f2",
+      "bytes": 1177179
+    },
+    "afterWs10": {
+      "digest": "712d70cbf42aa35f464a2bca1a3f9c4ed9ad88a0512e0710fd0568c72d56f6f2",
+      "bytes": 1177179
+    },
+    "verdict": "FULL profile is byte-identical to the pre-WS-10 output"
+  },
+  "pageFit": {
+    "fixturePermitProfile": "PASS — scripts/planset-pagefit.mjs: sheets=14 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0",
+    "fixtureFullProfile": "PASS — sheets=24, all zero",
+    "liveBothProfiles": "PV-4C internal-clip 26.4px present in BOTH the live permit AND the live full profile (pre-existing live-data condition, identical in both; not a WS-10 regression). The fixture does not reproduce it."
+  }
+}

@@ -317,3 +317,138 @@ export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): De
 function round(ft: number): number {
   return Math.max(5, Math.round(ft));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §7 (closeout 2026-07-23) — GEOMETRIC per-branch Q-Cable path derivation.
+//
+// The pre-closeout BRANCH_RUN length was Σ plane-widths × slack (a whole-array
+// heuristic, ~68 ft) which, multiplied by the branch count, never reconciled
+// with the BOM's drops × pitch footage (3×68=204 ≠ 152). This derives the REAL
+// trunk cable path per branch from the branch's module CENTER coordinates + its
+// branch assignment: order the micros along the branch (nearest-neighbour chain
+// from an extreme corner — deterministic), sum the inter-module centre distances,
+// add one lead-in drop, apply documented waste. `dropCount` (one connector per
+// micro) is the reconciling invariant every source agrees on; `procurementLength`
+// = drops × pitch × waste is the BOM footage basis (§10 separates the two).
+// PURE — identical coordinates ⇒ identical result.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface BranchModulesForPath {
+  branchId: string;
+  branchLabel: string;
+  /** canonical branch device count (drops = one connector per micro). */
+  moduleCount: number;
+  /** module centre points in canonical feet (any single consistent frame). */
+  moduleCentersFt: { x: number; y: number }[];
+}
+
+export interface BranchCablePathResult {
+  branchId: string;
+  branchLabel: string;
+  moduleCount: number;
+  dropCount: number;
+  designedInstalledLengthFt: number | null;
+  connectorSpacingFt: number | null;
+  procurementLengthFt: number | null;
+  wasteFactor: number;
+  lengthProvenance: 'geometry-derived' | 'estimated';
+  derivation: string;
+}
+
+/**
+ * THE deterministic cable ordering through a branch's micro positions: a
+ * nearest-neighbour chain from the min-x (then min-y) extreme. Returns the
+ * ORDER (indices into `pts`) — the single source both the length derivation
+ * below and the AAC WS-5 Q-Cable topology engine
+ * (lib/permit/snapshot/qcableTopology.ts) consume, so the two can never disagree
+ * about which module the cable reaches next.
+ */
+export function orderBranchCableChain(pts: { x: number; y: number }[]): number[] {
+  const n = pts.length;
+  if (n === 0) return [];
+  let start = 0;
+  for (let i = 1; i < n; i++) {
+    if (pts[i].x < pts[start].x || (pts[i].x === pts[start].x && pts[i].y < pts[start].y)) start = i;
+  }
+  const used = new Array(n).fill(false);
+  const order = [start];
+  used[start] = true;
+  for (let k = 1; k < n; k++) {
+    const last = order[order.length - 1];
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (used[i]) continue;
+      const d = Math.hypot(pts[last].x - pts[i].x, pts[last].y - pts[i].y);
+      if (d < bd) { bd = d; best = i; }
+    }
+    order.push(best);
+    used[best] = true;
+  }
+  return order;
+}
+
+/** The per-hop centre-to-centre distances along `orderBranchCableChain`. */
+export function branchChainSegmentsFt(pts: { x: number; y: number }[], order?: number[]): number[] {
+  const ord = order ?? orderBranchCableChain(pts);
+  const out: number[] = [];
+  for (let i = 1; i < ord.length; i++) {
+    const a = pts[ord[i - 1]], c = pts[ord[i]];
+    out.push(Math.hypot(a.x - c.x, a.y - c.y));
+  }
+  return out;
+}
+
+/** Deterministic nearest-neighbour ordering length (ft) through a point set,
+ *  starting at the min-x (then min-y) extreme. Returns the summed centre-to-centre
+ *  path distance (0 for <2 points). */
+function nearestNeighbourPathFt(pts: { x: number; y: number }[]): number {
+  if (pts.length < 2) return 0;
+  return branchChainSegmentsFt(pts).reduce((s, d) => s + d, 0);
+}
+
+/**
+ * Derive per-branch cable-path objects geometrically. `connectorSpacingFt` is the
+ * assembly's molded drop pitch (Enphase portrait 4.25 ft); `wasteFactor` the NEC
+ * slack (default 1.15). Branches whose coordinates are missing fall back to the
+ * pitch × drop-count estimate (labeled 'estimated'), never a fabricated route.
+ */
+export function deriveBranchCablePaths(
+  branches: BranchModulesForPath[],
+  connectorSpacingFt: number | null,
+  wasteFactor = SLACK_FACTOR,
+): BranchCablePathResult[] {
+  const pitch = connectorSpacingFt != null && connectorSpacingFt > 0 ? connectorSpacingFt : null;
+  return branches.map(b => {
+    const pts = (b.moduleCentersFt ?? []).filter(p => Number.isFinite(p?.x) && Number.isFinite(p?.y));
+    const drops = b.moduleCount;
+    const hasGeom = pts.length >= 2 && pts.length === drops;
+    if (hasGeom) {
+      const interMod = nearestNeighbourPathFt(pts);
+      // one lead-in drop from the branch start into the trunk (half a pitch each end)
+      const leadIn = pitch != null ? pitch : 4.25;
+      const designed = Math.round((interMod + leadIn) * 10) / 10;
+      const procurement = pitch != null ? Math.ceil(drops * pitch * wasteFactor) : Math.ceil(designed * wasteFactor);
+      return {
+        branchId: b.branchId, branchLabel: b.branchLabel, moduleCount: drops, dropCount: drops,
+        designedInstalledLengthFt: designed,
+        connectorSpacingFt: pitch,
+        procurementLengthFt: procurement,
+        wasteFactor,
+        lengthProvenance: 'geometry-derived' as const,
+        derivation: `Σ inter-module path ${interMod.toFixed(1)} ft (nearest-neighbour through ${drops} micro centres) + ${leadIn.toFixed(2)} ft lead-in = ${designed.toFixed(1)} ft installed; procurement = ${drops} drops × ${pitch != null ? pitch.toFixed(2) : '—'} ft pitch × ${wasteFactor} waste`,
+      };
+    }
+    // Estimate fallback — no per-branch coordinates.
+    const estDesigned = pitch != null ? Math.round(drops * pitch * 10) / 10 : null;
+    const procurement = pitch != null ? Math.ceil(drops * pitch * wasteFactor) : null;
+    return {
+      branchId: b.branchId, branchLabel: b.branchLabel, moduleCount: drops, dropCount: drops,
+      designedInstalledLengthFt: estDesigned,
+      connectorSpacingFt: pitch,
+      procurementLengthFt: procurement,
+      wasteFactor,
+      lengthProvenance: 'estimated' as const,
+      derivation: `estimate: ${drops} drops × ${pitch != null ? pitch.toFixed(2) : '—'} ft pitch (module coordinates unavailable)`,
+    };
+  });
+}

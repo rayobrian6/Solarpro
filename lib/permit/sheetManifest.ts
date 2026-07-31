@@ -16,7 +16,18 @@
 // LEADS the electrical section as its key sheet with PV-4A/PV-4B supporting.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface SheetRef { id: string; title: string; }
+import type { PlansetProfile } from './plansetProfile';
+// TAC WS-16 — the sheet's printed identity is state-dependent (a compliance
+// letter only under a digest-bound approval). ONE source, shared with the
+// rendering pages.
+import { peLetterManifestTitle } from './utils/peLetterIdentity';
+
+/** AAC WS-10 — a sheet belongs either to the numbered DRAWING set or to the
+ *  MANUFACTURER ATTACHMENT appendix that follows it. Absent ⇒ 'drawing' (every
+ *  pre-WS-10 caller keeps its exact meaning). */
+export type SheetSection = 'drawing' | 'appendix';
+
+export interface SheetRef { id: string; title: string; section?: SheetSection; }
 
 export type HybridManifestSub = 'roof' | 'ground' | 'fence';
 
@@ -26,7 +37,19 @@ export interface SheetManifestOptions {
   pv3Title: string;
   /** DS-n equipment datasheet pages already resolved (module/inverter/battery) */
   datasheets?: SheetRef[];
-  includeSchedCont?: boolean;     // long BOM → SCHED-2
+  includeSchedCont?: boolean;     // long BOM → SCHED-2 (legacy single-sheet flag)
+  /** W9/§15 — number of SCHED continuation sheets (SCHED-2, SCHED-3, …) a long
+   *  BOM paginates onto. Overrides includeSchedCont when > 0. */
+  schedContCount?: number;
+  /** RGM §5 — number of RS-1 continuation sheets (RS-1.1, RS-1.2, …) the
+   *  gate-led review-status registry paginates onto. Derived from the SAME
+   *  layout function the page assembly uses (reviewStatusContPageCount), so the
+   *  printed sheet index can never disagree with the rendered page set. */
+  reviewStatusContCount?: number;
+  /** W9/§15 page-fit — roof structural calcs spill onto the formal continuation
+   *  sheet PV-4C.1 (attachment detail + governing load combination + page
+   *  conclusion). Roof, single-system only; the page assembly gates identically. */
+  includePv4cCont?: boolean;
   includeValidation?: boolean;    // VAL-1 internal QA (off in AHJ deliverable)
   includeCadAppendix?: boolean;   // APP-CAD non-authoritative preview
   /** Wave 5B — hybrid (multi-sub-system) planset. Present sub keys in fixed
@@ -38,6 +61,37 @@ export interface SheetManifestOptions {
    *  sub-system count — never a single-type sheet claiming another sub's
    *  modules. */
   hybridSubs?: HybridManifestSub[];
+  /** §4 (07-22) — microinverter systems have AC BRANCH CIRCUITS, not DC strings.
+   *  PV-1B is titled "AC BRANCH CIRCUIT LAYOUT" for micro; string/optimizer keep
+   *  the "ARRAY GEOMETRY — STRING LAYOUT" title. Undefined ⇒ string (unchanged). */
+  isMicro?: boolean;
+  /** AAC WS-10 — output profile. 'full' (default) is the internal package.
+   *  'permit' is the AHJ submittal: the compact drawing set + the manufacturer
+   *  attachment appendix, certification sheets only under a digest-bound
+   *  approval. 'design-review' (post-AAC) is the compact set that ENDS on PE-1
+   *  as the final engineer-review sheet in its current (possibly unsigned,
+   *  pending) state. */
+  profile?: PlansetProfile;
+  /** Post-AAC E-1 repair — PV-4B.1 carries the canonical physical section
+   *  schedule + full ampacity chain + open-air grounding note (micro
+   *  topologies). Mirrors hasPhysicalSectionSchedule in the page assembly. */
+  includePv4b1?: boolean;
+  /** AAC WS-10 — a digest-bound engineering approval covering THIS snapshot
+   *  exists, so the certification sheets carry a real signed release rather
+   *  than a placeholder. Only then does the permit profile carry PE-1/CERT. */
+  certificationCompleted?: boolean;
+}
+
+/** AAC WS-10 — the merged PV-5 + PV-6 labels/directory sheet title (ONE source;
+ *  the sheet's own title block mirrors it). */
+export const PERMIT_LABELS_SHEET_TITLE =
+  'WARNING LABELS, PLACARDS & DISCONNECT DIRECTORY';
+
+/** §4 — PV-1B title, topology-aware (the ONE source; sheet titleBlock mirrors). */
+export function pv1bTitle(isMicro: boolean | undefined, suffix = ''): string {
+  return isMicro
+    ? `AC BRANCH CIRCUIT LAYOUT${suffix}`
+    : `ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION${suffix}`;
 }
 
 const HYBRID_SUFFIX: Record<HybridManifestSub, string> = { roof: 'R', ground: 'G', fence: 'F' };
@@ -63,6 +117,15 @@ export function hybridSheetId(base: string, sub: HybridManifestSub): string {
   return `${base}${HYBRID_SUFFIX[sub]}`;
 }
 
+/** Ordered SCHED continuation sheet ids for the given options (SCHED-2,
+ *  SCHED-3, …). schedContCount is authoritative; includeSchedCont ⇒ one sheet. */
+function schedContIds(o: SheetManifestOptions): string[] {
+  const n = o.schedContCount != null && o.schedContCount > 0
+    ? o.schedContCount
+    : (o.includeSchedCont ? 1 : 0);
+  return Array.from({ length: n }, (_, i) => (i === 0 ? 'SCHED-2' : `SCHED-${i + 2}`));
+}
+
 /**
  * The canonical ordered list of sheets for a permit package. Deterministic and
  * pure — safe to call on both the server (generator, cover index) and the
@@ -73,34 +136,105 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
   const extras = hybridExtras(o);
   const isHybrid = extras.length > 0;
   const primaryLabel = isHybrid ? ` — ${HYBRID_LABEL[(o.hybridSubs ?? ['roof'])[0]]}` : '';
+
+  // ── AAC WS-10 — the PERMIT profile (the AHJ submittal) ────────────────────
+  // Removed from the core set: RS-1/.1/.2 (the review registry lives in the
+  // application review record and the full profile), SCHED-2/3/4 (procurement
+  // BOM continuations — the permit needs ONE major-equipment schedule), APP-A
+  // (a duplicate reference to the DS pages that follow it), and the CERT/PE-1
+  // certification placeholders while no digest-bound approval exists. PV-5 and
+  // PV-6 compose onto ONE labels/directory sheet. DS-n move OUT of the numbered
+  // drawing set into the manufacturer attachment appendix.
+  //
+  // Nothing here decides truth: every requirement these sheets used to print is
+  // still in the snapshot registry, still counted by the release gates, and
+  // still stated on the cover's single release-status line.
+  if (o.profile === 'permit' || o.profile === 'design-review') {
+    const cert = o.certificationCompleted === true;
+    const designReview = o.profile === 'design-review';
+    // Certification tail per the post-AAC profile contract:
+    //   permit        — CERT/PE-1 ONLY under a digest-bound approval (before the
+    //                   appendix, like the drawing set they certify);
+    //   design-review — the package ENDS on PE-1 as the final engineer-review
+    //                   sheet (after the appendix), in its current state.
+    const certSheets = [
+      { id: 'CERT', title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
+      { id: 'PE-1', title: peLetterManifestTitle(cert, primaryLabel) },
+      ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: peLetterManifestTitle(cert, ` — ${HYBRID_LABEL[sub]}`) })),
+    ];
+    const reviewTail = [
+      ...(cert ? [{ id: 'CERT', title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' }] : []),
+      { id: 'PE-1', title: peLetterManifestTitle(cert, primaryLabel) },
+      ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: peLetterManifestTitle(cert, ` — ${HYBRID_LABEL[sub]}`) })),
+    ];
+    return [
+      { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
+      { id: 'PV-1',  title: o.pv1Title },
+      ...extras.map(sub => ({ id: hybridSheetId('PV-1', sub), title: HYBRID_PLAN_TITLE[sub] })),
+      { id: 'PV-1B', title: pv1bTitle(o.isMicro, primaryLabel) },
+      ...extras.map(sub => ({ id: hybridSheetId('PV-1B', sub), title: pv1bTitle(o.isMicro, ` — ${HYBRID_LABEL[sub]}`) })),
+      { id: 'PV-3',  title: o.pv3Title },
+      ...extras.map(sub => ({ id: hybridSheetId('PV-3', sub), title: HYBRID_STRUCT_TITLE[sub] })),
+      { id: 'PV-4C', title: 'STRUCTURAL CALCULATIONS — ASCE 7-22 ANALYSIS' },
+      ...(o.includePv4cCont ? [{ id: 'PV-4C.1', title: 'STRUCTURAL CALCULATIONS (CONTINUED) — DETAIL · LOAD COMBINATION · CONCLUSION' }] : []),
+      { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
+      { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
+      { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
+      ...(o.includePv4b1 ? [{ id: 'PV-4B.1', title: 'CONDUCTOR SCHEDULE — PHYSICAL SECTIONS' }] : []),
+      { id: 'PV-5',  title: PERMIT_LABELS_SHEET_TITLE },
+      { id: 'SCHED', title: 'MAJOR EQUIPMENT SCHEDULE — MODULES, INVERTERS & MOUNTING' },
+      ...(!designReview && cert ? certSheets : []),
+      // ── manufacturer attachment appendix (NOT numbered drawing sheets) ────
+      ...ds.map(d => ({ ...d, section: 'appendix' as SheetSection })),
+      // ── DESIGN_REVIEW: PE-1 is the FINAL engineer-review sheet ────────────
+      ...(designReview ? reviewTail : []),
+    ];
+  }
+
   return [
     { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
+    // W10 (RP-D): the dedicated review-status registry sheet — every active
+    // release blocker, referenced from the cover SHEET INDEX. Always present so
+    // the manifest and page assembly stay byte-for-byte in sync (V12/V35).
+    // RGM §5: the sheet leads with the seven-row ROOT-GATE table; the child
+    // requirements group beneath their gate and paginate onto RS-1.n.
+    { id: 'RS-1',  title: 'REVIEW STATUS — RELEASE GATES & REQUIREMENTS' },
+    ...Array.from({ length: Math.max(0, o.reviewStatusContCount ?? 0) },
+      (_unused, i) => ({ id: `RS-1.${i + 1}`, title: 'REVIEW STATUS (CONTINUED) — RELEASE REQUIREMENTS' })),
     { id: 'PV-1',  title: o.pv1Title },
     // Hybrid: one plan/elevation detail sheet PER additional sub-system
     // (real GPS geometry — never overlays only).
     ...extras.map(sub => ({ id: hybridSheetId('PV-1', sub), title: HYBRID_PLAN_TITLE[sub] })),
-    { id: 'PV-1B', title: `ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION${primaryLabel}` },
-    ...extras.map(sub => ({ id: hybridSheetId('PV-1B', sub), title: `ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION — ${HYBRID_LABEL[sub]}` })),
+    { id: 'PV-1B', title: pv1bTitle(o.isMicro, primaryLabel) },
+    ...extras.map(sub => ({ id: hybridSheetId('PV-1B', sub), title: pv1bTitle(o.isMicro, ` — ${HYBRID_LABEL[sub]}`) })),
     // ── structural (how it's held up) ─────────────────────────────────────
     { id: 'PV-3',  title: o.pv3Title },
     ...extras.map(sub => ({ id: hybridSheetId('PV-3', sub), title: HYBRID_STRUCT_TITLE[sub] })),
     { id: 'PV-4C', title: 'STRUCTURAL CALCULATIONS — ASCE 7-22 ANALYSIS' },
+    // W9/§15: formal continuation of the roof structural calc sheet.
+    ...(o.includePv4cCont ? [{ id: 'PV-4C.1', title: 'STRUCTURAL CALCULATIONS (CONTINUED) — DETAIL · LOAD COMBINATION · CONCLUSION' }] : []),
     // ── electrical (how it's wired — the single-line leads, calcs support) ─
     { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
     { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
     { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
+    // Post-AAC E-1 repair: the canonical physical section schedule sheet
+    // (micro topologies) — mirrors hasPhysicalSectionSchedule in the assembly.
+    ...(o.includePv4b1 ? [{ id: 'PV-4B.1', title: 'CONDUCTOR SCHEDULE — PHYSICAL SECTIONS' }] : []),
     // ── labels ────────────────────────────────────────────────────────────
     { id: 'PV-5',  title: 'WARNING LABELS & PLACARDS — NEC REQUIRED SIGNAGE' },
     { id: 'PV-6',  title: 'DISCONNECT DIRECTORY & EMERGENCY PLACARD — NEC 705.10 / 690.56(B)' },
     // ── schedules · specs · datasheets ────────────────────────────────────
     { id: 'SCHED', title: 'EQUIPMENT SCHEDULE — MODULES, INVERTERS & BOM' },
-    ...(o.includeSchedCont ? [{ id: 'SCHED-2', title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' }] : []),
+    // W9/§15: N continuation sheets (SCHED-2 … SCHED-(N+1)) for long BOMs; each
+    // capped so no continuation page clips. schedContCount is authoritative;
+    // includeSchedCount is the legacy single-sheet fallback.
+    ...schedContIds(o).map(id => ({ id, title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' })),
     { id: 'APP-A', title: 'SPECIFICATION REFERENCE — EQUIPMENT DATA SHEETS' },
     ...ds,
     // ── certifications ────────────────────────────────────────────────────
     { id: 'CERT',  title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
-    { id: 'PE-1',  title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE${primaryLabel}` },
-    ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE — ${HYBRID_LABEL[sub]}` })),
+    { id: 'PE-1',  title: peLetterManifestTitle(o.certificationCompleted === true, primaryLabel) },
+    ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: peLetterManifestTitle(o.certificationCompleted === true, ` — ${HYBRID_LABEL[sub]}`) })),
     ...(o.includeValidation ? [{ id: 'VAL-1', title: 'VALIDATION SUMMARY — INTERNAL QA (NOT FOR CONSTRUCTION)' }] : []),
     // ── appendix ──────────────────────────────────────────────────────────
     ...(o.includeCadAppendix ? [{ id: 'APP-CAD', title: 'CAD PREVIEW APPENDIX — NON-AUTHORITATIVE' }] : []),

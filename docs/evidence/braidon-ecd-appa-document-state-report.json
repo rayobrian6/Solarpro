@@ -1,0 +1,196 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.145Z",
+  "artifact": "APP-A document-state report — the seven-state document model",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §8 (deliverable 9)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "before": {
+    "citation": "docs/ECD-ROOT-CAUSE-MAP.md §8",
+    "sentence": "All equipment is CEC Listed, UL Listed, and approved for grid interconnection. — a BARE LITERAL in compliancePages.ts, no registry read, no requirement check, no gate.",
+    "tick": "const mark = a.verified ? '✓ on file' : 'on file' — a.verified is ManufacturerAsset.verified, documented as \"true only when the source_url was fetched + confirmed\": a SCRAPE flag with no relationship to applicability. Three green ticks rendered, one of them on the Racking row whose very next span said APPLICABILITY UNVERIFIED.",
+    "applicabilityCoverage": "applicability was evaluated only when a selectedModel argument was passed — 1 of the 5 document rows (Racking). Module / Inverter / Battery / AC-Combiner were structurally incapable of showing an applicability state.",
+    "stateModel": "binary DocumentApplicability.state: 'verified' | 'unverified'"
+  },
+  "after": {
+    "states": [
+      {
+        "state": "ARCHIVED",
+        "chip": "ARCHIVED (ON FILE)"
+      },
+      {
+        "state": "APPLICABLE",
+        "chip": "APPLICABLE"
+      },
+      {
+        "state": "VERIFIED",
+        "chip": "APPLICABILITY VERIFIED"
+      },
+      {
+        "state": "AUTHORITATIVE",
+        "chip": "AUTHORITATIVE"
+      },
+      {
+        "state": "SUPERSEDED",
+        "chip": "SUPERSEDED"
+      },
+      {
+        "state": "NOT_APPLICABLE",
+        "chip": "NOT APPLICABLE"
+      },
+      {
+        "state": "PENDING_APPLICABILITY",
+        "chip": "APPLICABILITY PENDING"
+      }
+    ],
+    "establishedStates": [
+      "APPLICABLE",
+      "VERIFIED",
+      "AUTHORITATIVE"
+    ],
+    "rule": "ARCHIVED is a COMPANION availability chip and is NEVER the verdict — archived ≠ applicable. AUTHORITATIVE additionally requires a real archived + content-hash-bound registry record. SUPERSEDED comes only from a registry status supplied by the caller; nothing is inferred from a product NAME.",
+    "applicabilityCoverage": "evaluated for EVERY document row (selectedModel is passed on all of them, falling back to the asset's own keyed model)",
+    "tickRule": "the green ✓ is gone. Availability and applicability render as separate chips and a positive style is reserved for APPLICABLE / VERIFIED / AUTHORITATIVE.",
+    "documentRows": [
+      {
+        "label": "Module",
+        "assetId": "module_spec:qcells-peak-duo-400",
+        "brand": "Q CELLS",
+        "assetModel": "Q.PEAK DUO 400W",
+        "docTitle": "Qcells Q.PEAK DUO BLK ML-G10+ 385-405W Datasheet",
+        "selectedModel": "Q.PEAK DUO BLK ML-G10+ 400W",
+        "sourceUrlConfirmed": true,
+        "states": [
+          "ARCHIVED",
+          "APPLICABLE"
+        ],
+        "primaryState": "APPLICABLE",
+        "archived": true,
+        "referencedNotArchived": false,
+        "applicabilityVerified": true,
+        "authoritative": false,
+        "documentProduct": "Q.PEAK DUO 400W",
+        "reason": "The on-file document matches the asset product version (no version conflation)."
+      },
+      {
+        "label": "Racking",
+        "assetId": "racking_detail:rooftech-mini",
+        "brand": "Roof Tech",
+        "assetModel": "RT-MINI",
+        "docTitle": "Roof Tech RT-MINI II Installation Manual (Jun 2025)",
+        "selectedModel": "RT-MINI",
+        "sourceUrlConfirmed": true,
+        "states": [
+          "ARCHIVED",
+          "PENDING_APPLICABILITY"
+        ],
+        "primaryState": "PENDING_APPLICABILITY",
+        "archived": true,
+        "referencedNotArchived": false,
+        "applicabilityVerified": false,
+        "authoritative": false,
+        "documentProduct": "RT-MINI II",
+        "reason": "The on-file document covers RT-MINI II, a different product version than the selected RT-MINI, and no verified cross-reference/alias evidence establishes applicability."
+      }
+    ],
+    "renderedDocumentRows": [
+      {
+        "label": "Module",
+        "documentStates": [
+          "ARCHIVED",
+          "APPLICABLE"
+        ],
+        "applicabilityTag": null,
+        "authoritativeTag": "false",
+        "positiveTickPresent": false,
+        "text": "Q CELLS Q.PEAK DUO 400W — Qcells Q.PEAK DUO BLK ML-G10+ 385-405W Datasheet · full · cdn.myced.com ARCHIVED (ON FILE) APPLICABLE — not authoritative for engineering values"
+      },
+      {
+        "label": "Inverter",
+        "documentStates": [
+          "ARCHIVED",
+          "APPLICABLE"
+        ],
+        "applicabilityTag": null,
+        "authoritativeTag": "false",
+        "positiveTickPresent": false,
+        "text": "Enphase IQ8A Microinverter (IQ8A-72-2-US) — IQ8 Series Microinverters Data Sheet (North America) · p.2 spec table, column IQ8A-72-2-US · enphase.com ARCHIVED (ON FILE) APPLICABLE — not authoritative for engineering values"
+      },
+      {
+        "label": "Racking",
+        "documentStates": [
+          "ARCHIVED",
+          "PENDING_APPLICABILITY"
+        ],
+        "applicabilityTag": "PENDING_APPLICABILITY",
+        "authoritativeTag": "false",
+        "positiveTickPresent": false,
+        "text": "Roof Tech RT-MINI — Roof Tech RT-MINI II Installation Manual (Jun 2025) · p.9-20 (Part B Bracket Installation cross-sections; rafter attach ~p.11, deck attach ~p.12/p.20) · design.roof-tech.us ARCHIVED (ON FILE) APPLICABILITY PENDING — the document covers RT-MINI II, NOT VERIFIED for the selected RT-MINI — NOT AUTHORITATIVE for installation requirements — not authoritative for engineering values"
+      },
+      {
+        "label": "AC Combiner / Gateway",
+        "documentStates": [
+          "PENDING_APPLICABILITY"
+        ],
+        "applicabilityTag": null,
+        "authoritativeTag": null,
+        "positiveTickPresent": false,
+        "text": "Enphase IQ Combiner 6C — integrated combiner · gateway · metering · disconnect · rapid shutdown · manufacturer datasheet NO DOCUMENT ON FILE"
+      }
+    ],
+    "rtMiniCase": {
+      "note": "the exact case the directive names",
+      "ARCHIVED": true,
+      "APPLICABLE_TO_RT_MINI": false,
+      "AUTHORITATIVE": false,
+      "renderedStates": [
+        "ARCHIVED",
+        "PENDING_APPLICABILITY"
+      ],
+      "documentProduct": "RT-MINI II"
+    },
+    "listingConclusion": {
+      "established": false,
+      "sentence": "EQUIPMENT LISTING AND DOCUMENT APPLICABILITY NOT YET ESTABLISHED FOR THE COMPLETE SELECTED ASSEMBLY — SEE RS-1",
+      "openCodes": [
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+      ],
+      "openAdvisoryCodes": [],
+      "openGateIds": [
+        "RG-2",
+        "RG-4",
+        "RG-6"
+      ],
+      "registryRead": true,
+      "snapshotId": "PDS-76C0C5B56CEF",
+      "snapshotDigest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+      "scopeCodes": [
+        "EQUIPMENT-IDENTITY-CONFLICT",
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "EQUIPMENT-DOCUMENT-UNVERIFIED",
+        "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED",
+        "ATTACHMENT-CAPACITY-SOURCE-MISSING",
+        "MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED",
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "FASTENER-CONFIG-MISSING",
+        "MODULE-DIMENSIONS-UNVERIFIED",
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+      ],
+      "note": "derived from the canonical release-gate registry — it can only turn positive when the in-scope requirement set is clear. FAIL-CLOSED with no registry."
+    }
+  },
+  "knownFutureWiring": {
+    "issue": "SUPERSEDED and AUTHORITATIVE are REACHABLE but UNWIRED on the render path.",
+    "detail": "both require DocumentRegistryFacts (archivedInRepo + sha256 + status) from lib/documents/registry.ts, which is async/DB-backed. evaluateDocumentApplicability takes those facts as a pure ARGUMENT and never guesses them, and the synchronous render path does not supply them today. The states are proven reachable by the harness anti-vacuity probe for gate 15 (alias+archived+hash → AUTHORITATIVE; registry status superseded → SUPERSEDED).",
+    "classification": "FUTURE WIRING, not a defect: the honest current output is ARCHIVED + APPLICABLE / PENDING_APPLICABILITY, and nothing is claimed that the inputs do not support."
+  }
+}

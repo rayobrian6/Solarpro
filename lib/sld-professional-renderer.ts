@@ -85,6 +85,22 @@ const SW_THIN   = 1.0;
 // Change once here — propagates everywhere.
 const LABEL_OFFSET_ABOVE = 8;   // px: wire label sits N px above the line
 const LABEL_OFFSET_BELOW = 11;  // px: wire label sits N px below the line
+
+/** Post-AAC E-1 repair — wrap a legend label at word boundaries so data-driven
+ *  wiring-method names stay inside the fixed legend box (and inside the
+ *  embedded viewBox crop). ~40 chars ≈ the 140px text run at F.tiny. */
+function wrapLegendLabel(label: string, maxChars = 40): string[] {
+  if (label.length <= maxChars) return [label];
+  const words = label.split(' ');
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    if (cur && (cur.length + 1 + w.length) > maxChars) { lines.push(cur); cur = w; }
+    else cur = cur ? `${cur} ${w}` : w;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
 const EQP_LABEL_ABOVE    = 15;  // px: equipment header above top edge
 const EQP_LABEL_BELOW    = 9;   // px: equipment info below bottom edge
 const SW_HAIR   = 0.5;
@@ -189,6 +205,14 @@ export interface SLDProfessionalInput {
    *  right next to the sheet's title block on E-1) and crop the viewBox to
    *  the diagram. Standalone Diagram-tab renders keep the panel. */
   suppressTitleBlock?:     boolean;
+  /** Post-AAC E-1 repair: the in-SVG CONDUIT & CONDUCTOR SCHEDULE band re-derives
+   *  the same canonical physical sections the planset renders as an HTML schedule
+   *  (now on PV-4B.1) — two derivations of one authority is the drift class the
+   *  snapshot campaign kills, and the band forced a 1.15:1 canvas that could not
+   *  fit E-1's landscape drawing box without clipping. When set, the band is not
+   *  emitted and the viewBox is cropped to close below the calc panels. The
+   *  standalone Diagram tab keeps the band (it has no companion schedule sheet). */
+  suppressScheduleBand?:   boolean;
   projectName:             string;
   clientName:              string;
   address:                 string;
@@ -258,6 +282,10 @@ export interface SLDProfessionalInput {
   hasEnphaseIQSC3?:        boolean;
   scale:                   string;
   acWireLength:            number;
+  /** §3 — canonical AC feeder conduit trade size (e.g. '1"'), single-sourced
+   *  from the snapshot feeder segment so E-1 never invents a '3/4"' fallback that
+   *  disagrees with PV-4B. */
+  acConduitSize?:          string;
   /** Real engine-computed AC feeder conduit fill % (NEC Ch.9 Tbl.1). */
   acConduitFillPct?:       number;
   /** Real engine-computed AC feeder voltage drop %. */
@@ -287,6 +315,40 @@ export interface SLDProfessionalInput {
   microBranches?:          MicroBranch[];
   branchWireGauge?:        string;
   branchConduitSize?:      string;
+  branchConduitType?:      string;   // W1b — canonical BRANCH_RUN raceway (single source; no '3/4" EMT' literal)
+  branchIsOpenAir?:        boolean;  // W1b — branch home-run in raceway (false) vs open-air Q-Cable (true)
+  // §3/§4 — the SHARED jbox→combiner home-run raceway (all branches bundled).
+  // SEGMENT_2A prints this in-conduit section; the Q-Cable branch stays open-air.
+  homerunConduitType?:     string;
+  homerunConduitSize?:     string;
+  homerunSharedCircuits?:  number;
+  // §1 — the shared home-run's current-carrying-conductor inventory + phase gauge
+  // from the canonical physicalRaceway object. SEGMENT_2A prints '${ccc}#${gauge}
+  // THWN-2' (e.g. 6#10) — never the legacy OCPD-derived #12.
+  homerunCurrentCarryingCount?: number;
+  homerunConductorGauge?:  string;
+  /** §8 (BAR closeout 2026-07-25) — the LISTED wiring-method identity for the
+   *  OPEN-AIR branch section actually drawn on the sheet (micro ⇒ the Q-Cable
+   *  assembly, e.g. 'ENPHASE Q CABLE (TC-ER)'). The legend derives its open-air
+   *  entry from THIS instead of the hardcoded 'PV Wire/THWN-2' literal; when
+   *  absent (a non-micro sheet with real open-air PV-wire), the legend keeps the
+   *  generic PV-Wire label. Semantic gate 11: legend == displayed segment method. */
+  openAirBranchWiringLabel?: string;
+  /** §5 (BAR closeout 2026-07-25) — the BRANCH EGC gauge from the canonical
+   *  `branch-egc` grounding object (NEC 250.122 on the 20 A BRANCH OCPD, e.g.
+   *  #12), NOT the feeder EGC. The open-air Q-Cable segment used to print the
+   *  feeder's #10 while the grounding object and the BOM footage row carried #12
+   *  — a separate-EGC assertion the quantities did not match (gate 7). */
+  branchEgcGauge?:         string;
+  /** GROUNDING AUTHORITY (2026-07-25) — the SEGMENT-1 open-air grounding line as
+   *  decided by the document-based three-outcome grounding authority:
+   *  '1×#12 GRN EGC' (B), 'NO ADD'L EGC — LISTED METHOD' (A), or
+   *  'EGC: PENDING MFR AUTHORITY' (C, the fail-closed live state). When absent the
+   *  renderer keeps the legacy per-gauge label (non-micro / standalone routes). */
+  openAirBranchEgcLabel?:  string;
+  /** §5 — the EGC carried in the SHARED jbox→combiner home-run raceway (that
+   *  segment's own egcGauge), so SEGMENT_2A cites its own conductor, not the feeder's. */
+  homerunEgcGauge?:        string;
   branchOcpdAmps?:         number;
   stringDetails?:          { stringIndex: number; panelCount: number; ocpdAmps: number; wireGauge: string; voc: number; isc: number }[];
   runs?:                   RunSegment[];
@@ -1681,6 +1743,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   const roofRun       = findRun('ROOF_RUN');
   const branchRun     = findRun('BRANCH_RUN');
+  // §3/§4 — the shared jbox→combiner conduit home-run (SEGMENT_2A). Distinct from
+  // the open-air Q-Cable BRANCH_RUN so E-1 never labels the open-air run in-conduit.
+  const branchHomerunRun = findRun('BRANCH_HOMERUN_RUN');
   // BUILD v24: Battery/BUI/Generator/ATS computed segments
   const batToBuiRun   = findRun('BATTERY_TO_BUI_RUN');
   const buiToMspRun   = findRun('BUI_TO_MSP_RUN');
@@ -1696,7 +1761,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const acFeederRun         = isMicro ? combDiscoRun : invDiscoRun;
   const resolvedAcWire      = acFeederRun?.wireGauge   ?? input.acWireGauge   ?? '#6 AWG';
   const resolvedAcOCPD      = acFeederRun?.ocpdAmps    ?? input.acOCPD        ?? 30;
-  const resolvedAcConduit   = acFeederRun?.conduitSize ?? '3/4"';
+  // §3 — canonical feeder conduit size/type: engine run first, then the snapshot-
+  // sourced feeder trade size/raceway the adapter passes, then a last-resort default.
+  const resolvedAcConduit   = acFeederRun?.conduitSize ?? input.acConduitSize ?? '3/4"';
   const resolvedAcCondType  = acFeederRun?.conduitType ?? input.acConduitType ?? 'EMT';
   // Phase 6: AC conductor count — US residential 120/240V split-phase.
   // Standard string/hybrid inverters output L1+L2+N (3 current-carrying + EGC = 4 total).
@@ -1718,6 +1785,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ?? '#10 AWG';
   // Strip '#' and ' AWG' for inline display (e.g. '#10 AWG' → '10')
   const egcNum = resolvedEgcGauge.replace('#', '').replace(' AWG', '').trim();
+  // §5 (BAR closeout 2026-07-25) — the BRANCH-side segments cite their OWN EGC
+  // (NEC 250.122 on the BRANCH OCPD), never the feeder's. Without this the
+  // open-air Q-Cable segment printed the feeder's #10 while the canonical
+  // branch-egc grounding object and the BOM open-air EGC footage row were #12 —
+  // a separate-EGC assertion whose quantity no surface could match (gate 7).
+  const _gaugeNumOf = (g?: string | null): string | null =>
+    g ? g.replace('#', '').replace(' AWG', '').trim() : null;
+  const branchEgcNum  = _gaugeNumOf(input.branchEgcGauge)  ?? egcNum;
+  const homerunEgcNum = _gaugeNumOf(input.homerunEgcGauge) ?? branchEgcNum;
 
   const intercon     = String(input.interconnection ?? '').toLowerCase();
   const isLoadSide   = intercon.includes('load');
@@ -1727,11 +1803,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // ── SVG root ──────────────────────────────────────────────────────────────
   // Embedded mode crops the viewBox at the title-block column so the diagram
-  // fills the sheet instead of reserving a blank right margin.
+  // fills the sheet instead of reserving a blank right margin. With the schedule
+  // band suppressed the canvas is also cropped VERTICALLY to close just below
+  // the calc panels — the blank band would otherwise force letterboxing that
+  // shrinks the schematic inside E-1's drawing wrapper.
   const effW = input.suppressTitleBlock ? TB_X - 10 : W;
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${H}" viewBox="0 0 ${effW} ${H}" style="background:${WHT};">`);
-  parts.push(rect(0, 0, effW, H, {fill:WHT, stroke:WHT, sw:0}));
-  parts.push(rect(MAR/2, MAR/2, effW-MAR, H-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
+  const effH = input.suppressScheduleBand ? CALC_Y + CALC_H + MAR : H;
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${effH}" viewBox="0 0 ${effW} ${effH}" preserveAspectRatio="xMidYMid meet" style="background:${WHT};">`);
+  parts.push(rect(0, 0, effW, effH, {fill:WHT, stroke:WHT, sw:0}));
+  parts.push(rect(MAR/2, MAR/2, effW-MAR, effH-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
 
   // ── Title ─────────────────────────────────────────────────────────────────
   const tcx = (DX + TB_X) / 2;
@@ -1909,7 +1989,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   {
     const run = isMicro ? roofRun : dcStringRun;
     const fb = isMicro
-      ? [`ENPHASE Q CABLE (TC-ER)`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31(C)']
+      // §8 — the open-air branch identity is the LISTED assembly the legend names
+      // (one source); §5 — its EGC is the BRANCH EGC, not the feeder's.
+      ? [input.openAirBranchWiringLabel ?? 'ENPHASE Q CABLE (TC-ER)',
+         // the grounding line is the OUTCOME of the document-based grounding
+         // authority (fail-closed PENDING when no applicable document exists) —
+         // never an unconditional EGC assertion.
+         input.openAirBranchEgcLabel ?? `1×#${branchEgcNum} GRN EGC`,
+         'OPEN AIR — NEC 690.31(C)']
       : [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31'];
     const {lines, cnt} = runLines(run, fb);
     const _s1Y = resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y);
@@ -1934,18 +2021,40 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     node3RX = cr.feederOutX;  // Use feeder output terminal X as the right-side connection point
     parts.push(txt(xComb, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
 
-    // SEGMENT 2: J-Box → Combiner
+    // SEGMENT 2: J-Box → Combiner  (§3/§4 — the SHARED conduit home-run)
     {
-      const run = branchRun;
+      // Prefer the dedicated home-run conduit segment; the open-air BRANCH_RUN is
+      // the Q-Cable trunk drawn as SEGMENT 1 and must NOT drive this in-conduit run.
+      const run = branchHomerunRun ?? branchRun;
       // Conductor gauge(s) from the branch plan's own callouts — mixed-OCPD
       // plans carry mixed gauges (#12 for 20A branches, #10 for a 25A branch).
+      // §1 — SEGMENT_2A is the SHARED jbox→combiner home-run: print the canonical
+      // physicalRaceway's FULL current-carrying inventory ('6#10 THWN-2') from
+      // homerunCurrentCarryingCount + homerunConductorGauge (gate 2 — count ==
+      // raceway inventory). Never the legacy per-branch #12-from-OCPD gauge.
+      const _hrGaugeNum = (input.homerunConductorGauge ?? '').replace('#', '').replace(' AWG', '').trim();
       const _brGauges = [...new Set((input.microBranches ?? [])
         .map(b => b.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
         .filter((g): g is string => !!g))];
-      const _brWireTxt = _brGauges.length
-        ? `${_brGauges.join('/')} AWG THWN-2`
-        : `${input.branchWireGauge??'#10 AWG'} THWN-2`;
-      const fb = [_brWireTxt, `1×#${egcNum} GRN EGC`, `IN ${input.branchConduitSize??'3/4"'} EMT`];
+      const _brWireTxt = (input.homerunCurrentCarryingCount && _hrGaugeNum)
+        ? `${input.homerunCurrentCarryingCount}#${_hrGaugeNum} THWN-2`
+        : _brGauges.length
+          ? `${_brGauges.join('/')} AWG THWN-2`
+          : `${input.branchWireGauge??'#10 AWG'} THWN-2`;
+      // W1b — the branch home-run conduit label PROJECTS the canonical BRANCH_RUN
+      // raceway (branchConduitType/Size from the snapshot), never a hardcoded
+      // '3/4" EMT'. Open-air Q-Cable branches print the 690.31(C) free-air label;
+      // in-raceway home runs print the real raceway type + size (matching PV-4B).
+      // §3/§4 — SEGMENT_2A is the SHARED jbox→combiner raceway. Label it from the
+      // home-run raceway projection (bundled branches in conduit), NOT the open-air
+      // branch. Falls back to the legacy branch label only when no home-run object.
+      const _brCondLine = input.homerunConduitType
+        ? `IN ${input.homerunConduitSize ?? ''} ${input.homerunConduitType}${input.homerunSharedCircuits && input.homerunSharedCircuits > 1 ? ` (${input.homerunSharedCircuits} BRANCHES SHARED)` : ''}`.replace(/\s+/g, ' ').trim()
+        : (input.branchIsOpenAir
+            ? 'OPEN AIR — NEC 690.31(C)'
+            : `IN ${input.branchConduitSize ?? '3/4"'} ${input.branchConduitType ?? 'EMT'}`);
+      // §5 — SEGMENT_2A cites the SHARED HOME-RUN raceway's own EGC.
+      const fb = [_brWireTxt, `1×#${homerunEgcNum} GRN EGC`, _brCondLine];
       const {lines, cnt} = runLines(run, fb);
       const _s2aY = resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y);
       console.log('[WIRE RUN CREATED] SEGMENT_2A_JBOX_TO_COMBINER: AC branch');
@@ -2504,24 +2613,43 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // ── LEGEND ────────────────────────────────────────────────────────────────
   // Legend expanded with battery/generator/ATS entries
+  // §8 (BAR closeout 2026-07-25) — the OPEN-AIR legend entry derives from the
+  // wiring-method ACTUALLY drawn on this sheet, not a hardcoded literal. A micro
+  // sheet's open-air section is the listed Q-Cable assembly (SEGMENT 1), so the
+  // legend names it; the generic 'PV Wire/THWN-2' label is used ONLY when a real
+  // open-air PV-wire method exists (a string/optimizer DC run). Gate 11: legend
+  // entries == displayed segment wiring methods.
+  const _openAirLabel = isMicro
+    ? `Open Air — ${input.openAirBranchWiringLabel ?? 'AC Trunk Cable (TC-ER)'} AC Branch (NEC 690.31(C))`
+    : 'Open Air — PV Wire/THWN-2 (NEC 690.31)';
+  // Post-AAC E-1 repair — long DATA-DRIVEN labels (the listed open-air wiring
+  // method) overflowed the fixed 188px legend box and ran past the embedded
+  // viewBox crop, where the clip harness now (correctly) fails them as cropped
+  // drawing content. Long labels WRAP onto continuation lines inside the box.
   const legEntries: {dash: string; stroke: string; label: string}[] = [
     {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
-    {dash:'10,5',stroke:GRN,       label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'},
+    {dash:'10,5',stroke:GRN,       label:_openAirLabel},
     {dash:'',    stroke:GRN,       label:'Equipment Grounding Conductor (EGC)'},
-    {dash:'4,2', stroke:BLK,       label:'DC Conductor in Conduit (USE-2/PV Wire)'},
+    // §8 closeout — the DC-conductor-in-conduit legend entry renders ONLY when a
+    // canonical DC-in-conduit segment exists. A pure 1:1 micro job has no field
+    // DC conductor (module→micro is the factory MC4 lead, open-air) — the entry
+    // is suppressed so the legend never advertises string materials it lacks.
+    ...(!isMicro ? [{dash:'4,2', stroke:BLK, label:'DC Conductor in Conduit (USE-2/PV Wire)'}] : []),
     ...(input.hasBattery ? [{dash:'6,3', stroke:'#1565C0', label:'Battery AC-Coupled Connection'}] : []),
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#2E7D32', label:'Generator Output Conductor'}] : []),
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#E65100', label:'ATS Transfer Conductor'}] : []),
   ];
-  const legH = 16 + legEntries.length * 11;
+  const legRows = legEntries.flatMap(e =>
+    wrapLegendLabel(e.label).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
+  const legH = 16 + legRows.length * 11;
   const legX = SCH_X+SCH_W-195, legY = SCH_Y+SCH_H - legH - 4;
   parts.push(rect(legX, legY, 188, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(legX+4, legY+10, 'LEGEND', {sz:F.sub, bold:true}));
   parts.push(ln(legX, legY+13, legX+188, legY+13, {sw:SW_THIN}));
-  legEntries.forEach((item,i) => {
+  legRows.forEach((item,i) => {
     const ly = legY+19+i*11;
-    parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
-    parts.push(txt(legX+44, ly+3, item.label, {sz:F.tiny}));
+    if (!item.cont) parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
+    parts.push(txt(legX+44, ly+3, item.text, {sz:F.tiny}));
   });
 
   // ── CALCULATION PANELS ────────────────────────────────────────────────────
@@ -2739,6 +2867,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   });
 
   // ── CONDUIT & CONDUCTOR SCHEDULE ──────────────────────────────────────────
+  // Suppressed in embedded planset mode — the canonical physical section
+  // schedule renders ONCE, as the PV-4B.1 HTML schedule (same objects, one
+  // derivation). See suppressScheduleBand on the input type.
+  if (!input.suppressScheduleBand) {
   parts.push(rect(DX, SCHED_Y, DW, SCHED_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(rect(DX, SCHED_Y, DW, 14, {fill:BLK, sw:0}));
   parts.push(txt(DX+6, SCHED_Y+10, 'CONDUIT & CONDUCTOR SCHEDULE — NEC 310 / NEC CHAPTER 9 TABLE 1', {sz:F.hdr, bold:true, fill:WHT}));
@@ -2798,10 +2930,42 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _fVd   = input.acVoltageDropPct ?? 0;
     const _fLen  = input.acWireLength ?? 0;
     const _fPass = _fFill <= 40 && _fVd <= 3;
+    const _feederConduit = `${resolvedAcCondType} ${resolvedAcConduit}`;
+    // §4 (07-22): a microinverter system has N parallel AC BRANCH CIRCUITS (each
+    // ≤20A OCPD, its own conductor), NOT one collapsed BR-1 carrying the feeder's
+    // #6/45A/60A. Render every real branch from the canonical branch plan
+    // (input.microBranches). Their AC output is on the open-air Q-Cable trunk;
+    // the shared feeder (combiner→disco→MSP) carries the aggregated current.
+    const _branchRows: SR[] = (input.microBranches && input.microBranches.length > 0)
+      ? input.microBranches.map(b => ({
+          id: `BR-${b.branchIndex}`,
+          from: `${b.deviceCount}× MICRO`, to: 'AC COMBINER',
+          conductors: b.conductorCallout ?? `${input.branchWireGauge ?? '#10 AWG'} THWN-2 + 1×#${branchEgcNum} GRN`,
+          conduit: 'OPEN AIR',
+          fill: 0,
+          amp: Math.round((b.branchCurrentA * 1.25) * 10) / 10,
+          ocpd: b.ocpdAmps,
+          vdrop: 0, len: 0, pass: true,
+        }))
+      : [{ id: 'BR-1', from: 'AC BRANCHES', to: 'AC COMBINER',
+          conductors: `${input.branchWireGauge ?? '#10 AWG'} THWN-2 + 1×#${branchEgcNum} GRN`,
+          conduit: 'OPEN AIR', fill: 0,
+          amp: input.branchOcpdAmps ? Math.round(input.branchOcpdAmps * 0.8 * 10) / 10 : 0,
+          ocpd: input.branchOcpdAmps ?? 20, vdrop: 0, len: 0, pass: true }];
+    // §3/§4 — the SHARED jbox→combiner home-run raceway as its OWN row (all
+    // branches bundled in one conduit). Distinct from the open-air Q-Cable
+    // branch rows above — never one merged multi-method branch string.
+    const _homerunRow: SR[] = input.homerunConduitType ? [{
+      id: 'BR-HR', from: 'ROOF J-BOX', to: 'AC COMBINER',
+      conductors: `${(input.homerunSharedCircuits ?? 1)}×[${input.branchWireGauge ?? '#10 AWG'}] THWN-2 + 1×#${homerunEgcNum} GRN`,
+      conduit: `${input.homerunConduitType}${input.homerunConduitSize ? ' ' + input.homerunConduitSize : ''}`,
+      fill: 0, amp: 0, ocpd: input.branchOcpdAmps ?? 20, vdrop: 0, len: 0, pass: true,
+    }] : [];
     sRows = isMicro ? [
-      {id:'BR-1',from:'ROOF J-BOX',to:'AC COMBINER',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
-      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
-      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
+      ..._branchRows,
+      ..._homerunRow,
+      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
+      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
     ] : [
       {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
       {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
@@ -2832,6 +2996,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       cx3 += cw3;
     });
   });
+  } // end !suppressScheduleBand
 
   // ── TITLE BLOCK ───────────────────────────────────────────────────────────
   // Build badge stays even in embedded mode — invisible deployment telemetry.
@@ -3755,22 +3920,37 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   }
 
   // ── LEGEND ────────────────────────────────────────────────────────────────
+  // §8 (BAR closeout 2026-07-25) — the multi-lane open-air legend entries derive
+  // from the lane wiring-methods actually drawn: a micro lane draws the listed
+  // Q-Cable assembly open-air; a string/optimizer lane draws open-air PV wire.
+  // Only the entries whose method exists on the sheet appear (gate 11).
+  const _hasMicroLane = lanes.some(b => laneTopology(b) === 'MICRO');
+  const _hasNonMicroLane = lanes.some(b => laneTopology(b) !== 'MICRO');
   const legEntries: {dash: string; stroke: string; label: string}[] = [
     {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
-    {dash:'10,5',stroke:GRN,       label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'},
+    ...(_hasMicroLane ? [{dash:'10,5', stroke:GRN, label:`Open Air — ${input.openAirBranchWiringLabel ?? 'AC Trunk Cable (TC-ER)'} AC Branch (NEC 690.31(C))`}] : []),
+    ...(_hasNonMicroLane ? [{dash:'10,5', stroke:GRN, label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'}] : []),
     {dash:'',    stroke:GRN,       label:'Equipment Grounding Conductor (EGC)'},
-    {dash:'4,2', stroke:BLK,       label:'DC Conductor in Conduit (USE-2/PV Wire)'},
+    // §8 closeout — DC-in-conduit legend renders only when a lane actually has DC
+    // conductors in conduit (a string/optimizer lane). All-micro multi-lane sets
+    // carry no field DC conductor; suppress the entry rather than imply strings.
+    ...(_hasNonMicroLane
+      ? [{dash:'4,2', stroke:BLK, label:'DC Conductor in Conduit (USE-2/PV Wire)'}] : []),
     ...(input.hasBattery ? [{dash:'6,3', stroke:'#1565C0', label:'Battery AC-Coupled Connection'}] : []),
   ];
-  const legH = 16 + legEntries.length * 11;
+  // Post-AAC E-1 repair — long data-driven labels wrap inside the box (see the
+  // single-lane legend note).
+  const legRows = legEntries.flatMap(e =>
+    wrapLegendLabel(e.label).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
+  const legH = 16 + legRows.length * 11;
   const legX = SCH_X+SCH_W-195, legY = SCH_Y+SCH_H - legH - 4;
   parts.push(rect(legX, legY, 188, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(legX+4, legY+10, 'LEGEND', {sz:F.sub, bold:true}));
   parts.push(ln(legX, legY+13, legX+188, legY+13, {sw:SW_THIN}));
-  legEntries.forEach((item,i) => {
+  legRows.forEach((item,i) => {
     const ly = legY+19+i*11;
-    parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
-    parts.push(txt(legX+44, ly+3, item.label, {sz:F.tiny}));
+    if (!item.cont) parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
+    parts.push(txt(legX+44, ly+3, item.text, {sz:F.tiny}));
   });
 
   // ═══ BOTTOM CALC BAND — reference-planset table suite ═════════════════════

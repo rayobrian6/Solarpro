@@ -1,0 +1,80 @@
+{
+  "generatedAt": "2026-07-24T01:12:13.270Z",
+  "artifact": "braidon-framing-authority-gate",
+  "directive": "docs/FRAMING-AUTHORITY-GATE-DIRECTIVE.md",
+  "ruling": "Operator-entered or field-observed data establishes OBSERVED geometry ONLY and can NEVER independently prove framing CAPACITY.",
+  "contractChange": {
+    "old": "isFramingVerified = operator-field completeness (framingType && rafterSize && rafterSpacing && rafterSpecies && rafterSpan). Live Braidon row (complete fields) was treated as VERIFIED and rendered modeled framing capacity.",
+    "new": "isFramingVerified = a verified FramingCapacityAuthority exists (verified+archived project-applicable document via lib/documents [truss_design_drawing / manufacturer_structural_calc / stamped_structural_analysis], OR a licensed-engineer review bound to the current snapshot digest). Operator completeness is OBSERVATION, never capacity authority.",
+    "blockerCode": {
+      "canonical": "FRAMING-AUTHORITY-UNVERIFIED",
+      "legacyAliasMapped": "STRUCTURAL-FRAMING-UNVERIFIED"
+    }
+  },
+  "authorityFlow": {
+    "before": "complete operator fields -> framingVerified=true -> framing check PASS + rendered utilization/adequate capacity (live).",
+    "after": "complete operator fields -> FramingObservation (source operator-entered, honest nulls) ; framingCapacityAuthority=null (no archived document / no digest-bound review) -> framingVerified=false -> FRAMING-AUTHORITY-UNVERIFIED fires, framing check passes:null, PRELIMINARY / NON-AUTHORITATIVE, no numeric capacity."
+  },
+  "clearingPaths": [
+    "Verified + archived, project-applicable document resolved THROUGH lib/documents (document class truss_design_drawing / manufacturer_structural_calc / stamped_structural_analysis; sha-256; current; verified; hasFramingCapacityClaim; exact project applicability).",
+    "Licensed-engineer review record bound to the CURRENT snapshot digest (invalidated by any digest change unless a new review covers the new digest)."
+  ],
+  "invalidation": "Framing approval (review path) references the snapshot digest. Any change to observations / geometry / module layout / racking / attachments / loads changes the snapshot digest by construction, invalidating prior approval unless the review covers the new digest — integrated with the snapshot_digest_invalidations ledger (lib/reconciliation).",
+  "liveBlockerResult": {
+    "snapshotId": "PDS-2E65B042F09F",
+    "digest": "2e65b042f09fc1ab…",
+    "framingObservation": {
+      "source": "operator-entered",
+      "framingType": "truss",
+      "nominalMemberSizeIn": "2x6",
+      "spacingIn": 24,
+      "apparentSpeciesGrade": "Douglas Fir-Larch",
+      "measuredSpanFt": 12,
+      "roofCovering": "shingle",
+      "bearingObservations": null,
+      "confidence": null,
+      "observer": null,
+      "observedAtIso": null,
+      "evidenceRefs": [],
+      "geometryComplete": true,
+      "provenance": {
+        "source": "framing-authority gate — observation",
+        "note": "OBSERVED framing geometry (source: operator-entered) — NOT capacity-verified. observer/timestamp absent on the source row (honest null). Operator-entered completeness is OBSERVATION, never capacity authority."
+      }
+    },
+    "framingCapacityAuthority": null,
+    "engineeringReviewRequired": true,
+    "framingCheckPasses": null,
+    "framingAuthorityUnverifiedBlockerFires": true,
+    "legacyStructuralFramingUnverifiedEmitted": false
+  },
+  "fixtureBlockerResult": {
+    "snapshotId": "PDS-27C8B1270466",
+    "digest": "27c8b1270466bc15…",
+    "framingObservation": {
+      "source": "operator-entered",
+      "framingType": null,
+      "nominalMemberSizeIn": null,
+      "spacingIn": null,
+      "apparentSpeciesGrade": null,
+      "measuredSpanFt": null,
+      "roofCovering": "Composition Shingle",
+      "bearingObservations": null,
+      "confidence": null,
+      "observer": null,
+      "observedAtIso": null,
+      "evidenceRefs": [],
+      "geometryComplete": false,
+      "provenance": {
+        "source": "framing-authority gate — observation",
+        "note": "OBSERVED framing geometry (source: operator-entered) — NOT capacity-verified. observer/timestamp absent on the source row (honest null). Operator-entered completeness is OBSERVATION, never capacity authority."
+      }
+    },
+    "framingCapacityAuthority": null,
+    "engineeringReviewRequired": true,
+    "framingCheckPasses": null,
+    "framingAuthorityUnverifiedBlockerFires": true,
+    "legacyStructuralFramingUnverifiedEmitted": false
+  },
+  "bothFollowSameRule": true
+}

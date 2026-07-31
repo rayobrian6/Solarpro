@@ -1,0 +1,258 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.141Z",
+  "artifact": "Q-Cable connector selection report — CableExtensionSolution contract",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §4 (deliverable 5)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "contract": {
+    "record": "CableExtensionSolution (lib/permit/snapshot/types.ts) — solutionId, type, selected, manufacturer, selectedSku, compatibilityVerified, manufacturerDocument, representedInBom, verificationState, bomLineIds",
+    "promotionRule": "lib/permit/utils/bomForPermit.ts — evaluateCableExtensionPromotion(): a connector row is promoted ONLY by a solution that is SELECTED, verificationState===\"verified\", names an exact SKU, has compatibilityVerified, carries a manufacturer document, is representedInBom, and NAMES THIS EXACT bomLineId. No solution ⇒ no promotion.",
+    "before": "the two connector rows were emitted by the trunk-cable resolver with required=false, no orderability flag at all — data-bom-orderable=\"true\", inside the 36 and inside the export — carrying installation-intent prose in derivedFrom, while no CableExtensionSolution existed anywhere (SnapshotAuthorityInputs.cableExtensionSolutions was a threading slot, always [])."
+  },
+  "modes": [
+    {
+      "mode": "fixture",
+      "snapshotId": "PDS-76C0C5B56CEF",
+      "snapshotDigest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+      "openRequirementCount": 15,
+      "cableExtensionSolutions": [],
+      "procurementSufficiency": {
+        "insufficient": false,
+        "deficitFt": 0,
+        "thresholdFt": 140.5,
+        "resolutionOptions": [
+          {
+            "kind": "verified-jumper-extension",
+            "description": "Verified listed jumper / extension cable product covering the deficit (exact SKU + verified manufacturer document + system compatibility).",
+            "selected": false
+          },
+          {
+            "kind": "alternate-listed-cable",
+            "description": "Alternate listed AC trunk cable assembly whose procurement footage envelopes the designed-installed path.",
+            "selected": false
+          },
+          {
+            "kind": "route-layout-revision",
+            "description": "Route / layout revision that reduces the per-branch cable path below the procured footage.",
+            "selected": false
+          },
+          {
+            "kind": "field-wireable-connector",
+            "description": "Field-wireable / field-cut listed connector solution with a verified manufacturer document.",
+            "selected": false
+          }
+        ],
+        "clearedBySolutionId": null
+      },
+      "connectorRows": [
+        {
+          "bomLineId": "BOM-CONNECTOR-F3079FAD",
+          "partNumber": "Q-CONN-10M",
+          "model": "IQ Field-Wireable Connector (Male)",
+          "quantity": 1,
+          "unit": "ea",
+          "required": false,
+          "derivedFrom": "1 splice pair(s) — count basis: 1 required trunk jump(s)",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "resolutionAction": "Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, and bind it to this BOM line.",
+          "promotion": {
+            "promoted": false,
+            "solutionId": null,
+            "missing": [
+              "no CableExtensionSolution exists for this design"
+            ]
+          },
+          "inAuthoritativeExport": false
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-25827044",
+          "partNumber": "Q-CONN-10F",
+          "model": "IQ Field-Wireable Connector (Female)",
+          "quantity": 1,
+          "unit": "ea",
+          "required": false,
+          "derivedFrom": "1 splice pair(s) — count basis: 1 required trunk jump(s)",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "resolutionAction": "Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, and bind it to this BOM line.",
+          "promotion": {
+            "promoted": false,
+            "solutionId": null,
+            "missing": [
+              "no CableExtensionSolution exists for this design"
+            ]
+          },
+          "inAuthoritativeExport": false
+        }
+      ]
+    },
+    {
+      "mode": "insufficient",
+      "snapshotId": "PDS-4B328A574DB9",
+      "snapshotDigest": "4b328a574db9ef3afc6fefd1736124c54ec58b2afb71e9e57bbdb61111dc25d0",
+      "openRequirementCount": 16,
+      "cableExtensionSolutions": [],
+      "procurementSufficiency": {
+        "insufficient": true,
+        "deficitFt": 14.5,
+        "thresholdFt": 166.5,
+        "resolutionOptions": [
+          {
+            "kind": "verified-jumper-extension",
+            "description": "Verified listed jumper / extension cable product covering the deficit (exact SKU + verified manufacturer document + system compatibility).",
+            "selected": false
+          },
+          {
+            "kind": "alternate-listed-cable",
+            "description": "Alternate listed AC trunk cable assembly whose procurement footage envelopes the designed-installed path.",
+            "selected": false
+          },
+          {
+            "kind": "route-layout-revision",
+            "description": "Route / layout revision that reduces the per-branch cable path below the procured footage.",
+            "selected": false
+          },
+          {
+            "kind": "field-wireable-connector",
+            "description": "Field-wireable / field-cut listed connector solution with a verified manufacturer document.",
+            "selected": false
+          }
+        ],
+        "clearedBySolutionId": null
+      },
+      "connectorRows": [
+        {
+          "bomLineId": "BOM-CONNECTOR-F3079FAD",
+          "partNumber": "Q-CONN-10M",
+          "model": "IQ Field-Wireable Connector (Male)",
+          "quantity": 1,
+          "unit": "ea",
+          "required": false,
+          "derivedFrom": "1 splice pair(s) — count basis: 1 required trunk jump(s)",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "resolutionAction": "Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. \"Jumpers required\" by assertion does NOT clear this.",
+          "promotion": {
+            "promoted": false,
+            "solutionId": null,
+            "missing": [
+              "no CableExtensionSolution exists for this design"
+            ]
+          },
+          "inAuthoritativeExport": false
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-25827044",
+          "partNumber": "Q-CONN-10F",
+          "model": "IQ Field-Wireable Connector (Female)",
+          "quantity": 1,
+          "unit": "ea",
+          "required": false,
+          "derivedFrom": "1 splice pair(s) — count basis: 1 required trunk jump(s)",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "resolutionAction": "Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. \"Jumpers required\" by assertion does NOT clear this.",
+          "promotion": {
+            "promoted": false,
+            "solutionId": null,
+            "missing": [
+              "no CableExtensionSolution exists for this design"
+            ]
+          },
+          "inAuthoritativeExport": false
+        }
+      ]
+    },
+    {
+      "mode": "identity",
+      "snapshotId": "PDS-949E2B4125A5",
+      "snapshotDigest": "949e2b4125a5890552558e8ac21ed202c370b1308a2a060f4264a3038c400fd4",
+      "openRequirementCount": 17,
+      "cableExtensionSolutions": [],
+      "procurementSufficiency": {
+        "insufficient": false,
+        "deficitFt": 0,
+        "thresholdFt": 140.5,
+        "resolutionOptions": [
+          {
+            "kind": "verified-jumper-extension",
+            "description": "Verified listed jumper / extension cable product covering the deficit (exact SKU + verified manufacturer document + system compatibility).",
+            "selected": false
+          },
+          {
+            "kind": "alternate-listed-cable",
+            "description": "Alternate listed AC trunk cable assembly whose procurement footage envelopes the designed-installed path.",
+            "selected": false
+          },
+          {
+            "kind": "route-layout-revision",
+            "description": "Route / layout revision that reduces the per-branch cable path below the procured footage.",
+            "selected": false
+          },
+          {
+            "kind": "field-wireable-connector",
+            "description": "Field-wireable / field-cut listed connector solution with a verified manufacturer document.",
+            "selected": false
+          }
+        ],
+        "clearedBySolutionId": null
+      },
+      "connectorRows": [
+        {
+          "bomLineId": "BOM-CONNECTOR-F3079FAD",
+          "partNumber": "Q-CONN-10M",
+          "model": "IQ Field-Wireable Connector (Male)",
+          "quantity": 1,
+          "unit": "ea",
+          "required": false,
+          "derivedFrom": "1 splice pair(s) — count basis: 1 required trunk jump(s)",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "resolutionAction": "Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, and bind it to this BOM line.",
+          "promotion": {
+            "promoted": false,
+            "solutionId": null,
+            "missing": [
+              "no CableExtensionSolution exists for this design"
+            ]
+          },
+          "inAuthoritativeExport": false
+        },
+        {
+          "bomLineId": "BOM-CONNECTOR-25827044",
+          "partNumber": "Q-CONN-10F",
+          "model": "IQ Field-Wireable Connector (Female)",
+          "quantity": 1,
+          "unit": "ea",
+          "required": false,
+          "derivedFrom": "1 splice pair(s) — count basis: 1 required trunk jump(s)",
+          "authorityState": "CANDIDATE_NON_ORDERABLE",
+          "orderable": false,
+          "exportable": false,
+          "authoritySource": "CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution selects a field-wireable connector solution for the selected cable assembly, so this connector is not established as the listed splice method. Design quantity only; excluded from the authoritative procurement total and from every export. It does NOT resolve any cable-length deficit. PROMOTION CONTRACT: no CableExtensionSolution exists for this design",
+          "resolutionAction": "Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, and bind it to this BOM line.",
+          "promotion": {
+            "promoted": false,
+            "solutionId": null,
+            "missing": [
+              "no CableExtensionSolution exists for this design"
+            ]
+          },
+          "inAuthoritativeExport": false
+        }
+      ]
+    }
+  ],
+  "deficitSeparation": "The connector rows are NOT a resolution for the Q-Cable length deficit and are never named by the deficit statement or by the sufficiency authority's resolutionOptions. They are candidate hardware with no selected solution behind them; the deficit is closed only by a selected, verified CableExtensionSolution."
+}

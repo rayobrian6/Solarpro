@@ -1,0 +1,74 @@
+{
+  "section": "BAR §6 — unverified fasteners are NON-ORDERABLE",
+  "contract": "While FastenerAssembly.verification !== \"verified\": the calculated attachment quantity is RETAINED as a DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY, is EXCLUDED from the authoritative procurement totals, and no manufacturer / SKU / diameter / length / coating / capacity may be displayed. The exact row auto-regenerates when the assembly verifies (no second code path).",
+  "byMode": [
+    {
+      "mode": "original",
+      "snapshotId": "PDS-CD0F6377533F",
+      "digest": "cd0f6377533f404ff20ebd80817124c77d60c95699add1cd72d64c8fd64023b1",
+      "sheetCount": 21,
+      "source": "frozen tests/fixtures/braidon-original-audit-fixture (zero mutable DB input)",
+      "fastenerAssembly": {
+        "fastenerVerification": "verified",
+        "overall": "pending",
+        "screwLagModel": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+        "datasheetSource": "ICC-ES ESR-3575",
+        "verification": "unverified"
+      },
+      "rackingAssemblyVerification": {
+        "railSku": "pending",
+        "capacitySource": "pending",
+        "spanSource": "pending",
+        "fastener": "verified",
+        "overall": "pending"
+      },
+      "blockerActive": true,
+      "designQuantityAttachments": 64,
+      "renderedFlag": "data-fastener-orderable=\"false\"",
+      "renderedRows": [
+        "DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY",
+        "DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY —"
+      ],
+      "specLeaks": [],
+      "gate8": {
+        "ok": true,
+        "detail": "verification=unverified flagged=true label=true specLeaks=none blockerOnRs1=true"
+      }
+    },
+    {
+      "mode": "live",
+      "snapshotId": "PDS-8910EFAC2AB8",
+      "digest": "8910efac2ab8468628a5e5cfac5f6119981d1ca59eca5bffcacc714d375ac6d1",
+      "sheetCount": 21,
+      "source": "live Neon design 4030b664-bebe-433b-a11c-cda05ead2f7d (BRAIDON M PILLA — Solar TEST), regenerated through resolveSnapshotAuthorityInputs + generatePermitHTML",
+      "fastenerAssembly": {
+        "fastenerVerification": "verified",
+        "overall": "pending",
+        "screwLagModel": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+        "datasheetSource": "ICC-ES ESR-3575",
+        "verification": "unverified"
+      },
+      "rackingAssemblyVerification": {
+        "railSku": "pending",
+        "capacitySource": "pending",
+        "spanSource": "pending",
+        "fastener": "verified",
+        "overall": "pending"
+      },
+      "blockerActive": true,
+      "designQuantityAttachments": 64,
+      "renderedFlag": "data-fastener-orderable=\"false\"",
+      "renderedRows": [
+        "DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY",
+        "DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY —"
+      ],
+      "specLeaks": [],
+      "gate8": {
+        "ok": true,
+        "detail": "verification=unverified flagged=true label=true specLeaks=none blockerOnRs1=true"
+      }
+    }
+  ],
+  "honestState": "UNVERIFIED on both modes — the fastener assembly quantity is present as a design quantity and excluded from procurement. No SKU, diameter, length, coating or capacity is displayed.",
+  "boundary": "No fabricated source, grounding authority, fastener SKU or manufacturer evidence. Every state below is the state the code actually produced; honest PENDING/UNVERIFIED states are recorded as such, not resolved."
+}

@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.787Z",
+  "artifact": "braidon-framing-authority",
+  "section": "framing-authority gate — observation vs capacity authority",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "purpose": "Ray's ruling: operator-entered / field-observed data establishes OBSERVED geometry ONLY and can NEVER independently prove framing CAPACITY. Verification requires a FramingCapacityAuthority: a verified + archived project-applicable document (truss design drawing / manufacturer structural calc / stamped analysis) resolved through lib/documents, OR a licensed-engineer review bound to the current snapshot digest. A generic BCSI table / operator-entered dimensions / assumed grade inform PRELIMINARY modeling only. When unverified the sheet prints EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED and the FRAMING-AUTHORITY-UNVERIFIED blocker fires — INCLUDING on the live Braidon row whose operator-entered framing fields are complete.",
+  "engineeringReviewRequired": true,
+  "reviewReasons": [
+    "EXISTING FRAMING CAPACITY NOT VERIFIED — no project-specific structural authority (archived truss design drawing / manufacturer capacity calc / stamped analysis, or a licensed-engineer review bound to the current snapshot digest) establishes the existing framing capacity. Operator-entered / observed framing geometry is OBSERVATION only and does NOT verify capacity; the code-default rafter/truss capacity is NOT engineering authority. A project-specific structural review is required before permit submission."
+  ],
+  "framingObservation": {
+    "source": "operator-entered",
+    "framingType": null,
+    "nominalMemberSizeIn": null,
+    "spacingIn": null,
+    "apparentSpeciesGrade": null,
+    "measuredSpanFt": null,
+    "roofCovering": "Composition Shingle",
+    "bearingObservations": null,
+    "confidence": null,
+    "observer": null,
+    "observedAtIso": null,
+    "evidenceRefs": [],
+    "geometryComplete": false,
+    "provenance": {
+      "source": "framing-authority gate — observation",
+      "note": "OBSERVED framing geometry (source: operator-entered) — NOT capacity-verified. observer/timestamp absent on the source row (honest null). Operator-entered completeness is OBSERVATION, never capacity authority."
+    }
+  },
+  "framingCapacityAuthority": null,
+  "observationCompleteButNotVerified": false,
+  "addedDeadLoadPsf": 2.153,
+  "distributedRoofLoadPsf": 17.153,
+  "governing": {
+    "utilization": 0.723,
+    "safetyFactor": 1.3838571901419954,
+    "passes": null
+  },
+  "observedFramingKeptSeparateFromVerifiedCapacity": true,
+  "clearingPaths": [
+    "A verified + archived, project-applicable document resolved through lib/documents — document class truss_design_drawing / manufacturer_structural_calc / stamped_structural_analysis (sha-256, current, verified).",
+    "A licensed-engineer review record bound to the CURRENT snapshot digest (invalidated by any digest change unless a new review covers the new digest)."
+  ],
+  "note": "UNVERIFIED — no capacity/utilization/PASS/adequate verdict is asserted; only added PV load quantified. Operator-entered framing completeness is OBSERVATION, not capacity authority."
+}

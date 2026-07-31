@@ -1,0 +1,104 @@
+{
+  "generatedAt": "2026-07-27T16:47:05.681Z",
+  "artifact": "braidon-label-topology-report",
+  "section": "§16 PV-5 label applicability is topology-driven",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "purpose": "On this 705.11 supply-side design, the load-side-only back-fed-breaker placard (NEC 705.12(D)(2)(3)(b)) is marked N/A, never required; the supply-side line-side treatment applies. Label applicability is driven by the canonical interconnection topology, not rendered unconditionally.",
+  "interconnectionTopology": "supply-side (705.11)",
+  "placards": [
+    {
+      "id": "L-1",
+      "code": "NEC 2020 690.56(C)",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-2",
+      "code": "NEC 2020 690.56(C)(2)",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-3",
+      "code": "NEC 2020 690.56(C)(3)",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-4",
+      "code": "NEC 2020 690.13(B)",
+      "applicability": "N/A"
+    },
+    {
+      "id": "L-5",
+      "code": "NEC 2020 690.13(B) / 690.15",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-6",
+      "code": "NEC 2020 690.13(B)",
+      "applicability": "N/A"
+    },
+    {
+      "id": "L-7",
+      "code": "NEC 2020 690.31(D)",
+      "applicability": "N/A"
+    },
+    {
+      "id": "L-8",
+      "code": "NEC 2020 690.53",
+      "applicability": "N/A"
+    },
+    {
+      "id": "L-9",
+      "code": "NEC 2020 690.54 / 705.10",
+      "applicability": "YES*"
+    },
+    {
+      "id": "L-10",
+      "code": "NEC 2020 690.13 / 705.20",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-12",
+      "code": "NEC 2020 705.10",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-13",
+      "code": "NEC 2020 705.10",
+      "applicability": "YES*"
+    },
+    {
+      "id": "L-14",
+      "code": "NEC 2020 705.11",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-15",
+      "code": "NEC 2020 705.10",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-16",
+      "code": "NEC 2020 706.15 / 706.16",
+      "applicability": "N/A"
+    },
+    {
+      "id": "L-17",
+      "code": "NEC 2020 706 · IFC PENDING 1207",
+      "applicability": "N/A"
+    },
+    {
+      "id": "L-18",
+      "code": "NEC 2020 250.119 / 690.43 / 690.47",
+      "applicability": "YES"
+    },
+    {
+      "id": "L-19",
+      "code": "NEC 2020 690.4 / 690.56 / 110.21(B)",
+      "applicability": "YES"
+    }
+  ],
+  "loadSideOnlyBackfedBreaker": null,
+  "noLoadSideOnlyRequiredOnSupplySide": true
+}

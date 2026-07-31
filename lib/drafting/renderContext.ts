@@ -18,6 +18,7 @@
 
 import type { CADModel }    from '../cad/types';
 import type { BillInsights } from '../billInsights';
+import type { PermitDesignSnapshot } from '../permit/snapshot/types';
 import { utilityDisplayName } from '../permit/utils/helpers';
 import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
 import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
@@ -82,6 +83,16 @@ export interface RenderContext {
   invalidationLineage: EngineeringInvalidationLineageMetadata | null;
   staleStateMetadata: EngineeringStaleStateMetadata | null;
   engineeringStateSnapshot: EngineeringStateSnapshotReference | null;
+
+  /**
+   * W3 — the validated canonical PermitDesignSnapshot. Structural / roof-layout
+   * / racking facts drawn on any sheet PROJECT from this object (module dims,
+   * rail + attachment coordinates, setback polygons, environmental values,
+   * structural checks). Templates never re-derive these; a null snapshot means
+   * the drawing runs OUTSIDE permit generation (standalone preview) and the
+   * template must degrade honestly (em-dash / UNVERIFIED), never invent a value.
+   */
+  snapshot: PermitDesignSnapshot | null;
 }
 
 // ─── Builder ──────────────────────────────────────────────────────────────────
@@ -107,6 +118,7 @@ export function buildRenderContext(
     invalidationLineage?: EngineeringInvalidationLineageMetadata | null;
     staleStateMetadata?: EngineeringStaleStateMetadata | null;
     engineeringStateSnapshot?: EngineeringStateSnapshotReference | null;
+    snapshot?: PermitDesignSnapshot | null;
   },
 ): RenderContext {
   const systemType = cad.systemType as RenderContext['systemType'];
@@ -148,6 +160,7 @@ export function buildRenderContext(
     invalidationLineage: opts?.invalidationLineage ?? null,
     staleStateMetadata: opts?.staleStateMetadata ?? null,
     engineeringStateSnapshot: opts?.engineeringStateSnapshot ?? opts?.documentProvenance?.engineeringStateSnapshot ?? opts?.invalidationLineage?.snapshotReference ?? null,
+    snapshot: opts?.snapshot ?? null,
   };
 
   console.log(

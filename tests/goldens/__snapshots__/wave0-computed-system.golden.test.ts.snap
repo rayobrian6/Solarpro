@@ -27,7 +27,7 @@ exports[`Wave 0 golden — computeSystem legacy MICRO (20 × IQ8+, roof) > acBra
 exports[`Wave 0 golden — computeSystem legacy MICRO (20 × IQ8+, roof) > per-run {id, gauge, lengthFt, conductors} matches the pre-contract snapshot 1`] = `
 [
   {
-    "conductors": 4,
+    "conductors": 2,
     "gauge": "#10 AWG",
     "id": "ROOF_RUN",
     "lengthFt": 30,
@@ -37,6 +37,12 @@ exports[`Wave 0 golden — computeSystem legacy MICRO (20 × IQ8+, roof) > per-r
     "gauge": "#10 AWG",
     "id": "BRANCH_RUN",
     "lengthFt": 50,
+  },
+  {
+    "conductors": 2,
+    "gauge": "#10 AWG",
+    "id": "BRANCH_HOMERUN_RUN",
+    "lengthFt": 20,
   },
   {
     "conductors": 3,
@@ -63,6 +69,7 @@ exports[`Wave 0 golden — computeSystem legacy MICRO (20 × IQ8+, roof) > runs[
 [
   "ROOF_RUN",
   "BRANCH_RUN",
+  "BRANCH_HOMERUN_RUN",
   "COMBINER_TO_DISCO_RUN",
   "DISCO_TO_METER_RUN",
   "MSP_TO_UTILITY_RUN",

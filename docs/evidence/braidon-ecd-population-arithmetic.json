@@ -1,0 +1,95 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.140Z",
+  "artifact": "before/after BOM population arithmetic",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §1 (deliverable 3)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "before": {
+    "measuredAt": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+    "citation": "docs/ECD-ROOT-CAUSE-MAP.md §1 — \"The measured truth\" + \"The three divergent counters\"",
+    "fullBomRows": 48,
+    "schedRenderedRows": 47,
+    "renderedCounters": [
+      {
+        "rendered": "TOTAL LINE ITEMS (THIS SCHEDULE, ALL ROWS INCLUDING PENDING)",
+        "value": 47,
+        "population": "rows AFTER BOM_SKIP_CATEGORIES (renderer-local `flat.length`)",
+        "emitter": "structuralPages.ts:1581"
+      },
+      {
+        "rendered": "AUTHORITATIVE PROCUREMENT TOTAL — ORDERABLE ROWS ONLY (FULL BOM)",
+        "value": 36,
+        "population": "the FULL 48-row BOM",
+        "emitter": "structuralPages.ts:1578,1585,1590"
+      },
+      {
+        "rendered": "…ORDERABLE ROWS ONLY: 36 of 48 BOM line items. 12 EXCLUDED …",
+        "value": "36 / 48 / 12",
+        "population": "the FULL 48-row BOM",
+        "emitter": "structuralPages.ts:1629-1633"
+      },
+      {
+        "rendered": "This system BOM contains 47 line items across 5 stages",
+        "value": 47,
+        "population": "renderer-local slice",
+        "emitter": "structuralPages.ts:1603"
+      },
+      {
+        "rendered": "44 items are required per NEC / manufacturer specification",
+        "value": 44,
+        "population": "an ORTHOGONAL axis (required-vs-optional)",
+        "emitter": "structuralPages.ts:1599,1604"
+      }
+    ],
+    "renderedRowTags": {
+      "data-bom-orderable=\"true\"": 35,
+      "data-bom-orderable=\"false\"": 12,
+      "total": 47
+    },
+    "contradiction": "Two counters over two different populations printed side by side with no label distinguishing them, plus a third on an orthogonal axis. The off-by-one (48−47, 36−35) IS the solar_panel row, silently counted ORDERABLE because it carried neither nonOrderable nor quantityState. The 47 rendered row tags themselves disproved the printed \"36 of 48\".",
+    "invariantHeld": false
+  },
+  "after": {
+    "measuredAt": "this pass, from the rendered package + the ONE ProcurementApproval object",
+    "snapshotId": "PDS-76C0C5B56CEF",
+    "population": "the FULL BOM — every line the package orders. BOM_SKIP_CATEGORIES is now a DISPLAY-SECTION concern only.",
+    "totalRowCount": 48,
+    "rowsShownInTheBomTable": 47,
+    "rowsScheduledAboveInTheirOwnTables": 1,
+    "rowsScheduledAboveIds": [
+      {
+        "bomLineId": "BOM-SOLAR-PANEL-18288B26",
+        "category": "solar_panel",
+        "state": "CANDIDATE_NON_ORDERABLE"
+      }
+    ],
+    "stateCounts": {
+      "VERIFIED_ORDERABLE": 11,
+      "ESTIMATED_FIELD_VERIFY": 22,
+      "CANDIDATE_NON_ORDERABLE": 14,
+      "QUANTITY_PENDING": 1,
+      "EXCLUDED_NOT_APPLICABLE": 0
+    },
+    "arithmetic": "11 + 22 + 14 + 1 + 0 = 48 = totalRowCount",
+    "displaySplit": "47 shown in the BOM table + 1 scheduled above = 48",
+    "authoritativeExportCount": 11,
+    "countsReconcile": true,
+    "invariantHeld": true,
+    "retiredRenderedClaims": [
+      "\"36 of 48\" (and every hardcoded N-of-M count of that class)",
+      "\"This system BOM contains {flat.length} line items\" — a renderer-local counter",
+      "\"{N} items are required per NEC / manufacturer specification\" — an orthogonal axis read as procurement",
+      "\"All quantities are derived from CAD geometry and equipment registry — no manual estimates.\""
+    ]
+  },
+  "delta": {
+    "note": "The population did NOT change (48 rows, both before and after). What changed is that ONE counter now reports it, the display split is stated and reconciled by row id, and the orderable count fell from 36 to 11 because a row is only VERIFIED_ORDERABLE when nothing open affects it (fail-CLOSED) rather than whenever no flag happened to be set (fail-OPEN).",
+    "orderableBefore": 36,
+    "orderableAfter": 11,
+    "reclassified": {
+      "routeDerivedToEstimatedFieldVerify": 22,
+      "toCandidateNonOrderable": 14,
+      "quantityPending": 1
+    }
+  }
+}
