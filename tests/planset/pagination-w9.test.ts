@@ -22,9 +22,22 @@
 //     "Issued for permit review" while the set is pending review.
 // ═══════════════════════════════════════════════════════════════════════════
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
+import {
+  PROBE_VIEWPORT, DEVICE_SCALE_FACTOR, INTERNAL_TOL_PX, CLIP_TOL_IN,
+  preparePrintPage, readEnvelope, measurePages, formatFailure, detectFontAvailability,
+} from '../../scripts/lib/pagination-probe.mjs';
+
+/** Deterministic test-output root — the exact HTML measured and a screenshot of
+ *  every failing sheet land here, so a reported overflow is always reproducible
+ *  from the same bytes rather than from a number in a log. */
+const OUT_DIR = path.resolve(__dirname, '../../test-output/pagination-w9');
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
@@ -171,85 +184,81 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
       ctx.skip();
       return;
     }
+    fs.mkdirSync(OUT_DIR, { recursive: true });
+    const browserVersion = `chromium ${browser.version()}`;
     try {
       // WS-10: both profiles are measured in the same browser session.
       for (const profile of ['full', 'permit'] as const) {
       const { html, snap } = render(profile);
-      const page = await browser.newPage({ viewport: { width: 1700, height: 1120 }, deviceScaleFactor: 1 });
-      await page.setContent(html, { waitUntil: 'load' });
-      const report = await page.evaluate(() => {
-        const clipsY = (root: Element) => {
-          const cs = getComputedStyle(root);
-          return cs.overflowY === 'hidden' || cs.overflowY === 'clip'
-              || cs.overflow === 'hidden' || cs.overflow === 'clip';
-        };
-        const pages = Array.from(document.querySelectorAll('.page')) as HTMLElement[];
-        return pages.map((pg, i) => {
-          const cs = getComputedStyle(pg);
-          const padB = parseFloat(cs.paddingBottom) || 0;
-          const pr = pg.getBoundingClientRect();
-          const contentBottom = pg.clientHeight - padB; // px, inside the padding box
-          // lowest non-SVG descendant bottom, relative to the page top
-          let maxBottom = 0;
-          let worst = '';
-          pg.querySelectorAll('*').forEach(el => {
-            // intentional aerial/detail SVG bleed is not content clipping
-            if (el.closest('svg') || el.tagName.toLowerCase() === 'svg') return;
-            const r = el.getBoundingClientRect();
-            if (r.width === 0 && r.height === 0) return;
-            const relBottom = r.bottom - pr.top;
-            if (relBottom > maxBottom) {
-              maxBottom = relBottom;
-              worst = (el.className || el.tagName) + ' :: ' + (el.textContent || '').trim().slice(0, 44);
-            }
-          });
-          const belowByIn = (maxBottom - contentBottom) / 96;
 
-          // §19 — SUB-SHEET internal clip: a block taller than its own hidden-
-          // overflow container is silently truncated even when the page fits.
-          // Measure the deepest NON-SVG content overflow per vertical clip
-          // container (an oversized <svg> cropped to a viewport is intentional
-          // bleed, excluded). Scale-corrected for the fit-to-width transform.
-          const pgScale = pr.height / pg.offsetHeight;
-          let internalWorstPx = 0; let internalWorst = '';
-          for (const c of [pg, ...Array.from(pg.querySelectorAll('*'))] as HTMLElement[]) {
-            if (c.tagName.toLowerCase() === 'svg' || c.closest('svg')) continue;
-            if (!clipsY(c)) continue;
-            if (c.scrollHeight - c.clientHeight <= 2) continue;  // no clip
-            const cr = c.getBoundingClientRect();
-            const cPadB = parseFloat(getComputedStyle(c).paddingBottom) || 0;
-            const contentBottomLayout = c.clientTop + (c.clientHeight - cPadB);
-            let over = 0; let wEl = '';
-            for (const el of Array.from(c.querySelectorAll('*'))) {
-              if (el.tagName.toLowerCase() === 'svg' || el.closest('svg')) continue;
-              const ecs = getComputedStyle(el);
-              if (ecs.position === 'absolute' || ecs.position === 'fixed') continue;
-              const r = el.getBoundingClientRect();
-              if (r.width === 0 && r.height === 0) continue;
-              if ((el.textContent || '').trim() === '' && r.height < 4) continue;
-              const ov = (r.bottom - cr.top) / pgScale - contentBottomLayout;
-              if (ov > over) { over = ov; wEl = (c.className || c.tagName) + ' clips ' + ((el.className || el.tagName) + ' :: ' + (el.textContent || '').trim().slice(0, 36)); }
-            }
-            if (over > internalWorstPx) { internalWorstPx = over; internalWorst = wEl; }
-          }
+      // The measured bytes are WRITTEN FIRST and loaded over file:// — the test
+      // reports an artifact path + SHA-256 that can be reopened and re-measured
+      // by hand, instead of an in-memory string nobody can retrieve.
+      const artifactPath = path.join(OUT_DIR, `pagination-w9.${profile}.html`);
+      fs.writeFileSync(artifactPath, html, 'utf8');
+      const artifactSha256 = crypto.createHash('sha256').update(html, 'utf8').digest('hex');
+      const snapshotId = (snap as { meta?: { snapshotId?: string } }).meta?.snapshotId
+        ?? (html.match(/PDS-[A-F0-9]{12}/) ?? ['(no snapshot id in artifact)'])[0];
 
-          return { i, belowByIn: +belowByIn.toFixed(3), worst, hasTitleBlock: !!pg.querySelector('.title-block'),
-                   internalWorstPx: +internalWorstPx.toFixed(1), internalWorst };
-        });
-      });
+      const page = await browser.newPage({ viewport: PROBE_VIEWPORT, deviceScaleFactor: DEVICE_SCALE_FACTOR });
+      await page.goto(pathToFileURL(artifactPath).href, { waitUntil: 'load' });
+      // every embedded resource settled (the package inlines its assets as
+      // data: URIs, so this is the true "all resources" barrier)
+      await page.waitForLoadState('networkidle').catch(() => {});
+      const env = await preparePrintPage(page);
+      const envelope = await readEnvelope(page);
 
-      // physical page count agrees with the manifest
-      expect(report.length).toBe(snap.projectAuthority.sheetIndex.length);
-      for (const r of report) expect(r.hasTitleBlock, `page ${r.i} missing title block`).toBe(true);
+      const probeCtx = {
+        artifactPath, artifactSha256, snapshotId, profile,
+        sheetCount: envelope.pageCount, env, envelope, browserVersion,
+        deviceScaleFactor: DEVICE_SCALE_FACTOR,
+        savedHtmlPath: artifactPath,
+      };
+      const envMsg = `[${profile}] ${artifactPath} sha=${artifactSha256.slice(0, 16)} ${browserVersion}`;
+
+      // ── the measurement is only valid inside a verified print envelope ────
+      expect(env.mediaPrint, `${envMsg} — print media not active`).toBe(true);
+      expect(env.fontsStatus, `${envMsg} — fonts not settled`).toBe('loaded');
+      expect(envelope.atPageIs17x11, `${envMsg} — @page is not 17in x 11in: ${envelope.atPageRule}`).toBe(true);
+      expect(envelope.allPages17x11, `${envMsg} — .page geometry is not 1632x1056px: ${envelope.pageGeometries.join(' | ')}`).toBe(true);
+      expect(envelope.toolbarHidden, `${envMsg} — #sp-toolbar visible under print (display=${envelope.toolbarDisplay})`).toBe(true);
+      expect(envelope.sheetsTransformNone, `${envMsg} — #sp-sheets carries a screen transform: ${envelope.sheetsTransform}`).toBe(true);
+
+      // ── the fonts the stylesheet ASKS FOR must actually exist here ────────
+      // The package embeds no @font-face. On a host without Arial / Courier New
+      // the browser substitutes a metrically different face, dense text blocks
+      // rewrap taller, and this scan reports a LAYOUT clip that is really a
+      // MISSING FONT. Fail on the environment explicitly rather than let a
+      // phantom overflow be attributed to the sheet design.
+      const fonts = await detectFontAvailability(page, ['Arial', 'Courier New']);
+      for (const [family, info] of Object.entries(fonts as Record<string, { available: boolean; widthPx: number; serifFallbackWidthPx: number }>)) {
+        expect(info.available,
+          `${envMsg} — FONT "${family}" IS NOT INSTALLED ON THIS HOST (probe width ${info.widthPx}px == serif fallback ${info.serifFallbackWidthPx}px). ` +
+          `The planset embeds no @font-face and requests ${family}; a substituted face rewraps text and produces overflow numbers that describe THIS MACHINE, not the sheet. ` +
+          `Install the metric-compatible fonts (or run where they exist) before treating any page-fit result as a layout defect.`,
+        ).toBe(true);
+      }
+
+      const report = await measurePages(page, INTERNAL_TOL_PX);
+      expect(report.length, `${envMsg} — page count`).toBe(snap.projectAuthority.sheetIndex.length);
+      for (const r of report) expect(r.hasTitleBlock, `${envMsg} page ${r.pageIndex} missing title block`).toBe(true);
+
+      // Every sheet that trips EITHER gate gets a screenshot + a fully
+      // provenanced diagnostic block naming the exact offending element.
+      const failing = report.filter((r: any) => r.internalWorstPx > INTERNAL_TOL_PX || r.belowByIn > CLIP_TOL_IN);
+      for (const r of failing) {
+        const shot = path.join(OUT_DIR, `${profile}.${String(r.pageIndex).padStart(2, '0')}.${r.sheetId.replace(/[^\w.-]/g, '_')}.png`);
+        await page.locator('.page').nth(r.pageIndex).screenshot({ path: shot }).catch(() => {});
+        r.screenshotPath = shot;
+      }
+      const diagnostics = failing.map((r: any) => formatFailure(probeCtx, r)).join('\n');
 
       // §19 — no MEANINGFUL sub-sheet internal clip (real content severed by a
-      // nested hidden-overflow box). >2px of non-SVG content past a clip box.
-      const INTERNAL_TOL_PX = 2;
-      const internalClips = report
-        .map(r => ({ ...r, id: snap.projectAuthority.sheetIndex[r.i]?.id ?? String(r.i) }))
-        .filter(r => r.internalWorstPx > INTERNAL_TOL_PX);
-      const iDetail = internalClips.map(r => `${r.id}: +${r.internalWorstPx}px [${r.internalWorst}]`).join('  |  ');
-      expect(internalClips, `[${profile}] internal-clipped sheets: ${iDetail}`).toEqual([]);
+      // nested hidden-overflow box). Tolerance is the PRE-EXISTING 2px layout
+      // rounding allowance; it is never raised to make a sheet pass.
+      const internalClips = failing.filter((r: any) => r.internalWorstPx > INTERNAL_TOL_PX);
+      expect(internalClips.map((r: any) => `${r.sheetId} +${r.internalWorstPx}px`),
+        `\n[${profile}] INTERNAL-CLIPPED SHEETS\n${diagnostics}\n`).toEqual([]);
 
       // A page is CLIPPED when a non-SVG element extends meaningfully past the
       // printable box. Clean full-bleed sheets sit ≤ ~0.38in below the content
@@ -257,16 +266,14 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
       // (an overflowing page conclusion / footer) is >1in. 0.5in cleanly
       // separates the two — the five historically-clipped sheets measured
       // 0.9–4.95in over before this pass.
-      const CLIP_TOL_IN = 0.5;
-      const clipped = report
-        .map(r => ({ ...r, id: snap.projectAuthority.sheetIndex[r.i]?.id ?? String(r.i) }))
-        .filter(r => r.belowByIn > CLIP_TOL_IN);
-      const detail = clipped.map(r => `${r.id}: +${r.belowByIn}in [${r.worst}]`).join('  |  ');
-      expect(clipped, `[${profile}] clipped sheets: ${detail}`).toEqual([]);
+      const clipped = failing.filter((r: any) => r.belowByIn > CLIP_TOL_IN);
+      expect(clipped.map((r: any) => `${r.sheetId} +${r.belowByIn}in`),
+        `\n[${profile}] PAGE-BOX CLIPPED SHEETS\n${diagnostics}\n`).toEqual([]);
+
       await page.close();
       }
     } finally {
       await browser.close();
     }
-  }, 120000);
+  }, 180000);
 });

@@ -47,6 +47,17 @@ const root = path.resolve(__dirname, '..');
  *  which is exactly why 117 left five assertions failing after it landed. */
 const HIGHEST_GOVERNED_MIGRATION = '117';
 
+/** THE count of governed migration SQL files. This is deliberately a LITERAL and
+ *  not `discoverMigrationFiles().count` — deriving it from the manifest would
+ *  assert the manifest against itself and could never fail. It is the tripwire
+ *  that makes an ungoverned .sql file dropped into lib/migrations/ break the
+ *  build until someone updates this line on purpose.
+ *
+ *  NOTE it is NOT the highest prefix: the numbering is non-contiguous (the
+ *  101-file baseline, then 105-108, 109-112, 113/114, 115, 116, 117), so 114
+ *  FILES have a highest prefix of 117. The two numbers move independently. */
+const GOVERNED_MIGRATION_COUNT = 114;
+
 /** Normalize a filesystem path to POSIX separators. `path.join` returns
  *  backslashes on Windows, so `toContain('lib/migrations')` failed on this
  *  platform regardless of what the manifest actually discovered — a test-harness
@@ -223,9 +234,9 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
     expect(extractDescription('001_initial_schema.sql')).toBe('initial schema');
   });
 
-  it('discovers 114 SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review + 117 AHJ registry)', () => {
+  it(`discovers ${GOVERNED_MIGRATION_COUNT} SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review + 117 AHJ registry)`, () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.count).toBe(114);
+    expect(manifest.count).toBe(GOVERNED_MIGRATION_COUNT);
   });
 
   it('highest prefix is 117 (the AHJ registry)', () => {

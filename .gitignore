@@ -99,3 +99,6 @@ worker/dist/
 
 # Manufacturer asset PDF download cache (not source)
 scripts/.mfr-cache/
+
+# Deterministic pagination diagnostics (measured HTML + failing-sheet screenshots)
+test-output/

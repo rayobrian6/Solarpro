@@ -21,8 +21,12 @@ import {
   type LicensedReviewRole, type ReviewDecision,
 } from './types';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
+// Raw pg rows are `any` here exactly as in lib/documents/registry.ts and
+// lib/personnel/store.ts — the row shape is the migration's, and each field is
+// narrowed on the way into the typed record below. No eslint suppression: this
+// project extends `next/core-web-vitals`, which registers @typescript-eslint as
+// a PARSER only, so `no-explicit-any` is not a defined rule and a disable
+// directive naming it is an orphan ESLint rejects.
 function rowToReview(r: any): EngineeringReviewRecord {
   return {
     id: r.id,
