@@ -32,6 +32,7 @@ import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 import {
   PROBE_VIEWPORT, DEVICE_SCALE_FACTOR, INTERNAL_TOL_PX, CLIP_TOL_IN,
   preparePrintPage, readEnvelope, measurePages, formatFailure, detectFontAvailability,
+  probeTextWidth, FONT_METRIC_TOLERANCE_PCT,
 } from '../../scripts/lib/pagination-probe.mjs';
 
 /** Deterministic test-output root — the exact HTML measured and a screenshot of
@@ -224,18 +225,32 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
       expect(envelope.toolbarHidden, `${envMsg} — #sp-toolbar visible under print (display=${envelope.toolbarDisplay})`).toBe(true);
       expect(envelope.sheetsTransformNone, `${envMsg} — #sp-sheets carries a screen transform: ${envelope.sheetsTransform}`).toBe(true);
 
-      // ── the fonts the stylesheet ASKS FOR must actually exist here ────────
+      // ── ENVIRONMENT GATE: the requested fonts must resolve METRICALLY ─────
       // The package embeds no @font-face. On a host without Arial / Courier New
-      // the browser substitutes a metrically different face, dense text blocks
-      // rewrap taller, and this scan reports a LAYOUT clip that is really a
-      // MISSING FONT. Fail on the environment explicitly rather than let a
-      // phantom overflow be attributed to the sheet design.
-      const fonts = await detectFontAvailability(page, ['Arial', 'Courier New']);
-      for (const [family, info] of Object.entries(fonts as Record<string, { available: boolean; widthPx: number; serifFallbackWidthPx: number }>)) {
-        expect(info.available,
-          `${envMsg} — FONT "${family}" IS NOT INSTALLED ON THIS HOST (probe width ${info.widthPx}px == serif fallback ${info.serifFallbackWidthPx}px). ` +
-          `The planset embeds no @font-face and requests ${family}; a substituted face rewraps text and produces overflow numbers that describe THIS MACHINE, not the sheet. ` +
-          `Install the metric-compatible fonts (or run where they exist) before treating any page-fit result as a layout defect.`,
+      // (or a metric-compatible Liberation substitute) the browser resolves a
+      // different face, dense text blocks rewrap taller, and this scan reports a
+      // LAYOUT clip that is really a MISSING FONT. This fails as a SETUP error,
+      // by name, rather than letting a phantom overflow be attributed to sheet
+      // design. Presence alone is insufficient — fontconfig will resolve "Arial"
+      // to DejaVu Sans, which is present, non-generic and ~12% wider.
+      const fonts = await detectFontAvailability(page);
+      for (const [label, m] of Object.entries(fonts as Record<string, {
+        stack: string; widthPx: number; expectedPx: number; deltaPct: number;
+        metricCompatible: boolean; genericSerifPx: number; genericMonospacePx: number;
+      }>)) {
+        expect(m.metricCompatible,
+          `\n${envMsg}\n` +
+          `RENDERING ENVIRONMENT NOT SET UP — font metrics for ${label} do not match the reference.\n` +
+          `  stack            : ${m.stack}\n` +
+          `  measured         : ${m.widthPx}px\n` +
+          `  expected         : ${m.expectedPx}px  (±${FONT_METRIC_TOLERANCE_PCT}%)\n` +
+          `  deviation        : ${m.deltaPct}%\n` +
+          `  generic serif    : ${m.genericSerifPx}px\n` +
+          `  generic monospace: ${m.genericMonospacePx}px\n` +
+          `This is an ENVIRONMENT/SETUP failure, NOT sheet clipping. The planset embeds no @font-face; ` +
+          `a non-metric-compatible face rewraps text and yields overflow numbers that describe THIS MACHINE. ` +
+          `Install fonts-liberation (Liberation Sans + Liberation Mono are metric-compatible with Arial + Courier New) ` +
+          `and re-run. Do not adjust any sheet layout on the strength of a measurement taken here.`,
         ).toBe(true);
       }
 
@@ -272,6 +287,65 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
 
       await page.close();
       }
+    } finally {
+      await browser.close();
+    }
+  }, 180000);
+});
+
+// ── NEGATIVE CONTROL — the gate must have teeth ─────────────────────────────
+// A page-fit gate that reports "clean" is only meaningful if it can report
+// "dirty". This deliberately substitutes the fonts the planset asks for and
+// asserts the probe THEN detects clipping.
+//
+// It is also the standing demonstration of the 2026-07-31 root cause: identical
+// bytes, different fonts, different verdict. The package embeds no @font-face,
+// so a rendering host without Arial / Courier New produces overflow that
+// describes the HOST. That is an environment defect, never a sheet defect —
+// which is why the gate above asserts font availability before measuring.
+describe('W9 negative control — substituted fonts DO trip the page-fit gate', () => {
+  it('the same bytes clip once the requested fonts are substituted', async (ctx) => {
+    let chromium: typeof import('playwright').chromium | undefined;
+    try { ({ chromium } = await import('playwright')); } catch { ctx.skip(); return; }
+    let browser: import('playwright').Browser | undefined;
+    try { browser = await chromium.launch(); } catch { ctx.skip(); return; }
+    try {
+      fs.mkdirSync(OUT_DIR, { recursive: true });
+      const { html } = render('full');
+      const artifactPath = path.join(OUT_DIR, 'pagination-w9.negative-control.html');
+      fs.writeFileSync(artifactPath, html, 'utf8');
+
+      const page = await browser.newPage({ viewport: PROBE_VIEWPORT, deviceScaleFactor: DEVICE_SCALE_FACTOR });
+      await page.goto(pathToFileURL(artifactPath).href, { waitUntil: 'load' });
+
+      // Substitute BOTH stacks with a generic family. `cursive` is a CSS generic
+      // (always resolvable, no installed-font dependency) that maps to a face
+      // metrically unlike Arial / Courier New on every host.
+      const SUBSTITUTE = 'cursive';
+      const baselineWidth = await probeTextWidth(page, `Arial, 'Helvetica Neue', sans-serif`);
+      const substitutedWidth = await probeTextWidth(page, SUBSTITUTE);
+      await page.addStyleTag({ content: `:root, html { --sans: ${SUBSTITUTE} !important; --mono: ${SUBSTITUTE} !important; }` });
+      await preparePrintPage(page);
+
+      // Only assert on the layout once the substitution DEMONSTRABLY changed text
+      // metrics. Without this the control could "pass" on a host where the
+      // substitute happens to be metric-identical, proving nothing.
+      if (substitutedWidth <= baselineWidth * 1.02) {
+        ctx.skip();
+        return;
+      }
+
+      const report = await measurePages(page, INTERNAL_TOL_PX);
+      const clipped = report.filter((r: any) => r.internalWorstPx > INTERNAL_TOL_PX || r.belowByIn > CLIP_TOL_IN);
+      const detail = clipped.map((r: any) => `${r.sheetId} +${r.internalWorstPx}px/${r.belowByIn}in`).join(', ');
+
+      expect(clipped.length,
+        `NEGATIVE CONTROL FAILED — substituting ${SUBSTITUTE} (probe width ${baselineWidth}px -> ${substitutedWidth}px) ` +
+        `produced NO clipped sheet. The page-fit gate is not detecting font-driven layout growth and its "clean" ` +
+        `verdict on the real artifact is therefore worthless. Detected: ${detail || '(none)'}`,
+      ).toBeGreaterThan(0);
+
+      await page.close();
     } finally {
       await browser.close();
     }

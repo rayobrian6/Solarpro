@@ -80,39 +80,72 @@ export async function preparePrintPage(page) {
   }));
 }
 
+/** The METRIC FINGERPRINT of the two stacks the planset asks for, measured at
+ *  16px on a reference host carrying genuine Arial and Courier New (Chromium
+ *  149). Liberation Sans / Liberation Mono are metric-compatible substitutes and
+ *  reproduce these widths; DejaVu and the bare CSS generics do not (the generic
+ *  `monospace` measures 615.78 — 8.4% short of Courier New), so a fallback is
+ *  detectable rather than silently mis-measured. */
+export const FONT_METRIC_REFERENCE = [
+  { label: 'sans (Arial / Liberation Sans)', stack: `Arial, 'Helvetica Neue', sans-serif`, expectedPx: 571.73 },
+  { label: 'mono (Courier New / Liberation Mono)', stack: `'Courier New', Courier, monospace`, expectedPx: 672.11 },
+];
+
+/** Allowed deviation from the fingerprint. Metric-compatible families reproduce
+ *  advance widths exactly; 1.5% absorbs hinting/rasteriser differences across
+ *  platforms without admitting a genuinely different face. */
+export const FONT_METRIC_TOLERANCE_PCT = 1.5;
+
 /**
- * Is the family the stylesheet actually ASKS FOR installed on this host?
+ * Does this host actually resolve the families the stylesheet asks for — and
+ * resolve them to something METRICALLY EQUIVALENT?
  *
  * The planset embeds no @font-face, so `--sans: Arial…` / `--mono: 'Courier
  * New'…` resolve against host-installed fonts. A host missing them silently
- * substitutes a metrically different face, text rewraps, dense blocks grow, and
- * the page-fit scan then reports a LAYOUT clip that exists only on that host.
- * That is exactly how "PV-0 +10.0px / PV-4B +15.7px / SCHED +31.9px" was
- * reported against an artifact that measures clean everywhere Arial exists.
+ * substitutes a different face, text rewraps, dense blocks grow, and the
+ * page-fit scan then reports a LAYOUT clip that exists only on that host. That
+ * is exactly how "PV-0 +10.0px / PV-4B +15.7px / SCHED +31.9px" was reported
+ * against an artifact that measures clean wherever Arial exists.
  *
- * Detection: measure a long mixed string in `'<family>', serif` and in `serif`.
- * If the family is installed the widths differ; if it is missing, the stack
- * falls through to serif and the widths are identical. `serif` is used as the
- * sentinel rather than a bogus name because the canvas default is itself
- * sans-serif on most hosts, which would mask a present Arial.
+ * Checking mere *presence* is not enough: on a Linux host with neither the MS
+ * core fonts nor Liberation, fontconfig happily resolves "Arial" to DejaVu Sans
+ * — present, non-generic, and ~12% wider. Only a metric comparison catches that,
+ * so this measures the rendered advance width of a fixed probe string against
+ * the reference fingerprint above.
  */
-export async function detectFontAvailability(page, families = ['Arial', 'Courier New']) {
-  return page.evaluate((fams) => {
+export async function detectFontAvailability(page, reference = FONT_METRIC_REFERENCE, tolerancePct = FONT_METRIC_TOLERANCE_PCT) {
+  return page.evaluate(([ref, tol]) => {
     const ctx = document.createElement('canvas').getContext('2d');
     const S = 'MMMMMMWWWWiiiill1234567890 The quick brown fox jumps over the lazy dog';
     const widthOf = (stack) => { ctx.font = `16px ${stack}`; return ctx.measureText(S).width; };
-    const sentinel = widthOf('serif');
     const out = {};
-    for (const f of fams) {
-      const w = widthOf(`'${f}', serif`);
-      out[f] = {
-        available: Math.abs(w - sentinel) > 0.5,
+    for (const { label, stack, expectedPx } of ref) {
+      const w = widthOf(stack);
+      const deltaPct = ((w - expectedPx) / expectedPx) * 100;
+      out[label] = {
+        stack,
         widthPx: +w.toFixed(2),
-        serifFallbackWidthPx: +sentinel.toFixed(2),
+        expectedPx,
+        deltaPct: +deltaPct.toFixed(2),
+        metricCompatible: Math.abs(deltaPct) <= tol,
+        // kept for the failure message: what the bare generics measure here
+        genericSerifPx: +widthOf('serif').toFixed(2),
+        genericMonospacePx: +widthOf('monospace').toFixed(2),
       };
     }
     return out;
-  }, families);
+  }, [reference, tolerancePct]);
+}
+
+/** Rendered width of a fixed probe string in an arbitrary font stack, in px.
+ *  Used by the negative control to PROVE a substitution actually changed text
+ *  metrics before asserting anything about the layout it produced. */
+export async function probeTextWidth(page, stack) {
+  return page.evaluate((s) => {
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.font = `16px ${s}`;
+    return +ctx.measureText('MMMMMMWWWWiiiill1234567890 The quick brown fox jumps over the lazy dog').width.toFixed(2);
+  }, stack);
 }
 
 /**
