@@ -137,26 +137,28 @@ review"). That exception is per-push and does not generalize.
 Rationale: keeps all agent work on one reviewable branch, avoids
 branch proliferation, makes revert/cherry-pick predictable.
 
-### R8 — Branch hierarchy: work → `james-dev` (Ray reviews) → `master` (JAMES approves)
-**Added 2026-07-31 per JAMES's standing instruction.**
+### R8 — Branch hierarchy: work → `james-dev` → `dev` (Ray reviews) → `master` (JAMES approves)
+**Added 2026-07-31 per JAMES's standing instruction. Amended 2026-08-01 by Ray to keep `dev` in the flow.**
 
 The branch order of operations, top to bottom:
 
 | Layer | Branch | Owner / review gate | Notes |
 |---|---|---|---|
-| Top | `master` | **JAMES** approves | Production deploy. The only branch the website goes live from. Hard ban on autonomous push (R1). |
-| Middle | `james-dev` | **Ray** (`rayobrian6`, maintainer of record per §0) reviews | Integration branch. Where agent work lands. Where Ray's technical review happens (PR or direct review). |
+| Top | `master` | **JAMES** approves | Production deploy (`solarpro.solutions`). The only branch the website goes live from. Hard ban on autonomous push (R1). |
+| Integration | `dev` | **Ray** (`rayobrian6`, maintainer of record per §0) reviews | The integration branch and Ray's default working branch. Auto-deploys to the Vercel `solarpro-dev` project (`solarpro-dev.vercel.app`), Ray's testing grounds. Everything reaches `master` through here. |
+| Staging | `james-dev` | the implementer, then Ray | Where agent work lands and is reviewed before integration into `dev`. |
 | Bottom | `feature/*`, `chore/*`, `fix/*` | the implementer | Short-lived. Land in `james-dev` when ready, delete the branch same task. Never accumulate 5+ stale branches. |
 
 **Operating rules:**
 
 1. **Working branch is `james-dev`** for all agent work, or a short-lived branch off it. If a task needs more than one commit, branch off `james-dev`, work, merge back, delete.
-2. **Ray's "lgtm" / "ship" on `james-dev` is what unblocks the master push.** Ray is the technical/architectural review.
-3. **`james-dev` → `master` is a deliberate promotion, not a fast-forward.** JAMES names the promotion in chat ("ship it to master", "deploy", or equivalent). This is the operator-level approval — Ray handles the technical side, JAMES handles the business/operational side.
+2. **Ray's "lgtm" / "ship" is what promotes `james-dev` into `dev`.** Ray is the technical/architectural review.
+3. **`dev` → `master` is a deliberate promotion, not a fast-forward.** JAMES names the promotion in chat ("ship it to master", "deploy", or equivalent). This is the operator-level approval — Ray handles the technical side, JAMES handles the business/operational side. Nothing goes to `master` that has not first landed and been exercised on `dev`.
 4. **No multiple feature branches accumulating.** A stale branch is one that has been merged (or should be) and not deleted. Goal: never more than 1-2 active feature branches at any time, and zero stale ones.
-5. **Merging a feature branch into `james-dev` does NOT require JAMES's chat approval** — that's the working branch. Approval is needed for the `james-dev` → `master` promotion only.
+5. **Merging a feature branch into `james-dev` does NOT require JAMES's chat approval** — that's the working branch. Approval is needed for the `dev` → `master` promotion only.
+6. **Legal push targets are `dev` and `james-dev`** (enforced by `.harness/scripts/prepush.ps1`). `master` is banned by R1.
 
-**Rationale:** keeps the merge surface small, makes Ray's review surface predictable (one place — `james-dev`), and gives JAMES a clear single gate (master) for the operator-level approval. Avoids the "12 stale feature branches" pattern that built up pre-2026-07-31.
+**Rationale:** keeps the merge surface small and makes Ray's review surface predictable, while preserving `dev` as the integration branch that actually gets deployed and exercised before anything reaches production. Avoids the "12 stale feature branches" pattern that built up pre-2026-07-31.
 
 ---
 
