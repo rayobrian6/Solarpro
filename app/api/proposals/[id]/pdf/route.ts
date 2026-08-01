@@ -297,11 +297,11 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest, context: RouteContext): Promise<NextResponse> {
-  return handleRequest(req, /* @next-codemod-error 'context' is passed as an argument. Any asynchronous properties of 'props' must be awaited when accessed. */
+  return handleRequest(req, /* @next-codemod-ignore 'context' is passed as an argument. Any asynchronous properties of 'props' must be awaited when accessed. (handleRequest already does `await context.params` on line 134.) */
   context);
 }
 
 export async function POST(req: NextRequest, context: RouteContext): Promise<NextResponse> {
-  return handleRequest(req, /* @next-codemod-error 'context' is passed as an argument. Any asynchronous properties of 'props' must be awaited when accessed. */
+  return handleRequest(req, /* @next-codemod-ignore 'context' is passed as an argument. Any asynchronous properties of 'props' must be awaited when accessed. (handleRequest already does `await context.params` on line 134.) */
   context);
 }
