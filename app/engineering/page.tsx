@@ -8883,7 +8883,7 @@ function EngineeringPageInner() {
               </div>
             )}
             {!selectorLoading && selectorProjects.length === 0 ? (
-              <p className="text-slate-500 text-sm mt-1">No projects found. <a href="/projects/new" className="text-amber-400 hover:text-amber-300">Create one →</a></p>
+              <p className="text-slate-500 text-sm mt-1">No projects found. <Link href="/projects/new" className="text-amber-400 hover:text-amber-300">Create one →</Link></p>
             ) : null}
           </div>
         </div>

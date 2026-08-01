@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -447,12 +448,12 @@ export default function FreeSolarEstimatePage() {
                 won't change your original request.
               </p>
             </div>
-            <a
+            <Link
               href="/"
               className="mt-8 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-amber-300"
             >
               Back to SolarPro <ArrowRight className="h-4 w-4" />
-            </a>
+            </Link>
           </section>
 
           <section className="rounded-3xl border border-white/[0.08] bg-white/[0.035] p-5 shadow-2xl shadow-black/30 sm:p-8">
@@ -664,12 +665,12 @@ export default function FreeSolarEstimatePage() {
 
       <header className="relative z-10 border-b border-white/[0.06] bg-[#07070e]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4 sm:px-8">
-          <a href="/" className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-400/20 bg-amber-400/10">
               <Sun className="h-4 w-4 text-amber-300" />
             </span>
             <span className="text-sm font-black tracking-tight">SolarPro</span>
-          </a>
+          </Link>
           <p className="hidden text-xs text-slate-500 sm:block">
             Free estimate — no obligation
           </p>

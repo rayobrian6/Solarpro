@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Sun, Mail, ArrowRight, AlertCircle, KeyRound,
   Loader2, Shield, Zap, TrendingUp, Leaf, CheckCircle2,
@@ -464,9 +465,9 @@ function PortalLogin() {
 
           <p className="text-center text-xs text-slate-600 mt-6">
             Don't have a project yet?{' '}
-            <a href="/" className="text-slate-500 hover:text-amber-400 transition-colors font-medium">
+            <Link href="/" className="text-slate-500 hover:text-amber-400 transition-colors font-medium">
               Get a free quote →
-            </a>
+            </Link>
           </p>
         </div>
       </div>
