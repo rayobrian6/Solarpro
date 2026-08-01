@@ -7,9 +7,10 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
-export async function POST(req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, props: Params) {
+  const params = await props.params;
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 

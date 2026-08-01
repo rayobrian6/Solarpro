@@ -622,7 +622,7 @@ describe("contractor network assignment visibility", () => {
         undefined,
         "POST",
       ),
-      { params: { id: OPP_ID } },
+      { params: Promise.resolve({ id: OPP_ID }) },
     );
 
     expect(res.status).toBe(201);

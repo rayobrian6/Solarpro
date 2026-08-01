@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 
 export default function ClientsError({ error, reset }: { error: Error; reset: () => void }) {
@@ -17,12 +18,12 @@ export default function ClientsError({ error, reset }: { error: Error; reset: ()
         >
           <RefreshCw size={14} className="inline mr-1.5" />Try Again
         </button>
-        <a
+        <Link
           href="/clients"
           className="px-5 py-2 rounded-lg text-sm font-semibold bg-white/10 text-slate-300 border border-white/15 hover:border-white/30 transition-colors"
         >
           <Home size={14} className="inline mr-1.5" />Clients
-        </a>
+        </Link>
       </div>
     </div>
   );

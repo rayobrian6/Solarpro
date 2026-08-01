@@ -34,10 +34,8 @@ const CANONICAL_STATES = new Set(['promoted_canonical', 'cad_safe']);
 const isAerialRoofPlane = (a: UnifiedGeometryArtifact) =>
   a.provenance.sourcePipeline === 'google_solar_api' && a.geometryClass === 'roof_plane';
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) {

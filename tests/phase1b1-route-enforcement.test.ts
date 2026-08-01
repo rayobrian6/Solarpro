@@ -457,7 +457,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
       setMockUser({ id: outsiderId, name: 'Outsider', email: 'outsider_s3a@test.com' });
 
       const req = makeRequest('GET');
-      const res = await GET(req, { params: { id: orgId } });
+      const res = await GET(req, { params: Promise.resolve({ id: orgId }) });
       expect(res.status).toBe(403);
     });
 
@@ -477,7 +477,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
 
       // Key test: enforcement flag is OFF, but the route MUST still deny
       const req = makeRequest('GET');
-      const res = await GET(req, { params: { id: orgId } });
+      const res = await GET(req, { params: Promise.resolve({ id: orgId }) });
       expect(res.status).toBe(403);
     });
 
@@ -495,7 +495,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
       setMockUser({ id: ownerId, name: 'Owner', email: 'owner_s3c@test.com' });
 
       const req = makeRequest('GET');
-      const res = await GET(req, { params: { id: orgId } });
+      const res = await GET(req, { params: Promise.resolve({ id: orgId }) });
       expect(res.status).toBe(200);
     });
   });
@@ -528,7 +528,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
 
       // Key test: enforcement flag is OFF, but the route MUST still deny
       const req = makeRequest('POST', { userId: targetId, role: 'member' });
-      const res = await POST(req, { params: { id: orgId } });
+      const res = await POST(req, { params: Promise.resolve({ id: orgId }) });
       expect(res.status).toBe(403);
     });
 
@@ -547,7 +547,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
       setMockUser({ id: ownerId, name: 'Owner', email: 'owner_s4b@test.com' });
 
       const req = makeRequest('POST', { userId: targetId, role: 'member' });
-      const res = await POST(req, { params: { id: orgId } });
+      const res = await POST(req, { params: Promise.resolve({ id: orgId }) });
       expect(res.status).toBe(201);
     });
   });
@@ -579,7 +579,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
 
       // Key test: enforcement flag is OFF, but the route MUST still deny
       const req = makeRequest('PATCH', { role: 'admin' });
-      const res = await PATCH(req, { params: { id: orgId, userId: memberId } });
+      const res = await PATCH(req, { params: Promise.resolve({ id: orgId, userId: memberId }) });
       expect(res.status).toBe(403);
     });
 
@@ -604,7 +604,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
       setMockUser({ id: outsiderId, name: 'Outsider', email: 'outsider_s5b@test.com' });
 
       const req = makeRequest('PATCH', { action: 'suspend' });
-      const res = await PATCH(req, { params: { id: orgId, userId: memberId } });
+      const res = await PATCH(req, { params: Promise.resolve({ id: orgId, userId: memberId }) });
       expect(res.status).toBe(403);
     });
 
@@ -628,7 +628,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
       setMockUser({ id: ownerId, name: 'Owner', email: 'owner_s5c@test.com' });
 
       const req = makeRequest('PATCH', { role: 'admin' });
-      const res = await PATCH(req, { params: { id: orgId, userId: memberId } });
+      const res = await PATCH(req, { params: Promise.resolve({ id: orgId, userId: memberId }) });
       expect(res.status).toBe(200);
     });
   });
@@ -660,7 +660,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
 
       // Key test: enforcement flag is OFF, but the route MUST still deny
       const req = makeRequest('DELETE');
-      const res = await DELETE(req, { params: { id: orgId, userId: memberId } });
+      const res = await DELETE(req, { params: Promise.resolve({ id: orgId, userId: memberId }) });
       expect(res.status).toBe(403);
     });
 
@@ -684,7 +684,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
       setMockUser({ id: ownerId, name: 'Owner', email: 'owner_s6b@test.com' });
 
       const req = makeRequest('DELETE');
-      const res = await DELETE(req, { params: { id: orgId, userId: memberId } });
+      const res = await DELETE(req, { params: Promise.resolve({ id: orgId, userId: memberId }) });
       expect(res.status).toBe(200);
     });
   });
@@ -708,7 +708,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
       setMockUser(null);
 
       const req = makeRequest('GET');
-      const res = await GET(req, { params: { id: orgId } });
+      const res = await GET(req, { params: Promise.resolve({ id: orgId }) });
       expect(res.status).toBe(401);
     });
 
@@ -728,7 +728,7 @@ describeOrSkip('Phase 1B.1 — Route Enforcement Safety Tests (Workstream 2)', (
 
       // Platform admin without org membership must be denied (ADR-004)
       const req = makeRequest('GET');
-      const res = await GET(req, { params: { id: orgId } });
+      const res = await GET(req, { params: Promise.resolve({ id: orgId }) });
       expect(res.status).toBe(403);
     });
   });

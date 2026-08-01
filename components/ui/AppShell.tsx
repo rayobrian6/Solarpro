@@ -59,7 +59,7 @@ function getInitials(name: string): string {
 
 function useMiniToast() {
   const [msg, setMsg] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   function show(text: string, ms = 2500) {
     setMsg(text);

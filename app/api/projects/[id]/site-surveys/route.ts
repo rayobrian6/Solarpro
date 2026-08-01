@@ -18,10 +18,8 @@ import {
 // ---------------------------------------------------------------------------
 // GET — list surveys for project
 // ---------------------------------------------------------------------------
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -42,10 +40,8 @@ export async function GET(
 // ---------------------------------------------------------------------------
 // POST — create survey linked to project (office-side manual creation)
 // ---------------------------------------------------------------------------
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

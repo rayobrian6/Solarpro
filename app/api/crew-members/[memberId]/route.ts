@@ -17,10 +17,8 @@ import {
  * Ownership is enforced via user_id on both crew_members and parent crews.
  * Body: any subset of { name, role, phone, email, certifications, is_lead, notes }
  */
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { memberId: string } },
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ memberId: string }> }) {
+  const params = await props.params;
   try {
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
@@ -115,10 +113,8 @@ export async function PATCH(
  * DELETE /api/crew-members/[memberId]
  * Removes a crew member.  Only the crew owner may delete.
  */
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { memberId: string } },
-) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ memberId: string }> }) {
+  const params = await props.params;
   try {
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {

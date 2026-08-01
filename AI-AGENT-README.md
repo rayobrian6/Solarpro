@@ -162,7 +162,40 @@ NEXT_PUBLIC_APP_URL           = https://solarpro.solutions
 MIGRATE_SECRET                = solarpro-migrate-2024
 CRON_SECRET                   = 38747a11def95fd6b497f254fb4425d9a7874744f7d5772869ffff162a804c10  (encrypted, all envs)
 ADMIN_OVERRIDE_EMAIL          = <team-member email — F-13, plain, all envs>
+
+# ── Rate limiter (Upstash Redis — P0 fix 2026-08) ────────────────────────────
+# lib/rateLimiter.ts. Production MUST have the two UPSTASH vars set;
+# the fail mode governs behavior when Upstash errors/times out.
+UPSTASH_REDIS_REST_URL        = <Upstash REST URL — encrypted, all envs>
+UPSTASH_REDIS_REST_TOKEN      = <Upstash REST token — encrypted, all envs>
+RATE_LIMITER_FAIL_MODE        = in-memory-fallback   (plain, all envs — default)
+# Optional: process-local LRU cap. Default 50000, hard cap 1000000.
+RATE_LIMITER_IN_MEM_LRU_MAX   = 50000                (plain, all envs — optional)
 ```
+
+**Rate limiter fail-mode (P0 fix, 2026-08):** When Upstash errors or hits the
+500ms timeout, `lib/rateLimiter.ts checkRateLimit(...)` applies the
+`RATE_LIMITER_FAIL_MODE` env var:
+
+- `in-memory-fallback` (default, SOC 2-preferred): per-process, per-(key,ip)
+  sliding-window fallback. Preserves availability AND security for
+  single-instance abuse. When Upstash recovers, in-memory state is naturally
+  discarded and the canonical limit resumes.
+- `closed` (paranoid, opt-in): deny every request when Upstash fails.
+  Maximum security; risk of cascading outage during a sustained Upstash
+  outage.
+- `open` (legacy, NOT recommended): allow every request when Upstash fails.
+  Matches the pre-2026-08 behavior. Kept for explicit emergency rollback
+  only.
+
+Telemetry counters (`redisError`, `redisTimeout`, `fallbackUsed`,
+`closedDenied`, `inMemorySize`) are exposed via
+`__getRateLimiterMetrics()` in `lib/rateLimiter.ts`. A non-zero
+`fallbackUsed / total requests` ratio sustained over > 5m indicates
+Upstash degradation. Recommend alerting on
+`fallbackUsed / total requests > 0.01`. See `HANDOFF_RATELIMITER_FAILCLOSED.md`
+for the full design and the audit reference (`audit_security_migrations_2026-07-30.md`
+§2, P0 #1).
 
 **Changes made 2026-05-18 (this fixes the SSO "invalid signature" bug):**
 - `SOLARPRO_HANDOFF_SECRET`: deleted empty `sensitive` production placeholder (id: `rIrBhbVItL9mlV52`),

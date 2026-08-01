@@ -52,10 +52,8 @@ const MAX_ACTIVE_JOBS_PER_USER = 3;
 // ---------------------------------------------------------------------------
 // POST — Create async job + submit ALL photos to Render (returns instantly)
 // ---------------------------------------------------------------------------
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const startedAt = Date.now();
   const surveyId = params?.surveyId ?? 'unknown';
   console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} creating async job`);
@@ -171,10 +169,8 @@ export async function POST(
 // Heavy post-processing runs via POST /finalize (called by the UI explicitly).
 // This route NEVER runs heavy work — it only reads from DB.
 // ---------------------------------------------------------------------------
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const getStart = Date.now();
   const surveyId = params?.surveyId ?? 'unknown';
   const jobId = req.nextUrl.searchParams.get('jobId');
@@ -253,10 +249,8 @@ export async function GET(
 // ---------------------------------------------------------------------------
 // DELETE — Cancel an active job
 // ---------------------------------------------------------------------------
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const surveyId = params?.surveyId ?? 'unknown';
   const jobId = req.nextUrl.searchParams.get('jobId');
 

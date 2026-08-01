@@ -201,10 +201,8 @@ function estimateJsonByteSize(obj: unknown): number {
 
 const VERCEL_RESPONSE_LIMIT_BYTES = 4.5 * 1024 * 1024; // 4.5MB
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) {

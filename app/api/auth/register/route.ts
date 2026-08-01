@@ -10,6 +10,7 @@ import {
 import { getDbReady, DbConfigError , handleRouteDbError } from '@/lib/db-neon';
 import { isTransientDbError } from '@/lib/db-ready';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { isProduction } from '@/lib/env';
 import { checkHoneypot, isGibberish, isDisposableEmail } from '@/lib/signupGuard';
 
 // v47.9: Explicit maxDuration for DB cold-start retry budget
@@ -165,7 +166,7 @@ export async function POST(req: NextRequest) {
     );
     response.cookies.set('solarpro_session', token, {
       httpOnly: true,
-      secure:   process.env.NODE_ENV === 'production',
+      secure:   isProduction(),
       sameSite: 'lax' as const,
       path:     '/',
       maxAge:   60 * 60 * 24 * 30, // 30 days

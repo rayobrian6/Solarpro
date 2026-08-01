@@ -203,6 +203,15 @@ export default function CompliancePage() {
           >
             Contact Security Team
           </a>
+          <p className="mt-6 text-sm text-slate-500">
+            Looking for the full posture summary?{' '}
+            <a
+              href="/trust"
+              className="text-amber-700 hover:text-amber-800 font-semibold underline underline-offset-2"
+            >
+              Visit our Trust Center
+            </a>{' '}— SOC 2 / ISO 27001 progress, subprocessors, policies, and the SOC 2 report request form.
+          </p>
         </div>
       </section>
     </div>

@@ -103,7 +103,7 @@ describe('site survey photo classification apply route', () => {
         { fileId: 'file-meter', acceptedCategory: 'Utility Meter' },
         { fileId: 'file-overview', acceptedCategory: 'Site Overview' },
       ]),
-      { params: { surveyId } },
+      { params: Promise.resolve({ surveyId }) },
     );
     const json = await response.json();
 
@@ -166,7 +166,7 @@ describe('site survey photo classification apply route', () => {
         { fileId: 'file-meter', acceptedCategory: 'Utility Meter' },
         { fileId: 'file-overview', acceptedCategory: 'Site Overview' },
       ]),
-      { params: { surveyId } },
+      { params: Promise.resolve({ surveyId }) },
     );
     const json = await response.json();
 

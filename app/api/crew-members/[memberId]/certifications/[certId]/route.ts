@@ -10,7 +10,8 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 type Params = { memberId: string; certId: string };
 
 /** DELETE /api/crew-members/[memberId]/certifications/[certId] — remove a cert from the vault. */
-export async function DELETE(req: NextRequest, { params }: { params: Params }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<Params> }) {
+  const params = await props.params;
   try {
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });

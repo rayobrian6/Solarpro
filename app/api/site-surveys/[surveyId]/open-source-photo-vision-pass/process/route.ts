@@ -31,10 +31,8 @@ import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 const MAX_BATCHES_PER_TICK = 2; // Process 2 batches per invocation (~25-35s total, safely under 60s)
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const surveyId = params?.surveyId ?? 'unknown';
 
   // Auth check

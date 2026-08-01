@@ -30,14 +30,14 @@ const titleize = (v: string) =>
 
 export async function GET(
   req: NextRequest,
-  ctx: { params: Promise<{ id: string }> } | { params: { id: string } },
+  ctx: { params: Promise<{ id: string }> },
 ) {
   const user = getUserFromRequest(req);
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const raw = await (ctx as { params: Promise<{ id: string }> }).params;
+    const raw = await ctx.params;
     const id = s(raw.id);
     const sql = await getDbReady();
 

@@ -2,15 +2,40 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { neon, NeonQueryFunction } from '@neondatabase/serverless';
 import { getDbWithRetry, getDbDirect, DbConfigError } from '@/lib/db-ready';
+import { isProduction } from '@/lib/env';
 export { DbConfigError } from '@/lib/db-ready';
 
 type SqlExecutor = NeonQueryFunction<false, false>;
 
-// Lazy getter — only throws at runtime, NOT at build time
+// Lazy getter — only throws at runtime, NOT at build time.
+//
+// SECURITY: Enforces a 32-character minimum on JWT_SECRET at runtime.
+//   - HS256 signing keys should be at least 32 bytes (256 bits) to match
+//     the algorithm's security level. A 4-char placeholder is a real
+//     security hole — anyone who can guess it can mint valid sessions.
+//   - Matches the existing checks in `lib/survey/handoff/tokenMinter.ts`
+//     (`secret.length < 32`) and `lib/mobile/auth.ts` (`handoffSecretLen < 32`).
+//   - The env-fingerprint route reports `meets_32_char_min: true/false`
+//     for triage, but the actual enforcement happens here.
+//
+// The error message points the operator at AI-AGENT-README.md §6 so they
+// can find the rotation + length-generation instructions without guessing.
+const JWT_SECRET_MIN_LENGTH = 32;
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    throw new Error('JWT_SECRET environment variable is not set.');
+    throw new Error(
+      'JWT_SECRET environment variable is not set. ' +
+      'See AI-AGENT-README.md §6 for setup and rotation.'
+    );
+  }
+  if (secret.length < JWT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `JWT_SECRET is too short (${secret.length} chars; minimum ${JWT_SECRET_MIN_LENGTH}). ` +
+      'HS256 signing keys must be at least 32 bytes to match the algorithm security level. ' +
+      'Generate a new value with: `openssl rand -base64 48` (or equivalent). ' +
+      'See AI-AGENT-README.md §6 for rotation procedure.'
+    );
   }
   return secret;
 }
@@ -358,14 +383,17 @@ export function isSessionStale(
 // ── Cookie helpers ────────────────────────────────────────────────────────────
 export function makeSessionCookie(token: string): string {
   const expires = new Date(Date.now() + COOKIE_MAX_AGE * 1000).toUTCString();
-  // Add Secure flag in production (HTTPS) so the cookie is never sent over plain HTTP.
-  // In local dev (http://localhost) we omit Secure so the cookie still works.
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  // Secure flag: gate on isProduction() (VERCEL_ENV-aware), not NODE_ENV.
+  // Vercel sets NODE_ENV=production for ALL deployment types (Production,
+  // Preview, Development CLI) — using NODE_ENV as the gate was the v47.57
+  // dev-auth regression pattern. See lib/env.ts isProduction() for the
+  // authoritative truth-table and audit §2 #2 for the rationale.
+  const secure = isProduction() ? '; Secure' : '';
   return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${secure}; Expires=${expires}`;
 }
 
 export function clearSessionCookie(): string {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  const secure = isProduction() ? '; Secure' : '';
   return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
 }
 
