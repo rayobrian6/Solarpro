@@ -326,11 +326,19 @@ function ensureCleanupStarted(): void {
 ensureCleanupStarted();
 
 function inMemoryCheck(
+  limiterKey: LimiterKey,
   cfg: LimiterConfig,
   identifier: string,
 ): RateLimitResult {
   const now = Date.now();
-  const key = identifier;
+  // Namespace the bucket by limiter key. Keying on the identifier alone
+  // makes every limiter share one bucket per IP, which breaks BOTH ways:
+  //   - a high-volume key (tile, 60/60s) drains the budget that a tight key
+  //     (login, 5/60s) needs, locking legitimate users out; and
+  //   - a short window (tile, 60s) overwrites the resetAt of a long one
+  //     (portal_verify_otp, 15m), collapsing OTP brute-force protection
+  //     from 10-per-15-minutes to 10-per-60-seconds.
+  const key = `${limiterKey}:${identifier}`;
   const existing = inMemStore.get(key);
 
   // Cap the store size opportunistically. We drop the OLDEST entries
@@ -450,7 +458,7 @@ export async function checkRateLimit(
     }
     // Default: in-memory fallback.
     metrics.fallbackUsed += 1;
-    return inMemoryCheck(cfg, identifier);
+    return inMemoryCheck(key, cfg, identifier);
   }
 }
 

@@ -92,10 +92,12 @@ afterEach(() => {
   // can't bleed into the next.
   _resetInMemoryForTest();
   _setFailModeForTest('in-memory-fallback');
-  _setLimiterForTest('login',        null);
-  _setLimiterForTest('register',     null);
-  _setLimiterForTest('mfa_verify',   null);
-  _setLimiterForTest('migrate',      null);
+  _setLimiterForTest('login',             null);
+  _setLimiterForTest('register',          null);
+  _setLimiterForTest('mfa_verify',        null);
+  _setLimiterForTest('migrate',           null);
+  _setLimiterForTest('tile',              null);
+  _setLimiterForTest('portal_verify_otp', null);
 });
 
 // ─── 1. fail-mode env-var contract ──────────────────────────────────────────
@@ -183,15 +185,53 @@ describe('P0 fix: in-memory fallback on Redis error', () => {
   });
 
   it('isolates per-key state (login vs register from same IP)', async () => {
-    // Each call uses a different key — each has its own 5/60s bucket.
+    // NOTE: `register` needs its OWN erroring fake. Without one its limiter is
+    // null (dev mode), checkRateLimit short-circuits to allow-all, and this
+    // test passes without ever touching the in-memory fallback.
+    injectFake('register', makeFakeLimiter({ error: new Error('upstash_500') }));
+
+    // login = 5/60s, register = 3/10m — separate buckets for the same IP,
+    // each exhausted independently at its own budget from CONFIG.
     const loginResults = await Promise.all(
       Array.from({ length: 5 }, () => checkRateLimit('login', '1.2.3.4'))
     );
     const registerResults = await Promise.all(
-      Array.from({ length: 5 }, () => checkRateLimit('register', '1.2.3.4'))
+      Array.from({ length: 3 }, () => checkRateLimit('register', '1.2.3.4'))
     );
     expect(loginResults.every((r) => r.allowed)).toBe(true);
     expect(registerResults.every((r) => r.allowed)).toBe(true);
+
+    expect((await checkRateLimit('login', '1.2.3.4')).allowed).toBe(false);
+    expect((await checkRateLimit('register', '1.2.3.4')).allowed).toBe(false);
+  });
+
+  it('a high-volume key does not drain a tight key for the same IP', async () => {
+    // Regression guard: the fallback store was keyed on the identifier alone,
+    // so `tile` traffic (60/60s) consumed the `login` budget (5/60s) and locked
+    // legitimate users out of login during an Upstash outage.
+    injectFake('tile', makeFakeLimiter({ error: new Error('upstash_500') }));
+
+    for (let i = 0; i < 10; i++) {
+      expect((await checkRateLimit('tile', '9.9.9.9')).allowed).toBe(true);
+    }
+    const login = await Promise.all(
+      Array.from({ length: 5 }, () => checkRateLimit('login', '9.9.9.9'))
+    );
+    expect(login.every((r) => r.allowed)).toBe(true);
+  });
+
+  it('a short window does not truncate a long one for the same IP', async () => {
+    // Regression guard: a shared bucket let `tile` (60s window) overwrite the
+    // resetAt of `portal_verify_otp` (15m window), collapsing OTP brute-force
+    // protection from 10-per-15-minutes to 10-per-60-seconds.
+    injectFake('tile',              makeFakeLimiter({ error: new Error('upstash_500') }));
+    injectFake('portal_verify_otp', makeFakeLimiter({ error: new Error('upstash_500') }));
+
+    await checkRateLimit('tile', '8.8.8.8');
+    const otp = await checkRateLimit('portal_verify_otp', '8.8.8.8');
+
+    // The OTP bucket must carry its own 15-minute window.
+    expect((otp.reset ?? 0) - Date.now()).toBeGreaterThan(10 * 60_000);
   });
 
   it('isolates per-identifier state (login from two different IPs)', async () => {
