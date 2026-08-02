@@ -284,9 +284,59 @@ export interface GroundingSegment {
 export type RouteVerificationState =
   | 'unverified-estimate'
   | 'cad-derived-estimate'
+  /** WS-5 — a length taken from ROUTED CAD GEOMETRY. Distinct from an estimate
+   *  (the route really is in the model) and from field evidence (nobody measured
+   *  it). Its absence is what forced BRANCH_RUN to contradict itself: the segment
+   *  carried `lengthSource: 'cad-route'` beside
+   *  `verificationStatus: 'cad-derived-estimate'`, because there was no state to
+   *  express "geometry-derived, but not field evidence". */
+  | 'geometry-derived'
+  /** WS-5 — an operator-entered measurement that has NOT been verified. Entry is
+   *  not authority: this may become the calculation length, and must NOT close a
+   *  field-verification requirement. */
+  | 'field-reported'
   | 'field-measured'
   | 'field-verified'
   | 'as-built-verified';
+
+/** WS-5 — the SOURCE of a route length. Deliberately separate from
+ *  RouteVerificationState: where a number came from and how strongly it has been
+ *  verified are different questions, and collapsing them is what produced the
+ *  BRANCH_RUN contradiction. */
+export type RouteLengthSource =
+  | 'cad-derived-estimate'
+  | 'cad-route'
+  | 'field-reported'
+  | 'field-verified';
+
+/** WS-5 — the ONLY legal (source, state) pairings. Anything else is a defect,
+ *  not a variant: a `cad-route` length described as an estimate understates it,
+ *  and a `field-reported` length described as verified overstates it — and the
+ *  second is the one that puts an unverified number on a stamped drawing. */
+export const ROUTE_LENGTH_AUTHORITY_PAIRS: ReadonlyArray<
+  readonly [RouteLengthSource, RouteVerificationState]
+> = [
+  ['cad-derived-estimate', 'cad-derived-estimate'],
+  ['cad-route', 'geometry-derived'],
+  ['field-reported', 'field-reported'],
+  ['field-verified', 'field-verified'],
+];
+
+/** Fail-closed validity check for a (source, state) pair. */
+export function isValidRouteLengthAuthority(
+  source: string | null | undefined,
+  state: string | null | undefined,
+): boolean {
+  return ROUTE_LENGTH_AUTHORITY_PAIRS.some(([s, v]) => s === source && v === state);
+}
+
+/** WS-5 — does this length authority satisfy a FIELD-VERIFICATION requirement?
+ *  Only field-verified evidence does. A geometry-derived route is more specific
+ *  than an estimate but is still not field evidence, and a field REPORT is an
+ *  operator's claim, not a verification. */
+export function closesFieldVerification(state: RouteVerificationState | null | undefined): boolean {
+  return state === 'field-verified' || state === 'as-built-verified';
+}
 
 /** W2.1 / W1 — canonical route-length + per-segment electrical authority: every
  *  physically distinct electrical section is a segment with ONE authoritative

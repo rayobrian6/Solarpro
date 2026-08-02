@@ -14,7 +14,7 @@ import { getSnapshot, peekSnapshot } from '../snapshot/read';
 // §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
-import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, projectGroundingSegments, ampacityChainLines, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, projectGroundingSegments, ampacityChainLines, gradeVoltageDrop, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
 import { projectRackingBondingAuthority } from '../snapshot/rackingBonding';
 import { GROUNDING_PENDING_LABEL, GROUNDING_PENDING_BONDING_CELL_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { escapeH } from '../utils/drawing';
@@ -841,6 +841,15 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
     ? (_rwDesc.entries[0].tradeSizeIn ? `${_rwDesc.entries[0].racewayType} ${_rwDesc.entries[0].tradeSizeIn}` : _rwDesc.entries[0].racewayType)
     : (project.conduitType ? project.conduitType : 'PENDING');
   const _feedCallout = _feed.conductorCallout ?? 'PENDING — feeder conductor authority incomplete';
+  // WS-5 — ONE graded conclusion, derived from the canonical feeder segment's
+  // own length authority. Renderers must not re-decide this.
+  const _vdSeg = (_snap?.electrical?.routeSegments ?? []).find(x => x.segmentId === _feed.segment?.segmentId);
+  const _vdGrade = gradeVoltageDrop({
+    pct: _feed.voltageDropPct,
+    lengthFt: _vdSeg?.calculationLengthFt ?? _feed.oneWayFt,
+    lengthSource: _vdSeg?.lengthSource ?? null,
+    verificationState: _vdSeg?.verificationState ?? _vdSeg?.verificationStatus ?? null,
+  });
   const _feedConduit = _feed.conduitLabel ?? 'PENDING';
   // W4 §2/§11 (V11): NEC/ASCE editions on this sheet project from the ONE
   // snapshot codeAuthority record — no sheet-local 'ASCE 7-22' literal.
@@ -1135,7 +1144,10 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <td class="tr mono">${_feed.voltageDropPct != null ? (_feed.voltageDropPct * 240 / 100).toFixed(2) + 'V' : 'PENDING'}</td>
             <td class="tr mono fw7" style="color:${(_feed.voltageDropPct || 0) > 3 ? '#cc0000' : '#000'}">${_feedVdTxt}</td>
             <td class="tr">≤ 3.0%</td>
-            <td class="center fw7" style="color:${_feed.voltageDropPct == null ? '#cc6600' : ((_feed.voltageDropPct || 0) > 3 ? '#cc0000' : '#000')}">${_feed.voltageDropPct == null ? 'PENDING' : ((_feed.voltageDropPct || 0) <= 3 ? '✓ PASS' : '✗ REVIEW')}</td>
+            ${''/* WS-5 — the conclusion carries its INPUT AUTHORITY. This printed an
+                 unqualified checkmark for a result computed from a CAD estimate,
+                 stating a provisional finding at the grade of a measured one. */}
+            <td class="center fw7" style="color:${_vdGrade.conclusion === 'FAIL' ? '#cc0000' : _vdGrade.conclusion === 'INDETERMINATE' ? '#cc6600' : _vdGrade.conclusion === 'PROVISIONAL_PASS' ? '#b45309' : '#000'}">${_vdGrade.label}</td>
           </tr>
         </tbody>
       </table>

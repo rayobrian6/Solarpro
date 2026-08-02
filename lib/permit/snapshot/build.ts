@@ -591,11 +591,27 @@ export function buildPermitDesignSnapshot(
       racewayNecArticle: _rwArticle,
       upsizingReason: r.upsizingReason ?? null,
       oneWayFt: isFinite(r.onewayLengthFt) ? r.onewayLengthFt : null,
+      // ── WS-5 — THE LENGTH AUTHORITY, POPULATED ────────────────────────────
+      // These four fields used to be two hardcoded literals and five undefineds.
+      // `lengthSource` and `verificationStatus` were BOTH pinned to
+      // 'cad-derived-estimate' here, and one later mutation set `lengthSource`
+      // (only) to 'cad-route' for the branch run — which is how BRANCH_RUN came
+      // to say its length was routed geometry while its verification said
+      // estimate. Source and verification are different questions and are now
+      // resolved together, from ONE place, so they cannot drift apart.
+      //
+      // Everything the engine gives us today is estimate-grade; the branch run
+      // is upgraded to geometry-derived below, where the geometry is known. No
+      // path here produces field evidence — that requires a recorded, verified
+      // measurement, which is a domain record, not a mapper default.
       lengthSource: 'cad-derived-estimate',
-      // W1 — CAD-derived length ⇒ cad-derived-estimate verification state (never
-      // field-verified without a recorded measurement). Mirrors the canonical
-      // RouteVerificationStatus accessor's mapping.
       verificationStatus: 'cad-derived-estimate',
+      lengthProvenance: 'estimated',
+      verificationState: 'cad-derived-estimate',
+      // the length ELECTRICAL CALCULATIONS use (voltage drop, resistance). Kept
+      // distinct from procurementLengthFt: a conductor is sized on the run it
+      // actually covers, but purchased with slack and terminations.
+      calculationLengthFt: isFinite(r.onewayLengthFt) ? r.onewayLengthFt : null,
       raceway: _isOpenAir ? 'FREE_AIR' : (r.conduitType ?? null),
       tradeSizeIn: r.conduitSize ?? null,
       // AAC WS-7 — the SAME field-name mismatch class as computeSystemProjection:
@@ -1321,7 +1337,18 @@ export function buildPermitDesignSnapshot(
       // verified — so no downstream claim is strengthened by this.) Only the
       // runs whose route genuinely is not in the model keep the estimate source,
       // and ROUTE-LENGTH-ESTIMATE now names exactly those.
-      if (_geom) _branchSeg.lengthSource = 'cad-route';
+      // WS-5 — set the SOURCE and the VERIFICATION STATE together. Setting only
+      // `lengthSource` here is what produced the BRANCH_RUN contradiction:
+      // `cad-route` beside a `cad-derived-estimate` verification. A routed CAD
+      // geometry is more specific than an estimate, so it earns its own state —
+      // but it is NOT field evidence and must never satisfy a field-verification
+      // requirement (see closesFieldVerification).
+      if (_geom) {
+        _branchSeg.lengthSource = 'cad-route';
+        _branchSeg.verificationStatus = 'geometry-derived';
+        _branchSeg.verificationState = 'geometry-derived';
+        _branchSeg.lengthProvenance = 'geometry-derived';
+      }
     }
   }
 

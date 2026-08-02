@@ -128,6 +128,9 @@ export function projectCanonicalFeeder(snap: PermitDesignSnapshot | null | undef
 export type RouteVerificationStatus =
   | 'unverified-estimate'      // no segment authority / unknown length source
   | 'cad-derived-estimate'     // deriveRunLengths / CAD geometry, not field-checked
+  | 'geometry-derived'         // WS-5: taken from ROUTED CAD geometry — stronger than
+                               // an estimate, still not field evidence
+  | 'field-reported'           // WS-5: operator-entered, NOT yet verified
   | 'field-measured'           // a tech measured the run in the field
   | 'field-verified'           // measured AND verified against the installed route
   | 'as-built-verified';       // as-built record closes the loop
@@ -135,6 +138,8 @@ export type RouteVerificationStatus =
 const ROUTE_STATUS_LABEL: Record<RouteVerificationStatus, string> = {
   'unverified-estimate': 'UNVERIFIED ESTIMATE — FIELD VERIFY',
   'cad-derived-estimate': 'CAD-DERIVED ESTIMATE — FIELD VERIFY',
+  'geometry-derived': 'CAD ROUTE — GEOMETRY DERIVED — FIELD VERIFY',
+  'field-reported': 'FIELD REPORTED — UNVERIFIED',
   'field-measured': 'FIELD-MEASURED',
   'field-verified': 'FIELD-VERIFIED',
   'as-built-verified': 'AS-BUILT VERIFIED',
@@ -142,7 +147,11 @@ const ROUTE_STATUS_LABEL: Record<RouteVerificationStatus, string> = {
 
 /** Order weakest→strongest so we can pick the governing (weakest) status. */
 const ROUTE_STATUS_RANK: RouteVerificationStatus[] = [
-  'unverified-estimate', 'cad-derived-estimate', 'field-measured', 'field-verified', 'as-built-verified',
+  // WS-5 — weakest→strongest. geometry-derived outranks a bare estimate (the
+  // route is really in the model) but sits BELOW any field evidence; a
+  // field REPORT outranks geometry but is not verification.
+  'unverified-estimate', 'cad-derived-estimate', 'geometry-derived', 'field-reported',
+  'field-measured', 'field-verified', 'as-built-verified',
 ];
 
 /** Map a RouteSegmentRecord.lengthSource → a verification status. Conservative:
@@ -485,6 +494,83 @@ const _PURPOSE_LABEL: Record<string, string> = {
  *  was stamped on all three E-1 branch rows). The grouped node is an AUTHORITY, not
  *  an installed path — it is never counted as a physical grounding segment. */
 export const BRANCH_EGC_AUTHORITY_GROUP_ID = 'gnd-branch-egc-authority';
+
+/** ── WS-5 — VOLTAGE-DROP CONCLUSION GRADE ─────────────────────────────────
+ *  A voltage-drop result has THREE separable parts: the arithmetic, the
+ *  authority of the length it was computed from, and the release conclusion.
+ *  The sheet used to print an unqualified `✓ PASS` for a 0.369% result derived
+ *  from a 20 ft CAD ESTIMATE — correct arithmetic presented at the grade of a
+ *  measured conclusion.
+ *
+ *  A failure stays a failure at every grade: an over-limit result computed from
+ *  an estimate is still over the limit, and softening it to "provisional" would
+ *  be the same defect pointed the other way. */
+export type VoltageDropConclusion =
+  | 'VERIFIED_PASS'
+  | 'PROVISIONAL_PASS'
+  | 'FAIL'
+  | 'INDETERMINATE';
+
+export interface VoltageDropGrade {
+  conclusion: VoltageDropConclusion;
+  /** what a sheet prints: 'VERIFIED PASS' / 'PROVISIONAL PASS' / 'FAIL' / … */
+  label: string;
+  /** one sentence naming the length the number rests on. */
+  basis: string;
+  pct: number | null;
+  limitPct: number;
+  lengthFt: number | null;
+  lengthSource: string | null;
+  verificationState: string | null;
+}
+
+export function gradeVoltageDrop(args: {
+  pct: number | null | undefined;
+  limitPct?: number;
+  lengthFt?: number | null;
+  lengthSource?: string | null;
+  verificationState?: string | null;
+}): VoltageDropGrade {
+  const limitPct = args.limitPct ?? 3;
+  const pct = num(args.pct);
+  const lengthFt = num(args.lengthFt);
+  const lengthSource = args.lengthSource ?? null;
+  const verificationState = args.verificationState ?? null;
+  const verified = verificationState === 'field-verified' || verificationState === 'as-built-verified';
+
+  const sourceLabel = lengthSource === 'cad-route' ? 'CAD-routed geometry'
+    : lengthSource === 'field-verified' ? 'FIELD-VERIFIED measurement'
+    : lengthSource === 'field-reported' ? 'field-reported measurement (UNVERIFIED)'
+    : 'CAD-derived estimate';
+
+  if (pct == null || lengthFt == null) {
+    return {
+      conclusion: 'INDETERMINATE', label: 'INDETERMINATE',
+      basis: 'No usable route length or incomplete electrical inputs — no voltage-drop conclusion can be drawn.',
+      pct, limitPct, lengthFt, lengthSource, verificationState,
+    };
+  }
+  if (pct > limitPct) {
+    // over the limit at ANY grade — an estimate does not soften a failure
+    return {
+      conclusion: 'FAIL', label: '✗ FAIL',
+      basis: `${pct.toFixed(2)}% exceeds the ${limitPct.toFixed(1)}% criterion. Length basis: ${lengthFt} ft ${sourceLabel}.`,
+      pct, limitPct, lengthFt, lengthSource, verificationState,
+    };
+  }
+  if (verified) {
+    return {
+      conclusion: 'VERIFIED_PASS', label: '✓ VERIFIED PASS',
+      basis: `Length basis: ${lengthFt} ft FIELD-VERIFIED.`,
+      pct, limitPct, lengthFt, lengthSource, verificationState,
+    };
+  }
+  return {
+    conclusion: 'PROVISIONAL_PASS', label: 'PROVISIONAL PASS',
+    basis: `Length basis: ${lengthFt} ft ${sourceLabel}. Field-verified route length required for final acceptance.`,
+    pct, limitPct, lengthFt, lengthSource, verificationState,
+  };
+}
 
 /** ── THE CANONICAL GROUNDING SUMMARY (Planset 17 D2) ──────────────────────
  *  Grounding on a PV package is SEGMENT-SPECIFIC. There is no project-wide EGC
