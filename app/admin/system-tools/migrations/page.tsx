@@ -238,12 +238,13 @@ export default function MigrationConsolePage() {
       {/* Targeted authority-registry deployment (current priority) — migrations 113 + 114 */}
       <section className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-4">
         <div className="flex items-center gap-3 mb-1">
-          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 → 117</h2>
+          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 → 118</h2>
           <Pill ok={null}>SCOPED</Pill>
         </div>
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm font-semibold px-3 py-2 mb-3">
-          Run <b>113 first</b>, verify it applied, <b>then 114</b>, <b>then 115</b>, <b>then 116</b>. <b>117 is independent</b> —
-          it may be run at any time, before or after the others. Each is idempotent (a second run is a safe no-op).
+          Run <b>113 first</b>, verify it applied, <b>then 114</b>, <b>then 115</b>, <b>then 116</b>. <b>117 and 118 are
+          independent</b> — either may be run at any time, before or after the others. Each is idempotent (a second run
+          is a safe no-op).
           Targeted deployment only — the historical baseline remains incomplete and is NOT advanced.
         </div>
         <p className="text-xs text-slate-400 mb-3">
@@ -262,6 +263,12 @@ export default function MigrationConsolePage() {
           retrievals + governed operator verifications centrally (research once, reuse for every project in that AHJ). It
           seeds NO adoption: a copied in-code row is retained as <code>seeded-unprovenanced</code>, which the provider
           refuses to serve as authority.
+          <b> 118</b> creates <code>field_route_measurements</code> + <code>field_route_measurement_events</code> — the
+          producer the <code>field-verified</code> route-length state never had. WS-5 taught the model to SAY
+          field-verified; until this table exists nothing can MAKE it say so, so <code>ROUTE-LENGTH-ESTIMATE</code> is
+          structurally unclosable and every length-dependent conclusion stays PROVISIONAL. Two tables because the domain
+          audit must commit in the SAME transaction as the state transition it records. It seeds NO measurement and
+          creates no path from configuration to a verified length.
           Server-side each is statically verified <b>idempotent CREATE-TABLE-only</b>
           and <b>non-destructive</b> (no DROP / DELETE / TRUNCATE / ALTER / UPDATE / INSERT), creates exactly the expected
           table(s), success is read back from the ledger + run history + the actual tables, and the window auto-relocks.
@@ -285,6 +292,16 @@ export default function MigrationConsolePage() {
           <RegistryButton id="117" label="Run migration 117…" tables="ahj_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-ahj-registry-117" onResult={(v) => setRegistry((s) => ({ ...s, ['117']: v }))} result={registry['117']} />
+          {/* WS-5 — the operator surface for migration 118. Everything server-side
+              was already wired (the `execute-field-measurements-118` action is in
+              the allowlist, REGISTRY_DEPLOYMENT carries its expected tables, and
+              the handler resolves the identifier), but this button was never
+              added — so the migration was executable by the system and reachable
+              by nobody. That is the SAME defect class WS-5 itself was written to
+              fix: a state the model can express and no operator can produce. */}
+          <RegistryButton id="118" label="Run migration 118…" tables="field_route_measurements + field_route_measurement_events"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-field-measurements-118" onResult={(v) => setRegistry((s) => ({ ...s, ['118']: v }))} result={registry['118']} />
         </div>
       </section>
 

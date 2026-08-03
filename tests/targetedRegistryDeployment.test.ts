@@ -124,6 +124,41 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     }
   });
 
+  // ── REACHABILITY: the half of the sentence above that was never asserted ───
+  // The test above says a migration with no "spec/action/button" is unreachable
+  // from the console — then only checked the SPEC. Migration 118 shipped with a
+  // spec, an allowlisted action and a server handler, and NO operator button, so
+  // it was executable by the system and reachable by nobody. That is the exact
+  // defect class WS-5 exists to fix, reappearing one layer down in the operator
+  // surface. These two assertions close it for every identifier, not just 118.
+  it('EVERY governed identifier has an allowlisted API action', () => {
+    const route = readFileSync(
+      join(process.cwd(), 'app/api/admin/migrations/route.ts'), 'utf8');
+    const missing = REGISTRY_SEQUENCE.filter(id => {
+      // the action name varies per migration; the identifier is what must appear
+      // inside an allowlisted `execute-…-<id>` action string.
+      const re = new RegExp(`'execute-[a-z0-9-]*${id}'`);
+      return !re.test(route);
+    });
+    expect(missing, `no allowlisted execute action for: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('EVERY governed identifier has an operator button in the governed console', () => {
+    const page = readFileSync(
+      join(process.cwd(), 'app/admin/system-tools/migrations/page.tsx'), 'utf8');
+    const missing = REGISTRY_SEQUENCE.filter(id => !new RegExp(`RegistryButton\\s+id="${id}"`).test(page));
+    expect(missing, `no console button for migration(s): ${missing.join(', ')} — `
+      + 'the migration would be executable by the system and reachable by no operator').toEqual([]);
+    // and each button must name the SAME tables the deployment spec expects, so a
+    // button cannot advertise something the gate would refuse.
+    for (const id of REGISTRY_SEQUENCE) {
+      const btn = page.match(new RegExp(`RegistryButton\\s+id="${id}"[\\s\\S]{0,400}?/>`))?.[0] ?? '';
+      for (const t of REGISTRY_DEPLOYMENT[id].expectedTables) {
+        expect(btn, `button ${id} does not name expected table ${t}`).toContain(t);
+      }
+    }
+  });
+
   it('does NOT trip on the word DELETE appearing inside a comment', () => {
     // 114's header prose says a snapshot "must NOT be treated as authoritative"
     // — string/comment stripping must keep the analysis clean. (Regression: a
