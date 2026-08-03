@@ -263,11 +263,26 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
         `segment ${r.segmentId} lacks an authoritative length/source`);
     }
   }
-  if (s.electrical.routeSegments.some(r => r.lengthSource === 'cad-derived-estimate' || r.lengthSource === 'unknown')
+  // D1 SCOPING (WS-5): the population this invariant governs is the PROJECT-OWNED
+  // runs, exactly like the two emitters it is checking against. Unscoped, it
+  // asserted that ANY estimate-grade segment must produce a blocker — including
+  // the utility-owned service run, which is EXCLUDED from project route
+  // authority and therefore never contributes one. That was latent while the
+  // requirement was unclosable (some project run was always estimate-grade, so
+  // a blocker always existed). WS-5 makes closure reachable, and the first fully
+  // measured project turned the latent bug into a hard build failure: every
+  // project-owned run verified, ROUTE-LENGTH-ESTIMATE correctly absent, and this
+  // invariant firing because the UTILITY-OWNED run still reads
+  // 'cad-derived-estimate' — as it must, since nobody may measure it.
+  //
+  // Fail-closed on the applicability decision, as every other D1 consumer is.
+  const _v18Applicable = s.electrical.routeSegments.filter(
+    r => (r.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
+  if (_v18Applicable.some(r => r.lengthSource === 'cad-derived-estimate' || r.lengthSource === 'unknown')
       && !s.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-ESTIMATE')) {
     add('V18', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
       'snapshot builder', ['PV-0', 'VAL-1'],
-      'estimate-grade route lengths present but not reflected as a permit-readiness blocker');
+      'estimate-grade route lengths present on PROJECT-OWNED runs but not reflected as a permit-readiness blocker');
   }
 
   // ── §3 (07-22) ELECTRICAL VALUE INTEGRITY — no NaN/Infinity ever renders ─────

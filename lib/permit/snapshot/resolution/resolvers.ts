@@ -57,6 +57,10 @@ export {
   rackingDocumentRetrievalResolver, rackingAssemblySelectionResolver,
   framingCapacityRetrievalResolver, engineeringReviewRecordResolver,
 } from './structuralResolvers';
+// WS-5 — the field route measurement read (migration 118). Read-only: it is the
+// resolver half of a workflow whose WRITE half is the authenticated API.
+import { fieldRouteMeasurementResolver } from './fieldMeasurementResolver';
+export { fieldRouteMeasurementResolver } from './fieldMeasurementResolver';
 
 const DOC_REGISTRY_SOURCE = 'manufacturer_document_registry (lib/documents/registry, migration 113)';
 const LEDGER_SOURCE = 'snapshot_digest_invalidations (lib/reconciliation/reconcile, migration 114)';
@@ -886,4 +890,9 @@ export const PRODUCTION_RESOLVERS: readonly RequirementResolver[] = [
   engineeringReviewRecordResolver,
   rackingDocumentRetrievalResolver,
   framingCapacityRetrievalResolver,
+  // ── WS-5 — FIELD ROUTE MEASUREMENTS. Last among the AUTO_DERIVED set: it
+  //    reads a store nothing else in the lifecycle writes, and what it produces
+  //    is consumed by the pure build (route length authority) rather than by
+  //    another resolver, so nothing depends on it running earlier.
+  fieldRouteMeasurementResolver,
 ];

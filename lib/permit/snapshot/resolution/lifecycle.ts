@@ -104,6 +104,10 @@ export function defaultAuthorityBundle(): SnapshotAuthorityInputs {
     rackingAssemblySelection: null,
     framingRetrieval: null,
     engineeringReview: null,
+    // WS-5 — no field measurement until the store says otherwise. The engine
+    // cannot produce one, and a null here is what keeps every route on its CAD
+    // source with ROUTE-LENGTH-ESTIMATE open.
+    fieldRouteMeasurements: null,
   };
 }
 

@@ -22,6 +22,7 @@ const SQL_113 = readFileSync(join(process.cwd(), 'lib', 'migrations', '113_manuf
 const SQL_114 = readFileSync(join(process.cwd(), 'lib', 'migrations', '114_equipment_reconciliation_audit.sql'), 'utf8');
 const SQL_115 = readFileSync(join(process.cwd(), 'lib', 'migrations', '115_project_personnel_roles.sql'), 'utf8');
 const SQL_117 = readFileSync(join(process.cwd(), 'lib', 'migrations', '117_ahj_registry.sql'), 'utf8');
+const SQL_118 = readFileSync(join(process.cwd(), 'lib', 'migrations', '118_field_route_measurements.sql'), 'utf8');
 
 describe('targetedRegistryDeployment — static analysis (pure)', () => {
   it('accepts the real migration 113 (creates manufacturer_document_registry)', () => {
@@ -77,9 +78,40 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(/\bALTER\b/i.test(body)).toBe(false);
   });
 
-  it('sequence + spec are exactly 113, 114, 115, 116 then 117', () => {
-    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116', '117']);
-    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114', '115', '116', '117']);
+  // WS-5 — migration 118 (field_route_measurements + field_route_measurement_events).
+  // Two tables on purpose: the domain audit must commit in the SAME transaction
+  // as the transition it records, which the best-effort compliance audit_log
+  // cannot promise. The FK columns carry NO ON-DELETE clause because the static
+  // gate forbids the DELETE token — that omission is deliberate, not an oversight.
+  it('accepts the real migration 118 (creates both field-measurement tables) — WS-5', () => {
+    const s = analyzeRegistryMigration('118', SQL_118, REGISTRY_DEPLOYMENT['118'].expectedTables);
+    expect(s.problems).toEqual([]);
+    expect(s.ok).toBe(true);
+    expect(s.idempotent).toBe(true);
+    expect(s.nonDestructive).toBe(true);
+    expect(s.tablesMatchExpected).toBe(true);
+    expect(new Set(s.createdTables)).toEqual(new Set(['field_route_measurements', 'field_route_measurement_events']));
+    expect(s.forbiddenFound).toEqual([]);
+  });
+
+  it('118 seeds NO rows — a seeded measurement would be field evidence nobody gathered', () => {
+    const body = SQL_118.split(String.fromCharCode(10)).map(l => l.replace(/--.*$/, '')).join(' ');
+    expect(/\bINSERT\b/i.test(body)).toBe(false);
+    expect(/\bALTER\b/i.test(body)).toBe(false);
+  });
+
+  it('118 defaults a new measurement to REPORTED_UNVERIFIED and refuses a verified row with no verifier', () => {
+    // The two storage-layer facts that make "operator entry is not authority"
+    // structural rather than a code convention.
+    expect(SQL_118).toContain("verification_state        TEXT NOT NULL DEFAULT 'REPORTED_UNVERIFIED'");
+    expect(SQL_118).toContain('ck_frm_verified_complete');
+    expect(SQL_118).toMatch(/verification_state <> 'VERIFIED'[\s\S]{0,200}verified_by_user_id IS NOT NULL/);
+    expect(SQL_118).toMatch(/verification_state <> 'VERIFIED'[\s\S]{0,200}verification_mode IS NOT NULL/);
+  });
+
+  it('sequence + spec are exactly 113, 114, 115, 116, 117 then 118', () => {
+    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116', '117', '118']);
+    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114', '115', '116', '117', '118']);
   });
 
   it('EVERY governed identifier resolves to a real file that passes its own gate', () => {

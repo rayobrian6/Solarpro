@@ -27,6 +27,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { buildResolutionAuditRef } from './evidence';
+import { sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
 import type {
   ClearanceResult, RequirementResolutionState, ResolutionEvidenceRecord,
   ResolutionMode, ResolutionResult, Retryability,
@@ -108,6 +109,14 @@ export interface DerivedResolutionContext {
   qcableProcurement: import('../qcableProcurement').QCableProcurementResolution | null;
 }
 
+/** WS-5 §14 — THE CLOSURE RULE, NAMED. This used to be a bare array here, where
+ *  it read as an implementation detail rather than as a policy somebody decided.
+ *  `sourceClosesRouteLengthRequirement` is that same rule stated and testable in
+ *  lib/fieldMeasurement/resolver.ROUTE_LENGTH_CLOSURE_POLICY, which is the
+ *  explicit declaration §14 requires for a CAD route to satisfy this
+ *  requirement. It does not widen it: 'operator-entry' (an UNVERIFIED field
+ *  report) is deliberately NOT sufficient, so recording a measurement moves the
+ *  calculation length without closing anything. */
 const ROUTE_GEOMETRY_SOURCES: RouteSegmentRecord['lengthSource'][] = ['cad-route', 'field-measurement'];
 
 /** THE derived stage. Pure: identical inputs ⇒ identical states + evidence. */
@@ -163,8 +172,11 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
     const allSegs = ctx.routeSegments;
     const segs = allSegs.filter(s => (s.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
     const excluded = allSegs.filter(s => (s.routeAuthorityApplicability ?? 'REQUIRED') !== 'REQUIRED');
-    const resolved = segs.filter(s => ROUTE_GEOMETRY_SOURCES.includes(s.lengthSource));
-    const residual = segs.filter(s => !ROUTE_GEOMETRY_SOURCES.includes(s.lengthSource));
+    // WS-5 §14 — closure is decided by the NAMED policy, so an UNVERIFIED field
+    // report ('operator-entry') stays residual even though it has already become
+    // the calculation length. Recording is not verification, here too.
+    const resolved = segs.filter(s => sourceClosesRouteLengthRequirement(s.lengthSource));
+    const residual = segs.filter(s => !sourceClosesRouteLengthRequirement(s.lengthSource));
     const cleared = segs.length > 0 && residual.length === 0;
     attempts.push({
       resolverId: 'route-length@v1',

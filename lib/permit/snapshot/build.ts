@@ -39,6 +39,16 @@ import { planMicroBranches, microMaxPerBranch, microBranchMaxOcpdA, type BranchP
 import { getDesignTemps } from '../utils/designTemps';
 import { resolveTrunkCablePlan, findTrunkCableSystem } from '@/lib/equipment/trunkCable';
 import { deriveBranchCablePaths } from '@/lib/bom/deriveRunLengths';
+// WS-5 §13 — the ITEMISED procurement allowance policy for a field-measured
+// route. Kept out of this file so the allowances are reviewable in one place and
+// so nobody adds a bare percentage next to a length.
+import { deriveFieldMeasuredProcurement } from './routeProcurementPolicy';
+// WS-5 §12 — the voltage drop is RECOMPUTED from the new length (conductor
+// resistance re-read from the gauge), never carried over from the prior length.
+import { recalculateRouteVoltageDrop } from './routeVoltageDropRecalc';
+// WS-5 §14 — the NAMED closure policy for ROUTE-LENGTH-ESTIMATE, shared with the
+// derived resolver so the two emitters cannot drift.
+import { sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
 // AAC WS-5 — the deterministic Q-Cable topology + procurement SOLUTION engine.
 import { buildQCableTopology, evaluateQCableSolutions } from './qcableTopology';
 import { resolveQCableProcurement } from './qcableProcurement';
@@ -136,6 +146,11 @@ export function buildPermitDesignSnapshot(
      *  migration 116. The ONLY thing that can make ENGINEERING-REVIEW-PENDING
      *  clearable, and it is never written by the engine. */
     engineeringReview?: import('@/lib/engineeringReview/types').EngineeringReviewCoverage | null;
+    /** WS-5 — the ACTIVE field route measurements READ from migration 118, one
+     *  authority per route segment, already reduced by the deterministic
+     *  selection rule. The build PROJECTS this; it never produces it. Absent or
+     *  null ⇒ every route keeps its CAD length source, exactly as before. */
+    fieldRouteMeasurements?: import('@/lib/fieldMeasurement/resolver').FieldRouteMeasurementAuthority | null;
     /** §Q — canonical Q-Cable procurement-deficit resolution solutions, async-
      *  resolved by the caller (operator selection + verified lib/documents record).
      *  Empty/undefined ⇒ no solution ⇒ QCABLE-PROCUREMENT-INSUFFICIENT stays firing
@@ -503,8 +518,31 @@ export function buildPermitDesignSnapshot(
     if (/SERVICE|MSP/.test(s)) return 'service equipment connection';
     return 'electrical run';
   };
+  // WS-5 §12 — the per-segment SYSTEM VOLTAGE, captured here because it is the
+  // one voltage-drop input the RouteSegmentRecord does not carry and the
+  // recalculation cannot be honest without it. Captured from the engine's own
+  // run model at mapping time so a re-derivation never has to guess 240 V.
+  const _segSystemVoltage = new Map<string, number>();
+  // …and the CURRENT the engine's own voltage-drop call consumed. The engine
+  // names this field `continuousCurrent` (computed-system RunSegment:196) and
+  // the snapshot's `continuousCurrentA` / `operatingCurrentA` read
+  // `r.continuousCurrentA` / `r.currentA`, which the engine never emits — so
+  // those two segment fields are null on EVERY run today. That pre-existing
+  // projection gap is NOT repaired here (populating them changes what PV-4B
+  // prints on every project, which is its own change with its own regression
+  // surface); it is captured so the WS-5 recalculation uses the SAME current the
+  // original result was computed from, and named in the provenance it writes.
+  const _segCurrentA = new Map<string, number>();
   const routeSegments: import('./types').RouteSegmentRecord[] = ((cs?.runs ?? []) as any[]).map((r: any) => {
     const _isOpenAir = !!r.isOpenAir;
+    if (isFinite(r.systemVoltage)) _segSystemVoltage.set(String(r.id), r.systemVoltage);
+    {
+      const _engineCurrent = isFinite(r.continuousCurrent) ? r.continuousCurrent
+        : isFinite(r.continuousCurrentA) ? r.continuousCurrentA
+        : isFinite(r.operatingCurrentA) ? r.operatingCurrentA
+        : isFinite(r.currentA) ? r.currentA : null;
+      if (_engineCurrent != null) _segCurrentA.set(String(r.id), _engineCurrent);
+    }
     const _opA = isFinite(r.operatingCurrentA) ? r.operatingCurrentA
       : (isFinite(r.currentA) ? r.currentA : null);
     const _contA = isFinite(r.continuousCurrentA) ? r.continuousCurrentA
@@ -1352,6 +1390,90 @@ export function buildPermitDesignSnapshot(
     }
   }
 
+  // ═══ WS-5 — FIELD MEASUREMENT AUTHORITY OVERRIDES THE CAD SOURCE ══════════
+  // This runs AFTER the branch-geometry patch above, and that order is the
+  // precedence rule made physical:
+  //
+  //     active FIELD_VERIFIED > active FIELD_REPORTED > CAD_ROUTE > CAD_ESTIMATE
+  //
+  // A person who walked the run knows more than a heuristic AND more than a
+  // coordinate chain, so a field measurement becomes the CALCULATION length even
+  // while it is unverified. What an unverified report does NOT do is close a
+  // field-verification requirement or upgrade a voltage-drop conclusion — those
+  // are decided by `closesFieldVerification` and `gradeVoltageDrop`, from the
+  // VERIFICATION STATE this block writes, not from the fact that a number moved.
+  //
+  // The selection itself already happened (one active record per segment, by the
+  // deterministic rule in lib/fieldMeasurement/resolver.ts). This block only
+  // PROJECTS it, so there is no second opinion about which measurement won.
+  //
+  // THE FEEDER RECORD IS PATCHED IN STEP. `electrical.feeder.voltageDropPct` is a
+  // SECOND carrier of the same result (built from the engine run below, and
+  // preferred over the segment by projectCanonicalFeeder). Updating only the
+  // segment produced exactly the defect this workstream is about: PV-4B printed
+  // "Vd = 0.37% over 89 ft" — the OLD 20-ft percentage beside the NEW measured
+  // length, which reads as derived and is not. `_fieldVoltageDrop` carries the
+  // recalculation forward to that record.
+  const _fieldVoltageDrop = new Map<string, number | null>();
+  {
+    const _fm = opts?.fieldRouteMeasurements ?? null;
+    if (_fm && Object.keys(_fm.bySegmentId).length > 0) {
+      for (const seg of routeSegments) {
+        const a = _fm.bySegmentId[seg.segmentId];
+        if (!a) continue;
+        // D1 — a measurement on a run the project does not own is refused at the
+        // API, but a stale row must never take effect here either. Fail-closed.
+        if ((seg.routeAuthorityApplicability ?? 'REQUIRED') !== 'REQUIRED') continue;
+
+        seg.lengthSource = a.lengthSource === 'field-verified' ? 'field-measurement' : 'operator-entry';
+        seg.verificationStatus = a.verificationState;
+        seg.verificationState = a.verificationState;
+        seg.lengthProvenance = 'field-measured';
+        seg.calculationLengthFt = a.calculationLengthFt;
+        // The taxonomy keeps BOTH numbers: `verifiedFieldLengthFt` is populated
+        // only by a VERIFIED record, so a sheet can never read an unverified
+        // number out of a field named "verified".
+        seg.verifiedFieldLengthFt = a.closesFieldVerification ? a.calculationLengthFt : null;
+        // oneWayFt is what the voltage-drop projection reads when no explicit
+        // calculation length is present; keeping it in step is what makes the
+        // recalculation actually happen rather than merely being declared.
+        seg.oneWayFt = a.calculationLengthFt;
+
+        // §13 — the procurement length is the measured length PLUS ITEMISED,
+        // DOCUMENTED allowances, never a blanket percentage.
+        const _proc = deriveFieldMeasuredProcurement(a.calculationLengthFt);
+        seg.procurementLengthFt = _proc.procurementLengthFt;
+        seg.wasteFactor = _proc.wasteFactor;
+
+        // §12 — THE PERCENTAGE IS RECOMPUTED, NOT RETAINED. Keeping the prior
+        // 0.369% beside a length that just changed is the quiet failure this
+        // whole workstream is about: arithmetic that is correct about a length
+        // nobody is using. The conductor resistance is re-read from the gauge.
+        const _vd = recalculateRouteVoltageDrop({
+          lengthFt: a.calculationLengthFt,
+          // The ENGINE's own current (see _segCurrentA above) first, so the
+          // recalculation rests on the same basis the original result did; the
+          // segment's declared fields are the fallback.
+          continuousCurrentA: _segCurrentA.get(seg.segmentId) ?? seg.continuousCurrentA,
+          operatingCurrentA: seg.operatingCurrentA,
+          conductorGauge: seg.conductorGauge,
+          systemVoltage: _segSystemVoltage.get(seg.segmentId) ?? null,
+        });
+        // null is written through deliberately: an un-recomputable voltage drop
+        // is INDETERMINATE, and leaving the stale number would be worse.
+        seg.voltageDropPct = _vd.voltageDropPct;
+        if (_vd.currentBasis) seg.voltageDropCurrentBasis = _vd.currentBasis;
+        _fieldVoltageDrop.set(seg.segmentId, _vd.voltageDropPct);
+
+        seg.provenance = {
+          source: `field route measurement (migration 118) — ${a.provenance}. `
+            + `Procurement: ${_proc.derivation} Voltage drop: ${_vd.derivation}`,
+          ref: `authority:fieldRouteMeasurement#${a.measurementId}`,
+        } as typeof seg.provenance;
+      }
+    }
+  }
+
   // ═══ W4 §1 CANONICAL CODE AUTHORITY ════════════════════════════════════
   // THE single source for every printed edition. NEC comes from the best real
   // adoption authority (resolved AHJ record / server-enriched jurisdiction);
@@ -1712,8 +1834,12 @@ export function buildPermitDesignSnapshot(
         (r.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
       const _excludedRoutes = routeSegments.filter(r =>
         (r.routeAuthorityApplicability ?? 'REQUIRED') !== 'REQUIRED');
-      const _residual = _projectRoutes.filter(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement');
-      const _derivedSegs = _projectRoutes.filter(r => r.lengthSource === 'cad-route' || r.lengthSource === 'field-measurement');
+      // WS-5 §14 — the SAME named closure policy the derived resolver uses, so
+      // the permit-set banner and the internal-set requirement cannot disagree.
+      // 'operator-entry' (an UNVERIFIED field report) is deliberately residual:
+      // it has already become the calculation length and it closes nothing.
+      const _residual = _projectRoutes.filter(r => !sourceClosesRouteLengthRequirement(r.lengthSource));
+      const _derivedSegs = _projectRoutes.filter(r => sourceClosesRouteLengthRequirement(r.lengthSource));
       if (_residual.length > 0) {
         push('ROUTE-LENGTH-ESTIMATE',
           `${_residual.length} of ${_projectRoutes.length} PROJECT-OWNED electrical run(s) have no routed geometry in the CAD model and require a field-measured route: `
@@ -2262,7 +2388,17 @@ export function buildPermitDesignSnapshot(
         ocpdA: cs?.backfeedBreakerAmps ?? cs?.acOcpdAmps ?? null,
         continuousA: cs?.acContinuousCurrentA ?? null,
         currentA: cs?.acOutputCurrentA ?? null,
-        voltageDropPct: feederRun?.voltageDropPct ?? null,
+        // WS-5 §12 — when the canonical feeder run carries a FIELD MEASUREMENT,
+        // its voltage drop is the RECALCULATED one, not the engine's estimate
+        // result. projectCanonicalFeeder prefers THIS field over the segment's,
+        // so leaving it on the old value is what printed "Vd = 0.37% over 89 ft"
+        // on PV-4B — the previous length's percentage beside the measured
+        // length. `_fieldVoltageDrop` holds a value ONLY for segments the
+        // measurement authority actually moved, so an unmeasured project is
+        // byte-identical.
+        voltageDropPct: (feederRun?.id != null && _fieldVoltageDrop.has(String(feederRun.id)))
+          ? _fieldVoltageDrop.get(String(feederRun.id)) ?? null
+          : (feederRun?.voltageDropPct ?? null),
         conduit: { raceway: feederRun?.conduitType ?? null, tradeSizeIn: feederRun?.conduitSize ?? null,
                    fillPct: (elec?.conduitFill as any)?.fillPercent ?? null },
       },

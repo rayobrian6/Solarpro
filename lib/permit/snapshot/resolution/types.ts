@@ -326,6 +326,17 @@ export interface SnapshotAuthorityInputs {
    *  116. The engine never writes it; a licensed reviewer does. */
   engineeringReview?: import('@/lib/engineeringReview/types').EngineeringReviewCoverage | null;
 
+  /** WS-5 — the ACTIVE field route measurements READ from migration 118, one
+   *  per route segment, already reduced to the deterministic selection. The
+   *  engine never writes it: an operator records, an authorised verifier
+   *  verifies, and this build only PROJECTS what they established.
+   *
+   *  Null is the honest seed — no field authority — and an unreadable store
+   *  produces a bundle whose `storeUnavailable` is true rather than an empty
+   *  one, because "we could not look" and "there is nothing" are different
+   *  facts even though both refuse to close a requirement. */
+  fieldRouteMeasurements?: import('@/lib/fieldMeasurement/resolver').FieldRouteMeasurementAuthority | null;
+
   /** AAC WS-1 — the lifecycle record: per-requirement resolution state + the
    *  full evidence trail. Optional so every existing construction site of this
    *  interface (scripts, harnesses, tests) keeps compiling and the snapshot

@@ -245,6 +245,7 @@ export async function POST(req: NextRequest) {
     'execute-personnel-115',    // mutation: TARGETED deployment of ONLY migration 115 (personnel roles of record — AAC WS-6)
     'execute-engineering-review-116', // mutation: TARGETED deployment of ONLY migration 116 (digest-bound engineering review — AAC WS-8/WS-9)
     'execute-ahj-registry-117', // mutation: TARGETED deployment of ONLY migration 117 (SolarPro's own central AHJ / adopted-code registry — TAC WS-19)
+    'execute-field-measurements-118', // mutation: TARGETED deployment of ONLY migration 118 (field route measurements + their atomic domain audit — WS-5)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -321,8 +322,12 @@ export async function POST(req: NextRequest) {
   // adopted-code registry. Same pure additive CREATE-TABLE-only shape, through
   // the same static gate and the same identifier-scoped permit.
   const isAhjRegistry117 = action === 'execute-ahj-registry-117';
+  // WS-5 — migration 118 (field_route_measurements + field_route_measurement_events):
+  // the field-measurement record and its ATOMIC domain audit. Same pure additive
+  // CREATE-TABLE-only shape, same static gate, same identifier-scoped permit.
+  const isFieldMeasurements118 = action === 'execute-field-measurements-118';
   const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115
-    || isEngineeringReview116 || isAhjRegistry117;
+    || isEngineeringReview116 || isAhjRegistry117 || isFieldMeasurements118;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
@@ -630,7 +635,8 @@ export async function POST(req: NextRequest) {
         : isReconciliation114 ? '114'
         : isPersonnel115 ? '115'
         : isEngineeringReview116 ? '116'
-        : '117';
+        : isAhjRegistry117 ? '117'
+        : '118';
       const spec = REGISTRY_DEPLOYMENT[identifier];
       const reason = (body?.reason as string | undefined)?.trim();
       if (!reason) {

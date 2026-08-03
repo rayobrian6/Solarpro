@@ -12,6 +12,11 @@ import {
   ExternalLink, Info, BarChart2, Layers, Grid, FolderOpen, Eye
 } from 'lucide-react';
 import type { EngineeringReport } from '@/lib/engineering/types';
+// WS-5 — the field route measurement workflow lives INSIDE the electrical
+// review experience, beside the run lengths it governs. It is deliberately not
+// a separate developer page: an operator who is looking at a voltage drop is
+// exactly the person who needs to see whether its length was measured.
+import RouteMeasurementPanel from '@/components/project/RouteMeasurementPanel';
 
 interface ProjectFile {
   id: string;
@@ -584,6 +589,14 @@ ${(pp?.specialConditions?.length) ? `
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* WS-5 — ROUTE LENGTH AUTHORITY. Placed inside Electrical
+              Engineering, directly under the AC/DC numbers it qualifies: the run
+              lengths above are CAD estimates until someone measures them, and
+              this is where that happens and where it is verified. */}
+          <div className="pt-2 border-t border-slate-700">
+            <RouteMeasurementPanel projectId={projectId} />
           </div>
         </div>
       </Section>

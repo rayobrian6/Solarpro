@@ -64,10 +64,24 @@ export const REGISTRY_DEPLOYMENT: Record<string, { expectedTables: string[] }> =
   // authority). So it goes through the same statically-verified,
   // identifier-scoped permit. Independent of 113-116; order does not matter.
   '117': { expectedTables: ['ahj_registry'] },
+  // WS-5 (2026-08-02) — field_route_measurements + field_route_measurement_events:
+  // the PRODUCER that the 'field-verified' route-length state never had. WS-5
+  // part 1 taught the model to SAY field-verified; nothing could make it say so,
+  // so ROUTE-LENGTH-ESTIMATE was structurally unclosable. Two tables because the
+  // domain audit must commit in the SAME transaction as the state transition it
+  // records (the compliance audit_log is best-effort by design and swallows its
+  // own write failure, so it cannot be the durable record of a domain change).
+  //
+  // Same migration shape as 113-117: pure additive CREATE TABLE / CREATE INDEX
+  // IF NOT EXISTS, no ALTER, no DO block, no seeded rows and — critically — no
+  // seeded MEASUREMENT and no path from configuration to a verified length. The
+  // foreign keys carry no ON-DELETE clause because the static gate below forbids
+  // the DELETE token outright. Independent of 113-117; order does not matter.
+  '118': { expectedTables: ['field_route_measurements', 'field_route_measurement_events'] },
 };
 
 /** The migration identifiers this module governs, in ceremony order. */
-export const REGISTRY_SEQUENCE = ['113', '114', '115', '116', '117'] as const;
+export const REGISTRY_SEQUENCE = ['113', '114', '115', '116', '117', '118'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;

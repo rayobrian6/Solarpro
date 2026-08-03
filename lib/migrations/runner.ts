@@ -385,6 +385,12 @@ export function authorizeMigration(params: {
  *   - 117: ahj_registry — SolarPro's own central AHJ / adopted-code registry
  *     (TAC WS-19). Same static gate. Independent of 113-116. Creates one table +
  *     three indexes, all IF NOT EXISTS, and seeds NO rows.
+ *   - 118: field_route_measurements + field_route_measurement_events — the WS-5
+ *     field-measurement record and its ATOMIC domain audit. Same static gate.
+ *     Independent of 113-117. Until it is run, the canonical route-length
+ *     resolver reports a RETRYABLE store-unavailable failure naming this exact
+ *     step and the CAD source stands; it never invents a field measurement and
+ *     never closes ROUTE-LENGTH-ESTIMATE.
  * NOTHING else — not any historical migration, not "all pending" — can be run
  * through the targeted path. (The retired 108 Nearmap-index and 109-112
  * data-authority targeted cards were removed 2026-07-21; their identifiers are
@@ -398,7 +404,7 @@ export function authorizeMigration(params: {
  * is exactly what happened to 117. The registry-parity test asserts this set and
  * REGISTRY_DEPLOYMENT/REGISTRY_SEQUENCE agree, so the four gates cannot drift again.
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['113', '114', '115', '116', '117']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['113', '114', '115', '116', '117', '118']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;

@@ -63,6 +63,10 @@ import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
 import { inlineManufacturerAssets } from './utils/inlineManufacturerAssets';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
+// WS-5 — the ACTIVE field measurement substitutes for the engine's estimated
+// run length ONCE, on the canonical run model, so the BOM and the snapshot
+// cannot disagree about the same run.
+import { applyFieldMeasurementsToRuns } from './snapshot/applyFieldMeasurements';
 import { fontFaceCss, fontFaceIdentities, FONT_PACK_VERSION } from './fonts/fontPack';
 
 export function generatePermitHTML(
@@ -1040,6 +1044,31 @@ export function generatePermitHTML(
     if (!csFull) {
       throw new Error('[PLANSET] canonical electrical engine (computeSystem) produced no result — fail closed (W2.1: no legacy fallback, no estimates)');
     }
+    // ── WS-5 §12/§13 — THE MEASURED LENGTH SUBSTITUTES HERE ─────────────────
+    // Before the BOM and before the snapshot, so the ordered conduit footage,
+    // the fittings, the conductor schedule and every sheet all derive from ONE
+    // number. Patching only the snapshot left SCHED ordering 23 ft of conduit
+    // for a run PV-4B called 89 ft. No-op when no measurement exists, so an
+    // unmeasured project produces a byte-identical package.
+    // Parked on the input because `buildComputedRunsForPermit` (the BOM's run
+    // source) invokes computeSystem a SECOND time from the CAD rather than
+    // reusing this result — a pre-existing duplication this workstream does not
+    // restructure. Both run models therefore go through the SAME substitution
+    // function, from the same authority, rather than one of them silently
+    // keeping the estimate.
+    (input as unknown as Record<string, unknown>)._fieldRouteMeasurements =
+      snapshotAuthority?.fieldRouteMeasurements ?? null;
+    const _fieldApplications = applyFieldMeasurementsToRuns(
+      csFull as unknown as { runs?: Array<Record<string, unknown>> },
+      snapshotAuthority?.fieldRouteMeasurements ?? null,
+    );
+    if (_fieldApplications.length > 0) {
+      console.log('[PLANSET] WS-5 field route measurements applied to the canonical run model:',
+        _fieldApplications.map(a =>
+          `${a.segmentId} ${a.previousLengthFt ?? '—'}→${a.measuredLengthFt} ft `
+          + `(VD ${a.previousVoltageDropPct?.toFixed(3) ?? '—'}→${a.recalculatedVoltageDropPct?.toFixed(3) ?? 'INDETERMINATE'}%, `
+          + `${a.verified ? 'FIELD-VERIFIED' : 'field-reported'})`).join(' · '));
+    }
     (input as unknown as Record<string, unknown>)._computeSystem = csFull;
     input.compliance.electrical = mapComputedSystemToCompliance(csFull, {
       busRatingA: input.project.panelBusRating ?? input.project.mainPanelAmps ?? null,
@@ -1215,6 +1244,10 @@ export function generatePermitHTML(
       rackingAssemblySelection: snapshotAuthority?.rackingAssemblySelection ?? null,
       framingRetrieval: snapshotAuthority?.framingRetrieval ?? null,
       engineeringReview: snapshotAuthority?.engineeringReview ?? null,
+      // WS-5 — the ACTIVE field route measurements (migration 118). Null ⇒ every
+      // route keeps its CAD length source and ROUTE-LENGTH-ESTIMATE stays open,
+      // which is the correct outcome for a project nobody has measured.
+      fieldRouteMeasurements: snapshotAuthority?.fieldRouteMeasurements ?? null,
     });
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);
