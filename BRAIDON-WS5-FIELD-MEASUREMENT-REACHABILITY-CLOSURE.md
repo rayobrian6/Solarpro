@@ -895,4 +895,43 @@ tests/{phase1a-migration-governance,targetedRegistryDeployment}.test.ts
 
 ## 27. FINAL COMMIT AND PUSH
 
-Recorded at commit time — see the closing section appended after push.
+```
+Starting remote HEAD   9402824a279440497bd72209ae0acbe3a1cc71b3
+Ending commit          eafdc6882320c6237ad3959dba0285d918cf9873
+Push                   9402824a..eafdc688  dev -> dev
+Verified after fetch   HEAD == origin/dev == eafdc688
+Ahead / behind         0 / 0
+Files changed          46  (+8383 / −19)
+```
+
+No history was rewound, reset or force-pushed. `dev` remains the integration branch
+per R8.
+
+---
+
+## 28. ACCEPTANCE, POINT BY POINT
+
+| Requirement | Status |
+|---|---|
+| Persistent measurement evidence | migration 118, two tables, governed through all four gates |
+| Real API and UI workflow | five endpoints in the build; panel in the Electrical Engineering section |
+| Operator entry defaults to unverified | constant function + DB DEFAULT + CHECK; tested for the org owner |
+| Verification explicit, authorised, evidenced, audited | policy service; capability + project access; evidence re-resolved; atomic event |
+| Tenant / project / route isolation fail-closed | every read and guard scoped; cross-tenant reported as 404 |
+| Rejection and supersession preserve history | append-only; the retired value survives; no DELETE exists |
+| Canonical resolver consumes active authority | deterministic selection → authority bundle → build |
+| Field-reported supports only provisional conclusions | `DESIGN_REVIEW_ONLY`; PROVISIONAL PASS; closes nothing |
+| Field-verified can support final conclusions | `FINAL_RELEASE_READY`; `✓ VERIFIED PASS`; closes the requirement |
+| Requirement closure reachable through the real workflow | 21-test proof, real service → API → engine |
+| Requirement reopening proven | rejection and supersession-without-verified-replacement |
+| Voltage drop recalculates | resistance re-read from the gauge; feeder projection patched in step |
+| Procurement recalculates | itemised policy on the segment; BOM footage 21/23/18 → 102/103/104 ft |
+| Live Braidon honest and pending | 0 measurements, 4 unresolved, requirement OPEN |
+| D1, D2, D3, D4 intact | 48/48/15; ownership, grounding, fonts all pass |
+| All profiles unclipped | 19/18/25 + both controlled sets, zero clipping |
+| Tests, lint, typecheck, harnesses, build, PDFs, visual review honestly reported | §19–§24, including the ECD exit-2 and the Postgres skip |
+| Final commit pushed and verified | `eafdc688`, 0 / 0 |
+
+**Not claimed:** live PostgreSQL execution of the adapter's SQL (§19), and the six
+open defects in §26. WS-5's workflow is complete and reachable; Braidon's
+project-specific field evidence is not, and truthfully should not be.
