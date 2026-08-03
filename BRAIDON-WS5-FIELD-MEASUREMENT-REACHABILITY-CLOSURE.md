@@ -935,3 +935,319 @@ per R8.
 **Not claimed:** live PostgreSQL execution of the adapter's SQL (§19), and the six
 open defects in §26. WS-5's workflow is complete and reachable; Braidon's
 project-specific field evidence is not, and truthfully should not be.
+
+---
+---
+
+# PART II — PLANSET 19 ARTIFACT-PROJECTION REPAIR (D5 / D6)
+
+Scope: a narrowly-scoped repair of two artifact-projection defects found by
+reading the accepted Planset 19 artifact. WS-5 persistence, migration 118, the
+measurement API, RBAC, audit records, the route-length resolver, procurement
+recalculation, D1 route ownership, D2 grounding, D3 schedule continuation, D4
+canonical fonts and WS-3 conduit authority were **not** reopened. Braidon
+received **no** field measurements.
+
+Baseline: `origin/dev` = `6bafde00e277e819889d2b916224ebeccc443f8b`, local HEAD
+identical, 0 ahead / 0 behind, tracked tree clean. `6bafde00` confirmed present;
+all D1–D4, WS-3, WS-5, Next 15 / React 19 and SOC 2 commits present in the log.
+No rewind, reset or force-push.
+
+## 29. PLANSET 19 AUDIT FINDINGS
+
+Read directly out of `PermitPackage-BRAIDON M PILLA — Solar TEST (19).html`
+(snapshot `PDS-36BE671F881E`, written 2026-08-02 19:29 America/Chicago):
+
+| Observation | Count / value |
+|---|---|
+| `PROVISIONAL PASS` | 1 — PV-4B only |
+| `PENDING — REVIEW REQ'D` on PV-4B.1 | 7 — every physical section row |
+| `VERIFIED PASS` | 0 |
+| Distinct calendar dates in the whole artifact | 1 — `8/3/2026`, on 42 occurrences |
+| Occurrences of `8/2/2026` | 0 |
+
+PV-4B.1 row 5 and PV-4B describe the **same circuit**:
+
+```
+PV-4B      AC Output                20 ft   0.37%   <= 3.0%   PROVISIONAL PASS
+PV-4B.1    COMBINER_TO_DISCO_RUN    20 ft   0.37%   <= 3%     PENDING — REVIEW REQ'D
+```
+
+Identical length, identical percentage, contradictory conclusion.
+
+## 30. DEFECT 1 — PV-4B vs PV-4B.1: ROOT CAUSE
+
+Not a second calculation. A second *vocabulary*.
+
+* PV-4B (`pageConductorSchedule`) graded through the canonical
+  `gradeVoltageDrop()` — the **only** production call site in the repo.
+* PV-4B.1 (`pageConductorScheduleCont` → `renderE1PhysicalSchedule`) printed
+  `complianceBadge(x.compliance)` in the verdict position — the shared release
+  tri-state from `evaluateCompliance()`.
+* `projectE1PhysicalSchedule` feeds that tri-state a `pending` entry reading
+  *"branch/home-run/feeder route length is a CAD-derived estimate (not
+  field-verified)"*. A non-empty `pending` list forces `PENDING-REVIEW-REQUIRED`.
+
+So an **open review item was standing in for a calculation conclusion**. The
+release state consumed the voltage-drop verdict, on every row, on every profile.
+
+A second defect fell out of the same trace: `gradeVoltageDrop`'s `sourceLabel`
+enumerated the resolver's own `RouteLengthSource` union, but is fed
+`RouteSegmentRecord.lengthSource`, a different five-value union. The two values
+the field-measurement applier actually writes — `field-measurement` and
+`operator-entry` — both fell through to the default, so a **walked 87 ft run was
+described on the sheet as a "CAD-derived estimate"**.
+
+## 31. THE SHARED CANONICAL CONCLUSION
+
+`VoltageDropConclusion` (`VERIFIED_PASS | PROVISIONAL_PASS | FAIL |
+INDETERMINATE`) and `gradeVoltageDrop()` already existed and were already
+correct. Nothing was re-implemented and **no second resolver was created**.
+
+* `E1PhysicalSection` gained `voltageDrop: VoltageDropGrade` and
+  `vdCalculationLengthFt`. All four builders (branch, shared home-run, the
+  feeder/disconnect `runRow`, tap) populate it through the *same* resolver.
+* `_vdLenOf()` reads the calculation basis exactly as PV-4B does
+  (`calculationLengthFt ?? oneWayFt`) — one accessor, so a percentage and the
+  length behind it cannot differ by sheet.
+* `gradeVoltageDrop` now derives "verified" from the canonical
+  `closesFieldVerification()` predicate in `types.ts` instead of a second inline
+  copy of the same rule, and `sourceLabel` accepts **both** length-source
+  vocabularies.
+* Neither sheet re-decides anything: `voltageDropDisplayFields()` and
+  `voltageDropConclusionColor()` are shared, so PV-4B and PV-4B.1 render the same
+  strings and the same colour ramp from one object.
+
+A failure stays a failure at every grade — an estimate-grade input never softens
+an over-limit result, and closing the field requirement never upgrades one.
+
+## 32. SEPARATION OF CALCULATION GRADE FROM RELEASE STATE
+
+Each PV-4B.1 row now exposes two independent, labelled facts, plus the release
+tri-state it always had, in its own column:
+
+```
+V-DROP · CALCULATION · LENGTH AUTHORITY              RELEASE / REVIEW
+0.37% / <=3%                                         RELEASE / REVIEW
+CALCULATION                                          PENDING — REVIEW REQ'D
+PROVISIONAL PASS — 0.37% <= 3.0%
+LENGTH AUTHORITY
+CAD-DERIVED ESTIMATE — FIELD VERIFICATION PENDING
+```
+
+PV-4B prints the identical pair. Both are tagged machine-readably —
+`data-vd-conclusion`, `data-vd-length-authority`,
+`data-vd-field-verification-pending` — so cross-sheet agreement is *provable*,
+not eyeballed. The release column is unchanged and still reads
+`PENDING — REVIEW REQ'D`: it was never wrong, it was merely in the wrong place.
+
+## 33. DEFECT 2 — THE UTC DATE: ROOT CAUSE
+
+One line, `generatePermit.ts`:
+
+```ts
+const genAt = genIso ? new Date(genIso) : new Date();
+const genDateStr = (...).toLocaleDateString('en-US');   // no timeZone option
+project.date = genDateStr;
+```
+
+`toLocaleDateString` with no `timeZone` formats in the **host** zone. On a UTC
+serverless host that is the UTC calendar date, so every evening after 19:00 CDT
+the whole package advanced a day.
+
+Reproduced exactly at baseline `6bafde00` under `TZ=UTC`:
+
+| Instant | Expected (America/Chicago) | Baseline printed |
+|---|---|---|
+| `2026-08-03T00:30:00Z` | `8/2/2026` | **`8/3/2026`** FAIL |
+| `2026-08-03T06:30:00Z` | `8/3/2026` | `8/3/2026` ok |
+| `2026-01-01T03:00:00Z` | `12/31/2025` | **`1/1/2026`** FAIL |
+
+The architecture was already single-sourced — `project.date` is set once, before
+the snapshot builds, and every title block, cover, revision row, CERT and PE-1
+date reads it. The value was wrong, not the plumbing.
+
+## 34. THE PROJECT-TIMEZONE DATE AUTHORITY
+
+New `lib/permit/utils/documentIssueContext.ts`. One resolution, recorded:
+
+```ts
+type DocumentIssueContext = {
+  generatedAtUtc: string; timezone: string; timezoneSource: DocumentTimezoneSource;
+  issueDateLocal: string; issueDateIso: string; issueDateSource: DocumentIssueDateSource;
+};
+```
+
+Precedence, first match wins, every outcome recorded in `timezoneSource`:
+
+1. **explicit document issue date** — used verbatim; re-rendering never re-dates
+   an issued package
+2. **explicit project timezone** (`project.timezone`, IANA)
+3. **project jurisdiction** — derived from the project's state, and **only** for
+   states occupying exactly one zone. The 15 split-zone states are deliberately
+   absent from the table, so a Florida project falls through rather than being
+   told, wrongly, that it is Eastern. Braidon (Granite City, **IL**) resolves
+   `America/Chicago` via this rule — for the right reason, not by luck.
+4. **tenant timezone**
+5. **configured default** — `PLANSET_DEFAULT_TIMEZONE`, documented default
+   `America/Chicago`
+
+An invalid zone **never** degrades to UTC: it falls to the one documented default,
+warns, and records `configured-default-after-invalid`.
+
+Propagation: resolved once in `generatePermit`, frozen on
+`input._documentIssueContext`, `project.date` set from it. Two other producers
+removed — `sldAdapter`'s `?? new Date().toLocaleDateString()` fallback (a latent
+second host-local date feeding three E-1 positions) and PV-4A's overrides-log
+`new Date(o.timestamp).toLocaleDateString()`, which rendered a UTC-stored instant
+in host-local time (two shifts stacked). The artifact now carries five `<meta>`
+tags naming the zone, its source, the resolved date in both forms and how the
+date was decided.
+
+**Deliberately not changed:** `snapshot.meta.generatedAtIso` still falls back to
+`proj.date` (a localised `M/D/YYYY` string) when no instant is injected. It is a
+real format defect, but that field is **digested**, and two renders of one input
+are pinned byte-identical (`aac-ws3-ws4`, `wave6-legacy-sweep`); substituting a
+true sub-second instant gave every render a new snapshot id. Fixing it needs the
+digest to stop covering the generation instant — a snapshot-contract change, out
+of scope here. Recorded rather than papered over. For the same reason the
+artifact does not emit the raw instant, only the date authority.
+
+## 35. FROZEN-CLOCK TESTS
+
+House style is `input.generatedAtIso`, which the generator reads explicitly —
+not `vi.setSystemTime`, which would only take effect through the fallback.
+
+* `tests/planset/d6-document-issue-date.test.ts` — **32 tests**: the three
+  mandated boundary cases, the boundary *minute* either side, CDT and CST offsets,
+  both DST transitions, non-Chicago zones, all five precedence levels, invalid
+  project zone, invalid tenant zone, missing zone, explicit override in both
+  accepted forms, malformed override, ISO/printed agreement, determinism,
+  one-date-per-package, per-sheet title-block equality, issue-vs-revision
+  agreement, all three profiles, repeated generation, byte-identical re-render,
+  and a source-level scan proving no authoritative generator still calls
+  `toLocale*String` without a `timeZone` or slices a UTC ISO string.
+* `tests/planset/d5-voltage-drop-cross-sheet.test.ts` — **27 tests**: the enum at
+  every grade, FAIL at all four grades, FAIL never softened, INDETERMINATE, both
+  length-source vocabularies, the two display fields, per-section grading equal
+  to the canonical resolver, release-vs-calculation independence, the shared
+  feeder carrying the same conclusion on both sheets, percentage and length
+  agreement, no review state in the calculation position, and Braidon honesty.
+
+Both files pass unchanged under `TZ=UTC`, `TZ=Asia/Tokyo` and the host zone —
+host-independence is the fix, so it is asserted.
+
+Evidence gate `ep` gate 3 (`e1-no-pass-with-pending`) was updated, **stronger**:
+it excludes the graded `PROVISIONAL PASS` / `VERIFIED PASS` vocabulary and the
+enum legend, still forbids an unqualified `PASS`, and newly forbids a
+`VERIFIED_PASS` row while any row reports field verification pending; its scan
+window now runs to the end of the table instead of a fixed 4000 characters. It
+passes on the repaired artifact (7 graded rows) and **fails on the Planset 19
+baseline artifact** — a gate that rejects the defect it was blind to.
+
+## 36. BEFORE / AFTER (identical frozen fixture, `2026-08-02T12:00:00Z`)
+
+| | Before (`6bafde00`) | After |
+|---|---|---|
+| PV-4B voltage-drop grade | `PROVISIONAL PASS` | `PROVISIONAL PASS` (unchanged) |
+| PV-4B.1 voltage-drop grade | *none — `PENDING — REVIEW REQ'D`* | `PROVISIONAL PASS` x6, `INDETERMINATE` x1 |
+| Cross-sheet percentage | 0.37% / 0.37% (agreed) | 0.37% / 0.37% (agreed) |
+| Cross-sheet length | 20 ft / 20 ft (agreed) | 20 ft / 20 ft (agreed) |
+| Release-review state | `PENDING — REVIEW REQ'D` x7 | `PENDING — REVIEW REQ'D` x7 (unchanged, own column) |
+| Graded rows tagged | 0 | 7 |
+| `VERIFIED PASS` in Braidon | 0 | 0 |
+| Sheets (design-review / permit / full) | 17 / 16 / 22 | 17 / 16 / 22 |
+| Open release gates | 6 | 6 |
+| Unresolved requirements | 13 | 13 |
+| Braidon verified measurements | 0 | 0 |
+| `ROUTE-LENGTH-ESTIMATE` | OPEN | OPEN |
+| Snapshot ids | `PDS-F204B258575D` / `PDS-0FCD30C4C7A5` / `PDS-52CF36872161` | identical |
+| Unqualified tick `PASS` in package | 4 | 4 (conduit fill + branch device rating — not length-dependent) |
+
+Date authority, proven under `TZ=UTC`:
+
+| | Before | After |
+|---|---|---|
+| `2026-08-03T00:30:00Z` | `8/3/2026` FAIL | `8/2/2026` ok |
+| `2026-08-03T06:30:00Z` | `8/3/2026` ok | `8/3/2026` ok |
+| `2026-01-01T03:00:00Z` | `1/1/2026` FAIL | `12/31/2025` ok |
+| Timezone metadata in artifact | absent | `America/Chicago` via `project-jurisdiction` |
+
+Full-profile artifact: 53 date occurrences across 22 sheets, **1** distinct value,
+**0** sheets with mixed dates. CERT Document ID corrected to
+`SP-PERMIT-BRAIDONORIGI-822026` (it embedded the shifted date).
+
+D-series regression, before → after, identical: D1 4 unresolved project-owned /
+1 geometry-derived / 1 utility-owned excluded; D2 segment-specific, no
+project-wide EGC minimum; D3 **48 rows / 48 unique / 0 duplicates / 15 conduit
+fitting rows**; D4 **5 `@font-face`, 0 Helvetica, 0 Courier New, 0 bare
+monospace, 0 bare sans-serif**.
+
+## 37. VALIDATION RESULTS
+
+| Check | Result |
+|---|---|
+| Full suite | **9606 passed / 0 failed / 490 skipped** (416 files, 17 skipped) |
+| Lint | exit 0, **0 errors** (pre-existing `no-console` warnings only; none in new files) |
+| Typecheck | exit 0 |
+| Production build | exit 0 |
+| Page-fit (full profile) | exit 0 — 25 sheets, **0 clipped, 0 internal-clipped**, 0 missing title blocks |
+| `planset-evidence-ep` | exit 0 — 22/22 |
+| `planset-evidence-ppc` | exit 0 — 18/18 |
+| `planset-evidence-bar` | exit 0 — 14/14 |
+| `planset-evidence-rgm` | exit 0 — 17/17 |
+| `planset-evidence-co` | exit 0 — 20/20 |
+| `planset-evidence-rp` | exit 0 — 20/20 |
+| `planset-evidence-w3` / `-w4` | exit 0 |
+| `planset-evidence-ecd` | **exit 2 — PRE-EXISTING**, fails identically on the `6bafde00` baseline artifact (gates 8/9, Q-CONN promotion + export scope). Not caused here and not repaired here. |
+| Authoritative Chromium PDF | exit 0 — `braidon_full.pdf`, 25 sheets + 25 per-sheet PNGs under print media |
+
+One regression was introduced and fixed during the work: the first PV-4B draft
+overflowed the printable box by **+10.58 px** (that sheet has zero slack). The
+two-fact block was compressed to one dense line; page-fit is now 0 clipped.
+
+## 38. VISUAL INSPECTION (authoritative print-media captures)
+
+PV-0, PV-1, PV-4A, PV-4B, PV-4B.1, E-1, SCHED, SCHED-2/3/4, PE-1, CERT reviewed.
+
+* PV-4B and PV-4B.1 agree — both `PROVISIONAL PASS` on the 20 ft / 0.37% feeder
+* `PROVISIONAL PASS` visible with its `LENGTH AUTHORITY` beneath it on both sheets
+* Release verification visibly pending in its own column on all 7 rows
+* No verified claim anywhere — `VERIFIED PASS` appears 0 times in the package
+* `8/2/2026` on every title block, revision row, cover, CERT and PE-1 date
+* No tofu, no clipping, no shifted SVG text, no D1–D4 or WS-5 regression
+
+## 39. MIGRATION 118
+
+Unchanged by this repair, and this repair does not depend on it. It remains
+pending the governed-console application and real PostgreSQL contract execution.
+No PostgreSQL deployment acceptance is claimed. The honest no-measurement Braidon
+artifact generates without it.
+
+## 40. WHAT THIS REPAIR DOES **NOT** CLAIM
+
+Found while tracing, **not** repaired, recorded so they are not lost:
+
+1. `snapshot.meta.generatedAtIso` (and `environmentalCapturedAtIso`,
+   `_capturedIso`) store a localised `M/D/YYYY` string in ISO-declared fields
+   when no instant is injected — see §34 for why the digest blocks the fix.
+2. `routeProvenanceLabel` (`electricalProjection.ts`) carries a **second,
+   divergent** copy of the verification rule: it counts `field-measured` as
+   verified where canonical `closesFieldVerification` does not. It drives PV-1 /
+   roof-template conduit callouts and is pinned by an existing test. Same defect
+   class as D5; deliberately left alone because it sits inside the route-length
+   resolver this repair was told not to reopen.
+3. The GET self-heal path regenerates without replaying the issue context, so a
+   version-bump read re-stamps an already-issued package with today's date. The
+   `explicitIssueDate` hook now exists to fix it; wiring it is a save-path change.
+4. `jurisdictionResolvers.ts` / `structuralResolvers.ts` derive document-registry
+   dates by slicing a UTC ISO string. These are third-party retrieval stamps, not
+   the document's issue date, and sit in doc-control — left alone by scope.
+5. Client-side UTC date defaults (`app/engineering/page.tsx`, `lib/system-state.ts`)
+   show a Central-time operator tomorrow's date in the UI before generation. The
+   server overwrites it; the UI is not an authoritative generator.
+6. The frozen fixture renders **6 gates / 13 requirements**; the accepted live
+   Planset 19 artifact says **5 gates / 14 requirements**. Different inputs — the
+   fixture is not the live design (as with the 58 ft vs 64 ft `BRANCH_RUN`).
+   Neither was changed to match the other, and nothing was suppressed to move a
+   count.

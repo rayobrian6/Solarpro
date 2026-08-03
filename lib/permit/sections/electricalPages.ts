@@ -14,10 +14,12 @@ import { getSnapshot, peekSnapshot } from '../snapshot/read';
 // §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
-import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, projectGroundingSegments, ampacityChainLines, gradeVoltageDrop, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, projectGroundingSegments, ampacityChainLines, gradeVoltageDrop, voltageDropDisplayFields, voltageDropConclusionColor, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
 import { projectRackingBondingAuthority } from '../snapshot/rackingBonding';
 import { GROUNDING_PENDING_LABEL, GROUNDING_PENDING_BONDING_CELL_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { escapeH } from '../utils/drawing';
+// D6 — every project-facing date on a sheet resolves in the DOCUMENT's timezone.
+import { formatInDocumentTimezone, documentIssueContextOf } from '../utils/documentIssueContext';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
@@ -173,8 +175,29 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         + `${x.lengthLabel ? `<br/><span style="color:#333">${x.lengthLabel}</span>` : ''}`
         + `${x.lengthObjectId ? `<br/><span class="mono" style="color:#888;font-size:5.5px">${x.lengthObjectId}</span>` : ''}`
         + `<br/><span style="color:#666">${s(x.verificationStatus)}</span></td>`
-      + `<td class="tr" style="font-size:6.5px">${x.voltageDropPct != null ? `${x.voltageDropPct.toFixed(2)}%` : '—'}<br/><span style="color:#666">≤${x.vdLimitPct}%</span></td>`
-      + `<td class="center" style="font-size:6.5px;overflow-wrap:anywhere;">${complianceBadge(x.compliance)}</td>`
+      // ── D5 (Planset 19) — TWO SEPARATE FACTS IN THE VOLTAGE-DROP CELL ──────
+      // CALCULATION = the canonical gradeVoltageDrop conclusion (the SAME object
+      // and wording PV-4B prints). LENGTH AUTHORITY = where the length came from
+      // and whether field verification is still open. This cell used to carry the
+      // percentage only, and the verdict position carried the release tri-state
+      // alone — so an open route requirement erased the voltage-drop conclusion
+      // and PV-4B.1 contradicted PV-4B on the identical 20 ft / 0.37% feeder.
+      + `<td class="tr" style="font-size:6.5px" data-vd-conclusion="${x.voltageDrop.conclusion}"`
+        + ` data-vd-length-authority="${escapeH(x.voltageDrop.lengthAuthorityLabel)}"`
+        + ` data-vd-field-verification-pending="${x.voltageDrop.fieldVerificationPending ? 'true' : 'false'}">`
+        + `${x.voltageDropPct != null ? `${x.voltageDropPct.toFixed(2)}%` : '—'}`
+        + `<span style="color:#666"> / ≤${x.vdLimitPct}%</span>`
+        + `<br/><span style="color:#555;font-size:5.5px">CALCULATION</span>`
+        + `<br/><span class="fw7" style="color:${voltageDropConclusionColor(x.voltageDrop.conclusion)}">`
+          + `${escapeH(voltageDropDisplayFields(x.voltageDrop).calculation)}</span>`
+        + `<br/><span style="color:#555;font-size:5.5px">LENGTH AUTHORITY</span>`
+        + `<br/><span style="color:${x.voltageDrop.fieldVerificationPending ? '#b45309' : '#127a3e'}">`
+          + `${escapeH(voltageDropDisplayFields(x.voltageDrop).lengthAuthority)}</span></td>`
+      // The RELEASE / review state — conductor-size holes, conduit fill, the NEC
+      // 705.11(C) tap rule AND the open field-verification requirement. It stays
+      // exactly as it was; it simply no longer stands in for the calculation.
+      + `<td class="center" style="font-size:6.5px;overflow-wrap:anywhere;">`
+        + `<span style="color:#555;font-size:5.5px">RELEASE / REVIEW</span><br/>${complianceBadge(x.compliance)}</td>`
       + `</tr>`;
   }).join('');
   return `
@@ -189,22 +212,35 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         <!-- .equip-table th is white-space:nowrap globally, which under fixed layout let
              the LENGTH header overrun the V-DROP header. These headers wrap instead. -->
         <thead><tr style="white-space:normal;">
-          <th style="width:20%;white-space:normal;">Section / From → To</th>
-          <th style="width:16%;white-space:normal;">Cable · Conductors · Bonding</th>
-          <th style="width:16%;white-space:normal;">Physical Raceway · Fill · Derate</th>
-          <th style="width:12%;white-space:normal;">Currents</th>
-          <th style="width:12%;white-space:normal;">Length (quantity · source) · Verify</th>
-          <th style="width:9%;white-space:normal;">V-Drop</th>
-          <th style="width:15%;white-space:normal;">Compliance</th>
+          <th style="width:18%;white-space:normal;">Section / From → To</th>
+          <th style="width:15%;white-space:normal;">Cable · Conductors · Bonding</th>
+          <th style="width:15%;white-space:normal;">Physical Raceway · Fill · Derate</th>
+          <th style="width:11%;white-space:normal;">Currents</th>
+          <th style="width:11%;white-space:normal;">Length (quantity · source) · Verify</th>
+          ${''/* D5 — widened: this cell now carries the CALCULATION grade and the
+                LENGTH AUTHORITY as two separate labelled facts, not a bare %. */}
+          <th style="width:17%;white-space:normal;">V-Drop · Calculation · Length Authority</th>
+          <th style="width:13%;white-space:normal;">Release / Review</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fafafa;">
         Each row is a DISTINCT canonical physical section — the open-air Enphase Q Cable branch trunks (NEC 690.31(C)),
         the shared jbox→combiner home-run raceway (conductor count = its physical-raceway current-carrying inventory),
-        the combiner feeder, and the supply-side tap conductors — never merged. Compliance is the shared tri-state
-        authority: no section shows PASS while its route length is an estimate, its conduit fill is uncomputed, or the
-        NEC 705.11(C) ≤10-ft tap rule is unmeasured.
+        the combiner feeder, and the supply-side tap conductors — never merged.
+        <br/><strong>Two independent verdicts per row.</strong> <em>Calculation</em> is the canonical voltage-drop
+        conclusion — the SAME graded object sheet PV-4B prints, at the grade of the length it was computed from
+        ${''/* the enum is named in CODE form, not in verdict form: a legend that
+             spelled the verdicts out would put the words "VERIFIED PASS" on a
+             package that has verified nothing, which is the exact reading error
+             this sheet family exists to prevent. */}
+        (<span class="mono">VERIFIED_PASS</span> / <span class="mono">PROVISIONAL_PASS</span> /
+        <span class="mono">FAIL</span> / <span class="mono">INDETERMINATE</span>). <em>Length authority</em> names where that length
+        came from and whether field verification is still open. <em>Release / review</em> is the shared tri-state
+        authority covering conductor-size holes, conduit fill, the NEC 705.11(C) ≤10-ft tap rule <em>and</em> the open
+        field-verification requirement: no section shows PASS while its route length is an estimate, its conduit fill is
+        uncomputed, or the tap rule is unmeasured. An open review item never replaces the calculation conclusion, and an
+        estimate-grade input never softens a result that exceeds its criterion.
         <br/><strong>Length quantities:</strong> the Q-Cable branch rows print the <em>cable path (geometry)</em> —
         the designed-installed trunk path (Σ inter-module + lead-in) traced to each <span class="mono">QCABLE-ASSEMBLY:Bn</span>
         object; the home-run / feeder / disconnect rows print the <em>route (one-way)</em> estimate traced to their run
@@ -806,7 +842,11 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
             <td style="color:#000;font-weight:bold">${o.overrideValue}</td>
             <td>${o.justification}</td>
             <td>${o.engineer}</td>
-            <td>${new Date(o.timestamp).toLocaleDateString()}</td>
+            ${''/* D6 — the override timestamps are stored in UTC
+                 (siteSurvey/permitIntegration.ts). Formatting them with a bare
+                 toLocaleDateString() rendered a UTC instant in the HOST's zone —
+                 a second, independent day-shift stacked on the issue-date one. */}
+            <td>${escapeH(formatInDocumentTimezone(o.timestamp, documentIssueContextOf(input)))}</td>
           </tr>`).join('')}
         </tbody>
       </table>` : ''}
@@ -1146,8 +1186,18 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <td class="tr">≤ 3.0%</td>
             ${''/* WS-5 — the conclusion carries its INPUT AUTHORITY. This printed an
                  unqualified checkmark for a result computed from a CAD estimate,
-                 stating a provisional finding at the grade of a measured one. */}
-            <td class="center fw7" style="color:${_vdGrade.conclusion === 'FAIL' ? '#cc0000' : _vdGrade.conclusion === 'INDETERMINATE' ? '#cc6600' : _vdGrade.conclusion === 'PROVISIONAL_PASS' ? '#b45309' : '#000'}">${_vdGrade.label}</td>
+                 stating a provisional finding at the grade of a measured one.
+                 D5 (Planset 19) — the LENGTH AUTHORITY is now printed as its OWN
+                 fact beneath the conclusion, using the same shared projection
+                 PV-4B.1 renders, so neither sheet can imply the other's state. */}
+            <td class="center" data-vd-conclusion="${_vdGrade.conclusion}"
+                data-vd-length-authority="${escapeH(_vdGrade.lengthAuthorityLabel)}"
+                data-vd-field-verification-pending="${_vdGrade.fieldVerificationPending ? 'true' : 'false'}">
+              <span style="color:#555;font-size:5.5px">CALCULATION</span><br/>
+              <span class="fw7" style="color:${voltageDropConclusionColor(_vdGrade.conclusion)}">${_vdGrade.label}</span><br/>
+              <span style="color:#555;font-size:5.5px">LENGTH AUTHORITY</span><br/>
+              <span style="font-size:6px;color:${_vdGrade.fieldVerificationPending ? '#b45309' : '#127a3e'}">${escapeH(voltageDropDisplayFields(_vdGrade).lengthAuthority)}</span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -1155,6 +1205,14 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         <strong>VOLTAGE DROP INTERPRETATION:</strong>
         AC feeder Vd = ${_feedVdTxt} over ${_feedLenTxt} of ${_feedCallout} Cu${_feed.currentA != null ? ` at the PV operating current ${_feed.currentA.toFixed(1)} A (OCPD ${_ic.feederOcpd || '—'} A is not the Vd load current)` : ''}. NEC 210.19(A) IN recommends ≤3% feeder / ≤5% total.
         ${_feed.voltageDropPct == null ? 'Feeder Vd pending conductor authority — resolve before submission.' : ((_feed.voltageDropPct || 0) <= 3 ? 'Within limits — no upsizing required.' : 'Exceeds 3% — upsize conductors or reduce run length.')}
+        ${''/* D5 — the CALCULATION GRADE and the LENGTH AUTHORITY stated as two
+             labelled facts, never one badge. Deliberately ONE dense line: this
+             sheet has zero printable slack (pagefit W9 — the first draft of this
+             block overflowed the box by 10.6 px), and the full reading of the two
+             states is carried by PV-4B.1's schedule footnote. */}
+        <br/><strong>CALCULATION:</strong> ${escapeH(voltageDropDisplayFields(_vdGrade).calculation)} &middot;
+        <strong>LENGTH AUTHORITY:</strong> ${escapeH(voltageDropDisplayFields(_vdGrade).lengthAuthority)} &middot;
+        an open field requirement is a RELEASE state and never changes this conclusion (per-section grades: PV-4B.1).
       </div>
       ${''/* Formula-tutorial box removed — code-book pedagogy that displaced
            project content on the fixed sheet; the calc row + interpretation

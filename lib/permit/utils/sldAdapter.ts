@@ -197,7 +197,12 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     clientName:              project.clientName ?? 'Homeowner',
     address:                 project.address ?? '',
     designer:                project.designer ?? '',
-    drawingDate:             project.date ?? new Date().toLocaleDateString(),
+    // D6 — the E-1 drawing date is the SAME document issue date every title
+    // block prints. The old `?? new Date().toLocaleDateString()` fallback was a
+    // second, HOST-LOCAL date producer: on a UTC host it could put a different
+    // calendar day on the SLD than on the sheet the SLD is drawn inside. There is
+    // one document date; a missing one prints PENDING, never a fresh clock read.
+    drawingDate:             project.date ?? 'PENDING',
     drawingNumber:           'SLD-001',
     revision:                'A',
     topologyType,

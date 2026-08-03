@@ -15,6 +15,8 @@ import {
   resolveProjectStateAuthority, normalizeStateCode, isUnknownStateSentinel,
 } from './snapshot/locationAuthority';
 import { deepFreeze } from './snapshot/digest';
+// D6 — THE single project-facing document date authority (timezone-explicit).
+import { resolveDocumentIssueContext, type DocumentIssueContext } from './utils/documentIssueContext';
 import { scanRenderedObjectIds, checkRenderedIdCoverage, parsePlacementManifests, checkRenderParity } from './snapshot/coordinateAuthority';
 import type { PermitDesignSnapshot } from './snapshot/types';
 import { escapeH } from './utils/drawing';
@@ -122,19 +124,44 @@ export function generatePermitHTML(
     }
   }
 
-  // ── P0-9: planset DATE = GENERATION date (server-side authority) ──────────
-  // config.date is a design label only — a stale client date must never print
-  // on a stamped sheet. Callers may inject a fixed `generatedAtIso` for
+  // ── P0-9 / D6: planset DATE = the ONE resolved DOCUMENT ISSUE CONTEXT ─────
+  // config.date is a design label only — a stale client date must never print on
+  // a stamped sheet. Callers may inject a fixed `generatedAtIso` for
   // deterministic output (tests / regen harnesses); otherwise "now" governs.
+  //
+  // D6 (Planset 19): this used to be `new Date().toLocaleDateString('en-US')`,
+  // which formats in the HOST's zone — on a UTC serverless host that is the UTC
+  // calendar date, and Planset 19 printed 8/3/2026 on all 17 sheets for a set
+  // generated 19:29 on 2026-08-02 America/Chicago. A permit date is a calendar
+  // date in the JURISDICTION's zone, never a property of the render machine.
+  // The zone is now resolved EXPLICITLY and recorded, and every project-facing
+  // date in the package propagates from this one object.
   {
     const genIso = (input as PermitInput & { generatedAtIso?: string }).generatedAtIso;
-    const genAt = genIso ? new Date(genIso) : new Date();
-    const genDateStr = (isFinite(genAt.getTime()) ? genAt : new Date()).toLocaleDateString('en-US');
-    if (project.date && project.date !== genDateStr) {
-      console.warn('[PLANSET] DATE recompute: generation date', genDateStr,
+    // the SAME canonical state authority the jurisdiction repair above uses —
+    // the document's zone derives from the project's jurisdiction, not the host.
+    const _st = resolveProjectStateAuthority({
+      projectState: (project as { state?: string | null }).state ?? null,
+      address: project.address ?? null,
+      complianceState: (input.compliance?.jurisdiction as { state?: string } | undefined)?.state ?? null,
+    });
+    const _issue = resolveDocumentIssueContext({
+      generatedAtIso: genIso ?? null,
+      explicitIssueDate: (project as { issueDate?: string | null }).issueDate
+        ?? (input as { documentIssueDate?: string | null }).documentIssueDate ?? null,
+      projectTimezone: (project as { timezone?: string | null }).timezone ?? null,
+      projectStateCode: _st.stateCode ?? null,
+      tenantTimezone: (input as { tenantTimezone?: string | null }).tenantTimezone ?? null,
+    });
+    if (project.date && project.date !== _issue.issueDateLocal) {
+      console.warn('[PLANSET] DATE recompute: document issue date', _issue.issueDateLocal,
+        `(${_issue.timezone} via ${_issue.timezoneSource}; generated ${_issue.generatedAtUtc})`,
         'replaces client-posted', project.date, '(config.date is a design label, not the issue date)');
     }
-    project.date = genDateStr;
+    project.date = _issue.issueDateLocal;
+    // THE single propagation point. Sheets read this (or `project.date`, which is
+    // set from it); no sheet generator resolves a project-facing date of its own.
+    (input as { _documentIssueContext?: DocumentIssueContext })._documentIssueContext = _issue;
   }
 
   // ── STEP 7: Canonical pipeline entry point ─────────────────────────────
@@ -1688,6 +1715,15 @@ export function generatePermitHTML(
     }
   }
 
+  // D6 — the ONE context resolved at the top of this function. Absent only if a
+  // caller reached the renderer without the date step, which is a defect, so it
+  // is recorded as UNRESOLVED rather than being re-derived from a fresh clock.
+  const _issueCtx: DocumentIssueContext =
+    (input as { _documentIssueContext?: DocumentIssueContext })._documentIssueContext
+    ?? { generatedAtUtc: '', timezone: 'UNRESOLVED', timezoneSource: 'configured-default',
+         issueDateLocal: String(project.date ?? ''), issueDateIso: '',
+         issueDateSource: 'generation-timestamp' };
+
   const __permitHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -1700,6 +1736,18 @@ ${''/* D4 — the rendering environment, recorded IN the artifact. A reader (or 
 <meta name="rendering-pack-version" content="${RENDERING_PACK_VERSION}">
 <meta name="font-pack-version" content="${FONT_PACK_VERSION}">
 <meta name="font-faces" content="${escapeH(fontFaceIdentities().map(f => `${f.family}/${f.weight}/${f.sha256.slice(0, 16)}/${f.byteLength}`).join(' '))}">
+${''/* D6 — the DOCUMENT ISSUE CONTEXT, recorded IN the artifact. A reader can
+     tell WHICH zone produced the printed calendar date, and prove the date was
+     not a UTC/host-clock accident, from data rather than from the date alone.
+     The raw sub-second generation instant is deliberately NOT emitted here: two
+     renders of one input are pinned byte-identical, and a millisecond timestamp
+     would differ on every render. It is recorded on the snapshot instead; what
+     the artifact needs is the DATE AUTHORITY, and these five fields are it. */}
+<meta name="document-timezone" content="${escapeH(_issueCtx.timezone)}">
+<meta name="document-timezone-source" content="${escapeH(_issueCtx.timezoneSource)}">
+<meta name="document-issue-date-local" content="${escapeH(_issueCtx.issueDateLocal)}">
+<meta name="document-issue-date-iso" content="${escapeH(_issueCtx.issueDateIso)}">
+<meta name="document-issue-date-source" content="${escapeH(_issueCtx.issueDateSource)}">
 <title>Permit Package — ${escapeH(String(project.projectName ?? ''))}</title>
 <style>
   /* ── D4 · THE CANONICAL EMBEDDED FONT PACK ────────────────────────────────

@@ -111,18 +111,49 @@ gate(2, 'e1-conductor-count-equals-raceway-inventory',
 
 // ═══ GATE 3 — no E-1 section prints PASS while length/fill/tap is pending. ════
 const e1SchedStart = html.indexOf('PHYSICAL CONDUCTOR / RACEWAY SCHEDULE — CANONICAL SECTION OBJECTS');
-const e1Sched = e1SchedStart >= 0 ? html.slice(e1SchedStart, e1SchedStart + 4000) : '';
+// D5 — slice to the END OF THE TABLE, not a fixed 4000 chars. The graded
+// conclusion + length authority made each row taller in characters, and a fixed
+// window would silently stop scanning part-way down the schedule — a gate that
+// reads less than the whole table can only get weaker as rows grow.
+const _e1SchedEnd = e1SchedStart >= 0
+  ? (html.indexOf('</table>', e1SchedStart) >= 0 ? html.indexOf('</table>', e1SchedStart) + 8 : e1SchedStart + 4000)
+  : -1;
+const e1Sched = e1SchedStart >= 0 ? html.slice(e1SchedStart, _e1SchedEnd) : '';
 // BAR §4 added the itemized AmpacityAdjustmentResult to each section, and that object
 // carries its OWN verdict ("req 20.00A cont · PASS") — a specific ampacity calculation
 // that genuinely passes and that BAR gates 4/5 REQUIRE to be shown. This gate is about
 // the SECTION verdict (no section may claim PASS while its length / fill / tap authority
 // is pending), so the ampacity chain's own verdict is excluded before the scan.
 const e1SchedNoAmpacity = e1Sched.replace(/req\s*[\d.]+A\s*cont\s*·\s*(PASS|FAIL|PENDING)/g, 'req … cont · <ampacity>');
-const g3_noPass = e1Sched.length > 0 && !/\bPASS\b/.test(e1SchedNoAmpacity);
+// D5 (Planset 19) — the section rows now carry a GRADED voltage-drop conclusion
+// beside the release tri-state. `PROVISIONAL PASS` is not the thing this gate
+// forbids: it is the qualified conclusion that exists precisely BECAUSE the
+// length authority is an estimate, and it is what stopped PV-4B.1 from printing
+// `PENDING — REVIEW REQ’D` where PV-4B printed a graded pass on the same feeder.
+// What stays forbidden is an UNQUALIFIED pass — and, newly, a VERIFIED PASS on a
+// package whose field verification is still open, which is strictly stronger
+// than the original scan. The enum legend (VERIFIED_PASS, underscored) is code,
+// not a verdict, so it is excluded too.
+const e1SchedGraded = e1SchedNoAmpacity
+  .replace(/\bPROVISIONAL PASS\b/g, '<graded-provisional>')
+  .replace(/\bVERIFIED PASS\b/g, '<graded-verified>')
+  .replace(/\b(?:VERIFIED_PASS|PROVISIONAL_PASS)\b/g, '<enum>');
+const g3_noPass = e1Sched.length > 0 && !/\bPASS\b/.test(e1SchedGraded);
 const g3_pendingShown = /PENDING|REVIEW/.test(e1Sched);
-gate(3, 'e1-no-pass-with-pending', g3_noPass && g3_pendingShown,
-  `e1SchedFound=${e1Sched.length > 0} noSectionPASS=${g3_noPass} pendingShown=${g3_pendingShown} `
-  + `sectionPassCount=${(e1SchedNoAmpacity.match(/\bPASS\b/g) || []).length} `
+// no section may claim a FIELD-VERIFIED pass while any section still reports its
+// field verification as pending (the two facts are tagged per row).
+const g3_anyFieldPending = /data-vd-field-verification-pending="true"/.test(e1Sched);
+const g3_anyVerifiedPass = /data-vd-conclusion="VERIFIED_PASS"/.test(e1Sched);
+const g3_noVerifiedWhilePending = !(g3_anyFieldPending && g3_anyVerifiedPass);
+// and every row must actually state a graded conclusion — a blank verdict is not
+// an honest one.
+const g3_rowCount = (e1Sched.match(/data-vd-conclusion="/g) || []).length;
+const g3_graded = g3_rowCount > 0;
+gate(3, 'e1-no-pass-with-pending',
+  g3_noPass && g3_pendingShown && g3_noVerifiedWhilePending && g3_graded,
+  `e1SchedFound=${e1Sched.length > 0} noUnqualifiedPASS=${g3_noPass} pendingShown=${g3_pendingShown} `
+  + `gradedRows=${g3_rowCount} noVerifiedPassWhileFieldPending=${g3_noVerifiedWhilePending} `
+  + `unqualifiedPassCount=${(e1SchedGraded.match(/\bPASS\b/g) || []).length} `
   + `ampacityVerdicts=${(e1Sched.match(/cont\s*·\s*(PASS|FAIL|PENDING)/g) || []).length}`, null);
 
 // ═══ GATE 4 — no live EMT literal without an EMT raceway object. ══════════════

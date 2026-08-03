@@ -1020,6 +1020,8 @@ export function buildPermitDesignSnapshot(
     environmentalCoordinates: (proj.lat != null || proj.lng != null)
       ? { lat: proj.lat ?? null, lng: proj.lng ?? null } : null,
     environmentalAddressUsed: proj.address ?? null,
+    // D6 NOTE — digested; see meta.generatedAtIso below for why this keeps the
+    // `proj.date` fallback despite it being a localised date, not an ISO instant.
     environmentalCapturedAtIso: (input as any).generatedAtIso ?? proj.date ?? null,
     meanRoofHeightFt: roofSInput?.meanRoofHeight ?? null,
     asceEdition: `ASCE ${necFromRecord ? '7-22' : '7-22'}`,
@@ -1481,6 +1483,8 @@ export function buildPermitDesignSnapshot(
   // is sourced from the structural engine's computational basis. Nothing is
   // `verified` (no archived adoption ordinance) — the honest state that drives
   // CODE-AUTHORITY-INCOMPLETE below and PENDING editions on the sheets.
+  // D6 NOTE — digested; see meta.generatedAtIso for why the `proj.date` fallback
+  // stands (byte-identical-render invariant vs a sub-second instant).
   const _capturedIso = (input as any).generatedAtIso ?? proj.date ?? '';
   // KDP WS-12 — resolve from the identity the project ALREADY carries, in
   // most-specific-first order, and record HOW it matched. The stored
@@ -2266,6 +2270,15 @@ export function buildPermitDesignSnapshot(
     meta: {
       snapshotId: '', digest: '', schemaVersion: SNAPSHOT_SCHEMA_VERSION,
       engineVersion: String(PLANSET_ENGINE_VERSION),
+      // D6 NOTE — this field is DIGESTED, and the digest is pinned byte-identical
+      // across two renders of the same input (aac-ws3-ws4, wave6-legacy-sweep).
+      // Substituting the resolved context's true sub-second UTC instant here made
+      // every unfrozen render produce a new snapshot id, so it is deliberately NOT
+      // done. The known defect stands and is recorded rather than papered over:
+      // with no injected `generatedAtIso`, this stores the localised 'M/D/YYYY'
+      // issue date in a slot the schema declares as ISO. Fixing it needs the
+      // digest to stop covering the generation instant — a snapshot-contract
+      // change, out of scope for an artifact-projection repair.
       generatedAtIso: (input as any).generatedAtIso ?? proj.date ?? '',
       projectId: opts?.projectId ?? (input as any).projectId ?? null,
       designVersionId: opts?.designVersionId ?? null,
