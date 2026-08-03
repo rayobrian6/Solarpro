@@ -421,3 +421,305 @@ newly failing and is not repaired here.
 
 Nothing in Phase B was implemented. The `1.15` was not touched. Braidon received
 no measurements and its artifact is byte-identical.
+
+---
+---
+
+# MIGRATION 118 LIVE POSTGRESQL ACCEPTANCE
+
+Pass run on `a4defa15` after migration 118 was applied through the governed
+production console.
+
+> # MIGRATION 118 POSTGRESQL NOT ACCEPTED
+>
+> ## BLOCKED — DATABASE OWNER CREDENTIAL REQUIRES ROTATION
+
+No database connection was opened in this pass. The blocker is the security
+precondition, not a defect in migration 118.
+
+---
+
+## 0. REPOSITORY STATE
+
+| | |
+|---|---|
+| Starting remote HEAD | `a4defa15683baba488d8dcd74828190bd5c71f8a` |
+| Local HEAD | identical — **0 ahead / 0 behind** |
+| Working tree | clean (tracked) |
+| Ending commit | report-only; no source change |
+| Push status | see §9 |
+
+All accepted ancestors confirmed present on `origin/dev`: `a4defa15`,
+`c92a8b50` (118 console reachability), `01d128a2` (PV-4B/PV-4B.1 + timezone),
+`6bafde00` / `eafdc688` / `9402824a` (WS-5), `f944906a` (D1), `b108164b` (D2),
+`f088e72a` (D3), `97468283` (D4), `1d2d7922` (WS-3), `eb2cde6f` (Next 15 /
+React 19 + SOC 2 / ISO 27001). No rewind, reset, rebase or force-push.
+
+---
+
+## 1. SECURITY GATE — FAILED
+
+The precondition was: *confirm the exposed credential has been rotated; if not,
+stop database testing.* It has **not** been rotated.
+
+Verified by fingerprint comparison only — **no password, connection URL or
+token was printed, and none appears in this report.**
+
+| Check | Result |
+|---|---|
+| `.db_url` credential vs the exposed value | **IDENTICAL** (SHA-256 fingerprint match) |
+| `.db_url` last modified | **2026-06-06** — unchanged since before the exposure |
+| Application / console using a replacement credential | **cannot be confirmed** — no replacement exists |
+| Database connection opened this pass | **none** |
+
+### 1.1 The exposure is far wider than the transcript leak
+
+Searching for the credential across the repository turned up something more
+serious than the console print I made in the previous pass. **The same
+`neondb_owner` credential is hard-coded in five files that are committed to git
+and pushed to `github.com/rayobrian6/Solarpro`.**
+
+| Tracked file | Credential |
+|---|---|
+| `check_is_global.js` | same as exposed |
+| `check_table_structure.js` | same as exposed |
+| `migrations/add_is_global_column.js` | same as exposed |
+| `test_knowledge_loading.js` | same as exposed |
+| `test_solardog_knowledge.sh` | same as exposed |
+
+- **Earliest commit containing it: `b583829a`, 2026-03-05** ("SolarPro V8.3
+  build") — roughly **five months** in pushed history, across 3 commits.
+- All five files are **dead scratch**: zero references from `app/`, `lib/` or
+  `package.json`.
+- `.gitignore` covers `.env*` but nothing stopped credentials being pasted
+  directly into tracked `.js` / `.sh` files.
+
+**My transcript print was a duplicate of an exposure that already existed in
+public history — it did not create it.** That does not reduce the urgency; it
+raises it, because rotation is now overdue rather than merely prudent.
+
+### 1.2 Required remediation, in order
+
+1. **Rotate the `neondb_owner` password in the Neon console.** This is the only
+   action that ends the exposure — history rewriting alone does not, because the
+   old value has been pushed and may be cloned or cached.
+2. Update the credential wherever the application and governed console read it
+   (Vercel environment, local `.db_url`).
+3. Remove the hard-coded credentials from the five dead files (they are
+   unreferenced; deleting the files is the simplest fix).
+4. Optionally purge history (`git filter-repo` / BFG) — **after** rotation, and
+   coordinated, since it rewrites shared history. **I did not do this: the brief
+   forbids rewriting shared history, and it must not be done unilaterally.**
+5. Consider a pre-commit secret scan so a pasted credential cannot be committed
+   again.
+
+**No source change was made in this pass.** Scrubbing the five files is a real
+repair but it is not this pass's scope, and doing it without rotation would give
+a false sense of closure.
+
+---
+
+## 2. WHAT WAS PROVEN WITHOUT THE DATABASE
+
+### 2.1 Migration 118 source checksum — full match
+
+| | |
+|---|---|
+| File | `lib/migrations/118_field_route_measurements.sql` |
+| Bytes | 14,616 |
+| **Source SHA-256** | **`31ed0d08b2a42d5582cb013cea3ce35090268e4f05b496e8e52135f977807b6f`** |
+| Expected prefix `31ed0d08` | matches |
+
+The **complete** checksum is recorded here, not only the prefix, so the
+stored-vs-source comparison can be made byte-for-byte the moment the database is
+reachable. **The stored ledger checksum was not read this pass** — that requires
+a connection.
+
+### 2.2 Registry deployment + console reachability — 24/24
+
+`npx vitest run tests/targetedRegistryDeployment.test.ts` → **24 passed**,
+including the two reachability assertions added in `c92a8b50` (every
+`REGISTRY_SEQUENCE` identifier has an allowlisted API action **and** a console
+button naming the deployment spec's tables).
+
+### 2.3 Targeted regression — 241 passed / 1 skipped
+
+`d1-route-ownership`, `d3-sched-bom-reconciliation`, `d4-canonical-font-pack`,
+`conductor-authority` (D2), `ws5-field-measurement-reachability`,
+`ws5-braidon-truth-state`, `d5-voltage-drop-cross-sheet`,
+`d6-document-issue-date`, `resolver-precedence`, and all of
+`tests/fieldMeasurement` → **13 files, 241 passed, 1 skipped**.
+
+The single skip is the **PostgreSQL repository-contract block**, which skips
+without `TEST_DATABASE_URL`. That skip is precisely what this pass existed to
+turn green, and it remains skipped.
+
+### 2.4 Planset 22 — accepted baseline verified
+
+Measured directly from
+`PermitPackage-BRAIDON M PILLA — Solar TEST (22).html`:
+
+| Fact | Expected | Measured |
+|---|---|---|
+| Profile | design review | design review |
+| Snapshot | — | `PDS-F0B861F20C07` |
+| Sheets | 19 | **19** (`SHEET n OF 19`, 19 title blocks) |
+| Open gates | 5 | **5** |
+| Unresolved requirements | 14 | **14** |
+| Braidon measurements | 0 | **0** |
+| Verified measurements | 0 | **0** |
+| Unresolved project-owned routes | 4 | **4** ("4 of 5 PROJECT-OWNED electrical run(s)") |
+| Geometry-derived project-owned | 1 | **1** |
+| Utility-owned excluded | 1 | **1** |
+| Route requirement | OPEN | **OPEN** (`ROUTE-LENGTH-ESTIMATE` present) |
+| Voltage drop within limit | PROVISIONAL | **8 × `PROVISIONAL PASS`**, 0 × `VERIFIED PASS` |
+| D3 | 48 / 48 / 15 | **48 rows / 48 unique / 15 conduit fitting** |
+| D4 | 5 faces / 0 host | **5 `@font-face` / 0 Helvetica / 0 Courier New / 0 bare** |
+| Issue date authority | America/Chicago | **`America/Chicago` via `project-jurisdiction`**, single date `8/3/2026` |
+
+Planset 22 matches its stated truth on every point.
+
+### 2.5 A correction I owe to my own earlier reports
+
+**The "sheet count" figures in the D5/D6 and triage reports were measured on the
+wrong basis.** I counted `<div class="page">` elements; the authoritative count
+is the title block (`SHEET n OF N`). Re-measured:
+
+| Profile | I reported | Actual |
+|---|---|---|
+| design-review | 17 | **19** |
+| permit | 16 | **18** |
+| full | 22 | **25** |
+
+Consequence for §40-6: the frozen fixture's design-review artifact renders
+**19 sheets — the same as the live Planset 22.** The sheet-count half of that
+finding was my measurement error, not a fixture-vs-live data difference.
+
+**The gates/requirements half still stands and is still a genuine data
+difference**: the frozen fixture renders **6 gates / 13 requirements**, the live
+design renders **5 / 14**. Different inputs, neither changed to match the other.
+
+`scripts/ws5-artifacts.ts` prints the same misleading `.page` count. Correcting
+it is a one-line change and is **not** made here (report-only pass); it is noted
+so the number is not trusted again.
+
+---
+
+## 3. WHAT COULD NOT BE PROVEN — the full acceptance checklist
+
+Every item below requires a database connection and is **NOT PROVEN**. None is
+claimed, inferred, or substituted from the in-memory adapter.
+
+| § | Requirement | Status |
+|---|---|---|
+| 1 | Migration ledger entry, stored checksum, applied timestamp, applied-by, runner identity | **NOT PROVEN** |
+| 1 | Highest applied = 118, applied once, no pending duplicate | **NOT PROVEN** |
+| 2 | Catalog-level table / column / type / nullability / default / PK / FK proof | **NOT PROVEN** |
+| 3 | `ck_frm_verified_complete` and the 8 constraint rejection probes | **NOT PROVEN** |
+| 4 | Installed index proof (7 index groups) | **NOT PROVEN** |
+| 6 | Real PostgreSQL repository/service contract | **NOT RUN — skipped** |
+| 7 | Recording contract (12 cases) | **NOT PROVEN** |
+| 8 | Verification contract (14 cases) | **NOT PROVEN** |
+| 9 | Rejection contract (9 cases) | **NOT PROVEN** |
+| 10 | Supersession contract (9 cases) | **NOT PROVEN** |
+| 11 | Transactional audit atomicity + 3 forced-rollback proofs | **NOT PROVEN** |
+| 12 | Tenant-isolation proof (10 cases) | **NOT PROVEN** |
+| 13 | End-to-end reachability fixture (initial → reported → verified → reopened) | **NOT RUN** |
+| 14 | Snapshot ID / digest behaviour by state | **NOT MEASURED** |
+
+**Exact command that must run, and its status:**
+
+```
+TEST_DATABASE_URL=<redacted> npx vitest run tests/fieldMeasurement
+→ NOT RUN. Currently: 1 skipped (the PostgreSQL repository-contract block).
+```
+
+Catalog validation was **not** performed either, so this pass cannot even offer
+the partial read-only proof the brief allows — the credential gate precedes it.
+
+---
+
+## 4. LIVE BRAIDON NON-MUTATION
+
+Braidon was **not** used as a fixture. **No measurement, audit event, tenant or
+project row was written to any database, because no database connection was
+opened.**
+
+| | |
+|---|---|
+| Field route measurements | **0** |
+| Verified field route measurements | **0** |
+| Unresolved project-owned routes | **4** |
+| Geometry-derived project-owned routes | **1** |
+| Utility-owned excluded routes | **1** |
+| Route requirement | **OPEN** |
+| Voltage-drop grade | **PROVISIONAL** where within limit (8 rows), `INDETERMINATE` on the unmeasured tap |
+| Planset generation without measurements | **works** — Planset 22 rendered and verified |
+
+No test measurement or audit event references Braidon's project id, because none
+was created.
+
+---
+
+## 5. PLANSET REGRESSION
+
+**No regeneration performed and none required** — no application source changed
+in this pass. Planset 22 was verified as an artifact (§2.4) rather than
+re-rendered.
+
+`planset-evidence-ecd` remains **exit 2** — pre-existing, verified in an earlier
+pass to fail identically on the `6bafde00` baseline artifact. **Not a new
+regression, and not repaired here.**
+
+---
+
+## 6. TEST RESULTS
+
+| Check | Result |
+|---|---|
+| Migration 118 source checksum | **full match** `31ed0d08…807b6f` |
+| Migration ledger verification | **BLOCKED** |
+| Catalog schema verification | **BLOCKED** |
+| PostgreSQL constraint probes | **BLOCKED** |
+| PostgreSQL adapter contract | **SKIPPED** (no `TEST_DATABASE_URL`) |
+| Transaction rollback tests | **BLOCKED** |
+| Tenant-isolation tests | **BLOCKED** |
+| Reachability / reopening fixture | **BLOCKED** |
+| Registry deployment + console reachability | **24 passed** |
+| Targeted D1–D4 / WS-5 / PV-4B / timezone | **241 passed / 1 skipped** (13 files) |
+| Lint | not run — no source change |
+| Typecheck | not run — no source change |
+| Full suite / harnesses / build / PDFs / visual | not run — no source change |
+
+---
+
+## 7. WHAT UNBLOCKS THIS
+
+1. **Rotate the `neondb_owner` credential** (§1.2). Nothing else can proceed.
+2. Update the application, governed console and local `.db_url` to the new value.
+3. Provide a **safe writable PostgreSQL target** for the contract suite, in the
+   brief's own order of preference — a dedicated test database, or an ephemeral
+   Neon branch. The contract writes measurements, audit events and two tenants;
+   it must not run against production.
+4. Then, in one pass: ledger + catalog + constraint + index proof, the real
+   adapter contract, the three forced-rollback proofs, tenant isolation, and the
+   end-to-end reachability fixture.
+
+Migration 118 itself shows no sign of a defect. **It simply has not been proven
+yet**, and this report does not pretend otherwise.
+
+---
+
+## 8. FINAL RULING
+
+> # MIGRATION 118 POSTGRESQL NOT ACCEPTED
+>
+> **Blocker:** `BLOCKED — DATABASE OWNER CREDENTIAL REQUIRES ROTATION`
+>
+> The `neondb_owner` credential exposed earlier is unrotated, and the same
+> credential is committed in five tracked files pushed to GitHub since
+> 2026-03-05. No database connection was opened. Ledger, catalog, constraint,
+> index, adapter-contract, atomicity, tenant-isolation and reachability proofs
+> are all outstanding.
+
+WS-A remains not started, as instructed.
