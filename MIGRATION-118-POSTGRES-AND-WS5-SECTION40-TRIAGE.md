@@ -16,7 +16,7 @@ Two-phase operational pass on top of `01d128a2`.
 | Starting remote HEAD | `01d128a26b28bacce849e158a4813bc8adbb9216` |
 | Local HEAD at start | identical — **0 ahead / 0 behind** |
 | Working tree | clean (tracked); only `_tmp_*` scratch untracked |
-| Ending commit | `<recorded at push, §7>` |
+| Ending commit | `c92a8b500b5b8074d2d78ebf1e1c832206e55c44` — pushed, 0 ahead / 0 behind |
 
 Ancestry verified — every required commit is an ancestor of `origin/dev`:
 
