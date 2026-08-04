@@ -390,7 +390,22 @@ Rendered under print media at 17×11 in via `scripts/ws5-pdf-and-shots.mjs` (Chr
 
 ## 19–20. Final artifact / commit / push
 
-*(recorded below on completion)*
+- **Commit:** `b9436ddba7c98cc5de8bfb46ca8fcd8a7f9f649e` (7 files, +889 / −11)
+- **Push:** `3a649ae7..b9436ddb  dev -> dev` → `https://github.com/rayobrian6/Solarpro.git`
+- **`HEAD == origin/dev`:** ✅ both `b9436ddba7c98cc5de8bfb46ca8fcd8a7f9f649e` after `git fetch --prune`
+- **Production build:** ✅ `Compiled successfully` · `Generating static pages (91/91)` · exit 0
+- **Final planset artifact:** `_tmp_mc_shots/braidon_after.pdf` (25 sheets) +
+  `_tmp_mc_shots/braidon_after_shots/*.png`; snapshots `_tmp_pr_mc_c_*.{html,snapshot.json}`
+
+### Reproduce
+
+```bash
+npx tsx _tmp_pr_baseline.ts                       # live Braidon, 3 profiles (TAG=…)
+npx vitest run tests/planset/mcc-machine-closure.test.ts
+npx vitest run --maxWorkers 3                     # full suite
+node scripts/ws5-pdf-and-shots.mjs _tmp_pr_mc_c_full.html _tmp_mc_shots/braidon_after
+NODE_OPTIONS=--max-old-space-size=8192 npm run build
+```
 
 ---
 
