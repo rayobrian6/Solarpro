@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, isValidUUID } from '@/lib/db-neon';
+// WS-A — the read handle that cannot write (see lib/db/readOnlySql.ts).
+import { readOnlySql, ReadOnlyViolationError } from '@/lib/db/readOnlySql';
 import { checkPipelineGuard, extractCanonicalSnapshot } from '@/lib/engineering/pipelineGuard';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
@@ -231,7 +233,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'projectId (UUID) required' }, { status: 400 });
     }
 
-    const sql = await getDbReady();
+    // ── WS-A — THE READ HANDLE CANNOT WRITE ──────────────────────────────
+    // Every statement issued below is classified before dispatch; a mutation
+    // throws ReadOnlyViolationError. This is the structural half of the fix:
+    // deleting the self-heal below repairs today, but nothing stopped the next
+    // convenience helper from writing again. `sql.transaction` is not forwarded
+    // at all, which is what previously carried the four-statement equipment
+    // reconciliation into this GET.
+    const sql = readOnlySql(await getDbReady(), 'permit/GET');
 
     // Ownership check
     const projectRows = await sql`
@@ -259,85 +268,61 @@ export async function GET(req: NextRequest) {
     let html = _toStr((fileRows as Array<{ file_name: string; file_data: unknown }>).find(r => r.file_name === 'permit_planset.html')?.file_data);
     const inputJson = _toStr((fileRows as Array<{ file_name: string; file_data: unknown }>).find(r => r.file_name === 'permit_input.json')?.file_data);
 
-    // ── Staleness / self-heal ────────────────────────────────────────
-    // Every engine bump used to hard-409 preview AND pdf until the user
-    // manually regenerated ('Permit preview failed'). With the enriched-input
-    // snapshot saved at POST time we regenerate HERE with the current engine;
-    // dead-ends remain only when nothing usable exists.
+    // ── WS-A — ISSUED-PACKAGE READS ARE IMMUTABLE ────────────────────────
+    // What used to live here was a "self-heal": whenever the stored artifact was
+    // older than the current engine version, this READ regenerated the planset
+    // and wrote it back over the issued one.
+    //
+    // That made a download change the document. `generatePermitHTML`
+    // unconditionally re-resolves `project.date` (generatePermit.ts:161), and
+    // that value reaches the DIGESTED `meta.generatedAtIso`, so viewing an
+    // issued package on a later day moved its issue date, its snapshot digest,
+    // its snapshot id and its CERT Document ID — measured on the real path:
+    // 8/2/2026 → 9/15/2026, PDS-5A88FD0FC1D6 → PDS-55DF7DC7ED12,
+    // SP-PERMIT-BRAIDONORIGI-822026 → …-9152026. A licensed engineering review
+    // is bound to the exact digest it approved, so the approval stopped
+    // covering the document it had approved. The row survived; the coverage did
+    // not.
+    //
+    // It was also far more than one write. `resolveSnapshotAuthorityInputs`
+    // reached SIX tables from this GET — `projects.selected_equipment` and
+    // `projects.engineering_config` via a four-statement reconciliation
+    // transaction, `equipment_reconciliation_audit`,
+    // `snapshot_digest_invalidations`, `ahj_registry` (on BOTH the success and
+    // the failure path, the latter appending an unbounded `enrichment_attempts`
+    // entry per download), and `manufacturer_document_registry` — while
+    // `attachParcelIfMissing` wrote `nearmap_ai_cache` against a METERED
+    // external quota. Most of it was disguised: the upserts were passed to a
+    // helper named `safeDbRead`.
+    //
+    // The regenerate-on-read convenience is gone. Regeneration is a mutation and
+    // now happens only through POST, which is authenticated, authorized and
+    // explicit. A read serves the artifact of record, exactly as issued.
     {
-      const metaMatch = html.match(/<meta\s+name="planset-version"\s+content="(\d+)"/);
-      const savedVerNum = metaMatch ? parseInt(metaMatch[1], 10) : 0;
-      const isStale = savedVerNum < PLANSET_ENGINE_VERSION;
-      if ((!html || isStale) && inputJson) {
-        try {
-          const savedInput = JSON.parse(inputJson) as PermitInput;
-          // Square the array to true lines (de-skew azimuth + grid) before
-          // anything else reads it — see utils/deskewArrayToTrue.ts.
-          deskewArrayToTrue(savedInput);
-          // Attach the county-GIS parcel boundary if the saved snapshot predates
-          // the site-context feature (non-fatal, null-safe).
-          await attachParcelIfMissing(savedInput);
-          // Google-fallback aerials need the async edge-snap registration
-          // computed before the (sync) render — see utils/aerialEdgeSnap.ts.
-          await applyAerialEdgeSnapRegistration(savedInput);
-          // AAC WS-1 — GET/POST PARITY. This path used to call generatePermitHTML
-          // with NO snapshotAuthority, so a regenerated preview silently used the
-          // fail-soft defaults and could disagree with the POST artifact (audit
-          // §7.11 / §5 "two wiring gaps"). BOTH permit paths now run the SAME
-          // resolution lifecycle before the sync build. It never throws.
-          // AAC WS-9 — the PRIOR snapshot digest, so engineering-review-record@v1
-          // can look for a licensed approval bound to the set that was last
-          // produced. The build re-checks `reviewedDigest === meta.digest`, so a
-          // stale approval still fails closed; this only lets a CURRENT one be
-          // seen at all.
-          attachPriorSnapshotDigest(savedInput);
-          // Post-AAC profile contract — GET/POST parity for the OUTPUT PROFILE
-          // too: a stored input with no profile used to fall back to the engine
-          // default ('full'), so a self-healed preview could silently be a
-          // different package than the POST artifact. Pin the same artifact
-          // default; a profile stored on the input (an explicit caller choice)
-          // is respected.
-          if (!(savedInput as unknown as { plansetProfile?: string }).plansetProfile) {
-            (savedInput as unknown as { plansetProfile?: string }).plansetProfile = PERMIT_ARTIFACT_PROFILE;
-          }
-          const selfHealAuthority = await resolveSnapshotAuthorityInputs(savedInput);
-          const freshHtml = generatePermitHTML(savedInput, undefined, selfHealAuthority);
-          console.log(`[permit/GET] Self-heal: regenerated v${savedVerNum || 0} -> v${PLANSET_ENGINE_VERSION} from permit_input.json`
-            + ` (resolution: ${selfHealAuthority.resolution?.iterations ?? 0} iteration(s), stabilized=${selfHealAuthority.resolution?.stabilized ?? false})`, { projectId });
-          html = freshHtml;
-          // Persist the fresh copy (best-effort)
-          try {
-            const freshBuf = Buffer.from(freshHtml, 'utf8');
-            await sql`
-              INSERT INTO project_files
-                (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
-              VALUES
-                (${projectId}, ${null}, ${projectRow.user_id},
-                 'permit_planset.html', 'permit_planset', ${freshBuf.length},
-                 'text/html', ${freshBuf}, 'Auto-regenerated by preview/pdf endpoint')
-              ON CONFLICT (project_id, user_id, file_name)
-              DO UPDATE SET file_type = EXCLUDED.file_type, file_size = EXCLUDED.file_size,
-                mime_type = EXCLUDED.mime_type, file_data = EXCLUDED.file_data,
-                notes = EXCLUDED.notes, upload_date = NOW()
-            `;
-          } catch (persistErr: unknown) {
-            console.warn('[permit/GET] Self-heal persist failed (serving fresh HTML anyway):',
-              persistErr instanceof Error ? persistErr.message : persistErr);
-          }
-        } catch (regenErr: unknown) {
-          console.warn('[permit/GET] Self-heal regeneration failed — serving stale copy if available:',
-            regenErr instanceof Error ? regenErr.message : regenErr);
-        }
-      }
       if (!html) {
         return NextResponse.json({
           success: false,
-          error: 'No permit package found for this project. Generate the permit first from the Engineering page.',
-          code: 'PERMIT_NOT_GENERATED',
+          error: inputJson
+            ? 'This project has a stored design but no issued permit package. Regenerate it from the Engineering page.'
+            : 'No permit package found for this project. Generate the permit first from the Engineering page.',
+          code: inputJson ? 'ISSUED_ARTIFACT_UNAVAILABLE' : 'PERMIT_NOT_GENERATED',
+          repairRequired: Boolean(inputJson),
         }, { status: 404 });
       }
     }
-    // ── End staleness / self-heal ────────────────────────────────────
+
+    // Staleness is REPORTED, never repaired here. The stored artifact is the
+    // document of record: an older engine version does not make it wrong, it
+    // makes it OLD, and silently substituting a different document is not a fix.
+    const _storedVerMatch = html.match(/<meta\s+name="planset-version"\s+content="(\d+)"/);
+    const _storedVer = _storedVerMatch ? parseInt(_storedVerMatch[1], 10) : 0;
+    const _isStale = _storedVer < PLANSET_ENGINE_VERSION;
+    if (_isStale) {
+      console.log('[permit/GET] Serving the ISSUED artifact unchanged; a newer engine exists.'
+        + ` stored=v${_storedVer || 'unknown'} current=v${PLANSET_ENGINE_VERSION}`
+        + ' — regeneration is an explicit POST, never a side effect of a read.', { projectId });
+    }
+    // ── End issued-package read ──────────────────────────────────────────
 
     const safeProjectName = (projectRow.name || 'project')
       .replace(/[^\x00-\xFF]/g, '')
@@ -345,11 +330,24 @@ export async function GET(req: NextRequest) {
       .replace(/[^\w\s\-\.]/g, '_')
       .trim() || 'project';
 
+    // WS-A — staleness is DISCLOSED on every response rather than silently
+    // repaired, so a caller can tell "this is the issued document" from "this is
+    // the issued document and a newer engine exists" without the server having
+    // decided for them.
+    const _integrityHeaders: Record<string, string> = {
+      'X-Planset-Issued-Artifact': 'stored',
+      'X-Planset-Stored-Engine-Version': String(_storedVer || 'unknown'),
+      'X-Planset-Current-Engine-Version': String(PLANSET_ENGINE_VERSION),
+      'X-Planset-Stale': _isStale ? 'true' : 'false',
+      ..._isStale ? { 'X-Planset-Repair': 'POST /api/engineering/permit to issue a new package' } : {},
+    };
+
     if (format === 'html') {
       return new NextResponse(html, {
         headers: {
           'Content-Type': 'text/html',
           'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.html"`,
+          ..._integrityHeaders,
         },
       });
     }
@@ -368,6 +366,7 @@ export async function GET(req: NextRequest) {
           'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.pdf"`,
           'Cache-Control': 'no-store',
           'X-Pdf-Method': pdfResult.method,
+          ..._integrityHeaders,
         },
       });
     }
@@ -377,10 +376,21 @@ export async function GET(req: NextRequest) {
         'Content-Type': 'text/html',
         'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.html"`,
         'X-Pdf-Method': 'html-fallback',
+        ..._integrityHeaders,
       },
     });
 
   } catch (error: unknown) {
+    // WS-A — a read that tried to write is a DEFECT, not a condition. Surface it
+    // as a 500 with its own code rather than letting it look like a DB hiccup.
+    if (error instanceof ReadOnlyViolationError) {
+      console.error('[permit/GET] READ-ONLY VIOLATION — a read path attempted a write:', error.message);
+      return NextResponse.json({
+        success: false,
+        error: 'Internal integrity error: the permit read path attempted to modify stored data.',
+        code: 'READ_PATH_WRITE_ATTEMPT',
+      }, { status: 500 });
+    }
     console.error('[permit/GET] Error:', error);
     return NextResponse.json(
       { success: false, error: (error as Error).message || 'Download failed' },

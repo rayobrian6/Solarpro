@@ -661,13 +661,25 @@ describe('AAC WS-9 · the renderer determines no authority', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('AAC WS-9 · lifecycle integration', () => {
-  it('BOTH permit paths run the SAME lifecycle before the sync build', () => {
+  // WS-A (2026-08-03) — this used to assert TWO resolveSnapshotAuthorityInputs
+  // call sites, "GET self-heal + POST", and that each was followed by a build
+  // receiving the bundle. That invariant protected GET/POST parity: if a READ
+  // was going to regenerate a package, it had better resolve authority the same
+  // way POST does.
+  //
+  // The premise is gone. A read no longer regenerates anything, because doing so
+  // re-dated the issued package, moved its digest and Document ID, and dropped
+  // the licensed review bound to the old digest — and because the resolution
+  // lifecycle itself wrote to six tables from a GET. The parity requirement is
+  // replaced by the stronger one it was standing in for: there is exactly ONE
+  // path that builds a package, and it is the explicit mutation.
+  it('exactly ONE path resolves authority and builds — the explicit POST', () => {
     const src = readFileSync(join(process.cwd(), 'app/api/engineering/permit/route.ts'), 'utf8');
     const calls = src.match(/resolveSnapshotAuthorityInputs\s*\(/g) ?? [];
-    expect(calls.length).toBe(2);                       // GET self-heal + POST
-    // and each is followed by a generatePermitHTML that RECEIVES the bundle
-    expect(src).toMatch(/generatePermitHTML\(savedInput, undefined, selfHealAuthority\)/);
+    expect(calls.length, 'a second build path has appeared').toBe(1);
     expect(src).toMatch(/generatePermitHTML\(enrichedBody, storedSldSvg, snapshotAuthority\)/);
+    // and no call site may omit the resolved authority bundle
+    expect(src).not.toMatch(/generatePermitHTML\(\s*[A-Za-z_$][\w$]*\s*\)/);
   });
 
   it('every WS-8 resolver is REGISTERED in the production set, in dependency order', () => {
