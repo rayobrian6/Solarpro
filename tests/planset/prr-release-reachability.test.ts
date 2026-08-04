@@ -630,6 +630,48 @@ describe('PRR §4b · 10. a controlled project with complete authority reaches I
     expect(changed.projectAuthority.issuedForPermitGate.pass).toBe(false);
     expect(changed.certification.engineeringReviewApproved).toBe(false);
   });
+
+  // ── PA §6 — THE DESIGNER IS A HARD RELEASE PREREQUISITE (V37 / §15d) ──────
+  // The live Braidon project has NO designer, because `personnel_roles` is
+  // empty. That is not cosmetic: V37 refuses a production/issued issue state
+  // while the designer is blank, so a legitimate current-digest PE approval
+  // does not merely fail to release — it makes generation THROW. Both halves
+  // are pinned here, because "Braidon is ready the moment a PE approves" is
+  // only true of the first one.
+  it('PA §6a — a valid approval with a BLANK designer BLOCKS generation (V37)', () => {
+    const input = issuableInput();
+    (input.project as Record<string, unknown>).designer = '';
+    const authority = completeAuthority(input.project as Record<string, unknown>);
+    // Approve whatever digest this blank-designer design produces, so the
+    // refusal cannot be blamed on a digest mismatch.
+    const probe = issuableInput();
+    (probe.project as Record<string, unknown>).designer = '';
+    generatePermitHTML(probe as never, undefined,
+      completeAuthority(probe.project as Record<string, unknown>) as never);
+    const D = (probe as unknown as { _snapshot: PermitDesignSnapshot })._snapshot.meta.digest;
+    authority.engineeringReview = approval(D);
+
+    expect(() => generatePermitHTML(input as never, undefined, authority as never))
+      .toThrowError(/V37/);
+  });
+
+  it('PA §6b — with a legitimate designer the SAME approval releases, no V37', () => {
+    const D = buildIssuable().meta.digest;
+    const snap = buildIssuable(approval(D));
+    expect(snap.projectAuthority.designer).toBeTruthy();
+    expect(snap.projectAuthority.issueState).toBe('ISSUED FOR PERMIT');
+    expect(snap.projectAuthority.issuedForPermitGate.pass).toBe(true);
+    expect(snap.permitReadiness.registry.filter(r => !r.resolved)).toEqual([]);
+  });
+
+  it('PA §6c — a no-op regeneration PRESERVES the approval and the digest', () => {
+    const D = buildIssuable().meta.digest;
+    const a = buildIssuable(approval(D));
+    const b = buildIssuable(approval(D));
+    expect(b.meta.digest).toBe(a.meta.digest);
+    expect(b.projectAuthority.issueState).toBe('ISSUED FOR PERMIT');
+    expect(b.certification.engineeringReviewApproved).toMatchObject({ reviewedDigest: D });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
