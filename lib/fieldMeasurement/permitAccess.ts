@@ -49,15 +49,43 @@ export async function readProjectMeasurements(projectId: string): Promise<FieldR
   const ownerUserId = (projRows as Array<{ user_id: string }>)[0]?.user_id;
   if (!ownerUserId) return [];
 
-  const memberRows = await sql`
-    SELECT organization_id FROM organization_members
-    WHERE user_id = ${ownerUserId} AND status = 'active'
-    ORDER BY
-      CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END,
-      created_at ASC
-    LIMIT 1
-  `;
-  let organizationId = (memberRows as Array<{ organization_id: string }>)[0]?.organization_id ?? null;
+  // ── LA §5 — THE MEMBERSHIP TABLE IS OPTIONAL AUTHORITY, NOT A PRECONDITION ─
+  // `organization_members` (migration 105) is ABSENT on production — 105 was
+  // never applied, while migration 118 (this feature's own table) was. This
+  // query therefore THREW 42P01, and the legacy `users.org_id` fallback below
+  // was unreachable, because it only ran when the query RETURNED NO ROWS.
+  //
+  // The consequence was total: the throw propagated to the lifecycle's
+  // safeDbRead, so the authority resolved to `unavailable` rather than `empty`,
+  // and ROUTE-LENGTH-ESTIMATE reported "the field-measurement store could not be
+  // read" — which reads as "nobody has measured" but actually meant "this
+  // feature cannot be read at all". The WRITE path fails on the same table, so
+  // no amount of field work could have closed it either: every WS-5 endpoint
+  // 503s before it reaches field_route_measurements.
+  //
+  // The fallback ALREADY HAS what it needs — Braidon's owner carries a real
+  // `users.org_id` — so the tenant was derivable from data that exists today and
+  // only the statement ORDER discarded it. A missing OPTIONAL table must degrade
+  // to the legacy pointer, exactly as an empty result does; a genuine database
+  // failure on the legacy read still throws and is still reported as evidence.
+  let organizationId: string | null = null;
+  try {
+    const memberRows = await sql`
+      SELECT organization_id FROM organization_members
+      WHERE user_id = ${ownerUserId} AND status = 'active'
+      ORDER BY
+        CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END,
+        created_at ASC
+      LIMIT 1
+    `;
+    organizationId = (memberRows as Array<{ organization_id: string }>)[0]?.organization_id ?? null;
+  } catch (e: unknown) {
+    // ONLY "the membership table is not deployed here" degrades. Anything else
+    // (permissions, connectivity, a real query fault) must still surface.
+    if ((e as { code?: string })?.code !== '42P01') throw e;
+    console.warn('[fieldMeasurement] organization_members is absent (migration 105 unapplied) — '
+      + 'falling back to the legacy users.org_id pointer for tenant derivation');
+  }
   if (!organizationId) {
     const legacy = await sql`SELECT org_id FROM users WHERE id = ${ownerUserId} AND org_id IS NOT NULL LIMIT 1`;
     organizationId = (legacy as Array<{ org_id: string }>)[0]?.org_id ?? null;

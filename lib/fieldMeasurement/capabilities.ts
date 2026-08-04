@@ -261,16 +261,26 @@ export const productionAuthorizationSource: AuthorizationSource = {
 
   async getOrgMembership(userId: string) {
     const sql = await getDbReady();
-    const rows = await sql`
-      SELECT organization_id, role
-      FROM organization_members
-      WHERE user_id = ${userId} AND status = 'active'
-      ORDER BY
-        CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END,
-        created_at ASC
-      LIMIT 1
-    `;
-    const r = (rows as Array<{ organization_id: string; role: string }>)[0];
+    // LA §5 — same preemption as the permit read: `organization_members`
+    // (migration 105) is absent on production, so this threw 42P01 and the
+    // legacy pointer below — which only ran on an EMPTY result — was
+    // unreachable. Every WS-5 write endpoint resolves the actor through here,
+    // so the whole record/verify workflow 503'd before touching its own table.
+    let r: { organization_id: string; role: string } | undefined;
+    try {
+      const rows = await sql`
+        SELECT organization_id, role
+        FROM organization_members
+        WHERE user_id = ${userId} AND status = 'active'
+        ORDER BY
+          CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END,
+          created_at ASC
+        LIMIT 1
+      `;
+      r = (rows as Array<{ organization_id: string; role: string }>)[0];
+    } catch (e: unknown) {
+      if ((e as { code?: string })?.code !== '42P01') throw e;
+    }
     if (r) return { organizationId: String(r.organization_id), role: String(r.role) };
 
     // Legacy pointer (migration 016) — still authoritative for users who were
@@ -288,9 +298,18 @@ export const productionAuthorizationSource: AuthorizationSource = {
     // wants it must say so explicitly.
     if (!organizationId) return false;
     const sql = await getDbReady();
-    const rows = await sql`
-      SELECT settings FROM organizations WHERE id = ${organizationId} LIMIT 1
-    `;
+    // LA §5 — `organizations.settings` is added by the same unapplied migration
+    // 105, so this raised 42703 and took the whole workflow down with it. Absent
+    // settings is exactly the fail-closed case this function already documents:
+    // no explicit opt-in ⇒ self-verification NOT permitted. Degrade, do not throw.
+    let rows: unknown;
+    try {
+      rows = await sql`SELECT settings FROM organizations WHERE id = ${organizationId} LIMIT 1`;
+    } catch (e: unknown) {
+      const code = (e as { code?: string })?.code;
+      if (code !== '42703' && code !== '42P01') throw e;
+      return false;
+    }
     const raw = (rows as Array<{ settings: unknown }>)[0]?.settings;
     const settings = (typeof raw === 'string' ? safeJson(raw) : raw) as Record<string, unknown> | null;
     const section = settings?.routeMeasurement as Record<string, unknown> | undefined;

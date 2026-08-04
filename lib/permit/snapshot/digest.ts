@@ -59,6 +59,22 @@ const RUN_INSTANT_KEYS: ReadonlySet<string> = new Set([
 /** The sentinel a run-instant value collapses to for hashing. Never stored. */
 const RUN_INSTANT_SENTINEL = '<run-instant>';
 
+// ── LA §6 — THE AUDIT REFERENCE CARRIES AN INSTANT TOO ──────────────────────
+// `buildResolutionAuditRef` (resolution/evidence.ts) returns
+// `AAC-RESOLVER:<resolver> <refs…> @<iso>`, and that string lands on the
+// DIGESTED `resolutionAuditRef` (and inside payload.resolutionEvidence[]).
+// Collapsing the whole value would be wrong — the resolver id and the
+// `document:` / `sha256:` references ARE design authority and must stay in the
+// digest, so that binding a DIFFERENT document changes it. Only the trailing
+// instant is normalised.
+//
+// This had never fired: with zero requirements cleared, no audit ref existed.
+// The first genuine clearance would have been the first one — silently
+// reinstating the exact regenerate-and-the-approval-goes-stale defect the
+// run-instant exclusion above was written to kill.
+const AUDIT_REF_KEYS: ReadonlySet<string> = new Set(['resolutionAuditRef', 'auditRef']);
+const AUDIT_REF_INSTANT_RE = /@\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/;
+
 /** Replace run-instant provenance with a constant, recursively. Pure; the input
  *  is never mutated, so the stored snapshot keeps its real timestamps. */
 function normalizeRunInstants(v: unknown): unknown {
@@ -66,9 +82,14 @@ function normalizeRunInstants(v: unknown): unknown {
   if (v && typeof v === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      out[k] = RUN_INSTANT_KEYS.has(k) && (typeof val === 'string' || val === null)
-        ? (val === null ? null : RUN_INSTANT_SENTINEL)
-        : normalizeRunInstants(val);
+      if (RUN_INSTANT_KEYS.has(k) && (typeof val === 'string' || val === null)) {
+        out[k] = val === null ? null : RUN_INSTANT_SENTINEL;
+      } else if (AUDIT_REF_KEYS.has(k) && typeof val === 'string') {
+        // keep the resolver + evidence references, drop only the instant
+        out[k] = val.replace(AUDIT_REF_INSTANT_RE, `@${RUN_INSTANT_SENTINEL}`);
+      } else {
+        out[k] = normalizeRunInstants(val);
+      }
     }
     return out;
   }
