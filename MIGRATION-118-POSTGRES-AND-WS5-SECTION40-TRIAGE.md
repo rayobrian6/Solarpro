@@ -723,3 +723,337 @@ yet**, and this report does not pretend otherwise.
 > are all outstanding.
 
 WS-A remains not started, as instructed.
+
+---
+---
+
+# CURRENT-HEAD CREDENTIAL CLEANUP
+
+Repository security-cleanup pass on `197cc7cf`. **No database connection was
+opened, the old credential was not tested, and no history was rewritten.**
+
+> ## CURRENT-HEAD SECRET CLEANUP: ACCEPTED
+> ## CREDENTIAL EXPOSURE REMEDIATION: NOT ACCEPTED
+> ## MIGRATION 118 POSTGRESQL: NOT ACCEPTED
+>
+> The credential is still unrotated. Removing it from the working tree reduces
+> future discoverability; **only rotation invalidates it.**
+
+---
+
+## 0. REPOSITORY STATE
+
+| | |
+|---|---|
+| Starting remote HEAD | `197cc7cf2381b6c26ad43a98a3c4e3438dfcb0e8` |
+| Local HEAD at start | identical — **0 ahead / 0 behind** |
+| Working tree at start | clean (tracked) |
+| Ending commit | `<recorded at push>` |
+
+All required ancestors confirmed on `origin/dev`: `197cc7cf`, `a4defa15`,
+`c92a8b50` (118 console reachability), `01d128a2` (PV-4B/PV-4B.1 + timezone),
+`6bafde00` / `eafdc688` / `9402824a` (WS-5), `f944906a` (D1), `b108164b` (D2),
+`f088e72a` (D3), `97468283` (D4), `1d2d7922` (WS-3), `eb2cde6f` (Next 15 /
+React 19 + SOC 2 / ISO 27001). No rewind, reset, rebase or force-push.
+
+---
+
+## 1. ROTATION STATUS — UNCHANGED
+
+| | |
+|---|---|
+| Rotated | **NO** |
+| Current credential fingerprint | `a40357903308` |
+| Exposed credential fingerprint | `a40357903308` — **identical** |
+| `.db_url` last modified | 2026-06-06 |
+| Old credential invalidated | **no** |
+| Database connection opened this pass | **NO** |
+| Old credential authentication tested | **NO** — deliberately not attempted |
+
+Verified by SHA-256 fingerprint comparison only. **No password, connection URL,
+encoded form or token appears anywhere in this report or in any command output.**
+
+---
+
+## 2. SIX-FILE DEPENDENCY AUDIT
+
+Every file was proven dead before deletion.
+
+| File | Tracked | Code refs | package.json | CI | Migration runner | Decision |
+|---|---|---|---|---|---|---|
+| `check_is_global.js` | yes | 0 | none | none | n/a | **DELETE** |
+| `check_table_structure.js` | yes | 0 | none | none | n/a | **DELETE** |
+| `migrations/add_is_global_column.js` | yes | 0 | none | none | **not in sequence** | **DELETE** |
+| `test_knowledge_loading.js` | yes | 0 | none | none | n/a | **DELETE** |
+| `test_solardog_knowledge.sh` | yes | 0 | none | none | n/a | **DELETE** |
+| `verify_knowledge.js` | yes | 0 | none | none | n/a | **DELETE** |
+
+Searched `app/`, `lib/`, `scripts/`, `tests/`, `package.json`,
+`package-lock.json`, `.github/workflows/`, `vercel.json` and all documentation.
+The only hits were **prose mentions** in `docs/phase1a/*.md`,
+`WEBSITE_AUDIT_REPORT.md` and this report — no import, require, npm script,
+workflow step or runtime reference.
+
+**`migrations/add_is_global_column.js` is NOT part of the governed sequence**, on
+two independent grounds:
+
+1. `MIGRATIONS_DIR_RELATIVE = 'lib/migrations'` (`lib/migrations/types.ts:611`) —
+   the file is in the **root** `migrations/` directory, a separate legacy folder.
+2. `discoverMigrationFiles` accepts only `^(\d{3,})_.*\.sql$`
+   (`lib/migrations/manifest.ts:40`) — it is a `.js` file.
+
+**All six deleted** in a normal forward commit. Not edited to swap the password,
+not archived, not copied elsewhere. The governed sequence is intact: **115
+`.sql` migrations** remain in `lib/migrations/`.
+
+---
+
+## 3. LOCAL SECRET-FILE PROTECTION
+
+| | |
+|---|---|
+| `.db_url` tracked in this repo | **no** — the file lives *outside* the repo root and never could be |
+| `.db_url` now ignored | **yes** — `.gitignore:108` `**/.db_url` (verified with `git check-ignore -v`) |
+| Local `.db_url` preserved | **yes** — untouched, contents never read into output |
+| Tracked `.env` with real values | **none** — only `.env.example` (template, allowed) |
+
+`.gitignore` gained a **DATABASE CREDENTIALS** block: `.db_url`, `**/.db_url`,
+`db_url.txt`, `credentials.json`, `secrets.json`, `*.pem`, `*.key`. Verified that
+**no currently-tracked file** is hidden by the new `*.pem` / `*.key` rules.
+
+The header records why `.env*` never helped: nobody put the credential in a
+`.env` file — they pasted it into a connection string in ordinary `.js`/`.sh`
+source, which no ignore rule can catch. Ignoring filenames is the cheap half;
+the half that works is the content scanner in §5.
+
+---
+
+## 4. CURRENT-TREE SECRET SCAN
+
+**Command:** `npm run test:secrets`
+(→ `vitest run tests/security/secret-guard.test.ts`)
+**Scanner:** `lib/security/secretScan.ts` — repository-native, dependency-free.
+
+| Check | Result |
+|---|---|
+| Tracked files containing the compromised fingerprint | **0** |
+| Inline database passwords (non-placeholder) | **0** |
+| Neon-style credential literals | **0** |
+| Private keys committed | **0** |
+| Tracked `.db_url` / real `.env` | **0** |
+| Forbidden files restored | **0** |
+| **Total findings** | **0** |
+
+18 files matched the *shape* `postgres://user:pass@host`. Each was reviewed
+rather than suppressed: **all 18 are placeholders, `${ENV}` references, or
+`localhost` CI stubs.** Zero live credentials.
+
+No third-party scanner was installed. An optional `gitleaks`/`trufflehog` pass is
+a reasonable addition, but the critical check is repository-native precisely so
+it cannot pass silently when an optional binary is absent.
+
+---
+
+## 5. REGRESSION GUARDS
+
+New: `lib/security/secretScan.ts` + `tests/security/secret-guard.test.ts`
+(**12 tests**), wired into `npm test`, `npm run test:secrets`, and a dedicated
+CI job (**Job 3 · Committed-secret guard**) that fails fast and by name.
+
+Six rules:
+
+| Rule | Fires when |
+|---|---|
+| `known-compromised-credential` | a token's SHA-256 fingerprint matches a burned credential |
+| `inline-database-password` | a connection string embeds a real password |
+| `neon-credential-literal` | an `npg_…` literal appears in source |
+| `forbidden-file-restored` | any of the six deleted files returns |
+| `secret-file-tracked` | `.db_url` / real `.env` / `credentials.json` becomes tracked |
+| `private-key-committed` | a `-----BEGIN … PRIVATE KEY-----` block is committed |
+
+**The guard contains no secret.** Burned credentials are stored as 12-hex
+SHA-256 fingerprints, so the hunter is safe to read, diff and publish. Findings
+carry file, line, rule and a *redacted* excerpt — test 12 asserts the matched
+password never appears in a finding or in the summary.
+
+### Adversarial proof — every rule fired
+
+Each rule is proven against a violating fixture written into a **throwaway temp
+directory**, never the real index:
+
+| # | Fixture | Rule that fired |
+|---|---|---|
+| 5 | tracked `.db_url` | `secret-file-tracked` |
+| 6 | `postgresql://appuser:<synthetic>@db.example.invalid/prod` | `inline-database-password` |
+| 7 | restored `verify_knowledge.js` | `forbidden-file-restored` |
+| 8 | `npg_<synthetic>` literal | `neon-credential-literal` |
+| 9 | RSA private-key block | `private-key-committed` |
+| 11 | four placeholder URLs | **nothing** — no false positives |
+| 12 | synthetic password | finding excludes the secret verbatim |
+
+**Real-tree proof.** Restoring `verify_knowledge.js` from HEAD makes the live
+guard fail by name on the actual repository:
+
+```
+forbidden-file-restored (1):
+known-compromised-credential (1):
+    verify_knowledge.js:3 — Token matches a known-compromised fingerprint
+    (a40357903308) — neondb_owner password exposed 2026-03-05 (b583829a);
+    rotation outstanding
+```
+
+The deletion was re-staged immediately; **12/12 green afterwards.**
+
+No adversarial fixture uses a real credential; every synthetic one points at
+`example.invalid`.
+
+**The guard caught this report.** The first draft of the table above wrote the
+fixture's `npg_…` literal out in full, and `npm run test:secrets` failed on
+`MIGRATION-118-POSTGRES-AND-WS5-SECTION40-TRIAGE.md` with
+`neon-credential-literal`. That is the rule doing exactly its job — the brief
+requires that a credential-shaped string must not be written into a repository
+report — so the report was masked rather than the scanner given an exception.
+An allowlist for "documentation" would be the first hole anyone drives a real
+secret through.
+
+### Two defects found in my own guard while proving it
+
+Recorded because both would have made it useless in the way that matters:
+
+1. **False-negative hole.** The first placeholder heuristic tested the *whole
+   match and line* against a word list containing `example` and `synthetic`. A
+   **real** password on any line mentioning "example", or at a host like
+   `db.example.com`, would have been silently skipped. The verdict now rests on
+   the **password field and host only** — never on surrounding prose.
+2. **Flaky, index-mutating proof.** The adversarial tests originally staged
+   fixtures into the shared git index with `git add --force --intent-to-add`.
+   They passed in isolation and failed intermittently under the parallel full
+   suite (two rules unprovable at random), and an ill-timed failure could have
+   left a synthetic credential staged in the real repository. They now scan an
+   explicit file list in a temp directory — deterministic, parallel-safe, and
+   incapable of touching the repo.
+
+A guard whose proof is flaky is a guard nobody trusts when it finally fires.
+
+---
+
+## 6. GIT-HISTORY EXPOSURE INVENTORY
+
+Built without printing the credential — candidate commits were found with the
+safe pattern `npg_[A-Za-z0-9_]{8,}`, then each blob's tokens were **fingerprinted
+and compared**. **No history was modified.**
+
+| | |
+|---|---|
+| Earliest exposing commit | **`b583829a` · 2026-03-05 · "SolarPro V8.3 build"** — the brief's figure, **verified, not repeated** |
+| Latest exposing commit | `9ff569fd` · 2026-05-04 |
+| Commits containing it | **3** (`b583829a`, `2e005fba`, `9ff569fd`) |
+| **Tags containing it** | **`production-stable-v47.25`, `stable-v47.25`** |
+| Current HEAD after this commit | **clean — 0 files** |
+
+### Eleven historical paths, not six
+
+The six at HEAD are only the survivors. History also carries five files that were
+already deleted in earlier work:
+
+```
+check_productions.cjs
+run_migration.js
+run_migration_002.cjs
+run_migration_002.mjs
+run_migration_pricing_v2.cjs
+```
+
+Any future history remediation must cover **all eleven**, not the six named in
+the brief.
+
+### Recommendation for coordinated history remediation — NOT performed
+
+1. **Rotate first.** Everything below is pointless until the credential is dead.
+2. Then, in a scheduled window: `git filter-repo` over all eleven paths across
+   all refs.
+3. **The two tags must be re-pointed or re-cut** — a purge that rewrites branches
+   but leaves `production-stable-v47.25` and `stable-v47.25` intact leaves the
+   credential fully reachable.
+4. Force-update the remote, then have every clone re-clone; stale clones and
+   forks retain the old objects regardless.
+5. GitHub may retain unreachable objects in cached views; request support
+   cleanup if the repository is or ever was public.
+
+> **Rotation invalidates the credential. History cleanup only reduces future
+> discoverability.** They are not substitutes, and the order matters.
+
+---
+
+## 7. VALIDATION
+
+| Check | Result |
+|---|---|
+| Secret-regression suite (`npm run test:secrets`) | **12 passed** |
+| Current-tree secret scan | **0 findings** |
+| History exposure inventory | complete (§6) |
+| Full suite | **9619 passed / 1 failed / 490 skipped** (434 files) — see below |
+| Lint | **0 errors** |
+| Typecheck | **exit 0** |
+| Production build | **exit 0** |
+| Planset artifact, all 3 profiles | **byte-identical** to `01d128a2` |
+| Sheet counts (`SHEET n OF N`) | **19 / 18 / 25** — design-review / permit / full |
+| Database tests | **none run** |
+| PostgreSQL contract | **remains skipped** (no rotation, no isolated target) |
+
+### The one full-suite failure is pre-existing and not mine
+
+`tests/planset/qcable-grounding-authority.test.ts` — "the BAR rendered-truth
+harness passes every gate on the generated package".
+
+**Root cause, from the failure output:**
+
+```
+harness produced no report — [low_level_alloc.cc : 554] RAW:
+Check new_pages != nullptr failed: VirtualAlloc failed
+```
+
+`VirtualAlloc failed` is an **out-of-memory** condition: the BAR harness spawns a
+Chromium/Playwright process, and under full-suite parallel load this machine runs
+out of address space before the harness can write its report. The assertion fires
+because the report file never exists — not because a gate failed.
+
+- **Passes in isolation** (29/29).
+- **Fails under full-suite parallel load with this pass's changes stashed** —
+  reproduced at the `197cc7cf` baseline.
+
+Environmental, pre-existing, and unrelated to this change. Reported rather than
+re-run until green. Test arithmetic is consistent: 10,098 → **10,110** total
+(+12, exactly the new guard tests) and 9,619 = 9,608 + 12 − 1.
+
+`planset-evidence-ecd` was not run — no planset or shared artifact code changed,
+and all three profiles are byte-identical. It remains **exit 2**, pre-existing
+and unchanged.
+
+---
+
+## 8. RULINGS
+
+> ### CURRENT-HEAD SECRET CLEANUP: ACCEPTED
+>
+> Six files audited and deleted · `.db_url` untracked and ignored · current tree
+> has zero live credential matches · zero inline database passwords · secret
+> regression guards pass 12/12 · every rule adversarially proven, plus a
+> real-tree proof · CI job active · history inventory documented · full tests,
+> lint, typecheck and build pass · no secret printed or committed.
+
+> ### CREDENTIAL EXPOSURE REMEDIATION: NOT ACCEPTED
+> ### MIGRATION 118 POSTGRESQL: NOT ACCEPTED
+
+### Still required
+
+1. **Rotate `neondb_owner`** — nothing else closes the exposure.
+2. Prove the old credential no longer authenticates.
+3. Update Vercel production, preview and development.
+4. Update the governed console and the approved local secret store.
+5. Redeploy affected consumers and workers.
+6. Create an ephemeral Neon branch or a dedicated acceptance database.
+7. Set `TEST_DATABASE_URL` securely (never repoint production `DATABASE_URL`).
+8. Run Migration 118's real PostgreSQL contract.
+
+WS-A remains not started.

@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ci": "vitest run --reporter=verbose",
+    "test:secrets": "vitest run tests/security/secret-guard.test.ts",
     "verify:golden": "vitest run tests/golden-path.test.ts --reporter=verbose",
     "golden:generate": "tsx tests/golden-generate.ts",
     "check:topology": "node scripts/check-dependency-topology.js",

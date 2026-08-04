@@ -97,6 +97,24 @@ worker/dist/
 .harness/secrets/*.env
 !.harness/secrets/*.env.template
 
+# ── DATABASE CREDENTIALS ────────────────────────────────────────────────────
+# The live neondb_owner password was committed in six plain .js/.sh scratch
+# scripts and pushed for ~5 months. `.env*` above never covered them, because
+# nobody put the credential in a .env file — they pasted it into a connection
+# string in ordinary source. Ignoring these filenames is the cheap half of the
+# fix; the half that actually works is tests/security/secret-guard.test.ts,
+# which reads file CONTENT on every CI run.
+.db_url
+**/.db_url
+db_url.txt
+**/db_url.txt
+credentials.json
+credential.json
+secrets.json
+*.pem
+*.key
+!**/*.key.template
+
 # Manufacturer asset PDF download cache (not source)
 scripts/.mfr-cache/
 
