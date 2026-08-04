@@ -327,7 +327,29 @@ PV-0, RS-1, E-1, PE-1, CERT).
 
 ## 20–23. Suite / build / commit / push
 
-*(recorded on completion)*
+- **Full suite:** `npx vitest run --maxWorkers 3` → **9714 passed · 0 failed · 490 skipped (10204)**
+  (baseline 9693; +21 new).
+- **TypeScript:** `npx tsc --noEmit` → exit 0.
+- **Production build:** `npm run build` → `Compiled successfully` · `Generating static pages (91/91)`
+  · exit 0 (with `NODE_OPTIONS=--max-old-space-size=8192`).
+- **Commit:** `c8f0604aed005e8693f870022cccbd66ef07a824` (7 files, +868 / −25).
+- **Push:** `9005884d..c8f0604a  dev -> dev`.
+- **`HEAD == origin/dev`:** ✅ both `c8f0604aed005e8693f870022cccbd66ef07a824` after `git fetch --prune`.
+- **Final artifact:** `_tmp_la_shots/braidon_final.pdf` (25 sheets) +
+  `_tmp_la_shots/braidon_final_shots/*.png`; snapshots `_tmp_pr_la_after_*.{html,snapshot.json}`;
+  determinism evidence `_tmp_la_determinism.json`.
+
+### Reproduce
+
+```bash
+npx tsx _tmp_la_determinism.ts                    # three-run live determinism proof (read-only)
+npx vitest run tests/planset/la-canonical-name-route.test.ts
+npx vitest run tests/planset/la-registry-propagation.test.ts
+npx vitest run tests/planset/la-field-measurement-reachability.test.ts
+npx vitest run --maxWorkers 3
+node scripts/ws5-pdf-and-shots.mjs _tmp_pr_la_after_full.html _tmp_la_shots/braidon_final
+NODE_OPTIONS=--max-old-space-size=8192 npm run build
+```
 
 ---
 
