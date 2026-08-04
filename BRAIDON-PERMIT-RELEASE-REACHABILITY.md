@@ -489,9 +489,26 @@ Rendered under **print media** at the 17×11 in envelope via
 
 ---
 
-## 21–24. Commit / push
+## 21–24. Commit / push / artifacts
 
-*(completed below — see the repository log)*
+- **Commit:** `61a16d332a098a75dcd2686440c4cf105a128d6f` — *"Make the permit-release state reachable,
+  and the digest stop covering its own approval"* (12 files, +1720 / −90)
+- **Push:** `c9862ab9..61a16d33  dev -> dev` → `https://github.com/rayobrian6/Solarpro.git`
+- **`HEAD == origin/dev`:** ✅ both `61a16d332a098a75dcd2686440c4cf105a128d6f` after `git fetch --prune`
+- **Final planset artifacts:**
+  - `_tmp_pr_shots/braidon_full.pdf` (25 sheets) + `_tmp_pr_shots/braidon_full_shots/*.png`
+  - `_tmp_pr_after_{design-review,permit,full}.html` + `.snapshot.json`
+  - `_tmp_pr_shots/ctrl_issued.pdf` (20 sheets, the ISSUED-FOR-PERMIT proof) + per-sheet PNGs
+
+### Reproduce
+
+```bash
+npx tsx _tmp_pr_baseline.ts                       # live Braidon, 3 profiles (TAG=after)
+npx vitest run tests/planset/prr-release-reachability.test.ts
+npx vitest run --maxWorkers 3                     # full suite
+node scripts/ws5-pdf-and-shots.mjs _tmp_pr_after_full.html _tmp_pr_shots/braidon_full
+NODE_OPTIONS=--max-old-space-size=8192 npm run build
+```
 
 ---
 
