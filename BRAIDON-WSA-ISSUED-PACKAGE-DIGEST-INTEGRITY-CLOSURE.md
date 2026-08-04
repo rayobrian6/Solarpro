@@ -14,7 +14,7 @@ was opened, no Migration 118 work was done, and no credential work was mixed in.
 | Starting remote HEAD | `026db5a150836a12a691862063a838ff59326b1d` |
 | Local HEAD at start | identical — **0 ahead / 0 behind** |
 | Working tree at start | clean (tracked) |
-| Ending commit | `<recorded at push>` |
+| Ending commit | `5ee96411` |
 
 Ancestors confirmed on `origin/dev`: `026db5a1` (secret cleanup), `197cc7cf`,
 `a4defa15` (118 console reachability), `01d128a2` (PV-4B/PV-4B.1 + timezone),
@@ -378,7 +378,7 @@ because an assertion was loosened.
 | | |
 |---|---|
 | Files changed | `app/api/engineering/permit/route.ts`, `lib/db/readOnlySql.ts` (new), `tests/security/issued-package-read-immutability.test.ts` (new), `tests/planset/aac-ws1-resolver-lifecycle.test.ts`, `tests/planset/aac-ws8-ws9-structural-lifecycle.test.ts`, this report |
-| Final commit | `<recorded at push>` |
+| Final commit | `5ee96411` |
 | Push | `origin/dev`, 0 ahead / 0 behind |
 
 > # WS-A ISSUED-PACKAGE DIGEST INTEGRITY: ACCEPTED
