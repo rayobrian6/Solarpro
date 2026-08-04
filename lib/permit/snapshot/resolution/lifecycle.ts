@@ -71,6 +71,11 @@ export function defaultAuthorityBundle(): SnapshotAuthorityInputs {
     projectJurisdiction: null,
     manufacturerDocumentsArchived: null,
     digestInvalidatedByLedger: false,
+    // PRR §2 — `[]` (not null) is the honest seed: with no lifecycle run there is
+    // no ledger AUTHORITY in play, which is a different fact from "the ledger was
+    // read and failed" (null ⇒ fail closed). The review requirement is held open
+    // by the absent approval, not by a fabricated invalidation.
+    digestInvalidations: [],
     framingCapacityDocument: null,
     framingProjectApplicabilityKey: null,
     cableExtensionSolutions: [],

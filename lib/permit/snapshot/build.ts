@@ -24,7 +24,9 @@ import { buildCodeAuthority, resolveAhjRecordTraced } from './codeAuthority';
 import {
   buildProjectAuthority, classifyBlockerDomain,
   type IssueStateReview, type IssuedForPermitGateInput,
+  type ProjectAuthorityBuildArgs, type ProjectAuthorityRecord,
 } from './projectAuthority';
+import { decideReviewCoverage, type DigestInvalidationFact } from './reviewCoverage';
 import { computePlansetManifest } from '../plansetManifest';
 import { hybridSheetSections, SUB_LABEL } from '../sections/subSystemSheets';
 import { buildStructuralAuthority, type StructuralRunsBundle } from './structuralAuthority';
@@ -120,6 +122,11 @@ export function buildPermitDesignSnapshot(
     /** §12 gate: a snapshot_digest_invalidations ledger entry forces the review-
      *  coverage precondition false. Conservative default when unresolved. */
     digestInvalidatedByLedger?: boolean;
+    /** PRR §2 — the ACTIVE invalidation ROWS, so an entry can be scoped to the
+     *  digest (or approval instant) it names instead of latching the whole
+     *  project. `null` ⇒ the ledger read failed ⇒ fail closed; `[]` ⇒ read OK,
+     *  nothing active; absent ⇒ no ledger authority in play (pure build/tests). */
+    digestInvalidations?: DigestInvalidationFact[] | null;
     /** FRAMING-AUTHORITY GATE — resolved evidence for the framing CAPACITY
      *  authority (async-resolved THROUGH lib/documents / the review record by the
      *  caller). null ⇒ capacity UNVERIFIED ⇒ FRAMING-AUTHORITY-UNVERIFIED fires. */
@@ -1653,9 +1660,24 @@ export function buildPermitDesignSnapshot(
   // `reviewedDigest === meta.digest`, so a review of a stale set never releases
   // a changed one. Absent opts ⇒ null ⇒ uncovered ⇒ byte-identical to before.
   const _reviewCoverage = opts?.engineeringReview ?? null;
-  const _engineeringReviewCovered = _reviewCoverage?.covered === true
-    && !!_reviewCoverage.reviewedDigest
-    && !!_reviewCoverage.reviewerLicense;
+  // ═══ PRR §1 — THIS BUILD IS TWO PASSES, AND PASS 1 IS REVIEW-NEUTRAL ════════
+  // WS-9 projected the review here, at build time, into `certification`, the
+  // issue state and the release registry — all of which are DIGESTED. So
+  // recording an approval for digest D produced a snapshot whose digest was
+  // D′ ≠ D, and `reviewedDigest === meta.digest` (the test validate V33/V34,
+  // certPages, plansetProfile.certificationIsCompleted and peLetterIdentity all
+  // apply) could never be true for ANY approval. Signing a document may not
+  // change the document it signs.
+  //
+  // So: PASS 1 below builds the snapshot exactly as if UNREVIEWED and digests
+  // it. That digest is the DESIGN DIGEST — it identifies the design, is
+  // invariant to whether anyone has approved it, and is byte-identical to what
+  // this function produced before this change for every unapproved build.
+  // PASS 2 (after the digest, at the foot of this function) decides coverage
+  // against that digest and projects the approval.
+  //
+  // Nothing between here and the digest may read the coverage record.
+  const _engineeringReviewCovered = false;
 
   // ═══ AAC WS-7 — CONDUIT-FILL AUTHORITY (the computed NEC Ch.9 T1 result) ════
   // The calculation runs in the canonical engine; the projection seam now
@@ -2096,13 +2118,15 @@ export function buildPermitDesignSnapshot(
     // approval for a DIFFERENT digest is never coverage (checked again at
     // certPages / validate against meta.digest); and the engine can never write
     // an approval — it only reads one.
-    if (!_engineeringReviewCovered) {
-      push('ENGINEERING-REVIEW-PENDING',
-        _reviewCoverage?.storeUnavailable
-          ? 'No approved engineering-review record covering this snapshot digest (D-6) — the review store could not be '
-            + 'read, and an unreadable store never satisfies a professional-release gate'
-          : `No approved engineering-review record covering this snapshot digest (D-6). ${_reviewCoverage?.basis ?? ''}`.trim());
-    }
+    // PASS 1 is review-neutral, so this requirement always fires here and its
+    // message may not vary with the coverage record (the message is digested —
+    // a basis string that mentions the approver would put the approval back
+    // inside the design digest). PASS 2 resolves the entry, with the reviewer's
+    // identity as its evidence, when a licensed approval covers the design
+    // digest; when it does not, PASS 2 replaces this message with the precise
+    // refusal (stale digest / unlicensed role / ledger invalidation / …).
+    push('ENGINEERING-REVIEW-PENDING',
+      'No approved engineering-review record covering this snapshot digest (D-6).');
 
     // Back-compat: the code/message list is the BLOCKING subset, single-sourced
     // from the registry — the issue-state derivation, gates, and prior consumers
@@ -2142,9 +2166,10 @@ export function buildPermitDesignSnapshot(
   // Still fail-closed: null unless a LICENSED reviewer's active approval names a
   // digest, and deriveIssueState independently re-checks that digest against the
   // one the sheets carry.
-  const _paReview: IssueStateReview | null = _engineeringReviewCovered && _reviewCoverage?.reviewedDigest
-    ? { reviewedDigest: _reviewCoverage.reviewedDigest }
-    : null;
+  // PASS 1: no review record (see the PRR §1 block above). PASS 2 rebuilds this
+  // record — and the whole projectAuthority with it — once the design digest an
+  // approval must name actually exists.
+  const _paReview: IssueStateReview | null = null;
   const _paAuthGapBlockers = _permitReadiness.blockers.filter(b => classifyBlockerDomain(b.code) !== 'review');
   // §15(d) — production identity: the project name must NOT contain "TEST" and a
   // designer/engineer-of-record must be present, or the ISSUED-FOR-PERMIT gate
@@ -2166,16 +2191,17 @@ export function buildPermitDesignSnapshot(
     manufacturerDocumentsArchived: opts?.manufacturerDocumentsArchived ?? null,
     structuralApplicabilityEstablished: !structAuth.engine.engineeringReviewRequired
       && !_paAuthGapBlockers.some(b => classifyBlockerDomain(b.code) === 'structural'),
-    engineerReviewCoversCurrentDigest: false,   // no review record at build
-    // W4 §12 (closer-wired): a snapshot_digest_invalidations ledger entry (from
-    // lib/reconciliation.listActiveInvalidations, resolved async upstream) forces
-    // the review-coverage precondition false. Unavailable ⇒ conservative true
-    // ('unknown' must NOT satisfy the gate). No effect on today's outcome (review
-    // is always null at build) but keeps the gate honest once reviews are wired.
+    // PASS 1 neutral values. These two were HARDCODED `false` with the stale
+    // comments "no review record at build" / "certification.engineer === null at
+    // build" — both untrue since WS-9 wired the coverage record 24 lines above,
+    // and together they made the ISSUED-FOR-PERMIT gate unreachable for every
+    // project regardless of what any engineer recorded. PASS 2 supplies the
+    // decided values from decideReviewCoverage().
+    engineerReviewCoversCurrentDigest: false,
     digestInvalidatedByLedger: opts?.digestInvalidatedByLedger ?? false,
-    signatureSealSatisfied: false,               // certification.engineer === null at build
+    signatureSealSatisfied: false,
   };
-  const projectAuthority = buildProjectAuthority({
+  const _paArgs: ProjectAuthorityBuildArgs = {
     projectName: proj.projectName ?? null,
     customer: proj.clientName ?? null,
     installationAddress: proj.address ?? null,
@@ -2259,10 +2285,16 @@ export function buildPermitDesignSnapshot(
     hasDesign: geoModules.length > 0 || (totalsPanels ?? 0) > 0,
     blockers: _permitReadiness.blockers,
     review: _paReview,
-    currentDigest: '',                         // review === null ⇒ digest unused
+    // PASS 1: review === null, so this is genuinely unused. It was NOT unused
+    // once WS-9 started supplying a review here: a 64-hex reviewedDigest never
+    // equals '', so deriveIssueState read every real approval as a digest
+    // MISMATCH and reported REVISED — "prior approval invalidated by a design
+    // change" — for a design that had not changed. PASS 2 passes the real digest.
+    currentDigest: '',
     gateInput: _paGateInput,
     capturedAtIso: _capturedIso,
-  });
+  };
+  const projectAuthority = buildProjectAuthority(_paArgs);
 
   const snapshot: PermitDesignSnapshot = {
     codeAuthority,
@@ -2538,37 +2570,34 @@ export function buildPermitDesignSnapshot(
       opts?.documentRegistryFacts ?? null,
       null,   // the alias store stays EMPTY: no cross-reference is fabricated.
     ),
-    // AAC WS-9 — the certification record now PROJECTS the digest-bound review
-    // when one exists, in the EXISTING `false | { reviewedDigest; approvedAtIso }`
-    // shape certPages / validate / the V13 issue gate already consume. The
-    // consumers re-check `reviewedDigest === meta.digest`, so a review recorded
-    // against a prior digest still fails closed — which is the whole point of
-    // binding an approval to bytes.
+    // AAC WS-9 / PRR §1 — the certification record PROJECTS the digest-bound
+    // review, in the `false | { reviewedDigest; approvedAtIso }` shape certPages /
+    // validate V13 / plansetProfile.certificationIsCompleted / peLetterIdentity
+    // already consume. Every one of them re-checks `reviewedDigest === meta.digest`,
+    // so a review recorded against a different design still fails closed — which
+    // is the whole point of binding an approval to bytes.
+    //
+    // PASS 1 neutral here; PASS 2 (foot of this function) writes the approved
+    // projection once the design digest exists to check the approval against.
+    // ONE predicate decides the certification, the release requirement AND the
+    // issue state, so validator V33 (stored issue state must equal the derived
+    // one) can never be tripped by a partially-accepted review record.
     certification: {
-      // ONE predicate for the certification, the requirement AND the issue state
-      // (`_paReview`). They cannot disagree, so validator V33 (stored issue state
-      // must equal the derived one) can never be tripped by a partially-accepted
-      // review record — e.g. `covered: true` with no licence recorded.
-      engineeringReviewApproved: _engineeringReviewCovered && _reviewCoverage?.reviewedDigest
-        ? { reviewedDigest: _reviewCoverage.reviewedDigest, approvedAtIso: _reviewCoverage.approvedAtIso ?? '' }
-        : false,
-      engineer: _engineeringReviewCovered && _reviewCoverage
-        ? {
-            name: _reviewCoverage.reviewerName,
-            license: _reviewCoverage.reviewerLicense,
-            state: _reviewCoverage.reviewerLicenseState,
-            role: _reviewCoverage.reviewerRole,
-          } as never
-        : null,
+      engineeringReviewApproved: false,
+      engineer: null,
     },
     permitReadiness: _permitReadiness,
     // AAC WS-2 / WS-6 — evidence for the AUTO-CLEARED requirements. OMITTED
     // entirely when the lifecycle resolved nothing, so canonicalJson drops it and
     // an unresolved (harness / no-DB) build hashes exactly as before.
+    // PRR §1 — `engineeringReview` is deliberately NOT one of the presence tests
+    // and is null below: this block is DIGESTED, so letting the approval record
+    // decide whether it exists put the approval back inside the design digest
+    // (which is exactly how the circularity survived the first repair attempt).
+    // PASS 2 attaches the coverage record as evidence, after the digest.
     ...(opts?.canonicalEquipment || opts?.moduleDatasheetBinding || opts?.projectPersonnel
       || opts?.projectLegalAuthority || opts?.codeAdoptionAuthority || opts?.environmentalRetrieval
       || opts?.structuralDocumentRetrieval || opts?.rackingAssemblySelection || opts?.framingRetrieval
-      || opts?.engineeringReview
       ? {
           resolutionAuthority: {
             canonicalEquipment: opts?.canonicalEquipment ?? null,
@@ -2589,15 +2618,113 @@ export function buildPermitDesignSnapshot(
             structuralDocumentRetrieval: opts?.structuralDocumentRetrieval ?? null,
             rackingAssemblySelection: opts?.rackingAssemblySelection ?? null,
             framingRetrieval: opts?.framingRetrieval ?? null,
-            engineeringReview: opts?.engineeringReview ?? null,
+            engineeringReview: null,   // PASS 2 (PRR §1)
           },
         }
       : {}),
   };
 
+  // ═══ THE DESIGN DIGEST ═════════════════════════════════════════════════════
+  // Computed over the REVIEW-NEUTRAL snapshot above, so it identifies the DESIGN
+  // and not the approval state of the design. For an unapproved package this is
+  // byte-identical to the digest this function produced before PRR §1.
   const digest = computeSnapshotDigest(snapshot as unknown as Record<string, unknown>);
   (snapshot.meta as { digest: string }).digest = digest;
   (snapshot.meta as { snapshotId: string }).snapshotId = snapshotIdFromDigest(digest);
+
+  // ═══ PASS 2 — PROJECT THE LICENSED APPROVAL ════════════════════════════════
+  // The design digest now exists, so the question an approval answers ("do you
+  // accept responsibility for EXACTLY these bytes?") is finally askable. This is
+  // the ONLY place that decides it, and the decision is a pure function of the
+  // review record + the authority ledger. Nothing here can invent an approval:
+  // decideReviewCoverage refuses on a missing, unreadable, unlicensed, unscoped,
+  // identity-incomplete, digest-mismatched or ledger-invalidated record, and the
+  // engine never writes to the review store.
+  {
+    const _decision = decideReviewCoverage({
+      coverage: _reviewCoverage,
+      designDigest: digest,
+      // A caller that supplied only the legacy boolean still fails closed: `true`
+      // is read as "the ledger says invalidated" (null ⇒ fail closed in
+      // invalidationApplies). Absent socket ⇒ no ledger authority in play.
+      invalidations: opts?.digestInvalidations !== undefined
+        ? opts.digestInvalidations
+        : (opts?.digestInvalidatedByLedger ? null : []),
+    });
+
+    // The coverage record is EVIDENCE, attached after the digest: what was
+    // looked up, who (if anyone) approved, and — when it does not release the
+    // package — the exact facts that refused. It sits in the same evidence home
+    // every other resolved requirement uses.
+    if (_reviewCoverage) {
+      const _ra = (snapshot as { resolutionAuthority?: Record<string, unknown> }).resolutionAuthority;
+      if (_ra) _ra.engineeringReview = _reviewCoverage;
+      else {
+        (snapshot as { resolutionAuthority?: Record<string, unknown> }).resolutionAuthority = {
+          canonicalEquipment: null, moduleDatasheetBinding: null, projectPersonnel: null,
+          projectLegalAuthority: null, codeAdoptionAuthority: null, environmentalRetrieval: null,
+          structuralDocumentRetrieval: null, rackingAssemblySelection: null, framingRetrieval: null,
+          engineeringReview: _reviewCoverage,
+        };
+      }
+    }
+
+    const _reviewEntry = _permitReadiness.registry.find(r => r.code === 'ENGINEERING-REVIEW-PENDING');
+    if (_decision.covers) {
+      // The requirement is CLOSED by the record, with the reviewer as evidence.
+      if (_reviewEntry) {
+        (_reviewEntry as { resolved: boolean }).resolved = true;
+        (_reviewEntry as { justification: string }).justification = _decision.basis;
+        (_reviewEntry as { explanation: string }).explanation =
+          `Approved engineering review covers design digest ${digest.slice(0, 12)}… — ${_decision.basis}`;
+      }
+      (_permitReadiness as { blockers: { code: string; message: string }[] }).blockers =
+        _permitReadiness.blockers.filter(b => b.code !== 'ENGINEERING-REVIEW-PENDING');
+      (_permitReadiness as { ready: boolean }).ready = _permitReadiness.blockers.length === 0;
+      (snapshot as { certification: PermitDesignSnapshot['certification'] }).certification = {
+        engineeringReviewApproved: {
+          reviewedDigest: digest,
+          approvedAtIso: _reviewCoverage?.approvedAtIso ?? '',
+        },
+        engineer: {
+          name: _reviewCoverage?.reviewerName,
+          license: _reviewCoverage?.reviewerLicense,
+          state: _reviewCoverage?.reviewerLicenseState,
+          role: _reviewCoverage?.reviewerRole,
+        } as never,
+      };
+    } else if (_reviewEntry && _reviewCoverage && !_reviewCoverage.storeUnavailable && _reviewCoverage.covered) {
+      // A record EXISTS but does not release this package. Say exactly why —
+      // "pending" would hide a stale or invalidated approval from the reviewer.
+      (_reviewEntry as { explanation: string }).explanation =
+        `Engineering review does not cover this package: ${_decision.basis}`;
+    }
+
+    // The issue state, the gate and the cover record are all functions of the
+    // decision, so projectAuthority is rebuilt rather than patched — one
+    // derivation, no field left disagreeing with another (validator V33).
+    (snapshot as { projectAuthority: ProjectAuthorityRecord }).projectAuthority = buildProjectAuthority({
+      ..._paArgs,
+      // The manifest depends on the registry: resolving the review requirement
+      // can drop an RS-1.n continuation sheet, so the stored sheet index must be
+      // recomputed or it would disagree with the pages actually rendered.
+      sheetIndex: _decision.covers
+        ? computePlansetManifest(input, cad, { releaseRegistry: _permitReadiness.registry })
+        : _paArgs.sheetIndex,
+      blockers: _permitReadiness.blockers,
+      review: _decision.covers ? { reviewedDigest: digest } : null,
+      currentDigest: digest,
+      gateInput: {
+        ..._paGateInput,
+        blockingValidatorsPass: _permitReadiness.blockers
+          .filter(b => classifyBlockerDomain(b.code) !== 'review').length === 0,
+        engineerReviewCoversCurrentDigest: _decision.covers,
+        signatureSealSatisfied: _decision.signatureSealSatisfied,
+        digestInvalidatedByLedger: _decision.invalidatedByLedger,
+      },
+    });
+  }
+
   return snapshot;
 }
 

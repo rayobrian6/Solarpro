@@ -916,7 +916,8 @@ describe('AAC WS-3 / WS-4 · a run with no retrieval is byte-identical to the pr
     const b = braidonInput();
     generatePermitHTML(b, undefined, {
       capacityDocument: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
-      digestInvalidatedByLedger: false, framingCapacityDocument: null, framingProjectApplicabilityKey: null,
+      digestInvalidatedByLedger: false, digestInvalidations: [],
+      framingCapacityDocument: null, framingProjectApplicabilityKey: null,
       cableExtensionSolutions: [], qcableServiceLoopAllowance: null, environmentalSource: null,
       projectLegalAuthority: null, codeAdoptionAuthority: null, environmentalRetrieval: null,
     });

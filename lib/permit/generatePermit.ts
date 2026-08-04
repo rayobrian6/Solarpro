@@ -57,6 +57,7 @@ import {
 import { hybridSheetId } from './sheetManifest';
 // TAC WS-18 — cross-sheet references resolved against the ACTIVE sheet index.
 import { activeSheetIds, normalizeAbsentSheetReferences, findDanglingSheetReferences } from './utils/sheetRef';
+import { certificationApproved } from './utils/peLetterIdentity';
 import { resolvePlansetProfile, certificationIsCompleted, isCompactProfile } from './plansetProfile';
 import { resolveSeismicAuthority } from './snapshot/environmentalAuthority';
 import { pageValidationSummary } from './sections/validationPage';
@@ -1209,6 +1210,15 @@ export function generatePermitHTML(
       projectJurisdiction: snapshotAuthority?.projectJurisdiction ?? null,
       manufacturerDocumentsArchived: snapshotAuthority?.manufacturerDocumentsArchived ?? null,
       digestInvalidatedByLedger: snapshotAuthority?.digestInvalidatedByLedger ?? false,
+      // PRR §2 — the ACTIVE invalidation ROWS. The boolean above was `rows > 0`
+      // for the whole project and nothing ever supersedes a row, so it latched
+      // review coverage false permanently (22 such rows on the live Braidon
+      // project). The rows let the decision scope each entry to the digest, or
+      // the approval instant, it actually names.
+      // `??` must NOT be used here: `null` is the "ledger read FAILED" signal and
+      // collapsing it to `undefined` would turn a fail-closed fact into "no
+      // ledger authority in play" — releasing a package on an unreadable ledger.
+      digestInvalidations: snapshotAuthority ? snapshotAuthority.digestInvalidations : undefined,
       // FRAMING-AUTHORITY GATE — verified framing-capacity document (or null ⇒
       // FRAMING-AUTHORITY-UNVERIFIED keeps firing). Fail-soft.
       framingCapacityDocument: snapshotAuthority?.framingCapacityDocument ?? null,
@@ -1647,17 +1657,63 @@ export function generatePermitHTML(
       }
       if (_stateViol.length) throw new SnapshotValidationError(_stateViol);
     }
-    const v13Missing = pages
-      .map((p, i) => (/tb-sheet-id">\s*(CERT|PE-1[GF]?)\s*</.test(p)
-        && !p.includes('PENDING ENGINEERING REVIEW') ? i + 1 : -1))
-      .filter(i => i > 0);
-    if (v13Missing.length) {
-      throw new SnapshotValidationError(v13Missing.map(pn => ({
-        invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: false,
-        sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
-        message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
-      })));
-    }
+    // ═══ V13 — THE CERTIFICATION SHEETS MUST MATCH THE APPROVAL STATE ═════════
+    // This used to demand the literal "PENDING ENGINEERING REVIEW" on EVERY
+    // CERT/PE-1 sheet unconditionally, with `offendingValue: false` hardcoded —
+    // it was written when `certification.engineeringReviewApproved` could never
+    // be anything but `false`, so "always pending" and "matches the record" were
+    // the same assertion. Now that a licensed, digest-bound approval is reachable
+    // (PRR §1), an unconditional check would BLOCK every approved package: the
+    // engine would refuse to emit the very artifact the approval exists to
+    // release. It is now the two-sided check it was always meant to be.
+    const _certApproved = certificationApproved(input);
+    const snapFullCert = (input as unknown as {
+      _snapshot?: { certification?: { engineer: { name?: string; license?: string } | null } };
+    })._snapshot?.certification ?? null;
+    const _isCertSheet = (p: string) => /tb-sheet-id">\s*(CERT|PE-1[GF]?)\s*</.test(p);
+    const v13Viol = pages.flatMap((p, i) => {
+      if (!_isCertSheet(p)) return [];
+      const pn = i + 1;
+      if (!_certApproved) {
+        // UNAPPROVED ⇒ the pending gate is mandatory. Unchanged behaviour.
+        return p.includes('PENDING ENGINEERING REVIEW') ? [] : [{
+          invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: false,
+          sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+          message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
+        }];
+      }
+      // APPROVED ⇒ the sheet must NOT still say pending, and must name the
+      // licensed approver and the exact digest approved. An "approved" sheet
+      // that names nobody is the same lie in the other direction.
+      const viol: ReturnType<typeof Array.prototype.flatMap> = [];
+      const eng = (snapFullCert?.engineer ?? null) as { name?: string; license?: string } | null;
+      if (p.includes('PENDING ENGINEERING REVIEW')) {
+        viol.push({
+          invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: true,
+          sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+          message: `certification sheet ${pn} still prints the PENDING ENGINEERING REVIEW gate although an approved `
+            + 'review covers the current design digest', enforcement: 'blocking' as const,
+        });
+      }
+      if (!eng?.name || !p.includes(eng.name)) {
+        viol.push({
+          invariant: 'V13', authorityPath: 'certification.engineer', offendingValue: eng?.name ?? null,
+          sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+          message: `certification sheet ${pn} claims an approved review but does not name the approving engineer`,
+          enforcement: 'blocking' as const,
+        });
+      }
+      if (!eng?.license || !p.includes(eng.license)) {
+        viol.push({
+          invariant: 'V13', authorityPath: 'certification.engineer', offendingValue: eng?.license ?? null,
+          sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+          message: `certification sheet ${pn} claims an approved review but does not print the approver's licence number`,
+          enforcement: 'blocking' as const,
+        });
+      }
+      return viol;
+    });
+    if (v13Viol.length) throw new SnapshotValidationError(v13Viol as never);
     // ═══ V29 — RENDER-PARITY (W3.1 §2 (d)): no rendered physical object without
     // a canonical object ID. Every data-object-id drawn on a sheet MUST resolve
     // to a snapshot physical object (module/rail/attachment). Renderers may not

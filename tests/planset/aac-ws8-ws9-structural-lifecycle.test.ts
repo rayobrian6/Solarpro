@@ -460,19 +460,39 @@ describe('AAC WS-9 · ENGINEERING-REVIEW-PENDING is CONDITIONAL, and closed by d
     expect(snap.certification.engineeringReviewApproved).toBe(false);
   });
 
-  it('with a LICENSED approval bound to the prior digest it CLEARS, and the certification projects it', () => {
-    const digest = 'c'.repeat(64);
-    const snap = render({
-      engineeringReview: {
-        covered: true, reviewedDigest: digest, approvedAtIso: NOW,
-        reviewerName: 'A. Engineer', reviewerRole: 'engineer_of_record',
-        reviewerLicense: '062-012345', reviewerLicenseState: 'IL',
-        scopeStatement: 'Full set.', recordId: 'r1',
-        storeUnavailable: false, storeError: null, basis: 'approved',
-      },
-    });
-    const codes = snap.permitReadiness.registry.map(r => r.code);
-    expect(codes).not.toContain('ENGINEERING-REVIEW-PENDING');
+  // PRR §1 — THIS TEST USED TO PIN THE DEFECT. It supplied an approval naming an
+  // ARBITRARY digest ('c'×64 — never this build's) and asserted the requirement
+  // CLEARED and `certification.engineeringReviewApproved` projected it. That is
+  // the bug: an approval of some other set released this one in the registry and
+  // on the certification record, and only downstream consumers re-checked the
+  // digest, so the snapshot contradicted itself. Coverage is now decided in ONE
+  // place against the build's own design digest (decideReviewCoverage), so the
+  // two halves below are the two halves that were conflated.
+  const licensedApproval = (reviewedDigest: string) => ({
+    engineeringReview: {
+      covered: true, reviewedDigest, approvedAtIso: NOW,
+      reviewerName: 'A. Engineer', reviewerRole: 'engineer_of_record',
+      reviewerLicense: '062-012345', reviewerLicenseState: 'IL',
+      scopeStatement: 'Full set.', recordId: 'r1',
+      storeUnavailable: false, storeError: null, basis: 'approved',
+    },
+    digestInvalidations: [],
+  });
+
+  it('a LICENSED approval naming a DIFFERENT digest does NOT clear it', () => {
+    const snap = render(licensedApproval('c'.repeat(64)));
+    const entry = snap.permitReadiness.registry.find(r => r.code === 'ENGINEERING-REVIEW-PENDING');
+    expect(entry?.resolved).toBe(false);
+    expect(snap.certification.engineeringReviewApproved).toBe(false);
+    expect(entry?.explanation).toMatch(/design changed after approval/);
+  });
+
+  it('a LICENSED approval naming THIS design digest CLEARS it, and the certification projects it', () => {
+    const digest = render().meta.digest;              // the design digest, unapproved
+    const snap = render(licensedApproval(digest));
+    expect(snap.meta.digest).toBe(digest);            // approving does not move the digest
+    expect(snap.permitReadiness.registry.find(r => r.code === 'ENGINEERING-REVIEW-PENDING')?.resolved).toBe(true);
+    expect(snap.permitReadiness.blockers.map(b => b.code)).not.toContain('ENGINEERING-REVIEW-PENDING');
     expect(snap.certification.engineeringReviewApproved).toEqual({ reviewedDigest: digest, approvedAtIso: NOW });
   });
 

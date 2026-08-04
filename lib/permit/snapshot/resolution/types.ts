@@ -28,6 +28,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { PermitInput } from '../../types';
+import type { DigestInvalidationFact } from '../reviewCoverage';
 import type { RackingCapacityDocumentEvidence } from '../rackingAssembly';
 import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } from '../framingAuthority';
 import type { CableExtensionSolution } from '../types';
@@ -226,8 +227,20 @@ export interface SnapshotAuthorityInputs {
   manufacturerDocumentsArchived: boolean | null;
   /** a snapshot_digest_invalidations ledger entry forces the review-coverage
    *  precondition false. Unavailable ⇒ conservative `true` (unknown must not
-   *  satisfy the gate). */
+   *  satisfy the gate).
+   *
+   *  PRR §2 — LEGACY. This project-scoped boolean was `rows.length > 0`, which
+   *  latched review coverage false FOREVER: nothing in the codebase ever writes
+   *  `superseded_at`, so a row written by one equipment reconciliation blocked
+   *  every future approval. It is retained only so a caller that supplies just
+   *  the boolean still fails closed; the DECISION now reads `digestInvalidations`
+   *  and scopes each row to the digest (and approval time) it actually names. */
   digestInvalidatedByLedger: boolean;
+  /** PRR §2 — the ACTIVE invalidation rows themselves, so review coverage can be
+   *  scoped to the digest a row names instead of "this project has ever had one".
+   *  `null` ⇒ the ledger read FAILED (fail closed); `[]` ⇒ read OK, no active
+   *  rows. See lib/permit/snapshot/reviewCoverage.ts#invalidationApplies. */
+  digestInvalidations: DigestInvalidationFact[] | null;
   /** FRAMING-AUTHORITY GATE — the VERIFIED, project-applicable framing-capacity
    *  document (truss drawing / mfr calc / stamped analysis) or null. */
   framingCapacityDocument: FramingCapacityDocumentEvidence | null;

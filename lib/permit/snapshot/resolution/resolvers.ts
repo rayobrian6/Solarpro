@@ -130,14 +130,14 @@ export const digestInvalidationLedgerResolver: RequirementResolver = {
   mode: 'AUTO_DERIVED',
   requirementCodes: [],
   requiredInputs: [],
-  produces: ['digestInvalidatedByLedger'],
+  produces: ['digestInvalidatedByLedger', 'digestInvalidations'],
   description: 'Reads the active snapshot_digest_invalidations rows for the project (the review-coverage precondition).',
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     if (!ctx.projectId) {
       return {
         result: 'SKIPPED',
         clearance: { cleared: false, missing: ['projectId'], reasons: ['no projectId on the permit input — the ledger cannot be scoped'] },
-        patch: { digestInvalidatedByLedger: false },
+        patch: { digestInvalidatedByLedger: false, digestInvalidations: [] },
         sourceQueried: LEDGER_SOURCE,
         retryability: 'REQUIRES_INPUT',
         failureReason: 'no projectId — the invalidation ledger cannot be queried',
@@ -152,6 +152,21 @@ export const digestInvalidationLedgerResolver: RequirementResolver = {
     // fail-soft INVERTED: unreadable ⇒ conservative `true`.
     const rows = read.ok ? (Array.isArray(read.value) ? read.value : []) : null;
     const invalidated = rows == null ? true : rows.length > 0;
+    // PRR §2 — project the ROWS, not just their count. The count alone was a
+    // permanent latch: the writer records `digest: null` and nothing in the
+    // codebase ever sets `superseded_at`, so one reconciliation blocked every
+    // future approval on that project forever. reviewCoverage.invalidationApplies
+    // scopes each row to the digest (or the approval instant) it actually names.
+    const facts = rows == null ? null : rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      const at = row.invalidated_at ?? row.invalidatedAt ?? null;
+      return {
+        digest: (row.digest as string | null) ?? null,
+        scope: (row.scope as string | null) ?? null,
+        invalidatedAtIso: at == null ? null : (at instanceof Date ? at.toISOString() : String(at)),
+        reason: (row.reason as string | null) ?? null,
+      };
+    });
     return {
       result: read.ok ? 'RESOLVED' : 'FAILED',
       clearance: {
@@ -159,7 +174,7 @@ export const digestInvalidationLedgerResolver: RequirementResolver = {
         missing: read.ok ? [] : ['snapshot_digest_invalidations'],
         reasons: read.ok ? [] : ['the invalidation ledger is unreadable — the review-coverage precondition is fail-closed to INVALIDATED'],
       },
-      patch: { digestInvalidatedByLedger: invalidated },
+      patch: { digestInvalidatedByLedger: invalidated, digestInvalidations: facts },
       sourceQueried: LEDGER_SOURCE,
       sourceRefs: ['authority:reconciliation.snapshot_digest_invalidations'],
       retryability: read.ok ? 'NON_RETRYABLE' : 'RETRYABLE',

@@ -43,6 +43,36 @@ import {
 } from '../utils/peLetter';
 export { certificationApproved };
 
+/** PRR §3 — THE APPROVING ENGINEER OF RECORD, or null.
+ *
+ *  The signature blocks below printed blank rules ("NAME: ______") in EVERY
+ *  state, because before this repair `certification.engineer` was always null —
+ *  no approval could exist, so there was never an identity to print. With a
+ *  digest-bound approval now reachable, a sheet that carries approved
+ *  certification language while naming nobody is exactly the "blank
+ *  Engineer-of-Record" defect. This reads the identity off the SAME record the
+ *  approval gate decides from; it can never fabricate one, and the wet
+ *  signature/seal rules stay blank because affixing a seal is a physical act. */
+function approvingEngineer(input: PermitInput): {
+  name: string; license: string; state: string; approvedOn: string;
+} | null {
+  if (!certificationApproved(input)) return null;
+  const cert = (input as unknown as {
+    _snapshot?: { certification?: {
+      engineer: { name?: string; license?: string; state?: string; role?: string } | null;
+      engineeringReviewApproved: false | { reviewedDigest: string; approvedAtIso: string };
+    } };
+  })._snapshot?.certification;
+  const e = cert?.engineer;
+  if (!e?.name || !e.license || !e.state) return null;
+  const appr = cert?.engineeringReviewApproved;
+  const iso = appr && typeof appr === 'object' ? appr.approvedAtIso : '';
+  return {
+    name: e.name, license: e.license, state: e.state,
+    approvedOn: iso ? String(iso).slice(0, 10) : '',
+  };
+}
+
 /** The derived issue-state string for revision blocks (Section 1). While the
  *  snapshot is PENDING ENGINEERING REVIEW this is never "ISSUED FOR PERMIT" /
  *  "Initial Issue for Permit" -- it is the honest DERIVED state. */
@@ -148,6 +178,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
   // template renders in its place -- no affirmative conclusion, no seal-implied
   // validity, and the revision history states the DERIVED issue state.
   const approved = certificationApproved(input);
+  const _eor = approvingEngineer(input);
   const revDesc = approved ? 'Issued for Permit' : escapeH(issueStateLabel(input));
   // Section 11: an IFC setback COMPLIANCE claim may not render while the IFC
   // authority is unverified/pending -- the code list is only shown in the
@@ -212,14 +243,17 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
       <div class="cert-grid">
         <div>
           <div class="cert-block-title">PREPARED BY</div>
-          <div class="cert-field"><div class="cf-val">${escapeH(project.designer || '________________________________')}</div><div class="cf-lbl">Designer / Engineer of Record</div></div>
+          <div class="cert-field"><div class="cf-val">${_eor ? `<strong>${escapeH(_eor.name)}</strong>` : escapeH(project.designer || '________________________________')}</div><div class="cf-lbl">Designer / Engineer of Record</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">Firm / Company Name</div></div>
-          <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">PE License Number</div></div>
-          <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">State of Licensure</div></div>
+          <!-- PRR §3 — the licence, jurisdiction and certification date come from
+               the digest-bound approval record when one exists. They stayed blank
+               in every state before this repair because no approval could exist.
+               Expiration and contact are NOT on the approval record, so they
+               remain rules rather than being invented. -->
+          <div class="cert-field"><div class="cf-val">${_eor ? `<strong>${escapeH(_eor.license)}</strong>` : '________________________________'}</div><div class="cf-lbl">PE License Number</div></div>
+          <div class="cert-field"><div class="cf-val">${_eor ? `<strong>${escapeH(_eor.state)}</strong>` : '________________________________'}</div><div class="cf-lbl">State of Licensure</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">License Expiration Date</div></div>
-          <!-- Blank -- the PE dates this when signing. Prefilling the package
-               issue date read as the expiration value of the field above. -->
-          <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">Date of Certification</div></div>
+          <div class="cert-field"><div class="cf-val">${_eor && _eor.approvedOn ? `<strong>${escapeH(_eor.approvedOn)}</strong>` : '________________________________'}</div><div class="cf-lbl">Date of Certification</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">Phone / Email</div></div>
           <div class="cert-field" style="margin-top:var(--xs)"><div class="cf-val" style="border-bottom:var(--border-hvy);padding-bottom:10px;">________________________________</div><div class="cf-lbl">Signature</div></div>
         </div>
@@ -290,16 +324,23 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
 
 // --- SHARED PE LETTER PRIMITIVES --------------------------------------------
 // Signature block and footer are identical across all families -- extracted once
-function _peSigBlock(): string {
+function _peSigBlock(input?: PermitInput): string {
+  // PRR §3 — print the identity of the engineer whose digest-bound approval
+  // released this package; leave the rules blank when there is none. The
+  // SIGNATURE and SEAL rules stay blank either way: those are physical acts.
+  const eor = input ? approvingEngineer(input) : null;
+  const val = (s: string, cls: string) => (eor
+    ? `<strong>${escapeH(s)}</strong>`
+    : `<span class="${cls}">&nbsp;</span>`);
   return `
   <div class="sec">
     <div class="sec-hdr">PROFESSIONAL ENGINEER OF RECORD</div>
     <div class="sig-grid">
       <div class="sig-col">
-        <div class="mb-sm f-sm">NAME: <span class="sig-underline-md">&nbsp;</span></div>
-        <div class="mb-sm f-sm">PE LICENSE #: <span class="sig-underline-sm">&nbsp;</span></div>
-        <div class="mb-sm f-sm">STATE OF LICENSURE: <span class="sig-underline-110">&nbsp;</span></div>
-        <div class="mb-sm f-sm">DATE: <span class="sig-underline-md">&nbsp;</span></div>
+        <div class="mb-sm f-sm">NAME: ${val(eor?.name ?? '', 'sig-underline-md')}</div>
+        <div class="mb-sm f-sm">PE LICENSE #: ${val(eor?.license ?? '', 'sig-underline-sm')}</div>
+        <div class="mb-sm f-sm">STATE OF LICENSURE: ${val(eor?.state ?? '', 'sig-underline-110')}</div>
+        <div class="mb-sm f-sm">DATE: ${val(eor?.approvedOn ?? '', 'sig-underline-md')}</div>
         <div style="margin-top:20px;margin-bottom:4px;" class="f-sm">SIGNATURE: <span style="border-bottom:var(--border-hvy);display:inline-block;width:155px;">&nbsp;</span></div>
       </div>
       <div class="sig-col-stamp">
@@ -478,7 +519,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
             </div>
           </div>` : _pePendingCertStatement()}
 
-          ${_peSigBlock()}
+          ${_peSigBlock(input)}
         </div>
       </div>
 
@@ -587,7 +628,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
             </div>
           </div>` : _pePendingCertStatement()}
 
-          ${_peSigBlock()}
+          ${_peSigBlock(input)}
         </div>
       </div>
 
@@ -798,7 +839,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             </div>
           </div>`}
 
-          ${_peSigBlock()}
+          ${_peSigBlock(input)}
         </div>
       </div>
 
