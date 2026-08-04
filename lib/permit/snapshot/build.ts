@@ -1843,8 +1843,26 @@ export function buildPermitDesignSnapshot(
         provenance: over?.provenance ?? { source: 'snapshot build (permitReadiness)', ref: null },
         createdAtIso: _capturedIso,
         createdVersion: String(PLANSET_ENGINE_VERSION),
-        resolved: false,
-        resolutionAuditRef: null,
+        // ═══ MCC §1 — THE LIFECYCLE'S CLEARANCE IS AUTHORITY, NOT PROSE ═══════
+        // These two were the literals `false` and `null` on EVERY record. The
+        // resolution state carrying the answer is `_resState`, in scope 18 lines
+        // above — and it was consumed ONLY to decorate the rendered payload. So a
+        // resolver could do the real registry read, return RESOLVED with an audit
+        // reference, have the lifecycle mark the requirement `cleared`… and the
+        // requirement still shipped OPEN, because the record that the release
+        // gate actually reads was hardcoded unresolved.
+        //
+        // This is the same defect class as the review-coverage circularity: an
+        // authority result is computed and then discarded at the consumer. It was
+        // not specific to the module datasheet — it silently voided EVERY
+        // resolver clearance in the system.
+        //
+        // FAIL-CLOSED, and deliberately the SAME two-part predicate
+        // `deriveRequirementStatus` applies (releaseGates.ts) — a `cleared` flag
+        // with no audit reference is not a clearance, so the registry can never
+        // claim a resolution the gate would reject:
+        resolved: _resState?.cleared === true && !!_resState?.resolutionAuditRef?.trim(),
+        resolutionAuditRef: _resState?.resolutionAuditRef?.trim() ? _resState.resolutionAuditRef : null,
       });
     };
 

@@ -556,6 +556,49 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── MCC §2 — CANONICAL PROJECT IDENTITY ────────────────────────────────
+    // `projects.name` is the project record. `engineering_config.projectName` is
+    // a MIRROR of it, written by the Engineering page's React state, and it does
+    // not round-trip: renaming the project does not rewrite the saved config. The
+    // permit POST body carries the config mirror, so the package took its whole
+    // identity — cover, title blocks, release summary, certification, document
+    // control id, Content-Disposition filename — from a value nobody had
+    // reconciled since the design was last saved.
+    //
+    // On the live Braidon project the two disagree exactly as that predicts:
+    // projects.name = "BRAIDON M PILLA — Solar", engineering_config.projectName =
+    // "BRAIDON M PILLA — Solar TEST". The stale mirror fired
+    // PROJECT-NAME-NONPRODUCTION and held the projectIdentityValid gate
+    // precondition false on a project whose real name is production-valid.
+    //
+    // This is the SAME correction the system_type block above already performs,
+    // for the same reason and against the same table: where the authoritative
+    // project row and the posted mirror disagree, the record wins.
+    //
+    // NOT a string fix. Nothing here removes the substring "TEST" — a project
+    // genuinely named "…TEST" keeps its name and still fails the gate. What
+    // changes is only WHICH FIELD is authoritative.
+    if (projectId && isValidUUID(projectId)) {
+      try {
+        const sqlNm = await getDbReady();
+        const nmRows = await sqlNm`
+          SELECT name FROM projects WHERE id = ${projectId} AND deleted_at IS NULL LIMIT 1
+        `;
+        const canonicalName = typeof nmRows[0]?.name === 'string' ? nmRows[0].name.trim() : '';
+        const postedName = String(project.projectName ?? '').trim();
+        if (canonicalName && canonicalName !== postedName) {
+          console.warn('[permit/POST] MCC §2: project name mismatch — projects.name:',
+            JSON.stringify(canonicalName), 'posted (engineering_config mirror):',
+            JSON.stringify(postedName), '— using the authoritative project record');
+          project.projectName = canonicalName;
+        }
+        // A project row with a blank name is NOT authority: the posted value
+        // stands and the identity requirement stays open on its own merits.
+      } catch (nmErr: unknown) {
+        console.warn('[permit/POST] Could not read canonical projects.name (non-critical):', (nmErr as Error).message);
+      }
+    }
+
     // FIX v47.54: ENGINEERING_MODEL_STALE guard.
     // Block permit generation if totalPanels is 0 or missing.
     // This prevents the permit from silently generating with stale/default values

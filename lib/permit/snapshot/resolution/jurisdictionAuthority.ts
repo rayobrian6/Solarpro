@@ -123,6 +123,13 @@ export interface ProjectLegalAuthorityArgs {
   ahjRecord: AhjRecord | null;
   confidence: number;
   resolverId: string;
+  /** MCC §4 — a PARCEL retrieval from a county assessor / GIS layer, when the
+   *  permit pipeline already performed one. The property-identity chain
+   *  (ATTOM → Census → Nominatim) publishes an APN only from ATTOM, but
+   *  `lib/aerial/parcelBoundary.ts` queries county parcel layers directly and
+   *  DOES return one. Its `source` is carried here so the APN is attributed to
+   *  the layer that actually published it, never to the geocoder. */
+  parcelRetrieval?: { apn: string | null; source: string | null } | null;
 }
 
 /**
@@ -158,13 +165,37 @@ export function buildProjectLegalAuthority(args: ProjectLegalAuthorityArgs): Pro
         'no official source returned a normalised address — the posted string stands unverified', posted.address);
 
   // ── APN — only a parcel source may establish one ──────────────────────────
+  // MCC §4: the property-identity chain publishes an APN only from ATTOM, but it
+  // is NOT the only parcel source the pipeline has. `fetchParcelBoundary`
+  // queries county assessor GIS layers directly and returns both an APN and the
+  // layer that published it. On the live Braidon parcel that layer is Madison
+  // County CCAO — the assessor of record for this very parcel — and it returns
+  // the same APN the project carries. Before this, that retrieval reached the
+  // grader as a bare string on `project.apn`, indistinguishable from a
+  // keystroke, so a machine-retrieved identifier was graded 'unverified-derived'
+  // under a basis sentence that read "no parcel record" while a parcel record
+  // had in fact just been read. The grading RULE is unchanged; what changed is
+  // that a real retrieval now arrives labelled as one.
+  const _retrievedApn = args.parcelRetrieval?.apn?.trim() || null;
+  const _retrievedApnSource = args.parcelRetrieval?.source?.trim() || null;
+  // A retrieved APN that CONTRADICTS the posted one is a real conflict, and gets
+  // the same treatment the county mismatch already gets — never a silent flip.
+  if (_retrievedApn && posted.apn && norm(_retrievedApn) !== norm(posted.apn)) {
+    confirmationRequired.push(
+      `the project record says APN "${posted.apn}" but ${_retrievedApnSource ?? 'the parcel layer'} publishes `
+      + `"${_retrievedApn}" for this location — the parcel identifier determines the legal description, so the engine may not pick one.`);
+  }
   const apn = id.parcelId
     ? fieldRec('verified', id.parcelId, id.providerUsed, `parcel identifier published by ${id.providerUsed} for this address`, posted.apn)
-    : posted.apn
-      ? fieldRec('unverified-derived', posted.apn, 'project-record',
-          'the posted APN was not confirmed against a parcel source (no ATTOM key / no parcel record) — never inferred', posted.apn)
-      : fieldRec('unknown', null, null,
-          'no parcel source in the chain published an APN for this address (only ATTOM does); it is left UNKNOWN, not inferred', null);
+    : (_retrievedApn && _retrievedApnSource && (!posted.apn || norm(_retrievedApn) === norm(posted.apn)))
+      ? fieldRec('verified', _retrievedApn, _retrievedApnSource,
+          `parcel identifier published by ${_retrievedApnSource} for this parcel`
+          + (posted.apn ? ' — it agrees with the identifier on the project record' : ''), posted.apn)
+      : posted.apn
+        ? fieldRec('unverified-derived', posted.apn, 'project-record',
+            'the posted APN was not confirmed against a parcel source (no ATTOM key / no parcel record) — never inferred', posted.apn)
+        : fieldRec('unknown', null, null,
+            'no parcel source in the chain published an APN for this address (only ATTOM does); it is left UNKNOWN, not inferred', null);
 
   // ── municipal boundary ─────────────────────────────────────────────────────
   const municipalBoundary = id.boundaryLayersResolved
@@ -183,7 +214,33 @@ export function buildProjectLegalAuthority(args: ProjectLegalAuthorityArgs): Pro
 
   // ── AHJ / fire authority consistency ──────────────────────────────────────
   const ahjType = args.ahjRecord?.ahjType ?? null;
-  const ahjName = posted.ahjName ?? args.ahjRecord?.ahjName ?? null;
+  // ── MCC §3 — THE NAME AND THE TYPE MUST COME FROM THE SAME SOURCE ─────────
+  // This was `posted.ahjName ?? args.ahjRecord?.ahjName`, so the printed NAME
+  // came from the project record while every consistency test below reads
+  // `ahjType` from the BOUND REGISTRY RECORD. On an unincorporated parcel whose
+  // registry match is the COUNTY, the city-vs-unincorporated guard at the first
+  // branch cannot fire (the bound type is 'county', not 'city'), so a posted
+  // mailing-city AHJ fell straight through to the `else` and was stamped
+  // VERIFIED — with a basis sentence that simultaneously asserted the parcel is
+  // unincorporated and the county is the authority of record.
+  //
+  // Live proof on Braidon: fields.ahjName.value was "City of Granite City
+  // Building & Zoning" marked 'verified', while the bound record was
+  // il-madison-county and codeAuthority.ahjName on the very same build said
+  // "Madison County Building & Zoning". One package, two authorities, and the
+  // wrong one carried the verification stamp.
+  //
+  // The boundary determination IS the resolution of "which authority governs
+  // this parcel", so where it resolved and bound a record, that record names the
+  // AHJ. The posted string is kept as postedValue and named in the basis, so the
+  // supersession is visible rather than silent. Nothing is inferred: with no
+  // bound record, or no resolved boundary, the posted value still stands.
+  const boundAhjName = args.ahjRecord?.ahjName ?? null;
+  const ahjSupersedesPosted = !!(id.boundaryLayersResolved && boundAhjName
+    && posted.ahjName && norm(posted.ahjName) !== norm(boundAhjName));
+  const ahjName = (id.boundaryLayersResolved && boundAhjName)
+    ? boundAhjName
+    : (posted.ahjName ?? boundAhjName ?? null);
   let ahjField: ProjectLegalFieldRecord;
   if (!ahjName) {
     ahjField = fieldRec('unknown', null, null, 'no AHJ is named on the project and none could be localised', null);
@@ -206,7 +263,12 @@ export function buildProjectLegalAuthority(args: ProjectLegalAuthorityArgs): Pro
       'the named county AHJ conflicts with an official incorporated-place boundary determination', ahjName);
   } else {
     ahjField = fieldRec('verified', ahjName, `${id.providerUsed} boundary determination`,
-      `the named AHJ is CONSISTENT with the official boundary determination: ${id.boundaryEvidence}`, ahjName);
+      ahjSupersedesPosted
+        ? `the AHJ of record is the registry authority bound by the official boundary determination (${id.boundaryEvidence}). `
+          + `The project record named "${posted.ahjName}", which the boundary determination supersedes — that value was `
+          + 'derived from the mailing address, not from a jurisdictional match.'
+        : `the named AHJ is CONSISTENT with the official boundary determination: ${id.boundaryEvidence}`,
+      posted.ahjName ?? ahjName);
   }
   // The fire authority derives with the building AHJ, exactly as the existing
   // ProjectAuthorityVerification models it — same state, stated as derived.

@@ -152,8 +152,19 @@ export const projectAuthorityResolver: RequirementResolver = {
         incorporatedPlace: res.value.incorporatedPlace,
       },
     });
+    // MCC §4 — the county-GIS parcel retrieval the permit pipeline already
+    // performed (lib/aerial/parcelBoundary.ts → aerialData.parcel). It carries
+    // the publishing layer in `source`; route.ts copies only the bare `apn`
+    // onto project.apn, so without this the retrieval reaches the grader
+    // stripped of its provenance and is graded as if it were typed in.
+    const _parcel = (ctx.input as { aerialData?: { parcel?: { apn?: string | null; source?: string | null } } })
+      ?.aerialData?.parcel ?? null;
+    const parcelRetrieval = _parcel?.apn
+      ? { apn: String(_parcel.apn), source: _parcel.source ? String(_parcel.source) : null }
+      : null;
     const record = buildProjectLegalAuthority({
       identity: res.value, posted, ahjRecord, confidence: res.confidence, resolverId: 'project-authority@v1',
+      parcelRetrieval,
     });
 
     // PROPAGATION — fill the project record from the retrieval where it was

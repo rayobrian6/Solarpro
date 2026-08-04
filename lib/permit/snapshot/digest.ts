@@ -23,13 +23,66 @@ function sortKeys(v: unknown): unknown {
   return v;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MCC §0 — RUN-INSTANT PROVENANCE IS NOT DESIGN CONTENT.
+//
+// Each of these records WHEN a resolver ran, never WHAT it found. They are real
+// evidence and stay in the stored snapshot; they are excluded from the DESIGN
+// digest because two builds of an unchanged design, twenty seconds apart, must
+// be the same design.
+//
+// THE DEFECT THIS CLOSES: the live Braidon package regenerated to a different
+// digest every single time — measured, two consecutive runs, 30 leaf diffs and
+// every one of them one of these keys. That made the digest-bound professional
+// approval unusable in production: a PE approves digest D, the operator
+// regenerates, the digest is D′, and the approval is dropped as "stale" by the
+// very mechanism built to protect it. It is the same defect class as the review
+// circularity — a fact about the act of BUILDING leaking into the identity of
+// the thing built.
+//
+// Adding a key here is a deliberate act. The guarantee that survives new keys is
+// the determinism test (tests/planset/mcc-snapshot-determinism.test.ts), which
+// builds the same design twice against a MOVING clock and compares digests, so
+// any future run-instant field fails the suite rather than silently returning.
+// EXACTLY the keys measured to vary between two consecutive builds of the
+// unchanged live Braidon design. Nothing speculative: `capturedAtIso` is NOT
+// here because it did NOT vary (it derives from the stable generation input),
+// and excluding a stable field would move every existing digest for no reason.
+const RUN_INSTANT_KEYS: ReadonlySet<string> = new Set([
+  'lastResolutionAttempt',   // registry payload — when resolution was last attempted
+  'atIso',                   // resolutionEvidence entries — when this evidence was produced
+  'attemptedAtIso',          // framing / document retrieval attempt instant
+  'startedAtIso',            // retrieval record start instant
+  'retrievedAtIso',          // per-source retrieval instant (the CONTENT hash carries identity)
+]);
+
+/** The sentinel a run-instant value collapses to for hashing. Never stored. */
+const RUN_INSTANT_SENTINEL = '<run-instant>';
+
+/** Replace run-instant provenance with a constant, recursively. Pure; the input
+ *  is never mutated, so the stored snapshot keeps its real timestamps. */
+function normalizeRunInstants(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(normalizeRunInstants);
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      out[k] = RUN_INSTANT_KEYS.has(k) && (typeof val === 'string' || val === null)
+        ? (val === null ? null : RUN_INSTANT_SENTINEL)
+        : normalizeRunInstants(val);
+    }
+    return out;
+  }
+  return v;
+}
+
 /** SHA-256 hex over the canonical JSON of the snapshot WITHOUT meta.digest /
- *  meta.snapshotId (they derive from this). */
+ *  meta.snapshotId (they derive from this) and WITHOUT run-instant provenance
+ *  (see above — the digest identifies the DESIGN, not the build that produced it). */
 export function computeSnapshotDigest(snapshot: Record<string, unknown>): string {
   const meta = { ...(snapshot.meta as Record<string, unknown>) };
   delete meta.digest;
   delete meta.snapshotId;
-  const body = { ...snapshot, meta };
+  const body = normalizeRunInstants({ ...snapshot, meta });
   return createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex');
 }
 
