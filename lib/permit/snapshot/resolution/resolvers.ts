@@ -24,7 +24,13 @@ import {
   findAppliedReconciliation,
 } from '@/lib/reconciliation/reconcile';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import type { RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation } from './types';
+// D4 — the curated jurisdiction resolution. No provider, no network: the same
+// derivation the pure snapshot build uses for codeAuthority.ahjRecordId.
+import { resolveAhjRecordTraced } from '../codeAuthority';
+import type {
+  RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation,
+  LegalJurisdictionAuthority,
+} from './types';
 import { buildResolutionAuditRef, documentSourceRefs } from './evidence';
 import {
   collectModuleSelectionCandidates, decideCanonicalSelection, buildCanonicalEquipmentAuthority,
@@ -86,8 +92,8 @@ export const projectAuthorityKeyResolver: RequirementResolver = {
   mode: 'AUTO_DERIVED',
   requirementCodes: [],
   requiredInputs: [],
-  produces: ['projectJurisdiction', 'framingProjectApplicabilityKey'],
-  description: 'Derives the AHJ/jurisdiction boundary and the project applicability key from the posted project record.',
+  produces: ['projectJurisdiction', 'framingProjectApplicabilityKey', 'legalJurisdiction'],
+  description: 'Derives the AHJ/jurisdiction boundary and the project applicability key from the posted project record, and establishes the CANONICAL legal AHJ from the curated jurisdiction table.',
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     const proj = (ctx.input.project ?? {}) as Record<string, unknown>;
     const jurisdiction: string | null =
@@ -95,6 +101,69 @@ export const projectAuthorityKeyResolver: RequirementResolver = {
       ?? (proj.ahjName as string | undefined)
       ?? (proj.state as string | undefined)
       ?? null;
+
+    // ── D4 — THE CANONICAL LEGAL AHJ, ESTABLISHED HERE AND NOWHERE LATER ────
+    // `jurisdiction` above is the POSTED record's answer. For the live Braidon
+    // project that is "City of Granite City Building & Zoning" — the MAILING
+    // city — while the parcel sits in unincorporated Madison County. Stamping a
+    // manufacturer document from it is how all four live registry rows came to
+    // carry the wrong governing authority.
+    //
+    // The retrieval resolvers that could correct it do not reliably run: BOTH
+    // `project-authority@v1` (needs a property-identity provider) and
+    // `code-authority@v1` (early-returns when the adoption retrieval finds no
+    // coverage) exit before publishing anything. On the live path neither
+    // reaches its patch, which is why the correction never propagated.
+    //
+    // `resolveAhjRecordTraced` needs no provider and no network. It is the same
+    // resolution the pure snapshot build already uses to produce
+    // `codeAuthority.ahjRecordId`, and it applies the boundary rule directly: a
+    // postal city is not a jurisdiction, so an unincorporated parcel resolves to
+    // the COUNTY record. Deriving it here — in the AUTO_DERIVED resolver that
+    // runs FIRST — makes the legal AHJ a precondition available to every
+    // document resolver, rather than an accident of retrieval ordering.
+    const _traced = resolveAhjRecordTraced({
+      ahjRecordId: (proj.ahjRecordId as string | undefined) ?? (proj.ahjId as string | undefined) ?? null,
+      ahjName: (proj.ahjName as string | undefined) ?? null,
+      stateCode: (proj.state as string | undefined) ?? null,
+      county: (proj.county as string | undefined) ?? null,
+      city: (proj.city as string | undefined) ?? null,
+      address: (proj.address as string | undefined) ?? null,
+    });
+    const _rec = _traced.record;
+    // ⚠ THIS DERIVATION IS NEVER 'verified'. It resolves a curated-table record
+    // from hints; it does NOT perform a municipal-boundary determination. Its
+    // match methods are 'explicit-record-id' | 'stored-ahj-name' |
+    // 'incorporated-city' | 'address-parse' | 'unresolved' — every one of which
+    // can be wrong in the exact way this defect was wrong. `explicit-record-id`
+    // is the most dangerous of them: on the live Braidon project the stored
+    // engineering_config carries `ahjId: 'il-icc'`, a stale value that would
+    // resolve "explicitly" to the wrong authority.
+    //
+    // So this publishes the legal AHJ for VISIBILITY and for the name-comparison
+    // fallback, and deliberately marks it UNVERIFIED. Only a real boundary
+    // determination (project-authority@v1, which sets 'verified') may authorise
+    // archiving a jurisdiction-bound document. An unverified derivation stamping
+    // a document is precisely the class of defect D4 exists to remove.
+    const legalJurisdiction: LegalJurisdictionAuthority | null = _rec
+      ? {
+          ahjRecordId: _rec.id,
+          ahjName: _rec.ahjName,
+          jurisdictionType: (_rec.ahjType as LegalJurisdictionAuthority['jurisdictionType']) ?? null,
+          stateCode: _rec.stateCode ?? ((proj.state as string | undefined) ?? null),
+          county: _rec.county ?? ((proj.county as string | undefined) ?? null),
+          unincorporated: _traced.incorporated == null ? null : !_traced.incorporated,
+          // the MAILING city, kept separate so display never reaches for the legal name
+          mailingCity: (proj.city as string | undefined) ?? null,
+          provenance: {
+            source: 'project-authority-key@v1',
+            ref: `ahj-national:${_rec.id}`,
+            basis: `curated jurisdiction table · match method '${_traced.matchMethod}' `
+              + '· NOT a municipal-boundary determination',
+          },
+          verificationState: 'unverified',
+        }
+      : null;
     const applicabilityKey: string | null =
       ctx.projectId ?? (proj.apn as string | undefined) ?? (proj.address as string | undefined) ?? null;
     const missing: string[] = [];
@@ -107,7 +176,7 @@ export const projectAuthorityKeyResolver: RequirementResolver = {
         missing,
         reasons: missing.length ? ['the project record carries no jurisdiction / applicability key'] : [],
       },
-      patch: { projectJurisdiction: jurisdiction, framingProjectApplicabilityKey: applicabilityKey },
+      patch: { projectJurisdiction: jurisdiction, framingProjectApplicabilityKey: applicabilityKey, legalJurisdiction },
       sourceQueried: 'PermitInput.project (posted record)',
       sourceRefs: ['provenance:permit-input#project'],
       retryability: missing.length ? 'REQUIRES_INPUT' : 'NON_RETRYABLE',

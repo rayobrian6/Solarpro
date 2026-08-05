@@ -50,6 +50,7 @@ function rowToDocument(r: any): RegistryDocument {
     sha256: r.sha256 ?? null,
     source: r.source ?? null,
     jurisdictionBoundary: r.jurisdiction_boundary ?? null,
+    jurisdictionAuthorityId: r.jurisdiction_authority_id ?? null,
     applicabilityNotes: r.applicability_notes ?? null,
     status: r.status,
     supersedesId: r.supersedes_id ?? null,
@@ -82,6 +83,8 @@ export interface DocumentInput {
   sha256?: string | null;
   source?: string | null;
   jurisdictionBoundary?: string | null;
+  /** D4 — the STABLE legal-AHJ identity this document is bound to. */
+  jurisdictionAuthorityId?: string | null;
   applicabilityNotes?: string | null;
   status?: string;
   supersedesId?: string | null;
@@ -193,7 +196,7 @@ export async function createDocument(input: DocumentInput): Promise<RegistryDocu
     INSERT INTO manufacturer_document_registry (
       id, document_class, manufacturer_or_issuer, equipment_id, equipment_model_applicability,
       title, revision, document_date, archived_file_identity, archived_in_repo, sha256,
-      source, jurisdiction_boundary, applicability_notes, status, supersedes_id,
+      source, jurisdiction_boundary, jurisdiction_authority_id, applicability_notes, status, supersedes_id,
       extracted_claims, verification_state, reviewer, created_by,
       -- D5: these three were MISSING from this column list entirely, which is
       -- exactly how a terminally-verified row with a NULL verifier was created.
@@ -203,7 +206,7 @@ export async function createDocument(input: DocumentInput): Promise<RegistryDocu
       ${input.equipmentModelApplicability ?? null}, ${input.title}, ${input.revision ?? null},
       ${input.documentDate ?? null}, ${input.archivedFileIdentity ?? null},
       ${input.archivedInRepo ?? false}, ${input.sha256 ?? null}, ${input.source ?? null},
-      ${input.jurisdictionBoundary ?? null}, ${input.applicabilityNotes ?? null},
+      ${input.jurisdictionBoundary ?? null}, ${input.jurisdictionAuthorityId ?? null}, ${input.applicabilityNotes ?? null},
       ${input.status ?? 'draft'}, ${input.supersedesId ?? null}, ${claimsJson},
       ${input.verificationState ?? 'unverified'}, ${input.reviewer ?? null}, ${input.createdBy ?? null},
       ${verifiedBy}, ${verifiedAt}, ${verificationNotes}
@@ -408,6 +411,9 @@ export function toRackingClearanceEvidence(
     loadBasis: s?.loadBasis ?? null,
     adjustmentFactors: s?.adjustmentFactors ?? null,
     jurisdiction: s?.jurisdiction ?? doc.jurisdictionBoundary ?? null,
+    // D4 — carry the STABLE identity through so the clearance evaluator can
+    // compare ids rather than prose. NULL for rows archived before migration 119.
+    jurisdictionAuthorityId: doc.jurisdictionAuthorityId ?? null,
     asdAllowableLbs: s?.asdAllowableLbs ?? null,
     revisionOrDate: doc.revision ?? doc.documentDate ?? null,
   };

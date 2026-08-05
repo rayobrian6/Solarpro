@@ -121,6 +121,11 @@ export interface RegistryDocument {
   sha256: string | null;
   source: string | null;
   jurisdictionBoundary: string | null;
+  /** D4 — STABLE legal-AHJ identity (ahj_registry record id). THE key for
+   *  jurisdiction applicability; jurisdictionBoundary is the display name.
+   *  NULL on rows written before migration 119, and optional on the type so a
+   *  pre-119 read model still satisfies it. `rowToDocument` always populates it. */
+  jurisdictionAuthorityId?: string | null;
   applicabilityNotes: string | null;
   status: DocumentStatus;
   supersedesId: string | null;

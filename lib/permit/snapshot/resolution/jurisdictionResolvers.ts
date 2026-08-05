@@ -22,7 +22,10 @@ import { retryabilityFor } from '@/lib/providers/types';
 import { normalizeRiskCategory, type AsceEdition } from '@/lib/providers/climateHazard/types';
 import { AHJ_REGISTRY_ENDPOINT, AHJ_REGISTRY_TOKEN_ACTION } from '@/lib/jurisdictions/ahjRegistry';
 import { upsertAhjRegistryRow } from '@/lib/jurisdictions/internalAhjRegistry';
-import type { RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation } from './types';
+import type {
+  RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation,
+  LegalJurisdictionAuthority,
+} from './types';
 import { buildResolutionAuditRef } from './evidence';
 import {
   buildProjectLegalAuthority, buildCodeAdoptionAuthority, missingAdoptionEditions,
@@ -203,6 +206,40 @@ export const projectAuthorityResolver: RequirementResolver = {
       }
     }
 
+    // ── D4 — PUBLISH THE CANONICAL LEGAL JURISDICTION ONTO THE BUNDLE ───────
+    // This resolver has always KNOWN the legal AHJ — it corrects `p.ahjName` and
+    // `p.ahjRecordId` a few lines above. What it never did was put that answer
+    // where a downstream document resolver could reach it: it patched only
+    // `projectLegalAuthority`, while `authority.projectJurisdiction` kept the
+    // posted, mailing-derived value frozen by `project-authority-key@v1`. The
+    // lifecycle stabilises in one iteration, so the correction never propagated,
+    // and every manufacturer document was stamped with the mailing city.
+    //
+    // `verificationState` is deliberately conservative: only a VERIFIED municipal
+    // boundary may stamp a document. Anything else and the document resolver
+    // refuses rather than guessing — see structuralResolvers.
+    const _legalVerified = record.fields.municipalBoundary.state === 'verified'
+      && record.fields.ahjName.state === 'verified';
+    const legalJurisdiction: LegalJurisdictionAuthority = {
+      ahjRecordId: str(p.ahjRecordId) ?? ahjRecord?.id ?? null,
+      ahjName: str(p.ahjName) ?? ahjRecord?.ahjName ?? null,
+      jurisdictionType: (ahjRecord?.ahjType as LegalJurisdictionAuthority['jurisdictionType']) ?? null,
+      stateCode: str(p.state) ?? record.normalized.stateFips ?? null,
+      county: record.normalized.county ?? str(p.county) ?? null,
+      unincorporated: record.unincorporated,
+      // The MAILING city stays a first-class, separately-named fact so address
+      // display never has to reach for the legal name.
+      mailingCity: posted.city ?? str(p.city) ?? null,
+      provenance: {
+        source: 'project-authority@v1',
+        ref: `authority:project-legal#${record.sourceHash.slice(0, 16)}`,
+        basis: record.boundaryEvidence,
+      },
+      verificationState: record.confirmationRequired.length
+        ? 'conflict'
+        : (_legalVerified ? 'verified' : 'unverified'),
+    };
+
     const refs = [
       `authority:project-legal#${record.sourceHash.slice(0, 16)}`,
       ...res.sourcesQueried.map(u => `provenance:${u}`),
@@ -228,7 +265,7 @@ export const projectAuthorityResolver: RequirementResolver = {
       return {
         result: 'FAILED',
         clearance: { cleared: false, missing: record.confirmationRequired, reasons: record.confirmationRequired },
-        patch: { projectLegalAuthority: record },
+        patch: { projectLegalAuthority: record, legalJurisdiction },
         sourceQueried: res.sourcesQueried.join(' · '),
         sourceRefs: refs,
         retryability: 'REQUIRES_INPUT',
@@ -248,7 +285,7 @@ export const projectAuthorityResolver: RequirementResolver = {
       return {
         result: 'FAILED',
         clearance: { cleared: false, missing: unverified, reasons: unverified },
-        patch: { projectLegalAuthority: record },
+        patch: { projectLegalAuthority: record, legalJurisdiction },
         sourceQueried: res.sourcesQueried.join(' · '),
         sourceRefs: refs,
         retryability: 'RETRYABLE',
@@ -266,7 +303,7 @@ export const projectAuthorityResolver: RequirementResolver = {
     return {
       result: 'RESOLVED',
       clearance: { cleared: true, missing: [], reasons: [] },
-      patch: { projectLegalAuthority: record },
+      patch: { projectLegalAuthority: record, legalJurisdiction },
       sourceQueried: res.sourcesQueried.join(' · '),
       sourceRefs: refs,
       retryability: 'NON_RETRYABLE',

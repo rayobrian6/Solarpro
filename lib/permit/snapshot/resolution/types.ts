@@ -215,11 +215,64 @@ export interface RequirementResolutionState {
 // and the bundle cannot drift; authorityInputs re-exports it verbatim).
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// D4 — THE CANONICAL LEGAL JURISDICTION, AVAILABLE BEFORE ANY DOCUMENT IS
+// ARCHIVED.
+//
+// `projectJurisdiction` (below) is produced by `project-authority-key@v1`, an
+// AUTO_DERIVED resolver that runs FIRST and reads the POSTED project record:
+//     compliance.jurisdiction.ahj ?? project.ahjName ?? project.state
+// On the live Braidon project that is the MAILING-derived value, "City of
+// Granite City Building & Zoning".
+//
+// `project-authority@v1` later determines the real legal AHJ from the parcel
+// boundary — Madison County, unincorporated — and corrects `project.ahjName` /
+// `project.ahjRecordId` on the INPUT. But it patches only `projectLegalAuthority`
+// onto the bundle; it never updates `projectJurisdiction`. The live lifecycle
+// stabilises in ONE iteration, so nothing ever corrects it.
+//
+// `structuralResolvers` then stamped `jurisdictionBoundary` from
+// `projectJurisdiction`, which is how all four live registry rows came to carry
+// the mailing city instead of the legal AHJ — and why verifying them would still
+// fail the clearance comparison.
+//
+// This record is the canonical answer, carried explicitly so a document resolver
+// can REFUSE rather than fall back. A free-text name is a display projection;
+// `ahjRecordId` is the identity.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface LegalJurisdictionAuthority {
+  /** STABLE identity — the ahj_registry / curated-table record id. THE key. */
+  ahjRecordId: string | null;
+  /** canonical legal AHJ name. A DISPLAY projection, never the primary key. */
+  ahjName: string | null;
+  jurisdictionType: 'county' | 'city' | 'township' | 'state' | 'other' | null;
+  stateCode: string | null;
+  county: string | null;
+  /** true ⇒ positively outside any incorporated municipality (county governs). */
+  unincorporated: boolean | null;
+  /** the MAILING city. Carried so address display never has to reach for the
+   *  legal name, and so the two can never be silently conflated again. */
+  mailingCity: string | null;
+  /** which resolver established this, and from what. */
+  provenance: { source: string; ref: string | null; basis: string } | null;
+  /** 'verified' only when the boundary determination itself is verified. A
+   *  document may not be stamped from an unverified jurisdiction. */
+  verificationState: 'verified' | 'unverified' | 'conflict' | 'unresolved';
+}
+
 /** The authority inputs resolved async and threaded into the sync build. */
 export interface SnapshotAuthorityInputs {
   /** VERIFIED racking-capacity document for the selected mount (or null). */
   capacityDocument: RackingCapacityDocumentEvidence | null;
-  /** project jurisdiction / AHJ applicability boundary. */
+  /** D4 — the CANONICAL legal jurisdiction. Document resolvers must use this and
+   *  refuse when it is unresolved; they may NOT fall back to
+   *  `projectJurisdiction`, which is posted-record-derived. */
+  legalJurisdiction: LegalJurisdictionAuthority | null;
+  /** project jurisdiction / AHJ applicability boundary.
+   *  ⚠ POSTED-RECORD DERIVED (project-authority-key@v1). Retained for the
+   *  consumers that legitimately want "what the project record says", but it is
+   *  NOT the legal AHJ and must never stamp a document. See `legalJurisdiction`. */
   projectJurisdiction: string | null;
   /** required manufacturer documents archived. null ⇒ unresolved (DB unavailable
    *  or no matching verified document) ⇒ ISSUED-FOR-PERMIT precondition NOT

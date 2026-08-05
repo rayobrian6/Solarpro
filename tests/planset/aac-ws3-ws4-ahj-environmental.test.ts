@@ -915,7 +915,7 @@ describe('AAC WS-3 / WS-4 · a run with no retrieval is byte-identical to the pr
     const digestA = ((a as any)._snapshot as PermitDesignSnapshot).meta.digest;
     const b = braidonInput();
     generatePermitHTML(b, undefined, {
-      capacityDocument: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
+      capacityDocument: null, legalJurisdiction: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
       digestInvalidatedByLedger: false, digestInvalidations: [],
       framingCapacityDocument: null, framingProjectApplicabilityKey: null,
       cableExtensionSolutions: [], qcableServiceLoopAllowance: null, environmentalSource: null,

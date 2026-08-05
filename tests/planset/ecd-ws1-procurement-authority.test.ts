@@ -38,7 +38,7 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 /** SYNTHETIC, clearly-labelled, STRICTER-ONLY allowance (as the RGM harness). */
 const INSUFFICIENT_AUTHORITY: SnapshotAuthorityInputs = {
-  capacityDocument: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
+  capacityDocument: null, legalJurisdiction: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
   digestInvalidatedByLedger: false, digestInvalidations: [],
   framingCapacityDocument: null, framingProjectApplicabilityKey: null,
   cableExtensionSolutions: [],

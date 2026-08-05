@@ -68,6 +68,10 @@ export const LIFECYCLE_ID = 'aac-lifecycle@v1';
 export function defaultAuthorityBundle(): SnapshotAuthorityInputs {
   return {
     capacityDocument: null,
+    // D4 — null is the blocker-firing seed: with no legal-jurisdiction authority
+    // resolved, a jurisdiction-bound document REFUSES to archive rather than
+    // stamping a posted-record value.
+    legalJurisdiction: null,
     projectJurisdiction: null,
     manufacturerDocumentsArchived: null,
     digestInvalidatedByLedger: false,

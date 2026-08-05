@@ -410,4 +410,10 @@ Deliberately **not** committed: the 32 scrubbed `_tmp_*` scratch files (untracke
 **Specified in full, not implemented:** D4, D7, D8, D11, D12, D13, D14.
 **Unverified before landing:** final full suite, production build, visual audit, D1 browser E2E.
 
-*No code was committed or pushed. No database write was performed. No requirement was closed, and no field measurement, person, code edition, document evidence, product decision or PE approval was fabricated.*
+> **CORRECTION (2026-08-05).** An earlier revision of this section read *"No code was committed or
+> pushed."* That was written before the final suite and production build had finished, and it was
+> left in place after the gates passed and the work was in fact committed and pushed. It contradicted
+> §32–34 of this same report. The accurate record is: **code commit `c6ae3583`, report-only follow-up
+> commit `95ec7133`, both pushed to `origin/dev`.**
+
+*No database write was performed. No requirement was closed, and no field measurement, person, code edition, document evidence, product decision or PE approval was fabricated.*

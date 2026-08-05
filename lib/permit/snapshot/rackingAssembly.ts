@@ -177,7 +177,11 @@ export interface RackingCapacityDocumentEvidence {
   railLFootAssembly: string | null;          // rail / L-foot assembly covered
   loadBasis: string | null;                  // load basis (must resolve to an ASD allowable)
   adjustmentFactors: Record<string, unknown> | null; // adjustment factors
-  jurisdiction: string | null;               // jurisdiction / applicability boundary
+  jurisdiction: string | null;               // jurisdiction / applicability boundary (DISPLAY name)
+  /** D4 — STABLE legal-AHJ identity the document is bound to (ahj_registry id).
+   *  When present on BOTH sides this is THE comparison; the name is a fallback
+   *  for rows archived before migration 119. */
+  jurisdictionAuthorityId?: string | null;
   asdAllowableLbs: number | null;            // the allowable value the doc establishes
   revisionOrDate: string | null;
 }
@@ -187,7 +191,24 @@ export interface RackingClearanceContext {
   mountModel: string;
   requiredSubstrate?: string | null;
   requiredRail?: string | null;
+  /** the project's legal AHJ DISPLAY name. */
   projectJurisdiction?: string | null;
+  /** D4 — the project's STABLE legal-AHJ identity (ahj_registry record id). */
+  projectJurisdictionAuthorityId?: string | null;
+}
+
+/** D4 — normalise a jurisdiction NAME for the compatibility comparison.
+ *  Case, whitespace and the ampersand/"and" spelling are presentation, not
+ *  identity: "Madison County Building & Zoning" and "Madison County Building and
+ *  Zoning" are the same authority. Punctuation is dropped for the same reason.
+ *  This is a FALLBACK — it exists only for rows archived before the stable id. */
+export function normalizeJurisdictionName(s: string | null | undefined): string {
+  return (s ?? '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[.,''`"()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export interface RackingClearanceResult {
@@ -264,9 +285,34 @@ export function evaluateRackingCapacityClearance(
   if (!evidence.adjustmentFactors || Object.keys(evidence.adjustmentFactors).length === 0) {
     fail('adjustment_factors', 'adjustment factors not stated');
   }
-  if (!norm(evidence.jurisdiction)) fail('jurisdiction', 'jurisdiction / applicability boundary not stated');
-  else if (ctx.projectJurisdiction && norm(evidence.jurisdiction) !== norm(ctx.projectJurisdiction)) {
-    fail('jurisdiction', `document jurisdiction '${evidence.jurisdiction}' is not confirmed for the project jurisdiction '${ctx.projectJurisdiction}'`);
+  // ── D4 — JURISDICTION IS AN IDENTITY, NOT A SENTENCE ────────────────────
+  // This compared two free-text strings with a bare lowercase/trim. Two things
+  // were wrong with that. It could be defeated by an ampersand — "Madison County
+  // Building & Zoning" vs "… and Zoning" are the same authority — and it was
+  // being handed the MAILING city, because that is what the document rows were
+  // stamped with.
+  //
+  // Stable identity governs when both sides carry it. The name comparison
+  // survives only as a compatibility path for rows archived before migration
+  // 119, and it is normalised so presentation cannot decide applicability.
+  // Absent identity on BOTH sides with no name is still a failure: fail closed.
+  const _docAhjId = (evidence.jurisdictionAuthorityId ?? '').trim();
+  const _projAhjId = (ctx.projectJurisdictionAuthorityId ?? '').trim();
+  if (_docAhjId && _projAhjId) {
+    if (_docAhjId !== _projAhjId) {
+      fail('jurisdiction',
+        `document is bound to legal AHJ '${_docAhjId}', not the project's '${_projAhjId}'`);
+    }
+  } else if (!norm(evidence.jurisdiction)) {
+    fail('jurisdiction', 'jurisdiction / applicability boundary not stated');
+  } else if (ctx.projectJurisdiction
+      && normalizeJurisdictionName(evidence.jurisdiction) !== normalizeJurisdictionName(ctx.projectJurisdiction)) {
+    fail('jurisdiction',
+      `document jurisdiction '${evidence.jurisdiction}' is not confirmed for the project jurisdiction `
+      + `'${ctx.projectJurisdiction}'`
+      + (_docAhjId || _projAhjId
+          ? ' (compared by name — one side carries no stable AHJ identity)'
+          : ''));
   }
   if (evidence.asdAllowableLbs == null || !(evidence.asdAllowableLbs > 0)) {
     fail('asd_allowable_value', 'document does not establish a positive ASD allowable capacity');

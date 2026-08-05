@@ -128,6 +128,32 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
       providerConfigured: provider ? provider.isConfigured() : false,
     };
 
+    // ══ D4 — ARCHIVAL, NOT RETRIEVAL, IS WHAT DEPENDS ON THE LEGAL AHJ ══════
+    // The defect was in the STAMP: `jurisdictionBoundary` came from
+    // `ctx.authority.projectJurisdiction`, which the AUTO_DERIVED
+    // `project-authority-key@v1` builds from the POSTED project record. On the
+    // live Braidon project that is the MAILING city — "City of Granite City
+    // Building & Zoning" — while the legal AHJ is Madison County,
+    // unincorporated. All four live registry rows carry the mailing value.
+    //
+    // A later pass CANNOT repair it: the document id is content-derived
+    // (sourceId + sha256), so a re-run finds the row that already exists and
+    // leaves its jurisdiction untouched. The wrong write must never happen.
+    //
+    // But FETCHING BYTES has nothing to do with jurisdiction. Refusing the whole
+    // resolver would have thrown away the retrieval evidence — the attempt
+    // record, the hash, the soft-404 detection — which is exactly what the WS-8
+    // evidence contract exists to preserve. So retrieval proceeds unconditionally
+    // and only the ARCHIVAL step is gated, below, at the point where a
+    // jurisdiction is actually written.
+    const legal = ctx.authority.legalJurisdiction ?? null;
+    const legalUsable = !!legal && legal.verificationState === 'verified' && !!legal.ahjRecordId;
+    const legalRefusal = !legal
+      ? 'no legal-jurisdiction authority was resolved for this run'
+      : (legal.verificationState !== 'verified'
+          ? `the legal jurisdiction is '${legal.verificationState}', not verified`
+          : 'the legal jurisdiction carries no stable ahjRecordId');
+
     const sources = sourcesForEquipment(mountId);
     if (!mount || sources.length === 0) {
       record.residual.push(mount
@@ -223,7 +249,15 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
         );
         const _alreadyArchived = preExisting.ok && preExisting.value != null
           && preExisting.value.sha256 === doc.sha256;
-        const archive = _alreadyArchived
+        // ── D4 — THE ARCHIVAL GATE ────────────────────────────────────────
+        // This is the only step that writes a jurisdiction. Without a verified
+        // legal AHJ the write is REFUSED — never stamped from a fallback. The
+        // document was still retrieved and its evidence is still recorded, so
+        // nothing is hidden; what does not happen is an immutable row being
+        // created under a jurisdiction that can never be corrected.
+        const archive = (!_alreadyArchived && !legalUsable)
+          ? { ok: false as const, value: null, error: `ARCHIVAL REFUSED — ${legalRefusal}` }
+          : _alreadyArchived
           ? { ok: true as const, value: preExisting.value!, error: null }
           : await ctx.safeDbRead(
           `createDocument(${source.documentClass})`,
@@ -242,7 +276,12 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
             archivedInRepo: true,
             sha256: doc.sha256,
             source: doc.finalUrl,
-            jurisdictionBoundary: ctx.authority.projectJurisdiction ?? (stateCode ? `US-${stateCode}` : null),
+            // D4 — the CANONICAL legal AHJ, never the posted/mailing value. The
+            // guard above guarantees `legal` is present, verified and carries a
+            // stable ahjRecordId, so there is no fallback here by design: a
+            // fallback is how the mailing city got stamped in the first place.
+            jurisdictionBoundary: legal!.ahjName,
+            jurisdictionAuthorityId: legal!.ahjRecordId,
             applicabilityNotes: source.notes,
             status: 'current',
             // NOT VERIFIED. Retrieval establishes existence + bytes, never
@@ -263,10 +302,18 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
           sha256: doc.sha256, retrievedAtIso: doc.retrievedAtIso,
           failure: null,
           archival: {
-            attempted: true,
+            // D4 — `attempted` is false when the archival was REFUSED on the
+            // legal-jurisdiction precondition: nothing was tried, so recording an
+            // attempt would misdescribe it.
+            attempted: legalUsable || _alreadyArchived,
             documentId: archive.ok && archive.value ? archive.value.id : null,
             failure: archive.ok ? null : archive.error,
-            operatorAction: archive.ok ? null : ARCHIVE_FAILURE_ACTION,
+            operatorAction: archive.ok
+              ? null
+              : (legalUsable
+                  ? ARCHIVE_FAILURE_ACTION
+                  : 'Establish the project legal AHJ (parcel boundary determination), then regenerate — '
+                    + 'a jurisdiction-bound document is not archived until the governing authority is known.'),
           },
           coversSelectedModel, notes: source.notes,
         });
