@@ -272,7 +272,26 @@ over every `.page` container plus direct inspection of PV-0, RS-1, E-1, PE-1.
 
 ## 21–24. Commit / push / artifact
 
-*(recorded on completion)*
+- **Commit:** `d6ae79fb4b836f47fe0e9009cd8d98b753157877` (3 files, +606).
+- **Push:** `3cabc3c3..d6ae79fb  dev -> dev`.
+- **`HEAD == origin/dev`:** ✅ both `d6ae79fb4b836f47fe0e9009cd8d98b753157877` after `git fetch --prune`.
+- **No credential committed** — the staged files were scanned for the compromised secret before commit.
+- **Final artifact:** `_tmp_pa_shots/braidon_final.pdf` (25 sheets) +
+  `_tmp_pa_shots/braidon_final_shots/*.png`; snapshots `_tmp_pr_pa_before_*.{html,snapshot.json}`;
+  determinism evidence `_tmp_la_determinism.json`.
+
+### Reproduce
+
+```bash
+npx tsx _tmp_pr_baseline.ts                       # live Braidon, 3 profiles (TAG=…)
+npx tsx _tmp_la_determinism.ts                    # three-run live determinism proof (read-only)
+npx vitest run tests/planset/pa-ws5-handlers.test.ts
+npx vitest run tests/planset/prr-release-reachability.test.ts
+npx vitest run --maxWorkers 3
+node scripts/ws5-pdf-and-shots.mjs _tmp_pr_pa_before_full.html _tmp_pa_shots/braidon_final
+npx tsx _tmp_la_audit.ts _tmp_pr_pa_before_full.html
+NODE_OPTIONS=--max-old-space-size=8192 npm run build
+```
 
 ---
 
