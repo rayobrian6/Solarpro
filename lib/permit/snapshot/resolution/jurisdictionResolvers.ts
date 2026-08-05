@@ -708,7 +708,21 @@ export const environmentalAuthorityResolver: RequirementResolver = {
         applicabilityNotes: record.applicability,
         status: 'current',
         extractedClaims: claims as never,
+        // ── D5 — MACHINE VERIFICATION, DECLARED AS SUCH ────────────────────
+        // This row stays terminally verified (RG-3 must not regress): retrieving
+        // a published ASCE 7 hazard dataset at a coordinate is objective and
+        // reproducible, which is precisely what `climate_hazard_dataset` is
+        // allowed to be machine-verified for.
+        //
+        // What changes is that the machine now SAYS SO. Previously the resolver
+        // id went into `reviewer` — the ASSIGNED-reviewer column — and
+        // `createDocument` never wrote `verified_by` at all, so the row read as
+        // "verified by nobody". A resolver must never be indistinguishable from
+        // a human verifier.
         verificationState: 'verified',
+        verificationActor: record.resolverId,
+        verificationActorKind: 'resolver',
+        verificationBasis: 'MACHINE_GOVERNMENT_DATASET_RETRIEVAL',
         reviewer: record.resolverId,
         createdBy: record.resolverId,
       }),

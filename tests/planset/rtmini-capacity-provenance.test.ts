@@ -25,20 +25,44 @@ describe('W3.1 §4 — RT-MINI capacity provenance (records only in-repo-verifia
     expect(p.ultimateBasisRefusedForAsd).toBe(false);
     expect(p.fastenerPattern).toMatch(/2× 5\/16"/);
     expect(p.substrateInstallationCondition).toMatch(/2×4 DF-L #2/);
-    expect(p.jurisdictionApplicabilityBoundary).toMatch(/ASCE 7-10/);
+    // ── D3 (2026-08-05) — NO HARDCODED DESIGN BASIS ────────────────────────
+    // This used to assert the boundary text contained "ASCE 7-10", which came
+    // from a hardcoded literal reading "Source basis = ASCE 7-10, Kentucky".
+    // The archived letters are the ILLINOIS issues, so that string was doubly
+    // wrong. With no document supplied, the honest statement is that no
+    // jurisdiction is established — and nothing is inferred from the catalog.
+    expect(p.jurisdictionApplicabilityBoundary).toMatch(/No capacity document is selected/i);
+    expect(p.jurisdictionApplicabilityBoundary).not.toMatch(/Kentucky/i);
+    expect(p.jurisdictionApplicabilityBoundary).not.toMatch(/ASCE 7-10/);
     expect(p.adjustmentFactors.impliedUltimateToAllowableRatio).toBe(1.5);
     expect(String(p.adjustmentFactors.impliedRatioStatus)).toMatch(/UNVERIFIED/);
   });
 
-  it('records the source document as NOT archived (documentHash null, honest note)', () => {
+  // ── D3 — the module states what it KNOWS, not what it assumes ─────────────
+  // Previously: hashNote asserted "no PDF/datasheet file exists in this
+  // repository (searched docs/, public/, assets, _tesla_docs)". That is a claim
+  // about the ARCHIVE, which a pure function cannot make — and the live registry
+  // holds two archived, SHA-256'd RT-MINI II letters that contradict it.
+  it('with NO document, records nothing as SELECTED — and asserts nothing about the archive', () => {
     const d = a.capacityProvenance.sourceDocument;
     expect(d.documentHash).toBeNull();
     expect(d.archivedInRepo).toBe(false);
-    expect(d.hashNote).toMatch(/source-document-not-archived/);
-    expect(d.identity).toMatch(/PE-stamped structural letter/);
-    // ESR-3575 is explicitly disqualified as the capacity source
-    expect(d.identity).toMatch(/ESR-3575/);
-    expect(d.identity).toMatch(/EXCLUDES structural capacity/);
+    expect(d.identity).toBeNull();
+    expect(d.hashNote).toMatch(/no applicable verified capacity document is currently SELECTED/i);
+    // The false archive claim is gone.
+    expect(d.hashNote).not.toMatch(/no PDF/i);
+    expect(d.hashNote).not.toMatch(/searched docs\//i);
+    // …and it names the registry as the owner of that question.
+    expect(d.hashNote).toMatch(/manufacturer_document_registry/);
+  });
+
+  it('ESR-3575 is disqualified as the capacity source via the STRUCTURED role, not prose', () => {
+    // D6 — the disqualification used to live only inside a prose `identity`
+    // string while `capacitySource` still named ESR-3575.
+    expect(a.documentRoles.structuralCapacityAuthority.established).toBe(false);
+    expect(a.documentRoles.structuralCapacityAuthority.basis).toMatch(/excludes structural capacity/i);
+    expect(a.documentRoles.listingFlashingBasis.established).toBe(true);
+    expect(a.documentRoles.listingFlashingBasis.documentIdentity).toMatch(/ESR-3575/);
   });
 
   it('EXCLUDES the 900 lb "ultimate" registry records from allowable capacity', () => {

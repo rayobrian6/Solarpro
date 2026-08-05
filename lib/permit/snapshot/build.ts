@@ -775,7 +775,9 @@ export function buildPermitDesignSnapshot(
       label: 'Combiner load-break', description: 'Integral load-break disconnecting means at the combiner (NEC 690.13) where listed',
       conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
       constraints: [], upstreamObjectId: 'svc-combiner',
-      downstreamObjectId: rsd ? 'svc-rsd-initiator' : (isSupply ? 'svc-tap-conductors' : 'svc-fused-ocpd'),
+      // D10 — the fused OCPD is the next device in BOTH interconnection modes now;
+      // the tap conductors follow it rather than preceding it.
+      downstreamObjectId: rsd ? 'svc-rsd-initiator' : 'svc-fused-ocpd',
       deviceModel: null, electricalRole: 'pv-system-disconnect', utilityRole: null,
       fusedState: 'non-fused', lockable: true, rsdRole: 'none',
       provenance: { source: 'design (combiner integral load-break)' },
@@ -786,32 +788,38 @@ export function buildPermitDesignSnapshot(
         label: 'Rapid-shutdown initiator', description: 'PV rapid-shutdown initiation device (NEC 690.12) at the service location',
         conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
         constraints: [], upstreamObjectId: 'svc-combiner-loadbreak',
-        downstreamObjectId: isSupply ? 'svc-tap-conductors' : 'svc-fused-ocpd',
+        // D10 — see above: the fused OCPD, then the tap conductors.
+        downstreamObjectId: 'svc-fused-ocpd',
         deviceModel: null, electricalRole: 'rapid-shutdown', utilityRole: 'emergency-shutdown',
         fusedState: 'not-applicable', lockable: null, rsdRole: 'initiator',
         provenance: { source: 'design (NEC 690.12 rapid shutdown)' },
       });
     }
     const _afterRsd = rsd ? 'svc-rsd-initiator' : 'svc-combiner-loadbreak';
-    if (isSupply) {
-      objs.push({
-        objectId: 'svc-tap-conductors', type: 'tap-conductors',
-        label: 'Tap conductors', description: 'Tap point → fused AC disconnect; sized ≥ 125% of PV output current',
-        conductorSpec: feederGauge ? `${feederGauge} THWN-2${pvContA != null ? ` (≥ ${pvContA.toFixed(1)}A)` : ''}` : null,
-        ocpdRatingA: null,
-        lengthFt: null, lengthSource: 'unknown',
-        constraints: [{
-          code: 'NEC-705.11(C)-TAP-10FT',
-          description: 'Fused disconnect within 10 ft of the tap; tap-conductor length ≤ 10 ft',
-          limitFt: 10,
-          state: 'pending',
-        }],
-        upstreamObjectId: _afterRsd, downstreamObjectId: 'svc-fused-ocpd',
-        deviceModel: null, electricalRole: 'tap-conductors', utilityRole: null,
-        fusedState: 'not-applicable', lockable: null, rsdRole: 'none',
-        provenance: { source: 'design rule (tap-conductor length not measured)', note: 'FIELD-VERIFY ≤10ft' },
-      });
-    }
+    // ── D10 — THE TAP CONDUCTORS ARE THE EDGE THEIR OWN DESCRIPTION NAMES ────
+    // `svc-tap-conductors` is the object that OWNS the NEC 705.11(C) ≤10-ft
+    // constraint, and it described itself as "Tap point → fused AC disconnect".
+    // Its graph edges said something else: it was wired
+    //   rsd → tap-conductors → fused-ocpd → tap-point
+    // which places the tap conductors on the PV side of the fused disconnect
+    // rather than between the tap point and that disconnect. The constraint was
+    // therefore attached to a span that is not the tap run.
+    //
+    // Nothing rendered a wrong NUMBER, because the length is null and every
+    // consumer finds these objects by `type` / `objectId` — no code in the tree
+    // walks upstreamObjectId/downstreamObjectId, which is precisely why the
+    // mis-wiring survived. It would have produced a wrong length the moment any
+    // route derivation started traversing the chain.
+    //
+    // Corrected export-flow order (PV → utility), matching the direction the
+    // rest of this chain already uses:
+    //   … → rsd → fused-ocpd → tap-conductors → [utility-disconnect] → tap-point → meter → …
+    //
+    // The objects are also EMITTED in that order now, so the array reads as the
+    // chain it represents. This is digest-affecting: the edges are part of the
+    // signed design projection.
+    // The length stays null and the constraint stays `pending` — this repair
+    // does not, and must not, close TAP-CONDUCTOR-LENGTH-PENDING.
     // §9 — the SINGLE listed fused AC disconnect. When no separate utility
     // disconnect is specified (the residential norm), it is DUAL-PURPOSE: the
     // 705.11 tap OCPD AND the utility-accessible lockable disconnect. No phantom
@@ -826,8 +834,10 @@ export function buildPermitDesignSnapshot(
         : 'PV-system AC disconnecting means (NEC 690.13)',
       conductorSpec: null, ocpdRatingA: feederOcpd, lengthFt: null, lengthSource: 'not-applicable',
       constraints: [],
-      upstreamObjectId: isSupply ? 'svc-tap-conductors' : _afterRsd,
-      downstreamObjectId: isSupply ? 'svc-tap-point' : 'svc-meter',
+      // D10 — the fused OCPD now sits directly after the RSD/load-break in both
+      // cases; the tap conductors follow it, on the way to the tap point.
+      upstreamObjectId: _afterRsd,
+      downstreamObjectId: isSupply ? 'svc-tap-conductors' : 'svc-meter',
       deviceModel: _fusedModel, electricalRole: 'overcurrent-protection',
       utilityRole: (isSupply && !_separateUtilityDisconnect) ? 'utility-accessible-disconnect' : null,
       fusedState: 'fused', lockable: true, rsdRole: 'none',
@@ -836,13 +846,36 @@ export function buildPermitDesignSnapshot(
         ? ['705.11-tap-ocpd', 'utility-accessible-lockable-disconnect'] : null,
       provenance: { source: 'computeSystem tap OCPD', note: (isSupply && !_separateUtilityDisconnect) ? 'ONE listed device, dual role (no duplicate utility disconnect)' : undefined },
     });
+    // D10 — the tap conductors: the span from the fused AC disconnect to the tap
+    // point. Emitted here so the array order matches the electrical chain.
+    if (isSupply) {
+      objs.push({
+        objectId: 'svc-tap-conductors', type: 'tap-conductors',
+        label: 'Tap conductors', description: 'Tap point → fused AC disconnect; sized ≥ 125% of PV output current',
+        conductorSpec: feederGauge ? `${feederGauge} THWN-2${pvContA != null ? ` (≥ ${pvContA.toFixed(1)}A)` : ''}` : null,
+        ocpdRatingA: null,
+        lengthFt: null, lengthSource: 'unknown',
+        constraints: [{
+          code: 'NEC-705.11(C)-TAP-10FT',
+          description: 'Fused disconnect within 10 ft of the tap; tap-conductor length ≤ 10 ft',
+          limitFt: 10,
+          state: 'pending',
+        }],
+        upstreamObjectId: 'svc-fused-ocpd',
+        downstreamObjectId: _separateUtilityDisconnect ? 'svc-utility-disconnect' : 'svc-tap-point',
+        deviceModel: null, electricalRole: 'tap-conductors', utilityRole: null,
+        fusedState: 'not-applicable', lockable: null, rsdRole: 'none',
+        provenance: { source: 'design rule (tap-conductor length not measured)', note: 'FIELD-VERIFY ≤10ft' },
+      });
+    }
     // Optional SEPARATE utility disconnect — ONLY when the project specifies it.
     if (isSupply && _separateUtilityDisconnect) {
       objs.push({
         objectId: 'svc-utility-disconnect', type: 'utility-disconnect',
         label: 'Utility-accessible AC disconnect (separate)', description: 'Distinct lockable AC disconnect ahead of the point of interconnection (specified by the project/utility)',
         conductorSpec: null, ocpdRatingA: feederOcpd, lengthFt: null, lengthSource: 'not-applicable',
-        constraints: [], upstreamObjectId: 'svc-fused-ocpd', downstreamObjectId: 'svc-tap-point',
+        // D10 — follows the tap conductors, still immediately ahead of the tap point.
+        constraints: [], upstreamObjectId: 'svc-tap-conductors', downstreamObjectId: 'svc-tap-point',
         deviceModel: (typeof proj.utilityDisconnectModel === 'string' ? proj.utilityDisconnectModel : null),
         electricalRole: 'disconnecting-means', utilityRole: 'utility-accessible-disconnect',
         fusedState: 'non-fused', lockable: true, rsdRole: 'none',
@@ -855,7 +888,8 @@ export function buildPermitDesignSnapshot(
         label: 'Supply-side tap point', description: 'Line side of the service disconnecting means (NEC 705.11)',
         conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
         constraints: [],
-        upstreamObjectId: _separateUtilityDisconnect ? 'svc-utility-disconnect' : 'svc-fused-ocpd',
+        // D10 — the tap point is reached THROUGH the tap conductors.
+        upstreamObjectId: _separateUtilityDisconnect ? 'svc-utility-disconnect' : 'svc-tap-conductors',
         downstreamObjectId: 'svc-meter',
         deviceModel: null, electricalRole: 'interconnection-point', utilityRole: 'supply-side-tap',
         fusedState: 'not-applicable', lockable: null, rsdRole: 'none',

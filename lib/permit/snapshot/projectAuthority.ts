@@ -229,9 +229,28 @@ export function evaluateIssuedForPermitGate(input: IssuedForPermitGateInput): Is
       satisfied: input.projectIdentityValid,
       detail: input.projectIdentityValid ? 'project name is not a TEST project and a designer is present'
         : 'project name contains "TEST" or the designer/engineer-of-record is blank (§15d)' },
-    { id: 'blocking-validators', label: 'All blocking validators pass',
+    // ── D2 — THIS PRECONDITION NOW SAYS WHAT IT MEASURES ────────────────────
+    // It was labelled "All blocking validators pass" and rendered "blocking
+    // snapshot violation(s) present". It has never measured that. Its input is
+    // derived in build.ts from `permitReadiness.blockers` — the REQUIREMENT
+    // REGISTRY, minus the review-domain entries — not from
+    // validatePermitDesignSnapshot.
+    //
+    // On the live Braidon package the real validator returns ZERO violations
+    // while this precondition read false, so the sheet asserted a defect that
+    // did not exist and sent anyone debugging it looking for violations that
+    // were never there.
+    //
+    // It could not be rewired to the validator either: generatePermit.ts throws
+    // on any real blocking violation BEFORE the gate is evaluated, so by the
+    // time this runs there are always zero. Wiring it to the validator would
+    // make it a permanent `true` — a precondition that can never fail is not a
+    // gate. The honest fix is the accurate name.
+    { id: 'authority-gaps-cleared', label: 'Non-review authority gaps cleared',
       satisfied: input.blockingValidatorsPass,
-      detail: input.blockingValidatorsPass ? 'no blocking snapshot violations' : 'blocking snapshot violation(s) present' },
+      detail: input.blockingValidatorsPass
+        ? 'no unresolved non-review requirements'
+        : 'unresolved non-review requirement(s) in the release registry' },
     { id: 'equipment-identity', label: 'Equipment identity reconciled',
       satisfied: input.noEquipmentIdentityConflict,
       detail: input.noEquipmentIdentityConflict ? 'no equipment-identity conflict' : 'EQUIPMENT-IDENTITY-CONFLICT unresolved' },

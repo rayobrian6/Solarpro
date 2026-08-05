@@ -89,7 +89,29 @@ export interface DocumentInput {
   verificationState?: string;
   reviewer?: string | null;
   createdBy?: string | null;
+  // ── D5 — VERIFICATION REQUIRES A VERIFIER ────────────────────────────────
+  // `reviewer` is the ASSIGNED reviewer — a different fact from "who verified
+  // this, on what basis". The environmental resolver put its own id in
+  // `reviewer` and passed verificationState:'verified'; because createDocument
+  // never wrote `verified_by` at all, the result was a terminally-verified row
+  // with a NULL verifier. Both halves are fixed here.
+  /** Who verified. Required for terminal 'verified'. Never inferred from `reviewer`. */
+  verificationActor?: string | null;
+  /** Human or deterministic resolver. A resolver must never masquerade as a human. */
+  verificationActorKind?: 'human' | 'resolver' | null;
+  /** Why this counts as verification. Required for terminal 'verified'. */
+  verificationBasis?: string | null;
+  verificationNotes?: string | null;
 }
+
+/** Document classes whose verification may be established by a DETERMINISTIC
+ *  RESOLVER. Retrieval of a published government dataset is objective and
+ *  reproducible; licensed structural applicability is not. Every structural
+ *  class is deliberately absent — a machine may establish custody, never
+ *  licensed engineering applicability. */
+export const MACHINE_VERIFIABLE_DOCUMENT_CLASSES: readonly string[] = [
+  'climate_hazard_dataset',
+];
 
 export interface ValidationResult { ok: boolean; error?: string; }
 
@@ -121,6 +143,30 @@ export function validateDocumentInput(input: DocumentInput): ValidationResult {
   if (input.verificationState === 'verified' && !(input.archivedInRepo && input.sha256)) {
     return { ok: false, error: 'a document cannot be verified unless it is archived with a sha256' };
   }
+  // ── D5 — "VERIFIED BY NOBODY" IS NOT A LEGAL STATE ──────────────────────
+  // Custody (archived + hashed) is not verification. Terminal 'verified' now
+  // requires an auditable actor, the KIND of actor, and a stated basis — and a
+  // deterministic resolver may only verify the document classes where machine
+  // verification is objective.
+  if (input.verificationState === 'verified') {
+    if (!input.verificationActor || !String(input.verificationActor).trim()) {
+      return { ok: false, error: 'a document cannot be verified without a verificationActor — custody is not verification' };
+    }
+    if (input.verificationActorKind !== 'human' && input.verificationActorKind !== 'resolver') {
+      return { ok: false, error: "verificationActorKind must be 'human' or 'resolver' when verificationState is 'verified'" };
+    }
+    if (!input.verificationBasis || !String(input.verificationBasis).trim()) {
+      return { ok: false, error: 'a document cannot be verified without a stated verificationBasis' };
+    }
+    if (input.verificationActorKind === 'resolver'
+        && !MACHINE_VERIFIABLE_DOCUMENT_CLASSES.includes(input.documentClass)) {
+      return {
+        ok: false,
+        error: `document class '${input.documentClass}' may not be verified by a resolver — machine `
+          + 'retrieval establishes existence and bytes, never licensed applicability. A human verifier is required.',
+      };
+    }
+  }
   return { ok: true };
 }
 
@@ -133,12 +179,25 @@ export async function createDocument(input: DocumentInput): Promise<RegistryDocu
   const sql = await getDbReady();
   const id = input.id ?? randomUUID();
   const claimsJson = input.extractedClaims ? JSON.stringify(input.extractedClaims) : null;
+  // D5 — a verified row carries its verifier, the moment of verification, and the
+  // basis. A non-verified row carries none of them (no stale identity left behind).
+  const _verified = input.verificationState === 'verified';
+  const verifiedBy = _verified ? (input.verificationActor ?? null) : null;
+  const verifiedAt = _verified ? new Date().toISOString() : null;
+  const verificationNotes = _verified
+    ? [input.verificationBasis ? `basis=${input.verificationBasis}` : null,
+       input.verificationActorKind ? `actorKind=${input.verificationActorKind}` : null,
+       input.verificationNotes ?? null].filter(Boolean).join(' · ')
+    : (input.verificationNotes ?? null);
   const [row] = await sql`
     INSERT INTO manufacturer_document_registry (
       id, document_class, manufacturer_or_issuer, equipment_id, equipment_model_applicability,
       title, revision, document_date, archived_file_identity, archived_in_repo, sha256,
       source, jurisdiction_boundary, applicability_notes, status, supersedes_id,
-      extracted_claims, verification_state, reviewer, created_by
+      extracted_claims, verification_state, reviewer, created_by,
+      -- D5: these three were MISSING from this column list entirely, which is
+      -- exactly how a terminally-verified row with a NULL verifier was created.
+      verified_by, verified_at, verification_notes
     ) VALUES (
       ${id}, ${input.documentClass}, ${input.manufacturerOrIssuer}, ${input.equipmentId ?? null},
       ${input.equipmentModelApplicability ?? null}, ${input.title}, ${input.revision ?? null},
@@ -146,7 +205,8 @@ export async function createDocument(input: DocumentInput): Promise<RegistryDocu
       ${input.archivedInRepo ?? false}, ${input.sha256 ?? null}, ${input.source ?? null},
       ${input.jurisdictionBoundary ?? null}, ${input.applicabilityNotes ?? null},
       ${input.status ?? 'draft'}, ${input.supersedesId ?? null}, ${claimsJson},
-      ${input.verificationState ?? 'unverified'}, ${input.reviewer ?? null}, ${input.createdBy ?? null}
+      ${input.verificationState ?? 'unverified'}, ${input.reviewer ?? null}, ${input.createdBy ?? null},
+      ${verifiedBy}, ${verifiedAt}, ${verificationNotes}
     )
     RETURNING *
   `;

@@ -102,7 +102,16 @@ describe('W4 §9 — buildRackingAssembly consults the registry evidence', () =>
     const codes = a.structuralAuthorityGaps.map(g => g.code);
     expect(codes).toContain('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED');
     expect(codes).toContain('RACKING-CAPACITY-APPLICABILITY-GAP');
-    expect(a.capacityProvenance.sourceDocument.archivedInRepo).toBe(false);
+    // ── D3 (2026-08-05) — ARCHIVE STATE IS THE DOCUMENT'S, NOT AN ASSERTION ──
+    // This used to expect `false` unconditionally, because the module hardcoded
+    // archivedInRepo:false whenever the blockers stayed. That was the defect: the
+    // package denied the existence of archived, hashed registry documents.
+    // The brochure IS archived; it simply carries no structural capacity claim.
+    // The blockers still fire — for the RIGHT reason, which is what matters.
+    expect(a.capacityProvenance.sourceDocument.archivedInRepo).toBe(brochure.archivedInRepo);
+    expect(a.capacityProvenance.sourceDocument.documentHash).toBe(brochure.sha256);
+    // and the capacity role is still NOT established
+    expect(a.documentRoles.structuralCapacityAuthority.established).toBe(false);
   });
 
   it('CLEARS both blockers with a verified matching structural document', () => {

@@ -87,7 +87,26 @@ describe('W4 §8 — validateDocumentInput', () => {
   it('rejects an unknown class', () => expect(validateDocumentInput({ ...base, documentClass: 'brochure' }).ok).toBe(false));
   it('rejects archived without sha256', () => expect(validateDocumentInput({ ...base, archivedInRepo: true }).ok).toBe(false));
   it('rejects verifying an un-archived doc', () => expect(validateDocumentInput({ ...base, verificationState: 'verified' }).ok).toBe(false));
-  it('accepts verified when archived+hashed', () => expect(validateDocumentInput({ ...base, archivedInRepo: true, sha256: SHA, verificationState: 'verified' }).ok).toBe(true));
+  // ── D5 (2026-08-05) — CUSTODY IS NOT VERIFICATION ────────────────────────
+  // This case used to assert that archive+hash alone made a document verifiable.
+  // That was the hole: `createDocument` also omitted verified_by/verified_at
+  // from its INSERT, so the terminal state was reachable with no verifier, and
+  // the live climate row cedb14f7-… is `verified` with verified_by NULL.
+  // Terminal 'verified' now additionally requires an actor, an actor KIND, and a
+  // stated basis — and a resolver may only verify machine-verifiable classes.
+  it('REFUSES verified when archived+hashed but no verifier identity is supplied', () => {
+    const r = validateDocumentInput({ ...base, archivedInRepo: true, sha256: SHA, verificationState: 'verified' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/custody is not verification/i);
+  });
+
+  it('accepts verified when archived+hashed AND a human verifier with a basis is supplied', () => {
+    expect(validateDocumentInput({
+      ...base, archivedInRepo: true, sha256: SHA, verificationState: 'verified',
+      verificationActor: 'registrar-user-id', verificationActorKind: 'human',
+      verificationBasis: 'REGISTRAR_REVIEW',
+    }).ok).toBe(true);
+  });
 });
 
 describe('W4 §8 — toRackingClearanceEvidence', () => {
