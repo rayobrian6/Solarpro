@@ -3,9 +3,9 @@ import React, { useEffect, useState, Suspense } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import DesignStudio from '@/components/design/DesignStudio';
 import AddressAutocomplete, { type AddressSuggestion } from '@/components/ui/AddressAutocomplete';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import type { Project } from '@/types';
-import { Map, ArrowLeft, Plus, AlertCircle, RefreshCw, Zap, Loader2 } from 'lucide-react';
+import { Map, ArrowLeft, Plus, AlertCircle, RefreshCw, Zap, Loader2, Square, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/appStore';
 
@@ -36,6 +36,7 @@ function makeDemoProject(address: string, lat: number, lng: number): Project {
 
 // ── Quick Launch Panel ──────────────────────────────────────────────────────
 function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
+  const router = useRouter();
   const [address, setAddress] = useState('');
   const [geocoding, setGeocoding] = useState(false);
   const [error, setError] = useState('');
@@ -48,34 +49,36 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
     setError('');
   };
 
-  const handleLaunch = async (addr?: string) => {
+  // Resolve a project for the given address — uses the picked coords if
+  // available, otherwise geocodes the free-form text. Returns null on
+  // geocoding failure (caller falls back to US center).
+  const resolveProject = async (addr?: string): Promise<Project | null> => {
     const target = addr ?? address;
-    if (!target.trim()) { setError('Please enter an address'); return; }
+    if (!target.trim()) { setError('Please enter an address'); return null; }
     setError('');
-
-    // Fast path — user already selected a suggestion with coords
-    if (picked) {
-      onLaunch(makeDemoProject(target, picked.lat, picked.lng));
-      return;
-    }
-
-    // Slow path — geocode free-form text
+    if (picked) return makeDemoProject(target, picked.lat, picked.lng);
     setGeocoding(true);
     try {
       const res = await fetch(`/api/geocode?q=${encodeURIComponent(target)}&mode=autocomplete`);
       const data = await res.json();
       const first = data.success && data.data?.[0];
-      if (first) {
-        onLaunch(makeDemoProject(first.short_name || target, first.lat, first.lng));
-      } else {
-        // Design studio has its own address bar — launch with US center as fallback
-        onLaunch(makeDemoProject(target, 39.8283, -98.5795));
-      }
+      if (first) return makeDemoProject(first.short_name || target, first.lat, first.lng);
+      return makeDemoProject(target, 39.8283, -98.5795);
     } catch {
-      onLaunch(makeDemoProject(target, 39.8283, -98.5795));
+      return makeDemoProject(target, 39.8283, -98.5795);
     } finally {
       setGeocoding(false);
     }
+  };
+
+  const handleLaunch = async (addr?: string) => {
+    const p = await resolveProject(addr);
+    if (p) onLaunch(p);
+  };
+
+  const handleOutlineFirst = async (addr?: string) => {
+    const p = await resolveProject(addr);
+    if (p) router.push(`/design/outline?projectId=${p.id}`);
   };
 
   return (
@@ -101,6 +104,15 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
           autoFocus
         />
         <button
+          onClick={() => handleOutlineFirst()}
+          disabled={geocoding || !address.trim()}
+          className="btn-secondary px-4 flex items-center gap-2 whitespace-nowrap h-[38px]"
+          title="Draw the roof outline first, then continue to the 3D studio"
+        >
+          <Square size={14} />
+          Mark out roof
+        </button>
+        <button
           onClick={() => handleLaunch()}
           disabled={geocoding || !address.trim()}
           className="btn-primary px-4 flex items-center gap-2 whitespace-nowrap h-[38px]"
@@ -112,6 +124,8 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
       {error ? <p className="text-red-400 text-xs mt-2">{error}</p> : null}
       <p className="text-slate-500 text-xs mt-2">
         💡 Pick a suggestion to fly straight to the correct rooftop — no extra searching needed.
+        Or click <span className="text-amber-400 font-medium">Mark out roof</span> to draw
+        the roof outline first.
       </p>
     </div>
   );
