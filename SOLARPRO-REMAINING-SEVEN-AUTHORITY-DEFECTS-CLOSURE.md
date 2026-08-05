@@ -279,9 +279,21 @@ Net: **+1 test file, +11 tests, zero regressions.**
 > command chaining, not the tests: a trailing `grep -c` returns exit 1 when the
 > count is zero. Vitest itself exited 0. Verified before reporting.
 
-## 34. COMMITS, PUSH, PARITY
+## 34–36. COMMITS, PUSH, PARITY
 
-Recorded at the end of this document.
+| | |
+|---|---|
+| Baseline HEAD | `95ec7133` |
+| **Code commit (this phase)** | **`7afade1c`** — *Establish the legal AHJ before a document is archived…* |
+| Push | `95ec7133..7afade1c  dev -> dev` → `github.com/rayobrian6/Solarpro` |
+| Local HEAD after fetch | `7afade1c` |
+| `origin/dev` after fetch | `7afade1c` |
+| Divergence | **0 ahead / 0 behind — `HEAD == origin/dev`** |
+| Committed-secret guard | 12/12 pass |
+
+Prior phase, for the record: `c6ae3583` (code) and `95ec7133` (report-only) — both pushed. This phase adds one code commit; a report-only follow-up commit records these hashes.
+
+**Not committed:** all `_tmp_*` scratch and harness output (untracked; they read `.db_url` at runtime and embed no secret), and `next-env.d.ts` (a build artifact, restored).
 
 ## 37. FINAL ARTIFACT PATHS
 
