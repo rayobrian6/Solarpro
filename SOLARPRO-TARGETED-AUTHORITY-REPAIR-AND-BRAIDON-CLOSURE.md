@@ -357,23 +357,29 @@ All three gates passed (suite 429/9791 · TypeScript clean · production build �
 Change set:
 
 ```
- M app/engineering/page.tsx
- M lib/documents/registry.ts
- M lib/permit/sections/reviewStatus.ts
- M lib/permit/snapshot/build.ts
- M lib/permit/snapshot/projectAuthority.ts
- M lib/permit/snapshot/rackingAssembly.ts
- M lib/permit/snapshot/resolution/jurisdictionResolvers.ts
- M tests/planset/document-registry-resolver.test.ts
- M tests/planset/rtmini-blocker-clearance.test.ts
- M tests/planset/rtmini-capacity-provenance.test.ts
- ?? lib/http/contentDisposition.ts
- ?? tests/planset/tar-artifact-byte-stability.test.ts
- ?? tests/planset/tar-document-verification-policy.test.ts
- ?? tests/planset/tar-download-filename.test.ts
- ?? tests/planset/tar-racking-document-authority.test.ts
- ?? tests/planset/tar-tap-topology.test.ts
+ M app/engineering/page.tsx                                 M lib/permit/snapshot/rackingAssembly.ts
+ M lib/documents/registry.ts                                M lib/permit/snapshot/resolution/jurisdictionResolvers.ts
+ M lib/permit/sections/reviewStatus.ts                      M tests/planset/document-registry-resolver.test.ts
+ M lib/permit/snapshot/build.ts                             M tests/planset/rtmini-blocker-clearance.test.ts
+ M lib/permit/snapshot/projectAuthority.ts                  M tests/planset/rtmini-capacity-provenance.test.ts
+ A lib/http/contentDisposition.ts                           A tests/planset/tar-artifact-byte-stability.test.ts
+ A tests/planset/tar-download-filename.test.ts              A tests/planset/tar-document-verification-policy.test.ts
+ A tests/planset/tar-racking-document-authority.test.ts     A tests/planset/tar-tap-topology.test.ts
+ A SOLARPRO-SYSTEM-WIDE-AUTHORITY-PROPAGATION-AUDIT.md      A SOLARPRO-TARGETED-AUTHORITY-REPAIR-AND-BRAIDON-CLOSURE.md
 ```
+
+Deliberately **not** committed: the 32 scrubbed `_tmp_*` scratch files (untracked scratch, and they read `.db_url` at runtime), all `_tmp_*` harness output, and `next-env.d.ts` (a build artifact, restored).
+
+### Commit and push proof
+
+| | |
+|---|---|
+| Commit | **`c6ae3583`** |
+| Push | `b6572ed9..c6ae3583  dev -> dev` → `github.com/rayobrian6/Solarpro` |
+| Local HEAD after fetch | `c6ae3583` |
+| `origin/dev` after fetch | `c6ae3583` |
+| Divergence | **0 ahead / 0 behind — `HEAD == origin/dev`** |
+| Committed-secret guard | 12/12 pass |
 
 ## 35. FINAL BRAIDON ARTIFACTS
 
