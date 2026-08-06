@@ -201,7 +201,7 @@ export function baseSnapshot(): PermitDesignSnapshot {
       env: { ultimateWindSpeedMph: 115, windSpeedSource: 'test', exposureCategory: 'C', riskCategory: 'II',
              groundSnowPsf: 20, roofSnowPsf: 14, buildingHeightFt: 15, componentCladdingZones: [],
              upliftPressurePsf: null, downforcePressurePsf: null,
-             codeAuthority: { asceEdition: 'ASCE 7-22', source: 'pending-w4-ahj-authority' },
+             codeAuthority: { asceEdition: 'ASCE 7-22', source: 'engine-default', basis: null, ref: null, adoptedEdition: null, computedEdition: null, conflict: false, conflictDetail: null },
              environmentalLoadAuthority: {
                ultimateWindSpeedMph: 115, windSpeedBasis: 'operator-entered', riskCategory: 'II', exposureCategory: 'C',
                groundSnowLoadPsf: 20, snowLoadBasis: 'operator-entered', snowLoadSource: null,

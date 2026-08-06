@@ -40,7 +40,7 @@ const env = (): StructuralEnv => ({
   ultimateWindSpeedMph: 110, windSpeedSource: 'test', exposureCategory: 'C', riskCategory: 'II',
   groundSnowPsf: 20, roofSnowPsf: 4, buildingHeightFt: 15, componentCladdingZones: [],
   upliftPressurePsf: 20, downforcePressurePsf: 10,
-  codeAuthority: { asceEdition: 'ASCE 7-22', source: 'default' },
+  codeAuthority: { asceEdition: 'ASCE 7-22', source: 'engine-default', basis: null, ref: null, adoptedEdition: null, computedEdition: null, conflict: false, conflictDetail: null },
   environmentalLoadAuthority: {
     ultimateWindSpeedMph: 110, windSpeedBasis: 'operator-entered', riskCategory: 'II', exposureCategory: 'C',
     groundSnowLoadPsf: 20, snowLoadBasis: 'operator-entered', snowLoadSource: null,

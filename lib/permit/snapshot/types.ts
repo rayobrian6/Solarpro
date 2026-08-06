@@ -17,6 +17,7 @@ export type { StructuralBomRow, StructuralBomReconciliation } from './structural
 import type { StructuralReactionReconciliation } from './structuralEngine';
 export type { StructuralReactionReconciliation } from './structuralEngine';
 import type { CodeAuthorityRecord } from './codeAuthority';
+import type { AsceEditionSource } from './asceAuthority';
 export type { CodeAuthorityRecord, CodeEdition, CodeEditionKind, CodeVerificationStatus } from './codeAuthority';
 import type { ProjectAuthorityRecord } from './projectAuthority';
 export type { ProjectAuthorityRecord, ProjectIssueState } from './projectAuthority';
@@ -1356,9 +1357,22 @@ export interface StructuralEnv {
   componentCladdingZones: string[];
   upliftPressurePsf: number | null;
   downforcePressurePsf: number | null;
+  /** D13 — THE single ASCE decision, projected. `source` names an authority that
+   *  can actually supply an ASCE edition; the old union offered `'ahj-record'`,
+   *  and the curated AHJ table carries no ASCE edition, so that value could only
+   *  ever be a fabricated provenance. `adoptedEdition` vs `computedEdition`
+   *  separate the two questions that used to share this one field: what the
+   *  jurisdiction ADOPTS, and what the design values were COMPUTED under. */
   codeAuthority: {
     asceEdition: string | null;
-    source: 'ahj-record' | 'pending-w4-ahj-authority' | 'default';
+    source: AsceEditionSource;
+    basis: string | null;
+    ref: string | null;
+    adoptedEdition: string | null;
+    computedEdition: string | null;
+    /** true ⇔ adoption and computation name DIFFERENT editions. */
+    conflict: boolean;
+    conflictDetail: string | null;
   };
   /** §2 (BAR) — the canonical ENVIRONMENTAL LOAD AUTHORITY record. Operator-entered
    *  wind/snow/exposure are OBSERVATIONS/OVERRIDES, never verified design criteria

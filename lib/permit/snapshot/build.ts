@@ -21,6 +21,7 @@ import {
 } from './types';
 import { computeSnapshotDigest, snapshotIdFromDigest, deepFreeze } from './digest';
 import { buildCodeAuthority, resolveAhjRecordTraced } from './codeAuthority';
+import { resolveAsceEditionAuthority, type AsceEditionAuthority } from './asceAuthority';
 import {
   buildProjectAuthority, classifyBlockerDomain,
   type IssueStateReview, type IssuedForPermitGateInput,
@@ -981,6 +982,14 @@ export function buildPermitDesignSnapshot(
   const necRaw = String(compliance?.jurisdiction?.necVersion ?? '').replace(/^NEC\s*/i, '');
   const necFromRecord = /^(2017|2020|2023)$/.test(necRaw);
 
+  // D13 — the ASCE edition, decided ONCE from real authorities (adopted-code
+  // retrieval → hazard retrieval → engine default) and projected from here into
+  // BOTH structural.env.codeAuthority and codeAuthority.editions.asce.
+  const _asceAuthority = resolveAsceEditionAuthority({
+    codeAdoption: opts?.codeAdoptionAuthority ?? null,
+    environmentalRetrieval: opts?.environmentalRetrieval ?? null,
+  });
+
   const totalsPanels = geoModules.length || system?.totalPanels || 0;
   const dcWattsStc = geoModules.length && modules[0]?.spec.wattsStc
     ? geoModules.length * modules[0].spec.wattsStc
@@ -1067,8 +1076,15 @@ export function buildPermitDesignSnapshot(
     // `proj.date` fallback despite it being a localised date, not an ISO instant.
     environmentalCapturedAtIso: (input as any).generatedAtIso ?? proj.date ?? null,
     meanRoofHeightFt: roofSInput?.meanRoofHeight ?? null,
-    asceEdition: `ASCE ${necFromRecord ? '7-22' : '7-22'}`,
-    asceSource: necFromRecord ? 'ahj-record' : 'pending-w4-ahj-authority',
+    // D13 — ONE decision, from real authorities. This used to read
+    //   asceEdition: `ASCE ${necFromRecord ? '7-22' : '7-22'}`
+    //   asceSource:  necFromRecord ? 'ahj-record' : 'pending-w4-ahj-authority'
+    // — a ternary whose branches are identical, and a source that credited the
+    // curated AHJ table with a compiled-in constant. That table carries no ASCE
+    // edition; this record now names whichever authority actually supplied it.
+    asceEdition: _asceAuthority.label,
+    asceSource: _asceAuthority.source,
+    asceAuthority: _asceAuthority,
     ahjRidgeSetbackIn: (proj.ahjRidgeSetbackIn ?? proj.fireSetbackRidgeIn) ?? null,
     roofCovering: proj.roofType ?? null,
     fenceWind,
