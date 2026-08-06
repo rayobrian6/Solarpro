@@ -88,8 +88,22 @@ export const projectAuthorityResolver: RequirementResolver = {
   mode: 'AUTO_RETRIEVED',
   requirementCodes: ['PROJECT-AUTHORITY-UNVERIFIED'],
   requiredInputs: [],
-  produces: ['projectLegalAuthority'],
-  description: 'Retrieves the project\'s legal identity (normalised address, parcel/APN, county + FIPS, municipal boundary) from an official source and establishes the per-field verification states.',
+  // ── D4 LIFECYCLE — DECLARE WHAT YOU PATCH, OR THE LIFECYCLE DROPS IT ─────
+  // `legalJurisdiction` was computed here and placed in the outcome patch, but
+  // it was NOT declared. lifecycle.ts copies only declared keys:
+  //     for (const k of r.produces) { if (!(k in outcome.patch)) continue; … }
+  // so the verified boundary determination was discarded on every run, silently,
+  // and the bundle kept the DERIVED value from project-authority-key@v1. Because
+  // the archival gate requires 'verified', no document could ever be archived
+  // under the correct authority.
+  //
+  // The failure paths below (no provider, retrieval failed) deliberately do NOT
+  // patch this key. Omitting it leaves the derived value in place — which is the
+  // honest posture, since this resolver could not determine a boundary. Patching
+  // `null` there would destroy a usable (if unverified) authority and leave the
+  // name-comparison fallback with nothing to compare.
+  produces: ['projectLegalAuthority', 'legalJurisdiction'],
+  description: 'Retrieves the project\'s legal identity (normalised address, parcel/APN, county + FIPS, municipal boundary) from an official source, establishes the per-field verification states, and publishes the CANONICAL legal jurisdiction authority.',
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     const p = proj(ctx);
     const provider = ctx.providers.propertyIdentity ?? null;

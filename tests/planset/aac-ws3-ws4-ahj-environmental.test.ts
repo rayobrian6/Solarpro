@@ -509,7 +509,13 @@ describe('AAC WS-3 · A7 · a failed retrieval records the exact source, the exa
     const ids = PRODUCTION_RESOLVERS.map(r => r.id);
     expect(ids.indexOf('project-authority@v1')).toBeLessThan(ids.indexOf('code-authority@v1'));
     expect(codeAuthorityResolver.requiredInputs).toContain('projectLegalAuthority');
-    expect(projectAuthorityResolver.produces).toEqual(['projectLegalAuthority']);
+    // ── D4 (2026-08-05) — THIS RESOLVER ALSO PUBLISHES THE LEGAL JURISDICTION ─
+    // It used to declare `['projectLegalAuthority']` alone while ALSO returning
+    // `legalJurisdiction` in its patch. lifecycle.ts copies only declared keys,
+    // so the verified boundary determination was discarded on every run and the
+    // bundle kept the derived, unverified value. The declaration is the fix, and
+    // this assertion is what pins it.
+    expect(projectAuthorityResolver.produces).toEqual(['projectLegalAuthority', 'legalJurisdiction']);
     expect(projectAuthorityKeyResolver.mode).toBe('AUTO_DERIVED');
   });
 });

@@ -90,7 +90,14 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
   ],
   // Runs AFTER the registry LOOKUP (racking-capacity-document@v1): an already
   // archived, verified document is the durable cache and is never re-fetched.
-  requiredInputs: ['projectJurisdiction', 'capacityDocument'],
+  // ── D4 — ARCHIVAL DEPENDS ON THE LEGAL AHJ, NOT THE POSTED ONE ──────────
+  // This declared `projectJurisdiction`, the posted/mailing-derived value. That
+  // told the dependency graph the wrong thing twice over: a change to the real
+  // legal jurisdiction did not re-dirty this resolver, and the stale mailing
+  // value looked like a legitimate archival input. `projectJurisdiction` is NOT
+  // retained here — it has no non-archival use in this resolver, and keeping it
+  // would leave exactly the hidden fallback D4 exists to remove.
+  requiredInputs: ['legalJurisdiction', 'capacityDocument'],
   produces: ['structuralDocumentRetrieval', 'documentRegistryFacts'],
   description:
     'Retrieves the manufacturer\'s PUBLISHED structural documents for the selected mount (stamped PE capacity letter, '

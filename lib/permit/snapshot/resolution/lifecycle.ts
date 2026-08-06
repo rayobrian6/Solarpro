@@ -244,6 +244,10 @@ export async function runResolutionLifecycle(
   const evidence: ResolutionEvidenceRecord[] = [];
   const invalidations: ResolutionInvalidation[] = [];
   const executionOrder: string[] = [];
+  /** D4 — resolver-contract violations: patch keys that were computed, not
+   *  declared in `produces`, and therefore silently discarded. Surfaced on the
+   *  outcome's invariantViolations rather than lost. */
+  const undeclaredPatchKeys: string[] = [];
 
   // ── determine the AUTOMATIC requirements: every registered resolver is dirty
   //    on iteration 1 (nothing has been attempted). ───────────────────────────
@@ -285,6 +289,30 @@ export async function runResolutionLifecycle(
         // ── persist the bundle patch (only the keys the resolver DECLARES) ────
         const changedKeys: AuthorityBundleKey[] = [];
         if (outcome.patch) {
+          // ── D4 — AN UNDECLARED PATCH KEY IS A CONTRACT VIOLATION ──────────
+          // This loop is a filter, and a silent one: a key the resolver computed
+          // but did not declare is dropped with no signal anywhere. That is
+          // exactly how the D4 defect survived — `project-authority@v1` returned
+          // the VERIFIED legal jurisdiction in its patch, declared only
+          // `projectLegalAuthority`, and the boundary determination was thrown
+          // away on every single run while the bundle kept the derived,
+          // unverified value. Nothing failed. Nothing was logged.
+          //
+          // Dropping is still the right BEHAVIOUR — `produces` is the dependency
+          // graph, and honouring an undeclared write would corrupt it. What was
+          // missing is that the drop is now REPORTED, so the next resolver that
+          // computes an authority and forgets to declare it is a visible defect
+          // rather than a silent loss.
+          //
+          // A survey of every production resolver before enabling this found
+          // exactly one violation — the one above — so this is safe to apply
+          // globally rather than test-only.
+          for (const k of Object.keys(outcome.patch)) {
+            if (!(r.produces as readonly string[]).includes(k)) {
+              undeclaredPatchKeys.push(`resolver ${r.id}: patched undeclared bundle key '${k}' — `
+                + `it was DISCARDED. Add it to this resolver's \`produces\` declaration.`);
+            }
+          }
           for (const k of r.produces) {
             if (!(k in outcome.patch)) continue;
             const next = (outcome.patch as Record<string, unknown>)[k];
@@ -402,7 +430,12 @@ export async function runResolutionLifecycle(
     invariantViolations: [],
     startedAtIso: nowIso,
   };
-  outcome.invariantViolations = verifyResolutionLifecycle(outcome, registry);
+  // D4 — resolver-contract violations join the lifecycle's own invariant set, so
+  // a silently-dropped authority is as visible as any other lifecycle defect.
+  outcome.invariantViolations = [
+    ...verifyResolutionLifecycle(outcome, registry),
+    ...undeclaredPatchKeys,
+  ];
   return { authority, outcome };
 }
 
