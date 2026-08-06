@@ -34,6 +34,9 @@ export type ModuleDatasheetCoverageState =
   | 'EXACT'
   | 'RANGE-COVERED'
   | 'RANGE-NOT-COVERED'
+  /** D8 — an asset is on file but states no coverage either way. Unproven, which
+   *  is not the same as exact, and was previously reported as EXACT. */
+  | 'UNEVIDENCED'
   | 'NO-DOCUMENT';
 
 export interface ModuleDatasheetCoverage {
@@ -49,6 +52,13 @@ export interface ModuleDatasheetCoverage {
   coversSelectedWatts: boolean | null;
   /** the precise reason, from the (single-sourced) exactness resolution. */
   basis: string;
+  /** D8 — WHAT established exactness. `'registry'` only ever accompanies
+   *  `state: 'EXACT'`; a static asset is always `'none'`. */
+  exactnessAuthority: 'registry' | 'none';
+  /** wattages a multi-wattage sheet names (Panasonic "410W/400W"). */
+  familyWattages: number[] | null;
+  /** models a multi-model sheet names (Tesla "TSP-415/TSP-420"). */
+  familyModels: string[] | null;
   /** the document that is genuinely missing (null ⇒ nothing missing). */
   missingDocument: string | null;
   /** the registry lookup this coverage evaluation ATTEMPTED. */
@@ -79,9 +89,28 @@ export interface ModuleDatasheetBindingAuthority {
 /** The document class the exact-wattage binding must live in (lib/documents). */
 export const MODULE_DATASHEET_DOCUMENT_CLASS = 'module_datasheet';
 
+/**
+ * D8 — THE BOUND RULE, stated ONCE and exported so no consumer can restate it
+ * differently. A module's exact-wattage source is established when, and only
+ * when, a VERIFIED, current registry document names it.
+ *
+ * The rule used to be `state === 'EXACT' || boundDocumentId`, written out
+ * separately here and in `moduleDatasheetBindingResolver`. Because `EXACT` was
+ * granted by a title heuristic over an unhashed static asset, both copies could
+ * report a module bound with an empty archive and no lookup performed at all.
+ */
+export function moduleSourceIsEstablished(m: ModuleDatasheetCoverage): boolean {
+  return m.registryLookup.boundDocumentId != null;
+}
+
+// D8 — the coverage state is a projection of the ONE evaluator's verdict, which
+// already folded the registry binding in. `EXACT` therefore arrives here only
+// when a verified registry row bound the selection; it can no longer be produced
+// by a static asset whose title happens to state no wattage range.
 const state = (ex: ModuleDatasheetExactness): ModuleDatasheetCoverageState => {
-  if (ex.stateLabel === 'NO-DOCUMENT') return 'NO-DOCUMENT';
   if (ex.stateLabel === 'EXACT') return 'EXACT';
+  if (ex.stateLabel === 'NO-DOCUMENT') return 'NO-DOCUMENT';
+  if (ex.stateLabel === 'UNEVIDENCED-DATASHEET-PENDING') return 'UNEVIDENCED';
   return ex.coversSelectedWatts === true ? 'RANGE-COVERED' : 'RANGE-NOT-COVERED';
 };
 
@@ -103,8 +132,11 @@ export function evaluateModuleDatasheetBinding(
       if (!model || seen.has(model)) continue;
       seen.add(model);
       const watts = typeof s?.panelWatts === 'number' ? s.panelWatts : null;
-      const ex = resolveModuleDatasheetExactness(model, watts);
       const lookup = registryLookup ? registryLookup({ model, watts }) : null;
+      // D8 — ONE evaluator. The registry binding is an INPUT to the exactness
+      // resolution, not a second opinion layered on top of it, so the state, the
+      // basis and the missing document can never disagree with each other.
+      const ex = resolveModuleDatasheetExactness(model, watts, lookup);
       modules.push({
         moduleModel: model,
         selectedWatts: ex.selectedWatts,
@@ -114,7 +146,10 @@ export function evaluateModuleDatasheetBinding(
         familyRange: ex.familyRange,
         coversSelectedWatts: ex.coversSelectedWatts,
         basis: ex.coverageBasis,
-        missingDocument: lookup?.boundDocumentId ? null : ex.missingDocument,
+        exactnessAuthority: ex.exactnessAuthority,
+        familyWattages: ex.familyWattages,
+        familyModels: ex.familyModels,
+        missingDocument: ex.missingDocument,
         registryLookup: {
           attempted: !!registryLookup,
           documentClass: MODULE_DATASHEET_DOCUMENT_CLASS,
@@ -126,8 +161,8 @@ export function evaluateModuleDatasheetBinding(
     }
   }
 
-  const bound = modules.filter(m => m.state === 'EXACT' || m.registryLookup.boundDocumentId).map(m => m.moduleModel);
-  const pending = modules.filter(m => !(m.state === 'EXACT' || m.registryLookup.boundDocumentId)).map(m => m.moduleModel);
+  const bound = modules.filter(moduleSourceIsEstablished).map(m => m.moduleModel);
+  const pending = modules.filter(m => !moduleSourceIsEstablished(m)).map(m => m.moduleModel);
 
   return {
     modules,

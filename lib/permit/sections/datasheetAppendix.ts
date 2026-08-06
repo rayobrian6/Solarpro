@@ -145,6 +145,22 @@ function datasheetPage(input: PermitInput, sheetId: string, entry: DatasheetEntr
   // PENDING (never presented as the exact selected-wattage datasheet).
   const _ex = entry.moduleExactness;
   const _familyPending = !!_ex && _ex.stateLabel === 'FAMILY-DATASHEET-PENDING';
+  // D8 — a module sheet that is NOT established as the exact-wattage source must
+  // never render clean. Before D8 the banner fired only for a parsed wattage
+  // RANGE, so the Tesla sheet covering TSP-415 *and* TSP-420 — and LONGi's
+  // 550-580M series sheet — printed with no banner at all, presenting a
+  // multi-product document as the exact selected-module datasheet.
+  const _unevidenced = !!_ex && _ex.stateLabel === 'UNEVIDENCED-DATASHEET-PENDING';
+  const _exactPending = _familyPending || _unevidenced;
+  // What the on-file document actually states, in the terms IT uses.
+  const _onFile = !_ex ? ''
+    : _ex.familyRange
+      ? `${escapeH(String(_ex.familyRange[0]))}–${escapeH(String(_ex.familyRange[1]))} W family sheet; selected module is ${escapeH(String(_ex.selectedWatts ?? '?'))} W`
+      : _ex.familyWattages
+        ? `multi-wattage sheet naming ${escapeH(_ex.familyWattages.join(' W and '))} W; selected module is ${escapeH(String(_ex.selectedWatts ?? '?'))} W`
+        : _ex.familyModels
+          ? `multi-model sheet covering ${escapeH(_ex.familyModels.join(' and '))}; selected module is ${escapeH(String(a.model))}`
+          : `a manufacturer-asset entry with no hash, no verification and no page reference; selected module is ${escapeH(String(_ex.selectedWatts ?? '?'))} W`;
   // W6 — the rail datasheet is shown for reference while the rail SKU is unpinned;
   // it must NOT imply the shown rail is the specified rail.
   const _railPending = entry.label === 'RACKING RAIL' && !!entry.railPending;
@@ -162,8 +178,14 @@ function datasheetPage(input: PermitInput, sheetId: string, entry: DatasheetEntr
   const _pendingBanner = _familyPending ? `
       <div data-ds-state="family-datasheet-pending" style="border:2px solid #b00;background:#fff5f5;color:#b00;font-weight:700;font-size:8.5px;padding:5px 8px;margin-bottom:6px;line-height:1.4;">
         EXACT MODULE DOCUMENT PENDING — family datasheet shown for reference.
-        On file: ${escapeH(String(_ex!.familyRange?.[0]))}–${escapeH(String(_ex!.familyRange?.[1]))} W family sheet; selected module is ${escapeH(String(_ex!.selectedWatts ?? '?'))} W.
+        On file: ${_onFile}.
         Attach the exact ${escapeH(String(_ex!.selectedWatts ?? ''))} W datasheet before permit submission.
+      </div>`
+    : _unevidenced ? `
+      <div data-ds-state="unevidenced-datasheet-pending" style="border:2px solid #b00;background:#fff5f5;color:#b00;font-weight:700;font-size:8.5px;padding:5px 8px;margin-bottom:6px;line-height:1.4;">
+        EXACT MODULE DOCUMENT NOT ESTABLISHED — datasheet shown for reference.
+        On file: ${_onFile}.
+        Nothing on file proves this is the exact ${escapeH(String(_ex!.selectedWatts ?? ''))} W source. Register the exact datasheet, naming its page/column, before permit submission.
       </div>`
     : _railPending ? `
       <div data-ds-state="rail-not-selected" style="border:2px solid #b00;background:#fff5f5;color:#b00;font-weight:700;font-size:8.5px;padding:5px 8px;margin-bottom:6px;line-height:1.4;">
@@ -171,7 +193,7 @@ function datasheetPage(input: PermitInput, sheetId: string, entry: DatasheetEntr
         No rail SKU is pinned to this racking assembly (PENDING RACKING ASSEMBLY SELECTION); ${escapeH(a.brand + ' ' + a.model)} is NOT the specified rail. Confirm and pin the rail before permit submission.
       </div>` : '';
   return `
-  <div class="page" data-sheet-id="${sheetId}"${_familyPending ? ' data-ds-exact="pending"' : ''}${_railPending ? ' data-ds-rail="pending"' : ''}${_applUnverified ? ' data-ds-applicability="unverified"' : ''}>
+  <div class="page" data-sheet-id="${sheetId}"${_exactPending ? ' data-ds-exact="pending"' : ''}${_railPending ? ' data-ds-rail="pending"' : ''}${_applUnverified ? ' data-ds-applicability="unverified"' : ''}>
     ${titleBlock(input, sheetId, title, n, t)}
     <div style="height:calc(100% - 150px);padding:10px 14px;display:flex;flex-direction:column;">
       ${_applBanner}

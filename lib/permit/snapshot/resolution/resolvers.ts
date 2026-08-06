@@ -40,7 +40,7 @@ import {
   type StoredEquipmentRecord,
 } from './equipmentSelection';
 import {
-  evaluateModuleDatasheetBinding, MODULE_DATASHEET_DOCUMENT_CLASS,
+  evaluateModuleDatasheetBinding, MODULE_DATASHEET_DOCUMENT_CLASS, moduleSourceIsEstablished,
 } from './datasheetBinding';
 import {
   resolveProjectPersonnel, unavailablePersonnelAuthority,
@@ -779,7 +779,8 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
     const binding = evaluateModuleDatasheetBinding(ctx.input, ({ model }) =>
       lookups.get(model) ?? { boundDocumentId: null, failure: 'no lookup performed for this model' });
 
-    const pending = binding.modules.filter(m => !(m.state === 'EXACT' || m.registryLookup.boundDocumentId));
+    // D8 — the bound rule is not restated here; it lives in datasheetBinding.
+    const pending = binding.modules.filter(m => !moduleSourceIsEstablished(m));
     const inputsRecorded: Record<string, string | number | boolean | null> = {
       canonicalModule: ctx.authority.canonicalEquipment?.canonical?.model ?? null,
       moduleCount: binding.modules.length,
@@ -802,8 +803,13 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
     }
 
     if (binding.allBound) {
-      const refs = binding.modules
-        .map(m => (m.registryLookup.boundDocumentId ? `document:${m.registryLookup.boundDocumentId}` : `document:asset#${m.moduleModel}`));
+      // D8 — every ref is a REGISTRY document id. The old fallback minted
+      // `document:asset#<model>` for a module whose only evidence was an
+      // unhashed static asset, and that ref went into a resolution audit ref —
+      // a citation naming something that cannot be cited. `allBound` now
+      // guarantees a bound document id for every module, so the fallback is
+      // unreachable; it is removed rather than left as an invitation.
+      const refs = binding.modules.map(m => `document:${m.registryLookup.boundDocumentId}`);
       return {
         result: 'RESOLVED',
         clearance: { cleared: true, missing: [], reasons: [] },

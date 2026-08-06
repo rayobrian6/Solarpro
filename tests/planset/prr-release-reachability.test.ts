@@ -439,8 +439,21 @@ describe('PRR §4 · the design digest identifies the DESIGN, not its approval s
 //     SKU left unselected, and its cited source is an INSTALLATION MANUAL
 //     rather than a flashing/water-resistance ESR (which is not fastener
 //     authority — resolveFastenerVerification).
-//   • Tesla Solar Panel TSP-420 — one of the five catalog modules whose on-file
-//     datasheet is exact-wattage rather than a family range.
+//   • Tesla Solar Panel TSP-420 — with a VERIFIED `module_datasheet` registry
+//     binding supplied in `completeAuthority`, exactly as every other document
+//     authority here is supplied.
+//
+//     D8 CORRECTION. This module was originally chosen because it was "one of
+//     the five catalog modules whose on-file datasheet is exact-wattage rather
+//     than a family range" — and that was never true. `resolveModuleDatasheetExactness`
+//     returned EXACT from the ABSENCE of a wattage-range match on the asset
+//     title, and Tesla's on-file sheet is "Tesla Solar Panel Datasheet
+//     (TSP-415/TSP-420)" — ONE document covering TWO models. So this fixture's
+//     module requirement was closing on a title heuristic over an unhashed
+//     static asset, which means the ONLY demonstration that ISSUED FOR PERMIT is
+//     reachable was itself resting on the D8 defect. The requirement now closes
+//     the same way the other thirteen do: because the authority is present and
+//     stated.
 //   • load-side interconnection, so there is no supply-side tap conductor whose
 //     length NEC 705.11(C) would need.
 // Braidon is NOT this project, and §5 asserts Braidon's own state is untouched.
@@ -578,6 +591,26 @@ function completeAuthority(project: Record<string, unknown>): Record<string, unk
       ['ROOF_RUN', 'BRANCH_HOMERUN_RUN', 'COMBINER_TO_DISCO_RUN', 'DISCO_TO_METER_RUN', 'BRANCH_RUN']
         .map((id, i) => measurement(id, i)) as never,
     ),
+    // D8 — the module's exact-wattage source, stated rather than inferred. This
+    // is the shape `module-datasheet-binding@v1` produces when `findVerifiedDocument`
+    // resolves: a VERIFIED, current `module_datasheet` row naming this selection.
+    moduleDatasheetBinding: {
+      modules: [{
+        moduleModel: 'Solar Panel TSP-420', selectedWatts: 420, state: 'EXACT',
+        documentTitle: 'Tesla Solar Panel Datasheet (TSP-415/TSP-420)',
+        documentSourceUrl: null, familyRange: null, familyWattages: null, familyModels: null,
+        coversSelectedWatts: true, exactnessAuthority: 'registry',
+        basis: "registry document 'doc-tesla-tsp-420-datasheet-ffffffffffff' (p.1, column TSP-420) "
+          + 'is the VERIFIED, current module_datasheet bound to 420 W',
+        missingDocument: null,
+        registryLookup: {
+          attempted: true, documentClass: 'module_datasheet', equipmentModel: 'Solar Panel TSP-420',
+          boundDocumentId: 'doc-tesla-tsp-420-datasheet-ffffffffffff', failure: null,
+        },
+      }],
+      boundModels: ['Solar Panel TSP-420'], pendingModels: [], allBound: true,
+      basis: 'Solar Panel TSP-420: EXACT',
+    },
   };
 }
 

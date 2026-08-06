@@ -2148,7 +2148,11 @@ export function buildPermitDesignSnapshot(
     // W5 (RP-C): equipment / document readiness (advisory) — a micro with no
     // verified datasheet, or a family/range module page instead of the exact
     // wattage. Structured records carry their own authority path + resolution.
-    for (const e of collectEquipmentDocumentBlockers(input)) {
+    // D8 — the registry verdict is handed in, so the requirement is raised
+    // against the SAME evaluator that would clear it. Previously this call saw
+    // only the static asset library, and a module whose asset title merely
+    // lacked a wattage range raised nothing at all.
+    for (const e of collectEquipmentDocumentBlockers(input, opts?.moduleDatasheetBinding ?? null)) {
       push(e.code, e.explanation, {
         severity: e.severity,
         authorityPath: e.authorityPath,
