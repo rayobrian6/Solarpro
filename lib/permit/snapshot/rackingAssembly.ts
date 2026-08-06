@@ -392,6 +392,25 @@ export function resolveAsdAllowableLbs(
 export interface BuildRackingAssemblyOptions {
   capacityDocument?: RackingCapacityDocumentEvidence | null;
   projectJurisdiction?: string | null;
+  /** D12 — the rail an operator PINNED to this assembly, when one is in force.
+   *
+   *  A mixed-manufacturer mount carries no rail of its own, so before D12 the
+   *  record could only ever say PENDING SELECTION: there was nowhere for the
+   *  answer to live. This is that answer, and it arrives already validated —
+   *  `planRailPin` admits only a rail the mount's own compatibility statement
+   *  names, at a span the mount's spacing admits or under stated authority. This
+   *  builder does not re-decide it and does not widen it. */
+  pinnedRail?: {
+    manufacturer: string;
+    railModel: string;
+    /** null, always: mounting-hardware-db carries no rail part numbers. */
+    railSku: string | null;
+    selectedBy: string;
+    selectedAtIso: string;
+    basis: string;
+    coversSpan: boolean;
+    spanOverrideAuthority: string | null;
+  } | null;
 }
 
 /** Build the canonical racking-assembly record from a mounting-hardware-db spec.
@@ -415,8 +434,12 @@ export function buildRackingAssembly(
   // §10 — a rail-based mount with NO own rail spec has an UNPINNED rail SKU. The
   // record must state PENDING SELECTION explicitly (never a generic "compatible /
   // or equivalent" placeholder that reads as if a rail were specified).
-  const railUnpinned = isRailBased && !rail;
-  const railBrand = rail ? system.manufacturer : null;
+  // D12 — a PIN answers the open rail question. It only applies where the
+  // question was actually open: a mount that carries its own rail is not
+  // overridden by a stored selection, and a rail-less mount has no rail to pin.
+  const pinned = (isRailBased && !rail) ? (opts?.pinnedRail ?? null) : null;
+  const railUnpinned = isRailBased && !rail && !pinned;
+  const railBrand = rail ? system.manufacturer : (pinned?.manufacturer ?? null);
   // W6 — the explicit pending-banner language for an unpinned rail/splice SKU.
   // NO "compatible rail" / "or equivalent" / RAIL-PENDING-SELECTION raw tokens on
   // any renderer: an unpinned assembly reads as the blocked state it is.
@@ -466,10 +489,10 @@ export function buildRackingAssembly(
   // SEMANTIC rail SKU for clearance / provenance matching: the exact rail model
   // when pinned, else null (unpinned) — never a placeholder string, so a verified
   // document's rail-assembly match is not defeated by a display placeholder.
-  const railModel = rail?.model ?? null;
+  const railModel = rail?.model ?? pinned?.railModel ?? null;
   // DISPLAY value on the record: exact SKU, or explicit PENDING SELECTION when a
   // rail-based mount carries no own rail (never "compatible / or equivalent").
-  const railDisplay = rail?.model ?? (railUnpinned ? RAIL_PENDING : null);
+  const railDisplay = rail?.model ?? pinned?.railModel ?? (railUnpinned ? RAIL_PENDING : null);
   const installationCondition = system.compatibleRoofTypes.join(', ') || null;
   const fastenerPattern = mount.fastenersPerMount != null
     ? `${mount.fastenersPerMount}× ${hw.lagBolt ?? mount.attachmentMethod}`
@@ -720,8 +743,16 @@ export function buildRackingAssembly(
   }
 
   // ── W6 — per-element verification states (honest; no fabrication) ──
+  // D12 — a PINNED rail is 'verified' only when its published span covers the
+  // mount's attachment spacing. Pinned under a span OVERRIDE it stays 'pending':
+  // the selection is recorded and the stated authority travels with it, but the
+  // catalog does not corroborate the span, and a per-element state that reads
+  // 'verified' on a document this repository has not evaluated is the exact
+  // overstatement TAC WS-4 removed from the fastener element.
   const _vRailSku: 'verified' | 'pending' | 'unverified' =
-    rail?.model ? 'verified' : (railUnpinned ? 'pending' : 'unverified');
+    rail?.model ? 'verified'
+      : pinned ? (pinned.coversSpan ? 'verified' : 'pending')
+        : (railUnpinned ? 'pending' : 'unverified');
   const _vCapacity: 'verified' | 'pending' | 'unverified' =
     isRtMini ? (rtCleared ? 'verified' : 'pending')
       : (publishedAllowable != null && !asd.refused ? 'verified' : 'pending');
@@ -761,7 +792,12 @@ export function buildRackingAssembly(
     mountSku: null,
     railManufacturer: railBrand,
     railModel: railDisplay,
-    railSku: null,
+    // D12 — still null even when a rail is PINNED: mounting-hardware-db carries
+    // no rail part numbers at all, so the orderable SKU comes from the
+    // distributor line item. Pinning a rail establishes WHICH rail, not its
+    // part number, and inventing one here would be a procurement instruction
+    // the design never made.
+    railSku: pinned?.railSku ?? null,
     // ── P13 WS-4 — architecture + attachment mode, projected from the catalog ──
     // mounting-hardware-db already carried mountTopology, fastenersPerMount and
     // maxSpacingIn. Nothing downstream consumed them, so PV-1 printed a

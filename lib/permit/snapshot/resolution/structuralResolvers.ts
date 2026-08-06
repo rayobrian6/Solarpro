@@ -34,6 +34,8 @@ import { uncoveredReview, type EngineeringReviewCoverage } from '@/lib/engineeri
 import { DEFAULT_DOCUMENT_REQUEST } from '@/lib/providers/documentRetrieval/types';
 import { buildResolutionAuditRef } from './evidence';
 import { deriveRailSelection, type RailSelectionVerdict } from './railSelection';
+import { readProjectEquipmentStores } from '@/lib/reconciliation/reconcile';
+import type { StoredEquipmentRecord } from './equipmentSelection';
 import {
   attemptableSources, normalizeAsceEdition, sourcesForEquipment, structuralDocumentId,
   RT_MINI_CROSS_REFERENCE_FINDING,
@@ -489,11 +491,32 @@ export const rackingAssemblySelectionResolver: RequirementResolver = {
 
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     const proj = (ctx.input.project ?? {}) as Record<string, unknown>;
-    const canonical = ctx.authority.canonicalEquipment ?? null;
+
+    // ── D12 — THE PHANTOM CAST ────────────────────────────────────────────
+    // This used to read
+    //     (canonical as unknown as { storedRecord?: … } | null)?.storedRecord
+    // and `CanonicalEquipmentAuthority` has no `storedRecord` property — the
+    // `as unknown` cast hid that from the compiler, so probe 2 was fed `null`
+    // on every run and `projects.selected_equipment` reported "no rail
+    // recorded" whatever the store actually held. Adding a rail field would not
+    // have made it work.
+    //
+    // It now reads the store through the SAME guarded reader the canonical
+    // equipment resolver uses, so a rail selection is seen exactly when it
+    // exists, and an unreadable store is an unreadable store rather than a
+    // silent absence.
+    const storeRead = ctx.projectId
+      ? await ctx.safeDbRead(
+          'readProjectEquipmentStores(rail)',
+          () => readProjectEquipmentStores(ctx.projectId as string),
+          null as StoredEquipmentRecord | null,
+        )
+      : { value: null as StoredEquipmentRecord | null, ok: false, error: 'no projectId on the permit input — the equipment store cannot be read' };
+
     const verdict: RailSelectionVerdict = deriveRailSelection({
       mountingSystemId: str(proj.mountingSystemId),
       project: proj,
-      selectedEquipment: (canonical as unknown as { storedRecord?: Record<string, unknown> } | null)?.storedRecord ?? null,
+      selectedEquipment: storeRead.value?.selectedEquipment ?? null,
     });
 
     const inputsRecorded: Record<string, string | number | boolean | null> = {
@@ -508,11 +531,20 @@ export const rackingAssemblySelectionResolver: RequirementResolver = {
       partNumberAvailability: verdict.partNumberAvailability,
     };
 
-    if (verdict.state === 'inherent' || verdict.state === 'no-rail-required') {
-      const refs = [
-        `assembly:rail#${verdict.selectedRailModel ?? 'none-required'}`,
-        `provenance:mounting-hardware-db#${verdict.selectedRailSystemId ?? str(proj.mountingSystemId) ?? 'mount'}`,
-      ];
+    if (verdict.state === 'inherent' || verdict.state === 'no-rail-required' || verdict.state === 'selected') {
+      // D12 — a PINNED rail cites the selection act, not just the catalog: the
+      // requirement closes because a named person chose, with a stated reason
+      // and a span authority, and the audit ref must be able to reach that.
+      const refs = verdict.state === 'selected'
+        ? [
+            `assembly:rail#${verdict.selectedRailModel}`,
+            `selection:rail-pin#${verdict.pinned!.selectedBy}@${verdict.pinned!.selectedAtIso}`,
+            `provenance:mounting-hardware-db#${verdict.selectedRailSystemId}`,
+          ]
+        : [
+            `assembly:rail#${verdict.selectedRailModel ?? 'none-required'}`,
+            `provenance:mounting-hardware-db#${verdict.selectedRailSystemId ?? str(proj.mountingSystemId) ?? 'mount'}`,
+          ];
       return {
         result: 'RESOLVED',
         clearance: { cleared: true, missing: [], reasons: [] },

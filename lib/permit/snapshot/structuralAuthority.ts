@@ -187,6 +187,14 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
   const rackingAssembly = buildRackingAssembly(ctx.mountSystem, {
     capacityDocument: ctx.capacityDocument ?? null,
     projectJurisdiction: ctx.projectJurisdiction ?? null,
+    // D12 — the operator's pinned rail, already validated by `planRailPin`
+    // against the mount's own compatibility statement and span. The verdict is
+    // the ONE place a rail selection is decided; this is a projection of it, so
+    // the assembly record, the BOM and the DS rail page cannot disagree about
+    // which rail is specified.
+    pinnedRail: ctx.rackingAssemblySelection?.state === 'selected'
+      ? ctx.rackingAssemblySelection.pinned
+      : null,
   });
   // FRAMING-AUTHORITY GATE — the OBSERVED framing record + the verified CAPACITY
   // authority (or null). framingVerified is now driven by the CAPACITY AUTHORITY,
