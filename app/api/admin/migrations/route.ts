@@ -52,6 +52,7 @@ import {
 import {
   REGISTRY_DEPLOYMENT,
   verifyColumnsState,
+  verifyIndexesState,
   analyzeRegistryMigration,
   verifyTablesState,
 } from '@/lib/migrations/targetedRegistryDeployment';
@@ -249,6 +250,7 @@ export async function POST(req: NextRequest) {
     'execute-field-measurements-118', // mutation: TARGETED deployment of ONLY migration 118 (field route measurements + their atomic domain audit — WS-5)
     'execute-document-jurisdiction-119', // mutation: TARGETED deployment of ONLY migration 119 (jurisdiction_authority_id on manufacturer_document_registry — D4). The first ADD-COLUMN target.
     'execute-audit-org-context-107', // mutation: TARGETED deployment of ONLY migration 107 (org-context columns on audit_log — ADR-013 T-08). Repairs the durable audit path itself.
+    'execute-audit-chain-closure-120', // mutation: TARGETED deployment of ONLY migration 120 (unique successor index on audit_log). Makes a concurrent chain fork impossible. The first INDEX-ONLY target.
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -339,9 +341,13 @@ export async function POST(req: NextRequest) {
   // path's OWN repair: until it runs, this handler's governance events cannot be
   // durably recorded, which is why 113's and 119's are missing.
   const isAuditOrgContext107 = action === 'execute-audit-org-context-107';
+  // Audit chain closure — migration 120 (unique successor index). Index-only:
+  // it reads and writes no row, and makes a sibling fork impossible at the
+  // storage layer. Requires 107.
+  const isAuditChainClosure120 = action === 'execute-audit-chain-closure-120';
   const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115
     || isEngineeringReview116 || isAhjRegistry117 || isFieldMeasurements118 || isDocumentJurisdiction119
-    || isAuditOrgContext107;
+    || isAuditOrgContext107 || isAuditChainClosure120;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
@@ -646,6 +652,7 @@ export async function POST(req: NextRequest) {
       // never marks the historical baseline verified. Idempotent: if the
       // table(s) already exist it is a safe no-op.
       const identifier = isAuditOrgContext107 ? '107'
+        : isAuditChainClosure120 ? '120'
         : isRegistry113 ? '113'
         : isReconciliation114 ? '114'
         : isPersonnel115 ? '115'
@@ -678,7 +685,8 @@ export async function POST(req: NextRequest) {
       // migration deployed, with no default and no constraint. Both refuse every
       // destructive, mutating and row-seeding token.
       const isColumnShape = (spec.expectedColumns?.length ?? 0) > 0;
-      const shape = analyzeRegistryMigration(identifier, sql, spec.expectedTables, spec.expectedColumns, undefined, spec.altersPreexistingTables);
+      const isIndexShape = (spec.expectedIndexes?.length ?? 0) > 0;
+      const shape = analyzeRegistryMigration(identifier, sql, spec.expectedTables, spec.expectedColumns, undefined, spec.altersPreexistingTables, spec.expectedIndexes);
       if (!shape.ok) {
         return NextResponse.json({ success: false, action, error: `Static verification failed: ${shape.problems.join(' ')}`, verification: shape, correlationId }, { status: 409 });
       }
@@ -687,6 +695,10 @@ export async function POST(req: NextRequest) {
       // this handler — permit, dry-run, run, ledger read-back, relock — is
       // identical for both.
       const readState = async (): Promise<{ allPresent: boolean; present: string[]; absent: string[]; missingTables: string[] }> => {
+        if (isIndexShape) {
+          const i = await verifyIndexesState(spec.expectedIndexes!);
+          return { allPresent: i.allPresent, present: i.presentIndexes, absent: i.absentIndexes, missingTables: i.missingTables };
+        }
         if (isColumnShape) {
           const c = await verifyColumnsState(spec.expectedColumns!);
           return { allPresent: c.allPresent, present: c.presentColumns, absent: c.absentColumns, missingTables: c.missingTables };
@@ -699,11 +711,11 @@ export async function POST(req: NextRequest) {
       // A column whose TABLE does not exist is a PREREQUISITE failure, not a
       // migration failure: running this would error, and the operator needs to
       // be told which migration to run first rather than shown a SQL error.
-      if (isColumnShape && before.missingTables.length > 0) {
+      if ((isColumnShape || isIndexShape) && before.missingTables.length > 0) {
         return NextResponse.json({
           success: false, action, identifier,
           error: `Migration ${identifier} adds a column to ${before.missingTables.join(', ')}, which does not exist yet. `
-            + 'Run the migration that creates it first (113 creates manufacturer_document_registry).',
+            + 'Run the migration that creates it first (113 creates manufacturer_document_registry; audit_log is migration 100).',
           verification: shape, correlationId,
         }, { status: 409 });
       }
@@ -718,6 +730,9 @@ export async function POST(req: NextRequest) {
         expectedColumns: shape.expectedColumns,
         addedColumns: shape.addedColumns,
         columnsMatchExpected: shape.columnsMatchExpected,
+        expectedIndexes: shape.expectedIndexes,
+        createdIndexes: shape.createdIndexes,
+        indexesMatchExpected: shape.indexesMatchExpected,
         tablesPresentBefore: before.present,
         tablesAbsentBefore: before.absent,
       };

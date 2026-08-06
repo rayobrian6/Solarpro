@@ -289,6 +289,16 @@ export default function MigrationConsolePage() {
             tables="audit_log.actor_organization_id + audit_log.resource_owner_organization_id (columns)"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-audit-org-context-107" onResult={(v) => setRegistry((s) => ({ ...s, ['107']: v }))} result={registry['107']} />
+          {/* Audit chain closure — migration 120. Index-only, and the piece that
+              makes "tamper-evident" true under concurrency: within a partition a
+              prev_hash may be claimed by exactly one successor, so two racing
+              appends cannot fork the chain. Run AFTER 107. It touches no row and
+              is partial on prev_hash IS NOT NULL, so the historical bootstrap
+              roots 58-62 remain legal and untouched. */}
+          <RegistryButton id="120" label="Run migration 120… (audit chain fork closure — run after 107)"
+            tables="audit_log index uq_audit_log_chain_successor"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-audit-chain-closure-120" onResult={(v) => setRegistry((s) => ({ ...s, ['120']: v }))} result={registry['120']} />
           <RegistryButton id="113" label="Run migration 113…" tables="manufacturer_document_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-registry-113" onResult={(v) => setRegistry((s) => ({ ...s, ['113']: v }))} result={registry['113']} />

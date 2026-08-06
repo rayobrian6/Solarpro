@@ -68,6 +68,10 @@ export interface RegistryDeploymentSpec {
    *  here keeps that exception explicit and per-migration instead of widening
    *  the rule for everything. */
   altersPreexistingTables?: string[];
+  /** Indexes this migration CREATEs. The third narrow shape: index-only, no
+   *  column and no table. Used by 120, which closes the audit chain against
+   *  concurrent forks and touches no data at all. */
+  expectedIndexes?: Array<{ table: string; index: string }>;
 }
 
 export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
@@ -165,6 +169,17 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
   // Its target table is created by 113, which is on this same allowlist — the
   // ADD-COLUMN admission requires that, so this path can never alter a table
   // nothing here deployed.
+  // AUDIT CHAIN CLOSURE (2026-08-06) — one parent, one child. The writer's
+  // compare-and-swap defeats the common interleaving, but under READ COMMITTED
+  // two overlapping statements can both observe the same head, so a sibling fork
+  // stays possible until the storage layer forbids it. This unique partial index
+  // is that closure. Index-only: no column, no table, no row read or written.
+  // Requires 107 (it names actor_organization_id), hence its place in sequence.
+  '120': {
+    expectedTables: [],
+    expectedIndexes: [{ table: 'audit_log', index: 'uq_audit_log_chain_successor' }],
+    altersPreexistingTables: ['audit_log'],
+  },
   '119': {
     expectedTables: [],
     expectedColumns: [{ table: 'manufacturer_document_registry', column: 'jurisdiction_authority_id' }],
@@ -176,7 +191,7 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
  *  other migration's governance event is recorded through, so running it first
  *  means the rest are actually auditable. 119 is last because its target table
  *  is 113's. */
-export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119'] as const;
+export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;
@@ -233,7 +248,7 @@ const ALTER_SUBCOMMAND_BAN = [
 export interface RegistryMigrationShape {
   identifier: string;
   /** Which narrow shape this migration was analysed as. */
-  kind: 'create-table' | 'add-column';
+  kind: 'create-table' | 'add-column' | 'index-only';
   /** Table names created via CREATE TABLE (IF NOT EXISTS) in the file. */
   createdTables: string[];
   /** The tables the caller expects this migration to create. */
@@ -244,6 +259,10 @@ export interface RegistryMigrationShape {
   expectedColumns: string[];
   /** The added columns exactly match the expected set. */
   columnsMatchExpected: boolean;
+  /** Index names created via CREATE INDEX (IF NOT EXISTS). */
+  createdIndexes: string[];
+  expectedIndexes: string[];
+  indexesMatchExpected: boolean;
   /** Every CREATE TABLE is written IF NOT EXISTS (safe to re-run). */
   idempotent: boolean;
   /** The set of created tables exactly matches the expected set. */
@@ -275,9 +294,16 @@ export function analyzeRegistryMigration(
   deployedTables?: string[],
   /** PRE-EXISTING tables this specific migration declared it may alter. */
   altersPreexistingTables?: string[],
+  /** INDEX-ONLY shape: the indexes this migration creates. */
+  expectedIndexes?: Array<{ table: string; index: string }>,
 ): RegistryMigrationShape {
   const problems: string[] = [];
   const body = stripCommentsAndStrings(sql);
+
+  // ── THE INDEX-ONLY SHAPE ────────────────────────────────────────────────
+  if (expectedIndexes && expectedIndexes.length > 0) {
+    return analyzeIndexOnlyMigration(identifier, body, expectedIndexes, deployedTables, problems, altersPreexistingTables);
+  }
 
   // ── THE ADD-COLUMN SHAPE ────────────────────────────────────────────────
   if (expectedColumns && expectedColumns.length > 0) {
@@ -336,6 +362,7 @@ export function analyzeRegistryMigration(
     addedColumns: [],
     expectedColumns: [],
     columnsMatchExpected: true,
+    createdIndexes: [], expectedIndexes: [], indexesMatchExpected: true,
     idempotent,
     tablesMatchExpected,
     nonDestructive,
@@ -351,6 +378,66 @@ export function deployedRegistryTables(): string[] {
   return [...new Set(
     Object.values(REGISTRY_DEPLOYMENT).flatMap(s => s.expectedTables.map(t => t.toLowerCase())),
   )];
+}
+
+/**
+ * THE INDEX-ONLY analysis. Narrowest of the three: every CREATE INDEX must be
+ * IF NOT EXISTS, must name an expected index on a table this path deployed or
+ * the spec declared, and the file may contain no CREATE TABLE, no ALTER and no
+ * forbidden token at all. An index touches no row, so there is nothing to
+ * backfill and nothing to lose.
+ */
+function analyzeIndexOnlyMigration(
+  identifier: string,
+  body: string,
+  expectedIndexes: Array<{ table: string; index: string }>,
+  deployedTables: string[] | undefined,
+  problems: string[],
+  altersPreexistingTables?: string[],
+): RegistryMigrationShape {
+  const deployed = new Set([
+    ...(deployedTables ?? deployedRegistryTables()),
+    ...(altersPreexistingTables ?? []),
+  ].map(t => t.toLowerCase()));
+  const expected = expectedIndexes.map(i => i.index.toLowerCase());
+
+  const all = [...body.matchAll(/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][\w$]*)\s+ON\s+(?:[A-Za-z_][\w$]*\.)?([A-Za-z_][\w$]*)/gi)];
+  const idempotent = [...body.matchAll(/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+/gi)];
+  if (all.length === 0) problems.push(`Migration ${identifier} creates no index — not the expected index-only deployment.`);
+  if (all.length !== idempotent.length) {
+    problems.push(`Migration ${identifier} has a CREATE INDEX that is not written IF NOT EXISTS (not idempotent).`);
+  }
+  const created = all.map(m => m[1].toLowerCase());
+  for (const m of all) {
+    const table = m[2].toLowerCase();
+    if (!deployed.has(table)) {
+      problems.push(`Migration ${identifier} indexes '${table}', which no allowlisted migration deploys and which its `
+        + 'spec does not declare in altersPreexistingTables.');
+    }
+  }
+  if (/\bCREATE\s+TABLE\b/i.test(body)) problems.push(`Migration ${identifier} is declared index-only but contains CREATE TABLE.`);
+  if (/\bALTER\b/i.test(body)) problems.push(`Migration ${identifier} is declared index-only but contains ALTER.`);
+
+  const missing = expected.filter(i => !created.includes(i));
+  const unexpected = created.filter(i => !expected.includes(i));
+  if (missing.length) problems.push(`Migration ${identifier} does not create expected index(es): ${missing.join(', ')}.`);
+  if (unexpected.length) problems.push(`Migration ${identifier} creates unexpected index(es): ${unexpected.join(', ')}.`);
+
+  const forbiddenFound = FORBIDDEN_TOKENS.filter(tok =>
+    new RegExp(`\b${tok.replace(/\s+/g, '\s+')}\b`, 'i').test(body));
+  const nonDestructive = forbiddenFound.length === 0;
+  if (!nonDestructive) problems.push(`Migration ${identifier} contains destructive/mutating/seeding token(s): ${forbiddenFound.join(', ')}.`);
+
+  return {
+    identifier, kind: 'index-only',
+    createdTables: [], expectedTables: [],
+    addedColumns: [], expectedColumns: [], columnsMatchExpected: true,
+    createdIndexes: [...new Set(created)], expectedIndexes: expected,
+    indexesMatchExpected: missing.length === 0 && unexpected.length === 0,
+    idempotent: all.length > 0 && all.length === idempotent.length,
+    tablesMatchExpected: true, nonDestructive, forbiddenFound,
+    ok: problems.length === 0, problems,
+  };
 }
 
 /**
@@ -441,6 +528,7 @@ function analyzeAddColumnMigration(
     addedColumns: [...new Set(addedColumns)],
     expectedColumns: expected,
     columnsMatchExpected: missing.length === 0 && unexpected.length === 0,
+    createdIndexes: [], expectedIndexes: [], indexesMatchExpected: true,
     idempotent: idempotent && problems.length === 0,
     tablesMatchExpected: true,
     nonDestructive,
@@ -476,6 +564,38 @@ export async function verifyTablesState(tables: string[]): Promise<TablesStateCh
     nonePresent: present.length === 0,
     presentTables: present,
     absentTables: absent,
+  };
+}
+
+export interface IndexesStateCheck {
+  allPresent: boolean;
+  nonePresent: boolean;
+  presentIndexes: string[];
+  absentIndexes: string[];
+  missingTables: string[];
+}
+
+/** The INDEX-ONLY counterpart of `verifyTablesState`. Read-only. */
+export async function verifyIndexesState(
+  indexes: Array<{ table: string; index: string }>,
+): Promise<IndexesStateCheck> {
+  const sql = getRawSql();
+  const present: string[] = [];
+  const absent: string[] = [];
+  const missingTables: string[] = [];
+  for (const ix of indexes) {
+    const t = (await sql`SELECT to_regclass(${ix.table}) IS NOT NULL AS present`) as Array<{ present: boolean }>;
+    if (t[0]?.present !== true) { missingTables.push(ix.table); absent.push(ix.index); continue; }
+    const rows = (await sql`
+      SELECT 1 FROM pg_indexes WHERE tablename = ${ix.table} AND indexname = ${ix.index} LIMIT 1
+    `) as unknown[];
+    if (rows.length > 0) present.push(ix.index); else absent.push(ix.index);
+  }
+  return {
+    allPresent: absent.length === 0 && present.length === indexes.length,
+    nonePresent: present.length === 0,
+    presentIndexes: present, absentIndexes: absent,
+    missingTables: [...new Set(missingTables)],
   };
 }
 

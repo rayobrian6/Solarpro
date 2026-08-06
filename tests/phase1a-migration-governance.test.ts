@@ -45,7 +45,7 @@ const root = path.resolve(__dirname, '..');
 /** THE highest governed migration prefix. Named once so adding a migration is a
  *  one-line, deliberate governance update rather than a hunt through literals —
  *  which is exactly why 117 left five assertions failing after it landed. */
-const HIGHEST_GOVERNED_MIGRATION = '119';
+const HIGHEST_GOVERNED_MIGRATION = '120';
 
 /** THE count of governed migration SQL files. This is deliberately a LITERAL and
  *  not `discoverMigrationFiles().count` — deriving it from the manifest would
@@ -54,9 +54,9 @@ const HIGHEST_GOVERNED_MIGRATION = '119';
  *  build until someone updates this line on purpose.
  *
  *  NOTE it is NOT the highest prefix: the numbering is non-contiguous (the
- *  101-file baseline, then 105-108, 109-112, 113/114, 115, 116, 117, 118), so
- *  115 FILES have a highest prefix of 118. The two numbers move independently. */
-const GOVERNED_MIGRATION_COUNT = 116;
+ *  101-file baseline, then 105-108, 109-112, 113/114, 115, 116, 117, 118, 119,
+ *  120), so the count and the highest prefix move independently. */
+const GOVERNED_MIGRATION_COUNT = 117;
 
 /** Normalize a filesystem path to POSIX separators. `path.join` returns
  *  backslashes on Windows, so `toContain('lib/migrations')` failed on this

@@ -375,6 +375,13 @@ export function authorizeMigration(params: {
  *     for 113 and 119. Verified by the ADD-COLUMN gate; its target predates the
  *     registry, so the spec declares `altersPreexistingTables: ['audit_log']`.
  *     RUN IT FIRST — every other migration's audit record depends on it.
+ *   - 120: uq_audit_log_chain_successor on audit_log — the audit chain's
+ *     structural closure. Within an ADR-013 partition a given prev_hash may be
+ *     claimed by exactly ONE successor, so two concurrent appends cannot fork
+ *     the tamper-evident chain. Index-only: no column, no table, no row touched.
+ *     Requires 107 (it names actor_organization_id). Partial on
+ *     `prev_hash IS NOT NULL`, so the historical bootstrap roots 58-62 stay
+ *     legal and unmodified.
  *   - 113: manufacturer_document_registry — the versioned authority-document
  *     store (W4 §8). Statically verified idempotent CREATE-TABLE-only and
  *     non-destructive by lib/migrations/targetedRegistryDeployment.ts before any
@@ -420,7 +427,7 @@ export function authorizeMigration(params: {
  * is exactly what happened to 117. The registry-parity test asserts this set and
  * REGISTRY_DEPLOYMENT/REGISTRY_SEQUENCE agree, so the four gates cannot drift again.
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['107', '113', '114', '115', '116', '117', '118', '119']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['107', '113', '114', '115', '116', '117', '118', '119', '120']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;

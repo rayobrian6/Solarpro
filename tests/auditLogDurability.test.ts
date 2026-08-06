@@ -46,11 +46,13 @@ function fakeSql(opts: { orgColumns: boolean; failInsert?: string }) {
     if (/information_schema\.columns/.test(text)) {
       return [{ n: opts.orgColumns ? 2 : 0 }];
     }
-    if (/SELECT entry_hash FROM audit_log/.test(text)) return [];
+    // The CAS append embeds `SELECT entry_hash FROM audit_log` inside its WHERE,
+    // so the head-lookup branch must not claim the INSERT.
     if (/INSERT INTO audit_log/.test(text)) {
       if (opts.failInsert) throw new Error(opts.failInsert);
-      return [];
+      return [{ id: 1 }];                       // one row => the append landed
     }
+    if (/SELECT entry_hash FROM audit_log/.test(text)) return [];   // empty chain
     return [];
   };
   return { fn, calls };

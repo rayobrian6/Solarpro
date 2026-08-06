@@ -110,11 +110,12 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(SQL_118).toMatch(/verification_state <> 'VERIFIED'[\s\S]{0,200}verification_mode IS NOT NULL/);
   });
 
-  it('sequence is 107 FIRST, then 113 … 119', () => {
+  it('sequence is 107 FIRST, then 113 … 120', () => {
     // 107 leads deliberately: it repairs the durable audit path that every other
-    // migration's governance event is recorded through.
-    expect(REGISTRY_SEQUENCE).toEqual(['107', '113', '114', '115', '116', '117', '118', '119']);
-    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['107', '113', '114', '115', '116', '117', '118', '119']);
+    // migration's governance event is recorded through. 120 closes that same
+    // chain against concurrent forks and depends on 107's columns.
+    expect(REGISTRY_SEQUENCE).toEqual(['107', '113', '114', '115', '116', '117', '118', '119', '120']);
+    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['107', '113', '114', '115', '116', '117', '118', '119', '120']);
   });
 
   it('EVERY governed identifier resolves to a real file that passes its own gate', () => {
@@ -127,8 +128,10 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     for (const id of REGISTRY_SEQUENCE) {
       const spec = REGISTRY_DEPLOYMENT[id];
       expect(spec, `no deployment spec for ${id}`).toBeTruthy();
-      const declares = spec.expectedTables.length + (spec.expectedColumns?.length ?? 0);
-      expect(declares, `spec ${id} declares neither a table nor a column`).toBeGreaterThan(0);
+      const declares = spec.expectedTables.length
+        + (spec.expectedColumns?.length ?? 0)
+        + (spec.expectedIndexes?.length ?? 0);
+      expect(declares, `spec ${id} declares neither a table, a column nor an index`).toBeGreaterThan(0);
     }
   });
 
@@ -150,6 +153,32 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     // and it must genuinely not backfill — the four live rows keep their value
     expect(SQL_119).not.toMatch(/UPDATE/i);
     expect(SQL_119).not.toMatch(/INSERT/i);
+  });
+
+  it('accepts the real migration 120 (index-only, touches no row)', () => {
+    const SQL_120 = readFileSync(join(process.cwd(), 'lib', 'migrations', '120_audit_chain_unique_successor.sql'), 'utf8');
+    const spec = REGISTRY_DEPLOYMENT['120'];
+    const s = analyzeRegistryMigration('120', SQL_120, spec.expectedTables, spec.expectedColumns,
+      undefined, spec.altersPreexistingTables, spec.expectedIndexes);
+    expect(s.problems).toEqual([]);
+    expect(s.ok).toBe(true);
+    expect(s.kind).toBe('index-only');
+    expect(s.createdIndexes).toEqual(['uq_audit_log_chain_successor']);
+    // partial on prev_hash IS NOT NULL so the historical roots stay legal
+    expect(SQL_120).toMatch(/WHERE prev_hash IS NOT NULL/);
+    expect(SQL_120).not.toMatch(/UPDATE|DELETE|INSERT/i);
+  });
+
+  it('refuses an index-only migration that also alters or creates', () => {
+    const ix = [{ table: 'audit_log', index: 'ix_x' }];
+    for (const sql of [
+      'CREATE INDEX ix_x ON audit_log (a);',                                  // not idempotent
+      'CREATE INDEX IF NOT EXISTS ix_x ON users (a);',                        // undeclared table
+      'CREATE INDEX IF NOT EXISTS ix_x ON audit_log (a); ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS z TEXT;',
+    ]) {
+      const r = analyzeRegistryMigration('T', sql, [], undefined, undefined, ['audit_log'], ix);
+      expect(r.ok, `should refuse: ${sql}`).toBe(false);
+    }
   });
 
   it('refuses an ALTER that is anything other than ADD COLUMN IF NOT EXISTS', () => {
@@ -226,6 +255,9 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
       // a button may not advertise something the gate would refuse.
       for (const c of REGISTRY_DEPLOYMENT[id].expectedColumns ?? []) {
         expect(btn, `button ${id} does not name expected column ${c.column}`).toContain(c.column);
+      }
+      for (const ix of REGISTRY_DEPLOYMENT[id].expectedIndexes ?? []) {
+        expect(btn, `button ${id} does not name expected index ${ix.index}`).toContain(ix.index);
       }
     }
   });
