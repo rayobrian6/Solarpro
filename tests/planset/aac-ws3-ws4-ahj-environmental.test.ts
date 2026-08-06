@@ -479,7 +479,18 @@ describe('AAC WS-3 · A7 · a failed retrieval records the exact source, the exa
     const n = await runLifecycle(braidonInput(), bag({ codeAdoption: empty }));
     expect(t.outcome.states['CODE-AUTHORITY-INCOMPLETE'].retryability).toBe('RETRYABLE');
     expect(n.outcome.states['CODE-AUTHORITY-INCOMPLETE'].retryability).toBe('NON_RETRYABLE');
-    expect(t.outcome.states['CODE-AUTHORITY-INCOMPLETE'].blockingReason).toMatch(/TimeoutError/);
+    // TR — the EXACT transport failure is still never swallowed; it is recorded
+    // on the evidence record rather than on `blockingReason`. `blockingReason` is
+    // DIGESTED, and a timeout is a fact about the attempt, not about this
+    // jurisdiction: two wordings of one outage used to produce two digests for an
+    // unchanged design. The guarantee is unchanged — only its home is.
+    const tEv = t.outcome.states['CODE-AUTHORITY-INCOMPLETE'].resolutionEvidence
+      .find(e => e.resolverId === 'code-authority@v1')!;
+    expect(tEv.failureReason).toMatch(/TimeoutError/);
+    expect(tEv.sourceQueried).toMatch(/ahj/i);
+    expect(t.outcome.states['CODE-AUTHORITY-INCOMPLETE'].blockingReason).not.toMatch(/TimeoutError/);
+    // …and the NO_COVERAGE answer — a fact about this SITE — still is digested.
+    expect(n.outcome.states['CODE-AUTHORITY-INCOMPLETE'].blockingReason).toMatch(/no AHJ record covers/);
   });
 
   it('a PARTIAL retrieval names the missing edition, never infers it, and does not clear', async () => {

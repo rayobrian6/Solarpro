@@ -288,9 +288,19 @@ export const rackingCapacityDocumentResolver: RequirementResolver = {
       clearance: {
         cleared: doc != null,
         missing: doc ? [] : ['manufacturer_document_registry: structural_pe_letter | evaluation_report covering the exact mount + jurisdiction'],
-        reasons: doc ? [] : [read.ok
-          ? 'no VERIFIED, current, archived, structurally-claiming capacity document is registered for the selected mount in this jurisdiction'
-          : (read.error ?? 'the document registry is unreadable')],
+        // ── TR — THE MATERIAL REASON DOES NOT DEPEND ON HOW THE LOOKUP WENT ──
+        // This sentence reaches `blockingReason` → the registry payload → the
+        // DESIGN DIGEST. It is therefore stated so that it is equally true when
+        // the registry answered "none" and when the registry could not be
+        // reached: either way NO capacity authority is established, the
+        // requirement is open, the gate is closed and the drawings are the same.
+        // WHY the lookup did not answer is operational — it travels verbatim on
+        // `failureReason` / `retryability` below into
+        // `snapshot.resolverAttemptEvidence`, which the digest does not read.
+        // Interpolating `read.error` here (what this did) meant a one-second
+        // registry blip re-worded a digested field and invalidated the PE's
+        // digest-bound approval of an unchanged design.
+        reasons: doc ? [] : ['no VERIFIED, current, archived, structurally-claiming capacity document is ESTABLISHED for the selected mount in this jurisdiction'],
       },
       // doc ⇒ archived true; no doc ⇒ UNRESOLVED (null), never a hard false.
       patch: { capacityDocument: doc, manufacturerDocumentsArchived: doc != null ? true : null },
@@ -328,9 +338,8 @@ export const framingCapacityDocumentResolver: RequirementResolver = {
       clearance: {
         cleared: doc != null,
         missing: doc ? [] : ['manufacturer_document_registry: truss_design_drawing | manufacturer_structural_calc | stamped_structural_analysis covering this building'],
-        reasons: doc ? [] : [read.ok
-          ? 'no VERIFIED, current, archived framing-capacity document covers this exact building — operator-entered framing geometry is OBSERVATION, never capacity'
-          : (read.error ?? 'the document registry is unreadable')],
+        // TR — material reason, independent of the attempt outcome.
+        reasons: doc ? [] : ['no VERIFIED, current, archived framing-capacity document is ESTABLISHED for this exact building — operator-entered framing geometry is OBSERVATION, never capacity'],
       },
       patch: { framingCapacityDocument: doc },
       sourceQueried: DOC_REGISTRY_SOURCE,
@@ -373,9 +382,9 @@ export const climateHazardDocumentResolver: RequirementResolver = {
       clearance: {
         cleared: doc != null,
         missing: doc ? [] : ['manufacturer_document_registry: climate_hazard_dataset covering this site (wind + snow + exposure/risk, currency-reviewed)'],
-        reasons: doc ? [] : [read.ok
-          ? 'no ARCHIVED climate-hazard source exists for this exact site — operator-entered wind/snow are an OBSERVATION/OVERRIDE and can never clear it'
-          : (read.error ?? 'the document registry is unreadable')],
+        // TR — material reason, independent of the attempt outcome (see the
+        // racking-capacity resolver above for the full rationale).
+        reasons: doc ? [] : ['no ARCHIVED climate-hazard source is ESTABLISHED for this exact site — operator-entered wind/snow are an OBSERVATION/OVERRIDE and can never clear it'],
       },
       patch: { environmentalSource: doc },
       sourceQueried: DOC_REGISTRY_SOURCE,
@@ -418,11 +427,10 @@ export const cableExtensionSolutionsResolver: RequirementResolver = {
         missing: solutions.length ? [] : (skus.length
           ? ['manufacturer_document_registry: a verified listed-extension document for the selected SKU']
           : ['project.cableExtensionSkus (no listed extension product selected)']),
-        reasons: solutions.length ? [] : [read.ok
-          ? (skus.length
-            ? 'the selected extension SKUs have no VERIFIED listed document — a documented solution cannot be constructed'
-            : 'no listed cable-extension product is selected (project.cableExtensionSkus is empty), so there is no extension DOCUMENT for this resolver to resolve. The alternate-stock / raw-stock / dead-drop / rebranch option space IS evaluated deterministically — by qcable-solution@v1, which owns QCABLE-PROCUREMENT-INSUFFICIENT and states the governing unresolved reason')
-          : (read.error ?? 'the document registry is unreadable')],
+        // TR — material reason, independent of the attempt outcome.
+        reasons: solutions.length ? [] : [skus.length
+          ? 'the selected extension SKUs have no VERIFIED listed document ESTABLISHED — a documented solution cannot be constructed'
+          : 'no listed cable-extension product is selected (project.cableExtensionSkus is empty), so there is no extension DOCUMENT for this resolver to resolve. The alternate-stock / raw-stock / dead-drop / rebranch option space IS evaluated deterministically — by qcable-solution@v1, which owns QCABLE-PROCUREMENT-INSUFFICIENT and states the governing unresolved reason'],
       },
       patch: { cableExtensionSolutions: solutions },
       sourceQueried: DOC_REGISTRY_SOURCE,

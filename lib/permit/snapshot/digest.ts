@@ -170,16 +170,57 @@ function buildStampedDates(snapshot: Record<string, unknown>): ReadonlySet<strin
   return out;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TR — THE OPERATIONAL-EVIDENCE CONTAINER.
+//
+// MCC §0 above excludes WHEN a resolver ran. It does not exclude WHAT the
+// resolver recorded about the attempt — and that is the door the defect walked
+// through next. Measured, real path, fixed clock: forcing a transient
+// `safeDbRead` failure on `resolveRackingCapacityDocument` changed only
+//   permitReadiness.registry[…].payload.resolutionEvidence[0].failureReason
+//   permitReadiness.registry[…].payload.resolutionEvidence[0].retryability
+// and moved the snapshot digest plus 31 lines of the signed artifact, with the
+// accepted authority, the release verdict and every gate byte-identical. Two
+// different wordings of the SAME temporary failure produced two different
+// digests.
+//
+// The repair is a TYPED PROJECTION BOUNDARY (resolution/authorityProjection.ts),
+// not another key-name rule — a recursive "drop anything called failure/reason/
+// source" would have deleted `equipment.*.datasheet.capturedAtIso`, which is real
+// document provenance and must keep moving the digest (D11).
+//
+// This constant is the structural half of that boundary: ONE declared top-level
+// container, skipped exactly the way `meta.digest` is. It is a CONTAINER
+// exclusion, not a key-name exclusion — a field of any name elsewhere in the
+// snapshot is untouched. The evidence stays IN the stored snapshot (rather than
+// being attached after the hash, as the PRR review record is), so an archived
+// package still re-digests to its own `meta.digest`.
+const OPERATIONAL_EVIDENCE_KEY = 'resolverAttemptEvidence';
+
+/** THE EXACT VALUE THE DIGEST IS TAKEN OVER.
+ *
+ *  Exported as durable diagnostic tooling: "the digest moved" is a fact, but
+ *  "WHICH leaf moved" is the fact that makes a drift investigable. Every
+ *  digest-stability test and every drift harness reads the body through this
+ *  accessor rather than re-implementing the normalisation, so a diagnostic can
+ *  never disagree with the hash it is explaining.
+ *
+ *  Pure; the input is not mutated. */
+export function canonicalDigestBody(snapshot: Record<string, unknown>): unknown {
+  const meta = { ...(snapshot.meta as Record<string, unknown>) };
+  delete meta.digest;
+  delete meta.snapshotId;
+  const body: Record<string, unknown> = { ...snapshot, meta };
+  delete body[OPERATIONAL_EVIDENCE_KEY];
+  return normalizeRunInstants(body, '', buildStampedDates(snapshot));
+}
+
 /** SHA-256 hex over the canonical JSON of the snapshot WITHOUT meta.digest /
  *  meta.snapshotId (they derive from this), WITHOUT run-instant provenance and
  *  WITHOUT the build stamp (see above — the digest identifies the DESIGN, not
  *  the build that produced it, nor the day it ran). */
 export function computeSnapshotDigest(snapshot: Record<string, unknown>): string {
-  const meta = { ...(snapshot.meta as Record<string, unknown>) };
-  delete meta.digest;
-  delete meta.snapshotId;
-  const body = normalizeRunInstants({ ...snapshot, meta }, '', buildStampedDates(snapshot));
-  return createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex');
+  return createHash('sha256').update(canonicalJson(canonicalDigestBody(snapshot)), 'utf8').digest('hex');
 }
 
 export function snapshotIdFromDigest(digest: string): string {

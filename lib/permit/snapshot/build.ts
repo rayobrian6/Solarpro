@@ -87,6 +87,11 @@ import type { CableExtensionSolution, ProcurementSufficiency } from './types';
 // AAC WS-1 — resolution state → blocker payload (existing RS-1 machinery).
 import type { RequirementResolutionState } from './resolution/types';
 import { resolutionStatePayload } from './resolution/evidence';
+// TR — the resolver AUTHORITY / ATTEMPT-EVIDENCE boundary.
+import {
+  elideOperationalAuthority, buildResolverAttemptEvidence,
+} from './resolution/authorityProjection';
+import type { ResolutionEvidenceRecord } from './resolution/types';
 // AAC WS-2 / WS-6 — the automatic-resolution authority records (evidence for the
 // requirements the lifecycle CLEARED; a cleared requirement emits no blocker).
 import type { CanonicalEquipmentAuthority } from './resolution/equipmentSelection';
@@ -197,6 +202,12 @@ export function buildPermitDesignSnapshot(
      *  machinery — no visual redesign). Absent ⇒ payloads unchanged ⇒ the
      *  snapshot digest of a harness/test build is byte-identical. */
     resolutionStates?: Record<string, RequirementResolutionState> | null;
+    /** TR — the FULL lifecycle attempt trail, including the infrastructure
+     *  resolvers that bear on no requirement code and therefore appear in no
+     *  `resolutionStates` entry. Stored on `snapshot.resolverAttemptEvidence`,
+     *  which the digest does not read. Absent ⇒ the container carries only the
+     *  per-requirement trails. */
+    resolutionEvidence?: readonly ResolutionEvidenceRecord[] | null;
     /** AAC WS-2 / WS-6 — the automatic-resolution AUTHORITY records (canonical
      *  equipment identity + superseded history + reconciliation audit id, module
      *  exact-datasheet coverage, configured personnel). Recorded on the snapshot
@@ -2689,7 +2700,7 @@ export function buildPermitDesignSnapshot(
       || opts?.projectLegalAuthority || opts?.codeAdoptionAuthority || opts?.environmentalRetrieval
       || opts?.structuralDocumentRetrieval || opts?.rackingAssemblySelection || opts?.framingRetrieval
       ? {
-          resolutionAuthority: {
+          resolutionAuthority: elideOperationalAuthority({
             canonicalEquipment: opts?.canonicalEquipment ?? null,
             moduleDatasheetBinding: opts?.moduleDatasheetBinding ?? null,
             projectPersonnel: opts?.projectPersonnel ?? null,
@@ -2709,7 +2720,33 @@ export function buildPermitDesignSnapshot(
             rackingAssemblySelection: opts?.rackingAssemblySelection ?? null,
             framingRetrieval: opts?.framingRetrieval ?? null,
             engineeringReview: null,   // PASS 2 (PRR §1)
-          },
+          }),
+        }
+      : {}),
+
+    // ═══ TR — THE OPERATIONAL EVIDENCE CONTAINER ═══════════════════════════
+    // Everything the registry payload and the authority records used to carry
+    // ABOUT THE ATTEMPT: the raw transport error, the retryability it implied,
+    // the attempt count and order, the attempt instants, the per-source HTTP
+    // outcomes. Stored in full so a transient failure stays diagnosable;
+    // skipped by `computeSnapshotDigest` so it can never re-date a design.
+    //
+    // Omitted entirely when no lifecycle ran, so a harness / test / DB-down
+    // build produces the same snapshot shape — and the same digest — it did
+    // before this container existed.
+    ...(Object.keys(_resolutionStates).length > 0
+      ? {
+          resolverAttemptEvidence: buildResolverAttemptEvidence(
+            _resolutionStates,
+            opts?.resolutionEvidence ?? [],
+            {
+              structuralDocumentRetrieval: opts?.structuralDocumentRetrieval ?? null,
+              projectPersonnel: opts?.projectPersonnel ?? null,
+              environmentalRetrieval: opts?.environmentalRetrieval ?? null,
+              moduleDatasheetBinding: opts?.moduleDatasheetBinding ?? null,
+              engineeringReview: null,   // PASS 2 (PRR §1) — filled below
+            },
+          ),
         }
       : {}),
   };
@@ -2747,14 +2784,23 @@ export function buildPermitDesignSnapshot(
     // package — the exact facts that refused. It sits in the same evidence home
     // every other resolved requirement uses.
     if (_reviewCoverage) {
+      // TR — the coverage record carries `storeError`, the RAW read failure from
+      // the review store. It is attached after the digest, so it cannot move the
+      // hash on this build — but a stored snapshot gets re-digested elsewhere,
+      // and an operational string sitting inside a digested container is exactly
+      // the shape of defect this phase closed. Elide it here and keep the real
+      // value on the operational container, like every other attempt fact.
+      const _reviewDigested = elideOperationalAuthority({ engineeringReview: _reviewCoverage }).engineeringReview;
+      const _rae = (snapshot as { resolverAttemptEvidence?: { authorityOperational: Record<string, unknown> } }).resolverAttemptEvidence;
+      if (_rae && _reviewCoverage.storeError != null) _rae.authorityOperational.engineeringReviewStoreError = _reviewCoverage.storeError;
       const _ra = (snapshot as { resolutionAuthority?: Record<string, unknown> }).resolutionAuthority;
-      if (_ra) _ra.engineeringReview = _reviewCoverage;
+      if (_ra) _ra.engineeringReview = _reviewDigested;
       else {
         (snapshot as { resolutionAuthority?: Record<string, unknown> }).resolutionAuthority = {
           canonicalEquipment: null, moduleDatasheetBinding: null, projectPersonnel: null,
           projectLegalAuthority: null, codeAdoptionAuthority: null, environmentalRetrieval: null,
           structuralDocumentRetrieval: null, rackingAssemblySelection: null, framingRetrieval: null,
-          engineeringReview: _reviewCoverage,
+          engineeringReview: _reviewDigested,
         };
       }
     }

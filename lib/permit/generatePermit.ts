@@ -1250,6 +1250,11 @@ export function generatePermitHTML(
       // machinery. Absent (harness / tests / no lifecycle) ⇒ payloads and the
       // digest are unchanged.
       resolutionStates: snapshotAuthority?.resolution?.states ?? null,
+      // TR — the FULL attempt trail (including the infrastructure resolvers that
+      // bear on no requirement code). Lands on `snapshot.resolverAttemptEvidence`,
+      // which the digest does not read, so a transient transport failure stays
+      // diagnosable without ever re-dating the design.
+      resolutionEvidence: snapshotAuthority?.resolution?.evidence ?? null,
       // AAC WS-2 / WS-6 — the automatic-resolution AUTHORITY records: the
       // canonical equipment identity (+ superseded audit history + the
       // reconciliation audit id), the per-module exact-datasheet coverage, and

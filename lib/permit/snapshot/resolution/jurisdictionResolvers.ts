@@ -27,6 +27,7 @@ import type {
   LegalJurisdictionAuthority,
 } from './types';
 import { buildResolutionAuditRef } from './evidence';
+import { materialRetrievalReason } from './authorityProjection';
 import {
   buildProjectLegalAuthority, buildCodeAdoptionAuthority, missingAdoptionEditions,
 } from './jurisdictionAuthority';
@@ -140,7 +141,22 @@ export const projectAuthorityResolver: RequirementResolver = {
         clearance: {
           cleared: false,
           missing: ['an official-source match for the installation address'],
-          reasons: [`${provider.name}: ${res.failure}`],
+          // ── TR — A TRANSPORT FAILURE IS NOT A FACT ABOUT THIS PARCEL ───────
+          // `reasons` reaches `blockingReason` → the registry payload → the
+          // DESIGN DIGEST. Interpolating the provider's failure string here made
+          // two different wordings of the SAME temporary Census outage produce
+          // two different digests for one unchanged design (found live: three of
+          // twenty read-only runs). But the SAME string also carries genuine
+          // answers about this site — NO_COVERAGE, AMBIGUOUS — so it is split by
+          // KIND, not thrown away. The exact provider text, the endpoints queried
+          // and the retryability are preserved either way on `failureReason` /
+          // `sourceQueried` / `retryability`, which land in
+          // `snapshot.resolverAttemptEvidence` — outside the digest.
+          reasons: [materialRetrievalReason({
+            failureKind: res.failureKind,
+            providerFailure: `${provider.name}: ${res.failure}`,
+            whenOperational: 'the project LEGAL identity is NOT ESTABLISHED — no official-source match for the installation address was retrieved',
+          })],
         },
         sourceQueried: res.sourcesQueried.join(' · ') || provider.name,
         sourceRefs: res.sourcesQueried.map(u => `provenance:${u}`),
@@ -418,7 +434,14 @@ export const codeAuthorityResolver: RequirementResolver = {
           missing: ambiguous
             ? ['an operator determination of which overlapping authority governs this parcel']
             : ['an adopted-code retrieval carrying the IBC / IRC / IFC editions for this jurisdiction'],
-          reasons: [res.failure],
+          // TR — split by failure KIND (see project-authority). AMBIGUOUS names
+          // BOTH overlapping authorities and their editions; that is a design
+          // finding and must stay in the digest. A timeout must not.
+          reasons: [materialRetrievalReason({
+            failureKind: res.failureKind,
+            providerFailure: res.failure,
+            whenOperational: 'the adopted code editions are NOT ESTABLISHED — no adopted-code retrieval carrying the IBC / IRC / IFC editions was obtained for this jurisdiction',
+          })],
         },
         sourceQueried: res.sourcesQueried.join(' · ') || AHJ_REGISTRY_ENDPOINT,
         sourceRefs: res.sourcesQueried.map(u => `provenance:${u}`),
@@ -697,7 +720,14 @@ export const environmentalAuthorityResolver: RequirementResolver = {
         clearance: {
           cleared: false,
           missing: ['an ASCE 7 hazard retrieval or an archived climate_hazard_dataset covering this site'],
-          reasons: [`${provider.name}: ${res.failure}`],
+          // TR — split by failure KIND (see project-authority). A NO_COVERAGE
+          // answer ("ground snow load NOT retrieved") is a fact about this site
+          // and stays; a timeout is not and does not.
+          reasons: [materialRetrievalReason({
+            failureKind: res.failureKind,
+            providerFailure: `${provider.name}: ${res.failure}`,
+            whenOperational: 'the environmental-load authority is NOT ESTABLISHED — no ASCE 7 hazard retrieval or archived climate-hazard dataset was obtained for this site',
+          })],
         },
         sourceQueried: res.sourcesQueried.join(' · ') || provider.name,
         sourceRefs: res.sourcesQueried.map(u => `provenance:${u}`),

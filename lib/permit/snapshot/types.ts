@@ -1915,6 +1915,27 @@ export interface PermitDesignSnapshot {
      *  migration 116: who approved, under which licence, for which digest. */
     engineeringReview?: import('@/lib/engineeringReview/types').EngineeringReviewCoverage | null;
   };
+
+  /** TR — OPERATIONAL RESOLVER ATTEMPT EVIDENCE. The ONE declared home for facts
+   *  about how a resolver ATTEMPT went, as opposed to what the design accepts:
+   *  the raw transport error, the retry count, the attempt instant, the source
+   *  last queried, the per-requirement attempt trail.
+   *
+   *  `computeSnapshotDigest` skips this key by name — a CONTAINER exclusion, the
+   *  same structural device already used for `meta.digest`. It is deliberately
+   *  NOT a recursive key-name rule: a broad "drop anything called failure /
+   *  reason / source" would have deleted `equipment.*.datasheet.capturedAtIso`,
+   *  which is genuine document provenance and must keep moving the digest (D11).
+   *
+   *  WHY IT IS STORED RATHER THAN DISCARDED: a transient failure must stay
+   *  reachable to whoever has to diagnose it. WHY IT IS STORED RATHER THAN
+   *  ATTACHED AFTER THE HASH (the PRR review-record pattern): keeping it inside
+   *  the snapshot means an archived package still re-digests to its own
+   *  `meta.digest`, so digest re-verification of an issued package keeps working.
+   *
+   *  OPTIONAL and OMITTED when no lifecycle ran (harness / test / DB-unavailable
+   *  run), exactly like `resolutionAuthority`. */
+  resolverAttemptEvidence?: import('./resolution/authorityProjection').ResolverAttemptEvidenceBundle;
 }
 
 /** W10 (RP-D) — a canonical, structured permit-readiness blocker. Every release
