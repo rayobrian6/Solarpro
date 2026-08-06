@@ -277,6 +277,18 @@ export default function MigrationConsolePage() {
           <code>MIGRATION_ALLOW_PRODUCTION_EXECUTION=true</code>.
         </p>
         <div className="flex flex-wrap gap-2">
+          {/* ADR-013 T-08 — migration 107, FIRST in the ceremony and the one to run
+              before any other. Its code half shipped 2026-07-12 and the migration
+              never ran, so every audit write since inserted two columns that do
+              not exist and PostgreSQL refused the row: the tamper-evident
+              audit_log has recorded nothing from this deployment, including the
+              governance events for migrations 113 and 119. Running this restores
+              the durable audit path that every other button here is recorded
+              through. */}
+          <RegistryButton id="107" label="Run migration 107… (repairs the audit trail — run FIRST)"
+            tables="audit_log.actor_organization_id + audit_log.resource_owner_organization_id (columns)"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-audit-org-context-107" onResult={(v) => setRegistry((s) => ({ ...s, ['107']: v }))} result={registry['107']} />
           <RegistryButton id="113" label="Run migration 113…" tables="manufacturer_document_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-registry-113" onResult={(v) => setRegistry((s) => ({ ...s, ['113']: v }))} result={registry['113']} />

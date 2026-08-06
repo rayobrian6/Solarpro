@@ -248,6 +248,7 @@ export async function POST(req: NextRequest) {
     'execute-ahj-registry-117', // mutation: TARGETED deployment of ONLY migration 117 (SolarPro's own central AHJ / adopted-code registry — TAC WS-19)
     'execute-field-measurements-118', // mutation: TARGETED deployment of ONLY migration 118 (field route measurements + their atomic domain audit — WS-5)
     'execute-document-jurisdiction-119', // mutation: TARGETED deployment of ONLY migration 119 (jurisdiction_authority_id on manufacturer_document_registry — D4). The first ADD-COLUMN target.
+    'execute-audit-org-context-107', // mutation: TARGETED deployment of ONLY migration 107 (org-context columns on audit_log — ADR-013 T-08). Repairs the durable audit path itself.
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -334,8 +335,13 @@ export async function POST(req: NextRequest) {
   // backfill. It goes through the SAME permit and the SAME runner; only the static
   // gate and the present/absent check differ, because a column is not a table.
   const isDocumentJurisdiction119 = action === 'execute-document-jurisdiction-119';
+  // ADR-013 T-08 — migration 107 (org-context columns on audit_log). The audit
+  // path's OWN repair: until it runs, this handler's governance events cannot be
+  // durably recorded, which is why 113's and 119's are missing.
+  const isAuditOrgContext107 = action === 'execute-audit-org-context-107';
   const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115
-    || isEngineeringReview116 || isAhjRegistry117 || isFieldMeasurements118 || isDocumentJurisdiction119;
+    || isEngineeringReview116 || isAhjRegistry117 || isFieldMeasurements118 || isDocumentJurisdiction119
+    || isAuditOrgContext107;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
@@ -639,7 +645,8 @@ export async function POST(req: NextRequest) {
       // is ignored). It NEVER runs any other migration, never "all pending", and
       // never marks the historical baseline verified. Idempotent: if the
       // table(s) already exist it is a safe no-op.
-      const identifier = isRegistry113 ? '113'
+      const identifier = isAuditOrgContext107 ? '107'
+        : isRegistry113 ? '113'
         : isReconciliation114 ? '114'
         : isPersonnel115 ? '115'
         : isEngineeringReview116 ? '116'
@@ -671,7 +678,7 @@ export async function POST(req: NextRequest) {
       // migration deployed, with no default and no constraint. Both refuse every
       // destructive, mutating and row-seeding token.
       const isColumnShape = (spec.expectedColumns?.length ?? 0) > 0;
-      const shape = analyzeRegistryMigration(identifier, sql, spec.expectedTables, spec.expectedColumns);
+      const shape = analyzeRegistryMigration(identifier, sql, spec.expectedTables, spec.expectedColumns, undefined, spec.altersPreexistingTables);
       if (!shape.ok) {
         return NextResponse.json({ success: false, action, error: `Static verification failed: ${shape.problems.join(' ')}`, verification: shape, correlationId }, { status: 409 });
       }

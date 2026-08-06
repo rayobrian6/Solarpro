@@ -367,6 +367,14 @@ export function authorizeMigration(params: {
  * TARGETED recovery permit (bypassing the global EXECUTION_ENABLED window).
  * This is intentionally a narrow escape hatch and holds ONLY the currently
  * runnable targets:
+ *   - 107: actor_organization_id + resource_owner_organization_id on audit_log
+ *     (ADR-013 T-08). THE most consequential entry here. Its code half shipped
+ *     on 2026-07-12 and the migration never ran, so every audit write from that
+ *     code inserted 17 columns into a 16-column table and PostgreSQL refused it:
+ *     the tamper-evident trail recorded nothing, including the governance events
+ *     for 113 and 119. Verified by the ADD-COLUMN gate; its target predates the
+ *     registry, so the spec declares `altersPreexistingTables: ['audit_log']`.
+ *     RUN IT FIRST — every other migration's audit record depends on it.
  *   - 113: manufacturer_document_registry — the versioned authority-document
  *     store (W4 §8). Statically verified idempotent CREATE-TABLE-only and
  *     non-destructive by lib/migrations/targetedRegistryDeployment.ts before any
@@ -412,7 +420,7 @@ export function authorizeMigration(params: {
  * is exactly what happened to 117. The registry-parity test asserts this set and
  * REGISTRY_DEPLOYMENT/REGISTRY_SEQUENCE agree, so the four gates cannot drift again.
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['113', '114', '115', '116', '117', '118', '119']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['107', '113', '114', '115', '116', '117', '118', '119']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;
@@ -1373,7 +1381,10 @@ async function runSinglePendingMigrationInternal(
           completedAt: new Date(),
           durationMs,
           errorCode: 'AUDIT_PERSISTENCE_FAILED',
-          errorSummary: 'Migration applied but durable audit persistence failed (fail-closed).',
+          // THE REASON, on the record. This summary used to be a fixed string, so
+          // 113 (July) and 119 (August) both reported an audit failure that named
+          // no cause — and the cause was one line of PostgreSQL.
+          errorSummary: `Migration applied but durable audit persistence failed (fail-closed): ${auditResult.error ?? 'reason not reported'}`,
         });
         return {
           identifier,
@@ -1381,7 +1392,8 @@ async function runSinglePendingMigrationInternal(
           status: 'failed',
           durationMs,
           errorCode: 'AUDIT_PERSISTENCE_FAILED',
-          errorSummary: `Migration '${identifier}' was applied but the durable audit record could not be persisted. ` +
+          errorSummary: `Migration '${identifier}' was applied but the durable audit record could not be persisted: ` +
+            `${auditResult.error ?? 'reason not reported'}. ` +
             `The audit trail is incomplete. Treat this as a governance incident and investigate.`,
           dryRun,
           executionId,
@@ -1469,7 +1481,7 @@ async function runSinglePendingMigrationInternal(
           completedAt: new Date(),
           durationMs,
           errorCode: 'AUDIT_PERSISTENCE_FAILED',
-          errorSummary: `Migration failed (${result.errorCode ?? 'EXECUTION_ERROR'}) AND durable audit persistence failed (fail-closed).`,
+          errorSummary: `Migration failed (${result.errorCode ?? 'EXECUTION_ERROR'}) AND durable audit persistence failed (fail-closed): ${auditResult.error ?? 'reason not reported'}`,
         });
         return {
           identifier,
@@ -1477,7 +1489,8 @@ async function runSinglePendingMigrationInternal(
           status: 'failed',
           durationMs,
           errorCode: 'AUDIT_PERSISTENCE_FAILED',
-          errorSummary: `Migration '${identifier}' failed (${result.error ?? 'Unknown error'}) and the durable audit record could not be persisted. ` +
+          errorSummary: `Migration '${identifier}' failed (${result.error ?? 'Unknown error'}) and the durable audit record could not be persisted: ` +
+            `${auditResult.error ?? 'reason not reported'}. ` +
             `The audit trail is incomplete. Treat this as a governance incident.`,
           dryRun,
           executionId,

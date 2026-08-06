@@ -268,75 +268,220 @@ async function getLatestHash(orgId?: string | null): Promise<string | null> {
  *
  * @returns The entry hash on success, null on failure (never throws)
  */
+// ═══════════════════════════════════════════════════════════════════════════
+// THE ORG-COLUMN CAPABILITY PROBE
+//
+// THE OUTAGE THIS ENDS. Commit d479cbda (2026-07-12) added
+// `actor_organization_id` / `resource_owner_organization_id` to the INSERT
+// below, with migration 107 to create them. 107 was never applied — the ledger
+// jumps 108 → 119, because 107 sits in the ~27-migration historical baseline the
+// global execution gate refuses and it was never brought through the targeted
+// path either. From that commit onward every call inserted 17 columns into a
+// 16-column table, PostgreSQL answered `column "actor_organization_id" does not
+// exist`, the catch below swallowed it, and the event was gone.
+//
+// It went unnoticed for weeks because the two halves ran in different places:
+// production (master) still runs the pre-d479cbda writer and its auth events
+// kept landing, while the dev deployment's migration events — 113 in July, 119
+// in August — silently vanished. Both migrations reported
+// AUDIT_PERSISTENCE_FAILED and neither said why.
+//
+// THE RULE THIS ENFORCES: an audit event is DURABLE first. Losing the event
+// entirely is strictly worse for SOC 2 CC7.2 / ISO 27001 A.12.4 than recording
+// it without org partitioning — one is a missing control, the other is a
+// narrower query surface. So when the columns are absent the entry is still
+// written, the org ids are preserved INSIDE metadata so nothing is lost, and the
+// degradation is reported loudly and on the record rather than inferred.
+//
+// This is a SAFETY NET, not a substitute for applying 107. `auditLogOrgContextStatus`
+// exposes the degraded state so an operator surface can say so out loud.
+let _orgColumnsPresent: boolean | null = null;
+let _orgColumnProbeError: string | null = null;
+
+/** Reset the cached probe — for tests, and after a migration lands. */
+export function resetAuditLogSchemaProbe(): void {
+  _orgColumnsPresent = null;
+  _orgColumnProbeError = null;
+}
+
+/** Whether the per-org chain columns exist. Probed once per instance. */
+async function auditLogHasOrgColumns(sql: SqlExecutorLike): Promise<boolean> {
+  if (_orgColumnsPresent !== null) return _orgColumnsPresent;
+  try {
+    const rows = await sql`
+      SELECT count(*)::int AS n FROM information_schema.columns
+      WHERE table_name = 'audit_log'
+        AND column_name IN ('actor_organization_id', 'resource_owner_organization_id')
+    `;
+    const n = Number((rows as Array<{ n: number }>)[0]?.n ?? 0);
+    _orgColumnsPresent = n === 2;
+    if (!_orgColumnsPresent) {
+      console.error('[AUDIT_LOG_SCHEMA_DEGRADED]', JSON.stringify({
+        detail: `audit_log is missing the ADR-013 org-context column(s) (found ${n} of 2). `
+          + 'Migration 107 (107_audit_log_org_context.sql) has NOT been applied. Audit entries are '
+          + 'still being written, WITHOUT per-org hash-chain partitioning; the org ids are preserved '
+          + 'in metadata.orgContext. Apply migration 107 to restore ADR-013 partitioning.',
+      }));
+    }
+    return _orgColumnsPresent;
+  } catch (err: unknown) {
+    // Fail toward the LEGACY shape: it is the one that works on both schemas, so
+    // an unreadable catalog degrades to a durable write rather than to no write.
+    _orgColumnProbeError = err instanceof Error ? err.message : String(err);
+    _orgColumnsPresent = false;
+    console.error('[AUDIT_LOG_SCHEMA_PROBE_FAILED]', _orgColumnProbeError);
+    return false;
+  }
+}
+
+/** The org-context state, for an operator surface / health check. */
+export function auditLogOrgContextStatus(): {
+  probed: boolean; orgColumnsPresent: boolean | null; probeError: string | null;
+} {
+  return { probed: _orgColumnsPresent !== null, orgColumnsPresent: _orgColumnsPresent, probeError: _orgColumnProbeError };
+}
+
+/** The minimal shape of the tagged-template executor this module needs. */
+type SqlExecutorLike = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown[]>;
+
+/** What a write attempt actually did. `entryHash` is non-null iff it persisted. */
+export interface AuditWriteResult {
+  entryHash: string | null;
+  persisted: boolean;
+  /** WHY it did not persist. Null on success. */
+  error: string | null;
+  /** true ⇔ written without ADR-013 org partitioning (migration 107 absent). */
+  orgContextDegraded: boolean;
+}
+
+/**
+ * Write an audit entry, returning the full outcome.
+ *
+ * `writeAuditLog` keeps its `string | null` contract for its many callers;
+ * this is the same work with the REASON preserved. Two weeks of failed migration
+ * audits reported `AUDIT_PERSISTENCE_FAILED` with no cause attached, because the
+ * reason was discarded at this boundary.
+ */
+export async function writeAuditLogDetailed(
+  entry: Omit<AuditLogEntry, 'id' | 'prev_hash' | 'entry_hash' | 'timestamp'>,
+  timestamp?: Date,
+): Promise<AuditWriteResult> {
+  const ts = timestamp ?? new Date();
+  const isoTimestamp = ts.toISOString();
+  const orgId = entry.actor_organization_id ?? null;
+  const resourceOrgId = entry.resource_owner_organization_id ?? null;
+
+  // EVERYTHING that can throw is inside the try. `redactMetadata` walks caller
+  // data and `computeEntryHash` JSON.stringifies it — both sat OUTSIDE it, so a
+  // circular or non-serialisable metadata value threw straight past the fallback
+  // that exists to guarantee an event is never silently lost.
+  let fullEntry: Omit<AuditLogEntry, 'id' | 'entry_hash'> | null = null;
+  let entryHash: string | null = null;
+  let degraded = false;
+  try {
+    const safeMetadata = redactMetadata(entry.metadata ?? {});
+    const sql = await getDbWithRetry();
+    const hasOrgColumns = await auditLogHasOrgColumns(sql as unknown as SqlExecutorLike);
+    degraded = !hasOrgColumns;
+
+    // Per-org hash chain partitioning (ADR-013). With no org columns there is
+    // one platform chain; `getLatestHash` already fails soft to null.
+    const prevHash = await getLatestHash(hasOrgColumns ? orgId : null);
+
+    // Nothing is lost in degraded mode: the org ids travel in metadata, so the
+    // entry can be re-partitioned once 107 lands.
+    const storedMetadata = degraded && (orgId || resourceOrgId)
+      ? { ...safeMetadata, orgContext: { actor_organization_id: orgId, resource_owner_organization_id: resourceOrgId, degraded: true } }
+      : safeMetadata;
+
+    fullEntry = {
+      timestamp: isoTimestamp,
+      category: entry.category,
+      action: entry.action,
+      actor_id: entry.actor_id ?? null,
+      actor_email: entry.actor_email ?? null,
+      actor_role: entry.actor_role ?? null,
+      target_type: entry.target_type ?? null,
+      target_id: entry.target_id ?? null,
+      description: entry.description,
+      metadata: storedMetadata,
+      ip_address: entry.ip_address ?? null,
+      user_agent: entry.user_agent ?? null,
+      request_path: entry.request_path ?? null,
+      actor_organization_id: orgId,
+      resource_owner_organization_id: resourceOrgId,
+      prev_hash: prevHash,
+    };
+    // The hash covers the org ids in BOTH modes, so the chain value for a given
+    // event does not change when 107 is applied.
+    entryHash = computeEntryHash(fullEntry);
+    const metaJson = JSON.stringify(storedMetadata);
+
+    if (hasOrgColumns) {
+      await sql`
+        INSERT INTO audit_log (
+          timestamp, category, action,
+          actor_id, actor_email, actor_role,
+          target_type, target_id,
+          description, metadata,
+          ip_address, user_agent, request_path,
+          actor_organization_id, resource_owner_organization_id,
+          prev_hash, entry_hash
+        ) VALUES (
+          ${isoTimestamp}::timestamptz, ${entry.category}::text, ${entry.action}::text,
+          ${fullEntry.actor_id}, ${fullEntry.actor_email}, ${fullEntry.actor_role},
+          ${fullEntry.target_type}, ${fullEntry.target_id},
+          ${entry.description}, ${metaJson}::jsonb,
+          ${fullEntry.ip_address}, ${fullEntry.user_agent}, ${fullEntry.request_path},
+          ${orgId}::uuid, ${resourceOrgId}::uuid,
+          ${prevHash}, ${entryHash}
+        )
+      `;
+    } else {
+      await sql`
+        INSERT INTO audit_log (
+          timestamp, category, action,
+          actor_id, actor_email, actor_role,
+          target_type, target_id,
+          description, metadata,
+          ip_address, user_agent, request_path,
+          prev_hash, entry_hash
+        ) VALUES (
+          ${isoTimestamp}::timestamptz, ${entry.category}::text, ${entry.action}::text,
+          ${fullEntry.actor_id}, ${fullEntry.actor_email}, ${fullEntry.actor_role},
+          ${fullEntry.target_type}, ${fullEntry.target_id},
+          ${entry.description}, ${metaJson}::jsonb,
+          ${fullEntry.ip_address}, ${fullEntry.user_agent}, ${fullEntry.request_path},
+          ${prevHash}, ${entryHash}
+        )
+      `;
+    }
+    return { entryHash, persisted: true, error: null, orgContextDegraded: degraded };
+  } catch (err: unknown) {
+    // The console fallback is the last line of defence and must never itself
+    // throw — a circular metadata value would take the fallback down with it.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[AUDIT_LOG_WRITE_ERROR]', msg);
+    try {
+      console.error('[AUDIT_LOG_FALLBACK]', JSON.stringify({ ...(fullEntry ?? entry), entry_hash: entryHash }));
+    } catch {
+      console.error('[AUDIT_LOG_FALLBACK_UNSERIALISABLE]',
+        `category=${entry.category} action=${entry.action} target=${entry.target_type}:${entry.target_id} `
+        + `actor=${entry.actor_id ?? 'none'} at=${isoTimestamp} — metadata could not be serialised`);
+    }
+    return { entryHash: null, persisted: false, error: msg, orgContextDegraded: degraded };
+  }
+}
+
+/**
+ * Write an audit entry. Returns the entry hash, or null when it did not persist
+ * (the reason is logged, and available structurally via `writeAuditLogDetailed`).
+ */
 export async function writeAuditLog(
   entry: Omit<AuditLogEntry, 'id' | 'prev_hash' | 'entry_hash' | 'timestamp'>,
   timestamp?: Date,
 ): Promise<string | null> {
-  const ts = timestamp ?? new Date();
-  const isoTimestamp = ts.toISOString();
-
-  // Redact sensitive metadata before storage
-  const safeMetadata = redactMetadata(entry.metadata ?? {});
-
-  // Per-org hash chain partitioning (ADR-013)
-  const orgId = entry.actor_organization_id ?? null;
-  const resourceOrgId = entry.resource_owner_organization_id ?? null;
-  const prevHash = await getLatestHash(orgId);
-
-  const fullEntry: Omit<AuditLogEntry, 'id' | 'entry_hash'> = {
-    timestamp: isoTimestamp,
-    category: entry.category,
-    action: entry.action,
-    actor_id: entry.actor_id ?? null,
-    actor_email: entry.actor_email ?? null,
-    actor_role: entry.actor_role ?? null,
-    target_type: entry.target_type ?? null,
-    target_id: entry.target_id ?? null,
-    description: entry.description,
-    metadata: safeMetadata,
-    ip_address: entry.ip_address ?? null,
-    user_agent: entry.user_agent ?? null,
-    request_path: entry.request_path ?? null,
-    actor_organization_id: orgId,
-    resource_owner_organization_id: resourceOrgId,
-    prev_hash: prevHash,
-  };
-
-  const entryHash = computeEntryHash(fullEntry);
-
-  try {
-    const sql = await getDbWithRetry();
-    await sql`
-      INSERT INTO audit_log (
-        timestamp, category, action,
-        actor_id, actor_email, actor_role,
-        target_type, target_id,
-        description, metadata,
-        ip_address, user_agent, request_path,
-        actor_organization_id, resource_owner_organization_id,
-        prev_hash, entry_hash
-      ) VALUES (
-        ${isoTimestamp}::timestamptz, ${entry.category}::text, ${entry.action}::text,
-        ${fullEntry.actor_id}, ${fullEntry.actor_email}, ${fullEntry.actor_role},
-        ${fullEntry.target_type}, ${fullEntry.target_id},
-        ${entry.description}, ${JSON.stringify(safeMetadata)}::jsonb,
-        ${fullEntry.ip_address}, ${fullEntry.user_agent}, ${fullEntry.request_path},
-        ${orgId}::uuid, ${resourceOrgId}::uuid,
-        ${prevHash}, ${entryHash}
-      )
-    `;
-    return entryHash;
-  } catch (err: unknown) {
-    // Fallback to console logging if DB write fails
-    // This ensures audit events are never silently lost
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[AUDIT_LOG_WRITE_ERROR]', msg);
-    console.error('[AUDIT_LOG_FALLBACK]', JSON.stringify({
-      ...fullEntry,
-      entry_hash: entryHash,
-    }));
-    return null;
-  }
+  return (await writeAuditLogDetailed(entry, timestamp)).entryHash;
 }
 
 // ─── Convenience Wrappers ────────────────────────────────────────────────────

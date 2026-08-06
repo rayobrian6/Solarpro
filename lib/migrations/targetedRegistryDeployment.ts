@@ -61,9 +61,47 @@ export interface RegistryDeploymentSpec {
   expectedTables: string[];
   /** Columns this migration ADDs. Absent/empty for a CREATE-TABLE migration. */
   expectedColumns?: Array<{ table: string; column: string }>;
+  /** A PRE-EXISTING table this migration may alter, one no allowlisted migration
+   *  created. Declaring it is a deliberate, reviewable act: the default rule is
+   *  that this path may only alter tables it deployed itself, and 107's target
+   *  (`audit_log`, from migration 100) predates the whole registry. Naming it
+   *  here keeps that exception explicit and per-migration instead of widening
+   *  the rule for everything. */
+  altersPreexistingTables?: string[];
 }
 
 export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
+  // 2026-07-12 / ADR-013 T-08 — the org-context columns on audit_log, and the
+  // most consequential entry in this table.
+  //
+  // WHY IT IS HERE. Commit d479cbda added `actor_organization_id` /
+  // `resource_owner_organization_id` to lib/auditLog.ts's INSERT together with
+  // this migration. The migration was never applied: it predates 108, so it sits
+  // in the ~27-migration historical baseline the global execution gate refuses,
+  // and nothing ever brought it through the targeted path. From that commit on,
+  // every audit write from that code inserted 17 columns into a 16-column table
+  // and PostgreSQL refused it — so the tamper-evident audit trail recorded
+  // NOTHING from the dev deployment, including the governance events for
+  // migrations 113 and 119. It surfaced only as `AUDIT_PERSISTENCE_FAILED` with
+  // no stated cause.
+  //
+  // Production (master) still runs the pre-d479cbda writer, which is the only
+  // reason auth events kept landing. Merging dev to master WITHOUT this
+  // migration would take the whole audit_log dark — the SOC 2 CC7.2 / ISO 27001
+  // A.12.4 control, silently.
+  //
+  // Same additive shape as 119: two `ADD COLUMN IF NOT EXISTS`, two
+  // `CREATE INDEX IF NOT EXISTS`, two COMMENTs, no row written and no backfill.
+  // Its target predates the registry, so `altersPreexistingTables` names it
+  // explicitly rather than the gate quietly permitting any table.
+  '107': {
+    expectedTables: [],
+    expectedColumns: [
+      { table: 'audit_log', column: 'actor_organization_id' },
+      { table: 'audit_log', column: 'resource_owner_organization_id' },
+    ],
+    altersPreexistingTables: ['audit_log'],
+  },
   '113': { expectedTables: ['manufacturer_document_registry'] },
   '114': { expectedTables: ['equipment_reconciliation_audit', 'snapshot_digest_invalidations'] },
   // AAC WS-6 (2026-07-27) — the personnel-roles store: the designer / preparer /
@@ -134,8 +172,11 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
 };
 
 /** The migration identifiers this module governs, in ceremony order.
- *  119 is last because its target table is 113's — run 113 before 119. */
-export const REGISTRY_SEQUENCE = ['113', '114', '115', '116', '117', '118', '119'] as const;
+ *  107 is FIRST, deliberately: it repairs the durable audit path that every
+ *  other migration's governance event is recorded through, so running it first
+ *  means the rest are actually auditable. 119 is last because its target table
+ *  is 113's. */
+export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;
@@ -232,13 +273,15 @@ export function analyzeRegistryMigration(
    *  only against one of these, so this path can never alter a table it did not
    *  deploy. Omitted ⇒ derived from REGISTRY_DEPLOYMENT. */
   deployedTables?: string[],
+  /** PRE-EXISTING tables this specific migration declared it may alter. */
+  altersPreexistingTables?: string[],
 ): RegistryMigrationShape {
   const problems: string[] = [];
   const body = stripCommentsAndStrings(sql);
 
   // ── THE ADD-COLUMN SHAPE ────────────────────────────────────────────────
   if (expectedColumns && expectedColumns.length > 0) {
-    return analyzeAddColumnMigration(identifier, body, expectedColumns, deployedTables, problems);
+    return analyzeAddColumnMigration(identifier, body, expectedColumns, deployedTables, problems, altersPreexistingTables);
   }
 
   // Every CREATE TABLE (schema-qualified or not), whether or not IF NOT EXISTS.
@@ -323,8 +366,15 @@ function analyzeAddColumnMigration(
   expectedColumns: Array<{ table: string; column: string }>,
   deployedTables: string[] | undefined,
   problems: string[],
+  altersPreexistingTables?: string[],
 ): RegistryMigrationShape {
-  const deployed = new Set((deployedTables ?? deployedRegistryTables()).map(t => t.toLowerCase()));
+  // The default set is what this path deployed itself. A migration may add a
+  // PRE-EXISTING table only by declaring it in its own spec — an explicit,
+  // reviewable exception rather than a blanket widening.
+  const deployed = new Set([
+    ...(deployedTables ?? deployedRegistryTables()),
+    ...(altersPreexistingTables ?? []),
+  ].map(t => t.toLowerCase()));
   const expected = expectedColumns.map(c => `${c.table.toLowerCase()}.${c.column.toLowerCase()}`);
 
   // Statement-by-statement, so a second ALTER cannot hide behind a first.
@@ -346,7 +396,7 @@ function analyzeAddColumnMigration(
     if (!deployed.has(table.toLowerCase())) {
       problems.push(
         `Migration ${identifier} adds a column to '${table}', which no allowlisted migration deploys. `
-        + 'This path may only alter tables it created.');
+        + 'This path may only alter tables it created, or one its spec names explicitly.');
     }
     const banned = ALTER_SUBCOMMAND_BAN.filter(tok =>
       new RegExp(`\\b${tok.replace(/\s+/g, '\\s+')}\\b`, 'i').test(typeClause));

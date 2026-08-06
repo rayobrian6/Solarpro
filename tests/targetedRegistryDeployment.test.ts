@@ -110,9 +110,11 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(SQL_118).toMatch(/verification_state <> 'VERIFIED'[\s\S]{0,200}verification_mode IS NOT NULL/);
   });
 
-  it('sequence + spec are exactly 113 … 118 then 119', () => {
-    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116', '117', '118', '119']);
-    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114', '115', '116', '117', '118', '119']);
+  it('sequence is 107 FIRST, then 113 … 119', () => {
+    // 107 leads deliberately: it repairs the durable audit path that every other
+    // migration's governance event is recorded through.
+    expect(REGISTRY_SEQUENCE).toEqual(['107', '113', '114', '115', '116', '117', '118', '119']);
+    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['107', '113', '114', '115', '116', '117', '118', '119']);
   });
 
   it('EVERY governed identifier resolves to a real file that passes its own gate', () => {
@@ -211,7 +213,12 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     // and each button must name the SAME tables the deployment spec expects, so a
     // button cannot advertise something the gate would refuse.
     for (const id of REGISTRY_SEQUENCE) {
-      const btn = page.match(new RegExp(`RegistryButton\\s+id="${id}"[\\s\\S]{0,400}?/>`))?.[0] ?? '';
+      // The window is a source-scan convenience, not a contract. 107's button
+      // carries a longer label and a two-column `tables` string and legitimately
+      // runs past 400 characters; a silently-empty match then made this assertion
+      // read as "the button does not name its column" when the button was fine.
+      const btn = page.match(new RegExp(`RegistryButton\\s+id="${id}"[\\s\\S]{0,800}?/>`))?.[0] ?? '';
+      expect(btn, `could not locate the RegistryButton block for ${id}`).not.toBe('');
       for (const t of REGISTRY_DEPLOYMENT[id].expectedTables) {
         expect(btn, `button ${id} does not name expected table ${t}`).toContain(t);
       }

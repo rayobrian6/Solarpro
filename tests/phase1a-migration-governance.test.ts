@@ -1260,9 +1260,13 @@ describe('Phase 1A.1: Persistent audit integration', () => {
     expect(ledgerSrc).toContain("'migration.transaction_mode.review_required': 'migration_transaction_mode_review_required'");
   });
 
-  it('ledger.ts has a persistMigrationAuditEvent function that calls writeAuditLog', () => {
+  it('ledger.ts persists migration audit events through the central audit writer', () => {
     expect(ledgerSrc).toContain('async function persistMigrationAuditEvent');
-    expect(ledgerSrc).toContain("writeAuditLog(");
+    // `writeAuditLogDetailed` is the same central writer, returning the FAILURE
+    // REASON as well as the hash. The reason used to be discarded here, which is
+    // why migrations 113 and 119 both reported AUDIT_PERSISTENCE_FAILED naming no
+    // cause — for weeks, while the cause was one line of PostgreSQL.
+    expect(ledgerSrc).toMatch(/writeAuditLog(Detailed)?\(/);
     expect(ledgerSrc).toContain("category: 'migration'");
   });
 
