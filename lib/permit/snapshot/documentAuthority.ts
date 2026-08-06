@@ -31,6 +31,218 @@ import {
   type DocumentApplicability, type DocumentApplicabilityAlias, type DocumentRegistryFacts,
 } from '@/lib/manufacturer-assets-db';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// D7 — IDENTITY AND FACTS MUST DESCRIBE THE SAME DOCUMENT.
+//
+// This module received registry FACTS (archive state, hash, status) but never
+// registry document IDENTITY. It resolved the static `manufacturer_assets` entry
+// for the equipment, then attached whatever facts sat under the same
+// `category:equipmentId` key. Those are two different documents whenever the
+// static asset and the registry disagree — and on the live Braidon project they
+// do:
+//
+//   entry.documentTitle  "Roof Tech RT-MINI II Installation Manual (Jun 2025)"   ← static asset
+//   entry.sourceUrl      …/Installation-Manual-RT-MINI-II.pdf                    ← static asset
+//   registryFacts.sha256 2f6035586e94…                                           ← RT-MINI manual
+//
+// That hash belongs to `doc-rooftech-rtmini-install-manual-2f6035586e94`, the
+// VERSION-EXACT RT-MINI document. The entry asserted, in one object, that the
+// RT-MINI II manual has the RT-MINI manual's SHA-256. A citation built from it
+// is false in a way no reader could detect.
+//
+// The existing guard in structuralResolvers ("only the VERSION-EXACT document may
+// supply facts") checks that the DOCUMENT covers the selected model. It cannot
+// catch this, because it never compares the document to the ASSET it is being
+// attached to.
+//
+// The fix is structural: a document is SELECTED as a whole — identity, custody
+// and applicability together — and the entry reports that one document. Facts
+// are never grafted onto an identity they do not belong to.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Where a selected document came from, in precedence order. */
+export type DocumentAuthorityTier =
+  /** a registry document that is verified AND applicable to the selection. */
+  | 'REGISTRY_AUTHORITY'
+  /** a registry document that is archived + hashed but NOT yet authoritative.
+   *  Visible, citable as a candidate, and never treated as established. */
+  | 'REGISTRY_CANDIDATE'
+  /** the legacy static asset. A render cache: no hash, no verification. */
+  | 'STATIC_ASSET'
+  /** nothing on file. Stated explicitly rather than implied by nulls. */
+  | 'UNAVAILABLE';
+
+/** A registry document's identity, as the registry itself records it. Every
+ *  field here describes ONE row; nothing in this object may be sourced from
+ *  another document. */
+export interface RegistryDocumentIdentity {
+  documentId: string;
+  documentClass: string;
+  manufacturerOrIssuer: string | null;
+  equipmentId: string | null;
+  /** the product the document ACTUALLY covers — which may differ from the
+   *  selection. This is the field that keeps RT-MINI and RT-MINI II apart. */
+  equipmentModelApplicability: string | null;
+  title: string | null;
+  revision: string | null;
+  documentDate: string | null;
+  sourceUrl: string | null;
+  archivedFileIdentity: string | null;
+  archivedInRepo: boolean;
+  sha256: string | null;
+  status: string | null;
+  verificationState: string | null;
+  verificationActor: string | null;
+  verificationActorKind: string | null;
+  verificationBasis: string | null;
+  /** D4 — the stable legal-AHJ identity the document is bound to. */
+  jurisdictionAuthorityId: string | null;
+  jurisdictionBoundary: string | null;
+}
+
+/** THE selection: one document, described once, with the reason it won. */
+export interface SelectedDocumentAuthority {
+  tier: DocumentAuthorityTier;
+  /** true only for REGISTRY_AUTHORITY. A candidate is never authoritative. */
+  authoritative: boolean;
+  documentId: string | null;
+  documentClass: string | null;
+  title: string | null;
+  revision: string | null;
+  sourceUrl: string | null;
+  archivedInRepo: boolean;
+  sha256: string | null;
+  status: string | null;
+  verificationState: string | null;
+  verificationActor: string | null;
+  verificationActorKind: string | null;
+  verificationBasis: string | null;
+  jurisdictionAuthorityId: string | null;
+  /** the product the SELECTED document covers. */
+  documentProduct: string | null;
+  /** true ⇔ documentProduct matches the selected equipment model exactly. */
+  coversSelectedModelExactly: boolean;
+  /** why this document won, in one sentence a reviewer can act on. */
+  selectionReason: string;
+}
+
+/** Case/space-insensitive product comparison. Version suffixes are significant:
+ *  'RT-MINI' and 'RT-MINI II' must NOT compare equal. */
+function sameProduct(a: string | null | undefined, b: string | null | undefined): boolean {
+  const n = (s: string | null | undefined) => (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const x = n(a), y = n(b);
+  return !!x && x === y;
+}
+
+/**
+ * THE PRECEDENCE. Pure, deterministic, and total — every path returns a
+ * selection, including the explicit unavailable state.
+ *
+ *   1 REGISTRY_AUTHORITY  verified + current + archived + hashed + product-exact
+ *   2 REGISTRY_CANDIDATE  archived + hashed, but not yet authoritative
+ *   3 STATIC_ASSET        the legacy render cache
+ *   4 UNAVAILABLE         nothing on file
+ *
+ * A candidate is preferred over a static asset even when the candidate is not
+ * product-exact: the registry row is a real, hashed document of record, and
+ * saying so is more honest than citing an unhashed asset. What it is NOT is
+ * authoritative — and `coversSelectedModelExactly` reports the difference.
+ */
+export function selectEquipmentDocument(args: {
+  selectedModel: string | null | undefined;
+  candidates: readonly RegistryDocumentIdentity[] | null | undefined;
+  staticAsset: { id: string; docTitle: string | null; sourceUrl: string | null; model: string | null } | null | undefined;
+}): SelectedDocumentAuthority {
+  const model = args.selectedModel ?? null;
+  const pool = (args.candidates ?? []).filter(Boolean);
+
+  const fromRegistry = (d: RegistryDocumentIdentity, tier: DocumentAuthorityTier, reason: string): SelectedDocumentAuthority => ({
+    tier,
+    authoritative: tier === 'REGISTRY_AUTHORITY',
+    documentId: d.documentId,
+    documentClass: d.documentClass,
+    title: d.title,
+    revision: d.revision,
+    // the registry's archived identity is the citable location; fall back to the
+    // recorded source only when no archive identity exists.
+    sourceUrl: d.archivedFileIdentity ?? d.sourceUrl,
+    archivedInRepo: d.archivedInRepo,
+    sha256: d.sha256,
+    status: d.status,
+    verificationState: d.verificationState,
+    verificationActor: d.verificationActor,
+    verificationActorKind: d.verificationActorKind,
+    verificationBasis: d.verificationBasis,
+    jurisdictionAuthorityId: d.jurisdictionAuthorityId,
+    documentProduct: d.equipmentModelApplicability,
+    coversSelectedModelExactly: sameProduct(d.equipmentModelApplicability, model),
+    selectionReason: reason,
+  });
+
+  // ── 1 — verified, current, archived, hashed AND product-exact ────────────
+  const authority = pool.find(d =>
+    (d.verificationState ?? '').toLowerCase() === 'verified'
+    && (d.status ?? '').toLowerCase() === 'current'
+    && d.archivedInRepo && !!d.sha256
+    && sameProduct(d.equipmentModelApplicability, model));
+  if (authority) {
+    return fromRegistry(authority, 'REGISTRY_AUTHORITY',
+      `verified registry document covering the selected model '${model}' exactly`);
+  }
+
+  // ── 2 — archived + hashed registry candidate ─────────────────────────────
+  // Product-exact candidates rank ahead of non-exact ones, so the closest real
+  // document is the one cited.
+  const archived = pool.filter(d => d.archivedInRepo && !!d.sha256
+    && (d.status ?? '').toLowerCase() !== 'withdrawn');
+  const candidate = archived.find(d => sameProduct(d.equipmentModelApplicability, model)) ?? archived[0];
+  if (candidate) {
+    const exact = sameProduct(candidate.equipmentModelApplicability, model);
+    const why = !exact
+      ? `covers '${candidate.equipmentModelApplicability ?? 'an unstated product'}', not the selected '${model}'`
+      : `verification is '${candidate.verificationState ?? 'unrecorded'}', not 'verified'`;
+    return fromRegistry(candidate, 'REGISTRY_CANDIDATE',
+      `archived registry document, NOT authoritative — ${why}`);
+  }
+
+  // ── 3 — the legacy static asset ──────────────────────────────────────────
+  if (args.staticAsset) {
+    const a = args.staticAsset;
+    return {
+      tier: 'STATIC_ASSET',
+      authoritative: false,
+      documentId: null,               // an asset has no registry document id
+      documentClass: null,
+      title: a.docTitle,
+      revision: null,
+      sourceUrl: a.sourceUrl,
+      archivedInRepo: false,          // NEVER inherit archive state from a registry row
+      sha256: null,                   // NEVER inherit a hash from another document
+      status: null,
+      verificationState: null,
+      verificationActor: null,
+      verificationActorKind: null,
+      verificationBasis: null,
+      jurisdictionAuthorityId: null,
+      documentProduct: a.model,
+      coversSelectedModelExactly: sameProduct(a.model, model),
+      selectionReason: 'no registry document is on file; the legacy static asset is a render cache '
+        + 'only — it carries no hash, no verification and no jurisdiction binding',
+    };
+  }
+
+  // ── 4 — nothing at all, said out loud ────────────────────────────────────
+  return {
+    tier: 'UNAVAILABLE', authoritative: false,
+    documentId: null, documentClass: null, title: null, revision: null, sourceUrl: null,
+    archivedInRepo: false, sha256: null, status: null,
+    verificationState: null, verificationActor: null, verificationActorKind: null,
+    verificationBasis: null, jurisdictionAuthorityId: null,
+    documentProduct: null, coversSelectedModelExactly: false,
+    selectionReason: 'no registry document and no static asset are on file for this equipment',
+  };
+}
+
 /** The per-document verdict the snapshot carries and every sheet projects. */
 export interface EquipmentDocumentAuthorityEntry {
   /** `${category}:${equipmentId}` — the key the asset library itself resolves on. */
@@ -49,6 +261,14 @@ export interface EquipmentDocumentAuthorityEntry {
    *  false the AUTHORITATIVE verdict is genuinely out of reach, and that is a
    *  fact about the archive, not about the renderer. */
   registryFactsPresent: boolean;
+  /** D7 — THE SELECTED DOCUMENT, as one coherent object.
+   *
+   *  `assetId` / `documentTitle` / `sourceUrl` above are the LEGACY static-asset
+   *  fields and are retained so no existing consumer breaks. They describe the
+   *  asset, which is not necessarily the document of record. Anything that cites
+   *  a document — a title beside a hash, a document id, an archive claim — must
+   *  read `selectedDocument`, where every field describes the SAME row. */
+  selectedDocument: SelectedDocumentAuthority;
 }
 
 /**
@@ -62,6 +282,11 @@ export interface EquipmentDocumentAuthorityEntry {
 export interface EquipmentDocumentAuthority {
   entries: Record<string, EquipmentDocumentAuthorityEntry>;
   registryFacts: Record<string, DocumentRegistryFacts>;
+  /** D7 — the registry document IDENTITIES the verdicts were selected from,
+   *  keyed `${category}:${equipmentId}`. Frozen alongside the verdicts for the
+   *  same reason `registryFacts` is: a sheet citing a document the build did not
+   *  pre-enumerate must reach the same answer, from the same inputs. */
+  registryDocuments: Record<string, RegistryDocumentIdentity[]>;
   /** VERIFIED cross-reference records only. Always empty unless one genuinely
    *  exists: the WS-8 research established that the manufacturer publishes no
    *  cross-reference, and none is ever fabricated to clear a gap. */
@@ -69,7 +294,7 @@ export interface EquipmentDocumentAuthority {
 }
 
 export function emptyEquipmentDocumentAuthority(): EquipmentDocumentAuthority {
-  return { entries: {}, registryFacts: {}, aliases: {} };
+  return { entries: {}, registryFacts: {}, registryDocuments: {}, aliases: {} };
 }
 
 export interface DocumentAuthorityRequest {
@@ -93,10 +318,15 @@ export function buildEquipmentDocumentAuthority(
   requests: DocumentAuthorityRequest[],
   registryFacts?: Record<string, DocumentRegistryFacts> | null,
   aliases?: Record<string, DocumentApplicabilityAlias> | null,
+  /** D7 — registry document IDENTITIES, keyed `${category}:${equipmentId}`.
+   *  Optional: omitted ⇒ no registry candidate exists and the static asset is
+   *  selected, which is byte-identical to the pre-D7 behaviour. */
+  registryDocuments?: Record<string, RegistryDocumentIdentity[]> | null,
 ): EquipmentDocumentAuthority {
   const region: EquipmentDocumentAuthority = {
     entries: {},
     registryFacts: { ...(registryFacts ?? {}) },
+    registryDocuments: { ...(registryDocuments ?? {}) },
     aliases: { ...(aliases ?? {}) },
   };
   const out = region.entries;
@@ -120,17 +350,49 @@ export function buildEquipmentDocumentAuthority(
     // manufacturer cross-reference does not exist, and the correct answer was
     // the version-exact document, not a bridge.
     const alias = aliases?.[key] ?? null;
+    const model = req.selectedModel ?? asset?.model ?? null;
+
+    // ── D7 — SELECT ONE DOCUMENT, WHOLE ──────────────────────────────────
+    // The candidates are looked up under the SAME key shape as the facts, so a
+    // registry document and its own custody travel together. `selectEquipmentDocument`
+    // applies the precedence and returns a single coherent object.
+    const candidates = registryDocuments?.[documentAuthorityKey(category, equipmentId)]
+      ?? registryDocuments?.[key]
+      ?? null;
+    const selected = selectEquipmentDocument({
+      selectedModel: model,
+      candidates,
+      staticAsset: asset ? { id: asset.id, docTitle: asset.docTitle ?? null, sourceUrl: asset.sourceUrl ?? null, model: asset.model ?? null } : null,
+    });
+
+    // ── D7 — FACTS MAY ONLY DESCRIBE THE SELECTED DOCUMENT ────────────────
+    // The applicability evaluator takes custody facts (archive + hash + status).
+    // Those must come from the document that was actually SELECTED. Passing the
+    // key-scoped `facts` blindly is what let the RT-MINI manual's SHA-256 be
+    // reported against the RT-MINI II asset's title. When a registry document
+    // won, its own custody is used; when the static asset won, there is no
+    // custody to report and `null` is the honest answer — an asset has no hash.
+    const factsForSelection: DocumentRegistryFacts | null =
+      selected.tier === 'REGISTRY_AUTHORITY' || selected.tier === 'REGISTRY_CANDIDATE'
+        ? {
+            archivedInRepo: selected.archivedInRepo,
+            sha256: selected.sha256,
+            status: (selected.status as DocumentRegistryFacts['status']) ?? null,
+          }
+        : (candidates && candidates.length ? null : facts);
+
     out[key] = {
       key,
       category: req.category,
       equipmentId,
-      selectedModel: req.selectedModel ?? asset?.model ?? null,
+      selectedModel: model,
+      // LEGACY static-asset fields — retained for existing consumers.
       assetId: asset?.id ?? null,
       documentTitle: asset?.docTitle ?? null,
       sourceUrl: asset?.sourceUrl ?? null,
-      applicability: evaluateDocumentApplicability(
-        req.selectedModel ?? asset?.model ?? null, asset, alias, facts),
-      registryFactsPresent: facts != null,
+      applicability: evaluateDocumentApplicability(model, asset, alias, factsForSelection),
+      registryFactsPresent: factsForSelection != null,
+      selectedDocument: selected,
     };
   }
   return region;

@@ -1278,6 +1278,7 @@ export function generatePermitHTML(
       //   • engineeringReview           — the digest-bound licensed approval, READ only
       structuralDocumentRetrieval: snapshotAuthority?.structuralDocumentRetrieval ?? null,
       documentRegistryFacts: snapshotAuthority?.documentRegistryFacts ?? null,
+      documentRegistryIdentities: snapshotAuthority?.documentRegistryIdentities ?? null,
       rackingAssemblySelection: snapshotAuthority?.rackingAssemblySelection ?? null,
       framingRetrieval: snapshotAuthority?.framingRetrieval ?? null,
       engineeringReview: snapshotAuthority?.engineeringReview ?? null,

@@ -370,6 +370,12 @@ export interface SnapshotAuthorityInputs {
    *  the AUTHORITATIVE verdict that was unreachable while all seven call sites
    *  passed `null`. Only a VERSION-EXACT archived document contributes facts. */
   documentRegistryFacts?: Record<string, import('@/lib/manufacturer-assets-db').DocumentRegistryFacts> | null;
+  /** D7 — registry document IDENTITIES, keyed `${category}:${equipmentId}`.
+   *  Facts alone were never enough: they told the build a hash existed without
+   *  telling it WHICH document owned the hash, so the static asset's identity
+   *  ended up carrying another document's custody. Identity travels with custody
+   *  from here on. */
+  documentRegistryIdentities?: Record<string, import('@/lib/permit/snapshot/documentAuthority').RegistryDocumentIdentity[]> | null;
   /** WS-8 — the rail-selection trace: which stores were probed, whether the rail
    *  is inherent in the mount product or genuinely unselected, and the
    *  span-screened candidate list that bounds the operator's remaining pick. */

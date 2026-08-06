@@ -143,6 +143,8 @@ export function buildPermitDesignSnapshot(
      *  `${category}:${equipmentId}`. Absent ⇒ the AUTHORITATIVE verdict stays
      *  unreachable, exactly as before this seam. */
     documentRegistryFacts?: Record<string, import('@/lib/manufacturer-assets-db').DocumentRegistryFacts> | null;
+    /** D7 — registry document identities the document selection is made from. */
+    documentRegistryIdentities?: Record<string, import('./documentAuthority').RegistryDocumentIdentity[]> | null;
     /** AAC WS-8 — the rail-selection trace (probes, inherent-vs-unselected,
      *  span-screened candidates). Decides PENDING-RACKING-ASSEMBLY-SELECTION. */
     rackingAssemblySelection?: import('./resolution/railSelection').RailSelectionVerdict | null;
@@ -2621,6 +2623,10 @@ export function buildPermitDesignSnapshot(
       ],
       opts?.documentRegistryFacts ?? null,
       null,   // the alias store stays EMPTY: no cross-reference is fabricated.
+      // D7 — the registry document IDENTITIES. With these the build can SELECT a
+      // document rather than resolve a static asset and graft another document's
+      // custody onto it.
+      opts?.documentRegistryIdentities ?? null,
     ),
     // AAC WS-9 / PRR §1 — the certification record PROJECTS the digest-bound
     // review, in the `false | { reviewedDigest; approvedAtIso }` shape certPages /

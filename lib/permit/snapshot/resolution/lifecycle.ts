@@ -110,6 +110,9 @@ export function defaultAuthorityBundle(): SnapshotAuthorityInputs {
     // review, until a real source establishes one.
     structuralDocumentRetrieval: null,
     documentRegistryFacts: null,
+    // D7 — no registry identities ⇒ the static asset is selected, which is
+    // byte-identical to the pre-D7 behaviour.
+    documentRegistryIdentities: null,
     rackingAssemblySelection: null,
     framingRetrieval: null,
     engineeringReview: null,

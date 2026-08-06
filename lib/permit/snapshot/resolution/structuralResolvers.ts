@@ -40,6 +40,9 @@ import {
   type DocumentRetrievalAttempt, type StructuralDocumentRetrievalRecord,
 } from './structuralDocuments';
 import type { RequirementResolver, ResolverContext, ResolverOutcome } from './types';
+// D7 — a registry document is selected as a WHOLE: identity, custody and
+// applicability together, never assembled from two different rows.
+import type { RegistryDocumentIdentity } from '../documentAuthority';
 
 const REGISTRY_SOURCE = 'manufacturer_document_registry (lib/documents/registry, migration 113)';
 const REVIEW_STORE_SOURCE = 'engineering_review_records (lib/engineeringReview/store, migration 116)';
@@ -98,7 +101,7 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
   // retained here — it has no non-archival use in this resolver, and keeping it
   // would leave exactly the hidden fallback D4 exists to remove.
   requiredInputs: ['legalJurisdiction', 'capacityDocument'],
-  produces: ['structuralDocumentRetrieval', 'documentRegistryFacts'],
+  produces: ['structuralDocumentRetrieval', 'documentRegistryFacts', 'documentRegistryIdentities'],
   description:
     'Retrieves the manufacturer\'s PUBLISHED structural documents for the selected mount (stamped PE capacity letter, '
     + 'version-exact installation manual), hashes the exact bytes, and archives them through the document registry.',
@@ -366,8 +369,63 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
       // Only the VERSION-EXACT document may supply facts for this asset: handing
       // the II manual's hash to an RT-MINI citation would manufacture an
       // AUTHORITATIVE verdict for a document that does not cover the product.
+      //
+      // ⚠ D7 — THIS GUARD IS NECESSARY BUT NOT SUFFICIENT. It checks that the
+      // DOCUMENT covers the selected model. It cannot check that the ASSET these
+      // facts are being attached to is the same document — and on live Braidon it
+      // was not: the RT-MINI manual's hash landed under `racking_detail:rooftech-mini`,
+      // whose static asset is the RT-MINI *II* manual. Identity is now carried
+      // alongside (see `identities` below) so the selection can compare them.
       if (!a.coversSelectedModel) continue;
       facts[`racking_detail:${mountId}`] = { archivedInRepo: true, sha256: a.sha256, status: 'current' };
+    }
+
+    // ── D7 — THE REGISTRY DOCUMENT IDENTITIES ────────────────────────────────
+    // Every archived document this retrieval produced, described as the registry
+    // records it. The build selects ONE of these (or the static asset) and reports
+    // that single document — identity, custody and applicability together.
+    // Unlike `facts` above, identities are NOT filtered by `coversSelectedModel`:
+    // a document that covers a different product is a real, citable CANDIDATE,
+    // and hiding it is what left the version-exact RT-MINI manual invisible while
+    // the RT-MINI II asset spoke for it.
+    const identities: Record<string, RegistryDocumentIdentity[]> = {
+      ...(ctx.authority.documentRegistryIdentities ?? {}),
+    };
+    if (mountId) {
+      const key = `racking_detail:${mountId}`;
+      const rows: RegistryDocumentIdentity[] = [];
+      for (const a of record.attempts) {
+        if (a.outcome !== 'RETRIEVED' || !a.archival.documentId) continue;
+        const stored = await ctx.safeDbRead(
+          `getDocument(identity:${a.archival.documentId})`,
+          () => getDocument(a.archival.documentId as string),
+          null,
+        );
+        const d = stored.ok ? stored.value : null;
+        rows.push({
+          documentId: a.archival.documentId,
+          documentClass: d?.documentClass ?? a.documentClass,
+          manufacturerOrIssuer: d?.manufacturerOrIssuer ?? null,
+          equipmentId: d?.equipmentId ?? mountId,
+          // THE field that keeps RT-MINI and RT-MINI II apart.
+          equipmentModelApplicability: d?.equipmentModelApplicability ?? a.documentProduct ?? null,
+          title: d?.title ?? null,
+          revision: d?.revision ?? a.edition ?? null,
+          documentDate: d?.documentDate ?? null,
+          sourceUrl: a.url,
+          archivedFileIdentity: d?.archivedFileIdentity ?? a.url,
+          archivedInRepo: d?.archivedInRepo ?? true,
+          sha256: d?.sha256 ?? a.sha256,
+          status: d?.status ?? 'current',
+          verificationState: d?.verificationState ?? 'unverified',
+          verificationActor: d?.verifiedBy ?? null,
+          verificationActorKind: null,
+          verificationBasis: d?.verificationNotes ?? null,
+          jurisdictionAuthorityId: d?.jurisdictionAuthorityId ?? null,
+          jurisdictionBoundary: d?.jurisdictionBoundary ?? null,
+        });
+      }
+      if (rows.length) identities[key] = rows;
     }
 
     const refs = retrieved.flatMap(a => [
@@ -389,7 +447,7 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
         missing: record.residual.length ? record.residual : [],
         reasons: record.residual,
       },
-      patch: { structuralDocumentRetrieval: record, documentRegistryFacts: facts },
+      patch: { structuralDocumentRetrieval: record, documentRegistryFacts: facts, documentRegistryIdentities: identities },
       sourceQueried: `${provider?.name ?? 'no-document-provider'} → ${REGISTRY_SOURCE}`,
       sourceRefs: refs,
       retryability: retrieved.length ? 'REQUIRES_INPUT' : 'RETRYABLE',
