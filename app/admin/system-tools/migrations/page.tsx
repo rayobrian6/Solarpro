@@ -302,6 +302,21 @@ export default function MigrationConsolePage() {
           <RegistryButton id="118" label="Run migration 118…" tables="field_route_measurements + field_route_measurement_events"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-field-measurements-118" onResult={(v) => setRegistry((s) => ({ ...s, ['118']: v }))} result={registry['118']} />
+          {/* D4 — migration 119. The FIRST target here that is not a CREATE TABLE:
+              it adds one nullable column to manufacturer_document_registry (113's
+              table) plus one partial index, both IF NOT EXISTS, and it writes no
+              row and refuses to backfill.
+
+              It was written on 2026-08-05 and reported as "created, not applied"
+              while being registered in NONE of the four gates — no deployment
+              spec, no API action, no button, not on the runner allowlist — so
+              there was no path by which anyone could apply it. That is the same
+              failure 118 hit, and the reason the parity test below now asserts
+              all four gates agree. Run 113 first; the handler refuses with a
+              named prerequisite if the table is absent. */}
+          <RegistryButton id="119" label="Run migration 119…" tables="manufacturer_document_registry.jurisdiction_authority_id (column)"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-document-jurisdiction-119" onResult={(v) => setRegistry((s) => ({ ...s, ['119']: v }))} result={registry['119']} />
         </div>
       </section>
 

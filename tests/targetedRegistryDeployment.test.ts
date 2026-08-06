@@ -23,6 +23,7 @@ const SQL_114 = readFileSync(join(process.cwd(), 'lib', 'migrations', '114_equip
 const SQL_115 = readFileSync(join(process.cwd(), 'lib', 'migrations', '115_project_personnel_roles.sql'), 'utf8');
 const SQL_117 = readFileSync(join(process.cwd(), 'lib', 'migrations', '117_ahj_registry.sql'), 'utf8');
 const SQL_118 = readFileSync(join(process.cwd(), 'lib', 'migrations', '118_field_route_measurements.sql'), 'utf8');
+const SQL_119 = readFileSync(join(process.cwd(), 'lib', 'migrations', '119_document_jurisdiction_authority.sql'), 'utf8');
 
 describe('targetedRegistryDeployment — static analysis (pure)', () => {
   it('accepts the real migration 113 (creates manufacturer_document_registry)', () => {
@@ -109,19 +110,77 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(SQL_118).toMatch(/verification_state <> 'VERIFIED'[\s\S]{0,200}verification_mode IS NOT NULL/);
   });
 
-  it('sequence + spec are exactly 113, 114, 115, 116, 117 then 118', () => {
-    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116', '117', '118']);
-    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114', '115', '116', '117', '118']);
+  it('sequence + spec are exactly 113 … 118 then 119', () => {
+    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116', '117', '118', '119']);
+    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114', '115', '116', '117', '118', '119']);
   });
 
   it('EVERY governed identifier resolves to a real file that passes its own gate', () => {
     // The gap this closes: a spec entry with no file 409s at run time, and a file
     // with no spec/action/button is simply unreachable from the console.
+    //
+    // A spec must declare SOMETHING to deploy — tables or columns. 119 is the
+    // first with no table, and asserting `expectedTables.length > 0` here would
+    // have been the fifth gate it silently failed.
     for (const id of REGISTRY_SEQUENCE) {
       const spec = REGISTRY_DEPLOYMENT[id];
       expect(spec, `no deployment spec for ${id}`).toBeTruthy();
-      expect(spec.expectedTables.length).toBeGreaterThan(0);
+      const declares = spec.expectedTables.length + (spec.expectedColumns?.length ?? 0);
+      expect(declares, `spec ${id} declares neither a table nor a column`).toBeGreaterThan(0);
     }
+  });
+
+  // ── THE ADD-COLUMN SHAPE (119) ────────────────────────────────────────────
+  // Migration 119 was authored 2026-08-05 and reported as "created, not applied"
+  // while registered in NONE of the four gates — no spec, no API action, no
+  // console button, not on the runner allowlist. It could not be applied by
+  // anybody. Worse, its SHAPE was inadmissible: the static verifier rejected the
+  // bare token ALTER, so registering it alone would not have been enough.
+  it('accepts the real migration 119 (adds ONE nullable column + a partial index)', () => {
+    const spec = REGISTRY_DEPLOYMENT['119'];
+    const s = analyzeRegistryMigration('119', SQL_119, spec.expectedTables, spec.expectedColumns);
+    expect(s.problems).toEqual([]);
+    expect(s.ok).toBe(true);
+    expect(s.kind).toBe('add-column');
+    expect(s.addedColumns).toEqual(['manufacturer_document_registry.jurisdiction_authority_id']);
+    expect(s.columnsMatchExpected).toBe(true);
+    expect(s.nonDestructive).toBe(true);
+    // and it must genuinely not backfill — the four live rows keep their value
+    expect(SQL_119).not.toMatch(/UPDATE/i);
+    expect(SQL_119).not.toMatch(/INSERT/i);
+  });
+
+  it('refuses an ALTER that is anything other than ADD COLUMN IF NOT EXISTS', () => {
+    const cols = [{ table: 'manufacturer_document_registry', column: 'x' }];
+    for (const sql of [
+      'ALTER TABLE manufacturer_document_registry DROP COLUMN x;',
+      'ALTER TABLE manufacturer_document_registry RENAME COLUMN a TO x;',
+      'ALTER TABLE manufacturer_document_registry ALTER COLUMN x TYPE INTEGER;',
+      'ALTER TABLE manufacturer_document_registry ADD COLUMN x TEXT;',   // not idempotent
+    ]) {
+      const s = analyzeRegistryMigration('T', sql, [], cols);
+      expect(s.ok, `should refuse: ${sql}`).toBe(false);
+    }
+  });
+
+  it('refuses an admitted ADD COLUMN that carries a default or a constraint', () => {
+    const cols = [{ table: 'manufacturer_document_registry', column: 'x' }];
+    for (const clause of ["TEXT NOT NULL", "TEXT DEFAULT 'a'", 'TEXT UNIQUE', 'TEXT REFERENCES t(id)', 'TEXT PRIMARY KEY']) {
+      const s = analyzeRegistryMigration('T',
+        `ALTER TABLE manufacturer_document_registry ADD COLUMN IF NOT EXISTS x ${clause};`, [], cols);
+      expect(s.ok, `should refuse clause: ${clause}`).toBe(false);
+    }
+    // the bare nullable column IS admitted — a catalog-only change
+    expect(analyzeRegistryMigration('T',
+      'ALTER TABLE manufacturer_document_registry ADD COLUMN IF NOT EXISTS x TEXT;', [], cols).ok).toBe(true);
+  });
+
+  it('refuses an ADD COLUMN on a table no allowlisted migration deploys', () => {
+    const s = analyzeRegistryMigration('T',
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin TEXT;',
+      [], [{ table: 'users', column: 'is_admin' }]);
+    expect(s.ok).toBe(false);
+    expect(s.problems.join(' ')).toMatch(/no allowlisted migration deploys/);
   });
 
   // ── REACHABILITY: the half of the sentence above that was never asserted ───
@@ -155,6 +214,11 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
       const btn = page.match(new RegExp(`RegistryButton\\s+id="${id}"[\\s\\S]{0,400}?/>`))?.[0] ?? '';
       for (const t of REGISTRY_DEPLOYMENT[id].expectedTables) {
         expect(btn, `button ${id} does not name expected table ${t}`).toContain(t);
+      }
+      // an ADD-COLUMN button must name the column it adds, for the same reason:
+      // a button may not advertise something the gate would refuse.
+      for (const c of REGISTRY_DEPLOYMENT[id].expectedColumns ?? []) {
+        expect(btn, `button ${id} does not name expected column ${c.column}`).toContain(c.column);
       }
     }
   });
