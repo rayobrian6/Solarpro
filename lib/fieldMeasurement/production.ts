@@ -22,9 +22,19 @@ import { MEASUREMENT_ERROR_STATUS, MeasurementError } from './types';
  * Write a snapshot_digest_invalidations row (migration 114) so the stored
  * planset stops being served as current after field authority changes.
  *
- * `digest: null` is the ledger's "all current, until rebuild" form — which is
- * the right claim here: the measurement does not know which digest is live, and
- * naming the wrong one would leave the live artifact uninvalidated.
+ * D11 — THE DIGEST IS NOW RECORDED WHEN IT IS KNOWN. This sink used to hardcode
+ * `digest: null`, justified as "the measurement does not know which digest is
+ * live, and naming the wrong one would leave the live artifact uninvalidated."
+ * The premise was true and the conclusion cost too much: a null-digest row is a
+ * TIME WATERMARK that invalidates every approval on the project made at or
+ * before it, whatever design those approvals covered. Meanwhile `reconcile.ts`
+ * has always recorded the pre-change digest — one ledger, two writers, two
+ * behaviours.
+ *
+ * The service now reads the CURRENT design before the transition and passes it
+ * here, so the row scopes to the design the measurement actually changed. `null`
+ * survives as the honest fallback for "not knowable at write time" — it is never
+ * guessed, and a row that recorded no digest is never backfilled afterwards.
  */
 export const productionInvalidationSink: InvalidationSink = {
   async invalidate(rec) {
@@ -34,7 +44,7 @@ export const productionInvalidationSink: InvalidationSink = {
         id, project_id, digest, snapshot_id, scope, engineering_approval_ref,
         reason, invalidated_by, invalidated_at
       ) VALUES (
-        ${randomUUID()}, ${rec.projectId}, ${null}, ${null}, ${rec.scope}, ${null},
+        ${randomUUID()}, ${rec.projectId}, ${rec.digest ?? null}, ${rec.snapshotId ?? null}, ${rec.scope}, ${null},
         ${rec.reason}, ${rec.invalidatedBy}, ${rec.atIso}::timestamptz
       )
     `;

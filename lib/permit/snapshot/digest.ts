@@ -75,20 +75,81 @@ const RUN_INSTANT_SENTINEL = '<run-instant>';
 const AUDIT_REF_KEYS: ReadonlySet<string> = new Set(['resolutionAuditRef', 'auditRef']);
 const AUDIT_REF_INSTANT_RE = /@\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/;
 
-/** Replace run-instant provenance with a constant, recursively. Pure; the input
- *  is never mutated, so the stored snapshot keeps its real timestamps. */
-function normalizeRunInstants(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(normalizeRunInstants);
+// ═══════════════════════════════════════════════════════════════════════════
+// D11 — THE CALENDAR DATE WALKED THROUGH THE SAME DOOR.
+//
+// The MCC §0 note above says `capturedAtIso` was left out "because it did NOT
+// vary". That measurement was taken between two builds SECONDS apart, and none
+// of these vary on that timescale. They vary by DAY.
+//
+// `meta.generatedAtIso` is the resolved jurisdiction-zone issue date, and
+// `generatePermit.ts` overwrites `project.date` with it on EVERY render — so an
+// unchanged design regenerates to a different digest after midnight in the
+// project's zone. A PE approves digest D today; tomorrow the same design is D′
+// and the approval is dropped as stale by the very mechanism built to protect
+// it. The archived Braidon snapshot on disk reads 7/30/2026 against a live
+// 8/6/2026: different digests, no design change between them. That is MCC §0's
+// defect at day granularity, and D11's whole premise — that a row naming digest
+// D can invalidate an approval of D — is meaningless until it is closed.
+//
+// EXCLUDED BY PATH, NOT BY KEY NAME. Measured, not assumed: every leaf in the
+// live snapshot equal to the generation stamp was enumerated, and the six paths
+// below are the whole set. `capturedAtIso` is NOT excludable by key —
+// `equipment.*.datasheet.capturedAtIso` is a DOCUMENT capture date and is real
+// provenance that must keep moving the digest. Excluding it by name would have
+// quietly deleted that.
+//
+// WHEN a package was generated is not WHAT was designed. Every one of these
+// stays in the stored snapshot and on every stamped sheet; only the DESIGN
+// digest stops seeing them.
+const BUILD_STAMP_PATHS: ReadonlySet<string> = new Set([
+  'meta.generatedAtIso',              // D14 — the generation stamp itself
+  'meta.generatedAtPrecision',        // D14 — its form: a property of the build
+  'meta.generatedAtBasis',            // D14 — why it has that form
+  'codeAuthority.capturedAtIso',      // when the code authority was captured
+  'projectAuthority.capturedAtIso',   // when the project authority was captured
+  'projectAuthority.issueDate',       // the DOCUMENT issue date, not a design fact
+  'project.ahj.recordCapturedAtIso',  // when the AHJ record was read
+  'permitReadiness.registry[].createdAtIso', // the same stamp, once per row
+]);
+
+/** `projectAuthority.revisionHistory[].date` is NOT excluded wholesale: a
+ *  genuine historical revision dated last June is design provenance and must
+ *  keep moving the digest. Only an entry stamped BY THIS BUILD is excluded —
+ *  the auto-generated current revision (live: one Rev A row).
+ *
+ *  It is matched against `projectAuthority.issueDate`, NOT `meta.generatedAtIso`:
+ *  the revision row carries the LOCALISED issue date ('7/30/2026') while the meta
+ *  stamp may be an injected ISO instant ('2026-07-30T12:00:00.000Z'). Comparing
+ *  against the meta stamp — which is what this first did — silently never matched
+ *  on any frozen-clock build, and the digest went on moving with the calendar. */
+const REVISION_DATE_PATH = 'projectAuthority.revisionHistory[].date';
+const ISSUE_DATE_PATH = 'projectAuthority.issueDate';
+
+/** Replace run-instant and build-stamp provenance with a constant, recursively.
+ *  Pure; the input is never mutated, so the stored snapshot keeps its real
+ *  timestamps. `path` is the normalized location (`[]` for any array index) so
+ *  D11's exclusions can be scoped to the exact fields measured to carry the
+ *  build stamp, rather than to every field that shares their name. */
+function normalizeRunInstants(v: unknown, path = '', buildDates: ReadonlySet<string> = new Set()): unknown {
+  if (Array.isArray(v)) return v.map(x => normalizeRunInstants(x, `${path}[]`, buildDates));
   if (v && typeof v === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      const at = path ? `${path}.${k}` : k;
       if (RUN_INSTANT_KEYS.has(k) && (typeof val === 'string' || val === null)) {
         out[k] = val === null ? null : RUN_INSTANT_SENTINEL;
+      } else if (BUILD_STAMP_PATHS.has(at) && (typeof val === 'string' || val === null)) {
+        out[k] = val === null ? null : RUN_INSTANT_SENTINEL;
+      } else if (at === REVISION_DATE_PATH && typeof val === 'string' && buildDates.has(val)) {
+        // stamped by THIS build; a historical revision date falls through and
+        // keeps its place in the digest.
+        out[k] = RUN_INSTANT_SENTINEL;
       } else if (AUDIT_REF_KEYS.has(k) && typeof val === 'string') {
         // keep the resolver + evidence references, drop only the instant
         out[k] = val.replace(AUDIT_REF_INSTANT_RE, `@${RUN_INSTANT_SENTINEL}`);
       } else {
-        out[k] = normalizeRunInstants(val);
+        out[k] = normalizeRunInstants(val, at, buildDates);
       }
     }
     return out;
@@ -96,14 +157,28 @@ function normalizeRunInstants(v: unknown): unknown {
   return v;
 }
 
+/** Read the date values THIS build stamped, so a revision row it wrote can be
+ *  told apart from a historical one. Both forms are collected because the two
+ *  fields use different formats (an ISO instant vs the localised issue date). */
+function buildStampedDates(snapshot: Record<string, unknown>): ReadonlySet<string> {
+  const out = new Set<string>();
+  const meta = snapshot.meta as Record<string, unknown> | undefined;
+  if (typeof meta?.generatedAtIso === 'string' && meta.generatedAtIso) out.add(meta.generatedAtIso);
+  const pa = snapshot[ISSUE_DATE_PATH.split('.')[0]] as Record<string, unknown> | undefined;
+  const issue = pa?.[ISSUE_DATE_PATH.split('.')[1]];
+  if (typeof issue === 'string' && issue) out.add(issue);
+  return out;
+}
+
 /** SHA-256 hex over the canonical JSON of the snapshot WITHOUT meta.digest /
- *  meta.snapshotId (they derive from this) and WITHOUT run-instant provenance
- *  (see above — the digest identifies the DESIGN, not the build that produced it). */
+ *  meta.snapshotId (they derive from this), WITHOUT run-instant provenance and
+ *  WITHOUT the build stamp (see above — the digest identifies the DESIGN, not
+ *  the build that produced it, nor the day it ran). */
 export function computeSnapshotDigest(snapshot: Record<string, unknown>): string {
   const meta = { ...(snapshot.meta as Record<string, unknown>) };
   delete meta.digest;
   delete meta.snapshotId;
-  const body = normalizeRunInstants({ ...snapshot, meta });
+  const body = normalizeRunInstants({ ...snapshot, meta }, '', buildStampedDates(snapshot));
   return createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex');
 }
 

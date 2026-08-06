@@ -19,6 +19,7 @@
 
 import { getDbReady } from '@/lib/db/core';
 import { randomUUID } from 'node:crypto';
+import { planInvalidationSupersession, type SupersessionPlan } from './invalidationLedger';
 import {
   type ReconciliationRequest,
   type ReconciliationResult,
@@ -400,4 +401,61 @@ export async function listActiveInvalidations(projectId: string): Promise<any[]>
     ORDER BY invalidated_at DESC
   `;
   return rows as any[];
+}
+
+/**
+ * D11 — LIFT the invalidations a rebuilt, re-reviewed design has answered.
+ *
+ * `superseded_at` / `superseded_by` have existed since migration 114 created the
+ * table, and `listActiveInvalidations` has always filtered on them — but NOTHING
+ * in the codebase ever wrote them. An invalidation, once recorded, was permanent:
+ * there was no path by which rebuilding and re-reviewing a design could clear the
+ * objection raised against its predecessor. This is that path, and it is the only
+ * one.
+ *
+ * NO MIGRATION IS NEEDED. The columns and the `(project_id, superseded_at)` index
+ * are already in 114; what was missing was a writer, not a schema.
+ *
+ * The decision is NOT made here — `planInvalidationSupersession` makes it, purely
+ * and testably, and this function executes exactly what the plan says. Rows the
+ * plan retains are left untouched, including every NULL-digest legacy watermark:
+ * those never recorded the digest they were protecting, so no rebuild can prove
+ * them answered, and reconstructing one would be fabricated authority. The plan
+ * is returned so the caller can report what was lifted AND what was not.
+ */
+export async function supersedeInvalidationsForRebuild(args: {
+  projectId: string;
+  /** the digest of the rebuilt design the new approval covers. */
+  rebuiltDigest: string;
+  /** the approval clearing them — recorded in `superseded_by`. */
+  approvalRef: string;
+  /** when the approval was made. */
+  atIso: string;
+}): Promise<SupersessionPlan> {
+  const active = await listActiveInvalidations(args.projectId);
+  const plan = planInvalidationSupersession({
+    rows: active.map(r => ({
+      id: String(r.id),
+      digest: (r.digest as string | null) ?? null,
+      invalidatedAtIso: r.invalidated_at == null
+        ? null
+        : (r.invalidated_at instanceof Date ? r.invalidated_at.toISOString() : String(r.invalidated_at)),
+    })),
+    rebuiltDigest: args.rebuiltDigest,
+    approvalRef: args.approvalRef,
+    atIso: args.atIso,
+  });
+  if (!plan.supersede.length) return plan;
+
+  const sql = await getDbReady();
+  for (const s of plan.supersede) {
+    // Guarded by `superseded_at IS NULL` so a concurrent lift cannot be
+    // overwritten and re-attributed to a later approval.
+    await sql`
+      UPDATE snapshot_digest_invalidations
+      SET superseded_at = ${s.supersededAtIso}::timestamptz, superseded_by = ${s.supersededBy}
+      WHERE id = ${s.id} AND superseded_at IS NULL
+    `;
+  }
+  return plan;
 }

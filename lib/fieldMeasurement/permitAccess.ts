@@ -166,6 +166,37 @@ export const productionRouteFactSource: RouteFactSource = {
     const snapshot = buildPermitDesignSnapshot(typed, cad, { projectId });
     return routeFactsFromSnapshot(snapshot);
   },
+
+  /** D11 — the design digest that is current right now, from the SAME build that
+   *  produces the route facts. A measurement's invalidation is scoped to this,
+   *  so it invalidates the design it actually changed rather than watermarking
+   *  every approval on the project.
+   *
+   *  Returns `{ digest: null }` rather than throwing when the project has no
+   *  stored input: "not knowable" is a real answer here and the caller records
+   *  it as such. */
+  async currentDesign(projectId: string): Promise<{ digest: string | null; snapshotId: string | null } | null> {
+    const sql = await getDbReady();
+    const rows = await sql`
+      SELECT file_data FROM project_files
+      WHERE project_id = ${projectId} AND file_name = 'permit_input.json'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    const raw = (rows as Array<{ file_data: unknown }>)[0]?.file_data;
+    if (!raw) return { digest: null, snapshotId: null };
+    const json = raw instanceof Buffer ? raw.toString('utf8') : String(raw);
+    let input: unknown;
+    try { input = JSON.parse(json); } catch { return { digest: null, snapshotId: null }; }
+    const [{ generateCADLayout }, { buildPermitDesignSnapshot }] = await Promise.all([
+      import('@/lib/cad/cadEngine'),
+      import('@/lib/permit/snapshot/build'),
+    ]);
+    const typed = input as import('@/lib/permit').PermitInput;
+    const snapshot = buildPermitDesignSnapshot(typed, generateCADLayout(typed as never), { projectId });
+    const meta = (snapshot as { meta?: { digest?: string; snapshotId?: string } }).meta;
+    return { digest: meta?.digest ?? null, snapshotId: meta?.snapshotId ?? null };
+  },
 };
 
 /** Project a built snapshot's route segments onto the applicability facts the

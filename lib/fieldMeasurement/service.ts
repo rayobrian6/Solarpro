@@ -57,6 +57,12 @@ import {
  *  never a second inference from a segment-name regex. */
 export interface RouteFactSource {
   listRouteFacts(projectId: string): Promise<RouteApplicabilityFact[]>;
+  /** D11 — the design digest that is CURRENT right now, i.e. the one every
+   *  existing approval names. Read BEFORE a transition so an invalidation can be
+   *  scoped to the design it actually affects instead of watermarking the whole
+   *  project. OPTIONAL: a source that cannot answer leaves the digest `null`,
+   *  which is the honest "not knowable at write time" — never a guess. */
+  currentDesign?(projectId: string): Promise<{ digest: string | null; snapshotId: string | null } | null>;
 }
 
 /** Invalidates the project's current artifact/snapshot after a field-authority
@@ -68,6 +74,23 @@ export interface InvalidationSink {
     invalidatedBy: string;
     scope: 'snapshot' | 'calculation';
     atIso: string;
+    /** D11 — the PRE-CHANGE design digest: the digest that was current at the
+     *  moment this measurement changed the field authority under it. That is the
+     *  digest every approval in existence right now names, so it is the one an
+     *  invalidation must scope to.
+     *
+     *  This parameter did not exist, so the production sink wrote `digest: null`
+     *  by construction — a time watermark invalidating EVERY approval on the
+     *  project made at or before it, including approvals for designs this
+     *  measurement never touched. `reconcile.ts` has always recorded the
+     *  pre-change digest; one ledger had two writers with two behaviours.
+     *
+     *  `null` remains legal and remains honest: it means the digest was NOT
+     *  knowable at write time. It is never guessed, and never reconstructed
+     *  afterwards. */
+    digest?: string | null;
+    /** the snapshot id that digest belonged to, when known. */
+    snapshotId?: string | null;
   }): Promise<void>;
 }
 
@@ -665,8 +688,26 @@ export class FieldMeasurementService {
   ): Promise<{ scope: string; reason: string } | null> {
     if (!this.d.invalidation) return null;
     try {
+      // D11 — scope the invalidation to the design it actually affects. This is
+      // read INSIDE the try and fail-soft to null on purpose: a digest we cannot
+      // establish must degrade to the honest project-wide watermark, and must
+      // never abort an invalidation that has to be recorded either way. It is
+      // never reconstructed after the fact.
+      let digest: string | null = null;
+      let snapshotId: string | null = null;
+      if (this.d.routes.currentDesign) {
+        try {
+          const cur = await this.d.routes.currentDesign(projectId);
+          digest = cur?.digest ?? null;
+          snapshotId = cur?.snapshotId ?? null;
+        } catch (err: unknown) {
+          console.warn('[fieldMeasurement] current design digest unreadable — the invalidation will be',
+            'recorded as a project-wide watermark rather than scoped:', err instanceof Error ? err.message : String(err));
+        }
+      }
       await this.d.invalidation.invalidate({
         projectId, reason, invalidatedBy: `field-route-measurement:${measurementId}`, scope, atIso: this.d.now(),
+        digest, snapshotId,
       });
       return { scope, reason };
     } catch (err: unknown) {
