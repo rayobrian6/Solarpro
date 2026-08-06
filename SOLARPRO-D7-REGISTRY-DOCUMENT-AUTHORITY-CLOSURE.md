@@ -143,7 +143,16 @@ run-instants still moving in the snapshot = 28   (D9 preserved)
 
 ## 9. COMMIT, PUSH, PARITY
 
-Recorded at the end of this document.
+| | |
+|---|---|
+| Baseline HEAD |  |
+| **Code commit** | **** — *Select a document whole: identity, custody and applicability must describe the same row* |
+| Push |  |
+| HEAD after fetch |  ·   |
+| Divergence | **0 ahead / 0 behind — HEAD == origin/dev** |
+| Committed-secret guard | 12/12 pass |
+
+**Not committed:** all  scratch (untracked, no embedded secret) and  (build artifact, restored).
 
 ## 10. REMAINING DEFECTS
 
