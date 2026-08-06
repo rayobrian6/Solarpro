@@ -28,6 +28,9 @@ import { validateOutlineForExtrude } from '@/lib/3d/outlineExtrude';
 export interface OutlineEditorProps {
   /** When set, the editor treats this as the project context. */
   projectId?: string;
+  /** Lat/lng of the site. When set, the drawing canvas shows a satellite
+   *  tile of the property so the user has a real surface to draw on. */
+  center?: { lat: number; lng: number };
   /** Called when the user clicks "Save & Continue". */
   onSave?: (doc: OutlineDocument) => void | Promise<void>;
   /** When set, the "Save & Continue" button routes here. Otherwise the
@@ -37,6 +40,7 @@ export interface OutlineEditorProps {
 
 export default function OutlineEditor({
   projectId,
+  center,
   onSave,
   continueHref,
 }: OutlineEditorProps) {
@@ -274,6 +278,7 @@ export default function OutlineEditor({
             <OutlineDrawCanvas
               polygon={doc.roof}
               onChange={setRoofPolygon}
+              center={center}
               hint={doc.roof.closed ? 'closed — drag vertices to adjust' : 'click to add'}
             />
           ) : (
@@ -315,6 +320,7 @@ export default function OutlineEditor({
                   width={300}
                   height={220}
                   accent="slate"
+                  hideSatellite
                   hint={doc.house.closed ? 'closed' : 'click to add'}
                 />
               </div>

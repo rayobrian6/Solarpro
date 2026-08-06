@@ -78,7 +78,12 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
 
   const handleOutlineFirst = async (addr?: string) => {
     const p = await resolveProject(addr);
-    if (p) router.push(`/design/outline?projectId=${p.id}`);
+    if (p) {
+      const qs = new URLSearchParams({ projectId: p.id });
+      if (typeof p.lat === 'number') qs.set('lat', String(p.lat));
+      if (typeof p.lng === 'number') qs.set('lng', String(p.lng));
+      router.push(`/design/outline?${qs.toString()}`);
+    }
   };
 
   return (

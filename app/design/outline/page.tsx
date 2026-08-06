@@ -20,6 +20,8 @@ function OutlinePageInner() {
   const params = useSearchParams();
   const router = useRouter();
   const projectId = params.get('projectId') ?? undefined;
+  const lat = parseFloatOrNull(params.get('lat'));
+  const lng = parseFloatOrNull(params.get('lng'));
 
   const [hydrated, setHydrated] = useState(false);
 
@@ -61,6 +63,7 @@ function OutlinePageInner() {
       <div className="h-[calc(100vh-64px)]">
         <OutlineEditor
           projectId={projectId}
+          center={lat !== null && lng !== null ? { lat, lng } : undefined}
           continueHref={
             projectId ? `/design?projectId=${projectId}` : '/design'
           }
@@ -74,6 +77,12 @@ function OutlinePageInner() {
       </div>
     </AppShell>
   );
+}
+
+function parseFloatOrNull(s: string | null): number | null {
+  if (s === null) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
 }
 
 export default function OutlinePage() {

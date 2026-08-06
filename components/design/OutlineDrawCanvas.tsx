@@ -4,13 +4,28 @@
 // 2D top-down polygon drawing canvas. Click to add vertices, double-click
 // to close. Snap to 0.5m grid. Edit vertex positions by dragging after
 // closure (post-close mode).
+//
+// When given a `center` (lat,lng), the canvas draws a Google Maps satellite
+// tile of the property as the background so the user has a real surface
+// to mark up. The 1m grid is aligned with the tile's zoom 20 scale
+// (~12 px/m) so the user can eyeball distances against the real house.
 
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import type { Point2D, OutlinePolygon } from '@/lib/outline/types';
 
-const PX_PER_METER = 28;
+// At Google Maps zoom 20, one ground meter is ~11.76 pixels. We round to
+// 12 px/m so the meter grid lines up with the satellite tile.
+const PX_PER_METER = 12;
 const GRID_M = 0.5;
 const VERTEX_HIT_PX = 9;
+// Static Map tile size in pixels. 640 is a sweet spot — enough detail
+// for residential at zoom 20, fits inside a 800x800 canvas with padding.
+const SAT_TILE_PX = 640;
+// Approximate meters per pixel at zoom 20 / equator (the Static API rounds
+// slightly by latitude but it's good enough for drawing-scale alignment).
+const METERS_PER_SAT_PIXEL = 1 / PX_PER_METER;
+// The tile is centered on the lat/lng. Half-width in world meters.
+const SAT_HALF_M = (SAT_TILE_PX / 2) * METERS_PER_SAT_PIXEL;
 
 export interface OutlineDrawCanvasProps {
   polygon: OutlinePolygon;
@@ -21,12 +36,35 @@ export interface OutlineDrawCanvasProps {
   accent?: 'amber' | 'slate';
   /** Caption rendered in the bottom-left status bar. */
   hint?: string;
+  /** When set, the canvas renders a Google Maps satellite tile of this
+   *  location as the background. The drawing grid is aligned to the
+   *  tile's pixel scale so the user can mark the actual roof on the
+   *  real house. */
+  center?: { lat: number; lng: number };
+  /** Set to true for the small side-panel canvas (no satellite, just grid). */
+  hideSatellite?: boolean;
 }
 
 const ACCENTS = {
   amber: { stroke: '#f59e0b', strokePending: '#fbbf24', fill: '#fbbf24' },
   slate: { stroke: '#64748b', strokePending: '#94a3b8', fill: '#cbd5e1' },
 } as const;
+
+/**
+ * Build the Google Maps Static API URL for a satellite tile centered on
+ * (lat, lng) at zoom 20. Returns null if the API key is missing.
+ */
+function buildSatelliteUrl(lat: number, lng: number, apiKey: string | undefined): string | null {
+  if (!apiKey) return null;
+  const params = new URLSearchParams({
+    center: `${lat},${lng}`,
+    zoom: '20',
+    size: `${SAT_TILE_PX}x${SAT_TILE_PX}`,
+    maptype: 'satellite',
+    key: apiKey,
+  });
+  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
+}
 
 export default function OutlineDrawCanvas({
   polygon,
@@ -35,12 +73,51 @@ export default function OutlineDrawCanvas({
   height = 560,
   accent = 'amber',
   hint,
+  center,
+  hideSatellite,
 }: OutlineDrawCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const satImageRef = useRef<HTMLImageElement | null>(null);
   const [hover, setHover] = useState<Point2D | null>(null);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const [satError, setSatError] = useState(false);
 
-  // Coordinate transforms
+  // Build the satellite URL once per (center, key) pair. The key comes
+  // from NEXT_PUBLIC_GOOGLE_MAPS_API_KEY at build time.
+  const satUrl = useMemo(() => {
+    if (hideSatellite || !center) return null;
+    const key =
+      (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) ||
+      undefined;
+    return buildSatelliteUrl(center.lat, center.lng, key);
+  }, [center, hideSatellite]);
+
+  // Pre-load the satellite image
+  useEffect(() => {
+    if (!satUrl) {
+      satImageRef.current = null;
+      return;
+    }
+    setSatError(false);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      satImageRef.current = img;
+      // Force a re-render so the draw loop picks it up.
+      setHover(h => h);
+    };
+    img.onerror = () => {
+      satImageRef.current = null;
+      setSatError(true);
+    };
+    img.src = satUrl;
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [satUrl]);
+
+  // Coordinate transforms (in world meters; (0,0) is the satellite center)
   const pxToWorld = useCallback(
     (px: number, py: number): Point2D => {
       const cx = width / 2;
@@ -94,11 +171,42 @@ export default function OutlineDrawCanvas({
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
     // Background fill
-    ctx.fillStyle = '#0f172a'; // slate-900
+    ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, cssWidth, cssHeight);
 
+    // Satellite tile (centered on canvas)
+    const sat = satImageRef.current;
+    if (sat) {
+      const tileW = SAT_TILE_PX * (PX_PER_METER * METERS_PER_SAT_PIXEL);
+      // SAT_TILE_PX * 1/12 = 53.33 canvas px. We want the tile to render at
+      // its native satellite resolution so 1 sat-pixel = 1 canvas-pixel
+      // (since PX_PER_METER and METERS_PER_SAT_PIXEL are inverses).
+      const tileH = SAT_TILE_PX;
+      const tileX = (cssWidth - tileW) / 2;
+      const tileY = (cssHeight - tileH) / 2;
+      ctx.drawImage(sat, tileX, tileY, tileW, tileH);
+      // Subtle border around the tile so it's clear what's the satellite
+      const bx = tileX, by = tileY, bw = tileW, bh = tileH;
+      ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, by, bw, bh);
+    } else if (satUrl && !satError) {
+      // Tile is loading — render a "Loading satellite…" placeholder
+      const cx = cssWidth / 2;
+      const cy = cssHeight / 2;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fillRect(cx - 90, cy - 18, 180, 36);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Loading satellite…', cx, cy + 4);
+      ctx.textAlign = 'start';
+    } else if (satError) {
+      // Fall through to grid below; tile failed to load
+    }
+
     // Grid: 1m major, 0.5m minor
-    ctx.strokeStyle = '#1e293b';
+    ctx.strokeStyle = 'rgba(30, 41, 59, 0.85)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = 0; x <= cssWidth; x += PX_PER_METER * GRID_M) {
@@ -111,7 +219,7 @@ export default function OutlineDrawCanvas({
     }
     ctx.stroke();
 
-    ctx.strokeStyle = '#334155';
+    ctx.strokeStyle = 'rgba(51, 65, 85, 0.95)';
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     for (let x = 0; x <= cssWidth; x += PX_PER_METER * 2) {
@@ -127,7 +235,7 @@ export default function OutlineDrawCanvas({
     // Axes
     const cx = cssWidth / 2;
     const cy = cssHeight / 2;
-    ctx.strokeStyle = '#475569';
+    ctx.strokeStyle = 'rgba(71, 85, 105, 0.7)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, cy);
@@ -135,13 +243,13 @@ export default function OutlineDrawCanvas({
     ctx.moveTo(cx, 0);
     ctx.lineTo(cx, cssHeight);
     ctx.stroke();
-    ctx.fillStyle = '#94a3b8';
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
     ctx.font = '10px monospace';
-    ctx.fillText('+x', cssWidth - 20, cy - 5);
-    ctx.fillText('+y', cx + 5, 12);
+    ctx.fillText('+x (east)', cssWidth - 60, cy - 5);
+    ctx.fillText('+y (north)', cx + 5, 12);
 
     // Scale bar
-    ctx.fillStyle = '#94a3b8';
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.9)';
     ctx.font = '10px monospace';
     const barX = 10;
     const barY = cssHeight - 28;
@@ -160,7 +268,8 @@ export default function OutlineDrawCanvas({
     const colors = ACCENTS[accent];
     if (polygon.vertices.length > 0) {
       ctx.strokeStyle = polygon.closed ? colors.stroke : colors.strokePending;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash(polygon.closed ? [] : [6, 4]);
       ctx.beginPath();
       const [sx, sy] = worldToPx(
         polygon.vertices[0][0],
@@ -181,6 +290,7 @@ export default function OutlineDrawCanvas({
         ctx.lineTo(hx, hy);
       }
       ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // Vertices
@@ -201,7 +311,7 @@ export default function OutlineDrawCanvas({
     // Hover ghost
     if (hover && !polygon.closed && draggingIdx === null) {
       const [hx, hy] = worldToPx(hover[0], hover[1]);
-      ctx.fillStyle = 'rgba(251, 191, 36, 0.4)';
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.5)';
       ctx.beginPath();
       ctx.arc(hx, hy, 4, 0, Math.PI * 2);
       ctx.fill();
@@ -211,7 +321,7 @@ export default function OutlineDrawCanvas({
     const status = polygon.closed
       ? `Closed: ${polygon.vertices.length} vertices — drag to edit`
       : `${polygon.vertices.length} vertices placed — double-click to close`;
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
     ctx.fillRect(0, cssHeight - 22, cssWidth, 22);
     ctx.fillStyle = '#cbd5e1';
     ctx.font = '11px monospace';
@@ -221,9 +331,9 @@ export default function OutlineDrawCanvas({
       const hintWidth = ctx.measureText(hint).width;
       ctx.fillText(hint, cssWidth - hintWidth - 8, cssHeight - 7);
     }
-  }, [polygon, hover, draggingIdx, width, height, worldToPx, accent, hint]);
+  }, [polygon, hover, draggingIdx, width, height, worldToPx, accent, hint, satUrl, satError]);
 
-  // Mouse handlers
+  // Mouse handlers (unchanged from prior version)
   const eventToPx = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -236,25 +346,21 @@ export default function OutlineDrawCanvas({
       const pt = eventToPx(e);
       if (!pt) return;
       const idx = findVertexAtPx(pt[0], pt[1]);
-      if (idx >= 0) {
-        setDraggingIdx(idx);
-      }
+      if (idx >= 0) setDraggingIdx(idx);
     },
     [findVertexAtPx],
   );
 
-  const handleMouseUp = useCallback(() => {
-    setDraggingIdx(null);
-  }, []);
+  const handleMouseUp = useCallback(() => setDraggingIdx(null), []);
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (draggingIdx !== null) return; // drag in progress
+      if (draggingIdx !== null) return;
       const pt = eventToPx(e);
       if (!pt) return;
       if (polygon.closed) return;
       const hit = findVertexAtPx(pt[0], pt[1]);
-      if (hit >= 0) return; // vertex hit — let drag handle it
+      if (hit >= 0) return;
       const world = snap(pxToWorld(pt[0], pt[1]));
       onChange({ ...polygon, vertices: [...polygon.vertices, world] });
     },
@@ -272,7 +378,6 @@ export default function OutlineDrawCanvas({
       const pt = eventToPx(e);
       if (!pt) return;
       const world = snap(pxToWorld(pt[0], pt[1]));
-
       if (draggingIdx !== null) {
         const next = [...polygon.vertices];
         next[draggingIdx] = world;
