@@ -18,6 +18,7 @@ import type { StructuralReactionReconciliation } from './structuralEngine';
 export type { StructuralReactionReconciliation } from './structuralEngine';
 import type { CodeAuthorityRecord } from './codeAuthority';
 import type { AsceEditionSource } from './asceAuthority';
+import type { GenerationStampPrecision } from './generationStamp';
 export type { CodeAuthorityRecord, CodeEdition, CodeEditionKind, CodeVerificationStatus } from './codeAuthority';
 import type { ProjectAuthorityRecord } from './projectAuthority';
 export type { ProjectAuthorityRecord, ProjectIssueState } from './projectAuthority';
@@ -1592,7 +1593,19 @@ export interface PermitDesignSnapshot {
     digest: string;                 // SHA-256 hex of canonical JSON (digest+snapshotId excluded)
     schemaVersion: string;
     engineVersion: string;
+    /** D14 — THE generation stamp, resolved once (`generationStamp.ts`) and
+     *  shared with every `registry[].createdAtIso`. An ISO instant when the
+     *  caller injected one; otherwise the project's issue date reformatted to an
+     *  ISO CALENDAR DATE. Never a sub-second instant on the live path — that
+     *  would break the byte-identical-render invariant and be dropped by D9's
+     *  render guard. This field previously held a localised 'M/D/YYYY' value. */
     generatedAtIso: string;
+    /** D14 — whether `generatedAtIso` carries a time component, a date only, an
+     *  unclassifiable value preserved verbatim, or nothing. "ISO" alone does not
+     *  say, and a consumer that needs to know had to guess. */
+    generatedAtPrecision: GenerationStampPrecision;
+    /** D14 — why the stamp has this form, in one sentence. */
+    generatedAtBasis: string;
     projectId: string | null;
     designVersionId: string | null;
   };

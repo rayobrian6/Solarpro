@@ -22,6 +22,7 @@ import {
 import { computeSnapshotDigest, snapshotIdFromDigest, deepFreeze } from './digest';
 import { buildCodeAuthority, resolveAhjRecordTraced } from './codeAuthority';
 import { resolveAsceEditionAuthority, type AsceEditionAuthority } from './asceAuthority';
+import { resolveGenerationStamp } from './generationStamp';
 import {
   buildProjectAuthority, classifyBlockerDomain,
   type IssueStateReview, type IssuedForPermitGateInput,
@@ -1542,9 +1543,18 @@ export function buildPermitDesignSnapshot(
   // is sourced from the structural engine's computational basis. Nothing is
   // `verified` (no archived adoption ordinance) — the honest state that drives
   // CODE-AUTHORITY-INCOMPLETE below and PENDING editions on the sheets.
-  // D6 NOTE — digested; see meta.generatedAtIso for why the `proj.date` fallback
-  // stands (byte-identical-render invariant vs a sub-second instant).
-  const _capturedIso = (input as any).generatedAtIso ?? proj.date ?? '';
+  // D14 — THE generation stamp, resolved ONCE. `meta.generatedAtIso` and every
+  // `registry[].createdAtIso` are this same value, so the two can never drift.
+  // The D6 note that stood here said the `proj.date` fallback had to stand
+  // because the alternative was a sub-second instant that broke the
+  // byte-identical-render invariant. The dichotomy was false: reformatting
+  // 'M/D/YYYY' to an ISO CALENDAR DATE moves no design fact, admits no clock,
+  // and makes the field's name true.
+  const _generationStamp = resolveGenerationStamp({
+    injectedIso: (input as any).generatedAtIso ?? null,
+    projectDate: proj.date ?? null,
+  });
+  const _capturedIso = _generationStamp.value;
   // KDP WS-12 — resolve from the identity the project ALREADY carries, in
   // most-specific-first order, and record HOW it matched. The stored
   // `ahjName` / `compliance.jurisdiction.ahj` is a server enrichment written
@@ -2376,16 +2386,18 @@ export function buildPermitDesignSnapshot(
     meta: {
       snapshotId: '', digest: '', schemaVersion: SNAPSHOT_SCHEMA_VERSION,
       engineVersion: String(PLANSET_ENGINE_VERSION),
-      // D6 NOTE — this field is DIGESTED, and the digest is pinned byte-identical
-      // across two renders of the same input (aac-ws3-ws4, wave6-legacy-sweep).
-      // Substituting the resolved context's true sub-second UTC instant here made
-      // every unfrozen render produce a new snapshot id, so it is deliberately NOT
-      // done. The known defect stands and is recorded rather than papered over:
-      // with no injected `generatedAtIso`, this stores the localised 'M/D/YYYY'
-      // issue date in a slot the schema declares as ISO. Fixing it needs the
-      // digest to stop covering the generation instant — a snapshot-contract
-      // change, out of scope for an artifact-projection repair.
-      generatedAtIso: (input as any).generatedAtIso ?? proj.date ?? '',
+      // D14 — this field is DIGESTED and the digest is pinned byte-identical
+      // across two renders of the same input (aac-ws3-ws4, wave6-legacy-sweep),
+      // so a sub-second instant may never land here. It no longer has to: the
+      // stamp is an ISO CALENDAR DATE on the live path (reformatted from the
+      // localised 'M/D/YYYY' issue date — same date, no timezone conversion, no
+      // time component) and the caller's ISO instant when one is injected.
+      // `generatedAtPrecision` says which, because "ISO" alone does not tell a
+      // consumer whether there is a time component and D9's render guard depends
+      // on exactly that.
+      generatedAtIso: _generationStamp.value,
+      generatedAtPrecision: _generationStamp.precision,
+      generatedAtBasis: _generationStamp.basis,
       projectId: opts?.projectId ?? (input as any).projectId ?? null,
       designVersionId: opts?.designVersionId ?? null,
     },

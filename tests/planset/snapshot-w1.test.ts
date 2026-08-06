@@ -88,7 +88,8 @@ export function baseSnapshot(): PermitDesignSnapshot {
       provenance: { source: 'test' },
     },
     meta: { snapshotId: '', digest: '', schemaVersion: '1.0.0', engineVersion: 'test',
-            generatedAtIso: '2026-07-20', projectId: null, designVersionId: null },
+            generatedAtIso: '2026-07-20', generatedAtPrecision: 'date', generatedAtBasis: 'test fixture',
+            projectId: null, designVersionId: null },
     sourceInputs: { clientElectrical: null, clientBackfeedBreakerA: null, clientWireGauge: null,
                     clientTotals: { totalPanels: null, totalDcKw: null, totalAcKw: null } },
     project: {
