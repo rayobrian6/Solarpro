@@ -145,14 +145,16 @@ run-instants still moving in the snapshot = 28   (D9 preserved)
 
 | | |
 |---|---|
-| Baseline HEAD |  |
-| **Code commit** | **** — *Select a document whole: identity, custody and applicability must describe the same row* |
-| Push |  |
-| HEAD after fetch |  ·   |
-| Divergence | **0 ahead / 0 behind — HEAD == origin/dev** |
+| Baseline HEAD | `34bc84cb` |
+| **Code commit** | **`fd7c3716`** — *Select a document whole: identity, custody and applicability must describe the same row* |
+| Report-only commits | `55117875`, plus the follow-up carrying this corrected table |
+| Push | `34bc84cb..fd7c3716  dev -> dev` → `github.com/rayobrian6/Solarpro` |
+| `origin/dev` after fetch | matches local HEAD, **0 ahead / 0 behind** |
 | Committed-secret guard | 12/12 pass |
 
-**Not committed:** all  scratch (untracked, no embedded secret) and  (build artifact, restored).
+**Not committed:** all `_tmp_*` scratch and harness output (untracked; they read `.db_url` at runtime and embed no secret) and `next-env.d.ts` (build artifact, restored).
+
+> A scripted edit wrote this table with the shell stripping every backticked value, leaving the hashes blank. Corrected here; the commit hashes above are the accurate record.
 
 ## 10. REMAINING DEFECTS
 
