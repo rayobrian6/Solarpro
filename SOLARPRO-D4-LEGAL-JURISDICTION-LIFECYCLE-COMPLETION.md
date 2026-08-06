@@ -199,7 +199,20 @@ New: `r7-d4-lifecycle-propagation.test.ts` (10 tests) alongside the existing `r7
 
 ## 21–23. COMMIT, PUSH, PARITY
 
-Recorded at the end of this document.
+| | |
+|---|---|
+| Baseline HEAD | `d56b5377` |
+| **Code commit** | **`634a1bc5`** — *Declare what you patch: the verified legal jurisdiction was being discarded by the lifecycle* |
+| Report-only follow-up | recorded below |
+| Push | `d56b5377..634a1bc5  dev -> dev` → `github.com/rayobrian6/Solarpro` |
+| HEAD after fetch | `634a1bc5` |
+| `origin/dev` after fetch | `634a1bc5` |
+| Divergence | **0 ahead / 0 behind — `HEAD == origin/dev`** |
+| Committed-secret guard | 12/12 pass |
+
+**Code commits across the D4 work:** `7afade1c` (canonical authority + archival gate + migration 119) and `634a1bc5` (this lifecycle completion). **Report-only:** `95ec7133`, `d56b5377`, and the follow-up recording these hashes.
+
+**Not committed:** all `_tmp_*` scratch and harness output (untracked, no embedded secret) and `next-env.d.ts` (build artifact, restored).
 
 ## 24. EXACT REMAINING DEFECTS
 
