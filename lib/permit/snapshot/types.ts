@@ -1883,6 +1883,20 @@ export interface PermitDesignSnapshot {
      *  endpoints queried, the retrieval timestamp, a payload SHA-256 and a
      *  confidence. THE evidence for a cleared PROJECT-AUTHORITY-UNVERIFIED. */
     projectLegalAuthority?: import('./resolution/jurisdictionAuthority').ProjectLegalAuthorityRecord | null;
+    /** OAR — THE ACCEPTED LEGAL JURISDICTION, projected so it is durable.
+     *
+     *  D4 established this as the canonical answer to "which authority governs
+     *  this parcel", and it is what stamps every archived document — but it lived
+     *  only on the in-memory resolver bundle. Nothing carried it between runs, so
+     *  a one-second Census outage dropped the verified county determination back
+     *  to the posted MAILING city and re-stamped the package with it.
+     *
+     *  Projecting it makes the accepted authority a first-class snapshot fact and
+     *  gives `project-authority@v1` something governed to retain when a refresh
+     *  cannot complete. MATERIAL by design: `ahjRecordId`, `verificationState`
+     *  and the provenance ref are accepted authority, so a genuine change to any
+     *  of them MUST move the digest. */
+    legalJurisdiction?: import('./resolution/types').LegalJurisdictionAuthority | null;
     /** AAC WS-3 — the ADOPTED code editions (NEC/IBC/IRC/IFC) retrieved from the
      *  AHJ registry, each with the registry field it came from, the raw
      *  enumeration, its corroborator and any conflicting source. THE evidence for

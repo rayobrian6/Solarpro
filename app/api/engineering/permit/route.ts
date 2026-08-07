@@ -136,11 +136,23 @@ function applyPlansetProfile(input: PermitInput, req: NextRequest): void {
   carrier.plansetProfile = requested ?? PERMIT_ARTIFACT_PROFILE;
 }
 
-/** Read the digest off an input that already carries a frozen snapshot. */
+/** Read the digest off an input that already carries a frozen snapshot.
+ *
+ *  OAR — the snapshot itself is also pinned as `_priorSnapshot`. It is the only
+ *  durable record of what this project last ACCEPTED as its legal jurisdiction,
+ *  and `project-authority@v1` reads it so a Census outage cannot drop the
+ *  verified county determination back to the posted mailing city. Pinning it
+ *  explicitly (rather than letting the resolver reach for `_snapshot`) keeps the
+ *  retention source unambiguous once generatePermit overwrites `_snapshot` with
+ *  the new build. */
 function attachPriorSnapshotDigest(input: PermitInput): void {
-  const d = (input as unknown as { _snapshot?: { meta?: { digest?: string } } })._snapshot?.meta?.digest;
+  const snap = (input as unknown as { _snapshot?: { meta?: { digest?: string } } })._snapshot;
+  const d = snap?.meta?.digest;
   if (typeof d === 'string' && d.trim()) {
     (input as unknown as Record<string, unknown>)._priorSnapshotDigest = d;
+  }
+  if (snap && typeof snap === 'object') {
+    (input as unknown as Record<string, unknown>)._priorSnapshot = snap;
   }
 }
 
@@ -162,6 +174,11 @@ async function attachPriorSnapshotDigestFromStore(input: PermitInput, projectId:
     const d = prior?._snapshot?.meta?.digest;
     if (typeof d === 'string' && d.trim()) {
       (input as unknown as Record<string, unknown>)._priorSnapshotDigest = d;
+    }
+    // OAR — the stored snapshot carries the accepted legal jurisdiction. Without
+    // it a regeneration that cannot reach Census has nothing governed to retain.
+    if (prior?._snapshot && typeof prior._snapshot === 'object') {
+      (input as unknown as Record<string, unknown>)._priorSnapshot = prior._snapshot;
     }
   } catch {
     // fail-soft: an unreadable prior artifact is not an approval, and never a gate.

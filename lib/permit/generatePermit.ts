@@ -1270,6 +1270,9 @@ export function generatePermitHTML(
       // no-lifecycle / no-network run ⇒ the snapshot field is omitted ⇒ digest
       // unchanged and every requirement stays exactly as unresolved as before.
       projectLegalAuthority: snapshotAuthority?.projectLegalAuthority ?? null,
+      // OAR — the ACCEPTED legal jurisdiction, so the next run can retain it
+      // through a provider outage instead of reverting to the mailing city.
+      legalJurisdiction: snapshotAuthority?.legalJurisdiction ?? null,
       codeAdoptionAuthority: snapshotAuthority?.codeAdoptionAuthority ?? null,
       environmentalRetrieval: snapshotAuthority?.environmentalRetrieval ?? null,
       // AAC WS-8 / WS-9 — the STRUCTURAL SEPARATION authorities. Each is null on

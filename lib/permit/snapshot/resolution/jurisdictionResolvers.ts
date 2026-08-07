@@ -28,6 +28,11 @@ import type {
 } from './types';
 import { buildResolutionAuditRef } from './evidence';
 import { materialRetrievalReason } from './authorityProjection';
+// OAR — accepted authority outlives a failed refresh.
+import {
+  readRetainedLegalAuthority, isRefreshOutage, sameLegalAuthority,
+  type LegalAuthorityRetentionState,
+} from './retainedAuthority';
 import {
   buildProjectLegalAuthority, buildCodeAdoptionAuthority, missingAdoptionEditions,
 } from './jurisdictionAuthority';
@@ -112,13 +117,65 @@ export const projectAuthorityResolver: RequirementResolver = {
       address: str(p.address), city: str(p.city), county: str(p.county),
       stateCode: str(p.state), apn: str(p.apn), ahjName: str(p.ahjName) ?? str((ctx.input.compliance?.jurisdiction as any)?.ahj),
     };
+    // ── OAR — WHAT THIS PROJECT ALREADY ACCEPTED ────────────────────────────
+    // Read BEFORE the provider is called, so a refresh that cannot complete has
+    // something governed to fall back to. Null unless the last governed run
+    // accepted a VERIFIED jurisdiction carrying a stable ahjRecordId — retention
+    // never promotes an unverified record (D4).
+    const retained = readRetainedLegalAuthority(ctx.input);
     const inputsRecorded: Record<string, string | number | boolean | null> = {
       postedAddress: posted.address, postedCity: posted.city, postedCounty: posted.county,
       postedState: posted.stateCode, postedApn: posted.apn, postedAhjName: posted.ahjName,
       providerInjected: !!provider,
+      retainedAuthorityId: retained?.jurisdiction.ahjRecordId ?? null,
+    };
+
+    /** Carry the accepted authority forward unchanged and say why. The
+     *  requirement stays CLOSED because the authority is established — what
+     *  failed was a refresh, and a refresh is not the authority. */
+    const retainOutcome = (
+      state: LegalAuthorityRetentionState,
+      r: NonNullable<typeof retained>,
+      attemptFailure: string | null,
+      sourceQueried: string | null,
+      retryability: 'RETRYABLE' | 'REQUIRES_INPUT' | 'NON_RETRYABLE',
+    ): ResolverOutcome => {
+      // The project record is restored from the accepted authority too, so the
+      // SHEETS keep naming the governing jurisdiction rather than reverting to
+      // the mailing city the posted record carries.
+      p.ahjName = r.jurisdiction.ahjName ?? p.ahjName;
+      p.ahjRecordId = r.jurisdiction.ahjRecordId ?? p.ahjRecordId;
+      return {
+        result: 'RESOLVED',
+        clearance: { cleared: true, missing: [], reasons: [] },
+        patch: { projectLegalAuthority: r.record, legalJurisdiction: r.jurisdiction },
+        sourceQueried,
+        sourceRefs: r.jurisdiction.provenance?.ref ? [r.jurisdiction.provenance.ref] : [],
+        retryability,
+        // OPERATIONAL only — it never reaches the digested reason (TR §3b).
+        failureReason: attemptFailure,
+        operatorAction: null,
+        confidence: null,
+        // The audit reference names the RETAINED evidence, not this run's
+        // attempt: what clears the requirement is the governed determination
+        // that is still standing, and the reference must point at it.
+        auditRef: buildResolutionAuditRef({
+          resolverId: 'project-authority@v1',
+          sourceRefs: [r.jurisdiction.provenance?.ref ?? `authority:ahj#${r.jurisdiction.ahjRecordId}`],
+          atIso: ctx.nowIso,
+        }),
+        inputsRecorded: { ...inputsRecorded, retentionState: state },
+      };
     };
 
     if (!provider) {
+      // A provider that is ABSENT is not an outage — but it is equally not a
+      // finding about the parcel, and an authority already accepted stands.
+      if (retained) {
+        return retainOutcome('REFRESH_FAILED_RETAINED', retained,
+          'PROVIDER-NOT-INJECTED: the property-identity provider bag is empty for this run; the accepted legal authority was retained.',
+          null, 'RETRYABLE');
+      }
       return {
         result: 'SKIPPED',
         clearance: { cleared: false, missing: ['a property-identity provider'], reasons: ['PROVIDER-NOT-INJECTED: no property-identity provider is available to this run — the legal identity was NOT retrieved, and this is not a finding about the project'] },
@@ -126,7 +183,7 @@ export const projectAuthorityResolver: RequirementResolver = {
         retryability: 'RETRYABLE',
         failureReason: 'PROVIDER-NOT-INJECTED: the property-identity provider bag is empty for this run.',
         confidence: null,
-        inputsRecorded,
+        inputsRecorded: { ...inputsRecorded, retentionState: 'NO_RETAINED_AUTHORITY' },
       };
     }
 
@@ -136,6 +193,23 @@ export const projectAuthorityResolver: RequirementResolver = {
     });
 
     if (!res.ok) {
+      // ── OAR — A TRANSPORT FAILURE DOES NOT UNMAKE A DETERMINATION ─────────
+      // Measured before this guard existed: forcing Census to time out flipped
+      // the accepted authority from "Madison County Building & Zoning
+      // [verified]" to "City of Granite City Building & Zoning [unverified]" —
+      // the MAILING city seeded by project-authority-key@v1 — reopened
+      // PROJECT-AUTHORITY-UNVERIFIED, re-stamped the rendered sheets and blocked
+      // document archival, all from a one-second outage.
+      //
+      // Retention is deliberately NOT applied to NO_COVERAGE or AMBIGUOUS: those
+      // are the source ANSWERING about this parcel, and masking a real "this is
+      // no longer that jurisdiction" as an outage is the failure mode this must
+      // never introduce. See `isRefreshOutage`.
+      if (retained && isRefreshOutage(res.failureKind)) {
+        return retainOutcome('REFRESH_FAILED_RETAINED', retained, res.failure,
+          res.sourcesQueried.join(' · ') || provider.name,
+          retryabilityFor(res.failureKind));
+      }
       return {
         result: 'FAILED',
         clearance: {
@@ -165,7 +239,13 @@ export const projectAuthorityResolver: RequirementResolver = {
         operatorAction: res.operatorAction,
         confidence: 0,
         auditRef: null,
-        inputsRecorded,
+        inputsRecorded: {
+          ...inputsRecorded,
+          // NO_COVERAGE / AMBIGUOUS reach here even when a retained authority
+          // exists: the source ANSWERED, so this is a finding about the parcel,
+          // not an outage, and it is surfaced rather than absorbed.
+          retentionState: retained ? 'AUTHORITY_CONFLICT' : 'NO_RETAINED_AUTHORITY',
+        },
       };
     }
 
@@ -279,6 +359,20 @@ export const projectAuthorityResolver: RequirementResolver = {
       ? [{ scope: 'snapshot', target: `projectAuthority + codeAuthority (county/APN propagated: ${propagated.join(', ')})`, reason: 'the project legal identity was established from an official source', invalidatedBy: 'project-authority@v1', atIso: ctx.nowIso }]
       : [];
 
+    // ── OAR — CLASSIFY THE REFRESH AGAINST WHAT WAS ALREADY ACCEPTED ─────────
+    // A completed refresh is the governed path by which authority may change, so
+    // nothing here blocks a change — it names it. Same authority ⇒ nothing moves.
+    // A different VERIFIED determination supersedes (the digest moves and D11
+    // handles the approval). A refresh that is NOT itself verified must never
+    // quietly displace one that was: that is surfaced as a conflict below.
+    const _refreshVerified = legalJurisdiction.verificationState === 'verified'
+      && !!legalJurisdiction.ahjRecordId;
+    const retentionState: LegalAuthorityRetentionState = !retained
+      ? 'NO_RETAINED_AUTHORITY'
+      : sameLegalAuthority(retained.jurisdiction, legalJurisdiction)
+        ? 'REFRESH_SUCCEEDED_SAME_AUTHORITY'
+        : (_refreshVerified ? 'REFRESH_SUCCEEDED_CHANGED_AUTHORITY' : 'AUTHORITY_CONFLICT');
+
     const recorded = {
       ...inputsRecorded,
       providerUsed: record.providerUsed,
@@ -288,7 +382,40 @@ export const projectAuthorityResolver: RequirementResolver = {
       incorporatedPlace: record.normalized.incorporatedPlace,
       unincorporated: record.unincorporated,
       propagatedFields: propagated.join(', ') || null,
+      retentionState,
     } as Record<string, string | number | boolean | null>;
+
+    // ── OAR — AN UNGOVERNED REFRESH MAY NOT DISPLACE A GOVERNED AUTHORITY ────
+    // The refresh completed but did not establish a verified determination, and
+    // it names a different jurisdiction from the one this project accepted.
+    // Neither side is adopted: the accepted identity is KEPT (so no document is
+    // stamped from a guess and the sheets do not silently change jurisdiction)
+    // and the state is recorded as a conflict, which is material and leaves the
+    // requirement open for an operator.
+    if (retained && retentionState === 'AUTHORITY_CONFLICT') {
+      const conflictReason =
+        `the accepted legal authority for this project is '${retained.jurisdiction.ahjName}' `
+        + `(${retained.jurisdiction.ahjRecordId}), and this refresh returned `
+        + `'${legalJurisdiction.ahjName ?? 'an unnamed authority'}' at verification state `
+        + `'${legalJurisdiction.verificationState}'. Neither is adopted automatically — an operator must determine `
+        + 'which authority governs this parcel.';
+      return {
+        result: 'FAILED',
+        clearance: { cleared: false, missing: ['an operator determination of the governing legal authority'], reasons: [conflictReason] },
+        patch: {
+          projectLegalAuthority: record,
+          legalJurisdiction: { ...retained.jurisdiction, verificationState: 'conflict' },
+        },
+        sourceQueried: res.sourcesQueried.join(' · '),
+        sourceRefs: refs,
+        retryability: 'REQUIRES_INPUT',
+        failureReason: conflictReason,
+        operatorAction: 'Confirm the governing legal authority for this parcel in the project record, then regenerate.',
+        confidence: record.confidence,
+        auditRef: null,
+        inputsRecorded: recorded,
+      };
+    }
 
     // GENUINE AMBIGUITY ⇒ OPERATOR_CONFIRMATION, never an engine choice.
     if (record.confirmationRequired.length) {

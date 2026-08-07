@@ -222,6 +222,10 @@ export function buildPermitDesignSnapshot(
      *  is the evidence for a requirement the lifecycle CLEARED. All absent ⇒ the
      *  snapshot field is omitted entirely ⇒ digest unchanged. */
     projectLegalAuthority?: ProjectLegalAuthorityRecord | null;
+    /** OAR — the ACCEPTED legal jurisdiction (D4's canonical answer). Projected
+     *  onto the snapshot so the next run can RETAIN it when a refresh cannot
+     *  complete, instead of falling back to the posted mailing city. */
+    legalJurisdiction?: import('./resolution/types').LegalJurisdictionAuthority | null;
     codeAdoptionAuthority?: CodeAdoptionAuthorityRecord | null;
     environmentalRetrieval?: EnvironmentalRetrievalRecord | null;
   },
@@ -2699,6 +2703,7 @@ export function buildPermitDesignSnapshot(
     ...(opts?.canonicalEquipment || opts?.moduleDatasheetBinding || opts?.projectPersonnel
       || opts?.projectLegalAuthority || opts?.codeAdoptionAuthority || opts?.environmentalRetrieval
       || opts?.structuralDocumentRetrieval || opts?.rackingAssemblySelection || opts?.framingRetrieval
+      || opts?.legalJurisdiction
       ? {
           resolutionAuthority: elideOperationalAuthority({
             canonicalEquipment: opts?.canonicalEquipment ?? null,
@@ -2708,6 +2713,11 @@ export function buildPermitDesignSnapshot(
             // evidence home AAC-2 established, so every auto-cleared requirement
             // has exactly one place a reviewer looks for its proof.
             projectLegalAuthority: opts?.projectLegalAuthority ?? null,
+            // OAR — the ACCEPTED legal jurisdiction, projected so it survives the
+            // run that produced it. Without this the only durable trace of the
+            // verified county determination was the mailing-derived name on the
+            // project record, and a Census outage reverted to that.
+            legalJurisdiction: opts?.legalJurisdiction ?? null,
             codeAdoptionAuthority: opts?.codeAdoptionAuthority ?? null,
             environmentalRetrieval: opts?.environmentalRetrieval ?? null,
             // AAC WS-8 / WS-9 — the STRUCTURAL evidence lands in the same home:
@@ -2744,6 +2754,7 @@ export function buildPermitDesignSnapshot(
               projectPersonnel: opts?.projectPersonnel ?? null,
               environmentalRetrieval: opts?.environmentalRetrieval ?? null,
               moduleDatasheetBinding: opts?.moduleDatasheetBinding ?? null,
+              projectLegalAuthority: opts?.projectLegalAuthority ?? null,
               engineeringReview: null,   // PASS 2 (PRR §1) — filled below
             },
           ),

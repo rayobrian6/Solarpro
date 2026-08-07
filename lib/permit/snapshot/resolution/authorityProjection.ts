@@ -183,11 +183,11 @@ export function projectResolvedAuthority(s: RequirementResolutionState): Resolve
 
 /** Field names that describe the ATTEMPT rather than the authority, per record. */
 export const OPERATIONAL_AUTHORITY_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  /** every element of `.attempts[]` is scrubbed of these. */
-  'structuralDocumentRetrieval.attempts[]': [
-    'proof', 'httpStatus', 'contentType', 'byteLength', 'failure', 'notes',
-  ],
-  'structuralDocumentRetrieval.attempts[].archival': ['failure', 'operatorAction'],
+  /** OAR — the attempt LIST is operational in full, not field by field: its
+   *  length and shape moved the digest on their own. It is emptied from the
+   *  digested record and preserved whole on the operational container. Listed
+   *  here as `[]` so the declared surface stays complete and auditable. */
+  'structuralDocumentRetrieval.attempts[]': [],
   projectPersonnel: ['storeError'],
   'environmentalRetrieval.registryArchival': ['failure', 'operatorAction'],
   engineeringReview: ['storeError'],
@@ -195,6 +195,12 @@ export const OPERATIONAL_AUTHORITY_FIELDS: Readonly<Record<string, readonly stri
    *  (resolvers.ts, module-datasheet binding). `boundDocumentId` — the accepted
    *  document identity — is NOT operational and stays in the digest. */
   'moduleDatasheetBinding.modules[].registryLookup': ['failure'],
+  /** OAR — `chainFailures` is "failures inside the provider chain, kept even on
+   *  success" (jurisdictionAuthority.ts). That is attempt evidence sitting inside
+   *  a digested authority record: a chain that fell through to a slower geocoder
+   *  on one run and not the next would move the digest for one unchanged parcel.
+   *  It matters most now that the SAME record is retained across runs. */
+  projectLegalAuthority: ['chainFailures'],
 };
 
 /** The sentinel an operational field collapses to in the DIGESTED copy. The real
@@ -218,18 +224,26 @@ function scrubFields(obj: unknown, fields: readonly string[]): unknown {
 export function elideOperationalAuthority<T extends Rec>(bag: T): T {
   const out: Rec = { ...bag };
 
+  // ── OAR — THE ATTEMPT LIST IS OPERATIONAL IN FULL ────────────────────────
+  // TR elided the obviously-transient FIELDS of each attempt (httpStatus,
+  // failure, contentType, byteLength, proof, notes) but left the attempt list's
+  // SHAPE and LENGTH in the digest — sourceId, role, url, edition, outcome, one
+  // element per address tried. Measured: an unreachable document provider yields
+  // FAILED attempts where an absent one yields SKIPPED ones, and a reachable
+  // provider adds an attempt per expansion, so the array alone moved the digest
+  // for one unchanged design across 32 leaf paths.
+  //
+  // It is safe to drop entirely only NOW: until this phase the accepted document
+  // identity was re-derived from these attempts every run, so they were load-
+  // bearing. The candidate pool is read from the durable registry instead, and
+  // this record's own MATERIAL conclusions — `versionExactDetailDocumentId`,
+  // `capacityDocumentId`, `crossReference`, `residual`, the selected model and
+  // adopted edition — are separate fields that stay in the digest.
+  //
+  // The full list, unmodified, is on `snapshot.resolverAttemptEvidence`.
   const sdr = out.structuralDocumentRetrieval as Rec | null | undefined;
   if (sdr && Array.isArray(sdr.attempts)) {
-    out.structuralDocumentRetrieval = {
-      ...sdr,
-      attempts: (sdr.attempts as unknown[]).map(a => {
-        const scrubbed = scrubFields(a, OPERATIONAL_AUTHORITY_FIELDS['structuralDocumentRetrieval.attempts[]']) as Rec;
-        if (scrubbed && typeof scrubbed.archival === 'object' && scrubbed.archival) {
-          scrubbed.archival = scrubFields(scrubbed.archival, OPERATIONAL_AUTHORITY_FIELDS['structuralDocumentRetrieval.attempts[].archival']);
-        }
-        return scrubbed;
-      }),
-    };
+    out.structuralDocumentRetrieval = { ...sdr, attempts: [] };
   }
 
   const pp = out.projectPersonnel as Rec | null | undefined;
@@ -245,6 +259,9 @@ export function elideOperationalAuthority<T extends Rec>(bag: T): T {
 
   const er = out.engineeringReview as Rec | null | undefined;
   if (er) out.engineeringReview = scrubFields(er, OPERATIONAL_AUTHORITY_FIELDS.engineeringReview) as Rec;
+
+  const pla = out.projectLegalAuthority as Rec | null | undefined;
+  if (pla) out.projectLegalAuthority = scrubFields(pla, OPERATIONAL_AUTHORITY_FIELDS.projectLegalAuthority) as Rec;
 
   const mdb = out.moduleDatasheetBinding as Rec | null | undefined;
   if (mdb && Array.isArray(mdb.modules)) {
@@ -372,6 +389,10 @@ export function buildResolverAttemptEvidence(
     if (env && env.registryArchival) authorityOperational.environmentalRegistryArchival = env.registryArchival;
     const er = authorityBag.engineeringReview as Rec | null | undefined;
     if (er && er.storeError != null) authorityOperational.engineeringReviewStoreError = er.storeError;
+    const pla = authorityBag.projectLegalAuthority as Rec | null | undefined;
+    if (pla && Array.isArray(pla.chainFailures) && pla.chainFailures.length) {
+      authorityOperational.projectLegalAuthorityChainFailures = pla.chainFailures;
+    }
     const mdb = authorityBag.moduleDatasheetBinding as Rec | null | undefined;
     if (mdb && Array.isArray(mdb.modules)) {
       authorityOperational.moduleDatasheetRegistryLookups = (mdb.modules as unknown[]).map(m => {
