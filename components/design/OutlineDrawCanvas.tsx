@@ -12,12 +12,14 @@
 
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import type { Point2D, OutlinePolygon } from '@/lib/outline/types';
+import type { Units } from '@/lib/outline/units';
 
 // At Google Maps zoom 20, one ground meter is ~11.76 pixels. We round to
 // 12 px/m so the meter grid lines up with the satellite tile.
 const PX_PER_METER = 12;
 const GRID_M = 0.5;
 const VERTEX_HIT_PX = 9;
+const FT_PER_M = 3.28084;
 // Static Map tile size in pixels. 640 is a sweet spot — enough detail
 // for residential at zoom 20, fits inside a 800x800 canvas with padding.
 const SAT_TILE_PX = 640;
@@ -43,6 +45,8 @@ export interface OutlineDrawCanvasProps {
   center?: { lat: number; lng: number };
   /** Set to true for the small side-panel canvas (no satellite, just grid). */
   hideSatellite?: boolean;
+  /** Display units for the scale bar. Default 'imperial' (US convention). */
+  units?: Units;
 }
 
 const ACCENTS = {
@@ -75,6 +79,7 @@ export default function OutlineDrawCanvas({
   hint,
   center,
   hideSatellite,
+  units = 'imperial',
 }: OutlineDrawCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const satImageRef = useRef<HTMLImageElement | null>(null);
@@ -248,20 +253,24 @@ export default function OutlineDrawCanvas({
     ctx.fillText('+x (east)', cssWidth - 60, cy - 5);
     ctx.fillText('+y (north)', cx + 5, 12);
 
-    // Scale bar
+    // Scale bar — width is a friendly round number in the user's units.
+    // Metric: 1 m bar (12 px). Imperial: 5 ft bar (≈ 18.3 px).
     ctx.fillStyle = 'rgba(148, 163, 184, 0.9)';
     ctx.font = '10px monospace';
     const barX = 10;
     const barY = cssHeight - 28;
-    ctx.fillText('1 m', barX + PX_PER_METER / 2 - 8, barY - 3);
+    const barLabelMeters = units === 'imperial' ? 5 / FT_PER_M : 1;
+    const barWidthPx = barLabelMeters * PX_PER_METER;
+    const barLabel = units === 'imperial' ? '5 ft' : '1 m';
+    ctx.fillText(barLabel, barX + barWidthPx / 2 - 12, barY - 3);
     ctx.strokeStyle = '#94a3b8';
     ctx.beginPath();
     ctx.moveTo(barX, barY);
-    ctx.lineTo(barX + PX_PER_METER, barY);
+    ctx.lineTo(barX + barWidthPx, barY);
     ctx.moveTo(barX, barY - 3);
     ctx.lineTo(barX, barY + 3);
-    ctx.moveTo(barX + PX_PER_METER, barY - 3);
-    ctx.lineTo(barX + PX_PER_METER, barY + 3);
+    ctx.moveTo(barX + barWidthPx, barY - 3);
+    ctx.lineTo(barX + barWidthPx, barY + 3);
     ctx.stroke();
 
     // Polygon edges
@@ -331,7 +340,7 @@ export default function OutlineDrawCanvas({
       const hintWidth = ctx.measureText(hint).width;
       ctx.fillText(hint, cssWidth - hintWidth - 8, cssHeight - 7);
     }
-  }, [polygon, hover, draggingIdx, width, height, worldToPx, accent, hint, satUrl, satError]);
+  }, [polygon, hover, draggingIdx, width, height, worldToPx, accent, hint, satUrl, satError, units]);
 
   // Mouse handlers (unchanged from prior version)
   const eventToPx = (e: React.MouseEvent<HTMLCanvasElement>) => {

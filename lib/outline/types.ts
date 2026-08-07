@@ -3,6 +3,8 @@
 // The outline is a 2D representation of a roof + house footprint that gets
 // lifted into a 3D scene in the design studio.
 
+import type { Units } from './units';
+
 /**
  * A 2D point in world space (meters).
  * x = easting, y = northing (plan-view convention, +y is "up the page").
@@ -16,24 +18,39 @@ export interface OutlinePolygon {
   closed: boolean;
 }
 
+export type RoofType = 'flat' | 'gable' | 'hip';
+
 export interface OutlineDocument {
   roof: OutlinePolygon;
   house: OutlinePolygon;
-  /** Roof slab thickness, meters. Default 0.3 (~1 ft). */
+  /** Roof slab thickness, meters. Default 0.3 (~1 ft). Used for flat
+   *  roofs as the extrusion height; for gable/hip, this becomes the
+   *  minimum thickness at the eaves. */
   roofHeightM: number;
   /** House wall height (ground to eave), meters. Default 2.5 (~8 ft). */
   houseHeightM: number;
   /** Distance the house footprint is offset out from the roof edge, meters.
    *  Default 0.6 (~2 ft) which is a typical eave overhang. */
   houseOffsetM: number;
+  /** Roof shape. Default 'flat' (current behavior). 'gable' is a peaked
+   *  roof with two sloped faces meeting at a ridge; 'hip' is a peaked
+   *  roof with four sloped faces meeting at a single peak point. */
+  roofType: RoofType;
+  /** Pitch as a ratio (rise/run, unitless). Default 6:12 = 0.5. */
+  pitch: { rise: number; run: number };
+  /** User's preferred display units. Default 'imperial' (US). */
+  units: Units;
 }
 
 export const DEFAULT_OUTLINE: OutlineDocument = {
   roof: { vertices: [], closed: false },
   house: { vertices: [], closed: false },
-  roofHeightM: 0.3,
-  houseHeightM: 2.5,
-  houseOffsetM: 0.6,
+  roofHeightM: 0.3,         // ~1 ft
+  houseHeightM: 2.5,        // ~8 ft
+  houseOffsetM: 0.6,        // ~2 ft
+  roofType: 'flat',
+  pitch: { rise: 6, run: 12 }, // 6:12 = 0.5 slope
+  units: 'imperial',
 };
 
 /**

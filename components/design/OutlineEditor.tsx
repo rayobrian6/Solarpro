@@ -4,17 +4,21 @@
 // Main editor for the design outline. Coordinates:
 //   - 2D drawing canvas (OutlineDrawCanvas)
 //   - 3D preview (Outline3DPreview)
-//   - toolbar (undo, clear, close, height inputs, save)
+//   - toolbar (undo, clear, close, units, roof type, pitch, height inputs, save)
 //
 // State is held in this component and threaded down. The 3D preview only
 // re-renders when the outline geometry actually changes (the inner useEffect
 // tears down and re-creates the meshes).
+//
+// Internal storage is ALWAYS meters. The UI converts to feet when the user
+// picks imperial units. Pitch is stored as rise/run (unitless) and displayed
+// as "X:12".
 
 import { useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, ArrowRight, RotateCcw, Trash2, Eye, Square,
-  AlertTriangle, CheckCircle2, Save,
+  AlertTriangle, CheckCircle2, Save, Ruler,
 } from 'lucide-react';
 import OutlineDrawCanvas from './OutlineDrawCanvas';
 import Outline3DPreview from './Outline3DPreview';
@@ -22,8 +26,13 @@ import {
   DEFAULT_OUTLINE,
   type OutlineDocument,
   type OutlinePolygon,
+  type RoofType,
 } from '@/lib/outline/types';
 import { validateOutlineForExtrude } from '@/lib/3d/outlineExtrude';
+import {
+  formatPitch,
+  type Units,
+} from '@/lib/outline/units';
 
 export interface OutlineEditorProps {
   /** When set, the editor treats this as the project context. */
@@ -49,13 +58,22 @@ export default function OutlineEditor({
   const [view, setView] = useState<'2d' | '3d'>('2d');
   const [saving, setSaving] = useState(false);
 
+  const units: Units = doc.units;
+  const isImperial = units === 'imperial';
+
+  // Display-only strings for the dimension inputs. The underlying state
+  // is always meters; we render the number in the user's units and convert
+  // back to meters on edit.
+  const dimStep = isImperial ? 0.5 : 0.05;     // feet / meters
+  const dimPrecision = isImperial ? 1 : 2;     // 1 decimal ft, 2 decimals m
+  const dimSuffix = isImperial ? 'ft' : 'm';
+  const toUnits = (m: number) => (isImperial ? m * 3.28084 : m);
+  const fromUnits = (v: number) => (isImperial ? v / 3.28084 : v);
+  const fmtDim = (m: number) => toUnits(m).toFixed(dimPrecision);
+
   const problems = useMemo(() => validateOutlineForExtrude(doc), [doc]);
   const canPreview = problems.length === 0;
   const canSave = problems.length === 0;
-
-  // Auto-switch to 3D when the roof is closed and valid
-  // (User can still go back to 2D; this is just a convenience.)
-  // (We do NOT auto-switch; respect the user's chosen view.)
 
   const setRoofPolygon = useCallback((p: OutlinePolygon) => {
     setDoc(prev => ({ ...prev, roof: p }));
@@ -65,12 +83,32 @@ export default function OutlineEditor({
     setDoc(prev => ({ ...prev, house: p }));
   }, []);
 
-  const updateField = useCallback(
-    <K extends keyof OutlineDocument>(key: K, value: OutlineDocument[K]) => {
-      setDoc(prev => ({ ...prev, [key]: value }));
-    },
-    [],
-  );
+  // ── Units toggle ─────────────────────────────────────────────────────────
+  const handleUnitsChange = useCallback((next: Units) => {
+    setDoc(prev => (prev.units === next ? prev : { ...prev, units: next }));
+  }, []);
+
+  // ── Dimension edits (always store in meters) ─────────────────────────────
+  const setRoofHeightMeters = useCallback((m: number) => {
+    setDoc(prev => ({ ...prev, roofHeightM: Math.max(0.05, m) }));
+  }, []);
+  const setHouseHeightMeters = useCallback((m: number) => {
+    setDoc(prev => ({ ...prev, houseHeightM: Math.max(0.5, m) }));
+  }, []);
+  const setHouseOffsetMeters = useCallback((m: number) => {
+    setDoc(prev => ({ ...prev, houseOffsetM: Math.max(0, m) }));
+  }, []);
+
+  // ── Roof type + pitch ────────────────────────────────────────────────────
+  const setRoofType = useCallback((rt: RoofType) => {
+    setDoc(prev => ({ ...prev, roofType: rt }));
+  }, []);
+  const setPitchRise = useCallback((rise: number) => {
+    setDoc(prev => {
+      if (!Number.isFinite(rise) || rise <= 0) return prev;
+      return { ...prev, pitch: { rise, run: prev.pitch.run || 12 } };
+    });
+  }, []);
 
   const handleUndoRoof = useCallback(() => {
     setDoc(prev => {
@@ -188,6 +226,7 @@ export default function OutlineEditor({
 
       {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-slate-800 text-xs">
+        {/* Edit actions */}
         <div className="flex items-center gap-1">
           <button
             onClick={handleUndoRoof}
@@ -205,53 +244,128 @@ export default function OutlineEditor({
             <Trash2 size={12} /> Clear roof
           </button>
         </div>
+
         <div className="h-5 w-px bg-slate-700" />
+
+        {/* Units toggle (metric / imperial) */}
+        <div className="flex items-center gap-1.5 text-slate-400">
+          <Ruler size={12} />
+          <div className="flex items-center bg-slate-800 rounded-md p-0.5">
+            <button
+              onClick={() => handleUnitsChange('imperial')}
+              className={`px-2 py-1 text-[11px] rounded ${
+                isImperial
+                  ? 'bg-amber-500 text-slate-900 font-medium'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+              title="Feet and inches (US construction convention)"
+            >
+              ft
+            </button>
+            <button
+              onClick={() => handleUnitsChange('metric')}
+              className={`px-2 py-1 text-[11px] rounded ${
+                !isImperial
+                  ? 'bg-amber-500 text-slate-900 font-medium'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+              title="Meters"
+            >
+              m
+            </button>
+          </div>
+        </div>
+
+        <div className="h-5 w-px bg-slate-700" />
+
+        {/* Roof type */}
+        <label className="flex items-center gap-1.5 text-slate-400">
+          Roof type
+          <select
+            value={doc.roofType}
+            onChange={e => setRoofType(e.target.value as RoofType)}
+            className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100 text-xs"
+          >
+            <option value="flat">Flat</option>
+            <option value="gable">Gable</option>
+            <option value="hip">Hip</option>
+          </select>
+        </label>
+
+        {/* Pitch (only when not flat) */}
+        {doc.roofType !== 'flat' && (
+          <label className="flex items-center gap-1.5 text-slate-400" title="Roof pitch (US convention: rise per 12 inches of run)">
+            Pitch
+            <input
+              type="number"
+              min={0.5}
+              max={18}
+              step={0.5}
+              value={doc.pitch.rise}
+              onChange={e => setPitchRise(Math.max(0.5, Number(e.target.value) || 6))}
+              className="w-14 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100"
+            />
+            <span className="text-slate-500">:12</span>
+            <span className="text-slate-500 text-[10px]">
+              ({formatPitch(doc.pitch.rise, doc.pitch.run)})
+            </span>
+          </label>
+        )}
+
+        <div className="h-5 w-px bg-slate-700" />
+
+        {/* Dimensions — display in current units, store in meters */}
         <label className="flex items-center gap-1.5 text-slate-400">
           Roof thickness
           <input
             type="number"
-            min={0.05}
-            max={2}
-            step={0.05}
-            value={doc.roofHeightM}
-            onChange={e =>
-              updateField('roofHeightM', Math.max(0.05, Number(e.target.value) || 0.3))
-            }
+            min={isImperial ? 0.1 : 0.05}
+            max={isImperial ? 6 : 2}
+            step={dimStep}
+            value={fmtDim(doc.roofHeightM)}
+            onChange={e => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v)) setRoofHeightMeters(fromUnits(v));
+            }}
             className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100"
           />
-          m
+          <span className="text-slate-500">{dimSuffix}</span>
         </label>
         <label className="flex items-center gap-1.5 text-slate-400">
           House height
           <input
             type="number"
-            min={0.5}
-            max={20}
-            step={0.1}
-            value={doc.houseHeightM}
-            onChange={e =>
-              updateField('houseHeightM', Math.max(0.5, Number(e.target.value) || 2.5))
-            }
+            min={isImperial ? 2 : 0.5}
+            max={isImperial ? 60 : 20}
+            step={dimStep}
+            value={fmtDim(doc.houseHeightM)}
+            onChange={e => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v)) setHouseHeightMeters(fromUnits(v));
+            }}
             className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100"
           />
-          m
+          <span className="text-slate-500">{dimSuffix}</span>
         </label>
         <label className="flex items-center gap-1.5 text-slate-400">
           Eave
           <input
             type="number"
             min={0}
-            max={3}
-            step={0.05}
-            value={doc.houseOffsetM}
-            onChange={e =>
-              updateField('houseOffsetM', Math.max(0, Number(e.target.value) || 0.6))
-            }
+            max={isImperial ? 10 : 3}
+            step={dimStep}
+            value={fmtDim(doc.houseOffsetM)}
+            onChange={e => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v)) setHouseOffsetMeters(fromUnits(v));
+            }}
             className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100"
           />
-          m
+          <span className="text-slate-500">{dimSuffix}</span>
         </label>
+
         <div className="h-5 w-px bg-slate-700" />
+
         <button
           onClick={handleAutoHouse}
           disabled={doc.roof.vertices.length < 3}
@@ -279,6 +393,7 @@ export default function OutlineEditor({
               polygon={doc.roof}
               onChange={setRoofPolygon}
               center={center}
+              units={units}
               hint={doc.roof.closed ? 'closed — drag vertices to adjust' : 'click to add'}
             />
           ) : (
@@ -321,6 +436,7 @@ export default function OutlineEditor({
                   height={220}
                   accent="slate"
                   hideSatellite
+                  units={units}
                   hint={doc.house.closed ? 'closed' : 'click to add'}
                 />
               </div>
@@ -352,8 +468,9 @@ export default function OutlineEditor({
             <p>1. Click on the grid to place each vertex of your roof outline.</p>
             <p>2. Double-click (or press Enter) to close the polygon.</p>
             <p>3. Toggle to 3D to preview. Drag vertices to adjust.</p>
-            <p>4. Adjust roof thickness / house height / eave as needed.</p>
-            <p>5. Save &amp; Continue to open the full 3D design studio.</p>
+            <p>4. Pick roof type and pitch (X:12 = rise per 12 in of run).</p>
+            <p>5. Adjust roof thickness / house height / eave as needed.</p>
+            <p>6. Save &amp; Continue to open the full 3D design studio.</p>
           </div>
         </div>
       </div>
