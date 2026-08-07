@@ -77,6 +77,14 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
   };
 
   const handleOutlineFirst = async (addr?: string) => {
+    const target = (addr ?? address).trim();
+    if (!target) {
+      // No address typed — go straight to the outline editor in demo mode
+      // (no projectId). The user can draw a roof and either continue with
+      // the demo or pick a real address later.
+      router.push('/design/outline');
+      return;
+    }
     const p = await resolveProject(addr);
     if (p) {
       const qs = new URLSearchParams({ projectId: p.id });
@@ -110,7 +118,7 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
         />
         <button
           onClick={() => handleOutlineFirst()}
-          disabled={geocoding || !address.trim()}
+          disabled={geocoding}
           className="btn-secondary px-4 flex items-center gap-2 whitespace-nowrap h-[38px]"
           title="Draw the roof outline first, then continue to the 3D studio"
         >
@@ -298,28 +306,41 @@ function DesignContent({ onQuickLaunch }: { onQuickLaunch?: (p: Project) => void
             <span className="text-xs text-slate-500">({projects.length})</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {projects.map(p => (
-              <Link
-                key={p.id}
-                href={`/design?projectId=${p.id}`}
-                className="card-hover p-4 group"
-              >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl mb-3 ${
-                  p.systemType === 'roof' ? 'bg-amber-500/10' :
-                  p.systemType === 'ground' ? 'bg-teal-500/10' : 'bg-purple-500/10'
-                }`}>
-                  {p.systemType === 'roof' ? '🏠' : p.systemType === 'ground' ? '🌱' : '🔲'}
+            {projects.map(p => {
+              // Pre-fill lat/lng for the outline tool if the project has them
+              const outlineQs = new URLSearchParams({ projectId: p.id });
+              if (typeof p.lat === 'number') outlineQs.set('lat', String(p.lat));
+              if (typeof p.lng === 'number') outlineQs.set('lng', String(p.lng));
+              return (
+                <div key={p.id} className="card-hover p-4 group relative">
+                  <Link href={`/design?projectId=${p.id}`} className="block">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl mb-3 ${
+                      p.systemType === 'roof' ? 'bg-amber-500/10' :
+                      p.systemType === 'ground' ? 'bg-teal-500/10' : 'bg-purple-500/10'
+                    }`}>
+                      {p.systemType === 'roof' ? '🏠' : p.systemType === 'ground' ? '🌱' : '🔲'}
+                    </div>
+                    <h3 className="font-semibold text-white text-sm group-hover:text-amber-300 transition-colors">{p.name}</h3>
+                    <p className="text-xs text-slate-400 mt-1">{p.client?.name}</p>
+                    <div className="flex items-center gap-2 mt-3">
+                      <span className={`badge ${p.systemType === 'roof' ? 'badge-roof' : p.systemType === 'ground' ? 'badge-ground' : 'badge-fence'}`}>
+                        {p.systemType}
+                      </span>
+                      <span className={`badge badge-${p.status}`}>{p.status}</span>
+                    </div>
+                  </Link>
+                  {/* Mark out roof shortcut — visible on hover (always visible on touch) */}
+                  <Link
+                    href={`/design/outline?${outlineQs.toString()}`}
+                    className="absolute top-3 right-3 p-1.5 rounded-md text-slate-500 hover:text-amber-400 hover:bg-slate-800/80 opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Mark out roof for this project"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <Square size={14} />
+                  </Link>
                 </div>
-                <h3 className="font-semibold text-white text-sm group-hover:text-amber-300 transition-colors">{p.name}</h3>
-                <p className="text-xs text-slate-400 mt-1">{p.client?.name}</p>
-                <div className="flex items-center gap-2 mt-3">
-                  <span className={`badge ${p.systemType === 'roof' ? 'badge-roof' : p.systemType === 'ground' ? 'badge-ground' : 'badge-fence'}`}>
-                    {p.systemType}
-                  </span>
-                  <span className={`badge badge-${p.status}`}>{p.status}</span>
-                </div>
-              </Link>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
