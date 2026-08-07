@@ -40,6 +40,9 @@ import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjecti
 // the package carried open blocking release items and no seal.
 import { projectIssueStateLanguageFromInput } from '../snapshot/projectAuthorityProjection';
 
+// CMDA — the ONLY correct inline font-family spelling (single-quoted names
+// nest safely inside a double-quoted style attribute).
+import { CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 export function pageWarningLabels(
   input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
   opts?: { merged?: boolean },
@@ -444,8 +447,8 @@ export function pageWarningLabels(
       // gate can assert directly that no supply-side label carries a load-side-only
       // citation (it previously had no tagged cell to read and the PV-5 placard
       // schedule was outside the gate's reach).
-      `<td style="font-family:"SolarPro Mono","SolarPro Symbols";font-size:6.4px;" data-label-nec-ref="${escapeH(lbl.necRef)}" data-label-side="${escapeH(lbl.interconnectSide)}" data-label-required="${lbl.required ? 'true' : 'false'}">${lbl.necRef}</td>` +
-      `<td style="text-align:center;font-weight:900;font-family:"SolarPro Mono","SolarPro Symbols";font-size:6.6px;">${lbl.required ? (SUPERSEDED.has(lbl.refId) ? 'YES*' : 'YES') : 'N/A'}</td>` +
+      `<td style="font-family:${CSS_FONT_MONO_STACK};font-size:6.4px;" data-label-nec-ref="${escapeH(lbl.necRef)}" data-label-side="${escapeH(lbl.interconnectSide)}" data-label-required="${lbl.required ? 'true' : 'false'}">${lbl.necRef}</td>` +
+      `<td style="text-align:center;font-weight:900;font-family:${CSS_FONT_MONO_STACK};font-size:6.6px;">${lbl.required ? (SUPERSEDED.has(lbl.refId) ? 'YES*' : 'YES') : 'N/A'}</td>` +
       `<td style="font-size:6.6px;">${lbl.placement}</td>` +
       `</tr>`;
     const _head = `<thead><tr>` +

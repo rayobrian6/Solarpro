@@ -708,21 +708,44 @@ describe('AAC WS-2 · E7 · module exact-datasheet: the range comparison the aud
     expect(st.resolutionAuditRef).toBeNull();
     const binding = authority.moduleDatasheetBinding!;
     const qcells = binding.modules.find(m => /Q\.PEAK/i.test(m.moduleModel))!;
-    expect(qcells.state).toBe('RANGE-COVERED');
-    expect(qcells.coversSelectedWatts).toBe(true);
+    // CMDA — with the registry unreadable there is NO governed document, so the
+    // honest state is NO-DOCUMENT. It used to read RANGE-COVERED, derived from a
+    // static asset's marketing title ("385-405W") — a coverage claim made with
+    // no document, no hash and no verification behind it.
+    expect(qcells.state).toBe('NO-DOCUMENT');
+    expect(qcells.applicability.state).toBe('NO_DOCUMENT');
+    expect(qcells.applicability.clears).toBe(false);
     expect(qcells.registryLookup.attempted).toBe(true);
     expect(qcells.registryLookup.documentClass).toBe('module_datasheet');
     expect(qcells.registryLookup.boundDocumentId).toBeNull();
     expect(qcells.registryLookup.failure).toMatch(/42P01/);
-    expect(qcells.missingDocument).toMatch(/registry binding/);
-    // the requirement's reason is now precise, not "pending"
-    expect(st.blockingReason).toMatch(/INSIDE that range/);
+    expect(qcells.missingDocument).toMatch(/governed module_datasheet registry claims/);
   });
 
   it('it CLEARS once a verified registry binding exists (the AUTO_RETRIEVED half\'s seam)', async () => {
     const { authority, outcome } = await runResolutionLifecycle(braidonInput(), {
       nowIso: NOW,
-      safeDbRead: scriptedRead({ 'findVerifiedDocument(module_datasheet': { id: 'doc-qcells-400', sha256: 'a'.repeat(64) } }),
+      // CMDA — the seam must hand back a GOVERNED row: identity, hash,
+      // verification AND the structured module claims that prove 400 W coverage.
+      // `{ id, sha256 }` alone no longer clears anything, which is the point.
+      safeDbRead: scriptedRead({ 'findVerifiedDocument(module_datasheet': {
+        id: 'doc-qcells-400', documentClass: 'module_datasheet', sha256: 'a'.repeat(64),
+        archivedInRepo: true, status: 'current', verificationState: 'verified',
+        verifiedBy: 'Dana Reyes', verificationNotes: 'page 2 table checked',
+        title: 'Q CELLS Q.PEAK DUO BLK ML-G10+ 385-405W Datasheet',
+        extractedClaims: {
+          module: {
+            manufacturer: 'Q CELLS', productFamily: 'Q.PEAK DUO BLK ML-G10+',
+            equipmentIdsCovered: ['qcells-peak-duo-400'],
+            modelsCovered: ['Q.PEAK DUO BLK ML-G10+ 400W'],
+            wattagesCovered: [385, 400, 405],
+            explicitWattageRange: { minWatts: 385, maxWatts: 405 },
+            electricalMechanicalSpecificationsPresent: true,
+            evidence: { page: 2, table: 'Electrical Characteristics', column: '400' },
+            applicabilityBasis: 'Q CELLS family datasheet, electrical characteristics table',
+          },
+        },
+      } }),
     });
     const st = outcome.states['MODULE-EXACT-DATASHEET-PENDING'];
     expect(st.cleared).toBe(true);

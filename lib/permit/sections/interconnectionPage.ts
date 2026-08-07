@@ -30,6 +30,9 @@ import {
 import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
 import { projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
 
+// CMDA — the ONLY correct inline font-family spelling (single-quoted names
+// nest safely inside a double-quoted style attribute).
+import { CSS_FONT_SANS_UI_STACK } from '../fonts/fontPack';
 // ─── HTML Escape Helper ──────────────────────────────────────────────────────
 function esc(s: string | null | undefined): string {
   if (!s) return '';
@@ -312,7 +315,7 @@ export function pageInterconnection(
   `;
 
   const body = `
-    <div class="page" style="padding:12px;font-family:"SolarPro Sans",Helvetica,Arial,sans-serif;font-size:9px;line-height:1.4;max-width:770px;margin:0 auto;">
+    <div class="page" style="padding:12px;font-family:${CSS_FONT_SANS_UI_STACK};font-size:9px;line-height:1.4;max-width:770px;margin:0 auto;">
       ${header}
       ${utilityBox}
       ${mainContent}

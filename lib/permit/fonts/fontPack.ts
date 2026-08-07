@@ -38,6 +38,39 @@ export const SVG_FONT_SANS = FONT_SANS;
 export const SVG_FONT_MONO = FONT_MONO;
 export const SVG_FONT_SYMBOLS = FONT_SYMBOLS;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CSS FONT STACKS FOR INLINE `style="…"` ATTRIBUTES.
+//
+// THE DEFECT THESE CLOSE. Forty-six renderer call sites hand-wrote the stack
+// with DOUBLE quotes inside a DOUBLE-quoted HTML attribute:
+//
+//     style="font-family:"SolarPro Mono","SolarPro Symbols";font-size:6.4px;"
+//              ─────────┬────────────────────────────────┬─
+//              the attribute ENDS here ───────────────────┘
+//
+// The parser closes `style` at the first inner quote, and everything after it
+// becomes stray attributes. The declared font never applies, and the emitted
+// markup is invalid. It appears in the shipped Braidon artifact.
+//
+// CSS font-family names may be quoted with SINGLE quotes, which nest safely
+// inside a double-quoted attribute. These constants are the ONLY correct way to
+// write the stack inline — no call site may spell it out again.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** `font-family` value for an inline style attribute — sans + symbol fallback. */
+export const CSS_FONT_SANS_STACK = `'${FONT_SANS}','${FONT_SYMBOLS}'`;
+/** `font-family` value for an inline style attribute — mono + symbol fallback. */
+export const CSS_FONT_MONO_STACK = `'${FONT_MONO}','${FONT_SYMBOLS}'`;
+/** `font-family` value for an inline style attribute — symbols only. */
+export const CSS_FONT_SYMBOLS_STACK = `'${FONT_SYMBOLS}'`;
+/** Sans with the generic UI fallbacks, for pages that degrade outside the pack. */
+export const CSS_FONT_SANS_UI_STACK = `'${FONT_SANS}',Helvetica,Arial,sans-serif`;
+
+/** Matches the malformed construction: a double-quoted family name inside a
+ *  `style="…"` attribute. Exported so the regression test and any future audit
+ *  share ONE definition of "malformed" rather than two that can drift. */
+export const MALFORMED_STYLE_FONT_FAMILY_RE = /style="[^"]*font-family:\s*"/;
+
 /** The six symbols Liberation does not carry, plus the two found by scanning all
  *  three profiles (‖ U+2016 which Liberation MONO lacks, and ⬡ U+2B21 which
  *  NEITHER face has). Asserted covered by test — a new symbol fails closed. */

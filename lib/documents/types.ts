@@ -47,6 +47,53 @@ export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 export interface ExtractedEngineeringClaims {
   /** Free-form claim key/values (e.g. { maxSystemVoltageV: 600 }). */
   values?: Record<string, unknown>;
+  /** ═══ CMDA — THE MODULE APPLICABILITY CLAIMS ═══════════════════════════
+   *
+   *  THE ONLY source that may establish that a datasheet covers the SELECTED
+   *  module. Nothing else qualifies: not the marketing title, not the filename,
+   *  not `equipment_model_applicability` substring matching, not a static
+   *  asset's "385-405W" title, and not `verification_state='verified'` — a
+   *  verified document is AUTHENTIC, which is a different question from whether
+   *  it covers this 400 W variant.
+   *
+   *  These are the document's OWN statements, read off the document and recorded
+   *  with the location they were read from. Nothing here may be back-filled from
+   *  the equipment catalogue or from the selection being evaluated: that would
+   *  make the document agree with the selection by construction.
+   *
+   *  Stored in the existing `extracted_claims` JSON column (migration 113) —
+   *  this shape carries no database change.
+   */
+  module?: {
+    /** the manufacturer the document itself names. */
+    manufacturer?: string | null;
+    /** e.g. 'Q.PEAK DUO BLK ML-G10+'. */
+    productFamily?: string | null;
+    /** stable catalogue ids the document covers. THE primary identity. */
+    equipmentIdsCovered?: string[];
+    /** full model strings the document covers. Supporting evidence only. */
+    modelsCovered?: string[];
+    /** the per-variant table the document prints. The strongest claim shape. */
+    variantsCovered?: Array<{ model?: string | null; watts?: number | null; equipmentId?: string | null }>;
+    /** discrete wattages the document covers. */
+    wattagesCovered?: number[];
+    /** an explicit, document-stated range (NOT parsed from a title). */
+    explicitWattageRange?: { minWatts: number; maxWatts: number } | null;
+    /** true only when the document actually prints the electrical + mechanical
+     *  specifications for the covered variants. A brochure sets this false. */
+    electricalMechanicalSpecificationsPresent?: boolean;
+    /** WHERE in the document the coverage was read. Required — a claim with no
+     *  location is unauditable and cannot clear the requirement. */
+    evidence?: {
+      page?: number | null;
+      table?: string | null;
+      row?: string | null;
+      column?: string | null;
+      section?: string | null;
+    } | null;
+    /** the human-readable basis a reviewer can check the claim against. */
+    applicabilityBasis?: string | null;
+  };
   /** §9 structural applicability claims — required for a racking capacity clear. */
   structural?: {
     exactModel?: string | null;
@@ -158,6 +205,16 @@ export interface DocumentResolverCriteria {
   requireEnvironmentalHazard?: boolean;
   /** the exact project/building applicability the framing document must cover. */
   projectApplicabilityKey?: string | null;
+  /** CMDA — the SELECTED module wattage the document must be proven to cover.
+   *  Supplied alongside `requireModuleDatasheetCoverage`; on its own it filters
+   *  nothing, because a wattage is a question, not a permission. */
+  selectedWatts?: number | null;
+  /** CMDA — when set, a module_datasheet must carry structured module claims
+   *  that cover the selected product AND the selected wattage, with an evidence
+   *  location. Model-substring matching is explicitly NOT sufficient under this
+   *  flag: `equipment_model_applicability LIKE '%<model>%'` is how a loosely
+   *  named row came to speak for a module it had never been checked against. */
+  requireModuleDatasheetCoverage?: boolean;
 }
 
 export function isDocumentClass(x: unknown): x is DocumentClass {

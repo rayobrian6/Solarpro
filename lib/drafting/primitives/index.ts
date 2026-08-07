@@ -10,6 +10,9 @@
 
 import type { LineClass, TextOptions } from '../types';
 
+// CMDA — the ONLY correct inline font-family spelling (single-quoted names
+// nest safely inside a double-quoted style attribute).
+import { CSS_FONT_SANS_STACK } from '@/lib/permit/fonts/fontPack';
 // ── drawLine ──────────────────────────────────────────────────
 // Draws a single line segment with a CAD class.
 
@@ -283,7 +286,7 @@ export function drawSVGOpen(
   return '<svg viewBox="0 0 ' + width + ' ' + height +
     '" preserveAspectRatio="xMidYMid meet"' +
     ' xmlns="http://www.w3.org/2000/svg"' +
-    ' style="font-family:"SolarPro Sans","SolarPro Symbols";display:block;">' +
+    ` style="font-family:${CSS_FONT_SANS_STACK};display:block;">` +
     defs;
 }
 

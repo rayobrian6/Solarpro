@@ -1930,6 +1930,22 @@ export interface PermitDesignSnapshot {
     engineeringReview?: import('@/lib/engineeringReview/types').EngineeringReviewCoverage | null;
   };
 
+  /** CMDA — THE CANONICAL MODULE DOCUMENT AUTHORITY, one entry per distinct
+   *  selected module model.
+   *
+   *  THE SINGLE ANSWER to "is the selected module's datasheet applicable?".
+   *  Frozen with the snapshot and projected by RG-2, DS-1, APP-A, the readiness
+   *  registry, the BOM and approval coverage. No consumer re-decides it, and
+   *  nothing may establish it from a marketing title, a filename, a model
+   *  substring, a static asset, or the bare presence of a document id.
+   *
+   *  MATERIAL: a change of selected module, wattage, registry document, SHA-256,
+   *  verification state or applicability MUST move the digest.
+   *
+   *  Omitted when no lifecycle ran (harness / test / DB-unavailable), exactly
+   *  like `resolutionAuthority`. */
+  moduleDocumentAuthority?: Record<string, import('./moduleDocumentAuthority').ModuleDatasheetApplicabilityAuthority>;
+
   /** TR — OPERATIONAL RESOLVER ATTEMPT EVIDENCE. The ONE declared home for facts
    *  about how a resolver ATTEMPT went, as opposed to what the design accepts:
    *  the raw transport error, the retry count, the attempt instant, the source

@@ -603,6 +603,23 @@ function completeAuthority(project: Record<string, unknown>): Record<string, unk
         basis: "registry document 'doc-tesla-tsp-420-datasheet-ffffffffffff' (p.1, column TSP-420) "
           + 'is the VERIFIED, current module_datasheet bound to 420 W',
         missingDocument: null,
+        // CMDA — the CANONICAL verdict is what establishes the source. A bound
+        // document id no longer clears anything on its own, so a fixture that
+        // means "this module's datasheet is governed and applicable" must say so.
+        applicability: {
+          selectedEquipmentId: 'tesla-tsp-420', selectedManufacturer: 'Tesla',
+          selectedModel: 'Solar Panel TSP-420', selectedWatts: 420,
+          documentId: 'doc-tesla-tsp-420-datasheet-ffffffffffff', documentClass: 'module_datasheet',
+          documentTitle: 'Tesla Solar Panel Datasheet (TSP-415/TSP-420)',
+          sha256: 'f'.repeat(64), archivedInRepo: true, status: 'current',
+          verificationState: 'verified', verificationActor: 'Dana Reyes',
+          verificationBasis: 'p.1 column TSP-420 checked against the manufacturer download',
+          state: 'EXACT_VARIANT', clears: true,
+          coveredRange: null, coveredWattages: [415, 420], coveredModels: ['Solar Panel TSP-420'],
+          evidenceLocation: 'page 1, column TSP-420', applicabilityBasis: 'Tesla datasheet, per-variant column',
+          refusals: [],
+          basis: "registry document 'doc-tesla-tsp-420-datasheet-ffffffffffff' names the 420 W variant on its own row",
+        },
         registryLookup: {
           attempted: true, documentClass: 'module_datasheet', equipmentModel: 'Solar Panel TSP-420',
           boundDocumentId: 'doc-tesla-tsp-420-datasheet-ffffffffffff', failure: null,

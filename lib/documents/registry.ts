@@ -146,29 +146,82 @@ export function validateDocumentInput(input: DocumentInput): ValidationResult {
   if (input.verificationState === 'verified' && !(input.archivedInRepo && input.sha256)) {
     return { ok: false, error: 'a document cannot be verified unless it is archived with a sha256' };
   }
-  // ── D5 — "VERIFIED BY NOBODY" IS NOT A LEGAL STATE ──────────────────────
-  // Custody (archived + hashed) is not verification. Terminal 'verified' now
-  // requires an auditable actor, the KIND of actor, and a stated basis — and a
-  // deterministic resolver may only verify the document classes where machine
-  // verification is objective.
-  if (input.verificationState === 'verified') {
-    if (!input.verificationActor || !String(input.verificationActor).trim()) {
-      return { ok: false, error: 'a document cannot be verified without a verificationActor — custody is not verification' };
-    }
-    if (input.verificationActorKind !== 'human' && input.verificationActorKind !== 'resolver') {
-      return { ok: false, error: "verificationActorKind must be 'human' or 'resolver' when verificationState is 'verified'" };
-    }
-    if (!input.verificationBasis || !String(input.verificationBasis).trim()) {
-      return { ok: false, error: 'a document cannot be verified without a stated verificationBasis' };
-    }
-    if (input.verificationActorKind === 'resolver'
-        && !MACHINE_VERIFIABLE_DOCUMENT_CLASSES.includes(input.documentClass)) {
-      return {
-        ok: false,
-        error: `document class '${input.documentClass}' may not be verified by a resolver — machine `
-          + 'retrieval establishes existence and bytes, never licensed applicability. A human verifier is required.',
-      };
-    }
+  // D5 / CMDA — the verification rules live in ONE owner (below) and are applied
+  // here as well as on every later transition. See `validateVerificationTransition`.
+  const vt = validateVerificationTransition({
+    documentClass: input.documentClass,
+    archivedInRepo: input.archivedInRepo === true,
+    sha256: input.sha256 ?? null,
+    verificationState: input.verificationState ?? null,
+    verificationActor: input.verificationActor ?? null,
+    verificationActorKind: input.verificationActorKind ?? null,
+    verificationBasis: input.verificationBasis ?? null,
+  });
+  if (!vt.ok) return vt;
+  return { ok: true };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CMDA / D5 — THE ONE VERIFICATION POLICY.
+//
+// `createDocument` enforced actor + actor KIND + basis + the machine-verifiable
+// class restriction. `setVerification` — the PATCH path the admin API actually
+// uses — enforced only "is it archived and hashed", and took a bare
+// `verifiedBy` string. So the entire D5 policy could be walked around by
+// creating a document unverified and then PATCHing it to verified: no actor
+// kind, no basis, and a resolver could verify a licensed document class.
+//
+// This function is now the SINGLE owner. Creation calls it, the PATCH path calls
+// it, and any future caller that wants to move a document to `verified` calls
+// it. Fixing this only in the admin route would have left the domain function
+// still permissive to the next caller.
+//
+// IT ANSWERS ONE QUESTION ONLY: is this document AUTHENTIC and governed? Whether
+// it COVERS a particular selected module is a different question, owned by
+// `evaluateModuleDatasheetApplicability`. Both must pass; neither implies the
+// other.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface VerificationTransition {
+  documentClass: string;
+  archivedInRepo: boolean;
+  sha256: string | null;
+  /** the state being moved TO. Non-`verified` transitions need no evidence. */
+  verificationState: string | null;
+  verificationActor?: string | null;
+  verificationActorKind?: string | null;
+  verificationBasis?: string | null;
+}
+
+export function validateVerificationTransition(t: VerificationTransition): ValidationResult {
+  if (t.verificationState && !isVerificationState(t.verificationState)) {
+    return { ok: false, error: `verificationState must be unverified|in_review|verified|rejected; got '${t.verificationState}'` };
+  }
+  if (t.verificationState !== 'verified') return { ok: true };
+
+  // Custody is not verification — but you cannot verify what is not there either.
+  if (!(t.archivedInRepo && t.sha256)) {
+    return { ok: false, error: 'a document cannot be verified unless it is archived with a sha256' };
+  }
+  if (t.sha256 && !SHA256_RE.test(t.sha256)) {
+    return { ok: false, error: 'sha256 must be a 64-char hex digest' };
+  }
+  if (!t.verificationActor || !String(t.verificationActor).trim()) {
+    return { ok: false, error: 'a document cannot be verified without a verificationActor — custody is not verification' };
+  }
+  if (t.verificationActorKind !== 'human' && t.verificationActorKind !== 'resolver') {
+    return { ok: false, error: "verificationActorKind must be 'human' or 'resolver' when verificationState is 'verified'" };
+  }
+  if (!t.verificationBasis || !String(t.verificationBasis).trim()) {
+    return { ok: false, error: 'a document cannot be verified without a stated verificationBasis' };
+  }
+  if (t.verificationActorKind === 'resolver'
+      && !MACHINE_VERIFIABLE_DOCUMENT_CLASSES.includes(t.documentClass as DocumentClass)) {
+    return {
+      ok: false,
+      error: `document class '${t.documentClass}' may not be verified by a resolver — machine `
+        + 'retrieval establishes existence and bytes, never licensed applicability. A human verifier is required.',
+    };
   }
   return { ok: true };
 }
@@ -253,19 +306,44 @@ export async function getDocument(id: string): Promise<RegistryDocument | null> 
 }
 
 /** Set verification state. Verifying requires the doc already be archived+hashed. */
+/**
+ * Move a document to a verification state.
+ *
+ * CMDA / D5 — this path used to enforce far less than creation did: no actor
+ * KIND, no basis, and no machine-verifiable-class restriction, so the whole D5
+ * policy could be bypassed by creating unverified and PATCHing to verified. It
+ * now goes through the SAME `validateVerificationTransition` owner, and the
+ * governed evidence is REQUIRED rather than optional.
+ *
+ * `actorKind` and `basis` are required to reach 'verified'. They are recorded on
+ * the row so the verification can be audited later — a verification whose basis
+ * is not written down is not auditable, and an unauditable verification is the
+ * thing D5 exists to prevent.
+ */
 export async function setVerification(
   id: string,
   verificationState: string,
   verifiedBy: string,
   notes?: string | null,
+  actorKind?: string | null,
 ): Promise<RegistryDocument | null> {
   if (!isVerificationState(verificationState)) throw new Error(`invalid verificationState '${verificationState}'`);
   const sql = await getDbReady();
   const existing = await getDocument(id);
   if (!existing) return null;
-  if (verificationState === 'verified' && !(existing.archivedInRepo && existing.sha256)) {
-    throw new Error('cannot verify a document that is not archived with a sha256');
-  }
+  const vt = validateVerificationTransition({
+    documentClass: existing.documentClass,
+    archivedInRepo: existing.archivedInRepo === true,
+    sha256: existing.sha256 ?? null,
+    verificationState,
+    verificationActor: verifiedBy,
+    // A PATCH that does not say what kind of actor this is cannot reach
+    // 'verified'; there is deliberately no default, because defaulting to
+    // 'human' would let an automated caller claim a human verification.
+    verificationActorKind: actorKind ?? null,
+    verificationBasis: notes ?? null,
+  });
+  if (!vt.ok) throw new Error(vt.error);
   const verifiedAt = verificationState === 'verified' ? new Date().toISOString() : null;
   const [row] = await sql`
     UPDATE manufacturer_document_registry
@@ -334,10 +412,46 @@ export function pickVerifiedDocument(
     // Must be archived + hashed to be citable.
     if (!(d.archivedInRepo && d.sha256)) return false;
     // Exact equipment coverage: by id OR by model substring.
+    //
+    // ⚠ CMDA — THE MODEL SUBSTRING IS A CANDIDATE FILTER, NEVER AN AUTHORITY.
+    // `equipment_model_applicability LIKE '%<model>%'` narrows the pool; it does
+    // not establish that the document covers the selection. For module
+    // datasheets that proof is required separately, below.
     const idHit = !!eqId && d.equipmentId === eqId;
     const modelHit = !!model && !!d.equipmentModelApplicability
       && d.equipmentModelApplicability.toLowerCase().includes(model);
     if (!idHit && !modelHit) return false;
+    // ── CMDA — MODULE COVERAGE MUST BE CLAIMED, NOT INFERRED ────────────────
+    // The same discipline the structural / framing / environmental gates already
+    // apply: the DOCUMENT must state what it covers, and the claim must name
+    // where it was read. Without this a verified, archived, hashed, loosely
+    // model-matched row cleared the module requirement with no proof it covered
+    // the selected 400 W variant at all.
+    if (criteria.requireModuleDatasheetCoverage === true) {
+      const mod = d.extractedClaims?.module;
+      if (!mod) return false;
+      if (mod.electricalMechanicalSpecificationsPresent !== true) return false;
+      const ev = mod.evidence;
+      const hasEvidence = !!ev && (ev.page != null || !!ev.table || !!ev.row || !!ev.column || !!ev.section);
+      if (!hasEvidence) return false;
+      // product / family coverage — stable id first, exact model equality next,
+      // family prefix last. Never a substring of the applicability free-text.
+      const nm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const idCovered = !!eqId && (mod.equipmentIdsCovered ?? []).some(x => nm(x) === nm(eqId));
+      const modelCovered = !!model
+        && ((mod.modelsCovered ?? []).some(x => nm(x) === nm(model))
+          || (mod.variantsCovered ?? []).some(v => nm(v.model) === nm(model)));
+      const familyCovered = !!mod.productFamily && !!model && nm(model).startsWith(nm(mod.productFamily));
+      if (!idCovered && !modelCovered && !familyCovered) return false;
+      // wattage coverage
+      const w = criteria.selectedWatts ?? null;
+      if (w == null || !Number.isFinite(w)) return false;
+      const inList = (mod.wattagesCovered ?? []).includes(w);
+      const r = mod.explicitWattageRange ?? null;
+      const inRange = !!r && w >= r.minWatts && w <= r.maxWatts;
+      const inVariants = (mod.variantsCovered ?? []).some(v => v.watts === w);
+      if (!inList && !inRange && !inVariants) return false;
+    }
     if (wantStructural) {
       const s = d.extractedClaims?.structural;
       if (!s || s.hasStructuralCapacityClaim !== true) return false;

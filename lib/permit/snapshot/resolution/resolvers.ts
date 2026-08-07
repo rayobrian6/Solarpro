@@ -42,6 +42,10 @@ import {
 import {
   evaluateModuleDatasheetBinding, MODULE_DATASHEET_DOCUMENT_CLASS, moduleSourceIsEstablished,
 } from './datasheetBinding';
+// CMDA — THE canonical module applicability authority.
+import {
+  evaluateModuleDatasheetApplicability, type ModuleDatasheetApplicabilityAuthority,
+} from '../moduleDocumentAuthority';
 import {
   resolveProjectPersonnel, unavailablePersonnelAuthority,
 } from '@/lib/personnel/store';
@@ -767,25 +771,75 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     // The registry lookup is performed per distinct module, through the shared
     // guard, and its result (or exact failure) is recorded on each coverage row.
-    const lookups = new Map<string, { boundDocumentId: string | null; failure: string | null }>();
-    const models = new Set<string>();
+    // ══ CMDA — ONE ROW IN, ONE CANONICAL VERDICT OUT ═══════════════════════
+    // The lookup requests module COVERAGE, not merely a model-shaped match, and
+    // it keeps the WHOLE registry row: identity, hash, verification state,
+    // verifier and the structured module claims all travel together into
+    // `evaluateModuleDatasheetApplicability`. Reducing the row to `{id}` here —
+    // which is what this did — is precisely how a document's identity came to be
+    // cited while its coverage was never checked.
+    const lookups = new Map<string, {
+      boundDocumentId: string | null;
+      failure: string | null;
+      applicability: ModuleDatasheetApplicabilityAuthority;
+    }>();
+    const selections = new Map<string, { model: string; watts: number | null }>();
     for (const inv of ctx.input.system?.inverters ?? []) {
-      for (const s of inv?.strings ?? []) if (s?.panelModel) models.add(s.panelModel);
+      for (const s of inv?.strings ?? []) {
+        if (!s?.panelModel) continue;
+        if (!selections.has(s.panelModel)) {
+          selections.set(s.panelModel, {
+            model: s.panelModel,
+            watts: typeof s.panelWatts === 'number' ? s.panelWatts : null,
+          });
+        }
+      }
     }
-    for (const model of models) {
+    // The SELECTED equipment identity comes from the canonical equipment
+    // authority — the stable catalogue id is the primary identity, and the model
+    // string is supporting evidence (never a substring test).
+    const canonical = ctx.authority.canonicalEquipment?.canonical ?? null;
+    for (const [model, sel] of selections) {
+      const equipmentId = canonical && canonical.model === model
+        ? (canonical.catalogId ?? null)
+        : null;
+      const watts = sel.watts ?? (canonical && canonical.model === model ? canonical.ratedWatts ?? null : null);
       const read = await ctx.safeDbRead(
         `findVerifiedDocument(${MODULE_DATASHEET_DOCUMENT_CLASS}, ${model})`,
-        () => findVerifiedDocument({ documentClass: MODULE_DATASHEET_DOCUMENT_CLASS, equipmentModel: model }),
+        () => findVerifiedDocument({
+          documentClass: MODULE_DATASHEET_DOCUMENT_CLASS,
+          equipmentId,
+          equipmentModel: model,
+          selectedWatts: watts,
+          requireModuleDatasheetCoverage: true,
+        }),
         null,
       );
+      const doc = read.ok ? read.value : null;
+      const applicability = evaluateModuleDatasheetApplicability({
+        selected: {
+          equipmentId,
+          manufacturer: canonical && canonical.model === model ? canonical.manufacturer ?? null : null,
+          model,
+          watts,
+        },
+        document: doc,
+      });
       lookups.set(model, {
-        boundDocumentId: read.ok && read.value ? read.value.id : null,
-        failure: read.ok ? (read.value ? null : 'no VERIFIED, current module_datasheet is registered for this model') : read.error,
+        boundDocumentId: doc ? doc.id : null,
+        failure: read.ok
+          ? (applicability.clears ? null : applicability.refusals.join(' · ') || applicability.basis)
+          : read.error,
+        applicability,
       });
     }
 
     const binding = evaluateModuleDatasheetBinding(ctx.input, ({ model }) =>
-      lookups.get(model) ?? { boundDocumentId: null, failure: 'no lookup performed for this model' });
+      lookups.get(model) ?? {
+        boundDocumentId: null,
+        failure: 'no lookup performed for this model',
+        applicability: null,
+      });
 
     // D8 — the bound rule is not restated here; it lives in datasheetBinding.
     const pending = binding.modules.filter(m => !moduleSourceIsEstablished(m));

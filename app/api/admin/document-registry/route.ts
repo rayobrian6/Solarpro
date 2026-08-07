@@ -72,13 +72,20 @@ export async function PATCH(req: NextRequest) {
   if (!body.verification_state) return NextResponse.json({ success: false, error: 'verification_state is required' }, { status: 400 });
 
   try {
-    const doc = await setVerification(body.id, body.verification_state, admin.id, body.notes ?? null);
+    // CMDA / D5 — the POLICY lives in `validateVerificationTransition`, which
+    // `setVerification` applies; this route supplies the governed evidence it
+    // requires. An authenticated admin is a HUMAN verifier by construction (the
+    // route is behind `requireAdminApi`), and `notes` carries the basis — which
+    // is why a verification with no notes is now refused rather than recorded.
+    const doc = await setVerification(
+      body.id, body.verification_state, admin.id, body.notes ?? null, 'human',
+    );
     if (!doc) return NextResponse.json({ success: false, error: 'Document not found' }, { status: 404 });
     await logAdminAction({ adminId: admin.id, action: 'document_registry_verify', metadata: { id: doc.id, state: doc.verificationState } });
     return NextResponse.json({ success: true, document: doc });
   } catch (err: any) {
     // validation errors (e.g. verifying an un-archived doc) → 400
-    if (err instanceof Error && /cannot verify|invalid/i.test(err.message)) {
+    if (err instanceof Error && /cannot verify|cannot be verified|may not be verified|must be|invalid/i.test(err.message)) {
       return NextResponse.json({ success: false, error: err.message }, { status: 400 });
     }
     return handleRouteDbError('[admin/document-registry PATCH]', err);

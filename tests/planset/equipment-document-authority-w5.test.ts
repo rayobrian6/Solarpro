@@ -187,10 +187,18 @@ describe('W5 §3 — module datasheet exactness', () => {
     expect(ex.selectedWatts).toBe(400);
   });
 
-  it('DS-1 renders an explicit EXACT-DOCUMENT-PENDING banner (never presents generic as exact)', () => {
+  it('DS-1 never presents a generic sheet as the established source, and never demands a wattage-exact PDF', () => {
     const html = generatePermitHTML(braidonLikeInput());
-    expect(html).toMatch(/data-ds-state="family-datasheet-pending"/);
-    expect(html).toContain('EXACT MODULE DOCUMENT PENDING');
+    // CMDA — DS-1 PROJECTS the canonical state. With no governed registry
+    // document this input has none, so the page must say applicability is not
+    // established — and must NOT claim it is, nor invent a coverage verdict from
+    // the static asset's title.
+    expect(html).toMatch(/data-ds-state="module-(no-document|applicability-evidence-incomplete|not-covered)"/);
+    expect(html).toMatch(/NO GOVERNED MODULE DATASHEET ON FILE|APPLICABILITY EVIDENCE INCOMPLETE|DOES NOT COVER/);
+    expect(html).not.toContain('COVERAGE VERIFIED');
+    // the false requirement is gone: a family document that covers the selection
+    // is acceptable, so DS-1 may never demand a single-wattage PDF.
+    expect(html).not.toMatch(/Attach the exact .* datasheet/);
   });
 
   it('emits a canonical blocker for the pending exact module document', () => {

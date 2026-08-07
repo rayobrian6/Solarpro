@@ -404,7 +404,20 @@ export interface EquipmentDocumentBlocker {
  *  a named import, so `equipmentProjection` (which `datasheetBinding` imports)
  *  acquires no dependency on it. */
 export interface ModuleBindingProjection {
-  modules: ReadonlyArray<{ moduleModel: string; registryLookup: { boundDocumentId: string | null } }>;
+  modules: ReadonlyArray<{
+    moduleModel: string;
+    registryLookup: { boundDocumentId: string | null };
+    /** CMDA — THE canonical verdict. Structural (not a named import) for the
+     *  same reason the rest of this interface is: `datasheetBinding` imports
+     *  this module, so this module may not import it back. */
+    applicability?: {
+      clears: boolean;
+      state: string;
+      basis: string;
+      selectedWatts: number | null;
+      documentId: string | null;
+    } | null;
+  }>;
 }
 
 /**
@@ -441,11 +454,19 @@ export function collectEquipmentDocumentBlockers(
     }
   }
 
-  // Module exact-document check (one per distinct module model).
-  const registryBound = new Set(
-    (binding?.modules ?? [])
-      .filter(m => m?.registryLookup?.boundDocumentId)
-      .map(m => m.moduleModel),
+  // ══ CMDA — THE BLOCKER IS A PROJECTION, NOT A SECOND OPINION ═════════════
+  // This loop used to decide module applicability for itself, by running
+  // `resolveModuleDatasheetExactness` over a STATIC ASSET's marketing title, and
+  // it suppressed the blocker on the mere PRESENCE of a bound document id. Two
+  // independent deciders, neither of which had looked at what the document
+  // actually claims.
+  //
+  // The canonical authority now owns the verdict. When the binding is present
+  // (the real permit path) this loop reports it verbatim. When it is absent
+  // (a render-only path with no registry access) it raises the honest
+  // "not established here" blocker and never claims coverage.
+  const canonicalByModel = new Map(
+    (binding?.modules ?? []).map(m => [m.moduleModel, m.applicability]),
   );
   const seen = new Set<string>();
   for (const inv of system.inverters ?? []) {
@@ -453,8 +474,26 @@ export function collectEquipmentDocumentBlockers(
       const model = str?.panelModel;
       if (!model || seen.has(model)) continue;
       seen.add(model);
-      // A VERIFIED registry document names this selection — nothing is missing.
-      if (registryBound.has(model)) continue;
+      const canonicalVerdict = canonicalByModel.get(model) ?? null;
+      if (canonicalVerdict) {
+        // PROJECTION ONLY — the canonical authority cleared it, or it did not.
+        if (canonicalVerdict.clears) continue;
+        const w = canonicalVerdict.selectedWatts ?? '?';
+        out.push({
+          code: 'MODULE-EXACT-DATASHEET-PENDING',
+          severity: 'blocking',
+          authorityPath: 'snapshot.moduleDocumentAuthority (canonical module applicability)',
+          affectedSheets: ['DS-1'],
+          explanation: `Module ${model} (${w} W): ${canonicalVerdict.basis}`,
+          resolutionAction: canonicalVerdict.state === 'NO_DOCUMENT'
+            ? `Register the manufacturer datasheet for ${model} as document_class 'module_datasheet', verify it, and record its structured module coverage claims (product/family, wattages, evidence location).`
+            : canonicalVerdict.state === 'NOT_COVERED'
+              ? `Register a manufacturer datasheet whose governed claims cover ${model} at ${w} W — the document on file explicitly does not.`
+              : `Complete the governed module coverage claims on registry document '${canonicalVerdict.documentId ?? 'the module datasheet'}' (product/family, wattage, evidence location, electrical+mechanical specifications present).`,
+          provenance: { source: 'moduleDocumentAuthority', equipmentRecordId: null, documentRecordId: canonicalVerdict.documentId },
+        });
+        continue;
+      }
       // D8 — with no binding this path has NO registry access, so it can never see EXACT. That is
       // correct and deliberate: it states the document gap from static evidence,
       // and `module-datasheet-binding@v1` — which does hold the registry lookup —
@@ -463,35 +502,32 @@ export function collectEquipmentDocumentBlockers(
       // a module with no datasheet at all, and a module whose asset title merely
       // lacked a wattage range, both produced no requirement, so RG-2 had nothing
       // to fail on and passed vacuously.
-      const ex = resolveModuleDatasheetExactness(model, str?.panelWatts ?? null);
-      if (ex.stateLabel !== 'EXACT') {
-        const w = ex.selectedWatts ?? '?';
-        const explanation =
-          ex.stateLabel === 'NO-DOCUMENT'
-            ? `Module ${model} (${w} W): no manufacturer module datasheet is on file at all — the exact-wattage source is absent, not merely imprecise.`
-            : ex.familyRange
-              ? `Module ${model} (${w} W): the on-file document is the ${ex.familyRange[0]}–${ex.familyRange[1]} W family datasheet, not the exact ${w} W sheet.`
-              : ex.familyWattages
-                ? `Module ${model} (${w} W): the on-file document is a multi-wattage sheet naming ${ex.familyWattages.join(' W and ')} W, not the exact ${w} W sheet.`
-                : ex.familyModels
-                  ? `Module ${model} (${w} W): the on-file document is a multi-model sheet covering ${ex.familyModels.join(' and ')}, not the exact sheet for this model.`
-                  : `Module ${model} (${w} W): the on-file manufacturer asset carries no hash, no verification and no page reference, so it is not established as the exact ${w} W source.`;
-        out.push({
-          code: 'MODULE-EXACT-DATASHEET-PENDING',
-          // §17 — BLOCKING: the exact selected-module electrical/mechanical source is
-          // permit-critical (drives conductor sizing / structural inputs / AHJ
-          // acceptance). Authoritative severity is set by severityPolicy.ts; this
-          // field is documentary intent and kept in sync.
-          severity: 'blocking',
-          authorityPath: `equipment-db(module) → manufacturer-assets-db#${ex.asset?.id ?? 'none'}`,
-          affectedSheets: ['DS-1'],
-          explanation,
-          resolutionAction: ex.stateLabel === 'NO-DOCUMENT'
-            ? `Obtain and register the manufacturer datasheet for ${model} (${w} W) as document_class 'module_datasheet'.`
-            : `Register the exact ${w} W module datasheet (or a single-wattage crop) as document_class 'module_datasheet', naming its page/column.`,
-          provenance: { source: 'equipmentProjection', equipmentRecordId: ex.asset?.equipmentId ?? null, documentRecordId: ex.asset?.id ?? null },
-        });
-      }
+      // ── CMDA — NO BINDING ⇒ NOT ESTABLISHED. FULL STOP. ──────────────────
+      // This branch used to run `resolveModuleDatasheetExactness` over a static
+      // asset's marketing title and compose five different verdicts from it
+      // ("the on-file document is the 385–405 W family datasheet, not the exact
+      // 400 W sheet"). That was a SECOND applicability decision, made from the
+      // weakest possible evidence, and it is the wording that told operators to
+      // attach a 400 W PDF that never needed to exist.
+      //
+      // A path with no registry access cannot answer the question. It says so.
+      const w = typeof str?.panelWatts === 'number' ? str.panelWatts : '?';
+      out.push({
+        code: 'MODULE-EXACT-DATASHEET-PENDING',
+        // §17 — BLOCKING: the exact selected-module electrical/mechanical source is
+        // permit-critical (drives conductor sizing / structural inputs / AHJ
+        // acceptance). Authoritative severity is set by severityPolicy.ts; this
+        // field is documentary intent and kept in sync.
+        severity: 'blocking',
+        authorityPath: 'snapshot.moduleDocumentAuthority (canonical module applicability)',
+        affectedSheets: ['DS-1'],
+        explanation: `Module ${model} (${w} W): module datasheet applicability is NOT ESTABLISHED on this path — `
+          + 'no governed registry evaluation was performed, and a manufacturer asset title is not authority.',
+        resolutionAction: `Register the manufacturer datasheet for ${model} as document_class 'module_datasheet', `
+          + 'verify it through the governed verification policy, and record its structured module coverage claims '
+          + '(product/family, wattages covered, evidence location).',
+        provenance: { source: 'moduleDocumentAuthority', equipmentRecordId: null, documentRecordId: null },
+      });
     }
   }
 

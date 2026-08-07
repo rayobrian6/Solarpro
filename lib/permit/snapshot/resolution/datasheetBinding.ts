@@ -28,7 +28,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { PermitInput } from '../../types';
-import { resolveModuleDatasheetExactness, type ModuleDatasheetExactness } from '../equipmentProjection';
+import { resolveModuleDatasheetExactness } from '../equipmentProjection';
+// CMDA — THE canonical module applicability authority. This module PROJECTS it.
+import {
+  noModuleDocumentAuthority, type ModuleDatasheetApplicabilityAuthority,
+} from '../moduleDocumentAuthority';
 
 export type ModuleDatasheetCoverageState =
   | 'EXACT'
@@ -61,6 +65,13 @@ export interface ModuleDatasheetCoverage {
   familyModels: string[] | null;
   /** the document that is genuinely missing (null ⇒ nothing missing). */
   missingDocument: string | null;
+  /** ═══ CMDA — THE CANONICAL VERDICT ═══════════════════════════════════════
+   *  THE authority for this module. Every field above is a PROJECTION of it.
+   *  Any consumer asking "is the selected module's datasheet applicable?" must
+   *  read this object (or `snapshot.moduleDocumentAuthority`, which carries the
+   *  same frozen values) and must not re-decide from a title, a filename, a
+   *  model substring or the presence of a document id. */
+  applicability: ModuleDatasheetApplicabilityAuthority;
   /** the registry lookup this coverage evaluation ATTEMPTED. */
   registryLookup: {
     attempted: boolean;
@@ -99,20 +110,41 @@ export const MODULE_DATASHEET_DOCUMENT_CLASS = 'module_datasheet';
  * granted by a title heuristic over an unhashed static asset, both copies could
  * report a module bound with an empty archive and no lookup performed at all.
  */
+/**
+ * CMDA — ESTABLISHED means the CANONICAL AUTHORITY cleared it.
+ *
+ * This used to be `registryLookup.boundDocumentId != null` — the mere PRESENCE
+ * of a bound id. A document could be archived, hashed, marked verified and
+ * matched on nothing more than `equipment_model_applicability LIKE '%<model>%'`,
+ * and this returned true with no proof it covered the selected 400 W variant.
+ *
+ * The verdict now comes from `evaluateModuleDatasheetApplicability`, which reads
+ * the governed structured claims off the SAME registry row whose identity, hash
+ * and verification are cited. This function only reports it.
+ */
 export function moduleSourceIsEstablished(m: ModuleDatasheetCoverage): boolean {
-  return m.registryLookup.boundDocumentId != null;
+  return m.applicability?.clears === true;
 }
 
 // D8 — the coverage state is a projection of the ONE evaluator's verdict, which
 // already folded the registry binding in. `EXACT` therefore arrives here only
 // when a verified registry row bound the selection; it can no longer be produced
 // by a static asset whose title happens to state no wattage range.
-const state = (ex: ModuleDatasheetExactness): ModuleDatasheetCoverageState => {
-  if (ex.stateLabel === 'EXACT') return 'EXACT';
-  if (ex.stateLabel === 'NO-DOCUMENT') return 'NO-DOCUMENT';
-  if (ex.stateLabel === 'UNEVIDENCED-DATASHEET-PENDING') return 'UNEVIDENCED';
-  return ex.coversSelectedWatts === true ? 'RANGE-COVERED' : 'RANGE-NOT-COVERED';
-};
+/** CMDA — the legacy coverage vocabulary, PROJECTED from the canonical state.
+ *  Kept so existing consumers and tests keep reading the words they know, while
+ *  the decision itself has exactly one owner. `EXACT` and `RANGE-COVERED` both
+ *  now mean CLEARED — a family document that explicitly includes the selection
+ *  is a real source, and the old rule that only `EXACT` counted was the false
+ *  exact-document requirement this phase removes. */
+export function coverageStateOf(a: ModuleDatasheetApplicabilityAuthority): ModuleDatasheetCoverageState {
+  switch (a.state) {
+    case 'EXACT_VARIANT': return 'EXACT';
+    case 'FAMILY_COVERED': return 'RANGE-COVERED';
+    case 'NOT_COVERED': return 'RANGE-NOT-COVERED';
+    case 'NO_DOCUMENT': return 'NO-DOCUMENT';
+    default: return 'UNEVIDENCED';
+  }
+}
 
 /**
  * Evaluate datasheet coverage for every distinct module in the fleet. PURE —
@@ -121,7 +153,15 @@ const state = (ex: ModuleDatasheetExactness): ModuleDatasheetCoverageState => {
  */
 export function evaluateModuleDatasheetBinding(
   input: PermitInput,
-  registryLookup?: (args: { model: string; watts: number | null }) => { boundDocumentId: string | null; failure: string | null },
+  registryLookup?: (args: { model: string; watts: number | null }) => {
+    boundDocumentId: string | null;
+    failure: string | null;
+    /** CMDA — THE canonical verdict for this module, produced by
+     *  `evaluateModuleDatasheetApplicability` from the SAME registry row whose
+     *  identity and hash are reported. When the caller performs no lookup this
+     *  is absent and the module is honestly unestablished. */
+    applicability?: ModuleDatasheetApplicabilityAuthority | null;
+  },
 ): ModuleDatasheetBindingAuthority {
   const seen = new Set<string>();
   const modules: ModuleDatasheetCoverage[] = [];
@@ -133,23 +173,40 @@ export function evaluateModuleDatasheetBinding(
       seen.add(model);
       const watts = typeof s?.panelWatts === 'number' ? s.panelWatts : null;
       const lookup = registryLookup ? registryLookup({ model, watts }) : null;
-      // D8 — ONE evaluator. The registry binding is an INPUT to the exactness
-      // resolution, not a second opinion layered on top of it, so the state, the
-      // basis and the missing document can never disagree with each other.
-      const ex = resolveModuleDatasheetExactness(model, watts, lookup);
+      // CMDA — the LEGACY exactness helper still runs, but ONLY to carry the
+      // presentation fields it always carried (the static asset's title and
+      // source url). It no longer decides anything: `state` and the established
+      // verdict come from the canonical applicability authority below. It may
+      // never clear a release requirement again.
+      const ex = resolveModuleDatasheetExactness(model, watts, null);
+      const applicability = lookup?.applicability
+        ?? noModuleDocumentAuthority(
+          { equipmentId: null, manufacturer: null, model, watts },
+          registryLookup
+            ? (lookup?.failure ?? 'no governed module_datasheet registry document covers the selected module')
+            : 'no registry lookup was performed on this path — module applicability is not established here',
+        );
       modules.push({
         moduleModel: model,
-        selectedWatts: ex.selectedWatts,
-        state: state(ex),
-        documentTitle: ex.asset?.docTitle ?? null,
+        selectedWatts: watts,
+        state: coverageStateOf(applicability),
+        // presentation only — the static asset the DS appendix prints
+        documentTitle: applicability.documentTitle ?? ex.asset?.docTitle ?? null,
         documentSourceUrl: ex.asset?.sourceUrl ?? null,
-        familyRange: ex.familyRange,
-        coversSelectedWatts: ex.coversSelectedWatts,
-        basis: ex.coverageBasis,
-        exactnessAuthority: ex.exactnessAuthority,
-        familyWattages: ex.familyWattages,
-        familyModels: ex.familyModels,
-        missingDocument: ex.missingDocument,
+        familyRange: applicability.coveredRange
+          ? [applicability.coveredRange.minWatts, applicability.coveredRange.maxWatts]
+          : null,
+        coversSelectedWatts: applicability.state === 'NO_DOCUMENT' || applicability.state === 'EVIDENCE_INCOMPLETE'
+          ? null
+          : applicability.clears,
+        basis: applicability.basis,
+        exactnessAuthority: applicability.clears ? 'registry' : 'none',
+        familyWattages: applicability.coveredWattages,
+        familyModels: applicability.coveredModels,
+        missingDocument: applicability.clears
+          ? null
+          : `governed module_datasheet registry claims covering ${model} at ${watts ?? '?'} W (product/family, wattage and evidence location)`,
+        applicability,
         registryLookup: {
           attempted: !!registryLookup,
           documentClass: MODULE_DATASHEET_DOCUMENT_CLASS,

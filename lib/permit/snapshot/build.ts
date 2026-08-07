@@ -2734,6 +2734,26 @@ export function buildPermitDesignSnapshot(
         }
       : {}),
 
+    // ═══ CMDA — THE CANONICAL MODULE DOCUMENT AUTHORITY ════════════════════
+    // One frozen verdict per distinct selected module, keyed by model. Every
+    // downstream consumer — RG-2, DS-1, APP-A, the readiness registry, the BOM —
+    // projects THIS. It is derived once, by `module-datasheet-binding@v1`, from
+    // the governed registry claims on the SAME row whose identity and hash it
+    // reports; nothing below re-decides it from a title or a substring.
+    //
+    // MATERIAL by design: selected module, wattage, document id, SHA-256,
+    // verification state and applicability all live here, so a genuine change to
+    // any of them moves the digest.
+    ...((opts?.moduleDatasheetBinding?.modules ?? []).length
+      ? {
+          moduleDocumentAuthority: Object.fromEntries(
+            [...(opts?.moduleDatasheetBinding?.modules ?? [])]
+              .sort((a, b) => a.moduleModel.localeCompare(b.moduleModel))
+              .map(m => [m.moduleModel, m.applicability]),
+          ),
+        }
+      : {}),
+
     // ═══ TR — THE OPERATIONAL EVIDENCE CONTAINER ═══════════════════════════
     // Everything the registry payload and the authority records used to carry
     // ABOUT THE ATTEMPT: the raw transport error, the retryability it implied,

@@ -57,10 +57,64 @@ const MODULE_CODE = 'MODULE-EXACT-DATASHEET-PENDING';
 const moduleBlockers = (input: PermitInput) =>
   collectEquipmentDocumentBlockers(input).filter(b => b.code === MODULE_CODE);
 
-/** a registry lookup that resolves — the ONLY thing that may establish exactness. */
-const BOUND = () => ({ boundDocumentId: 'doc-qcells-peak-duo-400w-9a1c4f2e0bd7', failure: null });
+// ── CMDA — D8's seam, STRENGTHENED ──────────────────────────────────────────
+// D8 made a bound document id the only route to EXACT. CMDA went further: a
+// bound id is no longer sufficient either, because the row it names may never
+// have been checked against the selected variant. The lookup now carries the
+// CANONICAL verdict, and these helpers say which one they mean.
+const DOC_ID = 'doc-qcells-peak-duo-400w-9a1c4f2e0bd7';
+
+/** a governed lookup whose claims genuinely cover the selection. */
+const BOUND = (a?: { model: string; watts: number | null }) => ({
+  boundDocumentId: DOC_ID,
+  failure: null,
+  applicability: {
+    selectedEquipmentId: null, selectedManufacturer: 'Q CELLS', selectedModel: a?.model ?? null, selectedWatts: a?.watts ?? null,
+    documentId: DOC_ID, documentClass: 'module_datasheet',
+    documentTitle: 'Q CELLS Q.PEAK DUO BLK ML-G10+ 385-405W Datasheet',
+    sha256: 'a'.repeat(64), archivedInRepo: true, status: 'current',
+    verificationState: 'verified', verificationActor: 'Dana Reyes', verificationBasis: 'page 2 table checked',
+    state: 'FAMILY_COVERED' as const, clears: true,
+    coveredRange: { minWatts: 385, maxWatts: 405 }, coveredWattages: [385, 400, 405], coveredModels: [a?.model ?? ''],
+    evidenceLocation: 'page 2, table Electrical Characteristics', applicabilityBasis: 'family datasheet',
+    refusals: [],
+    basis: `registry document '${DOC_ID}' explicitly covers 385–405 W, which includes ${a?.watts ?? '?'} W`,
+  },
+});
+
+/** CMDA — the D8-era shape: an id and nothing else. It must NOT clear. */
+const BOUND_ID_ONLY = (a?: { model: string; watts: number | null }) => ({
+  boundDocumentId: DOC_ID,
+  failure: null,
+  applicability: {
+    selectedEquipmentId: null, selectedManufacturer: null, selectedModel: a?.model ?? null, selectedWatts: a?.watts ?? null,
+    documentId: DOC_ID, documentClass: 'module_datasheet', documentTitle: null,
+    sha256: 'a'.repeat(64), archivedInRepo: true, status: 'current',
+    verificationState: 'verified', verificationActor: 'Dana Reyes', verificationBasis: null,
+    state: 'EVIDENCE_INCOMPLETE' as const, clears: false,
+    coveredRange: null, coveredWattages: null, coveredModels: null,
+    evidenceLocation: null, applicabilityBasis: null,
+    refusals: ['the document carries no structured module applicability claims'],
+    basis: 'the document is governed but states no structured module coverage',
+  },
+});
+
 /** the live case today: credential blocked, no registry row for any module. */
-const UNBOUND = () => ({ boundDocumentId: null, failure: 'no VERIFIED, current module_datasheet is registered for this model' });
+const UNBOUND = (a?: { model: string; watts: number | null }) => ({
+  boundDocumentId: null,
+  failure: 'no VERIFIED, current module_datasheet is registered for this model',
+  applicability: {
+    selectedEquipmentId: null, selectedManufacturer: null, selectedModel: a?.model ?? null, selectedWatts: a?.watts ?? null,
+    documentId: null, documentClass: null, documentTitle: null, sha256: null,
+    archivedInRepo: false, status: null,
+    verificationState: null, verificationActor: null, verificationBasis: null,
+    state: 'NO_DOCUMENT' as const, clears: false,
+    coveredRange: null, coveredWattages: null, coveredModels: null,
+    evidenceLocation: null, applicabilityBasis: null,
+    refusals: ['no governed module_datasheet registry document is on file for the selected module'],
+    basis: 'no governed module_datasheet registry document is on file for the selected module',
+  },
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1 — EXACTNESS IS EARNED FROM THE REGISTRY, NEVER FROM A TITLE
@@ -156,7 +210,10 @@ describe('D8 · every module gap reaches the readiness registry', () => {
   it('9 — a module with NO document on file emits a blocker (it emitted nothing)', () => {
     const b = moduleBlockers(fleet(['Totally Unknown Module 999W', 999]));
     expect(b).toHaveLength(1);
-    expect(b[0].explanation).toMatch(/no manufacturer module datasheet/i);
+    // CMDA — with no registry evaluation this path states the honest fact and
+    // stops. It used to describe the on-file ASSET from its marketing title,
+    // which was a second applicability decision made from the weakest evidence.
+    expect(b[0].explanation).toMatch(/NOT ESTABLISHED on this path/i);
   });
 
   it('10 — a multi-model static sheet emits a blocker (it emitted nothing)', () => {
@@ -170,10 +227,16 @@ describe('D8 · every module gap reaches the readiness registry', () => {
     expect(b[0].explanation).toMatch(/no hash|unverified|not established/i);
   });
 
-  it('12 — the Braidon module still emits exactly one, with the family wording', () => {
+  it('12 — the Braidon module still emits exactly one, and claims nothing from a title', () => {
     const b = moduleBlockers(fleet(['Q.PEAK DUO BLK ML-G10+ 400W', 400]));
     expect(b).toHaveLength(1);
-    expect(b[0].explanation).toMatch(/385–405 W family datasheet/);
+    // CMDA — the blocker no longer asserts what the on-file document IS
+    // ("the 385–405 W family datasheet") from a static asset's title. Whether a
+    // family sheet covers 400 W is a governed-claims question, and this path has
+    // not asked it.
+    expect(b[0].explanation).toMatch(/NOT ESTABLISHED on this path/i);
+    expect(b[0].explanation).not.toMatch(/385–405 W family datasheet/);
+    expect(b[0].authorityPath).toBe('snapshot.moduleDocumentAuthority (canonical module applicability)');
   });
 
   it('13 — one blocker per DISTINCT module, never per string', () => {
@@ -210,13 +273,24 @@ describe('D8 · the binding never reports bound from an empty archive', () => {
     expect(b.modules[0].registryLookup.failure).toMatch(/no VERIFIED/);
   });
 
-  it('16 — a resolving lookup binds, and ONLY then is the state EXACT', () => {
+  it('16 — a GOVERNED lookup binds, and a bare document id does not', () => {
     const b = evaluateModuleDatasheetBinding(fleet(['Q.PEAK DUO BLK ML-G10+ 400W', 400]), BOUND);
     expect(b.allBound).toBe(true);
-    expect(b.modules[0].state).toBe('EXACT');
+    // CMDA — a family document that explicitly covers the selection IS the
+    // source. `RANGE-COVERED` is the cleared state; demanding a single-wattage
+    // PDF was the false requirement this replaces.
+    expect(b.modules[0].state).toBe('RANGE-COVERED');
+    expect(b.modules[0].applicability.state).toBe('FAMILY_COVERED');
+    expect(b.modules[0].applicability.clears).toBe(true);
     expect(b.modules[0].exactnessAuthority).toBe('registry');
     expect(b.modules[0].registryLookup.boundDocumentId).toBe('doc-qcells-peak-duo-400w-9a1c4f2e0bd7');
     expect(b.modules[0].missingDocument).toBeNull();
+
+    // …and the D8-era shape — an id with no governed claims — does NOT bind.
+    const weak = evaluateModuleDatasheetBinding(fleet(['Q.PEAK DUO BLK ML-G10+ 400W', 400]), BOUND_ID_ONLY);
+    expect(weak.allBound).toBe(false);
+    expect(weak.modules[0].registryLookup.boundDocumentId).toBe('doc-qcells-peak-duo-400w-9a1c4f2e0bd7');
+    expect(weak.modules[0].applicability.clears).toBe(false);
   });
 
   it('17a — the readiness registry honours a REGISTRY binding, and only that', () => {
@@ -225,18 +299,38 @@ describe('D8 · the binding never reports bound from an empty archive', () => {
     expect(moduleBlockers(input)).toHaveLength(1);
     // a registry binding for THIS model establishes the source
     expect(collectEquipmentDocumentBlockers(input, {
-      modules: [{ moduleModel: 'Solar Panel TSP-415', registryLookup: { boundDocumentId: 'doc-tesla-1' } }],
+      modules: [{
+        moduleModel: 'Solar Panel TSP-415',
+        registryLookup: { boundDocumentId: 'doc-tesla-1' },
+        applicability: { clears: true, state: 'FAMILY_COVERED', basis: 'covers 415 W', selectedWatts: 415, documentId: 'doc-tesla-1' },
+      }],
     }).filter(b => b.code === MODULE_CODE)).toHaveLength(0);
+    // CMDA — a bound id with NO governed verdict establishes nothing
+    expect(collectEquipmentDocumentBlockers(input, {
+      modules: [{
+        moduleModel: 'Solar Panel TSP-415',
+        registryLookup: { boundDocumentId: 'doc-tesla-1' },
+        applicability: { clears: false, state: 'EVIDENCE_INCOMPLETE', basis: 'no module claims', selectedWatts: 415, documentId: 'doc-tesla-1' },
+      }],
+    }).filter(b => b.code === MODULE_CODE)).toHaveLength(1);
     // a binding that ATTEMPTED and found nothing establishes nothing
     expect(collectEquipmentDocumentBlockers(input, {
-      modules: [{ moduleModel: 'Solar Panel TSP-415', registryLookup: { boundDocumentId: null } }],
+      modules: [{
+        moduleModel: 'Solar Panel TSP-415',
+        registryLookup: { boundDocumentId: null },
+        applicability: { clears: false, state: 'NO_DOCUMENT', basis: 'nothing on file', selectedWatts: 415, documentId: null },
+      }],
     }).filter(b => b.code === MODULE_CODE)).toHaveLength(1);
   });
 
   it('17b — a binding for one model cannot suppress the gap on another', () => {
     const b = collectEquipmentDocumentBlockers(
       fleet(['Solar Panel TSP-415', 415], ['Q.PEAK DUO BLK ML-G10+ 400W', 400]),
-      { modules: [{ moduleModel: 'Solar Panel TSP-415', registryLookup: { boundDocumentId: 'doc-tesla-1' } }] },
+      { modules: [{
+        moduleModel: 'Solar Panel TSP-415',
+        registryLookup: { boundDocumentId: 'doc-tesla-1' },
+        applicability: { clears: true, state: 'FAMILY_COVERED', basis: 'covers 415 W', selectedWatts: 415, documentId: 'doc-tesla-1' },
+      }] },
     ).filter(x => x.code === MODULE_CODE);
     expect(b).toHaveLength(1);
     expect(b[0].explanation).toMatch(/Q\.PEAK/);
