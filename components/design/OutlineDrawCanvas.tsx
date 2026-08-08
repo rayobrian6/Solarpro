@@ -302,6 +302,36 @@ export default function OutlineDrawCanvas({
       ctx.setLineDash([]);
     }
 
+    // Edge length labels (Aurora-style "26.6 ft" on every edge).
+    // Only show for closed polygons — that's when the lengths are final.
+    if (polygon.closed && polygon.vertices.length >= 3) {
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i < polygon.vertices.length; i++) {
+        const next = (i + 1) % polygon.vertices.length;
+        const [x1, y1] = polygon.vertices[i];
+        const [x2, y2] = polygon.vertices[next];
+        const lengthM = Math.hypot(x2 - x1, y2 - y1);
+        const label = units === 'imperial'
+          ? `${(lengthM * FT_PER_M).toFixed(1)} ft`
+          : `${lengthM.toFixed(1)} m`;
+        const [px1, py1] = worldToPx(x1, y1);
+        const [px2, py2] = worldToPx(x2, y2);
+        const mx = (px1 + px2) / 2;
+        const my = (py1 + py2) / 2;
+        const tw = ctx.measureText(label).width;
+        // Background pill for readability
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(mx - tw / 2 - 3, my - 7, tw + 6, 14);
+        // Text
+        ctx.fillStyle = '#fbbf24'; // amber-400
+        ctx.fillText(label, mx, my + 1);
+      }
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+    }
+
     // Vertices
     polygon.vertices.forEach((v, i) => {
       const [px, py] = worldToPx(v[0], v[1]);

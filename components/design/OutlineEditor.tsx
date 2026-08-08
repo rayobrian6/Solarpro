@@ -182,9 +182,16 @@ export default function OutlineEditor({
           </button>
           <div>
             <div className="text-sm font-semibold">Mark out your roof</div>
-            <div className="text-xs text-slate-400">
-              Draw the roof outline, then lift it into 3D.
-            </div>
+            {problems.length === 0 ? (
+              <div className="flex items-center gap-1.5 text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5 w-fit">
+                <CheckCircle2 size={12} />
+                <span className="text-xs font-medium">Model accepted</span>
+              </div>
+            ) : (
+              <div className="text-xs text-slate-400">
+                Draw the roof outline, then lift it into 3D.
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">

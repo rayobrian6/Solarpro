@@ -315,8 +315,10 @@ export function extrudeOutlineDocument(doc: OutlineDocument): ExtrudedOutline | 
     house,
     roofPosition: [0, doc.houseHeightM, 0],
     housePosition: [0, 0, 0],
-    roofColor: '#b45309', // warm brown — matches SolarPro amber palette
-    houseColor: '#94a3b8', // slate-400 — neutral building
+    // Materials — terracotta tile roof + cream walls (matches Aurora-style
+    // residential rendering, not the abstract SolarPro amber palette).
+    roofColor: '#c2410c',  // orange-700 / terracotta tile
+    houseColor: '#e8d9b8', // warm cream / wheat
   };
 }
 

@@ -173,8 +173,8 @@ export default function Outline3DPreview({
 
     const roofMat = new THREE.MeshStandardMaterial({
       color: result.roofColor,
-      roughness: 0.7,
-      metalness: 0.05,
+      roughness: 0.85,
+      metalness: 0.02,
     });
     const roof = new THREE.Mesh(result.roof, roofMat);
     roof.castShadow = true;
@@ -186,8 +186,6 @@ export default function Outline3DPreview({
       color: result.houseColor,
       roughness: 0.95,
       metalness: 0.0,
-      transparent: true,
-      opacity: 0.92,
     });
     const house = new THREE.Mesh(result.house, houseMat);
     house.castShadow = true;
@@ -216,10 +214,59 @@ export default function Outline3DPreview({
   }, [outline]);
 
   return (
-    <div
-      ref={mountRef}
-      style={{ width, height }}
-      className="rounded-lg overflow-hidden border border-slate-700 bg-slate-900"
-    />
+    <div className="relative inline-block">
+      <div
+        ref={mountRef}
+        style={{ width, height }}
+        className="rounded-lg overflow-hidden border border-slate-700 bg-slate-900"
+      />
+      {/* Compass — bottom-right, rotates with camera azimuth (matches Aurora) */}
+      <CompassOverlay
+        getAzimuth={() => {
+          const c = cameraRef.current;
+          const t = controlsRef.current;
+          if (!c || !t) return 0;
+          const dx = c.position.x - t.target.x;
+          const dz = c.position.z - t.target.z;
+          return Math.atan2(dx, dz) * (180 / Math.PI);
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Small compass overlay that rotates a red needle to match the camera's
+ * azimuth. We update the SVG transform directly via a rAF loop so we don't
+ * trigger React re-renders 60 times per second.
+ */
+function CompassOverlay({ getAzimuth }: { getAzimuth: () => number }) {
+  const needleRef = useRef<SVGGElement | null>(null);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      if (needleRef.current) {
+        needleRef.current.setAttribute('transform', `rotate(${getAzimuth()} 20 20)`);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [getAzimuth]);
+  return (
+    <div className="absolute bottom-3 right-3 w-12 h-12 rounded-full bg-slate-900/85 border border-slate-700 flex items-center justify-center backdrop-blur-sm">
+      <svg viewBox="0 0 40 40" className="w-10 h-10" aria-label="Compass">
+        <circle cx="20" cy="20" r="18" fill="none" stroke="#475569" strokeWidth="0.8" />
+        <circle cx="20" cy="20" r="1.5" fill="#64748b" />
+        <text x="20" y="6" textAnchor="middle" fontSize="6" fill="#cbd5e1" fontWeight="bold">N</text>
+        <text x="20" y="38" textAnchor="middle" fontSize="5" fill="#64748b">S</text>
+        <text x="3" y="22" textAnchor="middle" fontSize="5" fill="#64748b">W</text>
+        <text x="37" y="22" textAnchor="middle" fontSize="5" fill="#64748b">E</text>
+        <g ref={needleRef} transform="rotate(0 20 20)">
+          <polygon points="20,8 17.5,21 22.5,21" fill="#dc2626" />
+          <polygon points="20,32 17.5,21 22.5,21" fill="#475569" />
+        </g>
+      </svg>
+    </div>
   );
 }
