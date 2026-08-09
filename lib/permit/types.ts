@@ -354,6 +354,20 @@ export interface PermitInput {
       strings: Array<{
         label: string;
         panelCount: number;
+        /** THE STABLE CATALOGUE ID of the selected module — the canonical
+         *  equipment identity for this string.
+         *
+         *  `applyCanonicalEquipmentToInput` (resolution/equipmentSelection.ts)
+         *  has always WRITTEN this field when it re-pins the canonical selection,
+         *  but the type never declared it, so no typed consumer could read it.
+         *  That is why downstream code identifies the module by its MODEL STRING
+         *  and re-derives the catalogue row with `fuzz()` substring matching —
+         *  the stable id was sitting on the object, invisible.
+         *
+         *  Optional because a body posted before the re-pin (or by an older
+         *  client) carries only the model. Absent ⇒ fall back to the model
+         *  string; present ⇒ it is authoritative and must be preferred. */
+        panelId?: string;
         panelManufacturer: string;
         panelModel: string;
         panelWatts: number;

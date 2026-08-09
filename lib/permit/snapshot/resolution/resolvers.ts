@@ -783,7 +783,19 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
       failure: string | null;
       applicability: ModuleDatasheetApplicabilityAuthority;
     }>();
-    const selections = new Map<string, { model: string; watts: number | null }>();
+    // ── THE STABLE CATALOGUE ID IS READ, NOT RE-DERIVED ─────────────────────
+    // `applyCanonicalEquipmentToInput` (equipmentSelection.ts) has already
+    // re-pinned the CANONICAL selection onto every string — `panelId`,
+    // `panelModel`, `panelManufacturer`, `panelWatts` — so `s.panelId` IS the
+    // canonical catalogue id for that string. Reading it directly is the whole
+    // point of the re-pin.
+    //
+    // This previously recovered the id by string-comparing
+    // `canonical.model === model`, which silently produced `null` — dropping the
+    // stable identity and leaving the document lookup on model matching alone —
+    // whenever the two spellings differed for any reason. A model string is
+    // supporting evidence; the catalogue id is the identity.
+    const selections = new Map<string, { model: string; watts: number | null; equipmentId: string | null }>();
     for (const inv of ctx.input.system?.inverters ?? []) {
       for (const s of inv?.strings ?? []) {
         if (!s?.panelModel) continue;
@@ -791,18 +803,17 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
           selections.set(s.panelModel, {
             model: s.panelModel,
             watts: typeof s.panelWatts === 'number' ? s.panelWatts : null,
+            equipmentId: typeof s.panelId === 'string' && s.panelId.trim() ? s.panelId.trim() : null,
           });
         }
       }
     }
-    // The SELECTED equipment identity comes from the canonical equipment
-    // authority — the stable catalogue id is the primary identity, and the model
-    // string is supporting evidence (never a substring test).
     const canonical = ctx.authority.canonicalEquipment?.canonical ?? null;
     for (const [model, sel] of selections) {
-      const equipmentId = canonical && canonical.model === model
-        ? (canonical.catalogId ?? null)
-        : null;
+      // the re-pinned string id first; the canonical authority is the fallback
+      // for a fleet that predates the re-pin.
+      const equipmentId = sel.equipmentId
+        ?? (canonical && canonical.model === model ? canonical.catalogId ?? null : null);
       const watts = sel.watts ?? (canonical && canonical.model === model ? canonical.ratedWatts ?? null : null);
       const read = await ctx.safeDbRead(
         `findVerifiedDocument(${MODULE_DATASHEET_DOCUMENT_CLASS}, ${model})`,
