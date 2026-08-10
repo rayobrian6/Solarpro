@@ -33,11 +33,12 @@ interface DatasheetEntry {
   docApplicability?: DocumentApplicability;
 }
 
+// CMEI — EXACT ONLY. A datasheet PAGE must belong to the selected product; a
+// substring match printed another product's sheet under this product's heading.
 function fuzz<T extends { model: string; id: string }>(list: T[], model?: string): T | undefined {
-  const m = (model || '').toLowerCase().trim();
+  const m = (model || '').toLowerCase().trim().replace(/\s+/g, ' ');
   if (!m) return undefined;
-  return list.find(e => e.model.toLowerCase() === m)
-    ?? list.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
+  return list.find(e => e.model.toLowerCase().trim().replace(/\s+/g, ' ') === m);
 }
 
 /** Resolve the real manufacturer datasheet images for the job's selected equipment. */

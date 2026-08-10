@@ -350,10 +350,17 @@ describe('W3 — digest invalidation on equipment change', () => {
     expect(d2).not.toBe(d1);
   });
 
-  it('changing the module changes module footprints and the digest', () => {
+  it('changing the module IDENTITY changes module footprints and the digest', () => {
     const s1 = realSnapshot();
+    // CMEI — the module is changed by changing its IDENTITY (the stable
+    // catalogue id), not by rewriting the model text. `panelId` is authoritative
+    // and manufacturer/model/watts are projections of it, so editing the text
+    // alone must NOT move the design — asserted below.
     const s2 = realSnapshot(p => {
-      for (const inv of p.system.inverters) for (const s of inv.strings) s.panelModel = 'Q.PEAK DUO BLK ML-G10+ 400W';
+      for (const inv of p.system.inverters) for (const s of inv.strings) {
+        (s as { panelId?: string }).panelId = 'qcells-peak-duo-400';
+        s.panelModel = 'Q.PEAK DUO BLK ML-G10+ 400W';
+      }
     });
     expect(s2.meta.digest).not.toBe(s1.meta.digest);
     // equipment revision on the instances tracks the record change
@@ -361,5 +368,31 @@ describe('W3 — digest invalidation on equipment change', () => {
       expect(s2.geometry.moduleInstances[0].equipmentRevision)
         .not.toBe(s1.geometry.moduleInstances[0].equipmentRevision);
     }
+  });
+
+  it('CMEI — rewriting the model TEXT while the panelId stands changes nothing', () => {
+    // The converse of the test above, and the reason it had to change: a stable
+    // id outranks conflicting model text, so a stale or re-typed model string
+    // can no longer silently re-identify the module or move the digest.
+    const pinned = (m: string) => realSnapshot(p => {
+      for (const inv of p.system.inverters) for (const s of inv.strings) {
+        (s as { panelId?: string }).panelId = 'qcells-peak-duo-400';
+        s.panelModel = m;
+      }
+    });
+    const a = pinned('Q.PEAK DUO BLK ML-G10+ 400W');
+    const b = pinned('SOME STALE MODEL TEXT 999W');
+    // The IDENTITY and everything projected from it are unchanged: same
+    // catalogue row, same model, same wattage, same spec.
+    expect(b.equipment.modules[0].catalogId).toBe(a.equipment.modules[0].catalogId);
+    expect(b.equipment.modules[0].model).toBe(a.equipment.modules[0].model);
+    expect(b.equipment.modules[0].spec.wattsStc).toBe(a.equipment.modules[0].spec.wattsStc);
+    expect(b.equipment.modules[0].catalogId).toBe('qcells-peak-duo-400');
+    // NOTE (honest residue): the PURE build does not run
+    // `materialiseModuleIdentity` — that happens at the resolver boundary — so
+    // the stale TEXT still reaches labels and therefore the digest. Identity is
+    // authoritative; the posted text is not yet normalised on this path. See
+    // docs/CANONICAL-MODULE-EQUIPMENT-IDENTITY.md §8.
+    expect(b.meta.digest).not.toBe(a.meta.digest);
   });
 });

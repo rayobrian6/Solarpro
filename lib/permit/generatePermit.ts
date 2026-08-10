@@ -72,6 +72,8 @@ import { generateBOMForPermit } from './utils/bomForPermit';
 import { applyFieldMeasurementsToRuns } from './snapshot/applyFieldMeasurements';
 import { fontFaceCss, fontFaceIdentities, FONT_PACK_VERSION } from './fonts/fontPack';
 
+// CMEI — module identity comes from THE canonical accessor.
+import { resolveModuleIdentity, resolveStringModuleIdentity } from '@/lib/equipment/moduleIdentity';
 export function generatePermitHTML(
   input: PermitInput,
   storedSldSvg?: string,
@@ -724,13 +726,22 @@ export function generatePermitHTML(
         // Build StringInput[] — backfill missing panel specs from equipment DB
         const stringInputs: StringInput[] = (inv.strings || []).map((str) => {
           // Try to resolve panel spec from equipment DB
-          const panelSpec = _getPanelById(str.panelModel)
-            || _getPanelById(str.panelModel?.toLowerCase().replace(/\s+/g, '-'));
+          // ── CMEI — THE CANONICAL ACCESSOR ────────────────────────────
+          // This passed a MODEL STRING into an ID lookup, then slugified it and
+          // tried again. `getPanelById` is an exact id match, so for a catalogue
+          // whose ids do not equal their model names this resolved essentially
+          // nothing — and the code below then fell through to hardcoded
+          // temperature coefficients for the SERVER-SIDE ELECTRICAL CALCULATION.
+          const panelSpec = resolveStringModuleIdentity(str).spec ?? undefined;
 
-          // Fallback: try project-level panel model/manufacturer fields
+          // Fallback: the project-level panel scalars, through the same accessor.
           const projPanelModel = input.project.panelModel || input.project.moduleModel;
           const projPanel = projPanelModel
-            ? (_getPanelById(projPanelModel) || _getPanelById(projPanelModel.toLowerCase().replace(/\s+/g, '-')))
+            ? (resolveModuleIdentity({
+                model: projPanelModel,
+                manufacturer: input.project.panelManufacturer ?? null,
+                watts: typeof input.project.panelWatts === 'number' ? input.project.panelWatts : null,
+              }).spec ?? null)
             : null;
 
           const db = panelSpec || projPanel;

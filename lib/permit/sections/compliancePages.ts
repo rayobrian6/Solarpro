@@ -43,6 +43,8 @@ import { projectIssueStateLanguageFromInput } from '../snapshot/projectAuthority
 // CMDA — the ONLY correct inline font-family spelling (single-quoted names
 // nest safely inside a double-quoted style attribute).
 import { CSS_FONT_MONO_STACK } from '../fonts/fontPack';
+// CMEI — module identity comes from THE canonical accessor.
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 export function pageWarningLabels(
   input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
   opts?: { merged?: boolean },
@@ -82,12 +84,8 @@ export function pageWarningLabels(
   });
   const tMinC = _temps.minDesignTempC;
 
-  const _panelDb = (model?: string) => {
-    const m = (model || '').toLowerCase().trim();
-    if (!m) return undefined;
-    return SOLAR_PANELS.find(p => p.model.toLowerCase() === m)
-      ?? SOLAR_PANELS.find(p => m.includes(p.model.toLowerCase()) || p.model.toLowerCase().includes(m));
-  };
+  // CMEI — THE canonical accessor. Was a two-way substring match.
+  const _panelDb = (model?: string) => resolveModuleIdentity({ model: model ?? null }).spec ?? undefined;
   const _subName = (k: string) => k === 'roof' ? 'ROOF ARRAY' : k === 'ground' ? 'GROUND ARRAY' : k === 'fence' ? 'FENCE ARRAY' : k.toUpperCase();
   const _invListX = ((system.inverters ?? []) as Array<{ subSystemKey?: string; type?: string; model?: string; strings?: Array<{ panelCount?: number }> }>);
   const _primaryKey = auth.subSystems[0]?.key;
@@ -646,10 +644,9 @@ export function pageDisconnectDirectory(
         const n = s.panelCount || 0;
         if (!(voc > 0 && n > 0)) continue;
         const m = (s.panelModel || '').toLowerCase().trim();
-        const db = m
-          ? (SOLAR_PANELS.find(p => p.model.toLowerCase() === m)
-            ?? SOLAR_PANELS.find(p => m.includes(p.model.toLowerCase()) || p.model.toLowerCase().includes(m)))
-          : undefined;
+        // CMEI — THE canonical accessor (cold-Voc beta must come from the
+        // SELECTED module, never from one whose name merely contains it).
+        const db = m ? (resolveModuleIdentity({ model: m }).spec ?? undefined) : undefined;
         const beta = typeof db?.tempCoeffVoc === 'number' ? db.tempCoeffVoc : undefined;
         const factor = coldVocFactor(beta, _tMin);  // P1-4: the ONE cold-Voc law
         vals.push(Math.round(voc * factor * n));
@@ -895,11 +892,12 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   // REAL datasheet records from equipment-db (fuzzy model match) — the sheet
   // previously ESTIMATED Vmp (Voc×0.83), derived Imp, and hardcoded the temp
   // coefficients + NOCT while the DB carries the manufacturer values.
+  // CMEI — EXACT ONLY. This fed manufacturer temperature coefficients and NOCT
+  // onto the compliance sheet; a substring match sourced them from another product.
   const _dbFind = <T extends { model: string }>(list: T[], model?: string): T | undefined => {
-    const m = (model || '').toLowerCase().trim();
+    const m = (model || '').toLowerCase().trim().replace(/\s+/g, ' ');
     if (!m) return undefined;
-    return list.find(e => e.model.toLowerCase() === m)
-      ?? list.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
+    return list.find(e => e.model.toLowerCase().trim().replace(/\s+/g, ' ') === m);
   };
   const _dbPanel = _dbFind(SOLAR_PANELS, panels?.panelModel);
   const _dbMicro = system.inverters?.[0]?.type === 'micro'
@@ -1227,10 +1225,10 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             // back to a generic "see manufacturer website" line when none on file.
             // ECD §8 — the registry-derived listing conclusion (never a literal).
             const _listing = projectEquipmentListingConclusion(peekSnapshot(input));
+            // CMEI — EXACT ONLY (equipment listing conclusion, not a guess).
             const _fuzz = <T extends { model: string; id: string }>(list: T[], model?: string): T | undefined => {
-              const m = (model || '').toLowerCase().trim(); if (!m) return undefined;
-              return list.find(e => e.model.toLowerCase() === m)
-                ?? list.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
+              const m = (model || '').toLowerCase().trim().replace(/\s+/g, ' '); if (!m) return undefined;
+              return list.find(e => e.model.toLowerCase().trim().replace(/\s+/g, ' ') === m);
             };
             const _inv0 = system.inverters?.[0];
             const _invId = _dbMicro?.id

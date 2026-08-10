@@ -18,6 +18,8 @@ import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/li
 import { buildConductorAuthority } from './conductorAuthority';
 import { getDesignTemps } from './designTemps';
 import { SOLAR_PANELS } from '@/lib/equipment-db';
+// CMEI — module identity comes from THE canonical accessor.
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';   // §11 — editions single-sourced
 import { peekSnapshot } from '../snapshot/read';   // TAC WS-13 — canonical grounding objects
 
@@ -298,9 +300,10 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
   // law and disagreed with the sheets (576V vs 527V class). Unresolved β
   // keeps ×1.25 as the conservative marked assumption, matching compliancePages.
   const _lblPanelModel = ((eq.panelModel && eq.panelModel !== '—' ? eq.panelModel : str0?.panelModel) ?? '').toLowerCase().trim();
+  // CMEI — THE canonical accessor. Was a two-way substring match, so a label's
+  // temperature coefficient could come from a different product entirely.
   const _lblDb = _lblPanelModel
-    ? (SOLAR_PANELS.find(p => p.model.toLowerCase() === _lblPanelModel)
-      ?? SOLAR_PANELS.find(p => _lblPanelModel.includes(p.model.toLowerCase()) || p.model.toLowerCase().includes(_lblPanelModel)))
+    ? (resolveModuleIdentity({ model: _lblPanelModel }).spec ?? undefined)
     : undefined;
   const _lblBeta = typeof _lblDb?.tempCoeffVoc === 'number' ? _lblDb.tempCoeffVoc : undefined;
   const _lblProj = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };

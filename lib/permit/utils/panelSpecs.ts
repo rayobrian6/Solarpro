@@ -17,6 +17,7 @@
 //      console.warn so the contradiction is never silent.
 // ═══════════════════════════════════════════════════════════════
 
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import type { PermitInput } from '../types';
 import { SOLAR_PANELS, getPanelById, type SolarPanel } from '@/lib/equipment-db';
 import { resolveEquipmentBySubSystem, type HybridEquipmentCarrier } from './helpers';
@@ -39,12 +40,13 @@ export interface ResolvedPanelSpecs {
   source: 'subsystem-map' | 'sub-fleet' | 'project-scalars';
 }
 
-/** Same fuzzy model→record match compliancePages/fieldLabels already use. */
+/** CMEI — model text is resolved by THE canonical accessor, which admits an
+ *  exact unique match and fails closed on anything ambiguous or partial. This
+ *  was a two-way substring match, so 'REC 400' silently became 'REC 400AA Pure-R'. */
 function panelDbByModel(model?: string): SolarPanel | undefined {
-  const m = (model ?? '').toLowerCase().trim();
+  const m = (model ?? '').trim();
   if (!m || m === '—') return undefined;
-  return SOLAR_PANELS.find(p => p.model.toLowerCase() === m)
-    ?? SOLAR_PANELS.find(p => p.model.toLowerCase().includes(m) || m.includes(p.model.toLowerCase()));
+  return resolveModuleIdentity({ model: m }).spec ?? undefined;
 }
 
 export function resolvePanelSpecs(

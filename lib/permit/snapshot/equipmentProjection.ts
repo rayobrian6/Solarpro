@@ -18,6 +18,8 @@ import type { PermitInput } from '../types';
 import { MICROINVERTERS, SOLAR_PANELS, type Microinverter, type SolarPanel } from '@/lib/equipment-db';
 import { getManufacturerAsset, type ManufacturerAsset } from '@/lib/manufacturer-assets-db';
 
+// CMEI — module identity comes from THE canonical accessor.
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 // ─── Provenance primitives ──────────────────────────────────────────────────
 
 export type VerificationState =
@@ -78,18 +80,17 @@ export interface MicroinverterDatasheetProjection {
 }
 
 /** Same fuzzy model match APP-A/BOM use, kept local so the projection is self-contained. */
+// CMEI — EXACT ONLY. Same construction as the module matcher this phase
+// removed; a microinverter is equipment identity too.
 function fuzzMicro(model?: string): Microinverter | undefined {
-  const m = (model || '').toLowerCase().trim();
+  const m = (model || '').toLowerCase().trim().replace(/\s+/g, ' ');
   if (!m) return undefined;
-  return MICROINVERTERS.find(e => e.model.toLowerCase() === m)
-    ?? MICROINVERTERS.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
+  return MICROINVERTERS.find(e => e.model.toLowerCase().trim().replace(/\s+/g, ' ') === m);
 }
 
+/** CMEI — delegates to THE canonical accessor. Was a two-way substring match. */
 function fuzzPanel(model?: string): SolarPanel | undefined {
-  const m = (model || '').toLowerCase().trim();
-  if (!m) return undefined;
-  return SOLAR_PANELS.find(e => e.model.toLowerCase() === m)
-    ?? SOLAR_PANELS.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
+  return resolveModuleIdentity({ model: model ?? null }).spec ?? undefined;
 }
 
 /**

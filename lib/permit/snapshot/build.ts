@@ -101,11 +101,16 @@ import type { ProjectLegalAuthorityRecord, CodeAdoptionAuthorityRecord } from '.
 import type { EnvironmentalRetrievalRecord } from './resolution/environmentalRetrieval';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 
+// CMEI — module identity comes from THE canonical accessor.
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
+// CMEI — EXACT ONLY. This was a two-way substring match used for panels AND
+// inverters, so 'REC 400' resolved to 'REC 400AA Pure-R'. Identity is never
+// established by containment. Module callers should prefer the canonical
+// accessor; this remains for the non-module lists, exact-matched.
 const fuzz = <T extends { model: string }>(list: T[], model?: string | null): T | undefined => {
-  const m = (model ?? '').toLowerCase().trim();
+  const m = (model ?? '').toLowerCase().trim().replace(/\s+/g, ' ');
   if (!m) return undefined;
-  return list.find(e => e.model.toLowerCase() === m)
-    ?? list.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
+  return list.find(e => e.model.toLowerCase().trim().replace(/\s+/g, ' ') === m);
 };
 
 export function buildPermitDesignSnapshot(
@@ -241,11 +246,25 @@ export function buildPermitDesignSnapshot(
   const isMicro = topology === 'MICRO';
 
   // ── equipment records ──────────────────────────────────────────────────
+  // CMEI — the fleet's own strings, with their FULL identity attributes, so the
+  // canonical accessor can use the stable id (or the legacy bridge) rather than
+  // being handed a bare model string.
   const moduleModels = new Set<string>();
+  const moduleSources = new Map<string, { panelId?: string | null; manufacturer?: string | null; model?: string | null; watts?: number | null }>();
   for (const inv of system?.inverters ?? []) for (const s of inv.strings ?? []) {
-    if (s?.panelModel) moduleModels.add(s.panelModel);
+    if (!s?.panelModel) continue;
+    moduleModels.add(s.panelModel);
+    if (!moduleSources.has(s.panelModel)) {
+      moduleSources.set(s.panelModel, {
+        panelId: s.panelId ?? null, manufacturer: s.panelManufacturer ?? null,
+        model: s.panelModel, watts: typeof s.panelWatts === 'number' ? s.panelWatts : null,
+      });
+    }
   }
-  if (!moduleModels.size && eq.panelModel && eq.panelModel !== '—') moduleModels.add(eq.panelModel);
+  if (!moduleModels.size && eq.panelModel && eq.panelModel !== '—') {
+    moduleModels.add(eq.panelModel);
+    moduleSources.set(eq.panelModel, { model: eq.panelModel });
+  }
 
   const modules: EquipmentRecord<ModuleSpec>[] = [...moduleModels].map((m, i) => {
     // Identity = the fleet's own model string resolved against the catalog.
@@ -253,7 +272,20 @@ export function buildPermitDesignSnapshot(
     // on Braidon it points at a DIFFERENT module (rec-alpha-pure-405) than the
     // fleet strings (Q.PEAK DUO 400W) — a stored-authority conflict the
     // snapshot must SURFACE (equipmentIdentityConflicts), not silently pick.
-    const db: any = fuzz(SOLAR_PANELS as any[], m);
+    // ── CMEI — THE CANONICAL ACCESSOR ────────────────────────────────────
+    // This was `fuzz(SOLAR_PANELS, m)` — a two-way substring match on the model
+    // string alone. Made exact-only it would leave `catalogId: null` for any
+    // model whose text differs at all from the catalogue, and the conflict check
+    // at the bottom of this function (`mapped.id !== modules[0].catalogId`)
+    // would then raise a FALSE, permit-ready-BLOCKING
+    // EQUIPMENT-IDENTITY-CONFLICT against every subsystem panelId.
+    //
+    // The accessor resolves the stable id when the string carries one, and
+    // otherwise runs the ONE legacy bridge (exact model + manufacturer + watts),
+    // which resolves strictly more real records than the substring match did —
+    // and refuses honestly rather than guessing when it cannot.
+    const _idn = resolveModuleIdentity(moduleSources.get(m) ?? { model: m });
+    const db: any = _idn.spec ?? undefined;
     const asset = db ? getManufacturerAsset(db.id, 'module_spec') : null;
     return {
       recordId: `mod-${i + 1}`, catalogId: db?.id ?? null,

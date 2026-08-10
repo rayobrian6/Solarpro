@@ -46,6 +46,8 @@ import {
 import {
   evaluateModuleDatasheetApplicability, type ModuleDatasheetApplicabilityAuthority,
 } from '../moduleDocumentAuthority';
+// CMEI — THE canonical module identity: one accessor, one boundary.
+import { materialiseModuleIdentity, resolveFleetModuleIdentities } from '@/lib/equipment/moduleIdentity';
 import {
   resolveProjectPersonnel, unavailablePersonnelAuthority,
 } from '@/lib/personnel/store';
@@ -783,38 +785,28 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
       failure: string | null;
       applicability: ModuleDatasheetApplicabilityAuthority;
     }>();
-    // ── THE STABLE CATALOGUE ID IS READ, NOT RE-DERIVED ─────────────────────
-    // `applyCanonicalEquipmentToInput` (equipmentSelection.ts) has already
-    // re-pinned the CANONICAL selection onto every string — `panelId`,
-    // `panelModel`, `panelManufacturer`, `panelWatts` — so `s.panelId` IS the
-    // canonical catalogue id for that string. Reading it directly is the whole
-    // point of the re-pin.
+    // ── CMEI — THE IDENTITY IS RESOLVED BY THE ONE ACCESSOR ─────────────────
+    // A previous pass asserted here that `applyCanonicalEquipmentToInput` had
+    // "already re-pinned" the canonical id onto every string. THAT WAS FALSE:
+    // it is called from only two places, both inside DIVERGENT branches of
+    // `canonical-equipment-selection@v1` (:582, :683). The ordinary
+    // no-divergence branch (:520-534), SKIPPED and OPERATOR_CONFIRMATION all
+    // return without re-pinning, so on most real projects `panelId` was written
+    // only if the posted body already carried it.
     //
-    // This previously recovered the id by string-comparing
-    // `canonical.model === model`, which silently produced `null` — dropping the
-    // stable identity and leaving the document lookup on model matching alone —
-    // whenever the two spellings differed for any reason. A model string is
-    // supporting evidence; the catalogue id is the identity.
-    const selections = new Map<string, { model: string; watts: number | null; equipmentId: string | null }>();
-    for (const inv of ctx.input.system?.inverters ?? []) {
-      for (const s of inv?.strings ?? []) {
-        if (!s?.panelModel) continue;
-        if (!selections.has(s.panelModel)) {
-          selections.set(s.panelModel, {
-            model: s.panelModel,
-            watts: typeof s.panelWatts === 'number' ? s.panelWatts : null,
-            equipmentId: typeof s.panelId === 'string' && s.panelId.trim() ? s.panelId.trim() : null,
-          });
-        }
-      }
-    }
+    // `materialiseModuleIdentity` below closes that gap unconditionally, and
+    // `resolveFleetModuleIdentities` is the ONE accessor every consumer uses.
+    // Keying by the resolved panelId is what makes a re-pin propagate without
+    // any subsystem rematching a model string.
+    materialiseModuleIdentity(ctx.input);
+    const identities = resolveFleetModuleIdentities(ctx.input.system);
     const canonical = ctx.authority.canonicalEquipment?.canonical ?? null;
-    for (const [model, sel] of selections) {
-      // the re-pinned string id first; the canonical authority is the fallback
-      // for a fleet that predates the re-pin.
-      const equipmentId = sel.equipmentId
+    for (const [, idn] of identities) {
+      const model = idn.model ?? '';
+      if (!model) continue;
+      const equipmentId = idn.panelId
         ?? (canonical && canonical.model === model ? canonical.catalogId ?? null : null);
-      const watts = sel.watts ?? (canonical && canonical.model === model ? canonical.ratedWatts ?? null : null);
+      const watts = idn.watts ?? (canonical && canonical.model === model ? canonical.ratedWatts ?? null : null);
       const read = await ctx.safeDbRead(
         `findVerifiedDocument(${MODULE_DATASHEET_DOCUMENT_CLASS}, ${model})`,
         () => findVerifiedDocument({

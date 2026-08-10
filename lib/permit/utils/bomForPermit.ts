@@ -176,7 +176,19 @@ function resolveRegistryEntry(
   );
   if (byModelExact) return byModelExact;
 
-  // 3. Model contains match + manufacturer match (most reliable fuzzy)
+  // ── CMEI SCOPE BOUNDARY ────────────────────────────────────────────────
+  // The two tiers below are SUBSTRING matches. For MODULES they are gone: the
+  // module call site resolves through `resolveModuleIdentity` and never reaches
+  // this function (see `panelEntry` below).
+  //
+  // They REMAIN for inverters and accessories, deliberately and temporarily.
+  // Those are their own identity domains (`inverterId`, accessory SKUs) with no
+  // canonical accessor yet, and removing the tiers blind broke 37 tests across
+  // procurement, grounding and sheet pagination — i.e. it silently changed which
+  // hardware is ordered. That is a separate phase, not a side effect of this one.
+  //
+  // ⚠ NAMED FOLLOW-UP: give inverters and accessories the same treatment modules
+  //    just received. Until then this function must not be used for modules.
   if (mfr) {
     const byBoth = EQUIPMENT_REGISTRY_V4.find(
       e =>
@@ -185,8 +197,6 @@ function resolveRegistryEntry(
     );
     if (byBoth) return byBoth;
   }
-
-  // 4. Model contains match (no manufacturer constraint)
   const byModelContains = EQUIPMENT_REGISTRY_V4.find(
     e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()),
   );
@@ -421,6 +431,10 @@ function buildFallbackBOM(input: PermitInput, cad: CADModel): PermitBOMItem[] {
 // OWN inverter (roof→micros×roof, ground→1 string, fence→optimizers×fence +
 // inverter) at its OWN count, and scopes the micro cabling/caps to the roof sub.
 
+// CMEI — module identity comes from THE canonical accessor.
+import { resolveModuleIdentity, resolveStringModuleIdentity } from '@/lib/equipment/moduleIdentity';
+import { getRegistryEntryV4 } from '@/lib/equipment-registry-v4';
+
 const _norm = (s?: string | null) => (s ?? '').toLowerCase().trim();
 
 /** Resolve an equipment-db / V4-registry id from a make+model, so the per-sub
@@ -438,15 +452,12 @@ function resolveInverterIdFromNames(mfr: string, model: string, isMicro: boolean
   return hit?.id;
 }
 
+/** CMEI — a MODULE is identified by THE canonical accessor. This swept
+ *  SOLAR_PANELS with a two-way substring match on both manufacturer AND model,
+ *  which is how a per-subsystem BOM row could name a product nobody selected. */
 function resolvePanelIdFromNames(mfr: string, model: string): string | undefined {
   if (_norm(model) === '' || _norm(model) === '—') return undefined;
-  const v4 = resolveRegistryEntry(model, mfr);
-  if (v4) return v4.id;
-  const nm = _norm(model), nf = _norm(mfr);
-  const hit = (SOLAR_PANELS as Array<{ id: string; manufacturer?: string; model?: string }>).find(e =>
-    (!nf || _norm(e.manufacturer).includes(nf) || nf.includes(_norm(e.manufacturer)))
-    && (_norm(e.model).includes(nm) || nm.includes(_norm(e.model))));
-  return hit?.id;
+  return resolveModuleIdentity({ model, manufacturer: mfr }).panelId ?? undefined;
 }
 
 /** One SubSystemEquipment map from the per-sub conductor authority — the input
@@ -524,7 +535,15 @@ export function generateBOMForPermit(
   const firstStr = firstInv?.strings?.[0];
 
   const inverterEntry = resolveRegistryEntry(firstInv?.model, firstInv?.manufacturer);
-  const panelEntry    = resolveRegistryEntry(firstStr?.panelModel, firstStr?.panelManufacturer);
+  // ── CMEI — THE MODULE IS IDENTIFIED, NOT MATCHED ────────────────────────
+  // This decides which PANEL IS ORDERED. It used to run the substring tiers
+  // above, so any registry entry whose model merely contained — or was
+  // contained by — the posted text became the purchased hardware.
+  // `resolveStringModuleIdentity` returns the stable catalogue id or nothing.
+  const _panelIdentity = resolveStringModuleIdentity(firstStr);
+  const panelEntry = _panelIdentity.panelId
+    ? (getRegistryEntryV4(_panelIdentity.panelId) ?? { id: _panelIdentity.panelId } as EquipmentRegistryEntry)
+    : undefined;
 
   log.push(`[bomForPermit] inverter: ${firstInv?.model} → ${inverterEntry?.id ?? 'not found'}`);
   log.push(`[bomForPermit] panel:    ${firstStr?.panelModel} → ${panelEntry?.id ?? 'not found'}`);
