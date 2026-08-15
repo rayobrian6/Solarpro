@@ -468,7 +468,7 @@ export function drawSiteContextEls(
     if (site.streetName) {
       const cx = big.reduce((s, p) => s + px(p).x, 0) / big.length;
       const cy = big.reduce((s, p) => s + px(p).y, 0) / big.length;
-      els.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="900" letter-spacing="1.5" fill="#4a4f57" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(site.streetName)}</text>`);
+      els.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="7" font-weight="900" letter-spacing="1.5" fill="#4a4f57" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(site.streetName)}</text>`);
     }
     legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#d3d8df" stroke="#a3abb6" stroke-width="0.7"/>`, label: 'ROAD (NEARMAP AI)' });
   }
@@ -485,7 +485,7 @@ export function drawSiteContextEls(
     }
     const dcx = dBig.reduce((s, p) => s + px(p).x, 0) / dBig.length;
     const dcy = dBig.reduce((s, p) => s + px(p).y, 0) / dBig.length;
-    els.push(`<text x="${dcx.toFixed(1)}" y="${dcy.toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#4a4f57" stroke="#fff" stroke-width="1.4" paint-order="stroke">DRIVEWAY</text>`);
+    els.push(`<text x="${dcx.toFixed(1)}" y="${dcy.toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.4" font-weight="bold" fill="#4a4f57" stroke="#fff" stroke-width="1.4" paint-order="stroke">DRIVEWAY</text>`);
     legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="url(#nm-drive)" stroke="#7f8894" stroke-width="0.9"/>`, label: 'DRIVEWAY (NEARMAP AI)' });
   }
 
@@ -522,7 +522,7 @@ export function drawSiteContextEls(
     legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="rgba(120,165,102,0.34)" stroke="#5f8a4a" stroke-width="0.7"/>`, label: 'TREE CANOPY (NEARMAP AI)' });
     if (shades && opts?.annotations !== false) {
       const bx = toX((roof.minLng + roof.maxLng) / 2);
-      els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.maxLat) - 6).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.2" font-weight="bold" fill="#b45309" stroke="#fff" stroke-width="1.5" paint-order="stroke">TREE CANOPY NEAR ARRAY — SHADING, FIELD VERIFY</text>`);
+      els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.maxLat) - 6).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.2" font-weight="bold" fill="#b45309" stroke="#fff" stroke-width="1.5" paint-order="stroke">TREE CANOPY NEAR ARRAY — SHADING, FIELD VERIFY</text>`);
     }
   }
 
@@ -550,7 +550,7 @@ export function drawSiteContextEls(
         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
         let ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
         if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-        els.push(`<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="900" letter-spacing="1.5" fill="#666" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(nm)}</text>`);
+        els.push(`<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="7" font-weight="900" letter-spacing="1.5" fill="#666" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(nm)}</text>`);
       }
     }
   }
@@ -595,7 +595,7 @@ export function drawSiteContextEls(
         const nm2 = Math.hypot(nx2, ny2) || 1; nx2 /= nm2; ny2 /= nm2;
         if ((mx - cq.x) * nx2 + (my - cq.y) * ny2 < 0) { nx2 = -nx2; ny2 = -ny2; }
         mx += nx2 * 7; my += ny2 * 7;
-        els.push(`<text x="${mx.toFixed(1)}" y="${(my + 2).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="6" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.7" paint-order="stroke">${ftToFtIn(ft)}</text>`);
+        els.push(`<text x="${mx.toFixed(1)}" y="${(my + 2).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="6" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.7" paint-order="stroke">${ftToFtIn(ft)}</text>`);
         _edgeDims++;
       }
       // "PROPERTY LINE" name tags (reference style) — on the two longest
@@ -620,7 +620,7 @@ export function drawSiteContextEls(
         _plEdges.push({ L, mx: tx, my: ty, ang });
       }
       _plEdges.sort((a, b) => b.L - a.L).slice(0, 2).forEach(e => {
-        els.push(`<text x="${e.mx.toFixed(1)}" y="${(e.my + 2).toFixed(1)}" transform="rotate(${e.ang.toFixed(1)} ${e.mx.toFixed(1)} ${e.my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5" font-weight="700" letter-spacing="1.2" fill="#50565e" stroke="#fff" stroke-width="1.4" paint-order="stroke">PROPERTY LINE</text>`);
+        els.push(`<text x="${e.mx.toFixed(1)}" y="${(e.my + 2).toFixed(1)}" transform="rotate(${e.ang.toFixed(1)} ${e.mx.toFixed(1)} ${e.my.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5" font-weight="700" letter-spacing="1.2" fill="#50565e" stroke="#fff" stroke-width="1.4" paint-order="stroke">PROPERTY LINE</text>`);
       });
     }
 
@@ -652,7 +652,7 @@ export function drawSiteContextEls(
         }
         if (bl > 70) {
           const sbTxt = `${sbFt % 1 === 0 ? sbFt : sbFt.toFixed(1)}' SETBACK FROM PROPERTY LINE`;
-          els.push(`<text x="${bmx.toFixed(1)}" y="${(bmy - 3).toFixed(1)}" transform="rotate(${bang.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#50565e" stroke="#fff" stroke-width="1.5" paint-order="stroke">${sbTxt}</text>`);
+          els.push(`<text x="${bmx.toFixed(1)}" y="${(bmy - 3).toFixed(1)}" transform="rotate(${bang.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.4" font-weight="bold" fill="#50565e" stroke="#fff" stroke-width="1.5" paint-order="stroke">${sbTxt}</text>`);
         }
         legend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#50565e" stroke-width="0.8" stroke-dasharray="3 2"/>`, label: `${sbFt % 1 === 0 ? sbFt : sbFt.toFixed(1)}' SETBACK FROM P/L (ARRAY/FENCE)` });
       }
@@ -698,7 +698,7 @@ export function drawSiteContextEls(
       els.push(`<line x1="${(s.x - tx).toFixed(1)}" y1="${(s.y - ty).toFixed(1)}" x2="${(s.x + tx).toFixed(1)}" y2="${(s.y + ty).toFixed(1)}" stroke="#2b2f36" stroke-width="0.6"/>`);
       els.push(`<line x1="${(e.x - tx).toFixed(1)}" y1="${(e.y - ty).toFixed(1)}" x2="${(e.x + tx).toFixed(1)}" y2="${(e.y + ty).toFixed(1)}" stroke="#2b2f36" stroke-width="0.6"/>`);
       const mx = (s.x + e.x) / 2, my = (s.y + e.y) / 2;
-      els.push(`<text x="${mx.toFixed(1)}" y="${(my - 1.5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.5" paint-order="stroke">${Math.round(d)}'</text>`);
+      els.push(`<text x="${mx.toFixed(1)}" y="${(my - 1.5).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.4" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.5" paint-order="stroke">${Math.round(d)}'</text>`);
       dimsDrawn++;
     }
     if (!dimsDrawn && !_edgeDims && !_ringDrawn && opts?.annotations !== false) {
@@ -716,7 +716,7 @@ export function drawSiteContextEls(
       }
       if (isFinite(minFt) && minFt > 0.5) {
         const bx = toX(cLng);
-        els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.minLat) + 12).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.2" fill="#555" stroke="#fff" stroke-width="1.4" paint-order="stroke">BLDG → P/L ~${Math.round(minFt)}' (APPROX — COUNTY GIS)</text>`);
+        els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.minLat) + 12).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.2" fill="#555" stroke="#fff" stroke-width="1.4" paint-order="stroke">BLDG → P/L ~${Math.round(minFt)}' (APPROX — COUNTY GIS)</text>`);
       }
     }
     if (dimsDrawn) legend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#2b2f36" stroke-width="0.6"/><line x1="0" y1="-2.5" x2="0" y2="2.5" stroke="#2b2f36" stroke-width="0.6"/><line x1="14" y1="-2.5" x2="14" y2="2.5" stroke="#2b2f36" stroke-width="0.6"/>`, label: 'SETBACK (APPROX)' });
@@ -761,7 +761,7 @@ export function drawSiteContextEls(
     let cx0 = rx0;
     for (let i = 0; i < tags.length; i++) {
       els.push(`<rect x="${cx0.toFixed(1)}" y="${ry0.toFixed(1)}" width="${widths[i].toFixed(1)}" height="${bh}" fill="#ffffff" stroke="#111" stroke-width="0.9"/>`);
-      els.push(`<text x="${(cx0 + widths[i] / 2).toFixed(1)}" y="${(ry0 + bh / 2 + 1.8).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${tags[i].length > 2 ? '4.4' : '5'}" font-weight="900" fill="#111">${tags[i]}</text>`);
+      els.push(`<text x="${(cx0 + widths[i] / 2).toFixed(1)}" y="${(ry0 + bh / 2 + 1.8).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${tags[i].length > 2 ? '4.4' : '5'}" font-weight="900" fill="#111">${tags[i]}</text>`);
       cx0 += widths[i];
     }
     // interconnection note — stacked under (or above) the row, away from the roof
@@ -777,7 +777,7 @@ export function drawSiteContextEls(
     // centered note tail was colliding with them
     const noteX = rcx + (rcx < rc.x ? -20 : 20);
     noteLines.forEach((ln, i) => {
-      els.push(`<text x="${noteX.toFixed(1)}" y="${(nY0 + i * 6.5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${i === 0 ? '5.4' : '4.8'}" font-weight="${i === 0 ? '900' : 'normal'}" fill="#111" stroke="#fff" stroke-width="1.5" paint-order="stroke">${ln}</text>`);
+      els.push(`<text x="${noteX.toFixed(1)}" y="${(nY0 + i * 6.5).toFixed(1)}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="${i === 0 ? '5.4' : '4.8'}" font-weight="${i === 0 ? '900' : 'normal'}" fill="#111" stroke="#fff" stroke-width="1.5" paint-order="stroke">${ln}</text>`);
     });
     legend.push({ swatch: `<rect x="0" y="-4" width="6" height="8" fill="#fff" stroke="#111" stroke-width="0.8"/><rect x="6" y="-4" width="6" height="8" fill="#fff" stroke="#111" stroke-width="0.8"/>`, label: 'SERVICE EQUIP — M / MSP / AC-D / INV (FIELD VERIFY)' });
   }

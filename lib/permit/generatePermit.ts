@@ -5,7 +5,7 @@
 
 import type { PermitInput, CanonicalInput } from './types';
 import type { CADModel } from '@/lib/cad/types';
-import { PLANSET_ENGINE_VERSION } from './constants';
+import { PLANSET_ENGINE_VERSION, RENDERING_PACK_VERSION } from './constants';
 import { buildPermitDesignSnapshot } from './snapshot/build';
 import { getDesignTemps } from './utils/designTemps';
 import { buildComputeSystemShadow } from './utils/computedRuns';
@@ -15,6 +15,8 @@ import {
   resolveProjectStateAuthority, normalizeStateCode, isUnknownStateSentinel,
 } from './snapshot/locationAuthority';
 import { deepFreeze } from './snapshot/digest';
+// D6 — THE single project-facing document date authority (timezone-explicit).
+import { resolveDocumentIssueContext, type DocumentIssueContext } from './utils/documentIssueContext';
 import { scanRenderedObjectIds, checkRenderedIdCoverage, parsePlacementManifests, checkRenderParity } from './snapshot/coordinateAuthority';
 import type { PermitDesignSnapshot } from './snapshot/types';
 import { escapeH } from './utils/drawing';
@@ -55,6 +57,7 @@ import {
 import { hybridSheetId } from './sheetManifest';
 // TAC WS-18 — cross-sheet references resolved against the ACTIVE sheet index.
 import { activeSheetIds, normalizeAbsentSheetReferences, findDanglingSheetReferences } from './utils/sheetRef';
+import { certificationApproved } from './utils/peLetterIdentity';
 import { resolvePlansetProfile, certificationIsCompleted, isCompactProfile } from './plansetProfile';
 import { resolveSeismicAuthority } from './snapshot/environmentalAuthority';
 import { pageValidationSummary } from './sections/validationPage';
@@ -63,7 +66,14 @@ import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
 import { inlineManufacturerAssets } from './utils/inlineManufacturerAssets';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
+// WS-5 — the ACTIVE field measurement substitutes for the engine's estimated
+// run length ONCE, on the canonical run model, so the BOM and the snapshot
+// cannot disagree about the same run.
+import { applyFieldMeasurementsToRuns } from './snapshot/applyFieldMeasurements';
+import { fontFaceCss, fontFaceIdentities, FONT_PACK_VERSION } from './fonts/fontPack';
 
+// CMEI — module identity comes from THE canonical accessor.
+import { resolveModuleIdentity, resolveStringModuleIdentity } from '@/lib/equipment/moduleIdentity';
 export function generatePermitHTML(
   input: PermitInput,
   storedSldSvg?: string,
@@ -117,19 +127,44 @@ export function generatePermitHTML(
     }
   }
 
-  // ── P0-9: planset DATE = GENERATION date (server-side authority) ──────────
-  // config.date is a design label only — a stale client date must never print
-  // on a stamped sheet. Callers may inject a fixed `generatedAtIso` for
+  // ── P0-9 / D6: planset DATE = the ONE resolved DOCUMENT ISSUE CONTEXT ─────
+  // config.date is a design label only — a stale client date must never print on
+  // a stamped sheet. Callers may inject a fixed `generatedAtIso` for
   // deterministic output (tests / regen harnesses); otherwise "now" governs.
+  //
+  // D6 (Planset 19): this used to be `new Date().toLocaleDateString('en-US')`,
+  // which formats in the HOST's zone — on a UTC serverless host that is the UTC
+  // calendar date, and Planset 19 printed 8/3/2026 on all 17 sheets for a set
+  // generated 19:29 on 2026-08-02 America/Chicago. A permit date is a calendar
+  // date in the JURISDICTION's zone, never a property of the render machine.
+  // The zone is now resolved EXPLICITLY and recorded, and every project-facing
+  // date in the package propagates from this one object.
   {
     const genIso = (input as PermitInput & { generatedAtIso?: string }).generatedAtIso;
-    const genAt = genIso ? new Date(genIso) : new Date();
-    const genDateStr = (isFinite(genAt.getTime()) ? genAt : new Date()).toLocaleDateString('en-US');
-    if (project.date && project.date !== genDateStr) {
-      console.warn('[PLANSET] DATE recompute: generation date', genDateStr,
+    // the SAME canonical state authority the jurisdiction repair above uses —
+    // the document's zone derives from the project's jurisdiction, not the host.
+    const _st = resolveProjectStateAuthority({
+      projectState: (project as { state?: string | null }).state ?? null,
+      address: project.address ?? null,
+      complianceState: (input.compliance?.jurisdiction as { state?: string } | undefined)?.state ?? null,
+    });
+    const _issue = resolveDocumentIssueContext({
+      generatedAtIso: genIso ?? null,
+      explicitIssueDate: (project as { issueDate?: string | null }).issueDate
+        ?? (input as { documentIssueDate?: string | null }).documentIssueDate ?? null,
+      projectTimezone: (project as { timezone?: string | null }).timezone ?? null,
+      projectStateCode: _st.stateCode ?? null,
+      tenantTimezone: (input as { tenantTimezone?: string | null }).tenantTimezone ?? null,
+    });
+    if (project.date && project.date !== _issue.issueDateLocal) {
+      console.warn('[PLANSET] DATE recompute: document issue date', _issue.issueDateLocal,
+        `(${_issue.timezone} via ${_issue.timezoneSource}; generated ${_issue.generatedAtUtc})`,
         'replaces client-posted', project.date, '(config.date is a design label, not the issue date)');
     }
-    project.date = genDateStr;
+    project.date = _issue.issueDateLocal;
+    // THE single propagation point. Sheets read this (or `project.date`, which is
+    // set from it); no sheet generator resolves a project-facing date of its own.
+    (input as { _documentIssueContext?: DocumentIssueContext })._documentIssueContext = _issue;
   }
 
   // ── STEP 7: Canonical pipeline entry point ─────────────────────────────
@@ -691,13 +726,22 @@ export function generatePermitHTML(
         // Build StringInput[] — backfill missing panel specs from equipment DB
         const stringInputs: StringInput[] = (inv.strings || []).map((str) => {
           // Try to resolve panel spec from equipment DB
-          const panelSpec = _getPanelById(str.panelModel)
-            || _getPanelById(str.panelModel?.toLowerCase().replace(/\s+/g, '-'));
+          // ── CMEI — THE CANONICAL ACCESSOR ────────────────────────────
+          // This passed a MODEL STRING into an ID lookup, then slugified it and
+          // tried again. `getPanelById` is an exact id match, so for a catalogue
+          // whose ids do not equal their model names this resolved essentially
+          // nothing — and the code below then fell through to hardcoded
+          // temperature coefficients for the SERVER-SIDE ELECTRICAL CALCULATION.
+          const panelSpec = resolveStringModuleIdentity(str).spec ?? undefined;
 
-          // Fallback: try project-level panel model/manufacturer fields
+          // Fallback: the project-level panel scalars, through the same accessor.
           const projPanelModel = input.project.panelModel || input.project.moduleModel;
           const projPanel = projPanelModel
-            ? (_getPanelById(projPanelModel) || _getPanelById(projPanelModel.toLowerCase().replace(/\s+/g, '-')))
+            ? (resolveModuleIdentity({
+                model: projPanelModel,
+                manufacturer: input.project.panelManufacturer ?? null,
+                watts: typeof input.project.panelWatts === 'number' ? input.project.panelWatts : null,
+              }).spec ?? null)
             : null;
 
           const db = panelSpec || projPanel;
@@ -1039,6 +1083,31 @@ export function generatePermitHTML(
     if (!csFull) {
       throw new Error('[PLANSET] canonical electrical engine (computeSystem) produced no result — fail closed (W2.1: no legacy fallback, no estimates)');
     }
+    // ── WS-5 §12/§13 — THE MEASURED LENGTH SUBSTITUTES HERE ─────────────────
+    // Before the BOM and before the snapshot, so the ordered conduit footage,
+    // the fittings, the conductor schedule and every sheet all derive from ONE
+    // number. Patching only the snapshot left SCHED ordering 23 ft of conduit
+    // for a run PV-4B called 89 ft. No-op when no measurement exists, so an
+    // unmeasured project produces a byte-identical package.
+    // Parked on the input because `buildComputedRunsForPermit` (the BOM's run
+    // source) invokes computeSystem a SECOND time from the CAD rather than
+    // reusing this result — a pre-existing duplication this workstream does not
+    // restructure. Both run models therefore go through the SAME substitution
+    // function, from the same authority, rather than one of them silently
+    // keeping the estimate.
+    (input as unknown as Record<string, unknown>)._fieldRouteMeasurements =
+      snapshotAuthority?.fieldRouteMeasurements ?? null;
+    const _fieldApplications = applyFieldMeasurementsToRuns(
+      csFull as unknown as { runs?: Array<Record<string, unknown>> },
+      snapshotAuthority?.fieldRouteMeasurements ?? null,
+    );
+    if (_fieldApplications.length > 0) {
+      console.log('[PLANSET] WS-5 field route measurements applied to the canonical run model:',
+        _fieldApplications.map(a =>
+          `${a.segmentId} ${a.previousLengthFt ?? '—'}→${a.measuredLengthFt} ft `
+          + `(VD ${a.previousVoltageDropPct?.toFixed(3) ?? '—'}→${a.recalculatedVoltageDropPct?.toFixed(3) ?? 'INDETERMINATE'}%, `
+          + `${a.verified ? 'FIELD-VERIFIED' : 'field-reported'})`).join(' · '));
+    }
     (input as unknown as Record<string, unknown>)._computeSystem = csFull;
     input.compliance.electrical = mapComputedSystemToCompliance(csFull, {
       busRatingA: input.project.panelBusRating ?? input.project.mainPanelAmps ?? null,
@@ -1152,6 +1221,15 @@ export function generatePermitHTML(
       projectJurisdiction: snapshotAuthority?.projectJurisdiction ?? null,
       manufacturerDocumentsArchived: snapshotAuthority?.manufacturerDocumentsArchived ?? null,
       digestInvalidatedByLedger: snapshotAuthority?.digestInvalidatedByLedger ?? false,
+      // PRR §2 — the ACTIVE invalidation ROWS. The boolean above was `rows > 0`
+      // for the whole project and nothing ever supersedes a row, so it latched
+      // review coverage false permanently (22 such rows on the live Braidon
+      // project). The rows let the decision scope each entry to the digest, or
+      // the approval instant, it actually names.
+      // `??` must NOT be used here: `null` is the "ledger read FAILED" signal and
+      // collapsing it to `undefined` would turn a fail-closed fact into "no
+      // ledger authority in play" — releasing a package on an unreadable ledger.
+      digestInvalidations: snapshotAuthority ? snapshotAuthority.digestInvalidations : undefined,
       // FRAMING-AUTHORITY GATE — verified framing-capacity document (or null ⇒
       // FRAMING-AUTHORITY-UNVERIFIED keeps firing). Fail-soft.
       framingCapacityDocument: snapshotAuthority?.framingCapacityDocument ?? null,
@@ -1172,6 +1250,10 @@ export function generatePermitHTML(
       // record) plug in without touching this call site. Both null today ⇒
       // byte-identical snapshot.
       groundingDocumentEvidence: snapshotAuthority?.groundingDocumentEvidence ?? null,
+      // WS-2 — `undefined` must survive as undefined (the archived accessor);
+      // only an EXPLICIT null refuses the authority, so `??` would defeat it.
+      qcableFieldTerminationAuthority: snapshotAuthority
+        ? snapshotAuthority.qcableFieldTerminationAuthority : undefined,
       framingEngineerReview: snapshotAuthority?.framingEngineerReview ?? null,
       framingReviewDigest: snapshotAuthority?.framingReviewDigest ?? null,
       // AAC WS-1 — the per-requirement resolution state, attached to each
@@ -1179,6 +1261,11 @@ export function generatePermitHTML(
       // machinery. Absent (harness / tests / no lifecycle) ⇒ payloads and the
       // digest are unchanged.
       resolutionStates: snapshotAuthority?.resolution?.states ?? null,
+      // TR — the FULL attempt trail (including the infrastructure resolvers that
+      // bear on no requirement code). Lands on `snapshot.resolverAttemptEvidence`,
+      // which the digest does not read, so a transient transport failure stays
+      // diagnosable without ever re-dating the design.
+      resolutionEvidence: snapshotAuthority?.resolution?.evidence ?? null,
       // AAC WS-2 / WS-6 — the automatic-resolution AUTHORITY records: the
       // canonical equipment identity (+ superseded audit history + the
       // reconciliation audit id), the per-module exact-datasheet coverage, and
@@ -1194,6 +1281,9 @@ export function generatePermitHTML(
       // no-lifecycle / no-network run ⇒ the snapshot field is omitted ⇒ digest
       // unchanged and every requirement stays exactly as unresolved as before.
       projectLegalAuthority: snapshotAuthority?.projectLegalAuthority ?? null,
+      // OAR — the ACCEPTED legal jurisdiction, so the next run can retain it
+      // through a provider outage instead of reverting to the mailing city.
+      legalJurisdiction: snapshotAuthority?.legalJurisdiction ?? null,
       codeAdoptionAuthority: snapshotAuthority?.codeAdoptionAuthority ?? null,
       environmentalRetrieval: snapshotAuthority?.environmentalRetrieval ?? null,
       // AAC WS-8 / WS-9 — the STRUCTURAL SEPARATION authorities. Each is null on
@@ -1207,9 +1297,14 @@ export function generatePermitHTML(
       //   • engineeringReview           — the digest-bound licensed approval, READ only
       structuralDocumentRetrieval: snapshotAuthority?.structuralDocumentRetrieval ?? null,
       documentRegistryFacts: snapshotAuthority?.documentRegistryFacts ?? null,
+      documentRegistryIdentities: snapshotAuthority?.documentRegistryIdentities ?? null,
       rackingAssemblySelection: snapshotAuthority?.rackingAssemblySelection ?? null,
       framingRetrieval: snapshotAuthority?.framingRetrieval ?? null,
       engineeringReview: snapshotAuthority?.engineeringReview ?? null,
+      // WS-5 — the ACTIVE field route measurements (migration 118). Null ⇒ every
+      // route keeps its CAD length source and ROUTE-LENGTH-ESTIMATE stays open,
+      // which is the correct outcome for a project nobody has measured.
+      fieldRouteMeasurements: snapshotAuthority?.fieldRouteMeasurements ?? null,
     });
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);
@@ -1424,8 +1519,15 @@ export function generatePermitHTML(
     (n, t) => pageWarningLabels(input, cad, n, t, _compact ? { merged: true } : undefined),
     ...(_compact ? [] : [(n: number, t: number) => pageDisconnectDirectory(input, cad, n, t)]),  // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
-    ...(_compact ? [] : Array.from({ length: _schedContCount }, (_unused, ci) =>
-      (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci))),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
+    // D3 (Planset 17) — SCHED continuations render on EVERY profile. The
+    // `_compact ? []` gate here was the other half of the omission fixed in
+    // sheetManifest.ts: it suppressed the continuation PAGES while the primary
+    // sheet capped at SCHED_BOM_ROWS_FIRST, so 38 of 48 procurement rows were
+    // dropped from the permit and design-review artifacts with no page to
+    // carry them. Both halves must move together or the sheet index and the
+    // page assembly disagree (V12/V35).
+    ...Array.from({ length: _schedContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci)),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
     ...(_compact ? [] : [(n: number, t: number) => pageSpecSheetReference(input, cad, n, t)]),   // APP-A (all)
     // DS-n (FULL profile): full-page REAL manufacturer datasheets, inline after
     // APP-A exactly as before. The compact profiles emit them at the END as the
@@ -1575,17 +1677,63 @@ export function generatePermitHTML(
       }
       if (_stateViol.length) throw new SnapshotValidationError(_stateViol);
     }
-    const v13Missing = pages
-      .map((p, i) => (/tb-sheet-id">\s*(CERT|PE-1[GF]?)\s*</.test(p)
-        && !p.includes('PENDING ENGINEERING REVIEW') ? i + 1 : -1))
-      .filter(i => i > 0);
-    if (v13Missing.length) {
-      throw new SnapshotValidationError(v13Missing.map(pn => ({
-        invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: false,
-        sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
-        message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
-      })));
-    }
+    // ═══ V13 — THE CERTIFICATION SHEETS MUST MATCH THE APPROVAL STATE ═════════
+    // This used to demand the literal "PENDING ENGINEERING REVIEW" on EVERY
+    // CERT/PE-1 sheet unconditionally, with `offendingValue: false` hardcoded —
+    // it was written when `certification.engineeringReviewApproved` could never
+    // be anything but `false`, so "always pending" and "matches the record" were
+    // the same assertion. Now that a licensed, digest-bound approval is reachable
+    // (PRR §1), an unconditional check would BLOCK every approved package: the
+    // engine would refuse to emit the very artifact the approval exists to
+    // release. It is now the two-sided check it was always meant to be.
+    const _certApproved = certificationApproved(input);
+    const snapFullCert = (input as unknown as {
+      _snapshot?: { certification?: { engineer: { name?: string; license?: string } | null } };
+    })._snapshot?.certification ?? null;
+    const _isCertSheet = (p: string) => /tb-sheet-id">\s*(CERT|PE-1[GF]?)\s*</.test(p);
+    const v13Viol = pages.flatMap((p, i) => {
+      if (!_isCertSheet(p)) return [];
+      const pn = i + 1;
+      if (!_certApproved) {
+        // UNAPPROVED ⇒ the pending gate is mandatory. Unchanged behaviour.
+        return p.includes('PENDING ENGINEERING REVIEW') ? [] : [{
+          invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: false,
+          sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+          message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
+        }];
+      }
+      // APPROVED ⇒ the sheet must NOT still say pending, and must name the
+      // licensed approver and the exact digest approved. An "approved" sheet
+      // that names nobody is the same lie in the other direction.
+      const viol: ReturnType<typeof Array.prototype.flatMap> = [];
+      const eng = (snapFullCert?.engineer ?? null) as { name?: string; license?: string } | null;
+      if (p.includes('PENDING ENGINEERING REVIEW')) {
+        viol.push({
+          invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: true,
+          sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+          message: `certification sheet ${pn} still prints the PENDING ENGINEERING REVIEW gate although an approved `
+            + 'review covers the current design digest', enforcement: 'blocking' as const,
+        });
+      }
+      if (!eng?.name || !p.includes(eng.name)) {
+        viol.push({
+          invariant: 'V13', authorityPath: 'certification.engineer', offendingValue: eng?.name ?? null,
+          sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+          message: `certification sheet ${pn} claims an approved review but does not name the approving engineer`,
+          enforcement: 'blocking' as const,
+        });
+      }
+      if (!eng?.license || !p.includes(eng.license)) {
+        viol.push({
+          invariant: 'V13', authorityPath: 'certification.engineer', offendingValue: eng?.license ?? null,
+          sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+          message: `certification sheet ${pn} claims an approved review but does not print the approver's licence number`,
+          enforcement: 'blocking' as const,
+        });
+      }
+      return viol;
+    });
+    if (v13Viol.length) throw new SnapshotValidationError(v13Viol as never);
     // ═══ V29 — RENDER-PARITY (W3.1 §2 (d)): no rendered physical object without
     // a canonical object ID. Every data-object-id drawn on a sheet MUST resolve
     // to a snapshot physical object (module/rail/attachment). Renderers may not
@@ -1643,13 +1791,47 @@ export function generatePermitHTML(
     }
   }
 
+  // D6 — the ONE context resolved at the top of this function. Absent only if a
+  // caller reached the renderer without the date step, which is a defect, so it
+  // is recorded as UNRESOLVED rather than being re-derived from a fresh clock.
+  const _issueCtx: DocumentIssueContext =
+    (input as { _documentIssueContext?: DocumentIssueContext })._documentIssueContext
+    ?? { generatedAtUtc: '', timezone: 'UNRESOLVED', timezoneSource: 'configured-default',
+         issueDateLocal: String(project.date ?? ''), issueDateIso: '',
+         issueDateSource: 'generation-timestamp' };
+
   const __permitHtml = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="planset-version" content="${PLANSET_ENGINE_VERSION}">
+${''/* D4 — the rendering environment, recorded IN the artifact. A reader (or a
+     gate) can tell a canonical-font artifact from a host-font one by data
+     rather than by inspecting glyphs. The face digests are of the DECODED
+     WOFF2 bytes, so they identify the fonts, not the base64 formatting. */}
+<meta name="rendering-pack-version" content="${RENDERING_PACK_VERSION}">
+<meta name="font-pack-version" content="${FONT_PACK_VERSION}">
+<meta name="font-faces" content="${escapeH(fontFaceIdentities().map(f => `${f.family}/${f.weight}/${f.sha256.slice(0, 16)}/${f.byteLength}`).join(' '))}">
+${''/* D6 — the DOCUMENT ISSUE CONTEXT, recorded IN the artifact. A reader can
+     tell WHICH zone produced the printed calendar date, and prove the date was
+     not a UTC/host-clock accident, from data rather than from the date alone.
+     The raw sub-second generation instant is deliberately NOT emitted here: two
+     renders of one input are pinned byte-identical, and a millisecond timestamp
+     would differ on every render. It is recorded on the snapshot instead; what
+     the artifact needs is the DATE AUTHORITY, and these five fields are it. */}
+<meta name="document-timezone" content="${escapeH(_issueCtx.timezone)}">
+<meta name="document-timezone-source" content="${escapeH(_issueCtx.timezoneSource)}">
+<meta name="document-issue-date-local" content="${escapeH(_issueCtx.issueDateLocal)}">
+<meta name="document-issue-date-iso" content="${escapeH(_issueCtx.issueDateIso)}">
+<meta name="document-issue-date-source" content="${escapeH(_issueCtx.issueDateSource)}">
 <title>Permit Package — ${escapeH(String(project.projectName ?? ''))}</title>
 <style>
+  /* ── D4 · THE CANONICAL EMBEDDED FONT PACK ────────────────────────────────
+     The exact WOFF2 bytes that render this document, inlined so its geometry is
+     independent of what the rendering host has installed. Emitted only after the
+     bytes verify against the manifest (fontPack.ts throws otherwise) — an
+     artifact that references unverified fonts is not authoritative. */
+${fontFaceCss()}
   /* ═══════════════════════════════════════════════════════════════════════════
      SOLARPRO ENGINEERING DOCUMENT SYSTEM — CANONICAL STYLESHEET v47.270
      CAD-standard. Rigid grid. Zero rounded corners. Zero UI colors.
@@ -1701,8 +1883,14 @@ export function generatePermitHTML(
     --f-3xl:13.5px;
     --f-4xl:18px;
 
-    --mono: 'Courier New', Courier, monospace;
-    --sans: Arial, 'Helvetica Neue', sans-serif;
+    /* D4 — the canonical families. No host fallback: authoritative rendering
+       must FAIL on a missing face rather than silently degrade to whatever the
+       machine happens to have. The symbols family is applied deliberately, per
+       element, never appended to the sans/mono chain (it must not participate
+       in ordinary text shaping). */
+    --mono: "SolarPro Mono", "SolarPro Symbols";
+    --sans: "SolarPro Sans", "SolarPro Symbols";
+    --symbols: "SolarPro Symbols";
 
     /* Vertical rhythm — space between major content blocks */
     --gap-section: var(--md);   /* default gap between .sec blocks */
@@ -2643,7 +2831,7 @@ export function generatePermitHTML(
       position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
       display: flex; align-items: center; gap: 6px; justify-content: center;
       background: #23262b; color: #e8eaed; padding: 6px 10px;
-      font-family: Arial, sans-serif; font-size: 13px;
+      font-family:"SolarPro Sans"; font-size: 13px;
       box-shadow: 0 1px 6px rgba(0,0,0,0.5); user-select: none;
     }
     #sp-toolbar button {

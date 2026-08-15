@@ -44,10 +44,8 @@ import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/
 import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) {

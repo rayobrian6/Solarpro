@@ -14,6 +14,7 @@
 // weakened.
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { projectResolvedAuthority } from './authorityProjection';
 import type { RequirementResolutionState, ResolutionEvidenceRecord } from './types';
 
 export const RESOLUTION_AUDIT_PREFIX = 'AAC-RESOLVER:';
@@ -65,26 +66,28 @@ export const RESOLUTION_RESULT_DISPLAY: Record<string, string> = {
  * The FLAT projection of a resolution state onto a blocker payload. It rides in
  * the EXISTING RS-1 payload machinery (`renderBlockerPayload` →
  * `payloadGeneric`, reviewStatus.ts:236) — scalars print as honest key/value
- * pairs and the arrays are named as structured detail. NO visual redesign: the
- * payload SCHEMA gains fields, the components are untouched.
+ * pairs. NO visual redesign: the payload SCHEMA changes, the components are
+ * untouched.
+ *
+ * TR — THIS IS THE DIGEST BOUNDARY. The registry payload is digest input, so
+ * everything returned here becomes part of the DESIGN's identity. It therefore
+ * returns EXACTLY `ResolvedAuthorityProjection` and nothing else.
+ *
+ * What used to be here and is not any more: `resolutionEvidence[]` (the attempt
+ * records, carrying the raw transport error and its retryability),
+ * `resolutionEvidenceCount` (the attempt count), `attemptedResolvers` (the
+ * attempt order), `retryability`, `resolutionConfidence` and
+ * `lastResolutionAttempt`. Measured: a transient `safeDbRead` failure on
+ * `resolveRackingCapacityDocument` moved three of those payloads, the snapshot
+ * digest and 31 lines of the signed artifact, while the accepted authority and
+ * every release gate were byte-identical.
+ *
+ * NONE OF IT IS LOST. All of it now travels on
+ * `snapshot.resolverAttemptEvidence`, which the digest does not read — see
+ * `./authorityProjection`.
  */
 export function resolutionStatePayload(s: RequirementResolutionState): Record<string, unknown> {
-  return {
-    resolutionMode: s.resolutionMode,
-    residualResolutionMode: s.residualMode,
-    resolverId: s.resolverId,
-    resolverImplemented: s.resolverImplemented,
-    plannedResolverPhase: s.plannedResolverPhase,
-    lastResolutionResult: RESOLUTION_RESULT_DISPLAY[s.lastResolutionResult] ?? s.lastResolutionResult,
-    lastResolutionAttempt: s.lastResolutionAttempt,
-    retryability: s.retryability,
-    resolutionConfidence: s.confidence,
-    resolutionBlockingReason: s.blockingReason,
-    resolutionEvidenceCount: s.resolutionEvidence.length,
-    attemptedResolvers: s.attemptedResolverIds.join(', ') || null,
-    requiredInputs: s.requiredInputs,
-    resolutionEvidence: s.resolutionEvidence,
-  };
+  return { ...projectResolvedAuthority(s) };
 }
 
 /** A compact, deterministic evidence line for the closure document / harness. */

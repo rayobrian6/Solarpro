@@ -50,8 +50,9 @@ export const metadata = {
   title: 'Project Engineering Intelligence | SolarPro Admin',
 };
 
-export default async function ProjectEngineeringIntelligencePage({ params }: { params: { id: string } }) {
-  const token = cookies().get('solarpro_session')?.value;
+export default async function ProjectEngineeringIntelligencePage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const token = (await cookies()).get('solarpro_session')?.value;
   const sessionUser = token ? verifyToken(token) : null;
   const hasValidProjectId = isValidUUID(params.id);
   const hydration = !hasValidProjectId

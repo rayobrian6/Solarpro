@@ -11,6 +11,7 @@
 // feeder + its route segment. Same field, same rounding, everywhere.
 // ═══════════════════════════════════════════════════════════════════════════
 import type { PermitDesignSnapshot, RouteSegmentRecord, GroundingSegment } from './types';
+import { closesFieldVerification, type RouteVerificationState } from './types';
 import { evaluateCompliance, type ComplianceResult } from './complianceState';
 import { GROUNDING_PENDING_BONDING_CELL_LABEL } from './groundingAuthority';
 // ECD W1-A — the stable, content-derived BOM row identity (same function the
@@ -128,6 +129,9 @@ export function projectCanonicalFeeder(snap: PermitDesignSnapshot | null | undef
 export type RouteVerificationStatus =
   | 'unverified-estimate'      // no segment authority / unknown length source
   | 'cad-derived-estimate'     // deriveRunLengths / CAD geometry, not field-checked
+  | 'geometry-derived'         // WS-5: taken from ROUTED CAD geometry — stronger than
+                               // an estimate, still not field evidence
+  | 'field-reported'           // WS-5: operator-entered, NOT yet verified
   | 'field-measured'           // a tech measured the run in the field
   | 'field-verified'           // measured AND verified against the installed route
   | 'as-built-verified';       // as-built record closes the loop
@@ -135,6 +139,8 @@ export type RouteVerificationStatus =
 const ROUTE_STATUS_LABEL: Record<RouteVerificationStatus, string> = {
   'unverified-estimate': 'UNVERIFIED ESTIMATE — FIELD VERIFY',
   'cad-derived-estimate': 'CAD-DERIVED ESTIMATE — FIELD VERIFY',
+  'geometry-derived': 'CAD ROUTE — GEOMETRY DERIVED — FIELD VERIFY',
+  'field-reported': 'FIELD REPORTED — UNVERIFIED',
   'field-measured': 'FIELD-MEASURED',
   'field-verified': 'FIELD-VERIFIED',
   'as-built-verified': 'AS-BUILT VERIFIED',
@@ -142,7 +148,11 @@ const ROUTE_STATUS_LABEL: Record<RouteVerificationStatus, string> = {
 
 /** Order weakest→strongest so we can pick the governing (weakest) status. */
 const ROUTE_STATUS_RANK: RouteVerificationStatus[] = [
-  'unverified-estimate', 'cad-derived-estimate', 'field-measured', 'field-verified', 'as-built-verified',
+  // WS-5 — weakest→strongest. geometry-derived outranks a bare estimate (the
+  // route is really in the model) but sits BELOW any field evidence; a
+  // field REPORT outranks geometry but is not verification.
+  'unverified-estimate', 'cad-derived-estimate', 'geometry-derived', 'field-reported',
+  'field-measured', 'field-verified', 'as-built-verified',
 ];
 
 /** Map a RouteSegmentRecord.lengthSource → a verification status. Conservative:
@@ -485,6 +495,202 @@ const _PURPOSE_LABEL: Record<string, string> = {
  *  was stamped on all three E-1 branch rows). The grouped node is an AUTHORITY, not
  *  an installed path — it is never counted as a physical grounding segment. */
 export const BRANCH_EGC_AUTHORITY_GROUP_ID = 'gnd-branch-egc-authority';
+
+/** ── WS-5 — VOLTAGE-DROP CONCLUSION GRADE ─────────────────────────────────
+ *  A voltage-drop result has THREE separable parts: the arithmetic, the
+ *  authority of the length it was computed from, and the release conclusion.
+ *  The sheet used to print an unqualified `✓ PASS` for a 0.369% result derived
+ *  from a 20 ft CAD ESTIMATE — correct arithmetic presented at the grade of a
+ *  measured conclusion.
+ *
+ *  A failure stays a failure at every grade: an over-limit result computed from
+ *  an estimate is still over the limit, and softening it to "provisional" would
+ *  be the same defect pointed the other way. */
+export type VoltageDropConclusion =
+  | 'VERIFIED_PASS'
+  | 'PROVISIONAL_PASS'
+  | 'FAIL'
+  | 'INDETERMINATE';
+
+export interface VoltageDropGrade {
+  conclusion: VoltageDropConclusion;
+  /** what a sheet prints: 'VERIFIED PASS' / 'PROVISIONAL PASS' / 'FAIL' / … */
+  label: string;
+  /** one sentence naming the length the number rests on. */
+  basis: string;
+  pct: number | null;
+  limitPct: number;
+  lengthFt: number | null;
+  lengthSource: string | null;
+  verificationState: string | null;
+  // ── D5 (Planset 19) — THE RELEASE STATE, PROJECTED SEPARATELY ─────────────
+  // The conclusion above answers "is the arithmetic within the criterion, and at
+  // what grade". These two answer "what is the length authority, and does a
+  // field-verification requirement remain open". PV-4B.1 used to print ONE badge
+  // that answered only the second question — `PENDING — REVIEW REQ’D` on the very
+  // same 20 ft / 0.37% feeder PV-4B graded `PROVISIONAL PASS`. A sheet must never
+  // have to infer one of these facts from the other, and must never substitute
+  // one for the other.
+  /** the length authority, as a sheet prints it: 'CAD-DERIVED ESTIMATE' |
+   *  'CAD ROUTE — GEOMETRY DERIVED' | 'FIELD VERIFIED' | 'FIELD-REPORTED (UNVERIFIED)' |
+   *  'NOT ESTABLISHED'. Never a conclusion — purely where the number came from. */
+  lengthAuthorityLabel: string;
+  /** true while a FIELD-VERIFICATION requirement on this length is still open.
+   *  Independent of the conclusion: a PROVISIONAL_PASS and a FAIL can both carry
+   *  an open field requirement, and closing the requirement never upgrades a FAIL. */
+  fieldVerificationPending: boolean;
+}
+
+export function gradeVoltageDrop(args: {
+  pct: number | null | undefined;
+  limitPct?: number;
+  lengthFt?: number | null;
+  lengthSource?: string | null;
+  verificationState?: string | null;
+}): VoltageDropGrade {
+  const limitPct = args.limitPct ?? 3;
+  const pct = num(args.pct);
+  const lengthFt = num(args.lengthFt);
+  const lengthSource = args.lengthSource ?? null;
+  const verificationState = args.verificationState ?? null;
+  // D5 — the ONE canonical predicate (types.ts). The literal pair it replaces was
+  // a second copy of the same rule, and a second copy is a future divergence.
+  const verified = closesFieldVerification(verificationState as RouteVerificationState | null);
+
+  // D5 — this sentence is fed BOTH length-source vocabularies: the resolver's
+  // `RouteLengthSource` ('cad-route' | 'field-verified' | …) and the value the
+  // snapshot actually stamps on a segment, `RouteSegmentRecord.lengthSource`
+  // ('field-measurement' | 'operator-entry' | …). It used to enumerate only the
+  // first, so the two values the field-measurement applier WRITES both fell
+  // through to the default — a walked 87 ft run was described on the sheet as a
+  // "CAD-derived estimate". The verification STATE decides how strongly a
+  // measurement is claimed; the source only says what kind of thing it is.
+  const sourceLabel = lengthSource === 'cad-route' ? 'CAD-routed geometry'
+    : lengthSource === 'field-verified' ? 'FIELD-VERIFIED measurement'
+    : lengthSource === 'field-reported' ? 'field-reported measurement (UNVERIFIED)'
+    : lengthSource === 'field-measurement' || lengthSource === 'operator-entry'
+      ? (verified ? 'FIELD-VERIFIED measurement' : 'field-reported measurement (UNVERIFIED)')
+    : 'CAD-derived estimate';
+
+  // D5 — the LENGTH AUTHORITY, stated on its own terms. It reads the canonical
+  // (source, state) pair, so a `cad-route` length is never flattened into
+  // "estimate" and a `field-reported` one is never promoted to "verified".
+  const lengthAuthorityLabel = lengthFt == null ? 'NOT ESTABLISHED'
+    : verified ? 'FIELD VERIFIED'
+    : verificationState === 'field-reported' || verificationState === 'field-measured'
+      || lengthSource === 'field-measurement' || lengthSource === 'field-reported'
+      || lengthSource === 'operator-entry'
+      ? 'FIELD-REPORTED (UNVERIFIED)'
+    : verificationState === 'geometry-derived' || lengthSource === 'cad-route'
+      ? 'CAD ROUTE — GEOMETRY DERIVED'
+    : 'CAD-DERIVED ESTIMATE';
+  // Open while nothing FIELD-VERIFIED backs the length. A length that does not
+  // exist yet cannot have a satisfied field requirement either.
+  const fieldVerificationPending = !verified;
+  const rest = {
+    pct, limitPct, lengthFt, lengthSource, verificationState,
+    lengthAuthorityLabel, fieldVerificationPending,
+  };
+
+  if (pct == null || lengthFt == null) {
+    return {
+      conclusion: 'INDETERMINATE', label: 'INDETERMINATE',
+      basis: 'No usable route length or incomplete electrical inputs — no voltage-drop conclusion can be drawn.',
+      ...rest,
+    };
+  }
+  if (pct > limitPct) {
+    // over the limit at ANY grade — an estimate does not soften a failure
+    return {
+      conclusion: 'FAIL', label: '✗ FAIL',
+      basis: `${pct.toFixed(2)}% exceeds the ${limitPct.toFixed(1)}% criterion. Length basis: ${lengthFt} ft ${sourceLabel}.`,
+      ...rest,
+    };
+  }
+  if (verified) {
+    return {
+      conclusion: 'VERIFIED_PASS', label: '✓ VERIFIED PASS',
+      basis: `Length basis: ${lengthFt} ft FIELD-VERIFIED.`,
+      ...rest,
+    };
+  }
+  return {
+    conclusion: 'PROVISIONAL_PASS', label: 'PROVISIONAL PASS',
+    basis: `Length basis: ${lengthFt} ft ${sourceLabel}. Field-verified route length required for final acceptance.`,
+    ...rest,
+  };
+}
+
+/** D5 (Planset 19) — the ONE sheet-facing renderer of the two separated facts.
+ *  Any sheet printing a voltage-drop verdict prints THESE two lines, so PV-4B and
+ *  PV-4B.1 cannot word the same result differently. Returns plain strings; the
+ *  caller owns the markup. */
+export function voltageDropDisplayFields(g: VoltageDropGrade): {
+  calculation: string; lengthAuthority: string;
+} {
+  const calculation = g.pct == null
+    ? `${g.label} — no usable voltage-drop input`
+    : `${g.label} — ${g.pct.toFixed(2)}% ${g.pct > g.limitPct ? '>' : '≤'} ${g.limitPct.toFixed(1)}%`;
+  const lengthAuthority = g.fieldVerificationPending && g.lengthFt != null
+    ? `${g.lengthAuthorityLabel} — FIELD VERIFICATION PENDING`
+    : g.lengthAuthorityLabel;
+  return { calculation, lengthAuthority };
+}
+
+/** D5 — the ONE colour ramp for a voltage-drop conclusion (was inlined in PV-4B's
+ *  template, which is how a second sheet could have picked different colours). */
+export function voltageDropConclusionColor(c: VoltageDropConclusion): string {
+  return c === 'FAIL' ? '#cc0000' : c === 'INDETERMINATE' ? '#cc6600'
+    : c === 'PROVISIONAL_PASS' ? '#b45309' : '#127a3e';
+}
+
+/** ── THE CANONICAL GROUNDING SUMMARY (Planset 17 D2) ──────────────────────
+ *  Grounding on a PV package is SEGMENT-SPECIFIC. There is no project-wide EGC
+ *  minimum, and printing one is a false statement about a life-safety conductor:
+ *  a single gauge presented as "the minimum" simultaneously over-states the
+ *  branch (whose canonical EGC is #12) and mis-attributes the feeder's #10 to
+ *  the whole package — while the selected microinverter's own product authority
+ *  may require no separate EGC at all.
+ *
+ *  This is the ONE object a general note may summarise from. It derives every
+ *  value from the canonical grounding objects and never re-sizes anything. */
+export interface GroundingSummaryProjection {
+  /** the manufacturer product-grounding conclusion, verbatim from the authority. */
+  productGroundingOutcome: string | null;
+  /** always true for a PV package — stated explicitly so a renderer cannot
+   *  quietly assume otherwise. */
+  segmentSpecificSizing: true;
+  /** always false — the fact this object exists to assert. */
+  projectWideMinimumApplies: false;
+  /** where a reader goes for the per-segment numbers. */
+  scheduleSheetRefs: readonly string[];
+  /** the canonical per-domain sizes, for a note that wants to enumerate rather
+   *  than merely point. Null where the authority has not established one. */
+  branchEgcSize: string | null;
+  feederEgcSize: string | null;
+  arrayBondCalculatedMinimum: string | null;
+  arrayBondSelectedDesign: string | null;
+}
+
+export function projectGroundingSummary(
+  snap: PermitDesignSnapshot | null | undefined,
+): GroundingSummaryProjection {
+  const oa = projectOpenAirBranchGrounding(snap) as unknown as { outcome?: string | null };
+  const segs = projectGroundingSegments(snap);
+  const byRole = (role: string): GroundingSegment | undefined =>
+    segs.find(s => String((s as unknown as { domain?: string }).domain ?? s.segmentRole ?? '') === role);
+  const arrayBond = byRole('array-rack-bonding-egc');
+  return {
+    productGroundingOutcome: oa?.outcome ?? null,
+    segmentSpecificSizing: true,
+    projectWideMinimumApplies: false,
+    scheduleSheetRefs: ['PV-4B', 'PV-4B.1'],
+    branchEgcSize: projectSharedBranchRaceway(snap).egcGauge ?? null,
+    feederEgcSize: projectCanonicalFeeder(snap).egcGauge ?? null,
+    arrayBondCalculatedMinimum: arrayBond?.calculatedMinimumSize ?? null,
+    arrayBondSelectedDesign: arrayBond?.selectedDesignSize ?? arrayBond?.conductorSize ?? null,
+  };
+}
 
 export function projectGroundingSegments(
   snap: PermitDesignSnapshot | null | undefined,
@@ -1119,9 +1325,25 @@ export interface E1PhysicalSection {
   deratingBasis: string | null;
   voltageDropPct: number | null;
   vdLimitPct: number;
+  /** D5 (Planset 19) — the length the VOLTAGE-DROP arithmetic actually consumed.
+   *  Distinct from `lengthFt`, which is the section's printed physical quantity
+   *  (a Q-Cable branch prints its cable-path geometry). PV-4B grades the feeder
+   *  from `calculationLengthFt`; PV-4B.1 must grade from the same field or the
+   *  two sheets can print the same percentage against different lengths. */
+  vdCalculationLengthFt: number | null;
   /** §4 — the FULL itemized ampacity chain for this section (replaces the bare
    *  0.96). Every in-conduit and free-air section carries one; PENDING on a hole. */
   ampacity: AmpacityAdjustmentResult | null;
+  // ── D5 (Planset 19) — TWO INDEPENDENT VERDICTS, NEVER ONE BADGE ───────────
+  // `voltageDrop` is the CANONICAL calculation grade — the identical
+  // `gradeVoltageDrop` object PV-4B consumes, so the two sheets cannot word the
+  // same result differently. `compliance` is the RELEASE / review state, which
+  // additionally covers conductor-size holes, conduit fill and the NEC 705.11(C)
+  // tap rule. PV-4B.1 previously printed ONLY `compliance` in the verdict
+  // position, so an open route-length requirement silently overwrote the
+  // voltage-drop conclusion: 20 ft / 0.37% / ≤3% read `PENDING — REVIEW REQ’D`
+  // on PV-4B.1 and `PROVISIONAL PASS` on PV-4B — the same circuit, same numbers.
+  voltageDrop: VoltageDropGrade;
   compliance: ComplianceResult;
 }
 
@@ -1129,6 +1351,30 @@ const _VERIFIED_ROUTE = new Set(['field-measured', 'field-verified', 'as-built-v
 
 function _seg(snap: PermitDesignSnapshot, id: string): RouteSegmentRecord | null {
   return (snap.electrical?.routeSegments ?? []).find(r => r.segmentId === id) ?? null;
+}
+
+/** D5 — the length the voltage-drop arithmetic consumed, read the SAME way PV-4B
+ *  reads it (`calculationLengthFt` first, the one-way route as the fallback). One
+ *  accessor, so the calc basis behind a percentage cannot differ by sheet. */
+function _vdLenOf(seg: RouteSegmentRecord | null | undefined): number | null {
+  return num(seg?.calculationLengthFt) ?? num(seg?.oneWayFt);
+}
+
+/** D5 — grade a section's voltage drop through the ONE canonical resolver, with
+ *  the segment's own length authority. Renderers never re-decide a conclusion and
+ *  PV-4B.1 never gets a resolver of its own. */
+function _gradeSeg(
+  seg: RouteSegmentRecord | null | undefined,
+  pct: number | null,
+  limitPct: number,
+): VoltageDropGrade {
+  return gradeVoltageDrop({
+    pct,
+    limitPct,
+    lengthFt: _vdLenOf(seg),
+    lengthSource: seg?.lengthSource ?? null,
+    verificationState: seg?.verificationState ?? seg?.verificationStatus ?? null,
+  });
 }
 
 /** THE E-1 sectioned physical schedule (micro AC path). Returns [] for non-micro
@@ -1263,6 +1509,9 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: 'free-air (no raceway fill adjustment)',
       voltageDropPct: vd,
       vdLimitPct: 2,
+      vdCalculationLengthFt: _vdLenOf(branchSeg),
+      // D5 — the SAME canonical resolver PV-4B uses. Not a PV-4B.1 variant.
+      voltageDrop: _gradeSeg(branchSeg, vd, 2),
       // §4 — free-air branch ampacity chain (Q-Cable conductor gauge, 690.31(C));
       // the CCC conduit-fill adjustment is N/A in free air.
       ampacity: projectAmpacityAdjustment({
@@ -1344,6 +1593,8 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: null,
       voltageDropPct: vd,
       vdLimitPct: 2,
+      vdCalculationLengthFt: _vdLenOf(hrSeg),
+      voltageDrop: _gradeSeg(hrSeg, vd, 2),
       // §4 — THE shared 6-CCC ampacity chain (the row that used to print a lone
       // "0.96"): base 90 °C × 310.15(C)(1) count-adjustment (6 CCC → 0.80) ×
       // 310.15(B)(1) ambient, capped at the 75 °C terminal ampacity (110.14(C)).
@@ -1422,6 +1673,8 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: rw?.deratingBasis ?? null,
       voltageDropPct: vd,
       vdLimitPct: 3,
+      vdCalculationLengthFt: _vdLenOf(seg),
+      voltageDrop: _gradeSeg(seg, vd, 3),
       // §4 — feeder / downstream service run ampacity chain.
       ampacity: projectAmpacityAdjustment({
         conductorGauge: seg.conductorGauge,
@@ -1489,6 +1742,15 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: null,
       voltageDropPct: null,
       vdLimitPct: 3,
+      vdCalculationLengthFt: num(tap.lengthFt),
+      // D5 — the tap has no computed voltage drop, so the canonical resolver
+      // returns INDETERMINATE. That is the honest calculation state and it is
+      // NOT the same statement as the open NEC 705.11(C) ≤10-ft review below.
+      voltageDrop: gradeVoltageDrop({
+        pct: null, limitPct: 3, lengthFt: num(tap.lengthFt),
+        lengthSource: tap.lengthSource ?? null,
+        verificationState: tap.lengthSource === 'field-measurement' ? 'field-measured' : 'unverified-estimate',
+      }),
       // §4 — tap conductors: length/current unmeasured on a live design ⇒ PENDING.
       ampacity: projectAmpacityAdjustment({
         conductorGauge: tap.conductorSpec?.match(/#\d+(?:\/0)?\s*AWG/i)?.[0] ?? null,

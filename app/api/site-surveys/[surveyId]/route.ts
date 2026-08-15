@@ -24,10 +24,8 @@ import { rateLimitGuard } from '@/lib/rateLimitGuard';
 // ---------------------------------------------------------------------------
 // GET — survey detail + all files
 // ---------------------------------------------------------------------------
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -108,10 +106,8 @@ export async function GET(
 // ---------------------------------------------------------------------------
 // PATCH — partial update (attach to project, change status, add notes)
 // ---------------------------------------------------------------------------
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

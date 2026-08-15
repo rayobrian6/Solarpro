@@ -20,6 +20,8 @@ import { getDesignTemps } from './designTemps';
 import { peekSnapshot } from '../snapshot/read';
 import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectListedCableAssembly, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
 
+// CMEI — module identity comes from THE canonical accessor.
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 /** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
  *  model string — the SAME records the equipment pages read. Undefined when
  *  the model can't be matched (the sheet then prints a MARKED conservative
@@ -27,10 +29,12 @@ import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRace
 function panelTempCoeffByModel(model?: string): number | undefined {
   const m = (model ?? '').trim().toLowerCase();
   if (!m) return undefined;
-  const hit = SOLAR_PANELS.find(p =>
-    m === p.model.toLowerCase()
-    || m === `${p.manufacturer} ${p.model}`.toLowerCase()
-    || m.includes(p.model.toLowerCase()));
+  // CMEI — THE canonical accessor. The `m.includes(p.model)` arm meant a
+  // temperature coefficient could be taken from a different product whose model
+  // name happened to be a substring of the posted text. β drives the cold-Voc
+  // law, so that is a calculation input, not a label.
+  const hit = resolveModuleIdentity({ model: m }).spec
+    ?? SOLAR_PANELS.find(p => m === `${p.manufacturer} ${p.model}`.toLowerCase());
   return typeof hit?.tempCoeffVoc === 'number' ? hit.tempCoeffVoc : undefined;
 }
 
@@ -197,7 +201,12 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     clientName:              project.clientName ?? 'Homeowner',
     address:                 project.address ?? '',
     designer:                project.designer ?? '',
-    drawingDate:             project.date ?? new Date().toLocaleDateString(),
+    // D6 — the E-1 drawing date is the SAME document issue date every title
+    // block prints. The old `?? new Date().toLocaleDateString()` fallback was a
+    // second, HOST-LOCAL date producer: on a UTC host it could put a different
+    // calendar day on the SLD than on the sheet the SLD is drawn inside. There is
+    // one document date; a missing one prints PENDING, never a fresh clock read.
+    drawingDate:             project.date ?? 'PENDING',
     drawingNumber:           'SLD-001',
     revision:                'A',
     topologyType,

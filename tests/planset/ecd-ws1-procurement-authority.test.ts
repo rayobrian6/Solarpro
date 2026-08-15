@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit/index';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import { pendingGroundingAuthority } from '../fixtures/synthetic-pending-grounding';
+import { unresolvedProcurementAuthority } from '../fixtures/synthetic-unresolved-procurement';
 import type { SnapshotAuthorityInputs } from '@/lib/permit/snapshot/authorityInputs';
 import type { PermitDesignSnapshot, CableExtensionSolution } from '@/lib/permit/snapshot/types';
 import { SUPPLY_SIDE_TAP_CANDIDATE_LABEL } from '@/lib/permit/snapshot/types';
@@ -37,8 +38,9 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 /** SYNTHETIC, clearly-labelled, STRICTER-ONLY allowance (as the RGM harness). */
 const INSUFFICIENT_AUTHORITY: SnapshotAuthorityInputs = {
-  capacityDocument: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
-  digestInvalidatedByLedger: false, framingCapacityDocument: null, framingProjectApplicabilityKey: null,
+  capacityDocument: null, legalJurisdiction: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
+  digestInvalidatedByLedger: false, digestInvalidations: [],
+  framingCapacityDocument: null, framingProjectApplicabilityKey: null,
   cableExtensionSolutions: [],
   qcableServiceLoopAllowance: {
     allowanceFt: 26,
@@ -60,6 +62,13 @@ function generate(opts?: {
   if (opts?.groundingPending) {
     auth = { ...(auth ?? ({} as SnapshotAuthorityInputs)), ...pendingGroundingAuthority('wrongConnectorArchitecture') };
   }
+  // WS-2 — W1-E (the field-wireable connectors as CANDIDATES) and the §2 state
+  // distribution both describe a package with NO established Q-Cable procurement
+  // design. That is now a refusable authority rather than a permanent condition,
+  // so both modes are generated with it refused: the candidate/non-orderable
+  // contract is exercised deliberately, and the live package keeps its
+  // archived-evidence resolution.
+  auth = { ...(auth ?? ({} as SnapshotAuthorityInputs)), ...unresolvedProcurementAuthority() };
   const html = generatePermitHTML(input, undefined, auth);
   return { html, bom: (input.bom ?? []) as PermitBOMItem[], snap: input._snapshot as PermitDesignSnapshot };
 }

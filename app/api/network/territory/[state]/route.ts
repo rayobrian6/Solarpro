@@ -83,14 +83,14 @@ const round1 = (n: number | null) => (n == null ? 0 : Math.round(n * 10) / 10);
 
 export async function GET(
   req: NextRequest,
-  ctx: { params: Promise<{ state: string }> } | { params: { state: string } },
+  ctx: { params: Promise<{ state: string }> },
 ) {
   const user = getUserFromRequest(req);
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const raw = await (ctx as { params: Promise<{ state: string }> }).params;
+    const raw = await ctx.params;
     const state = String(raw.state ?? "").toUpperCase();
     const countyParam = new URL(req.url).searchParams.get("county") ?? "";
 

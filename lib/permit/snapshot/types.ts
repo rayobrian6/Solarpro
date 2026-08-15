@@ -17,6 +17,8 @@ export type { StructuralBomRow, StructuralBomReconciliation } from './structural
 import type { StructuralReactionReconciliation } from './structuralEngine';
 export type { StructuralReactionReconciliation } from './structuralEngine';
 import type { CodeAuthorityRecord } from './codeAuthority';
+import type { AsceEditionSource } from './asceAuthority';
+import type { GenerationStampPrecision } from './generationStamp';
 export type { CodeAuthorityRecord, CodeEdition, CodeEditionKind, CodeVerificationStatus } from './codeAuthority';
 import type { ProjectAuthorityRecord } from './projectAuthority';
 export type { ProjectAuthorityRecord, ProjectIssueState } from './projectAuthority';
@@ -284,9 +286,59 @@ export interface GroundingSegment {
 export type RouteVerificationState =
   | 'unverified-estimate'
   | 'cad-derived-estimate'
+  /** WS-5 — a length taken from ROUTED CAD GEOMETRY. Distinct from an estimate
+   *  (the route really is in the model) and from field evidence (nobody measured
+   *  it). Its absence is what forced BRANCH_RUN to contradict itself: the segment
+   *  carried `lengthSource: 'cad-route'` beside
+   *  `verificationStatus: 'cad-derived-estimate'`, because there was no state to
+   *  express "geometry-derived, but not field evidence". */
+  | 'geometry-derived'
+  /** WS-5 — an operator-entered measurement that has NOT been verified. Entry is
+   *  not authority: this may become the calculation length, and must NOT close a
+   *  field-verification requirement. */
+  | 'field-reported'
   | 'field-measured'
   | 'field-verified'
   | 'as-built-verified';
+
+/** WS-5 — the SOURCE of a route length. Deliberately separate from
+ *  RouteVerificationState: where a number came from and how strongly it has been
+ *  verified are different questions, and collapsing them is what produced the
+ *  BRANCH_RUN contradiction. */
+export type RouteLengthSource =
+  | 'cad-derived-estimate'
+  | 'cad-route'
+  | 'field-reported'
+  | 'field-verified';
+
+/** WS-5 — the ONLY legal (source, state) pairings. Anything else is a defect,
+ *  not a variant: a `cad-route` length described as an estimate understates it,
+ *  and a `field-reported` length described as verified overstates it — and the
+ *  second is the one that puts an unverified number on a stamped drawing. */
+export const ROUTE_LENGTH_AUTHORITY_PAIRS: ReadonlyArray<
+  readonly [RouteLengthSource, RouteVerificationState]
+> = [
+  ['cad-derived-estimate', 'cad-derived-estimate'],
+  ['cad-route', 'geometry-derived'],
+  ['field-reported', 'field-reported'],
+  ['field-verified', 'field-verified'],
+];
+
+/** Fail-closed validity check for a (source, state) pair. */
+export function isValidRouteLengthAuthority(
+  source: string | null | undefined,
+  state: string | null | undefined,
+): boolean {
+  return ROUTE_LENGTH_AUTHORITY_PAIRS.some(([s, v]) => s === source && v === state);
+}
+
+/** WS-5 — does this length authority satisfy a FIELD-VERIFICATION requirement?
+ *  Only field-verified evidence does. A geometry-derived route is more specific
+ *  than an estimate but is still not field evidence, and a field REPORT is an
+ *  operator's claim, not a verification. */
+export function closesFieldVerification(state: RouteVerificationState | null | undefined): boolean {
+  return state === 'field-verified' || state === 'as-built-verified';
+}
 
 /** W2.1 / W1 — canonical route-length + per-segment electrical authority: every
  *  physically distinct electrical section is a segment with ONE authoritative
@@ -296,9 +348,32 @@ export type RouteVerificationState =
  *  conductor/conduit/length/fill/VD/current for a given segmentId. Fields added
  *  in the 07-22 repair pass are optional so existing serialization/digest is
  *  unchanged until the build populates them. */
+/** D1 (Planset 17) — WHO OWNS THIS RUN.
+ *  Utility-owned service equipment (the main-panel → utility-meter run) is not
+ *  the installer's to route, measure, procure or modify. It must stay visible in
+ *  the electrical topology and be excluded from every PROJECT authority. */
+export type RouteOwnership = 'PROJECT_OWNED' | 'UTILITY_OWNED';
+
+/** D1 — whether PROJECT route authority applies to this run.
+ *  EXCLUDED is a DECISION, carried explicitly, never inferred from a missing
+ *  raceway object or from a segment-name regex. */
+export type RouteAuthorityApplicability = 'REQUIRED' | 'EXCLUDED' | 'NOT_APPLICABLE';
+
 export interface RouteSegmentRecord {
   segmentId: string;                 // engine RunSegment id (e.g. 'COMBINER_TO_DISCO_RUN')
   from: string; to: string;
+  /** D1 — ownership, from the engine's own `isUtilityOwned` assertion (set by
+   *  computed-system.ts and segment-builder.ts). Optional so hand-built
+   *  RouteSegmentRecord literals in tests keep compiling; every consumer reads it
+   *  FAIL-CLOSED as `?? 'PROJECT_OWNED'`, so an unpopulated record is treated as
+   *  the installer's responsibility rather than silently excused. */
+  routeOwnership?: RouteOwnership;
+  /** D1 — whether project route authority applies. Utility-owned runs are
+   *  EXCLUDED: no field measurement, no raceway object, no procurement, and no
+   *  contribution to project route completeness. */
+  routeAuthorityApplicability?: RouteAuthorityApplicability;
+  /** D1 — why, in one sentence, for the reader of the sheet. */
+  routeApplicabilityReason?: string | null;
   /** what this physical section carries — e.g. 'micro AC branch (Q-Cable trunk)',
    *  'branch home-run', 'roof junction box', 'combiner feeder',
    *  'combiner→disconnect', 'disconnect→tap', 'tap conductors',
@@ -1283,9 +1358,22 @@ export interface StructuralEnv {
   componentCladdingZones: string[];
   upliftPressurePsf: number | null;
   downforcePressurePsf: number | null;
+  /** D13 — THE single ASCE decision, projected. `source` names an authority that
+   *  can actually supply an ASCE edition; the old union offered `'ahj-record'`,
+   *  and the curated AHJ table carries no ASCE edition, so that value could only
+   *  ever be a fabricated provenance. `adoptedEdition` vs `computedEdition`
+   *  separate the two questions that used to share this one field: what the
+   *  jurisdiction ADOPTS, and what the design values were COMPUTED under. */
   codeAuthority: {
     asceEdition: string | null;
-    source: 'ahj-record' | 'pending-w4-ahj-authority' | 'default';
+    source: AsceEditionSource;
+    basis: string | null;
+    ref: string | null;
+    adoptedEdition: string | null;
+    computedEdition: string | null;
+    /** true ⇔ adoption and computation name DIFFERENT editions. */
+    conflict: boolean;
+    conflictDetail: string | null;
   };
   /** §2 (BAR) — the canonical ENVIRONMENTAL LOAD AUTHORITY record. Operator-entered
    *  wind/snow/exposure are OBSERVATIONS/OVERRIDES, never verified design criteria
@@ -1505,7 +1593,19 @@ export interface PermitDesignSnapshot {
     digest: string;                 // SHA-256 hex of canonical JSON (digest+snapshotId excluded)
     schemaVersion: string;
     engineVersion: string;
+    /** D14 — THE generation stamp, resolved once (`generationStamp.ts`) and
+     *  shared with every `registry[].createdAtIso`. An ISO instant when the
+     *  caller injected one; otherwise the project's issue date reformatted to an
+     *  ISO CALENDAR DATE. Never a sub-second instant on the live path — that
+     *  would break the byte-identical-render invariant and be dropped by D9's
+     *  render guard. This field previously held a localised 'M/D/YYYY' value. */
     generatedAtIso: string;
+    /** D14 — whether `generatedAtIso` carries a time component, a date only, an
+     *  unclassifiable value preserved verbatim, or nothing. "ISO" alone does not
+     *  say, and a consumer that needs to know had to guess. */
+    generatedAtPrecision: GenerationStampPrecision;
+    /** D14 — why the stamp has this form, in one sentence. */
+    generatedAtBasis: string;
     projectId: string | null;
     designVersionId: string | null;
   };
@@ -1611,6 +1711,10 @@ export interface PermitDesignSnapshot {
      *  and every sheet length CONSUME it (one derivation). Null for non-micro /
      *  unknown trunk brand. */
     qcableTopology?: QCableTopology | null;
+    /** WS-2 — THE canonical procurement design (installed vs purchased vs
+     *  remainder, branch allocation, accessories). Renderers PROJECT this; no
+     *  sheet recalculates a purchase. */
+    qcableProcurement?: import('./qcableProcurement').QCableProcurementResolution | null;
     /** AAC WS-7 (2026-07-27): the COMPUTED NEC Chapter 9 Table 1 conduit-fill
      *  authority for the canonical feeder raceway — raceway identity, conductor
      *  set, insulation, adopted code edition, the percentage and the ≤40 %
@@ -1779,6 +1883,20 @@ export interface PermitDesignSnapshot {
      *  endpoints queried, the retrieval timestamp, a payload SHA-256 and a
      *  confidence. THE evidence for a cleared PROJECT-AUTHORITY-UNVERIFIED. */
     projectLegalAuthority?: import('./resolution/jurisdictionAuthority').ProjectLegalAuthorityRecord | null;
+    /** OAR — THE ACCEPTED LEGAL JURISDICTION, projected so it is durable.
+     *
+     *  D4 established this as the canonical answer to "which authority governs
+     *  this parcel", and it is what stamps every archived document — but it lived
+     *  only on the in-memory resolver bundle. Nothing carried it between runs, so
+     *  a one-second Census outage dropped the verified county determination back
+     *  to the posted MAILING city and re-stamped the package with it.
+     *
+     *  Projecting it makes the accepted authority a first-class snapshot fact and
+     *  gives `project-authority@v1` something governed to retain when a refresh
+     *  cannot complete. MATERIAL by design: `ahjRecordId`, `verificationState`
+     *  and the provenance ref are accepted authority, so a genuine change to any
+     *  of them MUST move the digest. */
+    legalJurisdiction?: import('./resolution/types').LegalJurisdictionAuthority | null;
     /** AAC WS-3 — the ADOPTED code editions (NEC/IBC/IRC/IFC) retrieved from the
      *  AHJ registry, each with the registry field it came from, the raw
      *  enumeration, its corroborator and any conflicting source. THE evidence for
@@ -1811,6 +1929,43 @@ export interface PermitDesignSnapshot {
      *  migration 116: who approved, under which licence, for which digest. */
     engineeringReview?: import('@/lib/engineeringReview/types').EngineeringReviewCoverage | null;
   };
+
+  /** CMDA — THE CANONICAL MODULE DOCUMENT AUTHORITY, one entry per distinct
+   *  selected module model.
+   *
+   *  THE SINGLE ANSWER to "is the selected module's datasheet applicable?".
+   *  Frozen with the snapshot and projected by RG-2, DS-1, APP-A, the readiness
+   *  registry, the BOM and approval coverage. No consumer re-decides it, and
+   *  nothing may establish it from a marketing title, a filename, a model
+   *  substring, a static asset, or the bare presence of a document id.
+   *
+   *  MATERIAL: a change of selected module, wattage, registry document, SHA-256,
+   *  verification state or applicability MUST move the digest.
+   *
+   *  Omitted when no lifecycle ran (harness / test / DB-unavailable), exactly
+   *  like `resolutionAuthority`. */
+  moduleDocumentAuthority?: Record<string, import('./moduleDocumentAuthority').ModuleDatasheetApplicabilityAuthority>;
+
+  /** TR — OPERATIONAL RESOLVER ATTEMPT EVIDENCE. The ONE declared home for facts
+   *  about how a resolver ATTEMPT went, as opposed to what the design accepts:
+   *  the raw transport error, the retry count, the attempt instant, the source
+   *  last queried, the per-requirement attempt trail.
+   *
+   *  `computeSnapshotDigest` skips this key by name — a CONTAINER exclusion, the
+   *  same structural device already used for `meta.digest`. It is deliberately
+   *  NOT a recursive key-name rule: a broad "drop anything called failure /
+   *  reason / source" would have deleted `equipment.*.datasheet.capturedAtIso`,
+   *  which is genuine document provenance and must keep moving the digest (D11).
+   *
+   *  WHY IT IS STORED RATHER THAN DISCARDED: a transient failure must stay
+   *  reachable to whoever has to diagnose it. WHY IT IS STORED RATHER THAN
+   *  ATTACHED AFTER THE HASH (the PRR review-record pattern): keeping it inside
+   *  the snapshot means an archived package still re-digests to its own
+   *  `meta.digest`, so digest re-verification of an issued package keeps working.
+   *
+   *  OPTIONAL and OMITTED when no lifecycle ran (harness / test / DB-unavailable
+   *  run), exactly like `resolutionAuthority`. */
+  resolverAttemptEvidence?: import('./resolution/authorityProjection').ResolverAttemptEvidenceBundle;
 }
 
 /** W10 (RP-D) — a canonical, structured permit-readiness blocker. Every release

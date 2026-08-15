@@ -11,14 +11,15 @@ import { evaluateContractorEligibility } from "@/lib/network/contractorEligibili
 import { createLeadCheckoutSession } from "@/lib/network/leadPurchase";
 import { logNetworkEvent } from "@/lib/network/attributionTracker";
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // ---------------------------------------------------------------------------
 // POST /api/network/opportunities/[id]/checkout
 // Start a one-time Stripe Checkout to PAY for (and thereby claim) a lead.
 // The claim is finalized in the Stripe webhook on checkout.session.completed.
 // ---------------------------------------------------------------------------
-export async function POST(req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, props: Params) {
+  const params = await props.params;
   const user = getUserFromRequest(req);
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

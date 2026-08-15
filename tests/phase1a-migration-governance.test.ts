@@ -42,6 +42,28 @@ import {
 
 const root = path.resolve(__dirname, '..');
 
+/** THE highest governed migration prefix. Named once so adding a migration is a
+ *  one-line, deliberate governance update rather than a hunt through literals —
+ *  which is exactly why 117 left five assertions failing after it landed. */
+const HIGHEST_GOVERNED_MIGRATION = '120';
+
+/** THE count of governed migration SQL files. This is deliberately a LITERAL and
+ *  not `discoverMigrationFiles().count` — deriving it from the manifest would
+ *  assert the manifest against itself and could never fail. It is the tripwire
+ *  that makes an ungoverned .sql file dropped into lib/migrations/ break the
+ *  build until someone updates this line on purpose.
+ *
+ *  NOTE it is NOT the highest prefix: the numbering is non-contiguous (the
+ *  101-file baseline, then 105-108, 109-112, 113/114, 115, 116, 117, 118, 119,
+ *  120), so the count and the highest prefix move independently. */
+const GOVERNED_MIGRATION_COUNT = 117;
+
+/** Normalize a filesystem path to POSIX separators. `path.join` returns
+ *  backslashes on Windows, so `toContain('lib/migrations')` failed on this
+ *  platform regardless of what the manifest actually discovered — a test-harness
+ *  defect, not a governance one. */
+const posix = (p: string): string => String(p).replace(/\\/g, '/');
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,14 +234,14 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
     expect(extractDescription('001_initial_schema.sql')).toBe('initial schema');
   });
 
-  it('discovers 113 SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review)', () => {
+  it(`discovers ${GOVERNED_MIGRATION_COUNT} SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review + 117 AHJ registry + 118 field route measurements + 119 document jurisdiction authority)`, () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.count).toBe(113);
+    expect(manifest.count).toBe(GOVERNED_MIGRATION_COUNT);
   });
 
-  it('highest prefix is 116', () => {
+  it('highest prefix is 119 (D4 document jurisdiction authority)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('116');
+    expect(manifest.highestPrefix).toBe(HIGHEST_GOVERNED_MIGRATION);
   });
 
   it('detects duplicate prefix 074 and disambiguates as 074a/074b', () => {
@@ -263,7 +285,7 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
       expect(file.identifier).toMatch(/^\d{3,}[a-z]?$/);
       expect(file.prefix).toMatch(/^\d{3,}$/);
       expect(file.filename).toMatch(/^\d{3,}_.*\.sql$/);
-      expect(file.fullPath).toContain('lib/migrations');
+      expect(posix(file.fullPath)).toContain('lib/migrations');
       expect(file.sizeBytes).toBeGreaterThan(0);
     }
   });
@@ -1165,7 +1187,7 @@ describe('Phase 1A: Historical reconciliation', () => {
 
   it('migration 105 exists (organization authority foundation), 106 exists (lifecycle correction), 107 exists (audit org context), and 108 exists (nearmap cache idx)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('116');
+    expect(manifest.highestPrefix).toBe(HIGHEST_GOVERNED_MIGRATION);
     const has105 = manifest.files.some((f: any) => f.prefix === '105');
     expect(has105).toBe(true);
     const has106 = manifest.files.some((f: any) => f.prefix === '106');
@@ -1182,11 +1204,11 @@ describe('Phase 1A: Historical reconciliation', () => {
     // (they should all be in lib/migrations/). We verify every occurrence of
     // "/migrations/" is preceded by "lib" — i.e., the canonical lib/migrations path.
     for (const file of manifest.files) {
-      expect(file.fullPath).toContain('lib/migrations');
+      expect(posix(file.fullPath)).toContain('lib/migrations');
       // Every "/migrations/" segment must be preceded by "lib" (not a root-level
       // migrations/ directory). We strip all "lib/migrations" occurrences and check
       // that no bare "/migrations/" remains.
-      const stripped = file.fullPath.replace(/lib\/migrations/g, '');
+      const stripped = posix(file.fullPath).replace(/lib\/migrations/g, '');
       expect(stripped).not.toMatch(/\/migrations\//);
     }
   });
@@ -1238,9 +1260,13 @@ describe('Phase 1A.1: Persistent audit integration', () => {
     expect(ledgerSrc).toContain("'migration.transaction_mode.review_required': 'migration_transaction_mode_review_required'");
   });
 
-  it('ledger.ts has a persistMigrationAuditEvent function that calls writeAuditLog', () => {
+  it('ledger.ts persists migration audit events through the central audit writer', () => {
     expect(ledgerSrc).toContain('async function persistMigrationAuditEvent');
-    expect(ledgerSrc).toContain("writeAuditLog(");
+    // `writeAuditLogDetailed` is the same central writer, returning the FAILURE
+    // REASON as well as the hash. The reason used to be discarded here, which is
+    // why migrations 113 and 119 both reported AUDIT_PERSISTENCE_FAILED naming no
+    // cause — for weeks, while the cause was one line of PostgreSQL.
+    expect(ledgerSrc).toMatch(/writeAuditLog(Detailed)?\(/);
     expect(ledgerSrc).toContain("category: 'migration'");
   });
 

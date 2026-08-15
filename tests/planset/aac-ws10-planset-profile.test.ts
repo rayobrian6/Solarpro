@@ -24,6 +24,7 @@ import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
+import { schedContPageCount } from '@/lib/permit/sections/structuralPages';
 import { resolvePlansetProfile, certificationIsCompleted, sheetIsDirectlyGated } from '@/lib/permit/plansetProfile';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 
@@ -62,9 +63,21 @@ describe('WS-10 (1) — the permit profile carries the compact drawing set only'
     expect(sheetIds(FULL.html).filter(i => i.startsWith('RS-1')).length).toBeGreaterThan(0);
   });
 
-  it('drops the SCHED procurement continuations but keeps ONE equipment schedule', () => {
-    expect(ids.filter(i => /^SCHED-\d+$/.test(i))).toEqual([]);
+  // ── D3 (Planset 17) — REPLACED ───────────────────────────────────────────
+  // This used to assert `ids.filter(i => /^SCHED-\d+$/).toEqual([])` — that the
+  // permit profile drops the BOM continuations. It was green while 38 of the 48
+  // canonical procurement rows were absent from the AHJ-facing artifact, so it
+  // was not protecting a contract, it was pinning a defect. The compact profile
+  // legitimately needs continuation sheets; what must be asserted is that the
+  // continuation is COMPLETE and CONSISTENT, not that it is forbidden.
+  it('carries the equipment schedule AND every continuation the BOM requires', () => {
     expect(ids).toContain('SCHED');
+    const cont = ids.filter(i => /^SCHED-\d+$/.test(i));
+    // schedContPageCount is the single source the manifest and page assembly share
+    const expected = schedContPageCount(PERMIT.input.bom);
+    expect(cont.length, `permit SCHED continuations: got ${cont.length}, BOM needs ${expected}`).toBe(expected);
+    // contiguous and correctly numbered: SCHED-2, SCHED-3, …
+    expect(cont).toEqual(Array.from({ length: expected }, (_u, i) => `SCHED-${i + 2}`));
   });
 
   it('drops APP-A (the duplicate reference to the datasheets that follow it)', () => {
@@ -91,7 +104,12 @@ describe('WS-10 (1) — the permit profile carries the compact drawing set only'
 
   it('the permit set is materially shorter than the internal package', () => {
     expect(ids.length).toBeLessThan(sheetIds(FULL.html).length);
-    expect(ids.length).toBeLessThanOrEqual(16);
+    // D3: the cap moved 16 → 20. The permit set is compact because it drops the
+    // REVIEW registry (RS-1.n), PV-6, APP-A and the CERT placeholders — not
+    // because it drops procurement rows. The BOM continuations it now carries
+    // are content the AHJ is entitled to, so they count against this ceiling
+    // honestly rather than being suppressed to keep a number down.
+    expect(ids.length).toBeLessThanOrEqual(20);
   });
 });
 
@@ -104,12 +122,32 @@ describe('WS-10 (2) — the BOM is snapshot-bound and unchanged by the profile',
     expect(JSON.stringify(PERMIT.snap.structural.bomReconciliation)).toBe(JSON.stringify(FULL.snap.structural.bomReconciliation));
   });
 
-  it('the permit SCHED names where the remaining procurement rows live (never silent truncation)', () => {
-    // the fixture BOM overflows one sheet, so the continuation row must appear —
-    // and it must point at the project record, not at a sheet that is not in the set.
-    expect(PERMIT.html).toContain('FULL PROCUREMENT BILL OF MATERIALS IN THE PROJECT RECORD');
-    expect(PERMIT.html).not.toContain('CONTINUED ON NEXT SHEET');
+  // ── D3 (Planset 17) — REPLACED ───────────────────────────────────────────
+  // This asserted the permit SCHED points at the PROJECT RECORD rather than at
+  // a sheet, and `not.toContain('CONTINUED ON NEXT SHEET')`. Both were true of
+  // the old behaviour and both described a schedule that omitted 38 of 48 rows.
+  // Pointing a reviewer at an in-app record is not a substitute for printing the
+  // schedule. Now the continuation names the SHEET the rows are actually on, and
+  // the assertion is that EVERY canonical row is rendered exactly once.
+  it('renders every canonical BOM row exactly once, under every profile', () => {
+    const rendered = (html: string): string[] =>
+      [...html.matchAll(/data-bom-line-id="([^"]+)"/g)].map(m => m[1]);
+    for (const [name, pkg] of [['permit', PERMIT], ['full', FULL]] as const) {
+      const ids = rendered(pkg.html);
+      const uniq = new Set(ids);
+      expect(ids.length, `${name}: no rendered BOM rows at all`).toBeGreaterThan(0);
+      expect(uniq.size, `${name}: duplicate BOM rows across continuation sheets — ${ids.length} rendered, ${uniq.size} unique`).toBe(ids.length);
+    }
+    // and the two profiles render the SAME row set — the compact profile drops
+    // sheets, never procurement lines.
+    expect(new Set(rendered(PERMIT.html))).toEqual(new Set(rendered(FULL.html)));
+  });
+
+  it('the continuation points at the next SHEET, not at an off-artifact record', () => {
+    expect(PERMIT.html).toContain('CONTINUED ON NEXT SHEET');
     expect(FULL.html).toContain('CONTINUED ON NEXT SHEET');
+    // the retired misdirection is gone
+    expect(PERMIT.html).not.toContain('FULL PROCUREMENT BILL OF MATERIALS IN THE PROJECT RECORD');
   });
 });
 
@@ -259,7 +297,13 @@ describe('WS-10 (7) — profile plumbing', () => {
     }).map(s => s.id);
     expect(permitIds).not.toContain('RS-1');
     expect(permitIds).not.toContain('RS-1.1');
-    expect(permitIds).not.toContain('SCHED-2');
+    // D3: the manifest now emits the BOM continuations on the compact profiles
+    // too — schedContCount: 3 above must produce SCHED-2/3/4, exactly as the
+    // page assembly does. This assertion previously required their ABSENCE,
+    // which is what kept the sheet index agreeing with a truncated package.
+    expect(permitIds).toContain('SCHED-2');
+    expect(permitIds).toContain('SCHED-3');
+    expect(permitIds).toContain('SCHED-4');
     expect(permitIds).not.toContain('APP-A');
     expect(permitIds).not.toContain('PV-6');
     expect(permitIds).not.toContain('CERT');

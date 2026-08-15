@@ -16,10 +16,8 @@ import {
  * GET /api/crews/[id]/members
  * Returns all members of a crew, ordered by is_lead DESC, name ASC.
  */
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -66,10 +64,8 @@ export async function GET(
  * Adds a new member to the crew.
  * Body: { name, role?, phone?, email?, certifications?, is_lead?, notes? }
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {

@@ -12,6 +12,12 @@ import {
   ExternalLink, Info, BarChart2, Layers, Grid, FolderOpen, Eye
 } from 'lucide-react';
 import type { EngineeringReport } from '@/lib/engineering/types';
+// WS-5 — the field route measurement workflow lives INSIDE the electrical
+// review experience, beside the run lengths it governs. It is deliberately not
+// a separate developer page: an operator who is looking at a voltage drop is
+// exactly the person who needs to see whether its length was measured.
+import RouteMeasurementPanel from '@/components/project/RouteMeasurementPanel';
+import RailSelectionPanel from '@/components/project/RailSelectionPanel';
 
 interface ProjectFile {
   id: string;
@@ -585,6 +591,14 @@ ${(pp?.specialConditions?.length) ? `
               ))}
             </div>
           </div>
+
+          {/* WS-5 — ROUTE LENGTH AUTHORITY. Placed inside Electrical
+              Engineering, directly under the AC/DC numbers it qualifies: the run
+              lengths above are CAD estimates until someone measures them, and
+              this is where that happens and where it is verified. */}
+          <div className="pt-2 border-t border-slate-700">
+            <RouteMeasurementPanel projectId={projectId} />
+          </div>
         </div>
       </Section>
 
@@ -624,6 +638,13 @@ ${(pp?.specialConditions?.length) ? `
             ))}
           </div>
         ) : null}
+        {/* D12 — the rail selection belongs HERE, beside the attachment spacing
+            it is screened against: a rail is chosen to cover that spacing, and
+            separating the two is how an operator ends up picking a rail whose
+            published span they never saw. */}
+        <div className="pt-3 mt-3 border-t border-slate-700">
+          <RailSelectionPanel projectId={projectId} />
+        </div>
       </Section>
 
       {/* Section: Equipment Schedule */}

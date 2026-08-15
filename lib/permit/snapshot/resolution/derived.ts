@@ -27,6 +27,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { buildResolutionAuditRef } from './evidence';
+import { sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
 import type {
   ClearanceResult, RequirementResolutionState, ResolutionEvidenceRecord,
   ResolutionMode, ResolutionResult, Retryability,
@@ -47,6 +48,7 @@ export const DERIVED_RESOLVER_IDS = [
   'raceway-authority@v1',
   'qcable-topology@v1',
   'qcable-solution@v1',
+  'qcable-procurement@v1',
 ] as const;
 export type DerivedResolverId = (typeof DERIVED_RESOLVER_IDS)[number];
 
@@ -102,8 +104,19 @@ export interface DerivedResolutionContext {
   qcableEvaluation: QCableSolutionEvaluation | null;
   /** the sufficiency authority AFTER the evaluation was consumed. */
   procurementSufficiency: ProcurementSufficiency | null;
+  /** WS-2 — THE canonical procurement design (branch allocation, purchase unit,
+   *  accessories). A VERIFIED resolution is what answers a measured shortage. */
+  qcableProcurement: import('../qcableProcurement').QCableProcurementResolution | null;
 }
 
+/** WS-5 §14 — THE CLOSURE RULE, NAMED. This used to be a bare array here, where
+ *  it read as an implementation detail rather than as a policy somebody decided.
+ *  `sourceClosesRouteLengthRequirement` is that same rule stated and testable in
+ *  lib/fieldMeasurement/resolver.ROUTE_LENGTH_CLOSURE_POLICY, which is the
+ *  explicit declaration §14 requires for a CAD route to satisfy this
+ *  requirement. It does not widen it: 'operator-entry' (an UNVERIFIED field
+ *  report) is deliberately NOT sufficient, so recording a measurement moves the
+ *  calculation length without closing anything. */
 const ROUTE_GEOMETRY_SOURCES: RouteSegmentRecord['lengthSource'][] = ['cad-route', 'field-measurement'];
 
 /** THE derived stage. Pure: identical inputs ⇒ identical states + evidence. */
@@ -147,9 +160,23 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
   // ── route-length@v1 (AUTO_DERIVED for the geometry-derived segments;
   //    FIELD_VERIFICATION residual for the runs genuinely absent from CAD) ────
   {
-    const segs = ctx.routeSegments;
-    const resolved = segs.filter(s => ROUTE_GEOMETRY_SOURCES.includes(s.lengthSource));
-    const residual = segs.filter(s => !ROUTE_GEOMETRY_SOURCES.includes(s.lengthSource));
+    // ── D1 (Planset 17) — scope to PROJECT-OWNED runs ──────────────────────
+    // This is the SECOND, independent derivation of the same fact (build.ts
+    // carries the first). It has to be scoped in step with it: the two sentences
+    // surface on DIFFERENT profiles — build.ts's via the per-sheet release banner
+    // on the permit set, this one on the full/internal set — so fixing only one
+    // ships a permit package that reads correctly beside an internal package
+    // that contradicts it.
+    //
+    // Fail-closed: a record with no applicability decision counts as REQUIRED.
+    const allSegs = ctx.routeSegments;
+    const segs = allSegs.filter(s => (s.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
+    const excluded = allSegs.filter(s => (s.routeAuthorityApplicability ?? 'REQUIRED') !== 'REQUIRED');
+    // WS-5 §14 — closure is decided by the NAMED policy, so an UNVERIFIED field
+    // report ('operator-entry') stays residual even though it has already become
+    // the calculation length. Recording is not verification, here too.
+    const resolved = segs.filter(s => sourceClosesRouteLengthRequirement(s.lengthSource));
+    const residual = segs.filter(s => !sourceClosesRouteLengthRequirement(s.lengthSource));
     const cleared = segs.length > 0 && residual.length === 0;
     attempts.push({
       resolverId: 'route-length@v1',
@@ -162,10 +189,13 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
         cleared,
         missing: residual.map(s => `electrical.routeSegments[${s.segmentId}].lengthSource (${s.electricalFunction ?? 'run'})`),
         reasons: cleared ? [] : [
-          `${resolved.length} of ${segs.length} segment(s) are derived from real geometry`
+          `${resolved.length} of ${segs.length} PROJECT-OWNED segment(s) are derived from real geometry`
           + (resolved.length ? ` (${resolved.map(s => s.segmentId).join(', ')})` : '')
           + `; ${residual.length} run(s) have no routed geometry in the CAD model and require a field-measured route: `
-          + residual.map(s => `${s.segmentId} — ${s.electricalFunction ?? 'run'}`).join('; '),
+          + residual.map(s => `${s.segmentId} — ${s.electricalFunction ?? 'run'}`).join('; ')
+          + (excluded.length
+            ? `. ${excluded.length} run(s) EXCLUDED from project route authority: ${excluded.map(s => `${s.segmentId} — ${s.routeOwnership === 'UTILITY_OWNED' ? 'utility-owned service equipment' : 'not applicable'}`).join('; ')}`
+            : ''),
         ],
       },
       sourceQueried: 'canonical layout geometry (module coordinates / branch cable paths) + computeSystem run model',
@@ -174,6 +204,9 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
         segmentCount: segs.length,
         geometryDerivedSegments: resolved.map(s => s.segmentId).join(', ') || null,
         residualSegments: residual.map(s => s.segmentId).join(', ') || null,
+        // D1 — published so the excluded population is auditable, not merely absent
+        excludedSegments: excluded.map(s => s.segmentId).join(', ') || null,
+        excludedSegmentCount: excluded.length,
       },
       failureReason: cleared ? null
         : `${residual.length} run(s) genuinely absent from the CAD route model: ${residual.map(s => s.segmentId).join(', ')}`,
@@ -299,6 +332,54 @@ export function runDerivedResolutionStage(ctx: DerivedResolutionContext): Derive
       failureReason: cleared ? null : (ev.unresolvedReason ?? 'no complete solution established'),
       retryability: cleared ? 'NON_RETRYABLE' : 'REQUIRES_INPUT',
       operatorAction: cleared ? null : (recommended?.requiresAction ?? null),
+      confidence: cleared ? 1 : 0,
+    });
+  }
+
+  // ── WS-2 · qcable-procurement@v1 (AUTO_DERIVED, owner of the SCOPED codes) ──
+  // The procurement RESOLUTION owns the narrow codes that replaced the one broad
+  // Q-Cable blocker. Each is cleared by the same object that raises it, so a
+  // missing accessory SKU and an unestablished package never share one verdict.
+  if (ctx.qcableProcurement) {
+    const qp = ctx.qcableProcurement;
+    const SCOPED = [
+      'QCABLE-STOCK-PACKAGING-UNVERIFIED',
+      'QCABLE-FIELD-CONNECTOR-SKU-MISSING',
+      'QCABLE-TERMINATOR-COMPATIBILITY-UNVERIFIED',
+    ];
+    const cleared = qp.present && qp.compatibilityStatus === 'VERIFIED';
+    attempts.push({
+      resolverId: 'qcable-procurement@v1',
+      mode: 'AUTO_DERIVED',
+      requirementCodes: SCOPED,
+      owns: true,
+      result: cleared ? 'RESOLVED' : 'FAILED',
+      clearance: {
+        cleared,
+        missing: cleared ? [] : qp.residuals.map(r => r.code),
+        reasons: cleared ? [] : qp.unresolved,
+      },
+      sourceQueried:
+        'archived Enphase field-termination authority (IOM-00068-3.0-EN) + the canonical Q-Cable topology '
+        + '+ the brand trunk-cable catalog packaging',
+      sourceRefs: [
+        `provenance:electrical.qcableProcurement#${qp.resolutionId}`,
+        ...qp.evidenceIds.map(e => `evidence:${e}`),
+      ],
+      inputs: {
+        selectedStockSku: qp.selectedStockSku,
+        stockUnitConnectorSections: qp.stockUnitConnectorSections,
+        stockUnitsRequired: qp.stockUnitsRequired,
+        additionalSectionsRequired: qp.additionalSectionsRequired,
+        totalUsableInstalledFt: qp.totalUsableInstalledFt,
+        expectedRemainingStockFt: qp.expectedRemainingStockFt,
+        accessoryLines: qp.accessories.length,
+        compatibilityStatus: qp.compatibilityStatus,
+      },
+      failureReason: cleared ? null : (qp.unresolved[0] ?? 'the procurement design is incomplete'),
+      retryability: cleared ? 'NON_RETRYABLE' : 'REQUIRES_INPUT',
+      operatorAction: cleared ? null
+        : 'Archive the manufacturer document that establishes the missing packaging / accessory fact.',
       confidence: cleared ? 1 : 0,
     });
   }

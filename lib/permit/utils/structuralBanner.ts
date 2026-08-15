@@ -117,8 +117,8 @@ export function structuralBannerSvg(
   return `
     <g class="struct-review-banner">
       <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fef2f2" stroke="#b91c1c" stroke-width="1.5"/>
-      <text x="${x + w / 2}" y="${y + 11}" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="#b91c1c" letter-spacing="0.6">${esc(b.line1)}</text>
-      <text x="${x + w / 2}" y="${y + 21}" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="bold" fill="#b91c1c" letter-spacing="0.6">${esc(b.line2)}</text>
+      <text x="${x + w / 2}" y="${y + 11}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="9" font-weight="bold" fill="#b91c1c" letter-spacing="0.6">${esc(b.line1)}</text>
+      <text x="${x + w / 2}" y="${y + 21}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="8" font-weight="bold" fill="#b91c1c" letter-spacing="0.6">${esc(b.line2)}</text>
     </g>`;
 }
 

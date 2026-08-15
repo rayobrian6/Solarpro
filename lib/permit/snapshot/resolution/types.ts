@@ -28,6 +28,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { PermitInput } from '../../types';
+import type { DigestInvalidationFact } from '../reviewCoverage';
 import type { RackingCapacityDocumentEvidence } from '../rackingAssembly';
 import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } from '../framingAuthority';
 import type { CableExtensionSolution } from '../types';
@@ -214,11 +215,64 @@ export interface RequirementResolutionState {
 // and the bundle cannot drift; authorityInputs re-exports it verbatim).
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// D4 — THE CANONICAL LEGAL JURISDICTION, AVAILABLE BEFORE ANY DOCUMENT IS
+// ARCHIVED.
+//
+// `projectJurisdiction` (below) is produced by `project-authority-key@v1`, an
+// AUTO_DERIVED resolver that runs FIRST and reads the POSTED project record:
+//     compliance.jurisdiction.ahj ?? project.ahjName ?? project.state
+// On the live Braidon project that is the MAILING-derived value, "City of
+// Granite City Building & Zoning".
+//
+// `project-authority@v1` later determines the real legal AHJ from the parcel
+// boundary — Madison County, unincorporated — and corrects `project.ahjName` /
+// `project.ahjRecordId` on the INPUT. But it patches only `projectLegalAuthority`
+// onto the bundle; it never updates `projectJurisdiction`. The live lifecycle
+// stabilises in ONE iteration, so nothing ever corrects it.
+//
+// `structuralResolvers` then stamped `jurisdictionBoundary` from
+// `projectJurisdiction`, which is how all four live registry rows came to carry
+// the mailing city instead of the legal AHJ — and why verifying them would still
+// fail the clearance comparison.
+//
+// This record is the canonical answer, carried explicitly so a document resolver
+// can REFUSE rather than fall back. A free-text name is a display projection;
+// `ahjRecordId` is the identity.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface LegalJurisdictionAuthority {
+  /** STABLE identity — the ahj_registry / curated-table record id. THE key. */
+  ahjRecordId: string | null;
+  /** canonical legal AHJ name. A DISPLAY projection, never the primary key. */
+  ahjName: string | null;
+  jurisdictionType: 'county' | 'city' | 'township' | 'state' | 'other' | null;
+  stateCode: string | null;
+  county: string | null;
+  /** true ⇒ positively outside any incorporated municipality (county governs). */
+  unincorporated: boolean | null;
+  /** the MAILING city. Carried so address display never has to reach for the
+   *  legal name, and so the two can never be silently conflated again. */
+  mailingCity: string | null;
+  /** which resolver established this, and from what. */
+  provenance: { source: string; ref: string | null; basis: string } | null;
+  /** 'verified' only when the boundary determination itself is verified. A
+   *  document may not be stamped from an unverified jurisdiction. */
+  verificationState: 'verified' | 'unverified' | 'conflict' | 'unresolved';
+}
+
 /** The authority inputs resolved async and threaded into the sync build. */
 export interface SnapshotAuthorityInputs {
   /** VERIFIED racking-capacity document for the selected mount (or null). */
   capacityDocument: RackingCapacityDocumentEvidence | null;
-  /** project jurisdiction / AHJ applicability boundary. */
+  /** D4 — the CANONICAL legal jurisdiction. Document resolvers must use this and
+   *  refuse when it is unresolved; they may NOT fall back to
+   *  `projectJurisdiction`, which is posted-record-derived. */
+  legalJurisdiction: LegalJurisdictionAuthority | null;
+  /** project jurisdiction / AHJ applicability boundary.
+   *  ⚠ POSTED-RECORD DERIVED (project-authority-key@v1). Retained for the
+   *  consumers that legitimately want "what the project record says", but it is
+   *  NOT the legal AHJ and must never stamp a document. See `legalJurisdiction`. */
   projectJurisdiction: string | null;
   /** required manufacturer documents archived. null ⇒ unresolved (DB unavailable
    *  or no matching verified document) ⇒ ISSUED-FOR-PERMIT precondition NOT
@@ -226,8 +280,20 @@ export interface SnapshotAuthorityInputs {
   manufacturerDocumentsArchived: boolean | null;
   /** a snapshot_digest_invalidations ledger entry forces the review-coverage
    *  precondition false. Unavailable ⇒ conservative `true` (unknown must not
-   *  satisfy the gate). */
+   *  satisfy the gate).
+   *
+   *  PRR §2 — LEGACY. This project-scoped boolean was `rows.length > 0`, which
+   *  latched review coverage false FOREVER: nothing in the codebase ever writes
+   *  `superseded_at`, so a row written by one equipment reconciliation blocked
+   *  every future approval. It is retained only so a caller that supplies just
+   *  the boolean still fails closed; the DECISION now reads `digestInvalidations`
+   *  and scopes each row to the digest (and approval time) it actually names. */
   digestInvalidatedByLedger: boolean;
+  /** PRR §2 — the ACTIVE invalidation rows themselves, so review coverage can be
+   *  scoped to the digest a row names instead of "this project has ever had one".
+   *  `null` ⇒ the ledger read FAILED (fail closed); `[]` ⇒ read OK, no active
+   *  rows. See lib/permit/snapshot/reviewCoverage.ts#invalidationApplies. */
+  digestInvalidations: DigestInvalidationFact[] | null;
   /** FRAMING-AUTHORITY GATE — the VERIFIED, project-applicable framing-capacity
    *  document (truss drawing / mfr calc / stamped analysis) or null. */
   framingCapacityDocument: FramingCapacityDocumentEvidence | null;
@@ -250,6 +316,10 @@ export interface SnapshotAuthorityInputs {
    *  open-air branch grounding/bonding method for the EXACT selected equipment.
    *  build.ts:111-117 accepts it; nothing resolved it before this wiring. */
   groundingDocumentEvidence?: GroundingDocumentEvidence | null;
+  /** WS-2 — the Q-Cable field-termination authority socket (see build.ts).
+   *  Omitted ⇒ the archived accessor; explicit null ⇒ refused. */
+  qcableFieldTerminationAuthority?:
+    import('../enphaseFieldTerminationEvidence').EnphaseFieldTerminationAuthority | null;
   /** FRAMING path B — a digest-bound engineer review of the framing capacity.
    *  build.ts:92-93 accepts both; generatePermit never passed them. */
   framingEngineerReview?: FramingEngineerReviewEvidence | null;
@@ -300,6 +370,12 @@ export interface SnapshotAuthorityInputs {
    *  the AUTHORITATIVE verdict that was unreachable while all seven call sites
    *  passed `null`. Only a VERSION-EXACT archived document contributes facts. */
   documentRegistryFacts?: Record<string, import('@/lib/manufacturer-assets-db').DocumentRegistryFacts> | null;
+  /** D7 — registry document IDENTITIES, keyed `${category}:${equipmentId}`.
+   *  Facts alone were never enough: they told the build a hash existed without
+   *  telling it WHICH document owned the hash, so the static asset's identity
+   *  ended up carrying another document's custody. Identity travels with custody
+   *  from here on. */
+  documentRegistryIdentities?: Record<string, import('@/lib/permit/snapshot/documentAuthority').RegistryDocumentIdentity[]> | null;
   /** WS-8 — the rail-selection trace: which stores were probed, whether the rail
    *  is inherent in the mount product or genuinely unselected, and the
    *  span-screened candidate list that bounds the operator's remaining pick. */
@@ -321,6 +397,17 @@ export interface SnapshotAuthorityInputs {
   /** WS-9 — the digest-bound engineering-review coverage READ from migration
    *  116. The engine never writes it; a licensed reviewer does. */
   engineeringReview?: import('@/lib/engineeringReview/types').EngineeringReviewCoverage | null;
+
+  /** WS-5 — the ACTIVE field route measurements READ from migration 118, one
+   *  per route segment, already reduced to the deterministic selection. The
+   *  engine never writes it: an operator records, an authorised verifier
+   *  verifies, and this build only PROJECTS what they established.
+   *
+   *  Null is the honest seed — no field authority — and an unreadable store
+   *  produces a bundle whose `storeUnavailable` is true rather than an empty
+   *  one, because "we could not look" and "there is nothing" are different
+   *  facts even though both refuse to close a requirement. */
+  fieldRouteMeasurements?: import('@/lib/fieldMeasurement/resolver').FieldRouteMeasurementAuthority | null;
 
   /** AAC WS-1 — the lifecycle record: per-requirement resolution state + the
    *  full evidence trail. Optional so every existing construction site of this

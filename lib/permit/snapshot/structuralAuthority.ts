@@ -25,6 +25,7 @@ import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { classifyMountTopology } from '@/lib/mounting-hardware-db';
 import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
 import { buildRackingAssembly, type RackingCapacityDocumentEvidence } from './rackingAssembly';
+import type { AsceEditionAuthority, AsceEditionSource } from './asceAuthority';
 import { getManufacturerAsset, evaluateDocumentApplicability, type DocumentRegistryFacts } from '@/lib/manufacturer-assets-db';
 import {
   runSnapshotStructuralEngine, reconcileReactions, type FramingInputs,
@@ -79,7 +80,13 @@ export interface StructuralAuthorityCtx {
   environmentalAddressUsed?: string | null;
   environmentalCapturedAtIso?: string | null;
   meanRoofHeightFt: number | null;
-  asceEdition: string; asceSource: 'ahj-record' | 'pending-w4-ahj-authority' | 'default';
+  // D13 — the source names an authority that CAN supply an ASCE edition. The old
+  // union offered `'ahj-record'`, and the curated AHJ table carries no ASCE
+  // edition at all, so that value could only ever be a fabricated provenance.
+  asceEdition: string; asceSource: AsceEditionSource;
+  /** D13 — the whole decision (adopted vs computed edition, and any conflict),
+   *  so a consumer never has to re-derive which authority supplied the edition. */
+  asceAuthority?: AsceEditionAuthority | null;
   ahjRidgeSetbackIn: number | null;
   roofCovering: string | null;
   /** §6 — fence wind engine input (solar_fence systems only). When present the
@@ -180,6 +187,14 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
   const rackingAssembly = buildRackingAssembly(ctx.mountSystem, {
     capacityDocument: ctx.capacityDocument ?? null,
     projectJurisdiction: ctx.projectJurisdiction ?? null,
+    // D12 — the operator's pinned rail, already validated by `planRailPin`
+    // against the mount's own compatibility statement and span. The verdict is
+    // the ONE place a rail selection is decided; this is a projection of it, so
+    // the assembly record, the BOM and the DS rail page cannot disagree about
+    // which rail is specified.
+    pinnedRail: ctx.rackingAssemblySelection?.state === 'selected'
+      ? ctx.rackingAssemblySelection.pinned
+      : null,
   });
   // FRAMING-AUTHORITY GATE — the OBSERVED framing record + the verified CAPACITY
   // authority (or null). framingVerified is now driven by the CAPACITY AUTHORITY,
@@ -804,7 +819,16 @@ function buildEnv(ctx: StructuralAuthorityCtx, run: StructuralResultV4 | null): 
     componentCladdingZones: run?.wind.roofZone ? [String(run.wind.roofZone)] : [],
     upliftPressurePsf: run ? r3(run.wind.netUpliftPressurePsf) : null,
     downforcePressurePsf: run ? r3(run.wind.netDownwardPressurePsf) : null,
-    codeAuthority: { asceEdition: ctx.asceEdition, source: ctx.asceSource },
+    // D13 — projected from the single decision, never re-derived here.
+    codeAuthority: {
+      asceEdition: ctx.asceEdition, source: ctx.asceSource,
+      basis: ctx.asceAuthority?.basis ?? null,
+      ref: ctx.asceAuthority?.ref ?? null,
+      adoptedEdition: ctx.asceAuthority?.adoptedEdition ?? null,
+      computedEdition: ctx.asceAuthority?.computedEdition ?? null,
+      conflict: ctx.asceAuthority?.conflict ?? false,
+      conflictDetail: ctx.asceAuthority?.conflictDetail ?? null,
+    },
     environmentalLoadAuthority,
     provenance: PROV('wind/snow/exposure = canonical ENVIRONMENTAL LOAD AUTHORITY (basis + verification state); '
       + 'roof pressures from structural-engine-v4; ASCE edition via code-authority interface (AHJ population = W4)'),

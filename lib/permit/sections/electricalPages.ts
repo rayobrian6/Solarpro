@@ -14,10 +14,12 @@ import { getSnapshot, peekSnapshot } from '../snapshot/read';
 // §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
-import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, projectGroundingSegments, ampacityChainLines, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, projectGroundingSegments, ampacityChainLines, gradeVoltageDrop, voltageDropDisplayFields, voltageDropConclusionColor, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
 import { projectRackingBondingAuthority } from '../snapshot/rackingBonding';
 import { GROUNDING_PENDING_LABEL, GROUNDING_PENDING_BONDING_CELL_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { escapeH } from '../utils/drawing';
+// D6 — every project-facing date on a sheet resolves in the DOCUMENT's timezone.
+import { formatInDocumentTimezone, documentIssueContextOf } from '../utils/documentIssueContext';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
@@ -29,6 +31,9 @@ import { getEGCSize } from '@/lib/manufacturer-specs';
 // (single source) — no sheet-local NEC/ASCE year literal. Missing ⇒ PENDING.
 import { projectCodeAuthorityFromInput, PENDING_EDITION } from '../snapshot/codeAuthorityProjection';
 
+// CMDA — the ONLY correct inline font-family spelling (single-quoted names
+// nest safely inside a double-quoted style attribute).
+import { CSS_FONT_SANS_STACK, CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 // ═══════════════════════════════════════════════════════════════
 // INTERCONNECTION — resolved ONCE for the whole set.
 // ───────────────────────────────────────────────────────────────
@@ -173,8 +178,29 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         + `${x.lengthLabel ? `<br/><span style="color:#333">${x.lengthLabel}</span>` : ''}`
         + `${x.lengthObjectId ? `<br/><span class="mono" style="color:#888;font-size:5.5px">${x.lengthObjectId}</span>` : ''}`
         + `<br/><span style="color:#666">${s(x.verificationStatus)}</span></td>`
-      + `<td class="tr" style="font-size:6.5px">${x.voltageDropPct != null ? `${x.voltageDropPct.toFixed(2)}%` : '—'}<br/><span style="color:#666">≤${x.vdLimitPct}%</span></td>`
-      + `<td class="center" style="font-size:6.5px;overflow-wrap:anywhere;">${complianceBadge(x.compliance)}</td>`
+      // ── D5 (Planset 19) — TWO SEPARATE FACTS IN THE VOLTAGE-DROP CELL ──────
+      // CALCULATION = the canonical gradeVoltageDrop conclusion (the SAME object
+      // and wording PV-4B prints). LENGTH AUTHORITY = where the length came from
+      // and whether field verification is still open. This cell used to carry the
+      // percentage only, and the verdict position carried the release tri-state
+      // alone — so an open route requirement erased the voltage-drop conclusion
+      // and PV-4B.1 contradicted PV-4B on the identical 20 ft / 0.37% feeder.
+      + `<td class="tr" style="font-size:6.5px" data-vd-conclusion="${x.voltageDrop.conclusion}"`
+        + ` data-vd-length-authority="${escapeH(x.voltageDrop.lengthAuthorityLabel)}"`
+        + ` data-vd-field-verification-pending="${x.voltageDrop.fieldVerificationPending ? 'true' : 'false'}">`
+        + `${x.voltageDropPct != null ? `${x.voltageDropPct.toFixed(2)}%` : '—'}`
+        + `<span style="color:#666"> / ≤${x.vdLimitPct}%</span>`
+        + `<br/><span style="color:#555;font-size:5.5px">CALCULATION</span>`
+        + `<br/><span class="fw7" style="color:${voltageDropConclusionColor(x.voltageDrop.conclusion)}">`
+          + `${escapeH(voltageDropDisplayFields(x.voltageDrop).calculation)}</span>`
+        + `<br/><span style="color:#555;font-size:5.5px">LENGTH AUTHORITY</span>`
+        + `<br/><span style="color:${x.voltageDrop.fieldVerificationPending ? '#b45309' : '#127a3e'}">`
+          + `${escapeH(voltageDropDisplayFields(x.voltageDrop).lengthAuthority)}</span></td>`
+      // The RELEASE / review state — conductor-size holes, conduit fill, the NEC
+      // 705.11(C) tap rule AND the open field-verification requirement. It stays
+      // exactly as it was; it simply no longer stands in for the calculation.
+      + `<td class="center" style="font-size:6.5px;overflow-wrap:anywhere;">`
+        + `<span style="color:#555;font-size:5.5px">RELEASE / REVIEW</span><br/>${complianceBadge(x.compliance)}</td>`
       + `</tr>`;
   }).join('');
   return `
@@ -189,22 +215,35 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         <!-- .equip-table th is white-space:nowrap globally, which under fixed layout let
              the LENGTH header overrun the V-DROP header. These headers wrap instead. -->
         <thead><tr style="white-space:normal;">
-          <th style="width:20%;white-space:normal;">Section / From → To</th>
-          <th style="width:16%;white-space:normal;">Cable · Conductors · Bonding</th>
-          <th style="width:16%;white-space:normal;">Physical Raceway · Fill · Derate</th>
-          <th style="width:12%;white-space:normal;">Currents</th>
-          <th style="width:12%;white-space:normal;">Length (quantity · source) · Verify</th>
-          <th style="width:9%;white-space:normal;">V-Drop</th>
-          <th style="width:15%;white-space:normal;">Compliance</th>
+          <th style="width:18%;white-space:normal;">Section / From → To</th>
+          <th style="width:15%;white-space:normal;">Cable · Conductors · Bonding</th>
+          <th style="width:15%;white-space:normal;">Physical Raceway · Fill · Derate</th>
+          <th style="width:11%;white-space:normal;">Currents</th>
+          <th style="width:11%;white-space:normal;">Length (quantity · source) · Verify</th>
+          ${''/* D5 — widened: this cell now carries the CALCULATION grade and the
+                LENGTH AUTHORITY as two separate labelled facts, not a bare %. */}
+          <th style="width:17%;white-space:normal;">V-Drop · Calculation · Length Authority</th>
+          <th style="width:13%;white-space:normal;">Release / Review</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fafafa;">
         Each row is a DISTINCT canonical physical section — the open-air Enphase Q Cable branch trunks (NEC 690.31(C)),
         the shared jbox→combiner home-run raceway (conductor count = its physical-raceway current-carrying inventory),
-        the combiner feeder, and the supply-side tap conductors — never merged. Compliance is the shared tri-state
-        authority: no section shows PASS while its route length is an estimate, its conduit fill is uncomputed, or the
-        NEC 705.11(C) ≤10-ft tap rule is unmeasured.
+        the combiner feeder, and the supply-side tap conductors — never merged.
+        <br/><strong>Two independent verdicts per row.</strong> <em>Calculation</em> is the canonical voltage-drop
+        conclusion — the SAME graded object sheet PV-4B prints, at the grade of the length it was computed from
+        ${''/* the enum is named in CODE form, not in verdict form: a legend that
+             spelled the verdicts out would put the words "VERIFIED PASS" on a
+             package that has verified nothing, which is the exact reading error
+             this sheet family exists to prevent. */}
+        (<span class="mono">VERIFIED_PASS</span> / <span class="mono">PROVISIONAL_PASS</span> /
+        <span class="mono">FAIL</span> / <span class="mono">INDETERMINATE</span>). <em>Length authority</em> names where that length
+        came from and whether field verification is still open. <em>Release / review</em> is the shared tri-state
+        authority covering conductor-size holes, conduit fill, the NEC 705.11(C) ≤10-ft tap rule <em>and</em> the open
+        field-verification requirement: no section shows PASS while its route length is an estimate, its conduit fill is
+        uncomputed, or the tap rule is unmeasured. An open review item never replaces the calculation conclusion, and an
+        estimate-grade input never softens a result that exceeds its criterion.
         <br/><strong>Length quantities:</strong> the Q-Cable branch rows print the <em>cable path (geometry)</em> —
         the designed-installed trunk path (Σ inter-module + lead-in) traced to each <span class="mono">QCABLE-ASSEMBLY:Bn</span>
         object; the home-run / feeder / disconnect rows print the <em>route (one-way)</em> estimate traced to their run
@@ -484,10 +523,10 @@ function pv4aBranchRatingTable(
     return `<tr style="background:${i % 2 ? '#f5f5f5' : '#fff'}">`
       + `<td class="fw9 mono">B${b.index}</td>`
       + `<td>${b.deviceCount} × microinverter</td>`
-      + `<td style="text-align:right;font-family:monospace">${b.branchCurrentA.toFixed(1)} A</td>`
-      + `<td style="text-align:right;font-family:monospace">${b.continuousA.toFixed(1)} A</td>`
-      + `<td style="text-align:center;font-family:monospace">${b.ocpdAmps} A</td>`
-      + `<td style="text-align:center;font-family:monospace">${mfrLimit > 0 ? `${mfrLimit} · ${mfrOcpdLimit}A` : '—'}</td>`
+      + `<td style="text-align:right;font-family:${CSS_FONT_MONO_STACK}">${b.branchCurrentA.toFixed(1)} A</td>`
+      + `<td style="text-align:right;font-family:${CSS_FONT_MONO_STACK}">${b.continuousA.toFixed(1)} A</td>`
+      + `<td style="text-align:center;font-family:${CSS_FONT_MONO_STACK}">${b.ocpdAmps} A</td>`
+      + `<td style="text-align:center;font-family:${CSS_FONT_MONO_STACK}">${mfrLimit > 0 ? `${mfrLimit} · ${mfrOcpdLimit}A` : '—'}</td>`
       + `<td class="center">${complianceBadge(compliance)}</td>`
       + `</tr>`;
   }).join('');
@@ -719,11 +758,11 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
               `<tr style="background:${i % 2 ? '#f5f5f5' : '#fff'}">` +
               `<td class="fw9 mono">${s.label}</td>` +
               `<td>DC string</td>` +
-              `<td style="text-align:right;font-family:monospace">${s.ampacityA != null ? s.ampacityA.toFixed(2) + ' A' : '—'}</td>` +
-              `<td style="text-align:center;font-family:monospace">${s.ocpdAmps != null ? s.ocpdAmps + ' A' : '—'}</td>` +
+              `<td style="text-align:right;font-family:${CSS_FONT_MONO_STACK}">${s.ampacityA != null ? s.ampacityA.toFixed(2) + ' A' : '—'}</td>` +
+              `<td style="text-align:center;font-family:${CSS_FONT_MONO_STACK}">${s.ocpdAmps != null ? s.ocpdAmps + ' A' : '—'}</td>` +
               `<td>${s.wireGauge} USE-2/PV Wire</td>` +
-              `<td style="text-align:right;font-family:monospace">${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>` +
-              `<td style="text-align:right;font-family:monospace">${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>` +
+              `<td style="text-align:right;font-family:${CSS_FONT_MONO_STACK}">${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>` +
+              `<td style="text-align:right;font-family:${CSS_FONT_MONO_STACK}">${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>` +
               `</tr>`).join('');
             return `
       <div class="section-title">DC String Schedule — ${subSectionLabel(sub)} — NEC 690.8(A)</div>
@@ -806,7 +845,11 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
             <td style="color:#000;font-weight:bold">${o.overrideValue}</td>
             <td>${o.justification}</td>
             <td>${o.engineer}</td>
-            <td>${new Date(o.timestamp).toLocaleDateString()}</td>
+            ${''/* D6 — the override timestamps are stored in UTC
+                 (siteSurvey/permitIntegration.ts). Formatting them with a bare
+                 toLocaleDateString() rendered a UTC instant in the HOST's zone —
+                 a second, independent day-shift stacked on the issue-date one. */}
+            <td>${escapeH(formatInDocumentTimezone(o.timestamp, documentIssueContextOf(input)))}</td>
           </tr>`).join('')}
         </tbody>
       </table>` : ''}
@@ -841,6 +884,15 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
     ? (_rwDesc.entries[0].tradeSizeIn ? `${_rwDesc.entries[0].racewayType} ${_rwDesc.entries[0].tradeSizeIn}` : _rwDesc.entries[0].racewayType)
     : (project.conduitType ? project.conduitType : 'PENDING');
   const _feedCallout = _feed.conductorCallout ?? 'PENDING — feeder conductor authority incomplete';
+  // WS-5 — ONE graded conclusion, derived from the canonical feeder segment's
+  // own length authority. Renderers must not re-decide this.
+  const _vdSeg = (_snap?.electrical?.routeSegments ?? []).find(x => x.segmentId === _feed.segment?.segmentId);
+  const _vdGrade = gradeVoltageDrop({
+    pct: _feed.voltageDropPct,
+    lengthFt: _vdSeg?.calculationLengthFt ?? _feed.oneWayFt,
+    lengthSource: _vdSeg?.lengthSource ?? null,
+    verificationState: _vdSeg?.verificationState ?? _vdSeg?.verificationStatus ?? null,
+  });
   const _feedConduit = _feed.conduitLabel ?? 'PENDING';
   // W4 §2/§11 (V11): NEC/ASCE editions on this sheet project from the ONE
   // snapshot codeAuthority record — no sheet-local 'ASCE 7-22' literal.
@@ -1078,14 +1130,26 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         // deficits with their own operands — renders on PV-4B.1. The retired line
         // paired the AGGREGATE operands with the PER-BRANCH deficit, so the
         // subtraction it displayed did not evaluate to the number it printed.
-        const _insuffBlock = _short
-          ? ` <strong style="color:#b00">⚠ QCABLE-PROCUREMENT-INSUFFICIENT (BLOCKING):</strong>`
-            + `<span style="color:#b00"> short by <span class="mono">${_ps!.deficitFt} ft</span> on the`
-            + ` ${_ps!.deficitBasis === 'topology-constrained' ? 'PER-BRANCH (governing)' : 'aggregate-footage'} basis;`
-            + ` min. additional purchase <span class="mono">${_ps!.requiredAdditionalPurchasableLengthFt} ft</span>.`
-            + ` Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE QUANTITY only — NON-ORDERABLE / PENDING a VERIFIED listed extension.`
-            + ` Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. Full derivation: PV-4B.1.</span>`
-          : '';
+        // WS-2 — when the procurement RESOLUTION is verified this states the
+        // ORDER (packages), not a pending shortfall, and it never prints the
+        // installed requirement as a purchase quantity.
+        const _qpInline = _snap?.electrical?.qcableProcurement ?? null;
+        const _qpOk = _qpInline?.present === true && _qpInline.compatibilityStatus === 'VERIFIED';
+        const _insuffBlock = _qpOk
+          ? ` <strong>Q-CABLE PROCUREMENT:</strong>`
+            + ` installed additional requirement <span class="mono">${_qpInline!.topologyConstrainedInstalledDeficitFt} ft</span>`
+            + ` on the PER-BRANCH (governing) basis — an installed length, not an order quantity.`
+            + ` ORDER <span class="mono">${_qpInline!.stockUnitsRequired ?? '—'} × ${_qpInline!.stockUnitDescription ?? _qpInline!.selectedStockSku ?? '—'}</span>`
+            + ` (${_qpInline!.totalSectionsRequired} section(s); remaining stock`
+            + ` <span class="mono">${_qpInline!.expectedRemainingStockFt ?? '—'} ft</span>). Full derivation: PV-4B.1.`
+          : _short
+            ? ` <strong style="color:#b00">⚠ QCABLE-PROCUREMENT-INSUFFICIENT (BLOCKING):</strong>`
+              + `<span style="color:#b00"> short by <span class="mono">${_ps!.deficitFt} ft</span> on the`
+              + ` ${_ps!.deficitBasis === 'topology-constrained' ? 'PER-BRANCH (governing)' : 'aggregate-footage'} basis;`
+              + ` min. additional INSTALLED length <span class="mono">${_ps!.requiredAdditionalPurchasableLengthFt} ft</span>.`
+              + ` Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE QUANTITY only — NON-ORDERABLE / PENDING a VERIFIED listed extension.`
+              + ` Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. Full derivation: PV-4B.1.</span>`
+            : '';
         // Compact one-line authority + reconciliation note (the per-branch designed
         // lengths already print in the branch rows; the full per-branch math lives on
         // E-1's sectioned schedule + the evidence artifact). Keeps PV-4B page-fit.
@@ -1123,7 +1187,20 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <td class="tr mono">${_feed.voltageDropPct != null ? (_feed.voltageDropPct * 240 / 100).toFixed(2) + 'V' : 'PENDING'}</td>
             <td class="tr mono fw7" style="color:${(_feed.voltageDropPct || 0) > 3 ? '#cc0000' : '#000'}">${_feedVdTxt}</td>
             <td class="tr">≤ 3.0%</td>
-            <td class="center fw7" style="color:${_feed.voltageDropPct == null ? '#cc6600' : ((_feed.voltageDropPct || 0) > 3 ? '#cc0000' : '#000')}">${_feed.voltageDropPct == null ? 'PENDING' : ((_feed.voltageDropPct || 0) <= 3 ? '✓ PASS' : '✗ REVIEW')}</td>
+            ${''/* WS-5 — the conclusion carries its INPUT AUTHORITY. This printed an
+                 unqualified checkmark for a result computed from a CAD estimate,
+                 stating a provisional finding at the grade of a measured one.
+                 D5 (Planset 19) — the LENGTH AUTHORITY is now printed as its OWN
+                 fact beneath the conclusion, using the same shared projection
+                 PV-4B.1 renders, so neither sheet can imply the other's state. */}
+            <td class="center" data-vd-conclusion="${_vdGrade.conclusion}"
+                data-vd-length-authority="${escapeH(_vdGrade.lengthAuthorityLabel)}"
+                data-vd-field-verification-pending="${_vdGrade.fieldVerificationPending ? 'true' : 'false'}">
+              <span style="color:#555;font-size:5.5px">CALCULATION</span><br/>
+              <span class="fw7" style="color:${voltageDropConclusionColor(_vdGrade.conclusion)}">${_vdGrade.label}</span><br/>
+              <span style="color:#555;font-size:5.5px">LENGTH AUTHORITY</span><br/>
+              <span style="font-size:6px;color:${_vdGrade.fieldVerificationPending ? '#b45309' : '#127a3e'}">${escapeH(voltageDropDisplayFields(_vdGrade).lengthAuthority)}</span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -1131,6 +1208,14 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         <strong>VOLTAGE DROP INTERPRETATION:</strong>
         AC feeder Vd = ${_feedVdTxt} over ${_feedLenTxt} of ${_feedCallout} Cu${_feed.currentA != null ? ` at the PV operating current ${_feed.currentA.toFixed(1)} A (OCPD ${_ic.feederOcpd || '—'} A is not the Vd load current)` : ''}. NEC 210.19(A) IN recommends ≤3% feeder / ≤5% total.
         ${_feed.voltageDropPct == null ? 'Feeder Vd pending conductor authority — resolve before submission.' : ((_feed.voltageDropPct || 0) <= 3 ? 'Within limits — no upsizing required.' : 'Exceeds 3% — upsize conductors or reduce run length.')}
+        ${''/* D5 — the CALCULATION GRADE and the LENGTH AUTHORITY stated as two
+             labelled facts, never one badge. Deliberately ONE dense line: this
+             sheet has zero printable slack (pagefit W9 — the first draft of this
+             block overflowed the box by 10.6 px), and the full reading of the two
+             states is carried by PV-4B.1's schedule footnote. */}
+        <br/><strong>CALCULATION:</strong> ${escapeH(voltageDropDisplayFields(_vdGrade).calculation)} &middot;
+        <strong>LENGTH AUTHORITY:</strong> ${escapeH(voltageDropDisplayFields(_vdGrade).lengthAuthority)} &middot;
+        an open field requirement is a RELEASE state and never changes this conclusion (per-section grades: PV-4B.1).
       </div>
       ${''/* Formula-tutorial box removed — code-book pedagogy that displaced
            project content on the fixed sheet; the calc row + interpretation
@@ -1303,7 +1388,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
       <div class="section-title">Grounding & Bonding Detail — NEC 690.43, 250.166</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:2px;align-items:center;">
         <div style="text-align:center;">
-          <svg viewBox="0 0 300 198" width="128" height="84" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
+          <svg viewBox="0 0 300 198" width="128" height="84" style="display:block;margin:0 auto;font-family:${CSS_FONT_SANS_STACK};">
             <!-- PV module frames (aluminum, white with inner frame line) -->
             <g stroke="#1a2230" stroke-width="1.1" fill="#ffffff">
               <rect x="22" y="14" width="66" height="34" rx="1"/>
@@ -1657,18 +1742,35 @@ function renderQCableProcurementDerivation(
       + `<td class="tr" style="color:${sur > 0 ? '#b45309' : '#333'}">${sur > 0 ? `${sur} ft (non-redistributable)` : '—'}</td>`
       + `</tr>`;
   }).join('');
+  // WS-2 — ONE per-branch table. The sufficiency derivation and the procurement
+  // resolution carried the same six per-branch facts in two stacked tables, which
+  // overflowed this sheet's printable box by 164 px (pagefit W9). The allocation
+  // is now a COLUMN on the measurement it answers, which is also how it reads.
+  const _qpT = snap?.electrical?.qcableProcurement ?? null;
+  const _allocOf = (branchId: string) =>
+    _qpT?.branchAllocations.find(a => a.branchId === branchId) ?? null;
+  const rowsWithAllocation = (ps.perBranch ?? []).map((p, i) => {
+    const a = _allocOf(p.branchId);
+    const cell = a && a.allocatedSections > 0
+      ? `${a.allocatedSections} × section = ${a.allocatedNewUsableLengthFt} ft`
+      : '—';
+    return rows.split('</tr>')[i] !== undefined
+      ? `${rows.split('</tr>')[i]}<td class="tr mono">${cell}</td></tr>`
+      : '';
+  }).join('');
   return `
     <div style="margin:6px 12px 10px;">
-      <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">Q-CABLE PROCUREMENT SUFFICIENCY — PER-BRANCH DERIVATION (GOVERNING BASIS: ${String(ps.deficitBasis ?? 'none').toUpperCase()})</div>
+      <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">Q-CABLE PROCUREMENT — PER-BRANCH DERIVATION &amp; ALLOCATION (GOVERNING BASIS: ${String(ps.deficitBasis ?? 'none').toUpperCase()})</div>
       <table class="equip-table" style="width:100%;table-layout:fixed;">
         <thead><tr style="white-space:normal;">
-          <th style="width:10%;">Branch</th><th style="width:10%;">Drops</th>
-          <th style="width:20%;">Required installed length (cable path)</th>
-          <th style="width:20%;">Usable allocated cable (drops × pitch × waste)</th>
-          <th style="width:20%;">Branch deficit</th>
-          <th style="width:20%;">Surplus on this branch</th>
+          <th style="width:8%;">Branch</th><th style="width:8%;">Drops</th>
+          <th style="width:17%;">Required installed length (cable path)</th>
+          <th style="width:17%;">Usable allocated cable (drops × pitch × waste)</th>
+          <th style="width:16%;">Branch deficit</th>
+          <th style="width:17%;">Surplus on this branch</th>
+          <th style="width:17%;">New cable allocated</th>
         </tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rowsWithAllocation}</tbody>
       </table>
       <div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fafafa;line-height:1.3;">
         ${ps.deficitArithmeticNote
@@ -1678,9 +1780,46 @@ function renderQCableProcurementDerivation(
         between branches. The AGGREGATE FOOTAGE deficit is the pure subtraction (designed + allowance − procured); the
         TOPOLOGY-CONSTRAINED deficit is Σ of the individual branch shortfalls. When a non-short branch holds surplus,
         the topology figure is the larger and GOVERNING one — an aggregate total can never demonstrate branch
-        sufficiency. <strong>Minimum additional purchasable length: ${n(ps.requiredAdditionalPurchasableLengthFt)} ft</strong>
-        (a verified listed cable-extension solution, or a documented re-branching of the affected runs, is required —
-        speculative jumpers do not clear this).
+        sufficiency.
+      </div>
+      ${_qcableProcurementBlock(snap)}
+    </div>`;
+}
+
+/** WS-2 — the PROCUREMENT RESOLUTION block on PV-4B.1: the per-branch allocation,
+ *  the purchase in the manufacturer's own package unit, the remainder and the
+ *  accessories. Every value is PROJECTED from `electrical.qcableProcurement`; this
+ *  renderer computes nothing. Absent resolution ⇒ the honest pending sentence. */
+function _qcableProcurementBlock(
+  snap: import('../snapshot/types').PermitDesignSnapshot | null | undefined,
+): string {
+  const qp = snap?.electrical?.qcableProcurement ?? null;
+  if (!qp?.present) {
+    return `<div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fff7ed;line-height:1.3;">
+      <strong>PROCUREMENT RESOLUTION:</strong> NOT ESTABLISHED — a verified listed cable-extension solution, or a
+      documented re-branching of the affected runs, is required; speculative jumpers do not clear this.</div>`;
+  }
+  // PV-4B.1 has roughly one line of printable slack. The resolution therefore
+  // renders as ONE allocation table + TWO dense summary lines — an accessory
+  // TABLE and a per-candidate rejection block overflowed the printable box by
+  // 164 px (pagefit W9). Nothing is dropped: every accessory and its quantity is
+  // stated inline, and the full objects are on the snapshot + the review record.
+  const accLine = qp.accessories
+    .reduce((m: Map<string, number>, a) => m.set(a.sku, (m.get(a.sku) ?? 0) + a.quantity), new Map<string, number>());
+  const acc = [...accLine].map(([sku, q]) => `${escapeH(sku)} × ${q}`).join(' &middot; ');
+  // SKU + the one-clause reason only; the full basis is on the snapshot object
+  // and the review record (this sheet has ~0.6in of slack — pagefit W9).
+  const rejected = qp.rejectedStockCandidates
+    .map(rj => `${escapeH(rj.sku)} NOT USED — no archived manufacturer document names it`).join('; ');
+  return `
+    <div style="margin-top:4px;">
+      <div style="background:#000;color:#fff;font-weight:900;font-size:7.5px;letter-spacing:0.7px;padding:2px 6px;">Q-CABLE PROCUREMENT RESOLUTION — INSTALLED vs PURCHASED (${escapeH(qp.compatibilityStatus)})</div>
+      <div style="border:var(--border);border-top:none;padding:1px 6px;font-size:6.2px;color:#333;background:#f2f8f2;line-height:1.2;">
+        <strong>INSTALLED (governing, per-branch): ${qp.topologyConstrainedInstalledDeficitFt} ft</strong> — an installed length, <strong>not</strong> an order quantity &middot;
+        <strong>ORDER: ${qp.stockUnitsRequired ?? '—'} × ${escapeH(qp.stockUnitDescription ?? qp.selectedStockSku ?? '—')}</strong>
+        = ${qp.totalSectionsRequired} section(s) (${qp.baseSectionsOrdered} base + ${qp.additionalSectionsRequired} allocated${qp.additionalStockUnitsRequired === 0 ? ', no extra package' : `, +${qp.additionalStockUnitsRequired} package(s)`}),
+        ${qp.totalStockPurchasedFt ?? '—'} ft purchased, remaining <strong>${qp.expectedRemainingStockFt ?? '—'} ft</strong> &middot;
+        <strong>Accessories:</strong> ${acc || '—'} &middot; <strong>Method:</strong> cut listed cable + IQ Field Wireable Connector pair per ${escapeH(qp.evidenceIds[0] ?? 'the archived manual')}${rejected ? ` &middot; ${rejected}` : ''}
       </div>
     </div>`;
 }

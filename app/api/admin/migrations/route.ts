@@ -51,6 +51,8 @@ import {
 } from '@/lib/migrations/governedTotpAction';
 import {
   REGISTRY_DEPLOYMENT,
+  verifyColumnsState,
+  verifyIndexesState,
   analyzeRegistryMigration,
   verifyTablesState,
 } from '@/lib/migrations/targetedRegistryDeployment';
@@ -245,6 +247,10 @@ export async function POST(req: NextRequest) {
     'execute-personnel-115',    // mutation: TARGETED deployment of ONLY migration 115 (personnel roles of record — AAC WS-6)
     'execute-engineering-review-116', // mutation: TARGETED deployment of ONLY migration 116 (digest-bound engineering review — AAC WS-8/WS-9)
     'execute-ahj-registry-117', // mutation: TARGETED deployment of ONLY migration 117 (SolarPro's own central AHJ / adopted-code registry — TAC WS-19)
+    'execute-field-measurements-118', // mutation: TARGETED deployment of ONLY migration 118 (field route measurements + their atomic domain audit — WS-5)
+    'execute-document-jurisdiction-119', // mutation: TARGETED deployment of ONLY migration 119 (jurisdiction_authority_id on manufacturer_document_registry — D4). The first ADD-COLUMN target.
+    'execute-audit-org-context-107', // mutation: TARGETED deployment of ONLY migration 107 (org-context columns on audit_log — ADR-013 T-08). Repairs the durable audit path itself.
+    'execute-audit-chain-closure-120', // mutation: TARGETED deployment of ONLY migration 120 (unique successor index on audit_log). Makes a concurrent chain fork impossible. The first INDEX-ONLY target.
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -321,8 +327,27 @@ export async function POST(req: NextRequest) {
   // adopted-code registry. Same pure additive CREATE-TABLE-only shape, through
   // the same static gate and the same identifier-scoped permit.
   const isAhjRegistry117 = action === 'execute-ahj-registry-117';
+  // WS-5 — migration 118 (field_route_measurements + field_route_measurement_events):
+  // the field-measurement record and its ATOMIC domain audit. Same pure additive
+  // CREATE-TABLE-only shape, same static gate, same identifier-scoped permit.
+  const isFieldMeasurements118 = action === 'execute-field-measurements-118';
+  // D4 — migration 119 (jurisdiction_authority_id on manufacturer_document_registry):
+  // the FIRST targeted deployment that is not a CREATE TABLE. It adds one nullable
+  // column and one partial index, both IF NOT EXISTS, writes no row and refuses to
+  // backfill. It goes through the SAME permit and the SAME runner; only the static
+  // gate and the present/absent check differ, because a column is not a table.
+  const isDocumentJurisdiction119 = action === 'execute-document-jurisdiction-119';
+  // ADR-013 T-08 — migration 107 (org-context columns on audit_log). The audit
+  // path's OWN repair: until it runs, this handler's governance events cannot be
+  // durably recorded, which is why 113's and 119's are missing.
+  const isAuditOrgContext107 = action === 'execute-audit-org-context-107';
+  // Audit chain closure — migration 120 (unique successor index). Index-only:
+  // it reads and writes no row, and makes a sibling fork impossible at the
+  // storage layer. Requires 107.
+  const isAuditChainClosure120 = action === 'execute-audit-chain-closure-120';
   const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115
-    || isEngineeringReview116 || isAhjRegistry117;
+    || isEngineeringReview116 || isAhjRegistry117 || isFieldMeasurements118 || isDocumentJurisdiction119
+    || isAuditOrgContext107 || isAuditChainClosure120;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
@@ -626,11 +651,15 @@ export async function POST(req: NextRequest) {
       // is ignored). It NEVER runs any other migration, never "all pending", and
       // never marks the historical baseline verified. Idempotent: if the
       // table(s) already exist it is a safe no-op.
-      const identifier = isRegistry113 ? '113'
+      const identifier = isAuditOrgContext107 ? '107'
+        : isAuditChainClosure120 ? '120'
+        : isRegistry113 ? '113'
         : isReconciliation114 ? '114'
         : isPersonnel115 ? '115'
         : isEngineeringReview116 ? '116'
-        : '117';
+        : isAhjRegistry117 ? '117'
+        : isFieldMeasurements118 ? '118'
+        : '119';
       const spec = REGISTRY_DEPLOYMENT[identifier];
       const reason = (body?.reason as string | undefined)?.trim();
       if (!reason) {
@@ -650,30 +679,69 @@ export async function POST(req: NextRequest) {
       }
       const sql = readFileSync(file.fullPath, 'utf8');
 
-      // Static analysis: idempotent CREATE-TABLE-only, non-destructive, creates
-      // exactly the expected table(s).
-      const shape = analyzeRegistryMigration(identifier, sql, spec.expectedTables);
+      // Static analysis. Two narrow shapes: idempotent CREATE-TABLE-only creating
+      // exactly the expected table(s), OR (119 onward) idempotent ADD-COLUMN
+      // adding exactly the expected column(s) to a table another allowlisted
+      // migration deployed, with no default and no constraint. Both refuse every
+      // destructive, mutating and row-seeding token.
+      const isColumnShape = (spec.expectedColumns?.length ?? 0) > 0;
+      const isIndexShape = (spec.expectedIndexes?.length ?? 0) > 0;
+      const shape = analyzeRegistryMigration(identifier, sql, spec.expectedTables, spec.expectedColumns, undefined, spec.altersPreexistingTables, spec.expectedIndexes);
       if (!shape.ok) {
         return NextResponse.json({ success: false, action, error: `Static verification failed: ${shape.problems.join(' ')}`, verification: shape, correlationId }, { status: 409 });
       }
 
-      // Read-only table state before.
-      const before = await verifyTablesState(spec.expectedTables);
+      // Read-only state before, normalised across the two shapes so the rest of
+      // this handler — permit, dry-run, run, ledger read-back, relock — is
+      // identical for both.
+      const readState = async (): Promise<{ allPresent: boolean; present: string[]; absent: string[]; missingTables: string[] }> => {
+        if (isIndexShape) {
+          const i = await verifyIndexesState(spec.expectedIndexes!);
+          return { allPresent: i.allPresent, present: i.presentIndexes, absent: i.absentIndexes, missingTables: i.missingTables };
+        }
+        if (isColumnShape) {
+          const c = await verifyColumnsState(spec.expectedColumns!);
+          return { allPresent: c.allPresent, present: c.presentColumns, absent: c.absentColumns, missingTables: c.missingTables };
+        }
+        const t = await verifyTablesState(spec.expectedTables);
+        return { allPresent: t.allPresent, present: t.presentTables, absent: t.absentTables, missingTables: [] };
+      };
+      const before = await readState();
+
+      // A column whose TABLE does not exist is a PREREQUISITE failure, not a
+      // migration failure: running this would error, and the operator needs to
+      // be told which migration to run first rather than shown a SQL error.
+      if ((isColumnShape || isIndexShape) && before.missingTables.length > 0) {
+        return NextResponse.json({
+          success: false, action, identifier,
+          error: `Migration ${identifier} adds a column to ${before.missingTables.join(', ')}, which does not exist yet. `
+            + 'Run the migration that creates it first (113 creates manufacturer_document_registry; audit_log is migration 100).',
+          verification: shape, correlationId,
+        }, { status: 409 });
+      }
+
       const verification = {
+        shape: shape.kind,
         idempotent: shape.idempotent,
         nonDestructive: shape.nonDestructive,
         expectedTables: spec.expectedTables,
         createdTables: shape.createdTables,
         tablesMatchExpected: shape.tablesMatchExpected,
-        tablesPresentBefore: before.presentTables,
-        tablesAbsentBefore: before.absentTables,
+        expectedColumns: shape.expectedColumns,
+        addedColumns: shape.addedColumns,
+        columnsMatchExpected: shape.columnsMatchExpected,
+        expectedIndexes: shape.expectedIndexes,
+        createdIndexes: shape.createdIndexes,
+        indexesMatchExpected: shape.indexesMatchExpected,
+        tablesPresentBefore: before.present,
+        tablesAbsentBefore: before.absent,
       };
 
       // Idempotent short-circuit: if ALL expected tables already exist, the
       // migration is effectively applied — do nothing (never re-run).
       if (before.allPresent) {
         logGov(`registry-${identifier} tables already present — no-op`, {});
-        emitAuditEvent({ type: 'migration.migration.skipped', actorType: 'human', actorId: adminUser.id, environment: env, executionId: null, migrationIdentifier: identifier, filename: file.filename, details: { targetedRegistryDeployment: true, reason, note: 'expected table(s) already present (idempotent no-op)', correlationId } });
+        emitAuditEvent({ type: 'migration.migration.skipped', actorType: 'human', actorId: adminUser.id, environment: env, executionId: null, migrationIdentifier: identifier, filename: file.filename, details: { targetedRegistryDeployment: true, reason, note: isColumnShape ? 'expected column(s) already present (idempotent no-op)' : 'expected table(s) already present (idempotent no-op)', correlationId } });
         return NextResponse.json({
           success: true, action, identifier, alreadyApplied: true,
           scope: 'Targeted authority-registry deployment only. Historical baseline remains incomplete.',
@@ -697,7 +765,7 @@ export async function POST(req: NextRequest) {
       const runHistory = await readMigrationRunHistory(identifier, 5).catch(() => []);
       const appliedInLedger = ledgerRow?.status === 'applied';
       const appliedRun = runHistory.some((r) => r.status === 'applied' && r.execution_id === execution.executionId);
-      const after = await verifyTablesState(spec.expectedTables);
+      const after = await readState();
       const verifiedSuccess = appliedInLedger && appliedRun && after.allPresent;
 
       // Automatic relock: the permit is single-use and consumed, and the global
@@ -715,7 +783,7 @@ export async function POST(req: NextRequest) {
         type: verifiedSuccess ? 'migration.run.completed' : 'migration.run.failed',
         actorType: 'human', actorId: adminUser.id, environment: env,
         executionId: execution.executionId, migrationIdentifier: identifier, filename: file.filename,
-        details: { targetedRegistryDeployment: true, reason, checksum: file.checksumSha256, verification: { ...verification, tablesPresentAfter: after.presentTables }, ledgerStatus: ledgerRow?.status ?? null, verifiedSuccess, relocked, lifecycleAfter, baselineVerified: false, correlationId },
+        details: { targetedRegistryDeployment: true, reason, checksum: file.checksumSha256, verification: { ...verification, tablesPresentAfter: after.present }, ledgerStatus: ledgerRow?.status ?? null, verifiedSuccess, relocked, lifecycleAfter, baselineVerified: false, correlationId },
       });
       logGov(verifiedSuccess ? `registry-${identifier} applied` : `registry-${identifier} failed`, { ledgerStatus: ledgerRow?.status ?? null, relocked });
 
@@ -726,7 +794,7 @@ export async function POST(req: NextRequest) {
         scope: 'Targeted authority-registry deployment only. Historical baseline remains incomplete.',
         verifiedFrom: 'ledger+run_history+tables',
         checksum: file.checksumSha256,
-        verification: { ...verification, tablesPresentAfter: after.presentTables, tablesAbsentAfter: after.absentTables },
+        verification: { ...verification, tablesPresentAfter: after.present, tablesAbsentAfter: after.absent },
         dryRun: { status: dryRunResult.status, errorCode: dryRunResult.errorCode },
         execution: { status: execution.status, executionId: execution.executionId, durationMs: execution.durationMs, errorCode: execution.errorCode, errorSummary: execution.errorSummary },
         ledger: ledgerRow ? { status: ledgerRow.status, appliedAt: ledgerRow.applied_at, executionId: ledgerRow.execution_id } : null,

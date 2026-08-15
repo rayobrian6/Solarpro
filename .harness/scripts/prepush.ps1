@@ -32,21 +32,24 @@ Write-Host "=== Solarpro agent pre-push ===" -ForegroundColor Cyan
 Write-Host "Repo: $(Get-Location)"
 Write-Host ""
 
-# 1. Branch guard (R7 - JAMES 2026-07-13): only james-dev is a legal push
-#    target. Master is still banned by R1. Other branches fail closed unless
-#    SOLARPRO_PUSH_OVERRIDE=1 is set in the environment (per-push JAMES
-#    standing green light for a specific non-james-dev ref).
+# 1. Branch guard (R7 - JAMES 2026-07-13; amended by Ray 2026-08-01): both
+#    'dev' and 'james-dev' are legal push targets. 'dev' is the integration
+#    branch that the Vercel solarpro-dev project auto-deploys from and remains
+#    Ray's default working branch; 'james-dev' is where agent work lands before
+#    integration. Master is still banned by R1. Other branches fail closed
+#    unless SOLARPRO_PUSH_OVERRIDE=1 is set in the environment (per-push JAMES
+#    standing green light for a specific ref).
 $branch = git branch --show-current
 $SOLARPRO_PUSH_OVERRIDE = $env:SOLARPRO_PUSH_OVERRIDE -eq '1'
 
 if ($branch -eq 'master') {
     Check-Fail "on branch: master (forbidden per AGENTS.md R1 - refusing to push)"
-} elseif ($branch -eq 'james-dev') {
-    Check-Ok "on branch: $branch (R7: only legal push target)"
+} elseif ($branch -eq 'dev' -or $branch -eq 'james-dev') {
+    Check-Ok "on branch: $branch (R7: legal push target)"
 } elseif ($SOLARPRO_PUSH_OVERRIDE) {
     Check-Warn "on branch: $branch (R7 violation, but SOLARPRO_PUSH_OVERRIDE=1 is set - proceeding with caution)"
 } else {
-    Check-Fail "on branch: $branch (R7: only 'james-dev' is a legal push target. To override for a per-push JAMES green light, set SOLARPRO_PUSH_OVERRIDE=1.)"
+    Check-Fail "on branch: $branch (R7: only 'dev' and 'james-dev' are legal push targets. To override for a per-push JAMES green light, set SOLARPRO_PUSH_OVERRIDE=1.)"
 }
 
 # 2. Commit message format — Conventional Commits (must be parsed before R6)

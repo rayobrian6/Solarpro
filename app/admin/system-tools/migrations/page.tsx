@@ -238,12 +238,13 @@ export default function MigrationConsolePage() {
       {/* Targeted authority-registry deployment (current priority) — migrations 113 + 114 */}
       <section className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-4">
         <div className="flex items-center gap-3 mb-1">
-          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 → 117</h2>
+          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 → 118</h2>
           <Pill ok={null}>SCOPED</Pill>
         </div>
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm font-semibold px-3 py-2 mb-3">
-          Run <b>113 first</b>, verify it applied, <b>then 114</b>, <b>then 115</b>, <b>then 116</b>. <b>117 is independent</b> —
-          it may be run at any time, before or after the others. Each is idempotent (a second run is a safe no-op).
+          Run <b>113 first</b>, verify it applied, <b>then 114</b>, <b>then 115</b>, <b>then 116</b>. <b>117 and 118 are
+          independent</b> — either may be run at any time, before or after the others. Each is idempotent (a second run
+          is a safe no-op).
           Targeted deployment only — the historical baseline remains incomplete and is NOT advanced.
         </div>
         <p className="text-xs text-slate-400 mb-3">
@@ -262,6 +263,12 @@ export default function MigrationConsolePage() {
           retrievals + governed operator verifications centrally (research once, reuse for every project in that AHJ). It
           seeds NO adoption: a copied in-code row is retained as <code>seeded-unprovenanced</code>, which the provider
           refuses to serve as authority.
+          <b> 118</b> creates <code>field_route_measurements</code> + <code>field_route_measurement_events</code> — the
+          producer the <code>field-verified</code> route-length state never had. WS-5 taught the model to SAY
+          field-verified; until this table exists nothing can MAKE it say so, so <code>ROUTE-LENGTH-ESTIMATE</code> is
+          structurally unclosable and every length-dependent conclusion stays PROVISIONAL. Two tables because the domain
+          audit must commit in the SAME transaction as the state transition it records. It seeds NO measurement and
+          creates no path from configuration to a verified length.
           Server-side each is statically verified <b>idempotent CREATE-TABLE-only</b>
           and <b>non-destructive</b> (no DROP / DELETE / TRUNCATE / ALTER / UPDATE / INSERT), creates exactly the expected
           table(s), success is read back from the ledger + run history + the actual tables, and the window auto-relocks.
@@ -270,6 +277,28 @@ export default function MigrationConsolePage() {
           <code>MIGRATION_ALLOW_PRODUCTION_EXECUTION=true</code>.
         </p>
         <div className="flex flex-wrap gap-2">
+          {/* ADR-013 T-08 — migration 107, FIRST in the ceremony and the one to run
+              before any other. Its code half shipped 2026-07-12 and the migration
+              never ran, so every audit write since inserted two columns that do
+              not exist and PostgreSQL refused the row: the tamper-evident
+              audit_log has recorded nothing from this deployment, including the
+              governance events for migrations 113 and 119. Running this restores
+              the durable audit path that every other button here is recorded
+              through. */}
+          <RegistryButton id="107" label="Run migration 107… (repairs the audit trail — run FIRST)"
+            tables="audit_log.actor_organization_id + audit_log.resource_owner_organization_id (columns)"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-audit-org-context-107" onResult={(v) => setRegistry((s) => ({ ...s, ['107']: v }))} result={registry['107']} />
+          {/* Audit chain closure — migration 120. Index-only, and the piece that
+              makes "tamper-evident" true under concurrency: within a partition a
+              prev_hash may be claimed by exactly one successor, so two racing
+              appends cannot fork the chain. Run AFTER 107. It touches no row and
+              is partial on prev_hash IS NOT NULL, so the historical bootstrap
+              roots 58-62 remain legal and untouched. */}
+          <RegistryButton id="120" label="Run migration 120… (audit chain fork closure — run after 107)"
+            tables="audit_log index uq_audit_log_chain_successor"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-audit-chain-closure-120" onResult={(v) => setRegistry((s) => ({ ...s, ['120']: v }))} result={registry['120']} />
           <RegistryButton id="113" label="Run migration 113…" tables="manufacturer_document_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-registry-113" onResult={(v) => setRegistry((s) => ({ ...s, ['113']: v }))} result={registry['113']} />
@@ -285,6 +314,31 @@ export default function MigrationConsolePage() {
           <RegistryButton id="117" label="Run migration 117…" tables="ahj_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-ahj-registry-117" onResult={(v) => setRegistry((s) => ({ ...s, ['117']: v }))} result={registry['117']} />
+          {/* WS-5 — the operator surface for migration 118. Everything server-side
+              was already wired (the `execute-field-measurements-118` action is in
+              the allowlist, REGISTRY_DEPLOYMENT carries its expected tables, and
+              the handler resolves the identifier), but this button was never
+              added — so the migration was executable by the system and reachable
+              by nobody. That is the SAME defect class WS-5 itself was written to
+              fix: a state the model can express and no operator can produce. */}
+          <RegistryButton id="118" label="Run migration 118…" tables="field_route_measurements + field_route_measurement_events"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-field-measurements-118" onResult={(v) => setRegistry((s) => ({ ...s, ['118']: v }))} result={registry['118']} />
+          {/* D4 — migration 119. The FIRST target here that is not a CREATE TABLE:
+              it adds one nullable column to manufacturer_document_registry (113's
+              table) plus one partial index, both IF NOT EXISTS, and it writes no
+              row and refuses to backfill.
+
+              It was written on 2026-08-05 and reported as "created, not applied"
+              while being registered in NONE of the four gates — no deployment
+              spec, no API action, no button, not on the runner allowlist — so
+              there was no path by which anyone could apply it. That is the same
+              failure 118 hit, and the reason the parity test below now asserts
+              all four gates agree. Run 113 first; the handler refuses with a
+              named prerequisite if the table is absent. */}
+          <RegistryButton id="119" label="Run migration 119…" tables="manufacturer_document_registry.jurisdiction_authority_id (column)"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-document-jurisdiction-119" onResult={(v) => setRegistry((s) => ({ ...s, ['119']: v }))} result={registry['119']} />
         </div>
       </section>
 

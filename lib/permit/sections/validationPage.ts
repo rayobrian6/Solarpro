@@ -21,6 +21,9 @@ import { escapeH } from '../utils/drawing';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 
 
+// CMDA — the ONLY correct inline font-family spelling (single-quoted names
+// nest safely inside a double-quoted style attribute).
+import { CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 // ══════════════════════════════════════════════════════════════════════════════
 // VALIDATION SUMMARY SHEET (Sheet 15)
 // Authority signal to AHJ — shows every canonical field was resolved and verified.
@@ -438,7 +441,7 @@ export function pageValidationSummary(
           ${checks.map((c, i) => `
           <tr style="background:${i%2===0?'#fff':'#f9f9f9'};">
             <td style="font-weight:${c.status==='FAIL'?'900':'600'};color:${c.status==='FAIL'?'#cc0000':'#000'};font-size:7.5px;">${c.label}</td>
-            <td style="font-family:monospace;font-size:7px;color:#000;">${c.value}</td>
+            <td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;color:#000;">${c.value}</td>
             <td style="text-align:center;">${statusBadge(c.status)}</td>
             <td style="font-size:6.5px;color:#555;">${c.note}</td>
           </tr>`).join('')}
@@ -458,106 +461,106 @@ export function pageValidationSummary(
         <tbody>
           <tr>
             <td style="font-weight:900;color:${surveyEvidenceColor};font-size:7.5px;">Survey Evidence Completeness</td>
-            <td style="font-family:monospace;font-size:7px;color:#000;">${esc(surveyEvidenceSummary)}</td>
+            <td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;color:#000;">${esc(surveyEvidenceSummary)}</td>
             <td style="text-align:center;">${statusBadge(surveyEvidenceStatus)}</td>
             <td style="font-size:6.5px;color:#555;">Evidence is advisory/traceability metadata; canonical validation remains authoritative.</td>
           </tr>
           <tr style="background:#f9f9f9;">
             <td style="font-weight:600;font-size:7.5px;">Photo Evidence Categories</td>
-            <td style="font-family:monospace;font-size:7px;color:#000;">${esc(surveyPhotoCategoryRows)}</td>
+            <td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;color:#000;">${esc(surveyPhotoCategoryRows)}</td>
             <td style="text-align:center;">${statusBadge(surveyEvidence?.photos.length ? 'PASS' : 'N/A')}</td>
             <td style="font-size:6.5px;color:#555;">Links real survey photo records to permit/CAD assumptions without image-recognition overclaiming.</td>
           </tr>
           <tr>
             <td style="font-weight:600;font-size:7.5px;">Missing Required Evidence</td>
-            <td style="font-family:monospace;font-size:7px;color:${surveyEvidence?.missingCategories.length ? '#b45309' : '#006600'};">${esc(missingSurveyEvidence)}</td>
+            <td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;color:${surveyEvidence?.missingCategories.length ? '#b45309' : '#006600'};">${esc(missingSurveyEvidence)}</td>
             <td style="text-align:center;">${statusBadge(surveyEvidence && surveyEvidence.missingCategories.length === 0 ? 'PASS' : 'N/A')}</td>
             <td style="font-size:6.5px;color:#555;">Missing categories become engineer-verification warnings, not silent assumptions.</td>
           </tr>
           ${surveyFieldEvidenceRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#f9f9f9':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:7px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#7c3aed;background:#f5f3ff;">Engineering Requirement Registry</td></tr>
           ${registryStatusRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#faf5ff':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#92400e;background:#fffbeb;">Missing Requirement Analysis</td></tr>
           ${missingRequirementAnalysisRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#fffbeb':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#0f766e;background:#f0fdfa;">Requirement Provenance</td></tr>
           ${requirementProvenanceRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#f0fdfa':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#0e7490;background:#ecfeff;">Requirement Evidence Traceability</td></tr>
           ${requirementTraceRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#f0fdfa':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#047857;background:#ecfdf5;">Canonical Evidence Provenance</td></tr>
           ${canonicalProvenanceRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#f9f9f9':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#4338ca;background:#eef2ff;">Survey Lineage</td></tr>
           ${surveyLineageRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#f9f9ff':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#1d4ed8;background:#eff6ff;">Document Provenance + Requirement Bindings</td></tr>
           ${documentProvenanceRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#eff6ff':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#1e40af;background:#dbeafe;">Document Section Provenance</td></tr>
           ${documentSectionRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#eff6ff':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#7f1d1d;background:#fee2e2;">Engineering Decision Provenance</td></tr>
           ${decisionProvenanceRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#fff1f2':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#9f1239;background:#ffe4e6;">Engineering Decision Records</td></tr>
           ${decisionRecordRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#fff1f2':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.25px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.25px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
   
         <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#065f46;background:#d1fae5;">Engineering State Invalidation</td></tr>
         ${engineeringStateRows.map(([label, value], i) => `
         <tr style="background:${i%2===0?'#ecfdf5':'#fff'};">
           <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-          <td colspan="3" style="font-family:monospace;font-size:6.25px;color:#000;">${esc(value)}</td>
+          <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.25px;color:#000;">${esc(value)}</td>
         </tr>`).join('')}
         <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#047857;background:#ecfdf5;">Engineering State Records</td></tr>
         ${engineeringStateRecordRows.map(([label, value], i) => `
         <tr style="background:${i%2===0?'#ecfdf5':'#fff'};">
           <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-          <td colspan="3" style="font-family:monospace;font-size:6px;color:#000;">${esc(value)}</td>
+          <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6px;color:#000;">${esc(value)}</td>
         </tr>`).join('')}
 
         <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#be123c;background:#fff1f2;">Decision-Aware Output Metadata</td></tr>
           ${decisionMetadataRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#fff1f2':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
-            <td colspan="3" style="font-family:monospace;font-size:6.25px;color:#000;">${esc(value)}</td>
+            <td colspan="3" style="font-family:${CSS_FONT_MONO_STACK};font-size:6.25px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           ${surveyWarningRows.map((warning, i) => `
           <tr style="background:${i%2===0?'#fff7ed':'#fff'};">
@@ -573,12 +576,12 @@ export function pageValidationSummary(
       <table class="equip-table" style="width:100%;">
         <thead><tr><th>Parameter</th><th>Formula</th><th>Input Values</th><th>Result</th></tr></thead>
         <tbody>
-          <tr><td>Velocity Pressure</td><td style="font-family:monospace;font-size:7px;">qz = 0.00256 × Kz × Kzt × Kd × V²</td><td style="font-family:monospace;font-size:7px;">Kz=0.85, Kzt=1.0, Kd=0.85, V=${canonical.site.windSpeed} mph</td><td style="font-weight:bold;">${qzDisp}</td></tr>
-          <tr style="background:#f9f9f9"><td>Net Wind Pressure</td><td style="font-family:monospace;font-size:7px;">p = qz × Cf</td><td style="font-family:monospace;font-size:7px;">Cf=1.3 (solid panel, Fig. 29.4-1)</td><td style="font-weight:bold;">${windPressDisp}</td></tr>
-          <tr><td>Lateral Force / Post</td><td style="font-family:monospace;font-size:7px;">F = p × H × S</td><td style="font-family:monospace;font-size:7px;">H=${canonical.structure.panelHeightFt.toFixed(2)} ft, S=${canonical.structure.postSpacingFt.toFixed(1)} ft</td><td style="font-weight:bold;">${windForce}</td></tr>
-          <tr style="background:#f9f9f9"><td>Overturning Moment</td><td style="font-family:monospace;font-size:7px;">M = F × H/2</td><td style="font-family:monospace;font-size:7px;">H/2 = ${(canonical.structure.panelHeightFt/2).toFixed(2)} ft</td><td style="font-weight:bold;">${windMoment}</td></tr>
-          <tr><td>Required Embedment</td><td style="font-family:monospace;font-size:7px;">D = 1.5 × ∛(M / (q × b))</td><td style="font-family:monospace;font-size:7px;">q=${canonical.structure.soilResistance} psf, b=0.25 ft</td><td style="font-weight:bold;">${reqEmbed}</td></tr>
-          <tr style="background:#f9f9f9"><td>Provided Embedment</td><td style="font-family:monospace;font-size:7px;">D_prov (CAD-sourced)</td><td style="font-family:monospace;font-size:7px;">${canonical.structure.postEmbedFt.toFixed(1)} ft min.</td><td style="font-weight:bold;color:${embedColor};">${provEmbed} — ${embedStatus}</td></tr>
+          <tr><td>Velocity Pressure</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">qz = 0.00256 × Kz × Kzt × Kd × V²</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">Kz=0.85, Kzt=1.0, Kd=0.85, V=${canonical.site.windSpeed} mph</td><td style="font-weight:bold;">${qzDisp}</td></tr>
+          <tr style="background:#f9f9f9"><td>Net Wind Pressure</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">p = qz × Cf</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">Cf=1.3 (solid panel, Fig. 29.4-1)</td><td style="font-weight:bold;">${windPressDisp}</td></tr>
+          <tr><td>Lateral Force / Post</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">F = p × H × S</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">H=${canonical.structure.panelHeightFt.toFixed(2)} ft, S=${canonical.structure.postSpacingFt.toFixed(1)} ft</td><td style="font-weight:bold;">${windForce}</td></tr>
+          <tr style="background:#f9f9f9"><td>Overturning Moment</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">M = F × H/2</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">H/2 = ${(canonical.structure.panelHeightFt/2).toFixed(2)} ft</td><td style="font-weight:bold;">${windMoment}</td></tr>
+          <tr><td>Required Embedment</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">D = 1.5 × ∛(M / (q × b))</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">q=${canonical.structure.soilResistance} psf, b=0.25 ft</td><td style="font-weight:bold;">${reqEmbed}</td></tr>
+          <tr style="background:#f9f9f9"><td>Provided Embedment</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">D_prov (CAD-sourced)</td><td style="font-family:${CSS_FONT_MONO_STACK};font-size:7px;">${canonical.structure.postEmbedFt.toFixed(1)} ft min.</td><td style="font-weight:bold;color:${embedColor};">${provEmbed} — ${embedStatus}</td></tr>
         </tbody>
       </table>` : ''}
 

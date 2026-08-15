@@ -479,7 +479,18 @@ describe('AAC WS-3 · A7 · a failed retrieval records the exact source, the exa
     const n = await runLifecycle(braidonInput(), bag({ codeAdoption: empty }));
     expect(t.outcome.states['CODE-AUTHORITY-INCOMPLETE'].retryability).toBe('RETRYABLE');
     expect(n.outcome.states['CODE-AUTHORITY-INCOMPLETE'].retryability).toBe('NON_RETRYABLE');
-    expect(t.outcome.states['CODE-AUTHORITY-INCOMPLETE'].blockingReason).toMatch(/TimeoutError/);
+    // TR — the EXACT transport failure is still never swallowed; it is recorded
+    // on the evidence record rather than on `blockingReason`. `blockingReason` is
+    // DIGESTED, and a timeout is a fact about the attempt, not about this
+    // jurisdiction: two wordings of one outage used to produce two digests for an
+    // unchanged design. The guarantee is unchanged — only its home is.
+    const tEv = t.outcome.states['CODE-AUTHORITY-INCOMPLETE'].resolutionEvidence
+      .find(e => e.resolverId === 'code-authority@v1')!;
+    expect(tEv.failureReason).toMatch(/TimeoutError/);
+    expect(tEv.sourceQueried).toMatch(/ahj/i);
+    expect(t.outcome.states['CODE-AUTHORITY-INCOMPLETE'].blockingReason).not.toMatch(/TimeoutError/);
+    // …and the NO_COVERAGE answer — a fact about this SITE — still is digested.
+    expect(n.outcome.states['CODE-AUTHORITY-INCOMPLETE'].blockingReason).toMatch(/no AHJ record covers/);
   });
 
   it('a PARTIAL retrieval names the missing edition, never infers it, and does not clear', async () => {
@@ -509,7 +520,13 @@ describe('AAC WS-3 · A7 · a failed retrieval records the exact source, the exa
     const ids = PRODUCTION_RESOLVERS.map(r => r.id);
     expect(ids.indexOf('project-authority@v1')).toBeLessThan(ids.indexOf('code-authority@v1'));
     expect(codeAuthorityResolver.requiredInputs).toContain('projectLegalAuthority');
-    expect(projectAuthorityResolver.produces).toEqual(['projectLegalAuthority']);
+    // ── D4 (2026-08-05) — THIS RESOLVER ALSO PUBLISHES THE LEGAL JURISDICTION ─
+    // It used to declare `['projectLegalAuthority']` alone while ALSO returning
+    // `legalJurisdiction` in its patch. lifecycle.ts copies only declared keys,
+    // so the verified boundary determination was discarded on every run and the
+    // bundle kept the derived, unverified value. The declaration is the fix, and
+    // this assertion is what pins it.
+    expect(projectAuthorityResolver.produces).toEqual(['projectLegalAuthority', 'legalJurisdiction']);
     expect(projectAuthorityKeyResolver.mode).toBe('AUTO_DERIVED');
   });
 });
@@ -915,8 +932,9 @@ describe('AAC WS-3 / WS-4 · a run with no retrieval is byte-identical to the pr
     const digestA = ((a as any)._snapshot as PermitDesignSnapshot).meta.digest;
     const b = braidonInput();
     generatePermitHTML(b, undefined, {
-      capacityDocument: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
-      digestInvalidatedByLedger: false, framingCapacityDocument: null, framingProjectApplicabilityKey: null,
+      capacityDocument: null, legalJurisdiction: null, projectJurisdiction: null, manufacturerDocumentsArchived: null,
+      digestInvalidatedByLedger: false, digestInvalidations: [],
+      framingCapacityDocument: null, framingProjectApplicabilityKey: null,
       cableExtensionSolutions: [], qcableServiceLoopAllowance: null, environmentalSource: null,
       projectLegalAuthority: null, codeAdoptionAuthority: null, environmentalRetrieval: null,
     });

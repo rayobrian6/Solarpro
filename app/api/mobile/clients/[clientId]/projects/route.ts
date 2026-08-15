@@ -36,10 +36,8 @@ import type { SurveyLookupProject } from '@/lib/survey/v2/types';
 
 const ROUTE = '[GET /api/mobile/clients/:clientId/projects]';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { clientId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ clientId: string }> }) {
+  const params = await props.params;
   try {
     // -- Rate limit ----------------------------------------------------------
     const rl = await checkRateLimit('standard', getClientIp(req));

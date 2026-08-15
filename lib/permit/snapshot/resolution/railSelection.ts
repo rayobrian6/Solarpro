@@ -43,6 +43,7 @@ import {
   getAllMountingSystems, getMountingSystemById,
   type MountingSystemSpec, type RailSpec,
 } from '@/lib/mounting-hardware-db';
+import { readRailSelection } from '@/lib/railSelection/service';
 
 /** Where a rail selection could have come from, and whether it did. */
 export interface RailSelectionSourceProbe {
@@ -74,11 +75,26 @@ export interface RailCandidate {
 }
 
 export interface RailSelectionVerdict {
-  /** 'inherent' — the mount carries its own rail; 'unselected' — genuinely open;
-   *  'no-rail-required' — a rail-less / non-rail-based mount. */
-  state: 'inherent' | 'unselected' | 'no-rail-required';
+  /** 'inherent' — the mount carries its own rail; 'selected' — an operator pinned
+   *  one (D12); 'unselected' — genuinely open; 'no-rail-required' — a rail-less /
+   *  non-rail-based mount. */
+  state: 'inherent' | 'selected' | 'unselected' | 'no-rail-required';
   selectedRailModel: string | null;
   selectedRailSystemId: string | null;
+  /** D12 — the stored selection in force, when one is. Null for every other
+   *  state, including `inherent`: a rail that comes with the product was not
+   *  chosen by anybody and has no actor, instant or basis to report. */
+  pinned: {
+    railSystemId: string;
+    manufacturer: string;
+    railModel: string;
+    railSku: string | null;
+    selectedBy: string;
+    selectedAtIso: string;
+    basis: string;
+    coversSpan: boolean;
+    spanOverrideAuthority: string | null;
+  } | null;
   /** every place a selection could have lived, and whether it did. */
   probes: RailSelectionSourceProbe[];
   /** the mount's own documented compatibility statement (free text). */
@@ -174,6 +190,9 @@ export function deriveRailSelection(input: RailSelectionInput): RailSelectionVer
   const mount = input.mountingSystemId ? getMountingSystemById(input.mountingSystemId) ?? null : null;
   const p = input.project ?? {};
   const se = input.selectedEquipment ?? null;
+  // D12 — the stored selection, read through the ONE reader.
+  const stored = readRailSelection(se);
+  const active = stored?.active ?? null;
 
   // ── every place a rail selection COULD live, probed by name ───────────────
   const probes: RailSelectionSourceProbe[] = [
@@ -184,10 +203,16 @@ export function deriveRailSelection(input: RailSelectionInput): RailSelectionVer
       note: 'PermitInput.project carries mountingSystemId only — no rail field is defined on the type.',
     },
     {
-      path: 'projects.selected_equipment.rail*',
-      present: !!(se && (se.railId || se.rail)),
-      value: ((se?.railId ?? null) as string | null),
-      note: 'SelectedEquipment carries panel / inverter / mounting / battery. No rail slot exists in the contract.',
+      // D12 — this probe used to be fed `null` unconditionally: its caller read
+      // `(canonical as unknown as { storedRecord?: … })?.storedRecord`, and
+      // CanonicalEquipmentAuthority has no such property — the `as unknown` cast
+      // hid that from the compiler. It reported "absent" whatever the store held.
+      path: 'projects.selected_equipment.railSelection',
+      present: !!active,
+      value: active?.railModel ?? null,
+      note: active
+        ? `pinned by ${active.selectedBy} at ${active.selectedAtIso} — ${active.basis}`
+        : 'SelectedEquipment carries the rail selection (D12). No selection is recorded for this project.',
     },
     {
       path: 'mounting-hardware-db[mountingSystemId].rail',
@@ -199,7 +224,7 @@ export function deriveRailSelection(input: RailSelectionInput): RailSelectionVer
 
   if (!mount) {
     return {
-      state: 'unselected', selectedRailModel: null, selectedRailSystemId: null, probes,
+      state: 'unselected', selectedRailModel: null, selectedRailSystemId: null, pinned: null, probes,
       compatibilityStatement: null, requiredSpanIn: null, candidates: [], eligibleCandidateCount: 0,
       basis: 'no mounting system is resolved for this project, so no rail question can be posed',
       operatorAction: 'Select the roof mounting system in the design.',
@@ -211,7 +236,7 @@ export function deriveRailSelection(input: RailSelectionInput): RailSelectionVer
     || mount.mountTopology === 'rail_paired';
   if (!isRailBased) {
     return {
-      state: 'no-rail-required', selectedRailModel: null, selectedRailSystemId: null, probes,
+      state: 'no-rail-required', selectedRailModel: null, selectedRailSystemId: null, pinned: null, probes,
       compatibilityStatement: mount.hardware?.railSplice ?? null, requiredSpanIn: mount.mount?.maxSpacingIn ?? null,
       candidates: [], eligibleCandidateCount: 0,
       basis: `${mount.manufacturer} ${mount.model} routes the rail-less direct-mount load path — no rail is part of the assembly`,
@@ -222,7 +247,7 @@ export function deriveRailSelection(input: RailSelectionInput): RailSelectionVer
 
   if (mount.rail) {
     return {
-      state: 'inherent', selectedRailModel: mount.rail.model, selectedRailSystemId: mount.id, probes,
+      state: 'inherent', selectedRailModel: mount.rail.model, selectedRailSystemId: mount.id, pinned: null, probes,
       compatibilityStatement: mount.hardware?.railSplice ?? null,
       requiredSpanIn: mount.mount?.maxSpacingIn ?? null,
       candidates: [], eligibleCandidateCount: 0,
@@ -235,8 +260,60 @@ export function deriveRailSelection(input: RailSelectionInput): RailSelectionVer
 
   const candidates = railCandidatesFor(mount);
   const eligible = candidates.filter(c => c.refusedReason == null);
+
+  // ── D12 — AN OPERATOR PINNED ONE ─────────────────────────────────────────
+  // A selection is only valid for the assembly it was made for: the
+  // compatibility statement that admitted the rail belongs to THAT mount. A
+  // selection made against a different mount is reported, and does not answer
+  // this assembly's question.
+  if (active) {
+    if (active.mountingSystemId !== mount.id) {
+      return {
+        state: 'unselected', selectedRailModel: null, selectedRailSystemId: null, pinned: null, probes,
+        compatibilityStatement: mount.hardware?.railSplice ?? null,
+        requiredSpanIn: mount.mount?.maxSpacingIn ?? null,
+        candidates, eligibleCandidateCount: eligible.length,
+        basis: `a rail selection exists (${active.manufacturer} ${active.railModel}) but it was pinned to a different mount `
+          + `(${active.mountingSystemId}), not the selected ${mount.id}. The compatibility statement that admitted it `
+          + 'belongs to that assembly, so it does not carry over — the rail must be pinned again for this mount',
+        operatorAction: `Re-pin the rail for the ${mount.model} assembly; the previous selection was made for `
+          + `${active.mountingSystemId}.`,
+        partNumberAvailability: 'none-in-catalog',
+      };
+    }
+    return {
+      state: 'selected',
+      selectedRailModel: active.railModel,
+      selectedRailSystemId: active.railSystemId,
+      pinned: {
+        railSystemId: active.railSystemId,
+        manufacturer: active.manufacturer,
+        railModel: active.railModel,
+        railSku: active.railSku ?? null,
+        selectedBy: active.selectedBy,
+        selectedAtIso: active.selectedAtIso,
+        basis: active.basis,
+        coversSpan: active.spanAuthority?.coversSpan ?? false,
+        spanOverrideAuthority: active.spanOverride?.authority ?? null,
+      },
+      probes,
+      compatibilityStatement: mount.hardware?.railSplice ?? null,
+      requiredSpanIn: mount.mount?.maxSpacingIn ?? null,
+      candidates, eligibleCandidateCount: eligible.length,
+      basis: `${active.manufacturer} ${active.railModel} is pinned to the ${mount.model} assembly by ${active.selectedBy} `
+        + `at ${active.selectedAtIso} — ${active.basis}. `
+        + (active.spanAuthority?.coversSpan
+          ? `Its published ${active.spanAuthority.publishedMaxSpanIn}" span covers the mount's `
+            + `${active.spanAuthority.requiredSpanIn}" attachment spacing.`
+          : `Its published span does NOT cover the mount's attachment spacing; pinned under stated authority: `
+            + `${active.spanOverride?.authority ?? 'UNRECORDED'}.`),
+      operatorAction: null,
+      partNumberAvailability: 'none-in-catalog',
+    };
+  }
+
   return {
-    state: 'unselected', selectedRailModel: null, selectedRailSystemId: null, probes,
+    state: 'unselected', selectedRailModel: null, selectedRailSystemId: null, pinned: null, probes,
     compatibilityStatement: mount.hardware?.railSplice ?? null,
     requiredSpanIn: mount.mount?.maxSpacingIn ?? null,
     candidates,

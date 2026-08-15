@@ -54,39 +54,47 @@ function makeEvent(id: string, date: string, crew: string): ScheduleEvent {
   };
 }
 
+// TIMEZONE: every date literal below carries an explicit LOCAL time (T12:00:00).
+// A bare 'YYYY-MM-DD' is parsed as UTC midnight, which in any negative-offset
+// zone is the PREVIOUS day locally — so `new Date('2025-01-13')` was a Sunday in
+// US Central and weekStart() correctly returned the week before the one the test
+// meant. The functions under test operate in local time (they back a date
+// picker), so the fixtures must too. Local noon is immune to DST in both
+// directions.
+
 // ─── 1. weekStart() ───────────────────────────────────────────────────────────
 
 describe('weekStart()', () => {
   it('returns Monday for a Monday input', () => {
-    const mon = new Date('2025-01-13'); // Monday
+    const mon = new Date('2025-01-13T12:00:00'); // Monday
     const start = weekStart(mon);
     expect(start.getDay()).toBe(1); // 1 = Monday
     expect(toIso(start)).toBe('2025-01-13');
   });
 
   it('returns Monday for a Wednesday input', () => {
-    const wed = new Date('2025-01-15'); // Wednesday
+    const wed = new Date('2025-01-15T12:00:00'); // Wednesday
     const start = weekStart(wed);
     expect(start.getDay()).toBe(1);
     expect(toIso(start)).toBe('2025-01-13');
   });
 
   it('returns Monday for a Sunday input (previous week)', () => {
-    const sun = new Date('2025-01-19'); // Sunday
+    const sun = new Date('2025-01-19T12:00:00'); // Sunday
     const start = weekStart(sun);
     expect(start.getDay()).toBe(1);
     expect(toIso(start)).toBe('2025-01-13');
   });
 
   it('returns Monday for a Saturday input', () => {
-    const sat = new Date('2025-01-18'); // Saturday
+    const sat = new Date('2025-01-18T12:00:00'); // Saturday
     const start = weekStart(sat);
     expect(start.getDay()).toBe(1);
     expect(toIso(start)).toBe('2025-01-13');
   });
 
   it('weekStart of a Monday is idempotent', () => {
-    const mon = new Date('2025-03-10');
+    const mon = new Date('2025-03-10T12:00:00');
     const start1 = weekStart(mon);
     const start2 = weekStart(start1);
     expect(toIso(start1)).toBe(toIso(start2));
@@ -104,7 +112,7 @@ describe('weekStart()', () => {
   });
 
   it('does not mutate the input date', () => {
-    const input = new Date('2025-06-15');
+    const input = new Date('2025-06-15T12:00:00');
     const inputDay = input.getDate();
     weekStart(input);
     expect(input.getDate()).toBe(inputDay);
@@ -115,17 +123,17 @@ describe('weekStart()', () => {
 
 describe('weekDays()', () => {
   it('returns exactly 7 days', () => {
-    expect(weekDays(new Date('2025-01-15'))).toHaveLength(7);
+    expect(weekDays(new Date('2025-01-15T12:00:00'))).toHaveLength(7);
   });
 
   it('first day is Monday, last is Sunday', () => {
-    const days = weekDays(new Date('2025-01-15')); // Wednesday
+    const days = weekDays(new Date('2025-01-15T12:00:00')); // Wednesday
     expect(days[0].getDay()).toBe(1); // Monday
     expect(days[6].getDay()).toBe(0); // Sunday
   });
 
   it('days are consecutive (each is 1 day after the previous)', () => {
-    const days = weekDays(new Date('2025-01-20'));
+    const days = weekDays(new Date('2025-01-20T12:00:00'));
     for (let i = 1; i < days.length; i++) {
       const diff = days[i].getTime() - days[i - 1].getTime();
       expect(diff).toBe(24 * 60 * 60 * 1000); // 1 day in ms
@@ -133,7 +141,7 @@ describe('weekDays()', () => {
   });
 
   it('Mon–Sun range is correct for a Wednesday input', () => {
-    const days = weekDays(new Date('2025-01-15')).map(toIso);
+    const days = weekDays(new Date('2025-01-15T12:00:00')).map(toIso);
     expect(days[0]).toBe('2025-01-13');
     expect(days[6]).toBe('2025-01-19');
   });
@@ -143,7 +151,7 @@ describe('weekDays()', () => {
 
 describe('toIso()', () => {
   it('returns YYYY-MM-DD format', () => {
-    expect(toIso(new Date('2025-01-05'))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(toIso(new Date('2025-01-05T12:00:00'))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('pads month and day with zeros', () => {
@@ -180,25 +188,25 @@ describe('formatDayHeader()', () => {
 
 describe('formatWeekRange()', () => {
   it('returns a non-empty string', () => {
-    const days = weekDays(new Date('2025-01-15'));
+    const days = weekDays(new Date('2025-01-15T12:00:00'));
     expect(formatWeekRange(days).length).toBeGreaterThan(0);
   });
 
   it('includes the year somewhere in the output', () => {
-    const days = weekDays(new Date('2025-01-15'));
+    const days = weekDays(new Date('2025-01-15T12:00:00'));
     expect(formatWeekRange(days)).toContain('2025');
   });
 
   it('handles week spanning two months', () => {
     // Jan 27 – Feb 2
-    const days = weekDays(new Date('2025-01-29'));
+    const days = weekDays(new Date('2025-01-29T12:00:00'));
     const range = formatWeekRange(days);
     expect(range.length).toBeGreaterThan(0);
   });
 
   it('handles week spanning two years', () => {
     // Dec 29, 2025 – Jan 4, 2026
-    const days = weekDays(new Date('2025-12-31'));
+    const days = weekDays(new Date('2025-12-31T12:00:00'));
     const range = formatWeekRange(days);
     expect(range.length).toBeGreaterThan(0);
   });
@@ -224,7 +232,7 @@ describe('isToday()', () => {
   });
 
   it('returns false for a far-future date', () => {
-    expect(isToday(new Date('2030-01-01'))).toBe(false);
+    expect(isToday(new Date('2030-01-01T12:00:00'))).toBe(false);
   });
 });
 

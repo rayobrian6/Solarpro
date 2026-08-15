@@ -51,7 +51,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { PermitInput } from '../../types';
-import { SOLAR_PANELS, getPanelById } from '@/lib/equipment-db';
+import { getPanelById } from '@/lib/equipment-db';
+// CMEI — THE canonical module identity accessor. This catalogue delegates to it.
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import { EQUIPMENT_SOURCES, type EquipmentSource, type EquipmentSourceValue } from '@/lib/reconciliation/types';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -158,21 +160,35 @@ export interface EquipmentCatalog {
   byModel(model: string): PanelIdentity | null;
 }
 
-/** The production catalog. `byModel` mirrors build.ts's `fuzz` EXACTLY, so the
- *  canonical authority and the snapshot's own module resolution can never
- *  disagree about what a posted model string means. */
+/**
+ * The production catalog.
+ *
+ * ══ CMEI — `byModel` NO LONGER SUBSTRING-MATCHES ═══════════════════════════
+ * This mirrored build.ts's `fuzz`, which meant the CANONICAL PICKER'S OWN
+ * catalogue resolved a posted model string by two-way substring:
+ *
+ *     list.find(e => e.model.includes(m) || m.includes(e.model))
+ *
+ * So "REC 400" resolved to "REC 400AA Pure-R", and that became a tiered
+ * candidate for the canonical selection — the deepest instance of the defect,
+ * sitting underneath the whole tier lattice.
+ *
+ * It now delegates to `resolveModuleIdentity`, the ONE canonical accessor, which
+ * admits an exact unique match (or an exact catalogue-id clue) and FAILS CLOSED
+ * on anything ambiguous, partial or fuzzy. A posted model that cannot be
+ * identified now contributes NO candidate, which is the honest outcome: the
+ * lattice ranks identities, and a guess is not an identity.
+ */
 export const PRODUCTION_EQUIPMENT_CATALOG: EquipmentCatalog = {
   byId(id: string): PanelIdentity | null {
     const p = getPanelById(id) as { id: string; manufacturer: string; model: string; watts?: number } | undefined;
     return p ? { id: p.id, manufacturer: p.manufacturer, model: p.model, watts: p.watts ?? null } : null;
   },
   byModel(model: string): PanelIdentity | null {
-    const m = (model ?? '').toLowerCase().trim();
-    if (!m) return null;
-    const list = SOLAR_PANELS as unknown as Array<{ id: string; manufacturer: string; model: string; watts?: number }>;
-    const hit = list.find(e => e.model.toLowerCase() === m)
-      ?? list.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
-    return hit ? { id: hit.id, manufacturer: hit.manufacturer, model: hit.model, watts: hit.watts ?? null } : null;
+    const idn = resolveModuleIdentity({ model });
+    return idn.established && idn.panelId
+      ? { id: idn.panelId, manufacturer: idn.manufacturer ?? '', model: idn.model ?? '', watts: idn.watts }
+      : null;
   },
 };
 

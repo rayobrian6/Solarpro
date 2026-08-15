@@ -17,10 +17,8 @@ import { buildProfessionalSurveyReadinessReport } from '@/lib/siteSurvey/profess
 import { analyzeSurveyPhotosOpenSource } from '@/lib/siteSurvey/photoIntelligence';
 import { buildProfessionalPlanSetRenderPackage } from '@/lib/siteSurvey/planSetRenderOutput';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

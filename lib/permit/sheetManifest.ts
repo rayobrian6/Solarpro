@@ -183,6 +183,22 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
       ...(o.includePv4b1 ? [{ id: 'PV-4B.1', title: 'CONDUCTOR SCHEDULE — PHYSICAL SECTIONS' }] : []),
       { id: 'PV-5',  title: PERMIT_LABELS_SHEET_TITLE },
       { id: 'SCHED', title: 'MAJOR EQUIPMENT SCHEDULE — MODULES, INVERTERS & MOUNTING' },
+      // ── D3 (Planset 17) — THE BOM CONTINUATIONS BELONG HERE TOO ───────────
+      // These were excluded from the compact profiles on the reasoning quoted
+      // above: "the permit needs ONE major-equipment schedule … Nothing here
+      // decides truth: every requirement these sheets used to print is still in
+      // the snapshot registry." That reasoning holds for the REVIEW sheets it
+      // was written about. It does not hold for the BOM, because the procurement
+      // lines are not requirements — they are the schedule itself.
+      //
+      // Measured on the live package: 48 canonical BOM rows, of which the full
+      // profile renders all 48 and the permit AND design-review profiles
+      // rendered 10. Thirty-eight procurement lines — including every fitting
+      // row for RW-COMBINER_TO_DISCO_RUN and RW-DISCO_TO_METER_RUN — never
+      // reached the AHJ-facing artifact, and the compact profiles did not even
+      // emit a population total to compare against. A schedule that silently
+      // omits four fifths of itself is not a compact schedule, it is a wrong one.
+      ...schedContIds(o).map(id => ({ id, title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' })),
       ...(!designReview && cert ? certSheets : []),
       // ── manufacturer attachment appendix (NOT numbered drawing sheets) ────
       ...ds.map(d => ({ ...d, section: 'appendix' as SheetSection })),

@@ -22,8 +22,17 @@ import { retryabilityFor } from '@/lib/providers/types';
 import { normalizeRiskCategory, type AsceEdition } from '@/lib/providers/climateHazard/types';
 import { AHJ_REGISTRY_ENDPOINT, AHJ_REGISTRY_TOKEN_ACTION } from '@/lib/jurisdictions/ahjRegistry';
 import { upsertAhjRegistryRow } from '@/lib/jurisdictions/internalAhjRegistry';
-import type { RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation } from './types';
+import type {
+  RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation,
+  LegalJurisdictionAuthority,
+} from './types';
 import { buildResolutionAuditRef } from './evidence';
+import { materialRetrievalReason } from './authorityProjection';
+// OAR — accepted authority outlives a failed refresh.
+import {
+  readRetainedLegalAuthority, isRefreshOutage, sameLegalAuthority,
+  type LegalAuthorityRetentionState,
+} from './retainedAuthority';
 import {
   buildProjectLegalAuthority, buildCodeAdoptionAuthority, missingAdoptionEditions,
 } from './jurisdictionAuthority';
@@ -85,8 +94,22 @@ export const projectAuthorityResolver: RequirementResolver = {
   mode: 'AUTO_RETRIEVED',
   requirementCodes: ['PROJECT-AUTHORITY-UNVERIFIED'],
   requiredInputs: [],
-  produces: ['projectLegalAuthority'],
-  description: 'Retrieves the project\'s legal identity (normalised address, parcel/APN, county + FIPS, municipal boundary) from an official source and establishes the per-field verification states.',
+  // ── D4 LIFECYCLE — DECLARE WHAT YOU PATCH, OR THE LIFECYCLE DROPS IT ─────
+  // `legalJurisdiction` was computed here and placed in the outcome patch, but
+  // it was NOT declared. lifecycle.ts copies only declared keys:
+  //     for (const k of r.produces) { if (!(k in outcome.patch)) continue; … }
+  // so the verified boundary determination was discarded on every run, silently,
+  // and the bundle kept the DERIVED value from project-authority-key@v1. Because
+  // the archival gate requires 'verified', no document could ever be archived
+  // under the correct authority.
+  //
+  // The failure paths below (no provider, retrieval failed) deliberately do NOT
+  // patch this key. Omitting it leaves the derived value in place — which is the
+  // honest posture, since this resolver could not determine a boundary. Patching
+  // `null` there would destroy a usable (if unverified) authority and leave the
+  // name-comparison fallback with nothing to compare.
+  produces: ['projectLegalAuthority', 'legalJurisdiction'],
+  description: 'Retrieves the project\'s legal identity (normalised address, parcel/APN, county + FIPS, municipal boundary) from an official source, establishes the per-field verification states, and publishes the CANONICAL legal jurisdiction authority.',
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     const p = proj(ctx);
     const provider = ctx.providers.propertyIdentity ?? null;
@@ -94,13 +117,65 @@ export const projectAuthorityResolver: RequirementResolver = {
       address: str(p.address), city: str(p.city), county: str(p.county),
       stateCode: str(p.state), apn: str(p.apn), ahjName: str(p.ahjName) ?? str((ctx.input.compliance?.jurisdiction as any)?.ahj),
     };
+    // ── OAR — WHAT THIS PROJECT ALREADY ACCEPTED ────────────────────────────
+    // Read BEFORE the provider is called, so a refresh that cannot complete has
+    // something governed to fall back to. Null unless the last governed run
+    // accepted a VERIFIED jurisdiction carrying a stable ahjRecordId — retention
+    // never promotes an unverified record (D4).
+    const retained = readRetainedLegalAuthority(ctx.input);
     const inputsRecorded: Record<string, string | number | boolean | null> = {
       postedAddress: posted.address, postedCity: posted.city, postedCounty: posted.county,
       postedState: posted.stateCode, postedApn: posted.apn, postedAhjName: posted.ahjName,
       providerInjected: !!provider,
+      retainedAuthorityId: retained?.jurisdiction.ahjRecordId ?? null,
+    };
+
+    /** Carry the accepted authority forward unchanged and say why. The
+     *  requirement stays CLOSED because the authority is established — what
+     *  failed was a refresh, and a refresh is not the authority. */
+    const retainOutcome = (
+      state: LegalAuthorityRetentionState,
+      r: NonNullable<typeof retained>,
+      attemptFailure: string | null,
+      sourceQueried: string | null,
+      retryability: 'RETRYABLE' | 'REQUIRES_INPUT' | 'NON_RETRYABLE',
+    ): ResolverOutcome => {
+      // The project record is restored from the accepted authority too, so the
+      // SHEETS keep naming the governing jurisdiction rather than reverting to
+      // the mailing city the posted record carries.
+      p.ahjName = r.jurisdiction.ahjName ?? p.ahjName;
+      p.ahjRecordId = r.jurisdiction.ahjRecordId ?? p.ahjRecordId;
+      return {
+        result: 'RESOLVED',
+        clearance: { cleared: true, missing: [], reasons: [] },
+        patch: { projectLegalAuthority: r.record, legalJurisdiction: r.jurisdiction },
+        sourceQueried,
+        sourceRefs: r.jurisdiction.provenance?.ref ? [r.jurisdiction.provenance.ref] : [],
+        retryability,
+        // OPERATIONAL only — it never reaches the digested reason (TR §3b).
+        failureReason: attemptFailure,
+        operatorAction: null,
+        confidence: null,
+        // The audit reference names the RETAINED evidence, not this run's
+        // attempt: what clears the requirement is the governed determination
+        // that is still standing, and the reference must point at it.
+        auditRef: buildResolutionAuditRef({
+          resolverId: 'project-authority@v1',
+          sourceRefs: [r.jurisdiction.provenance?.ref ?? `authority:ahj#${r.jurisdiction.ahjRecordId}`],
+          atIso: ctx.nowIso,
+        }),
+        inputsRecorded: { ...inputsRecorded, retentionState: state },
+      };
     };
 
     if (!provider) {
+      // A provider that is ABSENT is not an outage — but it is equally not a
+      // finding about the parcel, and an authority already accepted stands.
+      if (retained) {
+        return retainOutcome('REFRESH_FAILED_RETAINED', retained,
+          'PROVIDER-NOT-INJECTED: the property-identity provider bag is empty for this run; the accepted legal authority was retained.',
+          null, 'RETRYABLE');
+      }
       return {
         result: 'SKIPPED',
         clearance: { cleared: false, missing: ['a property-identity provider'], reasons: ['PROVIDER-NOT-INJECTED: no property-identity provider is available to this run — the legal identity was NOT retrieved, and this is not a finding about the project'] },
@@ -108,7 +183,7 @@ export const projectAuthorityResolver: RequirementResolver = {
         retryability: 'RETRYABLE',
         failureReason: 'PROVIDER-NOT-INJECTED: the property-identity provider bag is empty for this run.',
         confidence: null,
-        inputsRecorded,
+        inputsRecorded: { ...inputsRecorded, retentionState: 'NO_RETAINED_AUTHORITY' },
       };
     }
 
@@ -118,12 +193,44 @@ export const projectAuthorityResolver: RequirementResolver = {
     });
 
     if (!res.ok) {
+      // ── OAR — A TRANSPORT FAILURE DOES NOT UNMAKE A DETERMINATION ─────────
+      // Measured before this guard existed: forcing Census to time out flipped
+      // the accepted authority from "Madison County Building & Zoning
+      // [verified]" to "City of Granite City Building & Zoning [unverified]" —
+      // the MAILING city seeded by project-authority-key@v1 — reopened
+      // PROJECT-AUTHORITY-UNVERIFIED, re-stamped the rendered sheets and blocked
+      // document archival, all from a one-second outage.
+      //
+      // Retention is deliberately NOT applied to NO_COVERAGE or AMBIGUOUS: those
+      // are the source ANSWERING about this parcel, and masking a real "this is
+      // no longer that jurisdiction" as an outage is the failure mode this must
+      // never introduce. See `isRefreshOutage`.
+      if (retained && isRefreshOutage(res.failureKind)) {
+        return retainOutcome('REFRESH_FAILED_RETAINED', retained, res.failure,
+          res.sourcesQueried.join(' · ') || provider.name,
+          retryabilityFor(res.failureKind));
+      }
       return {
         result: 'FAILED',
         clearance: {
           cleared: false,
           missing: ['an official-source match for the installation address'],
-          reasons: [`${provider.name}: ${res.failure}`],
+          // ── TR — A TRANSPORT FAILURE IS NOT A FACT ABOUT THIS PARCEL ───────
+          // `reasons` reaches `blockingReason` → the registry payload → the
+          // DESIGN DIGEST. Interpolating the provider's failure string here made
+          // two different wordings of the SAME temporary Census outage produce
+          // two different digests for one unchanged design (found live: three of
+          // twenty read-only runs). But the SAME string also carries genuine
+          // answers about this site — NO_COVERAGE, AMBIGUOUS — so it is split by
+          // KIND, not thrown away. The exact provider text, the endpoints queried
+          // and the retryability are preserved either way on `failureReason` /
+          // `sourceQueried` / `retryability`, which land in
+          // `snapshot.resolverAttemptEvidence` — outside the digest.
+          reasons: [materialRetrievalReason({
+            failureKind: res.failureKind,
+            providerFailure: `${provider.name}: ${res.failure}`,
+            whenOperational: 'the project LEGAL identity is NOT ESTABLISHED — no official-source match for the installation address was retrieved',
+          })],
         },
         sourceQueried: res.sourcesQueried.join(' · ') || provider.name,
         sourceRefs: res.sourcesQueried.map(u => `provenance:${u}`),
@@ -132,7 +239,13 @@ export const projectAuthorityResolver: RequirementResolver = {
         operatorAction: res.operatorAction,
         confidence: 0,
         auditRef: null,
-        inputsRecorded,
+        inputsRecorded: {
+          ...inputsRecorded,
+          // NO_COVERAGE / AMBIGUOUS reach here even when a retained authority
+          // exists: the source ANSWERED, so this is a finding about the parcel,
+          // not an outage, and it is surfaced rather than absorbed.
+          retentionState: retained ? 'AUTHORITY_CONFLICT' : 'NO_RETAINED_AUTHORITY',
+        },
       };
     }
 
@@ -152,8 +265,19 @@ export const projectAuthorityResolver: RequirementResolver = {
         incorporatedPlace: res.value.incorporatedPlace,
       },
     });
+    // MCC §4 — the county-GIS parcel retrieval the permit pipeline already
+    // performed (lib/aerial/parcelBoundary.ts → aerialData.parcel). It carries
+    // the publishing layer in `source`; route.ts copies only the bare `apn`
+    // onto project.apn, so without this the retrieval reaches the grader
+    // stripped of its provenance and is graded as if it were typed in.
+    const _parcel = (ctx.input as { aerialData?: { parcel?: { apn?: string | null; source?: string | null } } })
+      ?.aerialData?.parcel ?? null;
+    const parcelRetrieval = _parcel?.apn
+      ? { apn: String(_parcel.apn), source: _parcel.source ? String(_parcel.source) : null }
+      : null;
     const record = buildProjectLegalAuthority({
       identity: res.value, posted, ahjRecord, confidence: res.confidence, resolverId: 'project-authority@v1',
+      parcelRetrieval,
     });
 
     // PROPAGATION — fill the project record from the retrieval where it was
@@ -192,6 +316,40 @@ export const projectAuthorityResolver: RequirementResolver = {
       }
     }
 
+    // ── D4 — PUBLISH THE CANONICAL LEGAL JURISDICTION ONTO THE BUNDLE ───────
+    // This resolver has always KNOWN the legal AHJ — it corrects `p.ahjName` and
+    // `p.ahjRecordId` a few lines above. What it never did was put that answer
+    // where a downstream document resolver could reach it: it patched only
+    // `projectLegalAuthority`, while `authority.projectJurisdiction` kept the
+    // posted, mailing-derived value frozen by `project-authority-key@v1`. The
+    // lifecycle stabilises in one iteration, so the correction never propagated,
+    // and every manufacturer document was stamped with the mailing city.
+    //
+    // `verificationState` is deliberately conservative: only a VERIFIED municipal
+    // boundary may stamp a document. Anything else and the document resolver
+    // refuses rather than guessing — see structuralResolvers.
+    const _legalVerified = record.fields.municipalBoundary.state === 'verified'
+      && record.fields.ahjName.state === 'verified';
+    const legalJurisdiction: LegalJurisdictionAuthority = {
+      ahjRecordId: str(p.ahjRecordId) ?? ahjRecord?.id ?? null,
+      ahjName: str(p.ahjName) ?? ahjRecord?.ahjName ?? null,
+      jurisdictionType: (ahjRecord?.ahjType as LegalJurisdictionAuthority['jurisdictionType']) ?? null,
+      stateCode: str(p.state) ?? record.normalized.stateFips ?? null,
+      county: record.normalized.county ?? str(p.county) ?? null,
+      unincorporated: record.unincorporated,
+      // The MAILING city stays a first-class, separately-named fact so address
+      // display never has to reach for the legal name.
+      mailingCity: posted.city ?? str(p.city) ?? null,
+      provenance: {
+        source: 'project-authority@v1',
+        ref: `authority:project-legal#${record.sourceHash.slice(0, 16)}`,
+        basis: record.boundaryEvidence,
+      },
+      verificationState: record.confirmationRequired.length
+        ? 'conflict'
+        : (_legalVerified ? 'verified' : 'unverified'),
+    };
+
     const refs = [
       `authority:project-legal#${record.sourceHash.slice(0, 16)}`,
       ...res.sourcesQueried.map(u => `provenance:${u}`),
@@ -200,6 +358,20 @@ export const projectAuthorityResolver: RequirementResolver = {
     const invalidations: ResolutionInvalidation[] = propagated.length
       ? [{ scope: 'snapshot', target: `projectAuthority + codeAuthority (county/APN propagated: ${propagated.join(', ')})`, reason: 'the project legal identity was established from an official source', invalidatedBy: 'project-authority@v1', atIso: ctx.nowIso }]
       : [];
+
+    // ── OAR — CLASSIFY THE REFRESH AGAINST WHAT WAS ALREADY ACCEPTED ─────────
+    // A completed refresh is the governed path by which authority may change, so
+    // nothing here blocks a change — it names it. Same authority ⇒ nothing moves.
+    // A different VERIFIED determination supersedes (the digest moves and D11
+    // handles the approval). A refresh that is NOT itself verified must never
+    // quietly displace one that was: that is surfaced as a conflict below.
+    const _refreshVerified = legalJurisdiction.verificationState === 'verified'
+      && !!legalJurisdiction.ahjRecordId;
+    const retentionState: LegalAuthorityRetentionState = !retained
+      ? 'NO_RETAINED_AUTHORITY'
+      : sameLegalAuthority(retained.jurisdiction, legalJurisdiction)
+        ? 'REFRESH_SUCCEEDED_SAME_AUTHORITY'
+        : (_refreshVerified ? 'REFRESH_SUCCEEDED_CHANGED_AUTHORITY' : 'AUTHORITY_CONFLICT');
 
     const recorded = {
       ...inputsRecorded,
@@ -210,14 +382,47 @@ export const projectAuthorityResolver: RequirementResolver = {
       incorporatedPlace: record.normalized.incorporatedPlace,
       unincorporated: record.unincorporated,
       propagatedFields: propagated.join(', ') || null,
+      retentionState,
     } as Record<string, string | number | boolean | null>;
+
+    // ── OAR — AN UNGOVERNED REFRESH MAY NOT DISPLACE A GOVERNED AUTHORITY ────
+    // The refresh completed but did not establish a verified determination, and
+    // it names a different jurisdiction from the one this project accepted.
+    // Neither side is adopted: the accepted identity is KEPT (so no document is
+    // stamped from a guess and the sheets do not silently change jurisdiction)
+    // and the state is recorded as a conflict, which is material and leaves the
+    // requirement open for an operator.
+    if (retained && retentionState === 'AUTHORITY_CONFLICT') {
+      const conflictReason =
+        `the accepted legal authority for this project is '${retained.jurisdiction.ahjName}' `
+        + `(${retained.jurisdiction.ahjRecordId}), and this refresh returned `
+        + `'${legalJurisdiction.ahjName ?? 'an unnamed authority'}' at verification state `
+        + `'${legalJurisdiction.verificationState}'. Neither is adopted automatically — an operator must determine `
+        + 'which authority governs this parcel.';
+      return {
+        result: 'FAILED',
+        clearance: { cleared: false, missing: ['an operator determination of the governing legal authority'], reasons: [conflictReason] },
+        patch: {
+          projectLegalAuthority: record,
+          legalJurisdiction: { ...retained.jurisdiction, verificationState: 'conflict' },
+        },
+        sourceQueried: res.sourcesQueried.join(' · '),
+        sourceRefs: refs,
+        retryability: 'REQUIRES_INPUT',
+        failureReason: conflictReason,
+        operatorAction: 'Confirm the governing legal authority for this parcel in the project record, then regenerate.',
+        confidence: record.confidence,
+        auditRef: null,
+        inputsRecorded: recorded,
+      };
+    }
 
     // GENUINE AMBIGUITY ⇒ OPERATOR_CONFIRMATION, never an engine choice.
     if (record.confirmationRequired.length) {
       return {
         result: 'FAILED',
         clearance: { cleared: false, missing: record.confirmationRequired, reasons: record.confirmationRequired },
-        patch: { projectLegalAuthority: record },
+        patch: { projectLegalAuthority: record, legalJurisdiction },
         sourceQueried: res.sourcesQueried.join(' · '),
         sourceRefs: refs,
         retryability: 'REQUIRES_INPUT',
@@ -237,7 +442,7 @@ export const projectAuthorityResolver: RequirementResolver = {
       return {
         result: 'FAILED',
         clearance: { cleared: false, missing: unverified, reasons: unverified },
-        patch: { projectLegalAuthority: record },
+        patch: { projectLegalAuthority: record, legalJurisdiction },
         sourceQueried: res.sourcesQueried.join(' · '),
         sourceRefs: refs,
         retryability: 'RETRYABLE',
@@ -255,7 +460,7 @@ export const projectAuthorityResolver: RequirementResolver = {
     return {
       result: 'RESOLVED',
       clearance: { cleared: true, missing: [], reasons: [] },
-      patch: { projectLegalAuthority: record },
+      patch: { projectLegalAuthority: record, legalJurisdiction },
       sourceQueried: res.sourcesQueried.join(' · '),
       sourceRefs: refs,
       retryability: 'NON_RETRYABLE',
@@ -356,7 +561,14 @@ export const codeAuthorityResolver: RequirementResolver = {
           missing: ambiguous
             ? ['an operator determination of which overlapping authority governs this parcel']
             : ['an adopted-code retrieval carrying the IBC / IRC / IFC editions for this jurisdiction'],
-          reasons: [res.failure],
+          // TR — split by failure KIND (see project-authority). AMBIGUOUS names
+          // BOTH overlapping authorities and their editions; that is a design
+          // finding and must stay in the digest. A timeout must not.
+          reasons: [materialRetrievalReason({
+            failureKind: res.failureKind,
+            providerFailure: res.failure,
+            whenOperational: 'the adopted code editions are NOT ESTABLISHED — no adopted-code retrieval carrying the IBC / IRC / IFC editions was obtained for this jurisdiction',
+          })],
         },
         sourceQueried: res.sourcesQueried.join(' · ') || AHJ_REGISTRY_ENDPOINT,
         sourceRefs: res.sourcesQueried.map(u => `provenance:${u}`),
@@ -635,7 +847,14 @@ export const environmentalAuthorityResolver: RequirementResolver = {
         clearance: {
           cleared: false,
           missing: ['an ASCE 7 hazard retrieval or an archived climate_hazard_dataset covering this site'],
-          reasons: [`${provider.name}: ${res.failure}`],
+          // TR — split by failure KIND (see project-authority). A NO_COVERAGE
+          // answer ("ground snow load NOT retrieved") is a fact about this site
+          // and stays; a timeout is not and does not.
+          reasons: [materialRetrievalReason({
+            failureKind: res.failureKind,
+            providerFailure: `${provider.name}: ${res.failure}`,
+            whenOperational: 'the environmental-load authority is NOT ESTABLISHED — no ASCE 7 hazard retrieval or archived climate-hazard dataset was obtained for this site',
+          })],
         },
         sourceQueried: res.sourcesQueried.join(' · ') || provider.name,
         sourceRefs: res.sourcesQueried.map(u => `provenance:${u}`),
@@ -697,7 +916,21 @@ export const environmentalAuthorityResolver: RequirementResolver = {
         applicabilityNotes: record.applicability,
         status: 'current',
         extractedClaims: claims as never,
+        // ── D5 — MACHINE VERIFICATION, DECLARED AS SUCH ────────────────────
+        // This row stays terminally verified (RG-3 must not regress): retrieving
+        // a published ASCE 7 hazard dataset at a coordinate is objective and
+        // reproducible, which is precisely what `climate_hazard_dataset` is
+        // allowed to be machine-verified for.
+        //
+        // What changes is that the machine now SAYS SO. Previously the resolver
+        // id went into `reviewer` — the ASSIGNED-reviewer column — and
+        // `createDocument` never wrote `verified_by` at all, so the row read as
+        // "verified by nobody". A resolver must never be indistinguishable from
+        // a human verifier.
         verificationState: 'verified',
+        verificationActor: record.resolverId,
+        verificationActorKind: 'resolver',
+        verificationBasis: 'MACHINE_GOVERNMENT_DATASET_RETRIEVAL',
         reviewer: record.resolverId,
         createdBy: record.resolverId,
       }),

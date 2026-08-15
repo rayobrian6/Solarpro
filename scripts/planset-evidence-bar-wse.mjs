@@ -184,8 +184,39 @@ if (isMicro) {
   check(6, 'no sheet claims the Q-Cable provides integrated equipment grounding',
     !/Q.?Cable[^.]{0,80}integrated (equipment )?grounding/i.test(noB64));
 
-  const assertsSeparate = /SEPARATE\s+(EQUIPMENT GROUNDING CONDUCTOR|EGC)/i.test(noB64)
-    || /SEPARATE\s+#?\d+[^.]{0,40}EGC/i.test(noB64);
+  // A NEGATED phrase is not an assertion. Outcome A is SUPPOSED to print
+  // "NO SEPARATE EGC REQUIRED", and the bare /SEPARATE EGC/ probe read that as
+  // an assertion of its own opposite. The negation is tested PER MATCH against
+  // the immediately preceding text — a document-wide negation test would let a
+  // real assertion hide behind an unrelated "no ... EGC" sentence elsewhere.
+  // (Same defect class as PPC gate 1's negation window.)
+  const SEPARATE_PROBES = [
+    /SEPARATE\s+(?:EQUIPMENT GROUNDING CONDUCTOR|EGC)/gi,
+    /SEPARATE\s+#?\d+[^.]{0,40}EGC/gi,
+  ];
+    const NEGATOR_BEFORE = /\b(?:no|without|not)\b[^.]{0,24}$/i;
+  const separateAssertions = (text) => {
+    const out = [];
+    for (const re of SEPARATE_PROBES) {
+      re.lastIndex = 0;
+      for (const m of text.matchAll(re)) {
+        const before = text.slice(Math.max(0, m.index - 40), m.index).replace(/<[^>]*>/g, ' ');
+        if (NEGATOR_BEFORE.test(before)) continue;   // "NO SEPARATE EGC …"
+        out.push(text.slice(Math.max(0, m.index - 60), m.index + 60).replace(/<[^>]*>/g, ' '));
+      }
+    }
+    return out;
+  };
+  // NON-VACUITY — the scanner must still catch a POSITIVE assertion, and must
+  // not flag the honest negated one.
+  if (separateAssertions('a separate #10 AWG EGC is installed with the trunk').length === 0) {
+    throw new Error('bar-wse: the separate-EGC probe stopped detecting a positive assertion');
+  }
+  if (separateAssertions('IQ8A PRODUCT: NO SEPARATE EGC REQUIRED (verified)').length !== 0) {
+    throw new Error('bar-wse: the negation window flagged the honest outcome-A sentence');
+  }
+  const separateHits = separateAssertions(noB64);
+  const assertsSeparate = separateHits.length > 0;
   const assertsNoEgc = /no (separate |additional )?EGC (is )?required/i.test(noB64);
 
   if (g.outcome === 'PENDING_MANUFACTURER_AUTHORITY') {
@@ -216,7 +247,7 @@ if (isMicro) {
       !/grounding[^.<]{0,60}✓\s*PASS/i.test(noB64)
     // case-SENSITIVE: a claim token 'VERIFIED', never the lowercase prose
     // 'no verified document' nor the blocker code '…-UNVERIFIED'.
-    && !/GROUNDING(?![-A-Z])[^.<]{0,60}(?<![A-Za-z-])VERIFIED/.test(noB64));
+    && !/GROUNDING(?![-A-Z])[^.<]{0,60}(?<![A-Za-z-])VERIFIED\b/.test(noB64));
     // the racking / module-frame bonding requirement is INDEPENDENT and preserved
     check(7, 'module-frame / racking bonding remains an independent, stated requirement',
       !!auth?.rackingModuleBondingRequirement?.required
@@ -243,7 +274,8 @@ if (isMicro) {
       g.bomRowState === 'orderable' && g.nonOrderable !== true, `bomRowState=${g.bomRowState}`);
   } else {
     // (A) — no additional conductor in this section.
-    check(7, 'outcome A renders NO separate-EGC requirement for this section', !assertsSeparate);
+    check(7, 'outcome A renders NO separate-EGC requirement for this section', !assertsSeparate,
+      assertsSeparate ? separateHits.slice(0, 2).join(' || ') : 'none');
     check(7, 'outcome A emits NO open-air EGC BOM row', g.bomRowState === 'no-row',
       `bomRowState=${g.bomRowState}`);
     check(7, 'outcome A retains the independent module-frame / racking bonding requirement',
@@ -272,8 +304,13 @@ if (isMicro) {
   check(9, 'no BOM/sheet text justifies sealing caps as "1 per AC branch"',
     !/Sealing Cap[^<]{0,160}1 per AC branch/i.test(noB64)
     && !/unused drops \(1 per AC branch\)/i.test(noB64));
+  // WS-2 states the same fact in the manufacturer's own terms — "N unused molded
+  // connector(s) on the ordered cable + M connector(s) on the newly allocated
+  // section(s)" — which IS the ordered-vs-occupied derivation, sourced to the
+  // archived per-unused-connector rule. Accepted alongside the legacy phrasings.
   check(9, 'the sealing-cap quantity is stated as topology-derived (or honest PENDING)',
     /NOT 1-per-branch/i.test(noB64) || /drops ordered/i.test(noB64)
+    || /unused molded connector/i.test(noB64)
     || !/Sealing Cap/i.test(noB64),
     'cap row carries its ordered-vs-occupied derivation');
   check(10, 'terminators are justified by cable-end objects, not a per-branch constant',

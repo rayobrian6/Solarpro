@@ -298,7 +298,14 @@ describe('PPC §6 (gate 8) — generic PASS cannot hide branch blockers', () => 
     const t = text(sched());
     expect(t).toContain('BRANCH RELEASE STATUS');
     for (const b of ['B1', 'B2', 'B3']) expect(t).toContain(b);
-    expect(t).toContain('PENDING MANUFACTURER AUTHORITY');       // grounding authority
+    // WS-2 corrected this cell. It used to read 'GROUNDING AUTHORITY: PENDING
+    // MANUFACTURER AUTHORITY' for EVERY outcome (the predicate compared a prose
+    // sentence to the literal 'verified'), which was false once the IQ8A product
+    // question closed. The cell now states each authority separately; what this
+    // test guards — that the grounding authority is NAMED on the branch block —
+    // is unchanged.
+    expect(t).toMatch(/GROUNDING — IQ8A PRODUCT:/);            // grounding authority
+    expect(t).toMatch(/ARRAY\/RACKING BONDING:/);              // and it stays separate
     expect(t).toMatch(/ROUTE AUTHORITY:/);
     expect(t).toMatch(/PENDING — CAD-DERIVED ESTIMATE/);          // route authority
     expect(t).toMatch(/OVERALL RELEASE: BLOCKED/);

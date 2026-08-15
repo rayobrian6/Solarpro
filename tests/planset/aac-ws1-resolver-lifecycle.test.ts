@@ -419,17 +419,22 @@ describe('AAC WS-1 · freeze only after stabilization', () => {
     expect(authority.projectJurisdiction).toBe('FIXTURE COUNTY');
   });
 
-  it('BOTH permit paths resolve authority BEFORE the sync build (GET/POST parity)', () => {
+  // WS-A (2026-08-03) — see the note in aac-ws8-ws9-structural-lifecycle.
+  // GET/POST build parity is retired because GET no longer builds. What remains
+  // is the half that still matters: the ONE build path resolves authority before
+  // the sync build, and no build anywhere omits the bundle.
+  it('the build path resolves authority BEFORE the sync build, and GET does not build at all', () => {
     const src = read('app/api/engineering/permit/route.ts');
-    expect(src).toContain('generatePermitHTML(savedInput, undefined, selfHealAuthority)');
     expect(src).toContain('generatePermitHTML(enrichedBody, storedSldSvg, snapshotAuthority)');
     // no call site may omit the resolved authority bundle
     expect(src).not.toMatch(/generatePermitHTML\(\s*[A-Za-z_$][\w$]*\s*\)/);
-    // and the GET path must resolve it first
-    const resolveIdx = src.indexOf('resolveSnapshotAuthorityInputs(savedInput)');
-    const genIdx = src.indexOf('generatePermitHTML(savedInput');
+    // the POST path resolves first
+    const resolveIdx = src.indexOf('resolveSnapshotAuthorityInputs(enrichedBody)');
+    const genIdx = src.indexOf('generatePermitHTML(enrichedBody');
     expect(resolveIdx).toBeGreaterThan(-1);
     expect(genIdx).toBeGreaterThan(resolveIdx);
+    // and the retired self-heal build is gone for good
+    expect(src).not.toContain('generatePermitHTML(savedInput');
   });
 
   it('the snapshot is frozen AFTER the build, and the build is the last consumer of the bundle', () => {

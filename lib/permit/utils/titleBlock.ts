@@ -9,7 +9,7 @@ import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { projectProjectAuthorityFromInput, projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
-import { projectRacewayDescriptor } from '../snapshot/electricalProjection';
+import { projectRacewayDescriptor, projectGroundingSummary } from '../snapshot/electricalProjection';
 import type { PermitDesignSnapshot } from '../snapshot/types';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { projectFastenerAssembly } from '../snapshot/structuralProjection';
@@ -239,7 +239,40 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     projectRacewayDescriptor(
       (input as unknown as { _snapshot?: PermitDesignSnapshot })._snapshot ?? null
     ).noteText,
-    `Equipment grounding conductor (EGC) shall be sized per NEC 250.122. All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: ${project.wireGauge || '#10 AWG'} per NEC 690.45.`,
+    // ── D2 (Planset 17) — NO PROJECT-WIDE EGC MINIMUM ────────────────────────
+    // This note used to end `DC EGC minimum: ${project.wireGauge || '#10 AWG'}
+    // per NEC 690.45.` Three things were wrong with it. It interpolated
+    // `project.wireGauge` — an operator-entered PHASE conductor gauge — and
+    // printed it as a grounding minimum. It asserted ONE size project-wide when
+    // grounding is sized per segment on each circuit's own OCPD (branch #12,
+    // feeder #10, array bond #12 minimum / #10 selected). And it stated a
+    // separate DC EGC requirement on a design whose microinverter product
+    // authority concluded NO SEPARATE EGC REQUIRED.
+    //
+    // The first two sentences are correct and load-bearing, so they stay. The
+    // false clause is replaced by a pointer to the canonical schedule — summarised
+    // from the ONE grounding summary object, never re-derived here.
+    ((): string => {
+      const g = projectGroundingSummary(
+        (input as unknown as { _snapshot?: PermitDesignSnapshot })._snapshot ?? null,
+      );
+      const sizes = [
+        g.branchEgcSize ? `branch ${g.branchEgcSize}` : null,
+        g.feederEgcSize ? `feeder ${g.feederEgcSize}` : null,
+        g.arrayBondCalculatedMinimum && g.arrayBondSelectedDesign
+          && g.arrayBondCalculatedMinimum !== g.arrayBondSelectedDesign
+          ? `array/racking bonding ${g.arrayBondCalculatedMinimum} calculated minimum · ${g.arrayBondSelectedDesign} selected design`
+          : (g.arrayBondSelectedDesign ? `array/racking bonding ${g.arrayBondSelectedDesign}` : null),
+      ].filter(Boolean).join('; ');
+      return 'Equipment grounding conductor (EGC) shall be sized per NEC 250.122. '
+        + 'All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. '
+        + 'Equipment grounding and bonding conductors are SEGMENT-SPECIFIC — no project-wide EGC minimum applies. '
+        + `See ${g.scheduleSheetRefs.join(' and ')} for the governing per-segment schedule`
+        + (sizes ? ` (${sizes}).` : '.')
+        + (g.productGroundingOutcome === 'NO_SEPARATE_EGC_REQUIRED'
+          ? ' The selected microinverter product authority establishes NO SEPARATE EGC REQUIRED for the array circuits.'
+          : '');
+    })(),
     `${project.acDisconnect ? 'AC disconnect switch required and shown on SLD' : 'AC disconnect — see SLD for requirements'}. Disconnect shall be within sight of inverter, accessible, and rated for available fault current per NEC 690.15.`,
     // PPC §6 — the inverter-output citation is TOPOLOGY-DEPENDENT. It printed NEC
     // 705.12 (load-side) unconditionally, including on 705.11 supply-side designs —
@@ -264,7 +297,11 @@ export function buildConstructionNotes(input: PermitInput): string[] {
       : input.project?.systemType === 'ground' || input.project?.systemType === 'ground_mount'
       ? [
           `Ground mount pile/pier foundations shall be installed per structural engineer specifications and attachment detail on sheet PV-3. Embedment depth per geotechnical requirements and ASCE ${asceVer}.`,
-          `All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: #10 AWG per NEC 690.45. Ground array grounding per NEC 690.47 and 250.166.`,
+          // D2 — the ground-mount branch is ADDITIVE to the base note above, so
+          // this carried the SAME false project-wide minimum a second time (and
+          // hardcoded, not even interpolated). Removing only the base occurrence
+          // would have left a ground-mount package still asserting it.
+          `All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. Equipment grounding and bonding conductors are SEGMENT-SPECIFIC — no project-wide EGC minimum applies; see PV-4B and PV-4B.1. Ground array grounding per NEC 690.47 and 250.166.`,
         ]
       : [
           roofAttachmentNote(input),

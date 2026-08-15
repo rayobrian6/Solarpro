@@ -48,15 +48,31 @@ export interface TrunkCableSpec {
   source?: string;
 }
 
-/** Raw (unconnectorized) cable stock — the source for field-fabricated jumpers
- *  built with the field-wireable connector pair. Present only where the brand
- *  publishes one. */
+/** Raw (unconnectorized) cable stock — a bulk reel some brands publish as the
+ *  source for field-fabricated jumpers.
+ *
+ *  WS-2B: a raw-stock entry is an ORDERABLE CLAIM, so it needs the same standard
+ *  as any other orderable fact. `verificationState` records whether an ARCHIVED,
+ *  HASHED manufacturer document actually names the product. `unverified-catalog`
+ *  means the row exists in this table and nowhere in the evidence — it may be
+ *  reported, and it may NEVER be purchased against or used to satisfy a length
+ *  deficit. (Enphase: the archived IOM-00068-3.0-EN enumerates every IQ Cable
+ *  accessory and names no bulk/raw/reel stock at all; the documented way to get
+ *  an arbitrary-length segment is to CUT the listed cable and terminate it.) */
 export interface TrunkRawCableSpec {
   sku: string;
   description: string;
   gaugeAwg: number;
+  /** the package length. NOTE the unit trap: this is derived from the published
+   *  package quantity, never parsed out of the SKU name — 'Q-12-RAW-300' is
+   *  claimed to be 300 METRES (~984 ft), not 300 feet. */
   lengthFt: number | null;
   source: string;
+  /** 'verified-archived' ⇒ an archived hashed document names this product.
+   *  'unverified-catalog' ⇒ catalog-only; NOT orderable, NOT a deficit remedy. */
+  verificationState: 'verified-archived' | 'unverified-catalog';
+  /** why it is in that state, in one sentence. */
+  verificationBasis: string;
 }
 
 /** The manufacturer's DOCUMENTED rule for what happens at a transition and at an
@@ -156,7 +172,23 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
     ],
     rawCable: {
       sku: 'Q-12-RAW-300', description: '300 m of 12 AWG cable with NO connectors — jumper stock used with the field-wireable connector pair',
+      // 300 METRES per the catalog description, i.e. ~984 ft — NOT 300 ft. The
+      // conversion is spelled out because reading '300' off the SKU name as feet
+      // would understate a purchase by a factor of three.
       gaugeAwg: 12, lengthFt: Math.round(300 * 3.28084), source: 'DSH-00247-1.0',
+      verificationState: 'unverified-catalog',
+      // NOTE: this string is RENDERED on the planset, so it names no tool SKUs —
+      // a suggested-tool part number on a permit sheet is a different defect
+      // (see tests/planset/suggested-tools.test.ts). The full accessory
+      // enumeration lives in the evidence module and in this file's comments.
+      verificationBasis:
+        'WS-2B: this SKU appears in NO archived manufacturer document. The archived, hashed '
+        + 'IOM-00068-3.0-EN (sha256 65167d4d…) tables the listed IQ Cable variants and enumerates the '
+        + 'IQ Cable accessories, and it names no bulk / raw / reel / spool cable stock product at all; '
+        + 'those words do not occur in its bytes. The documented method for an arbitrary-length '
+        + 'segment is §4.4 "Cut each segment of cable to meet your planned needs", joined with an IQ '
+        + 'Field Wireable Connector pair. Reported only; it may never be purchased against or used to '
+        + 'satisfy a cable-length deficit.',
     },
     spliceInstallRule: {
       continuousCableWithServiceLoop: true,
@@ -177,7 +209,9 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
     deviceBranchLimits: { IQ8M: 12, IQ8A: 10, IQ8H: 10, 'IQ8AC': 10 },
     branchOcpdA: 20,
     notes: [
-      'Raw cable Q-12-RAW-300 (no connectors) is used with Q-CONN M+F to build jumpers across sub-array gaps.',
+      '⚠ Q-12-RAW-300 is CATALOG-ONLY (verificationState unverified-catalog): no archived Enphase '
+        + 'document names it. The ESTABLISHED method for a sub-array gap is to CUT the listed IQ Cable '
+        + 'to length and join it with a Q-CONN-10M/Q-CONN-10F field-wireable pair (IOM-00068-3.0-EN §4.4/§6.4).',
       'Connector spacing variants exist (Q-12-12-240 1.5 m portrait, Q-12-18-240 2.1 m landscape, Q-12-2x-200 series); resolver picks the two US-standard SKUs.',
     ],
   },

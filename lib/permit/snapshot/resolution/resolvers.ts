@@ -24,7 +24,13 @@ import {
   findAppliedReconciliation,
 } from '@/lib/reconciliation/reconcile';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import type { RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation } from './types';
+// D4 — the curated jurisdiction resolution. No provider, no network: the same
+// derivation the pure snapshot build uses for codeAuthority.ahjRecordId.
+import { resolveAhjRecordTraced } from '../codeAuthority';
+import type {
+  RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation,
+  LegalJurisdictionAuthority,
+} from './types';
 import { buildResolutionAuditRef, documentSourceRefs } from './evidence';
 import {
   collectModuleSelectionCandidates, decideCanonicalSelection, buildCanonicalEquipmentAuthority,
@@ -34,8 +40,14 @@ import {
   type StoredEquipmentRecord,
 } from './equipmentSelection';
 import {
-  evaluateModuleDatasheetBinding, MODULE_DATASHEET_DOCUMENT_CLASS,
+  evaluateModuleDatasheetBinding, MODULE_DATASHEET_DOCUMENT_CLASS, moduleSourceIsEstablished,
 } from './datasheetBinding';
+// CMDA — THE canonical module applicability authority.
+import {
+  evaluateModuleDatasheetApplicability, type ModuleDatasheetApplicabilityAuthority,
+} from '../moduleDocumentAuthority';
+// CMEI — THE canonical module identity: one accessor, one boundary.
+import { materialiseModuleIdentity, resolveFleetModuleIdentities } from '@/lib/equipment/moduleIdentity';
 import {
   resolveProjectPersonnel, unavailablePersonnelAuthority,
 } from '@/lib/personnel/store';
@@ -57,6 +69,10 @@ export {
   rackingDocumentRetrievalResolver, rackingAssemblySelectionResolver,
   framingCapacityRetrievalResolver, engineeringReviewRecordResolver,
 } from './structuralResolvers';
+// WS-5 — the field route measurement read (migration 118). Read-only: it is the
+// resolver half of a workflow whose WRITE half is the authenticated API.
+import { fieldRouteMeasurementResolver } from './fieldMeasurementResolver';
+export { fieldRouteMeasurementResolver } from './fieldMeasurementResolver';
 
 const DOC_REGISTRY_SOURCE = 'manufacturer_document_registry (lib/documents/registry, migration 113)';
 const LEDGER_SOURCE = 'snapshot_digest_invalidations (lib/reconciliation/reconcile, migration 114)';
@@ -82,8 +98,8 @@ export const projectAuthorityKeyResolver: RequirementResolver = {
   mode: 'AUTO_DERIVED',
   requirementCodes: [],
   requiredInputs: [],
-  produces: ['projectJurisdiction', 'framingProjectApplicabilityKey'],
-  description: 'Derives the AHJ/jurisdiction boundary and the project applicability key from the posted project record.',
+  produces: ['projectJurisdiction', 'framingProjectApplicabilityKey', 'legalJurisdiction'],
+  description: 'Derives the AHJ/jurisdiction boundary and the project applicability key from the posted project record, and establishes the CANONICAL legal AHJ from the curated jurisdiction table.',
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     const proj = (ctx.input.project ?? {}) as Record<string, unknown>;
     const jurisdiction: string | null =
@@ -91,6 +107,69 @@ export const projectAuthorityKeyResolver: RequirementResolver = {
       ?? (proj.ahjName as string | undefined)
       ?? (proj.state as string | undefined)
       ?? null;
+
+    // ── D4 — THE CANONICAL LEGAL AHJ, ESTABLISHED HERE AND NOWHERE LATER ────
+    // `jurisdiction` above is the POSTED record's answer. For the live Braidon
+    // project that is "City of Granite City Building & Zoning" — the MAILING
+    // city — while the parcel sits in unincorporated Madison County. Stamping a
+    // manufacturer document from it is how all four live registry rows came to
+    // carry the wrong governing authority.
+    //
+    // The retrieval resolvers that could correct it do not reliably run: BOTH
+    // `project-authority@v1` (needs a property-identity provider) and
+    // `code-authority@v1` (early-returns when the adoption retrieval finds no
+    // coverage) exit before publishing anything. On the live path neither
+    // reaches its patch, which is why the correction never propagated.
+    //
+    // `resolveAhjRecordTraced` needs no provider and no network. It is the same
+    // resolution the pure snapshot build already uses to produce
+    // `codeAuthority.ahjRecordId`, and it applies the boundary rule directly: a
+    // postal city is not a jurisdiction, so an unincorporated parcel resolves to
+    // the COUNTY record. Deriving it here — in the AUTO_DERIVED resolver that
+    // runs FIRST — makes the legal AHJ a precondition available to every
+    // document resolver, rather than an accident of retrieval ordering.
+    const _traced = resolveAhjRecordTraced({
+      ahjRecordId: (proj.ahjRecordId as string | undefined) ?? (proj.ahjId as string | undefined) ?? null,
+      ahjName: (proj.ahjName as string | undefined) ?? null,
+      stateCode: (proj.state as string | undefined) ?? null,
+      county: (proj.county as string | undefined) ?? null,
+      city: (proj.city as string | undefined) ?? null,
+      address: (proj.address as string | undefined) ?? null,
+    });
+    const _rec = _traced.record;
+    // ⚠ THIS DERIVATION IS NEVER 'verified'. It resolves a curated-table record
+    // from hints; it does NOT perform a municipal-boundary determination. Its
+    // match methods are 'explicit-record-id' | 'stored-ahj-name' |
+    // 'incorporated-city' | 'address-parse' | 'unresolved' — every one of which
+    // can be wrong in the exact way this defect was wrong. `explicit-record-id`
+    // is the most dangerous of them: on the live Braidon project the stored
+    // engineering_config carries `ahjId: 'il-icc'`, a stale value that would
+    // resolve "explicitly" to the wrong authority.
+    //
+    // So this publishes the legal AHJ for VISIBILITY and for the name-comparison
+    // fallback, and deliberately marks it UNVERIFIED. Only a real boundary
+    // determination (project-authority@v1, which sets 'verified') may authorise
+    // archiving a jurisdiction-bound document. An unverified derivation stamping
+    // a document is precisely the class of defect D4 exists to remove.
+    const legalJurisdiction: LegalJurisdictionAuthority | null = _rec
+      ? {
+          ahjRecordId: _rec.id,
+          ahjName: _rec.ahjName,
+          jurisdictionType: (_rec.ahjType as LegalJurisdictionAuthority['jurisdictionType']) ?? null,
+          stateCode: _rec.stateCode ?? ((proj.state as string | undefined) ?? null),
+          county: _rec.county ?? ((proj.county as string | undefined) ?? null),
+          unincorporated: _traced.incorporated == null ? null : !_traced.incorporated,
+          // the MAILING city, kept separate so display never reaches for the legal name
+          mailingCity: (proj.city as string | undefined) ?? null,
+          provenance: {
+            source: 'project-authority-key@v1',
+            ref: `ahj-national:${_rec.id}`,
+            basis: `curated jurisdiction table · match method '${_traced.matchMethod}' `
+              + '· NOT a municipal-boundary determination',
+          },
+          verificationState: 'unverified',
+        }
+      : null;
     const applicabilityKey: string | null =
       ctx.projectId ?? (proj.apn as string | undefined) ?? (proj.address as string | undefined) ?? null;
     const missing: string[] = [];
@@ -103,7 +182,7 @@ export const projectAuthorityKeyResolver: RequirementResolver = {
         missing,
         reasons: missing.length ? ['the project record carries no jurisdiction / applicability key'] : [],
       },
-      patch: { projectJurisdiction: jurisdiction, framingProjectApplicabilityKey: applicabilityKey },
+      patch: { projectJurisdiction: jurisdiction, framingProjectApplicabilityKey: applicabilityKey, legalJurisdiction },
       sourceQueried: 'PermitInput.project (posted record)',
       sourceRefs: ['provenance:permit-input#project'],
       retryability: missing.length ? 'REQUIRES_INPUT' : 'NON_RETRYABLE',
@@ -126,14 +205,14 @@ export const digestInvalidationLedgerResolver: RequirementResolver = {
   mode: 'AUTO_DERIVED',
   requirementCodes: [],
   requiredInputs: [],
-  produces: ['digestInvalidatedByLedger'],
+  produces: ['digestInvalidatedByLedger', 'digestInvalidations'],
   description: 'Reads the active snapshot_digest_invalidations rows for the project (the review-coverage precondition).',
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     if (!ctx.projectId) {
       return {
         result: 'SKIPPED',
         clearance: { cleared: false, missing: ['projectId'], reasons: ['no projectId on the permit input — the ledger cannot be scoped'] },
-        patch: { digestInvalidatedByLedger: false },
+        patch: { digestInvalidatedByLedger: false, digestInvalidations: [] },
         sourceQueried: LEDGER_SOURCE,
         retryability: 'REQUIRES_INPUT',
         failureReason: 'no projectId — the invalidation ledger cannot be queried',
@@ -148,6 +227,21 @@ export const digestInvalidationLedgerResolver: RequirementResolver = {
     // fail-soft INVERTED: unreadable ⇒ conservative `true`.
     const rows = read.ok ? (Array.isArray(read.value) ? read.value : []) : null;
     const invalidated = rows == null ? true : rows.length > 0;
+    // PRR §2 — project the ROWS, not just their count. The count alone was a
+    // permanent latch: the writer records `digest: null` and nothing in the
+    // codebase ever sets `superseded_at`, so one reconciliation blocked every
+    // future approval on that project forever. reviewCoverage.invalidationApplies
+    // scopes each row to the digest (or the approval instant) it actually names.
+    const facts = rows == null ? null : rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      const at = row.invalidated_at ?? row.invalidatedAt ?? null;
+      return {
+        digest: (row.digest as string | null) ?? null,
+        scope: (row.scope as string | null) ?? null,
+        invalidatedAtIso: at == null ? null : (at instanceof Date ? at.toISOString() : String(at)),
+        reason: (row.reason as string | null) ?? null,
+      };
+    });
     return {
       result: read.ok ? 'RESOLVED' : 'FAILED',
       clearance: {
@@ -155,7 +249,7 @@ export const digestInvalidationLedgerResolver: RequirementResolver = {
         missing: read.ok ? [] : ['snapshot_digest_invalidations'],
         reasons: read.ok ? [] : ['the invalidation ledger is unreadable — the review-coverage precondition is fail-closed to INVALIDATED'],
       },
-      patch: { digestInvalidatedByLedger: invalidated },
+      patch: { digestInvalidatedByLedger: invalidated, digestInvalidations: facts },
       sourceQueried: LEDGER_SOURCE,
       sourceRefs: ['authority:reconciliation.snapshot_digest_invalidations'],
       retryability: read.ok ? 'NON_RETRYABLE' : 'RETRYABLE',
@@ -200,9 +294,19 @@ export const rackingCapacityDocumentResolver: RequirementResolver = {
       clearance: {
         cleared: doc != null,
         missing: doc ? [] : ['manufacturer_document_registry: structural_pe_letter | evaluation_report covering the exact mount + jurisdiction'],
-        reasons: doc ? [] : [read.ok
-          ? 'no VERIFIED, current, archived, structurally-claiming capacity document is registered for the selected mount in this jurisdiction'
-          : (read.error ?? 'the document registry is unreadable')],
+        // ── TR — THE MATERIAL REASON DOES NOT DEPEND ON HOW THE LOOKUP WENT ──
+        // This sentence reaches `blockingReason` → the registry payload → the
+        // DESIGN DIGEST. It is therefore stated so that it is equally true when
+        // the registry answered "none" and when the registry could not be
+        // reached: either way NO capacity authority is established, the
+        // requirement is open, the gate is closed and the drawings are the same.
+        // WHY the lookup did not answer is operational — it travels verbatim on
+        // `failureReason` / `retryability` below into
+        // `snapshot.resolverAttemptEvidence`, which the digest does not read.
+        // Interpolating `read.error` here (what this did) meant a one-second
+        // registry blip re-worded a digested field and invalidated the PE's
+        // digest-bound approval of an unchanged design.
+        reasons: doc ? [] : ['no VERIFIED, current, archived, structurally-claiming capacity document is ESTABLISHED for the selected mount in this jurisdiction'],
       },
       // doc ⇒ archived true; no doc ⇒ UNRESOLVED (null), never a hard false.
       patch: { capacityDocument: doc, manufacturerDocumentsArchived: doc != null ? true : null },
@@ -240,9 +344,8 @@ export const framingCapacityDocumentResolver: RequirementResolver = {
       clearance: {
         cleared: doc != null,
         missing: doc ? [] : ['manufacturer_document_registry: truss_design_drawing | manufacturer_structural_calc | stamped_structural_analysis covering this building'],
-        reasons: doc ? [] : [read.ok
-          ? 'no VERIFIED, current, archived framing-capacity document covers this exact building — operator-entered framing geometry is OBSERVATION, never capacity'
-          : (read.error ?? 'the document registry is unreadable')],
+        // TR — material reason, independent of the attempt outcome.
+        reasons: doc ? [] : ['no VERIFIED, current, archived framing-capacity document is ESTABLISHED for this exact building — operator-entered framing geometry is OBSERVATION, never capacity'],
       },
       patch: { framingCapacityDocument: doc },
       sourceQueried: DOC_REGISTRY_SOURCE,
@@ -285,9 +388,9 @@ export const climateHazardDocumentResolver: RequirementResolver = {
       clearance: {
         cleared: doc != null,
         missing: doc ? [] : ['manufacturer_document_registry: climate_hazard_dataset covering this site (wind + snow + exposure/risk, currency-reviewed)'],
-        reasons: doc ? [] : [read.ok
-          ? 'no ARCHIVED climate-hazard source exists for this exact site — operator-entered wind/snow are an OBSERVATION/OVERRIDE and can never clear it'
-          : (read.error ?? 'the document registry is unreadable')],
+        // TR — material reason, independent of the attempt outcome (see the
+        // racking-capacity resolver above for the full rationale).
+        reasons: doc ? [] : ['no ARCHIVED climate-hazard source is ESTABLISHED for this exact site — operator-entered wind/snow are an OBSERVATION/OVERRIDE and can never clear it'],
       },
       patch: { environmentalSource: doc },
       sourceQueried: DOC_REGISTRY_SOURCE,
@@ -330,11 +433,10 @@ export const cableExtensionSolutionsResolver: RequirementResolver = {
         missing: solutions.length ? [] : (skus.length
           ? ['manufacturer_document_registry: a verified listed-extension document for the selected SKU']
           : ['project.cableExtensionSkus (no listed extension product selected)']),
-        reasons: solutions.length ? [] : [read.ok
-          ? (skus.length
-            ? 'the selected extension SKUs have no VERIFIED listed document — a documented solution cannot be constructed'
-            : 'no listed cable-extension product is selected (project.cableExtensionSkus is empty), so there is no extension DOCUMENT for this resolver to resolve. The alternate-stock / raw-stock / dead-drop / rebranch option space IS evaluated deterministically — by qcable-solution@v1, which owns QCABLE-PROCUREMENT-INSUFFICIENT and states the governing unresolved reason')
-          : (read.error ?? 'the document registry is unreadable')],
+        // TR — material reason, independent of the attempt outcome.
+        reasons: solutions.length ? [] : [skus.length
+          ? 'the selected extension SKUs have no VERIFIED listed document ESTABLISHED — a documented solution cannot be constructed'
+          : 'no listed cable-extension product is selected (project.cableExtensionSkus is empty), so there is no extension DOCUMENT for this resolver to resolve. The alternate-stock / raw-stock / dead-drop / rebranch option space IS evaluated deterministically — by qcable-solution@v1, which owns QCABLE-PROCUREMENT-INSUFFICIENT and states the governing unresolved reason'],
       },
       patch: { cableExtensionSolutions: solutions },
       sourceQueried: DOC_REGISTRY_SOURCE,
@@ -671,27 +773,79 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     // The registry lookup is performed per distinct module, through the shared
     // guard, and its result (or exact failure) is recorded on each coverage row.
-    const lookups = new Map<string, { boundDocumentId: string | null; failure: string | null }>();
-    const models = new Set<string>();
-    for (const inv of ctx.input.system?.inverters ?? []) {
-      for (const s of inv?.strings ?? []) if (s?.panelModel) models.add(s.panelModel);
-    }
-    for (const model of models) {
+    // ══ CMDA — ONE ROW IN, ONE CANONICAL VERDICT OUT ═══════════════════════
+    // The lookup requests module COVERAGE, not merely a model-shaped match, and
+    // it keeps the WHOLE registry row: identity, hash, verification state,
+    // verifier and the structured module claims all travel together into
+    // `evaluateModuleDatasheetApplicability`. Reducing the row to `{id}` here —
+    // which is what this did — is precisely how a document's identity came to be
+    // cited while its coverage was never checked.
+    const lookups = new Map<string, {
+      boundDocumentId: string | null;
+      failure: string | null;
+      applicability: ModuleDatasheetApplicabilityAuthority;
+    }>();
+    // ── CMEI — THE IDENTITY IS RESOLVED BY THE ONE ACCESSOR ─────────────────
+    // A previous pass asserted here that `applyCanonicalEquipmentToInput` had
+    // "already re-pinned" the canonical id onto every string. THAT WAS FALSE:
+    // it is called from only two places, both inside DIVERGENT branches of
+    // `canonical-equipment-selection@v1` (:582, :683). The ordinary
+    // no-divergence branch (:520-534), SKIPPED and OPERATOR_CONFIRMATION all
+    // return without re-pinning, so on most real projects `panelId` was written
+    // only if the posted body already carried it.
+    //
+    // `materialiseModuleIdentity` below closes that gap unconditionally, and
+    // `resolveFleetModuleIdentities` is the ONE accessor every consumer uses.
+    // Keying by the resolved panelId is what makes a re-pin propagate without
+    // any subsystem rematching a model string.
+    materialiseModuleIdentity(ctx.input);
+    const identities = resolveFleetModuleIdentities(ctx.input.system);
+    const canonical = ctx.authority.canonicalEquipment?.canonical ?? null;
+    for (const [, idn] of identities) {
+      const model = idn.model ?? '';
+      if (!model) continue;
+      const equipmentId = idn.panelId
+        ?? (canonical && canonical.model === model ? canonical.catalogId ?? null : null);
+      const watts = idn.watts ?? (canonical && canonical.model === model ? canonical.ratedWatts ?? null : null);
       const read = await ctx.safeDbRead(
         `findVerifiedDocument(${MODULE_DATASHEET_DOCUMENT_CLASS}, ${model})`,
-        () => findVerifiedDocument({ documentClass: MODULE_DATASHEET_DOCUMENT_CLASS, equipmentModel: model }),
+        () => findVerifiedDocument({
+          documentClass: MODULE_DATASHEET_DOCUMENT_CLASS,
+          equipmentId,
+          equipmentModel: model,
+          selectedWatts: watts,
+          requireModuleDatasheetCoverage: true,
+        }),
         null,
       );
+      const doc = read.ok ? read.value : null;
+      const applicability = evaluateModuleDatasheetApplicability({
+        selected: {
+          equipmentId,
+          manufacturer: canonical && canonical.model === model ? canonical.manufacturer ?? null : null,
+          model,
+          watts,
+        },
+        document: doc,
+      });
       lookups.set(model, {
-        boundDocumentId: read.ok && read.value ? read.value.id : null,
-        failure: read.ok ? (read.value ? null : 'no VERIFIED, current module_datasheet is registered for this model') : read.error,
+        boundDocumentId: doc ? doc.id : null,
+        failure: read.ok
+          ? (applicability.clears ? null : applicability.refusals.join(' · ') || applicability.basis)
+          : read.error,
+        applicability,
       });
     }
 
     const binding = evaluateModuleDatasheetBinding(ctx.input, ({ model }) =>
-      lookups.get(model) ?? { boundDocumentId: null, failure: 'no lookup performed for this model' });
+      lookups.get(model) ?? {
+        boundDocumentId: null,
+        failure: 'no lookup performed for this model',
+        applicability: null,
+      });
 
-    const pending = binding.modules.filter(m => !(m.state === 'EXACT' || m.registryLookup.boundDocumentId));
+    // D8 — the bound rule is not restated here; it lives in datasheetBinding.
+    const pending = binding.modules.filter(m => !moduleSourceIsEstablished(m));
     const inputsRecorded: Record<string, string | number | boolean | null> = {
       canonicalModule: ctx.authority.canonicalEquipment?.canonical?.model ?? null,
       moduleCount: binding.modules.length,
@@ -714,8 +868,13 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
     }
 
     if (binding.allBound) {
-      const refs = binding.modules
-        .map(m => (m.registryLookup.boundDocumentId ? `document:${m.registryLookup.boundDocumentId}` : `document:asset#${m.moduleModel}`));
+      // D8 — every ref is a REGISTRY document id. The old fallback minted
+      // `document:asset#<model>` for a module whose only evidence was an
+      // unhashed static asset, and that ref went into a resolution audit ref —
+      // a citation naming something that cannot be cited. `allBound` now
+      // guarantees a bound document id for every module, so the fallback is
+      // unreachable; it is removed rather than left as an invitation.
+      const refs = binding.modules.map(m => `document:${m.registryLookup.boundDocumentId}`);
       return {
         result: 'RESOLVED',
         clearance: { cleared: true, missing: [], reasons: [] },
@@ -886,4 +1045,9 @@ export const PRODUCTION_RESOLVERS: readonly RequirementResolver[] = [
   engineeringReviewRecordResolver,
   rackingDocumentRetrievalResolver,
   framingCapacityRetrievalResolver,
+  // ── WS-5 — FIELD ROUTE MEASUREMENTS. Last among the AUTO_DERIVED set: it
+  //    reads a store nothing else in the lifecycle writes, and what it produces
+  //    is consumed by the pure build (route length authority) rather than by
+  //    another resolver, so nothing depends on it running earlier.
+  fieldRouteMeasurementResolver,
 ];

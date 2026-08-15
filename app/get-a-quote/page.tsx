@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import {
   Sun, ArrowRight, CheckCircle2, AlertCircle,
@@ -121,12 +122,12 @@ export default function GetAQuotePage() {
       {/* NAV */}
       <header className="sticky top-0 z-30 border-b border-white/[0.05] bg-[#07070e]/95 backdrop-blur-xl">
         <div className="max-w-5xl mx-auto px-5 sm:px-8 py-3.5 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-3 group">
+          <Link href="/" className="flex items-center gap-3 group">
             <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/15 flex items-center justify-center group-hover:bg-amber-500/15 transition-colors">
               <Sun size={14} className="text-amber-400" />
             </div>
             <span className="text-sm font-bold text-white">SolarPro</span>
-          </a>
+          </Link>
           <a
             href="/portal/login"
             className="text-xs text-slate-500 hover:text-slate-300 border border-white/[0.06] hover:border-white/[0.15] rounded-lg px-3 py-1.5 transition-all"

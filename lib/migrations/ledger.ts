@@ -41,7 +41,7 @@ import {
   MIGRATION_LOCK_KEY_DECIMAL,
 } from './types';
 import { getNodeEnv } from '@/lib/env';
-import { writeAuditLog, AuditCategory, AuditAction } from '@/lib/auditLog';
+import { writeAuditLog, writeAuditLogDetailed, AuditCategory, AuditAction, type AuditWriteResult } from '@/lib/auditLog';
 
 /**
  * The fixed bootstrap DDL that creates the migration governance tables.
@@ -261,6 +261,11 @@ const MIGRATION_EVENT_TO_AUDIT_ACTION: Record<MigrationAuditEventType, AuditActi
  * @returns The entry hash on success, null on failure.
  */
 async function persistMigrationAuditEvent(event: MigrationAuditEvent): Promise<string | null> {
+  return (await persistMigrationAuditEventDetailed(event)).entryHash;
+}
+
+/** The same persistence, with the outcome preserved. */
+async function persistMigrationAuditEventDetailed(event: MigrationAuditEvent): Promise<AuditWriteResult> {
   const action = MIGRATION_EVENT_TO_AUDIT_ACTION[event.type] ?? 'data_read';
   const description = `Migration governance event: ${event.type}`;
   const targetType = event.migrationIdentifier ? 'migration' : 'migration_governance';
@@ -274,8 +279,8 @@ async function persistMigrationAuditEvent(event: MigrationAuditEvent): Promise<s
     environment: event.environment,
     ...event.details,
   };
-  return writeAuditLog({
-    category: 'migration' as AuditCategory,
+  return writeAuditLogDetailed({
+    category: 'migration',
     action,
     description,
     actor_id: event.actorId,
@@ -351,7 +356,7 @@ export function emitAuditEvent(event: Omit<MigrationAuditEvent, 'timestamp'>): v
  */
 export async function emitAuditEventAsync(
   event: Omit<MigrationAuditEvent, 'timestamp'>,
-): Promise<{ persisted: boolean; entryHash: string | null }> {
+): Promise<{ persisted: boolean; entryHash: string | null; error: string | null; orgContextDegraded: boolean }> {
   const fullEvent: MigrationAuditEvent = {
     ...event,
     timestamp: new Date().toISOString(),
@@ -360,15 +365,27 @@ export async function emitAuditEventAsync(
   console.log(JSON.stringify({ level: 'audit', ...fullEvent }));
 
   try {
-    const entryHash = await persistMigrationAuditEvent(fullEvent);
+    // THE REASON IS CARRIED, not discarded. This boundary returned a bare
+    // `{persisted:false}`, so every AUDIT_PERSISTENCE_FAILED the runner reported
+    // — 113 in July, 119 in August — said an audit write had failed and could
+    // not say why. The cause was one line of PostgreSQL: `column
+    // "actor_organization_id" does not exist` (migration 107 unapplied). Two
+    // weeks of a governance incident nobody could act on, because the string was
+    // thrown away here.
+    const r = await persistMigrationAuditEventDetailed(fullEvent);
     return {
-      persisted: entryHash !== null,
-      entryHash,
+      persisted: r.persisted,
+      entryHash: r.entryHash,
+      error: r.error,
+      orgContextDegraded: r.orgContextDegraded,
     };
-  } catch {
-    // persistMigrationAuditEvent should never throw (writeAuditLog catches
-    // internally), but we catch here as a safety net.
-    return { persisted: false, entryHash: null };
+  } catch (err: unknown) {
+    // writeAuditLogDetailed catches internally; this is the safety net.
+    return {
+      persisted: false, entryHash: null,
+      error: err instanceof Error ? err.message : String(err),
+      orgContextDegraded: false,
+    };
   }
 }
 

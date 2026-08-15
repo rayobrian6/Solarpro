@@ -30,7 +30,82 @@ import { neon } from '@neondatabase/serverless';
  *  table(s) it must create. Order is a single ceremony but the two migrations
  *  are independent (each creates standalone tables). Ray runs 113 first, then
  *  114 — each with its own confirm flow. */
-export const REGISTRY_DEPLOYMENT: Record<string, { expectedTables: string[] }> = {
+/** What a targeted migration is permitted to do, and to what.
+ *
+ *  TWO SHAPES, both equally narrow:
+ *   • CREATE-TABLE — `expectedTables` names the tables it creates, and it may
+ *     create nothing else.
+ *   • ADD-COLUMN  — `expectedColumns` names the columns it adds to an ALREADY
+ *     DEPLOYED table, and it may add nothing else and alter nothing else.
+ *
+ *  WHY THE SECOND SHAPE EXISTS (2026-08-06). Migration 119 adds one nullable
+ *  column to `manufacturer_document_registry` and one partial index. It is
+ *  additive, idempotent (`ADD COLUMN IF NOT EXISTS`), touches no row, and
+ *  explicitly refuses to backfill — every property this gate exists to require.
+ *  It was nevertheless UNRUNNABLE: the static verifier rejected the bare token
+ *  `ALTER`, `REGISTRY_DEPLOYMENT` had no way to express "a column, not a table",
+ *  and the identifier was absent from all four gates. So a migration was written,
+ *  committed and reported as "created, not applied" that the operator had no path
+ *  to apply at all.
+ *
+ *  The gate's INTENT was always "pure additive, idempotent, non-destructive,
+ *  seeds nothing". `CREATE TABLE only` was how that intent happened to be
+ *  implemented, because until now it was all that had been needed. The admission
+ *  below is written to the intent, and it is narrower than the token ban it
+ *  replaces: an `ALTER` is admitted ONLY as `ADD COLUMN IF NOT EXISTS`, ONLY on a
+ *  table another allowlisted migration created, and ONLY with no column
+ *  constraint of any kind (see ALTER_SUBCOMMAND_BAN). Every other ALTER — DROP
+ *  COLUMN, RENAME, TYPE, SET, a DEFAULT, a constraint — is still refused. */
+export interface RegistryDeploymentSpec {
+  /** Tables this migration CREATEs. Empty for an ADD-COLUMN migration. */
+  expectedTables: string[];
+  /** Columns this migration ADDs. Absent/empty for a CREATE-TABLE migration. */
+  expectedColumns?: Array<{ table: string; column: string }>;
+  /** A PRE-EXISTING table this migration may alter, one no allowlisted migration
+   *  created. Declaring it is a deliberate, reviewable act: the default rule is
+   *  that this path may only alter tables it deployed itself, and 107's target
+   *  (`audit_log`, from migration 100) predates the whole registry. Naming it
+   *  here keeps that exception explicit and per-migration instead of widening
+   *  the rule for everything. */
+  altersPreexistingTables?: string[];
+  /** Indexes this migration CREATEs. The third narrow shape: index-only, no
+   *  column and no table. Used by 120, which closes the audit chain against
+   *  concurrent forks and touches no data at all. */
+  expectedIndexes?: Array<{ table: string; index: string }>;
+}
+
+export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
+  // 2026-07-12 / ADR-013 T-08 — the org-context columns on audit_log, and the
+  // most consequential entry in this table.
+  //
+  // WHY IT IS HERE. Commit d479cbda added `actor_organization_id` /
+  // `resource_owner_organization_id` to lib/auditLog.ts's INSERT together with
+  // this migration. The migration was never applied: it predates 108, so it sits
+  // in the ~27-migration historical baseline the global execution gate refuses,
+  // and nothing ever brought it through the targeted path. From that commit on,
+  // every audit write from that code inserted 17 columns into a 16-column table
+  // and PostgreSQL refused it — so the tamper-evident audit trail recorded
+  // NOTHING from the dev deployment, including the governance events for
+  // migrations 113 and 119. It surfaced only as `AUDIT_PERSISTENCE_FAILED` with
+  // no stated cause.
+  //
+  // Production (master) still runs the pre-d479cbda writer, which is the only
+  // reason auth events kept landing. Merging dev to master WITHOUT this
+  // migration would take the whole audit_log dark — the SOC 2 CC7.2 / ISO 27001
+  // A.12.4 control, silently.
+  //
+  // Same additive shape as 119: two `ADD COLUMN IF NOT EXISTS`, two
+  // `CREATE INDEX IF NOT EXISTS`, two COMMENTs, no row written and no backfill.
+  // Its target predates the registry, so `altersPreexistingTables` names it
+  // explicitly rather than the gate quietly permitting any table.
+  '107': {
+    expectedTables: [],
+    expectedColumns: [
+      { table: 'audit_log', column: 'actor_organization_id' },
+      { table: 'audit_log', column: 'resource_owner_organization_id' },
+    ],
+    altersPreexistingTables: ['audit_log'],
+  },
   '113': { expectedTables: ['manufacturer_document_registry'] },
   '114': { expectedTables: ['equipment_reconciliation_audit', 'snapshot_digest_invalidations'] },
   // AAC WS-6 (2026-07-27) — the personnel-roles store: the designer / preparer /
@@ -64,10 +139,59 @@ export const REGISTRY_DEPLOYMENT: Record<string, { expectedTables: string[] }> =
   // authority). So it goes through the same statically-verified,
   // identifier-scoped permit. Independent of 113-116; order does not matter.
   '117': { expectedTables: ['ahj_registry'] },
+  // WS-5 (2026-08-02) — field_route_measurements + field_route_measurement_events:
+  // the PRODUCER that the 'field-verified' route-length state never had. WS-5
+  // part 1 taught the model to SAY field-verified; nothing could make it say so,
+  // so ROUTE-LENGTH-ESTIMATE was structurally unclosable. Two tables because the
+  // domain audit must commit in the SAME transaction as the state transition it
+  // records (the compliance audit_log is best-effort by design and swallows its
+  // own write failure, so it cannot be the durable record of a domain change).
+  //
+  // Same migration shape as 113-117: pure additive CREATE TABLE / CREATE INDEX
+  // IF NOT EXISTS, no ALTER, no DO block, no seeded rows and — critically — no
+  // seeded MEASUREMENT and no path from configuration to a verified length. The
+  // foreign keys carry no ON-DELETE clause because the static gate below forbids
+  // the DELETE token outright. Independent of 113-117; order does not matter.
+  '118': { expectedTables: ['field_route_measurements', 'field_route_measurement_events'] },
+  // D4 (2026-08-05) — jurisdiction_authority_id on manufacturer_document_registry:
+  // the STABLE legal-AHJ identity beside the free-text display name, so document
+  // applicability stops being decided by comparing two prose strings (a check an
+  // ampersand could defeat). The FIRST migration here that is not a CREATE TABLE.
+  //
+  // It adds ONE nullable column and ONE partial index, both IF NOT EXISTS, and
+  // it deliberately does NOT backfill the four existing rows: their stored
+  // jurisdiction is wrong, and correcting it is a governed data act with its own
+  // before/after capture, not a silent side effect of a schema change. They keep
+  // the column NULL, which the resolver reads as "identity unknown, fall back to
+  // normalised-name comparison" — exactly today's behaviour. Nothing regresses
+  // and nothing is quietly repaired.
+  //
+  // Its target table is created by 113, which is on this same allowlist — the
+  // ADD-COLUMN admission requires that, so this path can never alter a table
+  // nothing here deployed.
+  // AUDIT CHAIN CLOSURE (2026-08-06) — one parent, one child. The writer's
+  // compare-and-swap defeats the common interleaving, but under READ COMMITTED
+  // two overlapping statements can both observe the same head, so a sibling fork
+  // stays possible until the storage layer forbids it. This unique partial index
+  // is that closure. Index-only: no column, no table, no row read or written.
+  // Requires 107 (it names actor_organization_id), hence its place in sequence.
+  '120': {
+    expectedTables: [],
+    expectedIndexes: [{ table: 'audit_log', index: 'uq_audit_log_chain_successor' }],
+    altersPreexistingTables: ['audit_log'],
+  },
+  '119': {
+    expectedTables: [],
+    expectedColumns: [{ table: 'manufacturer_document_registry', column: 'jurisdiction_authority_id' }],
+  },
 };
 
-/** The migration identifiers this module governs, in ceremony order. */
-export const REGISTRY_SEQUENCE = ['113', '114', '115', '116', '117'] as const;
+/** The migration identifiers this module governs, in ceremony order.
+ *  107 is FIRST, deliberately: it repairs the durable audit path that every
+ *  other migration's governance event is recorded through, so running it first
+ *  means the rest are actually auditable. 119 is last because its target table
+ *  is 113's. */
+export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;
@@ -95,12 +219,50 @@ const FORBIDDEN_TOKENS = [
   'GRANT', 'REVOKE', 'RENAME', 'COPY', 'VACUUM', 'CREATE OR REPLACE',
 ];
 
+/** The ADD-COLUMN shape's token ban: the same list, minus the one token this
+ *  shape exists to admit. `ALTER` is not waved through — every ALTER statement
+ *  must additionally match ADD_COLUMN_STMT below, and nothing else. */
+const FORBIDDEN_TOKENS_ADD_COLUMN = FORBIDDEN_TOKENS.filter(t => t !== 'ALTER');
+
+/** THE only ALTER statement form this module will ever admit:
+ *      ALTER TABLE <table> ADD COLUMN IF NOT EXISTS <column> <type>;
+ *  Schema qualification is allowed on the table. The type is captured so the
+ *  ban below can be applied to it. */
+const ADD_COLUMN_STMT =
+  /^\s*ALTER\s+TABLE\s+(?:[A-Za-z_][\w$]*\.)?([A-Za-z_][\w$]*)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][\w$]*)\s+([^;]*)$/i;
+
+/** Forbidden inside an admitted ADD COLUMN's type clause.
+ *
+ *  A bare nullable column with no default is a catalog-only change: PostgreSQL
+ *  does not rewrite the table and no existing row is touched. Each of these
+ *  would break one of those properties or reach beyond the column —
+ *  NOT NULL fails on a non-empty table, DEFAULT/GENERATED/IDENTITY write values
+ *  into every existing row, and a constraint or reference changes what other
+ *  tables may contain. None of them is needed by an additive identity column,
+ *  and a migration that wants one is not this shape. */
+const ALTER_SUBCOMMAND_BAN = [
+  'NOT NULL', 'DEFAULT', 'GENERATED', 'IDENTITY', 'PRIMARY KEY',
+  'UNIQUE', 'REFERENCES', 'CHECK', 'CONSTRAINT', 'COLLATE', 'USING',
+];
+
 export interface RegistryMigrationShape {
   identifier: string;
+  /** Which narrow shape this migration was analysed as. */
+  kind: 'create-table' | 'add-column' | 'index-only';
   /** Table names created via CREATE TABLE (IF NOT EXISTS) in the file. */
   createdTables: string[];
   /** The tables the caller expects this migration to create. */
   expectedTables: string[];
+  /** `table.column` pairs added via ALTER TABLE … ADD COLUMN IF NOT EXISTS. */
+  addedColumns: string[];
+  /** The `table.column` pairs the caller expects this migration to add. */
+  expectedColumns: string[];
+  /** The added columns exactly match the expected set. */
+  columnsMatchExpected: boolean;
+  /** Index names created via CREATE INDEX (IF NOT EXISTS). */
+  createdIndexes: string[];
+  expectedIndexes: string[];
+  indexesMatchExpected: boolean;
   /** Every CREATE TABLE is written IF NOT EXISTS (safe to re-run). */
   idempotent: boolean;
   /** The set of created tables exactly matches the expected set. */
@@ -124,9 +286,29 @@ export function analyzeRegistryMigration(
   identifier: string,
   sql: string,
   expectedTables: string[],
+  /** ADD-COLUMN shape only. Omitted ⇒ the CREATE-TABLE shape, unchanged. */
+  expectedColumns?: Array<{ table: string; column: string }>,
+  /** Tables another allowlisted migration creates. An ADD COLUMN is admitted
+   *  only against one of these, so this path can never alter a table it did not
+   *  deploy. Omitted ⇒ derived from REGISTRY_DEPLOYMENT. */
+  deployedTables?: string[],
+  /** PRE-EXISTING tables this specific migration declared it may alter. */
+  altersPreexistingTables?: string[],
+  /** INDEX-ONLY shape: the indexes this migration creates. */
+  expectedIndexes?: Array<{ table: string; index: string }>,
 ): RegistryMigrationShape {
   const problems: string[] = [];
   const body = stripCommentsAndStrings(sql);
+
+  // ── THE INDEX-ONLY SHAPE ────────────────────────────────────────────────
+  if (expectedIndexes && expectedIndexes.length > 0) {
+    return analyzeIndexOnlyMigration(identifier, body, expectedIndexes, deployedTables, problems, altersPreexistingTables);
+  }
+
+  // ── THE ADD-COLUMN SHAPE ────────────────────────────────────────────────
+  if (expectedColumns && expectedColumns.length > 0) {
+    return analyzeAddColumnMigration(identifier, body, expectedColumns, deployedTables, problems, altersPreexistingTables);
+  }
 
   // Every CREATE TABLE (schema-qualified or not), whether or not IF NOT EXISTS.
   const allCreateTable = [...body.matchAll(
@@ -174,10 +356,181 @@ export function analyzeRegistryMigration(
 
   return {
     identifier,
+    kind: 'create-table',
     createdTables,
     expectedTables: expected,
+    addedColumns: [],
+    expectedColumns: [],
+    columnsMatchExpected: true,
+    createdIndexes: [], expectedIndexes: [], indexesMatchExpected: true,
     idempotent,
     tablesMatchExpected,
+    nonDestructive,
+    forbiddenFound,
+    ok: problems.length === 0,
+    problems,
+  };
+}
+
+/** Every table any allowlisted CREATE-TABLE migration deploys — the only tables
+ *  an ADD COLUMN here may target. */
+export function deployedRegistryTables(): string[] {
+  return [...new Set(
+    Object.values(REGISTRY_DEPLOYMENT).flatMap(s => s.expectedTables.map(t => t.toLowerCase())),
+  )];
+}
+
+/**
+ * THE INDEX-ONLY analysis. Narrowest of the three: every CREATE INDEX must be
+ * IF NOT EXISTS, must name an expected index on a table this path deployed or
+ * the spec declared, and the file may contain no CREATE TABLE, no ALTER and no
+ * forbidden token at all. An index touches no row, so there is nothing to
+ * backfill and nothing to lose.
+ */
+function analyzeIndexOnlyMigration(
+  identifier: string,
+  body: string,
+  expectedIndexes: Array<{ table: string; index: string }>,
+  deployedTables: string[] | undefined,
+  problems: string[],
+  altersPreexistingTables?: string[],
+): RegistryMigrationShape {
+  const deployed = new Set([
+    ...(deployedTables ?? deployedRegistryTables()),
+    ...(altersPreexistingTables ?? []),
+  ].map(t => t.toLowerCase()));
+  const expected = expectedIndexes.map(i => i.index.toLowerCase());
+
+  const all = [...body.matchAll(/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][\w$]*)\s+ON\s+(?:[A-Za-z_][\w$]*\.)?([A-Za-z_][\w$]*)/gi)];
+  const idempotent = [...body.matchAll(/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+/gi)];
+  if (all.length === 0) problems.push(`Migration ${identifier} creates no index — not the expected index-only deployment.`);
+  if (all.length !== idempotent.length) {
+    problems.push(`Migration ${identifier} has a CREATE INDEX that is not written IF NOT EXISTS (not idempotent).`);
+  }
+  const created = all.map(m => m[1].toLowerCase());
+  for (const m of all) {
+    const table = m[2].toLowerCase();
+    if (!deployed.has(table)) {
+      problems.push(`Migration ${identifier} indexes '${table}', which no allowlisted migration deploys and which its `
+        + 'spec does not declare in altersPreexistingTables.');
+    }
+  }
+  if (/\bCREATE\s+TABLE\b/i.test(body)) problems.push(`Migration ${identifier} is declared index-only but contains CREATE TABLE.`);
+  if (/\bALTER\b/i.test(body)) problems.push(`Migration ${identifier} is declared index-only but contains ALTER.`);
+
+  const missing = expected.filter(i => !created.includes(i));
+  const unexpected = created.filter(i => !expected.includes(i));
+  if (missing.length) problems.push(`Migration ${identifier} does not create expected index(es): ${missing.join(', ')}.`);
+  if (unexpected.length) problems.push(`Migration ${identifier} creates unexpected index(es): ${unexpected.join(', ')}.`);
+
+  const forbiddenFound = FORBIDDEN_TOKENS.filter(tok =>
+    new RegExp(`\b${tok.replace(/\s+/g, '\s+')}\b`, 'i').test(body));
+  const nonDestructive = forbiddenFound.length === 0;
+  if (!nonDestructive) problems.push(`Migration ${identifier} contains destructive/mutating/seeding token(s): ${forbiddenFound.join(', ')}.`);
+
+  return {
+    identifier, kind: 'index-only',
+    createdTables: [], expectedTables: [],
+    addedColumns: [], expectedColumns: [], columnsMatchExpected: true,
+    createdIndexes: [...new Set(created)], expectedIndexes: expected,
+    indexesMatchExpected: missing.length === 0 && unexpected.length === 0,
+    idempotent: all.length > 0 && all.length === idempotent.length,
+    tablesMatchExpected: true, nonDestructive, forbiddenFound,
+    ok: problems.length === 0, problems,
+  };
+}
+
+/**
+ * THE ADD-COLUMN analysis. Narrower than the CREATE-TABLE one, not looser:
+ * every ALTER statement in the file must match ADD_COLUMN_STMT exactly, target a
+ * table this module deploys, carry no constraint or default, and add exactly the
+ * expected columns. Anything else — a second ALTER form, an unexpected column, a
+ * CREATE TABLE, a bare CREATE INDEX — is a problem.
+ */
+function analyzeAddColumnMigration(
+  identifier: string,
+  body: string,
+  expectedColumns: Array<{ table: string; column: string }>,
+  deployedTables: string[] | undefined,
+  problems: string[],
+  altersPreexistingTables?: string[],
+): RegistryMigrationShape {
+  // The default set is what this path deployed itself. A migration may add a
+  // PRE-EXISTING table only by declaring it in its own spec — an explicit,
+  // reviewable exception rather than a blanket widening.
+  const deployed = new Set([
+    ...(deployedTables ?? deployedRegistryTables()),
+    ...(altersPreexistingTables ?? []),
+  ].map(t => t.toLowerCase()));
+  const expected = expectedColumns.map(c => `${c.table.toLowerCase()}.${c.column.toLowerCase()}`);
+
+  // Statement-by-statement, so a second ALTER cannot hide behind a first.
+  const statements = body.split(';').filter(s => s.trim());
+  const addedColumns: string[] = [];
+  let idempotent = true;
+
+  for (const stmt of statements) {
+    if (!/\bALTER\b/i.test(stmt)) continue;
+    const m = stmt.match(ADD_COLUMN_STMT);
+    if (!m) {
+      idempotent = false;
+      problems.push(
+        `Migration ${identifier} contains an ALTER that is not a bare `
+        + `'ALTER TABLE <t> ADD COLUMN IF NOT EXISTS <c> <type>': ${stmt.trim().replace(/\s+/g, ' ').slice(0, 120)}`);
+      continue;
+    }
+    const [, table, column, typeClause] = m;
+    if (!deployed.has(table.toLowerCase())) {
+      problems.push(
+        `Migration ${identifier} adds a column to '${table}', which no allowlisted migration deploys. `
+        + 'This path may only alter tables it created, or one its spec names explicitly.');
+    }
+    const banned = ALTER_SUBCOMMAND_BAN.filter(tok =>
+      new RegExp(`\\b${tok.replace(/\s+/g, '\\s+')}\\b`, 'i').test(typeClause));
+    if (banned.length) {
+      problems.push(
+        `Migration ${identifier} adds '${table}.${column}' with disallowed clause(s): ${banned.join(', ')}. `
+        + 'An admitted column is nullable with no default, so no existing row is written and no table is rewritten.');
+    }
+    addedColumns.push(`${table.toLowerCase()}.${column.toLowerCase()}`);
+  }
+
+  if (addedColumns.length === 0) {
+    problems.push(`Migration ${identifier} adds no column — not the expected additive-column deployment.`);
+  }
+
+  // A column migration creates no table.
+  if (/\bCREATE\s+TABLE\b/i.test(body)) {
+    problems.push(`Migration ${identifier} is declared as an additive-column migration but contains CREATE TABLE.`);
+  }
+  // Same idempotency rule for indexes as the other shape.
+  if (/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?!(?:CONCURRENTLY\s+)?IF\s+NOT\s+EXISTS)/i.test(body)) {
+    problems.push(`Migration ${identifier} has a CREATE INDEX that is not written IF NOT EXISTS (not idempotent).`);
+  }
+
+  const missing = expected.filter(c => !addedColumns.includes(c));
+  const unexpected = addedColumns.filter(c => !expected.includes(c));
+  if (missing.length) problems.push(`Migration ${identifier} does not add expected column(s): ${missing.join(', ')}.`);
+  if (unexpected.length) problems.push(`Migration ${identifier} adds unexpected column(s): ${unexpected.join(', ')}.`);
+
+  const forbiddenFound = FORBIDDEN_TOKENS_ADD_COLUMN.filter(tok =>
+    new RegExp(`\\b${tok.replace(/\s+/g, '\\s+')}\\b`, 'i').test(body));
+  const nonDestructive = forbiddenFound.length === 0;
+  if (!nonDestructive) {
+    problems.push(`Migration ${identifier} contains destructive/mutating/seeding token(s): ${forbiddenFound.join(', ')}.`);
+  }
+
+  return {
+    identifier,
+    kind: 'add-column',
+    createdTables: [],
+    expectedTables: [],
+    addedColumns: [...new Set(addedColumns)],
+    expectedColumns: expected,
+    columnsMatchExpected: missing.length === 0 && unexpected.length === 0,
+    createdIndexes: [], expectedIndexes: [], indexesMatchExpected: true,
+    idempotent: idempotent && problems.length === 0,
+    tablesMatchExpected: true,
     nonDestructive,
     forbiddenFound,
     ok: problems.length === 0,
@@ -211,5 +564,79 @@ export async function verifyTablesState(tables: string[]): Promise<TablesStateCh
     nonePresent: present.length === 0,
     presentTables: present,
     absentTables: absent,
+  };
+}
+
+export interface IndexesStateCheck {
+  allPresent: boolean;
+  nonePresent: boolean;
+  presentIndexes: string[];
+  absentIndexes: string[];
+  missingTables: string[];
+}
+
+/** The INDEX-ONLY counterpart of `verifyTablesState`. Read-only. */
+export async function verifyIndexesState(
+  indexes: Array<{ table: string; index: string }>,
+): Promise<IndexesStateCheck> {
+  const sql = getRawSql();
+  const present: string[] = [];
+  const absent: string[] = [];
+  const missingTables: string[] = [];
+  for (const ix of indexes) {
+    const t = (await sql`SELECT to_regclass(${ix.table}) IS NOT NULL AS present`) as Array<{ present: boolean }>;
+    if (t[0]?.present !== true) { missingTables.push(ix.table); absent.push(ix.index); continue; }
+    const rows = (await sql`
+      SELECT 1 FROM pg_indexes WHERE tablename = ${ix.table} AND indexname = ${ix.index} LIMIT 1
+    `) as unknown[];
+    if (rows.length > 0) present.push(ix.index); else absent.push(ix.index);
+  }
+  return {
+    allPresent: absent.length === 0 && present.length === indexes.length,
+    nonePresent: present.length === 0,
+    presentIndexes: present, absentIndexes: absent,
+    missingTables: [...new Set(missingTables)],
+  };
+}
+
+export interface ColumnsStateCheck {
+  allPresent: boolean;
+  nonePresent: boolean;
+  presentColumns: string[];
+  absentColumns: string[];
+  /** Columns whose TABLE does not exist — a different failure from "the column
+   *  is missing", and the one that means a prerequisite migration has not run. */
+  missingTables: string[];
+}
+
+/** The ADD-COLUMN counterpart of `verifyTablesState`. Read-only.
+ *
+ *  It reports a missing TABLE separately from a missing COLUMN, because those
+ *  call for different actions: the first means the prerequisite CREATE-TABLE
+ *  migration has not been run, and applying this one would fail. */
+export async function verifyColumnsState(
+  columns: Array<{ table: string; column: string }>,
+): Promise<ColumnsStateCheck> {
+  const sql = getRawSql();
+  const present: string[] = [];
+  const absent: string[] = [];
+  const missingTables: string[] = [];
+  for (const c of columns) {
+    const key = `${c.table}.${c.column}`;
+    const t = (await sql`SELECT to_regclass(${c.table}) IS NOT NULL AS present`) as Array<{ present: boolean }>;
+    if (t[0]?.present !== true) { missingTables.push(c.table); absent.push(key); continue; }
+    const rows = (await sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = ${c.table} AND column_name = ${c.column}
+      LIMIT 1
+    `) as unknown[];
+    if (rows.length > 0) present.push(key); else absent.push(key);
+  }
+  return {
+    allPresent: absent.length === 0 && present.length === columns.length,
+    nonePresent: present.length === 0,
+    presentColumns: present,
+    absentColumns: absent,
+    missingTables: [...new Set(missingTables)],
   };
 }

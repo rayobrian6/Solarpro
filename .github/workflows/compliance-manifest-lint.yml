@@ -1,0 +1,62 @@
+name: Compliance Manifest Lint
+
+# Fails the build if compliance/manifest.json is missing a control
+# from CONTROL_MATRIX.md, has an empty evidence_sources list on a
+# non-N/A control, or has malformed evidence-source entries.
+#
+# This is the early-warning system for "we forgot to map a control to
+# evidence" — a SOC 2 finding waiting to happen. Block at PR time.
+#
+# Runs on:
+#   - every pull_request (catches issues before merge)
+#   - push to james-dev (per R7) and master (per R1 — push to master
+#     still triggers this lint as a safety net, not as a push enabler)
+
+on:
+  pull_request:
+  push:
+    branches: [james-dev, master]
+
+# Don't run a duplicate for the same ref while a previous run is in flight.
+concurrency:
+  group: compliance-manifest-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: validate compliance/manifest.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Manifest lint is pure ESM with no dependencies. Skip npm ci for
+      # speed — `node scripts/validate-compliance-manifest.mjs` only
+      # reads files and validates structure.
+      - name: Run manifest validator
+        run: node scripts/validate-compliance-manifest.mjs
+
+      # Unit tests for the validator itself. Uses vitest, so npm ci
+      # IS required. Kept in a separate step so the lint itself stays
+      # dependency-free and can fail fast.
+      - name: Install dependencies
+        run: npm ci
+        env:
+          # Stub values — same pattern as ci.yml
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          JWT_SECRET: ci-test-secret-do-not-use-in-production
+          OPENAI_API_KEY: sk-test-placeholder
+          GOOGLE_MAPS_API_KEY: test-placeholder
+          RESEND_API_KEY: re_test_placeholder
+          NEXT_PUBLIC_BASE_URL: https://localhost:3000
+
+      - name: Run validator unit tests
+        run: npx vitest run scripts/__tests__/validate-compliance-manifest.test.mjs --reporter=verbose

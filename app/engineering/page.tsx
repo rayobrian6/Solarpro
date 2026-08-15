@@ -151,6 +151,7 @@ import { useEngineeringStore, simplifyPanelCountSource } from '@/store/engineeri
 import { getUtilityPrograms, getPacePrograms, getLowIncomeProgramsByState, type TouRatePlan, type BatteryIncentiveProgram, type SolarRebateProgram, type NemSpecialProgram, type UtilityProgramBundle, type EvChargerIncentive, type PaceFinancingProgram, type LowIncomeSolarProgram } from '@/lib/utilityPrograms';
 import { getInterconnectionProfile, getTypicalTotalTimeline, type InterconnectionProfile } from '@/lib/utilityInterconnection';
 import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
+import { downloadFilenameFor } from '@/lib/http/contentDisposition';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -8183,9 +8184,18 @@ function EngineeringPageInner() {
         const a = document.createElement('a');
         a.href = url;
         const _suffix = _draftFallback ? '-DRAFT' : '';
-        a.download = isHtmlFallback
-          ? `PermitPackage-${config.projectName || 'project'}${_suffix}.html`
-          : `PermitPackage-${config.projectName || 'project'}${_suffix}.pdf`;
+        // D1 — the SERVER owns the filename. It derives it from the canonical
+        // `projects.name`; `config.projectName` is the engineering_config mirror,
+        // which does not round-trip and on live Braidon still reads "… TEST".
+        // `a.download` overrides Content-Disposition, so using the mirror here
+        // discarded a correct answer the server had already given us.
+        a.download = downloadFilenameFor({
+          header: res.headers.get('Content-Disposition'),
+          projectId: searchParams?.get('projectId') ?? null,
+          kind: 'PermitPackage',
+          extension: isHtmlFallback ? 'html' : 'pdf',
+          suffix: _suffix,
+        });
         a.click(); URL.revokeObjectURL(url);
         logDecision('Permit Package', `Downloaded ${_draftFallback ? 'DRAFT ' : ''}as ${isHtmlFallback ? 'HTML' : 'PDF'}`, 'auto');
       } else if (res.status === 422) {
@@ -8883,7 +8893,7 @@ function EngineeringPageInner() {
               </div>
             )}
             {!selectorLoading && selectorProjects.length === 0 ? (
-              <p className="text-slate-500 text-sm mt-1">No projects found. <a href="/projects/new" className="text-amber-400 hover:text-amber-300">Create one →</a></p>
+              <p className="text-slate-500 text-sm mt-1">No projects found. <Link href="/projects/new" className="text-amber-400 hover:text-amber-300">Create one →</Link></p>
             ) : null}
           </div>
         </div>
@@ -13306,7 +13316,14 @@ function EngineeringPageInner() {
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
                             a.href = url;
-                            a.download = `SLD-${config.projectName || 'project'}.pdf`;
+                            // D1 — same rule as the permit package: the server's
+                            // Content-Disposition is canonical; the config mirror is not.
+                            a.download = downloadFilenameFor({
+                              header: res.headers.get('Content-Disposition'),
+                              projectId: searchParams?.get('projectId') ?? null,
+                              kind: 'SLD',
+                              extension: 'pdf',
+                            });
                             a.click();
                             URL.revokeObjectURL(url);
                           } else {

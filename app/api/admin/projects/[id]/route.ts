@@ -24,10 +24,8 @@ type HomeownerStage = typeof HOMEOWNER_STAGES[number];
 
 // ─── GET /api/admin/projects/[id] ───────────────────────────────────────────
 // Returns project detail including homeowner_stage and stage history
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
@@ -130,10 +128,8 @@ export async function GET(
 
 // ─── PATCH /api/admin/projects/[id] ─────────────────────────────────────────
 // action: 'set-stage' — update homeowner_stage and log to history
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 

@@ -818,7 +818,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
                 <polygon points="20,36 23,24 20,26 17,24" fill="#888"/>
                 <polygon points="4,20 16,17 14,20 16,23" fill="#888"/>
                 <polygon points="36,20 24,17 26,20 24,23" fill="#888"/>
-                <text x="20" y="3.5" text-anchor="middle" font-size="7" font-weight="900" fill="#000" font-family="Arial">N</text>
+                <text x="20" y="3.5" text-anchor="middle" font-size="7" font-weight="900" fill="#000" font-family="SolarPro Sans, SolarPro Symbols">N</text>
               </svg>
             </div>
           </div>

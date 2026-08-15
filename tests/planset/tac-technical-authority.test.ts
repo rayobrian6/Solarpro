@@ -103,7 +103,9 @@ describe('TAC WS-1 — Q-Cable deficits are named, and the arithmetic is true', 
   });
 
   it('PV-4B.1 renders the per-branch derivation table', () => {
-    expect(PKG.html).toContain('Q-CABLE PROCUREMENT SUFFICIENCY — PER-BRANCH DERIVATION');
+    // WS-2 merged the sufficiency derivation and the procurement allocation into
+    // ONE per-branch table (two stacked tables overflowed the sheet by 164 px).
+    expect(PKG.html).toContain('Q-CABLE PROCUREMENT — PER-BRANCH DERIVATION &amp; ALLOCATION');
     expect(PKG.html).toContain('Required installed length (cable path)');
     expect(PKG.html).toContain('Usable allocated cable');
   });

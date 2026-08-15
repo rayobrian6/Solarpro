@@ -115,6 +115,11 @@ export type BlockerPayloadSchema =
 export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
   // ── the TWO schema-typed payloads ─────────────────────────────────────────
   'QCABLE-PROCUREMENT-INSUFFICIENT': 'qcable-procurement-deficit',
+  // WS-2 scoped residuals — each is a narrow, generically-rendered fact; only
+  // the broad deficit has a bespoke payload template.
+  'QCABLE-STOCK-PACKAGING-UNVERIFIED': 'generic',
+  'QCABLE-FIELD-CONNECTOR-SKU-MISSING': 'generic',
+  'QCABLE-TERMINATOR-COMPATIBILITY-UNVERIFIED': 'generic',
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': 'qcable-grounding-authority',
   // ── electrical ────────────────────────────────────────────────────────────
   'ROUTE-LENGTH-ESTIMATE': 'generic',
@@ -231,11 +236,57 @@ function payloadGroundingAuthority(p: Record<string, unknown>): string {
     'qcable-grounding-authority');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// D9 — RUN-ATTEMPT INSTANTS ARE OPERATIONAL DATA, NOT ARTIFACT CONTENT.
+//
+// The design digest already EXCLUDES resolver attempt instants from the signed
+// projection, and that exclusion is correct — but RS-1 rendered them anyway, via
+// payloadGeneric, which printed every primitive the payload carried. Measured on
+// the live Braidon package: nine occurrences of one sub-second instant
+// (`lastResolutionAttempt`), producing nine differing HTML lines out of 5201
+// between two regenerations of a design that had not changed. An issued
+// package's stored bytes could therefore never be compared against a re-render.
+//
+// The fix is at the RENDER only. The values stay in the snapshot payload and in
+// audit storage — nothing is hidden and nothing about the digest changes.
+//
+// TWO guards, deliberately redundant:
+//   1. a named key list — the fields known to carry a resolver run instant;
+//   2. a VALUE-SHAPE guard — any string that is a full ISO-8601 date-TIME.
+// The second is what stops the next payload field from quietly reintroducing
+// this. A date-ONLY value (the jurisdiction-zone issue date convention used by
+// meta.generatedAtIso) is unaffected: it has no time component.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Payload keys that carry an operational resolver run instant. */
+export const RUN_INSTANT_PAYLOAD_KEYS: readonly string[] = [
+  'lastResolutionAttempt',
+  'attemptedAtIso',
+  'startedAtIso',
+  'retrievedAtIso',
+  'resolvedAtIso',
+  'atIso',
+];
+
+/** An ISO-8601 value carrying a TIME component (the thing that moves per run).
+ *  Date-only values (`2026-08-05`) and locale dates (`8/5/2026`) do not match. */
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+
+/** True when this key/value pair is an operational run instant and must not be
+ *  rendered into the issued artifact. */
+export function isRunInstantPayloadEntry(key: string, value: unknown): boolean {
+  if (RUN_INSTANT_PAYLOAD_KEYS.includes(key)) return true;
+  return typeof value === 'string' && ISO_INSTANT_RE.test(value.trim());
+}
+
 /** COMPONENT — GENERIC. Renders ONLY the primitive fields the payload actually
- *  carries, so an unknown schema can never print another template's empty fields. */
+ *  carries, so an unknown schema can never print another template's empty fields.
+ *  Operational run instants are excluded (D9) — they remain in the payload and in
+ *  audit storage, but an unchanged design must render byte-identically. */
 function payloadGeneric(p: Record<string, unknown>): string {
   const pairs = Object.entries(p)
     .filter(([, v]) => v != null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
+    .filter(([k, v]) => !isRunInstantPayloadEntry(k, v))
     .map(([k, v]) => `${escapeH(k)} ${escapeH(String(v))}`);
   const nested = Object.entries(p)
     .filter(([, v]) => v != null && typeof v === 'object')

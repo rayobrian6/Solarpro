@@ -123,7 +123,7 @@ describe("/api/admin/network/contractor-match/[id]", () => {
     const sql = makeSql();
     mockGetDbReady.mockResolvedValueOnce(sql);
     const { GET } = await importRoute();
-    const res = await GET(req(undefined, "GET"), { params: { id: "opp-1" } });
+    const res = await GET(req(undefined, "GET"), { params: Promise.resolve({ id: "opp-1" }) });
     expect(res.status).toBe(200);
     const opportunityQuery =
       sql.calls.find((q: string) =>
@@ -150,7 +150,7 @@ describe("/api/admin/network/contractor-match/[id]", () => {
   it("POST counts actual inserted assignment rows", async () => {
     const { POST } = await importRoute();
     const res = await POST(req({ create_assignments: true }), {
-      params: { id: "opp-1" },
+      params: Promise.resolve({ id: "opp-1" }),
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
@@ -173,7 +173,7 @@ describe("/api/admin/network/contractor-match/[id]", () => {
     mockGetDbReady.mockResolvedValueOnce(makeSql({ insertRows: [] }));
     const { POST } = await importRoute();
     const res = await POST(req({ create_assignments: true }), {
-      params: { id: "opp-1" },
+      params: Promise.resolve({ id: "opp-1" }),
     });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({

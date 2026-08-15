@@ -56,7 +56,7 @@ export async function requireDeskApi(req: NextRequest): Promise<DeskUser | null>
 
 /** Page guard — redirects to login/dashboard if not allowed. */
 export async function requireDeskPage(): Promise<DeskUser> {
-  const token = cookies().get("solarpro_session")?.value;
+  const token = (await cookies()).get("solarpro_session")?.value;
   if (!token) redirect("/auth/login?redirect=/desk");
   const jwtMeta = verifyTokenWithMeta(token);
   if (!jwtMeta?.user?.id) redirect("/auth/login?redirect=/desk");

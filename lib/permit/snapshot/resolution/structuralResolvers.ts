@@ -26,7 +26,13 @@
 // capacity letter covers RT-MINI II.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { createDocument, getDocument, findVerifiedDocument } from '@/lib/documents/registry';
+import { createDocument, getDocument, findVerifiedDocument, listDocuments } from '@/lib/documents/registry';
+import type { RegistryDocument } from '@/lib/documents/types';
+// OAR — the accepted registry document outranks temporary retrieval health.
+import {
+  registryRowToIdentity, isUsableRegistryAuthority, mergeRegistryIdentities,
+  type RegistryAuthorityRetentionState,
+} from './retainedAuthority';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { resolveEngineeringReviewCoverage } from '@/lib/engineeringReview/store';
@@ -34,12 +40,17 @@ import { uncoveredReview, type EngineeringReviewCoverage } from '@/lib/engineeri
 import { DEFAULT_DOCUMENT_REQUEST } from '@/lib/providers/documentRetrieval/types';
 import { buildResolutionAuditRef } from './evidence';
 import { deriveRailSelection, type RailSelectionVerdict } from './railSelection';
+import { readProjectEquipmentStores } from '@/lib/reconciliation/reconcile';
+import type { StoredEquipmentRecord } from './equipmentSelection';
 import {
   attemptableSources, normalizeAsceEdition, sourcesForEquipment, structuralDocumentId,
   RT_MINI_CROSS_REFERENCE_FINDING,
   type DocumentRetrievalAttempt, type StructuralDocumentRetrievalRecord,
 } from './structuralDocuments';
 import type { RequirementResolver, ResolverContext, ResolverOutcome } from './types';
+// D7 — a registry document is selected as a WHOLE: identity, custody and
+// applicability together, never assembled from two different rows.
+import type { RegistryDocumentIdentity } from '../documentAuthority';
 
 const REGISTRY_SOURCE = 'manufacturer_document_registry (lib/documents/registry, migration 113)';
 const REVIEW_STORE_SOURCE = 'engineering_review_records (lib/engineeringReview/store, migration 116)';
@@ -90,8 +101,15 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
   ],
   // Runs AFTER the registry LOOKUP (racking-capacity-document@v1): an already
   // archived, verified document is the durable cache and is never re-fetched.
-  requiredInputs: ['projectJurisdiction', 'capacityDocument'],
-  produces: ['structuralDocumentRetrieval', 'documentRegistryFacts'],
+  // ── D4 — ARCHIVAL DEPENDS ON THE LEGAL AHJ, NOT THE POSTED ONE ──────────
+  // This declared `projectJurisdiction`, the posted/mailing-derived value. That
+  // told the dependency graph the wrong thing twice over: a change to the real
+  // legal jurisdiction did not re-dirty this resolver, and the stale mailing
+  // value looked like a legitimate archival input. `projectJurisdiction` is NOT
+  // retained here — it has no non-archival use in this resolver, and keeping it
+  // would leave exactly the hidden fallback D4 exists to remove.
+  requiredInputs: ['legalJurisdiction', 'capacityDocument'],
+  produces: ['structuralDocumentRetrieval', 'documentRegistryFacts', 'documentRegistryIdentities'],
   description:
     'Retrieves the manufacturer\'s PUBLISHED structural documents for the selected mount (stamped PE capacity letter, '
     + 'version-exact installation manual), hashes the exact bytes, and archives them through the document registry.',
@@ -119,6 +137,36 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
       startedAtIso: ctx.nowIso,
     };
 
+    // ══ OAR — THE DURABLE REGISTRY IS READ BEFORE ANY FETCH ═════════════════
+    // The registry row IS the accepted document authority; retrieval is only the
+    // ingestion path that puts bytes and a hash into it — this resolver says so
+    // itself where it archives ("Retrieval establishes existence + bytes, never
+    // applicability"). But the candidate pool used to be built ONLY from
+    // attempts whose outcome was RETRIEVED in THIS run, and the archived rows
+    // were reachable only through `getDocument(id)` AFTER a fetch produced the
+    // hash. So a single documentRetrieval timeout emptied the pool and
+    // `selectEquipmentDocument` fell from REGISTRY_CANDIDATE to STATIC_ASSET:
+    // the design cited an unhashed render cache instead of the archived document
+    // it already had. Measured: 111 canonical-body leaf paths moved,
+    // capacityDocumentId → null, tier REGISTRY_CANDIDATE → STATIC_ASSET.
+    //
+    // Reading the registry by equipment makes the accepted authority independent
+    // of transport health. It invents nothing: every field is reported exactly
+    // as the registry holds it, and `isUsableRegistryAuthority` keeps a
+    // withdrawn / unarchived / unhashed row out of the pool so a genuine
+    // invalidation is never disguised as an outage.
+    const durableRead = await ctx.safeDbRead(
+      `listDocuments(equipment:${mountId ?? 'none'})`,
+      () => (mountId ? listDocuments({ equipmentId: mountId }) : Promise.resolve([])),
+      [] as RegistryDocument[],
+    );
+    const durableIdentities = (durableRead.value ?? [])
+      .map(registryRowToIdentity)
+      .filter(isUsableRegistryAuthority);
+    const registryState: RegistryAuthorityRetentionState = !durableRead.ok
+      ? 'NO_REGISTRY_AUTHORITY'
+      : durableIdentities.length ? 'REGISTRY_AUTHORITY_ACCEPTED' : 'NO_REGISTRY_AUTHORITY';
+
     const inputsRecorded: Record<string, string | number | boolean | null> = {
       mountingSystemId: mountId,
       selectedModel,
@@ -126,7 +174,35 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
       adoptedAsceEdition: asce,
       providerName: provider?.name ?? null,
       providerConfigured: provider ? provider.isConfigured() : false,
+      acceptedRegistryDocuments: durableIdentities.length,
+      registryAuthorityState: registryState,
     };
+
+    // ══ D4 — ARCHIVAL, NOT RETRIEVAL, IS WHAT DEPENDS ON THE LEGAL AHJ ══════
+    // The defect was in the STAMP: `jurisdictionBoundary` came from
+    // `ctx.authority.projectJurisdiction`, which the AUTO_DERIVED
+    // `project-authority-key@v1` builds from the POSTED project record. On the
+    // live Braidon project that is the MAILING city — "City of Granite City
+    // Building & Zoning" — while the legal AHJ is Madison County,
+    // unincorporated. All four live registry rows carry the mailing value.
+    //
+    // A later pass CANNOT repair it: the document id is content-derived
+    // (sourceId + sha256), so a re-run finds the row that already exists and
+    // leaves its jurisdiction untouched. The wrong write must never happen.
+    //
+    // But FETCHING BYTES has nothing to do with jurisdiction. Refusing the whole
+    // resolver would have thrown away the retrieval evidence — the attempt
+    // record, the hash, the soft-404 detection — which is exactly what the WS-8
+    // evidence contract exists to preserve. So retrieval proceeds unconditionally
+    // and only the ARCHIVAL step is gated, below, at the point where a
+    // jurisdiction is actually written.
+    const legal = ctx.authority.legalJurisdiction ?? null;
+    const legalUsable = !!legal && legal.verificationState === 'verified' && !!legal.ahjRecordId;
+    const legalRefusal = !legal
+      ? 'no legal-jurisdiction authority was resolved for this run'
+      : (legal.verificationState !== 'verified'
+          ? `the legal jurisdiction is '${legal.verificationState}', not verified`
+          : 'the legal jurisdiction carries no stable ahjRecordId');
 
     const sources = sourcesForEquipment(mountId);
     if (!mount || sources.length === 0) {
@@ -134,10 +210,21 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
         ? `no published document source is declared for ${mount.manufacturer} ${mount.model} — the retrieval table `
           + 'covers the mount families whose sources have been located and verified live'
         : 'no mounting system is resolved for this project');
+      // OAR — no DECLARED SOURCE is not the same as no ACCEPTED DOCUMENT. A mount
+      // with archived registry rows and no published-source entry still has its
+      // documents; publishing the durable pool here keeps them selected.
       return {
         result: 'SKIPPED',
         clearance: { cleared: false, missing: ['a declared published document source for the selected mount'], reasons: record.residual },
-        patch: { structuralDocumentRetrieval: record },
+        patch: {
+          structuralDocumentRetrieval: record,
+          ...(mountId && durableIdentities.length
+            ? { documentRegistryIdentities: {
+                ...(ctx.authority.documentRegistryIdentities ?? {}),
+                [`racking_detail:${mountId}`]: mergeRegistryIdentities(durableIdentities, []),
+              } }
+            : {}),
+        },
         sourceQueried: 'PUBLISHED_DOCUMENT_SOURCES (lib/permit/snapshot/resolution/structuralDocuments)',
         retryability: 'REQUIRES_INPUT',
         failureReason: record.residual[0],
@@ -223,7 +310,15 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
         );
         const _alreadyArchived = preExisting.ok && preExisting.value != null
           && preExisting.value.sha256 === doc.sha256;
-        const archive = _alreadyArchived
+        // ── D4 — THE ARCHIVAL GATE ────────────────────────────────────────
+        // This is the only step that writes a jurisdiction. Without a verified
+        // legal AHJ the write is REFUSED — never stamped from a fallback. The
+        // document was still retrieved and its evidence is still recorded, so
+        // nothing is hidden; what does not happen is an immutable row being
+        // created under a jurisdiction that can never be corrected.
+        const archive = (!_alreadyArchived && !legalUsable)
+          ? { ok: false as const, value: null, error: `ARCHIVAL REFUSED — ${legalRefusal}` }
+          : _alreadyArchived
           ? { ok: true as const, value: preExisting.value!, error: null }
           : await ctx.safeDbRead(
           `createDocument(${source.documentClass})`,
@@ -242,7 +337,12 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
             archivedInRepo: true,
             sha256: doc.sha256,
             source: doc.finalUrl,
-            jurisdictionBoundary: ctx.authority.projectJurisdiction ?? (stateCode ? `US-${stateCode}` : null),
+            // D4 — the CANONICAL legal AHJ, never the posted/mailing value. The
+            // guard above guarantees `legal` is present, verified and carries a
+            // stable ahjRecordId, so there is no fallback here by design: a
+            // fallback is how the mailing city got stamped in the first place.
+            jurisdictionBoundary: legal!.ahjName,
+            jurisdictionAuthorityId: legal!.ahjRecordId,
             applicabilityNotes: source.notes,
             status: 'current',
             // NOT VERIFIED. Retrieval establishes existence + bytes, never
@@ -263,10 +363,18 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
           sha256: doc.sha256, retrievedAtIso: doc.retrievedAtIso,
           failure: null,
           archival: {
-            attempted: true,
+            // D4 — `attempted` is false when the archival was REFUSED on the
+            // legal-jurisdiction precondition: nothing was tried, so recording an
+            // attempt would misdescribe it.
+            attempted: legalUsable || _alreadyArchived,
             documentId: archive.ok && archive.value ? archive.value.id : null,
             failure: archive.ok ? null : archive.error,
-            operatorAction: archive.ok ? null : ARCHIVE_FAILURE_ACTION,
+            operatorAction: archive.ok
+              ? null
+              : (legalUsable
+                  ? ARCHIVE_FAILURE_ACTION
+                  : 'Establish the project legal AHJ (parcel boundary determination), then regenerate — '
+                    + 'a jurisdiction-bound document is not archived until the governing authority is known.'),
           },
           coversSelectedModel, notes: source.notes,
         });
@@ -279,18 +387,78 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
     // ── the residual, stated precisely ────────────────────────────────────────
     const retrieved = record.attempts.filter(a => a.outcome === 'RETRIEVED');
     const archived = retrieved.filter(a => a.archival.documentId);
-    const capacityAttempt = retrieved.find(a => a.role === 'capacity') ?? null;
-    if (!retrieved.length) {
+
+    // ══ OAR — THE ACCEPTED DOCUMENT IDS COME FROM THE REGISTRY, NOT THE FETCH ══
+    // `capacityDocumentId` / `versionExactDetailDocumentId` used to be assigned
+    // ONLY inside the retrieval loop, so a timeout nulled them even though the
+    // documents were archived and on file. Measured live: the accepted document
+    // stayed correctly SELECTED, and these two still went null, taking fifteen
+    // canonical leaf paths and the whole residual sentence with them.
+    //
+    // The declared sources give role → documentClass, so a durable row is matched
+    // to its role WITHOUT a second hardcoded table. Version-exactness is the same
+    // rule the retrieval loop applies: the document's own applicability must
+    // equal the selected model.
+    // The pick must MIRROR the retrieval's own preference, or the accepted
+    // document would change depending on whether the fetch happened. The registry
+    // legitimately holds more than one capacity letter for a mount (RT-MINI II
+    // exists for ASCE 7-10 AND 7-16), and `attemptableSources` probes the ADOPTED
+    // edition first, then the declared order, stopping at the first document.
+    // Walking the same ordered expansions and taking the first durable row whose
+    // recorded revision matches reproduces that choice exactly. Ties fall back to
+    // documentId so the answer can never depend on row order from the database.
+    const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
+    const acceptedFor = (role: 'capacity' | 'installation_detail', exactOnly: boolean) => {
+      const eligible = (d: RegistryDocumentIdentity, cls: string): boolean =>
+        norm(d.documentClass) === norm(cls)
+        && (!exactOnly || (!!selectedModel && norm(d.equipmentModelApplicability) === norm(selectedModel)));
+      for (const source of sources.filter(s => s.role === role)) {
+        for (const ex of attemptableSources(source, { stateCode, asceEdition: asce })) {
+          const want = normalizeAsceEdition(ex.edition);
+          const hit = durableIdentities
+            .filter(d => eligible(d, String(source.documentClass))
+              && (want == null || normalizeAsceEdition(d.revision) === want))
+            .sort((a, b) => a.documentId.localeCompare(b.documentId))[0];
+          if (hit) return hit;
+        }
+        // a source with no edition dimension at all
+        const plain = durableIdentities
+          .filter(d => eligible(d, String(source.documentClass)))
+          .sort((a, b) => a.documentId.localeCompare(b.documentId))[0];
+        if (plain) return plain;
+      }
+      return null;
+    };
+    const acceptedCapacity = acceptedFor('capacity', false);
+    const acceptedExactDetail = acceptedFor('installation_detail', true);
+    if (!record.capacityDocumentId && acceptedCapacity) record.capacityDocumentId = acceptedCapacity.documentId;
+    if (!record.versionExactDetailDocumentId && acceptedExactDetail) {
+      record.versionExactDetailDocumentId = acceptedExactDetail.documentId;
+    }
+
+    // The capacity document this record REPORTS is the accepted one — retrieved
+    // this run or already on file. Its product is what the applicability residual
+    // below reasons about, so that residual no longer changes with transport health.
+    const capacityProduct = retrieved.find(a => a.role === 'capacity')?.documentProduct
+      ?? acceptedCapacity?.equipmentModelApplicability
+      ?? null;
+    const capacityCoversSelected = capacityProduct != null && norm(capacityProduct) === norm(selectedModel);
+    const haveAcceptedDocuments = retrieved.length > 0 || durableIdentities.length > 0;
+
+    if (!haveAcceptedDocuments) {
       record.residual.push('no published structural document could be retrieved for the selected mount — see the '
         + 'per-address failures on the attempt list');
     }
-    if (capacityAttempt && !capacityAttempt.coversSelectedModel) {
+    // OAR — the applicability residual is about the ACCEPTED capacity document,
+    // so it reads the same whether that document was fetched this run or was
+    // already on file. It is a fact about the hardware, not about the network.
+    if (capacityProduct && !capacityCoversSelected) {
       record.residual.push(
-        `the only published stamped capacity letter covers ${capacityAttempt.documentProduct}, and the selected mount is `
+        `the only published stamped capacity letter covers ${capacityProduct}, and the selected mount is `
         + `${selectedModel}. The document is now retrieved, hashed and (registry permitting) archived, so the remaining `
         + 'question is a BOUNDED applicability confirmation — not research: either confirm through the registry that the '
-        + `${capacityAttempt.documentProduct} letter governs the hardware actually installed, or select `
-        + `${capacityAttempt.documentProduct}. No cross-reference exists to make automatically (see crossReference).`);
+        + `${capacityProduct} letter governs the hardware actually installed, or select `
+        + `${capacityProduct}. No cross-reference exists to make automatically (see crossReference).`);
     }
     if (retrieved.length && !archived.length) {
       record.residual.push('the documents were retrieved and hashed but could not be ARCHIVED — the registry table is '
@@ -304,6 +472,22 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
     const facts: Record<string, { archivedInRepo: boolean; sha256: string | null; status: 'current' | 'superseded' | 'draft' | 'withdrawn' | null }> = {
       ...(ctx.authority.documentRegistryFacts ?? {}),
     };
+    // ── OAR — SEED FROM THE DURABLE REGISTRY FIRST ──────────────────────────
+    // Same version-exactness rule as the retrieval loop below, applied to the
+    // rows already on file, so a retrieval outage cannot empty the facts that
+    // unlock the AUTHORITATIVE verdict. A fresh retrieval below still overwrites.
+    if (mountId && getManufacturerAsset(mountId, 'racking_detail')) {
+      const exact = durableIdentities.find(d =>
+        (d.equipmentModelApplicability ?? '').trim().toLowerCase() === (selectedModel ?? '').trim().toLowerCase()
+        && !!selectedModel);
+      if (exact) {
+        facts[`racking_detail:${mountId}`] = {
+          archivedInRepo: exact.archivedInRepo,
+          sha256: exact.sha256,
+          status: (exact.status as 'current' | 'superseded' | 'draft' | 'withdrawn' | null) ?? null,
+        };
+      }
+    }
     for (const a of record.attempts) {
       if (a.outcome !== 'RETRIEVED' || !a.archival.documentId || !mountId) continue;
       if (a.role !== 'installation_detail') continue;
@@ -312,8 +496,70 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
       // Only the VERSION-EXACT document may supply facts for this asset: handing
       // the II manual's hash to an RT-MINI citation would manufacture an
       // AUTHORITATIVE verdict for a document that does not cover the product.
+      //
+      // ⚠ D7 — THIS GUARD IS NECESSARY BUT NOT SUFFICIENT. It checks that the
+      // DOCUMENT covers the selected model. It cannot check that the ASSET these
+      // facts are being attached to is the same document — and on live Braidon it
+      // was not: the RT-MINI manual's hash landed under `racking_detail:rooftech-mini`,
+      // whose static asset is the RT-MINI *II* manual. Identity is now carried
+      // alongside (see `identities` below) so the selection can compare them.
       if (!a.coversSelectedModel) continue;
       facts[`racking_detail:${mountId}`] = { archivedInRepo: true, sha256: a.sha256, status: 'current' };
+    }
+
+    // ── D7 — THE REGISTRY DOCUMENT IDENTITIES ────────────────────────────────
+    // Every archived document this retrieval produced, described as the registry
+    // records it. The build selects ONE of these (or the static asset) and reports
+    // that single document — identity, custody and applicability together.
+    // Unlike `facts` above, identities are NOT filtered by `coversSelectedModel`:
+    // a document that covers a different product is a real, citable CANDIDATE,
+    // and hiding it is what left the version-exact RT-MINI manual invisible while
+    // the RT-MINI II asset spoke for it.
+    const identities: Record<string, RegistryDocumentIdentity[]> = {
+      ...(ctx.authority.documentRegistryIdentities ?? {}),
+    };
+    if (mountId) {
+      const key = `racking_detail:${mountId}`;
+      const rows: RegistryDocumentIdentity[] = [];
+      for (const a of record.attempts) {
+        if (a.outcome !== 'RETRIEVED' || !a.archival.documentId) continue;
+        const stored = await ctx.safeDbRead(
+          `getDocument(identity:${a.archival.documentId})`,
+          () => getDocument(a.archival.documentId as string),
+          null,
+        );
+        const d = stored.ok ? stored.value : null;
+        rows.push({
+          documentId: a.archival.documentId,
+          documentClass: d?.documentClass ?? a.documentClass,
+          manufacturerOrIssuer: d?.manufacturerOrIssuer ?? null,
+          equipmentId: d?.equipmentId ?? mountId,
+          // THE field that keeps RT-MINI and RT-MINI II apart.
+          equipmentModelApplicability: d?.equipmentModelApplicability ?? a.documentProduct ?? null,
+          title: d?.title ?? null,
+          revision: d?.revision ?? a.edition ?? null,
+          documentDate: d?.documentDate ?? null,
+          sourceUrl: a.url,
+          archivedFileIdentity: d?.archivedFileIdentity ?? a.url,
+          archivedInRepo: d?.archivedInRepo ?? true,
+          sha256: d?.sha256 ?? a.sha256,
+          status: d?.status ?? 'current',
+          verificationState: d?.verificationState ?? 'unverified',
+          verificationActor: d?.verifiedBy ?? null,
+          verificationActorKind: null,
+          verificationBasis: d?.verificationNotes ?? null,
+          jurisdictionAuthorityId: d?.jurisdictionAuthorityId ?? null,
+          jurisdictionBoundary: d?.jurisdictionBoundary ?? null,
+        });
+      }
+      // ── OAR — ACCEPTED REGISTRY AUTHORITY OUTRANKS RETRIEVAL HEALTH ───────
+      // The pool is the DURABLE registry rows merged with anything this run
+      // freshly read back, a fresh read winning per documentId. So zero
+      // retrievals no longer means zero candidates: the archived, hashed
+      // document this project already accepted stays selected, and only its
+      // FRESHNESS is in doubt — which is what the attempt record is for.
+      const merged = mergeRegistryIdentities(durableIdentities, rows);
+      if (merged.length) identities[key] = merged;
     }
 
     const refs = retrieved.flatMap(a => [
@@ -323,10 +569,15 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
     ]);
 
     return {
-      // A retrieval that produced NOTHING is FAILED; one that produced documents
-      // is RESOLVED as a RETRIEVAL even when the applicability residual survives
-      // — the two are different facts and are reported as such.
-      result: retrieved.length ? 'RESOLVED' : 'FAILED',
+      // A run that has NO document at all is FAILED; one that HAS documents is
+      // RESOLVED as a retrieval even when the applicability residual survives —
+      // the two are different facts and are reported as such.
+      //
+      // OAR — "has documents" now means ACCEPTED documents, fetched this run or
+      // already archived. Reporting FAILED because a fetch timed out, while the
+      // archived document was still selected and cited on the sheets, is the
+      // contradiction this phase removes.
+      result: haveAcceptedDocuments ? 'RESOLVED' : 'FAILED',
       clearance: {
         // The RETRIEVAL never clears the requirements by itself: the pure gates
         // in rackingAssembly / structuralAuthority decide, from the archived
@@ -335,16 +586,19 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
         missing: record.residual.length ? record.residual : [],
         reasons: record.residual,
       },
-      patch: { structuralDocumentRetrieval: record, documentRegistryFacts: facts },
+      patch: { structuralDocumentRetrieval: record, documentRegistryFacts: facts, documentRegistryIdentities: identities },
       sourceQueried: `${provider?.name ?? 'no-document-provider'} → ${REGISTRY_SOURCE}`,
       sourceRefs: refs,
-      retryability: retrieved.length ? 'REQUIRES_INPUT' : 'RETRYABLE',
+      retryability: haveAcceptedDocuments ? 'REQUIRES_INPUT' : 'RETRYABLE',
       failureReason: record.residual.join(' · ') || null,
-      operatorAction: archived.length && capacityAttempt && !capacityAttempt.coversSelectedModel
-        ? `Confirm in Admin → Document Registry that the ${capacityAttempt.documentProduct} stamped letter governs the `
-          + `installed ${selectedModel} hardware, or change the selection to ${capacityAttempt.documentProduct}.`
+      // OAR — the retention verdict for this run, recorded operationally.
+      // RETRIEVAL_FAILED_RETAINED is the case the phase exists to make safe: the
+      // fetch did not complete, and the accepted registry document still stands.
+      operatorAction: capacityProduct && !capacityCoversSelected
+        ? `Confirm in Admin → Document Registry that the ${capacityProduct} stamped letter governs the `
+          + `installed ${selectedModel} hardware, or change the selection to ${capacityProduct}.`
         : (retrieved.length && !archived.length ? ARCHIVE_FAILURE_ACTION : null),
-      confidence: retrieved.length ? 1 : 0,
+      confidence: haveAcceptedDocuments ? 1 : 0,
       auditRef: null,
       inputsRecorded: {
         ...inputsRecorded,
@@ -352,10 +606,16 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
         attempts: record.attempts.length,
         retrieved: retrieved.length,
         archived: archived.length,
-        capacityDocumentProduct: capacityAttempt?.documentProduct ?? null,
-        capacityCoversSelectedModel: capacityAttempt?.coversSelectedModel ?? null,
+        capacityDocumentProduct: capacityProduct,
+        capacityCoversSelectedModel: capacityProduct ? capacityCoversSelected : null,
         versionExactDetailDocumentId: record.versionExactDetailDocumentId,
         crossReferenceExists: false,
+        // OAR — which of the six registry-authority states this run landed in.
+        registryRetentionState: (retrieved.length
+          ? 'RETRIEVAL_SUCCEEDED'
+          : (durableIdentities.length ? 'RETRIEVAL_FAILED_RETAINED' : 'NO_REGISTRY_AUTHORITY')
+        ) satisfies RegistryAuthorityRetentionState,
+        selectedRegistryDocuments: (identities[`racking_detail:${mountId ?? ''}`] ?? []).length,
       },
     };
   },
@@ -377,11 +637,32 @@ export const rackingAssemblySelectionResolver: RequirementResolver = {
 
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     const proj = (ctx.input.project ?? {}) as Record<string, unknown>;
-    const canonical = ctx.authority.canonicalEquipment ?? null;
+
+    // ── D12 — THE PHANTOM CAST ────────────────────────────────────────────
+    // This used to read
+    //     (canonical as unknown as { storedRecord?: … } | null)?.storedRecord
+    // and `CanonicalEquipmentAuthority` has no `storedRecord` property — the
+    // `as unknown` cast hid that from the compiler, so probe 2 was fed `null`
+    // on every run and `projects.selected_equipment` reported "no rail
+    // recorded" whatever the store actually held. Adding a rail field would not
+    // have made it work.
+    //
+    // It now reads the store through the SAME guarded reader the canonical
+    // equipment resolver uses, so a rail selection is seen exactly when it
+    // exists, and an unreadable store is an unreadable store rather than a
+    // silent absence.
+    const storeRead = ctx.projectId
+      ? await ctx.safeDbRead(
+          'readProjectEquipmentStores(rail)',
+          () => readProjectEquipmentStores(ctx.projectId as string),
+          null as StoredEquipmentRecord | null,
+        )
+      : { value: null as StoredEquipmentRecord | null, ok: false, error: 'no projectId on the permit input — the equipment store cannot be read' };
+
     const verdict: RailSelectionVerdict = deriveRailSelection({
       mountingSystemId: str(proj.mountingSystemId),
       project: proj,
-      selectedEquipment: (canonical as unknown as { storedRecord?: Record<string, unknown> } | null)?.storedRecord ?? null,
+      selectedEquipment: storeRead.value?.selectedEquipment ?? null,
     });
 
     const inputsRecorded: Record<string, string | number | boolean | null> = {
@@ -396,11 +677,20 @@ export const rackingAssemblySelectionResolver: RequirementResolver = {
       partNumberAvailability: verdict.partNumberAvailability,
     };
 
-    if (verdict.state === 'inherent' || verdict.state === 'no-rail-required') {
-      const refs = [
-        `assembly:rail#${verdict.selectedRailModel ?? 'none-required'}`,
-        `provenance:mounting-hardware-db#${verdict.selectedRailSystemId ?? str(proj.mountingSystemId) ?? 'mount'}`,
-      ];
+    if (verdict.state === 'inherent' || verdict.state === 'no-rail-required' || verdict.state === 'selected') {
+      // D12 — a PINNED rail cites the selection act, not just the catalog: the
+      // requirement closes because a named person chose, with a stated reason
+      // and a span authority, and the audit ref must be able to reach that.
+      const refs = verdict.state === 'selected'
+        ? [
+            `assembly:rail#${verdict.selectedRailModel}`,
+            `selection:rail-pin#${verdict.pinned!.selectedBy}@${verdict.pinned!.selectedAtIso}`,
+            `provenance:mounting-hardware-db#${verdict.selectedRailSystemId}`,
+          ]
+        : [
+            `assembly:rail#${verdict.selectedRailModel ?? 'none-required'}`,
+            `provenance:mounting-hardware-db#${verdict.selectedRailSystemId ?? str(proj.mountingSystemId) ?? 'mount'}`,
+          ];
       return {
         result: 'RESOLVED',
         clearance: { cleared: true, missing: [], reasons: [] },

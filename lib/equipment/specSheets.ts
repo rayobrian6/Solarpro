@@ -168,56 +168,56 @@ const RACKING_SPECS: SpecSheetEntry[] = [
  * Find spec sheet for a module by manufacturer + model string (fuzzy match)
  */
 export function findModuleSpec(manufacturer: string, model: string): SpecSheetEntry | null {
-  const mfr = (manufacturer || '').toLowerCase();
-  const mdl = (model || '').toLowerCase();
-  return MODULE_SPECS.find(s =>
-    s.manufacturer.toLowerCase().includes(mfr) ||
-    mfr.includes(s.manufacturer.toLowerCase()) ||
-    s.model.toLowerCase().includes(mdl) ||
-    mdl.includes(s.model.toLowerCase())
-  ) || null;
+  // CMEI — EXACT ONLY. This was an OR of four substring tests, so an empty
+  // model matched everything and any partial name matched the wrong sheet.
+  const n = (x: string) => (x || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  const mfr = n(manufacturer);
+  const mdl = n(model);
+  if (!mdl) return null;
+  const hits = MODULE_SPECS.filter(s => n(s.model) === mdl && (!mfr || n(s.manufacturer) === mfr));
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /**
  * Find spec sheet for an inverter
  */
 export function findInverterSpec(manufacturer: string, model: string): SpecSheetEntry | null {
-  const mfr = (manufacturer || '').toLowerCase();
-  const mdl = (model || '').toLowerCase();
-  return INVERTER_SPECS.find(s =>
-    s.manufacturer.toLowerCase().includes(mfr) ||
-    mfr.includes(s.manufacturer.toLowerCase()) ||
-    s.model.toLowerCase().includes(mdl) ||
-    mdl.includes(s.model.toLowerCase())
-  ) || null;
+  // CMEI — EXACT ONLY. This was an OR of four substring tests, so an empty
+  // model matched everything and any partial name matched the wrong sheet.
+  const n = (x: string) => (x || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  const mfr = n(manufacturer);
+  const mdl = n(model);
+  if (!mdl) return null;
+  const hits = INVERTER_SPECS.filter(s => n(s.model) === mdl && (!mfr || n(s.manufacturer) === mfr));
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /**
  * Find spec sheet for a battery
  */
 export function findBatterySpec(manufacturer: string, model: string): SpecSheetEntry | null {
-  const mfr = (manufacturer || '').toLowerCase();
-  const mdl = (model || '').toLowerCase();
-  return BATTERY_SPECS.find(s =>
-    s.manufacturer.toLowerCase().includes(mfr) ||
-    mfr.includes(s.manufacturer.toLowerCase()) ||
-    s.model.toLowerCase().includes(mdl) ||
-    mdl.includes(s.model.toLowerCase())
-  ) || null;
+  // CMEI — EXACT ONLY. This was an OR of four substring tests, so an empty
+  // model matched everything and any partial name matched the wrong sheet.
+  const n = (x: string) => (x || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  const mfr = n(manufacturer);
+  const mdl = n(model);
+  if (!mdl) return null;
+  const hits = BATTERY_SPECS.filter(s => n(s.model) === mdl && (!mfr || n(s.manufacturer) === mfr));
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /**
  * Find spec sheet for racking
  */
 export function findRackingSpec(manufacturer: string, model: string): SpecSheetEntry | null {
-  const mfr = (manufacturer || '').toLowerCase();
-  const mdl = (model || '').toLowerCase();
-  return RACKING_SPECS.find(s =>
-    s.manufacturer.toLowerCase().includes(mfr) ||
-    mfr.includes(s.manufacturer.toLowerCase()) ||
-    s.model.toLowerCase().includes(mdl) ||
-    mdl.includes(s.model.toLowerCase())
-  ) || null;
+  // CMEI — EXACT ONLY. This was an OR of four substring tests, so an empty
+  // model matched everything and any partial name matched the wrong sheet.
+  const n = (x: string) => (x || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  const mfr = n(manufacturer);
+  const mdl = n(model);
+  if (!mdl) return null;
+  const hits = RACKING_SPECS.filter(s => n(s.model) === mdl && (!mfr || n(s.manufacturer) === mfr));
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /**

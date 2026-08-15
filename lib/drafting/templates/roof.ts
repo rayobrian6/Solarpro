@@ -771,7 +771,7 @@ export function drawRoofPlan(
           const mx = (bestSeg[0] + bestSeg[2]) / 2, my = (bestSeg[1] + bestSeg[3]) / 2;
           let ang = Math.atan2(bestSeg[3] - bestSeg[1], bestSeg[2] - bestSeg[0]) * 180 / Math.PI;
           if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-          tEls.push(`<text x="${mx.toFixed(1)}" y="${(my - 3.5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#3a3f46" stroke="#fff" stroke-width="1.6" paint-order="stroke">(N) TRENCH — ${routeProvenanceLabel(ctx?.snapshot)}</text>`);
+          tEls.push(`<text x="${mx.toFixed(1)}" y="${(my - 3.5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.4" font-weight="bold" fill="#3a3f46" stroke="#fff" stroke-width="1.6" paint-order="stroke">(N) TRENCH — ${routeProvenanceLabel(ctx?.snapshot)}</text>`);
         }
       });
       if (tEls.length) {
@@ -893,7 +893,7 @@ export function drawRoofPlan(
             bandLabelPts.push({ x: bmx, y: bmy });
             let angDeg = Math.atan2(ey, ex) * 180 / Math.PI;
             if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;   // never upside-down
-            bands.push(`<text x="${bmx.toFixed(1)}" y="${(bmy + 2).toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#b91c1c" opacity="0.9">${ftToFtIn(edgeSetbackFt)} ${edgeKind === 'ridge' ? 'RIDGE' : 'HIP/VALLEY'} SETBACK</text>`);
+            bands.push(`<text x="${bmx.toFixed(1)}" y="${(bmy + 2).toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.4" font-weight="bold" fill="#b91c1c" opacity="0.9">${ftToFtIn(edgeSetbackFt)} ${edgeKind === 'ridge' ? 'RIDGE' : 'HIP/VALLEY'} SETBACK</text>`);
           }
         }
       }
@@ -968,7 +968,7 @@ export function drawRoofPlan(
       const lmy = gc * udy + ((vMin + vMax) / 2) * vdy;
       let angDeg = Math.atan2(vdy, vdx) * 180 / Math.PI;
       if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;
-      els.push(`<text x="${lmx.toFixed(1)}" y="${lmy.toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${lmx.toFixed(1)} ${lmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#1a7a2e">${ftToFtIn(pathwayFt)} ACCESS PATHWAY</text>`);
+      els.push(`<text x="${lmx.toFixed(1)}" y="${lmy.toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${lmx.toFixed(1)} ${lmy.toFixed(1)})" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.6" font-weight="bold" fill="#1a7a2e">${ftToFtIn(pathwayFt)} ACCESS PATHWAY</text>`);
       _pathwaysDrawn++;
     }
   });

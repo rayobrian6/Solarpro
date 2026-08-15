@@ -97,7 +97,7 @@ function textSvg(
   const safe = txt.replace(/&/g, '&' + 'amp;')
                   .replace(/</g, '&' + 'lt;')
                   .replace(/>/g, '&' + 'gt;');
-  return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="Arial, Helvetica, sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anc}">${safe}</text>`;
+  return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anc}">${safe}</text>`;
 }
 
 // ─── Tesla Powerwall 3 (battery) ─────────────────────────────────────────────

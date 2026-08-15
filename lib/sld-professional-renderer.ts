@@ -379,7 +379,7 @@ function txt(x: number, y: number, s: string,
   const anc = `text-anchor="${o.anc ?? 'start'}"`;
   const clr = `fill="${o.fill ?? BLK}"`;
   const itl = o.italic ? 'font-style="italic"' : '';
-  return `<text x="${x}" y="${y}" font-family="Arial,sans-serif" font-size="${sz}" ${bld} ${anc} ${clr} ${itl} dominant-baseline="auto">${esc(s)}</text>`;
+  return `<text x="${x}" y="${y}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${sz}" ${bld} ${anc} ${clr} ${itl} dominant-baseline="auto">${esc(s)}</text>`;
 }
 
 function tspan(x: number, y: number, lines: string[],
@@ -392,7 +392,7 @@ function tspan(x: number, y: number, lines: string[],
   const clr = `fill="${o.fill ?? BLK}"`;
   const lh  = o.lh ?? Math.round(sz * 1.4);
   const spans = lines.map((l,i) => `<tspan x="${x}" dy="${i===0?0:lh}">${esc(l)}</tspan>`).join('');
-  return `<text x="${x}" y="${y}" font-family="Arial,sans-serif" font-size="${sz}" ${bld} ${anc} ${clr} dominant-baseline="auto">${spans}</text>`;
+  return `<text x="${x}" y="${y}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${sz}" ${bld} ${anc} ${clr} dominant-baseline="auto">${spans}</text>`;
 }
 
 function rect(x: number, y: number, w: number, h: number,

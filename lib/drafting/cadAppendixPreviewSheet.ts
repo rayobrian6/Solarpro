@@ -127,20 +127,20 @@ export function buildPlanSetCADAppendixPreviewSheetV1(
 export function renderPlanSetCADAppendixPreviewSheetV1(sheet: PlanSetCADAppendixPreviewSheetV1): string {
   assertAppendixSheet(sheet);
   const warnings = sheet.renderingWarnings.length > 0
-    ? sheet.renderingWarnings.map((warning, index) => `<text x="44" y="${548 + index * 13}" font-family="Arial, sans-serif" font-size="10" fill="#92400e">${escapeText(warning)}</text>`).join('')
-    : '<text x="44" y="548" font-family="Arial, sans-serif" font-size="10" fill="#475569">No rendering warnings reported by CAD preview appendix boundary.</text>';
+    ? sheet.renderingWarnings.map((warning, index) => `<text x="44" y="${548 + index * 13}" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" fill="#92400e">${escapeText(warning)}</text>`).join('')
+    : '<text x="44" y="548" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" fill="#475569">No rendering warnings reported by CAD preview appendix boundary.</text>';
 
   return [
     '<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="850" viewBox="0 0 1100 850" role="img" aria-label="CAD preview appendix non-authoritative">',
     '<rect width="1100" height="850" fill="#ffffff"/>',
     '<rect x="28" y="26" width="1044" height="798" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>',
     '<rect x="42" y="42" width="1016" height="62" fill="#111827"/>',
-    `<text x="58" y="72" font-family="Arial, sans-serif" font-size="24" font-weight="900" fill="#ffffff">${escapeText(sheet.sheetTitle)} · ${escapeText(sheet.sheetId)}</text>`,
-    `<text x="58" y="94" font-family="Arial, sans-serif" font-size="12" fill="#fecaca">${escapeText(sheet.previewOnlyLabels.join(' · '))}</text>`,
+    `<text x="58" y="72" font-family="SolarPro Sans, SolarPro Symbols" font-size="24" font-weight="900" fill="#ffffff">${escapeText(sheet.sheetTitle)} · ${escapeText(sheet.sheetId)}</text>`,
+    `<text x="58" y="94" font-family="SolarPro Sans, SolarPro Symbols" font-size="12" fill="#fecaca">${escapeText(sheet.previewOnlyLabels.join(' · '))}</text>`,
     '<rect x="42" y="118" width="704" height="472" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>',
     `<g transform="translate(64 134) scale(0.74)">${stripOuterSvg(sheet.svgPayload)}</g>`,
     '<rect x="766" y="118" width="292" height="472" fill="#f9fafb" stroke="#94a3b8" stroke-width="1.5"/>',
-    '<text x="786" y="148" font-family="Arial, sans-serif" font-size="16" font-weight="900" fill="#0f172a">CAD PREVIEW METADATA</text>',
+    '<text x="786" y="148" font-family="SolarPro Sans, SolarPro Symbols" font-size="16" font-weight="900" fill="#0f172a">CAD PREVIEW METADATA</text>',
     metadataRow(786, 180, 'SYSTEM', sheet.systemType),
     metadataRow(786, 204, 'CAD VERSION', sheet.cadModelVersion),
     metadataRow(786, 228, 'UNITS', sheet.units),
@@ -153,15 +153,15 @@ export function renderPlanSetCADAppendixPreviewSheetV1(sheet: PlanSetCADAppendix
     metadataRow(786, 408, 'FENCE SEGMENTS', String(sheet.layerSummary.fenceSegmentCount)),
     metadataRow(786, 432, 'OBSTRUCTIONS', String(sheet.layerSummary.obstructionCount)),
     metadataRow(786, 456, 'DIMENSIONS', String(sheet.layerSummary.dimensionCount)),
-    '<text x="786" y="498" font-family="Arial, sans-serif" font-size="11" font-weight="900" fill="#991b1b">NO PERMIT / ENGINEERING / CONSTRUCTION AUTHORITY</text>',
-    '<text x="786" y="518" font-family="Arial, sans-serif" font-size="10" fill="#475569">Generated from read-only CAD export + SVG artifact DTOs.</text>',
-    '<text x="44" y="626" font-family="Arial, sans-serif" font-size="15" font-weight="900" fill="#0f172a">BOUNDARY NOTES</text>',
-    ...sheet.deterministicNotes.slice(0, 4).map((note, index) => `<text x="44" y="${650 + index * 18}" font-family="Arial, sans-serif" font-size="11" fill="#334155">${escapeText(note)}</text>`),
-    '<text x="44" y="532" font-family="Arial, sans-serif" font-size="13" font-weight="900" fill="#0f172a">WARNINGS</text>',
+    '<text x="786" y="498" font-family="SolarPro Sans, SolarPro Symbols" font-size="11" font-weight="900" fill="#991b1b">NO PERMIT / ENGINEERING / CONSTRUCTION AUTHORITY</text>',
+    '<text x="786" y="518" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" fill="#475569">Generated from read-only CAD export + SVG artifact DTOs.</text>',
+    '<text x="44" y="626" font-family="SolarPro Sans, SolarPro Symbols" font-size="15" font-weight="900" fill="#0f172a">BOUNDARY NOTES</text>',
+    ...sheet.deterministicNotes.slice(0, 4).map((note, index) => `<text x="44" y="${650 + index * 18}" font-family="SolarPro Sans, SolarPro Symbols" font-size="11" fill="#334155">${escapeText(note)}</text>`),
+    '<text x="44" y="532" font-family="SolarPro Sans, SolarPro Symbols" font-size="13" font-weight="900" fill="#0f172a">WARNINGS</text>',
     warnings,
     '<rect x="42" y="744" width="1016" height="58" fill="#fee2e2" stroke="#991b1b" stroke-width="1.5"/>',
-    '<text x="550" y="770" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="900" fill="#991b1b">CAD PREVIEW ONLY · NON-AUTHORITATIVE · NOT CONSTRUCTION DRAWING</text>',
-    '<text x="550" y="790" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#7f1d1d">This appendix does not replace PV-2 or PV-3 and does not alter permit, engineering, NEC, BOM, routing, workflow, or recommendation outputs.</text>',
+    '<text x="550" y="770" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="18" font-weight="900" fill="#991b1b">CAD PREVIEW ONLY · NON-AUTHORITATIVE · NOT CONSTRUCTION DRAWING</text>',
+    '<text x="550" y="790" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="12" fill="#7f1d1d">This appendix does not replace PV-2 or PV-3 and does not alter permit, engineering, NEC, BOM, routing, workflow, or recommendation outputs.</text>',
     '</svg>',
   ].join('');
 }
@@ -193,7 +193,7 @@ function assertAppendixSheet(sheet: PlanSetCADAppendixPreviewSheetV1): void {
 }
 
 function metadataRow(x: number, y: number, label: string, value: string): string {
-  return `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="10" fill="#64748b">${escapeText(label)}</text><text x="${x + 92}" y="${y}" font-family="Arial, sans-serif" font-size="10" font-weight="700" fill="#0f172a">${escapeText(value)}</text>`;
+  return `<text x="${x}" y="${y}" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" fill="#64748b">${escapeText(label)}</text><text x="${x + 92}" y="${y}" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" font-weight="700" fill="#0f172a">${escapeText(value)}</text>`;
 }
 
 function stripOuterSvg(svg: string): string {

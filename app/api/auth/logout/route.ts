@@ -2,6 +2,7 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { COOKIE_NAME } from '@/lib/auth';
+import { isProduction } from '@/lib/env';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(req: NextRequest) {
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
     // Deleting with maxAge=0 is the reliable way to clear an httpOnly cookie.
     response.cookies.set(COOKIE_NAME, '', {
       httpOnly: true,
-      secure:   process.env.NODE_ENV === 'production',
+      secure:   isProduction(),
       sameSite: 'lax',
       path:     '/',
       maxAge:   0,

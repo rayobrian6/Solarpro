@@ -72,7 +72,7 @@ describe('open-source photo vision pass API route', () => {
     // Worker URL not configured → 503
     mocks.getExternalOpenCvWorkerUrl.mockReturnValueOnce(null);
 
-    const res = await POST(new NextRequest('https://solarpro.test/api/site-surveys/11111111-1111-4111-8111-111111111111/open-source-photo-vision-pass', { method: 'POST' }), { params: { surveyId: '11111111-1111-4111-8111-111111111111' } });
+    const res = await POST(new NextRequest('https://solarpro.test/api/site-surveys/11111111-1111-4111-8111-111111111111/open-source-photo-vision-pass', { method: 'POST' }), { params: Promise.resolve({ surveyId: '11111111-1111-4111-8111-111111111111' }) });
     const json = await res.json();
 
     expect(res.status).toBe(503);
@@ -95,7 +95,7 @@ describe('open-source photo vision pass API route', () => {
       renderError: null,
     });
 
-    const res = await POST(new NextRequest('https://solarpro.test/api/site-surveys/11111111-1111-4111-8111-111111111111/open-source-photo-vision-pass', { method: 'POST' }), { params: { surveyId: '11111111-1111-4111-8111-111111111111' } });
+    const res = await POST(new NextRequest('https://solarpro.test/api/site-surveys/11111111-1111-4111-8111-111111111111/open-source-photo-vision-pass', { method: 'POST' }), { params: Promise.resolve({ surveyId: '11111111-1111-4111-8111-111111111111' }) });
     const json = await res.json();
 
     expect(res.status).toBe(200);

@@ -120,12 +120,10 @@ function normalizeNecEdition(raw: string | null | undefined): string | null {
   return VALID_NEC.test(v) ? v : null;
 }
 
-function normalizeAsceEdition(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  // accept 'ASCE 7-22', '7-22', 'ASCE 7-16' → '7-22' / '7-16'
-  const m = String(raw).match(/7-\d{2}/);
-  return m ? m[0] : null;
-}
+// D13 — the ASCE normalizer lives in `asceAuthority` with the decision it serves.
+// An identical copy sat here, which is how one edition came to be normalized in
+// two places and reported under two provenances.
+import { normalizeAsce as normalizeAsceEdition } from './asceAuthority';
 
 /** KDP WS-12 — how the bound AHJ record was reached, for the authority trace. */
 export type AhjMatchMethod =
@@ -342,9 +340,21 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
       : edition(k, null, 'unknown', unknownProv);
   };
 
-  // ── ASCE: the structural engine basis (computational, not adoption) ─────────
-  const asce = normalizeAsceEdition(args.asceEngineBasis);
-  const asceSource: CodeEditionSource = asce ? 'structural-engine-basis' : 'unknown';
+  // ── ASCE — D13 ─────────────────────────────────────────────────────────────
+  // A RETRIEVED adoption wins, exactly as it does for NEC/IBC/IRC/IFC. This
+  // record previously never called `adoptFor('asce')` at all: it overwrote the
+  // retrieval with the engine basis unconditionally, so a hashed AHJ adoption
+  // fact for a code family the registry CAN carry was structurally unreachable —
+  // the same discarded-authority shape as D4's dropped patch key.
+  //
+  // With no adoption, the engine basis is reported and LABELLED as a
+  // computational basis. It is not an adoption claim and never says it is.
+  const asceAdopted = normalizeAsceEdition(adoptFor('asce'));
+  const asceBasis = normalizeAsceEdition(args.asceEngineBasis);
+  const asce = asceAdopted ?? asceBasis;
+  const asceSource: CodeEditionSource = asceAdopted
+    ? 'ahj-registry-retrieval'
+    : asceBasis ? 'structural-engine-basis' : 'unknown';
 
   const editions: Record<CodeEditionKind, CodeEdition> = {
     nec: edition('nec', nec, necSource, nec
@@ -360,9 +370,11 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
     ibc: kindEdition('ibc'),
     irc: kindEdition('irc'),
     ifc: kindEdition('ifc'),
-    asce: edition('asce', asce, asceSource, asce
-      ? { source: 'structural-engine', ref: 'structural.env.codeAuthority', note: 'ASCE edition the structural engine computed under — engine basis, not an AHJ adoption claim' }
-      : unknownProv),
+    asce: edition('asce', asce, asceSource, asceAdopted
+      ? retrievedProv('asce')
+      : asceBasis
+        ? { source: 'structural-engine', ref: 'structural.env.codeAuthority', note: 'ASCE edition the structural engine computed under — engine basis, not an AHJ adoption claim' }
+        : unknownProv),
   };
 
   const incompleteEditions = CODE_EDITION_KINDS.filter(k => editions[k].edition == null);

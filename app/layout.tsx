@@ -5,18 +5,15 @@ import { ToastProvider } from '@/components/ui/Toast';
 import { StoreProvider } from '@/store/StoreProvider';
 import { UserProvider } from '@/contexts/UserContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
-import dynamic from 'next/dynamic';
 import { Suspense } from 'react';
 import ImpersonationBanner from '@/components/ui/ImpersonationBanner';
 import ClientMonitoringInit from '@/components/ClientMonitoringInit';
 import { BUILD_VERSION } from '@/lib/version';
-
-// SolarDogWithTour uses inline <style> tags and localStorage — must be client-only
-// to prevent React hydration mismatch (#418 / #425)
-const SolarDogWithTour = dynamic(
-  () => import('@/components/support/SolarDogWithTour'),
-  { ssr: false }
-);
+// SolarDogWithTour is already a 'use client' component; importing it directly
+// in this Server Component layout is supported in Next 15. (The previous
+// `next/dynamic` wrapper with `ssr: false` was banned in Server Components
+// — error caught at build time on 2026-08-01.)
+import SolarDogWithTour from '@/components/support/SolarDogWithTour';
 
 export const metadata: Metadata = {
   title: 'SolarPro Design Platform',

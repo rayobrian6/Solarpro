@@ -26,6 +26,10 @@ import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/li
 import { toSubSystemKey, type SubSystemKey } from '@/lib/system/subSystemEquipment';
 import { microMaxPerBranch } from './branching';
 import { getDesignTemps } from './designTemps';
+// WS-5 — the ONE substitution of a field measurement for an estimated run
+// length, shared with the canonical run model in generatePermit.
+import { applyFieldMeasurementsToRuns } from '../snapshot/applyFieldMeasurements';
+import type { FieldRouteMeasurementAuthority } from '@/lib/fieldMeasurement/resolver';
 
 /**
  * Wave 2a (contract §3, 2a Compute): per-subsystem scoping for the permit-path
@@ -166,6 +170,18 @@ export function buildComputedRunsForPermit(
     };
 
     const cs = computeSystem(csInput);
+    // ── WS-5 §13 — THE SAME SUBSTITUTION THE CANONICAL RUN MODEL GETS ────────
+    // This function calls computeSystem a SECOND time from the CAD (it predates
+    // `input._computeSystem` being canonical), and the BOM's conduit footage is
+    // derived from THESE runs. Without this, a verified 89-ft run printed 89 ft
+    // on the conductor schedule and ordered 23 ft of conduit — the package
+    // contradicting itself about one run. One authority, one substitution
+    // function, both run models. No-op when no measurement exists.
+    applyFieldMeasurementsToRuns(
+      cs as unknown as { runs?: Array<Record<string, unknown>> },
+      (input as unknown as { _fieldRouteMeasurements?: FieldRouteMeasurementAuthority | null })
+        ._fieldRouteMeasurements ?? null,
+    );
     _lastFullResult = cs;
     return cs.runs && cs.runs.length > 0 ? cs.runs : null;
   } catch (err) {

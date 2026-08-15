@@ -82,6 +82,57 @@ export interface StructuralAuthorityGap {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// D6 — ONE DOCUMENT, ONE ROLE AT A TIME.
+//
+// The record used to say two incompatible things at once. Its structured fields
+// named ICC-ES ESR-3575 as the capacity source
+//   capacitySource / datasheetSource / ul2703ListingBasis / iccEsReport
+// while its own `notes[]` said ESR-3575 "is a flashing / water-resistance report
+// and carries no structural value" — which is also why
+// FASTENER-ASSEMBLY-UNVERIFIED fires. Prose was negating data. Any consumer
+// reading the structured field (rather than parsing English) cited a document
+// that the same record disqualifies.
+//
+// `documentRoles` is the structured statement instead. A document occupies a
+// role ONLY when it actually supports that role. ESR-3575 legitimately fills the
+// listing / flashing role — that is what an ICC-ES evaluation report for a
+// self-flashing mount IS — and fills no other.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The distinct authorities a racking document can carry. They are NOT
+ *  interchangeable: authenticity is not applicability, and a listing report is
+ *  not a structural capacity source. */
+export type RackingDocumentRole =
+  | 'listingFlashingBasis'
+  | 'installationAuthority'
+  | 'fastenerAuthority'
+  | 'structuralCapacityAuthority'
+  | 'ul2703BondingBasis'
+  | 'projectSpecificEngineeringAuthority';
+
+export interface RackingDocumentRoleFact {
+  /** true ⇔ a document actually establishes this role for the SELECTED product. */
+  established: boolean;
+  /** the document identity filling the role, or null when none does. */
+  documentIdentity: string | null;
+  /** registry document id, when the role is filled from the registry. */
+  documentId: string | null;
+  /** sha256 of the archived source, when one exists. */
+  documentHash: string | null;
+  /** true ⇔ the source is archived (registry `archived_in_repo`). */
+  archivedInRepo: boolean;
+  /** why the role is (or is not) established — always a true statement. */
+  basis: string;
+}
+
+export type RackingDocumentRoleAuthority = Record<RackingDocumentRole, RackingDocumentRoleFact>;
+
+/** A role nobody fills, stated honestly. */
+export function unfilledRole(basis: string): RackingDocumentRoleFact {
+  return { established: false, documentIdentity: null, documentId: null, documentHash: null, archivedInRepo: false, basis };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // W4 §9 — RT-MINI blocker clearance evidence.
 //
 // The two blocking gaps (RACKING-CAPACITY-SOURCE-NOT-ARCHIVED,
@@ -126,7 +177,11 @@ export interface RackingCapacityDocumentEvidence {
   railLFootAssembly: string | null;          // rail / L-foot assembly covered
   loadBasis: string | null;                  // load basis (must resolve to an ASD allowable)
   adjustmentFactors: Record<string, unknown> | null; // adjustment factors
-  jurisdiction: string | null;               // jurisdiction / applicability boundary
+  jurisdiction: string | null;               // jurisdiction / applicability boundary (DISPLAY name)
+  /** D4 — STABLE legal-AHJ identity the document is bound to (ahj_registry id).
+   *  When present on BOTH sides this is THE comparison; the name is a fallback
+   *  for rows archived before migration 119. */
+  jurisdictionAuthorityId?: string | null;
   asdAllowableLbs: number | null;            // the allowable value the doc establishes
   revisionOrDate: string | null;
 }
@@ -136,7 +191,24 @@ export interface RackingClearanceContext {
   mountModel: string;
   requiredSubstrate?: string | null;
   requiredRail?: string | null;
+  /** the project's legal AHJ DISPLAY name. */
   projectJurisdiction?: string | null;
+  /** D4 — the project's STABLE legal-AHJ identity (ahj_registry record id). */
+  projectJurisdictionAuthorityId?: string | null;
+}
+
+/** D4 — normalise a jurisdiction NAME for the compatibility comparison.
+ *  Case, whitespace and the ampersand/"and" spelling are presentation, not
+ *  identity: "Madison County Building & Zoning" and "Madison County Building and
+ *  Zoning" are the same authority. Punctuation is dropped for the same reason.
+ *  This is a FALLBACK — it exists only for rows archived before the stable id. */
+export function normalizeJurisdictionName(s: string | null | undefined): string {
+  return (s ?? '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[.,''`"()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export interface RackingClearanceResult {
@@ -213,9 +285,34 @@ export function evaluateRackingCapacityClearance(
   if (!evidence.adjustmentFactors || Object.keys(evidence.adjustmentFactors).length === 0) {
     fail('adjustment_factors', 'adjustment factors not stated');
   }
-  if (!norm(evidence.jurisdiction)) fail('jurisdiction', 'jurisdiction / applicability boundary not stated');
-  else if (ctx.projectJurisdiction && norm(evidence.jurisdiction) !== norm(ctx.projectJurisdiction)) {
-    fail('jurisdiction', `document jurisdiction '${evidence.jurisdiction}' is not confirmed for the project jurisdiction '${ctx.projectJurisdiction}'`);
+  // ── D4 — JURISDICTION IS AN IDENTITY, NOT A SENTENCE ────────────────────
+  // This compared two free-text strings with a bare lowercase/trim. Two things
+  // were wrong with that. It could be defeated by an ampersand — "Madison County
+  // Building & Zoning" vs "… and Zoning" are the same authority — and it was
+  // being handed the MAILING city, because that is what the document rows were
+  // stamped with.
+  //
+  // Stable identity governs when both sides carry it. The name comparison
+  // survives only as a compatibility path for rows archived before migration
+  // 119, and it is normalised so presentation cannot decide applicability.
+  // Absent identity on BOTH sides with no name is still a failure: fail closed.
+  const _docAhjId = (evidence.jurisdictionAuthorityId ?? '').trim();
+  const _projAhjId = (ctx.projectJurisdictionAuthorityId ?? '').trim();
+  if (_docAhjId && _projAhjId) {
+    if (_docAhjId !== _projAhjId) {
+      fail('jurisdiction',
+        `document is bound to legal AHJ '${_docAhjId}', not the project's '${_projAhjId}'`);
+    }
+  } else if (!norm(evidence.jurisdiction)) {
+    fail('jurisdiction', 'jurisdiction / applicability boundary not stated');
+  } else if (ctx.projectJurisdiction
+      && normalizeJurisdictionName(evidence.jurisdiction) !== normalizeJurisdictionName(ctx.projectJurisdiction)) {
+    fail('jurisdiction',
+      `document jurisdiction '${evidence.jurisdiction}' is not confirmed for the project jurisdiction `
+      + `'${ctx.projectJurisdiction}'`
+      + (_docAhjId || _projAhjId
+          ? ' (compared by name — one side carries no stable AHJ identity)'
+          : ''));
   }
   if (evidence.asdAllowableLbs == null || !(evidence.asdAllowableLbs > 0)) {
     fail('asd_allowable_value', 'document does not establish a positive ASD allowable capacity');
@@ -244,6 +341,10 @@ export interface RackingAssemblyRecordExt extends RackingAssemblyRecord {
     fastener: 'verified' | 'pending' | 'unverified';
     overall: 'verified' | 'pending';
   };
+  /** D6 — which document carries which authority, structurally. Replaces the
+   *  situation where a structured field named ESR-3575 as the capacity source
+   *  while the record's own prose disqualified it. */
+  documentRoles: RackingDocumentRoleAuthority;
 }
 
 // ── W3.1 §4 — ASD allowable resolver (refuses 'ultimate' basis) ────────────────
@@ -291,6 +392,25 @@ export function resolveAsdAllowableLbs(
 export interface BuildRackingAssemblyOptions {
   capacityDocument?: RackingCapacityDocumentEvidence | null;
   projectJurisdiction?: string | null;
+  /** D12 — the rail an operator PINNED to this assembly, when one is in force.
+   *
+   *  A mixed-manufacturer mount carries no rail of its own, so before D12 the
+   *  record could only ever say PENDING SELECTION: there was nowhere for the
+   *  answer to live. This is that answer, and it arrives already validated —
+   *  `planRailPin` admits only a rail the mount's own compatibility statement
+   *  names, at a span the mount's spacing admits or under stated authority. This
+   *  builder does not re-decide it and does not widen it. */
+  pinnedRail?: {
+    manufacturer: string;
+    railModel: string;
+    /** null, always: mounting-hardware-db carries no rail part numbers. */
+    railSku: string | null;
+    selectedBy: string;
+    selectedAtIso: string;
+    basis: string;
+    coversSpan: boolean;
+    spanOverrideAuthority: string | null;
+  } | null;
 }
 
 /** Build the canonical racking-assembly record from a mounting-hardware-db spec.
@@ -314,8 +434,12 @@ export function buildRackingAssembly(
   // §10 — a rail-based mount with NO own rail spec has an UNPINNED rail SKU. The
   // record must state PENDING SELECTION explicitly (never a generic "compatible /
   // or equivalent" placeholder that reads as if a rail were specified).
-  const railUnpinned = isRailBased && !rail;
-  const railBrand = rail ? system.manufacturer : null;
+  // D12 — a PIN answers the open rail question. It only applies where the
+  // question was actually open: a mount that carries its own rail is not
+  // overridden by a stored selection, and a rail-less mount has no rail to pin.
+  const pinned = (isRailBased && !rail) ? (opts?.pinnedRail ?? null) : null;
+  const railUnpinned = isRailBased && !rail && !pinned;
+  const railBrand = rail ? system.manufacturer : (pinned?.manufacturer ?? null);
   // W6 — the explicit pending-banner language for an unpinned rail/splice SKU.
   // NO "compatible rail" / "or equivalent" / RAIL-PENDING-SELECTION raw tokens on
   // any renderer: an unpinned assembly reads as the blocked state it is.
@@ -332,11 +456,23 @@ export function buildRackingAssembly(
       + 'weakest standard assembly, conservative round-down). The 900 lb "ultimate" (2×450) '
       + 'entries in equipment-db / equipment-registry-v4 are NOT structural authority '
       + '(ESR-3575 is a flashing / water-resistance report and carries no structural value).');
+    // D3 — this note used to assert "NOT archived in this repository". Archive
+    // state is owned by manufacturer_document_registry, and the live registry
+    // holds archived, hashed RT-MINI II letters. The note now states only what
+    // this pure evaluation actually knows.
     notes.push(
-      'W3.1 §4 — the cited PE structural letter is NOT archived in this repository '
-      + '(documentHash: null, source-document-not-archived); the 600 lb value is field-referenced '
-      + 'and PROVISIONAL. Applicability to the selected mixed assembly / project jurisdiction is '
-      + 'UNVERIFIED — see capacityProvenance and the RACKING-CAPACITY-* structural-authority gaps.');
+      'W3.1 §4 — the 600 lb value is PROVISIONAL until a capacity document is resolved that covers '
+      + 'the exact selected assembly. Archive state, hash and jurisdiction are properties of the '
+      + 'document registry record, not of this evaluation. Applicability to the selected mixed '
+      + 'assembly / project jurisdiction is UNVERIFIED — see capacityProvenance, documentRoles and '
+      + 'the RACKING-CAPACITY-* structural-authority gaps.');
+    // D6 — the product distinction, stated where it cannot be missed: the 613.2 lb
+    // figure is published for RT-MINI II. RT-MINI is a different product, and
+    // authenticating an RT-MINI II letter does not make it applicable here.
+    notes.push(
+      `PRODUCT DISTINCTION: the 613.2 lb figure the 600 lb round-down derives from is published for `
+      + `RT-MINI II. The selected mount is ${mount.model}. A document covering RT-MINI II does NOT `
+      + `establish capacity applicability to RT-MINI — authenticity is not applicability.`);
   }
   if (mixedManufacturer) {
     notes.push(
@@ -353,10 +489,10 @@ export function buildRackingAssembly(
   // SEMANTIC rail SKU for clearance / provenance matching: the exact rail model
   // when pinned, else null (unpinned) — never a placeholder string, so a verified
   // document's rail-assembly match is not defeated by a display placeholder.
-  const railModel = rail?.model ?? null;
+  const railModel = rail?.model ?? pinned?.railModel ?? null;
   // DISPLAY value on the record: exact SKU, or explicit PENDING SELECTION when a
   // rail-based mount carries no own rail (never "compatible / or equivalent").
-  const railDisplay = rail?.model ?? (railUnpinned ? RAIL_PENDING : null);
+  const railDisplay = rail?.model ?? pinned?.railModel ?? (railUnpinned ? RAIL_PENDING : null);
   const installationCondition = system.compatibleRoofTypes.join(', ') || null;
   const fastenerPattern = mount.fastenersPerMount != null
     ? `${mount.fastenersPerMount}× ${hw.lagBolt ?? mount.attachmentMethod}`
@@ -379,6 +515,9 @@ export function buildRackingAssembly(
       )
     : null;
   const rtCleared = rtClearance?.cleared === true;
+  /** The supplied registry document, if any. D3: every document FACT below is
+   *  read from this record — never asserted by this module. */
+  const _capDoc = opts?.capacityDocument ?? null;
 
   if (isRtMini) {
     capacityProvenance = {
@@ -387,24 +526,62 @@ export function buildRackingAssembly(
       capacityBasis: basis,
       asdAllowableLbs: asd.allowableLbs,               // 600 (basis 'allowable')
       ultimateBasisRefusedForAsd: asd.refused,          // false for the real 600 record
-      sourceDocument: {
-        identity: 'Roof Tech RT-MINI II PE-stamped structural letter — "RT-MINI II ASCE 7-10 (KY)". '
-          + 'ICC-ES ESR-3575 is a FLASHING / water-resistance report only and Sec. 5.2 explicitly '
-          + 'EXCLUDES structural capacity — it is NOT the capacity source.',
-        revisionOrDate: `${system.lastUpdated ?? 'unknown'} · basis ASCE 7-10`,
-        issuingEntity: 'Roof Tech (registered design professional; specific PE name / license / seal not captured in-repo)',
-        documentHash: null,
-        archivedInRepo: false,
-        hashNote: 'source-document-not-archived — the RT-MINI II PE structural letter is referenced by '
-          + 'URL/label only; no PDF/datasheet file exists in this repository (searched docs/, public/, '
-          + 'assets, _tesla_docs). sha256 cannot be computed and the 600 lb value cannot be verified '
-          + 'against an archived source in-repo. Cross-referenced by '
-          + 'lib/data/structural/attachment-capacity-basis-research.json, which flags it PROVISIONAL.',
-        url: 'design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_10/',
-      },
-      jurisdictionApplicabilityBoundary: 'Source basis = ASCE 7-10, Kentucky. The project AHJ / adopted '
-        + 'ASCE edition is NOT confirmed against this source in-repo — applicability to the project '
-        + 'jurisdiction is UNESTABLISHED.',
+      // ── D3 — THE REGISTRY OWNS DOCUMENT EXISTENCE, ARCHIVE STATE AND HASH ──
+      // What stood here was a block of hardcoded literals asserting, as fact,
+      // that the PE structural letter is NOT archived, that its hash is null,
+      // that "no PDF/datasheet file exists in this repository", and that the
+      // design basis is "ASCE 7-10, Kentucky".
+      //
+      // The live registry contradicts every one of those. It holds TWO archived,
+      // SHA-256'd RT-MINI II PE letters — and they are the ILLINOIS issues
+      // (RT_Mini_II_ASCE_7-10_IL.pdf and RT_Mini_II_ASCE_7-16_IL.pdf). The
+      // package was printing a false negative about its own archive, and naming
+      // the wrong jurisdiction while doing it.
+      //
+      // These values now DERIVE from the supplied registry document. When no
+      // applicable document is supplied the fallback states that no applicable
+      // verified capacity document is SELECTED — a fact about the resolution —
+      // and never asserts that no document exists, which is a fact about the
+      // archive that this pure function is in no position to know.
+      sourceDocument: _capDoc
+        ? {
+            identity: _capDoc.documentIdentity
+              ?? `Roof Tech structural capacity document ${_capDoc.documentId ?? '(id n/a)'}`,
+            revisionOrDate: _capDoc.revisionOrDate ?? (system.lastUpdated ?? null),
+            issuingEntity: 'Roof Tech (registered design professional; specific PE name / license / seal not captured in-repo)',
+            documentHash: _capDoc.sha256,
+            archivedInRepo: _capDoc.archivedInRepo,
+            hashNote: _capDoc.archivedInRepo && _capDoc.sha256
+              ? `source-archived — registry document ${_capDoc.documentId ?? '(id n/a)'} (class `
+                + `${_capDoc.documentClass}), SHA-256 recorded. Archive state and hash come from the `
+                + `document registry, not from this module.`
+              : `registry document ${_capDoc.documentId ?? '(id n/a)'} is recorded but is not archived `
+                + `with a SHA-256; the cited value cannot be verified against a source of record.`,
+            url: null,
+          }
+        : {
+            identity: null,
+            revisionOrDate: system.lastUpdated ?? null,
+            issuingEntity: 'Roof Tech (registered design professional; specific PE name / license / seal not captured in-repo)',
+            documentHash: null,
+            archivedInRepo: false,
+            hashNote: 'No applicable verified capacity document is currently SELECTED for this assembly. '
+              + 'That is a statement about the resolution, not about the archive: this evaluation is pure '
+              + 'and does not search the repository or the document registry. Whether a capacity document '
+              + 'exists is answered by manufacturer_document_registry, which is the sole owner of document '
+              + 'existence, archive state and hash.',
+            url: null,
+          },
+      jurisdictionApplicabilityBoundary: _capDoc
+        ? (_capDoc.jurisdiction
+            ? `Document jurisdiction of record: '${_capDoc.jurisdiction}'.`
+              + (rtCleared
+                  ? ' Confirmed for the project jurisdiction.'
+                  : ' NOT confirmed for the project jurisdiction — see the applicability gap.')
+            : 'The cited document states no jurisdiction / applicability boundary — applicability to the '
+              + 'project jurisdiction is UNESTABLISHED.')
+        : 'No capacity document is selected, so no jurisdiction / applicability boundary is established. '
+          + 'The design basis is NOT inferred from the mount catalog.',
       fastenerPattern: '2× 5/16" (8mm/M8) structural wood screw, ~3.5" (90mm) into the rafter, no pilot hole',
       substrateInstallationCondition: 'Weakest standard assembly governing the 613.2 lb allowable: '
         + '15/32" sheathing, 2×4 DF-L #2, 2 screws. Compatible roof types: '
@@ -431,10 +608,15 @@ export function buildRackingAssembly(
         sourceCoversMount: true,      // pad-to-rafter attachment (screw withdrawal)
         sourceCoversRail: false,      // mixed compatible rail (SKU unpinned) — span/cantilever not covered
         sourceCoversSubstrate: null,  // weakest wood assembly only; other substrates uncertain
+        // D3 — the jurisdiction clause is derived, never hardcoded. The old text
+        // named Kentucky; the archived letters are the Illinois issues.
         assessment: 'The 600 lb ASD allowable covers the RT-MINI pad-to-rafter attachment for the '
           + 'weakest standard wood assembly ONLY. It does NOT establish rail span/cantilever capacity '
-          + 'for the mixed-manufacturer paired rail (SKU unpinned), and the source jurisdiction '
-          + '(ASCE 7-10, KY) is not confirmed for the project AHJ. Do NOT apply generically.',
+          + `for the mixed-manufacturer paired rail (SKU unpinned)${
+              _capDoc?.jurisdiction
+                ? `, and the source jurisdiction ('${_capDoc.jurisdiction}') is not confirmed for the project AHJ`
+                : ', and no capacity document is selected from which a jurisdiction could be confirmed'
+            }. Do NOT apply generically.`,
       },
       provenance: {
         source: 'rackingAssembly.buildRackingAssembly',
@@ -444,22 +626,37 @@ export function buildRackingAssembly(
       },
     };
     if (!rtCleared) {
+      // D3 — the message states the ACTUAL resolution outcome. It no longer
+      // claims the source is "not archived in-repo": when a registry document IS
+      // supplied and archived, that is said plainly, and what remains unmet is
+      // the enumerated applicability, which is a different and honest failure.
       structuralAuthorityGaps.push({
         code: 'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
         severity: 'blocking',
-        message: 'The RT-MINI 600 lb ASD allowable cites a Roof Tech PE structural letter that is NOT '
-          + 'archived in-repo (documentHash null). ESR-3575 is a flashing report that excludes structural '
-          + 'capacity. The value cannot be verified against a source of record.'
-          + (rtClearance && rtClearance.missing.length
-            ? ` Supplied document did NOT clear it — missing/unmatched: ${rtClearance.missing.join(', ')}.`
-            : ''),
+        message: _capDoc
+          ? `A capacity document is on record (${_capDoc.documentId ?? 'id n/a'}${
+              _capDoc.archivedInRepo && _capDoc.sha256 ? ', archived with a SHA-256' : ', NOT archived with a SHA-256'
+            }) but it does not establish a verified allowable capacity for the selected assembly.`
+            + (rtClearance && rtClearance.missing.length
+              ? ` Unmet: ${rtClearance.missing.join(', ')}.`
+              : '')
+          : 'No verified capacity document is selected for the RT-MINI attachment, so the 600 lb ASD '
+            + 'allowable is not backed by a source of record. ICC-ES ESR-3575 is a flashing / '
+            + 'water-resistance evaluation report and carries no structural capacity authority.',
       });
       structuralAuthorityGaps.push({
         code: 'RACKING-CAPACITY-APPLICABILITY-GAP',
         severity: 'blocking',
         message: 'The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer '
-          + 'paired rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction '
-          + '(ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically.',
+          + `paired rail (SKU unpinned) span/cantilever is unverified${
+              _capDoc?.jurisdiction
+                ? `, and the document jurisdiction ('${_capDoc.jurisdiction}') is not confirmed for the project AHJ`
+                : ', and no capacity document is selected from which a jurisdiction could be confirmed'
+            }`
+          + `${_capDoc?.exactModel && norm(_capDoc.exactModel) !== norm(mount.model)
+              ? `. The document covers '${_capDoc.exactModel}', which is NOT the selected mount '${mount.model}'`
+              : ''}`
+          + '. Do not apply generically.',
       });
     } else {
       // A VERIFIED registry document covers the exact assembly + installation
@@ -546,8 +743,16 @@ export function buildRackingAssembly(
   }
 
   // ── W6 — per-element verification states (honest; no fabrication) ──
+  // D12 — a PINNED rail is 'verified' only when its published span covers the
+  // mount's attachment spacing. Pinned under a span OVERRIDE it stays 'pending':
+  // the selection is recorded and the stated authority travels with it, but the
+  // catalog does not corroborate the span, and a per-element state that reads
+  // 'verified' on a document this repository has not evaluated is the exact
+  // overstatement TAC WS-4 removed from the fastener element.
   const _vRailSku: 'verified' | 'pending' | 'unverified' =
-    rail?.model ? 'verified' : (railUnpinned ? 'pending' : 'unverified');
+    rail?.model ? 'verified'
+      : pinned ? (pinned.coversSpan ? 'verified' : 'pending')
+        : (railUnpinned ? 'pending' : 'unverified');
   const _vCapacity: 'verified' | 'pending' | 'unverified' =
     isRtMini ? (rtCleared ? 'verified' : 'pending')
       : (publishedAllowable != null && !asd.refused ? 'verified' : 'pending');
@@ -587,7 +792,12 @@ export function buildRackingAssembly(
     mountSku: null,
     railManufacturer: railBrand,
     railModel: railDisplay,
-    railSku: null,
+    // D12 — still null even when a rail is PINNED: mounting-hardware-db carries
+    // no rail part numbers at all, so the orderable SKU comes from the
+    // distributor line item. Pinning a rail establishes WHICH rail, not its
+    // part number, and inventing one here would be a procurement instruction
+    // the design never made.
+    railSku: pinned?.railSku ?? null,
     // ── P13 WS-4 — architecture + attachment mode, projected from the catalog ──
     // mounting-hardware-db already carried mountTopology, fastenersPerMount and
     // maxSpacingIn. Nothing downstream consumed them, so PV-1 printed a
@@ -666,6 +876,60 @@ export function buildRackingAssembly(
     assemblyVerification: {
       railSku: _vRailSku, capacitySource: _vCapacity, spanSource: _vSpan,
       fastener: _vFastener, overall: _vOverall,
+    },
+    // ── D6 — ROLES, STATED STRUCTURALLY ─────────────────────────────────────
+    // ESR-3575 fills the listing / flashing role and ONLY that role. It is an
+    // ICC-ES evaluation report for a self-flashing mount: that is exactly the
+    // authority it carries, and Sec. 5.2 excludes structural capacity. Naming it
+    // in `capacitySource` (as the legacy field still does for back-compat) was
+    // the defect; this record is the authoritative statement.
+    documentRoles: {
+      listingFlashingBasis: system.iccEsReport
+        ? {
+            established: true,
+            documentIdentity: system.iccEsReport,
+            documentId: null,
+            documentHash: null,
+            archivedInRepo: false,
+            basis: `${system.iccEsReport} is an ICC-ES evaluation report covering flashing / `
+              + `water-resistance for this mount. This is the role it carries — and the only one.`,
+          }
+        : unfilledRole('no ICC-ES evaluation report is recorded for this mount'),
+      installationAuthority: unfilledRole(
+        'No version-exact installation document is resolved into this record. Installation authority '
+        + 'is owned by manufacturer_document_registry and must cover the SELECTED product exactly.'),
+      fastenerAuthority: unfilledRole(
+        'No fastener-installation authority is established. An ICC-ES flashing / water-resistance '
+        + 'evaluation report carries no fastener-installation authority.'),
+      structuralCapacityAuthority: rtCleared && _capDoc
+        ? {
+            established: true,
+            documentIdentity: _capDoc.documentIdentity,
+            documentId: _capDoc.documentId,
+            documentHash: _capDoc.sha256,
+            archivedInRepo: _capDoc.archivedInRepo,
+            basis: 'A verified registry document covers the exact selected assembly and installation '
+              + 'condition on every required applicability field.',
+          }
+        : unfilledRole(
+            _capDoc
+              ? `The supplied capacity document does not establish capacity for the selected assembly`
+                + `${rtClearance && rtClearance.missing.length ? ` (unmet: ${rtClearance.missing.join(', ')})` : ''}.`
+              : 'No structural capacity authority is established for the selected assembly. '
+                + `${system.iccEsReport ?? 'The ICC-ES report'} is a flashing / water-resistance `
+                + 'evaluation and explicitly excludes structural capacity.'),
+      ul2703BondingBasis: system.ul2703Listed
+        ? {
+            established: true,
+            documentIdentity: system.iccEsReport ?? 'UL 2703 listed',
+            documentId: null,
+            documentHash: null,
+            archivedInRepo: false,
+            basis: 'UL 2703 listing basis for bonding/grounding of the mounting system.',
+          }
+        : unfilledRole('the mounting system records no UL 2703 listing'),
+      projectSpecificEngineeringAuthority: unfilledRole(
+        'No project-specific licensed engineering analysis is on record for this assembly.'),
     },
   };
   return { ...base, recordRevision: contentRevision(base) };

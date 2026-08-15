@@ -219,7 +219,7 @@ export function drawUtilityAnalysis(
   lines.push(
     `<rect x="${x}" y="${curY}" width="${w}" height="${headerH}" fill="#1a2744" rx="1"/>`,
     `<text x="${x + w / 2}" y="${curY + 9.5}" text-anchor="middle" ` +
-      `font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#a0b4d0" ` +
+      `font-family="SolarPro Sans, SolarPro Symbols" font-size="7" font-weight="bold" fill="#a0b4d0" ` +
       `letter-spacing="0.8">UTILITY ANALYSIS</text>`,
   );
   curY += headerH + 3;
@@ -228,8 +228,8 @@ export function drawUtilityAnalysis(
   // printed verbatim on PV-3's utility block) ─────────────────────────────────
   if (hasUtility) {
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Utility</text>`,
-      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="#111">${utilityDisplayName(eng!.utilityName!)}</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" fill="#555">Utility</text>`,
+      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" font-weight="bold" fill="#111">${utilityDisplayName(eng!.utilityName!)}</text>`,
     );
     curY += 12;
   }
@@ -243,13 +243,13 @@ export function drawUtilityAnalysis(
       eng!.rateSource === 'utility-db'        ? '(utility avg)'     :
       eng!.rateSource === 'manual'            ? '(manual entry)'    : '';
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Electric Rate</text>`,
-      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#34d399">${rateStr}</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" fill="#555">Electric Rate</text>`,
+      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="SolarPro Sans, SolarPro Symbols" font-size="7" font-weight="bold" fill="#34d399">${rateStr}</text>`,
     );
     curY += 11;
     if (sourceLabel) {
       lines.push(
-        `<text x="${x + w}" y="${curY + 6}" text-anchor="end" font-family="Arial,sans-serif" font-size="5.5" fill="#777" font-style="italic">${sourceLabel}</text>`,
+        `<text x="${x + w}" y="${curY + 6}" text-anchor="end" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.5" fill="#777" font-style="italic">${sourceLabel}</text>`,
       );
       curY += 9;
     }
@@ -258,8 +258,8 @@ export function drawUtilityAnalysis(
   // ── Monthly usage ────────────────────────────────────────────────────────────
   if (eng?.monthlyKwh != null && eng.monthlyKwh > 0) {
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Monthly Usage</text>`,
-      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="#111">${eng.monthlyKwh.toLocaleString()} kWh</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" fill="#555">Monthly Usage</text>`,
+      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" font-weight="bold" fill="#111">${eng.monthlyKwh.toLocaleString()} kWh</text>`,
     );
     curY += 11;
   }
@@ -272,8 +272,8 @@ export function drawUtilityAnalysis(
     const combinedColor = bi!.combinedUtilityDetected ? '#fbbf24' : '#34d399';
     const combinedLabel = bi!.combinedUtilityDetected ? 'YES' : 'NO';
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Combined Utility</text>`,
-      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="${combinedColor}">${combinedLabel}</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" fill="#555">Combined Utility</text>`,
+      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="SolarPro Sans, SolarPro Symbols" font-size="7" font-weight="bold" fill="${combinedColor}">${combinedLabel}</text>`,
     );
     curY += 11;
 
@@ -281,8 +281,8 @@ export function drawUtilityAnalysis(
     if (bi!.detectedServices.length > 0) {
       const serviceStr = bi!.detectedServices.slice(0, 3).join(', ');
       lines.push(
-        `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Services</text>`,
-        `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6" fill="#fbbf24" font-style="italic">${serviceStr}</text>`,
+        `<text x="${x}" y="${curY + 7}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" fill="#555">Services</text>`,
+        `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="SolarPro Sans, SolarPro Symbols" font-size="6" fill="#fbbf24" font-style="italic">${serviceStr}</text>`,
       );
       curY += 11;
     }
@@ -290,8 +290,8 @@ export function drawUtilityAnalysis(
     // Confidence
     const confColor = bi!.confidence === 'high' ? '#34d399' : bi!.confidence === 'medium' ? '#fbbf24' : '#94a3b8';
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Rate Confidence</text>`,
-      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="${confColor}">${bi!.confidence.toUpperCase()}</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" fill="#555">Rate Confidence</text>`,
+      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="SolarPro Sans, SolarPro Symbols" font-size="6.5" font-weight="bold" fill="${confColor}">${bi!.confidence.toUpperCase()}</text>`,
     );
     curY += 11;
 
@@ -301,9 +301,9 @@ export function drawUtilityAnalysis(
       const warnH = 20;
       lines.push(
         `<rect x="${x}" y="${curY}" width="${w}" height="${warnH}" fill="#78350f22" stroke="#d97706" stroke-width="0.5" rx="1"/>`,
-        `<text x="${x + 3}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="5.5" fill="#fbbf24">! COMBINED BILL DETECTED</text>`,
-        `<text x="${x + 3}" y="${curY + 14}" font-family="Arial,sans-serif" font-size="5" fill="#fde68a">Electric rate may include non-electric</text>`,
-        `<text x="${x + 3}" y="${curY + 19}" font-family="Arial,sans-serif" font-size="5" fill="#fde68a">charges. Verify rate independently.</text>`,
+        `<text x="${x + 3}" y="${curY + 7}" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.5" fill="#fbbf24">! COMBINED BILL DETECTED</text>`,
+        `<text x="${x + 3}" y="${curY + 14}" font-family="SolarPro Sans, SolarPro Symbols" font-size="5" fill="#fde68a">Electric rate may include non-electric</text>`,
+        `<text x="${x + 3}" y="${curY + 19}" font-family="SolarPro Sans, SolarPro Symbols" font-size="5" fill="#fde68a">charges. Verify rate independently.</text>`,
       );
       curY += warnH + 3;
     }
@@ -312,7 +312,7 @@ export function drawUtilityAnalysis(
     if (bi!.overrideRecommended && bi!.suggestedRate !== null) {
       curY += 2;
       lines.push(
-        `<text x="${x + w / 2}" y="${curY + 6}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.5" fill="#7dd3fc">` +
+        `<text x="${x + w / 2}" y="${curY + 6}" text-anchor="middle" font-family="SolarPro Sans, SolarPro Symbols" font-size="5.5" fill="#7dd3fc">` +
           `Review: $${bi!.suggestedRate.toFixed(3)}/kWh suggested` +
         `</text>`,
       );

@@ -196,6 +196,38 @@ export function isVercelProduction(): boolean {
   return process.env.VERCEL_ENV === 'production';
 }
 
+/**
+ * Returns true when the current runtime should be treated as production
+ * for security/cookie decisions (Secure flag, hard-block dev bypass, etc.).
+ *
+ * BACKGROUND — v47.57 lesson:
+ *   Vercel sets NODE_ENV=production for ALL deployment types
+ *   (Production, Preview, Development CLI). Using NODE_ENV as the
+ *   production gate was the source of the v47.57 dev-auth regression
+ *   and is also wrong for the Secure-cookie flag — Preview deployments
+ *   were getting Secure cookies (which is fine, but the gate is wrong)
+ *   and the in-file comments were wrong about which flag is authoritative.
+ *
+ * CORRECT GATE (use this everywhere):
+ *   1. VERCEL_ENV === 'production'  → Vercel production deploy → treat as production.
+ *   2. VERCEL_ENV unset, NODE_ENV === 'production' → local dev w/ prod build
+ *      (e.g. `next build && next start`) → treat as production.
+ *   3. VERCEL_ENV === 'preview' | 'development' → NOT production
+ *      (Preview / dev CLI deploys; Secure cookies OK on HTTPS but
+ *      dev-auth bypass should be allowed).
+ *   4. VERCEL_ENV unset, NODE_ENV !== 'production' → local dev → NOT production.
+ *
+ * This helper is the SINGLE SOURCE OF TRUTH for the Secure-cookie flag
+ * and the dev-auth hard-block. It is intentionally distinct from
+ * `isVercelProduction()` (which is the strict "Vercel prod only" check
+ * used elsewhere) — `isProduction()` is the security gate.
+ */
+export function isProduction(): boolean {
+  if (process.env.VERCEL_ENV === 'production') return true;
+  if (process.env.VERCEL_ENV) return false; // 'preview' | 'development' on Vercel
+  return process.env.NODE_ENV === 'production';
+}
+
 /** Returns MIGRATE_SECRET or null. */
 export function getMigrateSecret(): string | null {
   return process.env.MIGRATE_SECRET ?? null;

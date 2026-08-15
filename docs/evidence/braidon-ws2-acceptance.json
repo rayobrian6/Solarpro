@@ -1,0 +1,109 @@
+{
+ "snapshotId": "PDS-D5E2B667BC11",
+ "digest": "d5e2b667bc11a988bb588dc9b49ad6834cf2794c9700a8a3e362eaf537bd23ea",
+ "sheetCount": 16,
+ "openGates": 5,
+ "unresolvedRequirements": 14,
+ "openRequirements": [
+  "CODE-AUTHORITY-INCOMPLETE",
+  "DESIGNER-OF-RECORD-MISSING",
+  "ENGINEERING-REVIEW-PENDING",
+  "EQUIPMENT-DOCUMENT-APPLICABILITY",
+  "FASTENER-ASSEMBLY-UNVERIFIED",
+  "FRAMING-AUTHORITY-UNVERIFIED",
+  "MODULE-EXACT-DATASHEET-PENDING",
+  "PENDING-RACKING-ASSEMBLY-SELECTION",
+  "PROJECT-AUTHORITY-UNVERIFIED",
+  "PROJECT-NAME-NONPRODUCTION",
+  "RACKING-CAPACITY-APPLICABILITY-GAP",
+  "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+  "ROUTE-LENGTH-ESTIMATE",
+  "TAP-CONDUCTOR-LENGTH-PENDING"
+ ],
+ "selectedQCableSku": "Q-12-10-240",
+ "connectorArchitecture": "iq-q-cable-drop-connector",
+ "aggregateDeficitFt": 14.5,
+ "topologyConstrainedDeficitFt": 24.2,
+ "b1": {
+  "shortageFt": 10,
+  "allocatedSections": 3,
+  "allocatedFt": 12.8
+ },
+ "b2": {
+  "shortageFt": 14.2,
+  "allocatedSections": 4,
+  "allocatedFt": 17
+ },
+ "b3": {
+  "surplusFt": 9.7,
+  "allocatedSections": 0
+ },
+ "selectedRawStockSku": "Q-12-10-240",
+ "rejectedStockCandidates": [
+  "Q-12-RAW-300"
+ ],
+ "stockUnitDescription": "Q-12-10-240 — box of 240 connector sections at 1.3 m spacing (Portrait)",
+ "stockUnitConnectorSections": 240,
+ "stockUnitLengthFt": 1020,
+ "baseSectionsOrdered": 31,
+ "additionalSectionsRequired": 7,
+ "totalSectionsRequired": 38,
+ "stockUnitsRequired": 1,
+ "additionalStockUnitsRequired": 0,
+ "totalStockPurchasedFt": 1020,
+ "totalUsableInstalledFt": 29.8,
+ "expectedRemainingStockFt": 853.5,
+ "fieldWireableConnector": {
+  "male": "Q-CONN-10M",
+  "maleQty": 3,
+  "female": "Q-CONN-10F",
+  "femaleQty": 3
+ },
+ "terminator": {
+  "sku": "Q-TERM-10",
+  "qty": 6
+ },
+ "sealingCap": {
+  "sku": "Q-SEAL-10",
+  "qty": 15
+ },
+ "cableSupport": {
+  "sku": "Q-CLIP-100",
+  "qty": 28
+ },
+ "junctionBoxTransition": {
+  "sku": null,
+  "qty": null,
+  "basis": "the archived manual lists the AC junction box under §3.2 \"Other items\" (with screwdrivers and a voltmeter) — a generic electrical component, not an Enphase accessory with a SKU"
+ },
+ "compatibilityVerdict": "VERIFIED",
+ "unresolved": [],
+ "residuals": [],
+ "evidenceIds": [
+  "IOM-00068-3.0-EN#65167d4d8abd"
+ ],
+ "sufficiency": {
+  "totalDesignedInstalledFt": 166.5,
+  "procurementLengthFt": 152,
+  "aggregateFootageDeficitFt": 14.5,
+  "topologyConstrainedDeficitFt": 24.2,
+  "nonRedistributableSurplusFt": 9.7,
+  "insufficient": true
+ },
+ "groundingOutcome": "NO_SEPARATE_EGC_REQUIRED",
+ "gndArrayBond": {
+  "min": "#12 AWG",
+  "selected": "#10 AWG",
+  "bondingMethod": null
+ },
+ "stateCode": "IL",
+ "stateName": "Illinois",
+ "ahjName": "Madison County Building & Zoning",
+ "deckOnlyProhibited": true,
+ "deckMountTokenPresent": false,
+ "unknownStateProjections": 0,
+ "schedApportionment": "Q-Cable: aggregate installed-length deficit 14.5 ft; the GOVERNING topology-constrained requirement is 24.2 ft, allocated as B1 10 ft + B2 14.2 ft. The 9.7 ft surplus on B3 is NOT redistributable under the current branch topology (a Q-Cable branch is one continuous run). &middot; open blockers: see the project review record",
+ "schedGrounding": "GROUNDING &mdash; IQ8A PRODUCT: NO SEPARATE EGC REQUIRED (verified manufacturer document IOM-00068-3.0-EN) &middot; ARRAY/RACKING BONDING: <strong style=\"color:#b45309\">METHOD PENDING</strong> (separate authority ",
+ "schedStaleApportionmentPresent": false,
+ "schedStaleGroundingPresent": false
+}

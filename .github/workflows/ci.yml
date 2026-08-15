@@ -68,7 +68,41 @@ jobs:
         run: npm run type-check
 
   # ─────────────────────────────────────────────────────────────────
-  # Job 3: ESLint
+  # Job 3: Committed-secret guard
+  #
+  # The live neondb_owner password sat hard-coded in six tracked .js/.sh
+  # scratch scripts and was pushed for roughly five months. Nothing read
+  # source-file CONTENT looking for a credential, so nothing failed.
+  #
+  # This job is that reader. It is deliberately its own job — not a step
+  # inside the unit-test job — so a committed secret is reported by name
+  # and fails fast even when the wider suite is red for unrelated reasons.
+  # It is repository-native and needs no third-party binary: a critical
+  # check must never pass silently because an optional scanner is absent.
+  # ─────────────────────────────────────────────────────────────────
+  secret-guard:
+    name: Committed-secret guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scan the tracked tree for committed credentials
+        run: npm run test:secrets
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 4: ESLint
   # ─────────────────────────────────────────────────────────────────
   lint:
     name: ESLint
@@ -92,7 +126,7 @@ jobs:
         run: npm run lint
 
   # ─────────────────────────────────────────────────────────────────
-  # Job 4: Environment variable audit
+  # Job 5: Environment variable audit
   #
   # Runs scripts/check-env.js which verifies:
   #   • All required vars are referenced in lib/ and app/
@@ -123,7 +157,7 @@ jobs:
         run: node scripts/check-env.js
 
   # ─────────────────────────────────────────────────────────────────
-  # Job 5: Build gate (deployment blocker)
+  # Job 6: Build gate (deployment blocker)
   #
   # Runs only on push to master after test + type-check + lint pass.
   # Uses stub env vars — the validateBuildEnv() in next.config.js
@@ -178,12 +212,101 @@ jobs:
           retention-days: 3
 
   # ─────────────────────────────────────────────────────────────────
+  # Job 7: Planset page-fit (CANONICAL EMBEDDED FONTS)
+  #
+  # D4 — the planset now EMBEDS its fonts. Every text surface (CSS, tables,
+  # title blocks and every SVG text node) resolves to the canonical
+  # "SolarPro Sans" / "SolarPro Mono" / "SolarPro Symbols" faces carried inside
+  # the artifact as WOFF2, so page geometry no longer depends on what this
+  # runner has installed.
+  #
+  # This job therefore installs NO fonts, deliberately. A bare host is the
+  # supported case and the strongest test: if the embed regressed, there is
+  # nothing for the text to fall back to and the gate fails loudly. Installing
+  # Liberation here would MASK a broken embed by measuring the system face.
+  #
+  # Still pinned end to end, because determinism is the point:
+  #   • runner image  — ubuntu-24.04, NOT ubuntu-latest
+  #   • node          — 20
+  #   • npm deps      — npm ci (package-lock.json pins playwright 1.61.1)
+  #   • chromium      — installed by that pinned playwright, not the system one
+  #   • fonts         — EMBEDDED in the artifact, hash-verified by the suite
+  #
+  # The suite asserts print media, the 17x11 envelope, that all five canonical
+  # faces are loaded (per-face document.fonts.check — 'status: loaded' alone is
+  # not sufficient) and their metric fingerprint, before measuring anything.
+  # ─────────────────────────────────────────────────────────────────
+  page-fit:
+    name: Planset Page-Fit (print media, embedded canonical fonts)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # D4 — NO HOST FONTS ARE INSTALLED, ON PURPOSE.
+      # Before the canonical font pack this job installed fonts-liberation and
+      # hard-failed unless `fc-match Arial` resolved to a metric-compatible face.
+      # After embedding, that gate is wrong in both directions: a host with NO
+      # Arial is now the SUPPORTED case, and a host that HAS Arial would mask a
+      # broken embed by measuring the system face instead of the embedded one.
+      #
+      # So this runner deliberately installs nothing. The artifact must carry its
+      # own faces; the suite verifies the embedded bytes and their metrics.
+      - name: Record the (deliberately bare) font environment
+        run: |
+          {
+            echo "### Page-fit rendering environment (D4 — embedded fonts)"
+            echo '```text'
+            echo "runner image      : ubuntu-24.04"
+            echo "host fonts        : NOT installed — the artifact embeds its own"
+            echo "Arial resolves to : $(fc-match Arial 2>/dev/null || echo '(fontconfig absent)')"
+            echo "playwright        : $(node -p "require('playwright/package.json').version")"
+            echo '```'
+            echo "A host-font substitution must NOT be able to make this job pass:"
+            echo "the gate measures the embedded SolarPro faces, not the system's."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install pinned Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run page-fit + pagination gates
+        run: npx vitest run tests/planset/pagination-w9.test.ts --reporter=verbose
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          JWT_SECRET: ci-test-secret-do-not-use-in-production
+          OPENAI_API_KEY: sk-test-placeholder
+          GOOGLE_MAPS_API_KEY: test-placeholder
+          RESEND_API_KEY: re_test_placeholder
+          NEXT_PUBLIC_BASE_URL: https://localhost:3000
+
+      # The measured HTML and a PNG of every failing sheet — so a reported
+      # overflow is reopenable instead of being a number in a log.
+      - name: Upload page-fit diagnostics
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: page-fit-diagnostics-${{ github.sha }}
+          path: test-output/pagination-w9/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────
   # Summary job — always runs last, fails CI if any required job failed
   # ─────────────────────────────────────────────────────────────────
   ci-complete:
     name: CI Complete
     runs-on: ubuntu-latest
-    needs: [test, type-check, lint, env-audit]
+    needs: [test, type-check, lint, env-audit, page-fit]
     if: always()
 
     steps:
@@ -194,11 +317,13 @@ jobs:
           echo "type-check:  ${{ needs.type-check.result }}"
           echo "lint:        ${{ needs.lint.result }}"
           echo "env-audit:   ${{ needs.env-audit.result }}"
+          echo "page-fit:    ${{ needs.page-fit.result }}"
           echo ""
           if [ "${{ needs.test.result }}"       != "success" ] || \
              [ "${{ needs.type-check.result }}" != "success" ] || \
              [ "${{ needs.lint.result }}"        != "success" ] || \
-             [ "${{ needs.env-audit.result }}"   != "success" ]; then
+             [ "${{ needs.env-audit.result }}"   != "success" ] || \
+             [ "${{ needs.page-fit.result }}"    != "success" ]; then
             echo "STATUS: FAILED — one or more CI jobs did not succeed"
             exit 1
           fi

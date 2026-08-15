@@ -1,0 +1,141 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# compliance/workflows/hourly.yml
+#
+# GitHub Actions workflow — runs every hour at :07 (after the top of the
+# hour to avoid the GitHub cron stampede). Calls the SECURITY-EVENT
+# collectors only:
+#   - github.mjs          (Dependabot + secret-scanning alerts)
+#   - google-workspace.mjs (failed-login spike)
+#   - db-internal.mjs     (audit log new rows since the last run)
+#
+# Writes evidence to compliance/evidence/<integration>/<YYYY-MM-DD>/*.json
+# and commits the diff at the end of the job. The push to origin is
+# gated by the PUSH_ENABLED env var (default false) — the agent only
+# commits locally; the human (or a follow-up workflow) pushes.
+#
+# Per the design doc §2, hourly cadence is for security events whose
+# control mapping requires a 1-hour sampling window (CC6.6, CC7.1, A.8.16).
+# Missing a single hour is a defensibility gap for the auditor.
+# ═══════════════════════════════════════════════════════════════════════════
+name: compliance-hourly
+
+on:
+  schedule:
+    # Every hour at :07 UTC. Cron is in UTC.
+    - cron: '7 * * * *'
+  workflow_dispatch:
+    inputs:
+      push:
+        description: 'Set PUSH_ENABLED=true to also push the commit'
+        required: false
+        default: 'false'
+
+# Cancel an in-flight run if a new one starts (GitHub's recommended
+# setting for cron-style workflows — saves minutes and reduces noise).
+concurrency:
+  group: compliance-hourly
+  cancel-in-progress: true
+
+# Workflow-level default env. Per-collector secrets override as needed.
+env:
+  # The default branch to commit to. Matches the canonical doc §8 / R7
+  # (james-dev is the only legal push target).
+  COMMIT_BRANCH: james-dev
+  # Hard-coded to false. The workflow NEVER pushes — only commits
+  # locally. A separate "push" workflow (or James's "ship it" word) is
+  # required to actually push the evidence.
+  PUSH_ENABLED: 'false'
+
+jobs:
+  collect-hourly:
+    name: Collect hourly evidence + commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # required for the local commit step
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The full history is required so the merge step can find a
+          # common ancestor between the workflow branch and origin.
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          # CI stub envs satisfy any incidental env-check.ts calls
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          JWT_SECRET: ci-test-secret-do-not-use-in-production
+
+      # ── GitHub: Dependabot + secret-scanning ──────────────────────
+      - name: Run github.mjs (hourly)
+        id: github
+        run: node compliance/collectors/github.mjs hourly
+        env:
+          GITHUB_TOKEN: ${{ secrets.COMPLIANCE_GITHUB_TOKEN }}
+          GITHUB_ORG: rayobrian6
+          GITHUB_REPO: Solarpro
+          GITHUB_PROTECTED_BRANCH: master
+
+      # ── Google Workspace: failed-login spike ──────────────────────
+      - name: Run google-workspace.mjs (hourly)
+        id: gws
+        run: node compliance/collectors/google-workspace.mjs hourly
+        env:
+          GOOGLE_WORKSPACE_TOKEN: ${{ secrets.COMPLIANCE_GOOGLE_WORKSPACE_TOKEN }}
+          GOOGLE_WORKSPACE_CUSTOMER: 'my_customer'
+        continue-on-error: false
+
+      # ── Internal Postgres: audit log + webhook deliveries ────────
+      - name: Run db-internal.mjs (hourly)
+        id: db
+        run: node compliance/collectors/db-internal.mjs hourly
+        env:
+          DATABASE_URL: ${{ secrets.COMPLIANCE_DATABASE_URL }}
+          DB_AUDIT_LOG_SINCE: ${{ env.LAST_AUDIT_LOG_SINCE }}
+        continue-on-error: false
+
+      # ── Commit (always; push is gated below) ─────────────────────
+      - name: Configure git author
+        run: |
+          git config --local user.name  "compliance-bot"
+          git config --local user.email "compliance-bot@users.noreply.github.com"
+
+      - name: Compute today's evidence stamp
+        id: stamp
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          echo "today=$TODAY" >> "$GITHUB_OUTPUT"
+
+      - name: Stage and commit evidence
+        run: |
+          set -euo pipefail
+          TODAY="${{ steps.stamp.outputs.today }}"
+          git add "compliance/evidence/"
+          # If nothing changed (idempotent re-runs), bail out gracefully.
+          if git diff --cached --quiet; then
+            echo "No evidence changes; nothing to commit."
+            exit 0
+          fi
+          git commit \
+            -m "evidence(hourly): $TODAY — github + gws + db" \
+            -m "Auto-generated by compliance/workflows/hourly.yml. Includes:" \
+            -m "- github: Dependabot + secret-scanning alerts" \
+            -m "- google-workspace: failed-login spike (last 1h)" \
+            -m "- db: audit_log + webhook_deliveries new rows"
+
+      - name: Push to origin (gated by PUSH_ENABLED)
+        if: env.PUSH_ENABLED == 'true'
+        run: |
+          git push origin "$COMMIT_BRANCH"
+        env:
+          COMMIT_BRANCH: ${{ env.COMMIT_BRANCH }}

@@ -26,7 +26,10 @@ export function baseSnapshot(): PermitDesignSnapshot {
     // AAC WS-9 — the equipment-document authority region is decided once in the
     // pure build; a hand-rolled test snapshot carries the empty map (no assets
     // are being cited by this fixture).
-    equipmentDocumentAuthority: { entries: {}, registryFacts: {}, aliases: {} },
+    // D7 — `registryDocuments` carries the registry document IDENTITIES the
+    // verdicts are selected from. Empty here for the same reason the other maps
+    // are: this fixture cites no assets.
+    equipmentDocumentAuthority: { entries: {}, registryFacts: {}, registryDocuments: {}, aliases: {} },
     // W4 §1 — a VERIFIED code-authority record (test-only) so V11 passes with no
     // CODE-AUTHORITY-INCOMPLETE blocker required.
     codeAuthority: {
@@ -85,7 +88,8 @@ export function baseSnapshot(): PermitDesignSnapshot {
       provenance: { source: 'test' },
     },
     meta: { snapshotId: '', digest: '', schemaVersion: '1.0.0', engineVersion: 'test',
-            generatedAtIso: '2026-07-20', projectId: null, designVersionId: null },
+            generatedAtIso: '2026-07-20', generatedAtPrecision: 'date', generatedAtBasis: 'test fixture',
+            projectId: null, designVersionId: null },
     sourceInputs: { clientElectrical: null, clientBackfeedBreakerA: null, clientWireGauge: null,
                     clientTotals: { totalPanels: null, totalDcKw: null, totalAcKw: null } },
     project: {
@@ -198,7 +202,7 @@ export function baseSnapshot(): PermitDesignSnapshot {
       env: { ultimateWindSpeedMph: 115, windSpeedSource: 'test', exposureCategory: 'C', riskCategory: 'II',
              groundSnowPsf: 20, roofSnowPsf: 14, buildingHeightFt: 15, componentCladdingZones: [],
              upliftPressurePsf: null, downforcePressurePsf: null,
-             codeAuthority: { asceEdition: 'ASCE 7-22', source: 'pending-w4-ahj-authority' },
+             codeAuthority: { asceEdition: 'ASCE 7-22', source: 'engine-default', basis: null, ref: null, adoptedEdition: null, computedEdition: null, conflict: false, conflictDetail: null },
              environmentalLoadAuthority: {
                ultimateWindSpeedMph: 115, windSpeedBasis: 'operator-entered', riskCategory: 'II', exposureCategory: 'C',
                groundSnowLoadPsf: 20, snowLoadBasis: 'operator-entered', snowLoadSource: null,

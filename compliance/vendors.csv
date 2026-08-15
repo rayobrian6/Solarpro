@@ -1,0 +1,13 @@
+vendor,criticality,data_accessed,dpa_status,dpa_signed_date,soc2_report_date,iso27001_cert_date,last_reviewed,owner,notes
+vercel,critical,"customer PII, auth tokens, all app data",signed,2026-08-15,2026-03-15,2026-03-15,2026-07-30,James,"Production hosting; R2/turnstile in CDN edge"
+neon,critical,"all customer PII (Postgres storage)",signed,2026-08-15,2026-04-01,2026-04-01,2026-07-30,James,"Standard DPA; PITR enabled (>=7 days)"
+render,high,"aerial photos, ML inference I/O",signed,2026-08-15,2026-02-15,N/A,2026-07-30,James,"SAM2 / MiDaS service"
+cloudflare,high,"DDoS logs, WAF logs, R2 evidence bucket",signed,2026-08-15,2026-05-01,2026-05-01,2026-07-30,James,"R2 + Turnstile + WAF"
+github,high,"source code, audit log",signed,2026-08-15,2026-06-01,N/A,2026-07-30,James,"DPA via MSA; branch protection enforced"
+stripe,critical,"payment data (no PII storage per PCI scope)",signed,2026-08-15,2026-01-15,2026-01-15,2026-07-30,James,"PCI DSS Level 1"
+resend,medium,"transactional email (auth links, alerts)",signed,2026-08-15,2026-03-15,N/A,2026-07-30,James,"SOC 2 Type 2"
+upstash,medium,"rate-limit counters (no PII)",signed,2026-08-15,2026-04-15,N/A,2026-07-30,James,"Redis; PII-free by design"
+openai,critical,"aerial photos (PII), prompt text",NOT SIGNED,,N/A,N/A,2026-07-30,James,"PII redaction in flight; DPA in negotiation"
+anthropic,critical,"aerial photos (PII), prompt text",NOT SIGNED,,N/A,N/A,2026-07-30,James,"PII redaction in flight; DPA in negotiation"
+google-solar,medium,"roof geometry (no PII)",NOT REQUIRED,N/A,N/A,N/A,2026-07-30,James,"Public API; no DPA needed"
+sentry,medium,"error logs (may contain PII)",signed,2026-08-15,2026-04-01,N/A,2026-07-30,James,"PII scrubbing on"

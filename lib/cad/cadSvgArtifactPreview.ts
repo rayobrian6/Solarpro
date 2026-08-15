@@ -88,11 +88,11 @@ export function buildCADSvgArtifactPreview(bundle: CADModelExportBundle): CADSvg
     '<g data-layer="cad-preview-grid" stroke="#dbeafe" stroke-width="1" opacity="0.55">',
     renderGrid(),
     '</g>',
-    `<text x="24" y="34" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">${escapeText(`CAD SVG Preview · ${bundle.systemType}`)}</text>`,
-    `<text x="24" y="58" font-family="Arial, sans-serif" font-size="11" fill="#475569">${escapeText(`sourceExportHash=${bundle.exportHash} · units=${bundle.units} · preview-only/no downstream authority`)}</text>`,
+    `<text x="24" y="34" font-family="SolarPro Sans, SolarPro Symbols" font-size="18" font-weight="700" fill="#0f172a">${escapeText(`CAD SVG Preview · ${bundle.systemType}`)}</text>`,
+    `<text x="24" y="58" font-family="SolarPro Sans, SolarPro Symbols" font-size="11" fill="#475569">${escapeText(`sourceExportHash=${bundle.exportHash} · units=${bundle.units} · preview-only/no downstream authority`)}</text>`,
     `<g data-layer="cad-preview-geometry" transform="translate(0 0)">${layers.join('')}</g>`,
     '<rect x="18" y="78" width="864" height="510" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>',
-    '<text x="24" y="604" font-family="Arial, sans-serif" font-size="10" fill="#64748b">Preview artifact only. Not permit, plan-set, engineering, NEC, BOM, route, workflow, recommendation, or geometry authority.</text>',
+    '<text x="24" y="604" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" fill="#64748b">Preview artifact only. Not permit, plan-set, engineering, NEC, BOM, route, workflow, recommendation, or geometry authority.</text>',
     '</svg>',
   ].join('');
 
@@ -212,7 +212,7 @@ function renderLayers(cad: CADModel, viewBox: CADSvgArtifactPreview['viewBox']):
     const labelX = round((Number(p1[0]) + Number(p2[0])) / 2);
     const labelY = round((Number(p1[1]) + Number(p2[1])) / 2 - 6);
     parts.push(`<line data-layer="dimension" data-id="${escapeAttribute(dimension.id)}" x1="${p1[0]}" y1="${p1[1]}" x2="${p2[0]}" y2="${p2[1]}" stroke="#334155" stroke-width="1" stroke-dasharray="3 3"/>`);
-    parts.push(`<text data-layer="dimension-label" data-id="${escapeAttribute(dimension.id)}" x="${labelX}" y="${labelY}" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#334155">${escapeText(dimension.label)}</text>`);
+    parts.push(`<text data-layer="dimension-label" data-id="${escapeAttribute(dimension.id)}" x="${labelX}" y="${labelY}" font-family="SolarPro Sans, SolarPro Symbols" font-size="10" text-anchor="middle" fill="#334155">${escapeText(dimension.label)}</text>`);
   }
 
   return parts;

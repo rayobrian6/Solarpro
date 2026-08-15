@@ -48,6 +48,17 @@ const pr = snap.permitReadiness || {};
 const pa = snap.projectAuthority || null;
 const el = snap.electrical || {};
 const ps = el.procurementSufficiency || null;
+// WS-2 — the MEASUREMENT and the ANSWER are different facts. `ps.insufficient`
+// stays true whenever the ordered base cable is short of the as-routed path;
+// `qcableProcurement` is the procurement DESIGN that answers it (per-branch
+// allocation + a package to buy + the accessories). Gates 3/11/12 below describe
+// what a package may say while the shortfall is UNANSWERED, so they key on
+// "insufficient AND unresolved", never on the measurement alone — otherwise a
+// design that solved the problem would fail the gates that exist to make it
+// solve the problem.
+const qp = el.qcableProcurement || null;
+const qcableResolved = qp?.present === true && qp.compatibilityStatus === 'VERIFIED';
+const qcableUnanswered = ps?.insufficient === true && !qcableResolved;
 const gnd = el.openAirGroundingAuthority || null;
 const ra = snap.structural?.rackingAssembly ?? null;
 
@@ -229,7 +240,7 @@ function installedOpenAirEgcAssertions(sourceHtml) {
   const emptyTemplate = /SKU\s*—\s*@\s*—\s*ft|deficit\s*—\s*ft|mfr-doc authority null/.test(flat(rs1All));
   // the deficit component must exist EXACTLY where the deficit exists, and nowhere else
   const deficitBoxes = (rs1All.match(/DEFICIT PAYLOAD:/g) ?? []).length;
-  const expectDeficit = ps?.insufficient ? 1 : 0;
+  const expectDeficit = qcableUnanswered ? 1 : 0;
   const schemasSeen = [...new Set(rows.map(r => r.schema).filter(Boolean))];
   gate(3, 'blocker-detail-matches-canonical-payload-schema',
     wrong.length === 0 && undeclared.length === 0 && !emptyTemplate
@@ -239,7 +250,7 @@ function installedOpenAirEgcAssertions(sourceHtml) {
     + `deficitBoxes=${deficitBoxes} (expected ${expectDeficit}) emptyTemplate=${emptyTemplate} `
     + `schemasRendered=${schemasSeen.join(',') || 'none'}`,
     { expected, rows, wrong, undeclared });
-  if (!ps?.insufficient) vacuous.push('gate 3 deficit component (no procurement deficit on this input)');
+  if (!qcableUnanswered) vacuous.push('gate 3 deficit component (the procurement deficit is answered on this input)');
 }
 
 // ═══ GATE 4 — no unsupported MAX / allowable spacing language ════════════════
@@ -434,16 +445,37 @@ const stateCountsRendered = [...noB64.matchAll(/data-procurement-state-count="([
   const qualifiedPass = t.includes('PASS — ELECTRICAL RATING ONLY');
   const barePass = /✓\s*PASS/.test(t) || /(?<!ELECTRICAL RATING ONLY[^.]{0,40})>\s*PASS\s*</.test(branchSchedule);
   const matrix = t.includes('BRANCH RELEASE STATUS');
-  const authorities = ['ROUTE AUTHORITY:', 'GROUNDING AUTHORITY:', 'PROCUREMENT SUFFICIENCY:', 'OVERALL RELEASE:']
-    .filter(s => !t.includes(s));
+  // WS-2 renamed the grounding cell: it used to read 'GROUNDING AUTHORITY:
+  // PENDING MANUFACTURER AUTHORITY' for EVERY outcome, so it now names each
+  // authority separately ('GROUNDING — IQ8A PRODUCT:' + 'ARRAY/RACKING
+  // BONDING:'). The property is unchanged — the branch block must NAME the
+  // grounding authority — so either form satisfies it.
+  const groundingNamed = t.includes('GROUNDING AUTHORITY:') || t.includes('GROUNDING — IQ8A PRODUCT:');
+  const authorities = ['ROUTE AUTHORITY:', 'PROCUREMENT SUFFICIENCY:', 'OVERALL RELEASE:']
+    .filter(s => !t.includes(s))
+    .concat(groundingNamed ? [] : ['GROUNDING (any form)']);
   const blocked = !hasBlocking || /OVERALL RELEASE: BLOCKED/.test(t);
-  // the Σ deficit is NEVER apportioned per branch
-  const apportioned = /this branch is short by/i.test(t) || /B[123][^.]{0,40}short by \d/i.test(t);
+  // WS-2 — this gate used to require that the Σ deficit was NEVER apportioned
+  // per branch, because the package could not apportion it and a per-branch
+  // number would therefore have been invented. The package now DOES apportion
+  // it, from the canonical procurement resolution, and the directive requires
+  // that. So the check is inverted into its correct successor: an apportionment
+  // may appear only in the CANONICAL form — every short branch named with its
+  // own figure AND the non-redistributable surplus stated — never as a bare
+  // per-branch number with no basis.
+  const apportioned = /aggregate installed-length deficit/i.test(t);
+  const apportionmentCanonical = !apportioned || (
+    /GOVERNING topology-constrained requirement is [\d.]+ ft/i.test(t)
+    && /allocated as B\d[^.]*\d+(?:\.\d+)? ft/i.test(t)
+    && /NOT redistributable/i.test(t));
+  const bareApportionment = /this branch is short by/i.test(t);
   gate(8, 'generic-pass-cannot-hide-branch-blockers',
-    header && qualifiedPass && !barePass && matrix && authorities.length === 0 && blocked && !apportioned,
+    header && qualifiedPass && !barePass && matrix && authorities.length === 0 && blocked
+    && apportionmentCanonical && !bareApportionment,
     `scheduleFound=${branchSchedule.length > 0} ratingColumn=${header} qualifiedPass=${qualifiedPass} `
     + `barePassBadge=${barePass} releaseMatrix=${matrix} missingAuthorities=${authorities.join(',') || 'none'} `
-    + `overallBlocked=${blocked} perBranchDeficitApportioned=${apportioned}`,
+    + `overallBlocked=${blocked} apportioned=${apportioned} apportionmentCanonical=${apportionmentCanonical} `
+    + `bareApportionment=${bareApportionment}`,
     { missingAuthorities: authorities });
 }
 
@@ -531,9 +563,17 @@ const stateCountsRendered = [...noB64.matchAll(/data-procurement-state-count="([
   const establishedZeroWithPendingProse = bomRows.filter(r =>
     r.quantityState === 'established' && /QUANTITY PENDING|FIELD QUANTITY PENDING/i.test(r.text));
   const label = /MODELED \/ FIELD QUANTITY PENDING/.test(flat(noB64));
+  // WS-2 — while the procurement is UNANSWERED the cap quantity is a modelled
+  // count and must render PENDING. Once it is RESOLVED the count is established
+  // by the manufacturer's own per-unused-connector rule over a fixed ordered
+  // composition, so an ESTABLISHED cap row is the honest state — and a PENDING
+  // label beside a settled quantity would be the new lie.
   gate(11, 'pending-caps-cannot-render-a-certain-zero',
-    capRows.length > 0 && pendingCaps.length === capRows.length
-    && certainZero.length === 0 && establishedZeroWithPendingProse.length === 0 && label,
+    capRows.length > 0
+    && (qcableUnanswered
+      ? pendingCaps.length === capRows.length && label
+      : pendingCaps.length === 0 && capRows.every(r => r.quantityState === 'established'))
+    && certainZero.length === 0 && establishedZeroWithPendingProse.length === 0,
     `capRows=${capRows.length} pendingTagged=${pendingCaps.length} certainZeroWithPendingProse=${certainZero.length} `
     + `establishedRowsClaimingPending=${establishedZeroWithPendingProse.length} pendingLabelRendered=${label}`,
     { capRows: capRows.map(r => ({ quantityState: r.quantityState, orderable: r.orderable, text: r.text.slice(0, 160) })) });
@@ -541,7 +581,7 @@ const stateCountsRendered = [...noB64.matchAll(/data-procurement-state-count="([
 
 // ═══ GATE 12 — the insufficient Q-Cable row is itself NON-ORDERABLE ═════════
 {
-  const insufficient = ps?.insufficient === true;
+  const insufficient = qcableUnanswered;
   // the TRUNK-CABLE row only — not the candidate open-air EGC row that names the
   // same open-air section (that row is gate 2's subject and is legitimately
   // non-orderable under a DIFFERENT authority).
@@ -561,14 +601,19 @@ const stateCountsRendered = [...noB64.matchAll(/data-procurement-state-count="([
   const identityKept = !insufficient || /Q-12-10-240/.test(schedText);
   gate(12, 'insufficient-qcable-row-is-non-orderable',
     !insufficient
-      // sufficient ⇒ no row may CLAIM a deficit state the design does not have
+      // answered (or never short) ⇒ no row may CLAIM a deficit state the design
+      // does not have, and a RESOLVED design must state its ORDER on the schedule
+      // SCHED must not CLAIM a deficit state the design does not have. It is not
+      // required to carry the order statement itself: SCHED runs at zero
+      // printable slack, and the ORDER is stated on PV-4B.1 and on the BOM row
+      // (both asserted by tests/planset/ws2-qcable-procurement.test.ts).
       ? !schedText.includes('QCABLE-PROCUREMENT-INSUFFICIENT') && !/DEFICIT \d/.test(schedText)
       : trunkRows.length > 0 && orderableTrunk.length === 0 && missing.length === 0 && identityKept,
     `procurementInsufficient=${insufficient} deficitFt=${ps?.deficitFt ?? '—'} trunkRows=${trunkRows.length} `
     + `orderableAmongThem=${orderableTrunk.length} missingRowState=${missing.join(' | ') || 'none'} `
     + `cableIdentityKept=${identityKept}`,
     { trunkRows: trunkRows.map(r => ({ orderable: r.orderable, text: r.text.slice(0, 220) })), missing });
-  if (!insufficient) vacuous.push('gate 12 (no procurement deficit on this input)');
+  if (!insufficient) vacuous.push('gate 12 (the procurement deficit is answered on this input)');
 }
 
 // ═══ GATE 13 — procurement exports exclude every blocked row ════════════════
@@ -777,12 +822,17 @@ const mismatches = [];
       spc.verificationState === 'verified' ? /MAXIMUM ALLOWED/i.test(t) : !/MAXIMUM ALLOWED/i.test(t));
   }
   // procurement sufficiency
+  // WS-2 — the reported state is "short AND unanswered", not "short". A design
+  // whose shortfall is answered by the canonical procurement resolution must NOT
+  // render the requirement code (it is closed) and must not print the
+  // NON-ORDERABLE row state — so the rendered/reported comparison keys on
+  // `qcableUnanswered`, exactly as gates 3/11/12 do.
   if (ps) {
-    rcheck('procurementInsufficient', ps.insufficient,
-      ps.insufficient
+    rcheck('procurementInsufficient', qcableUnanswered,
+      qcableUnanswered
         ? t.includes('QCABLE-PROCUREMENT-INSUFFICIENT')
-        : !/DEFICIT \d+(\.\d+)? FT/.test(t));
-    if (ps.insufficient) {
+        : !/DEFICIT \d+(\.\d+)? FT/.test(t) && !t.includes('QCABLE-PROCUREMENT-INSUFFICIENT'));
+    if (qcableUnanswered) {
       rcheck('procurementDeficitFt', ps.deficitFt, t.includes(`DEFICIT ${ps.deficitFt} FT`));
       rcheck('procurementBaseFt', ps.procurementLengthFt, t.includes(`CURRENT BASE ${ps.procurementLengthFt} FT`));
       rcheck('procurementDesignedFt', ps.totalDesignedInstalledFt, t.includes(`DESIGNED-INSTALLED ${ps.totalDesignedInstalledFt} FT`));

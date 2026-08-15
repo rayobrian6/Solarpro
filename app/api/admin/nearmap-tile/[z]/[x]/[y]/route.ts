@@ -10,9 +10,10 @@ import { requireAdminApi } from '@/lib/adminAuth';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type Params = { params: { z: string; x: string; y: string } };
+type Params = { params: Promise<{ z: string; x: string; y: string }> };
 
-export async function GET(req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, props: Params) {
+  const params = await props.params;
   const admin = await requireAdminApi(req);
   if (!admin) return new NextResponse('Forbidden', { status: 403 });
 

@@ -17,10 +17,8 @@ import { isValidUUID } from '@/lib/db-neon';
 import { getSiteSurveyById } from '@/lib/db-neon';
 import { getArtifactsBySurvey } from '@/lib/db/geometryReconstruction';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { surveyId: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
+  const params = await props.params;
   const surveyId = params?.surveyId ?? 'unknown';
   console.log(`[GET geometry-reconstruction/artifacts] surveyId=${surveyId}`);
 
