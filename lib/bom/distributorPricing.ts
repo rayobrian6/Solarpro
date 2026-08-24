@@ -28,7 +28,23 @@ import type { BOMLineItemV4 } from '../bom-engine-v4';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
-export type DistributorSource = 'CED' | 'Soligent' | 'KWh' | 'Internal';
+export type DistributorSource =
+  | 'CED' | 'Soligent' | 'KWh' | 'Internal'
+  // Sellers whose listed prices were read directly off the product page. Named
+  // rather than folded into 'Internal' so a row states WHERE its number came
+  // from — several Tigo SKUs are only publicly priced by these vendors.
+  | 'NAZ Solar Electric' | 'US Solar Supplier' | 'Signature Solar' | 'PowerStore';
+
+/** How a row's numbers were obtained. Absent ⇒ the legacy Q1-2025 price-sheet
+ *  baseline, where netPrice is a discount applied to list. */
+export type PriceBasis =
+  /** listPrice was READ off a seller's public product page on `asOf`. No dealer
+   *  discount is established for it, so netPrice equals listPrice rather than a
+   *  fabricated percentage — the safe direction, since an invented discount
+   *  under-states job cost. */
+  | 'observed-listed'
+  /** distributor price sheet: netPrice is the contractor net after discount. */
+  | 'price-sheet';
 
 export interface DistributorPriceEntry {
   /** Part number (primary lookup key). */
@@ -47,6 +63,12 @@ export interface DistributorPriceEntry {
   source: DistributorSource;
   /** Price sheet date (YYYY-MM-DD). */
   asOf: string;
+  /** How the numbers were obtained. Absent ⇒ 'price-sheet' (legacy rows). */
+  priceBasis?: PriceBasis;
+  /** Stock state as shown by the seller on `asOf`. An in-catalog price for an
+   *  out-of-stock or pre-order item is still a real price, but it is not a real
+   *  lead time — worth carrying so a quote can say so. */
+  stockState?: 'in-stock' | 'out-of-stock' | 'pre-order' | 'limited' | 'unknown';
 }
 
 export interface DistributorPriceOverride {
@@ -355,13 +377,98 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     listPrice: 68.00, netPrice: 54.40,
     source: 'CED', asOf: '2025-01-15',
   },
+  // ⚠ This row's part number used to read `TAP-TS4-A-O`. In Tigo's nomenclature
+  // TAP is the Access Point — a wholly different device — so a search for a TAP
+  // price returned an OPTIMIZER. The real TS4-A-O ordering number is 461-00252-32.
+  // The PRICE is unchanged and still carries its original 2025-01-15 date: only
+  // the identifier was wrong, and no current quote was obtained for this SKU, so
+  // it is not restamped with today's date.
   {
-    partNumber: 'TAP-TS4-A-O',
+    partNumber: '461-00252-32',
     description: 'Tigo TS4-A-O Smart Module Optimizer',
     category: 'optimizer', unit: 'ea',
     listPrice: 45.00, netPrice: 36.00,
-    source: 'Soligent', asOf: '2025-01-15',
+    source: 'Soligent', asOf: '2025-01-15', priceBasis: 'price-sheet',
   },
+
+  // ─── Tigo rapid-shutdown + monitoring companions ───────────────────────────
+  // Prices READ off each seller's product page on 2026-08-24. netPrice equals
+  // listPrice: no dealer discount is established for these, and inventing one
+  // would under-state job cost. Full sourcing, the family switch and the
+  // quantity rules: docs/TIGO-TS4-COMPANION-HARDWARE-SPEC.md
+  //
+  // TWO SCRAPING HAZARDS, recorded so a refresh does not re-import bad numbers:
+  //   • Soligent product URLs carry unrelated slugs (/Storz-Power-10255 IS the
+  //     Tigo CCA kit) — re-verify by part number, never by URL.
+  //   • Signature Solar hides the price on out-of-stock items, so the only dollar
+  //     figures in the DOM belong to related-product tiles. Read the
+  //     product:price:amount meta, not the rendered text.
+  {
+    // THE keep-alive source for TS4-A-F / 2F. The BOM engine emits this exact
+    // part number (lib/bom/tigoRsdCompanions.ts) as a CANDIDATE row.
+    partNumber: '490-00000-51',
+    description: 'Tigo RSS Transmitter — single core, DIN rail (bare; PSU + enclosure separate)',
+    category: 'rapid_shutdown_transmitter', unit: 'ea',
+    listPrice: 49.41, netPrice: 49.41,
+    source: 'NAZ Solar Electric', asOf: '2026-08-24',
+    priceBasis: 'observed-listed', stockState: 'in-stock',
+  },
+  {
+    partNumber: '490-00000-52',
+    description: 'Tigo RSS Transmitter — dual core, DIN rail (bare). Dual core buys 20 strings OR a 300-500 m home run, never both',
+    category: 'rapid_shutdown_transmitter', unit: 'ea',
+    listPrice: 60.75, netPrice: 60.75,
+    source: 'Signature Solar', asOf: '2026-08-24',
+    priceBasis: 'observed-listed', stockState: 'in-stock',
+  },
+  {
+    partNumber: '492-00000-51',
+    description: 'Tigo RSS Transmitter KIT — single core + 120/240 VAC PSU + outdoor enclosure',
+    category: 'rapid_shutdown_transmitter', unit: 'ea',
+    listPrice: 163.32, netPrice: 163.32,
+    source: 'PowerStore', asOf: '2026-08-24',
+    priceBasis: 'observed-listed', stockState: 'unknown',
+  },
+  {
+    // The ACTUAL Tigo Access Point. Monitoring family (TS4-A-O/S/M) only — a TAP
+    // is never a companion to a TS4-A-F, and pairing them is the error the old
+    // `TAP-TS4-A-O` row encoded.
+    partNumber: '158-00000-02',
+    description: 'Tigo Access Point (TAP) — 2.4 GHz mesh receiver for TS4-A-O/S/M. Coverage: flat roof 18 m, metal/tile 13 m, ground/carport 35 m',
+    category: 'monitoring', unit: 'ea',
+    listPrice: 78.20, netPrice: 78.20,
+    source: 'Soligent', asOf: '2026-08-24',
+    priceBasis: 'observed-listed', stockState: 'in-stock',
+  },
+  {
+    partNumber: '348-00000-52',
+    description: 'Tigo CCA KIT — Cloud Connect Advanced + DIN PSU + outdoor enclosure + 1 TAP (subtract the bundled TAP from the TAP count)',
+    category: 'gateway', unit: 'ea',
+    listPrice: 423.49, netPrice: 423.49,
+    source: 'Soligent', asOf: '2026-08-24',
+    priceBasis: 'observed-listed', stockState: 'in-stock',
+  },
+  {
+    partNumber: '484-00252-22',
+    description: 'Tigo TS4-A-2F — fire safety, 2 modules, 15 A / 1000 W (500 W per input). The 25 A / 1400 W class is 485-00252-22',
+    category: 'rapid_shutdown', unit: 'ea',
+    listPrice: 67.71, netPrice: 67.71,
+    source: 'Soligent', asOf: '2026-08-24',
+    priceBasis: 'observed-listed', stockState: 'limited',
+  },
+  // NO PUBLIC PRICE OBTAINABLE on 2026-08-24 — deliberately absent rather than
+  // guessed, because a fabricated number here becomes a quoted number:
+  //   346-00000-00 (bare CCA) · 344-00000-52 · 492-00000-52 · 493-00000-52
+  //   481-00252-32 / -62 (TS4-A-F itself) · 466-00252-32 (TS4-A-S)
+  //   400-00900-00 (RSS Signal Detector) · every TS4-X SKU
+  // CED Greentech and Greentech Renewables list these behind a dealer login;
+  // they must be QUOTED, not scraped. These fall through to the category
+  // fallback today, which is an estimate — not a quote.
+  //
+  // EOL — never price, never emit: 490-00000-10/-20, 492-00000-10/-20,
+  // 458-00252-32 / -00257-12 / -00261-32 (superseded 500 W TS4-A-F generation).
+  // `493-00000-51` DOES NOT EXIST; it is a plausible-looking number that falls
+  // out of false symmetry with the 492 pair.
 
   // ─── Batteries ─────────────────────────────────────────────────────────────
   {
