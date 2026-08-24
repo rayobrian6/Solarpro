@@ -24,7 +24,10 @@ import { resolveIntegratedEquipment } from './equipment/integratedBos';
 import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
 import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
-import { resolveTigoRsdCompanions, type TigoRsdCompanionInput } from './bom/tigoRsdCompanions';
+import {
+  resolveTigoRsdCompanions, TS4_A_F_PART_NUMBER, TS4_A_F_DESCRIPTION,
+  type TigoRsdCompanionInput,
+} from './bom/tigoRsdCompanions';
 import { getPanelById, getMicroinverterById, getInverterById } from './equipment-db';
 
 import { racewayNecArticle, type RunSegment } from './computed-system';
@@ -1150,7 +1153,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const _rsdExemptMount = _roofModules <= 0;
     if (input.requiresRapidShutdown !== false && !rsdIntegrated && !isOptimizer && !_rsdExemptMount) {
       items.push(addItem('dc', 'rapid_shutdown', 'Tigo', 'TS4-A-F Rapid Shutdown',
-        'TS4-A-F', 'Rapid shutdown device per NEC 690.12 — 1 per ON-BUILDING module',
+        TS4_A_F_PART_NUMBER, TS4_A_F_DESCRIPTION,
         _roofModules, 'ea', 'NEC 690.12', 'roof-mounted modules', `${_roofModules} on-building`, true));
       log.push({ stageId: 'dc', category: 'rapid_shutdown', item: 'TS4-A-F',
         quantity: _roofModules, derivedFrom: 'roof-mounted modules', formula: `${_roofModules} on-building`, necReference: 'NEC 690.12' });
@@ -2539,8 +2542,8 @@ function generateBOMV4PerSubSystem(
       } else if (rsdIntegrated) {
         complianceNotes.push(`NEC 690.12: Rapid shutdown integrated in ${s.model ?? 'roof inverter'} — 0 add-on devices (roof sub-system)`);
       } else {
-        push('roof', addItem('dc', 'rapid_shutdown', 'Tigo', 'TS4-A-F Rapid Shutdown', 'TS4-A-F',
-          'Rapid shutdown device per NEC 690.12 — 1 per ON-BUILDING module (roof sub-system)',
+        push('roof', addItem('dc', 'rapid_shutdown', 'Tigo', 'TS4-A-F Rapid Shutdown',
+          TS4_A_F_PART_NUMBER, `${TS4_A_F_DESCRIPTION} (roof sub-system)`,
           s.modules, 'ea', 'NEC 690.12', 'roof sub-system modules', `${s.modules} on-building`, true));
         log.push({ stageId: 'dc', category: 'rapid_shutdown', item: 'TS4-A-F',
           quantity: s.modules, derivedFrom: 'roof sub-system modules (own inverter lacks integrated RSD)', formula: `${s.modules} on-building`, necReference: 'NEC 690.12' });

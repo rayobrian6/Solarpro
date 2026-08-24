@@ -278,7 +278,9 @@ describe('Wave 2c — RSD keys on the ROOF sub\'s own inverter (I-7)', () => {
     }));
     const rsd = bom.items.filter(i => i.category === 'rapid_shutdown');
     expect(rsd).toHaveLength(1);
-    expect(rsd[0].partNumber).toBe('TS4-A-F');
+    // The ORDERING NUMBER, not the model designation: `TS4-A-F` alone is not a
+    // purchasable SKU and could never match a SKU-keyed price row.
+    expect(rsd[0].partNumber).toBe('481-00252-32');
     expect(rsd[0].quantity).toBe(48);       // roof subset, never 91
     expect(rsd[0].subSystem).toBe('roof');
     // The roof sub is string now — it gets its own DC wire + disconnect too.

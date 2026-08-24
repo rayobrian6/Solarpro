@@ -131,7 +131,7 @@ describe('engineering BOM route — hybrid multi-system payload', () => {
     expect(byPart(json, 'PLP-PD-PXRAIL')).toBeDefined();
 
     // ── ROOF subset: NEC 690.12 RSD for the 51 on-building modules ──
-    const rsd = byPart(json, 'TS4-A-F');
+    const rsd = byPart(json, '481-00252-32');
     expect(rsd?.category).toBe('rapid_shutdown');
     expect(rsd?.quantity).toBe(51);
 
@@ -159,7 +159,7 @@ describe('engineering BOM route — hybrid multi-system payload', () => {
     expect(byPart(json, 'SOLFENCE-SECTION-6')?.quantity).toBe(40);
     expect(byPart(json, 'SOLFENCE-POST-6.5')?.quantity).toBe(41);
     // Legacy fence project without subSystemCounts: no on-roof modules → no RSD
-    expect(byPart(json, 'TS4-A-F')).toBeUndefined();
+    expect(byPart(json, '481-00252-32')).toBeUndefined();
     // No ground structural without groundData
     expect(qtyByCategory(json, 'pile')).toBe(0);
   });
@@ -190,7 +190,7 @@ describe('engineering BOM route — hybrid multi-system payload', () => {
     expect(json.merge).toBeUndefined();
     expect(qtyByCategory(json, 'fence_section')).toBe(0);
     expect(qtyByCategory(json, 'pile')).toBe(0);
-    expect(byPart(json, 'TS4-A-F')?.quantity).toBe(20);
+    expect(byPart(json, '481-00252-32')?.quantity).toBe(20);
   });
 });
 

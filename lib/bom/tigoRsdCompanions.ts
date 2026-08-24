@@ -45,6 +45,30 @@ export const STRINGS_PER_TRANSMITTER_CORE = 10;
 export const RSS_TRANSMITTER_PART_NUMBER = '490-00000-51';
 export const RSS_TRANSMITTER_KIT_PART_NUMBER = '492-00000-51';
 
+/**
+ * The TS4-A-F ORDERING NUMBER.
+ *
+ * `TS4-A-F` alone is a MODEL DESIGNATION, not a purchasable SKU — it was being
+ * emitted as the BOM part number, so the row could never match a SKU-keyed price
+ * and fell through to a category estimate on the largest DC line of the job.
+ *
+ * ⚠ VARIANT NOT DERIVED. Tigo publishes several current TS4-A-F ordering
+ * numbers, and this is the standard 15 A / 700 W part. `481-00252-62` is the
+ * SAME device with a long cable for 72-cell LANDSCAPE layouts, and there is no
+ * verified rule in this repo mapping module format to cable length, so it is not
+ * inferred — the description carries the condition instead of the code guessing
+ * it. Datasheet 002-00093-00 also lists 481-00252-20, 481-00261-32/-62 and the
+ * 486-/488- families. Pull the current sheet before locking a variant table.
+ */
+export const TS4_A_F_PART_NUMBER = '481-00252-32';
+
+/** Named so the two BOM emitters cannot drift apart, and so the variant caveat
+ *  travels with the SKU rather than living only in a comment. */
+export const TS4_A_F_DESCRIPTION =
+  'Rapid shutdown device per NEC 690.12 — 1 per ON-BUILDING module. 15 A / 700 W standard-cable '
+  + 'variant; 72-cell LANDSCAPE layouts take the long-cable 481-00252-62 — verify against the '
+  + 'module format before ordering.';
+
 /** The facts that decide whether module-level RSD devices are needed at all.
  *  Shared so the BOM engine and the snapshot cannot disagree about it — the
  *  snapshot does not consume BOM rows, so without one predicate the two would be

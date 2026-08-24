@@ -115,7 +115,7 @@ describe('(a) hybrid + RT-MINI roof authority — ONE racking system, roof-subse
     expect(structBy(json, 'grounding', 'WEEB-LUG-6.7')?.quantity).toBe(51);
 
     // Sanity: roof subset still drives NEC 690.12 RSD.
-    const rsd = (json.bom?.items ?? []).find((i: AnyItem) => i.partNumber === 'TS4-A-F');
+    const rsd = (json.bom?.items ?? []).find((i: AnyItem) => i.partNumber === '481-00252-32');
     expect(rsd?.quantity).toBe(51);
   });
 });
