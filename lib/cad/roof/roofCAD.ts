@@ -29,12 +29,13 @@ import {
   insetPolygon, gridInsidePolygon, polygonArea, centroid,
   metersToFt, ftToMeters, fmtFt,
 } from '../geometry';
+import { resolveCADPanelFootprint, panelFootprintWarning } from '../panelFootprint';
 
 const INCHES_TO_METERS = 0.0254;
 
-// ── Default panel dimensions ──────────────────────────────────
-const DEFAULT_PANEL_LENGTH_IN = 66;   // ~1.676 m (portrait height)
-const DEFAULT_PANEL_WIDTH_IN  = 40;   // ~1.016 m (portrait width)
+// Panel dimensions come from resolveCADPanelFootprint (the per-sub canonical
+// module identity). The old 66×40 constants lived here and were used
+// unconditionally — see lib/cad/panelFootprint.ts for why that was wrong.
 const DEFAULT_GAP_M           = 0.02; // 2 cm between panels
 
 // ── Setback defaults ──────────────────────────────────────────
@@ -75,8 +76,19 @@ export function roofCAD(input: PermitInputShape): CADModel {
   const canonicalCADElecNodes: CADElectricalNode[] = canonicalBridge?.electricalNodes ?? [];
 
   // ── Panel dimensions ─────────────────────────────────────────
-  const panelLenIn = input.project?.panelLengthIn ?? DEFAULT_PANEL_LENGTH_IN;
-  const panelWidIn = input.project?.panelWidthIn  ?? DEFAULT_PANEL_WIDTH_IN;
+  // THE canonical per-sub footprint (lib/cad/panelFootprint.ts). Previously this
+  // read `input.project.panelLengthIn ?? 66`, and the scalar was undefined on
+  // every generate — so every design was solved at 66×40, a size no catalogue
+  // module has.
+  const _fp = resolveCADPanelFootprint(input, 'roof');
+  const panelLenIn = _fp.lengthIn;
+  const panelWidIn = _fp.widthIn;
+  const _fpWarn = panelFootprintWarning(_fp, 'roof');
+  if (_fpWarn) warnings.push(_fpWarn);
+  console.log('[CAD PANEL FOOTPRINT] roofCAD', {
+    lengthIn: panelLenIn, widthIn: panelWidIn, source: _fp.source,
+    panelId: _fp.panelId, established: _fp.established,
+  });
   // Portrait: height = length, width = width
   const panelPortraitH = panelLenIn * INCHES_TO_METERS;   // ~1.676m
   const panelPortraitW = panelWidIn * INCHES_TO_METERS;    // ~1.016m

@@ -32,10 +32,11 @@ import {
   hemisphereOf,
   bearingDistanceDeg,
 } from '../../3d/ground/groundDefaults';
+import { resolveCADPanelFootprint, panelFootprintWarning } from '../panelFootprint';
 
 const INCHES_TO_METERS = 0.0254;
-const DEFAULT_PANEL_LENGTH_IN = 66;
-const DEFAULT_PANEL_WIDTH_IN  = 40;
+// Panel dimensions come from resolveCADPanelFootprint — the 66×40 constants that
+// used to live here matched no catalogue module (lib/cad/panelFootprint.ts).
 const DEFAULT_GAP_M           = 0.02;
 
 export function groundCAD(input: PermitInputShape): CADModel {
@@ -49,8 +50,18 @@ export function groundCAD(input: PermitInputShape): CADModel {
   const warnings: string[] = [];
 
   // ── Panel dimensions ─────────────────────────────────────────
-  const panelLenIn = input.project?.panelLengthIn ?? DEFAULT_PANEL_LENGTH_IN;
-  const panelWidIn = input.project?.panelWidthIn  ?? DEFAULT_PANEL_WIDTH_IN;
+  // Canonical per-sub footprint — see lib/cad/panelFootprint.ts. The previous
+  // `project.panelLengthIn ?? 66` read a scalar that was undefined on every
+  // generate, so every ground array was solved at 66×40.
+  const _fp = resolveCADPanelFootprint(input, 'ground');
+  const panelLenIn = _fp.lengthIn;
+  const panelWidIn = _fp.widthIn;
+  const _fpWarn = panelFootprintWarning(_fp, 'ground');
+  if (_fpWarn) warnings.push(_fpWarn);
+  console.log('[CAD PANEL FOOTPRINT] groundCAD', {
+    lengthIn: panelLenIn, widthIn: panelWidIn, source: _fp.source,
+    panelId: _fp.panelId, established: _fp.established,
+  });
   // Landscape for ground mount: width = length (horizontal), height = width
   const panelW = panelLenIn * INCHES_TO_METERS;   // ~1.676m horizontal
   const panelH = panelWidIn * INCHES_TO_METERS;   // ~1.016m vertical

@@ -26,6 +26,7 @@ import {
   Point2D, BBox,
   latLngToXY, bbox, metersToFt, ftToMeters, fmtFt, dist2D,
 } from '../geometry';
+import { resolveCADPanelFootprint, panelFootprintWarning } from '../panelFootprint';
 
 const INCHES_TO_METERS = 0.0254;
 const DEFAULT_PANEL_HEIGHT_FT = 6;    // standard fence panel height
@@ -54,9 +55,18 @@ export function fenceCAD(input: PermitInputShape): CADModel {
   const postEmbedM  = ftToMeters(postEmbedFt);
   const panelHM     = ftToMeters(panelHFt);
 
-  // Panel width from system data or default
-  const panelLenIn  = input.project?.panelLengthIn ?? 66;
-  const panelWidIn  = input.project?.panelWidthIn  ?? 40;
+  // Canonical per-sub footprint — see lib/cad/panelFootprint.ts. The previous
+  // inline `?? 66 / ?? 40` was a THIRD copy of a placeholder that matches no
+  // catalogue module, reading a scalar that was undefined on every generate.
+  const _fp = resolveCADPanelFootprint(input, 'fence');
+  const panelLenIn  = _fp.lengthIn;
+  const panelWidIn  = _fp.widthIn;
+  const _fpWarn = panelFootprintWarning(_fp, 'fence');
+  if (_fpWarn) warnings.push(_fpWarn);
+  console.log('[CAD PANEL FOOTPRINT] fenceCAD', {
+    lengthIn: panelLenIn, widthIn: panelWidIn, source: _fp.source,
+    panelId: _fp.panelId, established: _fp.established,
+  });
   // Fence panels: typically portrait (narrow width, full height)
   const panelWM     = panelWidIn * INCHES_TO_METERS;  // ~1.016m
   const panelHMFromInput = panelLenIn * INCHES_TO_METERS; // ~1.676m
