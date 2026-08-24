@@ -707,6 +707,31 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'selections disagree.',
   },
 
+  // A TS4-A-F is a SLAVE device: it holds its module on only while it receives a
+  // PLC keep-alive and outputs 0.6 V without one, so the array does not energize
+  // at all. Whether an EXTERNAL transmitter is needed depends on a per-MODEL fact
+  // (does this inverter carry a factory-integrated Tigo RSS transmitter) that the
+  // equipment catalogue does not record, and Tigo's own certification list cannot
+  // supply it: of 355 UL-PVRSS-certified rows only 43 are "Tigo Enhanced", and
+  // "Enhanced" itself means an integrated transmitter OR an integrated CCA. So
+  // the QUANTITY is derived and the SELECTION is unverified — a candidate row,
+  // never an orderable one, and never silent.
+  'TIGO-RSS-TRANSMITTER-UNVERIFIED': {
+    gateId: 'RG-5', findingType: 'PENDING_SELECTION',
+    title: 'Rapid-shutdown keep-alive source not established for the specified TS4 devices',
+    affects:
+      'The rapid-shutdown signalling path and the transmitter BOM row. Module-level device COUNT and placement are '
+      + 'unaffected — what is unresolved is whether an external RSS transmitter is required, or already integrated in '
+      + 'the selected inverter.',
+    resolutionMode: 'OPERATOR_CONFIRMATION',
+    resolverId: null, resolverPhase: 'Tigo companion-hardware pass',
+    modeBasis:
+      'The inverter→integrated-transmitter mapping is published per MODEL on Tigo\'s UL PVRSS list and is not a fact '
+      + 'the engine holds or may infer. Keying off UL PVRSS certification under-states it (355 certified vs 43 Tigo '
+      + 'Enhanced), and the list\'s method column records what a system was certified WITH, not what is built in. An '
+      + 'operator confirms the exact model, or an external transmitter is ordered.',
+  },
+
   // ── RG-6 QCABLE_SYSTEM_CLOSURE — WS-2 SCOPED PROCUREMENT RESIDUALS ─────────
   // WS-2 replaced the one broad Q-Cable blocker with a scoped requirement per
   // genuinely unresolved fact. Each names ONE thing, so a missing accessory SKU

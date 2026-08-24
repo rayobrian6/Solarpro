@@ -339,6 +339,14 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
     justification: '',
   },
+  // TS4-A-F devices with no established keep-alive source. Safety AND code:
+  // without a transmitter the modules sit at 0.6 V and the array never energizes,
+  // and the 690.12 shutdown path is not shown to exist. Procurement too — the
+  // transmitter row is a candidate and cannot be ordered as specified.
+  'TIGO-RSS-TRANSMITTER-UNVERIFIED': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
   // No canonical roof-plane geometry: nothing structural can be shown at all.
   'SITE-GEOMETRY-MISSING': {
     impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },

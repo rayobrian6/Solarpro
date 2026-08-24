@@ -43,6 +43,7 @@ import { planMicroBranches, microMaxPerBranch, microBranchMaxOcpdA, type BranchP
 import { getDesignTemps } from '../utils/designTemps';
 import { resolveTrunkCablePlan, findTrunkCableSystem } from '@/lib/equipment/trunkCable';
 import { deriveBranchCablePaths } from '@/lib/bom/deriveRunLengths';
+import { tigoRsdBranchReached, resolveTigoRsdCompanions } from '@/lib/bom/tigoRsdCompanions';
 // WS-5 §13 — the ITEMISED procurement allowance policy for a field-measured
 // route. Kept out of this file so the allowances are reviewable in one place and
 // so nobody adds a bare percentage next to a length.
@@ -1906,6 +1907,10 @@ export function buildPermitDesignSnapshot(
       'QCABLE-STOCK-PACKAGING-UNVERIFIED': { severity: 'blocking', authorityPath: 'electrical.qcableProcurement.stockUnitConnectorSections', sheets: ['PV-4B', 'SCHED', 'BOM'], resolution: 'Archive the manufacturer document that tables the purchasable package (connector sections per box) for the selected cable, or select a cable the archived table already lists.' },
       'QCABLE-FIELD-CONNECTOR-SKU-MISSING': { severity: 'blocking', authorityPath: 'electrical.qcableProcurement.accessories', sheets: ['PV-4B', 'SCHED', 'BOM'], resolution: 'Archive the manufacturer document naming the field-termination accessory for the selected cable assembly; an accessory with no established SKU may not be ordered.' },
       'QCABLE-TERMINATOR-COMPATIBILITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'electrical.qcableProcurement.accessories', sheets: ['PV-4B', 'SCHED', 'BOM'], resolution: 'Establish the terminator SKU and its documented per-branch-circuit quantity from an archived manufacturer document for the selected cable assembly.' },
+      // A TS4-A-F with no keep-alive outputs 0.6 V — the array does not energize.
+      // Whether an external transmitter is needed is a per-MODEL fact on Tigo's UL
+      // PVRSS list that the catalogue does not hold; see docs/TIGO-TS4-COMPANION-HARDWARE-SPEC.md.
+      'TIGO-RSS-TRANSMITTER-UNVERIFIED': { severity: 'blocking', authorityPath: 'equipment.inverters[].integratedTigoTransmitter', sheets: ['PV-4A', 'SCHED', 'BOM'], resolution: 'Confirm the exact inverter model against Tigo\'s UL PVRSS list (only 43 of 355 certified models are Tigo Enhanced), or order the external RSS transmitter(s) the design requires.' },
       // §2 (BAR) — the environmental-load authority gate. Subsumes the retired
       // WIND-SNOW-AUTHORITY-UNRESOLVED (null / code-minimum-default case) AND the
       // operator-entered-without-provenance case. Cleared ONLY by a verified,
@@ -2075,6 +2080,46 @@ export function buildPermitDesignSnapshot(
       && (o.constraints ?? []).some(k => k.state === 'pending'))) {
       push('TAP-CONDUCTOR-LENGTH-PENDING',
         'Supply-side tap-conductor length is not measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a length)');
+    }
+    // TIGO KEEP-ALIVE SOURCE. When the design carries add-on module-level RSD
+    // devices (TS4-A-F), those devices are SLAVES: each holds its module on only
+    // while it receives a PLC keep-alive and outputs 0.6 V without one, so the
+    // array does not energize at all. Whether an EXTERNAL transmitter is required
+    // turns on a per-MODEL fact — does this inverter carry a factory-integrated
+    // Tigo RSS transmitter — that the equipment catalogue does not record and that
+    // Tigo's certification list cannot supply (355 certified rows, 43 Enhanced,
+    // and "Enhanced" means integrated transmitter OR integrated CCA). Fail closed.
+    //
+    // The branch predicate is SHARED with the BOM engine (lib/bom/tigoRsdCompanions)
+    // rather than restated here: build.ts does not consume BOM rows, so two copies
+    // of this condition would be independent engines answering one question. A
+    // guard test asserts the two agree across the whole inverter catalogue.
+    {
+      const _topo = String((cs as { topology?: unknown } | null | undefined)?.topology ?? '').toUpperCase();
+      const _tigoFacts = {
+        onBuildingModuleCount: structAuth.moduleInstances.length,
+        rapidShutdownRequired: proj.requiresRapidShutdown !== false,
+        inverterRsdIntegrated: proj.rapidShutdownIntegrated === true,
+        topologyIsOptimizerOrMicro: _topo.includes('MICRO') || _topo.includes('OPTIMIZER'),
+      };
+      if (tigoRsdBranchReached(_tigoFacts)) {
+        const _comp = resolveTigoRsdCompanions({
+          ts4DeviceCount: _tigoFacts.onBuildingModuleCount,
+          stringCount: Number((cs as { stringCount?: unknown } | null | undefined)?.stringCount ?? 0) || 0,
+          inverterCount: Number(proj.inverterCount ?? 1) || 1,
+        });
+        if (_comp.blockerCode && _comp.blockerMessage) {
+          push(_comp.blockerCode, _comp.blockerMessage, {
+            payload: {
+              ts4DeviceCount: _tigoFacts.onBuildingModuleCount,
+              externalTransmittersRequired: _comp.transmitterCount,
+              quantityBasis: _comp.basis,
+              transmitterPartNumber: _comp.lines[0]?.partNumber ?? null,
+              integratedTransmitterEstablished: false,
+            },
+          });
+        }
+      }
     }
     // §Q — Q-CABLE PROCUREMENT INSUFFICIENCY. The Σ geometric designed-installed
     // cable path exceeds the drop-based procurement footage (+ allowance 0): the

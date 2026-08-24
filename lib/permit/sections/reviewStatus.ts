@@ -120,6 +120,7 @@ export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
   'QCABLE-STOCK-PACKAGING-UNVERIFIED': 'generic',
   'QCABLE-FIELD-CONNECTOR-SKU-MISSING': 'generic',
   'QCABLE-TERMINATOR-COMPATIBILITY-UNVERIFIED': 'generic',
+  'TIGO-RSS-TRANSMITTER-UNVERIFIED': 'generic',
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': 'qcable-grounding-authority',
   // ── electrical ────────────────────────────────────────────────────────────
   'ROUTE-LENGTH-ESTIMATE': 'generic',

@@ -24,6 +24,7 @@ import { resolveIntegratedEquipment } from './equipment/integratedBos';
 import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
 import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
+import { resolveTigoRsdCompanions, type TigoRsdCompanionInput } from './bom/tigoRsdCompanions';
 import { getPanelById, getMicroinverterById, getInverterById } from './equipment-db';
 
 import { racewayNecArticle, type RunSegment } from './computed-system';
@@ -605,6 +606,31 @@ const SUPPLY_SIDE_TAP_CONNECTOR_HINT: {
   quantitySource: 'per-installation-constant',
 };
 
+// ─── Tigo rapid-shutdown companions ───────────────────────────────────────────
+// ONE emitter shared by both TS4-A-F sites (whole-system and per-sub), for the
+// same reason the supply-side tap connector constants are shared: two copies of
+// a rule diverge. See lib/bom/tigoRsdCompanions.ts and
+// docs/TIGO-TS4-COMPANION-HARDWARE-SPEC.md.
+function _emitTigoRsdCompanions(
+  input: TigoRsdCompanionInput,
+  sink: (item: BOMLineItemV4) => void,
+): string | null {
+  const res = resolveTigoRsdCompanions(input);
+  if (!res.lines.length) return null;
+  for (const l of res.lines) {
+    sink(addItem('dc', 'rapid_shutdown_transmitter', l.manufacturer, l.model, l.partNumber,
+      l.description, l.quantity, l.unit as BOMLineItemV4['unit'], l.necReference,
+      l.derivedFrom, l.formula, true,
+      undefined, undefined, undefined, undefined,
+      {
+        authorityStateHint: l.authorityStateHint,
+        authorityStateHintReason: l.authorityStateHintReason,
+        quantitySource: l.quantitySource,
+      }));
+  }
+  return res.blockerMessage;
+}
+
 // ─── ID Generator ─────────────────────────────────────────────────────────────
 
 let _idCounter = 0;
@@ -1129,6 +1155,12 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       log.push({ stageId: 'dc', category: 'rapid_shutdown', item: 'TS4-A-F',
         quantity: _roofModules, derivedFrom: 'roof-mounted modules', formula: `${_roofModules} on-building`, necReference: 'NEC 690.12' });
       complianceNotes.push(`NEC 690.12: Rapid shutdown devices added — 1 per on-building module (${_roofModules})`);
+      // A TS4-A-F is a SLAVE: with no keep-alive it outputs 0.6 V and the array
+      // is dead. Emitting the devices without their transmitter produced a BOM
+      // that asserted 690.12 compliance while omitting the signalling hardware.
+      const _tigoNote = _emitTigoRsdCompanions({ ts4DeviceCount: _roofModules,
+        stringCount: input.stringCount, inverterCount: input.inverterCount }, i => items.push(i));
+      if (_tigoNote) complianceNotes.push(_tigoNote);
       if (_offBuildingModules > 0) {
         complianceNotes.push(`NEC 690.12(B)(2): ${_offBuildingModules} ground/fence module(s) exempt — not on/in a building`);
       }
@@ -2513,6 +2545,13 @@ function generateBOMV4PerSubSystem(
         log.push({ stageId: 'dc', category: 'rapid_shutdown', item: 'TS4-A-F',
           quantity: s.modules, derivedFrom: 'roof sub-system modules (own inverter lacks integrated RSD)', formula: `${s.modules} on-building`, necReference: 'NEC 690.12' });
         complianceNotes.push(`NEC 690.12: Rapid shutdown devices added — 1 per on-building module (${s.modules}, roof sub-system)`);
+        // Same keep-alive requirement on the sub-scoped path — shared emitter so
+        // the two sites cannot diverge (the divergence discipline the supply-side
+        // tap connector constants already established).
+        const _tigoNoteSub = _emitTigoRsdCompanions({ ts4DeviceCount: s.modules,
+          stringCount: input.stringCount, inverterCount: input.inverterCount },
+          it => push('roof', it));
+        if (_tigoNoteSub) complianceNotes.push(_tigoNoteSub);
       }
     } else {
       complianceNotes.push(`NEC 690.12(B)(2): ${key} sub-system (${s.modules} modules) exempt — not on/in a building`);
