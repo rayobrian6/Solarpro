@@ -52,23 +52,40 @@ function rowToFlag(row: Record<string, unknown>): DbFeatureFlag {
  *   2. Env var resolver (if the flag has one)
  *   3. false (fail-safe off)
  *
+ * FAIL-SAFE: if the DB is unreachable (build-time pre-render with no
+ * live connection, or a transient outage), we fall through to the env
+ * var resolver or default-off rather than throwing. The layout calls
+ * this on every page render — a throw here would crash the whole page
+ * tree at build time. The runtime cost is one extra try/catch on the
+ * happy path (zero overhead when the DB returns).
+ *
  * Returns { enabled, source } so the caller can render which one won.
  */
 export async function getFeatureFlag(
   flagKey: string,
   envResolver?: () => boolean,
 ): Promise<{ enabled: boolean; source: 'db' | 'env' | 'default' }> {
-  const sql = await getDbReady();
+  try {
+    const sql = await getDbReady();
 
-  const rows = (await sql`
-    SELECT id, flag_key, description, enabled, updated_at, updated_by_user_id, created_at
-      FROM app_feature_flags
-     WHERE flag_key = ${flagKey}
-     LIMIT 1
-  `) as unknown as FlagRow[];
+    const rows = (await sql`
+      SELECT id, flag_key, description, enabled, updated_at, updated_by_user_id, created_at
+        FROM app_feature_flags
+       WHERE flag_key = ${flagKey}
+       LIMIT 1
+    `) as unknown as FlagRow[];
 
-  if (rows.length > 0) {
-    return { enabled: Boolean(rows[0].enabled), source: 'db' };
+    if (rows.length > 0) {
+      return { enabled: Boolean(rows[0].enabled), source: 'db' };
+    }
+  } catch (e) {
+    // DB unreachable or query failed — fall through to env/default.
+    // Logged once at warn level so a sustained outage shows up in observability.
+    console.warn(
+      `[featureFlags] getFeatureFlag(${flagKey}) DB lookup failed; falling back to env/default. Error: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
   }
 
   if (envResolver) {

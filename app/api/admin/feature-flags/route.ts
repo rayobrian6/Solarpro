@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { handleRouteDbError, getDbReady } from '@/lib/db-neon';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { listFeatureFlags, setFeatureFlag, featureFlagsTableExists } from '@/lib/db/featureFlags';
 import { writeAuditLog } from '@/lib/auditLog';
 
@@ -123,6 +123,3 @@ export async function PUT(req: NextRequest) {
     return handleRouteDbError('[app/api/admin/feature-flags/route.ts] PUT', e);
   }
 }
-
-// ─── Suppress unused-import lint for getDbReady (kept for future raw queries) ─
-void getDbReady;
