@@ -2916,14 +2916,85 @@ export function buildPermitDesignSnapshot(
     const _reviewEntry = _permitReadiness.registry.find(r => r.code === 'ENGINEERING-REVIEW-PENDING');
     if (_decision.covers) {
       // The requirement is CLOSED by the record, with the reviewer as evidence.
-      if (_reviewEntry) {
+      //
+      // PHASE A / D51 — the audit ref is MANDATORY, not decorative. `resolved`
+      // used to be set here as a bare boolean while `deriveRequirementStatus`
+      // (releaseGates.ts) returns 'OPEN' for exactly that shape — a `cleared`
+      // flag with no reference is not a clearance. `permitReadiness.ready`
+      // filters on the raw boolean, so on the day an EOR approved, RS-1 printed
+      // "CLEARED FOR ISSUE — NO OPEN RELEASE GATES" beside
+      // data-release-open-gate-count="1". This is the SAME two-part predicate
+      // the PASS-1 emitter applies at :1978 — and the comment there names the
+      // review-coverage circularity as the defect class it was closing.
+      const _reviewAuditRef = _reviewCoverage?.recordId
+        ? `authority:engineering-review#${_reviewCoverage.recordId}`
+        : null;
+      if (_reviewEntry && _reviewAuditRef) {
         (_reviewEntry as { resolved: boolean }).resolved = true;
+        (_reviewEntry as { resolutionAuditRef: string | null }).resolutionAuditRef = _reviewAuditRef;
         (_reviewEntry as { justification: string }).justification = _decision.basis;
         (_reviewEntry as { explanation: string }).explanation =
           `Approved engineering review covers design digest ${digest.slice(0, 12)}… — ${_decision.basis}`;
+      } else if (_reviewEntry) {
+        // Covered, but the record carries no id to cite. Fail closed: the
+        // requirement stays open and says why, rather than clearing anonymously.
+        (_reviewEntry as { explanation: string }).explanation =
+          'Engineering review reports coverage but the record carries no citable id — '
+          + 'a clearance without an audit reference is not a clearance.';
       }
-      (_permitReadiness as { blockers: { code: string; message: string }[] }).blockers =
-        _permitReadiness.blockers.filter(b => b.code !== 'ENGINEERING-REVIEW-PENDING');
+      // D51 — the blocker is lifted ONLY alongside a citable clearance. Removing
+      // it while the registry entry stays OPEN is precisely how `ready` and
+      // `open-gate-count` came to disagree on the same sheet.
+      if (_reviewAuditRef) {
+        (_permitReadiness as { blockers: { code: string; message: string }[] }).blockers =
+          _permitReadiness.blockers.filter(b => b.code !== 'ENGINEERING-REVIEW-PENDING');
+      }
+
+      // ── PHASE A / D44 — FRAMING CAPACITY VIA REVIEW IS RELEASE STATE ───────
+      // A licensed review is an APPROVAL of the design, not a property of it, so
+      // it is projected HERE — after meta.digest is frozen — and never inside
+      // canonicalDigestBody. Previously the review was consumed in PASS 1
+      // (structuralAuthority.ts:212-217): clearing FRAMING-AUTHORITY-UNVERIFIED
+      // there mutated structural.framingCapacityAuthority, the registry,
+      // moduleInstances/rail substrate and sheetIndex — all digest members — so
+      // the approval MOVED the digest it approved and the requirement stayed
+      // open on the very build the approval enabled.
+      //
+      // `_decision.covers` is the honest, non-circular check: decideReviewCoverage
+      // compared the record's reviewedDigest against THIS build's frozen digest,
+      // and refuses on unlicensed, unscoped, identity-incomplete or
+      // ledger-invalidated records. structural.framingCapacityAuthority stays
+      // null unless an archived DOCUMENT established it — which is honest: the
+      // DESIGN carries no capacity document, the RELEASE carries an approval.
+      if (_reviewAuditRef) {
+        const _framingEntry = _permitReadiness.registry.find(r => r.code === 'FRAMING-AUTHORITY-UNVERIFIED');
+        const _framingAuditRef = `${_reviewAuditRef}#framing-capacity`;
+        if (_framingEntry && !_framingEntry.resolved) {
+          (_framingEntry as { resolved: boolean }).resolved = true;
+          (_framingEntry as { resolutionAuditRef: string | null }).resolutionAuditRef = _framingAuditRef;
+          (_framingEntry as { explanation: string }).explanation =
+            `Existing framing capacity accepted by the licensed engineer of record for design digest `
+            + `${digest.slice(0, 12)}… — ${_reviewCoverage?.reviewerName ?? 'engineer of record'}`
+            + `${_reviewCoverage?.reviewerLicense ? ` (${_reviewCoverage.reviewerLicense})` : ''}. `
+            + 'Accepted as a professional release act, not as an archived capacity document.';
+          (_permitReadiness as { blockers: { code: string; message: string }[] }).blockers =
+            _permitReadiness.blockers.filter(b => b.code !== 'FRAMING-AUTHORITY-UNVERIFIED');
+        }
+        // The release-state projection every renderer reads for the framing
+        // banner. Outside the digest body by construction.
+        (snapshot as { framingReleaseAuthority?: unknown }).framingReleaseAuthority = {
+          // Unconditionally true INSIDE this branch — reaching here means
+          // decideReviewCoverage accepted a licensed review of this exact digest.
+          // (Written plainly rather than as an always-true expression.)
+          acceptedByReview: true,
+          reviewedDigest: digest,
+          reviewerName: _reviewCoverage?.reviewerName ?? null,
+          reviewerLicense: _reviewCoverage?.reviewerLicense ?? null,
+          reviewerLicenseState: _reviewCoverage?.reviewerLicenseState ?? null,
+          approvedAtIso: _reviewCoverage?.approvedAtIso ?? null,
+          auditRef: _framingAuditRef,
+        };
+      }
       (_permitReadiness as { ready: boolean }).ready = _permitReadiness.blockers.length === 0;
       (snapshot as { certification: PermitDesignSnapshot['certification'] }).certification = {
         engineeringReviewApproved: {

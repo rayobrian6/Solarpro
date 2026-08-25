@@ -502,7 +502,22 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
     }
     // FRAMING-AUTHORITY GATE — canonical code FRAMING-AUTHORITY-UNVERIFIED
     // (successor to STRUCTURAL-FRAMING-UNVERIFIED; either satisfies the invariant).
-    if (!s.permitReadiness.blockers.some(b =>
+    //
+    // PHASE A / D44 — there is now a SECOND legitimate reason the blocker may be
+    // absent: a licensed review bound to THIS build's frozen digest accepted the
+    // existing framing in PASS 2. The engine flag above was computed in PASS 1
+    // and cannot know that, so reading it alone would report a violation for a
+    // correctly-released package. The acceptance is NOT a free pass — it is only
+    // set when decideReviewCoverage accepted a licensed, scoped, non-invalidated
+    // record naming meta.digest, and it lives outside canonicalDigestBody so it
+    // cannot move the digest it approves. The fabricated-PASS half above still
+    // applies unconditionally: a review accepts framing, it never publishes an
+    // allowable.
+    const _framingAcceptedByReview =
+      (s as unknown as { framingReleaseAuthority?: { acceptedByReview?: boolean } })
+        .framingReleaseAuthority?.acceptedByReview === true;
+    if (!_framingAcceptedByReview
+      && !s.permitReadiness.blockers.some(b =>
         b.code === 'FRAMING-AUTHORITY-UNVERIFIED' || b.code === 'STRUCTURAL-FRAMING-UNVERIFIED')) {
       add('V24', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code), 'W3 structural authority',
         ['PV-0', 'VAL-1'], 'engineering review required but no FRAMING-AUTHORITY-UNVERIFIED blocker present');

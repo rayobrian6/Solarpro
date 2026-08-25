@@ -63,6 +63,13 @@ export interface StructuralProjection {
   /** true ⇒ no verified framing CAPACITY authority ⇒ no numeric framing capacity /
    *  utilization / PASS / adequate may render. */
   framingUnverified: boolean;
+  /** D44 — the existing framing was accepted by a licensed review bound to THIS
+   *  build's frozen digest (a PASS-2 release-state fact, outside the design
+   *  digest). Distinct from `framingCapacityAuthority`, which is an archived
+   *  DOCUMENT and IS a design fact. Renderers that print a capacity NUMBER must
+   *  still key on `framingUnverified` / the check; a review accepts the framing,
+   *  it does not publish an allowable. */
+  framingAcceptedByReview: boolean;
   /** the OBSERVED FRAMING line, e.g. "TRUSS / 2×6 @ 24 IN. O.C. / APPROX. 12 FT SPAN". */
   observedFramingLine: string;
   /** the source label, e.g. "SOURCE: OPERATOR-ENTERED — NOT CAPACITY-VERIFIED". */
@@ -321,7 +328,27 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
     || _rackGaps.some(g => g.severity === 'blocking' && CAPACITY_GATE_BLOCKER_CODES.has(g.code));
   const framingObservation = st?.framingObservation ?? null;
   const framingCapacityAuthority = st?.framingCapacityAuthority ?? null;
-  const framingUnverified = !(framingCapacityAuthority && framingCapacityAuthority.verified === true);
+  // ── PHASE A / D44 — RELEASE-STATE FRAMING ACCEPTANCE ──────────────────────
+  // A licensed review is an APPROVAL of the design, not a property of it, so it
+  // is projected in PASS 2 (build.ts, after meta.digest is frozen) and never
+  // enters canonicalDigestBody — otherwise the approval moves the digest it
+  // approves. `structural.framingCapacityAuthority` therefore stays null when
+  // only a review (not an archived DOCUMENT) established capacity, and THIS is
+  // the one place that reconciles the two so every renderer agrees.
+  const framingReleaseAuthority =
+    (snap as { framingReleaseAuthority?: { acceptedByReview?: boolean } } | null | undefined)
+      ?.framingReleaseAuthority ?? null;
+  const framingAcceptedByReview = framingReleaseAuthority?.acceptedByReview === true;
+  const framingUnverified =
+    !(framingCapacityAuthority && framingCapacityAuthority.verified === true)
+    && !framingAcceptedByReview;
+  // The engine ran in PASS 1 and could not know about the approval. Overriding
+  // ONLY this flag keeps every computed number untouched — the review accepts
+  // the existing framing, it does not change what the engine calculated.
+  const _engine = st?.engine ?? null;
+  const _engineProjected = (_engine && framingAcceptedByReview)
+    ? { ..._engine, engineeringReviewRequired: false }
+    : _engine;
   const _base = {
     present: !!snap,
     env,
@@ -331,10 +358,11 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
     moduleInstances: mi,
     roofPlaneObjects: geo?.roofPlaneObjects ?? [],
     rackingAssembly: st?.rackingAssembly ?? null,
-    engine: st?.engine ?? null,
+    engine: _engineProjected,
     framingObservation,
     framingCapacityAuthority,
     framingUnverified,
+    framingAcceptedByReview,
     observedFramingLine: observedFramingLine(framingObservation),
     observedFramingSource: observedSourceLabel(framingObservation),
     bom: st?.bom ?? [],

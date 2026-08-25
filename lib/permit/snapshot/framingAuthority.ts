@@ -168,6 +168,12 @@ export interface FramingCapacityAuthorityInput {
   /** the CURRENT snapshot digest — the engineer-review binding is validated
    *  against this. Absent ⇒ the review path CANNOT verify (fail-closed). */
   currentDigest?: string | null;
+  /** D45 — the caller ASSERTS that `currentDigest` was obtained independently of
+   *  `reviewEvidence` (i.e. it is the build's own frozen `meta.digest`, not the
+   *  reviewed digest copied off the same record). Absent or false ⇒ the review
+   *  path fails closed, because comparing a value to itself proves nothing.
+   *  Only a PASS-2 caller, after `meta.digest` is frozen, may set this true. */
+  currentDigestIsIndependent?: boolean;
   /** the exact project/building applicability key the document must cover. When
    *  omitted, any archived document carrying an explicit applicability string is
    *  accepted (lib/documents already matched it upstream). */
@@ -217,10 +223,33 @@ export function resolveFramingCapacityAuthority(
     } satisfies FramingCapacityAuthority;
   }
   // (2) ENGINEER REVIEW — licensed engineer's review bound to the CURRENT digest.
+  //
+  // ⚠ PHASE A / D45 — THIS BRANCH IS FAIL-CLOSED UNTIL A1 LANDS.
+  //
+  // The digest comparison below was TAUTOLOGICAL in production. The only caller
+  // (structuralAuthority.ts:212-217) passes `reviewEvidence.reviewedSnapshotDigest`
+  // and `currentDigest` from the SAME source — `coverage.reviewedDigest`
+  // (structuralResolvers.ts:938 and :944) — so `r.reviewedSnapshotDigest ===
+  // input.currentDigest` evaluated `x === x` and could not fail. Because the
+  // coverage lookup key is the PRIOR digest, an approval of a SUPERSEDED design
+  // cleared FRAMING-AUTHORITY-UNVERIFIED, a `safety: true` requirement
+  // (severityPolicy.ts:259-262), while the build correctly refused to clear
+  // ENGINEERING-REVIEW-PENDING for the same record.
+  //
+  // The real current digest does not exist when buildStructuralAuthority runs —
+  // meta.digest is frozen later, in PASS 2 — which is why the reviewed digest
+  // was substituted in the first place. So the honest fix has two parts, and
+  // this is the first: REFUSE the review path unless the caller supplies a
+  // digest that is demonstrably NOT the record's own. `digestIsIndependent`
+  // makes the requirement explicit rather than implied, so a future caller
+  // cannot silently reintroduce the circularity.
   const r = input.reviewEvidence ?? null;
-  if (r
-    && !!r.reviewedSnapshotDigest
+  const digestIsIndependent =
+    input.currentDigestIsIndependent === true
     && !!input.currentDigest
+    && !!r?.reviewedSnapshotDigest;
+  if (r
+    && digestIsIndependent
     && r.reviewedSnapshotDigest === input.currentDigest
     && !!r.reviewerLicense) {
     const who = `${r.reviewerName ?? 'licensed engineer'} (${r.reviewerLicense}${r.licenseState ? `, ${r.licenseState}` : ''})`;

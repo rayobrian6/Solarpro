@@ -293,7 +293,12 @@ describe('FRAMING-AUTHORITY GATE — observation vs capacity authority', () => {
   it('§7.5 a licensed-engineer review bound to the current digest clears', () => {
     const review = { reviewedSnapshotDigest: DIGEST, reviewerName: 'Jane Roe, PE',
       reviewerLicense: 'PE-12345', licenseState: 'IL', approvedAtIso: '2026-07-23T00:00:00Z' };
-    const auth = resolveFramingCapacityAuthority({ reviewEvidence: review, currentDigest: DIGEST });
+    // D45 — the caller must ASSERT that currentDigest was obtained independently
+    // of the review record. Here it genuinely is: the test supplies DIGEST, and
+    // separately constructs a review that happens to name it.
+    const auth = resolveFramingCapacityAuthority({
+      reviewEvidence: review, currentDigest: DIGEST, currentDigestIsIndependent: true,
+    });
     expect(auth).not.toBeNull();
     expect(auth!.kind).toBe('engineer-review');
     expect(auth!.reviewedSnapshotDigest).toBe(DIGEST);
@@ -309,10 +314,38 @@ describe('FRAMING-AUTHORITY GATE — observation vs capacity authority', () => {
       reviewerLicense: 'PE-12345', licenseState: 'IL', approvedAtIso: '2026-07-23T00:00:00Z' };
     // review covers the OLD digest; the current digest changed → not covered → null
     const changed = 'ffffffff' + DIGEST.slice(8);
-    const auth = resolveFramingCapacityAuthority({ reviewEvidence: review, currentDigest: changed });
+    // Independence IS asserted, so this test proves the DIGEST MISMATCH refuses —
+    // not merely that the independence assertion was missing. Without the flag
+    // the call would return null for the wrong reason and the test would be
+    // vacuous for the behaviour it names.
+    const auth = resolveFramingCapacityAuthority({
+      reviewEvidence: review, currentDigest: changed, currentDigestIsIndependent: true,
+    });
     expect(auth).toBeNull();
     const out = runSnapshotStructuralEngine(baseResult, baseInput, OPERATOR_COMPLETE, auth);
     expect(out.engine.engineeringReviewRequired).toBe(true);  // invalidated → review required again
+  });
+
+  // ── §7.5b (PHASE A / D45) — the tautology guard itself. ───────────────────
+  // In production BOTH sides of the comparison came from coverage.reviewedDigest
+  // (structuralResolvers.ts:938 and :944 → structuralAuthority.ts:214-215), so
+  // `x === x` could not fail and an approval of a SUPERSEDED design cleared a
+  // safety:true requirement. A caller that cannot show its digest is independent
+  // must be refused even when the values match.
+  it('§7.5b a matching digest does NOT clear when independence is not asserted (D45)', () => {
+    const reviewedDigest = DIGEST;
+    const review = { reviewedSnapshotDigest: reviewedDigest, reviewerName: 'Jane Roe, PE',
+      reviewerLicense: 'PE-12345', licenseState: 'IL', approvedAtIso: '2026-07-23T00:00:00Z' };
+    // Exactly the production shape: currentDigest copied off the same record.
+    const auth = resolveFramingCapacityAuthority({ reviewEvidence: review, currentDigest: reviewedDigest });
+    expect(auth).toBeNull();
+    // …and it is the ASSERTION that is missing, not the match: flipping the flag
+    // on the identical inputs clears. This pins the refusal to the right cause.
+    const asserted = resolveFramingCapacityAuthority({
+      reviewEvidence: review, currentDigest: reviewedDigest, currentDigestIsIndependent: true,
+    });
+    expect(asserted).not.toBeNull();
+    expect(asserted!.kind).toBe('engineer-review');
   });
 
   // ── §7.7 — live-shaped and fixture-shaped inputs follow the SAME rule. ────

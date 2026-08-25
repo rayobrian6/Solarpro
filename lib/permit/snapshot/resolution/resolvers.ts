@@ -272,7 +272,15 @@ export const rackingCapacityDocumentResolver: RequirementResolver = {
   requirementCodes: [
     'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
     'RACKING-CAPACITY-APPLICABILITY-GAP',
-    'FASTENER-ASSEMBLY-UNVERIFIED',
+    // PHASE A / D33 — FASTENER-ASSEMBLY-UNVERIFIED was declared here and is
+    // NEVER fed by this resolver: the fastener predicate reads
+    // `ra.datasheetSource ?? ra.capacitySource` (structuralProjection.ts:494-511),
+    // which are compiled-in catalogue strings this resolver does not touch. A
+    // `cleared: true` with an audit ref would therefore have stamped
+    // `resolved: true` (build.ts:1978) on a record the emitter still pushes —
+    // a false clear standing in for a requirement that, at HEAD, has no writer
+    // at all. Phase B gives the fastener predicate a real document-backed
+    // writer; until then this resolver must not claim it.
   ],
   requiredInputs: ['projectJurisdiction'],
   produces: ['capacityDocument', 'manufacturerDocumentsArchived'],
