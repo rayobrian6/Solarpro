@@ -1219,6 +1219,14 @@ export function generatePermitHTML(
       // the pure build (fail-soft null defaults when the route did not resolve it).
       capacityDocument: snapshotAuthority?.capacityDocument ?? null,
       projectJurisdiction: snapshotAuthority?.projectJurisdiction ?? null,
+      // PHASE A.2 / D25 — the CANONICAL legal-AHJ identity. `projectJurisdiction`
+      // above is posted-record-derived and on Braidon is the MAILING city
+      // ("City of Granite City Building & Zoning") while the parcel is verified
+      // UNINCORPORATED Madison County. Supplying the identity is what makes the
+      // D4 identity comparison reachable in production instead of always
+      // falling through to the name path it was written to replace.
+      legalJurisdictionAuthorityId:
+        snapshotAuthority?.legalJurisdiction?.ahjRecordId ?? null,
       manufacturerDocumentsArchived: snapshotAuthority?.manufacturerDocumentsArchived ?? null,
       digestInvalidatedByLedger: snapshotAuthority?.digestInvalidatedByLedger ?? false,
       // PRR §2 — the ACTIVE invalidation ROWS. The boolean above was `rows > 0`

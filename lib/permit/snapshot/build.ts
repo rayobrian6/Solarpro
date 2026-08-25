@@ -127,8 +127,14 @@ export function buildPermitDesignSnapshot(
     /** VERIFIED racking-capacity document (lib/documents) for the selected mount
      *  — clears the RT-MINI blockers only when it covers the exact assembly. */
     capacityDocument?: RackingCapacityDocumentEvidence | null;
-    /** project jurisdiction (AHJ applicability) for the racking clearance check. */
+    /** project jurisdiction (AHJ applicability) for the racking clearance check.
+     *  ⚠ This is the POSTED-record display name, which on Braidon is the MAILING
+     *  city. Kept for the pre-migration-119 compatibility comparison only. */
     projectJurisdiction?: string | null;
+    /** PHASE A.2 / D25 — the CANONICAL legal-AHJ record id (ahj_registry). When
+     *  present on both the project and the document, applicability is decided by
+     *  IDENTITY and the free-text name above never decides it. */
+    legalJurisdictionAuthorityId?: string | null;
     /** §12 ISSUED-FOR-PERMIT gate: required manufacturer documents archived.
      *  null ⇒ unresolved (DB unavailable / not read) ⇒ precondition NOT satisfied. */
     manufacturerDocumentsArchived?: boolean | null;
@@ -1143,6 +1149,7 @@ export function buildPermitDesignSnapshot(
     // blockers firing (fail-soft).
     capacityDocument: opts?.capacityDocument ?? null,
     projectJurisdiction: opts?.projectJurisdiction ?? null,
+    legalJurisdictionAuthorityId: opts?.legalJurisdictionAuthorityId ?? null,
     // FRAMING-AUTHORITY GATE — evidence for the framing CAPACITY authority.
     framingCapacityDocument: opts?.framingCapacityDocument ?? null,
     framingEngineerReview: opts?.framingEngineerReview ?? null,

@@ -489,7 +489,11 @@ export const codeAuthorityResolver: RequirementResolver = {
   id: 'code-authority@v1',
   mode: 'AUTO_RETRIEVED',
   requirementCodes: ['CODE-AUTHORITY-INCOMPLETE'],
-  requiredInputs: ['projectLegalAuthority', 'projectJurisdiction'],
+  // PHASE A.2 / D2 — `legalJurisdiction` is declared so a jurisdiction CORRECTION
+  // re-dirties this resolver. The lifecycle tests DECLARED inputs only
+  // (lifecycle.ts:382), so without it the mailing-city answer below could never
+  // be revisited once the boundary was established.
+  requiredInputs: ['projectLegalAuthority', 'projectJurisdiction', 'legalJurisdiction'],
   produces: ['codeAdoptionAuthority'],
   description: 'Retrieves the adopted NEC / IBC / IRC / IFC editions, the permit office and the local amendments for the project\'s AHJ, corroborated against the curated record and escalated on disagreement.',
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
@@ -501,8 +505,34 @@ export const codeAuthorityResolver: RequirementResolver = {
     const lat = num(p.lat) ?? legal?.normalized.lat ?? null;
     const lng = num(p.lng) ?? legal?.normalized.lng ?? null;
     const county = legal?.normalized.county ?? str(p.county);
+    // ── PHASE A.2 / D1 — QUERY THE JURISDICTION THAT ACTUALLY GOVERNS ────────
+    // This passed `city: str(p.city)` — the MAILING city ("GRANITE CITY") — while
+    // the verified boundary determination sat unread on the same bundle. The
+    // registry matcher is city-first (internalAhjRegistry.ts:152-164), so
+    // allMatches resolved to the Granite City row and the canonical
+    // `il-madison-county` row was NEVER INSPECTED. Verifying the county row would
+    // still have returned NO_COVERAGE, which is why sourcing the adoption
+    // ordinance was worthless until this line changed.
+    //
+    // A positively-unincorporated parcel is governed by the COUNTY: suppress the
+    // mailing city so the county row is the one matched. `unincorporated === null`
+    // means undetermined, NOT false — only an explicit true suppresses, so an
+    // unresolved boundary keeps the previous behaviour rather than silently
+    // re-homing the query.
+    // ONLY the authoritative flag on LegalJurisdictionAuthority is consulted.
+    // `legal.normalized` carries `incorporatedPlace`, and an EMPTY value there
+    // means "not determined" just as often as "none" — inferring from it would
+    // re-home the query on absent data, which is the failure mode this repair
+    // exists to remove.
+    const _legalJur = ctx.authority.legalJurisdiction ?? null;
+    const _unincorporated = _legalJur?.unincorporated === true;
+    const _queryCity = _unincorporated ? null : str(p.city);
     const inputsRecorded: Record<string, string | number | boolean | null> = {
-      lat, lng, county, city: str(p.city), stateCode: str(p.state),
+      lat, lng, county, city: _queryCity, stateCode: str(p.state),
+      mailingCity: str(p.city),
+      unincorporated: _unincorporated,
+      canonicalAhjRecordId: _legalJur?.ahjRecordId ?? null,
+      canonicalAhjName: _legalJur?.ahjName ?? null,
       providerInjected: !!provider,
       providerConfigured: provider ? provider.isConfigured() : null,
       legalAuthorityVerified: legal?.verified ?? null,
@@ -521,7 +551,7 @@ export const codeAuthorityResolver: RequirementResolver = {
     }
 
     const res = await provider.getCodeAdoption({
-      lat, lng, address: str(p.address), stateCode: str(p.state), county, city: str(p.city),
+      lat, lng, address: str(p.address), stateCode: str(p.state), county, city: _queryCity,
     });
 
     if (!res.ok) {
@@ -531,9 +561,13 @@ export const codeAuthorityResolver: RequirementResolver = {
       // fields exist and which are missing — it can never clear anything) and
       // (b) an appended enrichment-attempt entry recording what was tried and
       // why it failed. Fail-soft: a missing table never blocks the run.
+      // D3 — the seed WRITE and the query above must name the SAME row. This
+      // wrote `il-madison-county` while the query hit `il-madison-granite-city`,
+      // so the county row accumulated enrichment attempts whose notes described
+      // a jurisdiction that was never queried.
       const _corr = resolveAhjRecord({
-        ahjRecordId: str(p.ahjRecordId) ?? str(p.ahjId),
-        stateCode: str(p.state), county, city: str(p.city), address: str(p.address),
+        ahjRecordId: _legalJur?.ahjRecordId ?? str(p.ahjRecordId) ?? str(p.ahjId),
+        stateCode: str(p.state), county, city: _queryCity, address: str(p.address),
       });
       if (_corr) {
         await ctx.safeDbRead('ahjRegistry.retainSeed', () => upsertAhjRegistryRow({

@@ -97,7 +97,11 @@ export interface StructuralAuthorityCtx {
    *  the selected mount (lib/documents). null ⇒ none archived / DB unavailable ⇒
    *  RT-MINI blockers stay firing (fail-soft). */
   capacityDocument?: RackingCapacityDocumentEvidence | null;
+  /** ⚠ POSTED-record display name — the MAILING city on Braidon. Compatibility
+   *  path only; `legalJurisdictionAuthorityId` is the identity that governs. */
   projectJurisdiction?: string | null;
+  /** PHASE A.2 / D25 — canonical legal-AHJ record id (ahj_registry). */
+  legalJurisdictionAuthorityId?: string | null;
   /** FRAMING-AUTHORITY GATE — the resolved evidence for the framing CAPACITY
    *  authority. The document path is resolved async THROUGH lib/documents (a
    *  verified + archived truss-drawing / manufacturer-calc / stamped-analysis
@@ -187,6 +191,12 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
   const rackingAssembly = buildRackingAssembly(ctx.mountSystem, {
     capacityDocument: ctx.capacityDocument ?? null,
     projectJurisdiction: ctx.projectJurisdiction ?? null,
+    // PHASE A.2 / D25 — the CANONICAL legal-AHJ identity, so the clearance
+    // comparison runs on identity rather than falling through to a free-text
+    // name that was the MAILING city. `ctx.projectJurisdiction` above is kept
+    // for the pre-migration-119 compatibility path only.
+    projectJurisdictionAuthorityId: ctx.legalJurisdictionAuthorityId ?? null,
+    requiredSubstrate: ctx.roofCovering ?? null,
     // D12 — the operator's pinned rail, already validated by `planRailPin`
     // against the mount's own compatibility statement and span. The verdict is
     // the ONE place a rail selection is decided; this is a projection of it, so

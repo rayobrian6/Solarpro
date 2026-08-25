@@ -392,6 +392,15 @@ export function resolveAsdAllowableLbs(
 export interface BuildRackingAssemblyOptions {
   capacityDocument?: RackingCapacityDocumentEvidence | null;
   projectJurisdiction?: string | null;
+  /** PHASE A.2 / D25 — the project's STABLE legal-AHJ identity. The clearance
+   *  context has accepted this since D4, but no caller ever supplied it, so the
+   *  comparison always fell through to the NAME path — and the name it received
+   *  was the MAILING city. Supplying the identity is what makes the D4 repair
+   *  actually reachable in production rather than only in its own tests. */
+  projectJurisdictionAuthorityId?: string | null;
+  /** The selected roof substrate the document must cover. Same story: the
+   *  clearance check has always applied it, and nothing passed it. */
+  requiredSubstrate?: string | null;
   /** D12 — the rail an operator PINNED to this assembly, when one is in force.
    *
    *  A mixed-manufacturer mount carries no rail of its own, so before D12 the
@@ -510,6 +519,12 @@ export function buildRackingAssembly(
           mountModel: mount.model,
           requiredRail: railModel,
           projectJurisdiction: opts?.projectJurisdiction ?? null,
+          // D25 — the identity path. When both sides carry an ahj_registry id the
+          // comparison is by IDENTITY and the free-text name never decides
+          // applicability; the name comparison survives only for rows archived
+          // before migration 119.
+          projectJurisdictionAuthorityId: opts?.projectJurisdictionAuthorityId ?? null,
+          requiredSubstrate: opts?.requiredSubstrate ?? null,
         },
         opts?.capacityDocument ?? null,
       )
