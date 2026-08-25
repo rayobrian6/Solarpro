@@ -159,6 +159,22 @@ export async function resolveEngineeringReviewCoverage(
     reviewerLicenseState: rec.reviewerLicenseState,
     scopeStatement: rec.scopeStatement,
     recordId: rec.id,
+    // ── A.1.1 §2 — NO SEAL EVIDENCE EXISTS IN THIS SCHEMA ────────────────────
+    // migration 116's engineering_review_records carries the REVIEW: who
+    // approved, under what licence, of which digest, with what scope. It carries
+    // no sealed instrument, no artifact hash and no seal date, because a seal is
+    // a separate authority event recorded at a different moment.
+    //
+    // Emitting nulls here is the honest answer and is deliberately NOT a
+    // placeholder to be filled in later by inference: until a governed seal
+    // store exists, `signatureSealSatisfied` is false for every project, and the
+    // ISSUED-FOR-PERMIT seal precondition stays unmet. A review still covers the
+    // design; the two facts are simply no longer conflated.
+    sealRecordId: null,
+    sealArtifactSha256: null,
+    sealedAtIso: null,
+    sealLicenseState: null,
+    sealVerified: false,
     storeUnavailable: false,
     storeError: null,
     basis: `${rec.reviewerName} (${rec.reviewerRole}, licence ${rec.reviewerLicense} ${rec.reviewerLicenseState}) approved `

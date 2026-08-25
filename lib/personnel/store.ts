@@ -109,6 +109,42 @@ export async function listPersonnel(scope: PersonnelScope): Promise<PersonnelRec
 }
 
 /** The ACTIVE (not-superseded) per-project assignments, newest first. */
+/**
+ * A.1.1 §1 — THE GOVERNED LICENSED IDENTITY FOR AN AUTHENTICATED ACTOR.
+ *
+ * The engineering-review API used to server-stamp only `reviewerUserId` and take
+ * `reviewerName`, `reviewerLicense` and `reviewerLicenseState` straight off the
+ * request body — under a comment claiming the identity was server-stamped. Any
+ * admin could therefore record an approval in another professional's name and
+ * licence number, which defeats the attestation the record exists to carry.
+ *
+ * This is the only sanctioned source of a reviewer's professional identity: an
+ * ACTIVE personnel row in a LICENSED role, tied to the authenticated user id.
+ * Returns null when no such row exists — and null must be refused by the caller,
+ * never back-filled from the request.
+ */
+export async function resolveLicensedProfessionalForUser(
+  userId: string,
+  role: PersonnelRole,
+): Promise<PersonnelRecord | null> {
+  if (!userId?.trim()) return null;
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT * FROM personnel_roles
+    WHERE active = true
+      AND user_id = ${userId}
+      AND role = ${role}
+      AND license_number IS NOT NULL
+      AND btrim(license_number) <> ''
+      AND license_state IS NOT NULL
+      AND btrim(license_state) <> ''
+    ORDER BY is_default DESC, updated_at DESC
+    LIMIT 1
+  `;
+  const r = (rows as unknown[])[0];
+  return r ? rowToPersonnel(r as Record<string, unknown>) : null;
+}
+
 export async function listProjectAssignments(projectId: string): Promise<ProjectPersonnelAssignment[]> {
   const sql = await getDbReady();
   const rows = await sql`

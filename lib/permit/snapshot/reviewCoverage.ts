@@ -181,13 +181,38 @@ export function decideReviewCoverage(input: ReviewCoverageDecisionInput): Review
     return { covers: false, signatureSealSatisfied: false, reviewedDigest, invalidatedByLedger: true, refusals, basis: led.reason ?? 'invalidated by the authority ledger' };
   }
 
+  // ── A.1.1 §2 — THE SEAL IS ITS OWN AUTHORITY EVENT ───────────────────────
+  // This used to return `signatureSealSatisfied: true` for ANY covering review,
+  // reasoning that "the digest-bound record IS the signature". That inferred a
+  // formal legal instrument from a database row. A review says a licensed
+  // professional accepted these exact bytes; a seal is how they attest it to the
+  // AHJ. They are recorded at different moments and revocable independently.
+  //
+  // The seal now requires its own governed evidence: a seal record, a content
+  // hash of the sealed instrument (a seal with no artifact is a claim, not a
+  // seal), a verification flag, and a licence state matching the reviewer's —
+  // a seal is state-scoped, so a seal from another jurisdiction satisfies
+  // nothing here. Absent ⇒ the SEAL precondition fails while the REVIEW still
+  // legitimately covers the design. `covers` is deliberately unaffected.
+  const _sealStateOk = !!c.sealLicenseState?.trim()
+    && c.sealLicenseState.trim().toUpperCase() === (c.reviewerLicenseState ?? '').trim().toUpperCase();
+  const sealSatisfied =
+    c.sealVerified === true
+    && !!c.sealRecordId?.trim()
+    && !!c.sealArtifactSha256?.trim()
+    && !!c.sealedAtIso?.trim()
+    && _sealStateOk;
+  if (!sealSatisfied) {
+    refusals.push(
+      c.sealRecordId?.trim()
+        ? 'a seal record exists but is unverified, unhashed, undated, or scoped to a different licence state'
+        : 'no governed signature/seal evidence is recorded — the review covers the design, the seal does not exist',
+    );
+  }
+
   return {
     covers: true,
-    // The digest-bound record IS the signature: a named licensed professional,
-    // licence number and state, an explicit scope statement, and the exact bytes
-    // approved. Nothing here is presentation — the seal claim rests on the same
-    // record the gate does, and it fails closed with it.
-    signatureSealSatisfied: true,
+    signatureSealSatisfied: sealSatisfied,
     reviewedDigest,
     invalidatedByLedger: false,
     refusals,

@@ -62,6 +62,11 @@ function approval(digest: string, over: Partial<EngineeringReviewCoverage> = {})
     reviewerLicenseState: 'IL',
     scopeStatement: 'Structural and electrical review of the complete permit set.',
     recordId: 'rec-0001',
+    // A.1.1 §2 — a REVIEW, with no seal. This is the shape the live store
+    // produces: migration 116 records the review and carries no sealed
+    // instrument. Tests that need a sealed package pass `sealed()` overrides.
+    sealRecordId: null, sealArtifactSha256: null, sealedAtIso: null,
+    sealLicenseState: null, sealVerified: false,
     storeUnavailable: false,
     storeError: null,
     basis: `Jordan Vale, PE approved design digest ${digest.slice(0, 12)}…`,
@@ -69,12 +74,26 @@ function approval(digest: string, over: Partial<EngineeringReviewCoverage> = {})
   };
 }
 
+/** A.1.1 §2 — governed signature/seal evidence, as its own authority event.
+ *  Separate from `approval()` so a test must OPT IN to a sealed package and can
+ *  never acquire the seal precondition as a side effect of a valid review. */
+const SEALED: Partial<EngineeringReviewCoverage> = {
+  sealRecordId: 'seal-0001',
+  sealArtifactSha256: 'f'.repeat(64),
+  sealedAtIso: '2026-08-04T10:05:00.000Z',
+  sealLicenseState: 'IL',
+  sealVerified: true,
+};
+
 /** The store's projection when nothing active+approved matches. */
 function uncovered(basis: string, over: Partial<EngineeringReviewCoverage> = {}): EngineeringReviewCoverage {
   return {
     covered: false, reviewedDigest: null, approvedAtIso: null,
     reviewerName: null, reviewerRole: null, reviewerLicense: null, reviewerLicenseState: null,
-    scopeStatement: null, recordId: null, storeUnavailable: false, storeError: null, basis, ...over,
+    scopeStatement: null, recordId: null,
+    sealRecordId: null, sealArtifactSha256: null, sealedAtIso: null,
+    sealLicenseState: null, sealVerified: false,
+    storeUnavailable: false, storeError: null, basis, ...over,
   };
 }
 
@@ -156,10 +175,34 @@ describe('PRR §1 · review coverage fails closed on every missing fact', () => 
   it('6. a VALID approved review for the EXACT current digest ⇒ coverage is TRUE', () => {
     const d = decide(approval(DIGEST_A));
     expect(d.covers).toBe(true);
-    expect(d.signatureSealSatisfied).toBe(true);
     expect(d.invalidatedByLedger).toBe(false);
-    expect(d.refusals).toEqual([]);
     expect(d.reviewedDigest).toBe(DIGEST_A);
+    // A.1.1 §2 — the REVIEW covers. The SEAL is a separate authority event and
+    // this record carries none, so the seal precondition is NOT satisfied. This
+    // previously returned true for any covering review, inferring a formal legal
+    // instrument from a database row.
+    expect(d.signatureSealSatisfied).toBe(false);
+    expect(d.refusals).toContain(
+      'no governed signature/seal evidence is recorded — the review covers the design, the seal does not exist');
+  });
+
+  it('6b. governed seal evidence — and ONLY that — satisfies the seal precondition (A.1.1 §2)', () => {
+    const sealed = decide(approval(DIGEST_A, SEALED));
+    expect(sealed.covers).toBe(true);
+    expect(sealed.signatureSealSatisfied).toBe(true);
+    expect(sealed.refusals).toEqual([]);
+  });
+
+  it('6c. an UNVERIFIED, unhashed or wrong-state seal does NOT satisfy it (A.1.1 §2)', () => {
+    // unverified
+    expect(decide(approval(DIGEST_A, { ...SEALED, sealVerified: false })).signatureSealSatisfied).toBe(false);
+    // no artifact hash — a seal with no instrument is a claim, not a seal
+    expect(decide(approval(DIGEST_A, { ...SEALED, sealArtifactSha256: null })).signatureSealSatisfied).toBe(false);
+    // sealed in a DIFFERENT jurisdiction than the reviewer is licensed in
+    const wrongState = decide(approval(DIGEST_A, { ...SEALED, sealLicenseState: 'MO' }));
+    expect(wrongState.signatureSealSatisfied).toBe(false);
+    // …and every one of these still COVERS: the review is valid, the seal is not.
+    expect(wrongState.covers).toBe(true);
   });
 
   it('an UNREADABLE review store is never coverage', () => {
@@ -330,11 +373,15 @@ describe('PRR §4 · the design digest identifies the DESIGN, not its approval s
     expect(snap.projectAuthority.issueStateBasis.reviewCoversCurrentDigest).toBe(true);
     expect(snap.projectAuthority.issueStateBasis.reviewStale).toBe(false);
     expect(snap.projectAuthority.engineerReviewStatus).toMatch(/^APPROVED/);
-    // The two preconditions that were hardcoded false now BOTH pass.
+    // The digest precondition, previously hardcoded false, now passes.
     const byId = Object.fromEntries(
       snap.projectAuthority.issuedForPermitGate.preconditions.map(p => [p.id, p.satisfied]));
     expect(byId['engineer-review-current-digest']).toBe(true);
-    expect(byId['signature-seal']).toBe(true);
+    // A.1.1 §2 — the SEAL precondition is a separate authority event and this
+    // approval carries no seal evidence, so it stays UNSATISFIED. A digest-bound
+    // review reaching REVIEWED is exactly what this test proves; reaching SEALED
+    // requires a governed sealed instrument, proven in §4b.
+    expect(byId['signature-seal']).toBe(false);
     // The review requirement is CLOSED and no longer a blocker.
     expect(snap.permitReadiness.blockers.map(b => b.code)).not.toContain('ENGINEERING-REVIEW-PENDING');
     expect(snap.permitReadiness.registry.find(r => r.code === 'ENGINEERING-REVIEW-PENDING')?.resolved).toBe(true);
@@ -651,9 +698,25 @@ describe('PRR §4b · 10. a controlled project with complete authority reaches I
     expect(snap.projectAuthority.issueState).toBe('PENDING ENGINEERING REVIEW');
   });
 
-  it('with a licensed approval of that exact design digest it reaches ISSUED FOR PERMIT', () => {
+  it('a licensed approval WITHOUT a seal reaches REVIEWED but NOT ISSUED FOR PERMIT (A.1.1 §2)', () => {
     const D = buildIssuable().meta.digest;
     const snap = buildIssuable(approval(D));
+    expect(snap.meta.digest).toBe(D);
+    // The review requirement closes…
+    expect(snap.permitReadiness.registry.find(r => r.code === 'ENGINEERING-REVIEW-PENDING')?.resolved).toBe(true);
+    // …but the seal precondition is its own authority event and is unmet, so the
+    // package may not claim ISSUED FOR PERMIT. Before this change a review alone
+    // carried the package all the way through the seal gate.
+    const unmet = snap.projectAuthority.issuedForPermitGate.preconditions
+      .filter(p => !p.satisfied).map(p => p.id);
+    expect(unmet).toContain('signature-seal');
+    expect(snap.projectAuthority.issuedForPermitGate.pass).toBe(false);
+    expect(snap.projectAuthority.issueState).not.toBe('ISSUED FOR PERMIT');
+  });
+
+  it('with a licensed approval AND a governed seal of that exact design digest it reaches ISSUED FOR PERMIT', () => {
+    const D = buildIssuable().meta.digest;
+    const snap = buildIssuable(approval(D, SEALED));
 
     expect(snap.meta.digest).toBe(D);                                  // approving changed nothing
     expect(snap.projectAuthority.issueState).toBe('ISSUED FOR PERMIT');
@@ -707,17 +770,63 @@ describe('PRR §4b · 10. a controlled project with complete authority reaches I
 
   it('PA §6b — with a legitimate designer the SAME approval releases, no V37', () => {
     const D = buildIssuable().meta.digest;
-    const snap = buildIssuable(approval(D));
+    // A.1.1 §2 — a SEALED approval: this test is about the designer precondition,
+    // so the seal is supplied rather than left to be inferred from the review.
+    const snap = buildIssuable(approval(D, SEALED));
     expect(snap.projectAuthority.designer).toBeTruthy();
     expect(snap.projectAuthority.issueState).toBe('ISSUED FOR PERMIT');
     expect(snap.projectAuthority.issuedForPermitGate.pass).toBe(true);
     expect(snap.permitReadiness.registry.filter(r => !r.resolved)).toEqual([]);
   });
 
+  // ── A.1.1 §3 — FRAMING CLEARS THROUGH THE PRODUCTION BUILD (PASS 2) ───────
+  // The framing authority used to be decided in PASS 1 from the review record's
+  // OWN digest (x === x), so an approval of a superseded design cleared a
+  // safety:true requirement while the build refused to clear the review itself.
+  // These exercise the real generatePermitHTML path, not the pure resolver.
+  it('A.1.1 §3 — an EXACT-digest review clears FRAMING through the real build', () => {
+    const D = buildIssuable().meta.digest;
+    const snap = buildIssuable(approval(D, SEALED));
+    const framing = snap.permitReadiness.registry.find(r => r.code === 'FRAMING-AUTHORITY-UNVERIFIED');
+    // Cleared, and cleared WITH a citable audit reference — a resolved flag
+    // carrying no reference is not a clearance (D51).
+    if (framing) {
+      expect(framing.resolved).toBe(true);
+      expect(String(framing.resolutionAuditRef ?? '')).toMatch(/^authority:engineering-review#/);
+    }
+    expect(snap.permitReadiness.blockers.map(b => b.code)).not.toContain('FRAMING-AUTHORITY-UNVERIFIED');
+  });
+
+  it('A.1.1 §3 — a STALE review clears NOTHING through the real build', () => {
+    const D = buildIssuable().meta.digest;
+    const stale = 'c'.repeat(64);
+    expect(stale).not.toBe(D);
+    const snap = buildIssuable(approval(stale, SEALED));
+    // Neither the review nor the framing requirement may close on a digest the
+    // approval does not name.
+    expect(snap.permitReadiness.blockers.map(b => b.code)).toContain('ENGINEERING-REVIEW-PENDING');
+    expect(snap.projectAuthority.issueState).not.toBe('ISSUED FOR PERMIT');
+  });
+
+  it('A.1.1 §3 — an INVALID professional identity creates no consumable authority', () => {
+    const D = buildIssuable().meta.digest;
+    // Complete in every respect EXCEPT the licence: the store shape can carry it,
+    // the decision must still refuse. This is the shape a client-supplied
+    // identity would have produced before the API derived it server-side.
+    const judge = (over: Partial<EngineeringReviewCoverage>) =>
+      decideReviewCoverage({ coverage: approval(D, over), designDigest: D, invalidations: [] });
+    const noLicence = judge({ ...SEALED, reviewerLicense: null });
+    expect(noLicence.covers).toBe(false);
+    expect(noLicence.signatureSealSatisfied).toBe(false);
+    expect(noLicence.refusals.join(' ')).toMatch(/identity is incomplete/i);
+    // …and an unlicensed ROLE is refused before identity is even considered.
+    expect(judge({ ...SEALED, reviewerRole: 'designer' as never }).covers).toBe(false);
+  });
+
   it('PA §6c — a no-op regeneration PRESERVES the approval and the digest', () => {
     const D = buildIssuable().meta.digest;
-    const a = buildIssuable(approval(D));
-    const b = buildIssuable(approval(D));
+    const a = buildIssuable(approval(D, SEALED));
+    const b = buildIssuable(approval(D, SEALED));
     expect(b.meta.digest).toBe(a.meta.digest);
     expect(b.projectAuthority.issueState).toBe('ISSUED FOR PERMIT');
     expect(b.certification.engineeringReviewApproved).toMatchObject({ reviewedDigest: D });

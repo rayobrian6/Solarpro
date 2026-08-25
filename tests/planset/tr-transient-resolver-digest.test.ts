@@ -517,6 +517,9 @@ function approvalOf(digest: string): EngineeringReviewCoverage {
     reviewerLicenseState: 'IL',
     scopeStatement: 'Structural and electrical review of the complete permit set.',
     recordId: 'rec-tr-0001',
+    // A.1.1 §2 — review without seal; this suite is about digest drift.
+    sealRecordId: null, sealArtifactSha256: null, sealedAtIso: null,
+    sealLicenseState: null, sealVerified: false,
     storeUnavailable: false,
     storeError: null,
     basis: `Jordan Vale, PE approved design digest ${digest.slice(0, 12)}…`,

@@ -32,6 +32,10 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+// A.1.1 §1 — the governed licensed-professional record is the ONLY source of a
+// reviewer's professional identity.
+import { resolveLicensedProfessionalForUser } from '@/lib/personnel/store';
+import { isPersonnelRole } from '@/lib/personnel/types';
 import {
   listEngineeringReviews, recordEngineeringReview, resolveEngineeringReviewCoverage,
 } from '@/lib/engineeringReview/store';
@@ -79,18 +83,48 @@ export async function POST(req: NextRequest) {
   try { body = await req.json(); }
   catch { return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 }); }
 
+  // ── A.1.1 §1 — PROFESSIONAL IDENTITY IS DERIVED, NEVER ACCEPTED ───────────
+  // This block previously stamped only `reviewerUserId` from the session and
+  // read reviewerName / reviewerLicense / reviewerLicenseState straight off the
+  // request body — beneath a comment asserting the identity was server-stamped.
+  // Any admin could therefore record an approval under another professional's
+  // name and licence number, which destroys exactly the attestation the record
+  // exists to carry.
+  //
+  // The reviewer's professional identity now comes from an ACTIVE personnel row
+  // in the requested LICENSED role, tied to the AUTHENTICATED actor. No such row
+  // ⇒ refuse. It is never back-filled from the request, and a client-supplied
+  // name/licence is not merged in as a fallback: a licence number the server
+  // cannot vouch for is not evidence.
+  const _requestedRole = String(body.reviewerRole ?? '');
+  if (!isPersonnelRole(_requestedRole)) {
+    return NextResponse.json(
+      { success: false, error: `reviewerRole '${_requestedRole}' is not a recognised personnel role` },
+      { status: 400 });
+  }
+  const _licensed = await resolveLicensedProfessionalForUser(admin.id, _requestedRole);
+  if (!_licensed) {
+    return NextResponse.json({
+      success: false,
+      error: 'No governed licensed-professional record is on file for the authenticated user in role '
+        + `'${_requestedRole}'. A professional approval may only be recorded by the licensed professional `
+        + 'themselves, from their own governed personnel record — reviewer identity is never accepted from '
+        + 'the request. Add or activate the personnel record first (Admin → Personnel).',
+    }, { status: 403 });
+  }
+
   const input: EngineeringReviewInput = {
     projectId: String(body.projectId ?? ''),
     snapshotDigest: String(body.snapshotDigest ?? '').trim().toLowerCase(),
     snapshotId: (body.snapshotId as string | undefined) ?? null,
     plansetEngineVersion: (body.plansetEngineVersion as string | undefined) ?? null,
-    reviewerRole: String(body.reviewerRole ?? ''),
-    // Server-stamped identity — the client may not name another reviewer.
+    reviewerRole: _requestedRole,
+    // Every identity field below is SERVER-DERIVED from the governed record.
     reviewerUserId: admin.id,
-    reviewerName: String(body.reviewerName ?? ''),
-    reviewerLicense: String(body.reviewerLicense ?? ''),
-    reviewerLicenseState: String(body.reviewerLicenseState ?? ''),
-    reviewerLicenseExpiresOn: (body.reviewerLicenseExpiresOn as string | undefined) ?? null,
+    reviewerName: _licensed.personName,
+    reviewerLicense: _licensed.licenseNumber ?? '',
+    reviewerLicenseState: _licensed.licenseState ?? '',
+    reviewerLicenseExpiresOn: _licensed.licenseExpiresOn ?? null,
     decision: String(body.decision ?? ''),
     scopeStatement: (body.scopeStatement as string | undefined) ?? null,
     notes: (body.notes as string | undefined) ?? null,

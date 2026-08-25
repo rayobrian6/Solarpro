@@ -439,7 +439,12 @@ function approvalOf(digest: string): EngineeringReviewCoverage {
     reviewerName: 'Jordan Vale, PE', reviewerRole: 'engineer_of_record',
     reviewerLicense: '062-071234', reviewerLicenseState: 'IL',
     scopeStatement: 'Structural and electrical review of the complete permit set.',
-    recordId: 'rec-oar-0001', storeUnavailable: false, storeError: null,
+    recordId: 'rec-oar-0001',
+    // A.1.1 §2 — review without seal; this suite is about outage retention, not
+    // the seal precondition.
+    sealRecordId: null, sealArtifactSha256: null, sealedAtIso: null,
+    sealLicenseState: null, sealVerified: false,
+    storeUnavailable: false, storeError: null,
     basis: `Jordan Vale, PE approved design digest ${digest.slice(0, 12)}…`,
   };
 }

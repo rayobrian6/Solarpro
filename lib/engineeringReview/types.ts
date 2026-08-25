@@ -135,6 +135,25 @@ export interface EngineeringReviewCoverage {
   reviewerLicenseState: string | null;
   scopeStatement: string | null;
   recordId: string | null;
+  // ── A.1.1 §2 — SIGNATURE / SEAL IS A SEPARATE AUTHORITY EVENT ─────────────
+  // A digest-bound review says a licensed professional accepted these exact
+  // bytes. A signature/seal is the formal instrument by which they attest it to
+  // the AHJ. They are recorded at different moments, can be revoked
+  // independently, and one does not imply the other. `signatureSealSatisfied`
+  // used to be returned `true` for any covering review, on the reasoning that
+  // "the digest-bound record IS the signature" — that inferred a legal
+  // instrument from a database row. These fields carry the seal as its own
+  // governed evidence; absent ⇒ the seal precondition is NOT satisfied, while
+  // the review itself may still legitimately cover the design.
+  /** the governed seal artifact id, when one has been recorded. */
+  sealRecordId: string | null;
+  /** content hash of the sealed instrument — a seal with no artifact is a claim. */
+  sealArtifactSha256: string | null;
+  sealedAtIso: string | null;
+  /** the jurisdiction the seal is valid in. A seal is state-scoped. */
+  sealLicenseState: string | null;
+  /** true only when the seal record itself passed governed verification. */
+  sealVerified: boolean;
   /** true ⇔ the store could not be read (migration 116 unrun / DB down). A
    *  DIFFERENT fact from "no approval exists", and never a clearance. */
   storeUnavailable: boolean;
@@ -150,6 +169,8 @@ export function uncoveredReview(basis: string, opts?: {
     covered: false, reviewedDigest: null, approvedAtIso: null,
     reviewerName: null, reviewerRole: null, reviewerLicense: null, reviewerLicenseState: null,
     scopeStatement: null, recordId: null,
+    sealRecordId: null, sealArtifactSha256: null, sealedAtIso: null,
+    sealLicenseState: null, sealVerified: false,
     storeUnavailable: opts?.storeUnavailable ?? false,
     storeError: opts?.storeError ?? null,
     basis,
