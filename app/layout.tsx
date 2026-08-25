@@ -14,6 +14,7 @@ import { BUILD_VERSION } from '@/lib/version';
 // `next/dynamic` wrapper with `ssr: false` was banned in Server Components
 // — error caught at build time on 2026-08-01.)
 import SolarDogWithTour from '@/components/support/SolarDogWithTour';
+import { getSolarDogEnabled } from '@/lib/db/featureFlags';
 
 export const metadata: Metadata = {
   title: 'SolarPro Design Platform',
@@ -39,7 +40,12 @@ export const viewport: Viewport = {
   maximumScale: 5,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // SolarDog visibility resolution: DB row → SOLARDOG_ENABLED env var → off.
+  // Read on every request so admin flips via /admin/system-tools take effect
+  // without a redeploy. If the app_feature_flags table is missing (migration
+  // 121 not yet run), the helper fails closed to the env-var path or off.
+  const solarDogEnabled = await getSolarDogEnabled();
   return (
     // suppressHydrationWarning: prevents false-positive hydration errors from
     // browser extensions (Grammarly, DarkReader, etc.) that modify the DOM
@@ -83,7 +89,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               {children}
               {/* SolarDog 🐾 — AI agent, floating widget, visible on all pages */}
               {/* SolarDogWithTour auto-starts the onboarding tour for new users */}
-              <SolarDogWithTour />
+              {/* Gated by getSolarDogEnabled() — DB row overrides env var. */}
+              {solarDogEnabled ? <SolarDogWithTour /> : null}
               {/* Client-side error monitoring — ships unhandled errors to Sentry when DSN is set */}
               <ClientMonitoringInit />
               {/* Version indicator — always visible for deployment verification */}

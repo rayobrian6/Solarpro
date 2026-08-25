@@ -45,7 +45,7 @@ const root = path.resolve(__dirname, '..');
 /** THE highest governed migration prefix. Named once so adding a migration is a
  *  one-line, deliberate governance update rather than a hunt through literals —
  *  which is exactly why 117 left five assertions failing after it landed. */
-const HIGHEST_GOVERNED_MIGRATION = '120';
+const HIGHEST_GOVERNED_MIGRATION = '121';
 
 /** THE count of governed migration SQL files. This is deliberately a LITERAL and
  *  not `discoverMigrationFiles().count` — deriving it from the manifest would
@@ -56,7 +56,7 @@ const HIGHEST_GOVERNED_MIGRATION = '120';
  *  NOTE it is NOT the highest prefix: the numbering is non-contiguous (the
  *  101-file baseline, then 105-108, 109-112, 113/114, 115, 116, 117, 118, 119,
  *  120), so the count and the highest prefix move independently. */
-const GOVERNED_MIGRATION_COUNT = 117;
+const GOVERNED_MIGRATION_COUNT = 118;
 
 /** Normalize a filesystem path to POSIX separators. `path.join` returns
  *  backslashes on Windows, so `toContain('lib/migrations')` failed on this
@@ -234,12 +234,12 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
     expect(extractDescription('001_initial_schema.sql')).toBe('initial schema');
   });
 
-  it(`discovers ${GOVERNED_MIGRATION_COUNT} SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review + 117 AHJ registry + 118 field route measurements + 119 document jurisdiction authority)`, () => {
+  it(`discovers ${GOVERNED_MIGRATION_COUNT} SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review + 117 AHJ registry + 118 field route measurements + 119 document jurisdiction authority + 120 audit chain + 121 app feature flags)`, () => {
     const manifest = discoverMigrationFiles();
     expect(manifest.count).toBe(GOVERNED_MIGRATION_COUNT);
   });
 
-  it('highest prefix is 119 (D4 document jurisdiction authority)', () => {
+  it('highest prefix is 121 (app feature flags)', () => {
     const manifest = discoverMigrationFiles();
     expect(manifest.highestPrefix).toBe(HIGHEST_GOVERNED_MIGRATION);
   });

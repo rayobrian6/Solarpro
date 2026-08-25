@@ -251,15 +251,15 @@ describe('W1-B — ProcurementAuthorityState consolidation', () => {
   });
 
   it('per-category rules: the module row is blocked by an OPEN procurement requirement, the micro is not', () => {
-    const module = fixture.bom.find(r => r.category === 'solar_panel')!;
+    const mod = fixture.bom.find(r => r.category === 'solar_panel')!;
     const micro = fixture.bom.find(r => r.category === 'microinverter')!;
     // identity + count are canonical for BOTH …
-    expect(module.procurement!.quantitySource).toBe('count-derived');
+    expect(mod.procurement!.quantitySource).toBe('count-derived');
     expect(micro.procurement!.quantitySource).toBe('count-derived');
     // … but MODULE-EXACT-DATASHEET-PENDING is OPEN and severityPolicy declares
     // it procurement-impacting, so the module row is honestly NOT orderable.
-    expect(module.procurement!.blockingRequirementCodes).toContain('MODULE-EXACT-DATASHEET-PENDING');
-    expect(module.procurement!.authorityState).toBe('CANDIDATE_NON_ORDERABLE');
+    expect(mod.procurement!.blockingRequirementCodes).toContain('MODULE-EXACT-DATASHEET-PENDING');
+    expect(mod.procurement!.authorityState).toBe('CANDIDATE_NON_ORDERABLE');
     expect(micro.procurement!.blockingRequirementCodes).toEqual([]);
     expect(micro.procurement!.authorityState).toBe('VERIFIED_ORDERABLE');
   });
