@@ -1043,6 +1043,24 @@ export function buildPermitDesignSnapshot(
   const _asceAuthority = resolveAsceEditionAuthority({
     codeAdoption: opts?.codeAdoptionAuthority ?? null,
     environmentalRetrieval: opts?.environmentalRetrieval ?? null,
+    // PHASE A.2 / D8 — the VERIFIED archived climate-hazard document. Its own
+    // record names the edition it was published under (`versionOrDate`, live:
+    // "ASCE 7-22"), and until now nothing could read it: only the live
+    // retrieval's edition was consulted, so a project holding a verified,
+    // archived, hashed hazard document still reported `engine-default`. The
+    // better the evidence on file, the weaker the provenance printed on the
+    // sheets. Verification is re-checked here rather than assumed — an
+    // unverified or unarchived row may not establish an edition any more than
+    // it may establish a load.
+    archivedHazardDocument: opts?.environmentalSource
+      ? {
+          edition: opts.environmentalSource.versionOrDate,
+          documentId: opts.environmentalSource.documentId,
+          sha256: opts.environmentalSource.sha256,
+          verified: opts.environmentalSource.verificationState === 'verified'
+            && opts.environmentalSource.archivedInRepo === true,
+        }
+      : null,
   });
 
   const totalsPanels = geoModules.length || system?.totalPanels || 0;
@@ -1642,6 +1660,14 @@ export function buildPermitDesignSnapshot(
     ahjNameHint: (compliance?.jurisdiction as any)?.ahj ?? proj.ahjName ?? null,
     stateCodeHint: typeof proj.state === 'string' ? proj.state : null,
     asceEngineBasis: structAuth.env.codeAuthority.asceEdition ?? null,
+    // D6 — carry the upstream authority's OWN basis so the downstream note
+    // cannot strengthen it. `_asceAuthority.basis` already says plainly whether
+    // this is a default, a retrieval or an archived document.
+    asceBasisProvenance: {
+      source: _asceAuthority.source,
+      ref: _asceAuthority.ref,
+      note: _asceAuthority.basis,
+    },
     utilityName: proj.utilityName ?? null,
     utilityId: null,
     capturedAtIso: _capturedIso,

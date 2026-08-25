@@ -39,6 +39,14 @@ export type AsceEditionSource =
   | 'ahj-adoption-retrieval'
   /** the hazard retrieval that produced the wind/snow/seismic design values. */
   | 'environmental-retrieval'
+  /** PHASE A.2 / D8 — a VERIFIED, archived, hashed climate-hazard document whose
+   *  own record names the edition it was published under. Strictly stronger
+   *  evidence than a live retrieval (it is archived and content-hashed), and it
+   *  was previously unreadable: only `environmentalRetrieval.edition` was
+   *  consulted, so on a project whose hazard document is verified and titled
+   *  "ASCE 7-22 hazard datasets" the answer still came back `engine-default`.
+   *  The better the evidence on file, the weaker the reported provenance. */
+  | 'archived-hazard-document'
   /** nothing on file — the engine's own compiled-in edition, said out loud. */
   | 'engine-default';
 
@@ -101,6 +109,15 @@ export function resolveAsceEditionAuthority(args: {
   codeAdoption?: AdoptionLike | null;
   /** the AAC WS-4 hazard retrieval (`environmental-retrieval@v1`). */
   environmentalRetrieval?: HazardLike | null;
+  /** D8 — a VERIFIED + archived + hashed climate-hazard document already on file.
+   *  Consulted only when it is genuinely verified; an unverified or unhashed row
+   *  may not establish an edition any more than it may establish a load. */
+  archivedHazardDocument?: {
+    edition?: string | null;
+    documentId?: string | null;
+    sha256?: string | null;
+    verified?: boolean | null;
+  } | null;
 }): AsceEditionAuthority {
   // WS-3 rule, unchanged: a retrieval whose sources DISAGREE is evidence of a
   // conflict, not an adoption, and may not populate an edition.
@@ -108,7 +125,15 @@ export function resolveAsceEditionAuthority(args: {
   const adoptedEdition = normalizeAsce(
     adopt?.editions?.find(e => (e?.kind ?? '').toLowerCase() === 'asce')?.edition ?? null,
   );
-  const computedEdition = normalizeAsce(args.environmentalRetrieval?.edition ?? null);
+  // D8 — an archived hazard DOCUMENT counts as a computational basis alongside a
+  // live retrieval, and only when it is verified AND hashed. Retrieval wins when
+  // both are present (it is what actually produced the values in this build);
+  // the document answers when no retrieval ran, which is the live Braidon case.
+  const _doc = args.archivedHazardDocument ?? null;
+  const _docUsable = !!_doc && _doc.verified === true && !!(_doc.sha256 ?? '').trim();
+  const _docEdition = _docUsable ? normalizeAsce(_doc!.edition ?? null) : null;
+  const _retrievalEdition = normalizeAsce(args.environmentalRetrieval?.edition ?? null);
+  const computedEdition = _retrievalEdition ?? _docEdition;
 
   const conflict = !!adoptedEdition && !!computedEdition && adoptedEdition !== computedEdition;
   const conflictDetail = conflict
@@ -128,16 +153,30 @@ export function resolveAsceEditionAuthority(args: {
     };
   }
 
-  if (computedEdition) {
+  if (_retrievalEdition) {
     const r = args.environmentalRetrieval!;
     return {
-      edition: computedEdition, label: `ASCE ${computedEdition}`,
+      edition: _retrievalEdition, label: `ASCE ${_retrievalEdition}`,
       source: 'environmental-retrieval',
       ref: r.sourceHash ? `${r.resolverId ?? 'environmental-retrieval'}#${r.sourceHash.slice(0, 16)}` : (r.resolverId ?? null),
-      basis: `ASCE ${computedEdition} is the edition the wind/snow/seismic design values were retrieved under`
+      basis: `ASCE ${_retrievalEdition} is the edition the wind/snow/seismic design values were retrieved under`
         + `${r.proof === 'fixture' ? ' [FIXTURE PROOF, not live]' : ''}`
         + ' — a computational basis, not a claim of AHJ adoption',
-      adoptedEdition: null, computedEdition, conflict: false, conflictDetail: null,
+      adoptedEdition: null, computedEdition, conflict, conflictDetail,
+    };
+  }
+
+  // D8 — the archived, verified, hashed hazard document on file. Same rank as a
+  // retrieval (a computational basis, never an adoption claim), but attributable
+  // to a document id + content hash rather than to a live call.
+  if (_docEdition) {
+    return {
+      edition: _docEdition, label: `ASCE ${_docEdition}`,
+      source: 'archived-hazard-document',
+      ref: _doc!.sha256 ? `document:${_doc!.documentId ?? 'climate-hazard'}#${_doc!.sha256!.slice(0, 16)}` : null,
+      basis: `ASCE ${_docEdition} is the edition named by the VERIFIED archived climate-hazard document on file `
+        + `(${_doc!.documentId ?? 'climate-hazard record'}) — a computational basis, not a claim of AHJ adoption`,
+      adoptedEdition: null, computedEdition, conflict, conflictDetail,
     };
   }
 

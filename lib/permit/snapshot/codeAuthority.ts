@@ -273,6 +273,12 @@ export interface CodeAuthorityBuildArgs {
    *  (structural.env.codeAuthority.asceEdition). This is a computational BASIS,
    *  not a claim of AHJ adoption — sourced as 'structural-engine-basis'. */
   asceEngineBasis?: string | null;
+  /** D6 — the UPSTREAM authority's own account of where `asceEngineBasis` came
+   *  from (resolveAsceEditionAuthority: engine-default vs environmental-retrieval
+   *  vs archived-hazard-document). Carried so the downstream note cannot state a
+   *  STRONGER claim than the authority made — a compiled-in default used to
+   *  arrive on the sheets described as something the engine "computed under". */
+  asceBasisProvenance?: { source: string; ref: string | null; note: string } | null;
   utilityName?: string | null;
   utilityId?: string | null;
   capturedAtIso: string;
@@ -370,10 +376,21 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
     ibc: kindEdition('ibc'),
     irc: kindEdition('irc'),
     ifc: kindEdition('ifc'),
+    // PHASE A.2 / D6 — the note must not STRENGTHEN in transit. It was a hardcoded
+    // literal saying the engine "computed under" this edition, printed no matter
+    // where the edition actually came from — so `engine-default` (a compiled-in
+    // constant, honestly labelled upstream as a default) arrived on the sheets as
+    // a computation. The upstream authority already states its own basis; carry
+    // it rather than re-asserting a stronger one.
     asce: edition('asce', asce, asceSource, asceAdopted
       ? retrievedProv('asce')
       : asceBasis
-        ? { source: 'structural-engine', ref: 'structural.env.codeAuthority', note: 'ASCE edition the structural engine computed under — engine basis, not an AHJ adoption claim' }
+        ? {
+            source: args.asceBasisProvenance?.source ?? 'structural-engine',
+            ref: args.asceBasisProvenance?.ref ?? 'structural.env.codeAuthority',
+            note: args.asceBasisProvenance?.note
+              ?? 'ASCE edition the structural engine computed under — engine basis, not an AHJ adoption claim',
+          }
         : unknownProv),
   };
 
