@@ -1763,7 +1763,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   const findRun = (id: string): RunSegment|undefined => input.runs?.find(r=>r.id===id);
 
-  const roofRun       = findRun('ROOF_RUN');
+  // ROOF_RUN is deliberately NOT looked up. It is the module→microinverter DC
+  // connection (computed-system.ts:1484 — "ROOF RUN (DC to Micro)"), i.e. the
+  // module's factory leads / MC4 connectors, not installer-run conductor. It has
+  // no place on the one-line: the field conductor leaving a micro array is the
+  // AC branch below. bom-engine-v4 excludes it from micro materials for the
+  // same reason.
   const branchRun     = findRun('BRANCH_RUN');
   // §3/§4 — the shared jbox→combiner conduit home-run (SEGMENT_2A). Distinct from
   // the open-air Q-Cable BRANCH_RUN so E-1 never labels the open-air run in-conduit.
@@ -2019,7 +2024,25 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // SEGMENT 1: PV → J-Box (open air)
   {
-    const run = isMicro ? roofRun : dcStringRun;
+    // 🚨 ON A MICRO SYSTEM THIS CONDUCTOR IS AC, NOT DC.
+    //
+    // The microinverter sits AT the module and converts there, so everything
+    // leaving the array is 240 V AC on the Q-Cable trunk. This used to bind
+    // `roofRun` = ROOF_RUN, which computed-system.ts:1484 defines as
+    // "ROOF RUN (DC to Micro)", PV ARRAY → MICROINVERTERS, sourceTerminal 'OUT'
+    // → destTerminal 'DC_IN', USE-2/PV Wire, isDC. That is the module-to-micro
+    // connection — the module's FACTORY-INTEGRATED LEADS / MC4 connectors — and
+    // it is not field wiring at all. Drawing it here printed "#8 DC+ / #8 DC-"
+    // on the array home run of an all-AC system: wrong current type, wrong
+    // conductors, wrong gauge, and it makes the sheet describe a DC circuit no
+    // installer will ever pull.
+    //
+    // The BOM already had this right — bom-engine-v4 excludes ROOF_RUN from
+    // micro DC materials (MICRO_FACTORY_LEAD_IDS, "the field wiring is the AC
+    // branch (Q-Cable trunk)"). The drawing now agrees: BRANCH_RUN, the open-air
+    // Q-Cable branch. SEGMENT_2A is unaffected — it binds the in-conduit
+    // BRANCH_HOMERUN_RUN and only falls back to BRANCH_RUN when there is none.
+    const run = isMicro ? branchRun : dcStringRun;
     const fb = isMicro
       // §8 — the open-air branch identity is the LISTED assembly the legend names
       // (one source); §5 — its EGC is the BRANCH EGC, not the feeder's.
@@ -2032,9 +2055,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       : [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31'];
     const {lines, cnt} = runLines(run, fb);
     const _s1Y = resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y);
-    console.log('[WIRE RUN CREATED] SEGMENT_1_PV_TO_JBOX: DC open-air');
+    console.log(`[WIRE RUN CREATED] SEGMENT_1_PV_TO_JBOX: ${isMicro ? 'AC open-air branch (Q-Cable trunk)' : 'DC open-air'}`);
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_1_PV_TO_JBOX', pvOutX, _s1Y, _jbInPt.x, _s1Y, run, lines, true, 'OPEN_AIR'),  // Phase 1: OPEN_AIR — roof surface wiring
+      // isDC = !isMicro. This was hardcoded `true`, so even after binding the AC
+      // branch run the segment still built a DC_POS/DC_NEG conductor map and drew
+      // the array home run as a DC pair. On a micro system it is L1/L2/G.
+      buildWireRun('SEGMENT_1_PV_TO_JBOX', pvOutX, _s1Y, _jbInPt.x, _s1Y, run, lines, !isMicro, 'OPEN_AIR'),  // Phase 1: OPEN_AIR — roof surface wiring
       lines));
   }
 
@@ -2940,7 +2966,17 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   let sRows: SR[] = [];
 
   if (input.runs && input.runs.length > 0) {
-    sRows = input.runs.filter(r=>r.id!=='MSP_TO_UTILITY_RUN').map(r => {
+    // MSP_TO_UTILITY_RUN is utility-owned service equipment. ROOF_RUN on a MICRO
+    // system is the module→microinverter connection — the module's factory leads
+    // / MC4 connectors, not installer-run conductor — so listing it in a
+    // conductor schedule tells the installer to pull a DC circuit that does not
+    // exist on an all-AC roof. bom-engine-v4 excludes it from micro materials
+    // for exactly this reason (MICRO_FACTORY_LEAD_IDS); the schedule now agrees.
+    // On a string/optimizer system ROOF_RUN is not emitted at all, so this is
+    // scoped to isMicro and cannot hide a genuine DC string segment.
+    const _scheduleExcluded = new Set(
+      isMicro ? ['MSP_TO_UTILITY_RUN', 'ROOF_RUN'] : ['MSP_TO_UTILITY_RUN']);
+    sRows = input.runs.filter(r=>!_scheduleExcluded.has(r.id)).map(r => {
       let cond = '';
       if (r.conductorBundle && r.conductorBundle.length > 0) {
         cond = r.conductorBundle.map((c:ConductorBundle) => {
