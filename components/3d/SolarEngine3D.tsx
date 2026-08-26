@@ -701,10 +701,10 @@ function SolarEngine3D({
   const measurePtsRef  = useRef<Array<{ lat: number; lng: number; height: number }>>([]);
   const [measurePtCount, setMeasurePtCount] = useState(0);
   // v64: Block primitive — 2-corner footprint then default-height box.
-  // The footprint corners are tracked in lat/lng (ECEF computed on commit).
-  // Each Block state entry: { id, sw:{lat,lng}, ne:{lat,lng}, heightM }
-  // Stored locally; persisted with the project in a later stage.
-  const blockPtsRef     = useRef<Array<{ lat: number; lng: number }>>([]);
+  // v65.1: each point now also stores the click elevation (h, meters above
+  // WGS84 ellipsoid) so the prism and the in-progress polyline render at
+  // the actual ground level, not buried 100m+ below the satellite drape.
+  const blockPtsRef     = useRef<Array<{ lat: number; lng: number; h: number }>>([]);
   const [blockPtCount, setBlockPtCount]     = useState(0);
   const blockEntitiesRef = useRef<any[]>([]); // Cesium Entity[] for the placed boxes
   const [placedBlockCount, setPlacedBlockCount] = useState(0);
@@ -6596,6 +6596,9 @@ function SolarEngine3D({
   // ── v65: Block tool — line-trace mode (click N points to define any polygon,
   //   right-click to finalize). Rendered as a Cesium extruded polygon (3D prism
   //   with real vertical walls, visible from any angle). ──
+  // v65.1: each click stores its actual elevation (where the user clicked on the
+  // satellite drape or 3D tile), not 0. The prism's base height is the average
+  // of the click heights so the walls sit on the visible surface.
   function handleBlockClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -6605,20 +6608,23 @@ function SolarEngine3D({
       const pt = {
         lat: C.Math.toDegrees(carto.latitude),
         lng: C.Math.toDegrees(carto.longitude),
+        h: carto.height, // actual elevation at the click point (above WGS84 ellipsoid)
       };
       if (!isValidCoord(pt.lat, pt.lng)) return;
       blockPtsRef.current.push(pt);
       setBlockPtCount(blockPtsRef.current.length);
-      addLog('BLOCK', `Point ${blockPtsRef.current.length} at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)})`);
+      addLog('BLOCK', `Point ${blockPtsRef.current.length} at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}, h=${pt.h.toFixed(1)}m)`);
 
-      // Update the in-progress preview polyline so the user sees the line trace
+      // Update the in-progress preview polyline so the user sees the line trace.
+      // Use the actual click elevations (no clampToGround) so the polyline is
+      // at the right height — not buried below the visible drape.
       if (blockPreviewRef.current) {
         try { viewer.entities.remove(blockPreviewRef.current); } catch { /* ignore */ }
         blockPreviewRef.current = null;
       }
       if (blockPtsRef.current.length >= 2) {
         const previewPositions = blockPtsRef.current
-          .map(p => safeCartesian3(C, p.lng, p.lat, 0))
+          .map(p => safeCartesian3(C, p.lng, p.lat, p.h))
           .filter((p): p is any => p != null);
         if (previewPositions.length >= 2) {
           blockPreviewRef.current = viewer.entities.add({
@@ -6628,14 +6634,13 @@ function SolarEngine3D({
               positions: previewPositions,
               width: 2,
               material: C.Color.fromCssColorString('#ffaa00').withAlpha(0.9),
-              clampToGround: true,
               arcType: C.ArcType.GEODESIC,
             },
           });
         }
         // Also add a small dot at each click point for clarity
         for (const p of blockPtsRef.current) {
-          const pos = safeCartesian3(C, p.lng, p.lat, 0.05);
+          const pos = safeCartesian3(C, p.lng, p.lat, p.h + 0.05);
           if (pos) {
             const dot = viewer.entities.add({
               position: pos,
@@ -6648,16 +6653,15 @@ function SolarEngine3D({
               },
             });
             // The dots are short-lived; clean them up on next click or finalize.
-            // We don't bother with a ref — they'll be removed when the block is finalized.
             try { (blockPreviewRef.current as any).__dots = ((blockPreviewRef.current as any).__dots || []).concat([dot]); } catch { /* ignore */ }
           }
         }
       }
 
       if (blockPtsRef.current.length === 1) {
-        setStatusMsg(`🧱 Block point 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click more points, right-click to finish`);
+        setStatusMsg(`🧱 Block point 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}, h=${pt.h.toFixed(1)}m) — click more points, right-click to finish`);
       } else {
-        setStatusMsg(`🧱 ${blockPtsRef.current.length} block points — right-click to finish, or Esc to cancel`);
+        setStatusMsg(`🧱 ${blockPtsRef.current.length} block points — right-click to finish (need 3+), Esc to cancel`);
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleBlockClick: ${(err as Error).message}`); }
@@ -6665,6 +6669,8 @@ function SolarEngine3D({
 
   // Finalize the line-trace block: build a 3D extruded polygon (real prism with
   // vertical walls), drop a resize handle on top, and reset for the next block.
+  // v65.1: use the average click elevation as the prism's base so the walls
+  // sit on the satellite drape, not 136m below it.
   function finalizeBlock(viewer: any, C: any) {
     const pts = blockPtsRef.current;
     if (pts.length < 3) {
@@ -6681,9 +6687,13 @@ function SolarEngine3D({
       blockPreviewRef.current = null;
     }
     const eaveHeightM = DEFAULT_BLOCK_HEIGHT_M;
-    // Build the polygon hierarchy (close the ring by repeating the first point)
+    // Average elevation of the click points — that's the ground level for the prism.
+    // The drape at Pocahontas IL is ~136m above the WGS84 ellipsoid; using the
+    // average click height puts the bottom of the prism flush with the drape.
+    const groundLevelM = pts.reduce((s, p) => s + (p.h || 0), 0) / pts.length;
+    // Build the polygon hierarchy at the actual click elevations
     const polyPositions = pts
-      .map(p => safeCartesian3(C, p.lng, p.lat, 0))
+      .map(p => safeCartesian3(C, p.lng, p.lat, p.h || 0))
       .filter((p): p is any => p != null);
     if (polyPositions.length < 3) {
       setStatusMsg('🧱 Block: failed to build polygon — try again');
@@ -6704,40 +6714,43 @@ function SolarEngine3D({
     const widthM  = Math.abs(maxLng - minLng) * 111_320 * Math.cos(midLat * Math.PI / 180);
     const depthM  = Math.abs(maxLat - minLat) * 111_320;
     const approxAreaM2 = widthM * depthM;
-    // 3D extruded polygon — a real prism with vertical walls. height=0 (ground)
-    // and extrudedHeight=eaveHeightM (top of walls) makes it a closed box.
+    // 3D extruded polygon — a real prism with vertical walls. height=groundLevel
+    // and extrudedHeight=groundLevel + eaveHeightM makes the walls sit on the drape.
     const blockId = `block-${Date.now()}`;
     const prismEntity = viewer.entities.add({
       id: blockId,
       name: 'Building Block',
       polygon: {
         hierarchy: new C.PolygonHierarchy(polyPositions),
-        height: 0,
-        extrudedHeight: eaveHeightM,
+        // Use the average click height as the base. Without this, the prism
+        // would render at height=0 (sea level) and be hidden by the drape.
+        height: groundLevelM,
+        extrudedHeight: groundLevelM + eaveHeightM,
         material: C.Color.fromCssColorString('#f5f5f5').withAlpha(0.92),
         outline: true,
         outlineColor: C.Color.fromCssColorString('#2a2a2a'),
         outlineWidth: 2,
-        // closeTop + closeBottom true: the top of the prism and the bottom (ground) are also rendered.
+        // closeTop + closeBottom: the top of the prism and the bottom (ground) are also rendered.
         closeTop: true,
         closeBottom: false, // the ground plane doesn't need to be drawn
       },
       description: `<table class="cesium-infoBox-defaultTable">
         <tr><th>Block</th><td>${pts.length} footprint points, eave ${eaveHeightM.toFixed(1)}m</td></tr>
+        <tr><th>Ground level</th><td>${groundLevelM.toFixed(1)}m (avg click elevation)</td></tr>
         <tr><th>Approx footprint</th><td>${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m ≈ ${approxAreaM2.toFixed(0)} m²</td></tr>
         <tr><th>Centroid</th><td>${centroidLat.toFixed(6)}, ${centroidLng.toFixed(6)}</td></tr>
       </table>`,
     });
     // Tag the prism with its centroid Cartesian so the resize handler can find it
     // (PolygonGraphics doesn't have a `position` field like BoxGraphics does).
-    const centroidCartesian = safeCartesian3(C, centroidLng, centroidLat, 0);
+    const centroidCartesian = safeCartesian3(C, centroidLng, centroidLat, groundLevelM + eaveHeightM);
     if (centroidCartesian) {
       try { (prismEntity as any).__centroidCart = centroidCartesian; } catch { /* ignore */ }
     }
     // Drag handle on top of the prism — small bright box the user can grab
     // to resize the block height by dragging up/down. The handle is at
-    // (centroid_lat, centroid_lng, eaveHeightM + 0.3) and is 0.4m × 0.4m × 0.4m.
-    const handlePos = safeCartesian3(C, centroidLng, centroidLat, eaveHeightM + 0.3);
+    // (centroid_lat, centroid_lng, groundLevel + eaveHeightM + 0.3) and is 0.4m³.
+    const handlePos = safeCartesian3(C, centroidLng, centroidLat, groundLevelM + eaveHeightM + 0.3);
     const handleEntity = viewer.entities.add({
       id: `block-handle-${Date.now()}`,
       name: 'Block resize handle (drag up/down to set height)',
@@ -6756,7 +6769,7 @@ function SolarEngine3D({
     blockHandlesRef.current.push(handleEntity);
     blockHeightOverridesRef.current.set(blockId, eaveHeightM);
     setPlacedBlockCount(blockEntitiesRef.current.length);
-    addLog('BLOCK', `Finalized: ${pts.length} points, ≈${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, eave ${eaveHeightM}m`);
+    addLog('BLOCK', `Finalized: ${pts.length} points, ≈${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ground ${groundLevelM.toFixed(1)}m, eave ${eaveHeightM}m`);
     setStatusMsg(`🧱 Block placed — ${pts.length} footprint points, eave ${eaveHeightM}m. Click more points to add another, or Esc.`);
     // Reset for the next block (keep the placed blocks; user can drop more)
     blockPtsRef.current = [];
@@ -9436,7 +9449,7 @@ function SolarEngine3D({
               { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruct',  tip: 'Mark a rectangular area as obstructed (HVAC etc.)' },
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
-              { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block: click two footprint corners, default 6m height. Use when Google 3D Tiles has no coverage for this address.' },
+              { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block by line-tracing its footprint: click N points to define any shape (rectangle, L, T, etc.), right-click to finish. Use when Google 3D Tiles has no coverage for this address.' },
               { mode: 'roof_gable'   as PlacementMode, icon: '\u{1F3E0}\u2009\u{1F3D7}', label: 'Gable', tip: 'Drop a 3D gable roof: click 2 eave corners, the system draws 2 sloped faces meeting at a ridge along the long edge.' },
               { mode: 'roof_hip'     as PlacementMode, icon: '\u{1F3D7}\u2009\u{1F3E0}', label: 'Hip', tip: 'Drop a 3D hip roof: click 2 eave corners, 4 sloped faces meet at a ridge that is shorter than the eave (set back on both short sides).' },
               { mode: 'tree'         as PlacementMode, icon: '\u{1F333}', label: 'Tree', tip: 'Drop a decorative tree: a green sphere on a thin trunk. Click anywhere on the terrain to place. No effect on solar production.' },
