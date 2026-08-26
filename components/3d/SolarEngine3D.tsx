@@ -98,6 +98,31 @@ import {
   clampBlockHeight,
 } from '@/lib/3d/blockMath';
 
+// v66 (lidar-integration): Load .las files, render as Mesh or Point Cloud,
+// apply X/Y/Z offset (feet), toggle textured drape. Aurora parity (frames
+// 125/130/135). Pure math in lib/3d/lidar; Cesium-coupled parts loaded
+// only when a dataset is present.
+import {
+  LiDARPropertiesPanel,
+  LiDARLoadingToast,
+  useLiDARState,
+  loadLiDARFromFilePicker,
+  createLiDARController,
+  liftRoofs as liftRoofsUtil,
+  flattenRoofs as flattenRoofsUtil,
+  type LiDARDataset,
+  type LiDARState,
+} from '@/lib/3d/lidar';
+
+// v68: Segment normal arrows — yellow chevron at the midpoint of each
+// polyline edge in the in-progress block line-trace. Aurora parity
+// for the "ridge direction" indicator (HANDOFF §2 Step 1).
+import {
+  createSegmentArrowOverlay,
+  buildSegmentsFromPoints,
+  type SegmentArrowOverlay,
+} from '@/components/3d/segments';
+
 // v66 (obstruction-primitive): Aurora-parity "Add Obstruction" primitive.
 // Single-click placement of a small rectangular prism (chimney, vent,
 // dormer). Default 0.6m × 0.6m × 1.0m, configurable via right-panel
@@ -1151,6 +1176,12 @@ function SolarEngine3D({
   // v65: Line-trace block mode — N points to define any polygon footprint, right-click
   // to finalize. The in-progress polyline is shown as a preview entity.
   const blockPreviewRef = useRef<any>(null); // preview polyline entity (in-progress)
+  // v68: Segment normal arrows — yellow chevron at the midpoint of each
+  // polyline edge in the in-progress block line-trace (Aurora parity).
+  // flippedArrowsRef tracks which segment ids the user has clicked to
+  // invert. The overlay factory is created once at viewer init.
+  const segmentArrowOverlayRef = useRef<SegmentArrowOverlay | null>(null);
+  const flippedArrowsRef = useRef<Set<string>>(new Set());
   const DEFAULT_BLOCK_HEIGHT_M = 6; // typical 1-story eave height
   // v66: 3D Primitives input state — exposed in the in-canvas Properties panel
   // so the user can set eave height for new blocks and roof pitch for new
@@ -1944,6 +1975,47 @@ function SolarEngine3D({
       const viewer = new C.Viewer(cesiumRef.current, viewerOptions);
       viewer.resize();
       viewerRef.current = viewer;
+
+      // v68: create the segment-arrow overlay factory once per viewer.
+      // The factory exposes update/clear/onPick; the call sites in
+      // handleBlockClick (and the finalize/cancel branches) drive it.
+      try {
+        segmentArrowOverlayRef.current = createSegmentArrowOverlay(viewer, C);
+        // Register the click-to-flip handler. The flipped set is
+        // mutated in place and the overlay re-renders on the next
+        // update() call from handleBlockClick.
+        segmentArrowOverlayRef.current.onPick((segId: string) => {
+          if (!segId) return;
+          const cur = flippedArrowsRef.current;
+          if (cur.has(segId)) cur.delete(segId);
+          else cur.add(segId);
+          addLog('ARROW', `Flipped ${segId} → normalDir ${cur.has(segId) ? -1 : 1}`);
+          // Re-render the overlay with the same segments but the
+          // updated flipped set. The list of points has not changed
+          // since the last click, so we just rebuild.
+          try {
+            const pts = blockPtsRef.current.map((p: any) => ({ lat: p.lat, lng: p.lng }));
+            if (pts.length >= 2) {
+              const closedPts = pts.slice();
+              if (closedPts.length >= 3) {
+                const first = closedPts[0];
+                const last  = closedPts[closedPts.length - 1];
+                if (first.lat !== last.lat || first.lng !== last.lng) {
+                  closedPts.push({ lat: first.lat, lng: first.lng });
+                }
+              }
+              const segs = buildSegmentsFromPoints(closedPts, cur, 'face-block-1');
+              const baseRefLat = blockPtsRef.current[0].lat;
+              const baseRefH   = blockPtsRef.current[0].h || 0;
+              segmentArrowOverlayRef.current?.update({
+                segments: segs,
+                refLat:   baseRefLat,
+                refHeightM: baseRefH,
+              });
+            }
+          } catch { /* render errors are non-fatal */ }
+        });
+      } catch (e) { addLog('WARN', `segment arrow overlay init: ${(e as Error).message}`); }
 
       // ── CUSTOM ORBIT CAMERA CONTROLLER ────────────────────────────────────────
       //
@@ -7271,6 +7343,36 @@ function SolarEngine3D({
             try { (blockPreviewRef.current as any).__dots = ((blockPreviewRef.current as any).__dots || []).concat([dot]); } catch { /* ignore */ }
           }
         }
+
+        // v68: rebuild the segment-arrow overlay so a yellow chevron
+        // sits at the midpoint of each in-progress edge. Closes the
+        // polygon for the overlay so the closing edge gets a normal
+        // too (Aurora parity). Drops any stale flip on a now-defunct
+        // segment id.
+        try {
+          const pts2 = blockPtsRef.current.map((p: any) => ({ lat: p.lat, lng: p.lng }));
+          const closedPts = pts2.slice();
+          if (closedPts.length >= 3) {
+            const first = closedPts[0];
+            const last  = closedPts[closedPts.length - 1];
+            if (first.lat !== last.lat || first.lng !== last.lng) {
+              closedPts.push({ lat: first.lat, lng: first.lng });
+            }
+          }
+          const newIds = new Set<string>();
+          for (let i = 0; i + 1 < closedPts.length; i++) newIds.add(`seg-${i}`);
+          for (const id of Array.from(flippedArrowsRef.current)) {
+            if (!newIds.has(id)) flippedArrowsRef.current.delete(id);
+          }
+          const segs = buildSegmentsFromPoints(closedPts, flippedArrowsRef.current, 'face-block-1');
+          const baseRefLat = blockPtsRef.current[0].lat;
+          const baseRefH   = blockPtsRef.current[0].h || 0;
+          segmentArrowOverlayRef.current?.update({
+            segments: segs,
+            refLat:   baseRefLat,
+            refHeightM: baseRefH,
+          });
+        } catch (e) { addLog('WARN', `segment arrow update: ${(e as Error).message}`); }
       }
 
       if (blockPtsRef.current.length === 1) {
