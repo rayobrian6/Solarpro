@@ -34,21 +34,29 @@ describe('W4 §1 — buildCodeAuthority (honest verification state)', () => {
     expect(ca.incompleteEditions).toEqual(['nec', 'ibc', 'irc', 'ifc', 'asce']);
   });
 
-  it('NEC populates from the enriched jurisdiction value; IBC/IRC/IFC stay null (no inference)', () => {
+  it('A.4 — an enriched/static NEC value is FALLBACK METADATA, never the adopted edition', () => {
     const ca = buildCodeAuthority({
       ahjRecord: null, necVersionEnriched: 'NEC 2023', asceEngineBasis: 'ASCE 7-22',
       capturedAtIso: '2026-07-21',
     });
-    expect(ca.editions.nec.edition).toBe('2023');
-    expect(ca.editions.nec.source).toBe('ahj-record');
+    // Previously this asserted edition '2023' with source 'ahj-record' — the
+    // bundled year published as the jurisdiction's ADOPTED code. Only a governed
+    // retrieval adopts; a curated table with no ordinance, source URL or hash
+    // cannot. It is carried, clearly labelled, where it can inform a lookup but
+    // never be quoted as adoption.
+    expect(ca.editions.nec.edition).toBeNull();
+    expect(ca.editions.nec.source).toBe('unknown');
+    expect(ca.editions.nec.fallbackEdition).toBe('2023');
+    expect(ca.editions.nec.fallbackSource).toBe('compliance.jurisdiction.necVersion');
+    expect(String(ca.editions.nec.provenance.note)).toMatch(/NON-AUTHORITATIVE fallback/i);
     expect(ca.editions.asce.edition).toBe('7-22');
     expect(ca.editions.asce.source).toBe('structural-engine-basis');
     // IBC/IRC/IFC are NOT carried by the AHJ DB → still unknown.
     expect(ca.editions.ibc.edition).toBeNull();
     expect(ca.editions.ifc.edition).toBeNull();
-    // Known NEC+ASCE but IBC/IRC/IFC unknown ⇒ still incomplete (never verified in-repo).
+    // NEC now joins them: unresolved adoption ⇒ incomplete.
     expect(ca.verificationStatus).toBe('incomplete');
-    expect(ca.incompleteEditions).toEqual(['ibc', 'irc', 'ifc']);
+    expect(ca.incompleteEditions).toEqual(['nec', 'ibc', 'irc', 'ifc']);
     // sourceHash shaped for the W4-D SHA-256 registry — null until archived.
     expect(ca.sourceHash).toBeNull();
     expect(ca.verifiedBy).toBeNull();
@@ -69,7 +77,10 @@ describe('W4 §1 — buildCodeAuthority (honest verification state)', () => {
     if (rec) {
       const ca = buildCodeAuthority({ ahjRecord: rec, asceEngineBasis: 'ASCE 7-22', capturedAtIso: '2026-07-21' });
       expect(ca.ahjRecordId).toBe(rec.id);
-      expect(ca.editions.nec.edition).toBe(rec.necVersion);
+      // A.4 — the curated record's NEC year is fallback metadata, not adoption.
+      expect(ca.editions.nec.edition).toBeNull();
+      expect(ca.editions.nec.fallbackEdition).toBe(rec.necVersion);
+      expect(ca.editions.nec.fallbackSource).toBe(`ahj-national:${rec.id}`);
       expect(ca.recordProvenance).toBe(rec.dataProvenance ?? null);
       // Still unverified/incomplete — a real record is not an archived adoption doc.
       expect(ca.verificationStatus).not.toBe('verified');

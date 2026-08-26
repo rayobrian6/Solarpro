@@ -216,7 +216,12 @@ describe('AAC WS-3 · A1 · a sourced retrieval establishes AHJ + editions and c
     // and it is DISTINGUISHABLE from the operator-typed / table state
     const typed = buildCodeAuthority({ ahjRecord: curated(), capturedAtIso: NOW });
     expect(typed.verificationStatus).toBe('incomplete');
-    expect(typed.editions.nec.source).toBe('ahj-record');
+    // A.4 — the curated-table state is distinguishable precisely BECAUSE it no
+    // longer adopts: a retrieval populates `edition` + 'ahj-registry-retrieval';
+    // the bundled table populates only `fallbackEdition` and stays 'unknown'.
+    expect(typed.editions.nec.source).toBe('unknown');
+    expect(typed.editions.nec.edition).toBeNull();
+    expect(typed.editions.nec.fallbackEdition).toBeTruthy();
     expect(typed.verifiedBy).toBeNull();
   });
 

@@ -1842,7 +1842,18 @@ export function buildPermitDesignSnapshot(
         conductorGauge: feederRun?.wireGauge ?? _feederSeg?.conductorGauge ?? null,
         insulation: feederRun?.insulation ?? _feederSeg?.insulation ?? null,
         egcGauge: feederRun?.egcGauge ?? _feederSeg?.egcGauge ?? null,
-        codeEdition: codeAuthority.editions.nec.edition ?? null,
+        // A.4 — COMPUTATION may use the fallback; ADOPTION may not.
+        // The conduit-fill result is an arithmetic check against NEC Ch.9
+        // Table 1, whose conductor areas are stable across the editions in play.
+        // Starving it of an edition because the jurisdiction's ADOPTION is
+        // unresolved re-fired CONDUIT-FILL-PENDING on a calculation that was
+        // legitimately closed — punishing the calculation for a paperwork gap.
+        // The bundled year is therefore admitted HERE, where it only selects a
+        // lookup table, and never in `editions.nec.edition`, where it would be
+        // published as the jurisdiction's adopted code.
+        codeEdition: codeAuthority.editions.nec.edition
+          ?? codeAuthority.editions.nec.fallbackEdition
+          ?? null,
         computedFillPct: (elec?.conduitFill as { fillPercent?: number } | undefined)?.fillPercent
           ?? (isFinite(feederRun?.conduitFillPct) ? feederRun.conduitFillPct : null) ?? null,
         computedPass: (elec?.conduitFill as { passes?: boolean } | undefined)?.passes

@@ -44,6 +44,12 @@ export type CodeEditionSource =
   | 'ahj-registry-retrieval'  // AAC WS-3 — retrieved live from the AHJ registry
   | 'structural-engine-basis' // ASCE edition the structural engine ran under
   | 'operator-entry'          // manual operator authority (future)
+  /** A.4 — TWO OR MORE GOVERNED ADOPTION AUTHORITIES DISAGREE. Distinct from
+   *  `unknown`, which claims we have nothing. Reporting a contradiction as
+   *  "unknown" is a lie of omission: it sends the operator to obtain evidence
+   *  they already hold two conflicting copies of. `edition` stays null — no
+   *  source is preferred by recency, rank, mailing city or engine default. */
+  | 'conflicting-adoption-authorities'
   | 'unknown';                // no authority — edition null, never inferred
 
 /** One adopted code edition, individually sourced and individually honest. */
@@ -56,6 +62,24 @@ export interface CodeEdition {
   standard: string;
   source: CodeEditionSource;
   provenance: Provenance;
+  // ── A.4 — NON-AUTHORITATIVE FALLBACK METADATA ────────────────────────────
+  // The bundled ahj-national table carries an NEC year for many jurisdictions.
+  // It is a curated convenience with no ordinance, no source URL and no hash,
+  // and it USED TO POPULATE `edition` with `source: 'ahj-record'` — i.e. it was
+  // presented as the AHJ's adopted edition. On Braidon that printed "NEC 2020",
+  // a year NEITHER governed source for Madison County supports (the codified
+  // ordinance says 2005; the county code official's state filing says 2023).
+  //
+  // Static data may inform, never adopt. It lives here, clearly separated, and
+  // is NEVER promoted into `edition`.
+  /** the bundled/static year, when one exists. Informational only. */
+  fallbackEdition?: string | null;
+  /** where the fallback came from, so it can never be mistaken for authority. */
+  fallbackSource?: string | null;
+  /** A.4 — every governed adoption authority seen for this family when they
+   *  DISAGREE. Present only alongside `source:'conflicting-adoption-authorities'`;
+   *  the reviewer sees both claims rather than a silently chosen winner. */
+  conflictingClaims?: Array<{ edition: string; authority: string; ref: string | null }>;
 }
 
 /** The versioned project-jurisdiction authority record (W4 §1). Every field the
@@ -314,15 +338,27 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
     kind: CodeEditionKind, value: string | null, source: CodeEditionSource, prov: Provenance,
   ): CodeEdition => ({ kind, edition: value, standard: STANDARD_LABEL[kind], source, provenance: prov });
 
-  // ── NEC: the RETRIEVAL wins; else the AHJ record / enriched jurisdiction ────
+  // ── NEC — A.4: ONLY A GOVERNED RETRIEVAL ADOPTS ────────────────────────────
+  // This used to read `necRetrieved ?? necFromRecord ?? necFromEnriched` and
+  // stamp the result `source: 'ahj-record'`, so the bundled ahj-national year
+  // was published as the jurisdiction's ADOPTED edition. Braidon printed
+  // "NEC 2020" on that basis — a year neither governed Madison County source
+  // supports (codified ordinance: 2005; the county code official's state filing:
+  // 2023). Static data is now carried as fallback METADATA and can never adopt.
   const necRetrieved = normalizeNecEdition(adoptFor('nec'));
   const necFromRecord = normalizeNecEdition(rec?.necVersion);
   const necFromEnriched = normalizeNecEdition(args.necVersionEnriched);
-  const nec = necRetrieved ?? necFromRecord ?? necFromEnriched;
-  const necSource: CodeEditionSource = necRetrieved ? 'ahj-registry-retrieval' : nec ? 'ahj-record' : 'unknown';
+  const necFallback = necFromRecord ?? necFromEnriched;
+  const necFallbackSource = necFromRecord
+    ? (rec ? `ahj-national:${rec.id}` : 'ahj-national')
+    : necFromEnriched ? 'compliance.jurisdiction.necVersion' : null;
+  const nec = necRetrieved ?? null;
+  const necSource: CodeEditionSource = necRetrieved
+    ? 'ahj-registry-retrieval'
+    : adoptConflicted ? 'conflicting-adoption-authorities' : 'unknown';
   const necRef = necRetrieved
     ? `${adopt!.sourcesQueried[0] ?? 'ahj-registry'}#${adopt!.sourceHash.slice(0, 16)}`
-    : rec ? `ahj-national:${rec.id}` : (necFromEnriched ? 'compliance.jurisdiction.necVersion' : undefined);
+    : undefined;
 
   // ── IBC / IRC / IFC: ONLY from a retrieval. The curated AHJ DB does not carry
   //    them and may not fill the gap; nothing is derived from the NEC year. ────
@@ -339,10 +375,29 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
       + `${adopt!.editions.find(e => e.kind === k)?.corroboratedBy ? ` — corroborated by ${adopt!.editions.find(e => e.kind === k)!.corroboratedBy}` : ''}`
       + `${adopt!.proof === 'fixture' ? ' [FIXTURE PROOF, not live]' : ''}`,
   });
+  // A.4 — surface BOTH claims when governed authorities disagree, so the sheet
+  // and the operator see the contradiction instead of a silently chosen winner.
+  const conflictingClaimsFor = (k: CodeEditionKind) =>
+    (args.codeAdoption?.conflicts ?? [])
+      .filter(c => (c as { kind?: string }).kind === k)
+      .map(c => {
+        const x = c as unknown as Record<string, unknown>;
+        return {
+          edition: String(x.edition ?? x.value ?? ''),
+          authority: String(x.authority ?? x.source ?? x.sourceName ?? 'unnamed authority'),
+          ref: (x.ref ?? x.sourceUrl ?? null) as string | null,
+        };
+      })
+      .filter(c => c.edition);
+
   const kindEdition = (k: CodeEditionKind): CodeEdition => {
     const v = adoptFor(k);
-    return v
-      ? edition(k, v, 'ahj-registry-retrieval', retrievedProv(k))
+    if (v) return edition(k, v, 'ahj-registry-retrieval', retrievedProv(k));
+    // A.4 — a contradiction is NOT an absence. `unknown` would tell the operator
+    // to go obtain evidence they already hold two conflicting copies of.
+    return adoptConflicted
+      ? { ...edition(k, null, 'conflicting-adoption-authorities', unknownProv),
+          conflictingClaims: conflictingClaimsFor(k) }
       : edition(k, null, 'unknown', unknownProv);
   };
 
@@ -363,16 +418,27 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
     : asceBasis ? 'structural-engine-basis' : 'unknown';
 
   const editions: Record<CodeEditionKind, CodeEdition> = {
-    nec: edition('nec', nec, necSource, nec
-      ? {
-          source: necRetrieved ? 'ahj-registry-retrieval' : 'ahj-national',
-          ref: necRef,
-          note: necRetrieved
-            ? `adopted NEC edition retrieved from ${adopt!.ahjName} at ${adopt!.retrievedAtIso}`
-              + `${adopt!.editions.find(e => e.kind === 'nec')?.corroboratedBy ? ` — corroborated by ${adopt!.editions.find(e => e.kind === 'nec')!.corroboratedBy}` : ''}`
-            : 'adopted NEC edition — unverified (no archived adoption ordinance)',
-        }
-      : unknownProv),
+    nec: {
+      ...edition('nec', nec, necSource, necRetrieved
+        ? {
+            source: 'ahj-registry-retrieval',
+            ref: necRef,
+            note: `adopted NEC edition retrieved from ${adopt!.ahjName} at ${adopt!.retrievedAtIso}`
+              + `${adopt!.editions.find(e => e.kind === 'nec')?.corroboratedBy ? ` — corroborated by ${adopt!.editions.find(e => e.kind === 'nec')!.corroboratedBy}` : ''}`,
+          }
+        : adoptConflicted
+          ? unknownProv
+          : {
+              source: 'code-authority',
+              note: necFallback
+                ? `no governed NEC adoption is established for this jurisdiction. A bundled/static year (${necFallback}) `
+                  + 'is carried as NON-AUTHORITATIVE fallback metadata only and is NOT the adopted edition.'
+                : 'no AHJ adoption authority for the NEC — edition left null (no inference)',
+            }),
+      fallbackEdition: necFallback,
+      fallbackSource: necFallbackSource,
+      ...(adoptConflicted ? { conflictingClaims: conflictingClaimsFor('nec') } : {}),
+    },
     ibc: kindEdition('ibc'),
     irc: kindEdition('irc'),
     ifc: kindEdition('ifc'),
