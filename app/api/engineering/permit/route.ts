@@ -370,11 +370,26 @@ export async function GET(req: NextRequest) {
     }
 
     // PDF via Puppeteer+chromium (Vercel-compatible)
-    const pdfResult = await generatePdfFromHtml(html, {
-      landscape: true,
-      widthIn: PDF_PAGE_CONFIG.width,
-      heightIn: PDF_PAGE_CONFIG.height,
-    });
+    // SCOPED CATCH — the canonical font gate is now armed and THROWS on a face
+    // or metric mismatch instead of returning null. This endpoint's contract is
+    // to degrade to the HTML package when no PDF can be produced, so a gate
+    // failure has to land HERE. Without this it would escape to the outer
+    // handler and 500 the entire permit request, turning a font problem into a
+    // total outage of permit generation.
+    let pdfResult: Awaited<ReturnType<typeof generatePdfFromHtml>> = null;
+    try {
+      pdfResult = await generatePdfFromHtml(html, {
+        landscape: true,
+        widthIn: PDF_PAGE_CONFIG.width,
+        heightIn: PDF_PAGE_CONFIG.height,
+      });
+    } catch (fontErr: unknown) {
+      console.error(
+        '[permit] PDF refused by the canonical font gate — degrading to HTML:',
+        (fontErr as Error)?.message,
+      );
+      pdfResult = null;
+    }
 
     if (pdfResult) {
       return new NextResponse(pdfResult.pdf as unknown as BodyInit, {
@@ -1701,11 +1716,26 @@ export async function POST(req: NextRequest) {
     }
 
     // PDF via Puppeteer+chromium (Vercel-compatible)
-    const pdfResult = await generatePdfFromHtml(html, {
-      landscape: true,
-      widthIn: PDF_PAGE_CONFIG.width,
-      heightIn: PDF_PAGE_CONFIG.height,
-    });
+    // SCOPED CATCH — the canonical font gate is now armed and THROWS on a face
+    // or metric mismatch instead of returning null. This endpoint's contract is
+    // to degrade to the HTML package when no PDF can be produced, so a gate
+    // failure has to land HERE. Without this it would escape to the outer
+    // handler and 500 the entire permit request, turning a font problem into a
+    // total outage of permit generation.
+    let pdfResult: Awaited<ReturnType<typeof generatePdfFromHtml>> = null;
+    try {
+      pdfResult = await generatePdfFromHtml(html, {
+        landscape: true,
+        widthIn: PDF_PAGE_CONFIG.width,
+        heightIn: PDF_PAGE_CONFIG.height,
+      });
+    } catch (fontErr: unknown) {
+      console.error(
+        '[permit] PDF refused by the canonical font gate — degrading to HTML:',
+        (fontErr as Error)?.message,
+      );
+      pdfResult = null;
+    }
 
     if (pdfResult) {
       return new NextResponse(pdfResult.pdf as unknown as BodyInit, {

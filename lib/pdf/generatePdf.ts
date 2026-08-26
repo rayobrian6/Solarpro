@@ -118,7 +118,13 @@ async function generateWithPuppeteer(html: string, opts: PdfOptions): Promise<Ui
         // wkhtmltopdf, which is exactly the substitution this gate exists to
         // prevent — so it throws instead.
         await browser.close();
-        throw new Error(
+        // MUST be CanonicalFontError, not a plain Error. The catch below only
+        // re-throws this class; a plain Error is swallowed into `return null`,
+        // which means "try wkhtmltopdf" — the exact silent substitution this
+        // gate exists to prevent. The class was declared and instanceof-checked
+        // but never constructed anywhere in the repo, so the fail-closed
+        // refusal had never once fired.
+        throw new CanonicalFontError(
           'AUTHORITATIVE PDF REFUSED — the canonical font pack did not render.\n'
           + `  faces not loaded : ${missing.join(', ') || 'none'}\n`
           + `  fonts.status     : ${fontState.status} (${fontState.size} faces)\n`
@@ -157,7 +163,12 @@ async function generateWithPuppeteer(html: string, opts: PdfOptions): Promise<Ui
     // condition. Swallowing it here would return null and hand the job to
     // wkhtmltopdf — producing a permit PDF with substituted fonts and different
     // geometry, which is the exact outcome the gate exists to prevent.
-    if (err instanceof CanonicalFontError) throw err;
+    // Duck-type as well as instanceof: bundlers can duplicate this module in a
+    // serverless build, and two copies of the class make `instanceof` false for
+    // an object that IS a canonical-font failure — which would silently restore
+    // the swallow this fix removes.
+    if (err instanceof CanonicalFontError
+      || (err as { isCanonicalFontError?: boolean })?.isCanonicalFontError === true) throw err;
     console.warn('[generatePdf] Puppeteer failed:', (err as Error).message?.substring(0, 200));
     return null;
   }
@@ -178,8 +189,6 @@ async function generateWithWkhtmltopdf(html: string, opts: PdfOptions): Promise<
     const execFileAsync = promisify(execFile);
 
     const args = [
-      '--page-size',       opts.format === 'A4' ? 'A4' : 'Letter',
-      '--orientation',     opts.landscape ? 'Landscape' : 'Portrait',
       '--margin-top',    '0',
       '--margin-right',  '0',
       '--margin-bottom', '0',
@@ -194,12 +203,20 @@ async function generateWithWkhtmltopdf(html: string, opts: PdfOptions): Promise<
       '--print-media-type',
     ];
 
-    // Custom page dimensions (e.g. 24in x 18in for engineering sheets)
+    // Page geometry — the two forms are MUTUALLY EXCLUSIVE.
+    //
+    // Explicit dimensions already encode orientation (24 wide × 18 high IS
+    // landscape). Passing `--orientation Landscape` alongside them makes Qt
+    // transpose the paper a SECOND time, so a 24×18 engineering sheet prints on
+    // an 18×24 portrait page — the identical double-transposition the puppeteer
+    // branch documents and avoids. The previous code emitted --orientation
+    // unconditionally and then spliced out only --page-size, leaving the
+    // transposing flag in place.
     if (opts.widthIn && opts.heightIn) {
       args.push('--page-width', opts.widthIn, '--page-height', opts.heightIn);
-      // Remove the --page-size we added above since custom size overrides it
-      const sizeIdx = args.indexOf('--page-size');
-      if (sizeIdx >= 0) args.splice(sizeIdx, 2);
+    } else {
+      args.push('--page-size',   opts.format === 'A4' ? 'A4' : 'Letter');
+      args.push('--orientation', opts.landscape ? 'Landscape' : 'Portrait');
     }
 
     args.push(htmlPath, pdfPath);

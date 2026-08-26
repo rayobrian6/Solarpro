@@ -263,7 +263,16 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
     const projectLabel = safeFilename(proposal.project?.name ?? proposal.title ?? 'Solar-Proposal');
     const filename = `SolarPro-Proposal-${projectLabel}.pdf`;
 
-    const pdfResult = await generatePdfFromHtml(html, { format: 'Letter', printBackground: true });
+    // requireCanonicalFonts:false — a sales proposal is NOT a permit-release
+    // artifact and does not embed the canonical WOFF2 pack (fontFaceCss() has a
+    // single consumer: the planset). The font gate is now armed and THROWS
+    // instead of returning null, so without this flag arming it would turn this
+    // route's silent, intended degradation into a hard failure on every call.
+    const pdfResult = await generatePdfFromHtml(html, {
+      format: 'Letter',
+      printBackground: true,
+      requireCanonicalFonts: false,
+    });
 
     if (pdfResult) {
       return new NextResponse(pdfResult.pdf as unknown as BodyInit, {

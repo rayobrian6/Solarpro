@@ -145,6 +145,29 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const panelsPerString = isMicro ? 1 : (strings[0]?.panelCount ?? Math.ceil(totalPanels / Math.max(totalStrings, 1)));
   const lastStringPanels = isMicro ? 1 : (strings[strings.length - 1]?.panelCount ?? panelsPerString);
 
+  // ── NEC 690.7(A) corrected Voc — DELIBERATELY NOT WIRED YET ──────────────
+  // The renderer no longer fabricates this (it printed the UNCORRECTED STC
+  // voltage under a row labelled "Voc Corrected" — a false NEC 690.7 statement,
+  // wrong in the UNSAFE direction). Until a value is supplied it prints
+  // "— NOT COMPUTED", which is honest.
+  //
+  // 🚨 DO NOT wire this without first resolving the UNIT question. There are TWO
+  // conflicting conventions for a field named `vocCorrected` in this codebase:
+  //   • app/engineering/core/stringSystem.ts:110 `correctVoc()` returns
+  //     `voc * panelCount * factor` — the STRING TOTAL. (Proof: :297 compares it
+  //     against the inverter's maxDcVoltage, which a ~41 V per-module figure
+  //     could never approach.)
+  //   • app/api/engineering/sld/route.ts:647 multiplies `stringResult.vocCorrected`
+  //     BY panelsPerString — i.e. it treats the same field name as PER MODULE.
+  // The permit path reads `compliance.electrical.inverters[].strings[].vocCorrected`,
+  // populated from an untyped `elecResult` (generatePermit.ts:1023), so which
+  // convention arrives here is not established by the types.
+  //
+  // Mapping these the wrong way round is off by the panel count — roughly 14× on
+  // a typical string — and would print as a plausible-looking voltage. Resolve
+  // the convention, pin it with a test, THEN wire it. The renderer's `stringVoc`
+  // is the string total; its `vocCorrected` is per module.
+
   // ── Topology type label for renderer ──
   const topologyType = isMicro ? 'MICROINVERTER'
     : topology === 'OPTIMIZER' ? 'OPTIMIZER'
@@ -308,6 +331,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // String-specific
     panelsPerString:         isMicro ? 1 : panelsPerString,
     lastStringPanels:        isMicro ? 1 : lastStringPanels,
+    // stringVoc / vocCorrected intentionally NOT set — see the UNIT TRAP note above.
 
     // Micro-specific
     deviceCount,

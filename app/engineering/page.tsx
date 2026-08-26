@@ -13202,9 +13202,14 @@ function EngineeringPageInner() {
                   <div>
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
                       <Zap size={14} className="text-amber-400" /> Permit-Grade Single-Line Diagram
-                      <span className="text-xs font-normal bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full">ANSI C · IEEE Symbols</span>
+                      <span className="text-xs font-normal bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full">ARCH C · IEEE Symbols</span>
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">Vector SVG · 18×24 inch sheet · Engineering title block · Conductor callouts</p>
+                    {/* Was "ANSI C" and "18×24 inch sheet" — both wrong. The canvas
+                        is 2304×1728 uu at 96 uu/in = 24 wide × 18 high, which is
+                        ARCH C (ANSI C is 22×17), and the dimensions were also
+                        transposed. Larger sheet sizes arrive with the Phase-2
+                        sheet picker. */}
+                    <p className="text-xs text-slate-500 mt-0.5">Vector PDF · 24×18 inch sheet · Engineering title block · Conductor callouts</p>
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -13246,7 +13251,17 @@ function EngineeringPageInner() {
                                 interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 interconnectionType: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
-                                topologyType: computedSystem.isMicro ? 'MICROINVERTER' : 'STRING_INVERTER',
+                                // Same five-branch resolution `fetchSLDSvg` already
+                                // uses. The old two-branch micro/string test drew
+                                // every SolarEdge and Tigo job as a plain string
+                                // inverter and every hybrid as a non-hybrid —
+                                // `isOptimizer` was populated on this exact object
+                                // and simply never read.
+                                topologyType: computedSystem.isMicro ? 'MICROINVERTER'
+                                  : computedSystem.isOptimizer ? 'STRING_WITH_OPTIMIZER'
+                                  : config.inverters[0]?.type === 'ecoflow' ? 'HYBRID_INVERTER'
+                                  : config.batteryBrand ? 'HYBRID_INVERTER'
+                                  : 'STRING_INVERTER',
                                 totalModules: totalPanels,
                                 totalStrings: computedSystem.isMicro ? 0 : (computedSystem.strings?.length ?? 1),
                                 inverterManufacturer: (() => { const inv = config.inverters[0]; const d = getInvById(inv?.inverterId, inv?.type) as any; return d?.manufacturer || (computedSystem.isMicro ? 'Enphase' : 'SolarEdge'); })(),

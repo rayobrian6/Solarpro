@@ -1917,13 +1917,23 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   } else {
     const _ns  = input.totalStrings || 1;
     const _pps = input.panelsPerString ?? Math.round(input.totalModules / Math.max(_ns, 1));
-    const _sVoc = input.stringVoc ?? ((input.vocCorrected ?? input.panelVoc) * _pps);
+    // Same NEC 690.7 provenance rule as the DC CALCULATIONS panel: an
+    // uncorrected STC total must never be printed as a bare "Voc=" on a string
+    // summary, because in this position a reviewer reads it as the corrected
+    // cold-weather figure the inverter's max DC voltage is checked against.
+    // A real corrected value is printed as "Voc="; the STC stand-in is printed
+    // but LABELLED "Voc(STC)=" so the sheet never overstates what it knows.
+    const _sVocCorrected = input.stringVoc
+      ?? (input.vocCorrected != null ? input.vocCorrected * _pps : undefined);
     const _sIsc = input.stringIsc ?? input.panelIsc;
+    const _vocTxt = _sVocCorrected != null
+      ? `Voc=${_sVocCorrected.toFixed(1)}V`
+      : `Voc(STC)=${(input.panelVoc * _pps).toFixed(1)}V`;
     // Line 1: string layout (e.g. "3 STRINGS × 12 MODULES")
     parts.push(txt(pvCX, pvCY+pvH/2+18, `${_ns} STRING${_ns>1?'S':''} × ${_pps} MODULES`, {sz:F.tiny, anc:'middle', bold:true}));
     // Line 2: electrical parameters
-    parts.push(txt(pvCX, pvCY+pvH/2+27, `Voc=${_sVoc.toFixed(1)}V  Isc=${_sIsc.toFixed(2)}A`, {sz:F.tiny, anc:'middle', fill:'#B71C1C'}));
-    console.log(`[SLD STRING SUMMARY] ${_ns} strings × ${_pps} modules, Voc=${_sVoc.toFixed(1)}V, Isc=${_sIsc.toFixed(2)}A`);
+    parts.push(txt(pvCX, pvCY+pvH/2+27, `${_vocTxt}  Isc=${_sIsc.toFixed(2)}A`, {sz:F.tiny, anc:'middle', fill:'#B71C1C'}));
+    console.log(`[SLD STRING SUMMARY] ${_ns} strings × ${_pps} modules, ${_vocTxt}, Isc=${_sIsc.toFixed(2)}A`);
     // Phase 4: Optimizer callout — show full info when optimizer topology
     if (input.optimizerQty && input.optimizerQty > 0) {
       const _optModel = input.optimizerModel ? ` (${input.optimizerModel})` : '';
@@ -2719,22 +2729,34 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   } else {
     const pps = input.panelsPerString ?? Math.round(input.totalModules/Math.max(input.totalStrings,1));
     const lsp = input.lastStringPanels ?? pps;
-    const vc  = input.vocCorrected ?? input.panelVoc;
-    const sv  = input.stringVoc ?? (vc*pps);
+    // NEC 690.7(A) provenance. `vocCorrected` and `designTempMin` are RESULTS of
+    // a cold-temperature correction the caller either performed or did not.
+    // The retired fallbacks (`?? input.panelVoc`, `?? -10`) printed the
+    // UNCORRECTED STC voltage under a row labelled "Voc Corrected" and invented
+    // a design temperature that nothing had used — a false NEC 690.7 statement
+    // on an AHJ-facing sheet, wrong in the UNSAFE direction (a corrected Voc is
+    // always HIGHER than STC, so the STC stand-in understates the real figure
+    // and can hide a string that exceeds the inverter's max DC voltage).
+    // Absent now means the sheet SAYS it is absent.
+    const NOT_COMPUTED = '— NOT COMPUTED';
+    const vc  = input.vocCorrected;
+    // A string total is real only if it was supplied, or if it derives from a
+    // REAL corrected module voltage — never from an STC stand-in.
+    const sv  = input.stringVoc ?? (vc != null ? vc * pps : undefined);
     const si  = input.stringIsc ?? input.panelIsc;
     const op  = input.ocpdPerString ?? input.dcOCPD;
-    const dt  = input.designTempMin ?? -10;
+    const dt  = input.designTempMin;
     const dar = input.dcAcRatio ?? calcDcAcRatio(dcKw, input.acOutputKw);
     parts.push(txt(p1x+cW/2, CALC_Y+10, 'DC SYSTEM CALCULATIONS', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
     const rows: [string,string][] = [
       ['Module Voc (STC)',`${input.panelVoc} V`],
       ['Module Isc (STC)',`${input.panelIsc} A`],
-      ['Design Temp (NEC 690.7)',`${dt}°C`],
-      ['Voc Corrected',`${vc.toFixed(2)} V`],
+      ['Design Temp (NEC 690.7)', dt != null ? `${dt}°C`            : NOT_COMPUTED],
+      ['Voc Corrected',           vc != null ? `${vc.toFixed(2)} V` : NOT_COMPUTED],
       ['Panels per String', pps===lsp?`${pps}`:`${pps} (last: ${lsp})`],
       ['Number of Strings',`${input.totalStrings}`],
-      ['String Voc (corrected)',`${sv.toFixed(1)} V`],
-      ['String Voc × 1.25',`${(sv*1.25).toFixed(1)} V`],
+      ['String Voc (corrected)',  sv != null ? `${sv.toFixed(1)} V`        : NOT_COMPUTED],
+      ['String Voc × 1.25',       sv != null ? `${(sv*1.25).toFixed(1)} V` : NOT_COMPUTED],
       ['String Isc × 1.25',`${(si*1.25).toFixed(2)} A`],
       ['DC OCPD / String',`${op} A`],
       ['DC Wire Gauge',`${resolvedDcWire}`],
@@ -3373,7 +3395,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
 
   // ── SVG root (same canvas + embedded-crop contract as the legacy path) ────
   const effW = input.suppressTitleBlock ? TB_X - 10 : W;
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${H}" viewBox="0 0 ${effW} ${H}" style="background:${WHT};">`);
+  // preserveAspectRatio stated EXPLICITLY. "xMidYMid meet" is the spec default,
+  // so this is behaviorally inert — but the page-fit harness
+  // (scripts/planset-pagefit.mjs) only lets the multi-lane root through via its
+  // `par === ''` escape hatch, i.e. the hybrid sheet is currently exempt from
+  // the check by accident rather than by passing it. State the contract.
+  // NOTE: height is still `H`, not `effH`, and that is DELIBERATE here — this
+  // path emits its bottom calc/schedule band unconditionally, so cropping the
+  // canvas without first reflowing that band would amputate ~408 units of live
+  // NEC content. Suppressing + reflowing the band is Phase 2.
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${H}" viewBox="0 0 ${effW} ${H}" preserveAspectRatio="xMidYMid meet" style="background:${WHT};">`);
   parts.push(rect(0, 0, effW, H, {fill:WHT, stroke:WHT, sw:0}));
   parts.push(rect(MAR/2, MAR/2, effW-MAR, H-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
 
