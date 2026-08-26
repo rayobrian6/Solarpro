@@ -191,7 +191,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -701,6 +701,14 @@ function SolarEngine3D({
   const blockEntitiesRef = useRef<any[]>([]); // Cesium Entity[] for the placed boxes
   const [placedBlockCount, setPlacedBlockCount] = useState(0);
   const DEFAULT_BLOCK_HEIGHT_M = 6; // typical 1-story eave height
+  // v64: Gable roof primitive — click 2 eave corners, render 2 sloped faces meeting at ridge.
+  // The eave is a rectangle in lat/lng; ridge runs along the long edge at the centroid.
+  const gablePtsRef = useRef<Array<{ lat: number; lng: number }>>([]);
+  const [gablePtCount, setGablePtCount] = useState(0);
+  const gableEntitiesRef = useRef<any[]>([]);
+  const [placedGableCount, setPlacedGableCount] = useState(0);
+  const DEFAULT_GABLE_PITCH_DEG = 22;
+  const DEFAULT_GABLE_EAVE_HEIGHT_M = 6;
   const ghostEntityRef = useRef<any>(null);
   const [statusMsg, setStatusMsg]       = useState('');
   const [fps, setFps]                   = useState(60);
@@ -3924,6 +3932,7 @@ function SolarEngine3D({
         else if (mode === 'set_direction')  handleSetDirectionClick(viewer, C, screenPos);
         else if (mode === 'set_origin')     handleSetOriginClick(viewer, C, screenPos);
         else if (mode === 'block')          handleBlockClick(viewer, C, screenPos);
+        else if (mode === 'roof_gable')     handleGableClick(viewer, C, screenPos);
         // auto_roof: fires once via placementMode useEffect — NOT on canvas click
 
         // pick_house: user clicked a house — get lat/lng and reverse-geocode
@@ -6458,6 +6467,136 @@ function SolarEngine3D({
     } catch (err: unknown) { addLog('ERROR', `handleBlockClick: ${(err as Error).message}`); }
   }
 
+  // ── v64: Gable roof tool — 2 eave corners, render 2 sloped faces ──
+  // The eave is a rectangle in lat/lng. The ridge runs along the long edge
+  // (the longer of the two eave dimensions) at the rectangle centroid. Two
+  // sloped polygons (south face + north face) meet at the ridge.
+  function handleGableClick(viewer: any, C: any, screenPos: any) {
+    try {
+      const hit = getWorldPosition(viewer, C, screenPos);
+      if (!hit) return;
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      if (!carto) return;
+      const pt = {
+        lat: C.Math.toDegrees(carto.latitude),
+        lng: C.Math.toDegrees(carto.longitude),
+      };
+      if (!isValidCoord(pt.lat, pt.lng)) return;
+      gablePtsRef.current.push(pt);
+      setGablePtCount(gablePtsRef.current.length);
+
+      if (gablePtsRef.current.length >= 2) {
+        const [c1, c2] = gablePtsRef.current;
+        // Eave rectangle: SW = min lat/lng, NE = max lat/lng
+        const sw = { lat: Math.min(c1.lat, c2.lat), lng: Math.min(c1.lng, c2.lng) };
+        const ne = { lat: Math.max(c1.lat, c2.lat), lng: Math.max(c1.lng, c2.lng) };
+        const midLat = (sw.lat + ne.lat) / 2;
+        const METERS_PER_DEG_LAT = 111_320;
+        const METERS_PER_DEG_LNG = 111_320 * Math.cos(midLat * Math.PI / 180);
+        const widthM  = Math.abs(ne.lng - sw.lng) * METERS_PER_DEG_LNG; // east-west eave
+        const depthM  = Math.abs(ne.lat - sw.lat) * METERS_PER_DEG_LAT; // north-south eave
+        if (widthM < 0.5 || depthM < 0.5) {
+          setStatusMsg('Gable: eave too small (<0.5m) — try again with a bigger rectangle');
+          gablePtsRef.current = [];
+          setGablePtCount(0);
+          return;
+        }
+        // Long edge along east-west direction (use whichever is longer as the ridge axis)
+        const longIsLng = widthM >= depthM;
+        // Ridge is at the centroid, at the long-edge midpoint, with vertical offset = (half short-edge) * tan(pitch)
+        const eaveHeightM  = DEFAULT_GABLE_EAVE_HEIGHT_M;
+        const shortEdgeM   = longIsLng ? depthM : widthM;
+        const ridgeRiseM   = (shortEdgeM / 2) * Math.tan(DEFAULT_GABLE_PITCH_DEG * Math.PI / 180);
+        const ridgeHeightM = eaveHeightM + ridgeRiseM;
+        // Ridge endpoints: at the centroid, offset by half the long edge along its axis
+        const longEdgeM = longIsLng ? widthM : depthM;
+        const halfLongDeg = (longEdgeM / 2) / (longIsLng ? METERS_PER_DEG_LNG : METERS_PER_DEG_LAT);
+        const ridgeMidLat = (sw.lat + ne.lat) / 2;
+        const ridgeMidLng = (sw.lng + ne.lng) / 2;
+        const ridgeA = longIsLng
+          ? { lat: ridgeMidLat, lng: ridgeMidLng - halfLongDeg }
+          : { lat: ridgeMidLat - halfLongDeg, lng: ridgeMidLng };
+        const ridgeB = longIsLng
+          ? { lat: ridgeMidLat, lng: ridgeMidLng + halfLongDeg }
+          : { lat: ridgeMidLat + halfLongDeg, lng: ridgeMidLng };
+        // Build 4 eave corners and 2 ridge endpoints in 3D Cartesian
+        const eaveHeightCart = eaveHeightM;
+        const ridgeHeightCart = ridgeHeightM;
+        const swC = safeCartesian3(C, sw.lng, sw.lat, eaveHeightCart);
+        const seC = safeCartesian3(C, ne.lng, sw.lat, eaveHeightCart);
+        const nwC = safeCartesian3(C, sw.lng, ne.lat, eaveHeightCart);
+        const neC = safeCartesian3(C, ne.lng, ne.lat, eaveHeightCart);
+        const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeHeightCart);
+        const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeHeightCart);
+        if (!swC || !seC || !nwC || !neC || !rAC || !rBC) {
+          setStatusMsg('Gable: failed to compute 3D positions — try again');
+          gablePtsRef.current = [];
+          setGablePtCount(0);
+          return;
+        }
+        // Build 2 slope polygons. Each is a 3D quadrilateral.
+        // Face 1: from eave on one side to ridge
+        // Face 2: from eave on the other side to ridge
+        const faceAPositions = longIsLng
+          ? [swC, seC, rBC, rAC]   // south face (low latitude) — eave SW→SE, ridge A→B
+          : [swC, nwC, rAC, rBC];  // west face
+        const faceBPositions = longIsLng
+          ? [nwC, neC, rBC, rAC]   // north face (high latitude)
+          : [seC, neC, rAC, rBC];  // east face
+        const faceA = viewer.entities.add({
+          id: `gable-face-a-${Date.now()}`,
+          name: 'Gable slope A',
+          polygon: {
+            hierarchy: new C.PolygonHierarchy(faceAPositions),
+            material: C.Color.fromCssColorString('#caa472').withAlpha(0.92), // wood/roof color
+            outline: true,
+            outlineColor: C.Color.fromCssColorString('#5a3a1a'),
+          },
+        });
+        const faceB = viewer.entities.add({
+          id: `gable-face-b-${Date.now()}`,
+          name: 'Gable slope B',
+          polygon: {
+            hierarchy: new C.PolygonHierarchy(faceBPositions),
+            material: C.Color.fromCssColorString('#caa472').withAlpha(0.92),
+            outline: true,
+            outlineColor: C.Color.fromCssColorString('#5a3a1a'),
+          },
+        });
+        // End gables (triangular walls closing the roof on the short edges)
+        const endGableA = viewer.entities.add({
+          id: `gable-end-a-${Date.now()}`,
+          name: 'Gable end A',
+          polygon: {
+            hierarchy: new C.PolygonHierarchy(longIsLng ? [swC, seC, rAC, rBC] : [swC, nwC, rAC, rBC]),
+            material: C.Color.fromCssColorString('#f5f0e8').withAlpha(0.6), // gable wall color
+            outline: true,
+            outlineColor: C.Color.fromCssColorString('#8a6a3a'),
+          },
+        });
+        const endGableB = viewer.entities.add({
+          id: `gable-end-b-${Date.now()}`,
+          name: 'Gable end B',
+          polygon: {
+            hierarchy: new C.PolygonHierarchy(longIsLng ? [nwC, neC, rAC, rBC] : [seC, neC, rAC, rBC]),
+            material: C.Color.fromCssColorString('#f5f0e8').withAlpha(0.6),
+            outline: true,
+            outlineColor: C.Color.fromCssColorString('#8a6a3a'),
+          },
+        });
+        gableEntitiesRef.current.push(faceA, faceB, endGableA, endGableB);
+        setPlacedGableCount(gableEntitiesRef.current.length / 4);
+        addLog('GABLE', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${DEFAULT_GABLE_PITCH_DEG}°`);
+        setStatusMsg(`🏠 Gable placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge ${ridgeRiseM.toFixed(1)}m up — click again to place another`);
+        gablePtsRef.current = [];
+        setGablePtCount(0);
+      } else {
+        setStatusMsg(`🏠 Eave corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click corner 2 (NE)`);
+      }
+      try { viewer.scene.requestRender(); } catch {}
+    } catch (err: unknown) { addLog('ERROR', `handleGableClick: ${(err as Error).message}`); }
+  }
+
   // ── Ghost panel preview (sequential auto-connect) ────────────────────────
   function showGhostPanel(viewer: any, C: any, lastLat: number, lastLng: number, lastH: number, tiltDeg: number, azimuthDeg: number) {
     if (ghostEntityRef.current) { try { viewer.entities.remove(ghostEntityRef.current); } catch {} ghostEntityRef.current = null; }
@@ -8861,6 +9000,7 @@ function SolarEngine3D({
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
               { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block: click two footprint corners, default 6m height. Use when Google 3D Tiles has no coverage for this address.' },
+              { mode: 'roof_gable'   as PlacementMode, icon: '\u{1F3E0}\u2009\u{1F3D7}', label: 'Gable', tip: 'Drop a 3D gable roof: click 2 eave corners, the system draws 2 sloped faces meeting at a ridge along the long edge.' },
             ],
           },
         ];
@@ -9088,6 +9228,7 @@ function SolarEngine3D({
                  placementMode === 'set_direction' ? '\u{1F9ED} Set Direction' :
                  placementMode === 'set_origin' ? '\u{1F4CD} Set Origin' :
                  placementMode === 'block' ? `\u{1F9F1} Block${blockPtCount > 0 ? ` (${blockPtCount}/2)` : ''}` :
+                 placementMode === 'roof_gable' ? `\u{1F3E0}\u2009\u{1F3D7} Gable${gablePtCount > 0 ? ` (${gablePtCount}/2)` : ''}` :
                  placementMode}
               </div>
 
@@ -9423,6 +9564,44 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(200,200,210,0.15)', color: '#e0e0e0',
                         border: '1px solid rgba(200,200,210,0.3)', cursor: 'pointer' }}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* ── Gable Roof context (v64: 3D gable roof placement) ── */}
+              {placementMode === 'roof_gable' ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(255,180,80,0.25)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#ffd28a', fontSize: 12 }}>
+                    {gablePtCount === 0
+                      ? '\u{1F3D7} Click eave corner 1 (SW)'
+                      : gablePtCount === 1
+                        ? '\u{1F3D7} Click eave corner 2 (NE) — gable placed with ridge along long edge'
+                        : `${placedGableCount} gable${placedGableCount === 1 ? '' : 's'} placed`}
+                  </span>
+                  {gablePtCount > 0 || placedGableCount > 0 ? (
+                    <button
+                      onClick={() => {
+                        gablePtsRef.current = []; setGablePtCount(0);
+                        const viewer = viewerRef.current;
+                        if (viewer) {
+                          for (const e of gableEntitiesRef.current) {
+                            try { viewer.entities.remove(e); } catch { /* ignore */ }
+                          }
+                        }
+                        gableEntitiesRef.current = [];
+                        setPlacedGableCount(0);
+                        setStatusMsg('Gable tool cleared');
+                      }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(255,180,80,0.15)', color: '#ffd28a',
+                        border: '1px solid rgba(255,180,80,0.3)', cursor: 'pointer' }}
                     >
                       Clear
                     </button>
