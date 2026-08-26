@@ -87,6 +87,9 @@ import {
 // PanelPrimitiveRenderer and LODManager removed — entity-based rendering used instead
 import { batchComputeShadeFactors, precomputeDaySunPositions, clearSunCache } from '@/lib/sunVectorCache';
 
+// v66: Bottom-right Design-phase status panel (Aurora frame 0147 parity).
+import { StatusPanel } from './status';
+
 // v64: Block / Gable / Hip math (pure functions, unit-tested in tests/block3d.test.ts)
 import {
   computeBlockDimensions,
@@ -147,6 +150,17 @@ import {
 } from './tree';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
+
+// v68: Vertex Handles (in-place footprint editing for Block / Gable / Hip / Tree).
+// Math in lib/3d/vertexHandlesMath.ts (unit-tested in tests/vertexHandles.test.ts).
+// Component in components/3d/editing/VertexHandles.tsx.
+import VertexHandles from '@/components/3d/editing/VertexHandles';
+import {
+  applyVertexMove as vhApplyVertexMove,
+  rebuildGableFaces as vhRebuildGableFaces,
+  rebuildHipFaces as vhRebuildHipFaces,
+  type VertexTargetSpec as VHTargetSpec,
+} from '@/lib/3d/vertexHandlesMath';
 
 // P0-6 (DATA-AUTHORITY-AUDIT): panel specs stamped onto placed panels come
 // from the equipment authority (equipment-db record), NEVER a hardcoded
@@ -986,6 +1000,9 @@ function SolarEngine3D({
         try { viewerRef.current?.entities.remove(blockPreviewRef.current); } catch { /* ignore */ }
         blockPreviewRef.current = null;
       }
+      // v68: drop the in-progress segment arrows on tool change
+      try { segmentArrowOverlayRef.current?.clear(); } catch { /* ignore */ }
+      flippedArrowsRef.current.clear();
       setClickCountForTool(0);
       clearGhostPanel();
       // v62: leaving select mode — drop the rotate knob and never leave a drag
@@ -6705,6 +6722,9 @@ function SolarEngine3D({
             } catch { /* ignore */ }
             blockPreviewRef.current = null;
           }
+          // v68: clear the in-progress segment arrows
+          try { segmentArrowOverlayRef.current?.clear(); } catch { /* ignore */ }
+          flippedArrowsRef.current.clear();
           blockPtsRef.current = [];
           setBlockPtCount(0);
           setStatusMsg('🧱 Block cancelled');
@@ -6788,6 +6808,154 @@ function SolarEngine3D({
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleMeasureClick: ${(err as Error).message}`); }
+  }
+
+  // ── v66: Measurements tool — multi-pair (Aurora TIER 2 #10) ─────────────
+  function handleMeasurementsClick(viewer: any, C: any, screenPos: any) {
+    try {
+      const hit = getWorldPosition(viewer, C, screenPos);
+      if (!hit) return;
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      if (!carto) return;
+      const pt: LngLatH = {
+        lat: C.Math.toDegrees(carto.latitude),
+        lng: C.Math.toDegrees(carto.longitude),
+        h:   carto.height,
+      };
+      if (!isValidCoord(pt.lat, pt.lng)) return;
+      measurePtsRef.current.push(pt);
+      setMeasurePtCount(measurePtsRef.current.length);
+      try {
+        const mPos = safeCartesian3(C, pt.lng, pt.lat, pt.h + 0.3);
+        if (mPos) {
+          const m = viewer.entities.add({
+            position: mPos,
+            point: { pixelSize: 10, color: C.Color.fromCssColorString('#00ffff'), outlineColor: C.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+          });
+          measureOverlayRef.current.push(m);
+        }
+      } catch { /* ignore */ }
+      if (measurePtsRef.current.length >= 2) {
+        const p1 = measurePtsRef.current[measurePtsRef.current.length - 2];
+        const p2 = measurePtsRef.current[measurePtsRef.current.length - 1];
+        const id = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+          ? (crypto as any).randomUUID()
+          : `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const m = buildMeasurement(id, p1, p2);
+        const bundle = renderMeasurement(viewer, C, m);
+        if (bundle) {
+          measurementsRef.current.push(m);
+          setStatusMsg(`📏 Measurement ${measurementsRef.current.length}: ${m.slopeDistM.toFixed(1)} m / ${(m.slopeDistM * 3.28084).toFixed(1)} ft`);
+        }
+        measurePtsRef.current = [];
+        setMeasurePtCount(0);
+      }
+      try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    } catch (err: unknown) {
+      addLog('ERROR', `handleMeasurementsClick: ${(err as Error).message}`);
+    }
+  }
+
+  // ── v66: Ruler tool — click+drag, single persistent measurement ─────────
+  function handleRulerDown(viewer: any, C: any, screenPos: any) {
+    try {
+      const hit = getWorldPosition(viewer, C, screenPos);
+      if (!hit) return;
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      if (!carto) return;
+      const pt: LngLatH = {
+        lat: C.Math.toDegrees(carto.latitude),
+        lng: C.Math.toDegrees(carto.longitude),
+        h:   carto.height,
+      };
+      if (!isValidCoord(pt.lat, pt.lng)) return;
+      rulerAnchorRef.current = pt;
+      rulerCursorRef.current = pt;
+      rulerDraggingRef.current = true;
+      rulerPreviewEntityRef.current = renderRulerPreview(viewer, C, pt, pt, null);
+      try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    } catch (err: unknown) {
+      addLog('ERROR', `handleRulerDown: ${(err as Error).message}`);
+    }
+  }
+
+  function handleRulerMove(viewer: any, C: any, screenPos: any) {
+    if (!rulerDraggingRef.current) return;
+    const anchor = rulerAnchorRef.current;
+    if (!anchor) return;
+    try {
+      const hit = getWorldPosition(viewer, C, screenPos);
+      if (!hit) return;
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      if (!carto) return;
+      const cursor: LngLatH = {
+        lat: C.Math.toDegrees(carto.latitude),
+        lng: C.Math.toDegrees(carto.longitude),
+        h:   carto.height,
+      };
+      if (!isValidCoord(cursor.lat, cursor.lng)) return;
+      rulerPreviewEntityRef.current = renderRulerPreview(
+        viewer, C, anchor, cursor, rulerPreviewEntityRef.current,
+      );
+      rulerCursorRef.current = cursor;
+      try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    } catch (err: unknown) {
+      addLog('ERROR', `handleRulerMove: ${(err as Error).message}`);
+    }
+  }
+
+  function handleRulerUp() {
+    if (!rulerDraggingRef.current) return;
+    const anchor = rulerAnchorRef.current;
+    const preview = rulerPreviewEntityRef.current;
+    const cursor  = rulerCursorRef.current;
+    const viewer  = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) {
+      rulerAnchorRef.current = null;
+      rulerCursorRef.current = null;
+      rulerDraggingRef.current = false;
+      return;
+    }
+    try {
+      if (!anchor || !cursor || !preview) {
+        rulerAnchorRef.current = null;
+        rulerCursorRef.current = null;
+        rulerDraggingRef.current = false;
+        return;
+      }
+      if (cursor.lat === anchor.lat && cursor.lng === anchor.lng && cursor.h === anchor.h) {
+        try { viewer.entities.remove(preview); } catch { /* ignore */ }
+        rulerPreviewEntityRef.current = null;
+        rulerAnchorRef.current = null;
+        rulerCursorRef.current = null;
+        rulerDraggingRef.current = false;
+        return;
+      }
+      const id = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+        ? (crypto as any).randomUUID()
+        : `r-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const ruler = buildMeasurement(id, anchor, cursor);
+      if (rulerEntitiesRef.current) {
+        removeMeasurementBundle(viewer, rulerEntitiesRef.current);
+        rulerEntitiesRef.current = null;
+      }
+      try { viewer.entities.remove(preview); } catch { /* ignore */ }
+      rulerPreviewEntityRef.current = null;
+      const bundle = renderMeasurement(viewer, C, ruler);
+      if (bundle) {
+        rulerEntitiesRef.current = bundle;
+        rulerRef.current = ruler;
+        setStatusMsg(`📐 Ruler: ${ruler.slopeDistM.toFixed(1)} m / ${(ruler.slopeDistM * 3.28084).toFixed(1)} ft`);
+      }
+      try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    } catch (err: unknown) {
+      addLog('ERROR', `handleRulerUp: ${(err as Error).message}`);
+    } finally {
+      rulerAnchorRef.current = null;
+      rulerCursorRef.current = null;
+      rulerDraggingRef.current = false;
+    }
   }
 
   // ── v65: Block tool — line-trace mode (click N points to define any polygon,
@@ -6980,6 +7148,12 @@ function SolarEngine3D({
     }]);
     addLog('BLOCK', `Finalized: ${pts.length} points, ≈${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ground ${groundLevelM.toFixed(1)}m, eave ${eaveHeightM}m`);
     setStatusMsg(`🧱 Block placed — ${pts.length} footprint points, eave ${eaveHeightM}m. Click more points to add another, or Esc.`);
+    // v68: drop the in-progress segment arrows now that the prism
+    // takes over. We do NOT clear the flip set — if the user starts
+    // a new block immediately, their previous flips don't carry
+    // over (the new edges get default normalDir), but the set is
+    // also cleaned on tool change.
+    try { segmentArrowOverlayRef.current?.clear(); } catch { /* ignore */ }
     // Reset for the next block (keep the placed blocks; user can drop more)
     blockPtsRef.current = [];
     setBlockPtCount(0);
