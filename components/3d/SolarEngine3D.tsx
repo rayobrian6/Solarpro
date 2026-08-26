@@ -6678,6 +6678,10 @@ function SolarEngine3D({
           name: 'Gable slope A',
           polygon: {
             hierarchy: new C.PolygonHierarchy(faceAPositions),
+            // perPositionHeight:true keeps the face at the 3D positions of its corners
+            // instead of clamping to the ellipsoid surface. Without this, the sloped
+            // face would render as a flat ground-clamped polygon.
+            perPositionHeight: true,
             material: C.Color.fromCssColorString('#caa472').withAlpha(0.92), // wood/roof color
             outline: true,
             outlineColor: C.Color.fromCssColorString('#5a3a1a'),
@@ -6688,6 +6692,7 @@ function SolarEngine3D({
           name: 'Gable slope B',
           polygon: {
             hierarchy: new C.PolygonHierarchy(faceBPositions),
+            perPositionHeight: true,
             material: C.Color.fromCssColorString('#caa472').withAlpha(0.92),
             outline: true,
             outlineColor: C.Color.fromCssColorString('#5a3a1a'),
@@ -6699,6 +6704,7 @@ function SolarEngine3D({
           name: 'Gable end A',
           polygon: {
             hierarchy: new C.PolygonHierarchy(longIsLng ? [swC, seC, rAC, rBC] : [swC, nwC, rAC, rBC]),
+            perPositionHeight: true,
             material: C.Color.fromCssColorString('#f5f0e8').withAlpha(0.6), // gable wall color
             outline: true,
             outlineColor: C.Color.fromCssColorString('#8a6a3a'),
@@ -6709,6 +6715,7 @@ function SolarEngine3D({
           name: 'Gable end B',
           polygon: {
             hierarchy: new C.PolygonHierarchy(longIsLng ? [nwC, neC, rAC, rBC] : [seC, neC, rAC, rBC]),
+            perPositionHeight: true,
             material: C.Color.fromCssColorString('#f5f0e8').withAlpha(0.6),
             outline: true,
             outlineColor: C.Color.fromCssColorString('#8a6a3a'),
@@ -6802,22 +6809,22 @@ function SolarEngine3D({
         const f1 = viewer.entities.add({
           id: `hip-slope-a-${Date.now()}`,
           name: 'Hip slope A',
-          polygon: { hierarchy: new C.PolygonHierarchy(faceSouthSlope), material: slopeMat, outline: true, outlineColor },
+          polygon: { hierarchy: new C.PolygonHierarchy(faceSouthSlope), perPositionHeight: true, material: slopeMat, outline: true, outlineColor },
         });
         const f2 = viewer.entities.add({
           id: `hip-slope-b-${Date.now()}`,
           name: 'Hip slope B',
-          polygon: { hierarchy: new C.PolygonHierarchy(faceNorthSlope), material: slopeMat, outline: true, outlineColor },
+          polygon: { hierarchy: new C.PolygonHierarchy(faceNorthSlope), perPositionHeight: true, material: slopeMat, outline: true, outlineColor },
         });
         const f3 = viewer.entities.add({
           id: `hip-end-a-${Date.now()}`,
           name: 'Hip end A',
-          polygon: { hierarchy: new C.PolygonHierarchy(faceSouthHip), material: hipEndMat, outline: true, outlineColor },
+          polygon: { hierarchy: new C.PolygonHierarchy(faceSouthHip), perPositionHeight: true, material: hipEndMat, outline: true, outlineColor },
         });
         const f4 = viewer.entities.add({
           id: `hip-end-b-${Date.now()}`,
           name: 'Hip end B',
-          polygon: { hierarchy: new C.PolygonHierarchy(faceNorthHip), material: hipEndMat, outline: true, outlineColor },
+          polygon: { hierarchy: new C.PolygonHierarchy(faceNorthHip), perPositionHeight: true, material: hipEndMat, outline: true, outlineColor },
         });
         hipEntitiesRef.current.push(f1, f2, f3, f4);
         setPlacedHipCount(hipEntitiesRef.current.length / 4);
