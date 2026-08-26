@@ -639,6 +639,12 @@ function SolarEngine3D({
   // Count of placed points (for status message)
   const [pts3DCount, setPts3DCount] = useState(0);
 
+  // v66: Aurora-style top-bar map-source picker state
+  // (`Details ▾` / `LiDAR | Street View` / `[Google ▾]`). Local for now —
+  // the actual Cesium imagery swap is the integration step that the next
+  // session wires up via the onChange callback.
+  const [mapPickerState, setMapPickerState] = useState<MapPickerState>(DEFAULT_PICKER_STATE);
+
   // ── v47.126: Layout direction + origin control refs ─────────────────────
   // customLayoutDirRef: user-defined u-axis ENU vector {x,y} (null = use longest edge)
   const customLayoutDirRef   = useRef<{x:number;y:number} | null>(null);
