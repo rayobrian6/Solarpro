@@ -20,6 +20,7 @@
 import type { RunSegment, MicroBranch } from './computed-system';
 import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker } from '@/lib/permit/utils/helpers';
 import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
+import { nextEnclosure } from '@/lib/electrical/stdSizes';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import { microBranchCount, microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { getBuildBadge } from './version';
@@ -1492,7 +1493,19 @@ function renderDisco(
 
   // Labels below — a supply-side tap's disconnect IS the tap OCPD and must be
   // fused (NEC 705.11); load-side jobs keep the conventional non-fused disco.
-  p.push(txt(cx, by2+H2+10, fusedTapOcpd ? `${ocpd}A FUSED — TAP OCPD` : `${ocpd}A NON-FUSED`, {sz:F.tiny, anc:'middle'}));
+  //
+  // FRAME AND FUSE ARE TWO DIFFERENT NUMBERS. This printed a single value, so a
+  // 25 A calculated OCPD came out as "25A FUSED" — and there is no 25 A fused
+  // safety switch to buy. Fused disconnects are sold in FRAME sizes
+  // (30/60/100/200/400/600 A, STD_DISCONNECT_ENCLOSURES); the fuses inside are
+  // sized to the OCPD. So 25 A of fusing is a 30 A frame with 25 A fuses, and
+  // 40 A of fusing is a 60 A frame with 40 A fuses. Naming only the OCPD tells
+  // the installer to order hardware that does not exist, and tells the reviewer
+  // a switch rating that is not the one on the wall.
+  const frameA = nextEnclosure(ocpd);
+  p.push(txt(cx, by2+H2+10,
+    fusedTapOcpd ? `${frameA}A FUSED DISCO — ${ocpd}A FUSES (TAP OCPD)` : `${frameA}A NON-FUSED`,
+    {sz:F.tiny, anc:'middle'}));
   p.push(txt(cx, by2+H2+19, fusedTapOcpd ? 'NEC 705.11(C), 690.14 — UTILITY ACCESSIBLE' : 'NEC 690.14 — UTILITY ACCESSIBLE', {sz:F.tiny, anc:'middle', italic:true}));
 
   // Callout
