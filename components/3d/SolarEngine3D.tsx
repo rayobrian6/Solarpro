@@ -191,7 +191,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -692,6 +692,15 @@ function SolarEngine3D({
   const groundMountStyleRef = useRef<'pipe' | 'ironridge'>('pipe');
   const measurePtsRef  = useRef<Array<{ lat: number; lng: number; height: number }>>([]);
   const [measurePtCount, setMeasurePtCount] = useState(0);
+  // v64: Block primitive — 2-corner footprint then default-height box.
+  // The footprint corners are tracked in lat/lng (ECEF computed on commit).
+  // Each Block state entry: { id, sw:{lat,lng}, ne:{lat,lng}, heightM }
+  // Stored locally; persisted with the project in a later stage.
+  const blockPtsRef     = useRef<Array<{ lat: number; lng: number }>>([]);
+  const [blockPtCount, setBlockPtCount]     = useState(0);
+  const blockEntitiesRef = useRef<any[]>([]); // Cesium Entity[] for the placed boxes
+  const [placedBlockCount, setPlacedBlockCount] = useState(0);
+  const DEFAULT_BLOCK_HEIGHT_M = 6; // typical 1-story eave height
   const ghostEntityRef = useRef<any>(null);
   const [statusMsg, setStatusMsg]       = useState('');
   const [fps, setFps]                   = useState(60);
@@ -3914,6 +3923,7 @@ function SolarEngine3D({
         else if (mode === 'mark_plane')     handlePlane3DClick(viewer, C, screenPos); // same point-trace, no panel fill on finish
         else if (mode === 'set_direction')  handleSetDirectionClick(viewer, C, screenPos);
         else if (mode === 'set_origin')     handleSetOriginClick(viewer, C, screenPos);
+        else if (mode === 'block')          handleBlockClick(viewer, C, screenPos);
         // auto_roof: fires once via placementMode useEffect — NOT on canvas click
 
         // pick_house: user clicked a house — get lat/lng and reverse-geocode
@@ -6367,6 +6377,87 @@ function SolarEngine3D({
     } catch (err: unknown) { addLog('ERROR', `handleMeasureClick: ${(err as Error).message}`); }
   }
 
+  // ── v64: Block tool — drop 2-corner footprint, render as 3D box entity ──
+  // The footprint is a rectangle in lat/lng (SW + NE corners). After the 2nd
+  // click, we compute the rectangle dimensions in meters, place a Cesium box
+  // entity at the centroid, and the user can then mark a roof plane on top.
+  function handleBlockClick(viewer: any, C: any, screenPos: any) {
+    try {
+      const hit = getWorldPosition(viewer, C, screenPos);
+      if (!hit) return;
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      if (!carto) return;
+      const pt = {
+        lat: C.Math.toDegrees(carto.latitude),
+        lng: C.Math.toDegrees(carto.longitude),
+      };
+      if (!isValidCoord(pt.lat, pt.lng)) return;
+      blockPtsRef.current.push(pt);
+      setBlockPtCount(blockPtsRef.current.length);
+
+      // 2nd click — finalize the footprint and create the box entity
+      if (blockPtsRef.current.length >= 2) {
+        const [c1, c2] = blockPtsRef.current;
+        // Order: SW = min lat/lng, NE = max lat/lng so dimensions are always positive
+        const sw = { lat: Math.min(c1.lat, c2.lat), lng: Math.min(c1.lng, c2.lng) };
+        const ne = { lat: Math.max(c1.lat, c2.lat), lng: Math.max(c1.lng, c2.lng) };
+        // Convert lat/lng deltas to meters (mid-latitude approximation is fine for footprints)
+        const midLat = (sw.lat + ne.lat) / 2;
+        const METERS_PER_DEG_LAT = 111_320;
+        const METERS_PER_DEG_LNG = 111_320 * Math.cos(midLat * Math.PI / 180);
+        const widthM  = Math.abs(ne.lng - sw.lng) * METERS_PER_DEG_LNG;
+        const depthM  = Math.abs(ne.lat - sw.lat) * METERS_PER_DEG_LAT;
+        const heightM = DEFAULT_BLOCK_HEIGHT_M;
+        // Skip degenerate footprints (sub-meter clicks)
+        if (widthM < 0.5 || depthM < 0.5) {
+          setStatusMsg('Block: footprint too small (<0.5m) — try again with a bigger area');
+          blockPtsRef.current = [];
+          setBlockPtCount(0);
+          return;
+        }
+        // Centroid at ground level (elev=0) for a box that sits on the ground
+        const centroidLat = (sw.lat + ne.lat) / 2;
+        const centroidLng = (sw.lng + ne.lng) / 2;
+        const centerCart = safeCartesian3(C, centroidLng, centroidLat, heightM / 2);
+        if (!centerCart) {
+          setStatusMsg('Block: failed to compute centroid — try again');
+          blockPtsRef.current = [];
+          setBlockPtCount(0);
+          return;
+        }
+        // CesiumJS BoxGraphics: dimensions are in METERS along the LOCAL east-north-up
+        // frame at the position, which is what we want for a building sitting on the ground.
+        const boxEntity = viewer.entities.add({
+          id: `block-${Date.now()}`,
+          name: 'Building Block',
+          position: centerCart,
+          box: {
+            dimensions: new C.Cartesian3(widthM, depthM, heightM),
+            material: C.Color.fromCssColorString('#f5f5f5').withAlpha(0.85),
+            outline: true,
+            outlineColor: C.Color.fromCssColorString('#2a2a2a'),
+            outlineWidth: 2,
+          },
+          description: `<table class="cesium-infoBox-defaultTable">
+            <tr><th>Block</th><td>${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${heightM.toFixed(1)}m</td></tr>
+            <tr><th>SW corner</th><td>${sw.lat.toFixed(6)}, ${sw.lng.toFixed(6)}</td></tr>
+            <tr><th>NE corner</th><td>${ne.lat.toFixed(6)}, ${ne.lng.toFixed(6)}</td></tr>
+          </table>`,
+        });
+        blockEntitiesRef.current.push(boxEntity);
+        setPlacedBlockCount(blockEntitiesRef.current.length);
+        addLog('BLOCK', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${heightM}m at (${centroidLat.toFixed(5)}, ${centroidLng.toFixed(5)})`);
+        setStatusMsg(`🧱 Block placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${heightM}m — click again to place another`);
+        // Reset for next block
+        blockPtsRef.current = [];
+        setBlockPtCount(0);
+      } else {
+        setStatusMsg(`🧱 Footprint corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click corner 2 (NE)`);
+      }
+      try { viewer.scene.requestRender(); } catch {}
+    } catch (err: unknown) { addLog('ERROR', `handleBlockClick: ${(err as Error).message}`); }
+  }
+
   // ── Ghost panel preview (sequential auto-connect) ────────────────────────
   function showGhostPanel(viewer: any, C: any, lastLat: number, lastLng: number, lastH: number, tiltDeg: number, azimuthDeg: number) {
     if (ghostEntityRef.current) { try { viewer.entities.remove(ghostEntityRef.current); } catch {} ghostEntityRef.current = null; }
@@ -8769,6 +8860,7 @@ function SolarEngine3D({
               { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruct',  tip: 'Mark a rectangular area as obstructed (HVAC etc.)' },
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
+              { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block: click two footprint corners, default 6m height. Use when Google 3D Tiles has no coverage for this address.' },
             ],
           },
         ];
@@ -8995,6 +9087,7 @@ function SolarEngine3D({
                  placementMode === 'measure' ? '\u{1F4CF} Measure' :
                  placementMode === 'set_direction' ? '\u{1F9ED} Set Direction' :
                  placementMode === 'set_origin' ? '\u{1F4CD} Set Origin' :
+                 placementMode === 'block' ? `\u{1F9F1} Block${blockPtCount > 0 ? ` (${blockPtCount}/2)` : ''}` :
                  placementMode}
               </div>
 
@@ -9293,6 +9386,45 @@ function SolarEngine3D({
                         background: 'rgba(255,215,0,0.12)', color: '#ffd700',
                         border: '1px solid rgba(255,215,0,0.3)', cursor: 'pointer' }}>
                       \u2715 Reset
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* ── Block context (v64: 3D building block placement) ── */}
+              {placementMode === 'block' ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(180,180,200,0.25)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#e0e0e0', fontSize: 12 }}>
+                    {blockPtCount === 0
+                      ? '\u{1F9F1} Click footprint corner 1 (SW)'
+                      : blockPtCount === 1
+                        ? '\u{1F9F1} Click footprint corner 2 (NE) — block placed at default 6m height'
+                        : `${placedBlockCount} block${placedBlockCount === 1 ? '' : 's'} placed`}
+                  </span>
+                  {blockPtCount > 0 || placedBlockCount > 0 ? (
+                    <button
+                      onClick={() => {
+                        blockPtsRef.current = []; setBlockPtCount(0);
+                        // remove all placed block entities
+                        const viewer = viewerRef.current;
+                        if (viewer) {
+                          for (const e of blockEntitiesRef.current) {
+                            try { viewer.entities.remove(e); } catch { /* ignore */ }
+                          }
+                        }
+                        blockEntitiesRef.current = [];
+                        setPlacedBlockCount(0);
+                        setStatusMsg('Block tool cleared');
+                      }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(200,200,210,0.15)', color: '#e0e0e0',
+                        border: '1px solid rgba(200,200,210,0.3)', cursor: 'pointer' }}
+                    >
+                      Clear
                     </button>
                   ) : null}
                 </div>
