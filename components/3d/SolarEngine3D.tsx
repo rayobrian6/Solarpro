@@ -17,6 +17,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { MapSourcePicker, DEFAULT_PICKER_STATE, type MapPickerState } from '@/components/3d/mapSource';
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { getSunPosition } from '@/lib/solarMath';
@@ -94,6 +95,12 @@ import {
   clampBlockHeight,
 } from '@/lib/3d/blockMath';
 
+// v65 (roof-wizard): 3-step sticky roof-drawing wizard — Aurora parity
+// (HANDOFF_2026-08-25 §2). HUD stepper that appears during any
+// roof-draw mode. UI + state machine live in components/3d/wizard/.
+// See DESIGN.md for the spec.
+import { RoofWizard } from './wizard';
+
 // v65 (camera-tilt): Aurora-parity camera presets — default 3D view at -45° pitch
 // (tilted aerial) instead of -65° (top-down-ish). See lib/3d/cameraPresets.ts.
 import {
@@ -125,6 +132,9 @@ import {
 import {
   CanvasControls,
   computeZoomedRadius,
+  ICON_PARCEL,
+  ICON_ROOF,
+  ICON_SHADE,
   type LayerToggle,
 } from './controls';
 
@@ -750,6 +760,17 @@ function SolarEngine3D({
   const groundMountStyleRef = useRef<'pipe' | 'ironridge'>('pipe');
   const measurePtsRef  = useRef<Array<{ lat: number; lng: number; height: number }>>([]);
   const [measurePtCount, setMeasurePtCount] = useState(0);
+  // v66: Measurements tool — multi-pair (Aurora TIER 2 #10).
+  // measurementsRef holds COMMITTED measurements; the in-progress pair
+  // still uses measurePtsRef + measureOverlayRef (the legacy measure refs).
+  const measurementsRef = useRef<Measurement[]>([]);
+  // v66: Ruler tool — single persistent measurement, drag-anchored.
+  const rulerRef = useRef<Measurement | null>(null);
+  const rulerEntitiesRef = useRef<MeasurementEntityBundle | null>(null);
+  const rulerPreviewEntityRef = useRef<any>(null);
+  const rulerAnchorRef = useRef<LngLatH | null>(null);
+  const rulerCursorRef = useRef<LngLatH | null>(null);
+  const rulerDraggingRef = useRef<boolean>(false);
   // v64: Block primitive — 2-corner footprint then default-height box.
   // v65.1: each point now also stores the click elevation (h, meters above
   // WGS84 ellipsoid) so the prism and the in-progress polyline render at
@@ -6836,6 +6857,12 @@ function SolarEngine3D({
     blockHeightOverridesRef.current.set(blockId, eaveHeightM);
     setPlacedBlockCount(blockEntitiesRef.current.length);
     setLastPlacedBlockId(blockId); // v66: remember the most recent block for the in-canvas height input
+    setVertexSpecs(prev => [...prev, {
+      id: blockId,
+      type: 'block',
+      vertices: pts.map(p => ({ lat: p.lat, lng: p.lng, h: p.h || 0 })),
+      blockExtrudeHeightM: eaveHeightM,
+    }]);
     addLog('BLOCK', `Finalized: ${pts.length} points, ≈${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ground ${groundLevelM.toFixed(1)}m, eave ${eaveHeightM}m`);
     setStatusMsg(`🧱 Block placed — ${pts.length} footprint points, eave ${eaveHeightM}m. Click more points to add another, or Esc.`);
     // Reset for the next block (keep the placed blocks; user can drop more)
@@ -6947,6 +6974,18 @@ function SolarEngine3D({
         });
         gableEntitiesRef.current.push(faceA, faceB, endGableA, endGableB);
         setPlacedGableCount(gableEntitiesRef.current.length / 4);
+        const gableGroupId = `gable-grp-${Date.now()}`;
+        try { (faceA as any).__groupId = gableGroupId; } catch { /* ignore */ }
+        try { (faceB as any).__groupId = gableGroupId; } catch { /* ignore */ }
+        try { (endGableA as any).__groupId = gableGroupId; } catch { /* ignore */ }
+        try { (endGableB as any).__groupId = gableGroupId; } catch { /* ignore */ }
+        setVertexSpecs(prev => [...prev, {
+          id: gableGroupId,
+          type: 'gable',
+          vertices: [eaveSW, eaveSE, eaveNW, eaveNE].map(v => ({ lat: v.lat, lng: v.lng, h: v.h })),
+          eaveHeightM,
+          pitchDeg: roofPitchDeg,
+        }]);
         addLog('GABLE', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${roofPitchDeg}°`);
         setStatusMsg(`🏠 Gable placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge ${ridgeRiseM.toFixed(1)}m up — click again to place another`);
         gablePtsRef.current = [];
@@ -7052,6 +7091,18 @@ function SolarEngine3D({
         });
         hipEntitiesRef.current.push(f1, f2, f3, f4);
         setPlacedHipCount(hipEntitiesRef.current.length / 4);
+        const hipGroupId = `hip-grp-${Date.now()}`;
+        try { (f1 as any).__groupId = hipGroupId; } catch { /* ignore */ }
+        try { (f2 as any).__groupId = hipGroupId; } catch { /* ignore */ }
+        try { (f3 as any).__groupId = hipGroupId; } catch { /* ignore */ }
+        try { (f4 as any).__groupId = hipGroupId; } catch { /* ignore */ }
+        setVertexSpecs(prev => [...prev, {
+          id: hipGroupId,
+          type: 'hip',
+          vertices: [eaveSW, eaveSE, eaveNW, eaveNE].map(v => ({ lat: v.lat, lng: v.lng, h: v.h })),
+          eaveHeightM,
+          pitchDeg: roofPitchDeg,
+        }]);
         addLog('HIP', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m, setback ${hipSetbackM.toFixed(2)}m`);
         setStatusMsg(`🏠 Hip placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ridge ${ridgeRiseM.toFixed(1)}m up, setback ${hipSetbackM.toFixed(1)}m — click again to place another`);
         hipPtsRef.current = [];
@@ -9316,6 +9367,20 @@ function SolarEngine3D({
       {/* Cesium container */}
       <div ref={cesiumRef} style={{ width: '100%', height: '100%' }} />
 
+      {/* v65 (roof-wizard): 3-step sticky wizard — Aurora parity
+          (HANDOFF_2026-08-25 §2). Appears during any roof-draw mode.
+          × cancels the whole flow. */}
+      <RoofWizard
+        placementMode={placementMode}
+        vertexCount={
+          placementMode === 'block'      ? blockPtCount
+          : placementMode === 'roof_gable' ? gablePtCount
+          : placementMode === 'roof_hip'   ? hipPtCount
+          : 0
+        }
+        onCancel={() => onPlacementModeChange('select')}
+      />
+
       {/* v65 (tree-cursor): 2D tree-placement footprint preview. Mounts
           unconditionally; only renders when active === true. Renders into
           the Cesium scene, so co-registers with the terrain drape and 3D
@@ -10249,6 +10314,7 @@ function SolarEngine3D({
                         blockHandlesRef.current = [];
                         blockHeightOverridesRef.current.clear();
                         setPlacedBlockCount(0);
+                        setVertexSpecs(prev => prev.filter(s => s.type !== 'block'));
                         setStatusMsg('All blocks cleared');
                       }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
@@ -10459,6 +10525,45 @@ function SolarEngine3D({
           />
         </div>
       ) : null}
+
+      {/* v68 (canvas-controls): Aurora-parity bottom-left control strip
+          (HANDOFF_2026-08-25 §1) — floating vertical dock at the canvas
+          corner. Compass needle rotates with `viewer.camera.heading`.
+          Click compass → reset to north. Zoom +/-, three layer toggles.
+          Sits at `left: 12, bottom: 12`, flush against the canvas edge;
+          the existing horizontal layer-toggle row at `left: 60,
+          bottom: 16` is unchanged and shares the same state. */}
+      <CanvasControls
+        viewer={viewerRef.current}
+        ready={stage === 'done'}
+        onResetNorth={() => {
+          const o = orbitRef.current;
+          o.heading = Math.PI;            // camera south → look north
+          o.pitch   = -Math.PI / 4;       // Aurora tilted-aerial default
+          applyOrbitRef.current?.();
+          if (typeof setStatusMsg === 'function') setStatusMsg('\u{1F9ED} North up');
+        }}
+        onZoomIn={() => {
+          const o = orbitRef.current;
+          o.radius = computeZoomedRadius(o.radius, -1);
+          applyOrbitRef.current?.();
+        }}
+        onZoomOut={() => {
+          const o = orbitRef.current;
+          o.radius = computeZoomedRadius(o.radius, 1);
+          applyOrbitRef.current?.();
+        }}
+        layers={([
+          { key: 'parcel', label: 'Parcel',     iconPath: ICON_PARCEL, on: showParcel,       onToggle: () => setShowParcel(v => !v) },
+          { key: 'roof',   label: 'Roof Segs',  iconPath: ICON_ROOF,   on: showRoofSegs,     onToggle: () => setShowRoofSegs(v => !v) },
+          { key: 'shade',  label: 'Shade',      iconPath: ICON_SHADE,  on: showShadeLocal,   onToggle: () => {
+            const next = !showShadeRef.current;
+            showShadeRef.current = next;
+            setShowShadeLocal(next);
+            updateShadeColors();
+          } },
+        ] as LayerToggle[])}
+      />
 
       {/* Overlay toggles (bottom-left, above status bar — clear of tool sidebar) */}
       {stage === 'done' ? (
@@ -10782,6 +10887,13 @@ function SolarEngine3D({
         </div>
       ) : null}
 
+      {/* v66: Bottom-right status panel (Aurora frame 0147 parity).
+          Sits above the "Last log" bar (which is at bottom: 8px) so
+          both are visible. The panel is a pure read of panels.length;
+          no $/W plumbing yet — the design-panel agent's Create Design
+          modal will thread costPerWatt through this prop when it lands. */}
+      {isDesignPhase ? <StatusPanel modules={panels.length} /> : null}
+
       {/* Last log */}
       {stage === 'done' && lastLog ? (
         <div style={{
@@ -10792,6 +10904,26 @@ function SolarEngine3D({
         }}>
           {lastLog}
         </div>
+      ) : null}
+
+      {/* v66: LiDAR Properties panel (Aurora parity — top-left). Mounted
+          only after the Cesium viewer is ready so the panel can show
+          error states from real load attempts. The "LiDAR is running..."
+          toast mirrors Aurora's top-right loader indicator. */}
+      {stage === 'done' ? (
+        <>
+          <LiDARPropertiesPanel
+            state={lidar.state}
+            onStyleChange={lidar.setStyle}
+            onTexturedChange={lidar.setTextured}
+            onOffsetChange={lidar.setOffset}
+            onLoadClick={handleLiDARLoad}
+            onLiftRoofs={handleLiftRoofs}
+            onFlattenRoofs={handleFlattenRoofs}
+            onClear={() => lidar.setDataset(null)}
+          />
+          <LiDARLoadingToast show={lidar.state.isLoading} />
+        </>
       ) : null}
     </div>
   );
