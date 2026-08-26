@@ -86,6 +86,14 @@ import {
 // PanelPrimitiveRenderer and LODManager removed — entity-based rendering used instead
 import { batchComputeShadeFactors, precomputeDaySunPositions, clearSunCache } from '@/lib/sunVectorCache';
 
+// v64: Block / Gable / Hip math (pure functions, unit-tested in tests/block3d.test.ts)
+import {
+  computeBlockDimensions,
+  computeGableGeometry,
+  computeHipGeometry,
+  clampBlockHeight,
+} from '@/lib/3d/blockMath';
+
 // P0-6 (DATA-AUTHORITY-AUDIT): panel specs stamped onto placed panels come
 // from the equipment authority (equipment-db record), NEVER a hardcoded
 // literal in this component.
@@ -3992,7 +4000,7 @@ function SolarEngine3D({
         const cursorYWorld = ray.origin.z + dir.z * t;
         // New height = start height + (cursor delta in world Y)
         const dyWorld = cursorYWorld - r.startYWorld;
-        const newHeightM = Math.max(1.0, Math.min(30.0, r.startHeightM + dyWorld));
+        const newHeightM = clampBlockHeight(r.startHeightM + dyWorld);
         // Update the block's box dimensions
         if (r.blockEntity.box?.dimensions) {
           const dims = r.blockEntity.box.dimensions.getValue(C.JulianDate.now());
@@ -6536,16 +6544,9 @@ function SolarEngine3D({
       // 2nd click — finalize the footprint and create the box entity
       if (blockPtsRef.current.length >= 2) {
         const [c1, c2] = blockPtsRef.current;
-        // Order: SW = min lat/lng, NE = max lat/lng so dimensions are always positive
-        const sw = { lat: Math.min(c1.lat, c2.lat), lng: Math.min(c1.lng, c2.lng) };
-        const ne = { lat: Math.max(c1.lat, c2.lat), lng: Math.max(c1.lng, c2.lng) };
-        // Convert lat/lng deltas to meters (mid-latitude approximation is fine for footprints)
-        const midLat = (sw.lat + ne.lat) / 2;
-        const METERS_PER_DEG_LAT = 111_320;
-        const METERS_PER_DEG_LNG = 111_320 * Math.cos(midLat * Math.PI / 180);
-        const widthM  = Math.abs(ne.lng - sw.lng) * METERS_PER_DEG_LNG;
-        const depthM  = Math.abs(ne.lat - sw.lat) * METERS_PER_DEG_LAT;
-        const heightM = DEFAULT_BLOCK_HEIGHT_M;
+        // Use extracted math for footprint dimensions (tested in lib/3d/blockMath)
+        const dims = computeBlockDimensions(c1, c2, DEFAULT_BLOCK_HEIGHT_M);
+        const { widthM, depthM, heightM, centroidLat, centroidLng, sw, ne } = dims;
         // Skip degenerate footprints (sub-meter clicks)
         if (widthM < 0.5 || depthM < 0.5) {
           setStatusMsg('Block: footprint too small (<0.5m) — try again with a bigger area');
@@ -6553,9 +6554,6 @@ function SolarEngine3D({
           setBlockPtCount(0);
           return;
         }
-        // Centroid at ground level (elev=0) for a box that sits on the ground
-        const centroidLat = (sw.lat + ne.lat) / 2;
-        const centroidLng = (sw.lng + ne.lng) / 2;
         const centerCart = safeCartesian3(C, centroidLng, centroidLat, heightM / 2);
         if (!centerCart) {
           setStatusMsg('Block: failed to compute centroid — try again');
@@ -6637,47 +6635,24 @@ function SolarEngine3D({
 
       if (gablePtsRef.current.length >= 2) {
         const [c1, c2] = gablePtsRef.current;
-        // Eave rectangle: SW = min lat/lng, NE = max lat/lng
-        const sw = { lat: Math.min(c1.lat, c2.lat), lng: Math.min(c1.lng, c2.lng) };
-        const ne = { lat: Math.max(c1.lat, c2.lat), lng: Math.max(c1.lng, c2.lng) };
-        const midLat = (sw.lat + ne.lat) / 2;
-        const METERS_PER_DEG_LAT = 111_320;
-        const METERS_PER_DEG_LNG = 111_320 * Math.cos(midLat * Math.PI / 180);
-        const widthM  = Math.abs(ne.lng - sw.lng) * METERS_PER_DEG_LNG; // east-west eave
-        const depthM  = Math.abs(ne.lat - sw.lat) * METERS_PER_DEG_LAT; // north-south eave
+        // Use extracted math for the gable geometry (tested in lib/3d/blockMath)
+        const eaveHeightM = DEFAULT_GABLE_EAVE_HEIGHT_M;
+        const g = computeGableGeometry(c1, c2, eaveHeightM, DEFAULT_GABLE_PITCH_DEG);
+        const { sw, ne, ridgeA, ridgeB, ridgeRiseM, longIsLng, eaveSW, eaveSE, eaveNW, eaveNE } = g;
+        const { widthM, depthM } = computeBlockDimensions(sw, ne, eaveHeightM);
         if (widthM < 0.5 || depthM < 0.5) {
           setStatusMsg('Gable: eave too small (<0.5m) — try again with a bigger rectangle');
           gablePtsRef.current = [];
           setGablePtCount(0);
           return;
         }
-        // Long edge along east-west direction (use whichever is longer as the ridge axis)
-        const longIsLng = widthM >= depthM;
-        // Ridge is at the centroid, at the long-edge midpoint, with vertical offset = (half short-edge) * tan(pitch)
-        const eaveHeightM  = DEFAULT_GABLE_EAVE_HEIGHT_M;
-        const shortEdgeM   = longIsLng ? depthM : widthM;
-        const ridgeRiseM   = (shortEdgeM / 2) * Math.tan(DEFAULT_GABLE_PITCH_DEG * Math.PI / 180);
-        const ridgeHeightM = eaveHeightM + ridgeRiseM;
-        // Ridge endpoints: at the centroid, offset by half the long edge along its axis
-        const longEdgeM = longIsLng ? widthM : depthM;
-        const halfLongDeg = (longEdgeM / 2) / (longIsLng ? METERS_PER_DEG_LNG : METERS_PER_DEG_LAT);
-        const ridgeMidLat = (sw.lat + ne.lat) / 2;
-        const ridgeMidLng = (sw.lng + ne.lng) / 2;
-        const ridgeA = longIsLng
-          ? { lat: ridgeMidLat, lng: ridgeMidLng - halfLongDeg }
-          : { lat: ridgeMidLat - halfLongDeg, lng: ridgeMidLng };
-        const ridgeB = longIsLng
-          ? { lat: ridgeMidLat, lng: ridgeMidLng + halfLongDeg }
-          : { lat: ridgeMidLat + halfLongDeg, lng: ridgeMidLng };
         // Build 4 eave corners and 2 ridge endpoints in 3D Cartesian
-        const eaveHeightCart = eaveHeightM;
-        const ridgeHeightCart = ridgeHeightM;
-        const swC = safeCartesian3(C, sw.lng, sw.lat, eaveHeightCart);
-        const seC = safeCartesian3(C, ne.lng, sw.lat, eaveHeightCart);
-        const nwC = safeCartesian3(C, sw.lng, ne.lat, eaveHeightCart);
-        const neC = safeCartesian3(C, ne.lng, ne.lat, eaveHeightCart);
-        const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeHeightCart);
-        const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeHeightCart);
+        const swC = safeCartesian3(C, eaveSW.lng, eaveSW.lat, eaveSW.h);
+        const seC = safeCartesian3(C, eaveSE.lng, eaveSE.lat, eaveSE.h);
+        const nwC = safeCartesian3(C, eaveNW.lng, eaveNW.lat, eaveNW.h);
+        const neC = safeCartesian3(C, eaveNE.lng, eaveNE.lat, eaveNE.h);
+        const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeA.h);
+        const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeB.h);
         if (!swC || !seC || !nwC || !neC || !rAC || !rBC) {
           setStatusMsg('Gable: failed to compute 3D positions — try again');
           gablePtsRef.current = [];
@@ -6766,48 +6741,25 @@ function SolarEngine3D({
 
       if (hipPtsRef.current.length >= 2) {
         const [c1, c2] = hipPtsRef.current;
-        const sw = { lat: Math.min(c1.lat, c2.lat), lng: Math.min(c1.lng, c2.lng) };
-        const ne = { lat: Math.max(c1.lat, c2.lat), lng: Math.max(c1.lng, c2.lng) };
-        const midLat = (sw.lat + ne.lat) / 2;
-        const METERS_PER_DEG_LAT = 111_320;
-        const METERS_PER_DEG_LNG = 111_320 * Math.cos(midLat * Math.PI / 180);
-        const widthM  = Math.abs(ne.lng - sw.lng) * METERS_PER_DEG_LNG;
-        const depthM  = Math.abs(ne.lat - sw.lat) * METERS_PER_DEG_LAT;
+        // Use extracted math for the hip geometry (tested in lib/3d/blockMath)
+        const eaveHeightM = DEFAULT_GABLE_EAVE_HEIGHT_M;
+        const h = computeHipGeometry(c1, c2, eaveHeightM, DEFAULT_GABLE_PITCH_DEG);
+        const { sw, ne, ridgeA, ridgeB, ridgeRiseM, hipSetbackM, longIsLng, eaveSW, eaveSE, eaveNW, eaveNE } = h;
+        const { widthM, depthM } = computeBlockDimensions(sw, ne, eaveHeightM);
         if (widthM < 0.5 || depthM < 0.5) {
           setStatusMsg('Hip: eave too small (<0.5m) — try again with a bigger rectangle');
           hipPtsRef.current = [];
           setHipPtCount(0);
           return;
         }
-        // Determine long edge (ridge runs along it)
-        const longIsLng = widthM >= depthM;
-        const longEdgeM  = longIsLng ? widthM  : depthM;
-        const shortEdgeM = longIsLng ? depthM  : widthM;
-        // Hip setback: ridge is set back by 1/3 of the short edge on each end
-        const hipSetbackM = shortEdgeM / 3;
-        const eaveHeightM = DEFAULT_GABLE_EAVE_HEIGHT_M;
-        const pitchRad    = DEFAULT_GABLE_PITCH_DEG * Math.PI / 180;
-        // Ridge rise from the eave: at the hip ends (set back from short eave by hipSetback),
-        // the ridge is also offset down by hipSetback * tan(pitch) (real-world hip geometry)
-        const ridgeRiseM  = (shortEdgeM / 2) * Math.tan(pitchRad);
-        const ridgeHeightM = eaveHeightM + ridgeRiseM;
         // Eave corners
-        const swC = safeCartesian3(C, sw.lng, sw.lat, eaveHeightM);
-        const seC = safeCartesian3(C, ne.lng, sw.lat, eaveHeightM);
-        const nwC = safeCartesian3(C, sw.lng, ne.lat, eaveHeightM);
-        const neC = safeCartesian3(C, ne.lng, ne.lat, eaveHeightM);
+        const swC = safeCartesian3(C, eaveSW.lng, eaveSW.lat, eaveSW.h);
+        const seC = safeCartesian3(C, eaveSE.lng, eaveSE.lat, eaveSE.h);
+        const nwC = safeCartesian3(C, eaveNW.lng, eaveNW.lat, eaveNW.h);
+        const neC = safeCartesian3(C, eaveNE.lng, eaveNE.lat, eaveNE.h);
         // Ridge endpoints — at the centroid, set back from the short edges by hipSetback
-        const centroidLat = (sw.lat + ne.lat) / 2;
-        const centroidLng = (sw.lng + ne.lng) / 2;
-        const halfRidgeLongDeg = ((longEdgeM / 2) - hipSetbackM) / (longIsLng ? METERS_PER_DEG_LNG : METERS_PER_DEG_LAT);
-        const ridgeA = longIsLng
-          ? { lat: centroidLat, lng: centroidLng - halfRidgeLongDeg }
-          : { lat: centroidLat - halfRidgeLongDeg, lng: centroidLng };
-        const ridgeB = longIsLng
-          ? { lat: centroidLat, lng: centroidLng + halfRidgeLongDeg }
-          : { lat: centroidLat + halfRidgeLongDeg, lng: centroidLng };
-        const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeHeightM);
-        const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeHeightM);
+        const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeA.h);
+        const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeB.h);
         if (!swC || !seC || !nwC || !neC || !rAC || !rBC) {
           setStatusMsg('Hip: failed to compute 3D positions — try again');
           hipPtsRef.current = [];
