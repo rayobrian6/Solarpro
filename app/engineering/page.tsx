@@ -31,6 +31,7 @@ import {
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById } from '@/lib/equipment-db';
+import { listCombiners } from '@/lib/equipment/integratedBos';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
 // ── Wave 5A — multi-lane SLD: page-path source-branch builder + the W4B.D
 // empty-fleet synthesis helper (a present sub with an empty fleet computes
@@ -529,6 +530,10 @@ const defaultProject: ProjectConfig = {
   inverters: [newInverter('string')],
   batteryBrand: '', batteryModel: '', batteryCount: 0, batteryKwh: 0,
   batteryId: '', generatorId: '', generatorWireLength: 50, trenchRunLengthFt: 0, atsId: '', backupInterfaceId: '',
+  // Operator override for the integrated AC combiner. Empty = auto-resolve from
+  // the inverter's equipment-db `compatibleWith` pairing. Set = that exact device
+  // is what the SLD, the schedule and the BOM must all name.
+  combinerId: '',
   mainPanelAmps: 200, mainPanelBrand: 'Square D', utilityMeter: 'Bidirectional Net Meter',
   acDisconnect: true, dcDisconnect: true, productionMeter: true, rapidShutdown: true,
   roofType: 'shingle', mountingId: 'ironridge-xr100',
@@ -6405,6 +6410,9 @@ function EngineeringPageInner() {
           dcOCPD:         cs.isString ? (cs.strings[0]?.ocpdAmps ?? sc?.ocpdPerString ?? 20) : 20,
           inverterModel:  invData ? `${invData.manufacturer} ${invData.model}` : 'String Inverter',
           inverterManufacturer: invData?.manufacturer || '',
+          // Operator combiner override -> resolveIntegratedEquipment's
+          // overrideDeviceIds path. Empty string means auto-resolve.
+          combinerId:     config.combinerId || undefined,
           acOutputKw,
           inverterMaxDcV: invData?.maxDcVoltage || 600,
           // Inverter MPPT specs for string generation (used by SLD API's own string gen)
@@ -13211,7 +13219,29 @@ function EngineeringPageInner() {
                         sheet picker. */}
                     <p className="text-xs text-slate-500 mt-0.5">Vector PDF · 24×18 inch sheet · Engineering title block · Conductor callouts</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center">
+                    {/* AC COMBINER OVERRIDE — the drawing must be able to name the
+                        device actually being installed. "Auto" resolves from the
+                        inverter's equipment-db `compatibleWith` pairing (IQ8+ →
+                        IQ Combiner 5); an explicit pick wins over that everywhere
+                        the combiner is named. Only meaningful on micro topologies,
+                        so it hides otherwise. */}
+                    {computedSystem.isMicro ? (
+                      <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <span className="whitespace-nowrap">AC Combiner</span>
+                        <select
+                          value={config.combinerId ?? ''}
+                          onChange={e => { updateConfig({ combinerId: e.target.value }); setSldSvg(''); }}
+                          className="eng-select"
+                          title="Overrides the combiner the SLD, schedule and BOM name. Auto uses the inverter's declared compatible device."
+                        >
+                          <option value="">Auto (from equipment DB)</option>
+                          {listCombiners().map(d => (
+                            <option key={d.id} value={d.id}>{d.brand} {d.model}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                     <button
                       onClick={fetchSLD}
                       disabled={sldLoading}
@@ -13251,6 +13281,7 @@ function EngineeringPageInner() {
                                 interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 interconnectionType: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+                                combinerId: config.combinerId || undefined,
                                 // Same five-branch resolution `fetchSLDSvg` already
                                 // uses. The old two-branch micro/string test drew
                                 // every SolarEdge and Tigo job as a plain string
@@ -15233,6 +15264,7 @@ function EngineeringPageInner() {
                                 attachmentSpacing: config.attachmentSpacing,
                                 interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+                                combinerId: config.combinerId || undefined,
                                 batteryBrand: config.batteryBrand, batteryModel: config.batteryModel,
                                 batteryCount: config.batteryCount, batteryKwh: config.batteryKwh,
                                 batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),

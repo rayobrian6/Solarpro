@@ -73,6 +73,12 @@ export interface ProjectConfig {
   trenchRunLengthFt?: number;   // ft — ground/fence array → service trench distance
   atsId: string;
   backupInterfaceId: string;    // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, …)
+  /** Operator override for the integrated AC combiner (integratedBos id, e.g.
+   *  `enphase-iq-combiner-5c`). Empty ⇒ auto-resolve from the inverter's
+   *  equipment-db `compatibleWith` pairing. When set it wins everywhere the
+   *  combiner is named — SLD, equipment schedule and BOM — so the drawing can
+   *  state the device actually being installed rather than an inferred one. */
+  combinerId?: string;
   mainPanelAmps: number;
   mainPanelBrand: string;
   utilityMeter: string;

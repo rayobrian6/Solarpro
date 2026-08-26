@@ -213,6 +213,18 @@ export function getBosDevice(id: string | undefined): BosDevice | undefined {
   return BOS_DEVICES.find(d => d.id === id && d.active !== false);
 }
 
+/** Every selectable integrated combiner, optionally narrowed to one brand.
+ *  Backs the UI picker so the operator can override the auto-resolved device —
+ *  the drawing must be able to say what is ACTUALLY going on the wall, not only
+ *  what the compatibility table infers. */
+export function listCombiners(brand?: string): BosDevice[] {
+  const want = brand?.trim().toLowerCase();
+  return BOS_DEVICES.filter(d =>
+    d.active !== false
+    && d.kind === 'integrated_combiner'
+    && (!want || d.brand.toLowerCase() === want));
+}
+
 /** Resolve an equipment-db combiner id against THIS catalogue.
  *
  *  The two catalogues drifted apart: equipment-db calls the device

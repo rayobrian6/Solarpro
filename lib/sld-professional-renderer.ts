@@ -20,7 +20,7 @@
 import type { RunSegment, MicroBranch } from './computed-system';
 import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker } from '@/lib/permit/utils/helpers';
 import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
-import { nextEnclosure } from '@/lib/electrical/stdSizes';
+import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import { microBranchCount, microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { getBuildBadge } from './version';
@@ -1502,11 +1502,20 @@ function renderDisco(
   // 40 A of fusing is a 60 A frame with 40 A fuses. Naming only the OCPD tells
   // the installer to order hardware that does not exist, and tells the reviewer
   // a switch rating that is not the one on the wall.
-  const frameA = nextEnclosure(ocpd);
-  p.push(txt(cx, by2+H2+10,
-    fusedTapOcpd ? `${frameA}A FUSED DISCO — ${ocpd}A FUSES (TAP OCPD)` : `${frameA}A NON-FUSED`,
+  // Resolved by the SAME function the BOM uses, so the drawing and the equipment
+  // schedule name the identical switch. The sheet now says WHAT the disconnect
+  // IS — make, part number, frame — not just a bare ampere figure.
+  const _disco = resolveAcDisconnect({ requiredAmps: ocpd, targetAmps: ocpd, fused: fusedTapOcpd });
+  p.push(txt(cx, by2+H2+10, _disco.drawingLabel, {sz:F.tiny, anc:'middle', bold:true}));
+  p.push(txt(cx, by2+H2+19,
+    `${_disco.manufacturer} ${_disco.partNumber}`
+      + (_disco.fusePartNumber ? `  ·  2× ${_disco.fuseManufacturer} ${_disco.fusePartNumber}` : ''),
     {sz:F.tiny, anc:'middle'}));
-  p.push(txt(cx, by2+H2+19, fusedTapOcpd ? 'NEC 705.11(C), 690.14 — UTILITY ACCESSIBLE' : 'NEC 690.14 — UTILITY ACCESSIBLE', {sz:F.tiny, anc:'middle', italic:true}));
+  p.push(txt(cx, by2+H2+28,
+    fusedTapOcpd
+      ? `TAP OCPD — NEC 705.11(C), 690.14 — UTILITY ACCESSIBLE`
+      : 'NEC 690.14 — UTILITY ACCESSIBLE',
+    {sz:F.tiny, anc:'middle', italic:true}));
 
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
