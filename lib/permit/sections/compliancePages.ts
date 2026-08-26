@@ -72,7 +72,14 @@ export function pageWarningLabels(
   // is the opposite of the honesty this containment exists for. It is displayed
   // and excluded from procurement, never displayed as ordered.
   const requiredLabels = labels.filter(l => l.required);
-  const displayLabels = [...requiredLabels, ...labels.filter(l => l.editionPending)];
+  const displayLabels = requiredLabels;
+  // A.4b — the RELEASED set drives the grid and every count line, exactly as
+  // before, so the sheet's own arithmetic (decals + on-card == applies) still
+  // reconciles. Pending placards are NOT folded into that accounting: they are
+  // not released, and counting them as released is the claim being prevented.
+  // They get their own block below, so the reviewer sees they are in play and
+  // withheld — a placard that vanishes silently is the other failure mode.
+  const pendingLabels = labels.filter(l => l.editionPending);
   const necYear = cp.nec ?? 'PENDING';
 
   // ── SITE-COMPUTED RATING LABELS (per sub-system) ─────────────────────────
@@ -314,17 +321,16 @@ export function pageWarningLabels(
     // has no authoritative specification. It is shown so the reviewer knows it is
     // in play, and marked NOT RELEASED so nobody manufactures or installs it from
     // a defaulted year.
-    const pendingBanner = lbl.editionPending
-      ? `<div style="margin-top:2px;padding:2px 3px;border:1px solid #b91c1c;background:#fdecec;`
-        + `font-size:6px;font-weight:800;color:#b91c1c;line-height:1.3;">`
-        + `PENDING CODE AUTHORITY — NOT RELEASED FOR PROCUREMENT / INSTALLATION`
-        + `<div style="font-weight:600;color:#7f1d1d;">${escapeH(lbl.editionPendingNote ?? '')}</div>`
-        + `</div>`
-      : '';
+    // A.4b — no per-card pending marker here BY CONSTRUCTION: the grid renders
+    // only RELEASED labels (`required` excludes editionPending), so a pending
+    // placard never reaches this function. An earlier draft added a banner here
+    // and it was doubly wrong — unreachable once the design settled, and while it
+    // was reachable it overflowed the printable box by 64 px and clipped PV-5.
+    // Pending placards are listed once, below the grid, where they cannot be
+    // mistaken for part of the released set.
     return `<div style="page-break-inside:avoid;">` +
       decal +
       labelCaption(lbl.id, `AFFIX TO ${affix}: ${lbl.placement}`, lbl.necRef) +
-      pendingBanner +
     `</div>`;
   }
 
@@ -521,6 +527,21 @@ export function pageWarningLabels(
             REQUIRED LABELS &mdash; ${requiredLabels.length} OF ${labels.length} DATASET LABELS (${gridLabels.length} DECAL${gridLabels.length === 1 ? '' : 'S'} &middot; ${ratingCards.length} CARD${ratingCards.length === 1 ? '' : 'S'} &middot; ${_supersededApplicable.length} ON CARD/PLACARD)
           </div>
           ${buildCardGrid(cardCells, _merged ? 3 : 4)}
+          ${pendingLabels.length ? `
+          <div style="margin-top:5px;border:1px solid #b91c1c;background:#fdecec;padding:3px 4px;">
+            <div style="font-size:6.4px;font-weight:900;color:#b91c1c;letter-spacing:0.3px;">
+              ${pendingLabels.length} PLACARD${pendingLabels.length === 1 ? '' : 'S'} PENDING CODE AUTHORITY &mdash; NOT RELEASED FOR PROCUREMENT / INSTALLATION
+            </div>
+            <div style="font-size:6px;color:#7f1d1d;line-height:1.35;margin-top:1px;">
+              These placards apply to this system, but their requirement, wording, colour or reflectivity changes by
+              NEC edition and the jurisdiction's adopted edition is not established. They are excluded from the
+              released set above and must not be ordered or installed until the adoption is governed. Specification
+              follows the adopted edition, never a bundled or default year.
+            </div>
+            ${pendingLabels.map(l => `<div style="font-size:6px;color:#111;margin-top:1px;">
+              <span style="font-weight:800;">${escapeH(l.refId)}</span> &mdash; ${escapeH(l.necRef || 'section pending')}
+            </div>`).join('')}
+          </div>` : ''}
 
         </div>${_merged ? `
 

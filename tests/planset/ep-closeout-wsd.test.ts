@@ -62,8 +62,13 @@ describe('§15 (gate 15) — unverified fire basis is never an AHJ requirement',
 // ── §16 — topology-driven label applicability ───────────────────────────────
 describe('§16 (gate 16) — no load-side-only labels on a supply-side system', () => {
   const cad = (p: any): CADModel => ({ systemType: p.project.systemType, totalPanels: p.system.totalPanels, totalDcKw: p.system.totalDcKw } as any);
-  const reqIds = (ls: FieldLabel[]) => ls.filter(l => l.required).map(l => l.refId).sort();
-  const anyNec705_12 = (ls: FieldLabel[]) => ls.filter(l => l.required).some(l => /705\.12/.test(l.necRef));
+  // A.4b — this suite asks a TOPOLOGY question: does a label apply to a
+  // supply-side vs a load-side system. `applies` is that question. `required`
+  // now additionally means RELEASED FOR PROCUREMENT, which is false for an
+  // edition-dependent placard while the adopted NEC edition is unresolved — a
+  // different fact, and not the one gate 16 is about.
+  const reqIds = (ls: FieldLabel[]) => ls.filter(l => l.applies).map(l => l.refId).sort();
+  const anyNec705_12 = (ls: FieldLabel[]) => ls.filter(l => l.applies).some(l => /705\.12/.test(l.necRef));
 
   // The directive's four interconnection fixtures.
   const supplyTap = () => { const p = clone(roofProject); p.project.interconnectionMethod = 'SUPPLY_SIDE_TAP'; return p; };
@@ -88,7 +93,7 @@ describe('§16 (gate 16) — no load-side-only labels on a supply-side system', 
     for (const mk of [supplyTap, lineAdapter]) {
       const p = mk();
       const labels = selectFieldLabels(p, cad(p));
-      const ids = labels.filter(l => l.required).map(l => l.refId);
+      const ids = labels.filter(l => l.applies).map(l => l.refId);
       expect(ids).toContain('line-side-tap-warning');
       expect(ids).not.toContain('backfeed-breaker-do-not-relocate');   // load-side-only
       // the merged 705.12 load-side clause must not leak onto the supply-side set
@@ -100,7 +105,7 @@ describe('§16 (gate 16) — no load-side-only labels on a supply-side system', 
     for (const mk of [loadBreaker, serviceReplacement]) {
       const p = mk();
       const labels = selectFieldLabels(p, cad(p));
-      const ids = labels.filter(l => l.required).map(l => l.refId);
+      const ids = labels.filter(l => l.applies).map(l => l.refId);
       expect(ids).toContain('backfeed-breaker-do-not-relocate');
       expect(ids).not.toContain('line-side-tap-warning');              // supply-side-only
       // load-side systems legitimately carry the 705.12 clauses

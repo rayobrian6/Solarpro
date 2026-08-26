@@ -23,6 +23,75 @@ import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';   // §11 — editions single-sourced
 import { peekSnapshot } from '../snapshot/read';   // TAC WS-13 — canonical grounding objects
 
+// ═══════════════════════════════════════════════════════════════════════════
+// A.4b §3/§5 — EDITION-DEPENDENT PLACARDS
+//
+// A placard is edition-dependent when its REQUIREMENT, WORDING, COLOUR,
+// REFLECTIVITY, LAYOUT or EXISTENCE moves between NEC cycles. Such a placard has
+// no authoritative specification while the jurisdiction's adopted edition is
+// unresolved, and must not be procured or installed from a defaulted year.
+//
+// WHY THIS IS A CURATED SET AND NOT A REGEX. The signal lives in the dataset's
+// prose (`material`, `letterHeightNotes`, `cycleNotes`), and the prose says three
+// different things that a pattern cannot reliably separate:
+//   · a real change      "NEC 2023 wording uses 'POWER SOURCE OUTPUT CONNECTION';
+//                         NEC 2017/2020 used 'INVERTER OUTPUT CONNECTION'"
+//   · an explicit NON-change  "This color scheme is UNCHANGED across NEC 2017/2020/2023"
+//   · a mere renumber    "In NEC 2023 the data label moved to 690.7(D); 2017/2020
+//                         lived in 690.53"   ← citation differs, product does not
+// An earlier attempt keyed off "the dataset mentions more than one edition" and
+// flagged essentially every placard, emptying the required set. Reading the prose
+// is a judgement; it is recorded ONCE here, and `auditEditionDependence` below is
+// the tripwire that refuses to let the dataset drift away from it silently.
+const EDITION_DEPENDENT_PLACARDS: ReadonlyMap<string, string> = new Map([
+  // Wording, colour AND reflectivity all move: 2017/2020 mandate the title WHITE
+  // on RED and reflective; 2023 dropped the mandated colour and relocated the
+  // requirement from 690.56(C) to 690.12(D).
+  ['rapid-shutdown-building-placard',
+    'title wording, mandated colour and reflectivity all change between 2017/2020 and 2023'],
+  // §5 — EXISTENCE. Module-level rapid shutdown arrived with NEC 2014 690.12 and
+  // the array-boundary concept with 2017. Under NEC 2005 — a live candidate for
+  // this jurisdiction — this placard has no basis at all. Its colour being stable
+  // across 2017/2020/2023 does not make it edition-independent when the adopted
+  // edition may predate the requirement entirely.
+  ['rapid-shutdown-array-boundary-label',
+    'the rapid-shutdown requirement set does not exist before NEC 2014/2017 — existence is edition-dependent'],
+  ['rapid-shutdown-switch-initiator-label',
+    'the rapid-shutdown requirement set does not exist before NEC 2014/2017 — existence is edition-dependent'],
+  // Required WORDING differs by cycle.
+  ['backfeed-breaker-do-not-relocate',
+    "required wording differs: NEC 2023 'POWER SOURCE OUTPUT CONNECTION' vs 2017/2020 'INVERTER OUTPUT CONNECTION'"],
+  // The 2023 cycle adds obligations to what the plaque must denote.
+  ['multiple-sources-of-power-directory',
+    'NEC 2023 705.10 adds requirements for what the plaque must denote and how it is grouped'],
+]);
+
+/** Labels whose prose names an edition but whose PRODUCT does not change — an
+ *  explicit statement of no-change, a section renumber, or a 2023 permission that
+ *  leaves the existing wording compliant. Listed so the tripwire can tell
+ *  "considered and excluded" from "never looked at". */
+const EDITION_MENTIONED_BUT_STABLE: ReadonlySet<string> = new Set([
+  'photovoltaic-power-source-conduit',      // 2023 PERMITS alternative wording; existing stays compliant
+  'dc-photovoltaic-power-source-ratings',   // section renumber only (690.53 → 690.7(D)); product identical
+]);
+
+/** TRIPWIRE. Every label whose prose names an NEC edition must have been
+ *  classified — either as edition-dependent or as explicitly stable. A new or
+ *  edited dataset entry that names an edition and appears in neither set is an
+ *  UNCLASSIFIED placard, and silently treating it as edition-independent is
+ *  exactly the failure this containment exists to prevent. Returns the offenders
+ *  so a test can fail on them; never throws in the render path. */
+export function auditEditionDependence(): string[] {
+  const raw = (fieldLabelData as { labels: RawLabel[] }).labels;
+  return raw
+    .filter(l => {
+      const prose = [l.material, l.letterHeightNotes, l.cycleNotes].filter(Boolean).join(' ');
+      return /\b20\d\d\b/.test(prose);
+    })
+    .map(l => l.id)
+    .filter(id => !EDITION_DEPENDENT_PLACARDS.has(id) && !EDITION_MENTIONED_BUT_STABLE.has(id));
+}
+
 interface RawLabel {
   id: string;
   title: string;
@@ -34,6 +103,11 @@ interface RawLabel {
   location: string;
   codeRefs: Array<{ code: string; section: string }>;
   appliesWhen: string;
+  // A.4b — the dataset's edition prose. These carry the statements the
+  // edition-dependence classification was read from, and `auditEditionDependence`
+  // scans them so a new or edited entry cannot slip past unclassified.
+  letterHeightNotes?: string;
+  cycleNotes?: string;
 }
 
 /** §16 — which interconnection SIDE a label belongs to. The design's canonical
@@ -52,7 +126,15 @@ export interface FieldLabel {
   fg: string;
   letterHeightIn: number;
   material: string;
-  required: boolean;     // does it apply to THIS system?
+  /** A.4b — does this placard APPLY to this system (design condition + topology
+   *  side)? A pure design question, independent of code-edition authority. */
+  applies: boolean;
+  /** RELEASED FOR PROCUREMENT / INSTALLATION: `applies` AND the specification is
+   *  authoritative. False for an edition-dependent placard while the adopted NEC
+   *  edition is unresolved — such a placard applies but has no specification, and
+   *  ordering one from a defaulted year manufactures a compliance product the
+   *  jurisdiction may not require in that form. */
+  required: boolean;
   interconnectSide: InterconnectSide;  // §16 — topology classification
   // ── A.4b — EDITION DEPENDENCE ────────────────────────────────────────────
   /** true ⇔ the dataset carries this label's NEC clauses under more than one
@@ -380,18 +462,13 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
     // from procurement while adoption is unresolved. Labels whose requirement is
     // edition-stable still print normally: refusing everything would be as
     // dishonest as specifying everything.
-    // ⚠ THE DISCRIMINATOR IS NOT YET BUILT — see the note above. A first attempt
-    // keyed this off "the dataset lists clauses under more than one NEC edition",
-    // which is WRONG: the dataset carries a section number under every cycle as a
-    // matter of course, even where the requirement is identical, so that flagged
-    // essentially every placard and emptied the required set. The real signal is
-    // the dataset's own edition-CONDITIONAL language ("NEC 2023 dropped the
-    // mandated red/reflective colour"), which lives in the material/colour prose,
-    // not in the presence of multiple codeRef rows. Building that discriminator
-    // is A.4b's remaining half; until it exists nothing is marked pending, so no
-    // placard is silently withheld on a guess.
-    const editionDependent = false;
-    const editionPending = false;
+    // A.4b §3/§5 — classified ONCE from the dataset's own prose; see
+    // EDITION_DEPENDENT_PLACARDS. `editionPending` is the intersection with an
+    // unresolved adoption: a placard that moves between cycles has no
+    // authoritative specification until the jurisdiction's edition is governed.
+    const _dependenceReason = EDITION_DEPENDENT_PLACARDS.get(l.id) ?? null;
+    const editionDependent = _dependenceReason != null;
+    const editionPending = !_cp.nec && editionDependent;
     n += 1;
     return {
       id: `L-${n}`,
@@ -403,15 +480,22 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
       fg: l.colors.text || '#000000',
       letterHeightIn: l.minLetterHeightIn,
       material: l.material,
-      required,
+      // §3/§5 — `required` is a PROCUREMENT / INSTALLATION assertion. An
+      // edition-dependent placard with no governed adoption is not asserted as
+      // required: under NEC 2005 several of these have no basis at all, so
+      // "required" would be an invented obligation. It is still DISPLAYED
+      // (compliancePages adds it to the display set) and marked NOT RELEASED, so
+      // the reviewer sees it is in play rather than having it vanish.
+      applies: required,
+      required: required && !editionPending,
       interconnectSide: side,
       editionDependent,
       editionPending,
       editionPendingNote: editionPending
         ? 'PENDING CODE AUTHORITY — NOT RELEASED FOR PROCUREMENT / INSTALLATION. '
-          + 'This placard\'s requirement, wording, colour or reflectivity changes by NEC edition and the '
-          + 'jurisdiction\'s adopted edition is not established. Specification follows the governed adoption, '
-          + 'never a bundled or default year.'
+          + `${_dependenceReason}. The jurisdiction's adopted NEC edition is not established, so this `
+          + 'placard has no authoritative specification. Specification follows the governed adoption, never '
+          + 'a bundled or default year.'
         : null,
     };
   });

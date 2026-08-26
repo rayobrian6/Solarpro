@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { selectFieldLabels } from '@/lib/permit/utils/fieldLabels';
+import { selectFieldLabels, auditEditionDependence } from '@/lib/permit/utils/fieldLabels';
 import { roofProject } from '../../test-fixtures/roofProject';
 import type { CADModel } from '@/lib/cad/types';
 
@@ -9,7 +9,13 @@ import type { CADModel } from '@/lib/cad/types';
 describe('field-label selection (standard per job)', () => {
   const clone = () => JSON.parse(JSON.stringify(roofProject));
   const cad = (p: any): CADModel => ({ systemType: p.project.systemType, totalPanels: p.system.totalPanels, totalDcKw: p.system.totalDcKw } as any);
-  const reqIds = (labels: ReturnType<typeof selectFieldLabels>) => labels.filter(l => l.required).map(l => l.refId);
+  // A.4b — these cases ask which labels APPLY to a given design (topology,
+  // battery, DC-vs-AC), a pure design question. `required` additionally means
+  // RELEASED FOR PROCUREMENT and is false for an edition-dependent placard while
+  // the adopted NEC edition is unresolved — a separate fact, covered by its own
+  // cases below.
+  const reqIds = (labels: ReturnType<typeof selectFieldLabels>) => labels.filter(l => l.applies).map(l => l.refId);
+  const releasedIds = (labels: ReturnType<typeof selectFieldLabels>) => labels.filter(l => l.required).map(l => l.refId);
 
   it('micro load-side (no battery): AC labels + backfeed, no DC-only or ESS or line-side labels', () => {
     const p = clone();
@@ -52,6 +58,42 @@ describe('field-label selection (standard per job)', () => {
     expect(rsd?.necRef).toMatch(/NEC §/);
     expect(rsd?.necRef).not.toContain('NEC 2020');
     expect(rsd?.necRef).not.toMatch(/NEC 20\d\d/);
+  });
+
+  it('A.4b §3/§5 — an edition-dependent placard APPLIES but is NOT RELEASED while adoption is unresolved', () => {
+    const p = clone();
+    p.project.interconnectionMethod = 'LOAD_SIDE';
+    p.compliance.jurisdiction.necVersion = 'NEC 2020';   // fallback only — not adoption
+    const labels = selectFieldLabels(p, cad(p));
+    const backfeed = labels.find(l => l.refId === 'backfeed-breaker-do-not-relocate')!;
+    // Its required WORDING differs between cycles ('POWER SOURCE OUTPUT
+    // CONNECTION' in 2023 vs 'INVERTER OUTPUT CONNECTION' in 2017/2020), so a
+    // defaulted year must not specify the physical product.
+    expect(backfeed.applies).toBe(true);
+    expect(backfeed.editionDependent).toBe(true);
+    expect(backfeed.editionPending).toBe(true);
+    expect(backfeed.required).toBe(false);
+    expect(backfeed.editionPendingNote).toMatch(/NOT RELEASED FOR PROCUREMENT/);
+    // §5 — the rapid-shutdown family is withheld on EXISTENCE grounds: the
+    // requirement set does not exist before NEC 2014/2017, and 2005 is a live
+    // candidate for this jurisdiction.
+    const rsd = labels.filter(l => /^rapid-shutdown/.test(l.refId));
+    expect(rsd.length).toBeGreaterThan(0);
+    expect(rsd.every(l => l.editionDependent)).toBe(true);
+    // An edition-STABLE placard is unaffected — refusing everything would be as
+    // dishonest as specifying everything.
+    const acPoi = labels.find(l => l.refId === 'ac-point-of-connection-disconnect')!;
+    expect(acPoi.editionDependent).toBe(false);
+    expect(acPoi.required).toBe(acPoi.applies);
+    expect(releasedIds(labels)).not.toContain('backfeed-breaker-do-not-relocate');
+  });
+
+  it('A.4b — every dataset label naming an NEC edition has been classified (tripwire)', () => {
+    // A new or edited dataset entry whose prose names an edition and appears in
+    // neither the dependent nor the explicitly-stable set is UNCLASSIFIED, and
+    // treating it as edition-independent by default is the failure this
+    // containment exists to prevent.
+    expect(auditEditionDependence()).toEqual([]);
   });
 
   it('A.4b — no label anywhere carries an authoritative NEC year from a fallback', () => {
