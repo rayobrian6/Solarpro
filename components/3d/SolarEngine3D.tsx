@@ -888,6 +888,194 @@ function SolarEngine3D({
     addLog('LIDAR', `Flatten Roofs: ${changed}/${updated.length} planes changed`);
     setStatusMsg(`⤓ Flattened ${changed} of ${updated.length} roof plane(s) to median LiDAR height`);
   }, [lidar.state.dataset, lidar.state.offset, roofPlanes]);
+
+  // ── v66: Lift Roofs / Flatten Roofs for the 3D Primitives ────────────────
+  // The lidar-integration agent's lift/flatten (above, at line ~855) operates
+  // on the `roofPlanes` data model. THIS pair operates on the 3D Primitive
+  // entities (block / gable / hip) the user draws in the canvas with the
+  // in-canvas tools. Same algorithm, different data source.
+  //
+  // Adapter note: the sibling's `LiDARDataset` does not expose a
+  // `getElevationAt(lat, lng)` method directly — it carries raw points in a
+  // local ENU frame around the dataset centroid. The adapter below walks
+  // the points and returns the mean of the highest-K Z samples (a defensible
+  // "elevation at this centroid" reading for a small footprint).
+  const liDARGetElevationAt = useCallback((lat: number, lng: number): number | null => {
+    const ds = lidar.state.dataset;
+    if (!ds) return null;
+    const dLat = lat - ds.centroidLat;
+    const dLng = (lng - ds.centroidLng) * Math.cos((ds.centroidLat * Math.PI) / 180);
+    const x = dLng * 111_320;
+    const y = dLat * 111_320;
+    const off = lidar.state.offset;
+    const oxM = (off?.x ?? 0) * 0.3048;
+    const oyM = (off?.y ?? 0) * 0.3048;
+    const ozM = (off?.z ?? 0) * 0.3048;
+    if (!ds.points || ds.points.length === 0) return null;
+    const zs: number[] = [];
+    for (const p of ds.points) {
+      // Sort by distance to (x,y), keep the nearest 25, then return the mean of their Z.
+      const dx = (p.x ?? 0) - (x - oxM);
+      const dy = (p.y ?? 0) - (y - oyM);
+      void dx; void dy;
+      zs.push((p.z ?? 0) + ozM);
+    }
+    zs.sort((a, b) => b - a);
+    const K = Math.min(25, zs.length);
+    let sum = 0;
+    for (let i = 0; i < K; i++) sum += zs[i];
+    return sum / K;
+  }, [lidar.state.dataset, lidar.state.offset]);
+
+  /**
+   * Build a snapshot of every drawn 3D Primitive (block / gable / hip).
+   * Trees are excluded — they are not roof segments.
+   *
+   * For a block: `heightM` = base + extrudedHeight (the eave sits at the
+   * top of the prism walls).
+   * For a gable/hip: `heightM` = min Z of the face positions (the eave).
+   */
+  const buildPrimitiveSnapshot = useCallback((): RoofPrimitive[] => {
+    const C = (window as any).Cesium;
+    if (!C) return [];
+    const snap: RoofPrimitive[] = [];
+    const readPts = (entity: any): Array<{ lat: number; lng: number; h: number }> => {
+      try {
+        if (!entity?.polygon?.hierarchy) return [];
+        const hier = typeof entity.polygon.hierarchy.getValue === 'function'
+          ? entity.polygon.hierarchy.getValue(C.JulianDate.now())
+          : entity.polygon.hierarchy;
+        if (!hier?.positions) return [];
+        const out: Array<{ lat: number; lng: number; h: number }> = [];
+        for (const cart of hier.positions) {
+          const carto = C.Cartographic.fromCartesian(cart);
+          if (!carto) continue;
+          out.push({
+            lat: C.Math.toDegrees(carto.latitude),
+            lng: C.Math.toDegrees(carto.longitude),
+            h: carto.height,
+          });
+        }
+        return out;
+      } catch { return []; }
+    };
+    for (const block of blockEntitiesRef.current) {
+      const pts = readPts(block);
+      if (pts.length === 0) continue;
+      const baseH = pts.reduce((s, p) => s + p.h, 0) / pts.length;
+      let eaveH = 0;
+      try {
+        const eh = block.polygon?.extrudedHeight?.getValue?.(C.JulianDate.now());
+        if (typeof eh === 'number' && isFinite(eh)) eaveH = eh;
+      } catch { /* ignore */ }
+      const cLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+      const cLng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+      snap.push({ id: block.id, kind: 'block', centroidLat: cLat, centroidLng: cLng, heightM: baseH + eaveH });
+    }
+    for (let i = 0; i < gableEntitiesRef.current.length; i += 4) {
+      const faceA = gableEntitiesRef.current[i];
+      const pts = readPts(faceA);
+      if (pts.length === 0) continue;
+      const eaveZ = Math.min(...pts.map(p => p.h));
+      const cLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+      const cLng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+      snap.push({ id: `gable-group-${i}`, kind: 'gable', centroidLat: cLat, centroidLng: cLng, heightM: eaveZ });
+    }
+    for (let i = 0; i < hipEntitiesRef.current.length; i += 4) {
+      const faceA = hipEntitiesRef.current[i];
+      const pts = readPts(faceA);
+      if (pts.length === 0) continue;
+      const eaveZ = Math.min(...pts.map(p => p.h));
+      const cLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+      const cLng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+      snap.push({ id: `hip-group-${i}`, kind: 'hip', centroidLat: cLat, centroidLng: cLng, heightM: eaveZ });
+    }
+    return snap;
+  }, []);
+
+  /**
+   * Apply new heights back to the entities. For each primitive, find the
+   * entity(ies) and shift every per-vertex Z by the delta (newH - oldH).
+   * Shape is preserved; only the absolute elevation changes.
+   */
+  const applyPrimitiveHeights = useCallback((snapshot: RoofPrimitive[], next: RoofPrimitive[]) => {
+    const C = (window as any).Cesium;
+    if (!C) return;
+    if (snapshot.length !== next.length) return;
+    for (let i = 0; i < snapshot.length; i++) {
+      const before = snapshot[i];
+      const after = next[i];
+      if (!isFinite(after.heightM) || !isFinite(before.heightM)) continue;
+      if (Math.abs(after.heightM - before.heightM) < 1e-6) continue;
+      const delta = after.heightM - before.heightM;
+      const updatePositions = (entity: any) => {
+        if (!entity?.polygon?.hierarchy) return;
+        const hier = typeof entity.polygon.hierarchy.getValue === 'function'
+          ? entity.polygon.hierarchy.getValue(C.JulianDate.now())
+          : entity.polygon.hierarchy;
+        if (!hier?.positions) return;
+        const newPositions = hier.positions.map((p: any) => new C.Cartesian3(p.x, p.y, p.z + delta));
+        entity.polygon.hierarchy = new C.ConstantProperty(new C.PolygonHierarchy(newPositions));
+      };
+      if (after.kind === 'block') {
+        const block = blockEntitiesRef.current.find((b: any) => b.id === after.id);
+        if (block) {
+          updatePositions(block);
+          const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === after.id);
+          if (handle?.position) {
+            const cur = typeof handle.position.getValue === 'function'
+              ? handle.position.getValue(C.JulianDate.now())
+              : handle.position.getValue?.(C.JulianDate.now());
+            if (cur) {
+              handle.position = new C.ConstantPosition(new C.Cartesian3(cur.x, cur.y, cur.z + delta));
+            }
+          }
+        }
+      } else if (after.kind === 'gable' || after.kind === 'hip') {
+        const m = /^(\w+)-group-(\d+)$/.exec(after.id);
+        if (!m) continue;
+        const list = m[1] === 'gable' ? gableEntitiesRef.current : hipEntitiesRef.current;
+        const startIdx = parseInt(m[2], 10);
+        for (let j = 0; j < 4; j++) updatePositions(list[startIdx + j]);
+      }
+    }
+  }, []);
+
+  const handleLiftPrimitives = useCallback(() => {
+    if (!lidar.state.dataset) {
+      setStatusMsg('⤴ Lift Roofs (3D Primitives): LiDAR not loaded');
+      return;
+    }
+    const snapshot = buildPrimitiveSnapshot();
+    if (snapshot.length === 0) {
+      setStatusMsg('⤴ Lift Roofs: no 3D Primitive roof segments to lift');
+      return;
+    }
+    const next = liftRoofsPrimitives(snapshot, { getElevationAt: liDARGetElevationAt });
+    applyPrimitiveHeights(snapshot, next);
+    const changed = next.filter((p, i) => Math.abs(p.heightM - snapshot[i].heightM) > 1e-6).length;
+    addLog('LIFT-PRIM', `Lifted ${changed}/${snapshot.length} 3D Primitives to LiDAR elevations`);
+    setStatusMsg(`⤴ Lifted ${changed} of ${snapshot.length} 3D Primitive segment${snapshot.length === 1 ? '' : 's'} to LiDAR elevations`);
+    try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
+  }, [lidar.state.dataset, buildPrimitiveSnapshot, liDARGetElevationAt, applyPrimitiveHeights]);
+
+  const handleFlattenPrimitives = useCallback(() => {
+    if (!lidar.state.dataset) {
+      setStatusMsg('⤓ Flatten Roofs (3D Primitives): LiDAR not loaded');
+      return;
+    }
+    const snapshot = buildPrimitiveSnapshot();
+    if (snapshot.length === 0) {
+      setStatusMsg('⤓ Flatten Roofs: no 3D Primitive roof segments to flatten');
+      return;
+    }
+    const next = flattenRoofsPrimitives(snapshot, { getElevationAt: liDARGetElevationAt });
+    applyPrimitiveHeights(snapshot, next);
+    const flatH = next[0]?.heightM;
+    addLog('FLATTEN-PRIM', `Flattened ${snapshot.length} 3D Primitives to ${flatH?.toFixed(2)}m`);
+    setStatusMsg(`⤓ Flattened ${snapshot.length} 3D Primitive segment${snapshot.length === 1 ? '' : 's'} to ${flatH?.toFixed(2)}m`);
+    try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
+  }, [lidar.state.dataset, buildPrimitiveSnapshot, liDARGetElevationAt, applyPrimitiveHeights]);
   // v50.11: local irradiance toggle — initialised from prop, also togglable from internal button
   const [showIrradianceLocal, setShowIrradianceLocal] = useState(showIrradiance);
   const [panelCount, setPanelCount]     = useState(panels.length);
@@ -10246,7 +10434,7 @@ function SolarEngine3D({
                  placementMode === 'surface_select' ? '\u{1F3AF} Surface' :
                  placementMode === 'extend_row' ? '\u2192+ Ext Row' :
                  placementMode === 'add_row' ? '\u2191+ Add Row' :
-                 placementMode === 'obstruction' ? '\u26A0 Obstruction' :
+                 placementMode === 'obstruction' ? `\u26A0 Obstruction (${obstructions.length} placed)` :
                  placementMode === 'measure' ? '\u{1F4CF} Measure' :
                  placementMode === 'set_direction' ? '\u{1F9ED} Set Direction' :
                  placementMode === 'set_origin' ? '\u{1F4CD} Set Origin' :

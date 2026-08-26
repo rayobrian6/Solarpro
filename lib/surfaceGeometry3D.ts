@@ -499,6 +499,34 @@ export function pointInPolygonLatLng(
 
 // ─── Obstruction Filtering ────────────────────────────────────────────────────
 
+/**
+ * Test whether a panel falls inside an obstruction's keep-out footprint.
+ * Aurora-parity obstructions use a rectangular footprint (widthM × depthM);
+ * legacy v47 obstructions use a circular radius. The function picks the
+ * right test based on which fields are present on `obs`.
+ *
+ * Pure, no I/O. Mirrors `pointInsideObstructionRectangle` in
+ * components/3d/obstruction/dimensions.ts but kept inline here so this
+ * file has no dependency on a UI-side helper.
+ */
+function isPanelInsideObstruction(panel: PlacedPanel, obs: PlacedObstruction): boolean {
+  const cosLat = Math.cos(panel.lat * DEG);
+  const dyM = (panel.lat - obs.lat) * METERS_PER_DEG_LAT;
+  const dxM = (panel.lng - obs.lng) * METERS_PER_DEG_LAT * cosLat;
+  // Aurora-parity rectangular keep-out: only if BOTH widthM and depthM are
+  // finite positive numbers. Falls back to the legacy radius otherwise.
+  if (
+    typeof obs.widthM === 'number' && Number.isFinite(obs.widthM) && obs.widthM > 0 &&
+    typeof obs.depthM === 'number' && Number.isFinite(obs.depthM) && obs.depthM > 0
+  ) {
+    // 1mm slack to avoid floating-point flicker on the border
+    return Math.abs(dxM) <= obs.widthM / 2 + 0.001 &&
+           Math.abs(dyM) <= obs.depthM / 2 + 0.001;
+  }
+  // Legacy v47 circular keep-out
+  return Math.sqrt(dxM * dxM + dyM * dyM) < obs.radiusM;
+}
+
 export function removeObstructedPanels(
   panels: PlacedPanel[],
   obstructions: PlacedObstruction[],
@@ -506,10 +534,7 @@ export function removeObstructedPanels(
   if (obstructions.length === 0) return panels;
   return panels.filter(panel => {
     for (const obs of obstructions) {
-      const cosLat = Math.cos(panel.lat * DEG);
-      const dy = (panel.lat - obs.lat) * METERS_PER_DEG_LAT;
-      const dx = (panel.lng - obs.lng) * METERS_PER_DEG_LAT * cosLat;
-      if (Math.sqrt(dx*dx + dy*dy) < obs.radiusM) return false;
+      if (isPanelInsideObstruction(panel, obs)) return false;
     }
     return true;
   });
