@@ -20,6 +20,7 @@ export const maxDuration = 30;
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { getInverterById } from '@/lib/equipment-db';
+import { resolveIntegratedEquipment } from '@/lib/equipment/integratedBos';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
 import {
@@ -491,6 +492,34 @@ export async function POST(req: NextRequest) {
       ? (layoutStrings ? layoutStrings.length : (stringResult?.totalStrings ?? 1))
       : 0;
 
+    // ── Integrated BOS "brains" — THE SAME RESOLVER THE PERMIT SHEET USES ────
+    // This route used to hardcode `combinerLabel: 'AC Trunk Cable'` for every
+    // micro system, so the Diagram tab drew a generic trunk cable while the
+    // permit E-1 (which resolves the real device through buildIntegratedEquipment
+    // → resolveIntegratedEquipment) drew the actual designed combiner. Two
+    // renderers, two answers, same project.
+    //
+    // `resolveIntegratedEquipment` is the PURE resolver both paths bottom out in;
+    // `buildIntegratedEquipment` is only the PermitInput-shaped adapter around it.
+    // Calling it directly here makes the device ONE fact with two adapters instead
+    // of one fact and one literal. An explicit picker selection wins, exactly as
+    // it does on the permit side.
+    const _bosPlan = resolveIntegratedEquipment({
+      inverterManufacturer,
+      inverterModel,
+      isMicro,
+      totalDevices: resolvedDeviceCount,
+      branchCount: Array.isArray(body.microBranches) ? body.microBranches.length : 0,
+      hasBattery: !!(body.hasBattery || body.batteryModel || body.batteryKwh || body.batteryBrand
+        || (body.batteryCount && Number(body.batteryCount) > 0)),
+      overrideDeviceIds: Array.isArray(body.bosDeviceIds)
+        ? body.bosDeviceIds.map(String)
+        : (body.combinerId ? [String(body.combinerId)] : undefined),
+    });
+    const _bosBrains = _bosPlan.brains ?? _bosPlan.devices[0];
+    const _bosLabel  = _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined;
+    console.log(`[SLD BOS] isMicro=${isMicro} devices=${resolvedDeviceCount} branches=${Array.isArray(body.microBranches) ? body.microBranches.length : 0} → ${_bosLabel ?? '(none)'} (source=${_bosPlan.source})`);
+
     // SINGLE SOURCE OF TRUTH: computeSystem() → PermitSystemModel
     // All NEC electrical values (OCPD, wire gauges, backfeed, EGC) come from
     // the engine. No duplicate calculations below this point.
@@ -741,7 +770,14 @@ export async function POST(req: NextRequest) {
       mpptChannels:            isMicro ? deviceCount : (stringResult?.mpptChannels.length ?? mpptChannels),
       mpptAllocation:          isMicro ? `${deviceCount} microinverters` : mpptAllocation,
       combinerType:            isMicro ? 'DIRECT' : stringResult?.combinerType,
-      combinerLabel:           isMicro ? 'AC Trunk Cable' : stringResult?.combinerLabel,
+      // The REAL designed device (e.g. "Enphase IQ Combiner 6C"), resolved above
+      // by the same function the permit E-1 uses — not the retired hardcoded
+      // 'AC Trunk Cable' literal, which named the wiring method rather than the
+      // combiner and was identical on every micro job regardless of design.
+      combinerLabel:           isMicro ? (_bosLabel ?? 'IQ Combiner') : stringResult?.combinerLabel,
+      combinerModel:           _bosLabel,
+      combinerHasIntegratedGateway: _bosPlan.hasIntegratedGateway,
+      combinerProvidesAcDisconnect: _bosPlan.providesAcDisconnect,
       ocpdPerString:           isMicro ? 0 : (systemModel?.stringOcpdAmps ?? stringResult?.ocpdPerString),
       dcAcRatio:               isMicro ? undefined : (stringResult ? calcDcAcRatio(stringResult.totalDcPower / 1000, acOutputKw) : undefined),
       stringConfigWarnings:    stringResult?.warnings,
