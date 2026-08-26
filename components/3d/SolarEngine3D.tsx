@@ -714,6 +714,9 @@ function SolarEngine3D({
   const blockResizeRef  = useRef<{ blockEntity: any; handleEntity: any; startHeightM: number; startYWorld: number; centroidCart: any } | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const blockHeightOverridesRef = useRef<Map<string, number>>(new Map()); // blockId -> heightM
+  // v65: Line-trace block mode — N points to define any polygon footprint, right-click
+  // to finalize. The in-progress polyline is shown as a preview entity.
+  const blockPreviewRef = useRef<any>(null); // preview polyline entity (in-progress)
   const DEFAULT_BLOCK_HEIGHT_M = 6; // typical 1-story eave height
   // v64: Gable roof primitive — click 2 eave corners, render 2 sloped faces meeting at ridge.
   // The eave is a rectangle in lat/lng; ridge runs along the long edge at the centroid.
@@ -785,6 +788,12 @@ function SolarEngine3D({
       rowPtsRef.current = []; rowLastClickRef.current = null;
       rowStartScreenPosRef.current = null; setRowPtCount(0);
       measurePtsRef.current = []; setMeasurePtCount(0);
+      // v65: also clear in-progress block on tool change / re-arm
+      blockPtsRef.current = []; setBlockPtCount(0);
+      if (blockPreviewRef.current) {
+        try { viewerRef.current?.entities.remove(blockPreviewRef.current); } catch { /* ignore */ }
+        blockPreviewRef.current = null;
+      }
       setClickCountForTool(0);
       clearGhostPanel();
       // v62: leaving select mode — drop the rotate knob and never leave a drag
@@ -3946,15 +3955,28 @@ function SolarEngine3D({
         if (!blockId) return;
         const blockEntity = blockEntitiesRef.current.find((b: any) => b.id === blockId);
         if (!blockEntity) return;
-        // Get the block's current height from its dimensions
-        const dims = blockEntity.box?.dimensions?.getValue
-          ? blockEntity.box.dimensions.getValue(C.JulianDate.now())
-          : null;
-        const startHeightM = dims ? dims.z : DEFAULT_BLOCK_HEIGHT_M;
-        // Get the block centroid Cartesian (for vertical line intersection)
-        const centroidCart = blockEntity.position?.getValue
-          ? blockEntity.position.getValue(C.JulianDate.now())
-          : null;
+        // v65: the new line-trace block is a PolygonGraphics with extrudedHeight
+        // (not a BoxGraphics with .dimensions). Get the current height from
+        // extrudedHeight, falling back to DEFAULT_BLOCK_HEIGHT_M.
+        let startHeightM = DEFAULT_BLOCK_HEIGHT_M;
+        if (blockEntity.polygon?.extrudedHeight?.getValue) {
+          const eh = blockEntity.polygon.extrudedHeight.getValue(C.JulianDate.now());
+          if (typeof eh === 'number' && isFinite(eh)) startHeightM = eh;
+        } else if (blockEntity.box?.dimensions?.getValue) {
+          // Legacy box-based block (Stage 1 only, before the line-trace rewrite)
+          const dims = blockEntity.box.dimensions.getValue(C.JulianDate.now());
+          if (dims) startHeightM = dims.z;
+        }
+        // Get the block centroid Cartesian (for vertical line intersection).
+        // v65: the new prism entity stores its centroid on a private property
+        // since PolygonGraphics doesn't have a `position` field.
+        let centroidCart: any = null;
+        if ((blockEntity as any).__centroidCart) {
+          centroidCart = (blockEntity as any).__centroidCart;
+        } else if (blockEntity.position?.getValue) {
+          // Legacy box-based block (Stage 1 only)
+          centroidCart = blockEntity.position.getValue(C.JulianDate.now());
+        }
         if (!centroidCart) return;
         // Compute initial cursor Y in world coords (ray-vertical-line intersection)
         const ray = viewer.camera.getPickRay(screenPos);
@@ -4005,8 +4027,12 @@ function SolarEngine3D({
         // New height = start height + (cursor delta in world Y)
         const dyWorld = cursorYWorld - r.startYWorld;
         const newHeightM = clampBlockHeight(r.startHeightM + dyWorld);
-        // Update the block's box dimensions
-        if (r.blockEntity.box?.dimensions) {
+        // v65: the new line-trace block is a PolygonGraphics with extrudedHeight.
+        // Update the prism's extrudedHeight so the walls stretch to the new height.
+        if (r.blockEntity.polygon?.extrudedHeight) {
+          r.blockEntity.polygon.extrudedHeight = new C.ConstantProperty(newHeightM);
+        } else if (r.blockEntity.box?.dimensions) {
+          // Legacy box-based block (Stage 1 only)
           const dims = r.blockEntity.box.dimensions.getValue(C.JulianDate.now());
           if (dims) {
             r.blockEntity.box.dimensions = new C.ConstantProperty(
@@ -4014,10 +4040,11 @@ function SolarEngine3D({
             );
           }
         }
-        // Update the handle's position to sit on top of the new block
+        // Update the handle's position to sit on top of the new prism
+        // (handle is at eaveHeight + 0.3 to keep it visible above the top face)
         if (r.handleEntity.position) {
           r.handleEntity.position = new C.ConstantProperty(
-            new C.Cartesian3(r.centroidCart.x, r.centroidCart.y, newHeightM),
+            new C.Cartesian3(r.centroidCart.x, r.centroidCart.y, newHeightM + 0.3),
           );
         }
         blockHeightOverridesRef.current.set(r.blockEntity.id, newHeightM);
@@ -4031,10 +4058,16 @@ function SolarEngine3D({
       const r = blockResizeRef.current;
       if (!r) return;
       try {
-        const dims = r.blockEntity.box?.dimensions?.getValue
-          ? r.blockEntity.box.dimensions.getValue(C.JulianDate.now())
-          : null;
-        const finalHeightM = dims ? dims.z : r.startHeightM;
+        // v65: read the current height from extrudedHeight (polygon) or
+        // .dimensions.z (legacy box), whichever the block uses.
+        let finalHeightM = r.startHeightM;
+        if (r.blockEntity.polygon?.extrudedHeight?.getValue) {
+          const eh = r.blockEntity.polygon.extrudedHeight.getValue(C.JulianDate.now());
+          if (typeof eh === 'number' && isFinite(eh)) finalHeightM = eh;
+        } else if (r.blockEntity.box?.dimensions?.getValue) {
+          const dims = r.blockEntity.box.dimensions.getValue(C.JulianDate.now());
+          if (dims) finalHeightM = dims.z;
+        }
         blockHeightOverridesRef.current.set(r.blockEntity.id, finalHeightM);
         suppressClickRef.current = true; // consume the trailing LEFT_CLICK
         setStatusMsg(`🧱 Block height set to ${finalHeightM.toFixed(1)}m — drag handle again to adjust`);
@@ -4254,6 +4287,24 @@ function SolarEngine3D({
         setMeasurePtCount(0);
         clearMeasureOverlay();
         setStatusMsg('Measure cleared');
+      } else if (modeRef.current === 'block') {
+        // v65: right-click finalizes the line-trace block (or cancels if < 3 points)
+        if (blockPtsRef.current.length >= 3) {
+          finalizeBlock(viewer, C);
+        } else {
+          // cancel — remove preview if any
+          if (blockPreviewRef.current) {
+            try {
+              const dots = (blockPreviewRef.current as any).__dots as any[] | undefined;
+              if (dots) for (const d of dots) try { viewer.entities.remove(d); } catch { /* ignore */ }
+              viewer.entities.remove(blockPreviewRef.current);
+            } catch { /* ignore */ }
+            blockPreviewRef.current = null;
+          }
+          blockPtsRef.current = [];
+          setBlockPtCount(0);
+          setStatusMsg('🧱 Block cancelled — need at least 3 points. Click again to start.');
+        }
       }
     }, C.ScreenSpaceEventType.RIGHT_CLICK);
   }
@@ -6447,6 +6498,20 @@ function SolarEngine3D({
         measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay();
         rowPtsRef.current = []; setRowPtCount(0); rowStartScreenPosRef.current = null;
         planePtsRef.current = []; setPlanePtCount(0);
+        // v65: also cancel an in-progress block line-trace
+        if (modeRef.current === 'block' && blockPtsRef.current.length > 0) {
+          if (blockPreviewRef.current) {
+            try {
+              const dots = (blockPreviewRef.current as any).__dots as any[] | undefined;
+              if (dots) for (const d of dots) try { viewerRef.current?.entities.remove(d); } catch { /* ignore */ }
+              viewerRef.current?.entities.remove(blockPreviewRef.current);
+            } catch { /* ignore */ }
+            blockPreviewRef.current = null;
+          }
+          blockPtsRef.current = [];
+          setBlockPtCount(0);
+          setStatusMsg('🧱 Block cancelled');
+        }
         clearGhostPanel();
       }
     };
@@ -6528,10 +6593,9 @@ function SolarEngine3D({
     } catch (err: unknown) { addLog('ERROR', `handleMeasureClick: ${(err as Error).message}`); }
   }
 
-  // ── v64: Block tool — drop 2-corner footprint, render as 3D box entity ──
-  // The footprint is a rectangle in lat/lng (SW + NE corners). After the 2nd
-  // click, we compute the rectangle dimensions in meters, place a Cesium box
-  // entity at the centroid, and the user can then mark a roof plane on top.
+  // ── v65: Block tool — line-trace mode (click N points to define any polygon,
+  //   right-click to finalize). Rendered as a Cesium extruded polygon (3D prism
+  //   with real vertical walls, visible from any angle). ──
   function handleBlockClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -6545,79 +6609,159 @@ function SolarEngine3D({
       if (!isValidCoord(pt.lat, pt.lng)) return;
       blockPtsRef.current.push(pt);
       setBlockPtCount(blockPtsRef.current.length);
+      addLog('BLOCK', `Point ${blockPtsRef.current.length} at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)})`);
 
-      // 2nd click — finalize the footprint and create the box entity
+      // Update the in-progress preview polyline so the user sees the line trace
+      if (blockPreviewRef.current) {
+        try { viewer.entities.remove(blockPreviewRef.current); } catch { /* ignore */ }
+        blockPreviewRef.current = null;
+      }
       if (blockPtsRef.current.length >= 2) {
-        const [c1, c2] = blockPtsRef.current;
-        // Use extracted math for footprint dimensions (tested in lib/3d/blockMath)
-        const dims = computeBlockDimensions(c1, c2, DEFAULT_BLOCK_HEIGHT_M);
-        const { widthM, depthM, heightM, centroidLat, centroidLng, sw, ne } = dims;
-        // Skip degenerate footprints (sub-meter clicks)
-        if (widthM < 0.5 || depthM < 0.5) {
-          setStatusMsg('Block: footprint too small (<0.5m) — try again with a bigger area');
-          blockPtsRef.current = [];
-          setBlockPtCount(0);
-          return;
+        const previewPositions = blockPtsRef.current
+          .map(p => safeCartesian3(C, p.lng, p.lat, 0))
+          .filter((p): p is any => p != null);
+        if (previewPositions.length >= 2) {
+          blockPreviewRef.current = viewer.entities.add({
+            id: `block-preview-${Date.now()}`,
+            name: 'Block footprint (in progress)',
+            polyline: {
+              positions: previewPositions,
+              width: 2,
+              material: C.Color.fromCssColorString('#ffaa00').withAlpha(0.9),
+              clampToGround: true,
+              arcType: C.ArcType.GEODESIC,
+            },
+          });
         }
-        const centerCart = safeCartesian3(C, centroidLng, centroidLat, heightM / 2);
-        if (!centerCart) {
-          setStatusMsg('Block: failed to compute centroid — try again');
-          blockPtsRef.current = [];
-          setBlockPtCount(0);
-          return;
+        // Also add a small dot at each click point for clarity
+        for (const p of blockPtsRef.current) {
+          const pos = safeCartesian3(C, p.lng, p.lat, 0.05);
+          if (pos) {
+            const dot = viewer.entities.add({
+              position: pos,
+              point: {
+                pixelSize: 8,
+                color: C.Color.fromCssColorString('#ffaa00'),
+                outlineColor: C.Color.BLACK,
+                outlineWidth: 1.5,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              },
+            });
+            // The dots are short-lived; clean them up on next click or finalize.
+            // We don't bother with a ref — they'll be removed when the block is finalized.
+            try { (blockPreviewRef.current as any).__dots = ((blockPreviewRef.current as any).__dots || []).concat([dot]); } catch { /* ignore */ }
+          }
         }
-        // CesiumJS BoxGraphics: dimensions are in METERS along the LOCAL east-north-up
-        // frame at the position, which is what we want for a building sitting on the ground.
-        const blockId = `block-${Date.now()}`;
-        const boxEntity = viewer.entities.add({
-          id: blockId,
-          name: 'Building Block',
-          position: centerCart,
-          box: {
-            dimensions: new C.Cartesian3(widthM, depthM, heightM),
-            material: C.Color.fromCssColorString('#f5f5f5').withAlpha(0.85),
-            outline: true,
-            outlineColor: C.Color.fromCssColorString('#2a2a2a'),
-            outlineWidth: 2,
-          },
-          description: `<table class="cesium-infoBox-defaultTable">
-            <tr><th>Block</th><td>${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${heightM.toFixed(1)}m</td></tr>
-            <tr><th>SW corner</th><td>${sw.lat.toFixed(6)}, ${sw.lng.toFixed(6)}</td></tr>
-            <tr><th>NE corner</th><td>${ne.lat.toFixed(6)}, ${ne.lng.toFixed(6)}</td></tr>
-          </table>`,
-        });
-        // Drag handle on top of the block — small bright box the user can grab
-        // to resize the block height by dragging up/down. The handle is at
-        // (centroid_lat, centroid_lng, heightM) and is 0.4m × 0.4m × 0.4m.
-        const handlePos = safeCartesian3(C, centroidLng, centroidLat, heightM);
-        const handleEntity = viewer.entities.add({
-          id: `block-handle-${Date.now()}`,
-          name: 'Block resize handle (drag up/down to set height)',
-          position: handlePos,
-          box: {
-            dimensions: new C.Cartesian3(0.4, 0.4, 0.4),
-            material: C.Color.fromCssColorString('#ffaa00').withAlpha(0.95),
-            outline: true,
-            outlineColor: C.Color.fromCssColorString('#000000'),
-            outlineWidth: 2,
-          },
-        });
-        // Tag the handle with the block id so the resize handler can find its target
-        try { (handleEntity as any).__blockId = blockId; } catch { /* ignore */ }
-        blockEntitiesRef.current.push(boxEntity);
-        blockHandlesRef.current.push(handleEntity);
-        blockHeightOverridesRef.current.set(blockId, heightM);
-        setPlacedBlockCount(blockEntitiesRef.current.length);
-        addLog('BLOCK', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${heightM}m at (${centroidLat.toFixed(5)}, ${centroidLng.toFixed(5)})`);
-        setStatusMsg(`🧱 Block placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${heightM}m — click again to place another`);
-        // Reset for next block
-        blockPtsRef.current = [];
-        setBlockPtCount(0);
+      }
+
+      if (blockPtsRef.current.length === 1) {
+        setStatusMsg(`🧱 Block point 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click more points, right-click to finish`);
       } else {
-        setStatusMsg(`🧱 Footprint corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click corner 2 (NE)`);
+        setStatusMsg(`🧱 ${blockPtsRef.current.length} block points — right-click to finish, or Esc to cancel`);
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleBlockClick: ${(err as Error).message}`); }
+  }
+
+  // Finalize the line-trace block: build a 3D extruded polygon (real prism with
+  // vertical walls), drop a resize handle on top, and reset for the next block.
+  function finalizeBlock(viewer: any, C: any) {
+    const pts = blockPtsRef.current;
+    if (pts.length < 3) {
+      setStatusMsg('🧱 Block needs at least 3 points — keep clicking, then right-click to finish');
+      return;
+    }
+    // Clean up the preview polyline + dots
+    if (blockPreviewRef.current) {
+      try {
+        const dots = (blockPreviewRef.current as any).__dots as any[] | undefined;
+        if (dots) for (const d of dots) try { viewer.entities.remove(d); } catch { /* ignore */ }
+        viewer.entities.remove(blockPreviewRef.current);
+      } catch { /* ignore */ }
+      blockPreviewRef.current = null;
+    }
+    const eaveHeightM = DEFAULT_BLOCK_HEIGHT_M;
+    // Build the polygon hierarchy (close the ring by repeating the first point)
+    const polyPositions = pts
+      .map(p => safeCartesian3(C, p.lng, p.lat, 0))
+      .filter((p): p is any => p != null);
+    if (polyPositions.length < 3) {
+      setStatusMsg('🧱 Block: failed to build polygon — try again');
+      blockPtsRef.current = [];
+      setBlockPtCount(0);
+      return;
+    }
+    // Centroid for the handle = average of the points
+    const centroidLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+    const centroidLng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+    // Compute approximate area in m² for the info box (using the lat/lng bounding box
+    // as a rough estimate — accurate area would need a polygon area algorithm).
+    const minLat = Math.min(...pts.map(p => p.lat));
+    const maxLat = Math.max(...pts.map(p => p.lat));
+    const minLng = Math.min(...pts.map(p => p.lng));
+    const maxLng = Math.max(...pts.map(p => p.lng));
+    const midLat = (minLat + maxLat) / 2;
+    const widthM  = Math.abs(maxLng - minLng) * 111_320 * Math.cos(midLat * Math.PI / 180);
+    const depthM  = Math.abs(maxLat - minLat) * 111_320;
+    const approxAreaM2 = widthM * depthM;
+    // 3D extruded polygon — a real prism with vertical walls. height=0 (ground)
+    // and extrudedHeight=eaveHeightM (top of walls) makes it a closed box.
+    const blockId = `block-${Date.now()}`;
+    const prismEntity = viewer.entities.add({
+      id: blockId,
+      name: 'Building Block',
+      polygon: {
+        hierarchy: new C.PolygonHierarchy(polyPositions),
+        height: 0,
+        extrudedHeight: eaveHeightM,
+        material: C.Color.fromCssColorString('#f5f5f5').withAlpha(0.92),
+        outline: true,
+        outlineColor: C.Color.fromCssColorString('#2a2a2a'),
+        outlineWidth: 2,
+        // closeTop + closeBottom true: the top of the prism and the bottom (ground) are also rendered.
+        closeTop: true,
+        closeBottom: false, // the ground plane doesn't need to be drawn
+      },
+      description: `<table class="cesium-infoBox-defaultTable">
+        <tr><th>Block</th><td>${pts.length} footprint points, eave ${eaveHeightM.toFixed(1)}m</td></tr>
+        <tr><th>Approx footprint</th><td>${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m ≈ ${approxAreaM2.toFixed(0)} m²</td></tr>
+        <tr><th>Centroid</th><td>${centroidLat.toFixed(6)}, ${centroidLng.toFixed(6)}</td></tr>
+      </table>`,
+    });
+    // Tag the prism with its centroid Cartesian so the resize handler can find it
+    // (PolygonGraphics doesn't have a `position` field like BoxGraphics does).
+    const centroidCartesian = safeCartesian3(C, centroidLng, centroidLat, 0);
+    if (centroidCartesian) {
+      try { (prismEntity as any).__centroidCart = centroidCartesian; } catch { /* ignore */ }
+    }
+    // Drag handle on top of the prism — small bright box the user can grab
+    // to resize the block height by dragging up/down. The handle is at
+    // (centroid_lat, centroid_lng, eaveHeightM + 0.3) and is 0.4m × 0.4m × 0.4m.
+    const handlePos = safeCartesian3(C, centroidLng, centroidLat, eaveHeightM + 0.3);
+    const handleEntity = viewer.entities.add({
+      id: `block-handle-${Date.now()}`,
+      name: 'Block resize handle (drag up/down to set height)',
+      position: handlePos,
+      box: {
+        dimensions: new C.Cartesian3(0.4, 0.4, 0.4),
+        material: C.Color.fromCssColorString('#ffaa00').withAlpha(0.95),
+        outline: true,
+        outlineColor: C.Color.fromCssColorString('#000000'),
+        outlineWidth: 2,
+      },
+    });
+    // Tag the handle with the prism id so the resize handler can find its target
+    try { (handleEntity as any).__blockId = blockId; } catch { /* ignore */ }
+    blockEntitiesRef.current.push(prismEntity);
+    blockHandlesRef.current.push(handleEntity);
+    blockHeightOverridesRef.current.set(blockId, eaveHeightM);
+    setPlacedBlockCount(blockEntitiesRef.current.length);
+    addLog('BLOCK', `Finalized: ${pts.length} points, ≈${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, eave ${eaveHeightM}m`);
+    setStatusMsg(`🧱 Block placed — ${pts.length} footprint points, eave ${eaveHeightM}m. Click more points to add another, or Esc.`);
+    // Reset for the next block (keep the placed blocks; user can drop more)
+    blockPtsRef.current = [];
+    setBlockPtCount(0);
+    try { viewer.scene.requestRender(); } catch {}
   }
 
   // ── v64: Gable roof tool — 2 eave corners, render 2 sloped faces ──
@@ -9829,7 +9973,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Block context (v64: 3D building block placement) ── */}
+              {/* ── Block context (v65: line-trace block placement) ── */}
               {placementMode === 'block' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -9838,31 +9982,47 @@ function SolarEngine3D({
                 }}>
                   <span style={{ color: '#e0e0e0', fontSize: 12 }}>
                     {blockPtCount === 0
-                      ? '\u{1F9F1} Click footprint corner 1 (SW)'
-                      : blockPtCount === 1
-                        ? '\u{1F9F1} Click footprint corner 2 (NE) — block placed at default 6m height'
-                        : `${placedBlockCount} block${placedBlockCount === 1 ? '' : 's'} placed`}
+                      ? '🧱 Click to add footprint points — right-click to finish, Esc to cancel'
+                      : `🧱 ${blockPtCount} points — right-click to finish (need 3+), Esc to cancel`}
                   </span>
-                  {blockPtCount > 0 || placedBlockCount > 0 ? (
+                  {blockPtCount >= 3 ? (
                     <button
                       onClick={() => {
-                        blockPtsRef.current = []; setBlockPtCount(0);
-                        // remove all placed block entities
+                        const viewer = viewerRef.current;
+                        if (viewer && typeof (window as any).Cesium !== 'undefined') {
+                          finalizeBlock(viewer, (window as any).Cesium);
+                        }
+                      }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(255,170,0,0.20)', color: '#ffd28a',
+                        border: '1px solid rgba(255,170,0,0.4)', cursor: 'pointer' }}
+                    >
+                      Finish ✓
+                    </button>
+                  ) : null}
+                  {placedBlockCount > 0 ? (
+                    <button
+                      onClick={() => {
                         const viewer = viewerRef.current;
                         if (viewer) {
                           for (const e of blockEntitiesRef.current) {
                             try { viewer.entities.remove(e); } catch { /* ignore */ }
                           }
+                          for (const e of blockHandlesRef.current) {
+                            try { viewer.entities.remove(e); } catch { /* ignore */ }
+                          }
                         }
                         blockEntitiesRef.current = [];
+                        blockHandlesRef.current = [];
+                        blockHeightOverridesRef.current.clear();
                         setPlacedBlockCount(0);
-                        setStatusMsg('Block tool cleared');
+                        setStatusMsg('All blocks cleared');
                       }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(200,200,210,0.15)', color: '#e0e0e0',
                         border: '1px solid rgba(200,200,210,0.3)', cursor: 'pointer' }}
                     >
-                      Clear
+                      Clear All
                     </button>
                   ) : null}
                 </div>
