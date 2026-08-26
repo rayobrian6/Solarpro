@@ -116,6 +116,18 @@ import {
   type MeasurementEntityBundle,
 } from './measure/measurements';
 
+// v68 (canvas-controls): Aurora-parity bottom-left control strip
+// (HANDOFF_2026-08-25 §1) — compass / north arrow, zoom +/-, three
+// layer toggle buttons. The strip is a pure UI shell: it owns no
+// scene state. Wired to the same `showParcel` / `showRoofSegs` /
+// `showShadeLocal` state that drives the existing horizontal
+// layer-toggle row at `left: 60, bottom: 16`. Both UIs stay in sync.
+import {
+  CanvasControls,
+  computeZoomedRadius,
+  type LayerToggle,
+} from './controls';
+
 // P0-6 (DATA-AUTHORITY-AUDIT): panel specs stamped onto placed panels come
 // from the equipment authority (equipment-db record), NEVER a hardcoded
 // literal in this component.
@@ -4126,6 +4138,8 @@ function SolarEngine3D({
         else if (mode === 'plane')  handlePlaneClick(viewer, C, screenPos);
         else if (mode === 'row')    handleRowClick(viewer, C, screenPos);
         else if (mode === 'measure')        handleMeasureClick(viewer, C, screenPos);
+        else if (mode === 'measurements')   handleMeasurementsClick(viewer, C, screenPos);
+        // ruler is routed via LEFT_DOWN / MOUSE_MOVE / LEFT_UP below (drag semantics)
         else if (mode === 'surface_select') handleSurfaceSelectClick(viewer, C, screenPos);
         else if (mode === 'extend_row')     handleExtendRowClick(viewer, C, screenPos);
         else if (mode === 'add_row')        handleAddRowClick(viewer, C, screenPos);
@@ -7078,6 +7092,18 @@ function SolarEngine3D({
       });
       treeEntitiesRef.current.push(trunkEntity, foliageEntity);
       setPlacedTreeCount(treeEntitiesRef.current.length / 2);
+      // v68: register the tree with the vertex-handles editor and tag the
+      // two Cesium entities so the editor can move them together.
+      const treeGroupId = `tree-grp-${Date.now()}`;
+      try { (trunkEntity as any).__groupId = treeGroupId; } catch { /* ignore */ }
+      try { (foliageEntity as any).__groupId = treeGroupId; } catch { /* ignore */ }
+      try { (trunkEntity as any).__trunkHeightM = trunkHeightM; } catch { /* ignore */ }
+      try { (trunkEntity as any).__foliageRadiusM = foliageRadiusM; } catch { /* ignore */ }
+      setVertexSpecs(prev => [...prev, {
+        id: treeGroupId,
+        type: 'tree',
+        vertices: [{ lat, lng, h: 0 }],
+      }]);
       addLog('TREE', `Placed at (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
       setStatusMsg(`\u{1F333} Tree placed at (${lat.toFixed(5)}, ${lng.toFixed(5)}) — click to place another`);
       try { viewer.scene.requestRender(); } catch {}
@@ -10235,6 +10261,7 @@ function SolarEngine3D({
                         }
                         gableEntitiesRef.current = [];
                         setPlacedGableCount(0);
+                        setVertexSpecs(prev => prev.filter(s => s.type !== 'gable'));
                         setStatusMsg('Gable tool cleared');
                       }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
@@ -10368,6 +10395,44 @@ function SolarEngine3D({
 
 
 
+
+      {/* v67: INSTRUCTIONS panel — context-aware helper text per placement mode.
+          Aurora frame 0070 parity. Bottom-left to mimic the left-sidebar slot
+          without colliding with the tool spine (left:10) or the overlay
+          toggles (left:60, bottom:16). */}
+      {stage === 'done' ? (
+        <div
+          data-testid="help-panel-mount"
+          style={{
+            position: 'absolute', left: 10, bottom: 60,
+            width: 260, zIndex: 50,
+            background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.10)', borderRadius: 10,
+            padding: '2px 0',
+            pointerEvents: 'auto',
+          }}
+        >
+          <HelpPanel
+            placementMode={placementMode}
+            context={{
+              pointsPlaced:
+                placementMode === 'block'        ? blockPtCount  :
+                placementMode === 'roof_gable'   ? gablePtCount  :
+                placementMode === 'roof_hip'     ? hipPtCount    :
+                placementMode === 'tree'         ? placedTreeCount :
+                placementMode === 'mark_plane'   ? markPlanePtCount :
+                placementMode === 'plane3d'      ? plane3DPtCount :
+                placementMode === 'fence'        ? fencePtCount  :
+                placementMode === 'measure'      ? measurePtCount :
+                placementMode === 'ground'       ? groundPtCount :
+                undefined,
+              liveCount: placementMode === 'tree'
+                ? { label: 'trees', value: placedTreeCount }
+                : undefined,
+            }}
+          />
+        </div>
+      ) : null}
 
       {/* Overlay toggles (bottom-left, above status bar — clear of tool sidebar) */}
       {stage === 'done' ? (
