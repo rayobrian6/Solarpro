@@ -229,7 +229,7 @@ export const selectToast = (s: IrradianceStoreState): IrradianceToast | null => 
  * The SolarEngine3D's existing `onKey` closure calls this and
  * dispatches to the store on `true`.
  */
-export function isIrradianceHotkeyEvent(e: { key: string; repeat?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): boolean {
+export function isIrradianceHotkeyEvent(e: { key: string; repeat?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean }): boolean {
   if (e.repeat) return false;
   if (e.ctrlKey || e.metaKey || e.altKey) return false;
   return e.key === 'i' || e.key === 'I';
