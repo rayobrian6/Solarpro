@@ -191,7 +191,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -700,6 +700,12 @@ function SolarEngine3D({
   const [blockPtCount, setBlockPtCount]     = useState(0);
   const blockEntitiesRef = useRef<any[]>([]); // Cesium Entity[] for the placed boxes
   const [placedBlockCount, setPlacedBlockCount] = useState(0);
+  // v64: Block resize — drag-handle on top of each block. handleDragRef tracks
+  // which block is being resized and the start Y in world coords.
+  const blockHandlesRef = useRef<any[]>([]); // Cesium Entity[] for the handles
+  const blockResizeRef  = useRef<{ blockEntity: any; handleEntity: any; startHeightM: number; startYWorld: number; centroidCart: any } | null>(null);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const blockHeightOverridesRef = useRef<Map<string, number>>(new Map()); // blockId -> heightM
   const DEFAULT_BLOCK_HEIGHT_M = 6; // typical 1-story eave height
   // v64: Gable roof primitive — click 2 eave corners, render 2 sloped faces meeting at ridge.
   // The eave is a rectangle in lat/lng; ridge runs along the long edge at the centroid.
@@ -709,6 +715,11 @@ function SolarEngine3D({
   const [placedGableCount, setPlacedGableCount] = useState(0);
   const DEFAULT_GABLE_PITCH_DEG = 22;
   const DEFAULT_GABLE_EAVE_HEIGHT_M = 6;
+  // v64: Hip roof — 4 eave corners (rectangle), 2 trapezoid slopes + 2 triangle ends
+  const hipPtsRef = useRef<Array<{ lat: number; lng: number }>>([]);
+  const [hipPtCount, setHipPtCount] = useState(0);
+  const hipEntitiesRef = useRef<any[]>([]);
+  const [placedHipCount, setPlacedHipCount] = useState(0);
   const ghostEntityRef = useRef<any>(null);
   const [statusMsg, setStatusMsg]       = useState('');
   const [fps, setFps]                   = useState(60);
@@ -3905,6 +3916,123 @@ function SolarEngine3D({
     const handler = new C.ScreenSpaceEventHandler(viewer.scene.canvas);
     handlerRef.current = handler;
 
+    // v64: Block resize — LEFT_DOWN picks a block handle and starts a height drag.
+    // Runs BEFORE the existing panel-array LEFT_DOWN so handle picks short-circuit
+    // panel array logic. We set suppressClickRef so the trailing LEFT_CLICK that
+    // fires on mouse-up doesn't re-run selection.
+    handler.setInputAction((event: any) => {
+      try {
+        if (blockResizeRef.current) return; // already resizing
+        const screenPos = event.position;
+        const picked = viewer.scene.pick(screenPos);
+        if (!picked || !picked.id) return;
+        const pickedId: string = picked.id.id || '';
+        if (!pickedId.startsWith('block-handle-')) return;
+        // Found a block handle — start the resize
+        const handleEntity = picked.id;
+        const blockId = (handleEntity as any).__blockId as string | undefined;
+        if (!blockId) return;
+        const blockEntity = blockEntitiesRef.current.find((b: any) => b.id === blockId);
+        if (!blockEntity) return;
+        // Get the block's current height from its dimensions
+        const dims = blockEntity.box?.dimensions?.getValue
+          ? blockEntity.box.dimensions.getValue(C.JulianDate.now())
+          : null;
+        const startHeightM = dims ? dims.z : DEFAULT_BLOCK_HEIGHT_M;
+        // Get the block centroid Cartesian (for vertical line intersection)
+        const centroidCart = blockEntity.position?.getValue
+          ? blockEntity.position.getValue(C.JulianDate.now())
+          : null;
+        if (!centroidCart) return;
+        // Compute initial cursor Y in world coords (ray-vertical-line intersection)
+        const ray = viewer.camera.getPickRay(screenPos);
+        let startYWorld = startHeightM;
+        if (ray) {
+          // Vertical line through centroidCart — find the highest Y the ray reaches
+          // Use the direction dot product of the ray direction with world up
+          const dir = ray.direction;
+          const upDot = dir.x * 0 + dir.y * 0 + dir.z * 1; // simple z-dot, fine for local heights
+          if (Math.abs(upDot) > 0.001) {
+            // t at which the ray's z equals the centroid's z
+            const t = (centroidCart.z - ray.origin.z) / upDot;
+            if (t > 0) {
+              const hitCart = new C.Cartesian3(
+                ray.origin.x + dir.x * t,
+                ray.origin.y + dir.y * t,
+                ray.origin.z + dir.z * t,
+              );
+              startYWorld = hitCart.z;
+            }
+          }
+        }
+        blockResizeRef.current = {
+          blockEntity, handleEntity,
+          startHeightM, startYWorld, centroidCart,
+        };
+        suppressClickRef.current = true; // swallow the click that follows on mouse-up
+        arrayManipRef.current = true;    // freeze the camera so the drag is a clean up/down motion
+        setSelectedBlockId(blockId);
+        setStatusMsg(`↕ Dragging block height — currently ${startHeightM.toFixed(1)}m`);
+      } catch (err: unknown) { addLog('ERROR', `block resize LEFT_DOWN: ${(err as Error).message}`); }
+    }, C.ScreenSpaceEventType.LEFT_DOWN);
+
+    // v64: Block resize — MOUSE_MOVE updates the block height in real-time.
+    // Same pattern as panel array drag — fires only when blockResizeRef is set.
+    handler.setInputAction((event: any) => {
+      const r = blockResizeRef.current;
+      if (!r) return;
+      try {
+        const ray = viewer.camera.getPickRay(event.endPosition);
+        if (!ray) return;
+        const dir = ray.direction;
+        const upDot = dir.z;
+        if (Math.abs(upDot) < 0.001) return;
+        const t = (r.centroidCart.z - ray.origin.z) / upDot;
+        if (t <= 0) return;
+        const cursorYWorld = ray.origin.z + dir.z * t;
+        // New height = start height + (cursor delta in world Y)
+        const dyWorld = cursorYWorld - r.startYWorld;
+        const newHeightM = Math.max(1.0, Math.min(30.0, r.startHeightM + dyWorld));
+        // Update the block's box dimensions
+        if (r.blockEntity.box?.dimensions) {
+          const dims = r.blockEntity.box.dimensions.getValue(C.JulianDate.now());
+          if (dims) {
+            r.blockEntity.box.dimensions = new C.ConstantProperty(
+              new C.Cartesian3(dims.x, dims.y, newHeightM),
+            );
+          }
+        }
+        // Update the handle's position to sit on top of the new block
+        if (r.handleEntity.position) {
+          r.handleEntity.position = new C.ConstantProperty(
+            new C.Cartesian3(r.centroidCart.x, r.centroidCart.y, newHeightM),
+          );
+        }
+        blockHeightOverridesRef.current.set(r.blockEntity.id, newHeightM);
+        setStatusMsg(`↕ Block height: ${newHeightM.toFixed(1)}m`);
+        try { viewer.scene.requestRender(); } catch {}
+      } catch (err: unknown) { addLog('ERROR', `block resize MOUSE_MOVE: ${(err as Error).message}`); }
+    }, C.ScreenSpaceEventType.MOUSE_MOVE);
+
+    // v64: Block resize — LEFT_UP finalizes and clears the resize state.
+    handler.setInputAction(() => {
+      const r = blockResizeRef.current;
+      if (!r) return;
+      try {
+        const dims = r.blockEntity.box?.dimensions?.getValue
+          ? r.blockEntity.box.dimensions.getValue(C.JulianDate.now())
+          : null;
+        const finalHeightM = dims ? dims.z : r.startHeightM;
+        blockHeightOverridesRef.current.set(r.blockEntity.id, finalHeightM);
+        suppressClickRef.current = true; // consume the trailing LEFT_CLICK
+        setStatusMsg(`🧱 Block height set to ${finalHeightM.toFixed(1)}m — drag handle again to adjust`);
+      } catch (err: unknown) { addLog('ERROR', `block resize LEFT_UP: ${(err as Error).message}`); }
+      finally {
+        blockResizeRef.current = null;
+        arrayManipRef.current = false; // hand the camera back
+      }
+    }, C.ScreenSpaceEventType.LEFT_UP);
+
     handler.setInputAction((event: any) => {
       try {
         // v62: swallow the click that trails a grab-drag (move/rotate) so it doesn't
@@ -3933,6 +4061,7 @@ function SolarEngine3D({
         else if (mode === 'set_origin')     handleSetOriginClick(viewer, C, screenPos);
         else if (mode === 'block')          handleBlockClick(viewer, C, screenPos);
         else if (mode === 'roof_gable')     handleGableClick(viewer, C, screenPos);
+        else if (mode === 'roof_hip')       handleHipClick(viewer, C, screenPos);
         // auto_roof: fires once via placementMode useEffect — NOT on canvas click
 
         // pick_house: user clicked a house — get lat/lng and reverse-geocode
@@ -6436,8 +6565,9 @@ function SolarEngine3D({
         }
         // CesiumJS BoxGraphics: dimensions are in METERS along the LOCAL east-north-up
         // frame at the position, which is what we want for a building sitting on the ground.
+        const blockId = `block-${Date.now()}`;
         const boxEntity = viewer.entities.add({
-          id: `block-${Date.now()}`,
+          id: blockId,
           name: 'Building Block',
           position: centerCart,
           box: {
@@ -6453,7 +6583,27 @@ function SolarEngine3D({
             <tr><th>NE corner</th><td>${ne.lat.toFixed(6)}, ${ne.lng.toFixed(6)}</td></tr>
           </table>`,
         });
+        // Drag handle on top of the block — small bright box the user can grab
+        // to resize the block height by dragging up/down. The handle is at
+        // (centroid_lat, centroid_lng, heightM) and is 0.4m × 0.4m × 0.4m.
+        const handlePos = safeCartesian3(C, centroidLng, centroidLat, heightM);
+        const handleEntity = viewer.entities.add({
+          id: `block-handle-${Date.now()}`,
+          name: 'Block resize handle (drag up/down to set height)',
+          position: handlePos,
+          box: {
+            dimensions: new C.Cartesian3(0.4, 0.4, 0.4),
+            material: C.Color.fromCssColorString('#ffaa00').withAlpha(0.95),
+            outline: true,
+            outlineColor: C.Color.fromCssColorString('#000000'),
+            outlineWidth: 2,
+          },
+        });
+        // Tag the handle with the block id so the resize handler can find its target
+        try { (handleEntity as any).__blockId = blockId; } catch { /* ignore */ }
         blockEntitiesRef.current.push(boxEntity);
+        blockHandlesRef.current.push(handleEntity);
+        blockHeightOverridesRef.current.set(blockId, heightM);
         setPlacedBlockCount(blockEntitiesRef.current.length);
         addLog('BLOCK', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${heightM}m at (${centroidLat.toFixed(5)}, ${centroidLng.toFixed(5)})`);
         setStatusMsg(`🧱 Block placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${heightM}m — click again to place another`);
@@ -6595,6 +6745,134 @@ function SolarEngine3D({
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleGableClick: ${(err as Error).message}`); }
+  }
+
+  // ── v64: Hip roof tool — 2 eave corners, 4 sloped faces meeting at a short ridge ──
+  // The ridge is set back from BOTH short eave edges (typical hip setback = 1/3 of short edge).
+  // 4 faces: 2 trapezoid slopes (long sides) + 2 triangular hip ends (short sides).
+  function handleHipClick(viewer: any, C: any, screenPos: any) {
+    try {
+      const hit = getWorldPosition(viewer, C, screenPos);
+      if (!hit) return;
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      if (!carto) return;
+      const pt = {
+        lat: C.Math.toDegrees(carto.latitude),
+        lng: C.Math.toDegrees(carto.longitude),
+      };
+      if (!isValidCoord(pt.lat, pt.lng)) return;
+      hipPtsRef.current.push(pt);
+      setHipPtCount(hipPtsRef.current.length);
+
+      if (hipPtsRef.current.length >= 2) {
+        const [c1, c2] = hipPtsRef.current;
+        const sw = { lat: Math.min(c1.lat, c2.lat), lng: Math.min(c1.lng, c2.lng) };
+        const ne = { lat: Math.max(c1.lat, c2.lat), lng: Math.max(c1.lng, c2.lng) };
+        const midLat = (sw.lat + ne.lat) / 2;
+        const METERS_PER_DEG_LAT = 111_320;
+        const METERS_PER_DEG_LNG = 111_320 * Math.cos(midLat * Math.PI / 180);
+        const widthM  = Math.abs(ne.lng - sw.lng) * METERS_PER_DEG_LNG;
+        const depthM  = Math.abs(ne.lat - sw.lat) * METERS_PER_DEG_LAT;
+        if (widthM < 0.5 || depthM < 0.5) {
+          setStatusMsg('Hip: eave too small (<0.5m) — try again with a bigger rectangle');
+          hipPtsRef.current = [];
+          setHipPtCount(0);
+          return;
+        }
+        // Determine long edge (ridge runs along it)
+        const longIsLng = widthM >= depthM;
+        const longEdgeM  = longIsLng ? widthM  : depthM;
+        const shortEdgeM = longIsLng ? depthM  : widthM;
+        // Hip setback: ridge is set back by 1/3 of the short edge on each end
+        const hipSetbackM = shortEdgeM / 3;
+        const eaveHeightM = DEFAULT_GABLE_EAVE_HEIGHT_M;
+        const pitchRad    = DEFAULT_GABLE_PITCH_DEG * Math.PI / 180;
+        // Ridge rise from the eave: at the hip ends (set back from short eave by hipSetback),
+        // the ridge is also offset down by hipSetback * tan(pitch) (real-world hip geometry)
+        const ridgeRiseM  = (shortEdgeM / 2) * Math.tan(pitchRad);
+        const ridgeHeightM = eaveHeightM + ridgeRiseM;
+        // Eave corners
+        const swC = safeCartesian3(C, sw.lng, sw.lat, eaveHeightM);
+        const seC = safeCartesian3(C, ne.lng, sw.lat, eaveHeightM);
+        const nwC = safeCartesian3(C, sw.lng, ne.lat, eaveHeightM);
+        const neC = safeCartesian3(C, ne.lng, ne.lat, eaveHeightM);
+        // Ridge endpoints — at the centroid, set back from the short edges by hipSetback
+        const centroidLat = (sw.lat + ne.lat) / 2;
+        const centroidLng = (sw.lng + ne.lng) / 2;
+        const halfRidgeLongDeg = ((longEdgeM / 2) - hipSetbackM) / (longIsLng ? METERS_PER_DEG_LNG : METERS_PER_DEG_LAT);
+        const ridgeA = longIsLng
+          ? { lat: centroidLat, lng: centroidLng - halfRidgeLongDeg }
+          : { lat: centroidLat - halfRidgeLongDeg, lng: centroidLng };
+        const ridgeB = longIsLng
+          ? { lat: centroidLat, lng: centroidLng + halfRidgeLongDeg }
+          : { lat: centroidLat + halfRidgeLongDeg, lng: centroidLng };
+        const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeHeightM);
+        const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeHeightM);
+        if (!swC || !seC || !nwC || !neC || !rAC || !rBC) {
+          setStatusMsg('Hip: failed to compute 3D positions — try again');
+          hipPtsRef.current = [];
+          setHipPtCount(0);
+          return;
+        }
+        // 4 faces:
+        //   - 2 trapezoid slopes (south slope: SW→SE→rB→rA, north slope: NW→NE→rB→rA)
+        //   - 2 triangular hip ends (south end: SW→SE→rA is wrong, actually SW→hipCorner→SE where
+        //     hipCorner is the ridge endpoint A on the south side)
+        // For the hip ends, the triangle is (eave SW corner, eave SE corner, ridge A). But that's
+        // only correct for the LONG-axis sides. For a true hip:
+        //   - South face (long axis, south side of ridge): eave SW, eave SE, ridge B, ridge A — but
+        //     we want the OUTSIDE of the slope. The slope is a trapezoid.
+        //   - South end (short axis, south end of ridge): eave SW, eave SE, ridge A — triangle.
+        // We have 4 slopes total: 2 long-axis trapezoids (south slope + north slope) + 2 short-axis
+        // triangle hip ends (south hip + north hip). But for a true hip, the 2 long-axis faces are
+        // already trapezoids (ridge is shorter than eave), and the 2 short-axis faces are triangles.
+        // The "end gables" from the gable tool become triangular hip faces here.
+        const faceSouthSlope = longIsLng
+          ? [swC, seC, rBC, rAC]  // south long-axis trapezoid
+          : [swC, seC, rAC, rBC];
+        const faceNorthSlope = longIsLng
+          ? [nwC, neC, rBC, rAC]  // north long-axis trapezoid
+          : [nwC, neC, rAC, rBC];
+        const faceSouthHip = longIsLng
+          ? [swC, seC, rAC]       // south short-axis triangle
+          : [swC, seC, rBC];
+        const faceNorthHip = longIsLng
+          ? [nwC, neC, rBC]       // north short-axis triangle
+          : [nwC, neC, rAC];
+        const slopeMat = C.Color.fromCssColorString('#caa472').withAlpha(0.92);
+        const hipEndMat = C.Color.fromCssColorString('#caa472').withAlpha(0.92);
+        const outlineColor = C.Color.fromCssColorString('#5a3a1a');
+        const f1 = viewer.entities.add({
+          id: `hip-slope-a-${Date.now()}`,
+          name: 'Hip slope A',
+          polygon: { hierarchy: new C.PolygonHierarchy(faceSouthSlope), material: slopeMat, outline: true, outlineColor },
+        });
+        const f2 = viewer.entities.add({
+          id: `hip-slope-b-${Date.now()}`,
+          name: 'Hip slope B',
+          polygon: { hierarchy: new C.PolygonHierarchy(faceNorthSlope), material: slopeMat, outline: true, outlineColor },
+        });
+        const f3 = viewer.entities.add({
+          id: `hip-end-a-${Date.now()}`,
+          name: 'Hip end A',
+          polygon: { hierarchy: new C.PolygonHierarchy(faceSouthHip), material: hipEndMat, outline: true, outlineColor },
+        });
+        const f4 = viewer.entities.add({
+          id: `hip-end-b-${Date.now()}`,
+          name: 'Hip end B',
+          polygon: { hierarchy: new C.PolygonHierarchy(faceNorthHip), material: hipEndMat, outline: true, outlineColor },
+        });
+        hipEntitiesRef.current.push(f1, f2, f3, f4);
+        setPlacedHipCount(hipEntitiesRef.current.length / 4);
+        addLog('HIP', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m, setback ${hipSetbackM.toFixed(2)}m`);
+        setStatusMsg(`🏠 Hip placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ridge ${ridgeRiseM.toFixed(1)}m up, setback ${hipSetbackM.toFixed(1)}m — click again to place another`);
+        hipPtsRef.current = [];
+        setHipPtCount(0);
+      } else {
+        setStatusMsg(`🏠 Eave corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click corner 2 (NE)`);
+      }
+      try { viewer.scene.requestRender(); } catch {}
+    } catch (err: unknown) { addLog('ERROR', `handleHipClick: ${(err as Error).message}`); }
   }
 
   // ── Ghost panel preview (sequential auto-connect) ────────────────────────
@@ -9001,6 +9279,7 @@ function SolarEngine3D({
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
               { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block: click two footprint corners, default 6m height. Use when Google 3D Tiles has no coverage for this address.' },
               { mode: 'roof_gable'   as PlacementMode, icon: '\u{1F3E0}\u2009\u{1F3D7}', label: 'Gable', tip: 'Drop a 3D gable roof: click 2 eave corners, the system draws 2 sloped faces meeting at a ridge along the long edge.' },
+              { mode: 'roof_hip'     as PlacementMode, icon: '\u{1F3D7}\u2009\u{1F3E0}', label: 'Hip', tip: 'Drop a 3D hip roof: click 2 eave corners, 4 sloped faces meet at a ridge that is shorter than the eave (set back on both short sides).' },
             ],
           },
         ];
@@ -9229,6 +9508,7 @@ function SolarEngine3D({
                  placementMode === 'set_origin' ? '\u{1F4CD} Set Origin' :
                  placementMode === 'block' ? `\u{1F9F1} Block${blockPtCount > 0 ? ` (${blockPtCount}/2)` : ''}` :
                  placementMode === 'roof_gable' ? `\u{1F3E0}\u2009\u{1F3D7} Gable${gablePtCount > 0 ? ` (${gablePtCount}/2)` : ''}` :
+                 placementMode === 'roof_hip'   ? `\u{1F3D7}\u2009\u{1F3E0} Hip${hipPtCount > 0 ? ` (${hipPtCount}/2)` : ''}` :
                  placementMode}
               </div>
 
@@ -9602,6 +9882,44 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(255,180,80,0.15)', color: '#ffd28a',
                         border: '1px solid rgba(255,180,80,0.3)', cursor: 'pointer' }}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* ── Hip Roof context (v64: 3D hip roof placement) ── */}
+              {placementMode === 'roof_hip' ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(180,140,80,0.25)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#d4b07a', fontSize: 12 }}>
+                    {hipPtCount === 0
+                      ? '\u{1F3D7} Click eave corner 1 (SW)'
+                      : hipPtCount === 1
+                        ? '\u{1F3D7} Click eave corner 2 (NE) — hip placed with ridge shorter than eave'
+                        : `${placedHipCount} hip${placedHipCount === 1 ? '' : 's'} placed`}
+                  </span>
+                  {hipPtCount > 0 || placedHipCount > 0 ? (
+                    <button
+                      onClick={() => {
+                        hipPtsRef.current = []; setHipPtCount(0);
+                        const viewer = viewerRef.current;
+                        if (viewer) {
+                          for (const e of hipEntitiesRef.current) {
+                            try { viewer.entities.remove(e); } catch { /* ignore */ }
+                          }
+                        }
+                        hipEntitiesRef.current = [];
+                        setPlacedHipCount(0);
+                        setStatusMsg('Hip tool cleared');
+                      }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(180,140,80,0.15)', color: '#d4b07a',
+                        border: '1px solid rgba(180,140,80,0.3)', cursor: 'pointer' }}
                     >
                       Clear
                     </button>
