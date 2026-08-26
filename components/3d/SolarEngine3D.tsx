@@ -199,7 +199,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip' | 'tree';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -728,6 +728,10 @@ function SolarEngine3D({
   const [hipPtCount, setHipPtCount] = useState(0);
   const hipEntitiesRef = useRef<any[]>([]);
   const [placedHipCount, setPlacedHipCount] = useState(0);
+  // v64: Tree primitive — single click drops a green sphere (foliage) + thin brown cylinder (trunk).
+  // Decorative only; doesn't affect solar production. Matches the 3D-After-at-Noon reference image.
+  const treeEntitiesRef = useRef<any[]>([]);
+  const [placedTreeCount, setPlacedTreeCount] = useState(0);
   const ghostEntityRef = useRef<any>(null);
   const [statusMsg, setStatusMsg]       = useState('');
   const [fps, setFps]                   = useState(60);
@@ -4070,6 +4074,7 @@ function SolarEngine3D({
         else if (mode === 'block')          handleBlockClick(viewer, C, screenPos);
         else if (mode === 'roof_gable')     handleGableClick(viewer, C, screenPos);
         else if (mode === 'roof_hip')       handleHipClick(viewer, C, screenPos);
+        else if (mode === 'tree')           handleTreeClick(viewer, C, screenPos);
         // auto_roof: fires once via placementMode useEffect — NOT on canvas click
 
         // pick_house: user clicked a house — get lat/lng and reverse-geocode
@@ -6827,6 +6832,57 @@ function SolarEngine3D({
     } catch (err: unknown) { addLog('ERROR', `handleHipClick: ${(err as Error).message}`); }
   }
 
+  // ── v64: Tree tool — single click drops a decorative tree (sphere + trunk) ──
+  // Decorative only; doesn't affect solar production. Used to add visual context
+  // around a house schematic, matching the 3D-After-at-Noon reference image.
+  function handleTreeClick(viewer: any, C: any, screenPos: any) {
+    try {
+      const hit = getWorldPosition(viewer, C, screenPos);
+      if (!hit) return;
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      if (!carto) return;
+      const lat = C.Math.toDegrees(carto.latitude);
+      const lng = C.Math.toDegrees(carto.longitude);
+      if (!isValidCoord(lat, lng)) return;
+      const trunkHeightM = 2.0;    // typical trunk
+      const foliageRadiusM = 1.8;  // typical canopy
+      const foliageCenterH = trunkHeightM + foliageRadiusM * 0.7;
+      // Trunk: thin brown cylinder
+      const trunkPos = safeCartesian3(C, lng, lat, trunkHeightM / 2);
+      const foliagePos = safeCartesian3(C, lng, lat, foliageCenterH);
+      if (!trunkPos || !foliagePos) return;
+      const trunkEntity = viewer.entities.add({
+        id: `tree-trunk-${Date.now()}`,
+        name: 'Tree trunk',
+        position: trunkPos,
+        cylinder: {
+          length: trunkHeightM,
+          topRadius: 0.15,
+          bottomRadius: 0.2,
+          material: C.Color.fromCssColorString('#5a3a1a'),
+          outline: true,
+          outlineColor: C.Color.fromCssColorString('#2a1a08'),
+        },
+      });
+      const foliageEntity = viewer.entities.add({
+        id: `tree-foliage-${Date.now()}`,
+        name: 'Tree foliage',
+        position: foliagePos,
+        ellipsoid: {
+          radii: new C.Cartesian3(foliageRadiusM, foliageRadiusM, foliageRadiusM * 0.85),
+          material: C.Color.fromCssColorString('#4a8a3a'),
+          outline: true,
+          outlineColor: C.Color.fromCssColorString('#1a3a0a'),
+        },
+      });
+      treeEntitiesRef.current.push(trunkEntity, foliageEntity);
+      setPlacedTreeCount(treeEntitiesRef.current.length / 2);
+      addLog('TREE', `Placed at (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+      setStatusMsg(`\u{1F333} Tree placed at (${lat.toFixed(5)}, ${lng.toFixed(5)}) — click to place another`);
+      try { viewer.scene.requestRender(); } catch {}
+    } catch (err: unknown) { addLog('ERROR', `handleTreeClick: ${(err as Error).message}`); }
+  }
+
   // ── Ghost panel preview (sequential auto-connect) ────────────────────────
   function showGhostPanel(viewer: any, C: any, lastLat: number, lastLng: number, lastH: number, tiltDeg: number, azimuthDeg: number) {
     if (ghostEntityRef.current) { try { viewer.entities.remove(ghostEntityRef.current); } catch {} ghostEntityRef.current = null; }
@@ -9232,6 +9288,7 @@ function SolarEngine3D({
               { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block: click two footprint corners, default 6m height. Use when Google 3D Tiles has no coverage for this address.' },
               { mode: 'roof_gable'   as PlacementMode, icon: '\u{1F3E0}\u2009\u{1F3D7}', label: 'Gable', tip: 'Drop a 3D gable roof: click 2 eave corners, the system draws 2 sloped faces meeting at a ridge along the long edge.' },
               { mode: 'roof_hip'     as PlacementMode, icon: '\u{1F3D7}\u2009\u{1F3E0}', label: 'Hip', tip: 'Drop a 3D hip roof: click 2 eave corners, 4 sloped faces meet at a ridge that is shorter than the eave (set back on both short sides).' },
+              { mode: 'tree'         as PlacementMode, icon: '\u{1F333}', label: 'Tree', tip: 'Drop a decorative tree: a green sphere on a thin trunk. Click anywhere on the terrain to place. No effect on solar production.' },
             ],
           },
         ];
@@ -9461,6 +9518,7 @@ function SolarEngine3D({
                  placementMode === 'block' ? `\u{1F9F1} Block${blockPtCount > 0 ? ` (${blockPtCount}/2)` : ''}` :
                  placementMode === 'roof_gable' ? `\u{1F3E0}\u2009\u{1F3D7} Gable${gablePtCount > 0 ? ` (${gablePtCount}/2)` : ''}` :
                  placementMode === 'roof_hip'   ? `\u{1F3D7}\u2009\u{1F3E0} Hip${hipPtCount > 0 ? ` (${hipPtCount}/2)` : ''}` :
+                 placementMode === 'tree'       ? `\u{1F333} Tree (${placedTreeCount} placed)` :
                  placementMode}
               </div>
 
@@ -9872,6 +9930,41 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(180,140,80,0.15)', color: '#d4b07a',
                         border: '1px solid rgba(180,140,80,0.3)', cursor: 'pointer' }}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* ── Tree context (v64: decorative tree placement) ── */}
+              {placementMode === 'tree' ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(74,138,58,0.25)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#7ab86a', fontSize: 12 }}>
+                    {placedTreeCount === 0
+                      ? '\u{1F333} Click anywhere to drop a tree (sphere + trunk)'
+                      : `\u{1F333} ${placedTreeCount} tree${placedTreeCount === 1 ? '' : 's'} placed — click to add more`}
+                  </span>
+                  {placedTreeCount > 0 ? (
+                    <button
+                      onClick={() => {
+                        const viewer = viewerRef.current;
+                        if (viewer) {
+                          for (const e of treeEntitiesRef.current) {
+                            try { viewer.entities.remove(e); } catch { /* ignore */ }
+                          }
+                        }
+                        treeEntitiesRef.current = [];
+                        setPlacedTreeCount(0);
+                        setStatusMsg('Tree tool cleared');
+                      }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(74,138,58,0.15)', color: '#7ab86a',
+                        border: '1px solid rgba(74,138,58,0.3)', cursor: 'pointer' }}
                     >
                       Clear
                     </button>
