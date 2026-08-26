@@ -128,6 +128,16 @@ import {
   type LayerToggle,
 } from './controls';
 
+// v65 (tree-cursor): 2D tree-placement footprint preview. Aurora parity
+// (frame 0115) — translucent light-blue circle sized to the tree canopy
+// radius, follows the mouse. See components/3d/tree/CURSOR.md.
+import {
+  TreeCursor,
+  DEFAULT_TREE_CANOPY_RADIUS_M as _TREE_CANOPY_R_M,
+} from './tree';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
+
 // P0-6 (DATA-AUTHORITY-AUDIT): panel specs stamped onto placed panels come
 // from the equipment authority (equipment-db record), NEVER a hardcoded
 // literal in this component.
@@ -9305,6 +9315,16 @@ function SolarEngine3D({
 
       {/* Cesium container */}
       <div ref={cesiumRef} style={{ width: '100%', height: '100%' }} />
+
+      {/* v65 (tree-cursor): 2D tree-placement footprint preview. Mounts
+          unconditionally; only renders when active === true. Renders into
+          the Cesium scene, so co-registers with the terrain drape and 3D
+          tiles. See components/3d/tree/CURSOR.md. */}
+      <TreeCursor
+        viewer={viewerRef.current}
+        active={placementMode === 'tree'}
+        canopyRadiusM={TREE_CANOPY_RADIUS_M}
+      />
 
       {/* v63: String / equipment legend overlay */}
       {(colorByString || showEquipment) && ((stringLegend && stringLegend.length > 0) || showEquipment) ? (
