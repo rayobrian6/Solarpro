@@ -98,6 +98,24 @@ import {
   clampBlockHeight,
 } from '@/lib/3d/blockMath';
 
+// v66 (obstruction-primitive): Aurora-parity "Add Obstruction" primitive.
+// Single-click placement of a small rectangular prism (chimney, vent,
+// dormer). Default 0.6m × 0.6m × 1.0m, configurable via right-panel
+// sliders. Reuses the block primitive's 3D extruded-polygon pattern;
+// math is unit-tested in tests/obstruction.test.ts.
+import {
+  DEFAULT_OBSTRUCTION_FOOTPRINT_W_M,
+  DEFAULT_OBSTRUCTION_FOOTPRINT_D_M,
+  DEFAULT_OBSTRUCTION_HEIGHT_M,
+  MIN_OBSTRUCTION_FOOTPRINT_M,
+  MAX_OBSTRUCTION_FOOTPRINT_M,
+  MIN_OBSTRUCTION_HEIGHT_M,
+  MAX_OBSTRUCTION_HEIGHT_M,
+  clampObstructionFootprint,
+  buildObstructionFootprint,
+  obstructionFootprintAreaM2,
+} from './obstruction';
+
 // v65 (roof-wizard): 3-step sticky roof-drawing wizard — Aurora parity
 // (HANDOFF_2026-08-25 §2). HUD stepper that appears during any
 // roof-draw mode. UI + state machine live in components/3d/wizard/.
@@ -180,6 +198,35 @@ import {
   createEmptySceneState,
   type HistoryStore,
 } from '@/lib/state';
+
+// v66: LiDAR integration — load .las files, render as Mesh or Point Cloud,
+// apply X/Y/Z offset (feet), toggle textured drape. Aurora parity (frames
+// 125/130/135). Pure math in lib/3d/lidar; Cesium-coupled parts loaded
+// only when a dataset is present.
+import {
+  LiDARPropertiesPanel,
+  LiDARLoadingToast,
+  useLiDARState,
+  loadLiDARFromFilePicker,
+  createLiDARController,
+  liftRoofs as liftRoofsUtil,
+  flattenRoofs as flattenRoofsUtil,
+  type LiDARDataset,
+  type LiDARState,
+} from '@/lib/3d/lidar';
+
+// v66: Lift Roofs / Flatten Roofs quick actions for the 3D Primitives
+// (block / gable / hip entities the user draws in the canvas). Pure
+// functions in lib/3d/roofActions.ts (unit-tested in tests/roofActions.test.ts).
+// Note: the lidar-integration agent's `liftRoofs` / `flattenRoofs`
+// (imported above, aliased as `liftRoofsUtil` / `flattenRoofsUtil`) operate
+// on the `roofPlanes` data model. This import is a separate, complementary
+// set of pure functions that operate on the 3D Primitives entity model.
+import {
+  liftRoofs as liftRoofsPrimitives,
+  flattenRoofs as flattenRoofsPrimitives,
+  type RoofPrimitive,
+} from '@/lib/3d/roofActions';
 
 // Ray's ruling 2026-07-19: the SolFence 6-ft fence uses ONLY the Philadelphia
 // Solar PS-MNB108(HCBF)-440W. Fence placement resolves the wattage stamp from
@@ -281,7 +328,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip' | 'tree';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip' | 'tree' | 'measurements' | 'ruler';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -801,7 +848,8 @@ function SolarEngine3D({
       onLoadingChange: lidar.setLoading,
     }).then((result) => {
       if (!result.ok) {
-        if (!result.cancelled) lidar.setError(result.error);
+        const r = result as { ok: false; error: string; cancelled?: boolean };
+        if (!r.cancelled) lidar.setError(r.error);
         return;
       }
       lidar.setDataset(result.dataset);
@@ -942,6 +990,13 @@ function SolarEngine3D({
   // Decorative only; doesn't affect solar production. Matches the 3D-After-at-Noon reference image.
   const treeEntitiesRef = useRef<any[]>([]);
   const [placedTreeCount, setPlacedTreeCount] = useState(0);
+  // v66 (obstruction-primitive): Aurora-parity "Add Obstruction" primitive.
+  // Single-click placement of a small rectangular prism (chimney / vent /
+  // dormer). The right-panel input block lets the user override the
+  // defaults before placing.
+  const [newObstructionWidthM,  setNewObstructionWidthM]  = useState<number>(DEFAULT_OBSTRUCTION_FOOTPRINT_W_M);
+  const [newObstructionDepthM,  setNewObstructionDepthM]  = useState<number>(DEFAULT_OBSTRUCTION_FOOTPRINT_D_M);
+  const [newObstructionHeightM, setNewObstructionHeightM] = useState<number>(DEFAULT_OBSTRUCTION_HEIGHT_M);
   const ghostEntityRef = useRef<any>(null);
   const [statusMsg, setStatusMsg]       = useState('');
   const [fps, setFps]                   = useState(60);
@@ -6824,7 +6879,9 @@ function SolarEngine3D({
         h:   carto.height,
       };
       if (!isValidCoord(pt.lat, pt.lng)) return;
-      measurePtsRef.current.push(pt);
+      // measurePtsRef stores { lat, lng, height } (legacy schema); LngLatH
+      // uses { lat, lng, h }. Convert at the call site.
+      measurePtsRef.current.push({ lat: pt.lat, lng: pt.lng, height: pt.h });
       setMeasurePtCount(measurePtsRef.current.length);
       try {
         const mPos = safeCartesian3(C, pt.lng, pt.lat, pt.h + 0.3);
@@ -6842,7 +6899,11 @@ function SolarEngine3D({
         const id = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
           ? (crypto as any).randomUUID()
           : `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const m = buildMeasurement(id, p1, p2);
+        // measurePtsRef stores { lat, lng, height } (legacy schema); LngLatH
+        // uses { lat, lng, h }. Convert at the call site.
+        const a: LngLatH = { lat: p1.lat, lng: p1.lng, h: p1.height };
+        const b: LngLatH = { lat: p2.lat, lng: p2.lng, h: p2.height };
+        const m = buildMeasurement(id, a, b);
         const bundle = renderMeasurement(viewer, C, m);
         if (bundle) {
           measurementsRef.current.push(m);
@@ -8315,8 +8376,20 @@ function SolarEngine3D({
   }
 
   /**
-   * handleObstructionClick — in 'obstruction' mode, clicking places an
-   * obstruction marker (red sphere) and removes panels within its radius.
+   * handleObstructionClick — v66 (obstruction-primitive): Aurora-parity
+   * "Add Obstruction". Single click places a small rectangular prism
+   * (chimney, vent, dormer) centered on the click point. Default
+   * 0.6m × 0.6m × 1.0m, configurable via the right-panel sliders.
+   *
+   * Replaces the v47 red-sphere marker (which used a hidden circular
+   * keep-out radius and a label that said "Vent"). The new visual is
+   * the same family as the v64 Block primitive (light-gray extruded
+   * polygon with a dark outline) so the two read as siblings, and the
+   * keep-out shape now matches the visible footprint.
+   *
+   * Math (footprint corners, clamps) lives in
+   * `components/3d/obstruction/dimensions.ts` and is unit-tested in
+   * `tests/obstruction.test.ts`.
    */
   function handleObstructionClick(viewer: any, C: any, screenPos: any) {
     try {
@@ -8333,40 +8406,72 @@ function SolarEngine3D({
 
       if (!isValidCoord(obsLat, obsLng)) return;
 
-      const OBSTRUCTION_RADIUS_M = 0.75; // 75cm radius = ~typical vent pipe
+      // v66: use the right-panel slider values, clamped to the safe range.
+      const { widthM, depthM } = clampObstructionFootprint(
+        newObstructionWidthM,
+        newObstructionDepthM,
+      );
+      const prismHeightM = Math.max(
+        MIN_OBSTRUCTION_HEIGHT_M,
+        Math.min(MAX_OBSTRUCTION_HEIGHT_M, newObstructionHeightM),
+      );
 
+      // Build the 4 corner points of the centered rectangle.
+      const footprint = buildObstructionFootprint(obsLat, obsLng, widthM, depthM);
+      const polyPositions = [footprint.sw, footprint.se, footprint.ne, footprint.nw]
+        .map(c => safeCartesian3(C, c.lng, c.lat, obsH))
+        .filter((p): p is any => p != null);
+      if (polyPositions.length < 4) {
+        setStatusMsg('Obstruction: failed to build footprint — try again');
+        return;
+      }
+
+      // Placed-obstruction record. widthM/depthM/heightM drive the new
+      // rectangular keep-out in removeObstructedPanels; radiusM stays
+      // set to the diagonal-half as a safe legacy fallback.
+      const legacyRadiusM = Math.sqrt(widthM * widthM + depthM * depthM) / 2;
       const newObs: PlacedObstruction = {
         id:      `obs-${Date.now()}`,
         lat:     obsLat,
         lng:     obsLng,
         height:  obsH,
-        radiusM: OBSTRUCTION_RADIUS_M,
-        type:    'vent',
+        radiusM: legacyRadiusM,
+        widthM,
+        depthM,
+        heightM: prismHeightM,
+        type:    'chimney',
       };
 
-      // Visual: red sphere entity
+      // Visual: a small white extruded polygon (per-position height so the
+      // prism's bottom sits flush with the click elevation, same trick the
+      // v64 Block primitive uses to avoid z-fighting with the drape).
+      const obsId = newObs.id;
       try {
-        const obsPos = C.Cartesian3.fromDegrees(obsLng, obsLat, obsH + OBSTRUCTION_RADIUS_M);
         viewer.entities.add({
-          name:     `[OBS] ${newObs.id}`,
-          position: obsPos,
-          ellipsoid: {
-            radii: new C.Cartesian3(OBSTRUCTION_RADIUS_M, OBSTRUCTION_RADIUS_M, OBSTRUCTION_RADIUS_M * 1.5),
-            material: C.Color.RED.withAlpha(0.6),
+          id:    obsId,
+          name:  `[OBS] ${obsId}`,
+          polygon: {
+            hierarchy: new C.PolygonHierarchy(polyPositions),
+            perPositionHeight: true,
+            // When perPositionHeight is true, height/extrudedHeight are
+            // RELATIVE to each position's elevation. So height=0 means
+            // the bottom is at each position's actual height, and
+            // extrudedHeight=prismHeightM means the top is prismHeightM
+            // above each position.
+            height: 0,
+            extrudedHeight: prismHeightM,
+            material: C.Color.fromCssColorString('#f5f5f5').withAlpha(0.92),
             outline: true,
-            outlineColor: C.Color.DARKRED,
-          },
-          label: {
-            text: '⚠ Vent',
-            font: '11px sans-serif',
-            fillColor: C.Color.WHITE,
-            style: C.LabelStyle.FILL_AND_OUTLINE,
-            outlineColor: C.Color.BLACK,
+            outlineColor: C.Color.fromCssColorString('#2a2a2a'),
             outlineWidth: 2,
-            verticalOrigin: C.VerticalOrigin.BOTTOM,
-            pixelOffset: new C.Cartesian2(0, -20),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            closeTop: true,
+            closeBottom: false,
           },
+          description: `<table class="cesium-infoBox-defaultTable">
+            <tr><th>Obstruction</th><td>${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${prismHeightM.toFixed(1)}m</td></tr>
+            <tr><th>Footprint area</th><td>${obstructionFootprintAreaM2(widthM, depthM).toFixed(2)} m²</td></tr>
+            <tr><th>Center</th><td>${obsLat.toFixed(6)}, ${obsLng.toFixed(6)}</td></tr>
+          </table>`,
         });
       } catch (e: unknown) {
         addLog('WARN', `Obstruction entity: ${(e as Error).message}`);
@@ -8377,7 +8482,8 @@ function SolarEngine3D({
       obstructionsRef.current = updatedObs;
       setObstructions(updatedObs);
 
-      // Remove panels within obstruction radius
+      // Remove panels inside the new rectangular footprint (Aurora parity)
+      // or, for legacy obstructions, inside the radiusM circle.
       const filtered = removeObstructedPanels(panelsRef.current, [newObs]);
       const removed  = panelsRef.current.length - filtered.length;
 
@@ -8390,12 +8496,12 @@ function SolarEngine3D({
         panelsRef.current = filtered;
         onPanelsChange(filtered);
         setPanelCount(filtered.length);
-        setStatusMsg(`Obstruction placed — ${removed} panel(s) removed within ${OBSTRUCTION_RADIUS_M}m radius`);
+        setStatusMsg(`Obstruction placed — ${removed} panel(s) removed within ${widthM.toFixed(1)}×${depthM.toFixed(1)}m footprint`);
       } else {
-        setStatusMsg(`Obstruction placed (no panels removed)`);
+        setStatusMsg(`Obstruction placed at ${widthM.toFixed(1)}×${depthM.toFixed(1)}×${prismHeightM.toFixed(1)}m (no panels removed)`);
       }
 
-      addLog('OBS', `Placed obstruction at ${obsLat.toFixed(5)}, ${obsLng.toFixed(5)} — ${removed} panels removed`);
+      addLog('OBS', `Placed obstruction at ${obsLat.toFixed(5)}, ${obsLng.toFixed(5)} — ${widthM.toFixed(2)}×${depthM.toFixed(2)}×${prismHeightM.toFixed(2)}m, ${removed} panels removed`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleObstructionClick: ${(err as Error).message}`);
@@ -9911,7 +10017,7 @@ function SolarEngine3D({
             id: 'tools', icon: '\u{1F4CF}', label: 'Tools',
             tools: [
               { mode: 'measure'       as PlacementMode, icon: '\u{1F4CF}', label: 'Measure',   tip: 'Click two points to measure distance on terrain' },
-              { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruct',  tip: 'Mark a rectangular area as obstructed (HVAC etc.)' },
+              { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruction', tip: 'Add Obstruction (Aurora parity): click the roof to drop a chimney-class prism. Default 0.6m × 0.6m × 1.0m, configurable via the right panel. Removes panels inside the footprint.' },
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
               { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block by line-tracing its footprint: click N points to define any shape (rectangle, L, T, etc.), right-click to finish. Use when Google 3D Tiles has no coverage for this address.' },
@@ -10632,6 +10738,137 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
+              {/* ── Add Obstruction Properties (v66: obstruction-primitive) ──
+                  Right-panel input block for the Aurora-parity "Add Obstruction"
+                  primitive. Three sliders (width, depth, height) — matches the
+                  parity bar: "a small block (e.g. 0.6m × 0.6m × 1.0m,
+                  configurable)". Same visual language as the 3D Primitives panel
+                  so the two read as siblings. */}
+              {placementMode === 'obstruction' ? (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,180,0,0.25)', borderRadius: 10,
+                  padding: '8px 10px', minWidth: 240, maxWidth: 320,
+                }}>
+                  <div style={{
+                    fontSize: 9, color: '#ffaa00', textAlign: 'left',
+                    fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase',
+                  }}>
+                    Add Obstruction
+                  </div>
+                  <div style={{ color: '#bbb', fontSize: 10, lineHeight: 1.35 }}>
+                    Click the roof to drop a chimney-class prism.
+                    Default 0.6m × 0.6m × 1.0m.
+                  </div>
+                  {/* Width (east-west) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>Width</span>
+                    <input
+                      type="range" min={MIN_OBSTRUCTION_FOOTPRINT_M} max={MAX_OBSTRUCTION_FOOTPRINT_M} step={0.1}
+                      value={newObstructionWidthM}
+                      onChange={e => setNewObstructionWidthM(parseFloat(e.target.value))}
+                      style={{ flex: 1, accentColor: '#ffaa00' }}
+                    />
+                    <input
+                      type="number" min={MIN_OBSTRUCTION_FOOTPRINT_M} max={MAX_OBSTRUCTION_FOOTPRINT_M} step={0.1}
+                      value={newObstructionWidthM}
+                      onChange={e => {
+                        const v = parseFloat(e.target.value);
+                        if (isFinite(v)) {
+                          setNewObstructionWidthM(
+                            Math.max(MIN_OBSTRUCTION_FOOTPRINT_M, Math.min(MAX_OBSTRUCTION_FOOTPRINT_M, v)),
+                          );
+                        }
+                      }}
+                      style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
+                    />
+                    <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
+                  </div>
+                  {/* Depth (north-south) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>Depth</span>
+                    <input
+                      type="range" min={MIN_OBSTRUCTION_FOOTPRINT_M} max={MAX_OBSTRUCTION_FOOTPRINT_M} step={0.1}
+                      value={newObstructionDepthM}
+                      onChange={e => setNewObstructionDepthM(parseFloat(e.target.value))}
+                      style={{ flex: 1, accentColor: '#ffaa00' }}
+                    />
+                    <input
+                      type="number" min={MIN_OBSTRUCTION_FOOTPRINT_M} max={MAX_OBSTRUCTION_FOOTPRINT_M} step={0.1}
+                      value={newObstructionDepthM}
+                      onChange={e => {
+                        const v = parseFloat(e.target.value);
+                        if (isFinite(v)) {
+                          setNewObstructionDepthM(
+                            Math.max(MIN_OBSTRUCTION_FOOTPRINT_M, Math.min(MAX_OBSTRUCTION_FOOTPRINT_M, v)),
+                          );
+                        }
+                      }}
+                      style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
+                    />
+                    <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
+                  </div>
+                  {/* Height (extrusion) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>Height</span>
+                    <input
+                      type="range" min={MIN_OBSTRUCTION_HEIGHT_M} max={MAX_OBSTRUCTION_HEIGHT_M} step={0.1}
+                      value={newObstructionHeightM}
+                      onChange={e => setNewObstructionHeightM(parseFloat(e.target.value))}
+                      style={{ flex: 1, accentColor: '#ffaa00' }}
+                    />
+                    <input
+                      type="number" min={MIN_OBSTRUCTION_HEIGHT_M} max={MAX_OBSTRUCTION_HEIGHT_M} step={0.1}
+                      value={newObstructionHeightM}
+                      onChange={e => {
+                        const v = parseFloat(e.target.value);
+                        if (isFinite(v)) {
+                          setNewObstructionHeightM(
+                            Math.max(MIN_OBSTRUCTION_HEIGHT_M, Math.min(MAX_OBSTRUCTION_HEIGHT_M, v)),
+                          );
+                        }
+                      }}
+                      style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
+                    />
+                    <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
+                  </div>
+                  {/* Quick-action row: revert to Aurora defaults */}
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <button
+                      onClick={() => {
+                        setNewObstructionWidthM(DEFAULT_OBSTRUCTION_FOOTPRINT_W_M);
+                        setNewObstructionDepthM(DEFAULT_OBSTRUCTION_FOOTPRINT_D_M);
+                        setNewObstructionHeightM(DEFAULT_OBSTRUCTION_HEIGHT_M);
+                        setStatusMsg('Obstruction dimensions reset to 0.6×0.6×1.0m');
+                      }}
+                      title="Reset to Aurora defaults (0.6m × 0.6m × 1.0m)"
+                      style={{ flex: 1, padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        background: 'rgba(255,170,0,0.12)', color: '#ffaa00',
+                        border: '1px solid rgba(255,170,0,0.3)' }}>
+                      Reset to 0.6×0.6×1.0m
+                    </button>
+                    <button
+                      onClick={() => {
+                        const v = viewerRef.current;
+                        if (!v) return;
+                        for (const e of obstructionsRef.current) {
+                          try { v.entities.removeById(e.id); } catch { /* ignore */ }
+                        }
+                        obstructionsRef.current = [];
+                        setObstructions([]);
+                        setStatusMsg('Obstructions cleared');
+                      }}
+                      title="Remove every placed obstruction"
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                        background: 'rgba(239,68,68,0.1)', color: '#f87171',
+                        border: '1px solid rgba(239,68,68,0.3)' }}>
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {/* ── Block context (v65: line-trace block placement) ── */}
               {placementMode === 'block' ? (
                 <div style={{
@@ -11312,6 +11549,7 @@ export default React.memo(SolarEngine3D, (prev, next) => {
     prev.onPlacementModeChange === next.onPlacementModeChange &&
     prev.roofPlanes === next.roofPlanes &&
     prev.selectedRoofPlaneId === next.selectedRoofPlaneId &&
-    prev.systemType === next.systemType
+    prev.systemType === next.systemType &&
+    prev.isDesignPhase === next.isDesignPhase
   );
 });
