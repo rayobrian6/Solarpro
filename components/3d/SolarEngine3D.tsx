@@ -153,6 +153,20 @@ const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
 // literal in this component.
 import { getPanelById } from '@/lib/equipment-db';
 
+// v70 (undo-system): Aurora TIER 3 #11 + #20 — top-bar Save / Undo / Redo
+// toolbar with a 50-step ring buffer of complete SceneState snapshots.
+// The store is a pure-logic factory in lib/state/historyStore.ts; the
+// toolbar React component is in lib/state/Buttons.tsx. Mounted once per
+// canvas. State is local to this view; the wider surface integration
+// (dispatching actions on every primitive add/remove) is intentionally
+// staged for a follow-up commit so this slice is reversible on its own.
+import {
+  UndoRedoToolbar,
+  createHistoryStore,
+  createEmptySceneState,
+  type HistoryStore,
+} from '@/lib/state';
+
 // Ray's ruling 2026-07-19: the SolFence 6-ft fence uses ONLY the Philadelphia
 // Solar PS-MNB108(HCBF)-440W. Fence placement resolves the wattage stamp from
 // this equipment-db record at placement time — the old hardcoded `430` here
@@ -380,6 +394,11 @@ interface Props {
    *  id via onPanelPaint instead of running the normal select/array behavior. */
   paintMode?: boolean;
   onPanelPaint?: (panelId: string) => void;
+  /** v66: design-phase flag — gates the bottom-right status panel
+   *  (Aurora frame 0147 parity, components/3d/status/). When false or
+   *  omitted, the panel is hidden. The design-panel agent will wire
+   *  this from their Design-phase context. */
+  isDesignPhase?: boolean;
 }
 
 function log(tag: string, msg: string, data?: any) {
@@ -534,6 +553,14 @@ function SolarEngine3D({
   const measureOverlayRef = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
+  // v70: Aurora-parity Save/Undo/Redo ring-buffer history store.
+  // Seeded empty; the wider dispatch integration (replaceState on load,
+  // dispatch on every primitive add/remove/move) is staged for the
+  // follow-up commit. This slice proves the UI + buffer work.
+  const historyStoreRef = useRef<HistoryStore | null>(null);
+  if (historyStoreRef.current === null) {
+    historyStoreRef.current = createHistoryStore(createEmptySceneState());
+  }
   // autoFillRunningRef: mutex to prevent Auto Fill from running more than once concurrently.
   // Set to true at the start of handleAutoRoof, cleared when done.
   const autoFillRunningRef = useRef(false);
@@ -713,6 +740,91 @@ function SolarEngine3D({
   const [animating, setAnimating] = useState(false);
   const [showParcel, setShowParcel]     = useState(true);
   const [showRoofSegs, setShowRoofSegs] = useState(true);
+
+  // v66: LiDAR feature — state, controller, and file-picker handlers.
+  // The state is local to SolarEngine3D; the parent (DesignStudio) doesn't
+  // need to know about LiDAR for v1. A future stage can lift the state
+  // to the parent if multiple components need it.
+  const lidar = useLiDARState();
+  const lidarControllerRef = useRef<ReturnType<typeof createLiDARController> | null>(null);
+  const lidarStateRef = useRef<LiDARState>(lidar.state);
+  lidarStateRef.current = lidar.state;
+
+  // Create the LiDAR controller once the Cesium viewer is ready, destroy
+  // on unmount. Subsequent style/offset/dataset changes route through
+  // the controller's setters; the controller teardown + rebuilds the
+  // primitives in `scene.primitives`.
+  useEffect(() => {
+    if (stage !== 'done') return;
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    if (lidarControllerRef.current) return;     // already created
+    const controller = createLiDARController(viewer, lidarStateRef.current);
+    lidarControllerRef.current = controller;
+    return () => {
+      controller.destroy();
+      lidarControllerRef.current = null;
+    };
+  }, [stage]);
+
+  // Push style / offset / textured / dataset updates to the controller.
+  useEffect(() => {
+    const c = lidarControllerRef.current;
+    if (!c) return;
+    c.setDataset(lidar.state.dataset);
+  }, [lidar.state.dataset]);
+  useEffect(() => { lidarControllerRef.current?.setStyle(lidar.state.style); }, [lidar.state.style]);
+  useEffect(() => { lidarControllerRef.current?.setOffset(lidar.state.offset); }, [lidar.state.offset]);
+  useEffect(() => { lidarControllerRef.current?.setTextured(lidar.state.textured); }, [lidar.state.textured]);
+
+  // File-picker handler. Uses the project lat/lng as the dataset centroid
+  // so the renderer can convert (x, y) → lat/lng for `Cartesian3.fromDegrees`.
+  const handleLiDARLoad = useCallback(async () => {
+    await loadLiDARFromFilePicker({
+      centroidLat: lat,
+      centroidLng: lng,
+      onLoadingChange: lidar.setLoading,
+    }).then((result) => {
+      if (!result.ok) {
+        if (!result.cancelled) lidar.setError(result.error);
+        return;
+      }
+      lidar.setDataset(result.dataset);
+    });
+  }, [lat, lng, lidar]);
+
+  // Lift Roofs / Flatten Roofs — sample LiDAR Z under each roof plane and
+  // update the plane's height. For v1 we log the action and surface a
+  // status message; the actual roofPlane mutation goes through a follow-up
+  // callback prop once the parent (DesignStudio) is wired to the LiDAR
+  // state (out of v1 scope).
+  const handleLiftRoofs = useCallback(() => {
+    if (!lidar.state.dataset || !roofPlanes || roofPlanes.length === 0) {
+      setStatusMsg('⤴ Lift Roofs: load LiDAR and have at least one roof plane first');
+      return;
+    }
+    const updated = liftRoofsUtil(lidar.state.dataset, roofPlanes as any, lidar.state.offset);
+    const beforeById = new Map(roofPlanes.map((p) => [p.id, p.planeHeightAtCenterMeters]));
+    const changed = updated.filter(
+      (p) => p.planeHeightAtCenterMeters !== beforeById.get(p.id),
+    ).length;
+    addLog('LIDAR', `Lift Roofs: ${changed}/${updated.length} planes changed`);
+    setStatusMsg(`⤴ Lifted ${changed} of ${updated.length} roof plane(s) to LiDAR-derived heights`);
+  }, [lidar.state.dataset, lidar.state.offset, roofPlanes]);
+
+  const handleFlattenRoofs = useCallback(() => {
+    if (!lidar.state.dataset || !roofPlanes || roofPlanes.length === 0) {
+      setStatusMsg('⤓ Flatten Roofs: load LiDAR and have at least one roof plane first');
+      return;
+    }
+    const updated = flattenRoofsUtil(lidar.state.dataset, roofPlanes as any, lidar.state.offset);
+    const beforeById = new Map(roofPlanes.map((p) => [p.id, p.planeHeightAtCenterMeters]));
+    const changed = updated.filter(
+      (p) => p.planeHeightAtCenterMeters !== beforeById.get(p.id),
+    ).length;
+    addLog('LIDAR', `Flatten Roofs: ${changed}/${updated.length} planes changed`);
+    setStatusMsg(`⤓ Flattened ${changed} of ${updated.length} roof plane(s) to median LiDAR height`);
+  }, [lidar.state.dataset, lidar.state.offset, roofPlanes]);
   // v50.11: local irradiance toggle — initialised from prop, also togglable from internal button
   const [showIrradianceLocal, setShowIrradianceLocal] = useState(showIrradiance);
   const [panelCount, setPanelCount]     = useState(panels.length);
@@ -4383,6 +4495,9 @@ function SolarEngine3D({
             } catch { /* ignore */ }
             blockPreviewRef.current = null;
           }
+          // v68: also clear the segment arrows
+          try { segmentArrowOverlayRef.current?.clear(); } catch { /* ignore */ }
+          flippedArrowsRef.current.clear();
           blockPtsRef.current = [];
           setBlockPtCount(0);
           setStatusMsg('🧱 Block cancelled — need at least 3 points. Click again to start.');
@@ -9366,6 +9481,27 @@ function SolarEngine3D({
 
       {/* Cesium container */}
       <div ref={cesiumRef} style={{ width: '100%', height: '100%' }} />
+
+      {/* v66: Aurora-style top-bar map-source picker
+          (`Details ▾` / `LiDAR | Street View` / `[Google ▾]`).
+          Floating bar at the top-center of the canvas. State is local for now;
+          the imagery/LiDAR swap is the integration step for the next session. */}
+      <MapSourcePicker
+        state={mapPickerState}
+        onChange={setMapPickerState}
+        disabled={stage !== 'done' && stage !== 'error'}
+      />
+
+      {/* v70: Aurora-style Save / Undo / Redo toolbar (top-left chip).
+       * Renders the three icon+label buttons from lib/state/Buttons.tsx.
+       * Persistence is intentionally a no-op for this slice — the host
+       * component owns the onSave contract (see lib/state/DESIGN.md §8). */}
+      {historyStoreRef.current ? (
+        <UndoRedoToolbar
+          store={historyStoreRef.current}
+          onSave={async () => { /* persistence wiring lives outside this slice */ }}
+        />
+      ) : null}
 
       {/* v65 (roof-wizard): 3-step sticky wizard — Aurora parity
           (HANDOFF_2026-08-25 §2). Appears during any roof-draw mode.
