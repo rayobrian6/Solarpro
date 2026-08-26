@@ -126,6 +126,26 @@ describe('arming the gate does not break the routes that never embedded the pack
   });
 });
 
+describe('the Chromium download URL is the one that actually exists', () => {
+  it('names the architecture — the unsuffixed asset 404s from v147 on', () => {
+    // THE reason no PDF was ever produced in production. chromium-min ships no
+    // binary; it fetches one from this URL. The release assets are
+    // `chromium-v147.0.0-pack.x64.tar` / `-pack.arm64.tar`. The old unsuffixed
+    // `-pack.tar` name 404s, executablePath() rejects, and this function's catch
+    // turns that into `return null` = "no PDF" for EVERY caller, silently.
+    const s = read(PDF_LIB);
+    expect(s).toMatch(/pack\.\$\{packArch\}\.tar/);
+    expect(s).not.toMatch(/chromium-v[\d.]+-pack\.tar/);
+    expect(s).toMatch(/process\.arch === 'arm64'/);
+  });
+
+  it('the SLD route allows enough time for the cold-start download', () => {
+    // ~65 MB tarball + extract + launch before anything is drawn. 30s cannot fit
+    // it, so even a correct URL would time out on the first request.
+    expect(read(SLD_ROUTE)).toMatch(/export const maxDuration = 60/);
+  });
+});
+
 describe('wkhtmltopdf geometry — no double transposition', () => {
   it('--orientation is only passed when there are NO explicit dimensions', () => {
     const s = read(PDF_LIB);

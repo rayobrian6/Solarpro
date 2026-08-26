@@ -13154,11 +13154,11 @@ function EngineeringPageInner() {
                         <Zap size={16} className="text-blue-400" />
                         Single-Line Diagram
                       </h2>
-                      <p className="text-xs text-slate-400 mt-0.5">ANSI C (18×24") · IEEE 315 symbols · Permit-grade</p>
+                      <p className="text-xs text-slate-400 mt-0.5">ARCH C (24×18") · IEEE 315 symbols · Permit-grade</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30 font-mono">
-                        ANSI C · IEEE 315
+                        ARCH C · IEEE 315
                       </span>
                     </div>
                   </div>
@@ -13373,7 +13373,7 @@ function EngineeringPageInner() {
                     <Zap size={40} className="mx-auto mb-4 text-slate-600" />
                     <div className="text-sm font-bold text-white mb-1">Permit-Grade SLD Ready</div>
                     <div className="text-xs text-slate-500 mb-4 max-w-sm mx-auto">
-                      Click "Generate SLD" to render a professional IEEE-symbol single-line diagram on an ANSI C (18×24") engineering sheet with full title block, conductor callouts, and grounding system.
+                      Click "Generate SLD" to render a professional IEEE-symbol single-line diagram on an ARCH C (24×18") engineering sheet with full title block, conductor callouts, and grounding system.
                     </div>
                     <button onClick={fetchSLD} className="btn-primary btn-sm mx-auto">
                       <Zap size={14} /> Generate SLD
@@ -13386,7 +13386,7 @@ function EngineeringPageInner() {
                   <div className="card p-12 text-center">
                     <RefreshCw size={32} className="mx-auto mb-3 text-amber-400 animate-spin" />
                     <div className="text-sm text-slate-400">Rendering permit-grade SLD...</div>
-                    <div className="text-xs text-slate-600 mt-1">Applying IEEE symbols · ANSI C sheet · Conductor callouts</div>
+                    <div className="text-xs text-slate-600 mt-1">Applying IEEE symbols · ARCH C sheet · Conductor callouts</div>
                   </div>
                 ) : null}
 
@@ -13396,7 +13396,7 @@ function EngineeringPageInner() {
                     <div className="bg-slate-800/50 border-b border-slate-700/50 px-4 py-2 flex items-center justify-between">
                       <div className="text-xs text-slate-400 flex items-center gap-2">
                         <CheckCircle size={12} className="text-emerald-400" />
-                        SLD rendered · ANSI C (18×24") · IEEE electrical symbols · {engineeringMode} mode
+                        SLD rendered · ARCH C (24×18") · IEEE electrical symbols · {engineeringMode} mode
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-1 text-xs text-slate-400">

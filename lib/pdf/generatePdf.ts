@@ -62,11 +62,25 @@ async function generateWithPuppeteer(html: string, opts: PdfOptions): Promise<Ui
     const puppeteer = await import('puppeteer-core');
     const chromium  = require('@sparticuz/chromium-min');
 
-    // chromium.executablePath() returns a remote URL on Lambda/Vercel pointing to
-    // a compressed Chromium binary hosted on S3. It downloads + caches it on first use.
-    const execPath: string = await chromium.executablePath(
-      'https://github.com/Sparticuz/chromium/releases/download/v147.0.0/chromium-v147.0.0-pack.tar'
-    );
+    // chromium-min ships NO binary — it downloads one from this URL on first use
+    // and caches it in /tmp.
+    //
+    // 🚨 THE URL MUST NAME THE ARCHITECTURE. Up to v1xx the release asset was
+    // `chromium-vX-pack.tar`; from v147 the assets are arch-suffixed:
+    //     chromium-v147.0.0-pack.x64.tar    (65.2 MB)
+    //     chromium-v147.0.0-pack.arm64.tar  (63.7 MB)
+    // The unsuffixed name 404s. A 404 here makes executablePath() reject, which
+    // this function's catch turns into `return null` = "no PDF" — silently, for
+    // EVERY caller. That is why neither the SLD export nor the permit package
+    // has ever produced a PDF in production; both degraded to their fallbacks.
+    //
+    // Keep CHROMIUM_PACK_VERSION in step with the installed @sparticuz/chromium-min
+    // major: the downloaded binary and the library's launch args are a matched pair.
+    const packVersion = process.env.CHROMIUM_PACK_VERSION ?? 'v147.0.0';
+    const packArch    = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const packUrl     = process.env.CHROMIUM_PACK_URL
+      ?? `https://github.com/Sparticuz/chromium/releases/download/${packVersion}/chromium-${packVersion}-pack.${packArch}.tar`;
+    const execPath: string = await chromium.executablePath(packUrl);
 
     const browser = await puppeteer.launch({
       args:            chromium.args,

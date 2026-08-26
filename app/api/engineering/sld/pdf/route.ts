@@ -16,7 +16,11 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+// 60s, matching the permit route. chromium-min ships no binary: the FIRST call on
+// a cold Lambda downloads a ~65 MB tarball, extracts it to /tmp and launches
+// Chromium before a single pixel is drawn. 30s could not fit that, so even with a
+// correct download URL the first request would time out and report no PDF.
+export const maxDuration = 60;
 
 
 // ─── HTML wrapper for wkhtmltopdf ─────────────────────────────────────────────
