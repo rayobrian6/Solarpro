@@ -6714,25 +6714,30 @@ function SolarEngine3D({
     const widthM  = Math.abs(maxLng - minLng) * 111_320 * Math.cos(midLat * Math.PI / 180);
     const depthM  = Math.abs(maxLat - minLat) * 111_320;
     const approxAreaM2 = widthM * depthM;
-    // 3D extruded polygon — a real prism with vertical walls. height=groundLevel
-    // and extrudedHeight=groundLevel + eaveHeightM makes the walls sit on the drape.
+    // 3D extruded polygon — a real prism with vertical walls.
+    // v65.2: perPositionHeight:true so each wall goes from the individual
+    // click elevation (matching the drape) up to (click_elevation + eaveHeightM).
+    // This avoids Z-fighting with the drape at the bottom and makes the
+    // prism visible from any angle, including directly above.
     const blockId = `block-${Date.now()}`;
     const prismEntity = viewer.entities.add({
       id: blockId,
       name: 'Building Block',
       polygon: {
         hierarchy: new C.PolygonHierarchy(polyPositions),
-        // Use the average click height as the base. Without this, the prism
-        // would render at height=0 (sea level) and be hidden by the drape.
-        height: groundLevelM,
-        extrudedHeight: groundLevelM + eaveHeightM,
+        perPositionHeight: true,
+        // When perPositionHeight is true, height/extrudedHeight are RELATIVE
+        // to each position's elevation. So height=0 means the bottom is at
+        // each position's actual height, and extrudedHeight=eaveHeightM means
+        // the top is eaveHeightM above each position.
+        height: 0,
+        extrudedHeight: eaveHeightM,
         material: C.Color.fromCssColorString('#f5f5f5').withAlpha(0.92),
         outline: true,
         outlineColor: C.Color.fromCssColorString('#2a2a2a'),
         outlineWidth: 2,
-        // closeTop + closeBottom: the top of the prism and the bottom (ground) are also rendered.
         closeTop: true,
-        closeBottom: false, // the ground plane doesn't need to be drawn
+        closeBottom: false,
       },
       description: `<table class="cesium-infoBox-defaultTable">
         <tr><th>Block</th><td>${pts.length} footprint points, eave ${eaveHeightM.toFixed(1)}m</td></tr>
