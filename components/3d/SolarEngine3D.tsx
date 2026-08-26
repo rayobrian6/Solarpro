@@ -718,6 +718,15 @@ function SolarEngine3D({
   // to finalize. The in-progress polyline is shown as a preview entity.
   const blockPreviewRef = useRef<any>(null); // preview polyline entity (in-progress)
   const DEFAULT_BLOCK_HEIGHT_M = 6; // typical 1-story eave height
+  // v66: 3D Primitives input state — exposed in the in-canvas Properties panel
+  // so the user can set eave height for new blocks and roof pitch for new
+  // gables/hips without 3D-dragging each one. The selected-block height input
+  // updates the most-recently-placed block's extrudedHeight in real-time.
+  const [newBlockEaveHeightM, setNewBlockEaveHeightM] = useState<number>(DEFAULT_BLOCK_HEIGHT_M);
+  const [roofPitchDeg, setRoofPitchDeg] = useState<number>(22);
+  const [lastPlacedBlockId, setLastPlacedBlockId] = useState<string | null>(null);
+  // Default eave for gable/hip roofs (height of the wall below the eave line)
+  const [newRoofEaveHeightM, setNewRoofEaveHeightM] = useState<number>(6);
   // v64: Gable roof primitive — click 2 eave corners, render 2 sloped faces meeting at ridge.
   // The eave is a rectangle in lat/lng; ridge runs along the long edge at the centroid.
   const gablePtsRef = useRef<Array<{ lat: number; lng: number }>>([]);
@@ -6686,7 +6695,7 @@ function SolarEngine3D({
       } catch { /* ignore */ }
       blockPreviewRef.current = null;
     }
-    const eaveHeightM = DEFAULT_BLOCK_HEIGHT_M;
+    const eaveHeightM = newBlockEaveHeightM; // user-settable eave height for new blocks
     // Average elevation of the click points — that's the ground level for the prism.
     // The drape at Pocahontas IL is ~136m above the WGS84 ellipsoid; using the
     // average click height puts the bottom of the prism flush with the drape.
@@ -6774,6 +6783,7 @@ function SolarEngine3D({
     blockHandlesRef.current.push(handleEntity);
     blockHeightOverridesRef.current.set(blockId, eaveHeightM);
     setPlacedBlockCount(blockEntitiesRef.current.length);
+    setLastPlacedBlockId(blockId); // v66: remember the most recent block for the in-canvas height input
     addLog('BLOCK', `Finalized: ${pts.length} points, ≈${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ground ${groundLevelM.toFixed(1)}m, eave ${eaveHeightM}m`);
     setStatusMsg(`🧱 Block placed — ${pts.length} footprint points, eave ${eaveHeightM}m. Click more points to add another, or Esc.`);
     // Reset for the next block (keep the placed blocks; user can drop more)
@@ -6803,8 +6813,8 @@ function SolarEngine3D({
       if (gablePtsRef.current.length >= 2) {
         const [c1, c2] = gablePtsRef.current;
         // Use extracted math for the gable geometry (tested in lib/3d/blockMath)
-        const eaveHeightM = DEFAULT_GABLE_EAVE_HEIGHT_M;
-        const g = computeGableGeometry(c1, c2, eaveHeightM, DEFAULT_GABLE_PITCH_DEG);
+        const eaveHeightM = newRoofEaveHeightM;
+        const g = computeGableGeometry(c1, c2, eaveHeightM, roofPitchDeg);
         const { sw, ne, ridgeA, ridgeB, ridgeRiseM, longIsLng, eaveSW, eaveSE, eaveNW, eaveNE } = g;
         const { widthM, depthM } = computeBlockDimensions(sw, ne, eaveHeightM);
         if (widthM < 0.5 || depthM < 0.5) {
@@ -6885,7 +6895,7 @@ function SolarEngine3D({
         });
         gableEntitiesRef.current.push(faceA, faceB, endGableA, endGableB);
         setPlacedGableCount(gableEntitiesRef.current.length / 4);
-        addLog('GABLE', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${DEFAULT_GABLE_PITCH_DEG}°`);
+        addLog('GABLE', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${roofPitchDeg}°`);
         setStatusMsg(`🏠 Gable placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge ${ridgeRiseM.toFixed(1)}m up — click again to place another`);
         gablePtsRef.current = [];
         setGablePtCount(0);
@@ -6916,8 +6926,8 @@ function SolarEngine3D({
       if (hipPtsRef.current.length >= 2) {
         const [c1, c2] = hipPtsRef.current;
         // Use extracted math for the hip geometry (tested in lib/3d/blockMath)
-        const eaveHeightM = DEFAULT_GABLE_EAVE_HEIGHT_M;
-        const h = computeHipGeometry(c1, c2, eaveHeightM, DEFAULT_GABLE_PITCH_DEG);
+        const eaveHeightM = newRoofEaveHeightM;
+        const h = computeHipGeometry(c1, c2, eaveHeightM, roofPitchDeg);
         const { sw, ne, ridgeA, ridgeB, ridgeRiseM, hipSetbackM, longIsLng, eaveSW, eaveSE, eaveNW, eaveNE } = h;
         const { widthM, depthM } = computeBlockDimensions(sw, ne, eaveHeightM);
         if (widthM < 0.5 || depthM < 0.5) {
@@ -9987,6 +9997,137 @@ function SolarEngine3D({
                         border: '1px solid rgba(255,215,0,0.3)', cursor: 'pointer' }}>
                       \u2715 Reset
                     </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* ── 3D Primitives Properties (v66: eave height + roof pitch inputs) ── */}
+              {(placementMode === 'block' || placementMode === 'roof_gable' || placementMode === 'roof_hip') ? (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(180,180,200,0.25)', borderRadius: 10,
+                  padding: '8px 10px', minWidth: 240, maxWidth: 320,
+                }}>
+                  <div style={{
+                    fontSize: 9, color: '#ffa040', textAlign: 'left',
+                    fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase',
+                  }}>
+                    3D Primitives
+                  </div>
+                  {/* Eave height — for new blocks */}
+                  {placementMode === 'block' ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>New block eave</span>
+                      <input
+                        type="range" min={1} max={30} step={0.5}
+                        value={newBlockEaveHeightM}
+                        onChange={e => setNewBlockEaveHeightM(parseFloat(e.target.value))}
+                        style={{ flex: 1, accentColor: '#ffaa00' }}
+                      />
+                      <input
+                        type="number" min={1} max={30} step={0.5}
+                        value={newBlockEaveHeightM}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value);
+                          if (isFinite(v)) setNewBlockEaveHeightM(Math.max(1, Math.min(30, v)));
+                        }}
+                        style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
+                      />
+                      <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
+                    </div>
+                  ) : null}
+                  {/* Selected block height — update last placed block */}
+                  {placementMode === 'block' && lastPlacedBlockId ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ color: '#ffd28a', fontSize: 11, minWidth: 100 }}>Selected height</span>
+                      <input
+                        type="range" min={1} max={30} step={0.5}
+                        value={blockHeightOverridesRef.current.get(lastPlacedBlockId) ?? newBlockEaveHeightM}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value);
+                          if (!isFinite(v)) return;
+                          const block = blockEntitiesRef.current.find((b: any) => b.id === lastPlacedBlockId);
+                          if (block?.polygon?.extrudedHeight) {
+                            block.polygon.extrudedHeight = new (window as any).Cesium.ConstantProperty(v);
+                            blockHeightOverridesRef.current.set(lastPlacedBlockId, v);
+                            // Also move the handle to the new top
+                            const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === lastPlacedBlockId);
+                            if (handle && block.position) {
+                              const cur = block.position.getValue((window as any).Cesium.JulianDate.now());
+                              if (cur) handle.position = new (window as any).Cesium.ConstantProperty(new (window as any).Cesium.Cartesian3(cur.x, cur.y, v + 0.3));
+                            }
+                            try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
+                          }
+                        }}
+                        style={{ flex: 1, accentColor: '#ffaa00' }}
+                      />
+                      <input
+                        type="number" min={1} max={30} step={0.5}
+                        value={blockHeightOverridesRef.current.get(lastPlacedBlockId) ?? newBlockEaveHeightM}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value);
+                          if (!isFinite(v)) return;
+                          const clamped = Math.max(1, Math.min(30, v));
+                          const block = blockEntitiesRef.current.find((b: any) => b.id === lastPlacedBlockId);
+                          if (block?.polygon?.extrudedHeight) {
+                            block.polygon.extrudedHeight = new (window as any).Cesium.ConstantProperty(clamped);
+                            blockHeightOverridesRef.current.set(lastPlacedBlockId, clamped);
+                            const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === lastPlacedBlockId);
+                            if (handle && block.position) {
+                              const cur = block.position.getValue((window as any).Cesium.JulianDate.now());
+                              if (cur) handle.position = new (window as any).Cesium.ConstantProperty(new (window as any).Cesium.Cartesian3(cur.x, cur.y, clamped + 0.3));
+                            }
+                            try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
+                          }
+                        }}
+                        style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
+                      />
+                      <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
+                    </div>
+                  ) : null}
+                  {/* Eave height — for new roofs (gable / hip) */}
+                  {(placementMode === 'roof_gable' || placementMode === 'roof_hip') ? (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>New roof eave</span>
+                        <input
+                          type="range" min={1} max={20} step={0.5}
+                          value={newRoofEaveHeightM}
+                          onChange={e => setNewRoofEaveHeightM(parseFloat(e.target.value))}
+                          style={{ flex: 1, accentColor: '#ffaa00' }}
+                        />
+                        <input
+                          type="number" min={1} max={20} step={0.5}
+                          value={newRoofEaveHeightM}
+                          onChange={e => {
+                            const v = parseFloat(e.target.value);
+                            if (isFinite(v)) setNewRoofEaveHeightM(Math.max(1, Math.min(20, v)));
+                          }}
+                          style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
+                        />
+                        <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>Roof pitch</span>
+                        <input
+                          type="range" min={5} max={60} step={1}
+                          value={roofPitchDeg}
+                          onChange={e => setRoofPitchDeg(parseFloat(e.target.value))}
+                          style={{ flex: 1, accentColor: '#ffaa00' }}
+                        />
+                        <input
+                          type="number" min={5} max={60} step={1}
+                          value={roofPitchDeg}
+                          onChange={e => {
+                            const v = parseFloat(e.target.value);
+                            if (isFinite(v)) setRoofPitchDeg(Math.max(5, Math.min(60, v)));
+                          }}
+                          style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
+                        />
+                        <span style={{ color: '#aaa', fontSize: 10 }}>°</span>
+                      </div>
+                    </>
                   ) : null}
                 </div>
               ) : null}
