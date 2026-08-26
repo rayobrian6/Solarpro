@@ -213,6 +213,25 @@ export function getBosDevice(id: string | undefined): BosDevice | undefined {
   return BOS_DEVICES.find(d => d.id === id && d.active !== false);
 }
 
+/** Resolve an equipment-db combiner id against THIS catalogue.
+ *
+ *  The two catalogues drifted apart: equipment-db calls the device
+ *  `enphase-iq-combiner-5`, this module calls it `enphase-iq-combiner-5c`. That
+ *  one-character difference meant a compatibility list from equipment-db could
+ *  never resolve here, so the auto-config silently fell through to a hardcoded
+ *  device and the SLD contradicted the equipment picker on every Enphase job.
+ *  Tries the id verbatim, then with/without the trailing 'C' revision letter. */
+export function resolveCompatibleCombiner(ids: string[] | undefined): BosDevice | undefined {
+  for (const raw of ids ?? []) {
+    const id = String(raw).trim().toLowerCase();
+    const hit = getBosDevice(id)
+      ?? getBosDevice(`${id}c`)
+      ?? getBosDevice(id.replace(/c$/, ''));
+    if (hit && hit.kind === 'integrated_combiner') return hit;
+  }
+  return undefined;
+}
+
 // ── Resolver ────────────────────────────────────────────────────────────────
 
 export interface SystemBosContext {
@@ -226,6 +245,15 @@ export interface SystemBosContext {
   hasBattery: boolean;
   /** Explicit user selection (overrides auto-config) — future design-studio hook. */
   overrideDeviceIds?: string[];
+  /** The combiner ids the SELECTED INVERTER declares in equipment-db
+   *  (`compatibleWith`). This module deliberately does not import equipment-db —
+   *  the caller, which already has it, passes the list in, so the BOS catalogue
+   *  stays dependency-free and cycle-free.
+   *
+   *  These are equipment-db ids and may not match this module's ids verbatim
+   *  (e.g. `enphase-iq-combiner-5` there vs `enphase-iq-combiner-5c` here);
+   *  see resolveCompatibleCombiner for the bridge. */
+  compatibleCombinerIds?: string[];
 }
 
 export interface ResolvedBosDevice extends BosDevice {
@@ -310,24 +338,42 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
   const isEnphase = /enphase/i.test(ctx.inverterManufacturer);
   if (!isEnphase || !ctx.isMicro) return emptyPlan(isEnphase ? 'Enphase' : null);
 
-  // Auto-config the BEST / easiest-install device: the current-gen IQ Combiner
-  // 6C — one box that IS the combiner + IQ Gateway + integral PV disconnect + RSD
-  // initiator (fewest boxes on the wall). The 4C/5C and standalone Gateway remain
-  // available as user overrides. (Enphase generation is an ecosystem line, not a
-  // property of the micro model, so we don't branch on the micro here.)
-  const combiner = getBosDevice('enphase-iq-combiner-6c')!;
-  // The 6C PV busbar takes 4 two-pole branches (5 with a quadplex); beyond that
-  // the branches spill onto the 200A DER busbar or a subpanel.
-  const pvBranchMax = 5;
+  // Auto-config. THE EQUIPMENT DATABASE DECIDES, not a literal.
+  //
+  // This used to be `getBosDevice('enphase-iq-combiner-6c')!` unconditionally, so
+  // every Enphase micro job drew a 6C no matter what the design said. equipment-db
+  // declares the pairing on the microinverter itself — `enphase-iq8plus` lists
+  // `compatibleWith: ['enphase-iq-combiner-5', ...]` and the combiner lists the
+  // IQ8 micros back — and the picker honoured it while the SLD did not. That is
+  // one fact with two contradicting answers on the same project.
+  //
+  // This is NOT cosmetic: the 5C is main-lug only with NO integral PV disconnect,
+  // while the 6C has one. Drawing the wrong device changes whether the sheet
+  // claims an integral AC disconnecting means, which is a code-compliance
+  // statement, not a label.
+  //
+  // Order: the inverter's declared compatibility, then the current-gen 6C as the
+  // last resort for an inverter that declares nothing.
+  const combiner = resolveCompatibleCombiner(ctx.compatibleCombinerIds)
+    ?? getBosDevice('enphase-iq-combiner-6c')!;
+  // Branch capacity comes from the RESOLVED device, not from the 6C. The 6C PV
+  // busbar takes 4 two-pole branches (5 with a quadplex); the 5C/4C take 4 with
+  // no quadplex position. Leaving this pinned at 5 would under-report an overflow
+  // on a 4-slot device.
+  const pvBranchMax = combiner.id === 'enphase-iq-combiner-6c'
+    ? 5
+    : (combiner.branchSlots ?? 4);
   return {
     brand: 'Enphase',
     devices: [resolved(combiner)],
     brains: resolved(combiner),
-    hasIntegratedGateway: true,
+    // Both derived from the RESOLVED device. `hasIntegratedGateway: true` was
+    // hardcoded and happened to be right only because the device was.
+    hasIntegratedGateway: !!combiner.integrated.monitoring,
     providesAcDisconnect: !!combiner.integrated.disconnect,
     branchSlots: combiner.branchSlots,
     branchSlotWarning: ctx.branchCount > pvBranchMax
-      ? `${ctx.branchCount} AC branches exceed the ${combiner.model} PV busbar (4 breakers, 5 with a quadplex) — route the balance onto the DER busbar or a subpanel.`
+      ? `${ctx.branchCount} AC branches exceed the ${combiner.model} PV busbar (${combiner.branchSlots ?? 4} breakers${pvBranchMax > (combiner.branchSlots ?? 4) ? ', 5 with a quadplex' : ''}) — route the balance onto the DER busbar or a subpanel.`
       : undefined,
     source: 'auto',
   };

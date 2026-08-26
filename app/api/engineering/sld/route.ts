@@ -515,6 +515,16 @@ export async function POST(req: NextRequest) {
       overrideDeviceIds: Array.isArray(body.bosDeviceIds)
         ? body.bosDeviceIds.map(String)
         : (body.combinerId ? [String(body.combinerId)] : undefined),
+      // The pairing equipment-db declares on the SELECTED microinverter — e.g.
+      // enphase-iq8plus → ['enphase-iq-combiner-5', ...]. This is what makes the
+      // drawing agree with the equipment picker instead of contradicting it, and
+      // it generalises: any inverter that declares a compatible combiner gets
+      // that combiner drawn, whatever the brand or family.
+      compatibleCombinerIds: (() => {
+        const invId = body.inverterId ? String(body.inverterId) : undefined;
+        const rec = invId ? (getInverterById(invId) as { compatibleWith?: string[] } | undefined) : undefined;
+        return Array.isArray(rec?.compatibleWith) ? rec.compatibleWith : undefined;
+      })(),
     });
     const _bosBrains = _bosPlan.brains ?? _bosPlan.devices[0];
     const _bosLabel  = _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined;

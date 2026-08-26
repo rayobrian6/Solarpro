@@ -12,6 +12,7 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { getEquipmentContext } from '@/lib/system';
 import { hasRealBattery } from './helpers';
+import { MICROINVERTERS } from '@/lib/equipment-db';
 import { buildConductorAuthority } from './conductorAuthority';
 import { resolveIntegratedEquipment, type IntegratedEquipmentPlan, type SystemBosContext } from '@/lib/equipment/integratedBos';
 
@@ -60,6 +61,24 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
   const overrideDeviceIds = project.bosDeviceIds
     ?? (project.combinerId ? [project.combinerId] : undefined);
 
+  // The combiner pairing equipment-db declares on the micro sub's OWN inverter.
+  // The permit sheet must resolve the SAME device the Diagram tab does, or E-1
+  // and the picker disagree about which combiner is installed — and the 5C/6C
+  // differ on whether there is an integral AC disconnecting means, so that
+  // disagreement is a code statement, not a label.
+  // ResolvedEquipment carries no inverter id (the module has `panelId`; inverters
+  // still have no stable identity), so the record is matched on manufacturer AND
+  // model EXACTLY — trimmed and case-insensitive, never a substring. Substring
+  // matching on equipment models is a known defect class in this codebase and is
+  // not being reintroduced here. No exact match ⇒ undefined ⇒ the previous
+  // current-gen default, so this can only add correctness, never remove it.
+  const _norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
+  const _invRec = isMicro
+    ? MICROINVERTERS.find(m =>
+        _norm(m.manufacturer) === _norm(inverterManufacturer)
+        && _norm(m.model) === _norm(inverterModel))
+    : undefined;
+
   const ctx: SystemBosContext = {
     inverterManufacturer,
     inverterModel,
@@ -68,6 +87,7 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
     branchCount,
     hasBattery: hasRealBattery(project),
     overrideDeviceIds,
+    compatibleCombinerIds: Array.isArray(_invRec?.compatibleWith) ? _invRec.compatibleWith : undefined,
   };
 
   return resolveIntegratedEquipment(ctx);
