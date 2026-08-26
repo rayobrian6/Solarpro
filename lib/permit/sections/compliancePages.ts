@@ -65,7 +65,14 @@ export function pageWarningLabels(
   // it from the field-label dataset (lib/data/placards) gated by topology,
   // interconnection, battery and rapid-shutdown, resolved to this NEC edition.
   const labels = selectFieldLabels(input, cad);
+  // A.4b §3 — `required` is a PROCUREMENT/INSTALLATION assertion and is false for
+  // an edition-dependent placard whose adopted edition is unresolved. Such a
+  // placard must still be SHOWN, marked NOT RELEASED — dropping it silently
+  // would hide from the reviewer that a placard is in play and unresolved, which
+  // is the opposite of the honesty this containment exists for. It is displayed
+  // and excluded from procurement, never displayed as ordered.
   const requiredLabels = labels.filter(l => l.required);
+  const displayLabels = [...requiredLabels, ...labels.filter(l => l.editionPending)];
   const necYear = cp.nec ?? 'PENDING';
 
   // ── SITE-COMPUTED RATING LABELS (per sub-system) ─────────────────────────
@@ -191,7 +198,7 @@ export function pageWarningLabels(
     'ac-point-of-connection-disconnect',
     'multiple-sources-of-power-directory',
   ]);
-  const gridLabels = requiredLabels.filter(l => !SUPERSEDED.has(l.refId));
+  const gridLabels = displayLabels.filter(l => !SUPERSEDED.has(l.refId));
   // TAC WS-13 — a superseded label is not DROPPED, it is delivered by another
   // item ON THIS SHEET. The set above is static; only the members that actually
   // apply to THIS system count, and each names where it went. This is what made
@@ -303,9 +310,21 @@ export function pageWarningLabels(
       `</div>`;
     }
 
+    // A.4b §3 — an edition-dependent placard with no established adopted edition
+    // has no authoritative specification. It is shown so the reviewer knows it is
+    // in play, and marked NOT RELEASED so nobody manufactures or installs it from
+    // a defaulted year.
+    const pendingBanner = lbl.editionPending
+      ? `<div style="margin-top:2px;padding:2px 3px;border:1px solid #b91c1c;background:#fdecec;`
+        + `font-size:6px;font-weight:800;color:#b91c1c;line-height:1.3;">`
+        + `PENDING CODE AUTHORITY — NOT RELEASED FOR PROCUREMENT / INSTALLATION`
+        + `<div style="font-weight:600;color:#7f1d1d;">${escapeH(lbl.editionPendingNote ?? '')}</div>`
+        + `</div>`
+      : '';
     return `<div style="page-break-inside:avoid;">` +
       decal +
       labelCaption(lbl.id, `AFFIX TO ${affix}: ${lbl.placement}`, lbl.necRef) +
+      pendingBanner +
     `</div>`;
   }
 

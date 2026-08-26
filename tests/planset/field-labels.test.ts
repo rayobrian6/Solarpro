@@ -38,15 +38,28 @@ describe('field-label selection (standard per job)', () => {
     expect(ids).not.toContain('backfeed-breaker-do-not-relocate'); // supply-side has no back-fed breaker
   });
 
-  it('resolves code references to the job NEC edition', () => {
-    const p2023 = clone(); p2023.compliance.jurisdiction.necVersion = 'NEC 2023';
-    const rsd2023 = selectFieldLabels(p2023, cad(p2023)).find(l => l.refId === 'rapid-shutdown-building-placard');
-    expect(rsd2023?.necRef).toContain('690.12(D)');   // 2023 renumber
-
+  // A.4b §2/§8 — `compliance.jurisdiction.necVersion` is FALLBACK metadata after
+  // A.4a, not the adopted edition. Setting it must therefore NOT produce an
+  // edition-stamped citation: only a governed adoption may put a year on a code
+  // reference. This test previously asserted the opposite ("NEC 2020"), which is
+  // exactly the leak being closed — on Braidon that year is supported by neither
+  // Madison County source.
+  it('A.4b — a fallback NEC year never stamps an edition onto a code reference', () => {
     const p2020 = clone(); p2020.compliance.jurisdiction.necVersion = 'NEC 2020';
-    const rsd2020 = selectFieldLabels(p2020, cad(p2020)).find(l => l.refId === 'rapid-shutdown-building-placard');
-    expect(rsd2020?.necRef).toContain('NEC 2020');
-    expect(rsd2020?.necRef).toContain('690.56(C)');
+    const rsd = selectFieldLabels(p2020, cad(p2020)).find(l => l.refId === 'rapid-shutdown-building-placard');
+    expect(rsd?.necRef).toBeTruthy();
+    // The SECTION is still cited — a reviewer needs it — but with no edition.
+    expect(rsd?.necRef).toMatch(/NEC §/);
+    expect(rsd?.necRef).not.toContain('NEC 2020');
+    expect(rsd?.necRef).not.toMatch(/NEC 20\d\d/);
+  });
+
+  it('A.4b — no label anywhere carries an authoritative NEC year from a fallback', () => {
+    const p = clone(); p.compliance.jurisdiction.necVersion = 'NEC 2020';
+    const refs = selectFieldLabels(p, cad(p)).map(l => l.necRef).join(' | ');
+    // §8 negative case: zero authoritative "NEC 2020" labels while adoption is
+    // unresolved. IFC keeps its own PENDING treatment, which is unaffected.
+    expect(refs).not.toMatch(/NEC 20\d\d/);
   });
 
   it('fills live ratings into the AC labels with no doubled units', () => {

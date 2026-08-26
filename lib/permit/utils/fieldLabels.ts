@@ -54,6 +54,19 @@ export interface FieldLabel {
   material: string;
   required: boolean;     // does it apply to THIS system?
   interconnectSide: InterconnectSide;  // §16 — topology classification
+  // ── A.4b — EDITION DEPENDENCE ────────────────────────────────────────────
+  /** true ⇔ the dataset carries this label's NEC clauses under more than one
+   *  edition — its requirement, wording, colour or reflectivity moves between
+   *  cycles. (NEC 2017/2020 mandate the rapid-shutdown title white-on-red and
+   *  reflective; 2023 dropped the mandated colour; 2005 predates the set.) */
+  editionDependent: boolean;
+  /** true ⇔ editionDependent AND the jurisdiction's adopted NEC is unresolved.
+   *  Such a placard has NO authoritative specification: it is rendered for
+   *  information, excluded from `required`, and must not be procured or
+   *  installed until the adoption is established. */
+  editionPending: boolean;
+  /** the sentence a sheet prints for a pending placard. Null when not pending. */
+  editionPendingNote: string | null;
 }
 
 interface Ctx {
@@ -217,10 +230,14 @@ function filterSectionByTopology(section: string, isSupply: boolean): string {
  *  placard JSON's baked-in "IFC 2021" literal may NEVER leak, because the IFC
  *  authority is unverified/pending on most jobs — an "IFC 2021" claim was a
  *  FALSE edition. A missing IFC edition prints PENDING (section still cited). */
-function resolveRef(codeRefs: RawLabel['codeRefs'], necYear: string, ifcEd: string | null, isSupply: boolean): string {
+function resolveRef(codeRefs: RawLabel['codeRefs'], necEd: string | null, ifcEd: string | null, isSupply: boolean): string {
   const nec = codeRefs.filter(c => /NEC/i.test(c.code));
   const ifc = codeRefs.filter(c => /IFC/i.test(c.code));
-  const necPick = nec.find(c => c.code.includes(necYear)) ?? nec[nec.length - 1];
+  // A.4b — the ADOPTED edition selects, never a fallback. With adoption
+  // unresolved we still cite the SECTION (edition-neutral, e.g. "NEC §705.11")
+  // but never an edition. The last listed entry is used only to obtain a section
+  // number; its own edition literal is discarded.
+  const necPick = (necEd ? nec.find(c => c.code.includes(necEd)) : undefined) ?? nec[nec.length - 1];
   // Never pick by the placard's own edition literal; use the authority edition
   // (or the latest listed section when pending — the section, not its edition).
   const ifcPick = (ifcEd ? ifc.find(c => c.code.includes(ifcEd)) : undefined) ?? ifc[ifc.length - 1];
@@ -228,7 +245,9 @@ function resolveRef(codeRefs: RawLabel['codeRefs'], necYear: string, ifcEd: stri
   if (necPick) {
     // §16 — strip side-contradicting NEC 705 clauses (no 705.12 on supply-side).
     const necSection = filterSectionByTopology(necPick.section, isSupply);
-    if (necSection) parts.push(`NEC ${necYear} ${necSection}`);
+    // A.4b §2 — edition-neutral when adoption is unresolved. "NEC 2020 690.56(C)"
+    // asserted an edition neither governed Madison County source supports.
+    if (necSection) parts.push(necEd ? `NEC ${necEd} ${necSection}` : `NEC §${necSection}`);
   }
   if (ifcPick) parts.push(`IFC ${ifcEd ?? 'PENDING'} ${ifcPick.section}`);
   // PPC §6 — SANITIZER BYPASS FIX. The old fallback returned `codeRefs[0]`
@@ -345,11 +364,39 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
     // Ensure the ANSI signal word leads the lines so the renderer styles it.
     const sig = (l.signalWord || '').toUpperCase();
     const lines = sig && textLines[0]?.toUpperCase() !== sig ? [sig, ...textLines] : textLines;
+    // ── A.4b — EDITION-DEPENDENT PLACARDS MAY NOT BE SPECIFIED FROM A FALLBACK ──
+    // `year` (necVersion, which defaults to '2020') used to select the placard
+    // VARIANT — i.e. it decided what physically gets manufactured and stuck on
+    // the equipment. That is not a citation-formatting concern: NEC 2017/2020
+    // mandate the rapid-shutdown title WHITE on RED and reflective, NEC 2023
+    // dropped the mandated colour, and NEC 2005 predates the requirement set
+    // entirely. Madison County's governed edition is unresolved (the codified
+    // ordinance says 2005; the county code official's state filing says 2023),
+    // so a "2020 for now" placard is a fabricated compliance product.
+    //
+    // A label is EDITION-DEPENDENT when the dataset carries NEC clauses under
+    // more than one edition — that is the dataset's own statement that the
+    // requirement moves between cycles. Those are marked PENDING and excluded
+    // from procurement while adoption is unresolved. Labels whose requirement is
+    // edition-stable still print normally: refusing everything would be as
+    // dishonest as specifying everything.
+    // ⚠ THE DISCRIMINATOR IS NOT YET BUILT — see the note above. A first attempt
+    // keyed this off "the dataset lists clauses under more than one NEC edition",
+    // which is WRONG: the dataset carries a section number under every cycle as a
+    // matter of course, even where the requirement is identical, so that flagged
+    // essentially every placard and emptied the required set. The real signal is
+    // the dataset's own edition-CONDITIONAL language ("NEC 2023 dropped the
+    // mandated red/reflective colour"), which lives in the material/colour prose,
+    // not in the presence of multiple codeRef rows. Building that discriminator
+    // is A.4b's remaining half; until it exists nothing is marked pending, so no
+    // placard is silently withheld on a guess.
+    const editionDependent = false;
+    const editionPending = false;
     n += 1;
     return {
       id: `L-${n}`,
       refId: l.id,
-      necRef: resolveRef(_codeRefs, year, _cp.ifc, isSupply),
+      necRef: resolveRef(_codeRefs, _cp.nec, _cp.ifc, isSupply),
       placement: l.location,
       lines,
       bg: l.colors.background || '#ffffff',
@@ -358,6 +405,14 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
       material: l.material,
       required,
       interconnectSide: side,
+      editionDependent,
+      editionPending,
+      editionPendingNote: editionPending
+        ? 'PENDING CODE AUTHORITY — NOT RELEASED FOR PROCUREMENT / INSTALLATION. '
+          + 'This placard\'s requirement, wording, colour or reflectivity changes by NEC edition and the '
+          + 'jurisdiction\'s adopted edition is not established. Specification follows the governed adoption, '
+          + 'never a bundled or default year.'
+        : null,
     };
   });
 }
