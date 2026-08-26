@@ -90,7 +90,26 @@ const LABEL_OFFSET_BELOW = 11;  // px: wire label sits N px below the line
 /** Post-AAC E-1 repair — wrap a legend label at word boundaries so data-driven
  *  wiring-method names stay inside the fixed legend box (and inside the
  *  embedded viewBox crop). ~40 chars ≈ the 140px text run at F.tiny. */
-function wrapLegendLabel(label: string, maxChars = 40): string[] {
+// ── LEGEND BOX GEOMETRY ──────────────────────────────────────────────────────
+// Sized for the legibility floor, not for the retired 6 uu type. At 188 uu wide
+// (140 uu of text) the listed-assembly entry — "Open Air — ENPHASE Q CABLE
+// (TC-ER) AC Branch (NEC 690.31(C))" — no longer fits on one line once type is
+// raised, and wrapping it split a string the §8 evidence gate matches on. The
+// box grows with the type instead of the text shrinking to fit a stale box.
+const LEG_W      = 260;                       // outer box width
+const LEG_TEXT_X = 44;                        // text inset (past the line swatch)
+const LEG_TEXT_W = LEG_W - LEG_TEXT_X - 6;    // 210 uu of drawable text
+const LEG_ROW_H  = 13;                        // row pitch — 11 crowds 8.67 uu type
+
+function wrapLegendLabel(label: string, maxChars = 40, sz?: number): string[] {
+  // Width-aware when the caller states the type size. The fixed 40-character
+  // budget was calibrated to F.tiny at 6 uu (~140 px of text in the 188 uu legend
+  // box); once the legibility floor raises that type the same 40 characters no
+  // longer fit and the label runs out of its box. Average glyph advance for this
+  // face is ~0.55 em, so the budget scales inversely with the type size.
+  if (sz && sz > 0) {
+    maxChars = Math.max(16, Math.floor(LEG_TEXT_W / (0.55 * sz)));
+  }
   if (label.length <= maxChars) return [label];
   const words = label.split(' ');
   const lines: string[] = [];
@@ -118,6 +137,44 @@ const SW_BUS    = 3.5;
 // tiny    = NEC references, secondary annotations
 // tb      = title block fields
 // tbTitle = title block section headers
+/** ── PRINTED LEGIBILITY FLOOR ────────────────────────────────────────────────
+ *  The canvas is 96 user units per inch, so printed points = uu × 0.75 at 1:1
+ *  (a 24 × 18 in ARCH C sheet). The ladder below was authored in uu with no
+ *  reference to physical size, and it lands far too small on paper:
+ *
+ *      seg  6.5 uu → 4.88 pt   ← the conductor callouts: gauge, conduit, OCPD
+ *      tiny 6.0 uu → 4.50 pt   ← NEC references
+ *      the smallest hardcoded literal, 3.6 uu → 2.70 pt
+ *
+ *  A plan reviewer cannot read 4.5 pt, and neither can the installer. 6.5 pt
+ *  (~1/16 in cap height) is the floor this repo already articulates elsewhere
+ *  (tests/planset/pagination-w9.test.ts calls 6–6.5 px "below the readable
+ *  floor for a permit reviewer").
+ *
+ *  6.5 pt ÷ 0.75 = 8.67 uu. Anything below that is raised to it by
+ *  applyTypeFloor() on the finished SVG, which catches the type scale AND the
+ *  ~51 hardcoded `sz:` literals that bypass it — an audit of the ladder alone
+ *  would have missed those. */
+const UU_PER_IN = 96;
+const MIN_PRINTED_PT = 6.5;
+/** uu that print at MIN_PRINTED_PT on a 1:1 sheet. */
+export const MIN_TYPE_UU = +(MIN_PRINTED_PT / (72 / UU_PER_IN)).toFixed(2);  // 8.67
+
+/** Raise every font-size below the legibility floor, leaving larger type alone
+ *  so the hierarchy is preserved rather than flattened.
+ *
+ *  Total by construction, not by audit: all text is emitted through the two
+ *  `txt`/`tspan` helpers as a `font-size="N"` ATTRIBUTE — there are no
+ *  `style="font-size:…"` forms anywhere in the SLD modules — so one regex over
+ *  the finished document reaches every glyph, including the device-illustration
+ *  and symbol sub-modules. */
+export function applyTypeFloor(svg: string, minUu: number = MIN_TYPE_UU): string {
+  return svg.replace(/font-size="([0-9.]+)"/g, (whole, n: string) => {
+    const v = Number(n);
+    return Number.isFinite(v) && v < minUu ? `font-size="${minUu}"` : whole;
+  });
+}
+
 const F = {
   title:  13,
   hdr:     9.5,   // equipment headers — bold, most prominent after title
@@ -1643,7 +1700,11 @@ function renderMSPSupply(
     // dropped the tap straight onto MAIN BUS (a load-side connection), which
     // contradicted every 'NEC 705.11' label on the sheet.
     const tapX = bx+28;
-    const svcY = busY-18;              // service conductor run, above the bus
+    // busY-18 put the service run's label baseline only 6 uu below the
+    // "MAIN SERVICE PANEL" baseline. That was already tight at the retired 4.5/5.5
+    // uu type and collides outright once both are raised to the legibility floor.
+    // Dropped so the label clears the panel header rule at by2+14.
+    const svcY = busY-10;              // service conductor run, above the bus
     const pvInY = by2+55;              // 'utility_in' anchor row — PV enters here
     const mainBkrX = bx+W2-20;         // main breaker position (drawn below)
     // Service conductors: main breaker LINE side up and across to the tap
@@ -2698,16 +2759,16 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#E65100', label:'ATS Transfer Conductor'}] : []),
   ];
   const legRows = legEntries.flatMap(e =>
-    wrapLegendLabel(e.label).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
-  const legH = 16 + legRows.length * 11;
-  const legX = SCH_X+SCH_W-195, legY = SCH_Y+SCH_H - legH - 4;
-  parts.push(rect(legX, legY, 188, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+    wrapLegendLabel(e.label, 40, Math.max(F.tiny, MIN_TYPE_UU)).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
+  const legH = 16 + legRows.length * LEG_ROW_H;
+  const legX = SCH_X+SCH_W-(LEG_W+7), legY = SCH_Y+SCH_H - legH - 4;
+  parts.push(rect(legX, legY, LEG_W, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(legX+4, legY+10, 'LEGEND', {sz:F.sub, bold:true}));
-  parts.push(ln(legX, legY+13, legX+188, legY+13, {sw:SW_THIN}));
+  parts.push(ln(legX, legY+13, legX+LEG_W, legY+13, {sw:SW_THIN}));
   legRows.forEach((item,i) => {
-    const ly = legY+19+i*11;
+    const ly = legY+19+i*LEG_ROW_H;
     if (!item.cont) parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
-    parts.push(txt(legX+44, ly+3, item.text, {sz:F.tiny}));
+    parts.push(txt(legX+LEG_TEXT_X, ly+3, item.text, {sz:F.tiny}));
   });
 
   // ── CALCULATION PANELS ────────────────────────────────────────────────────
@@ -3083,12 +3144,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(`<!-- ${getBuildBadge()} | SLD SYMBOLS V2 -->`);
   if (input.suppressTitleBlock) {
     parts.push('</svg>');
-    return parts.join('\n');
+    // Floor applied to the FINISHED document — see applyTypeFloor. Doing it here
+    // rather than at each emitter is what makes it total: it also catches the
+    // ~51 hardcoded `sz:` literals and the symbol/illustration sub-modules.
+    return applyTypeFloor(parts.join('\n'));
   }
   parts.push(titleBlockSvg(input, dcKw));
 
   parts.push('</svg>');
-  return parts.join('\n');
+  return applyTypeFloor(parts.join('\n'));
 }
 
 // ── TITLE BLOCK (shared by the legacy single-source path and the Wave-5
@@ -4030,16 +4094,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // Post-AAC E-1 repair — long data-driven labels wrap inside the box (see the
   // single-lane legend note).
   const legRows = legEntries.flatMap(e =>
-    wrapLegendLabel(e.label).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
-  const legH = 16 + legRows.length * 11;
-  const legX = SCH_X+SCH_W-195, legY = SCH_Y+SCH_H - legH - 4;
-  parts.push(rect(legX, legY, 188, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+    wrapLegendLabel(e.label, 40, Math.max(F.tiny, MIN_TYPE_UU)).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
+  const legH = 16 + legRows.length * LEG_ROW_H;
+  const legX = SCH_X+SCH_W-(LEG_W+7), legY = SCH_Y+SCH_H - legH - 4;
+  parts.push(rect(legX, legY, LEG_W, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(legX+4, legY+10, 'LEGEND', {sz:F.sub, bold:true}));
-  parts.push(ln(legX, legY+13, legX+188, legY+13, {sw:SW_THIN}));
+  parts.push(ln(legX, legY+13, legX+LEG_W, legY+13, {sw:SW_THIN}));
   legRows.forEach((item,i) => {
-    const ly = legY+19+i*11;
+    const ly = legY+19+i*LEG_ROW_H;
     if (!item.cont) parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
-    parts.push(txt(legX+44, ly+3, item.text, {sz:F.tiny}));
+    parts.push(txt(legX+LEG_TEXT_X, ly+3, item.text, {sz:F.tiny}));
   });
 
   // ═══ BOTTOM CALC BAND — reference-planset table suite ═════════════════════
@@ -4248,12 +4312,14 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   parts.push(`<!-- ${getBuildBadge()} | SLD MULTI-LANE wave5a lanes=${lanes.length} keys=${lanes.map(l => l.key).join('+')} -->`);
   if (input.suppressTitleBlock) {
     parts.push('</svg>');
-    return parts.join('\n');
+    return applyTypeFloor(parts.join('\n'));
   }
   parts.push(titleBlockSvg(
     { ...input, topologyType: `HYBRID MULTI-SOURCE (${lanes.map(l => `PV-${LANE_TAG[l.key]}`).join(' + ')})` },
     dcKw,
   ));
   parts.push('</svg>');
-  return parts.join('\n');
+  // Same floor on the hybrid path — it starts SMALLER than single-lane, not
+  // larger, so omitting it here would leave the worst sheets unimproved.
+  return applyTypeFloor(parts.join('\n'));
 }
