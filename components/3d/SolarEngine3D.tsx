@@ -555,6 +555,7 @@ function SolarEngine3D({
   stringLegend,
   paintMode = false,
   onPanelPaint,
+  isDesignPhase = false,
 }: Props) {
   const cesiumRef   = useRef<HTMLDivElement>(null);
   const viewerRef   = useRef<any>(null);
@@ -10577,6 +10578,56 @@ function SolarEngine3D({
                         <span style={{ color: '#aaa', fontSize: 10 }}>°</span>
                       </div>
                     </>
+                  ) : null}
+                  {/* v66: Lift Roofs / Flatten Roofs for 3D Primitives (block / gable / hip).
+                   *  Aurora parity: HANDOFF_2026-08-25 §4 (frame_0130, frame_0135).
+                   *  Only renders when LiDAR is loaded. Operates on the 3D Primitive
+                   *  entities the user drew with the in-canvas tools — distinct from
+                   *  the sibling's `roofPlanes` buttons in the LiDAR Properties panel
+                   *  (which operate on the data-model roof planes). */}
+                  {lidar.state.dataset ? (
+                    <div style={{
+                      borderTop: '1px solid rgba(180,180,200,0.2)',
+                      marginTop: 4, paddingTop: 6,
+                      display: 'flex', flexDirection: 'column', gap: 4,
+                    }}>
+                      <div style={{
+                        fontSize: 9, color: '#88aaff', textAlign: 'left',
+                        fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase',
+                      }}>
+                        LiDAR — 3D Primitives
+                      </div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          onClick={handleLiftPrimitives}
+                          disabled={(placedBlockCount + placedGableCount + placedHipCount) === 0}
+                          title="Snap every 3D Primitive to the LiDAR elevation at its centroid"
+                          style={{
+                            flex: 1, padding: '5px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                            cursor: (placedBlockCount + placedGableCount + placedHipCount) === 0 ? 'not-allowed' : 'pointer',
+                            background: 'rgba(0,170,255,0.15)', color: '#88ccff',
+                            border: '1px solid rgba(0,170,255,0.4)',
+                            opacity: (placedBlockCount + placedGableCount + placedHipCount) === 0 ? 0.4 : 1,
+                          }}
+                        >
+                          ⤴ Lift Roofs
+                        </button>
+                        <button
+                          onClick={handleFlattenPrimitives}
+                          disabled={(placedBlockCount + placedGableCount + placedHipCount) === 0}
+                          title="Set every 3D Primitive to the average LiDAR elevation across centroids"
+                          style={{
+                            flex: 1, padding: '5px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                            cursor: (placedBlockCount + placedGableCount + placedHipCount) === 0 ? 'not-allowed' : 'pointer',
+                            background: 'rgba(0,200,100,0.15)', color: '#88ff99',
+                            border: '1px solid rgba(0,200,100,0.4)',
+                            opacity: (placedBlockCount + placedGableCount + placedHipCount) === 0 ? 0.4 : 1,
+                          }}
+                        >
+                          ⤓ Flatten Roofs
+                        </button>
+                      </div>
+                    </div>
                   ) : null}
                 </div>
               ) : null}
