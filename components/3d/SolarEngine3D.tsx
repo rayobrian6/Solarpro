@@ -94,6 +94,28 @@ import {
   clampBlockHeight,
 } from '@/lib/3d/blockMath';
 
+// v65 (camera-tilt): Aurora-parity camera presets — default 3D view at -45° pitch
+// (tilted aerial) instead of -65° (top-down-ish). See lib/3d/cameraPresets.ts.
+import {
+  TILTED_AERIAL_VIEW,
+  computeRangeFromBounds,
+} from '@/lib/3d/cameraPresets';
+
+// v66: Measurements + Ruler math + renderers (Aurora TIER 2 #10 parity).
+// Pure math in lib/3d/measureMath.ts (unit-tested in tests/measurements.test.ts).
+// Cesium side-effects in components/3d/measure/measurements.tsx.
+import {
+  buildMeasurement,
+  type Measurement,
+  type LngLatH,
+} from '@/lib/3d/measureMath';
+import {
+  renderMeasurement,
+  removeMeasurementBundle,
+  renderRulerPreview,
+  type MeasurementEntityBundle,
+} from './measure/measurements';
+
 // P0-6 (DATA-AUTHORITY-AUDIT): panel specs stamped onto placed panels come
 // from the equipment authority (equipment-db record), NEVER a hardcoded
 // literal in this component.
