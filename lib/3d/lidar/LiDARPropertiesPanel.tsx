@@ -33,6 +33,8 @@ const PANEL_STYLE: React.CSSProperties = {
   fontSize: 11,
   lineHeight: '15px',
   minWidth: 200,
+  maxHeight: '40vh',
+  overflowY: 'auto',
   fontFamily: 'system-ui, -apple-system, sans-serif',
   boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
 };

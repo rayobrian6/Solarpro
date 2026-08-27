@@ -11408,24 +11408,30 @@ function SolarEngine3D({
 
 
       {/* v67: INSTRUCTIONS panel — context-aware helper text per placement mode.
-          Aurora frame 0070 parity. Bottom-left to mimic the left-sidebar slot.
+          Aurora frame 0070 parity.
 
-          POSITIONING: was left:10 which collided with the tool spine
-          (also at left:10) and the INSTRUCTIONS header was being cut off
-          ("UCTIONS" visible). Moved to left:90 (clear of the ~58px-wide
-          spine at left:10) and the existing layer toggles at left:60
-          (which extend ~30px past left:60). Stays in the left slot
-          Aurora uses, no longer overlapping the spine. */}
+          POSITIONING history (all of which collided with something):
+          v1: left:10,bottom:60 → covered by tool spine (left:10), "INSTR" cut off
+          v2: left:90,bottom:60 → overlapped the existing layer toggles
+              (left:60,bottom:16) and CanvasControls (left:12,bottom:12)
+          v3: left:200,bottom:200 → too far from the tool spine it's helping
+          v4 (current): right side, top:120, right:8, width:280, maxHeight:50vh
+              Sits between the 3D scene and the page-level DesignStudio
+              sidebar, NOT in the bottom-left at all. No conflict with
+              the tool spine, the Report a Bug, CanvasControls, the
+              layer toggles, or the 12:00 Solar widget. The help text
+              follows the active placement mode and is always visible. */}
       {stage === 'done' ? (
         <div
           data-testid="help-panel-mount"
           style={{
-            position: 'absolute', left: 90, bottom: 60,
-            width: 260, zIndex: 50,
+            position: 'absolute', right: 8, top: 120,
+            width: 280, maxHeight: '50vh', zIndex: 50,
             background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
             border: '1px solid rgba(255,255,255,0.10)', borderRadius: 10,
             padding: '2px 0',
             pointerEvents: 'auto',
+            overflowY: 'auto',
           }}
         >
           <HelpPanel
@@ -11489,10 +11495,16 @@ function SolarEngine3D({
         ] as LayerToggle[])}
       />
 
-      {/* Overlay toggles (bottom-left, above status bar — clear of tool sidebar) */}
+      {/* Overlay toggles (bottom area, clear of Report a Bug at bottom-left).
+          v67 was at left:60,bottom:16 which collided with both the
+          tool spine (left:10,top:50%) and the Report a Bug button
+          (page-level at fixed bottom-4 left-4 z-60) — making the toggle
+          buttons unclickable. v68 sits at bottom:12,left:260 (right of
+          the Report Bug), shares the bottom row with CanvasControls
+          (left:200,bottom:12) for a clean bottom-left-to-center dock. */}
       {stage === 'done' ? (
         <div style={{
-          position: 'absolute', left: 60, bottom: 16,
+          position: 'absolute', left: 260, bottom: 12,
           display: 'flex', flexDirection: 'row', gap: 6,
           background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
           border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '6px 10px', zIndex: 50,

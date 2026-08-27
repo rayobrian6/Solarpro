@@ -143,7 +143,7 @@ export const CanvasControls: React.FC<CanvasControlsProps> = ({
       aria-label="Canvas controls"
       style={{
         position: 'absolute',
-        left: 12,
+        left: 200,
         bottom: 12,
         zIndex: 50,
         display: 'flex',
