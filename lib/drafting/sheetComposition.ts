@@ -338,10 +338,14 @@ export function getFenceData(cad: CADModel, input?: Record<string, unknown>): {
     embedFt:       f?.postEmbedM   ? mToFt(f.postEmbedM)    : ((p?.fencePostEmbedmentFt as number) || 2.5),
     railCount:     f?.railCount    ?? 2,
     // AAC WS-9 — ONE seam, and it states its own basis. No literal here.
-    windSpeedMph: resolveSiteDesignLoads({
+    // BRAIDON PDF AUDIT 2026-08-27 (N11) — this descriptor is DISPLAY-ONLY (no arithmetic in
+    // this layer consumes it), and it printed the raw interpolated hazard value, so PV-3 read
+    // "WIND 107.533 MPH" beside PV-4C's "108 mph" for the same number. Take the resolver's
+    // display rounding; the full-precision value stays available to the calculation paths.
+    windSpeedMph: Math.round(resolveSiteDesignLoads({
       snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
       complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
-    }).windSpeedMph,
+    }).windSpeedMph),
   };
 }
 
@@ -398,10 +402,14 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
     setbackFt:     g?.setbackFt                ?? ((lay?.groundSetbackFt as number) || 5),
     // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
     // AAC WS-9 — ONE seam, basis-stated. No literal in the drafting layer.
-    windSpeedMph: resolveSiteDesignLoads({
+    // BRAIDON PDF AUDIT 2026-08-27 (N11) — this descriptor is DISPLAY-ONLY (no arithmetic in
+    // this layer consumes it), and it printed the raw interpolated hazard value, so PV-3 read
+    // "WIND 107.533 MPH" beside PV-4C's "108 mph" for the same number. Take the resolver's
+    // display rounding; the full-precision value stays available to the calculation paths.
+    windSpeedMph: Math.round(resolveSiteDesignLoads({
       snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
       complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
-    }).windSpeedMph,
+    }).windSpeedMph),
     snowPsf:       (p?.ahjGroundSnowPsf as number) || 0,
   };
 }
@@ -584,10 +592,14 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     conduitType:   canonicalConduitType((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null),
     // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
     // AAC WS-9 — ONE seam, basis-stated. No literal in the drafting layer.
-    windSpeedMph: resolveSiteDesignLoads({
+    // BRAIDON PDF AUDIT 2026-08-27 (N11) — this descriptor is DISPLAY-ONLY (no arithmetic in
+    // this layer consumes it), and it printed the raw interpolated hazard value, so PV-3 read
+    // "WIND 107.533 MPH" beside PV-4C's "108 mph" for the same number. Take the resolver's
+    // display rounding; the full-precision value stays available to the calculation paths.
+    windSpeedMph: Math.round(resolveSiteDesignLoads({
       snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
       complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
-    }).windSpeedMph,
+    }).windSpeedMph),
     totalPanels:   cad.totalPanels ?? 0,
     dcKw:          (cad.totalDcKw ?? 0).toFixed(2),
   };

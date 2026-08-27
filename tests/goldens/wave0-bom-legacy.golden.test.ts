@@ -9,6 +9,17 @@
 // changes a quantity, drops a line, reorders stages, or perturbs the nextId()
 // allocation on the legacy path fails HERE before it reaches a planset.
 // Snapshots live in tests/goldens/__snapshots__/ and are committed.
+//
+// DELIBERATE SNAPSHOT CHANGE — BRAIDON PDF AUDIT 2026-08-27 (N7).
+// The micro-fed-by-real-computeSystem-runs case moved
+//   `ac|junction_box|Soladeck|PV Junction Box|0786-41|2|ea`  →  `…|1|ea`.
+// The old count came from a filter that treated any run terminating at a JUNCTION BOX *or an AC
+// COMBINER* as a roof junction box. On a microinverter job two runs end at the combiner
+// (BRANCH_RUN and BRANCH_HOMERUN_RUN), so the AC combiner — a distinct listed device with its own
+// BOM line — was counted as a second Soladeck box, while PV-1B and E-1 both draw exactly ONE roof
+// j-box. Junction boxes are now counted as distinct junction-box NODES named on either end of the
+// run graph. The flat-input snapshots above are unchanged: they carry no run graph, so they still
+// use the documented ceil(deviceCount/16) fallback.
 // ============================================================================
 
 import { describe, it, expect } from 'vitest';

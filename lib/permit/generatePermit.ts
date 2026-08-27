@@ -634,8 +634,16 @@ export function generatePermitHTML(
       if (ml?.mountSpacingIn)    s.attachment.maxAllowedSpacing = ml.mountSpacingIn;
       if (ml?.upliftPerMountLbs) s.attachment.totalUpliftPerAttachment = ml.upliftPerMountLbs;
       if (!s.totalDeadLoadPsf)   s.totalDeadLoadPsf = ra.pvDeadLoadPsf + ra.roofDeadLoadPsf;
-      if (!s.moduleLoadPsf)      s.moduleLoadPsf = ra.pvDeadLoadPsf;
-      if (!s.rackingLoadPsf)     s.rackingLoadPsf = ra.pvDeadLoadPsf > 0 ? ra.pvDeadLoadPsf * 0.15 : 0.5;
+      // BRAIDON PDF AUDIT 2026-08-27 (N4) — these two lines manufactured the dead-load table.
+      // `ra.pvDeadLoadPsf` is ALREADY panel + racking (see structural-calc.ts: pvDeadLoad =
+      // panelWeightPsf + rackingWeightPsf), so assigning it to moduleLoadPsf mislabelled the
+      // combined figure as modules-only, and the 15 % line then added racking a SECOND time —
+      // the printed "TOTAL ADDED DEAD LOAD" came out 1.15× the load the attachment reactions
+      // were actually computed from. The v4 rafterAnalysis does not carry the split, so do not
+      // invent one: leave these unset and let PV-4C project the two components from the
+      // canonical snapshot engine (moduleDeadLoadLbs / rackingDeadLoadLbs ÷ array area), whose
+      // total IS the reaction basis. A fabricated split is worse than an absent one.
+      void 0;
       input.compliance.structural = s;
       console.log('[PLANSET] Server-side structural V4 computed rafter bending:', ra.bendingMomentDemandFtLbs?.toFixed(0), 'ft-lbs / capacity:', ra.bendingMomentCapacityFtLbs?.toFixed(0), 'ft-lbs');
     }

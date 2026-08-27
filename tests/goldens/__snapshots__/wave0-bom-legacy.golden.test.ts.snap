@@ -83,7 +83,7 @@ exports[`Wave 0 golden — BOM legacy roof MICRO fed by REAL computeSystem runs 
   "ac|terminator|Enphase|Q Cable Terminator (branch end, single-use)|Q-TERM-10|2|ea",
   "ac|sealing_cap|Enphase|Q Cable Sealing Cap (unused connector)|Q-SEAL-10|0|ea",
   "inverter|combiner|Enphase|IQ Combiner 6C|X-IQ-AM1-240-6C|1|ea",
-  "ac|junction_box|Soladeck|PV Junction Box|0786-41|2|ea",
+  "ac|junction_box|Soladeck|PV Junction Box|0786-41|1|ea",
   "ac|wire|Southwire|#10 AWG THWN-2|THWN2-10|213|ft",
   "ac|wire|Southwire|#10 AWG THWN-2 Green EGC|THWN2-GRN-10|41|ft",
   "ac|wire|Southwire|#12 AWG THWN-2 Green EGC|THWN2-GRN-12|23|ft",

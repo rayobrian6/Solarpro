@@ -179,11 +179,17 @@ describe('W5 §2 — IQ8A SKU is IQ8A-72-2-US only', () => {
 // ─── 5. DS-1 exact-vs-family module document ─────────────────────────────────
 
 describe('W5 §3 — module datasheet exactness', () => {
-  it('detects the Qcells 400W selection is served only by the 385-405W family sheet', () => {
+  it('detects the Qcells 400W selection is served only by a FAMILY series sheet', () => {
+    // BRAIDON PDF AUDIT 2026-08-27 (N2) — family range moved 385-405 → 395-415 because the
+    // registered Qcells document changed, deliberately: the asset row's docTitle said
+    // "385-405W" while its sourceUrl was the 395-415 Wp sheet, and the archived image was
+    // page 1 (marketing, no spec table). equipment-db, its datasheetUrl and the asset are now
+    // all on ZZ304800120 Rev06 2023-12. The RULE is unchanged: a series sheet is never exact,
+    // and the range still covers the selected 400 W.
     const ex = resolveModuleDatasheetExactness('Q.PEAK DUO BLK ML-G10+ 400W', 400);
     expect(ex.stateLabel).toBe('FAMILY-DATASHEET-PENDING');
     expect(ex.isExact).toBe(false);
-    expect(ex.familyRange).toEqual([385, 405]);
+    expect(ex.familyRange).toEqual([395, 415]);
     expect(ex.selectedWatts).toBe(400);
   });
 

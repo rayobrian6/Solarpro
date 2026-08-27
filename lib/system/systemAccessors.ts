@@ -36,6 +36,7 @@ import {
   type SysType,
 } from '@/lib/permit/utils/helpers';
 import type { SubSystemKey } from './subSystemEquipment';
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 
 // ── Accessor: getSystemType ──────────────────────────────────────
 /**
@@ -110,12 +111,24 @@ export function getEquipmentContext(input: PermitInput, cad?: CADModel | null): 
   // Path 1: SystemDefinition (preferred — but only if it has real data)
   const sd = cad?.systemDefinition;
   if (sd?.panel?.manufacturer && sd.panel.manufacturer !== '—') {
+    // BRAIDON PDF AUDIT 2026-08-27 (N1) — the SystemDefinition is a CARRIAGE, not a source of
+    // truth for module electrical data. Its panel.voc / panel.isc are scalars copied onto the
+    // design when it was saved, so a correction to the equipment-db record could never reach the
+    // sheets: E-1's data rail and the SCHED modules table both went on printing Voc 41.6 V /
+    // Isc 12.26 A (generic copy-paste values) after the catalogue was corrected to the Qcells
+    // datasheet's 45.24 V / 11.05 A. Same precedence inversion the panelSpecs.ts doctrine calls
+    // the panel0 disease, at the shared accessor.
+    // Rule: when the carried MODEL resolves to a canonical catalogue record, the RECORD's
+    // electrical values win. `resolveModuleIdentity` is the canonical accessor — it admits an
+    // exact unique match and fails closed on anything partial or ambiguous, so an unrecognised
+    // model keeps the carried scalars rather than silently borrowing another product's specs.
+    const _rec = resolveModuleIdentity({ model: sd.panel.model }).spec;
     const result: ResolvedEquipment = {
       panelManufacturer:    sd.panel.manufacturer || '—',
       panelModel:           sd.panel.model || '—',
-      panelWatts:           sd.panel.wattage || 0,
-      panelVoc:             sd.panel.voc || 0,
-      panelIsc:             sd.panel.isc || 0,
+      panelWatts:           _rec?.watts ?? sd.panel.wattage ?? 0,
+      panelVoc:             _rec?.voc ?? sd.panel.voc ?? 0,
+      panelIsc:             _rec?.isc ?? sd.panel.isc ?? 0,
       inverterManufacturer: sd.electrical.inverterManufacturer || '—',
       inverterModel:        sd.electrical.inverterModel || '—',
       inverterType:         sd.electrical.inverterType || '—',

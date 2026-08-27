@@ -797,6 +797,16 @@ export function pageDisconnectDirectory(
     ? 'SOLAR PV SYSTEM IS EQUIPPED WITH RAPID SHUTDOWN. TURN THE RAPID SHUTDOWN SWITCH TO THE "OFF" POSITION TO SHUT DOWN THE PV SYSTEM AND REDUCE SHOCK HAZARD IN THE ARRAY.'
     : 'SOLAR PV SYSTEM EQUIPPED WITH RAPID SHUTDOWN. TURN RAPID SHUTDOWN SWITCH TO THE "OFF" POSITION TO SHUT DOWN PV SYSTEM AND REDUCE SHOCK HAZARD IN THE ARRAY.';
   const rsdRef = is2023 ? 'NEC 690.12(D)' : 'NEC 690.56(C)';
+  // BRAIDON PDF AUDIT 2026-08-27 (N9) — the rapid-shutdown building placard is EDITION-DEPENDENT
+  // (wording, colour and reflectivity change by NEC edition, and under NEC 2005 it has no basis
+  // at all). fieldLabels.ts already withholds it correctly — PV-5 listed
+  // `rapid-shutdown-building-placard` under "PLACARDS PENDING CODE AUTHORITY — NOT RELEASED FOR
+  // PROCUREMENT / INSTALLATION" — but THIS plaque, on the same sheet, simultaneously printed the
+  // finished red RSD band and asserted "IT SATISFIES ... THE RAPID-SHUTDOWN BUILDING PLACARD",
+  // while L-1/L-2/L-3 were marked N/A in the label schedule and the BOM ordered LABEL-RSD qty 1.
+  // Four different answers for one safety label. The plaque may only claim what the adopted
+  // edition supports; when the edition is not governed, the RSD portion is explicitly pending.
+  const _rsdEditionPending = cp.nec == null;
 
   // Source list for the CAUTION header.
   const sources = `UTILITY GRID + SOLAR PV${hasBattery ? ' + ENERGY STORAGE' : ''}`;
@@ -817,7 +827,11 @@ export function pageDisconnectDirectory(
   const _pv6Body = `
       <div class="note-bar" style="margin-bottom:7px;">
         THE PLACARD BELOW SHALL BE PERMANENTLY INSTALLED AT THE MAIN SERVICE DISCONNECT (ENGRAVED PHENOLIC OR UV-STABLE PRINTED ALUMINUM, HIGH-CONTRAST, READABLE AT EYE LEVEL).
-        IT SATISFIES THE POWER-SOURCE DIRECTORY (NEC 705.10), THE PV DISCONNECT-LOCATION PLAQUE (NEC 690.56(B)), AND THE RAPID-SHUTDOWN BUILDING PLACARD (${rsdRef}).
+        IT SATISFIES THE POWER-SOURCE DIRECTORY (NEC 705.10) AND THE PV DISCONNECT-LOCATION PLAQUE (NEC 690.56(B)).${
+          _rsdEditionPending
+            ? ` THE RAPID-SHUTDOWN BUILDING PLACARD IS <strong>NOT RELEASED</strong> — ITS WORDING, COLOUR AND REFLECTIVITY ARE EDITION-DEPENDENT AND THE JURISDICTION'S ADOPTED NEC EDITION IS NOT ESTABLISHED. THE RAPID-SHUTDOWN BAND SHOWN BELOW IS A DESIGN-REVIEW PREVIEW ONLY — DO NOT ORDER OR INSTALL IT UNTIL THE ADOPTION IS GOVERNED.`
+            : ` IT ALSO SATISFIES THE RAPID-SHUTDOWN BUILDING PLACARD (${rsdRef}).`
+        }
         GROUP WITH ANY OTHER ON-SITE POWER-SOURCE DIRECTORIES SO ALL APPEAR TOGETHER.
       </div>
 
@@ -865,9 +879,10 @@ export function pageDisconnectDirectory(
         <!-- rapid-shutdown band (red field — NEC-mandated color for PV RSD placard) -->
         <div style="background:#cc0000;color:#fff;padding:6px 10px;border-top:3px solid #000;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
           <div>
-            <div style="font-size:10px;font-weight:900;letter-spacing:0.5px;">RAPID SHUTDOWN</div>
+            <div style="font-size:10px;font-weight:900;letter-spacing:0.5px;">RAPID SHUTDOWN${_rsdEditionPending ? ' &mdash; NOT RELEASED (PREVIEW)' : ''}</div>
             <div style="font-size:7.6px;font-weight:700;line-height:1.4;margin-top:1px;">${escapeH(rsdText)}</div>
             <div style="font-size:7px;font-weight:800;margin-top:2px;">TYPE: ${isMicro ? 'MODULE-LEVEL — CONDUCTORS OUTSIDE THE ARRAY BOUNDARY REDUCE TO A SAFE LEVEL' : 'ARRAY-LEVEL — CONTROLLED CONDUCTORS PER ' + rsdRef} &nbsp;·&nbsp; ${escapeH(rsdRef)}</div>
+            ${_rsdEditionPending ? `<div style="font-size:6.8px;font-weight:800;margin-top:3px;background:#fff;color:#cc0000;padding:2px 4px;">N9 &mdash; EDITION-DEPENDENT PLACARD, ADOPTED NEC EDITION NOT ESTABLISHED. DO NOT ORDER OR INSTALL. SPECIFICATION FOLLOWS THE GOVERNED ADOPTION, NEVER A DEFAULT YEAR.</div>` : ''}
           </div>
           <svg viewBox="0 0 96 60" width="96" style="flex:0 0 auto;">
             <path d="M8 44 L48 18 L88 44 Z" fill="none" stroke="#fff" stroke-width="1.4"/>
@@ -958,9 +973,17 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
       + `<td class="il">${label}</td><td class="iv">${disp}</td></tr>`;
   };
 
-  // Get specs from the spec sheet DB
-  const voc = panels?.panelVoc || project.panelVoc || _dbPanel?.voc || 41.6;
-  const isc = panels?.panelIsc || project.panelIsc || _dbPanel?.isc || 12.26;
+  // BRAIDON PDF AUDIT 2026-08-27 (N1) — this chain ran the panel-spec precedence BACKWARDS
+  // relative to the documented doctrine in utils/panelSpecs.ts: `panels` is
+  // system.inverters[0].strings[0] (the panel0 scalar, the FENCE module on a hybrid), and it beat
+  // the resolved equipment-db record. So a stale scalar saved onto a project outranked the
+  // manufacturer datasheet, and a corrected DB record could not reach this sheet at all.
+  // Doctrine order: per-sub resolved record → equipment-db exact match → legacy scalars last.
+  // The old `|| 41.6` / `|| 12.26` literals were the generic copy-paste values, not this module's.
+  const _specKeySS: SubSystemKey = _isFence ? 'fence' : _isGround ? 'ground' : 'roof';
+  const _psSS = resolvePanelSpecs(input, cad, _specKeySS);
+  const voc = _psSS.voc || _dbPanel?.voc || panels?.panelVoc || project.panelVoc || 0;
+  const isc = _psSS.isc || _dbPanel?.isc || panels?.panelIsc || project.panelIsc || 0;
   const pmax = modWatts;
   // Vmp/Imp: manufacturer values when the DB record resolves; otherwise the
   // nameplate-consistent estimate (Vmp≈Voc×0.83, Imp=Pmax/Vmp).
@@ -979,7 +1002,10 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const _spSpec = projectStructuralFromInput(input);
   const panelLen = _spSpec.moduleHeightIn ?? project.panelLengthIn ?? _dbPanel?.length ?? 66;
   const panelWid = _spSpec.moduleWidthIn ?? project.panelWidthIn ?? _dbPanel?.width  ?? 40;
-  const panelWt  = project.panelWeightLbs || _dbPanel?.weight || 44;
+  // BRAIDON PDF AUDIT 2026-08-27 (N1) — scalars-before-catalogue again, plus a bare 
+  // literal. The equipment-db record is the datasheet; a posted scalar is a saved copy that goes
+  // stale the moment the record is corrected.
+  const panelWt  = _psSS.weightLbs || _dbPanel?.weight || project.panelWeightLbs || 0;
   // Module efficiency = manufacturer/CEC datasheet value when the DB record
   // resolves; only fall back to the geometric estimate (Pmax ÷ area) when it
   // doesn't. Back-computing from the drawn footprint is what produced the

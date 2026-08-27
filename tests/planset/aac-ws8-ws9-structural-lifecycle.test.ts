@@ -43,6 +43,7 @@ import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import {
   buildEquipmentDocumentAuthority, sheetDocumentApplicability,
 } from '@/lib/permit/snapshot/documentAuthority';
+import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
 import {
   validateEngineeringReviewInput, uncoveredReview, LICENSED_REVIEW_ROLES,
 } from '@/lib/engineeringReview/types';
@@ -235,7 +236,11 @@ describe('AAC WS-8 · AUTHORITATIVE is reachable WHERE FACTS EXIST, and only the
   it('with REAL archived + hash-bound facts AND an applicable document, AUTHORITATIVE is reached', () => {
     // The version-EXACT manual keyed to the selected model: applicable AND archived.
     const region = buildEquipmentDocumentAuthority(
-      [{ category: 'racking_detail', equipmentId: 'rooftech-mini', selectedModel: 'RT-MINI II' }],
+      // BRAIDON PDF AUDIT 2026-08-27 — the POSITIVE case now uses the rooftech-mini row with its
+      // matching selected model. That row used to cite the RT-MINI **II** manual for the gen-1
+      // RT-MINI product; the version-exact gen-1 manual is archived now, so the row is
+      // self-consistent and reaches AUTHORITATIVE once registry facts exist.
+      [{ category: 'racking_detail', equipmentId: 'rooftech-mini', selectedModel: 'RT-MINI' }],
       { 'racking_detail:rooftech-mini': { archivedInRepo: true, sha256: sha, status: 'current' } }, null);
     const e = region.entries['racking_detail:rooftech-mini'];
     expect(e.registryFactsPresent).toBe(true);
@@ -244,13 +249,24 @@ describe('AAC WS-8 · AUTHORITATIVE is reachable WHERE FACTS EXIST, and only the
   });
 
   it('facts alone NEVER promote a document that does not cover the selected version', () => {
-    const region = buildEquipmentDocumentAuthority(
-      [{ category: 'racking_detail', equipmentId: 'rooftech-mini', selectedModel: 'RT-MINI' }],
-      { 'racking_detail:rooftech-mini': { archivedInRepo: true, sha256: sha, status: 'current' } }, null);
-    const e = region.entries['racking_detail:rooftech-mini'];
-    expect(e.applicability.applicabilityVerified).toBe(false);
-    expect(e.applicability.authoritative).toBe(false);
-    expect(e.applicability.state).toBe('PENDING_APPLICABILITY');
+    // The NEGATIVE case needs a row that genuinely conflates versions — asset.model present in
+    // the docTitle FOLLOWED by a version token. No live row does that any more (the rooftech-mini
+    // row now archives the version-exact gen-1 manual), and a safety rule must not depend on
+    // production data staying wrong. Construct the conflation and hand it the STRONGEST possible
+    // registry facts: archived in repo, content-hash bound, status current. Facts must still not
+    // promote it, because applicability is a separate axis from availability.
+    const conflating = {
+      ...(getManufacturerAsset('rooftech-mini', 'racking_detail') as NonNullable<ReturnType<typeof getManufacturerAsset>>),
+      model: 'RT-MINI',
+      docTitle: 'Roof Tech RT-MINI II Installation Manual (Jun 2025)',
+    };
+    const a = evaluateDocumentApplicability('RT-MINI', conflating, null,
+      { archivedInRepo: true, sha256: sha, status: 'current' });
+    expect(a.applicabilityVerified).toBe(false);
+    expect(a.authoritative).toBe(false);
+    expect(a.state).toBe('PENDING_APPLICABILITY');
+    // and the availability facts ARE still reported — they just never become authority.
+    expect(a.archived).toBe(true);
   });
 
   it('the resolver contributes facts ONLY for a version-EXACT archived document', async () => {
@@ -671,8 +687,16 @@ describe('AAC WS-9 · the renderer determines no authority', () => {
     const verdict = sheetDocumentApplicability({
       region: null, category: 'racking_detail', equipmentId: 'rooftech-mini', selectedModel: 'RT-MINI',
     });
+    // THE rule this case pins: with no snapshot region there are no registry facts, so nothing
+    // may be promoted to AUTHORITATIVE. That is unchanged.
     expect(verdict.authoritative).toBe(false);
-    expect(verdict.applicabilityVerified).toBe(false);
+    // BRAIDON PDF AUDIT 2026-08-27 — `applicabilityVerified` used to be false here too, but only
+    // because the archived document named a different product version. Now that the version-exact
+    // gen-1 RT-MINI manual is on file, applicability IS established while authority still is not
+    // — which is exactly the separation this file documents ("AUTHORITATIVE is a STRICTER verdict
+    // than APPLICABLE"). Asserting both false would re-couple the two axes.
+    expect(verdict.applicabilityVerified).toBe(true);
+    expect(verdict.state).not.toBe('AUTHORITATIVE');
   });
 });
 

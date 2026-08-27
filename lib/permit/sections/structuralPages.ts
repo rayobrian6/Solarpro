@@ -12,6 +12,7 @@ import {
 import { titleBlock } from '../utils/titleBlock';
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { analyzeFenceWind } from '@/lib/structural/fenceWindEngine';
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import {
   projectStructuralFromInput, fmt, fmtStr, findCheck, checkResultLabel,
   checkThresholdLabel, projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL,
@@ -719,7 +720,23 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const upliftAtt   = _attChk?.demand != null ? _attChk.demand.toFixed(0) : (structural?.wind?.upliftPerAttachment?.toFixed(0) || '—');
   const groundSnow  = _proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? '—');
   const roofSnow    = _proj.present && _proj.roofSnowPsf != null ? _proj.roofSnowPsf.toFixed(1) : (structural?.snow?.roofSnowLoad?.toFixed(1) || '—');
-  const snowAtt     = structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—';
+  // BRAIDON PDF AUDIT 2026-08-27 (N3) — `upliftAtt` above was migrated to the canonical
+  // attachment objects (_attChk.demand) but this line was left on the legacy
+  // structural.snow.snowLoadPerAttachment path, which uses a different tributary. The result:
+  // PV-4C's SNOW ANALYSIS box printed 111 lbs while the ATTACHMENT REACTION SCHEDULE on the
+  // SAME SHEET printed 185 lb for every attachment (roof snow 15.626 psf × 11.817 ft² = 184.6).
+  // Two snow-per-attachment numbers on one sheet, and only one of them reconciles in §8.
+  // Source it from the same canonical attachment objects the schedule and the reconciliation use.
+  // Guard: only project the canonical reaction when a roof snow load is actually ESTABLISHED.
+  // On a site with no snow authority the attachment objects carry snowReactionLbs = 0, and
+  // printing "0 lbs" would assert a computed zero where the honest answer is "not established".
+  const _snowEstablished = (_proj.roofSnowPsf ?? 0) > 0 || (_proj.groundSnowPsf ?? 0) > 0;
+  const _snowAttCanon = _snowEstablished
+    ? (_proj.attachments?.find(a => a.snowReactionLbs != null)?.snowReactionLbs ?? null)
+    : null;
+  const snowAtt     = _snowAttCanon != null
+    ? _snowAttCanon.toFixed(0)
+    : (structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—');
   const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
   const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
   const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '—';
@@ -755,12 +772,39 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const _deflRatio = (_deflRaw != null && _adRaw) ? _deflRaw / _adRaw : null;
   const bendUtil = _bendRatio != null ? (_bendRatio * 100).toFixed(0) : '—';
   const _governs = (_deflRatio ?? 0) > (_bendRatio ?? 0) ? 'deflection' : 'bending';
-  // "TOTAL ADDED DEAD LOAD" must equal the sum of the component rows above it —
-  // totalDeadLoadPsf is EXISTING roof + PV, a different (also useful) number.
-  const _addedRaw = (structural?.moduleLoadPsf != null || structural?.rackingLoadPsf != null)
-    ? (structural?.moduleLoadPsf ?? 0) + (structural?.rackingLoadPsf ?? 0) + 0.2
-    : null;
-  const addedDL = _addedRaw != null ? _addedRaw.toFixed(1) : '—';
+  // BRAIDON PDF AUDIT 2026-08-27 (N4) — this table published a dead load the attachment
+  // reactions never saw, and it was inflated three ways:
+  //   • generatePermit.ts set moduleLoadPsf = pvDeadLoadPsf, which is ALREADY panel + racking;
+  //   • it then invented rackingLoadPsf as a flat 15 % surcharge ON TOP — racking twice;
+  //   • a hardcoded +0.2 "electrical" was added that no engine computes.
+  // Net: printed total = 1.15 × (true added dead) + 0.2. On this job the reactions carried
+  // 2.371 psf while the sheet published 2.9 psf (2.371 × 1.15 + 0.2 = 2.93) — a plan reviewer
+  // who multiplies 2.9 psf by the tributary area cannot reproduce the DEAD column beside it.
+  // The canonical engine already carries the two components separately, so project THEM and
+  // let the total BE the value the reactions use. Display and reactions are now one number.
+  const _engMod  = _proj.engine?.moduleDeadLoadLbs ?? null;
+  const _engRack = _proj.engine?.rackingDeadLoadLbs ?? null;
+  const _engAdded = _proj.engine?.addedDeadLoadPsf ?? null;
+  // The engine's addedDeadLoadPsf is (module + racking) over the array BOUNDING BOX, while the
+  // reaction schedule multiplies it by a tributary derived from Σ module areas — two different
+  // area bases. Dividing the component weights by the reconciliation area would therefore produce
+  // rows that do not sum to the total. Split the ONE reaction-basis psf by the component WEIGHTS
+  // instead, so module + racking === TOTAL exactly and the total is still what the reactions used.
+  const _engWeightSum = (_engMod ?? 0) + (_engRack ?? 0);
+  const _modPsfCanon  = (_engAdded != null && _engMod  != null && _engWeightSum > 0)
+    ? Number((_engAdded * (_engMod / _engWeightSum)).toFixed(2)) : null;
+  // Take racking as the REMAINDER of the same total, so the two printed rows always add up to
+  // the printed total exactly. Rounding each share independently left 2.11 + 0.17 beside a
+  // total of 2.29 — the reader is entitled to add the column and get the answer.
+  const _rackPsfCanon = (_engAdded != null && _modPsfCanon != null)
+    ? Number((_engAdded - _modPsfCanon).toFixed(2)) : null;
+  // The engine's added dead load IS the reaction basis (structuralAuthority deadPerMount =
+  // run.addedDeadLoadPsf × tributary). Never re-derive it from rounded display components.
+  const _addedRaw = _proj.engine?.addedDeadLoadPsf
+    ?? ((structural?.moduleLoadPsf != null || structural?.rackingLoadPsf != null)
+      ? (structural?.moduleLoadPsf ?? 0) + (structural?.rackingLoadPsf ?? 0)
+      : null);
+  const addedDL = _addedRaw != null ? _addedRaw.toFixed(2) : '—';  // 2dp so the component rows sum to it
   // Truss framing is analyzed by load capacity (PSF), not rafter bending (ft-lbs).
   // Rendering its 0-demand / capacity-in-PSF as "0 ft-lbs / 45 ft-lbs" read as broken.
   const _isTruss      = (structural?.rafter?.framingType === 'truss') || (structural?.rafter?.bendingMoment === 0 && (structural?.rafter?.allowableBendingMoment || 0) > 0);
@@ -885,18 +929,24 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <table class="equip-table">
         <thead><tr><th>Component</th><th>Weight (PSF)</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td class="fw7">PV Modules</td><td class="tr mono">${moduleDL} PSF</td><td>Per manufacturer spec sheet, distributed over array area</td></tr>
-          <tr class="bg-lt"><td class="fw7">Racking / Rails</td><td class="tr mono">${rackDL} PSF</td><td>Aluminum rail + L-foot + clamp assembly</td></tr>
-          <tr><td class="fw7">Electrical (Wiring, Conduit)</td><td class="tr mono">0.2 PSF</td><td>Estimate for home-run conduit + module leads</td></tr>
-          <tr class="bg-lt" style="font-weight:bold;border-top:2px solid #000"><td class="fw7">TOTAL ADDED DEAD LOAD</td><td class="tr mono fw7">${addedDL} PSF</td><td>Sum of PV components above — added to the existing roof</td></tr>
-          <tr style="font-weight:bold;"><td class="fw7">COMBINED ROOF DEAD LOAD</td><td class="tr mono fw7">${totalDL} PSF</td><td>Existing roof construction (typically 8–12 PSF) + PV system</td></tr>
+          <tr><td class="fw7">PV Modules</td><td class="tr mono">${_modPsfCanon != null ? _modPsfCanon.toFixed(2) : moduleDL} PSF</td><td>${_modPsfCanon != null ? `&Sigma; module weight ${_engMod?.toFixed(0)} lb &mdash; manufacturer datasheet weight, distributed over the array footprint` : 'Per manufacturer spec sheet, distributed over array area'}</td></tr>
+          <tr class="bg-lt"><td class="fw7">Racking / Rails</td><td class="tr mono">${_rackPsfCanon != null ? _rackPsfCanon.toFixed(2) : rackDL} PSF</td><td>${_rackPsfCanon != null ? `&Sigma; racking weight ${_engRack?.toFixed(0)} lb &mdash; rail + mount + clamp assembly, same footprint` : 'Aluminum rail + L-foot + clamp assembly'}</td></tr>
+          <tr class="bg-lt" style="font-weight:bold;border-top:2px solid #000"><td class="fw7">TOTAL ADDED DEAD LOAD</td><td class="tr mono fw7">${addedDL} PSF</td><td>THE value carried into the attachment reaction schedule (Dead column = this &times; per-mount tributary)</td></tr>
+          <tr style="font-weight:bold;"><td class="fw7">COMBINED ROOF DEAD LOAD</td><td class="tr mono fw7">${totalDL} PSF</td><td>${_addedRaw != null && structural?.totalDeadLoadPsf != null ? `Existing roof construction ${(structural.totalDeadLoadPsf - _addedRaw).toFixed(1)} PSF (ASSUMED &mdash; not field-verified) + PV system` : 'Existing roof construction (assumed) + PV system'}</td></tr>
         </tbody>
       </table>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>DEAD LOAD INTERPRETATION:</strong>
         The added PV dead load of ${addedDL} PSF is distributed uniformly over the array footprint, for a combined roof
-        dead load of ${totalDL} PSF. This represents a minimal addition relative to the existing roof dead load (typically
-        8–12 PSF for asphalt shingle on plywood sheathing).
+        dead load of ${totalDL} PSF. ${
+          // BRAIDON PDF AUDIT 2026-08-27 (D54/N4) — this sentence used to say the existing roof
+          // is "typically 8–12 PSF" while the COMBINED figure beside it was built on the engine's
+          // 15.0 PSF assumption, so the two numbers on one line could not be reconciled by adding
+          // them. State the assumption that was actually used, and label it an assumption.
+          (_addedRaw != null && structural?.totalDeadLoadPsf != null)
+            ? `The existing roof construction is carried at an ASSUMED ${(structural.totalDeadLoadPsf - _addedRaw).toFixed(1)} PSF (engine default for this roof type — NOT a field-verified value; a roof with fewer or more layers will differ).`
+            : `The existing roof construction is carried at an engine-default assumption — NOT a field-verified value.`
+        } The PV addition is minimal relative to that existing construction.
         ${_reviewRequired
           ? `<strong style="color:#b91c1c;">OBSERVED FRAMING: ${escapeH(_proj.observedFramingLine)} — ${escapeH(_proj.observedFramingSource)}. EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED.</strong>
              The observed framing geometry is OPERATOR-ENTERED OBSERVATION and does not verify capacity; the existing framing
@@ -2153,16 +2203,27 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
               const _dcRunCell = _schedIsMicro
                 ? 'MC4 / EN4 (690.31)'
                 : `${str.wireLength}`;
+              // BRAIDON PDF AUDIT 2026-08-27 (N1) — this row printed `str.panelVoc` / `str.panelIsc`
+              // straight off the posted payload with NO catalogue lookup, so the MAJOR EQUIPMENT
+              // SCHEDULE kept showing 41.6 V / 12.26 A (the generic copy-paste values) beside the
+              // module's own name after the equipment-db record was corrected to the datasheet's
+              // 45.24 V / 11.05 A — the schedule contradicting E-1 on the same package. Resolve the
+              // module by the model this very row prints; fail closed on an unrecognised model and
+              // keep the posted scalar rather than borrowing another product's electrical data.
+              const _schedRec = resolveModuleIdentity({ model: str.panelModel }).spec;
+              const _schedVoc = _schedRec?.voc ?? str.panelVoc;
+              const _schedIsc = _schedRec?.isc ?? str.panelIsc;
+              const _schedWatts = _schedRec?.watts ?? str.panelWatts;
               return `
             <tr>
               <td class="fw7">${invIdx + 1}-${strIdx + 1}</td>
               ${_schedHybrid ? `<td class="fw7">${_schedSubOf(inv)}</td>` : ''}
               <td>${str.panelManufacturer || '—'}</td><td>${str.panelModel || '—'}</td>
               <td class="tr fw7">${str.panelCount}</td>
-              <td class="tr">${str.panelWatts}W</td>
-              <td class="tr">${str.panelVoc}V</td>
-              <td class="tr">${str.panelIsc}A</td>
-              <td class="tr fw7">${(str.panelCount * str.panelWatts / 1000).toFixed(2)}</td>
+              <td class="tr">${_schedWatts}W</td>
+              <td class="tr">${_schedVoc}V</td>
+              <td class="tr">${_schedIsc}A</td>
+              <td class="tr fw7">${(str.panelCount * (_schedWatts ?? 0) / 1000).toFixed(2)}</td>
               <td${_schedIsMicro ? ' style="font-size:7.5px"' : ''}>${_dcLeadCell}</td>
               <td class="tr"${_schedIsMicro ? ' style="font-size:7.5px"' : ''}>${_dcRunCell}</td>
             </tr>`;

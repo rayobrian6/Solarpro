@@ -102,10 +102,15 @@ describe('v47.423 — getBrandMinMpptCurrent()', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('v47.423 — evaluatePanelBrandCompatibility() core classification', () => {
-  it('flags Q.PEAK DUO 400W on Growatt as INCOMPATIBLE (12.26 × 1.25 = 15.33 A > 13.5 A)', () => {
+  // BRAIDON PDF AUDIT 2026-08-27 (N1) — the Isc moved 12.26 → 11.05 A because the equipment-db
+  // record was carrying a generic copy-paste template rather than the Qcells datasheet
+  // (ML-G10+ 395-415 Rev06, 400 W class: Isc 11.05 A). The CLASSIFICATION this test exists to
+  // pin is unchanged — 11.05 × 1.25 = 13.81 A still exceeds Growatt's 13.5 A per-MPPT cap, so
+  // the panel is still INCOMPATIBLE and the headroom is still negative. Only the arithmetic moved.
+  it('flags Q.PEAK DUO 400W on Growatt as INCOMPATIBLE (11.05 × 1.25 = 13.81 A > 13.5 A)', () => {
     const r = evaluatePanelBrandCompatibility(qcells400(), growatt());
     expect(r.status).toBe('incompatible');
-    expect(r.panel.designCurrent).toBeCloseTo(12.26 * 1.25, 1);
+    expect(r.panel.designCurrent).toBeCloseTo(11.05 * 1.25, 1);
     expect(r.brand.effectiveMaxInputCurrentPerMppt).toBe(13.5);
     expect(r.headroomPct).toBeLessThan(0);
   });
@@ -375,7 +380,7 @@ describe('v47.423 — result payload shape', () => {
     expect(r.panel).toMatchObject({
       id:           'qcells-peak-duo-400',
       manufacturer: 'Q CELLS',
-      isc:          12.26,
+      isc:          11.05,        // N1 — datasheet value (was the copy-paste 12.26)
     });
     expect(r.panel.designCurrent).toBeGreaterThan(0);
   });

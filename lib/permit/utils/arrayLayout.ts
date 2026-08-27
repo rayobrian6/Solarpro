@@ -23,6 +23,7 @@
 import type { PermitInput } from '../types';
 import { classifyPanel } from './subSystems';
 import { resolvePanelSpecs } from './panelSpecs';
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import type { HybridEquipmentCarrier } from './helpers';
 import type { CADModel } from '@/lib/cad/types';
 
@@ -88,14 +89,33 @@ export function resolveArrayStructuralLayout(
   // ── Panel physical dimensions (single-sourced: per-sub authority when
   //    scoped, else CAD panel dims from the selected equipment, else the
   //    project fallback). Long ≥ short always. ──
+  // BRAIDON PDF AUDIT 2026-08-27 (N1) — the per-sub authority above is only consulted when the
+  // call is SUB-SCOPED. An ordinary single-system planset passes no subSystemKey, so subSpecs is
+  // null and the chain fell straight through to the posted project scalars — and, failing those,
+  // to the literals 66.9 × 40.9 in and 50 lb. That is why the dead load and the array footprint
+  // could not be corrected by fixing the equipment-db record: nothing on the unscoped path ever
+  // read the catalogue. The module MODEL is known on every path, so resolve it canonically and
+  // use the record when it resolves. `resolveModuleIdentity` fails closed on a partial or
+  // ambiguous model, so an unrecognised module still falls back exactly as before.
+  // (the narrowed `cad` param here carries no systemDefinition, so the model comes off the
+  // posted fleet — the same string the sheets already name as the selected module)
+  const _catModel = input.system?.inverters
+    ?.flatMap(inv => inv.strings ?? [])
+    .find(st => st?.panelModel)?.panelModel ?? null;
+  const _cat = subSpecs ? null : (resolveModuleIdentity({ model: _catModel }).spec ?? null);
   const rawW = (cad?.panelWidthM ?? 0) > 0 ? cad!.panelWidthM * M_TO_IN : (project.panelWidthIn || 0);
   const rawH = (cad?.panelHeightM ?? 0) > 0 ? cad!.panelHeightM * M_TO_IN : (project.panelLengthIn || 0);
-  const dimA = (subSpecs?.widthIn ?? 0) > 0 ? subSpecs!.widthIn : (rawW > 0 ? rawW : 40.9);
-  const dimB = (subSpecs?.lengthIn ?? 0) > 0 ? subSpecs!.lengthIn : (rawH > 0 ? rawH : 66.9);
+  const dimA = (subSpecs?.widthIn ?? 0) > 0 ? subSpecs!.widthIn : (_cat?.width ?? (rawW > 0 ? rawW : 40.9));
+  const dimB = (subSpecs?.lengthIn ?? 0) > 0 ? subSpecs!.lengthIn : (_cat?.length ?? (rawH > 0 ? rawH : 66.9));
   const panelLengthIn = Math.max(dimA, dimB);
   const panelWidthIn = Math.min(dimA, dimB);
   const _legacyWeight = project.panelWeightLbs || 50;
-  const panelWeightLbs = (subSpecs?.weightLbs ?? 0) > 0 ? subSpecs!.weightLbs : _legacyWeight;
+  const panelWeightLbs = (subSpecs?.weightLbs ?? 0) > 0 ? subSpecs!.weightLbs
+    : (_cat?.weight ?? _legacyWeight);
+  if (_cat && Math.abs((_cat.weight ?? 0) - _legacyWeight) > 0.05) {
+    console.warn(`[arrayLayout] unscoped dead-load module weight from catalogue: `
+      + `${_legacyWeight} lbs (posted scalar) → ${_cat.weight} lbs (${_cat.model})`);
+  }
   if (subSpecs && subSpecs.weightLbs > 0 && Math.abs(subSpecs.weightLbs - _legacyWeight) > 0.05) {
     console.warn(`[arrayLayout] ${subSystemKey} dead-load module weight recomputed: `
       + `${_legacyWeight} lbs (project panel0 scalar) → ${subSpecs.weightLbs} lbs (${subSpecs.model})`);

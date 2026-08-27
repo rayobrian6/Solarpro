@@ -189,17 +189,21 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     category: 'solar_panel',
     topologyType: 'STRING_INVERTER',
     electricalSpecs: {
-      watts: 400, voc: 49.6, vmp: 41.8, isc: 10.18, imp: 9.57,
+      // BRAIDON PDF AUDIT 2026-08-27 (N1) — second copy of this module, and its electrical
+      // specs disagreed with BOTH the equipment-db record AND the datasheet (Voc 49.6 / Isc
+      // 10.18 belong to no ML-G10+ power class). Transcribed from the archived sheet:
+      // Q.PEAK DUO BLK ML-G10+ 395-415 Wp Rev06 (ZZ304800120_DS) p.2, POWER CLASS 400.
+      watts: 400, voc: 45.24, vmp: 37.95, isc: 11.05, imp: 10.54,
       maxDcVoltage: 1000, maxSeriesFuseRating: 20,
-      tempCoeffVoc: -0.27, tempCoeffIsc: 0.04, efficiency: 20.6,
+      tempCoeffVoc: -0.27, tempCoeffIsc: 0.04, efficiency: 20.4,
     },
     requiredAccessories: [],
     compatibilityRules: [],
     notesTemplates: ['Q CELLS Q.PEAK DUO BLK ML-G10+ 400W — mono-PERC, 1000V max, 20A fuse'],
     ulListing: 'UL 61730',
     warranty: '25-year product, 25-year performance',
-    weight: 44.1,
-    dimensions: '70.9 × 41.7 × 1.38 in',
+    weight: 48.5,                              // 22.0 kg
+    dimensions: '74.0 × 41.1 × 1.26 in',       // 1879 × 1045 × 32 mm
   },
 
   {
@@ -825,9 +829,22 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     category: 'microinverter',
     topologyType: 'MICROINVERTER',
     electricalSpecs: {
-      acOutputKw: 0.366, dcInputKwMax: 0.530, maxDcVoltage: 60,
-      acOutputVoltage: 240, acOutputCurrentMax: 1.53,
-      efficiency: 97.0, mpptChannels: 1,
+      // BRAIDON PDF AUDIT 2026-08-27 (N8) — equipment-db's IQ8A was reconciled to the verified
+      // datasheet on 2026-07-22; THIS copy never was, so the two stores disagreed:
+      //   acOutputKw 0.366 = the PEAK VA, not the max continuous 349 VA the system total uses.
+      //     The BOM row printed "Microinverter — 0.366kW AC output" while E-1 printed 349 W and
+      //     SCHED printed 0.35 kW — three numbers for one rating on one set.
+      //   acOutputCurrentMax 1.53 A contradicted the datasheet's 1.45 A, and it is not cosmetic:
+      //     11 units × 1.53 A × 1.25 = 21.0 A, which EXCEEDS the 20 A branch OCPD the package
+      //     passes B1 on. Whichever store a sizing path happened to read decided pass vs fail.
+      //   efficiency 97.0 matched neither the 97.6 peak nor the 97.5 CEC figure.
+      // All values below: IQ8 Series Microinverters Data Sheet (NA) p.2, column IQ8A-72-2-US
+      // (the same archived document as manufacturer-assets 'microinverter_spec:enphase-iq8a').
+      acOutputKw: 0.349,                 // max CONTINUOUS output 349 VA (peak is 366 VA)
+      dcInputKwMax: 0.500,               // module pairing top of range, 295–500 W
+      maxDcVoltage: 60,
+      acOutputVoltage: 240, acOutputCurrentMax: 1.45,   // A, max continuous @ 240 V
+      efficiency: 97.6, mpptChannels: 1,                // peak efficiency (CEC-weighted 97.5)
       rapidShutdownCompliant: true, arcFaultProtection: true,
     },
     requiredAccessories: [

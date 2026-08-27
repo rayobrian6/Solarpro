@@ -201,9 +201,17 @@ describe('§3 — manufacturer structural documents: applicability + inclusion h
     expect(v.applicabilityVerified).toBe(false);
   });
 
-  it('DS pages carry an explicit applicability state; the unverified RT document is marked', () => {
-    expect(DR.html).toContain('data-ds-applicability="unverified"');
-    expect(DR.html).toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
+  it('DS pages carry an explicit applicability state; an unverified document is marked', () => {
+    // BRAIDON PDF AUDIT 2026-08-27 — the LIVE Roof Tech row no longer conflates versions (the
+    // version-exact gen-1 RT-MINI manual is archived), so DS-3 correctly carries NO
+    // `data-ds-applicability="unverified"` marker and the package no longer raises
+    // EQUIPMENT-DOCUMENT-APPLICABILITY. The MARKING MECHANISM is what this case guards, and it is
+    // pinned directly against a synthetic conflating document in the case above (line ~195),
+    // which does not depend on production data staying wrong.
+    expect(DR.html).not.toContain('data-ds-applicability="unverified"');
+    expect(DR.html).not.toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
+    // the appendix still states a document state on the racking page rather than going silent
+    expect(DR.html).toMatch(/Roof Tech RT-MINI Installation Manual \(Jan 2021\)/);
   });
 
   it('the appendix index describes EXACTLY the pages that are emitted (no registry-only inclusion claims)', () => {

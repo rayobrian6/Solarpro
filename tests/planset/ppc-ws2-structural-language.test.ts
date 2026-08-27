@@ -122,7 +122,13 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
     expect(t).toContain('FASTENER ASSEMBLY: PENDING VERIFIED SELECTION');
     expect(t).not.toContain('FASTENER ASSEMBLY: VERIFIED');
     expect(t).toContain('INSTALLATION DETAILS: NOT ESTABLISHED');
-    expect(t).toContain('DOCUMENT APPLICABILITY: RT-MINI II MANUAL NOT VERIFIED FOR SELECTED RT-MINI');
+    // BRAIDON PDF AUDIT 2026-08-27 — the document-applicability warning is GONE from PV-3, and
+    // that is the correct outcome: the racking_detail asset now archives the version-exact gen-1
+    // "Roof Tech RT-MINI Installation Manual (Jan 2021)" instead of the RT-MINI **II** manual, so
+    // there is no longer a version conflation to warn about. What this test actually guards —
+    // that PV-3 states the fastener assembly and installation details as PENDING and prints no
+    // fabricated instruction — is unchanged and still asserted here and in the next case.
+    expect(t).not.toContain('DOCUMENT APPLICABILITY: RT-MINI II MANUAL NOT VERIFIED FOR SELECTED RT-MINI');
     expect(t).toContain(REFERENCE_DETAIL_BANNER);
   });
 

@@ -460,16 +460,28 @@ export const SOLAR_PANELS: SolarPanel[] = [
     manufacturer: 'Q CELLS',
     model: 'Q.PEAK DUO BLK ML-G10+ 400W',
     category: 'solar_panel',
-    watts: 400, efficiency: 20.6,  // datasheet: 20.4% (G10+ up to 21.1%); was a fabricated 22.4%
-    voc: 41.60, vmp: 34.50, isc: 12.26, imp: 11.59,
-    tempCoeffVoc: -0.26, tempCoeffIsc: 0.05, tempCoeffPmax: -0.35,
+    // BRAIDON PDF AUDIT 2026-08-27 (N1) — every electrical AND physical value below was the
+    // generic 44.1 lb / 70.9 × 41.7 copy-paste template (same one the Trina row above calls out),
+    // NOT this module. Consequences on the issued set: array area computed as 31 × 70.9×41.7 =
+    // 636.48 ft² (wrong footprint ⇒ wrong tributary ⇒ wrong per-attachment reactions ⇒ wrong
+    // IFC roof-coverage %), dead load 2.4 psf from a ~49 lb module, and Voc 41.60 / Vmp 34.50 —
+    // which put Vmp BELOW the paired IQ8A's 36–45 V MPPT window.
+    // Now transcribed from the archived manufacturer datasheet, 400 W power class:
+    //   Q.PEAK DUO BLK ML-G10+ SERIES, 395-415 Wp | 132 cells, Rev06 2023-12 (ZZ304800120_DS)
+    //   p.2 Electrical Characteristics, POWER CLASS 400 column + Mechanical Specification.
+    // Series choice: this is the CURRENT revision and it is the document already archived in
+    // lib/manufacturer-assets-db.ts, so DB values, datasheetUrl and the DS-1 appendix page all
+    // cite one document. (The older 385-405 Rev01 sheet, ZZ304800232, also has a 400 W class:
+    // Isc 11.14 / Voc 45.3 / 51.8 lb / 40 mm frame. Do not mix the two.)
+    watts: 400, efficiency: 20.4,       // η ≥ 20.4 % at the 400 W class
+    voc: 45.24, vmp: 37.95, isc: 11.05, imp: 10.54,
+    tempCoeffVoc: -0.27, tempCoeffIsc: 0.04, tempCoeffPmax: -0.34,
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
-    nominalOperatingTemp: 45, parallelStringLimit: 3,
-    weight: 44.1, length: 70.9, width: 41.7, thickness: 1.38,
+    nominalOperatingTemp: 43, parallelStringLimit: 3,  // NMOT 43 ± 3 °C
+    weight: 48.5, length: 74.0, width: 41.1, thickness: 1.26,  // 1879 × 1045 × 32 mm, 22.0 kg
     warranty: '25yr product / 25yr power', ulListing: 'UL 61730',
     bifacial: false, cellType: 'mono-PERC',
-    // v47.406 datasheet fix: Qcells Q.Peak Duo BLK ML-G10+ 385-405 datasheet (CED Electrical Supply distributor mirror)
-    datasheetUrl: 'https://cdn.myced.com/images/Products/ZZ0000/ZZ3048/00000/ZZ304800232_DS.pdf',
+    datasheetUrl: 'https://cdn.myced.com/images/Products/ZZ0000/ZZ3048/00000/ZZ304800120_DS.pdf',
   },
   // Silfab
   {

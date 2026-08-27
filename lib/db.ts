@@ -156,7 +156,10 @@ export const defaultPanels: SolarPanel[] = [
   // ── Q CELLS ──
   {
     id: 'qcells-peak-duo-400', manufacturer: 'Q CELLS', model: 'Q.PEAK DUO BLK ML-G10+ 400W',
-    wattage: 400, width: 1.024, height: 1.740, efficiency: 22.4,
+    // BRAIDON PDF AUDIT 2026-08-27 (N1) — third copy of this module, third set of specs.
+    // Was 1.740 × 1.024 m and 22.4 % (no silicon module of this size is 22.4 % at 400 W).
+    // Datasheet: 1879 × 1045 mm, η ≥ 20.4 % — ML-G10+ 395-415 Rev06, 400 W class.
+    wattage: 400, width: 1.045, height: 1.879, efficiency: 20.4,
     bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.34,
     pricePerWatt: 0.32, warranty: 25, cellType: 'Mono PERC',
   },

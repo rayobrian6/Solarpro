@@ -1355,11 +1355,29 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   if (isMicro) {
     // Derive from run segments ending at a rooftop junction/transition, else
     // fall back to ~1 box per AC trunk (16 devices).
+    // BRAIDON PDF AUDIT 2026-08-27 (N7) — this counted every run terminating at a JUNCTION BOX
+    // *or an AC COMBINER* as a Soladeck roof junction box. On a micro job the branch trunks end
+    // at the roof j-box (1) and the shared home-run ends at the AC combiner (1), so the BOM
+    // ordered 2 Soladeck boxes while PV-1B and E-1 both draw exactly ONE roof j-box. The AC
+    // combiner is a distinct listed device with its own BOM line (Enphase IQ Combiner 5C) — it
+    // is not a roof-flashed junction box and must never be counted as one.
+    // Count only true junction-box transitions, and count DISTINCT boxes: several branch trunks
+    // landing in one shared j-box are one box, not one per branch.
+    // A junction box is a NODE, so count distinct junction-box nodes named by the run graph on
+    // EITHER end — the roof j-box is modelled as `from: 'ROOF JUNCTION BOX'` on the shared
+    // home-run, and never appears as a `to` at all. The old `to === 'AC COMBINER'` clause is what
+    // produced the double count: BRANCH_RUN and BRANCH_HOMERUN_RUN both terminate at the
+    // combiner, so the AC combiner was counted twice as a Soladeck roof box.
     let junctionBoxQty = 0;
     if (input.runs && input.runs.length > 0) {
-      junctionBoxQty = input.runs.filter(r =>
-        r.to === 'JUNCTION BOX' || r.to === 'AC COMBINER' || r.to === 'COMBINER'
-      ).length;
+      const _isJbox = (v: unknown) => /junction\s*box/i.test(String(v ?? ''));
+      const _nodes = new Set<string>();
+      for (const r of input.runs) {
+        for (const end of [r.from, r.to]) {
+          if (_isJbox(end)) _nodes.add(String(end).trim().toUpperCase());
+        }
+      }
+      junctionBoxQty = _nodes.size;
     }
     if (junctionBoxQty === 0) {
       junctionBoxQty = Math.ceil((input.deviceCount ?? input.moduleCount) / 16);

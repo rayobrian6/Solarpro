@@ -55,6 +55,16 @@ export interface SiteDesignLoads {
   established: boolean;
   /** the one sentence a sheet prints when the values are not established. */
   guardNotice: string | null;
+  /** BRAIDON PDF AUDIT 2026-08-27 (N11) — THE display strings. The raw hazard values carry
+   *  full interpolation precision (e.g. 107.533 mph, 23.284 psf) and PV-4C already rounded via
+   *  fmt() while the cover sheet, PV-3 and the drafting descriptors printed them raw. The same
+   *  design wind speed therefore appeared as "107.533 MPH" on PV-0/PV-3 and "108 mph" on
+   *  PV-4C/PE-1. A design wind speed carried to three decimals reads as a machine artifact to a
+   *  plan reviewer, and two renderings of one value reads as an error.
+   *  Display only — NEVER feed these back into a calculation; the numeric fields above stay
+   *  full-precision so wind pressure and snow reduction are unaffected. */
+  windSpeedDisplay: string;
+  groundSnowDisplay: string;
 }
 
 const num = (v: unknown): number | null =>
@@ -135,6 +145,10 @@ export function resolveSiteDesignLoads(args: {
   const guarded = windBasis === 'code-minimum-guard' || snowBasis === 'code-minimum-guard';
   return {
     windSpeedMph, groundSnowPsf, windBasis, snowBasis,
+    // N11 — one rounding rule, applied once, for every sheet. Wind to whole mph (ASCE hazard
+    // maps are published in whole mph); ground snow to 1 decimal.
+    windSpeedDisplay: `${Math.round(windSpeedMph)}`,
+    groundSnowDisplay: `${Number(groundSnowPsf.toFixed(1))}`,
     established: !guarded,
     guardNotice: guarded
       ? 'DESIGN LOAD NOT ESTABLISHED — the value shown is the ASCE 7 code-minimum guard, not a site-specific authority. '

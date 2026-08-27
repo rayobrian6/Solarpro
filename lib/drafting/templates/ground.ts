@@ -887,8 +887,10 @@ export function drawGroundStructural(
     complianceSnowPsf: engineering.groundSnowPsf,
     ahjWindMph: project?.ahjWindSpeedMph, ahjSnowPsf: project?.ahjGroundSnowPsf,
   });
-  const windSpeedMph  = _siteLoads.windSpeedMph;
-  const groundSnowPsf = _siteLoads.groundSnowPsf;
+  // BRAIDON PDF AUDIT 2026-08-27 (N11) — drawing annotations only; take the resolver's shared
+  // display rounding so a ground set can never print 107.533 MPH beside PV-4C's 108 mph.
+  const windSpeedMph  = Math.round(_siteLoads.windSpeedMph);
+  const groundSnowPsf = Number(_siteLoads.groundSnowPsf.toFixed(1));
 
   const totalPanels = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw        = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;

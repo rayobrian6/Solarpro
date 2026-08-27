@@ -19,11 +19,32 @@ describe('§12 document applicability (product-version gate)', () => {
   const rtMiniAsset = getManufacturerAsset('rooftech-mini', 'racking_detail');
   const xrAsset = getManufacturerAsset('ironridge-xr100', 'racking_detail');
 
+  // BRAIDON PDF AUDIT 2026-08-27 — these cases pin the version-CONFLATION rule, and they used to
+  // do it by reading the LIVE `rooftech-mini` asset row, which happened to cite the RT-MINI **II**
+  // manual for the gen-1 RT-MINI product. That made a production data defect load-bearing for a
+  // safety test: the moment the data was corrected (the version-exact gen-1 manual is archived
+  // now, closing EQUIPMENT-DOCUMENT-APPLICABILITY) these tests failed even though the RULE they
+  // guard never changed. A negative fixture must be constructed, not borrowed from live data.
+  // The conflating asset below is synthetic and stays conflating forever.
+  const conflatingAsset = {
+    ...(rtMiniAsset as NonNullable<typeof rtMiniAsset>),
+    model: 'RT-MINI',
+    docTitle: 'Roof Tech RT-MINI II Installation Manual (Jun 2025)',
+  };
+
   it('RT-MINI mount vs RT-MINI II manual ⇒ UNVERIFIED (version conflation)', () => {
-    const a = evaluateDocumentApplicability('RT-MINI', rtMiniAsset);
+    const a = evaluateDocumentApplicability('RT-MINI', conflatingAsset);
     expect(a.applicabilityVerified).toBe(false);
     expect(a.state).toBe('PENDING_APPLICABILITY');
     expect(a.documentProduct).toMatch(/RT-MINI II/i);
+  });
+
+  it('the LIVE rooftech-mini row is version-exact and therefore APPLICABLE', () => {
+    // The companion to the case above: the real row must now pass the same gate it used to fail,
+    // because the archived document names the selected product version.
+    const a = evaluateDocumentApplicability('RT-MINI', rtMiniAsset);
+    expect(a.applicabilityVerified).toBe(true);
+    expect(a.documentProduct).not.toMatch(/RT-MINI II/i);
   });
 
   it('IronRidge XR100 mount vs XR Flush Mount manual ⇒ VERIFIED (mere naming variance, not a version mismatch)', () => {
@@ -33,7 +54,7 @@ describe('§12 document applicability (product-version gate)', () => {
   });
 
   it('a verified alias evidence record clears the version mismatch (never fabricated)', () => {
-    const a = evaluateDocumentApplicability('RT-MINI', rtMiniAsset, {
+    const a = evaluateDocumentApplicability('RT-MINI', conflatingAsset, {
       selectedModel: 'RT-MINI', documentProduct: 'RT-MINI II', verified: true, evidenceRef: 'doc-registry:rt-alias-1',
     });
     expect(a.applicabilityVerified).toBe(true);
@@ -45,7 +66,7 @@ describe('§12 document applicability (product-version gate)', () => {
   });
 
   it('an UNVERIFIED alias does NOT clear it', () => {
-    const a = evaluateDocumentApplicability('RT-MINI', rtMiniAsset, {
+    const a = evaluateDocumentApplicability('RT-MINI', conflatingAsset, {
       selectedModel: 'RT-MINI', documentProduct: 'RT-MINI II', verified: false, evidenceRef: 'note',
     });
     expect(a.applicabilityVerified).toBe(false);

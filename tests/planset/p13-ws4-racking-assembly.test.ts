@@ -138,11 +138,21 @@ describe('WS-4 — RT-MINI and RT-MINI II are different products', () => {
     expect(RA.mountModel).toBe('RT-MINI');
   });
 
-  it('cross-generation document applicability remains an OPEN requirement', () => {
-    // Nothing in WS-4 clears it: a RT-MINI II manual has not been shown to apply
-    // to a selected RT-MINI, and this campaign forbids letting it silently do so.
+  it('cross-generation document applicability is CLOSED by a version-exact archived document', () => {
+    // Nothing in WS-4 itself clears it — a RT-MINI II manual still may not stand in for a
+    // selected RT-MINI, and that prohibition is unchanged.
+    // BRAIDON PDF AUDIT 2026-08-27 — this requirement is CLOSED, and closed correctly.
+    // It was open because the racking_detail asset cited the RT-MINI **II** manual for the
+    // selected gen-1 RT-MINI. The prior audit believed no gen-1 document existed; the asset
+    // row's own notes already named one and it re-fetched clean on 2026-08-27 (HTTP 200,
+    // application/pdf, 33 pp, 'INSTALLATION MANUAL RT-MINI', Jan 2021). It is now the archived
+    // source of record, so there is no cross-generation conflation left to keep open. Nothing
+    // was relaxed: `evaluateDocumentApplicability` still rejects a version mismatch (pinned by
+    // the synthetic fixtures in ep-closeout-co-c and aac-ws8-ws9).
     const open = PKG.snap.permitReadiness.registry.filter(r => !r.resolved).map(r => r.code);
-    expect(open).toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
+    expect(open).not.toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
+    // The racking SKU decision is a separate authority and must stay open.
+    expect(open).toContain('PENDING-RACKING-ASSEMBLY-SELECTION');
   });
 });
 

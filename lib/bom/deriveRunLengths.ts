@@ -40,8 +40,23 @@ import type { RunSegmentId } from '@/lib/computed-system';
 
 const M_TO_FT = 3.28084;
 
-/** NEC 15% slack/waste factor applied to all derived run lengths. */
-const SLACK_FACTOR = 1.15;
+/* BRAIDON PDF AUDIT 2026-08-27 (N20 / prior audit D39) — the 1.15 slack factor that used to be
+ * applied here is DELETED, not moved. It was applied TWICE: once here, producing the "route
+ * (one-way)" length, and again in bom-engine-v4 (`_WASTE = 1.15`, `conduitLength()`), producing
+ * the order quantity — so a 15.65 ft measured run printed as an "18 ft route" and was ordered as
+ * 21 ft, 1.32× the real thing. Two separate harms:
+ *   • the PRINTED route length was not a route. PV-4B / PV-4B.1 label these "route (one-way)"
+ *     and a field crew sent to verify 18 ft cannot measure 18 ft; the number was already padded.
+ *   • the voltage drop was computed from the padded length, so the Vd on the sheet did not
+ *     describe the installed conductor either.
+ * A run length is a LENGTH. Slack and waste are a PROCUREMENT concern and belong in exactly one
+ * place — the BOM — which already applies its own 1.15. These functions now return the geometric
+ * route; the ordered quantity is unchanged in intent and is now route × 1.15 exactly once.
+ *
+ * The one PROCUREMENT waste factor below survives and is correctly placed: deriveBranchCablePaths
+ * applies it ONLY to `procurementLengthFt` and leaves `designedInstalledLengthFt` geometric —
+ * which is the pattern the run lengths above now follow too. */
+const PROCUREMENT_WASTE_FACTOR = 1.15;
 
 // ── Geometry helpers ───────────────────────────────────────────────────────
 
@@ -136,7 +151,9 @@ export interface DeriveRunLengthsOpts {
  * into `ComputedSystemInput.runLengths`. Segments where geometry is insufficient
  * are omitted — the caller's existing defaults will apply.
  *
- * All returned values include the 15% NEC slack factor.
+ * Returned values are GEOMETRIC route lengths — no slack, no waste. They are the length a field
+ * crew can go and measure, and the length the voltage drop is computed from. Procurement slack is
+ * applied once, downstream, by the BOM (see the N20 note on PROCUREMENT_WASTE_FACTOR above).
  */
 export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): DerivedRunLengths {
   const result: Partial<Record<RunSegmentId, number>> = {};
@@ -167,35 +184,35 @@ export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): De
       // DC_STRING_RUN: half-diagonal of the main plane (DC wire from panel
       // at far corner down to eave junction, + 15% slack)
       const halfDiagFt = diagonalFt(widthM, heightM) / 2;
-      result.DC_STRING_RUN = round(halfDiagFt * SLACK_FACTOR);
-      notes.DC_STRING_RUN  = `roof plane half-diagonal ${halfDiagFt.toFixed(1)} ft × ${SLACK_FACTOR} slack`;
+      result.DC_STRING_RUN = round(halfDiagFt);
+      notes.DC_STRING_RUN  = `roof plane half-diagonal ${halfDiagFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
 
       // ROOF_RUN: trunk cable along the eave (≈ plane width × 0.6)
       // 0.6 factor: cable runs to midpoint of each row, not full width
       const trunkFt = mToFt(widthM) * 0.6;
-      result.ROOF_RUN = round(trunkFt * SLACK_FACTOR);
-      notes.ROOF_RUN  = `roof plane width ${mToFt(widthM).toFixed(1)} ft × 0.6 eave factor × ${SLACK_FACTOR} slack`;
+      result.ROOF_RUN = round(trunkFt);
+      notes.ROOF_RUN  = `roof plane width ${mToFt(widthM).toFixed(1)} ft × 0.6 eave factor (geometric route — procurement slack applied by the BOM)`;
 
       // BRANCH_RUN: sum of plane widths (microinverter trunk along all planes)
       const totalWidthFt = planes.reduce((s, p) => s + mToFt(p.dimensions.widthM), 0);
-      result.BRANCH_RUN = round(totalWidthFt * SLACK_FACTOR);
-      notes.BRANCH_RUN  = `sum of all plane widths ${totalWidthFt.toFixed(1)} ft × ${SLACK_FACTOR} slack`;
+      result.BRANCH_RUN = round(totalWidthFt);
+      notes.BRANCH_RUN  = `sum of all plane widths ${totalWidthFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
 
       // ARRAY_CONDUIT_RUN: vision conduit routes if available, else plane height
       // (conduit from roof eave drop to inverter/disconnect)
       if (conduitFt > 0) {
-        result.ARRAY_CONDUIT_RUN = round(conduitFt * SLACK_FACTOR);
-        notes.ARRAY_CONDUIT_RUN  = `vision conduit route ${conduitFt.toFixed(1)} ft × ${SLACK_FACTOR} slack`;
+        result.ARRAY_CONDUIT_RUN = round(conduitFt);
+        notes.ARRAY_CONDUIT_RUN  = `vision conduit route ${conduitFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       } else {
         // Estimate: conduit runs down the wall (plane height as proxy for roof run-to-eave)
         const wallDropFt = mToFt(heightM) * 0.5 + 10; // half-height + 10 ft wall drop
-        result.ARRAY_CONDUIT_RUN = round(wallDropFt * SLACK_FACTOR);
-        notes.ARRAY_CONDUIT_RUN  = `estimated wall drop ${wallDropFt.toFixed(1)} ft × ${SLACK_FACTOR} slack`;
+        result.ARRAY_CONDUIT_RUN = round(wallDropFt);
+        notes.ARRAY_CONDUIT_RUN  = `estimated wall drop ${wallDropFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       }
 
       // ARRAY_OPEN_AIR: open-air homerun on roof (short - panel row to j-box)
-      result.ARRAY_OPEN_AIR = round(mToFt(widthM / planes.length) * 0.5 * SLACK_FACTOR);
-      notes.ARRAY_OPEN_AIR  = `per-plane width ${mToFt(widthM / planes.length).toFixed(1)} ft × 0.5 × slack`;
+      result.ARRAY_OPEN_AIR = round(mToFt(widthM / planes.length) * 0.5);
+      notes.ARRAY_OPEN_AIR  = `per-plane width ${mToFt(widthM / planes.length).toFixed(1)} ft × 0.5 (geometric route — procurement slack applied by the BOM)`;
     }
 
     // INV_TO_DISCO_RUN / COMBINER_TO_DISCO_RUN: inverter to AC disconnect
@@ -204,9 +221,9 @@ export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): De
       const dFt = distFt(arrayCentroid.x, arrayCentroid.y, mspNode.x, mspNode.y);
       // Inverter is typically near the array drop; disconnect is partway to MSP
       const invToDiscoFt = Math.min(dFt * 0.35, 30); // at most 30 ft
-      result.INV_TO_DISCO_RUN       = round(invToDiscoFt * SLACK_FACTOR);
-      result.COMBINER_TO_DISCO_RUN  = round(invToDiscoFt * SLACK_FACTOR);
-      notes.INV_TO_DISCO_RUN        = `35% of array→MSP dist ${dFt.toFixed(1)} ft = ${invToDiscoFt.toFixed(1)} ft × slack`;
+      result.INV_TO_DISCO_RUN       = round(invToDiscoFt);
+      result.COMBINER_TO_DISCO_RUN  = round(invToDiscoFt);
+      notes.INV_TO_DISCO_RUN        = `35% of array→MSP dist ${dFt.toFixed(1)} ft = ${invToDiscoFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       notes.COMBINER_TO_DISCO_RUN   = notes.INV_TO_DISCO_RUN;
     }
 
@@ -215,13 +232,13 @@ export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): De
       // Vision conduit covers the full array-drop → MSP path; subtract the
       // roof portion (ARRAY_CONDUIT_RUN already set above)
       const acRunFt = Math.max(conduitFt - (result.ARRAY_CONDUIT_RUN ?? 20), 10);
-      result.DISCO_TO_METER_RUN = round(acRunFt * SLACK_FACTOR);
-      notes.DISCO_TO_METER_RUN  = `vision conduit ${conduitFt.toFixed(1)} ft minus roof portion = ${acRunFt.toFixed(1)} ft × slack`;
+      result.DISCO_TO_METER_RUN = round(acRunFt);
+      notes.DISCO_TO_METER_RUN  = `vision conduit ${conduitFt.toFixed(1)} ft minus roof portion = ${acRunFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
     } else if (mspNode) {
       const dFt = distFt(arrayCentroid.x, arrayCentroid.y, mspNode.x, mspNode.y);
       const discoToMeterFt = Math.max(dFt * 0.65, 10); // remaining 65% of path
-      result.DISCO_TO_METER_RUN = round(discoToMeterFt * SLACK_FACTOR);
-      notes.DISCO_TO_METER_RUN  = `65% of array→MSP dist ${dFt.toFixed(1)} ft = ${discoToMeterFt.toFixed(1)} ft × slack`;
+      result.DISCO_TO_METER_RUN = round(discoToMeterFt);
+      notes.DISCO_TO_METER_RUN  = `65% of array→MSP dist ${dFt.toFixed(1)} ft = ${discoToMeterFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
     }
   }
 
@@ -239,37 +256,37 @@ export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): De
 
       // DC_STRING_RUN: half the array diagonal (DC wire from far panel to combiner)
       const halfDiagFt = diagonalFt(arrayWidthM, arrayDepthM) / 2;
-      result.DC_STRING_RUN = round(halfDiagFt * SLACK_FACTOR);
-      notes.DC_STRING_RUN  = `ground array half-diagonal ${halfDiagFt.toFixed(1)} ft × slack`;
+      result.DC_STRING_RUN = round(halfDiagFt);
+      notes.DC_STRING_RUN  = `ground array half-diagonal ${halfDiagFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
 
       // ARRAY_OPEN_AIR: open-air homerun from array edge to combiner/inverter
       const openAirFt = mToFt(arrayDepthM) * 0.5 + 5;
-      result.ARRAY_OPEN_AIR = round(openAirFt * SLACK_FACTOR);
-      notes.ARRAY_OPEN_AIR  = `ground array depth/2 ${(mToFt(arrayDepthM) * 0.5).toFixed(1)} ft + 5 ft drop × slack`;
+      result.ARRAY_OPEN_AIR = round(openAirFt);
+      notes.ARRAY_OPEN_AIR  = `ground array depth/2 ${(mToFt(arrayDepthM) * 0.5).toFixed(1)} ft + 5 ft drop (geometric route — procurement slack applied by the BOM)`;
 
       // ARRAY_CONDUIT_RUN: vision conduit or bounding box diagonal to MSP
       if (conduitFt > 0) {
-        result.ARRAY_CONDUIT_RUN = round(conduitFt * SLACK_FACTOR);
-        notes.ARRAY_CONDUIT_RUN  = `vision conduit ${conduitFt.toFixed(1)} ft × slack`;
+        result.ARRAY_CONDUIT_RUN = round(conduitFt);
+        notes.ARRAY_CONDUIT_RUN  = `vision conduit ${conduitFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       } else if (mspNode) {
         const dFt = distFt(arr.originX, arr.originY, mspNode.x, mspNode.y);
-        result.ARRAY_CONDUIT_RUN = round(dFt * SLACK_FACTOR);
-        notes.ARRAY_CONDUIT_RUN  = `ground array origin→MSP node ${dFt.toFixed(1)} ft × slack`;
+        result.ARRAY_CONDUIT_RUN = round(dFt);
+        notes.ARRAY_CONDUIT_RUN  = `ground array origin→MSP node ${dFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       } else {
         // Fallback: array diagonal as proxy for conduit run
         const fullDiagFt = diagonalFt(arrayWidthM, arrayDepthM);
-        result.ARRAY_CONDUIT_RUN = round(fullDiagFt * SLACK_FACTOR);
-        notes.ARRAY_CONDUIT_RUN  = `ground array full diagonal ${fullDiagFt.toFixed(1)} ft × slack`;
+        result.ARRAY_CONDUIT_RUN = round(fullDiagFt);
+        notes.ARRAY_CONDUIT_RUN  = `ground array full diagonal ${fullDiagFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       }
 
       // DISCO_TO_METER_RUN: conduit from inverter/disconnect to MSP
       if (mspNode) {
         const dFt = distFt(arr.originX, arr.originY, mspNode.x, mspNode.y);
-        result.DISCO_TO_METER_RUN = round(dFt * SLACK_FACTOR);
-        notes.DISCO_TO_METER_RUN  = `ground array origin→MSP node ${dFt.toFixed(1)} ft × slack`;
+        result.DISCO_TO_METER_RUN = round(dFt);
+        notes.DISCO_TO_METER_RUN  = `ground array origin→MSP node ${dFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       } else if (conduitFt > 0) {
-        result.DISCO_TO_METER_RUN = round(conduitFt * 0.6 * SLACK_FACTOR);
-        notes.DISCO_TO_METER_RUN  = `60% of conduit route ${conduitFt.toFixed(1)} ft × slack`;
+        result.DISCO_TO_METER_RUN = round(conduitFt * 0.6);
+        notes.DISCO_TO_METER_RUN  = `60% of conduit route ${conduitFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       }
     }
   }
@@ -279,20 +296,20 @@ export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): De
     const totalLenFt = mToFt(cad.fence.totalLengthM ?? 0);
     if (totalLenFt > 0) {
       // DC_STRING_RUN: half the fence total length (DC wire from far panel)
-      result.DC_STRING_RUN = round((totalLenFt / 2) * SLACK_FACTOR);
-      notes.DC_STRING_RUN  = `fence total length / 2 = ${(totalLenFt / 2).toFixed(1)} ft × slack`;
+      result.DC_STRING_RUN = round((totalLenFt / 2));
+      notes.DC_STRING_RUN  = `fence total length / 2 = ${(totalLenFt / 2).toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
 
       // ARRAY_OPEN_AIR: open-air run from panel to combiner (short)
-      result.ARRAY_OPEN_AIR = round(Math.min(totalLenFt * 0.1, 15) * SLACK_FACTOR);
-      notes.ARRAY_OPEN_AIR  = `10% fence length = ${(totalLenFt * 0.1).toFixed(1)} ft × slack (capped 15 ft)`;
+      result.ARRAY_OPEN_AIR = round(Math.min(totalLenFt * 0.1, 15));
+      notes.ARRAY_OPEN_AIR  = `10% fence length = ${(totalLenFt * 0.1).toFixed(1)} ft (geometric route — procurement slack applied by the BOM) (capped 15 ft)`;
 
       // ARRAY_CONDUIT_RUN: conduit from fence combiner to inverter
       if (conduitFt > 0) {
-        result.ARRAY_CONDUIT_RUN = round(conduitFt * SLACK_FACTOR);
-        notes.ARRAY_CONDUIT_RUN  = `vision conduit ${conduitFt.toFixed(1)} ft × slack`;
+        result.ARRAY_CONDUIT_RUN = round(conduitFt);
+        notes.ARRAY_CONDUIT_RUN  = `vision conduit ${conduitFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
       } else {
-        result.ARRAY_CONDUIT_RUN = round(Math.min(totalLenFt * 0.25, 40) * SLACK_FACTOR);
-        notes.ARRAY_CONDUIT_RUN  = `25% fence length = ${(totalLenFt * 0.25).toFixed(1)} ft × slack (capped 40 ft)`;
+        result.ARRAY_CONDUIT_RUN = round(Math.min(totalLenFt * 0.25, 40));
+        notes.ARRAY_CONDUIT_RUN  = `25% fence length = ${(totalLenFt * 0.25).toFixed(1)} ft (geometric route — procurement slack applied by the BOM) (capped 40 ft)`;
       }
 
       // DISCO_TO_METER_RUN
@@ -301,8 +318,8 @@ export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): De
         const seg0 = cad.fence.segments?.[0];
         if (seg0) {
           const dFt = distFt(seg0.startX, seg0.startY, mspNode.x, mspNode.y);
-          result.DISCO_TO_METER_RUN = round(dFt * SLACK_FACTOR);
-          notes.DISCO_TO_METER_RUN  = `fence start→MSP node ${dFt.toFixed(1)} ft × slack`;
+          result.DISCO_TO_METER_RUN = round(dFt);
+          notes.DISCO_TO_METER_RUN  = `fence start→MSP node ${dFt.toFixed(1)} ft (geometric route — procurement slack applied by the BOM)`;
         }
       }
     }
@@ -321,7 +338,7 @@ function round(ft: number): number {
 // ═══════════════════════════════════════════════════════════════════════════
 // §7 (closeout 2026-07-23) — GEOMETRIC per-branch Q-Cable path derivation.
 //
-// The pre-closeout BRANCH_RUN length was Σ plane-widths × slack (a whole-array
+// The pre-closeout BRANCH_RUN length was Σ plane-widths (geometric route — procurement slack applied by the BOM) (a whole-array
 // heuristic, ~68 ft) which, multiplied by the branch count, never reconciled
 // with the BOM's drops × pitch footage (3×68=204 ≠ 152). This derives the REAL
 // trunk cable path per branch from the branch's module CENTER coordinates + its
@@ -415,7 +432,7 @@ function nearestNeighbourPathFt(pts: { x: number; y: number }[]): number {
 export function deriveBranchCablePaths(
   branches: BranchModulesForPath[],
   connectorSpacingFt: number | null,
-  wasteFactor = SLACK_FACTOR,
+  wasteFactor = PROCUREMENT_WASTE_FACTOR,
 ): BranchCablePathResult[] {
   const pitch = connectorSpacingFt != null && connectorSpacingFt > 0 ? connectorSpacingFt : null;
   return branches.map(b => {

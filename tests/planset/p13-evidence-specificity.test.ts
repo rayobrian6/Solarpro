@@ -209,7 +209,15 @@ describe('P13 — authority separation on the LIVE package', () => {
     expect(bond.selectionSource).toBe('project-design-standard');
   });
 
-  it('cross-generation document applicability remains its own open requirement', () => {
-    expect(open).toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
+  it('cross-generation document applicability is CLOSED by a version-exact archived document', () => {
+    // BRAIDON PDF AUDIT 2026-08-27 — this requirement is CLOSED, and closed correctly.
+    // It was open because the racking_detail asset cited the RT-MINI **II** manual for the
+    // selected gen-1 RT-MINI. The prior audit believed no gen-1 document existed; the asset
+    // row's own notes already named one and it re-fetched clean on 2026-08-27 (HTTP 200,
+    // application/pdf, 33 pp, 'INSTALLATION MANUAL RT-MINI', Jan 2021). It is now the archived
+    // source of record, so there is no cross-generation conflation left to keep open. Nothing
+    // was relaxed: `evaluateDocumentApplicability` still rejects a version mismatch (pinned by
+    // the synthetic fixtures in ep-closeout-co-c and aac-ws8-ws9).
+    expect(open).not.toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
   });
 });

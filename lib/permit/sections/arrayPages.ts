@@ -12,6 +12,7 @@ import {
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { resolvePanelSpecs } from '../utils/panelSpecs';
+import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
@@ -345,15 +346,23 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         isc: 0,
       }))
     : (_dcInverters.flatMap((inv, ii) =>
-        (inv.strings || []).map((str, si) => ({
-          si: ii * (_dcInverters[0]?.strings?.length || 1) + si,
-          label: str.label || `String ${si+1}`,
-          count: str.panelCount,
-          model: str.panelModel || '—',
-          watts: str.panelWatts || 400,
-          voc: str.panelVoc || 41.6,
-          isc: str.panelIsc || 12.26,
-        }))
+        (inv.strings || []).map((str, si) => {
+          // BRAIDON PDF AUDIT 2026-08-27 (N1) — `|| 41.6` / `|| 12.26` were the generic
+          // copy-paste values, printed on the string legend as if they were the selected
+          // module's. Resolve the module by its own model through the canonical accessor;
+          // when it will not resolve, print 0 (the legend renders it as blank) rather than
+          // another product's electrical data.
+          const _rec = resolveModuleIdentity({ model: str.panelModel }).spec;
+          return {
+            si: ii * (_dcInverters[0]?.strings?.length || 1) + si,
+            label: str.label || `String ${si+1}`,
+            count: str.panelCount,
+            model: str.panelModel || '—',
+            watts: str.panelWatts || _rec?.watts || 0,
+            voc: str.panelVoc || _rec?.voc || 0,
+            isc: str.panelIsc || _rec?.isc || 0,
+          };
+        })
       ) || []);
 
   // ── PIPELINE v47.343: Build array grid SVG scaled to fill draw-zone ──────

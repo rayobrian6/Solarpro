@@ -673,7 +673,7 @@ describe('AAC WS-2 · E6 · anti-vacuity: a canonical change rebuilds BOM / data
 describe('AAC WS-2 · E7 · module exact-datasheet: the range comparison the audit found missing', () => {
   it('a COVERING series sheet and a NON-COVERING one are no longer treated identically', () => {
     const covering = resolveModuleDatasheetExactness('Q.PEAK DUO BLK ML-G10+ 400W', 400);
-    expect(covering.familyRange).toEqual([385, 405]);
+    expect(covering.familyRange).toEqual([395, 415]);  // N2 — registered doc is now ZZ304800120 Rev06
     expect(covering.coversSelectedWatts).toBe(true);
     expect(covering.coverageBasis).toMatch(/INSIDE/);
     // the same document with a wattage OUTSIDE its range

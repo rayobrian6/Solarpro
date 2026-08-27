@@ -341,9 +341,15 @@ describe('ECD §8 — APP-A cannot globally approve; archived ≠ applicable', (
     // ARCHIVED yes (a retained copy exists) …
     expect(appl.archived).toBe(true);
     expect(appl.states).toContain('ARCHIVED');
-    // … APPLICABLE-TO-RT-MINI pending …
-    expect(appl.state).toBe('PENDING_APPLICABILITY');
-    expect(appl.applicabilityVerified).toBe(false);
+    // BRAIDON PDF AUDIT 2026-08-27 — the row now archives the VERSION-EXACT gen-1
+    // "Roof Tech RT-MINI Installation Manual (Jan 2021)" instead of the RT-MINI II manual, so
+    // applicability is established and the primary verdict is APPLICABLE. THE RULE THIS GATE
+    // GUARDS IS UNCHANGED and is still asserted: ARCHIVED is a companion chip, never the verdict,
+    // and being archived does NOT by itself confer authority — `authoritative` is still false
+    // because no content-hash registry fact exists for this document.
+    expect(appl.state).toBe('APPLICABLE');
+    expect(appl.state).not.toBe('ARCHIVED');
+    expect(appl.applicabilityVerified).toBe(true);
     // … AUTHORITATIVE no.
     expect(appl.authoritative).toBe(false);
     // and the scrape flag is reported under its true name, driving nothing
@@ -382,11 +388,18 @@ describe('ECD §8 — APP-A cannot globally approve; archived ≠ applicable', (
     for (const li of listItems) {
       expect(li).toMatch(/data-ds-doc-state="[A-Z_]+"/);
     }
-    // the RT-MINI row shows ARCHIVED + PENDING and states NOT AUTHORITATIVE
+    // The RT-MINI row shows ARCHIVED + its applicability verdict, and STILL states NOT
+    // AUTHORITATIVE — which is the point of this case: a positive applicability verdict must
+    // never be allowed to read as engineering authority. (Verdict moved PENDING_APPLICABILITY →
+    // APPLICABLE on 2026-08-27 when the version-exact gen-1 manual replaced the RT-MINI II one.)
     const racking = listItems.find(li => /Racking:/.test(li)) ?? '';
     expect(racking).toContain('data-ds-doc-state="ARCHIVED"');
-    expect(racking).toContain('data-ds-doc-state="PENDING_APPLICABILITY"');
-    expect(text(racking)).toMatch(/NOT AUTHORITATIVE/);
+    expect(racking).toContain('data-ds-doc-state="APPLICABLE"');
+    // Assert the MACHINE-READABLE flag plus the prose case-insensitively: the renderer emits
+    // "— not authoritative for engineering values" in lower case on the APPLICABLE row, and the
+    // requirement is that the row SAYS it is not authoritative, not that it shouts it.
+    expect(racking).toContain('data-ds-authoritative="false"');
+    expect(text(racking)).toMatch(/not authoritative/i);
     // applicability is evaluated for MORE than one row (the coverage gap)
     const stateRows = listItems.filter(li => /data-ds-doc-state=/.test(li));
     expect(stateRows.length).toBeGreaterThanOrEqual(3);

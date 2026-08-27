@@ -1055,6 +1055,21 @@ export function generateBOMForPermit(
       if (it.category !== 'trunk_cable') continue;
       it.nonOrderable = false;
       it.nonOrderableReason = undefined;
+      // BRAIDON PDF AUDIT 2026-08-27 (N6) — this block rewrote the DESCRIPTION to state the
+      // resolved order ("ORDER 1 × Q-12-10-240 — box of 240 connector sections") but left
+      // it.quantity at the pre-resolution drop count (31). The rendered BOM row therefore read
+      // `Q-12-10-240 | 31 | ea` beside a description saying to order ONE box, and a procurement
+      // export reading the QTY column would order 31 boxes — 31,620 ft of trunk cable for a
+      // 166.5 ft installation. The row is orderable now, so the quantity cell must state the
+      // orderable package count, in packages. Guard the assignment: if the resolution somehow
+      // carries no stock-unit count, leave the old quantity rather than writing undefined.
+      if (_qpBom.stockUnitsRequired != null) {
+        it.quantity = _qpBom.stockUnitsRequired;
+        it.unit = _qpBom.stockUnitsRequired === 1 ? 'package' : 'packages';
+        it.quantitySource = it.quantitySource ?? undefined;
+        log.push(`[bomForPermit] N6 trunk_cable QTY corrected to ${_qpBom.stockUnitsRequired} ${it.unit} `
+          + `(was ${_qpBom.baseSectionsOrdered ?? '?'} drop-count sections rendered as 'ea')`);
+      }
       it.description =
         `ORDER ${_qpBom.stockUnitsRequired ?? '—'} × ${_qpBom.stockUnitDescription ?? _qpBom.selectedStockSku ?? '—'} `
         + `covering ${_qpBom.totalSectionsRequired} connector section(s) `

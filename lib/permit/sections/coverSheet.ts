@@ -357,9 +357,12 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
       : (!_isRoofCover ? infoRow('SYSTEM TYPE',  displaySystemTypeShort(_coverSysTypeCheck)) : ''),
     infoRow('STORIES',            stories ? `${stories}` : ''),
     infoRow('ROOF LOAD',          _isRoofCover && roofLoadPsf ? `${roofLoadPsf} PSF` : ''),
-    infoRow('WIND SPEED',         windSpeedMph ? `${windSpeedMph} MPH` : ''),
+    // BRAIDON PDF AUDIT 2026-08-27 (N11) — printed the raw hazard value ("107.533 MPH",
+    // "23.284 PSF") while PV-4C/PE-1 rounded the SAME value to "108 mph". Round for display
+    // with the same rule as everywhere else; the numeric value is untouched.
+    infoRow('WIND SPEED',         windSpeedMph !== '' ? `${Math.round(Number(windSpeedMph))} MPH` : ''),
     infoRow('WIND EXPOSURE',      windExposure ? `CAT. ${windExposure}` : ''),
-    infoRow('GROUND SNOW LOAD',   snowPsf !== '' ? `${snowPsf} PSF` : ''),
+    infoRow('GROUND SNOW LOAD',   snowPsf !== '' ? `${Number(Number(snowPsf).toFixed(1))} PSF` : ''),
     infoRow('SEISMIC DESIGN CAT.',
       seismic && seismic !== 'PENDING' ? `CAT. ${seismic}` : 'PENDING — NOT ESTABLISHED'),
     // machine-readable seismic evidence stamp (infoRow escapes values, so the

@@ -173,9 +173,26 @@ describe('the product closure does not leak into the racking authority', () => {
   const open = snap.permitReadiness.registry.filter(r => !r.resolved).map(r => r.code);
   const bond = snap.electrical.groundingObjects.find(g => g.groundingId === 'gnd-array-bond')!;
 
-  it('the racking-selection and equipment-document requirements stay OPEN', () => {
+  // BRAIDON PDF AUDIT 2026-08-27 — this test's PURPOSE is that the Q-Cable product closure must
+  // not leak into the RACKING authority. That purpose is intact and still asserted below.
+  //
+  // EQUIPMENT-DOCUMENT-APPLICABILITY was removed from this assertion because it has since been
+  // closed on its own merits, by a different change, for the right reason. The racking_detail
+  // asset for `rooftech-mini` cited the RT-MINI **II** manual for the gen-1 RT-MINI product, so
+  // `evaluateDocumentApplicability` correctly saw a version conflation and blocked. The prior
+  // audit recorded this requirement as unclearable on the belief that Roof Tech publishes no
+  // gen-1 document — but the asset row's own notes already named one, and it re-fetched clean on
+  // 2026-08-27 (HTTP 200, application/pdf, 2,042,678 bytes, 33 pp, "INSTALLATION MANUAL RT-MINI",
+  // Jan 2021). The archived document is now VERSION-EXACT for the selected mount, so docProduct
+  // === assetModel and applicability is established by evidence, not by a relaxed predicate.
+  // (State is APPLICABLE, not AUTHORITATIVE — AUTHORITATIVE additionally needs a sha256 registry
+  // fact we still do not have, which is correct.)
+  it('the racking-selection requirement stays OPEN (a SKU decision, not a document)', () => {
     expect(open).toContain('PENDING-RACKING-ASSEMBLY-SELECTION');
-    expect(open).toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
+  });
+
+  it('the equipment-document requirement is CLOSED by a version-exact archived document', () => {
+    expect(open).not.toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
   });
 
   it('gnd-array-bond.bondingMethod stays null until the racking assembly is verified', () => {

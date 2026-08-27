@@ -190,10 +190,20 @@ describe('D8 · family coverage the old parser could not see', () => {
     expect(ex.stateLabel).toBe('UNEVIDENCED-DATASHEET-PENDING');
   });
 
-  it('8 — the Qcells 385-405W series sheet is unchanged (Braidon must not move)', () => {
+  // BRAIDON PDF AUDIT 2026-08-27 (N1/N2) — the RULE this case pins is unchanged: a SERIES sheet
+  // is never an exact-model sheet, so the verdict stays FAMILY-DATASHEET-PENDING and the parsed
+  // family range must cover the selected 400 W. Only the registered DOCUMENT changed, deliberately.
+  // The asset row's docTitle said "385-405W" while its sourceUrl was ZZ304800120 = the 395-415 Wp
+  // sheet — two different documents with two different 400 W columns — and the archived image was
+  // page 1 (marketing) with no spec table at all. equipment-db separately cited ZZ304800232
+  // (385-405). Everything is now aligned on ZZ304800120 Rev06 2023-12, the current revision and
+  // the one actually archived, so the parsed range moves 385-405 → 395-415. 400 W remains inside it.
+  it('8 — the Qcells series sheet is a FAMILY sheet covering 400 W, never an exact-model sheet', () => {
     const ex = resolveModuleDatasheetExactness('Q.PEAK DUO BLK ML-G10+ 400W', 400);
     expect(ex.stateLabel).toBe('FAMILY-DATASHEET-PENDING');
-    expect(ex.familyRange).toEqual([385, 405]);
+    expect(ex.familyRange).toEqual([395, 415]);
+    expect(ex.familyRange![0]).toBeLessThanOrEqual(400);
+    expect(ex.familyRange![1]).toBeGreaterThanOrEqual(400);
     expect(ex.coversSelectedWatts).toBe(true);
     expect(ex.coverageBasis).toMatch(/INSIDE/);
     const outside = resolveModuleDatasheetExactness('Q.PEAK DUO BLK ML-G10+ 400W', 500);

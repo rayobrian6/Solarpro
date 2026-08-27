@@ -2126,8 +2126,14 @@ export function drawRoofStructural(
   // W3 §7 — THE 115-vs-90 FIX. Wind/snow PROJECT from the single-sourced
   // snapshot env; the `?? 90` sheet default is DELETED. Every sheet prints the
   // same value the cover / PV-4C / PE-1 print. em-dash-safe display below.
-  const windSpeedMph   = _spD.windSpeedMph ?? engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? null;
-  const groundSnowPsf  = _spD.groundSnowPsf ?? engineering.groundSnowPsf ?? project?.ahjGroundSnowPsf ?? null;
+  // BRAIDON PDF AUDIT 2026-08-27 (N11) — these feed the drawing's WIND/SNOW annotations only.
+  // They printed the raw interpolated hazard values, so the PV-3 cross-section carried
+  // "WIND 107.533 MPH" / "SNOW 23.284 PSF" while PV-4C and PE-1 printed 108 mph for the same
+  // number. Round for display here; nothing in this template does load arithmetic with them.
+  const _windRaw       = _spD.windSpeedMph ?? engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? null;
+  const _snowRaw       = _spD.groundSnowPsf ?? engineering.groundSnowPsf ?? project?.ahjGroundSnowPsf ?? null;
+  const windSpeedMph   = _windRaw != null ? Math.round(_windRaw) : null;
+  const groundSnowPsf  = _snowRaw != null ? Number(_snowRaw.toFixed(1)) : null;
   const totalPanels    = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw           = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
 
@@ -2536,7 +2542,11 @@ export function drawRoofStructural(
         ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
         ['FASTENER ASSEMBLY', _attD.fastenerStateLabel],
         ['INSTALLATION DETAILS', 'NOT ESTABLISHED'],
-        ['EMBEDMENT / TORQUE / PILOT', 'WITHHELD — NO VERIFIED SOURCE'],
+        // BRAIDON PDF AUDIT 2026-08-27 (V2) — 'EMBEDMENT / TORQUE / PILOT' at 6.4px bold is wider
+        // than the 87px label column (the value column starts at hbx1+92), so it ran UNDER the
+        // value and PV-3 printed the unreadable 'EMBEDMENT / TORQUE / PILOWITHHELD — NO VERIFIED
+        // SOURCE'. Shortened to fit the column it is drawn in.
+        ['EMBED / TORQUE / PILOT', 'WITHHELD — NO VERIFIED SOURCE'],
         ['MATERIAL / COATING', 'WITHHELD — NO VERIFIED SOURCE'],
         // ECD §7 — THE defect: this branch (assembly PENDING) asserted
         // 'UL 2703 INTEGRATED' on the same table that withholds embedment, torque,
@@ -2571,17 +2581,38 @@ export function drawRoofStructural(
     hwRows.forEach(([l, v], i) => {
       const ry = hby + hdrH + i * rowH;
       els.push(`<rect x="${hbx1}" y="${ry}" width="${hbw}" height="${rowH}" fill="${i % 2 ? '#f4f4f4' : '#fff'}" stroke="#c8c8c8" stroke-width="0.4"/>`);
-      els.push(drawText(hbx1 + 5, ry + 10.5, l, { anchor: 'start', fontSize: 6.4, fontWeight: 'bold', fill: '#333' }));
+      // V2 — the label column is only 87px wide (5 → 92) and drawText does not clip, so a label
+      // that overflows silently runs UNDER the value. Shrink the type for the few labels that are
+      // too long rather than letting them collide (7 chars ≈ 25px of headroom at 6.4px bold).
+      const _lblSize = l.length > 22 ? 5.6 : 6.4;
+      els.push(drawText(hbx1 + 5, ry + 10.5, l, { anchor: 'start', fontSize: _lblSize, fontWeight: 'bold', fill: '#333' }));
       els.push(drawText(hbx1 + 92, ry + 10.5, v, { anchor: 'start', fontSize: 6.2, fill: '#111' }));
     });
     els.push(`<rect x="${hbx1}" y="${hby}" width="${hbw}" height="${hdrH + hwRows.length * rowH}" fill="none" stroke="#2b2f36" stroke-width="1"/>`);
     // Right: waterproofing / roofing notes
     els.push(`<rect x="${hbx2}" y="${hby}" width="${hbw}" height="${hdrH}" fill="#000"/>`);
     els.push(drawText(hbx2 + hbw / 2, hby + 10, 'WATERPROOFING & ROOFING NOTES', { anchor: 'middle', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
-    const nBoxH = hdrH + rfNotes.length * 15 + 6;
+    // V2 — the roofing notes were drawn as single unwrapped lines inside a fixed-width box, so
+    // the longer ones (document applicability, the non-authoritative banner) ran straight through
+    // the right border and out of the box. Wrap to the box, and size the box to the wrapped
+    // result so the border always contains its own contents.
+    const _rfCharBudget = Math.max(22, Math.floor((hbw - 16) / (6.4 * 0.58)));
+    const _wrapRf = (t: string): string[] => {
+      if (t.length <= _rfCharBudget) return [t];
+      const out: string[] = []; let line = '';
+      for (const w of t.split(/\s+/)) {
+        if (!line) { line = w; continue; }
+        if ((line + ' ' + w).length <= _rfCharBudget) line += ' ' + w;
+        else { out.push(line); line = w; }
+      }
+      if (line) out.push(line);
+      return out;
+    };
+    const _rfLines = rfNotes.flatMap(n => _wrapRf(n));
+    const nBoxH = hdrH + _rfLines.length * 11 + 8;
     els.push(`<rect x="${hbx2}" y="${hby + hdrH}" width="${hbw}" height="${nBoxH - hdrH}" fill="#fff" stroke="#2b2f36" stroke-width="1"/>`);
-    rfNotes.forEach((n, i) => {
-      els.push(drawText(hbx2 + 6, hby + hdrH + 13 + i * 15, n, { anchor: 'start', fontSize: 6.4, fill: '#111' }));
+    _rfLines.forEach((n, i) => {
+      els.push(drawText(hbx2 + 6, hby + hdrH + 12 + i * 11, n, { anchor: 'start', fontSize: 6.4, fill: '#111' }));
     });
   }
 
@@ -2618,12 +2649,34 @@ export function drawRoofStructural(
     `${totalPanels} MODULES — ${dcKw.toFixed(2)} kW DC`,
     `REF: NEC 690.43 / IBC 1609 / ${_cpRf.asceLabel}`,
   ];
+  // BRAIDON PDF AUDIT 2026-08-27 (V2) — these were drawn as single unwrapped lines, so any note
+  // wider than the notes panel was CLIPPED MID-WORD by the panel edge. On PV-3 the spacing note
+  // printed "…48 IN. O.C. — PENDING STRUCTURAL VERIFICATIC" — a truncated word on a structural
+  // drawing reads as a rendering fault, and the reader loses the status the line exists to state.
+  // Wrap on word boundaries to the panel width instead of letting the edge cut the text.
+  const _notesAvailPx = Math.max(60, zones.dims.right - 16);
+  const _noteCharBudget = Math.max(22, Math.floor(_notesAvailPx / (6.5 * 0.58)));
+  const _wrapNote = (t: string): string[] => {
+    if (t.length <= _noteCharBudget) return [t];
+    const out: string[] = []; let line = '';
+    for (const w of t.split(/\s+/)) {
+      if (!line) { line = w; continue; }
+      if ((line + ' ' + w).length <= _noteCharBudget) line += ' ' + w;
+      else { out.push(line); line = w; }
+    }
+    if (line) out.push(line);
+    return out;
+  };
+  let _noteRow = 0;
   notes.forEach((note, i) => {
-    els.push(drawText(schedLeft, noteY + 10 + i * 9, note, {
-      anchor: 'start', fontSize: 6.5,
-      fill: i === 0 ? '#cc0000' : '#333',
-      fontWeight: i === 0 ? 'bold' : 'normal',
-    }));
+    for (const seg of _wrapNote(note)) {
+      els.push(drawText(schedLeft, noteY + 10 + _noteRow * 9, seg, {
+        anchor: 'start', fontSize: 6.5,
+        fill: i === 0 ? '#cc0000' : '#333',
+        fontWeight: i === 0 ? 'bold' : 'normal',
+      }));
+      _noteRow++;
+    }
   });
 
   // (UTILITY ANALYSIS removed — a utility-bill block does not belong on the

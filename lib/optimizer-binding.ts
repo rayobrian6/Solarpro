@@ -5,7 +5,7 @@
 // ============================================================
 
 import { SystemState, OptimizerInstance, ModuleInstance, buildModuleInstances, InverterConfig } from './system-state';
-import { OPTIMIZERS } from './equipment-db';
+import { OPTIMIZERS, getPanelById } from './equipment-db';
 
 export interface OptimizerBindingResult {
   optimizers: OptimizerInstance[];
@@ -131,6 +131,18 @@ export function checkOptimizerCompatibility(
     return { compatible: false, issues: [`Optimizer ${optimizerModelId} not found`], warnings: [] };
   }
 
+  // N1 — an unresolvable panel must NOT fall through to the two `>` comparisons below: 0 is less
+  // than every limit, so an unknown module would report "compatible" on both the wattage AND the
+  // Voc gate. Fail closed and name the id.
+  const panelRecord = getPanelById(panelId);
+  if (!panelRecord) {
+    return {
+      compatible: false,
+      issues: [`Panel ${panelId} not found in the equipment database — optimizer compatibility cannot be evaluated`],
+      warnings: [],
+    };
+  }
+
   const panelWatts = getPanelWatts(panelId);
   const panelVoc = getPanelVoc(panelId);
 
@@ -155,35 +167,16 @@ export function checkOptimizerCompatibility(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// BRAIDON PDF AUDIT 2026-08-27 (N1) — these were two hand-maintained lookup tables keyed by the
+// SAME panel ids the equipment-db already owns, so they were a second source of truth that drifts
+// silently: 'qcells-peak-duo-400' carried Voc 41.60 here long after the record itself changed, and
+// a panel absent from the table fell to a fabricated 400 W / 41.6 V rather than failing loudly.
+// The module already imports equipment-db at the top, so the old "avoid circular deps" note that
+// justified the tables no longer applies. Read the record; treat an unknown id as unknown.
 function getPanelWatts(panelId: string): number {
-  // Import inline to avoid circular deps
-  const PANEL_WATTS: Record<string, number> = {
-    'sunpower-maxeon7-440': 440,
-    'sunpower-maxeon6-400': 400,
-    'rec-alpha-pure-430': 430,
-    'panasonic-evervolt-410': 410,
-    'jinko-tiger-neo-580': 580,
-    'canadian-solar-hiku7-600': 600,
-    'longi-himo6-580': 580,
-    'trina-vertex-s-435': 435,
-    'qcells-peak-duo-400': 400,
-    'silfab-elite-400': 400,
-  };
-  return PANEL_WATTS[panelId] ?? 400;
+  return getPanelById(panelId)?.watts ?? 0;
 }
 
 function getPanelVoc(panelId: string): number {
-  const PANEL_VOC: Record<string, number> = {
-    'sunpower-maxeon7-440': 51.6,
-    'sunpower-maxeon6-400': 47.1,
-    'rec-alpha-pure-430': 48.9,
-    'panasonic-evervolt-410': 51.9,
-    'jinko-tiger-neo-580': 49.52,
-    'canadian-solar-hiku7-600': 49.80,
-    'longi-himo6-580': 49.65,
-    'trina-vertex-s-435': 37.80,
-    'qcells-peak-duo-400': 41.60,
-    'silfab-elite-400': 40.8,
-  };
-  return PANEL_VOC[panelId] ?? 41.6;
+  return getPanelById(panelId)?.voc ?? 0;
 }

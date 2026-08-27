@@ -907,17 +907,67 @@ export function buildPermitDesignSnapshot(
     // D10 — the tap conductors: the span from the fused AC disconnect to the tap
     // point. Emitted here so the array order matches the electrical chain.
     if (isSupply) {
+      // ── BRAIDON PDF AUDIT 2026-08-27 (N5) — THE TAP RUN WAS MODELLED TWICE ──────
+      // This object declared `lengthFt: null / lengthSource: 'unknown'` and an
+      // UNCONDITIONAL `state: 'pending'` — while DISCO_TO_METER_RUN, whose endpoints are
+      // the same two devices in the opposite order ("FUSED DISCONNECT → SERVICE / TAP"),
+      // carried a 15 ft CAD estimate. PV-4B.1 printed both rows adjacent: one saying the
+      // ≤10-ft rule cannot be evaluated because no length exists, immediately below a row
+      // stating 15 ft for that very span. A 15 ft estimate does not merely fail to help —
+      // it is positive evidence the layout does NOT satisfy NEC 705.11(C), and the sheet
+      // said "PENDING (length unknown)" instead.
+      //
+      // `state: 'pending'` being a hardcoded literal is also why the prior audit classed
+      // TAP-CONDUCTOR-LENGTH-PENDING as unclearable: a grep for `state: 'pass'` / `'fail'`
+      // across lib/ returned zero writers. This is that writer.
+      //
+      // Grading rule. Only a MEASUREMENT decides compliance. DISCO_TO_METER_RUN's estimate is a
+      // heuristic ("65% of the array→MSP distance"), and asserting a 705.11(C) violation from a
+      // heuristic would be the same over-claim as the original bug, pointed the other way. So:
+      //   • DISCO_TO_METER_RUN field-measured ≤ limit → 'pass'  (the ONLY way this clears; if a
+      //                                                          crew measured disconnect→service
+      //                                                          they measured the tap run)
+      //   • DISCO_TO_METER_RUN field-measured > limit → 'fail'
+      //   • otherwise                                 → 'pending', length stays NULL/unknown —
+      //     but when the MODELLED span already exceeds the limit, the constraint and the blocker
+      //     SAY SO. That is the actual defect being fixed: the sheet printed "PENDING (length
+      //     unknown)" one row below a 15 ft estimate for the same physical span, with nothing
+      //     connecting the two. The estimate is a design warning, never a verdict.
+      const _TAP_LIMIT_FT = 10;
+      const _tapSeg = routeSegments.find(r => r.segmentId === 'DISCO_TO_METER_RUN');
+      const _tapModelledFt = _tapSeg?.oneWayFt ?? null;
+      const _tapMeasured = _tapSeg?.lengthSource === 'field-measurement' && _tapModelledFt != null;
+      const _tapState: 'pass' | 'fail' | 'pending' = !_tapMeasured
+        ? 'pending'
+        : (_tapModelledFt as number) <= _TAP_LIMIT_FT ? 'pass' : 'fail';
+      // Only a measurement may populate the tap object's own length. An estimate for the
+      // disconnect→service route is NOT a tap-conductor measurement, and the two objects stay
+      // separate by design (see tests/planset/tar-tap-topology.test.ts).
+      const _tapLenFt = _tapMeasured ? _tapModelledFt : null;
+      const _tapLengthSource: 'known-design' | 'cad-derived-estimate' | 'field-measurement' | 'unknown' | 'not-applicable' =
+        _tapMeasured ? 'field-measurement' : 'unknown';
+      // The cross-check that was missing entirely.
+      const _tapModelledExceeds = !_tapMeasured && _tapModelledFt != null && _tapModelledFt > _TAP_LIMIT_FT;
       objs.push({
         objectId: 'svc-tap-conductors', type: 'tap-conductors',
         label: 'Tap conductors', description: 'Tap point → fused AC disconnect; sized ≥ 125% of PV output current',
         conductorSpec: feederGauge ? `${feederGauge} THWN-2${pvContA != null ? ` (≥ ${pvContA.toFixed(1)}A)` : ''}` : null,
         ocpdRatingA: null,
-        lengthFt: null, lengthSource: 'unknown',
+        lengthFt: _tapLenFt, lengthSource: _tapLengthSource,
         constraints: [{
           code: 'NEC-705.11(C)-TAP-10FT',
-          description: 'Fused disconnect within 10 ft of the tap; tap-conductor length ≤ 10 ft',
-          limitFt: 10,
-          state: 'pending',
+          description: _tapState === 'pass'
+            ? `Fused disconnect within ${_TAP_LIMIT_FT} ft of the tap; field-measured ${_tapLenFt} ft ≤ ${_TAP_LIMIT_FT} ft`
+            : _tapState === 'fail'
+              ? `Fused disconnect within ${_TAP_LIMIT_FT} ft of the tap; field-measured ${_tapLenFt} ft EXCEEDS the ${_TAP_LIMIT_FT} ft limit — relocate the disconnect or the tap point`
+              : _tapModelledExceeds
+                ? `Fused disconnect within ${_TAP_LIMIT_FT} ft of the tap; tap-conductor length NOT MEASURED. `
+                  + `WARNING — the modelled disconnect→service span (DISCO_TO_METER_RUN) is ${_tapModelledFt} ft, which already exceeds the ${_TAP_LIMIT_FT} ft limit. `
+                  + `That figure is a CAD estimate, not a tap measurement, so no violation is asserted — but the layout as drawn is unlikely to comply. `
+                  + `Verify the disconnect location before the crew mobilises.`
+                : 'Fused disconnect within 10 ft of the tap; tap-conductor length ≤ 10 ft — NOT MEASURED',
+          limitFt: _TAP_LIMIT_FT,
+          state: _tapState,
         }],
         upstreamObjectId: 'svc-fused-ocpd',
         downstreamObjectId: _separateUtilityDisconnect ? 'svc-utility-disconnect' : 'svc-tap-point',
@@ -2120,10 +2170,27 @@ export function buildPermitDesignSnapshot(
     // NEC 705.11(C) rule cannot be evaluated. §17 — surface it as a BLOCKING
     // blocker (no compliant claim without a length) rather than only a
     // service-topology PENDING cell.
-    if (serviceTopology.some(o => o.type === 'tap-conductors'
-      && (o.constraints ?? []).some(k => k.state === 'pending'))) {
+    // BRAIDON PDF AUDIT 2026-08-27 (N5) — this predicate fired ONLY on 'pending'. Now that the
+    // constraint has a real writer, a 'fail' (the modelled tap span EXCEEDS 10 ft) would have
+    // slipped through and raised NO blocker at all — the worst outcome quieter than the
+    // uncertain one. Block on pending AND fail; only a field-measured pass clears it.
+    const _tapConstraints = serviceTopology
+      .filter(o => o.type === 'tap-conductors')
+      .flatMap(o => o.constraints ?? []);
+    const _tapFailed = _tapConstraints.find(k => k.state === 'fail');
+    if (_tapFailed) {
       push('TAP-CONDUCTOR-LENGTH-PENDING',
-        'Supply-side tap-conductor length is not measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a length)');
+        `Supply-side tap-conductor run EXCEEDS the NEC 705.11(C) ≤10-ft limit — ${_tapFailed.description}. `
+        + 'This is a LAYOUT defect, not a missing measurement: relocate the fused AC disconnect closer to the tap point '
+        + '(or move the tap point) so the tap conductors are ≤10 ft, then re-verify by field measurement.');
+    } else if (_tapConstraints.some(k => k.state === 'pending')) {
+      const _pendingTap = _tapConstraints.find(k => k.state === 'pending');
+      // N5 — when the modelled span already busts the limit, the blocker must carry that warning
+      // rather than the bare "not measured" line the sheet printed beside a 15 ft estimate.
+      push('TAP-CONDUCTOR-LENGTH-PENDING',
+        /WARNING/.test(_pendingTap?.description ?? '')
+          ? (_pendingTap as { description: string }).description
+          : 'Supply-side tap-conductor length is not field-measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a measured length)');
     }
     // TIGO KEEP-ALIVE SOURCE. When the design carries add-on module-level RSD
     // devices (TS4-A-F), those devices are SLAVES: each holds its module on only
