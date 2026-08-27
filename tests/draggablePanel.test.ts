@@ -111,6 +111,25 @@ describe('DraggablePanel explicit handle support', () => {
     // by the drag handler.
     expect(src).toMatch(/closest\('button,\s*input,\s*select,\s*textarea,\s*a,\s*label,\s*\[data-no-drag\]'\)/);
   });
+
+  it('always wires onPointerDown to the wrapper (regression: explicit-handle panels were dead)', () => {
+    // Earlier we conditionally set the wrapper's onPointerDown to
+    // `undefined` when an explicit handle was present. That meant
+    // pointerdown never reached the drag handler for the top-left-dock
+    // and save-create-design panels, so the grip was decorative only.
+    // The wrapper must always own the pointerdown; the explicit-handle
+    // membership check happens inside the handler.
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'components', '3d', 'DraggablePanel.tsx'),
+      'utf8',
+    );
+    // The wrapper's onPointerDown prop should always reference the handler.
+    const wrapperOnPD = src.match(/<div\s+ref=\{wrapperRef\}[\s\S]*?onPointerDown=\{([^}]+)\}/);
+    expect(wrapperOnPD, 'wrapper onPointerDown not found').not.toBeNull();
+    expect(wrapperOnPD![1]).toBe('onWrapperPointerDown');
+  });
 });
 
 describe('All 18 panels are wired to DraggablePanel in SolarEngine3D', () => {

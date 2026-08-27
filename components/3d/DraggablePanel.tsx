@@ -198,11 +198,19 @@ export function DraggablePanel({
     );
   }
 
+  // The wrapper ALWAYS owns pointerdown. For explicit-handle panels
+  // the handler internally checks `querySelector('[data-drag-handle]')`
+  // and only starts a drag when the pointerdown target is inside that
+  // handle. For auto-handle panels the first child is wrapped in a
+  // handle div that also carries the same handler — both fire on
+  // pointerdown (event bubbling), both check for buttons / handle
+  // membership, both return early when the target is an interactive
+  // child so the button's own onClick fires normally.
   return (
     <div
       ref={wrapperRef}
       className={className}
-      onPointerDown={hasExplicitHandle ? undefined : onWrapperPointerDown}
+      onPointerDown={onWrapperPointerDown}
       style={{
         transform: `translate(${offset.x}px, ${offset.y}px)`,
         zIndex,
@@ -223,7 +231,6 @@ export function DraggablePanel({
             role="button"
             tabIndex={0}
             aria-label="Drag panel"
-            onPointerDown={onWrapperPointerDown}
             style={{
               cursor: dragging ? 'grabbing' : 'grab',
               touchAction: 'none',
