@@ -84,8 +84,8 @@ describe('defaultConsumptionForm', () => {
 describe('validateConsumptionProfile — happy path', () => {
   it('accepts a fully-populated valid form', () => {
     const r = validateConsumptionProfile(makeValidForm());
-    expect(r.ok).toBe(true);
-    if (r.ok) {
+    expect(r.ok).toBe('success');
+    if (r.ok === 'success') {
       expect(r.data.providerId).toBe('sdge');
       expect(r.data.rateId).toBe('sdge-dr');
       expect(r.data.locationId).toBe('san-diego-miramar-nas');
@@ -100,7 +100,7 @@ describe('validateConsumptionProfile — happy path', () => {
         ratePeriodId: 'sdge-alti-2017-present',
       }),
     );
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe('success');
   });
 
   it('accepts a form that includes monthly kWh data when source=electric-bill', () => {
@@ -110,14 +110,14 @@ describe('validateConsumptionProfile — happy path', () => {
         monthlyKwh: [400, 380, 420, 450, 500, 600, 720, 700, 580, 460, 410, 420],
       }),
     );
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe('success');
   });
 
   it('accepts a form with annualKwh within bounds', () => {
     const r = validateConsumptionProfile(
       makeValidForm({ source: 'none', annualKwh: 6500 }),
     );
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe('success');
   });
 });
 
@@ -128,8 +128,8 @@ describe('validateConsumptionProfile — happy path', () => {
 describe('validateConsumptionProfile — error rules', () => {
   it('R1: rejects missing profileType', () => {
     const r = validateConsumptionProfile({ ...makeValidForm(), profileType: undefined });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.profileType).toBeTruthy();
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.profileType).toBeTruthy();
   });
 
   it('R1: rejects invalid profileType', () => {
@@ -138,14 +138,14 @@ describe('validateConsumptionProfile — error rules', () => {
       ...makeValidForm(),
       profileType: 'industrial' as unknown as 'residential',
     });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.profileType).toMatch(/residential|commercial/);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.profileType).toMatch(/residential|commercial/);
   });
 
   it('R2: rejects unknown providerId', () => {
     const r = validateConsumptionProfile({ ...makeValidForm(), providerId: 'nope-utility' });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.providerId).toBeTruthy();
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.providerId).toBeTruthy();
   });
 
   it('R3: rejects rate that is not available for the selected profileType', () => {
@@ -153,8 +153,8 @@ describe('validateConsumptionProfile — error rules', () => {
     const r = validateConsumptionProfile(
       makeValidForm({ profileType: 'residential', rateId: 'sdge-alti' }),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.rateId).toMatch(/not available/);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.rateId).toMatch(/not available/);
   });
 
   it('R4: rejects rate that belongs to a different provider', () => {
@@ -162,36 +162,36 @@ describe('validateConsumptionProfile — error rules', () => {
     const r = validateConsumptionProfile(
       makeValidForm({ providerId: 'sdge', rateId: 'pge-e1' }),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.rateId).toMatch(/does not belong/);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.rateId).toMatch(/does not belong/);
   });
 
   it('R5: rejects rate period that does not apply to the selected rate', () => {
     const r = validateConsumptionProfile(
       makeValidForm({ rateId: 'sdge-dr', ratePeriodId: 'pge-e1-2017-present' }),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.ratePeriodId).toMatch(/not apply/);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.ratePeriodId).toMatch(/not apply/);
   });
 
   it('R6: rejects unknown locationId', () => {
     const r = validateConsumptionProfile({ ...makeValidForm(), locationId: 'pluto' });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.locationId).toBeTruthy();
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.locationId).toBeTruthy();
   });
 
   it('R7: rejects missing monthlyKwh when source=electric-bill', () => {
     const r = validateConsumptionProfile(makeValidForm({ source: 'electric-bill' }));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.monthlyKwh).toMatch(/required/i);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.monthlyKwh).toMatch(/required/i);
   });
 
   it('R7: rejects monthlyKwh that is not 12 elements long', () => {
     const r = validateConsumptionProfile(
       makeValidForm({ source: 'green-button', monthlyKwh: [100, 200, 300] }),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.monthlyKwh).toMatch(/12 months/);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.monthlyKwh).toMatch(/12 months/);
   });
 
   it('R7: rejects monthlyKwh with a negative value', () => {
@@ -201,8 +201,8 @@ describe('validateConsumptionProfile — error rules', () => {
         monthlyKwh: [100, -50, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
       }),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.monthlyKwh).toBeTruthy();
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.monthlyKwh).toBeTruthy();
   });
 
   it('R7: rejects monthlyKwh with a non-number value', () => {
@@ -213,20 +213,20 @@ describe('validateConsumptionProfile — error rules', () => {
         monthlyKwh: [100, 'oops' as unknown as number, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
       }),
     );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.monthlyKwh).toBeTruthy();
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.monthlyKwh).toBeTruthy();
   });
 
   it('R8: rejects annualKwh below the minimum', () => {
     const r = validateConsumptionProfile(makeValidForm({ annualKwh: MIN_ANNUAL_KWH - 1 }));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.annualKwh).toBeTruthy();
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.annualKwh).toBeTruthy();
   });
 
   it('R8: rejects annualKwh above the maximum', () => {
     const r = validateConsumptionProfile(makeValidForm({ annualKwh: MAX_ANNUAL_KWH + 1 }));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.annualKwh).toBeTruthy();
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect(r.errors.annualKwh).toBeTruthy();
   });
 
   it('reports multiple errors at once', () => {
@@ -235,8 +235,8 @@ describe('validateConsumptionProfile — error rules', () => {
       providerId: 'sdge',
       // missing rateId, ratePeriodId, locationId
     });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') {
       expect(r.errors.rateId).toBeTruthy();
       expect(r.errors.ratePeriodId).toBeTruthy();
       expect(r.errors.locationId).toBeTruthy();

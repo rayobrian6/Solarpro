@@ -125,13 +125,13 @@ export function validateConsumptionProfile(
   }
 
   if (Object.keys(errors).length > 0) {
-    return { ok: false, errors };
+    return { ok: 'error', errors } as const;
   }
 
   // Happy path — narrow Partial<Form> → Form. The discriminator check
   // above guarantees every required key is present and well-typed.
   return {
-    ok: true,
+    ok: 'success',
     data: {
       profileType: form.profileType as ProfileType,
       providerId: form.providerId as string,
@@ -142,7 +142,7 @@ export function validateConsumptionProfile(
       ...(form.monthlyKwh !== undefined ? { monthlyKwh: form.monthlyKwh } : {}),
       ...(form.annualKwh !== undefined ? { annualKwh: form.annualKwh } : {}),
     },
-  };
+  } as const;
 }
 
 /**

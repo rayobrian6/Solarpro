@@ -158,7 +158,7 @@ export default function ConsumptionForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const result = validateConsumptionProfile(form);
-    if (!result.ok) {
+    if (result.ok === 'error') {
       setErrors(result.errors);
       return;
     }
@@ -175,7 +175,7 @@ export default function ConsumptionForm() {
         | { success: true; data: ConsumptionProfileResult }
         | { success: false; error: string };
       if (!res.ok || !('success' in body) || !body.success) {
-        const msg = 'success' in body && !body.success ? body.error : `Server returned ${res.status}`;
+        const msg = 'success' in body && body.success === false ? body.error : `Server returned ${res.status}`;
         setSubmit({ kind: 'error', message: msg });
         return;
       }

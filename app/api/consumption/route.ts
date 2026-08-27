@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
   }
 
   const result = validateConsumptionProfile(body.profile);
-  if (!result.ok) {
+  if (result.ok === 'error') {
     return NextResponse.json(
       {
         success: false,

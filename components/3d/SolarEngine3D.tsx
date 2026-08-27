@@ -147,6 +147,22 @@ import {
 // See DESIGN.md for the spec.
 import { RoofWizard } from './wizard';
 
+// v66 (create-design-modal): Aurora-parity "Save → Create Design" trigger.
+// The modal itself lives in components/3d/designs/CreateDesignModal.tsx; the
+// parent owns open state and is expected to render the modal when onCreateDesign
+// fires. See components/3d/designs/DESIGN.md.
+// (no top-level import — the trigger is a local <button>, the modal is mounted by the parent)
+
+// v66 (dark-canvas): Aurora-parity Design-phase dark overlay with grid.
+// Renders the 50px major + 10px minor grid in rgba(26,26,46,0.75) over the
+// canvas. Returns null in Site Model so the satellite shows through. See
+// components/3d/canvasTheme/DESIGN.md.
+import { CanvasTheme } from './canvasTheme';
+
+// v66 (help-panel): Aurora-parity left-sidebar INSTRUCTIONS panel that
+// shows context-aware guidance per tool/mode. See components/3d/help/.
+import { HelpPanel } from './help/HelpPanel';
+
 // v65 (camera-tilt): Aurora-parity camera presets — default 3D view at -45° pitch
 // (tilted aerial) instead of -65° (top-down-ish). See lib/3d/cameraPresets.ts.
 import {
@@ -191,7 +207,6 @@ import {
   TreeCursor,
   DEFAULT_TREE_CANOPY_RADIUS_M as _TREE_CANOPY_R_M,
 } from './tree';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
 
 // v68: Vertex Handles (in-place footprint editing for Block / Gable / Hip / Tree).
@@ -223,22 +238,6 @@ import {
   createEmptySceneState,
   type HistoryStore,
 } from '@/lib/state';
-
-// v66: LiDAR integration — load .las files, render as Mesh or Point Cloud,
-// apply X/Y/Z offset (feet), toggle textured drape. Aurora parity (frames
-// 125/130/135). Pure math in lib/3d/lidar; Cesium-coupled parts loaded
-// only when a dataset is present.
-import {
-  LiDARPropertiesPanel,
-  LiDARLoadingToast,
-  useLiDARState,
-  loadLiDARFromFilePicker,
-  createLiDARController,
-  liftRoofs as liftRoofsUtil,
-  flattenRoofs as flattenRoofsUtil,
-  type LiDARDataset,
-  type LiDARState,
-} from '@/lib/3d/lidar';
 
 // v66: Lift Roofs / Flatten Roofs quick actions for the 3D Primitives
 // (block / gable / hip entities the user draws in the canvas). Pure
@@ -485,6 +484,11 @@ interface Props {
    *  omitted, the panel is hidden. The design-panel agent will wire
    *  this from their Design-phase context. */
   isDesignPhase?: boolean;
+  /** v66: create-design-modal trigger. Fired from the in-canvas "Save → Create
+   *  Design" button when the user finishes the site model. The parent owns the
+   *  modal state and is expected to render <CreateDesignModal> + switch to
+   *  Design phase when fired. */
+  onCreateDesign?: () => void;
 }
 
 function log(tag: string, msg: string, data?: any) {
@@ -628,6 +632,7 @@ function SolarEngine3D({
   paintMode = false,
   onPanelPaint,
   isDesignPhase = false,
+  onCreateDesign,
 }: Props) {
   const cesiumRef   = useRef<HTMLDivElement>(null);
   const viewerRef   = useRef<any>(null);
@@ -687,7 +692,9 @@ function SolarEngine3D({
   // Read by applyOrbitRef.current() to reposition the Cesium camera.
   const orbitRef = useRef({
     targetLat: lat, targetLng: lng, targetAlt: 0,
-    heading: Math.PI, pitch: -1.134, radius: 150.0,
+    heading: TILTED_AERIAL_VIEW.heading,
+    pitch:   TILTED_AERIAL_VIEW.pitch,
+    radius:  TILTED_AERIAL_VIEW.range,
     dragging: false, dragButton: -1,
     dragStartX: 0, dragStartY: 0,
     dragStartH: 0.0, dragStartP: 0.0,
@@ -872,9 +879,8 @@ function SolarEngine3D({
       centroidLng: lng,
       onLoadingChange: lidar.setLoading,
     }).then((result) => {
-      if (!result.ok) {
-        const r = result as { ok: false; error: string; cancelled?: boolean };
-        if (!r.cancelled) lidar.setError(r.error);
+      if (result.ok === 'error') {
+        if (!result.cancelled) lidar.setError(result.error);
         return;
       }
       lidar.setDataset(result.dataset);
@@ -1209,6 +1215,25 @@ function SolarEngine3D({
   // Decorative only; doesn't affect solar production. Matches the 3D-After-at-Noon reference image.
   const treeEntitiesRef = useRef<any[]>([]);
   const [placedTreeCount, setPlacedTreeCount] = useState(0);
+
+  // v66 (vertex-handles): per-primitive edit spec keyed by primitive id.
+  // The shape varies per primitive type (block has blockExtrudeHeightM,
+  // gable/hip have eaveHeightM + pitchDeg, tree has a position, etc.).
+  // The full type lives in components/3d/editing/ — we keep it loose here
+  // so the integration touch is minimal. See components/3d/editing/DESIGN.md.
+  type VertexSpec = any;
+  const vertexSpecsRef = useRef<VertexSpec[]>([]);
+  const [vertexSpecs, setVertexSpecs] = useState<VertexSpec[]>([]);
+
+  // v66 (roof-wizard): per-mode point counts for the wizard stepper and
+  // the context-aware help panel. Mirrors the existing block/gable/hip/tree
+  // counts. mark_plane / plane3d / ground are the legacy CAD-derivation
+  // flows; the wizard surfaces them in the help-panel context so the user
+  // can see "5/3 points" type progress.
+  const [markPlanePtCount, setMarkPlanePtCount] = useState(0);
+  const [plane3DPtCount,   setPlane3DPtCount]   = useState(0);
+  const [groundPtCount,    setGroundPtCount]    = useState(0);
+
   // v66 (obstruction-primitive): Aurora-parity "Add Obstruction" primitive.
   // Single-click placement of a small rectangular prism (chimney / vent /
   // dormer). The right-panel input block lets the user override the
@@ -1843,12 +1868,12 @@ function SolarEngine3D({
     o.targetLat = lat;
     o.targetLng = lng;
     o.targetAlt = elev;
-    o.heading   = Math.PI;  // π → fly-in looks NORTH (look dir = heading + π)
-    o.pitch     = -1.134;  // -65° — top-down-ish view
+    o.heading   = TILTED_AERIAL_VIEW.heading;  // π → fly-in looks NORTH (look dir = heading + π)
+    o.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45° Aurora parity (lib/3d/cameraPresets.ts)
     // 150m default framing; only fall back to a wider 300m when the ground
     // elevation is genuinely UNRESOLVED. (Was `elev > 0`, which wrongly treated
     // legitimately-negative coastal elevations as "unknown" and zoomed out.)
-    o.radius    = cesiumGroundElevResolvedRef.current ? 150 : 300;
+    o.radius    = cesiumGroundElevResolvedRef.current ? TILTED_AERIAL_VIEW.range : 300;
     o.dragging  = false;
     if (applyOrbitRef.current) {
       applyOrbitRef.current();
@@ -2085,7 +2110,7 @@ function SolarEngine3D({
         // π puts the camera SOUTH of the target so the fly-in looks NORTH
         // (was 0.0, which sat north of target and looked south).
         heading: Math.PI,         // radians; fly-in looks NORTH
-        pitch:   -1.134,          // radians, -65° (initial boot angle)
+        pitch:   TILTED_AERIAL_VIEW.pitch,  // radians, -45° (Aurora parity) — lib/3d/cameraPresets.ts
         radius:  150.0,           // metres from target
 
         // Drag state
@@ -2518,9 +2543,9 @@ function SolarEngine3D({
       oo.targetLat = lat;
       oo.targetLng = lng;
       oo.targetAlt = cesiumGroundElev;
-      oo.heading   = Math.PI;  // π → fly-in looks NORTH (look dir = heading + π)
-      oo.pitch     = -1.134;   // -65° top-down-ish
-      oo.radius    = 150;
+      oo.heading   = TILTED_AERIAL_VIEW.heading;  // π → fly-in looks NORTH (look dir = heading + π)
+      oo.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45° Aurora parity (lib/3d/cameraPresets.ts)
+      oo.radius    = TILTED_AERIAL_VIEW.range;
       applyOrbitRef.current?.();
 
       setProgress(90);
@@ -2748,7 +2773,7 @@ function SolarEngine3D({
       // No panels — reset to site at default pose
       o.targetLat = lat; o.targetLng = lng;
       o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      o.heading = Math.PI; o.pitch = -1.134; o.radius = 150;  // look NORTH
+      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = TILTED_AERIAL_VIEW.range;  // -45° Aurora parity
     } else {
       const lats = panels.map((p: PlacedPanel) => p.lat);
       const lngs = panels.map((p: PlacedPanel) => p.lng);
@@ -2760,7 +2785,7 @@ function SolarEngine3D({
       const radius   = Math.max(50, spanM * 1.4);
       o.targetLat = centLat; o.targetLng = centLng;
       o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      o.heading = Math.PI; o.pitch = -1.222;  // -70°, look NORTH
+      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch;  // -45° Aurora parity (Reset View)
       o.radius  = radius;
       addLog('FIT', `Fit view: ${panels.length} panels, span=${spanM.toFixed(0)}m, radius=${radius.toFixed(0)}m`);
     }
@@ -9486,7 +9511,7 @@ function SolarEngine3D({
         const o = orbitRef.current;
         o.targetLat = centLat; o.targetLng = centLng;
         o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-        o.heading = Math.PI; o.pitch = -1.222; o.radius = radius;  // -70° pitch, look NORTH
+        o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = radius;  // -45° Aurora parity (Reset View)
         applyOrbitRef.current?.();
       } catch {}
     }
@@ -10049,6 +10074,12 @@ function SolarEngine3D({
   // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#0a0a1a', overflow: 'hidden' }}>
+
+      {/* v66 (dark-canvas): Aurora-parity Design-phase dark overlay + grid.
+          Currently hardcoded to "design" so the dark grid is visible as soon
+          as the user enters the canvas. Future: wire to isDesignPhase so the
+          Site Model keeps the light satellite. See components/3d/canvasTheme/. */}
+      <CanvasTheme phase={isDesignPhase ? 'design' : 'site_model'} />
 
       {/* Cesium container */}
       <div ref={cesiumRef} style={{ width: '100%', height: '100%' }} />
@@ -11725,6 +11756,27 @@ function SolarEngine3D({
           }}
         >
           ✂ Stitch
+        </button>
+      ) : null}
+
+      {/* v66 (create-design-modal): Aurora-parity "Save → Create Design" trigger.
+          The parent owns the modal state and is expected to render
+          <CreateDesignModal> + switch to Design phase when fired. See
+          components/3d/designs/DESIGN.md. */}
+      {stage === 'done' && onCreateDesign ? (
+        <button
+          onClick={onCreateDesign}
+          title="Save the site model and open the Create Design dialog"
+          data-testid="solarengine-save-create-design"
+          style={{
+            position: 'absolute', top: 12, right: 12, zIndex: 51,
+            background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
+            color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px',
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            boxShadow: '0 4px 14px rgba(20,184,166,0.35)',
+          }}
+        >
+          💾 Save → Create Design
         </button>
       ) : null}
 

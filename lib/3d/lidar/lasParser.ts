@@ -51,8 +51,8 @@ export interface ParseOptions {
 
 /** Result of a parse attempt. Errors are returned, not thrown. */
 export type ParseResult =
-  | { ok: true; dataset: LiDARDataset }
-  | { ok: false; error: string };
+  | { ok: 'success'; dataset: LiDARDataset }
+  | { ok: 'error'; error: string };
 
 /**
  * Parse a LAS file from an ArrayBuffer (or a Uint8Array view of one).
@@ -64,37 +64,37 @@ export function parseLAS(buf: ArrayBuffer | Uint8Array, options: ParseOptions = 
   const maxPoints = options.maxPoints ?? 500_000;
 
   if (bytes.length < LAS_HEADER_SIZE) {
-    return { ok: false, error: `File too small to be LAS (${bytes.length} bytes; need ≥ ${LAS_HEADER_SIZE})` };
+    return { ok: 'error', error: `File too small to be LAS (${bytes.length} bytes; need ≥ ${LAS_HEADER_SIZE})` } as const;
   }
 
   // 1. File signature: "LASF" at offset 0 (4 bytes)
   const signature = view.getUint32(0, true);
   if (signature !== LASF_SIGNATURE) {
-    return { ok: false, error: `Not a LAS file (signature = 0x${signature.toString(16)}, expected 0x4653414c = "LASF")` };
+    return { ok: 'error', error: `Not a LAS file (signature = 0x${signature.toString(16)}, expected 0x4653414c = "LASF")` } as const;
   }
 
   // 2. Version: major (uint8 at 24) + minor (uint8 at 25)
   const versionMajor = view.getUint8(24);
   const versionMinor = view.getUint8(25);
   if (versionMajor !== 1) {
-    return { ok: false, error: `Unsupported LAS major version ${versionMajor}.X (expected 1.X)` };
+    return { ok: 'error', error: `Unsupported LAS major version ${versionMajor}.X (expected 1.X)` } as const;
   }
   if (![0, 1, 2, 3, 4].includes(versionMinor)) {
-    return { ok: false, error: `Unsupported LAS 1.${versionMinor}` };
+    return { ok: 'error', error: `Unsupported LAS 1.${versionMinor}` } as const;
   }
 
   // 3. Header size and point data offset
   const headerSize = view.getUint16(94, true);
   const pointOffset = view.getUint32(96, true);
   if (pointOffset < headerSize || pointOffset > bytes.length) {
-    return { ok: false, error: `Invalid point data offset: ${pointOffset} (headerSize=${headerSize}, fileLen=${bytes.length})` };
+    return { ok: 'error', error: `Invalid point data offset: ${pointOffset} (headerSize=${headerSize}, fileLen=${bytes.length})` } as const;
   }
 
   // 4. Point data format ID (uint8 at 104)
   const pointFormatId = view.getUint8(104);
   const pointSize = POINT_SIZES[pointFormatId];
   if (!pointSize) {
-    return { ok: false, error: `Unsupported LAS point data format ${pointFormatId} (we support 0–3). Waveform formats 4–10 are out of scope.` };
+    return { ok: 'error', error: `Unsupported LAS point data format ${pointFormatId} (we support 0–3). Waveform formats 4–10 are out of scope.` } as const;
   }
 
   // 5. Number of point records
@@ -106,7 +106,7 @@ export function parseLAS(buf: ArrayBuffer | Uint8Array, options: ParseOptions = 
     const lo = view.getUint32(111, true);
     numPoints = hi >= 0x1 ? Number.MAX_SAFE_INTEGER : lo;
     if (hi >= 0x1) {
-      return { ok: false, error: `LAS 1.4 point count overflow (${hi}*2^32 + ${lo}); refusing to parse.` };
+      return { ok: 'error', error: `LAS 1.4 point count overflow (${hi}*2^32 + ${lo}); refusing to parse.` } as const;
     }
   } else {
     numPoints = view.getUint32(107, true);
@@ -137,7 +137,7 @@ export function parseLAS(buf: ArrayBuffer | Uint8Array, options: ParseOptions = 
     numPoints = availablePoints;
   }
   if (numPoints <= 0) {
-    return { ok: false, error: `No point records in file (numPoints=${numPoints})` };
+    return { ok: 'error', error: `No point records in file (numPoints=${numPoints})` } as const;
   }
 
   // 9. Sub-sample if we exceed maxPoints. Uniform stride = ceil(N / M).
@@ -196,11 +196,11 @@ export function parseLAS(buf: ArrayBuffer | Uint8Array, options: ParseOptions = 
   // evenly into numPoints, or NaN points were dropped).
   points.length = o;
   if (points.length === 0) {
-    return { ok: false, error: 'All points were NaN/Inf after decoding. File may be corrupted.' };
+    return { ok: 'error', error: 'All points were NaN/Inf after decoding. File may be corrupted.' } as const;
   }
 
   return {
-    ok: true,
+    ok: 'success',
     dataset: {
       source: '',
       points,
@@ -213,14 +213,14 @@ export function parseLAS(buf: ArrayBuffer | Uint8Array, options: ParseOptions = 
       centroidLng: 0,
       crs: 'local-enu',
     },
-  };
+  } as const;
 }
 
 /** Parse a File / Blob (browser) and return the dataset. Promise-based. */
 export async function parseLASFile(file: File | Blob, options: ParseOptions = {}): Promise<ParseResult> {
   const buf = await file.arrayBuffer();
   const result = parseLAS(buf, options);
-  if (result.ok) {
+  if (result.ok === 'success') {
     // Stamp the source filename for display.
     if ('name' in file && typeof (file as File).name === 'string') {
       result.dataset.source = (file as File).name;

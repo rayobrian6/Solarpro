@@ -239,20 +239,20 @@ describe('lib/3d/lidar/offsetTransform', () => {
 describe('lib/3d/lidar/lasParser', () => {
   it('rejects files smaller than 227 bytes', () => {
     const r = parseLAS(new Uint8Array(100));
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect((r as { ok: false; error: string }).error).toMatch(/too small/i);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect((r as { ok: 'error'; error: string }).error).toMatch(/too small/i);
   });
   it('rejects bad signature', () => {
     const buf = new Uint8Array(227);
     const r = parseLAS(buf);
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect((r as { ok: false; error: string }).error).toMatch(/not a LAS/i);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect((r as { ok: 'error'; error: string }).error).toMatch(/not a LAS/i);
   });
   it('parses a 100-point LAS 1.2 file (format 0)', () => {
     const bytes = buildLAS12(100, 0);
     const r = parseLAS(bytes);
-    expect(r.ok).toBe(true);
-    if (r.ok) {
+    expect(r.ok).toBe('success');
+    if (r.ok === 'success') {
       expect(r.dataset.count).toBe(100);
       expect(r.dataset.bounds.maxX).toBeCloseTo(9.9, 1);
       expect(r.dataset.bounds.maxY).toBeCloseTo(4.95, 1);
@@ -260,13 +260,13 @@ describe('lib/3d/lidar/lasParser', () => {
   });
   it('parses a 50-point LAS 1.2 file (format 1, with GPS time)', () => {
     const r = parseLAS(buildLAS12(50, 1));
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.dataset.count).toBe(50);
+    expect(r.ok).toBe('success');
+    if (r.ok === 'success') expect(r.dataset.count).toBe(50);
   });
   it('parses a 50-point LAS 1.2 file (format 2, with RGB)', () => {
     const r = parseLAS(buildLAS12(50, 2));
-    expect(r.ok).toBe(true);
-    if (r.ok) {
+    expect(r.ok).toBe('success');
+    if (r.ok === 'success') {
       const p0 = r.dataset.points[0];
       expect(p0.r).toBe(100);
       expect(p0.g).toBe(200);
@@ -275,29 +275,29 @@ describe('lib/3d/lidar/lasParser', () => {
   });
   it('parses a 50-point LAS 1.2 file (format 3, GPS + RGB)', () => {
     const r = parseLAS(buildLAS12(50, 3));
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.dataset.count).toBe(50);
+    expect(r.ok).toBe('success');
+    if (r.ok === 'success') expect(r.dataset.count).toBe(50);
   });
   it('rejects unsupported point data format (e.g. 6 — waveform)', () => {
     const bytes = buildLAS12(1, 0);
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     dv.setUint8(104, 6);
     const r = parseLAS(bytes);
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect((r as { ok: false; error: string }).error).toMatch(/format 6/i);
+    expect(r.ok).toBe('error');
+    if (r.ok === 'error') expect((r as { ok: 'error'; error: string }).error).toMatch(/format 6/i);
   });
   it('sub-samples to maxPoints', () => {
     const bytes = buildLAS12(10_000, 0);
     const r = parseLAS(bytes, { maxPoints: 100 });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.dataset.count).toBeLessThanOrEqual(100);
+    expect(r.ok).toBe('success');
+    if (r.ok === 'success') expect(r.dataset.count).toBeLessThanOrEqual(100);
   });
   it('handles truncated files gracefully', () => {
     const bytes = buildLAS12(100, 0);
     const truncated = bytes.slice(0, 227 + 50 * 20);
     const r = parseLAS(truncated);
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.dataset.count).toBe(50);
+    expect(r.ok).toBe('success');
+    if (r.ok === 'success') expect(r.dataset.count).toBe(50);
   });
 });
 
@@ -368,8 +368,8 @@ describe('lib/3d/lidar/loadLiDAR', () => {
     const r = loadLiDARFromBuffer(copy, 'site.las', {
       centroidLat: 38.8, centroidLng: -77.0,
     });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
+    expect(r.ok).toBe('success');
+    if (r.ok === 'success') {
       expect(r.dataset.source).toBe('site.las');
       expect(r.dataset.centroidLat).toBe(38.8);
       expect(r.dataset.centroidLng).toBe(-77.0);
@@ -379,7 +379,7 @@ describe('lib/3d/lidar/loadLiDAR', () => {
     const r = loadLiDARFromBuffer(new ArrayBuffer(100), 'bad.las', {
       centroidLat: 0, centroidLng: 0,
     });
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe('error');
   });
   it('onLoadingChange fires true then false', () => {
     let loadingStates: boolean[] = [];

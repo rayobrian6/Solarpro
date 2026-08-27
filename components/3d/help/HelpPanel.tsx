@@ -58,7 +58,7 @@ export function HelpPanel({
   showHeader = true,
   defaultCollapsed = false,
   className,
-}: HelpPanelProps): JSX.Element {
+}: HelpPanelProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState<boolean>(defaultCollapsed);
 
   const handleToggle = useCallback(() => {

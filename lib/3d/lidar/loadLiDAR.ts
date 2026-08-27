@@ -22,8 +22,8 @@ export interface LoadOptions {
 }
 
 export type LoadResult =
-  | { ok: true; dataset: LiDARDataset }
-  | { ok: false; error: string; cancelled?: boolean };
+  | { ok: 'success'; dataset: LiDARDataset }
+  | { ok: 'error'; error: string; cancelled?: boolean };
 
 /** Open a file picker, read the chosen file as LAS, return the dataset. */
 export async function loadLiDARFromFilePicker(options: LoadOptions): Promise<LoadResult> {
@@ -34,16 +34,16 @@ export async function loadLiDARFromFilePicker(options: LoadOptions): Promise<Loa
     file = await picker();
   } catch (e) {
     options.onLoadingChange?.(false);
-    return { ok: false, error: `File picker failed: ${e instanceof Error ? e.message : String(e)}` };
+    return { ok: 'error', error: `File picker failed: ${e instanceof Error ? e.message : String(e)}` };
   }
   if (!file) {
     options.onLoadingChange?.(false);
-    return { ok: false, error: 'No file selected', cancelled: true };
+    return { ok: 'error', error: 'No file selected', cancelled: true };
   }
   const result = await parseLASFile(file, { maxPoints: options.maxPoints });
   options.onLoadingChange?.(false);
-  if (!result.ok) return { ok: false, error: result.error };
-  return { ok: true, dataset: stampDataset(result.dataset, file.name, options.centroidLat, options.centroidLng) };
+  if (result.ok === 'error') return { ok: 'error', error: result.error };
+  return { ok: 'success', dataset: stampDataset(result.dataset, file.name, options.centroidLat, options.centroidLng) };
 }
 
 /** Load LiDAR from a known File/Blob (no file picker). */
@@ -54,9 +54,9 @@ export async function loadLiDARFromFile(
   options.onLoadingChange?.(true);
   const result = await parseLASFile(file, { maxPoints: options.maxPoints });
   options.onLoadingChange?.(false);
-  if (!result.ok) return { ok: false, error: result.error };
+  if (result.ok === 'error') return { ok: 'error', error: result.error };
   const source = (file as File).name ?? 'blob';
-  return { ok: true, dataset: stampDataset(result.dataset, source, options.centroidLat, options.centroidLng) };
+  return { ok: 'success', dataset: stampDataset(result.dataset, source, options.centroidLat, options.centroidLng) };
 }
 
 /** Load LiDAR from an in-memory ArrayBuffer (test / drag-and-drop). */
@@ -68,8 +68,8 @@ export function loadLiDARFromBuffer(
   options.onLoadingChange?.(true);
   const result = parseLAS(buf, { maxPoints: options.maxPoints });
   options.onLoadingChange?.(false);
-  if (!result.ok) return { ok: false, error: result.error };
-  return { ok: true, dataset: stampDataset(result.dataset, source, options.centroidLat, options.centroidLng) };
+  if (result.ok === 'error') return { ok: 'error', error: result.error };
+  return { ok: 'success', dataset: stampDataset(result.dataset, source, options.centroidLat, options.centroidLng) };
 }
 
 function stampDataset(ds: LiDARDataset, source: string, centroidLat: number, centroidLng: number): LiDARDataset {

@@ -110,5 +110,5 @@ export interface ConsumptionProfileResult {
  * ok=false means errors maps a field name → human message.
  */
 export type ValidationResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; errors: Partial<Record<keyof T, string>> };
+  | { ok: 'success'; data: T }
+  | { ok: 'error'; errors: Partial<Record<keyof T, string>> };
