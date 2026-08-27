@@ -163,6 +163,11 @@ import { CanvasTheme } from './canvasTheme';
 // shows context-aware guidance per tool/mode. See components/3d/help/.
 import { HelpPanel } from './help/HelpPanel';
 
+// v68: Generic "drag-to-move" wrapper for the canvas chrome panels
+// (LiDAR, INSTRUCTIONS, Sun, etc.). Header becomes a grab cursor;
+// drag persists offset to localStorage. See components/3d/DraggablePanel.tsx.
+import { DraggablePanel } from './DraggablePanel';
+
 // v65 (camera-tilt): Aurora-parity camera presets — default 3D view at -45° pitch
 // (tilted aerial) instead of -65° (top-down-ish). See lib/3d/cameraPresets.ts.
 import {
@@ -11410,90 +11415,90 @@ function SolarEngine3D({
       {/* v67: INSTRUCTIONS panel — context-aware helper text per placement mode.
           Aurora frame 0070 parity.
 
-          POSITIONING history (all of which collided with something):
-          v1: left:10,bottom:60 → covered by tool spine (left:10), "INSTR" cut off
-          v2: left:90,bottom:60 → overlapped the existing layer toggles
-              (left:60,bottom:16) and CanvasControls (left:12,bottom:12)
-          v3: left:200,bottom:200 → too far from the tool spine it's helping
-          v4 (current): right side, top:120, right:8, width:280, maxHeight:50vh
-              Sits between the 3D scene and the page-level DesignStudio
-              sidebar, NOT in the bottom-left at all. No conflict with
-              the tool spine, the Report a Bug, CanvasControls, the
-              layer toggles, or the 12:00 Solar widget. The help text
-              follows the active placement mode and is always visible. */}
+          v5: wrapped in DraggablePanel. Drag the header (cursor: grab)
+          to move the panel anywhere; position persists to localStorage.
+          Click any button or text in the panel — those are NOT the drag
+          handle and remain clickable. */}
       {stage === 'done' ? (
-        <div
-          data-testid="help-panel-mount"
-          style={{
-            position: 'absolute', right: 8, top: 120,
-            width: 280, maxHeight: '50vh', zIndex: 50,
-            background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255,255,255,0.10)', borderRadius: 10,
-            padding: '2px 0',
-            pointerEvents: 'auto',
-            overflowY: 'auto',
-          }}
-        >
-          <HelpPanel
-            placementMode={placementMode}
-            context={{
-              pointsPlaced:
-                placementMode === 'block'        ? blockPtCount  :
-                placementMode === 'roof_gable'   ? gablePtCount  :
-                placementMode === 'roof_hip'     ? hipPtCount    :
-                placementMode === 'tree'         ? placedTreeCount :
-                placementMode === 'mark_plane'   ? markPlanePtCount :
-                placementMode === 'plane3d'      ? plane3DPtCount :
-                placementMode === 'fence'        ? fencePtCount  :
-                placementMode === 'measure'      ? measurePtCount :
-                placementMode === 'ground'       ? groundPtCount :
-                undefined,
-              liveCount: placementMode === 'tree'
-                ? { label: 'trees', value: placedTreeCount }
-                : undefined,
+        <DraggablePanel id="instructions-panel" zIndex={50}>
+          <div
+            data-testid="help-panel-mount"
+            style={{
+              position: 'absolute', right: 8, top: 120,
+              width: 280, maxHeight: '50vh', zIndex: 50,
+              background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.10)', borderRadius: 10,
+              padding: '2px 0',
+              pointerEvents: 'auto',
+              overflowY: 'auto',
             }}
-          />
-        </div>
+          >
+            <HelpPanel
+              placementMode={placementMode}
+              context={{
+                pointsPlaced:
+                  placementMode === 'block'        ? blockPtCount  :
+                  placementMode === 'roof_gable'   ? gablePtCount  :
+                  placementMode === 'roof_hip'     ? hipPtCount    :
+                  placementMode === 'tree'         ? placedTreeCount :
+                  placementMode === 'mark_plane'   ? markPlanePtCount :
+                  placementMode === 'plane3d'      ? plane3DPtCount :
+                  placementMode === 'fence'        ? fencePtCount  :
+                  placementMode === 'measure'      ? measurePtCount :
+                  placementMode === 'ground'       ? groundPtCount :
+                  undefined,
+                liveCount: placementMode === 'tree'
+                  ? { label: 'trees', value: placedTreeCount }
+                  : undefined,
+              }}
+            />
+          </div>
+        </DraggablePanel>
       ) : null}
 
       {/* v68 (canvas-controls): Aurora-parity bottom-left control strip
           (HANDOFF_2026-08-25 §1) — floating vertical dock at the canvas
           corner. Compass needle rotates with `viewer.camera.heading`.
           Click compass → reset to north. Zoom +/-, three layer toggles.
-          Sits at `left: 12, bottom: 12`, flush against the canvas edge;
-          the existing horizontal layer-toggle row at `left: 60,
-          bottom: 16` is unchanged and shares the same state. */}
-      <CanvasControls
-        viewer={viewerRef.current}
-        ready={stage === 'done'}
-        onResetNorth={() => {
-          const o = orbitRef.current;
-          o.heading = Math.PI;            // camera south → look north
-          o.pitch   = -Math.PI / 4;       // Aurora tilted-aerial default
-          applyOrbitRef.current?.();
-          if (typeof setStatusMsg === 'function') setStatusMsg('\u{1F9ED} North up');
-        }}
-        onZoomIn={() => {
-          const o = orbitRef.current;
-          o.radius = computeZoomedRadius(o.radius, -1);
-          applyOrbitRef.current?.();
-        }}
-        onZoomOut={() => {
-          const o = orbitRef.current;
-          o.radius = computeZoomedRadius(o.radius, 1);
-          applyOrbitRef.current?.();
-        }}
-        layers={([
-          { key: 'parcel', label: 'Parcel',     iconPath: ICON_PARCEL, on: showParcel,       onToggle: () => setShowParcel(v => !v) },
-          { key: 'roof',   label: 'Roof Segs',  iconPath: ICON_ROOF,   on: showRoofSegs,     onToggle: () => setShowRoofSegs(v => !v) },
-          { key: 'shade',  label: 'Shade',      iconPath: ICON_SHADE,  on: showShadeLocal,   onToggle: () => {
-            const next = !showShadeRef.current;
-            showShadeRef.current = next;
-            setShowShadeLocal(next);
-            updateShadeColors();
-          } },
-        ] as LayerToggle[])}
-      />
+          Sits at `left: 200, bottom: 12` (clear of Report a Bug at
+          bottom:16,left:16).
+
+          v69: wrapped in DraggablePanel. Drag the wrapper padding to
+          move; clicks on the actual buttons (compass / zoom +/-) still
+          trigger their own actions, not drag. */}
+      <DraggablePanel id="canvas-controls" zIndex={50}>
+        <CanvasControls
+          viewer={viewerRef.current}
+          ready={stage === 'done'}
+          onResetNorth={() => {
+            const o = orbitRef.current;
+            o.heading = Math.PI;            // camera south → look north
+            o.pitch   = -Math.PI / 4;       // Aurora tilted-aerial default
+            applyOrbitRef.current?.();
+            if (typeof setStatusMsg === 'function') setStatusMsg('\u{1F9ED} North up');
+          }}
+          onZoomIn={() => {
+            const o = orbitRef.current;
+            o.radius = computeZoomedRadius(o.radius, -1);
+            applyOrbitRef.current?.();
+          }}
+          onZoomOut={() => {
+            const o = orbitRef.current;
+            o.radius = computeZoomedRadius(o.radius, 1);
+            applyOrbitRef.current?.();
+          }}
+          layers={([
+            { key: 'parcel', label: 'Parcel',     iconPath: ICON_PARCEL, on: showParcel,       onToggle: () => setShowParcel(v => !v) },
+            { key: 'roof',   label: 'Roof Segs',  iconPath: ICON_ROOF,   on: showRoofSegs,     onToggle: () => setShowRoofSegs(v => !v) },
+            { key: 'shade',  label: 'Shade',      iconPath: ICON_SHADE,  on: showShadeLocal,   onToggle: () => {
+              const next = !showShadeRef.current;
+              showShadeRef.current = next;
+              setShowShadeLocal(next);
+              updateShadeColors();
+            } },
+          ] as LayerToggle[])}
+        />
+      </DraggablePanel>
 
       {/* Overlay toggles (bottom area, clear of Report a Bug at bottom-left).
           v67 was at left:60,bottom:16 which collided with both the
@@ -11501,10 +11506,15 @@ function SolarEngine3D({
           (page-level at fixed bottom-4 left-4 z-60) — making the toggle
           buttons unclickable. v68 sits at bottom:12,left:260 (right of
           the Report Bug), shares the bottom row with CanvasControls
-          (left:200,bottom:12) for a clean bottom-left-to-center dock. */}
+          (left:200,bottom:12) for a clean bottom-left-to-center dock.
+
+          v69: wrapped in DraggablePanel. Drag the panel background
+          to move; clicks on the actual toggle buttons (Parcel / Roof
+          Segs / Shade / Heatmap) still trigger their own actions. */}
       {stage === 'done' ? (
-        <div style={{
-          position: 'absolute', left: 260, bottom: 12,
+        <DraggablePanel id="layer-toggles" zIndex={50}>
+          <div style={{
+            position: 'absolute', left: 260, bottom: 12,
           display: 'flex', flexDirection: 'row', gap: 6,
           background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
           border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '6px 10px', zIndex: 50,
@@ -11541,17 +11551,24 @@ function SolarEngine3D({
             </button>
           ))}
         </div>
+        </DraggablePanel>
       ) : null}
 
-      {/* Sun simulator (bottom) */}
+      {/* Sun simulator (bottom). Wrapped in DraggablePanel so the user
+          can grab the time row at the top and drag the widget anywhere.
+          The widget keeps its centered default (bottom:40,left:50%
+          translateX(-50%)) and the DraggablePanel adds an outer
+          translate(dx,dy) on top, so the layout is unchanged until
+          the user drags. */}
       {stage === 'done' ? (
-        <div style={{
-          position: 'absolute', bottom: 40, left: '50%', transform: 'translateX(-50%)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-          background: 'rgba(10,12,24,0.94)', backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255,200,0,0.25)', borderRadius: 12,
-          padding: '10px 18px', zIndex: 50, minWidth: 360,
-        }}>
+        <DraggablePanel id="sun-simulator" zIndex={50}>
+          <div style={{
+            position: 'absolute', bottom: 40, left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+            background: 'rgba(10,12,24,0.94)', backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,200,0,0.25)', borderRadius: 12,
+            padding: '10px 18px', zIndex: 50, minWidth: 360,
+          }}>
           {/* Row 1: time + sun position + play */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -11634,6 +11651,7 @@ function SolarEngine3D({
             })}
           </div>
         </div>
+        </DraggablePanel>
       ) : null}
 
       {/* v48.13: Rotating compass rose — needle always points to true North */}
@@ -11876,19 +11894,25 @@ function SolarEngine3D({
       {/* v66: LiDAR Properties panel (Aurora parity — top-left). Mounted
           only after the Cesium viewer is ready so the panel can show
           error states from real load attempts. The "LiDAR is running..."
-          toast mirrors Aurora's top-right loader indicator. */}
+          toast mirrors Aurora's top-right loader indicator.
+
+          v67: Drag handle on the header (cursor: grab). Drag anywhere
+          on the green LiDAR header to move the panel. Position persists
+          to localStorage so the layout survives reloads. */}
       {stage === 'done' ? (
         <>
-          <LiDARPropertiesPanel
-            state={lidar.state}
-            onStyleChange={lidar.setStyle}
-            onTexturedChange={lidar.setTextured}
-            onOffsetChange={lidar.setOffset}
-            onLoadClick={handleLiDARLoad}
-            onLiftRoofs={handleLiftRoofs}
-            onFlattenRoofs={handleFlattenRoofs}
-            onClear={() => lidar.setDataset(null)}
-          />
+          <DraggablePanel id="lidar-properties" zIndex={60}>
+            <LiDARPropertiesPanel
+              state={lidar.state}
+              onStyleChange={lidar.setStyle}
+              onTexturedChange={lidar.setTextured}
+              onOffsetChange={lidar.setOffset}
+              onLoadClick={handleLiDARLoad}
+              onLiftRoofs={handleLiftRoofs}
+              onFlattenRoofs={handleFlattenRoofs}
+              onClear={() => lidar.setDataset(null)}
+            />
+          </DraggablePanel>
           <LiDARLoadingToast show={lidar.state.isLoading} />
         </>
       ) : null}
