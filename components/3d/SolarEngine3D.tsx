@@ -10093,21 +10093,34 @@ function SolarEngine3D({
           (`Details â–¾` / `LiDAR | Street View` / `[Google â–¾]`).
           Floating bar at the top-center of the canvas. State is local for now;
           the imagery/LiDAR swap is the integration step for the next session. */}
+      {/* v70: MapSourcePicker wrapped in DraggablePanel. The user can
+          grab the bar background (between the Details dropdown and
+          the Google source picker) to drag the whole top-bar around.
+          Clicking the Details / LiDAR / Street View / Google buttons
+          keeps their own click semantics. */}
+      <DraggablePanel id="map-source-picker" zIndex={25}>
       <MapSourcePicker
         state={mapPickerState}
         onChange={setMapPickerState}
         disabled={stage !== 'done' && stage !== 'error'}
       />
+      </DraggablePanel>
 
       {/* v70: Aurora-style Save / Undo / Redo toolbar (top-left chip).
        * Renders the three icon+label buttons from lib/state/Buttons.tsx.
        * Persistence is intentionally a no-op for this slice â€” the host
        * component owns the onSave contract (see lib/state/DESIGN.md Â§8). */}
+      {/* v70: UndoRedoToolbar (Save/Undo/Redo chip) wrapped in
+          DraggablePanel. The user can grab the bar background to
+          drag the toolbar anywhere. The Save / Undo / Redo buttons
+          keep their own click semantics. */}
       {historyStoreRef.current ? (
+        <DraggablePanel id="undo-redo-toolbar" zIndex={50}>
         <UndoRedoToolbar
           store={historyStoreRef.current}
           onSave={async () => { /* persistence wiring lives outside this slice */ }}
         />
+        </DraggablePanel>
       ) : null}
 
       {/* v65 (roof-wizard): 3-step sticky wizard â€” Aurora parity

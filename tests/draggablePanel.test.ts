@@ -113,7 +113,7 @@ describe('DraggablePanel explicit handle support', () => {
   });
 });
 
-describe('All 16 panels are wired to DraggablePanel in SolarEngine3D', () => {
+describe('All 18 panels are wired to DraggablePanel in SolarEngine3D', () => {
   it('wraps every chrome panel on the canvas in DraggablePanel', () => {
     const fs = require('fs');
     const path = require('path');
@@ -122,6 +122,8 @@ describe('All 16 panels are wired to DraggablePanel in SolarEngine3D', () => {
       'utf8',
     );
     const ids = [
+      'map-source-picker',       // top-center bar with Details + LiDAR | Street View
+      'undo-redo-toolbar',       // top-left chip with Save / Undo / Redo
       'legend-strings',
       'tool-spine',
       'top-right-stack',
