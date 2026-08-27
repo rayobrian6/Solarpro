@@ -11408,14 +11408,19 @@ function SolarEngine3D({
 
 
       {/* v67: INSTRUCTIONS panel — context-aware helper text per placement mode.
-          Aurora frame 0070 parity. Bottom-left to mimic the left-sidebar slot
-          without colliding with the tool spine (left:10) or the overlay
-          toggles (left:60, bottom:16). */}
+          Aurora frame 0070 parity. Bottom-left to mimic the left-sidebar slot.
+
+          POSITIONING: was left:10 which collided with the tool spine
+          (also at left:10) and the INSTRUCTIONS header was being cut off
+          ("UCTIONS" visible). Moved to left:90 (clear of the ~58px-wide
+          spine at left:10) and the existing layer toggles at left:60
+          (which extend ~30px past left:60). Stays in the left slot
+          Aurora uses, no longer overlapping the spine. */}
       {stage === 'done' ? (
         <div
           data-testid="help-panel-mount"
           style={{
-            position: 'absolute', left: 10, bottom: 60,
+            position: 'absolute', left: 90, bottom: 60,
             width: 260, zIndex: 50,
             background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
             border: '1px solid rgba(255,255,255,0.10)', borderRadius: 10,
@@ -11762,18 +11767,28 @@ function SolarEngine3D({
       {/* v66 (create-design-modal): Aurora-parity "Save → Create Design" trigger.
           The parent owns the modal state and is expected to render
           <CreateDesignModal> + switch to Design phase when fired. See
-          components/3d/designs/DESIGN.md. */}
+          components/3d/designs/DESIGN.md.
+
+          POSITIONING: v1 was top:12,right:12 → covered the top-right
+          column (stats + 3D Primitives Properties + context controls).
+          v2 was bottom:70,left:50% → conflicted with the 12:00 Solar
+          widget (also at bottom:40,left:50%). v3 places it at
+          bottom:50,right:100 (bottom-right) — to the right of the
+          12:00 Solar widget, above the last log, left of the compass.
+          The trigger is visible without occluding the 12:00 Solar
+          widget or the right-side tool panel column. */}
       {stage === 'done' && onCreateDesign ? (
         <button
           onClick={onCreateDesign}
           title="Save the site model and open the Create Design dialog"
           data-testid="solarengine-save-create-design"
           style={{
-            position: 'absolute', top: 12, right: 12, zIndex: 51,
+            position: 'absolute', bottom: 50, right: 100, zIndex: 51,
             background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
-            color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px',
-            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px',
+            fontSize: 13, fontWeight: 700, cursor: 'pointer',
             boxShadow: '0 4px 14px rgba(20,184,166,0.35)',
+            letterSpacing: 0.3,
           }}
         >
           💾 Save → Create Design
