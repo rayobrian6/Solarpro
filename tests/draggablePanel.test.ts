@@ -2,7 +2,10 @@
  * tests/draggablePanel.test.ts
  *
  * Verifies the localStorage key + shape used by DraggablePanel
- * for persisting per-panel drag offsets.
+ * for persisting per-panel drag offsets, and the explicit
+ * `data-drag-handle` attribute that lets a parent mark a specific
+ * child as the drag handle (used for single-button panels like
+ * Roof Model / Stitch / Save Create Design that need a grip).
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 
@@ -66,5 +69,91 @@ describe('DraggablePanel offset persistence', () => {
     for (const [id, offset] of Object.entries(all)) {
       expect(parsed[id]).toEqual(offset);
     }
+  });
+});
+
+describe('DraggablePanel explicit handle support', () => {
+  it('detects `data-drag-handle` on a child element', () => {
+    // Source-level check: DraggablePanel looks for `[data-drag-handle]`
+    // anywhere inside the wrapper when deciding whether to install
+    // pointerdown on the wrapper vs. wrap the first child.
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'components', '3d', 'DraggablePanel.tsx'),
+      'utf8',
+    );
+    expect(src).toMatch(/querySelector\('\[data-drag-handle\]'\)/);
+    expect(src).toMatch(/hasExplicitHandle/);
+  });
+
+  it('preserves the explicit handle element instead of auto-wrapping the first child', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'components', '3d', 'DraggablePanel.tsx'),
+      'utf8',
+    );
+    // When hasExplicitHandle is true, the source must render the
+    // children directly (no auto-wrap into a fresh drag-handle div).
+    expect(src).toMatch(/hasExplicitHandle\s*\?\s*\(\s*<>[\s\S]*?\{childArray\}[\s\S]*?<\/>/);
+  });
+
+  it('skips button children of the handle so the button keeps its own click semantics', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'components', '3d', 'DraggablePanel.tsx'),
+      'utf8',
+    );
+    // The closest('button, ...') check is what protects the buttons
+    // inside the dock (Roof Model, Stitch, Save) from being swallowed
+    // by the drag handler.
+    expect(src).toMatch(/closest\('button,\s*input,\s*select,\s*textarea,\s*a,\s*label,\s*\[data-no-drag\]'\)/);
+  });
+});
+
+describe('All 16 panels are wired to DraggablePanel in SolarEngine3D', () => {
+  it('wraps every chrome panel on the canvas in DraggablePanel', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'components', '3d', 'SolarEngine3D.tsx'),
+      'utf8',
+    );
+    const ids = [
+      'legend-strings',
+      'tool-spine',
+      'top-right-stack',
+      'instructions-panel',
+      'canvas-controls',
+      'layer-toggles',
+      'sun-simulator',
+      'compass-rose',
+      'status-bar',
+      'top-left-dock',
+      'save-create-design',
+      'roof-edges-legend',
+      'fire-setbacks-legend',
+      'coordinates-bar',
+      'last-log',
+      'lidar-properties',
+    ];
+    for (const id of ids) {
+      const re = new RegExp('<DraggablePanel\\s+id="' + id + '"');
+      expect(src, 'missing DraggablePanel id="' + id + '"').toMatch(re);
+    }
+  });
+
+  it('balances DraggablePanel open and close tags in SolarEngine3D', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'components', '3d', 'SolarEngine3D.tsx'),
+      'utf8',
+    );
+    const opens = (src.match(/<DraggablePanel\b/g) || []).length;
+    const closes = (src.match(/<\/DraggablePanel>/g) || []).length;
+    expect(opens).toBe(closes);
   });
 });

@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 /**
- * SolarEngine3D — Production Aurora-Solar-Quality 3D Design Engine
+ * SolarEngine3D â€” Production Aurora-Solar-Quality 3D Design Engine
  * 
  * Features:
  * - CesiumJS 1.114 + Google Photorealistic 3D Tiles
- * - True surface picking: scene.pickPosition → globe.pick → ellipsoid fallback
+ * - True surface picking: scene.pickPosition â†’ globe.pick â†’ ellipsoid fallback
  * - Three placement engines: Roof, Ground, Fence, Ground Array (chained rows)
  * - GPU-instanced panel rendering (Cesium entities, incremental diff)
  * - Real-time shade engine (NOAA sun position + Cesium shadow maps)
@@ -55,7 +55,7 @@ import {
 } from '@/lib/planeEngine';
 import { latLngToECEF as engLatLngToECEF } from '@/lib/roofPlane3D';
 
-// ─── v48.7: Control Layer ────────────────────────────────────────────────────
+// â”€â”€â”€ v48.7: Control Layer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // All panel placement is now routed through placePanelsControlled().
 // Original engine imports above are kept for non-placement functions
 // (frame rendering, plane building, etc.) that are NOT placement calls.
@@ -67,7 +67,7 @@ import {
   DEFAULT_SETBACKS,
 } from '@/lib/3d/controlLayer';
 
-// ─── v49.0: Isolated Ground Mount Reality Engine ──────────────────────────────
+// â”€â”€â”€ v49.0: Isolated Ground Mount Reality Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // ALL ground placement routes through this engine.
 // Roof / fence systems are UNTOUCHED by this import.
 import {
@@ -84,7 +84,7 @@ import {
   type GroundRackingResult,
 } from '@/lib/3d/ground/groundMountRealityEngine';
 
-// PanelPrimitiveRenderer and LODManager removed — entity-based rendering used instead
+// PanelPrimitiveRenderer and LODManager removed â€” entity-based rendering used instead
 import { batchComputeShadeFactors, precomputeDaySunPositions, clearSunCache } from '@/lib/sunVectorCache';
 
 // v66: Bottom-right Design-phase status panel (Aurora frame 0147 parity).
@@ -114,9 +114,9 @@ import {
   type LiDARState,
 } from '@/lib/3d/lidar';
 
-// v68: Segment normal arrows — yellow chevron at the midpoint of each
+// v68: Segment normal arrows â€” yellow chevron at the midpoint of each
 // polyline edge in the in-progress block line-trace. Aurora parity
-// for the "ridge direction" indicator (HANDOFF §2 Step 1).
+// for the "ridge direction" indicator (HANDOFF Â§2 Step 1).
 import {
   createSegmentArrowOverlay,
   buildSegmentsFromPoints,
@@ -125,7 +125,7 @@ import {
 
 // v66 (obstruction-primitive): Aurora-parity "Add Obstruction" primitive.
 // Single-click placement of a small rectangular prism (chimney, vent,
-// dormer). Default 0.6m × 0.6m × 1.0m, configurable via right-panel
+// dormer). Default 0.6m Ã— 0.6m Ã— 1.0m, configurable via right-panel
 // sliders. Reuses the block primitive's 3D extruded-polygon pattern;
 // math is unit-tested in tests/obstruction.test.ts.
 import {
@@ -141,17 +141,17 @@ import {
   obstructionFootprintAreaM2,
 } from './obstruction';
 
-// v65 (roof-wizard): 3-step sticky roof-drawing wizard — Aurora parity
-// (HANDOFF_2026-08-25 §2). HUD stepper that appears during any
+// v65 (roof-wizard): 3-step sticky roof-drawing wizard â€” Aurora parity
+// (HANDOFF_2026-08-25 Â§2). HUD stepper that appears during any
 // roof-draw mode. UI + state machine live in components/3d/wizard/.
 // See DESIGN.md for the spec.
 import { RoofWizard } from './wizard';
 
-// v66 (create-design-modal): Aurora-parity "Save → Create Design" trigger.
+// v66 (create-design-modal): Aurora-parity "Save â†’ Create Design" trigger.
 // The modal itself lives in components/3d/designs/CreateDesignModal.tsx; the
 // parent owns open state and is expected to render the modal when onCreateDesign
 // fires. See components/3d/designs/DESIGN.md.
-// (no top-level import — the trigger is a local <button>, the modal is mounted by the parent)
+// (no top-level import â€” the trigger is a local <button>, the modal is mounted by the parent)
 
 // v66 (dark-canvas): Aurora-parity Design-phase dark overlay with grid.
 // Renders the 50px major + 10px minor grid in rgba(26,26,46,0.75) over the
@@ -168,8 +168,8 @@ import { HelpPanel } from './help/HelpPanel';
 // drag persists offset to localStorage. See components/3d/DraggablePanel.tsx.
 import { DraggablePanel } from './DraggablePanel';
 
-// v65 (camera-tilt): Aurora-parity camera presets — default 3D view at -45° pitch
-// (tilted aerial) instead of -65° (top-down-ish). See lib/3d/cameraPresets.ts.
+// v65 (camera-tilt): Aurora-parity camera presets â€” default 3D view at -45Â° pitch
+// (tilted aerial) instead of -65Â° (top-down-ish). See lib/3d/cameraPresets.ts.
 import {
   TILTED_AERIAL_VIEW,
   computeRangeFromBounds,
@@ -191,7 +191,7 @@ import {
 } from './measure/measurements';
 
 // v68 (canvas-controls): Aurora-parity bottom-left control strip
-// (HANDOFF_2026-08-25 §1) — compass / north arrow, zoom +/-, three
+// (HANDOFF_2026-08-25 Â§1) â€” compass / north arrow, zoom +/-, three
 // layer toggle buttons. The strip is a pure UI shell: it owns no
 // scene state. Wired to the same `showParcel` / `showRoofSegs` /
 // `showShadeLocal` state that drives the existing horizontal
@@ -206,7 +206,7 @@ import {
 } from './controls';
 
 // v65 (tree-cursor): 2D tree-placement footprint preview. Aurora parity
-// (frame 0115) — translucent light-blue circle sized to the tree canopy
+// (frame 0115) â€” translucent light-blue circle sized to the tree canopy
 // radius, follows the mouse. See components/3d/tree/CURSOR.md.
 import {
   TreeCursor,
@@ -230,7 +230,7 @@ import {
 // literal in this component.
 import { getPanelById } from '@/lib/equipment-db';
 
-// v70 (undo-system): Aurora TIER 3 #11 + #20 — top-bar Save / Undo / Redo
+// v70 (undo-system): Aurora TIER 3 #11 + #20 â€” top-bar Save / Undo / Redo
 // toolbar with a 50-step ring buffer of complete SceneState snapshots.
 // The store is a pure-logic factory in lib/state/historyStore.ts; the
 // toolbar React component is in lib/state/Buttons.tsx. Mounted once per
@@ -259,11 +259,11 @@ import {
 
 // Ray's ruling 2026-07-19: the SolFence 6-ft fence uses ONLY the Philadelphia
 // Solar PS-MNB108(HCBF)-440W. Fence placement resolves the wattage stamp from
-// this equipment-db record at placement time — the old hardcoded `430` here
+// this equipment-db record at placement time â€” the old hardcoded `430` here
 // poisoned 18/18 Stowell fence stamps (plus 4 more projects).
 const FENCE_PANEL_EQUIPMENT_ID = 'panel-fence-ps1';
 
-// API keys loaded from environment variables — never hardcode secrets in source
+// API keys loaded from environment variables â€” never hardcode secrets in source
 const GOOGLE_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 const CESIUM_TOKEN   = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN   ?? '';
 
@@ -280,30 +280,30 @@ const PT = 0.040;  // thickness meters
 // Ground mount and fence panels use this directly (their height math is separate).
 const PANEL_OFFSET = 0.08; // meters above surface (ground / fence / fallback)
 // v62: debug-only plane overlays (frame axis arrows, geometry audit, layout bbox).
-// Off in production — they clutter the scene once several faces are placed/marked.
+// Off in production â€” they clutter the scene once several faces are placed/marked.
 const DEBUG_PLANE_OVERLAYS = false;
-// v62: auto-snap on single-panel move — DISABLED. First cut snapped to the nearest
+// v62: auto-snap on single-panel move â€” DISABLED. First cut snapped to the nearest
 // panel across ALL planes, which jumped panels onto the wrong plane and floated them
 // off the roof (+ eave jerk). Rebuild with point-in-polygon plane assignment and an
 // on-plane clamp before re-enabling. Free move stays on.
 const ENABLE_PANEL_SNAP = false;
 // v62: per-click trace snap (snap a corner onto an existing plane's point while marking)
-// stays OFF — it "snaps to the next point" mid-trace, which is exactly the behaviour
+// stays OFF â€” it "snaps to the next point" mid-trace, which is exactly the behaviour
 // that defeats free marking. Connection is instead handled by the Stitch button, which
-// now writes the averaged corners BACK into plane.vertices (see stitchRoofVertices →
+// now writes the averaged corners BACK into plane.vertices (see stitchRoofVertices â†’
 // onRoofPlaneStitched) so the geometry panels are placed on follows the stitch.
 const ENABLE_TRACE_SNAP = false;
 
-// ── Mounting-system-aware roof panel offset ─────────────────────────────────
+// â”€â”€ Mounting-system-aware roof panel offset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Physical stack height from roof deck to panel bottom face:
-//   rooftech-mini + xr100 : RT-MINI standoff (~4" = 0.102m) + XR100 rail (1.66" = 0.042m) ≈ 0.14m
-//   rooftech-mini + xr1000: RT-MINI standoff (~4" = 0.102m) + XR1000 rail (2.0"  = 0.051m) ≈ 0.16m
-//   ironridge l-foot only : L-foot body (~2.5" = 0.064m)  + XR100 rail (1.66" = 0.042m)   ≈ 0.11m
-//   rail-less (rt-mini-s) : standoff only                                                   ≈ 0.10m
-//   flat-roof ballasted   : tilt leg — conservative low profile                             ≈ 0.10m
-//   default / unknown     : 0.12m — conservative clearance, safe for any pitch
+//   rooftech-mini + xr100 : RT-MINI standoff (~4" = 0.102m) + XR100 rail (1.66" = 0.042m) â‰ˆ 0.14m
+//   rooftech-mini + xr1000: RT-MINI standoff (~4" = 0.102m) + XR1000 rail (2.0"  = 0.051m) â‰ˆ 0.16m
+//   ironridge l-foot only : L-foot body (~2.5" = 0.064m)  + XR100 rail (1.66" = 0.042m)   â‰ˆ 0.11m
+//   rail-less (rt-mini-s) : standoff only                                                   â‰ˆ 0.10m
+//   flat-roof ballasted   : tilt leg â€” conservative low profile                             â‰ˆ 0.10m
+//   default / unknown     : 0.12m â€” conservative clearance, safe for any pitch
 //
-// RENDERING ONLY — does NOT affect structural calc, placement math, ECEF coords, or BOM.
+// RENDERING ONLY â€” does NOT affect structural calc, placement math, ECEF coords, or BOM.
 function getRoofPanelOffset(mountingSystemId: string): number {
   switch (mountingSystemId) {
     case 'rooftech-mini':
@@ -319,7 +319,7 @@ function getRoofPanelOffset(mountingSystemId: string): number {
     case 'rooftech-mini-m':
       return 0.12;
     case 'ironridge-flat-roof':
-      return 0.10;              // ballasted tray — low profile
+      return 0.10;              // ballasted tray â€” low profile
     default:
       return 0.12;              // safe conservative default
   }
@@ -332,12 +332,12 @@ function getRoofPanelOffset(mountingSystemId: string): number {
 const MOUNT_HEIGHT_M = 1.2; // ~4ft standard ground-mount racking height
 
 // RENDER_SCALE_STRUCTURAL: visual thickness multiplier for ground-mount structural members.
-// Applied ONLY in the renderer — does NOT affect any geometry, positions, or calculations.
+// Applied ONLY in the renderer â€” does NOT affect any geometry, positions, or calculations.
 // Makes strongback, rails, and braces clearly readable at Cesium viewing distances.
-// Scale 2.5x: a 64mm strongback reads as ~160mm — visible but not cartoonish.
+// Scale 2.5x: a 64mm strongback reads as ~160mm â€” visible but not cartoonish.
 const RENDER_SCALE_STRUCTURAL = 1.0;
 
-// ── Manufacturer racking span constants ────────────────────────────────────
+// â”€â”€ Manufacturer racking span constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // IronRidge XR1000: rail lengths 11/14/17ft, max support span ~12ft (3.66m)
 // under commercial load. One post pair per span interval along the row.
 const IRONRIDGE_XR_SPAN_M  = 3.66;  // 12 ft between post pairs
@@ -386,8 +386,8 @@ interface Props {
   fenceHeight: number;
   showShade: boolean;
   selectedPanel?: any;
-  /** Mounting system ID from mounting-hardware-db — drives visual panel offset.
-   *  Defaults to 'ironridge-xr100' when not provided. VISUAL ONLY — no structural impact. */
+  /** Mounting system ID from mounting-hardware-db â€” drives visual panel offset.
+   *  Defaults to 'ironridge-xr100' when not provided. VISUAL ONLY â€” no structural impact. */
   mountingSystemId?: string;
   fireSetbacks?: {
     edgeSetbackM: number;
@@ -402,9 +402,9 @@ interface Props {
   onTwinLoaded?: (twin: DigitalTwinData) => void;
   onError?: (msg: string) => void;
   onLocationPick?: (lat: number, lng: number, address: string) => void;
-  /** v47.121: Called when user finishes drawing a 3D roof plane (≥3 points picked on 3D tiles) */
+  /** v47.121: Called when user finishes drawing a 3D roof plane (â‰¥3 points picked on 3D tiles) */
   onRoofPlaneCreated?: (plane: import('@/types').RoofPlane) => void;
-  /** v64: Stitch button — push the averaged/connected corners AND the recomputed
+  /** v64: Stitch button â€” push the averaged/connected corners AND the recomputed
    *  plane frame back into roofPlanes state so panel placement (Auto Layout) +
    *  persistence use the stitched geometry, not the pre-stitch traced corners or a
    *  stale frame. One call per Stitch, all updated planes at once. */
@@ -416,7 +416,7 @@ interface Props {
       v: { x: number; y: number; z: number };
       n: { x: number; y: number; z: number };
     };
-    /** Stitched ECEF corners — the exact polygon3D that the stitch produced.
+    /** Stitched ECEF corners â€” the exact polygon3D that the stitch produced.
      *  Persisted so the roof-plane restore-on-load effect can rebuild the
      *  STITCHED 3D outline without re-sampling terrain. */
     polygon3D?: Array<{ x: number; y: number; z: number }>;
@@ -431,10 +431,10 @@ interface Props {
     setbackInsets: number;
     /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
     roofPlaneEntityCount: number;
-    /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
+    /** Centroids (lat/lng) of each rendered setback band polygon â€” used to verify
      *  bands hug edges (not roof middle). cf0dd96b regression guard. */
     setbackBandCentroids: Array<{ lat: number; lng: number }>;
-    /** Count of full rebuilds triggered during panel drag/move — should stay 0
+    /** Count of full rebuilds triggered during panel drag/move â€” should stay 0
      *  for smooth moves. 2176e4d3 regression guard. */
     panelMoveRebuildCount: number;
   }) => void;
@@ -474,7 +474,7 @@ interface Props {
   colorByString?: boolean;
   /** v63: Render optimizer / microinverter device boxes mounted under each panel. */
   showEquipment?: boolean;
-  /** v63: Panel face opacity (0.1–1). Lower it to reveal equipment under the panels. */
+  /** v63: Panel face opacity (0.1â€“1). Lower it to reveal equipment under the panels. */
   panelOpacity?: number;
   /** v63: Per-panel string color + device type, keyed by panel id (from stringAssignment.ts). */
   panelMeta?: Record<string, { color?: string; deviceType?: 'optimizer' | 'micro' | 'none'; stringLabel?: string }>;
@@ -484,12 +484,12 @@ interface Props {
    *  id via onPanelPaint instead of running the normal select/array behavior. */
   paintMode?: boolean;
   onPanelPaint?: (panelId: string) => void;
-  /** v66: design-phase flag — gates the bottom-right status panel
+  /** v66: design-phase flag â€” gates the bottom-right status panel
    *  (Aurora frame 0147 parity, components/3d/status/). When false or
    *  omitted, the panel is hidden. The design-panel agent will wire
    *  this from their Design-phase context. */
   isDesignPhase?: boolean;
-  /** v66: create-design-modal trigger. Fired from the in-canvas "Save → Create
+  /** v66: create-design-modal trigger. Fired from the in-canvas "Save â†’ Create
    *  Design" button when the user finishes the site model. The parent owns the
    *  modal state and is expected to render <CreateDesignModal> + switch to
    *  Design phase when fired. */
@@ -518,7 +518,7 @@ function handleCesiumError(operation: string, error: any, warn = false) {
   else console.error(line, error);
 }
 
-// metersPerDegLat / metersPerDegLng removed v47.133 — all placement uses ECEF only
+// metersPerDegLat / metersPerDegLng removed v47.133 â€” all placement uses ECEF only
 
 // Unit conversion helpers - display in feet
 function mToFt(m: number): number { return m * 3.28084; }
@@ -554,7 +554,7 @@ function headingFromAzimuth(azDeg: number): number {
   return Math.atan2(-Math.cos(az), Math.sin(az));
 }
 
-// ── Ground Array: Inter-row spacing formula ────────────────────────────────
+// â”€â”€ Ground Array: Inter-row spacing formula â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Calculates minimum row spacing to prevent inter-row shading at winter solstice
 // (worst-case sun angle). Industry standard: add 10% buffer.
 // @param tiltDeg      - Panel tilt angle (degrees from horizontal)
@@ -594,7 +594,7 @@ function systemTypeColor(C: any, type: SystemType): any {
   return new C.Color(0.08, 0.08, 0.10, 0.97);
 }
 
-// ── NaN validation helpers ──────────────────────────────────────────────────
+// â”€â”€ NaN validation helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function isValidCoord(lat: number, lng: number, alt?: number): boolean {
   if (!isFinite(lat) || !isFinite(lng)) return false;
   if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return false;
@@ -643,7 +643,7 @@ function SolarEngine3D({
   const viewerRef   = useRef<any>(null);
   const tilesetRef  = useRef<any>(null);
   const panelMapRef = useRef<Map<string, any>>(new Map());
-  // primitiveRendererRef and lodManagerRef removed — entity-based rendering via panelMapRef
+  // primitiveRendererRef and lodManagerRef removed â€” entity-based rendering via panelMapRef
   const overlayRef  = useRef<any[]>([]);
   const setbackZoneEntitiesRef = useRef<any[]>([]); // v62: fire setback keep-out zone entities
   const roofWireframeEntitiesRef = useRef<any[]>([]); // v62: stitched roof-model edge polylines
@@ -661,14 +661,14 @@ function SolarEngine3D({
   // autoFillRunningRef: mutex to prevent Auto Fill from running more than once concurrently.
   // Set to true at the start of handleAutoRoof, cleared when done.
   const autoFillRunningRef = useRef(false);
-  // clearingRef: v47.217 — set to true during clearPanels() to block any in-flight async
+  // clearingRef: v47.217 â€” set to true during clearPanels() to block any in-flight async
   // operations (autoFill, row generation, etc.) from re-injecting panels after a clear.
   const clearingRef = useRef(false);
   // roofPlanesRef: always current copy of the roofPlanes prop (updated via useEffect)
   const roofPlanesRef = useRef<Props['roofPlanes']>(roofPlanes ?? []);
   // selectedPanelRef: always current copy of the selectedPanel prop
   const selectedPanelRef = useRef<Props['selectedPanel']>(selectedPanel);
-  // mountingSystemIdRef: always current mounting system ID — read inside closures without stale prop
+  // mountingSystemIdRef: always current mounting system ID â€” read inside closures without stale prop
   const mountingSystemIdRef = useRef<string>(mountingSystemId);
   // v63: string-coloring + equipment-overlay state, read inside render closures.
   const colorByStringRef = useRef<boolean>(colorByString);
@@ -725,7 +725,7 @@ function SolarEngine3D({
     });
   }, [onE2EDiagnostics]);
   // Row tool context: tracks which systemType to use for row-placed panels
-  // (row mode is a placement style, not a system type — inherits from last active mode)
+  // (row mode is a placement style, not a system type â€” inherits from last active mode)
   const rowSystemTypeRef = useRef<SystemType>('roof');
 
   // Ground Array tool state
@@ -741,14 +741,14 @@ function SolarEngine3D({
   const [groundArrayRowCount, setGroundArrayRowCount] = useState(0);
   const [groundArrayPanelCount, setGroundArrayPanelCount] = useState(0);
   const [showGroundArrayConfirm, setShowGroundArrayConfirm] = useState(false);
-  // v6.2.2: Unique key prefix per ground array instance — prevents racking key
+  // v6.2.2: Unique key prefix per ground array instance â€” prevents racking key
   // collisions between multiple finalized ground mounts.
   const groundArrayKeyPrefixRef = useRef<string>('');
   // prevLatRef / prevLngRef: track previous coordinates for address-change fly.
   const prevLatRef = useRef<number>(lat);
   const prevLngRef = useRef<number>(lng);
   // sceneReadyRef: true only after the tileset's first tiles are visible on screen.
-  // Panels must NOT be rendered before this — they would float with no surface beneath.
+  // Panels must NOT be rendered before this â€” they would float with no surface beneath.
   const sceneReadyRef = useRef<boolean>(false);
 
   // v47.119: Obstruction system
@@ -756,42 +756,42 @@ function SolarEngine3D({
   // selectedPlaneRef: the active RoofPlane for surface-based placement
   const obstructionsRef     = useRef<PlacedObstruction[]>([]);
   const [obstructions, setObstructions] = useState<PlacedObstruction[]>([]);
-  // selectedPlaneRef: the plane clicked in surface_select mode — anchor for place/extend/add
+  // selectedPlaneRef: the plane clicked in surface_select mode â€” anchor for place/extend/add
   const selectedPlaneRef    = useRef<any>(null);
 
   // surfaceOrientationRef: current orientation for surface-placed panels (separate from ground/fence)
   const surfaceOrientationRef = useRef<PanelOrientation>('portrait');
 
-  // ── v47.121: plane3d tool refs ──────────────────────────────────────────────
+  // â”€â”€ v47.121: plane3d tool refs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // pts3DCesium: raw Cesium Cartesian3 objects from scene.pickPosition (for Cesium entity rendering)
   const pts3DCesiumRef   = useRef<any[]>([]);
-  // pts3DCart: plain {x,y,z} Cart3 objects (for roofPlane3D math — no Cesium dependency)
+  // pts3DCart: plain {x,y,z} Cart3 objects (for roofPlane3D math â€” no Cesium dependency)
   const pts3DCartRef     = useRef<Cart3[]>([]);
   // Cesium entities for in-progress point markers
   const pts3DMarkersRef  = useRef<any[]>([]);
   // Cesium entity for in-progress preview polyline
   const pts3DLineRef     = useRef<any | null>(null);
   // Cesium entities for finalized plane surfaces (fill + outline + label)
-  // plane3DEntityMap: planeId → array of Cesium entity IDs for that specific plane
+  // plane3DEntityMap: planeId â†’ array of Cesium entity IDs for that specific plane
   // Allows per-plane removal and re-render on selection change
   const plane3DEntitiesRef = useRef<string[]>([]);
   const plane3DEntityMap   = useRef<Map<string, string[]>>(new Map());
-  // plane3DFrameMap: planeId → Plane3DFrame (for re-rendering on selection change)
+  // plane3DFrameMap: planeId â†’ Plane3DFrame (for re-rendering on selection change)
   const plane3DFrameMap    = useRef<Map<string, Plane3DFrame>>(new Map());
-  // plane3DCesiumPtsMap: planeId → Cesium Cartesian3[] (projected polygon corners)
+  // plane3DCesiumPtsMap: planeId â†’ Cesium Cartesian3[] (projected polygon corners)
   const plane3DCesiumPtsMap = useRef<Map<string, any[]>>(new Map());
-  // v62: planes traced with "Mark Plane" (outline only, no panels) — render clean.
+  // v62: planes traced with "Mark Plane" (outline only, no panels) â€” render clean.
   const markOnlyPlaneIdsRef = useRef<Set<string>>(new Set());
   // Count of placed points (for status message)
   const [pts3DCount, setPts3DCount] = useState(0);
 
   // v66: Aurora-style top-bar map-source picker state
-  // (`Details ▾` / `LiDAR | Street View` / `[Google ▾]`). Local for now —
+  // (`Details â–¾` / `LiDAR | Street View` / `[Google â–¾]`). Local for now â€”
   // the actual Cesium imagery swap is the integration step that the next
   // session wires up via the onChange callback.
   const [mapPickerState, setMapPickerState] = useState<MapPickerState>(DEFAULT_PICKER_STATE);
 
-  // ── v47.126: Layout direction + origin control refs ─────────────────────
+  // â”€â”€ v47.126: Layout direction + origin control refs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // customLayoutDirRef: user-defined u-axis ENU vector {x,y} (null = use longest edge)
   const customLayoutDirRef   = useRef<{x:number;y:number} | null>(null);
   // customLayoutOriginRef: user-defined grid origin lat/lng (null = use corner-snap)
@@ -828,7 +828,7 @@ function SolarEngine3D({
   // Whether cesiumGroundElevRef has been resolved (boot/fly). Used instead of a
   // `> 0` test so legitimately NEGATIVE ellipsoidal ground elevations (coastal /
   // low-lying sites, where elevation + geoid undulation < 0, e.g. Waterford CT)
-  // are kept rather than discarded → points no longer float above true ground.
+  // are kept rather than discarded â†’ points no longer float above true ground.
   const cesiumGroundElevResolvedRef = useRef<boolean>(false);
 
   const [stage, setStage]         = useState<LoadStage>('idle');
@@ -840,7 +840,7 @@ function SolarEngine3D({
   const [showParcel, setShowParcel]     = useState(true);
   const [showRoofSegs, setShowRoofSegs] = useState(true);
 
-  // v66: LiDAR feature — state, controller, and file-picker handlers.
+  // v66: LiDAR feature â€” state, controller, and file-picker handlers.
   // The state is local to SolarEngine3D; the parent (DesignStudio) doesn't
   // need to know about LiDAR for v1. A future stage can lift the state
   // to the parent if multiple components need it.
@@ -877,7 +877,7 @@ function SolarEngine3D({
   useEffect(() => { lidarControllerRef.current?.setTextured(lidar.state.textured); }, [lidar.state.textured]);
 
   // File-picker handler. Uses the project lat/lng as the dataset centroid
-  // so the renderer can convert (x, y) → lat/lng for `Cartesian3.fromDegrees`.
+  // so the renderer can convert (x, y) â†’ lat/lng for `Cartesian3.fromDegrees`.
   const handleLiDARLoad = useCallback(async () => {
     await loadLiDARFromFilePicker({
       centroidLat: lat,
@@ -892,14 +892,14 @@ function SolarEngine3D({
     });
   }, [lat, lng, lidar]);
 
-  // Lift Roofs / Flatten Roofs — sample LiDAR Z under each roof plane and
+  // Lift Roofs / Flatten Roofs â€” sample LiDAR Z under each roof plane and
   // update the plane's height. For v1 we log the action and surface a
   // status message; the actual roofPlane mutation goes through a follow-up
   // callback prop once the parent (DesignStudio) is wired to the LiDAR
   // state (out of v1 scope).
   const handleLiftRoofs = useCallback(() => {
     if (!lidar.state.dataset || !roofPlanes || roofPlanes.length === 0) {
-      setStatusMsg('⤴ Lift Roofs: load LiDAR and have at least one roof plane first');
+      setStatusMsg('â¤´ Lift Roofs: load LiDAR and have at least one roof plane first');
       return;
     }
     const updated = liftRoofsUtil(lidar.state.dataset, roofPlanes as any, lidar.state.offset);
@@ -908,12 +908,12 @@ function SolarEngine3D({
       (p) => p.planeHeightAtCenterMeters !== beforeById.get(p.id),
     ).length;
     addLog('LIDAR', `Lift Roofs: ${changed}/${updated.length} planes changed`);
-    setStatusMsg(`⤴ Lifted ${changed} of ${updated.length} roof plane(s) to LiDAR-derived heights`);
+    setStatusMsg(`â¤´ Lifted ${changed} of ${updated.length} roof plane(s) to LiDAR-derived heights`);
   }, [lidar.state.dataset, lidar.state.offset, roofPlanes]);
 
   const handleFlattenRoofs = useCallback(() => {
     if (!lidar.state.dataset || !roofPlanes || roofPlanes.length === 0) {
-      setStatusMsg('⤓ Flatten Roofs: load LiDAR and have at least one roof plane first');
+      setStatusMsg('â¤“ Flatten Roofs: load LiDAR and have at least one roof plane first');
       return;
     }
     const updated = flattenRoofsUtil(lidar.state.dataset, roofPlanes as any, lidar.state.offset);
@@ -922,17 +922,17 @@ function SolarEngine3D({
       (p) => p.planeHeightAtCenterMeters !== beforeById.get(p.id),
     ).length;
     addLog('LIDAR', `Flatten Roofs: ${changed}/${updated.length} planes changed`);
-    setStatusMsg(`⤓ Flattened ${changed} of ${updated.length} roof plane(s) to median LiDAR height`);
+    setStatusMsg(`â¤“ Flattened ${changed} of ${updated.length} roof plane(s) to median LiDAR height`);
   }, [lidar.state.dataset, lidar.state.offset, roofPlanes]);
 
-  // ── v66: Lift Roofs / Flatten Roofs for the 3D Primitives ────────────────
+  // â”€â”€ v66: Lift Roofs / Flatten Roofs for the 3D Primitives â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // The lidar-integration agent's lift/flatten (above, at line ~855) operates
   // on the `roofPlanes` data model. THIS pair operates on the 3D Primitive
   // entities (block / gable / hip) the user draws in the canvas with the
   // in-canvas tools. Same algorithm, different data source.
   //
   // Adapter note: the sibling's `LiDARDataset` does not expose a
-  // `getElevationAt(lat, lng)` method directly — it carries raw points in a
+  // `getElevationAt(lat, lng)` method directly â€” it carries raw points in a
   // local ENU frame around the dataset centroid. The adapter below walks
   // the points and returns the mean of the highest-K Z samples (a defensible
   // "elevation at this centroid" reading for a small footprint).
@@ -965,7 +965,7 @@ function SolarEngine3D({
 
   /**
    * Build a snapshot of every drawn 3D Primitive (block / gable / hip).
-   * Trees are excluded — they are not roof segments.
+   * Trees are excluded â€” they are not roof segments.
    *
    * For a block: `heightM` = base + extrudedHeight (the eave sits at the
    * top of the prism walls).
@@ -1079,40 +1079,40 @@ function SolarEngine3D({
 
   const handleLiftPrimitives = useCallback(() => {
     if (!lidar.state.dataset) {
-      setStatusMsg('⤴ Lift Roofs (3D Primitives): LiDAR not loaded');
+      setStatusMsg('â¤´ Lift Roofs (3D Primitives): LiDAR not loaded');
       return;
     }
     const snapshot = buildPrimitiveSnapshot();
     if (snapshot.length === 0) {
-      setStatusMsg('⤴ Lift Roofs: no 3D Primitive roof segments to lift');
+      setStatusMsg('â¤´ Lift Roofs: no 3D Primitive roof segments to lift');
       return;
     }
     const next = liftRoofsPrimitives(snapshot, { getElevationAt: liDARGetElevationAt });
     applyPrimitiveHeights(snapshot, next);
     const changed = next.filter((p, i) => Math.abs(p.heightM - snapshot[i].heightM) > 1e-6).length;
     addLog('LIFT-PRIM', `Lifted ${changed}/${snapshot.length} 3D Primitives to LiDAR elevations`);
-    setStatusMsg(`⤴ Lifted ${changed} of ${snapshot.length} 3D Primitive segment${snapshot.length === 1 ? '' : 's'} to LiDAR elevations`);
+    setStatusMsg(`â¤´ Lifted ${changed} of ${snapshot.length} 3D Primitive segment${snapshot.length === 1 ? '' : 's'} to LiDAR elevations`);
     try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
   }, [lidar.state.dataset, buildPrimitiveSnapshot, liDARGetElevationAt, applyPrimitiveHeights]);
 
   const handleFlattenPrimitives = useCallback(() => {
     if (!lidar.state.dataset) {
-      setStatusMsg('⤓ Flatten Roofs (3D Primitives): LiDAR not loaded');
+      setStatusMsg('â¤“ Flatten Roofs (3D Primitives): LiDAR not loaded');
       return;
     }
     const snapshot = buildPrimitiveSnapshot();
     if (snapshot.length === 0) {
-      setStatusMsg('⤓ Flatten Roofs: no 3D Primitive roof segments to flatten');
+      setStatusMsg('â¤“ Flatten Roofs: no 3D Primitive roof segments to flatten');
       return;
     }
     const next = flattenRoofsPrimitives(snapshot, { getElevationAt: liDARGetElevationAt });
     applyPrimitiveHeights(snapshot, next);
     const flatH = next[0]?.heightM;
     addLog('FLATTEN-PRIM', `Flattened ${snapshot.length} 3D Primitives to ${flatH?.toFixed(2)}m`);
-    setStatusMsg(`⤓ Flattened ${snapshot.length} 3D Primitive segment${snapshot.length === 1 ? '' : 's'} to ${flatH?.toFixed(2)}m`);
+    setStatusMsg(`â¤“ Flattened ${snapshot.length} 3D Primitive segment${snapshot.length === 1 ? '' : 's'} to ${flatH?.toFixed(2)}m`);
     try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
   }, [lidar.state.dataset, buildPrimitiveSnapshot, liDARGetElevationAt, applyPrimitiveHeights]);
-  // v50.11: local irradiance toggle — initialised from prop, also togglable from internal button
+  // v50.11: local irradiance toggle â€” initialised from prop, also togglable from internal button
   const [showIrradianceLocal, setShowIrradianceLocal] = useState(showIrradiance);
   const [panelCount, setPanelCount]     = useState(panels.length);
   const [fencePtCount, setFencePtCount] = useState(0);
@@ -1123,17 +1123,17 @@ function SolarEngine3D({
   const panelOrientationRef = useRef<PanelOrientation>('portrait');
   const [selectedPanelId, setSelectedPanelId]   = useState<string | null>(null);
   const selectedPanelIdRef = useRef<string | null>(null);
-  // v48.12: Multi-select — Set of panel IDs currently highlighted
+  // v48.12: Multi-select â€” Set of panel IDs currently highlighted
   const [selectedPanelIds, setSelectedPanelIds] = useState<Set<string>>(new Set());
   const selectedPanelIdsRef = useRef<Set<string>>(new Set());
-  // v62: Array group-selection drill state. null = top level → a click selects the
+  // v62: Array group-selection drill state. null = top level â†’ a click selects the
   // WHOLE array (all panels sharing a group key). When set to a group key, we've
-  // double-clicked INTO that array → clicks select single panels. Empty click exits.
+  // double-clicked INTO that array â†’ clicks select single panels. Empty click exits.
   const drilledGroupKeyRef = useRef<string | null>(null);
   // v62: mouse grab-to-move / grab-to-rotate state.
-  //   dragRef        — active drag session (mode 'move'|'rotate' + plane/centroid/angle)
-  //   suppressClickRef — true after a real drag so the trailing LEFT_CLICK is ignored
-  //   rotateHandleRef  — the floating rotate-knob entity shown above a selected array
+  //   dragRef        â€” active drag session (mode 'move'|'rotate' + plane/centroid/angle)
+  //   suppressClickRef â€” true after a real drag so the trailing LEFT_CLICK is ignored
+  //   rotateHandleRef  â€” the floating rotate-knob entity shown above a selected array
   const dragRef = useRef<any>(null);
   const suppressClickRef = useRef<boolean>(false);
   // v62: stitched roof-model wireframe toggle (classified edges across all planes)
@@ -1143,7 +1143,7 @@ function SolarEngine3D({
   // v62: true while a grab-to-move/rotate is in progress. The CUSTOM camera handler
   // (DOM pointermove orbit/pan, set up in boot) checks this and bails, so dragging an
   // array doesn't also pan/orbit the camera. (Cesium's built-in controller is fully
-  // disabled here, so toggling its enable flags does nothing — this is the real gate.)
+  // disabled here, so toggling its enable flags does nothing â€” this is the real gate.)
   const arrayManipRef = useRef<boolean>(false);
   // v48.12: Toolbar tooltip state
   const [tooltipInfo, setTooltipInfo] = useState<{ text: string; x: number; y: number } | null>(null);
@@ -1159,18 +1159,18 @@ function SolarEngine3D({
   const groundMountStyleRef = useRef<'pipe' | 'ironridge'>('pipe');
   const measurePtsRef  = useRef<Array<{ lat: number; lng: number; height: number }>>([]);
   const [measurePtCount, setMeasurePtCount] = useState(0);
-  // v66: Measurements tool — multi-pair (Aurora TIER 2 #10).
+  // v66: Measurements tool â€” multi-pair (Aurora TIER 2 #10).
   // measurementsRef holds COMMITTED measurements; the in-progress pair
   // still uses measurePtsRef + measureOverlayRef (the legacy measure refs).
   const measurementsRef = useRef<Measurement[]>([]);
-  // v66: Ruler tool — single persistent measurement, drag-anchored.
+  // v66: Ruler tool â€” single persistent measurement, drag-anchored.
   const rulerRef = useRef<Measurement | null>(null);
   const rulerEntitiesRef = useRef<MeasurementEntityBundle | null>(null);
   const rulerPreviewEntityRef = useRef<any>(null);
   const rulerAnchorRef = useRef<LngLatH | null>(null);
   const rulerCursorRef = useRef<LngLatH | null>(null);
   const rulerDraggingRef = useRef<boolean>(false);
-  // v64: Block primitive — 2-corner footprint then default-height box.
+  // v64: Block primitive â€” 2-corner footprint then default-height box.
   // v65.1: each point now also stores the click elevation (h, meters above
   // WGS84 ellipsoid) so the prism and the in-progress polyline render at
   // the actual ground level, not buried 100m+ below the satellite drape.
@@ -1178,23 +1178,23 @@ function SolarEngine3D({
   const [blockPtCount, setBlockPtCount]     = useState(0);
   const blockEntitiesRef = useRef<any[]>([]); // Cesium Entity[] for the placed boxes
   const [placedBlockCount, setPlacedBlockCount] = useState(0);
-  // v64: Block resize — drag-handle on top of each block. handleDragRef tracks
+  // v64: Block resize â€” drag-handle on top of each block. handleDragRef tracks
   // which block is being resized and the start Y in world coords.
   const blockHandlesRef = useRef<any[]>([]); // Cesium Entity[] for the handles
   const blockResizeRef  = useRef<{ blockEntity: any; handleEntity: any; startHeightM: number; startYWorld: number; centroidCart: any } | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const blockHeightOverridesRef = useRef<Map<string, number>>(new Map()); // blockId -> heightM
-  // v65: Line-trace block mode — N points to define any polygon footprint, right-click
+  // v65: Line-trace block mode â€” N points to define any polygon footprint, right-click
   // to finalize. The in-progress polyline is shown as a preview entity.
   const blockPreviewRef = useRef<any>(null); // preview polyline entity (in-progress)
-  // v68: Segment normal arrows — yellow chevron at the midpoint of each
+  // v68: Segment normal arrows â€” yellow chevron at the midpoint of each
   // polyline edge in the in-progress block line-trace (Aurora parity).
   // flippedArrowsRef tracks which segment ids the user has clicked to
   // invert. The overlay factory is created once at viewer init.
   const segmentArrowOverlayRef = useRef<SegmentArrowOverlay | null>(null);
   const flippedArrowsRef = useRef<Set<string>>(new Set());
   const DEFAULT_BLOCK_HEIGHT_M = 6; // typical 1-story eave height
-  // v66: 3D Primitives input state — exposed in the in-canvas Properties panel
+  // v66: 3D Primitives input state â€” exposed in the in-canvas Properties panel
   // so the user can set eave height for new blocks and roof pitch for new
   // gables/hips without 3D-dragging each one. The selected-block height input
   // updates the most-recently-placed block's extrudedHeight in real-time.
@@ -1203,7 +1203,7 @@ function SolarEngine3D({
   const [lastPlacedBlockId, setLastPlacedBlockId] = useState<string | null>(null);
   // Default eave for gable/hip roofs (height of the wall below the eave line)
   const [newRoofEaveHeightM, setNewRoofEaveHeightM] = useState<number>(6);
-  // v64: Gable roof primitive — click 2 eave corners, render 2 sloped faces meeting at ridge.
+  // v64: Gable roof primitive â€” click 2 eave corners, render 2 sloped faces meeting at ridge.
   // The eave is a rectangle in lat/lng; ridge runs along the long edge at the centroid.
   const gablePtsRef = useRef<Array<{ lat: number; lng: number }>>([]);
   const [gablePtCount, setGablePtCount] = useState(0);
@@ -1211,12 +1211,12 @@ function SolarEngine3D({
   const [placedGableCount, setPlacedGableCount] = useState(0);
   const DEFAULT_GABLE_PITCH_DEG = 22;
   const DEFAULT_GABLE_EAVE_HEIGHT_M = 6;
-  // v64: Hip roof — 4 eave corners (rectangle), 2 trapezoid slopes + 2 triangle ends
+  // v64: Hip roof â€” 4 eave corners (rectangle), 2 trapezoid slopes + 2 triangle ends
   const hipPtsRef = useRef<Array<{ lat: number; lng: number }>>([]);
   const [hipPtCount, setHipPtCount] = useState(0);
   const hipEntitiesRef = useRef<any[]>([]);
   const [placedHipCount, setPlacedHipCount] = useState(0);
-  // v64: Tree primitive — single click drops a green sphere (foliage) + thin brown cylinder (trunk).
+  // v64: Tree primitive â€” single click drops a green sphere (foliage) + thin brown cylinder (trunk).
   // Decorative only; doesn't affect solar production. Matches the 3D-After-at-Noon reference image.
   const treeEntitiesRef = useRef<any[]>([]);
   const [placedTreeCount, setPlacedTreeCount] = useState(0);
@@ -1224,7 +1224,7 @@ function SolarEngine3D({
   // v66 (vertex-handles): per-primitive edit spec keyed by primitive id.
   // The shape varies per primitive type (block has blockExtrudeHeightM,
   // gable/hip have eaveHeightM + pitchDeg, tree has a position, etc.).
-  // The full type lives in components/3d/editing/ — we keep it loose here
+  // The full type lives in components/3d/editing/ â€” we keep it loose here
   // so the integration touch is minimal. See components/3d/editing/DESIGN.md.
   type VertexSpec = any;
   const vertexSpecsRef = useRef<VertexSpec[]>([]);
@@ -1267,7 +1267,7 @@ function SolarEngine3D({
   const [tilesetReady, setTilesetReady]       = useState(false);
   const [clickCountForTool, setClickCountForTool] = useState(0);
   const [lastPickMethod, setLastPickMethod]   = useState<string>('none');
-  const [lastPickLatLon, setLastPickLatLon]   = useState<string>('—');
+  const [lastPickLatLon, setLastPickLatLon]   = useState<string>('â€”');
   const renderModeRef = useRef<'TILES' | 'TERRAIN_ONLY'>('TERRAIN_ONLY');
 
   // Phase 4: Row tool local lastClick ref (no stale state)
@@ -1310,7 +1310,7 @@ function SolarEngine3D({
       flippedArrowsRef.current.clear();
       setClickCountForTool(0);
       clearGhostPanel();
-      // v62: leaving select mode — drop the rotate knob and never leave a drag
+      // v62: leaving select mode â€” drop the rotate knob and never leave a drag
       // half-open (which would keep camera left-drag disabled).
       hideRotateHandle();
       if (dragRef.current) dragRef.current = null;
@@ -1332,9 +1332,9 @@ function SolarEngine3D({
     // Auto Fill: only trigger when mode CHANGES TO 'auto_roof' (not on every re-render)
     // This is inside prevMode !== placementMode guard to prevent duplicate runs.
     if (placementMode === 'pick_house' && prevMode !== 'pick_house') {
-      setStatusMsg('🏡 Click any house on the map to select it as the target property');
+      setStatusMsg('ðŸ¡ Click any house on the map to select it as the target property');
     }
-    // v62: marking faces → auto-show the stitched Roof Model so edges classify live.
+    // v62: marking faces â†’ auto-show the stitched Roof Model so edges classify live.
     // v62 (3D-plane no-tiles guard): plane3d + mark_plane trace CORNERS on the 3D
     // mesh. When no Google Photorealistic 3D Tiles are loaded, the scene falls
     // back to satellite imagery + WGS84 ellipsoid and every click hits the ellipsoid
@@ -1342,27 +1342,27 @@ function SolarEngine3D({
     // up, the eave axis falls through to the most-horizontal-edge heuristic, and
     // the resulting frame is (n=up, u=arbitrary horizontal, v=arbitrary horizontal).
     // buildSurfaceGrid places panels on that horizontal frame, aligned to whatever
-    // arbitrary direction — not to the user's traced polygon. That's the "wonky
+    // arbitrary direction â€” not to the user's traced polygon. That's the "wonky
     // panels on bare 2D maps" bug (Auto Fill on a no-tiles address).
     //
     // Layer A: refuse entry to these modes unless 3D tiles loaded. (Layer C lives
-    // in handlePlane3DClick — defensive pickMethod check on each click.)
+    // in handlePlane3DClick â€” defensive pickMethod check on each click.)
     if ((placementMode === 'plane3d' || placementMode === 'mark_plane') && prevMode !== placementMode) {
       if (!tilesetRef.current) {
         const isLoading = tileStatus === 'loading';
         setStatusMsg(
           isLoading
-            ? '⏳ 3D Plane is waiting for Google 3D Tiles to finish loading…'
-            : '3D Plane needs Google Photorealistic 3D Tiles for roof elevation. This address has no 3D coverage — try Auto Fill on detected roof segments, or pick an address in a 3D-covered region.'
+            ? 'â³ 3D Plane is waiting for Google 3D Tiles to finish loadingâ€¦'
+            : '3D Plane needs Google Photorealistic 3D Tiles for roof elevation. This address has no 3D coverage â€” try Auto Fill on detected roof segments, or pick an address in a 3D-covered region.'
         );
-        addLog('PLANE3D', `Refused entry to ${placementMode} — tilesetRef.current=${!!tilesetRef.current} tileStatus=${tileStatus}`);
+        addLog('PLANE3D', `Refused entry to ${placementMode} â€” tilesetRef.current=${!!tilesetRef.current} tileStatus=${tileStatus}`);
         onPlacementModeChange('select');
       } else {
         if (placementMode === 'mark_plane') {
           setShowRoofModel(true);
-          setStatusMsg('⬡ Mark Plane — click a roof face\'s corners (3+), right-click to finish · edges classify live');
+          setStatusMsg('â¬¡ Mark Plane â€” click a roof face\'s corners (3+), right-click to finish Â· edges classify live');
         } else {
-          setStatusMsg('▣ Custom Array — click 3+ roof corners, right-click to place an array');
+          setStatusMsg('â–£ Custom Array â€” click 3+ roof corners, right-click to place an array');
         }
       }
     }
@@ -1400,11 +1400,11 @@ function SolarEngine3D({
   useEffect(() => { panelsRef.current = panels; setPanelCount(panels.length); }, [panels]);
 
   // Rebuild fence sections from loaded panels (covers saved/restored state)
-  // NOTE: Does NOT depend on systemType prop — fence panels may exist even when
+  // NOTE: Does NOT depend on systemType prop â€” fence panels may exist even when
   // activeZoneType is 'roof' (mixed projects). We detect fence panels by their own systemType.
   useEffect(() => {
     if (panels.length === 0) return;
-    // Only rebuild if sections are empty (fresh load) — don't overwrite active editing
+    // Only rebuild if sections are empty (fresh load) â€” don't overwrite active editing
     if (fenceSectionsRef.current.length > 0) return;
 
     const fencePanels = panels.filter(p => (p as any).systemType === 'fence');
@@ -1443,7 +1443,7 @@ function SolarEngine3D({
 
   useEffect(() => { roofPlanesRef.current = roofPlanes ?? []; }, [roofPlanes]);
 
-  // ── v64: Restore 3D roof-plane outlines + wireframe on project load ──────
+  // â”€â”€ v64: Restore 3D roof-plane outlines + wireframe on project load â”€â”€â”€â”€â”€â”€
   // After reload the panels are still there (they have their own restore effect),
   // but the roof-plane outline entities (plane3DEntityMap) and stitched wireframe
   // are GONE because they were only ever built from user actions this session.
@@ -1451,7 +1451,7 @@ function SolarEngine3D({
   // polygon3D / origin3D / normal3D / localFrame3D from the stitch write-back).
   //
   // Idempotent: skips planes already in plane3DEntityMap (traced/stitched this
-  // session). Does NOT touch panels or fences — those have their own restore paths.
+  // session). Does NOT touch panels or fences â€” those have their own restore paths.
   useEffect(() => {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
@@ -1468,8 +1468,8 @@ function SolarEngine3D({
 
     for (const plane of planesToRestore) {
       try {
-        // ── Step 1: Get ECEF corners ──────────────────────────────────
-        // Prefer polygon3D (stitched geometry — exact ECEF corners from the
+        // â”€â”€ Step 1: Get ECEF corners â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Prefer polygon3D (stitched geometry â€” exact ECEF corners from the
         // stitch write-back, Part A). Fallback for 2D-only legacy planes:
         // project vertices (lat/lng) to ECEF via computeEcefFrameForLegacyPlane.
         let cartPts: Cart3[];
@@ -1491,7 +1491,7 @@ function SolarEngine3D({
           frame = computePlaneFromPoints3D(cartPts);
         } else {
           // 2D-only legacy plane (no polygon3D, no ecefFrame3D). Project from
-          // vertices via azimuth/pitch → ECEF. This is a lossy approximation but
+          // vertices via azimuth/pitch â†’ ECEF. This is a lossy approximation but
           // at least shows the outline on reload.
           try {
             const legacy = computeEcefFrameForLegacyPlane(plane, groundElev);
@@ -1507,23 +1507,23 @@ function SolarEngine3D({
           }
         }
 
-        // ── Step 2: Convert projected points to Cesium Cartesian3 ──────
+        // â”€â”€ Step 2: Convert projected points to Cesium Cartesian3 â”€â”€â”€â”€â”€â”€
         const projectedCesiumPts = frame.projectedPts.map((p: Cart3) =>
           new C.Cartesian3(p.x, p.y, p.z)
         );
 
-        // ── Step 3: Determine mark-only (no panels assigned) ──────────
+        // â”€â”€ Step 3: Determine mark-only (no panels assigned) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         const planeHasPanels = panelsRef.current.some(p => p.planeId === plane.id);
         const isMarkOnly = !planeHasPanels;
         if (isMarkOnly) markOnlyPlaneIdsRef.current.add(plane.id);
 
-        // ── Step 4: Render plane entity (mirrors finalizePlane3D) ──────
+        // â”€â”€ Step 4: Render plane entity (mirrors finalizePlane3D) â”€â”€â”€â”€â”€â”€
         const isSelected = selectedRoofPlaneId === plane.id;
         const entityIds = renderPlane3DEntity(
           viewer, C, projectedCesiumPts, plane.id, frame, isSelected, isMarkOnly,
         );
 
-        // ── Step 5: Populate all three maps ───────────────────────────
+        // â”€â”€ Step 5: Populate all three maps â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         plane3DEntityMap.current.set(plane.id, entityIds);
         plane3DFrameMap.current.set(plane.id, frame);
         plane3DCesiumPtsMap.current.set(plane.id, projectedCesiumPts);
@@ -1536,7 +1536,7 @@ function SolarEngine3D({
       }
     }
 
-    // ── Step 6: Show roof model + wireframe + setbacks ────────────────
+    // â”€â”€ Step 6: Show roof model + wireframe + setbacks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (restored > 0) {
       setShowRoofModel(true);
       try { renderRoofWireframe(viewer, C); } catch {}
@@ -1593,7 +1593,7 @@ function SolarEngine3D({
     if (!viewer || !C || !renderAllPanelsRef.current) return;
     // Only an actual viz CHANGE (toggle flip or opacity change) warrants the
     // expensive full panel rebuild. panelMeta is in this effect's deps too, but
-    // panelMeta churn from moving/adding a panel must NOT force a rebuild — doing
+    // panelMeta churn from moving/adding a panel must NOT force a rebuild â€” doing
     // so tore down + re-added EVERY panel entity on every drag-release while a
     // mode was active (the "jerky / snaps to everything" regression, 2176e4d3).
     // A moved/added panel is recolored by the normal incremental render path,
@@ -1610,7 +1610,7 @@ function SolarEngine3D({
   }, [colorByString, showEquipment, panelOpacity, panelMeta]);
 
   // v47.122: Re-render all tracked planes when selection changes
-  // Selected plane → bright highlight; all others → dimmed
+  // Selected plane â†’ bright highlight; all others â†’ dimmed
   useEffect(() => {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
@@ -1642,10 +1642,10 @@ function SolarEngine3D({
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
   useEffect(() => { showShadeRef.current = showShade; setShowShadeLocal(showShade); }, [showShade]);
-  // v50.11: sync prop → local state (parent can also drive the toggle)
+  // v50.11: sync prop â†’ local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
 
-  // v50.16: Irradiance heatmap — roof (masked) + ground/fence (unmasked, panel bbox)
+  // v50.16: Irradiance heatmap â€” roof (masked) + ground/fence (unmasked, panel bbox)
   // GroundPrimitive with ClassificationType.CESIUM_3D_TILE paints directly onto
   // the 3D tile mesh surface. imageryLayers only reach the globe ellipsoid and
   // are always hidden under the Google Photorealistic 3D tile mesh.
@@ -1654,7 +1654,7 @@ function SolarEngine3D({
     const C = (window as any).Cesium;
     if (!viewer || !C || stage !== 'done') return;
 
-    // ── Remove existing overlays ────────────────────────────────────────────
+    // â”€â”€ Remove existing overlays â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (irradianceOverlayRef.current) {
       try { viewer.scene.primitives.remove(irradianceOverlayRef.current); } catch {}
       irradianceOverlayRef.current = null;
@@ -1669,7 +1669,7 @@ function SolarEngine3D({
       return;
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
+    // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function makeGroundPrimitive(
       C: any,
       rect: any,
@@ -1696,7 +1696,7 @@ function SolarEngine3D({
       });
     }
 
-    // ── Load + render ───────────────────────────────────────────────────────
+    // â”€â”€ Load + render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let cancelled = false;
     setIrradianceLoading(true);
     (async () => {
@@ -1704,7 +1704,7 @@ function SolarEngine3D({
         const { loadIrradianceLayer, loadIrradianceLayerUnmasked } = await import('@/lib/geotiffDecoder');
         const { renderIrradianceCanvas } = await import('@/lib/irradianceColormap');
 
-        // ── 1. ROOF overlay (masked — only roof pixels coloured) ─────────────
+        // â”€â”€ 1. ROOF overlay (masked â€” only roof pixels coloured) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         const roofLayer = await loadIrradianceLayer(lat, lng);
         if (cancelled) return;
 
@@ -1720,13 +1720,13 @@ function SolarEngine3D({
           const roofPrimitive = makeGroundPrimitive(C, roofRect, roofDataUrl);
           viewer.scene.primitives.add(roofPrimitive);
           irradianceOverlayRef.current = roofPrimitive;
-          console.log('[Irradiance] ✅ Roof heatmap added (CESIUM_3D_TILE)',
-            roofLayer.minVal.toFixed(0), '–', roofLayer.maxVal.toFixed(0), 'kWh/m²/yr');
+          console.log('[Irradiance] âœ… Roof heatmap added (CESIUM_3D_TILE)',
+            roofLayer.minVal.toFixed(0), 'â€“', roofLayer.maxVal.toFixed(0), 'kWh/mÂ²/yr');
         } else {
           console.warn('[Irradiance] No roof data for', lat, lng);
         }
 
-        // ── 2. GROUND / FENCE overlay (unmasked — full solar flux in panel area) ─
+        // â”€â”€ 2. GROUND / FENCE overlay (unmasked â€” full solar flux in panel area) â”€
         // Find bounding box of all ground + fence panels on screen
         const groundFencePanels = panelsRef.current.filter(
           p => p.systemType === 'ground' || p.systemType === 'fence'
@@ -1768,9 +1768,9 @@ function SolarEngine3D({
               const groundPrimitive = makeGroundPrimitive(C, groundRect, groundDataUrl);
               viewer.scene.primitives.add(groundPrimitive);
               irradianceGroundRef.current = groundPrimitive;
-              console.log('[Irradiance] ✅ Ground/fence heatmap added —',
+              console.log('[Irradiance] âœ… Ground/fence heatmap added â€”',
                 groundFencePanels.length, 'panels bbox:',
-                minLat.toFixed(5), minLng.toFixed(5), '→', maxLat.toFixed(5), maxLng.toFixed(5));
+                minLat.toFixed(5), minLng.toFixed(5), 'â†’', maxLat.toFixed(5), maxLng.toFixed(5));
             }
           }
         }
@@ -1812,14 +1812,14 @@ function SolarEngine3D({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Restore panels when they arrive from DesignStudio (after boot) ──────────
+  // â”€â”€ Restore panels when they arrive from DesignStudio (after boot) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // If viewer is ready: render with debounce (16ms) to batch rapid updates.
   // If viewer not ready yet: store in pendingPanelsRef so boot() can pick them up.
   useEffect(() => {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C || !renderAllPanelsRef.current) {
-      // Boot not complete yet — store for later
+      // Boot not complete yet â€” store for later
       if (panels.length > 0) pendingPanelsRef.current = panels;
       return;
     }
@@ -1842,25 +1842,25 @@ function SolarEngine3D({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panels]);
 
-  // ── Fly camera when address changes (lat/lng props change) ──────────────────
+  // â”€â”€ Fly camera when address changes (lat/lng props change) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C) return;
-    // Only fly if coordinates changed by more than ~11m (0.0001°)
+    // Only fly if coordinates changed by more than ~11m (0.0001Â°)
     if (Math.abs(lat - prevLatRef.current) < 0.0001 && Math.abs(lng - prevLngRef.current) < 0.0001) return;
     prevLatRef.current = lat;
     prevLngRef.current = lng;
 
-    // ── v62: RESET per-location state on EVERY address change ────────────────
+    // â”€â”€ v62: RESET per-location state on EVERY address change â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Ray's repro: first fly-in works, the SECOND fly-in corrupts the plane.
     // Cause: state from the previous address leaked into the next plane build.
-    //   • cesiumGroundElevResolvedRef → false: the new address must NOT build
+    //   â€¢ cesiumGroundElevResolvedRef â†’ false: the new address must NOT build
     //     planes at the OLD address's ground elevation during the async twin
     //     reload (it gets re-resolved below once the new twin loads).
-    //   • customLayoutDir/Origin → null: a stale grid axis/origin from a prior
+    //   â€¢ customLayoutDir/Origin â†’ null: a stale grid axis/origin from a prior
     //     Set-Direction/Origin would skew the next address's grid.
-    //   • clearPlane3DPreview: drop any in-progress 3D-plane click points.
+    //   â€¢ clearPlane3DPreview: drop any in-progress 3D-plane click points.
     cesiumGroundElevResolvedRef.current = false;
     customLayoutDirRef.current   = null;
     customLayoutOriginRef.current = null;
@@ -1868,13 +1868,13 @@ function SolarEngine3D({
     addLog('FLY', 'reset per-location state (elevResolved/customDir/customOrigin/plane3d) on address change');
 
     const elev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-    // Update orbit state for new address — snap camera to site at default pose
+    // Update orbit state for new address â€” snap camera to site at default pose
     const o = orbitRef.current;
     o.targetLat = lat;
     o.targetLng = lng;
     o.targetAlt = elev;
-    o.heading   = TILTED_AERIAL_VIEW.heading;  // π → fly-in looks NORTH (look dir = heading + π)
-    o.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45° Aurora parity (lib/3d/cameraPresets.ts)
+    o.heading   = TILTED_AERIAL_VIEW.heading;  // Ï€ â†’ fly-in looks NORTH (look dir = heading + Ï€)
+    o.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45Â° Aurora parity (lib/3d/cameraPresets.ts)
     // 150m default framing; only fall back to a wider 300m when the ground
     // elevation is genuinely UNRESOLVED. (Was `elev > 0`, which wrongly treated
     // legitimately-negative coastal elevations as "unknown" and zoomed out.)
@@ -1882,9 +1882,9 @@ function SolarEngine3D({
     o.dragging  = false;
     if (applyOrbitRef.current) {
       applyOrbitRef.current();
-      addLog('FLY', `Address change → orbit to ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+      addLog('FLY', `Address change â†’ orbit to ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
     } else {
-      // applyOrbit not yet ready (boot hasn’t run); will be applied when applyOrbitRef is set
+      // applyOrbit not yet ready (boot hasnâ€™t run); will be applied when applyOrbitRef is set
       addLog('FLY', `Address change queued (applyOrbit not ready)`);
     }
     [200, 600, 1500, 3000].forEach(t =>
@@ -1894,7 +1894,7 @@ function SolarEngine3D({
     // Reload digital twin for new location (Pick House / address change)
     // Clear old overlays and reload Solar API data for the new lat/lng
     addLog('FLY', `Reloading digital twin for new location: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
-    setStatusMsg('🏡 Loading solar data for new location...');
+    setStatusMsg('ðŸ¡ Loading solar data for new location...');
     // Clear old roof segment overlays
     overlayRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     overlayRef.current = [];
@@ -1902,14 +1902,14 @@ function SolarEngine3D({
     twinRef.current = null;
     terrainReadyRef.current = false;
     setTerrainReady(false);
-    // PERF v61: Reload twin data for new location — skip DSM for speed, enrich lazily.
+    // PERF v61: Reload twin data for new location â€” skip DSM for speed, enrich lazily.
     buildDigitalTwin(lat, lng, projectAddress ?? '', true /* skipDsm */).then(newTwin => {
       twinRef.current = newTwin;
       onTwinLoaded?.(newTwin);
       addLog('FLY', `Twin reloaded: ${newTwin.roofSegments.length} segments`);
-      setStatusMsg(`✅ Solar data loaded: ${newTwin.roofSegments.length} roof segments`);
+      setStatusMsg(`âœ… Solar data loaded: ${newTwin.roofSegments.length} roof segments`);
 
-      // PERF v61: Use geoid approximation directly — skip sampleTerrainMostDetailed (saves 3-5s).
+      // PERF v61: Use geoid approximation directly â€” skip sampleTerrainMostDetailed (saves 3-5s).
       const googleGroundElev = newTwin.elevation ?? 0;
       const latRad = lat * Math.PI / 180;
       const geoidApprox = -29 - 5 * Math.sin(latRad);
@@ -1961,7 +1961,7 @@ function SolarEngine3D({
    * 1. Dynamically loads CesiumJS from CDN
    * 2. Creates the Cesium Viewer with optimized settings (requestRenderMode, EllipsoidTerrain)
    * 3. Fetches Google Photorealistic 3D Tiles AND Solar API data IN PARALLEL via Promise.allSettled
-   * 4. Samples Cesium terrain to compute geoid undulation offset (Google orthometric → Cesium ellipsoidal)
+   * 4. Samples Cesium terrain to compute geoid undulation offset (Google orthometric â†’ Cesium ellipsoidal)
    * 5. Draws roof segment + parcel overlays
    * 6. Sets up click, hover, keyboard, and resize handlers
    * 7. Renders any panels that arrived via props before boot completed (pendingPanelsRef)
@@ -1998,7 +1998,7 @@ function SolarEngine3D({
         imageryProvider: false,
       };
 
-      // Use flat ellipsoid terrain — Google Photorealistic 3D Tiles provide all geometry.
+      // Use flat ellipsoid terrain â€” Google Photorealistic 3D Tiles provide all geometry.
       // Cesium World Terrain conflicts with 3D Tiles and causes jagged mountain artifacts.
       viewerOptions.terrainProvider = new C.EllipsoidTerrainProvider();
 
@@ -2019,7 +2019,7 @@ function SolarEngine3D({
           const cur = flippedArrowsRef.current;
           if (cur.has(segId)) cur.delete(segId);
           else cur.add(segId);
-          addLog('ARROW', `Flipped ${segId} → normalDir ${cur.has(segId) ? -1 : 1}`);
+          addLog('ARROW', `Flipped ${segId} â†’ normalDir ${cur.has(segId) ? -1 : 1}`);
           // Re-render the overlay with the same segments but the
           // updated flipped set. The list of points has not changed
           // since the last click, so we just rebuild.
@@ -2047,11 +2047,11 @@ function SolarEngine3D({
         });
       } catch (e) { addLog('WARN', `segment arrow overlay init: ${(e as Error).message}`); }
 
-      // ── CUSTOM ORBIT CAMERA CONTROLLER ────────────────────────────────────────
+      // â”€â”€ CUSTOM ORBIT CAMERA CONTROLLER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       //
       // WHY A CUSTOM CONTROLLER?
       // Cesium's built-in ScreenSpaceCameraController is designed for planet-scale
-      // navigation.  At roof level (camera altitude 10–200 m), its spin3D() function
+      // navigation.  At roof level (camera altitude 10â€“200 m), its spin3D() function
       // randomly switches between pan3D / look3D / strafe / rotate3D depending on
       // what the depth-buffer ray hits each frame.  The result is the "mind of its
       // own" behaviour: dragging the mouse causes the camera to lurch, snap to
@@ -2060,31 +2060,31 @@ function SolarEngine3D({
       //
       // rotate3D() (the "good" orbit function) uses rho = |camera.position| from
       // Earth centre (~6,370,100 m at roof level), so one full drag rotates by
-      // roughly 0.006° — completely invisible.  All of Cesium's built-in modes
-      // are calibrated for distances ≥ 1,000 km.
+      // roughly 0.006Â° â€” completely invisible.  All of Cesium's built-in modes
+      // are calibrated for distances â‰¥ 1,000 km.
       //
       // SOLUTION: disable Cesium's input system entirely and implement a clean
       // turntable orbit using camera.setView() each frame:
       //
-      //   Camera position = target + R·(spherical heading/pitch)
+      //   Camera position = target + RÂ·(spherical heading/pitch)
       //
       // where:
       //   target  = building centre (lat/lng/groundElev, stable ref point)
       //   R       = orbit radius (metres, updated by scroll)
       //   heading = azimuth around target (radians, updated by left/right drag)
-      //   pitch   = elevation angle  (radians, −π/2 = top-down, updated by up/down drag)
+      //   pitch   = elevation angle  (radians, âˆ’Ï€/2 = top-down, updated by up/down drag)
       //
       // camera.setView() is fully deterministic and always produces the correct
       // camera position+orientation regardless of what tiles are loaded.
       //
       // CONTROLS (v52.2):
-      //   Left-drag     → pan (translate orbit target — matches 2D map drag)
-      //   Right-drag    → orbit (heading + pitch)
-      //   Middle-drag   → orbit (heading + pitch)
-      //   Scroll wheel  → zoom (adjust orbit radius)
-      //   Middle-click  → zoom to cursor is NOT supported; middle is pan only
+      //   Left-drag     â†’ pan (translate orbit target â€” matches 2D map drag)
+      //   Right-drag    â†’ orbit (heading + pitch)
+      //   Middle-drag   â†’ orbit (heading + pitch)
+      //   Scroll wheel  â†’ zoom (adjust orbit radius)
+      //   Middle-click  â†’ zoom to cursor is NOT supported; middle is pan only
 
-      // ── 1. Disable Cesium's built-in camera input ────────────────────────────
+      // â”€â”€ 1. Disable Cesium's built-in camera input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       try {
         const ctrl = viewer.scene.screenSpaceCameraController;
         ctrl.enableInputs     = false;   // disables all Cesium mouse/touch handling
@@ -2093,13 +2093,13 @@ function SolarEngine3D({
         ctrl.enableZoom       = false;
         ctrl.enableLook       = false;
         ctrl.enableTranslate  = false;
-        // Keep collision detection off so we can tilt past 90°
+        // Keep collision detection off so we can tilt past 90Â°
         ctrl.enableCollisionDetection = false;
       } catch (e) { addLog('WARN', `ctrl disable: ${(e as Error).message}`); }
 
-      // ── 2. Orbit state ───────────────────────────────────────────────────────
+      // â”€â”€ 2. Orbit state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       //
-      // These are plain numbers in a closure object — no React state, no re-renders.
+      // These are plain numbers in a closure object â€” no React state, no re-renders.
       // All mutations happen inside event handlers; camera.setView() is called at
       // the end of each mutation to apply the change immediately.
       const orbit = {
@@ -2111,11 +2111,11 @@ function SolarEngine3D({
         targetAlt: 0 as number,   // filled in after terrain sampling completes
 
         // Spherical camera pose
-        // heading = bearing from target to camera; look dir = heading + π.
-        // π puts the camera SOUTH of the target so the fly-in looks NORTH
+        // heading = bearing from target to camera; look dir = heading + Ï€.
+        // Ï€ puts the camera SOUTH of the target so the fly-in looks NORTH
         // (was 0.0, which sat north of target and looked south).
         heading: Math.PI,         // radians; fly-in looks NORTH
-        pitch:   TILTED_AERIAL_VIEW.pitch,  // radians, -45° (Aurora parity) — lib/3d/cameraPresets.ts
+        pitch:   TILTED_AERIAL_VIEW.pitch,  // radians, -45Â° (Aurora parity) â€” lib/3d/cameraPresets.ts
         radius:  150.0,           // metres from target
 
         // Drag state
@@ -2133,26 +2133,26 @@ function SolarEngine3D({
       // from anywhere in the component (fitCameraToRoofPlanes, flyToProperty, etc.)
       orbitRef.current = orbit;
 
-      // ── 3. camera.setView() helper ───────────────────────────────────────────
+      // â”€â”€ 3. camera.setView() helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       //
       // Computes the camera position from the orbit state and calls setView().
-      // This is the ONLY place that moves the Cesium camera — one clean function.
+      // This is the ONLY place that moves the Cesium camera â€” one clean function.
       //
       // MATH:
       //   orbit.heading = angle of camera POSITION relative to target (0=N, CW+)
-      //   orbit.pitch   = Cesium convention: 0=horizontal, -π/2=straight down
+      //   orbit.pitch   = Cesium convention: 0=horizontal, -Ï€/2=straight down
       //   orbit.radius  = metres from target to camera
       //
       //   Camera sits at:
-      //     ENU east  =  R · cos(−pitch) · sin(heading)
-      //     ENU north =  R · cos(−pitch) · cos(heading)
-      //     ENU up    = −R · sin(pitch)          (positive when pitch<0 = cam is above target)
+      //     ENU east  =  R Â· cos(âˆ’pitch) Â· sin(heading)
+      //     ENU north =  R Â· cos(âˆ’pitch) Â· cos(heading)
+      //     ENU up    = âˆ’R Â· sin(pitch)          (positive when pitch<0 = cam is above target)
       //
-      //   Camera looks TOWARD target, so look-direction = −enuOffset (normalised).
-      //   Cesium setView HPR derives orientation from the heading+pitch of the camera’s
+      //   Camera looks TOWARD target, so look-direction = âˆ’enuOffset (normalised).
+      //   Cesium setView HPR derives orientation from the heading+pitch of the cameraâ€™s
       //   look direction, NOT the camera position direction.
-      //   Look-direction heading = orbit.heading + π   (camera faces opposite to its position)
-      //   Look-direction pitch   = −orbit.pitch         (inverse: cam above target → look down)
+      //   Look-direction heading = orbit.heading + Ï€   (camera faces opposite to its position)
+      //   Look-direction pitch   = âˆ’orbit.pitch         (inverse: cam above target â†’ look down)
       function applyOrbit() {
         const cam = viewer.camera;
         if (!cam) return;
@@ -2164,7 +2164,7 @@ function SolarEngine3D({
         orbit.pitch  = CMath.clamp(orbit.pitch,  -CMath.PI_OVER_TWO + 0.02,  CMath.PI_OVER_TWO - 0.05);
         orbit.radius = CMath.clamp(orbit.radius, 1.5, 50000);
 
-        // Elevation angle: -pitch in Cesium convention (pitch=-π/2 = looking straight down = camera is overhead)
+        // Elevation angle: -pitch in Cesium convention (pitch=-Ï€/2 = looking straight down = camera is overhead)
         const elev  = -orbit.pitch;   // elevation above horizontal (positive = camera is above target)
         const pSin  = Math.sin(elev);  // how high the camera is (>0 = above)
         const pCos  = Math.cos(elev);  // horizontal distance scale
@@ -2177,14 +2177,14 @@ function SolarEngine3D({
         const upM    = orbit.radius * pSin;
 
         // Convert ENU offset to world Cartesian3.
-        // Cesium’s eastNorthUpToFixedFrame(origin) gives a 4×4 matrix where:
+        // Cesiumâ€™s eastNorthUpToFixedFrame(origin) gives a 4Ã—4 matrix where:
         //   col0 = East unit vector in ECEF
         //   col1 = North unit vector in ECEF
         //   col2 = Up unit vector in ECEF
         //   col3 = origin (target) in ECEF
         //
-        // multiplyByPointAsVector (3×4 × [x,y,z,0]) gives the ROTATION ONLY,
-        // i.e. ecef_offset = R · enuVec (no translation).
+        // multiplyByPointAsVector (3Ã—4 Ã— [x,y,z,0]) gives the ROTATION ONLY,
+        // i.e. ecef_offset = Râ€‰Â·â€‰enuVec (no translation).
         // Camera position = origin + ecef_offset.
         const targetCart = C3.fromDegrees(orbit.targetLng, orbit.targetLat, orbit.targetAlt);
         const enuToEcef  = C.Transforms.eastNorthUpToFixedFrame(targetCart);
@@ -2196,10 +2196,10 @@ function SolarEngine3D({
 
         // Camera look-direction heading & pitch:
         // The camera sits at position = target + offset, and must look TOWARD target.
-        // Look direction = −offset (normalised).
+        // Look direction = âˆ’offset (normalised).
         // In Cesium HPR convention for setView:
-        //   heading = compass bearing of look direction = orbit.heading + π  (camera is opposite side of target)
-        //   pitch   = elevation of look direction = −elev (camera above → look down, i.e. negative pitch)
+        //   heading = compass bearing of look direction = orbit.heading + Ï€  (camera is opposite side of target)
+        //   pitch   = elevation of look direction = âˆ’elev (camera above â†’ look down, i.e. negative pitch)
         const lookHeading = orbit.heading + Math.PI;
         const lookPitch   = -elev;   // same as orbit.pitch
 
@@ -2215,40 +2215,40 @@ function SolarEngine3D({
         viewer.scene.requestRender();
       }
 
-      // ── 4. Expose applyOrbit via ref so flyTo/fitCamera can update orbit state
+      // â”€â”€ 4. Expose applyOrbit via ref so flyTo/fitCamera can update orbit state
       applyOrbitRef.current = applyOrbit;
 
       // Seed orbit.targetAlt once terrain is available (deferred)
       // syncOrbitAlt: updates orbit target altitude after terrain elevation is resolved.
       // Called by the lat/lng change effect when cesiumGroundElevRef is updated.
-      // (defined here so it’s in scope; actually called via orbitRef/applyOrbitRef).
+      // (defined here so itâ€™s in scope; actually called via orbitRef/applyOrbitRef).
 
-      // ── 5. Mouse / Pointer event handlers ─────────────────────────────────────────────
-      // Use viewer.scene.canvas directly — guaranteed to be the Cesium rendering canvas.
+      // â”€â”€ 5. Mouse / Pointer event handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // Use viewer.scene.canvas directly â€” guaranteed to be the Cesium rendering canvas.
       // Previously used querySelector('canvas') which could pick a non-rendering canvas.
       const cesiumCanvas = viewer.scene.canvas as HTMLCanvasElement | null;
 
       if (cesiumCanvas) {
-        // ── 5a. Drag sensitivity constants ──────────────────────────────────────
+        // â”€â”€ 5a. Drag sensitivity constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // ORBIT_DRAG: radians of heading/pitch change per pixel of mouse movement.
-        // At 0.004 rad/px: dragging 400px across a 1600-wide canvas rotates ~92°.
+        // At 0.004 rad/px: dragging 400px across a 1600-wide canvas rotates ~92Â°.
         const ORBIT_DRAG  = 0.004;  // rad/px for left-drag orbit
         const TILT_DRAG   = 0.003;  // rad/px for right-drag tilt (finer)
 
         // PAN_DRAG: metres of orbit target shift per pixel.
-        // At orbit.radius = 150m: 1px → 150*0.001 = 0.15m pan.  Scales with zoom.
+        // At orbit.radius = 150m: 1px â†’ 150*0.001 = 0.15m pan.  Scales with zoom.
         const PAN_SCALE   = 0.001;  // world metres per pixel per metre of orbit radius
 
-        // ── 5b. Wheel zoom ──────────────────────────────────────────────────────
+        // â”€â”€ 5b. Wheel zoom â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // The upstream normalizer (see wheel listener below) already converts all
-        // wheel events to ±120.  We apply a fixed proportional step per notch.
+        // wheel events to Â±120.  We apply a fixed proportional step per notch.
         const ZOOM_FACTOR = 0.15;   // 15% of current radius per notch
 
         let middleDown   = false;
         let middleDownAt = 0;
         let reDispatching = false;
 
-        // ── 5c. pointerdown (replaces mousedown) ───────────────────────────────────────
+        // â”€â”€ 5c. pointerdown (replaces mousedown) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Using pointerdown (fires before implicit pointer capture) so we can
         // call setPointerCapture() and guarantee that pointermove/pointerup
         // follow the pointer to window even on browsers that redirect them.
@@ -2271,34 +2271,34 @@ function SolarEngine3D({
           ev.preventDefault();
         }, { capture: true });
 
-        // ── 5d. pointermove (replaces mousemove on window) ────────────────────────────────
+        // â”€â”€ 5d. pointermove (replaces mousemove on window) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // With pointer capture active, pointermove fires even after the cursor
         // leaves the canvas.  We also keep a mousemove fallback on window for
-        // browsers that don’t support pointer capture on canvas.
+        // browsers that donâ€™t support pointer capture on canvas.
         const handleDragMove = (ev: PointerEvent | MouseEvent) => {
           if (!orbit.dragging) return;
-          // v62: an array grab is active → don't move the camera (let the array
+          // v62: an array grab is active â†’ don't move the camera (let the array
           // manipulation own the drag). Without this the left-drag PANS the camera
-          // while the array also rotates/moves — the cause of the "shear".
+          // while the array also rotates/moves â€” the cause of the "shear".
           if (arrayManipRef.current) return;
 
           const dx = ev.clientX - orbit.dragStartX;
           const dy = ev.clientY - orbit.dragStartY;
 
           // v52.2: Swapped left/right-drag controls to match GIS/Google-Maps convention:
-          //   Left-drag   → pan (translate target) — matches 2D map drag behaviour
-          //   Right-drag  → full orbit (heading + pitch)
-          //   Middle-drag → orbit (heading + pitch, same as right-drag)
-          // Previously left=orbit, right=tilt — felt inverted vs 2D map expectations.
+          //   Left-drag   â†’ pan (translate target) â€” matches 2D map drag behaviour
+          //   Right-drag  â†’ full orbit (heading + pitch)
+          //   Middle-drag â†’ orbit (heading + pitch, same as right-drag)
+          // Previously left=orbit, right=tilt â€” felt inverted vs 2D map expectations.
           if (orbit.dragButton === 0) {
             // Left-drag: pan the orbit target (like 2D map drag)
             const panScale = orbit.radius * PAN_SCALE;
             const hSin = Math.sin(orbit.heading);
             const hCos = Math.cos(orbit.heading);
             // Google-Maps "grab the map" semantics: the scene follows the cursor,
-            // so the orbit TARGET moves opposite the drag (drag right → content
-            // moves right → target shifts camera-left). Camera looks toward
-            // heading+π, so camera-right = -(east·hCos) + ... with these signs:
+            // so the orbit TARGET moves opposite the drag (drag right â†’ content
+            // moves right â†’ target shifts camera-left). Camera looks toward
+            // heading+Ï€, so camera-right = -(eastÂ·hCos) + ... with these signs:
             const eastPan  =  dx * panScale * hCos - dy * panScale * hSin;
             const northPan = -dx * panScale * hSin - dy * panScale * hCos;
             const mPerDegLat = 111320;
@@ -2327,7 +2327,7 @@ function SolarEngine3D({
           (handleDragMove as EventListener)(ev);
         });
 
-        // ── 5e. pointerup + mouseup ────────────────────────────────────────────────────────
+        // â”€â”€ 5e. pointerup + mouseup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         const handleDragEnd = (ev: PointerEvent | MouseEvent) => {
           if ('pointerId' in ev) {
             try { cesiumCanvas.releasePointerCapture((ev as PointerEvent).pointerId); } catch {}
@@ -2340,13 +2340,13 @@ function SolarEngine3D({
         cesiumCanvas.addEventListener('pointercancel', handleDragEnd as EventListener);
         window.addEventListener('mouseup', handleDragEnd as EventListener);
 
-        // ── 5f. Wheel zoom ───────────────────────────────────────────────────────
-        // Capture-phase normalizer: converts all wheel events to ±120 and
+        // â”€â”€ 5f. Wheel zoom â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Capture-phase normalizer: converts all wheel events to Â±120 and
         // drops middle-click synthetic blips.  Then applyOrbit() handles zoom.
         cesiumCanvas.addEventListener('wheel', (ev: WheelEvent) => {
           if (reDispatching) return;
 
-          // Drop middle-click synthetic blip (button press → wheel within 150ms)
+          // Drop middle-click synthetic blip (button press â†’ wheel within 150ms)
           if (middleDown && Date.now() - middleDownAt < 150) {
             ev.stopImmediatePropagation();
             ev.preventDefault();
@@ -2377,7 +2377,7 @@ function SolarEngine3D({
           ev.preventDefault();
         });
       }
-      // ─────────────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
       if (cesiumRef.current) {
         const ro = new ResizeObserver(() => {
@@ -2386,7 +2386,7 @@ function SolarEngine3D({
         ro.observe(cesiumRef.current);
       }
 
-      // ─────────────────────────────────────────────────────────────────────────
+      // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
       // Global render error handler - prevents freeze
       viewer.scene.renderError.addEventListener((_scene: any, error: any) => {
@@ -2428,44 +2428,44 @@ function SolarEngine3D({
 
       setStage('tiles'); setStageMsg('Loading 3D tiles + Solar data...'); setProgress(45);
 
-      // ── Part 2 fix: explicit API key check before attempting tile load ─────
+      // â”€â”€ Part 2 fix: explicit API key check before attempting tile load â”€â”€â”€â”€â”€
       // If NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set in Vercel env vars,
       // the tile URL becomes "...?key=" which returns 403 from Google.
       // Log a clear error and skip the tile load rather than silently failing.
       if (!GOOGLE_API_KEY) {
         console.error(
           '[3D_TILE_ERROR] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set.\n' +
-          '  → Vercel Dashboard → Project → Settings → Environment Variables\n' +
-          '  → Add: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY = <your Google Maps API key>\n' +
-          '  → Enable: Maps JavaScript API + Photorealistic 3D Tiles API\n' +
-          '  → Then redeploy. 3D tiles require this key to load.'
+          '  â†’ Vercel Dashboard â†’ Project â†’ Settings â†’ Environment Variables\n' +
+          '  â†’ Add: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY = <your Google Maps API key>\n' +
+          '  â†’ Enable: Maps JavaScript API + Photorealistic 3D Tiles API\n' +
+          '  â†’ Then redeploy. 3D tiles require this key to load.'
         );
-        addLog('WARN', '3D Tiles skipped — NEXT_PUBLIC_GOOGLE_MAPS_API_KEY not configured (check Vercel env vars)');
+        addLog('WARN', '3D Tiles skipped â€” NEXT_PUBLIC_GOOGLE_MAPS_API_KEY not configured (check Vercel env vars)');
         setTileStatus('failed');
         setRenderMode('TERRAIN_ONLY');
       }
 
       // PERF v61: Run tiles and Solar API fetch IN PARALLEL for faster boot.
-      // DSM is NOT fetched at boot — it's the slowest call and not needed for initial render.
+      // DSM is NOT fetched at boot â€” it's the slowest call and not needed for initial render.
       // DSM is lazy-loaded after boot completes (additive, non-blocking).
       const tilePromise: Promise<any> = GOOGLE_API_KEY
         ? C.Cesium3DTileset.fromUrl(
             `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_API_KEY}`,
             {
               showCreditsOnScreen: false,
-              // PERF v48.29: Raised initial SSE from 32→64 for faster first paint.
+              // PERF v48.29: Raised initial SSE from 32â†’64 for faster first paint.
               // Dynamic optimizer (camera.changed) adjusts down to 16/8 on zoom-in.
               maximumScreenSpaceError: 64,
-              // PERF v61: skipLevelOfDetail=true — tiles appear immediately without waiting for full LOD chain.
+              // PERF v61: skipLevelOfDetail=true â€” tiles appear immediately without waiting for full LOD chain.
               // Visual quality is the same at final zoom; only intermediate LOD pops are slightly more visible.
               skipLevelOfDetail: true,
               // preferLeaves: true loads highest-detail tiles first when zoomed in.
               preferLeaves: true,
-              // dynamicScreenSpaceError: reduces tile detail at edges — big perf win.
+              // dynamicScreenSpaceError: reduces tile detail at edges â€” big perf win.
               dynamicScreenSpaceError: true,
               dynamicScreenSpaceErrorDensity: 0.00278,
               dynamicScreenSpaceErrorFactor: 4.0,
-              // PERF v61: Limit concurrent tile requests — prevents request queue saturation on first load.
+              // PERF v61: Limit concurrent tile requests â€” prevents request queue saturation on first load.
               maximumAttemptedTiles: 32,
             }
           )
@@ -2483,19 +2483,19 @@ function SolarEngine3D({
         const tileset = tileResult.value;
         viewer.scene.primitives.add(tileset);
         tilesetRef.current = tileset;
-        addLog('BOOT', '✅ Google 3D Tiles loaded OK');
+        addLog('BOOT', 'âœ… Google 3D Tiles loaded OK');
         setTileStatus('loaded');
         setRenderMode('TILES');
         // The Google 3D Tiles ARE the terrain + imagery, so hide the flat ellipsoid
         // globe (rendered at ellipsoidal height 0). At low-lying/coastal sites the
         // real tile ground sits BELOW height 0 (negative ellipsoidal), so the globe
         // pokes UP through the terrain and "bleeds through" at oblique angles
-        // (Waterford CT). Only hide once tiles are confirmed loaded — the failure
+        // (Waterford CT). Only hide once tiles are confirmed loaded â€” the failure
         // branch keeps globe.show=true so the Esri base map remains as a fallback.
         try { viewer.scene.globe.show = false; } catch (e) { handleCesiumError('hide globe', e, true); }
         try {
           tileset.allTilesLoaded.addEventListener(() => {
-            addLog('BOOT', '✅ All 3D tiles loaded');
+            addLog('BOOT', 'âœ… All 3D tiles loaded');
             try { viewer.scene.requestRender(); } catch {}
           });
         } catch (e) { handleCesiumError('allTilesLoaded listener', e, true); }
@@ -2504,7 +2504,7 @@ function SolarEngine3D({
         console.error('[3D_TILE_ERROR]', tileErr?.message ?? tileErr);
         addLog('WARN', `3D Tiles failed: ${tileErr?.message ?? 'unknown error'}`);
         setTileStatus('failed');
-        // Fallback to terrain-only mode — panel placement still works via CAD engine
+        // Fallback to terrain-only mode â€” panel placement still works via CAD engine
         setRenderMode('TERRAIN_ONLY');
       }
 
@@ -2527,11 +2527,11 @@ function SolarEngine3D({
       // Google Elevation API returns orthometric heights; Cesium uses ellipsoidal heights
       // In Ohio the geoid undulation is approximately -33m (EGM96 geoid model)
       const googleGroundElev = twinData?.elevation ?? 0;
-      // PERF v61: Use lat-based EGM96 geoid approximation directly — skip sampleTerrainMostDetailed.
+      // PERF v61: Use lat-based EGM96 geoid approximation directly â€” skip sampleTerrainMostDetailed.
       // sampleTerrainMostDetailed can take 3-5s with EllipsoidTerrainProvider (which returns 0 anyway).
       // The geoid approximation below is accurate to ~1-2m for CONUS, which is sufficient for panel placement.
       // Formula: ellipsoidal_height = orthometric_height (Google Elevation) + geoid_undulation
-      // EGM96 CONUS approx: -29 - 5*sin(lat_rad) → ~-34m at Ohio, ~-32m at Alexandria VA, ~-29m at Texas
+      // EGM96 CONUS approx: -29 - 5*sin(lat_rad) â†’ ~-34m at Ohio, ~-32m at Alexandria VA, ~-29m at Texas
       const latRadBoot = lat * Math.PI / 180;
       const geoidApproxBoot = -29 - 5 * Math.sin(latRadBoot);
       const cesiumGroundElev = googleGroundElev + geoidApproxBoot;
@@ -2548,8 +2548,8 @@ function SolarEngine3D({
       oo.targetLat = lat;
       oo.targetLng = lng;
       oo.targetAlt = cesiumGroundElev;
-      oo.heading   = TILTED_AERIAL_VIEW.heading;  // π → fly-in looks NORTH (look dir = heading + π)
-      oo.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45° Aurora parity (lib/3d/cameraPresets.ts)
+      oo.heading   = TILTED_AERIAL_VIEW.heading;  // Ï€ â†’ fly-in looks NORTH (look dir = heading + Ï€)
+      oo.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45Â° Aurora parity (lib/3d/cameraPresets.ts)
       oo.radius    = TILTED_AERIAL_VIEW.range;
       applyOrbitRef.current?.();
 
@@ -2588,7 +2588,7 @@ function SolarEngine3D({
       pendingPanelsRef.current = [];
 
       setStage('done'); setStageMsg('Ready'); setProgress(100);
-      setStatusMsg('✅ 3D Digital Twin loaded — click to place panels');
+      setStatusMsg('âœ… 3D Digital Twin loaded â€” click to place panels');
       addLog('BOOT', 'Boot complete');
 
       [200, 600, 1500, 3000].forEach(t =>
@@ -2609,7 +2609,7 @@ function SolarEngine3D({
               addLog('BOOT', `DSM enriched: ${enriched.roofSegments.length} roof segments`);
             }
           }).catch(e => addLog('WARN', `DSM enrichment failed: ${(e as Error).message}`));
-        }, 2000); // 2s delay — scene is already interactive by then
+        }, 2000); // 2s delay â€” scene is already interactive by then
       }
 
     } catch (err: unknown) {
@@ -2620,7 +2620,7 @@ function SolarEngine3D({
       // This is critical: without this, clicking Retry would silently skip boot() (initDone=true guard).
       initDone.current = false;
       // Note: onError is intentionally NOT calling setShow3D(false) anymore (v47.120).
-      // The error overlay inside this component has a Retry button — hiding the 3D view
+      // The error overlay inside this component has a Retry button â€” hiding the 3D view
       // on any transient failure (Cesium CDN down, network blip) is too aggressive.
       onError?.(msg);
     }
@@ -2671,7 +2671,7 @@ function SolarEngine3D({
     });
   }
 
-  // ── Camera-based performance optimizer ────────────────────────────────────
+  // â”€â”€ Camera-based performance optimizer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Dynamically adjusts shadow map resolution and tile detail based on camera
   // height. At overview distances (>500m), reduces GPU load significantly
   // without any visible quality loss.
@@ -2704,15 +2704,15 @@ function SolarEngine3D({
         }
 
         // Dynamic tile screen space error: more detail close-up, less at overview
-        // v48.29: Raised thresholds (64/32/16) to reduce tile-reload storms at oblique 45° angles.
-        // At 45° tilt many more tile faces are visible, causing SSE=4 to flood requests → slow render.
+        // v48.29: Raised thresholds (64/32/16) to reduce tile-reload storms at oblique 45Â° angles.
+        // At 45Â° tilt many more tile faces are visible, causing SSE=4 to flood requests â†’ slow render.
         if (tilesetRef.current) {
           if (h > 1000) {
             tilesetRef.current.maximumScreenSpaceError = 64; // fast overview
           } else if (h > 400) {
             tilesetRef.current.maximumScreenSpaceError = 32; // balanced
           } else {
-            tilesetRef.current.maximumScreenSpaceError = 16; // full quality close-up (was 4 — caused 10-15s loads at 45°)
+            tilesetRef.current.maximumScreenSpaceError = 16; // full quality close-up (was 4 â€” caused 10-15s loads at 45Â°)
           }
         }
       } catch {}
@@ -2754,10 +2754,10 @@ function SolarEngine3D({
 
     // Scroll wheel zoom: pump renders continuously for the full duration of
     // Cesium's zoom animation (~500ms) so it doesn't freeze mid-animation.
-    // Previous code only pumped at +100ms and +300ms — frames after 300ms were
+    // Previous code only pumped at +100ms and +300ms â€” frames after 300ms were
     // skipped, causing the zoom to stall then snap to the final position.
     canvas.addEventListener('wheel', () => {
-      // Kick off a short RAF loop that runs for 600ms — covers the full
+      // Kick off a short RAF loop that runs for 600ms â€” covers the full
       // Cesium zoom-inertia window without over-rendering idle frames.
       const end = Date.now() + 600;
       const pump = () => {
@@ -2768,17 +2768,17 @@ function SolarEngine3D({
     }, { passive: true });
   }
 
-  // ── v47.215: Fit camera to all placed panels (bounding box zoom) ─────────────────
+  // â”€â”€ v47.215: Fit camera to all placed panels (bounding box zoom) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Called by the "Fit View" toolbar button and automatically after any placement.
   // Works for both auto-fill and manually placed panels.
   function fitCameraToRoofPlanes(_viewer: any, _C: any) {
     const panels = panelsRef.current;
     const o = orbitRef.current;
     if (!panels || panels.length === 0) {
-      // No panels — reset to site at default pose
+      // No panels â€” reset to site at default pose
       o.targetLat = lat; o.targetLng = lng;
       o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = TILTED_AERIAL_VIEW.range;  // -45° Aurora parity
+      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = TILTED_AERIAL_VIEW.range;  // -45Â° Aurora parity
     } else {
       const lats = panels.map((p: PlacedPanel) => p.lat);
       const lngs = panels.map((p: PlacedPanel) => p.lng);
@@ -2790,14 +2790,14 @@ function SolarEngine3D({
       const radius   = Math.max(50, spanM * 1.4);
       o.targetLat = centLat; o.targetLng = centLng;
       o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch;  // -45° Aurora parity (Reset View)
+      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch;  // -45Â° Aurora parity (Reset View)
       o.radius  = radius;
       addLog('FIT', `Fit view: ${panels.length} panels, span=${spanM.toFixed(0)}m, radius=${radius.toFixed(0)}m`);
     }
     applyOrbitRef.current?.();
   }
 
-  // ── Draw all overlays ──────────────────────────────────────────────────────
+  // â”€â”€ Draw all overlays â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function drawOverlays(viewer: any, C: any, twinData: DigitalTwinData) {
     overlayRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     overlayRef.current = [];
@@ -2892,7 +2892,7 @@ function SolarEngine3D({
           // Use corrected positions (geoidOffset already applied to segElev)
           // With depthTestAgainstTerrain=false, these will always be visible
           if (positions.length >= 3) {
-            // No polygon fill — keep roof visible and unobstructed
+            // No polygon fill â€” keep roof visible and unobstructed
             // Thin yellow outline only
             try {
               const e = viewer.entities.add({
@@ -2916,11 +2916,11 @@ function SolarEngine3D({
                 const pitchStr = isFinite(seg.pitchDegrees) ? seg.pitchDegrees.toFixed(0) : '?';
                 const azStr = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees.toFixed(0) : '?';
                 const sunStr = isFinite(seg.sunshineHours) ? seg.sunshineHours.toFixed(0) : '?';
-                const areaFt = isFinite(seg.areaM2) ? ` ${(seg.areaM2 * 10.7639).toFixed(0)}ft²` : '';
+                const areaFt = isFinite(seg.areaM2) ? ` ${(seg.areaM2 * 10.7639).toFixed(0)}ftÂ²` : '';
                 const e = viewer.entities.add({
                   position: labelPos,
                   label: {
-                    text: `${pitchStr}° / ${azStr}°\n${sunStr}h${areaFt}`,
+                    text: `${pitchStr}Â° / ${azStr}Â°\n${sunStr}h${areaFt}`,
                     font: '12px sans-serif', fillColor: C.Color.WHITE,
                     outlineColor: C.Color.BLACK, outlineWidth: 2,
                     style: C.LabelStyle.FILL_AND_OUTLINE,
@@ -2937,7 +2937,7 @@ function SolarEngine3D({
             } catch (e) { handleCesiumError(`Segment ${i} label`, e, true); }
           }
 
-          // ── Setback boundary visualization ──────────────────────────────────────────
+          // â”€â”€ Setback boundary visualization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           // Show the buildable area boundary (inset from roof polygon by fire setback).
           // This helps the user see exactly where panels can be placed.
           // Only shown when placementMode === 'auto_roof' (Auto Fill active).
@@ -2998,16 +2998,16 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── Render all panels ──────────────────────────────────────────────────────
+  // â”€â”€ Render all panels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /**
    * Clears all existing panel entities from the viewer and rebuilds them from the provided list.
    *
    * @remarks
    * Always clears before rebuilding to prevent panel accumulation bugs.
-   * This is the ONLY correct way to update the panel display — never call addPanelEntity
+   * This is the ONLY correct way to update the panel display â€” never call addPanelEntity
    * directly without first clearing, or panels will multiply on re-renders.
    *
-   * Performance: uses incremental diff rendering — only adds new panels and removes
+   * Performance: uses incremental diff rendering â€” only adds new panels and removes
    * deleted ones, rather than clearing and rebuilding all entities on every change.
    * Falls back to full rebuild when shade mode changes (colors must be recomputed).
    *
@@ -3016,12 +3016,12 @@ function SolarEngine3D({
    * @param panelList - Full list of panels to render (replaces current display entirely)
    * @param forceFullRebuild - If true, clears all entities and rebuilds (used for shade toggle)
    */
-  // ── Phase 2: Roof rail visualization ────────────────────────────────────────
+  // â”€â”€ Phase 2: Roof rail visualization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // Renders IronRidge XR100 rails beneath roof panel arrays.
   //
   // Design rules (per spec):
-  //   - Rails ONLY — no pads, L-feet, bolts, or flashing (Phase 3+)
+  //   - Rails ONLY â€” no pads, L-feet, bolts, or flashing (Phase 3+)
   //   - Rails run parallel to eaves (along the panel u-axis / ridge direction)
   //   - One rail run per panel row (gridRow), spanning the full row width
   //   - Rail positioned at panel bottom edge (eave side of panel row)
@@ -3030,7 +3030,7 @@ function SolarEngine3D({
   //   - Only rendered for rail-based mounting systems
   //   - Entities stored in roofRailMapRef keyed by planeId for O(plane) cleanup
   //
-  // RENDERING ONLY — zero impact on structural calc, panel coords, or BOM.
+  // RENDERING ONLY â€” zero impact on structural calc, panel coords, or BOM.
 
   /** Returns XR rail dimensions for the active mounting system, or null for rail-less. */
   function getRailSpec(mountingId: string): { heightM: number; widthM: number; color: string } | null {
@@ -3038,17 +3038,17 @@ function SolarEngine3D({
       case 'ironridge-xr100':
       case 'rooftech-mini':
       case 'rt-mini':
-        return { heightM: 0.042, widthM: 0.025, color: '#6b7280' }; // XR100: 1.66"H × ~1"W, silver-grey
+        return { heightM: 0.042, widthM: 0.025, color: '#6b7280' }; // XR100: 1.66"H Ã— ~1"W, silver-grey
       case 'ironridge-xr1000':
         return { heightM: 0.051, widthM: 0.030, color: '#4b5563' }; // XR1000: 2"H, darker grey
-      // Rail-less and non-roof systems return null → no rails rendered
+      // Rail-less and non-roof systems return null â†’ no rails rendered
       case 'rooftech-mini-s':
       case 'rooftech-mini-t':
       case 'rooftech-hook':
       case 'ironridge-flat-roof':
         return null;
       default:
-        return null; // unknown system → don't render rails
+        return null; // unknown system â†’ don't render rails
     }
   }
 
@@ -3091,7 +3091,7 @@ function SolarEngine3D({
     if (!railSpec) return;
 
     // Only process roof panels that have ECEF frame vectors AND a planeId.
-    // Panels placed without a plane (single roof click) have no planeId — skip them.
+    // Panels placed without a plane (single roof click) have no planeId â€” skip them.
     // Both auto-fill and surface-select paths store ecefNx/ecefUx on every panel.
     const roofPanels = panelList.filter(p =>
       p.systemType === 'roof' &&
@@ -3101,7 +3101,7 @@ function SolarEngine3D({
     if (roofPanels.length === 0) return;
 
     // v62: panels rotated out of the plane grid (frameQuat) don't fit the row-spanning
-    // rail logic — they get their own per-panel rails below. Grid rails use the rest.
+    // rail logic â€” they get their own per-panel rails below. Grid rails use the rest.
     const rotatedPanels = roofPanels.filter(p => (p as any).frameQuat);
     const gridPanels    = roofPanels.filter(p => !(p as any).frameQuat);
 
@@ -3266,7 +3266,7 @@ function SolarEngine3D({
             try {
               const pos = new C.Cartesian3(railX, railY, railZ);
               // v62: if this array was in-plane-rotated, orient the rail from the
-              // ROTATED ECEF frame (box: X=width→−v, Y=length→u, Z=height→n) so it
+              // ROTATED ECEF frame (box: X=widthâ†’âˆ’v, Y=lengthâ†’u, Z=heightâ†’n) so it
               // tracks the panels. Non-rotated rails keep the exact HPR path.
               let ori: any;
               if ((rep as any).frameQuat) {
@@ -3311,7 +3311,7 @@ function SolarEngine3D({
     });
 
     // v62: per-panel rails for ROTATED panels. Rails are physically HORIZONTAL (run
-    // along the eave), regardless of how the panel is spun — a landscape panel just
+    // along the eave), regardless of how the panel is spun â€” a landscape panel just
     // clamps onto horizontal rails. So we rebuild the plane's true horizontal eave
     // (cross(up, normal)) and size each rail to the panel's footprint projected onto
     // that eave (length) and the slope axis (row spacing).
@@ -3331,7 +3331,7 @@ function SolarEngine3D({
         const up = C.Cartesian3.normalize(C.Cartesian3.clone(pos), new C.Cartesian3());
         const eave = C.Cartesian3.cross(up, n, new C.Cartesian3()); // horizontal reference
         const dims = panelDims(((p as any).orientation ?? 'portrait') as PanelOrientation);
-        // Rails run along whichever PANEL edge is closest to horizontal → square with
+        // Rails run along whichever PANEL edge is closest to horizontal â†’ square with
         // the panel AND horizontal when its long edge is. The other edge spaces the rows.
         const alignX = Math.abs(C.Cartesian3.dot(lX, eave)); // ph edge vs horizontal
         const alignY = Math.abs(C.Cartesian3.dot(lY, eave)); // pw edge vs horizontal
@@ -3339,7 +3339,7 @@ function SolarEngine3D({
         const railLen  = alignX >= alignY ? dims.ph : dims.pw;
         const offAxis  = alignX >= alignY ? lY : lX;
         const offDim   = alignX >= alignY ? dims.pw : dims.ph;
-        // orientation: rail box Y = railAxis (length), Z = n, X = railAxis × n.
+        // orientation: rail box Y = railAxis (length), Z = n, X = railAxis Ã— n.
         const Xax = C.Cartesian3.normalize(C.Cartesian3.cross(railAxis, n, new C.Cartesian3()), new C.Cartesian3());
         const m2 = new C.Matrix3(Xax.x, railAxis.x, n.x, Xax.y, railAxis.y, n.y, Xax.z, railAxis.z, n.z);
         const oq = C.Quaternion.fromRotationMatrix(m2, new C.Quaternion());
@@ -3362,24 +3362,24 @@ function SolarEngine3D({
     });
   }
 
-  // ── v62: Fire setback keep-out zones rendered ON the 3D roof ───────────────
+  // â”€â”€ v62: Fire setback keep-out zones rendered ON the 3D roof â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // For each roof plane: classify edges (ridge / eave / rake-side, + flag hips &
   // valleys = edges shared with another plane), inset each edge inward by its
   // required setback, and draw the keep-out band as a translucent strip on the
   // plane surface. This makes the firewalk clearances visible in 3D and is the
-  // groundwork for owning the roof model (→ in-house CAD).
+  // groundwork for owning the roof model (â†’ in-house CAD).
   function clearFireSetbackZones(viewer: any) {
     setbackZoneEntitiesRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     setbackZoneEntitiesRef.current = [];
   }
 
-  // ── v62: Shared roof-model primitives (used by setback zones AND the stitched
-  //         roof-model wireframe — single source of truth for plane geometry +
-  //         edge classification). ───────────────────────────────────────────────
+  // â”€â”€ v62: Shared roof-model primitives (used by setback zones AND the stitched
+  //         roof-model wireframe â€” single source of truth for plane geometry +
+  //         edge classification). â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // Collect renderable planes from BOTH sources with ECEF corners + frame + centroid:
-  //   1. 3D Plane tool planes (plane3DCesiumPtsMap + plane3DFrameMap) — exact ECEF.
-  //   2. roofPlanes prop (lat/lng vertices) — projected onto a panel/legacy frame.
+  //   1. 3D Plane tool planes (plane3DCesiumPtsMap + plane3DFrameMap) â€” exact ECEF.
+  //   2. roofPlanes prop (lat/lng vertices) â€” projected onto a panel/legacy frame.
   function collectRoofRenderables(C: any, groundElev: number): any[] {
     const renderables: any[] = [];
     const seen = new Set<string>();
@@ -3434,7 +3434,7 @@ function SolarEngine3D({
     return renderables;
   }
 
-  // partnerOf(planeId, edgeMidpointEcef) → the OTHER plane meeting at that edge (or
+  // partnerOf(planeId, edgeMidpointEcef) â†’ the OTHER plane meeting at that edge (or
   // null). A shared edge = a hip or a valley; the stitch's adjacency lives here.
   function buildPartnerOf(C: any, renderables: any[]): (pid: string, mid: any) => any {
     const byId = new Map(renderables.map((rp: any) => [rp.id, rp]));
@@ -3451,9 +3451,9 @@ function SolarEngine3D({
     };
   }
 
-  // Classify every edge of a plane → 'ridge' | 'eave' | 'hip' | 'valley' | 'rake'.
+  // Classify every edge of a plane â†’ 'ridge' | 'eave' | 'hip' | 'valley' | 'rake'.
   // ridge=highest edge, eave=lowest (by altitude, sign-independent); a shared edge is a
-  // hip (convex fold) or valley (concave) by (nA−nB)·(cA−cB); otherwise a rake.
+  // hip (convex fold) or valley (concave) by (nAâˆ’nB)Â·(cAâˆ’cB); otherwise a rake.
   function classifyPlaneEdges(C: any, rp: any, partnerOf: (pid: string, mid: any) => any): string[] {
     const corners = rp.corners; const N = corners.length;
     const heights = corners.map((P: any) => { const c = C.Cartographic.fromCartesian(P); return c ? c.height : 0; });
@@ -3463,7 +3463,7 @@ function SolarEngine3D({
     const kinds: string[] = [];
     for (let i = 0; i < N; i++) {
       const ha = heights[i], hb = heights[(i + 1) % N];
-      const am = (ha + hb) / 2; // edge's average altitude — robust vs a slightly-uneven eave
+      const am = (ha + hb) / 2; // edge's average altitude â€” robust vs a slightly-uneven eave
       const a3 = corners[i], b3 = corners[(i + 1) % N];
       const horiz = Math.abs(ha - hb) < Math.max(0.3, C.Cartesian3.distance(a3, b3) * 0.12); // ~level edge
       const mid = C.Cartesian3.midpoint(a3, b3, new C.Cartesian3());
@@ -3483,12 +3483,12 @@ function SolarEngine3D({
     return kinds;
   }
 
-  // v62: STITCH — snap a just-picked corner to the nearest SHARED roof point so planes
+  // v62: STITCH â€” snap a just-picked corner to the nearest SHARED roof point so planes
   // connect at exact common vertices/edges. Considers: every existing plane's corners
   // (vertices) and edges (projected point), plus the corners already in the current
   // trace. Returns the snapped Cartesian3, or null if nothing is within tolerance.
   function snapTracedPoint(C: any, cart: any): any | null {
-    const TOL = 0.9; // metres — how close a click must be to grab a shared point
+    const TOL = 0.9; // metres â€” how close a click must be to grab a shared point
     let best: any = null; let bestD = TOL * TOL;
     const consider = (p: any) => {
       if (!p) return;
@@ -3551,7 +3551,7 @@ function SolarEngine3D({
 
     const renderables = collectRoofRenderables(C, groundElev);
     if (renderables.length === 0) {
-      setStatusMsg('No roof planes to draw setbacks on — trace a 3D plane or fill a roof first');
+      setStatusMsg('No roof planes to draw setbacks on â€” trace a 3D plane or fill a roof first');
       return;
     }
     const partnerOf = buildPartnerOf(C, renderables);
@@ -3563,7 +3563,7 @@ function SolarEngine3D({
         return { uu: C.Cartesian3.dot(rel, u), vv: C.Cartesian3.dot(rel, v) };
       });
       if (uv.some((p: any) => !isFinite(p.uu) || !isFinite(p.vv))) return;
-      const kinds = classifyPlaneEdges(C, rp, partnerOf); // ridge/eave/hip/valley/rake per edge — one source of truth
+      const kinds = classifyPlaneEdges(C, rp, partnerOf); // ridge/eave/hip/valley/rake per edge â€” one source of truth
       const cu = uv.reduce((s: number, p: any) => s + p.uu, 0) / uv.length;
       const cv = uv.reduce((s: number, p: any) => s + p.vv, 0) / uv.length;
 
@@ -3574,27 +3574,27 @@ function SolarEngine3D({
               C.Cartesian3.multiplyByScalar(n, off, new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3());
 
       const N = uv.length;
-      // Pass 1 — classify each edge + its inward unit normal (in UV) + colour.
+      // Pass 1 â€” classify each edge + its inward unit normal (in UV) + colour.
       const E: Array<{ sb: number; kind: string; inx: number; iny: number; ex: number; ey: number; col: any }> = [];
       for (let i = 0; i < N; i++) {
         const a = uv[i], b = uv[(i + 1) % N];
         const kind = kinds[i];
-        const sb = kind === 'ridge' ? ridgeSB : kind === 'eave' ? eaveSB : edgeSB; // hip/valley/rake → edge setback
+        const sb = kind === 'ridge' ? ridgeSB : kind === 'eave' ? eaveSB : edgeSB; // hip/valley/rake â†’ edge setback
         let ex = b.uu - a.uu, ey = b.vv - a.vv;
         const L = Math.hypot(ex, ey) || 1; ex /= L; ey /= L;
         let inx = -ey, iny = ex;
         const mx = (a.uu + b.uu) / 2, my = (a.vv + b.vv) / 2;
         if (inx * (cu - mx) + iny * (cv - my) < 0) { inx = -inx; iny = -iny; }
         const col =
-            kind === 'hip'    ? C.Color.fromCssColorString('#ff9500')   // hip → orange
-          : kind === 'valley' ? C.Color.fromCssColorString('#22b8ff')   // valley → cyan
-          : kind === 'ridge'  ? C.Color.fromCssColorString('#ff2d2d')   // ridge → red
-          :                     C.Color.fromCssColorString('#ff6464');  // eave/rake → light red
+            kind === 'hip'    ? C.Color.fromCssColorString('#ff9500')   // hip â†’ orange
+          : kind === 'valley' ? C.Color.fromCssColorString('#22b8ff')   // valley â†’ cyan
+          : kind === 'ridge'  ? C.Color.fromCssColorString('#ff2d2d')   // ridge â†’ red
+          :                     C.Color.fromCssColorString('#ff6464');  // eave/rake â†’ light red
         E.push({ sb, kind, inx, iny, ex, ey, col });
       }
 
-      // Pass 2 — mitered inset corner per vertex = intersection of the two adjacent
-      // edges' inward-offset lines. Bands then SHARE corners → no overlap, no overhang.
+      // Pass 2 â€” mitered inset corner per vertex = intersection of the two adjacent
+      // edges' inward-offset lines. Bands then SHARE corners â†’ no overlap, no overhang.
       const lineX = (p1x: number, p1y: number, d1x: number, d1y: number, p2x: number, p2y: number, d2x: number, d2y: number) => {
         const denom = d1x * d2y - d1y * d2x;
         if (Math.abs(denom) < 1e-9) return null; // parallel (collinear edges)
@@ -3612,7 +3612,7 @@ function SolarEngine3D({
         // Guard (fix cf0dd96b regression): the miter is the intersection of two
         // inward-offset edge lines. At a CONCAVE/reflex vertex (notched outline),
         // or where a 0"-eave meets an 18" rake at a shallow angle, that intersection
-        // shoots far across the roof INTERIOR — drawing the red setback band through
+        // shoots far across the roof INTERIOR â€” drawing the red setback band through
         // the middle of the roof / along the eave line. A legitimate miter never
         // sits much farther from the vertex than the edge's own setback, so reject
         // any blown-up intersection and fall back to the per-edge offset.
@@ -3623,7 +3623,7 @@ function SolarEngine3D({
         inset.push(pt);
       }
 
-      // Pass 3 — render one band per edge: outer = exact polygon edge, inner = mitered
+      // Pass 3 â€” render one band per edge: outer = exact polygon edge, inner = mitered
       // corners. Hug the surface (4cm) so it doesn't overhang at oblique angles.
       const off = 0.04;
       for (let i = 0; i < N; i++) {
@@ -3669,7 +3669,7 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── v62: STITCHED ROOF MODEL wireframe ─────────────────────────────────────
+  // â”€â”€ v62: STITCHED ROOF MODEL wireframe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Draw every classified edge across ALL planes as a colour-coded polyline so the
   // connected roof reads as one model: ridge(red) hip(orange) valley(cyan) eave(green)
   // rake(amber). Reuses the same collect+classify pipeline as the setback zones.
@@ -3684,7 +3684,7 @@ function SolarEngine3D({
     const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     const renderables = collectRoofRenderables(C, groundElev);
     if (renderables.length === 0) {
-      setStatusMsg('No roof planes yet — trace a 3D plane or fill a roof to build the model');
+      setStatusMsg('No roof planes yet â€” trace a 3D plane or fill a roof to build the model');
       return;
     }
     const partnerOf = buildPartnerOf(C, renderables);
@@ -3693,7 +3693,7 @@ function SolarEngine3D({
       : kind === 'valley' ? C.Color.fromCssColorString('#22b8ff')
       : kind === 'ridge'  ? C.Color.fromCssColorString('#ff2d2d')
       : kind === 'eave'   ? C.Color.fromCssColorString('#34d399')
-      :                     C.Color.fromCssColorString('#facc15'); // rake → amber
+      :                     C.Color.fromCssColorString('#facc15'); // rake â†’ amber
     const counts: Record<string, number> = { eave: 0, ridge: 0, hip: 0, valley: 0, rake: 0 };
 
     renderables.forEach((rp: any) => {
@@ -3718,20 +3718,20 @@ function SolarEngine3D({
         roofWireframeEntitiesRef.current.push(ent);
       }
     });
-    setStatusMsg(`🔗 Roof model — ${renderables.length} face${renderables.length !== 1 ? 's' : ''} · ${counts.ridge} ridge · ${counts.hip} hip · ${counts.valley} valley · ${counts.eave} eave · ${counts.rake} rake`);
+    setStatusMsg(`ðŸ”— Roof model â€” ${renderables.length} face${renderables.length !== 1 ? 's' : ''} Â· ${counts.ridge} ridge Â· ${counts.hip} hip Â· ${counts.valley} valley Â· ${counts.eave} eave Â· ${counts.rake} rake`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── v62: STITCH — average shared corners to meet polygons in the middle ──────
+  // â”€â”€ v62: STITCH â€” average shared corners to meet polygons in the middle â”€â”€â”€â”€â”€â”€
   // Humans drop pins roughly where a hip/ridge/corner is; two faces drawn at
   // different angles never quite meet. This clusters corners across planes (each
-  // plane contributes ≤1 corner per cluster) and moves every corner in a shared
-  // cluster to the cluster AVERAGE — so faces meet at one natural point. Then it
-  // re-fits each plane's frame and re-renders. Free marking → Stitch → clean roof.
+  // plane contributes â‰¤1 corner per cluster) and moves every corner in a shared
+  // cluster to the cluster AVERAGE â€” so faces meet at one natural point. Then it
+  // re-fits each plane's frame and re-renders. Free marking â†’ Stitch â†’ clean roof.
   function stitchRoofVertices(viewer: any, C: any) {
     const entries = Array.from(plane3DCesiumPtsMap.current.entries()) as [string, any[]][];
     if (entries.length < 2) { setStatusMsg('Stitch needs 2+ marked planes'); return; }
-    const TOL = 1.6; // metres — corners within this are treated as the same point
+    const TOL = 1.6; // metres â€” corners within this are treated as the same point
     // Working copy of every plane's corners, mutated across passes.
     const work = new Map<string, any[]>();
     for (const [pid, pts] of entries) work.set(pid, pts.map((p: any) => new C.Cartesian3(p.x, p.y, p.z)));
@@ -3739,7 +3739,7 @@ function SolarEngine3D({
     type Cl = { members: { pid: string; idx: number }[]; cx: number; cy: number; cz: number };
     let lastShared = 0;
     // Multi-pass: pass 1 pulls most corners together; later passes catch stragglers
-    // (e.g. a hip→multi-valley junction) that only fall within tolerance once their
+    // (e.g. a hipâ†’multi-valley junction) that only fall within tolerance once their
     // neighbours have already moved to the averaged point.
     for (let pass = 0; pass < 4; pass++) {
       const clusters: Cl[] = [];
@@ -3769,10 +3769,10 @@ function SolarEngine3D({
       }
       if (movedThisPass === 0) break; // converged
     }
-    if (lastShared === 0) { setStatusMsg(`Stitch — no shared corners found within ~${TOL}m`); return; }
+    if (lastShared === 0) { setStatusMsg(`Stitch â€” no shared corners found within ~${TOL}m`); return; }
 
     // v64: collect the stitched corners (lat/lng) per plane so they can be written
-    // back into roofPlanes state — the geometry every panel-placement engine reads.
+    // back into roofPlanes state â€” the geometry every panel-placement engine reads.
     const stitchUpdates: Array<{
       id: string;
       vertices: Array<{ lat: number; lng: number }>;
@@ -3797,7 +3797,7 @@ function SolarEngine3D({
       plane3DFrameMap.current.set(pid, frame);
       plane3DCesiumPtsMap.current.set(pid, projected);
       // projected[i] is the same planarized corner buildRoofPlane3D used to make
-      // plane.vertices[i] — convert back to lat/lng to update the source geometry.
+      // plane.vertices[i] â€” convert back to lat/lng to update the source geometry.
       const verts: Array<{ lat: number; lng: number }> = [];
       for (const p of projected) {
         const carto = C.Cartographic.fromCartesian(p);
@@ -3837,10 +3837,10 @@ function SolarEngine3D({
     // refill), so this stays consistent with what we just drew while making panel
     // placement + persistence use the stitched corners.
     if (stitchUpdates.length > 0) onRoofPlanesStitched?.(stitchUpdates);
-    setStatusMsg(`🔗 Stitched — ${lastShared} shared point${lastShared !== 1 ? 's' : ''} averaged (multi-pass)`);
+    setStatusMsg(`ðŸ”— Stitched â€” ${lastShared} shared point${lastShared !== 1 ? 's' : ''} averaged (multi-pass)`);
   }
 
-  // ── v63: Equipment overlay (optimizers / microinverters) ────────────────────
+  // â”€â”€ v63: Equipment overlay (optimizers / microinverters) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function clearEquipment(viewer: any) {
     equipmentMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     equipmentMapRef.current.clear();
@@ -3875,13 +3875,13 @@ function SolarEngine3D({
       const UNDER = 0.07;
       const dpos = new C.Cartesian3(pos.x - n.x * UNDER, pos.y - n.y * UNDER, pos.z - n.z * UNDER);
       const isMicro = m.deviceType === 'micro';
-      // Device footprints (m): micro ~212×175×32, optimizer ~155×110×32.
+      // Device footprints (m): micro ~212Ã—175Ã—32, optimizer ~155Ã—110Ã—32.
       const dim = isMicro
         ? new C.Cartesian3(0.212, 0.175, 0.032)
         : new C.Cartesian3(0.155, 0.110, 0.032);
       const col = isMicro
-        ? C.Color.fromCssColorString('#16a34a')   // micro → green
-        : C.Color.fromCssColorString('#f59e0b');  // optimizer → amber
+        ? C.Color.fromCssColorString('#16a34a')   // micro â†’ green
+        : C.Color.fromCssColorString('#f59e0b');  // optimizer â†’ amber
       const ent = viewer.entities.add({
         name: `[EQUIP] ${m.deviceType} ${panel.id}`,
         position: dpos,
@@ -3918,13 +3918,13 @@ function SolarEngine3D({
       fullRebuildCountRef.current += 1;
       // E2E: track if this full rebuild happened while panel count was stable
       // (position-only move). Incrementing panelMoveRebuildCount during a drag
-      // means the 2176e4d3 regression is back — jerky rebuilds on panel move.
+      // means the 2176e4d3 regression is back â€” jerky rebuilds on panel move.
       if (prev.length > 0 && prev.length === panelList.length && forceFullRebuild) {
         panelMoveRebuildCountRef.current += 1;
       }
       panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
       panelMapRef.current.clear();
-      // v48.7: pre-compute skipGrid for entire batch — consistent rendering across all panels
+      // v48.7: pre-compute skipGrid for entire batch â€” consistent rendering across all panels
       const skipGridBatch = panelList.length > 12;
       panelList.forEach(p => addPanelEntity(viewer, C, p, skipGridBatch));
       lastRenderedPanelsRef.current = panelList;
@@ -3951,7 +3951,7 @@ function SolarEngine3D({
       }
     });
 
-    // v48.7: pre-compute skipGrid based on final panel count — consistent for all adds
+    // v48.7: pre-compute skipGrid based on final panel count â€” consistent for all adds
     const skipGridIncr = panelList.length > 12;
 
     // Add new panels (not in prev)
@@ -3994,33 +3994,33 @@ function SolarEngine3D({
     }
   }
 
-  // ── Add single panel entity ────────────────────────────────────────────────
+  // â”€â”€ Add single panel entity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /**
    * Adds a single solar panel as a Cesium box entity to the viewer.
    *
    * Panel geometry:
    * - Position: Cartesian3 from panel.lat/lng/height (with geoid correction applied upstream)
    * - Orientation: HeadingPitchRoll from panel.heading (azimuth), panel.tilt, panel.roll
-   * - Dimensions: portrait (1.134m × 1.722m) or landscape (1.722m × 1.134m), 40mm thick
+   * - Dimensions: portrait (1.134m Ã— 1.722m) or landscape (1.722m Ã— 1.134m), 40mm thick
    * - Color: system type color (roof=blue, ground=green, fence=orange) or shade heatmap color
    *
    * @remarks
    * Stores the created entity in panelMapRef keyed by panel.id for later removal/update.
-   * Validates all coordinates and quaternion values before adding — silently skips invalid panels.
+   * Validates all coordinates and quaternion values before adding â€” silently skips invalid panels.
    *
    * @param viewer - Active Cesium Viewer instance
    * @param C      - Cesium namespace (window.Cesium)
    * @param panel  - PlacedPanel data object with position, orientation, and type info
    * @returns The created Cesium Entity, or undefined if validation failed
    */
-  // v48.7: Optional skipGrid override — callers doing batch adds pass this in
+  // v48.7: Optional skipGrid override â€” callers doing batch adds pass this in
   // so all panels in the batch get consistent grid-line rendering.
   // When undefined, falls back to checking panelMapRef size (entities already rendered).
   function addPanelEntity(viewer: any, C: any, panel: PlacedPanel, skipGridOverride?: boolean) {
     try {
       // v47.138: Height is set by pure plane math in buildSurfaceGridECEF /
-      // addRow / extendRow / placeSinglePanel — origin + u*uC + v*vC + n*PANEL_OFFSET_ECEF (0.05m).
-      // Cesium mesh (3D tiles) is VISUAL ONLY — never sample per-panel height from terrain.
+      // addRow / extendRow / placeSinglePanel â€” origin + u*uC + v*vC + n*PANEL_OFFSET_ECEF (0.05m).
+      // Cesium mesh (3D tiles) is VISUAL ONLY â€” never sample per-panel height from terrain.
       const h       = panel.height ?? 0;
       const tiltDeg = panel.tilt    ?? 0;
       const azDeg   = panel.azimuth ?? 180;
@@ -4032,7 +4032,7 @@ function SolarEngine3D({
         addLog('ERROR', `Panel ${panel.id} invalid tilt/az tilt=${tiltDeg} az=${azDeg}`); return;
       }
 
-      // v47.143: Orientation — prefer ECEF frame vectors when stored on panel.
+      // v47.143: Orientation â€” prefer ECEF frame vectors when stored on panel.
       //
       // ECEF rotation matrix path (for 3D-tool roof planes):
       //   Panel coordinate frame = (u, v=cross(n,u), n) all in ECEF.
@@ -4062,7 +4062,7 @@ function SolarEngine3D({
       // v47.144: Panel orientation via HeadingPitchRoll derived from ECEF frame.
       //
       // Cesium HeadingPitchRoll convention at position P (ENU local frame):
-      //   - heading: yaw around local Up (0=North, π/2=East, clockwise)
+      //   - heading: yaw around local Up (0=North, Ï€/2=East, clockwise)
       //   - pitch:   tilt from horizontal (0=flat, negative = tilted back/nose-down)
       //   - roll:    0
       //
@@ -4070,12 +4070,12 @@ function SolarEngine3D({
       //   default pose: y=North (pw direction), x=East (ph direction), z=Up (thickness)
       //
       // We need: panel face normal = roof plane normal
-      //   → heading = compass bearing of plane u-axis (along-ridge)
-      //   → pitch   = -(tilt of plane from horizontal)
-      //   → roll    = 0
+      //   â†’ heading = compass bearing of plane u-axis (along-ridge)
+      //   â†’ pitch   = -(tilt of plane from horizontal)
+      //   â†’ roll    = 0
       //
       // This is EXACTLY what planeHPR() computes. heading/pitch are stored on panel.
-      // We use them directly — no matrix needed, no additional rotation.
+      // We use them directly â€” no matrix needed, no additional rotation.
       //
       // Step 3 (spec): quaternion.setFromUnitVectors((0,0,1), N) is equivalent to
       // HeadingPitchRoll(heading, -tilt, 0) when heading and tilt are correctly derived
@@ -4083,7 +4083,7 @@ function SolarEngine3D({
 
       const pn = panel as any;
       if (pn.frameQuat && isFinite(pn.frameQuat.x) && isFinite(pn.frameQuat.w)) {
-        // v62: panel was in-plane-rotated by the grab tool — render its explicit
+        // v62: panel was in-plane-rotated by the grab tool â€” render its explicit
         // world orientation verbatim (HPR can't express in-plane yaw about the normal).
         orientation = new C.Quaternion(pn.frameQuat.x, pn.frameQuat.y, pn.frameQuat.z, pn.frameQuat.w);
       } else {
@@ -4112,18 +4112,18 @@ function SolarEngine3D({
         addLog('ERROR', `Panel ${panel.id} invalid quaternion`); return;
       }
 
-      // v47.147: Alignment guard — verify panel face normal matches stored pitch.
+      // v47.147: Alignment guard â€” verify panel face normal matches stored pitch.
       // dot(panelNormal, Up_ENU) = cos(pitch) by construction.
-      // We check that the stored pitch produces a panel normal within 0.5° of
+      // We check that the stored pitch produces a panel normal within 0.5Â° of
       // the expected Up-component (nUp). This catches any future rotation stacking.
       {
         const pitchStored = isFinite(panel.pitch ?? NaN) ? (panel.pitch ?? 0) : 0;
         const nUpExpected = Math.cos(pitchStored);           // cos(pitch) = nUp
         const nUpActual   = Math.cos(Math.abs(pitchStored)); // |cos(pitch)| >= 0
-        // cos(pitch) = nUp — face normal z-component. Must be ≥ cos(0.5°) ≈ 0.99996 relative to expected.
+        // cos(pitch) = nUp â€” face normal z-component. Must be â‰¥ cos(0.5Â°) â‰ˆ 0.99996 relative to expected.
         // Simple check: |pitchStored| must be finite and in valid range.
         if (!isFinite(pitchStored) || Math.abs(pitchStored) > Math.PI / 2 + 0.01) {
-          addLog('WARN', `Panel ${panel.id} alignment guard: pitch=${(pitchStored*180/Math.PI).toFixed(1)}° out of range — clamping`);
+          addLog('WARN', `Panel ${panel.id} alignment guard: pitch=${(pitchStored*180/Math.PI).toFixed(1)}Â° out of range â€” clamping`);
         }
       }
 
@@ -4131,9 +4131,9 @@ function SolarEngine3D({
       const orient: PanelOrientation = (panel as any).orientation ?? panelOrientationRef.current;
       const { pw, ph } = panelDims(orient);
 
-      // ── v47.157: Realistic layered panel rendering ────────────────────────────
-      // Layer 1 (bottom): Solar cell body — dark navy/black, nearly opaque
-      // Layer 2 (top):    Glass sheen — very thin semi-transparent pale blue overlay
+      // â”€â”€ v47.157: Realistic layered panel rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // Layer 1 (bottom): Solar cell body â€” dark navy/black, nearly opaque
+      // Layer 2 (top):    Glass sheen â€” very thin semi-transparent pale blue overlay
       //                   Gives the characteristic reflective glass look of real panels
       // Frame:            Silver-white outline on both layers for aluminum rail effect
       const PANEL_THICKNESS  = 0.040; // 40mm total panel depth
@@ -4146,7 +4146,7 @@ function SolarEngine3D({
       if (showShadeRef.current && twinRef.current) {
         const d = new Date();
         d.setUTCFullYear(d.getUTCFullYear(), 5, 21);
-        // simHourRef is LOCAL solar time — convert to UTC
+        // simHourRef is LOCAL solar time â€” convert to UTC
         const _localH = simHourRef.current;
         const _utcH = ((_localH - lng / 15) % 24 + 24) % 24;
         d.setUTCHours(Math.floor(_utcH), Math.round((_utcH % 1) * 60), 0, 0);
@@ -4162,7 +4162,7 @@ function SolarEngine3D({
         // of what triggered the re-render (a stray [panels] diff, a nudge re-add, etc).
         const isSel = selectedPanelIdsRef.current.has(panel.id);
         const meta  = panelMetaRef.current?.[panel.id];
-        // v63: panel face opacity — lower it to reveal equipment under the panels.
+        // v63: panel face opacity â€” lower it to reveal equipment under the panels.
         const effOpacity = Math.max(0.1, Math.min(1, panelOpacityRef.current ?? 1));
         // v63: color-by-string overrides the system-type color when enabled.
         const baseCol = (colorByStringRef.current && meta?.color)
@@ -4171,7 +4171,7 @@ function SolarEngine3D({
         cellMaterial    = isSel
           ? new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92))
           : new C.ColorMaterialProperty(effOpacity < 1 ? baseCol.withAlpha(effOpacity) : baseCol);
-        // Glass sheen: pale blue-silver, very translucent — simulates tempered glass
+        // Glass sheen: pale blue-silver, very translucent â€” simulates tempered glass
         const glassRgb   = sType === 'roof' ? '#7ab8d4' : sType === 'ground' ? '#7ab8a0' : '#1a2030';
         const glassAlpha = (sType === 'fence' ? 0.35 : 0.22) * effOpacity;
         glassColor      = C.Color.fromCssColorString(glassRgb).withAlpha(glassAlpha);
@@ -4181,13 +4181,13 @@ function SolarEngine3D({
 
       addLog('DEBUG', `addPanelEntity ${panel.id} pos=(${panel.lat.toFixed(6)},${panel.lng.toFixed(6)},${h.toFixed(2)}) mag=${mag.toFixed(0)} ecefFrame=${isFinite((panel as any).ecefNx) ? 'yes' : 'HPR'} dims=${pw.toFixed(2)}x${ph.toFixed(2)}`);
 
-      // Layer 1: Solar cell body (main panel box — dark, nearly opaque)
+      // Layer 1: Solar cell body (main panel box â€” dark, nearly opaque)
       const frameEntity = viewer.entities.add({
         name: `[PANEL] ${panel.id}`,
         position: pos,
         orientation,
         box: {
-          // NOTE: do NOT oversize to overlap neighbors — overlapping coplanar boxes
+          // NOTE: do NOT oversize to overlap neighbors â€” overlapping coplanar boxes
           // z-fight and flicker (badly visible once highlighted). Seam-sealing on
           // rough coastal mesh will be done with a single continuous backing surface
           // per array instead (no overlap), as a follow-up.
@@ -4201,13 +4201,13 @@ function SolarEngine3D({
         },
       });
 
-      // Layer 2: Glass sheen overlay — very thin box floating just above cell surface.
+      // Layer 2: Glass sheen overlay â€” very thin box floating just above cell surface.
       // Simulates the characteristic light blue reflective tempered glass of real PV panels.
       // Offset along the panel normal by GLASS_OFFSET so it sits on top.
       const glassThickness = 0.004; // 4mm glass layer
       // Compute glass position: panel position + normal * GLASS_OFFSET
       // v6.2.2-fix: Derive ECEF face normal from orientation quaternion when not stored.
-      // The stored ecefN fallback (0,0,1) is WRONG for ground panels — it points toward
+      // The stored ecefN fallback (0,0,1) is WRONG for ground panels â€” it points toward
       // the North Pole in ECEF, not along the panel face normal. Instead, extract the
       // Z-axis of the orientation quaternion which IS the actual face normal.
       let ecefNx: number, ecefNy: number, ecefNz: number;
@@ -4245,7 +4245,7 @@ function SolarEngine3D({
       panelMapRef.current.set(panel.id, frameEntity);
       panelMapRef.current.set(`${panel.id}__glass`, glassEntity);
 
-      // v47.317: Cell grid lines — simulate photovoltaic cell grid on panel face.
+      // v47.317: Cell grid lines â€” simulate photovoltaic cell grid on panel face.
       // Philadelphia Solar PS-MNB108: 108 half-cells (54x2), visually 6 cols x 12 rows.
       // Grid lines are drawn as polylines on the panel surface using ECEF frame vectors.
       // u-axis = along panel width (pw), v-axis = along panel height (ph), n = face normal.
@@ -4268,7 +4268,7 @@ function SolarEngine3D({
 
         // v48.31: Compute ECEF pwDir/phDir axes for this panel grid.
         // pwDir = along panel width (pw), phDir = along panel height (ph), N = face normal.
-        // ALWAYS derive from orientation quaternion — this is the single source of truth
+        // ALWAYS derive from orientation quaternion â€” this is the single source of truth
         // (same quaternion drives the box entity, so grid lines MUST use it too).
         // The old storedUx branch used frame.u which for ground panels doesn't always
         // match the box Y-axis, causing the cell grid to render as a "ghost" behind panels.
@@ -4355,7 +4355,7 @@ function SolarEngine3D({
         });
 
       } catch (gridErr: unknown) {
-        // Grid lines are cosmetic — never fail silently on grid errors
+        // Grid lines are cosmetic â€” never fail silently on grid errors
         addLog('WARN', `addPanelEntity grid ${panel.id}: ${(gridErr as Error).message}`);
       }
 
@@ -4412,7 +4412,7 @@ function SolarEngine3D({
     return Math.max(0, nx * sx + ny * sy + nz * sz);
   }
 
-  // ── Update shade colors ────────────────────────────────────────────────────
+  // â”€â”€ Update shade colors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function updateShadeColors() {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -4482,17 +4482,17 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── Setup click handler ────────────────────────────────────────────────────
+  // â”€â”€ Setup click handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function setupClickHandler(viewer: any, C: any) {
     if (handlerRef.current) { try { handlerRef.current.destroy(); } catch {} }
-    // v62: kill Cesium's built-in double-click → track/zoom-to-entity. Our double-click
+    // v62: kill Cesium's built-in double-click â†’ track/zoom-to-entity. Our double-click
     // drills into a single panel; the default was also flying the camera in.
     try { viewer.screenSpaceEventHandler.removeInputAction(C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK); } catch {}
     try { viewer.trackedEntity = undefined; } catch {}
     const handler = new C.ScreenSpaceEventHandler(viewer.scene.canvas);
     handlerRef.current = handler;
 
-    // v64: Block resize — LEFT_DOWN picks a block handle and starts a height drag.
+    // v64: Block resize â€” LEFT_DOWN picks a block handle and starts a height drag.
     // Runs BEFORE the existing panel-array LEFT_DOWN so handle picks short-circuit
     // panel array logic. We set suppressClickRef so the trailing LEFT_CLICK that
     // fires on mouse-up doesn't re-run selection.
@@ -4504,7 +4504,7 @@ function SolarEngine3D({
         if (!picked || !picked.id) return;
         const pickedId: string = picked.id.id || '';
         if (!pickedId.startsWith('block-handle-')) return;
-        // Found a block handle — start the resize
+        // Found a block handle â€” start the resize
         const handleEntity = picked.id;
         const blockId = (handleEntity as any).__blockId as string | undefined;
         if (!blockId) return;
@@ -4537,7 +4537,7 @@ function SolarEngine3D({
         const ray = viewer.camera.getPickRay(screenPos);
         let startYWorld = startHeightM;
         if (ray) {
-          // Vertical line through centroidCart — find the highest Y the ray reaches
+          // Vertical line through centroidCart â€” find the highest Y the ray reaches
           // Use the direction dot product of the ray direction with world up
           const dir = ray.direction;
           const upDot = dir.x * 0 + dir.y * 0 + dir.z * 1; // simple z-dot, fine for local heights
@@ -4561,12 +4561,12 @@ function SolarEngine3D({
         suppressClickRef.current = true; // swallow the click that follows on mouse-up
         arrayManipRef.current = true;    // freeze the camera so the drag is a clean up/down motion
         setSelectedBlockId(blockId);
-        setStatusMsg(`↕ Dragging block height — currently ${startHeightM.toFixed(1)}m`);
+        setStatusMsg(`â†• Dragging block height â€” currently ${startHeightM.toFixed(1)}m`);
       } catch (err: unknown) { addLog('ERROR', `block resize LEFT_DOWN: ${(err as Error).message}`); }
     }, C.ScreenSpaceEventType.LEFT_DOWN);
 
-    // v64: Block resize — MOUSE_MOVE updates the block height in real-time.
-    // Same pattern as panel array drag — fires only when blockResizeRef is set.
+    // v64: Block resize â€” MOUSE_MOVE updates the block height in real-time.
+    // Same pattern as panel array drag â€” fires only when blockResizeRef is set.
     handler.setInputAction((event: any) => {
       const r = blockResizeRef.current;
       if (!r) return;
@@ -4603,12 +4603,12 @@ function SolarEngine3D({
           );
         }
         blockHeightOverridesRef.current.set(r.blockEntity.id, newHeightM);
-        setStatusMsg(`↕ Block height: ${newHeightM.toFixed(1)}m`);
+        setStatusMsg(`â†• Block height: ${newHeightM.toFixed(1)}m`);
         try { viewer.scene.requestRender(); } catch {}
       } catch (err: unknown) { addLog('ERROR', `block resize MOUSE_MOVE: ${(err as Error).message}`); }
     }, C.ScreenSpaceEventType.MOUSE_MOVE);
 
-    // v64: Block resize — LEFT_UP finalizes and clears the resize state.
+    // v64: Block resize â€” LEFT_UP finalizes and clears the resize state.
     handler.setInputAction(() => {
       const r = blockResizeRef.current;
       if (!r) return;
@@ -4625,7 +4625,7 @@ function SolarEngine3D({
         }
         blockHeightOverridesRef.current.set(r.blockEntity.id, finalHeightM);
         suppressClickRef.current = true; // consume the trailing LEFT_CLICK
-        setStatusMsg(`🧱 Block height set to ${finalHeightM.toFixed(1)}m — drag handle again to adjust`);
+        setStatusMsg(`ðŸ§± Block height set to ${finalHeightM.toFixed(1)}m â€” drag handle again to adjust`);
       } catch (err: unknown) { addLog('ERROR', `block resize LEFT_UP: ${(err as Error).message}`); }
       finally {
         blockResizeRef.current = null;
@@ -4665,9 +4665,9 @@ function SolarEngine3D({
         else if (mode === 'roof_gable')     handleGableClick(viewer, C, screenPos);
         else if (mode === 'roof_hip')       handleHipClick(viewer, C, screenPos);
         else if (mode === 'tree')           handleTreeClick(viewer, C, screenPos);
-        // auto_roof: fires once via placementMode useEffect — NOT on canvas click
+        // auto_roof: fires once via placementMode useEffect â€” NOT on canvas click
 
-        // pick_house: user clicked a house — get lat/lng and reverse-geocode
+        // pick_house: user clicked a house â€” get lat/lng and reverse-geocode
         if (mode === 'pick_house') {
           try {
             const pickedPos = viewer.scene.pickPosition(screenPos);
@@ -4677,7 +4677,7 @@ function SolarEngine3D({
               const pickedLng = C.Math.toDegrees(carto.longitude);
               if (isValidCoord(pickedLat, pickedLng)) {
                 addLog('PICK', `House picked at ${pickedLat.toFixed(5)}, ${pickedLng.toFixed(5)}`);
-                setStatusMsg('House selected — loading solar data...');
+                setStatusMsg('House selected â€” loading solar data...');
                 onPlacementModeChange('select');
                 // Reverse geocode in background
                 fetch(`/api/geocode?lat=${pickedLat}&lng=${pickedLng}`)
@@ -4700,14 +4700,14 @@ function SolarEngine3D({
       }
     }, C.ScreenSpaceEventType.LEFT_CLICK);
 
-    // v48.12: SHIFT+click in select mode → multi-select toggle
+    // v48.12: SHIFT+click in select mode â†’ multi-select toggle
     handler.setInputAction((event: any) => {
       if (modeRef.current === 'select') {
         handleShiftSelectClick(viewer, C, event.position);
       }
     }, C.ScreenSpaceEventType.LEFT_CLICK, C.KeyboardEventModifier.SHIFT);
 
-    // v62: DOUBLE-click in select mode → drill INTO the clicked panel's array so the
+    // v62: DOUBLE-click in select mode â†’ drill INTO the clicked panel's array so the
     // following single clicks select individual panels (micro-edit). Click empty space
     // exits back to whole-array selection (handled in handleSelectClick).
     handler.setInputAction((event: any) => {
@@ -4719,13 +4719,13 @@ function SolarEngine3D({
       if (gk) {
         drilledGroupKeyRef.current = gk;
         handleSelectClick(viewer, C, event.position); // now selects the single panel
-        setStatusMsg('🔎 Editing single panels — click panels to select · empty space to exit the array');
+        setStatusMsg('ðŸ”Ž Editing single panels â€” click panels to select Â· empty space to exit the array');
       }
     }, C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
-    // ── v62: GRAB-TO-MOVE / GRAB-TO-ROTATE (mouse drag in select mode) ──────────
-    // Drag the ⟳ handle → rotate the array about its centroid. Drag the array body
-    // (a selected panel) → move it on its plane. Camera left-drag is disabled for
+    // â”€â”€ v62: GRAB-TO-MOVE / GRAB-TO-ROTATE (mouse drag in select mode) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Drag the âŸ³ handle â†’ rotate the array about its centroid. Drag the array body
+    // (a selected panel) â†’ move it on its plane. Camera left-drag is disabled for
     // the duration so the globe doesn't orbit underneath.
     handler.setInputAction((event: any) => {
       if (modeRef.current !== 'select') return;
@@ -4753,7 +4753,7 @@ function SolarEngine3D({
         return;
       }
 
-      // Body hit on a selected panel → move.
+      // Body hit on a selected panel â†’ move.
       const { foundId } = pickPanelAtScreen(viewer, screen);
       if (foundId && ids.has(foundId)) {
         const ray = viewer.camera.getPickRay(screen);
@@ -4768,7 +4768,7 @@ function SolarEngine3D({
       if (!drag) return;
       const ray = viewer.camera.getPickRay(event.endPosition);
       if (!ray) return;
-      // v62: drag threshold — a click/double-click (cursor barely moves) must NOT move
+      // v62: drag threshold â€” a click/double-click (cursor barely moves) must NOT move
       // or rotate the array, so single-panel select (double-click) + Delete stays reliable.
       if (!drag.armed) {
         const ddx = event.endPosition.x - drag.downX, ddy = event.endPosition.y - drag.downY;
@@ -4817,7 +4817,7 @@ function SolarEngine3D({
         }
         onPanelsChange(panelsRef.current);    // commit once
         showRotateHandle(viewer, C);          // handle re-floats above the new position
-        setStatusMsg(drag.mode === 'rotate' ? '↻ Array rotated — drag ⟳ again, or drag the array to move' : '✥ Moved — drag again, or drag ⟳ to rotate');
+        setStatusMsg(drag.mode === 'rotate' ? 'â†» Array rotated â€” drag âŸ³ again, or drag the array to move' : 'âœ¥ Moved â€” drag again, or drag âŸ³ to rotate');
       }
     }, C.ScreenSpaceEventType.LEFT_UP);
 
@@ -4833,7 +4833,7 @@ function SolarEngine3D({
       } else if ((modeRef.current === 'plane3d' || modeRef.current === 'mark_plane') && pts3DCesiumRef.current.length > 0) {
         // Right-click with < 3 points: cancel and clear
         clearPlane3DPreview(viewer);
-        setStatusMsg(`${modeRef.current === 'mark_plane' ? 'Mark Plane' : '3D Plane'} cancelled — need at least 3 points. Click again to start.`);
+        setStatusMsg(`${modeRef.current === 'mark_plane' ? 'Mark Plane' : '3D Plane'} cancelled â€” need at least 3 points. Click again to start.`);
       } else if (modeRef.current === 'fence' && fencePtsRef.current.length >= 2) {
         finalizeFence(viewer, C);
       } else if (modeRef.current === 'roof') {
@@ -4849,7 +4849,7 @@ function SolarEngine3D({
         if (blockPtsRef.current.length >= 3) {
           finalizeBlock(viewer, C);
         } else {
-          // cancel — remove preview if any
+          // cancel â€” remove preview if any
           if (blockPreviewRef.current) {
             try {
               const dots = (blockPreviewRef.current as any).__dots as any[] | undefined;
@@ -4863,7 +4863,7 @@ function SolarEngine3D({
           flippedArrowsRef.current.clear();
           blockPtsRef.current = [];
           setBlockPtCount(0);
-          setStatusMsg('🧱 Block cancelled — need at least 3 points. Click again to start.');
+          setStatusMsg('ðŸ§± Block cancelled â€” need at least 3 points. Click again to start.');
         }
       }
     }, C.ScreenSpaceEventType.RIGHT_CLICK);
@@ -4874,8 +4874,8 @@ function SolarEngine3D({
     handler.setInputAction((event: any) => {
       try {
         if (modeRef.current === 'select') return;
-        // Use the same pick chain as placement (3D tiles → ellipsoid), NOT raw
-        // globe.pick — the globe is hidden once tiles load, so globe.pick returns
+        // Use the same pick chain as placement (3D tiles â†’ ellipsoid), NOT raw
+        // globe.pick â€” the globe is hidden once tiles load, so globe.pick returns
         // a garbage underground height. This keeps the readout truthful and
         // matching where panels actually land.
         const hit = getWorldPosition(viewer, C, event.endPosition);
@@ -4886,7 +4886,7 @@ function SolarEngine3D({
             const pLng = C.Math.toDegrees(carto.longitude);
             const h = carto.height;
             if (isFinite(pLat) && isFinite(pLng)) {
-              setStatusMsg(`📍 ${pLat.toFixed(5)}, ${pLng.toFixed(5)} | h=${ftStr(h)} (${h.toFixed(1)}m)`);
+              setStatusMsg(`ðŸ“ ${pLat.toFixed(5)}, ${pLng.toFixed(5)} | h=${ftStr(h)} (${h.toFixed(1)}m)`);
             }
           }
         }
@@ -4894,16 +4894,16 @@ function SolarEngine3D({
     }, C.ScreenSpaceEventType.MOUSE_MOVE);
   }
 
-  // ── getWorldPosition: unified surface picking (3D tiles → terrain → ellipsoid) ──
+  // â”€â”€ getWorldPosition: unified surface picking (3D tiles â†’ terrain â†’ ellipsoid) â”€â”€
   /**
-   * Unified surface picking — converts a screen pixel position to a 3D world coordinate.
+   * Unified surface picking â€” converts a screen pixel position to a 3D world coordinate.
    *
    * Picking priority chain (highest to lowest accuracy):
-   * 1. **3D Tiles** — scene.pick() + scene.pickPosition() on the Google Photorealistic mesh
+   * 1. **3D Tiles** â€” scene.pick() + scene.pickPosition() on the Google Photorealistic mesh
    *    (most accurate: snaps to actual building/roof geometry)
-   * 2. **Terrain** — globe.pick() on the ellipsoid terrain surface
+   * 2. **Terrain** â€” globe.pick() on the ellipsoid terrain surface
    *    (fallback when no 3D tile is under the cursor)
-   * 3. **Ellipsoid** — mathematical ray-ellipsoid intersection
+   * 3. **Ellipsoid** â€” mathematical ray-ellipsoid intersection
    *    (last resort: flat earth approximation, no terrain height)
    *
    * @param viewer    - Active Cesium Viewer instance
@@ -4921,7 +4921,7 @@ function SolarEngine3D({
       if (pickedObject) {
         const pp = viewer.scene.pickPosition(screenPos);
         if (pp && isFinite(pp.x) && isFinite(pp.y) && isFinite(pp.z) && C.Cartesian3.magnitude(pp) > 1000) {
-          // Google Photorealistic 3D Tiles meshes are shells — pickPosition can land on
+          // Google Photorealistic 3D Tiles meshes are shells â€” pickPosition can land on
           // the inner (back) face of a roof/wall, placing the point INSIDE the geometry.
           // Fix: nudge the hit point 0.15 m outward along the ellipsoid surface normal
           // (i.e. radially away from Earth's centre) so markers/panels always sit on top.
@@ -4938,7 +4938,7 @@ function SolarEngine3D({
     } catch (e) { handleCesiumError('3D tiles pick', e, true); }
 
     // Fallback: globe terrain pick.
-    // Only when the globe is SHOWN — we hide it once 3D Tiles load (coastal
+    // Only when the globe is SHOWN â€” we hide it once 3D Tiles load (coastal
     // bleed-through fix), and globe.pick on a hidden globe returns a garbage
     // point (far underground) that still passes the magnitude check, poisoning
     // plane/fence/roof placement. Skip straight to the deterministic ellipsoid
@@ -4972,27 +4972,27 @@ function SolarEngine3D({
     return { cartesian, pickMethod };
   }
 
-  // ── getGroundPlanePosition: ground-level click picker (v48.32) ──────────────
+  // â”€â”€ getGroundPlanePosition: ground-level click picker (v48.32) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /**
    * Picks a ground-level world position for ground array placement.
    *
    * Key requirement: must hit the GROUND SURFACE (where piles go into the ground),
    * NOT elevated panel geometry or racking structure entities.
    *
-   * Strategy: try globe.pick (terrain only — ignores all Cesium entities) first.
+   * Strategy: try globe.pick (terrain only â€” ignores all Cesium entities) first.
    * This guarantees we always get the ground surface point regardless of what
    * panel/racking geometry is above it.
    * Fall back to 3D tiles pick (scene.pick) if terrain pick fails.
    * Final fallback: cesiumGroundElevRef height with ray-ellipsoid.
    */
-  // ── getGroundPlanePosition v50.5: delegate to getWorldPosition (same as fence/plane) ──────────
+  // â”€â”€ getGroundPlanePosition v50.5: delegate to getWorldPosition (same as fence/plane) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
-  // getWorldPosition is already pixel-perfect for fence and plane modes — it uses
+  // getWorldPosition is already pixel-perfect for fence and plane modes â€” it uses
   // scene.pick + scene.pickPosition on 3D tiles (primary) with globe.pick and ellipsoid
   // as fallbacks. We use the SAME function here for lat/lng accuracy.
   //
-  // Height trust: only 3dtiles pick gives real mesh height; terrain/ellipsoid return h≈0
-  // with EllipsoidTerrainProvider. When h≈0 and site is elevated, fall back to
+  // Height trust: only 3dtiles pick gives real mesh height; terrain/ellipsoid return hâ‰ˆ0
+  // with EllipsoidTerrainProvider. When hâ‰ˆ0 and site is elevated, fall back to
   // cesiumGroundElevRef (boot-sampled from Google Elevation API + EGM96 geoid).
   //
   function getGroundPlanePosition(
@@ -5010,7 +5010,7 @@ function SolarEngine3D({
     const pLng = C.Math.toDegrees(carto.longitude);
     if (!isValidCoord(pLat, pLng)) return null;
 
-    // Height trust: 3dtiles gives real mesh height; terrain+ellipsoid return h≈0.
+    // Height trust: 3dtiles gives real mesh height; terrain+ellipsoid return hâ‰ˆ0.
     const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
     const trustedH = (hit.pickMethod === '3dtiles' && rawH !== null) ? rawH : null;
     const fallbackH = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
@@ -5020,12 +5020,12 @@ function SolarEngine3D({
     return { lat: pLat, lng: pLng, height: groundElevM, pickMethod: hit.pickMethod };
   }
 
-  // ── Roof placement ─────────────────────────────────────────────────────────
+  // â”€â”€ Roof placement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleRoofClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
       if (!hit) {
-        setStatusMsg('❌ No surface detected — click directly on the building');
+        setStatusMsg('âŒ No surface detected â€” click directly on the building');
         return;
       }
       const cartesian = hit.cartesian;
@@ -5040,7 +5040,7 @@ function SolarEngine3D({
 
       const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       const offM = getRoofPanelOffset(mountingSystemIdRef.current);
-      // v62: if the click lands on a marked/CAD plane, make the panel FIRST-CLASS —
+      // v62: if the click lands on a marked/CAD plane, make the panel FIRST-CLASS â€”
       // stamp that plane's ECEF frame + planeId so it rotates and renders rails (the
       // bare Roof tool used to place "stale" panels with no frame). Falls back to the
       // per-click surface normal when the click isn't on a known plane.
@@ -5083,7 +5083,7 @@ function SolarEngine3D({
       setPanelCount(newPanels.length);
       // Phase 2: rebuild rails after single-click roof placement
       try { renderRoofRails(viewer, C, newPanels); } catch {}
-      setStatusMsg(`✅ Roof panel placed (${(panel.tilt ?? 0).toFixed(0)}° pitch, ${(panel.azimuth ?? 0).toFixed(0)}° az)${rp ? ' · on plane' : ''} — click to continue, right-click to stop`);
+      setStatusMsg(`âœ… Roof panel placed (${(panel.tilt ?? 0).toFixed(0)}Â° pitch, ${(panel.azimuth ?? 0).toFixed(0)}Â° az)${rp ? ' Â· on plane' : ''} â€” click to continue, right-click to stop`);
       showGhostPanel(viewer, C, pLat, pLng, pHeight, panel.tilt ?? 0, panel.azimuth ?? 0);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
@@ -5091,11 +5091,11 @@ function SolarEngine3D({
     }
   }
 
-  // ── Ground placement ───────────────────────────────────────────────────────
+  // â”€â”€ Ground placement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleGroundClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
-      if (!hit) { setStatusMsg('❌ No ground detected'); return; }
+      if (!hit) { setStatusMsg('âŒ No ground detected'); return; }
       const cartesian = hit.cartesian;
 
       const carto = C.Cartographic.fromCartesian(cartesian);
@@ -5107,7 +5107,7 @@ function SolarEngine3D({
       // unavailable (e.g. ellipsoid-only pick returns height ~0).
       // v50.2: Same 3-tier trust logic as getGroundPlanePosition.
       // getWorldPosition uses scene.pick + pickPosition (3dtiles) first, then globe.pick, then ellipsoid.
-      // Only 3dtiles gives real mesh height; terrain+ellipsoid both return h≈0.
+      // Only 3dtiles gives real mesh height; terrain+ellipsoid both return hâ‰ˆ0.
       const rawHeightGnd = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
       const trustedHeightGnd = (hit.pickMethod === '3dtiles' && rawHeightGnd !== null && rawHeightGnd > -500) ? rawHeightGnd : null;
       const cesiumFallbackGnd = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
@@ -5128,7 +5128,7 @@ function SolarEngine3D({
       });
 
       addLog('GROUND', `[GROUND_CLICK_DEBUG] panel placed lat=${panel.lat.toFixed(6)} lng=${panel.lng.toFixed(6)} height=${panel.height.toFixed(2)}`);
-      // v48.17 FINAL: structure-before-panels — racking drawn first so posts render under panels
+      // v48.17 FINAL: structure-before-panels â€” racking drawn first so posts render under panels
       addGroundRacking(viewer, C, [panel], baseZ);
       addPanelEntity(viewer, C, panel);
       const newPanels = [...panelsRef.current, panel];
@@ -5136,14 +5136,14 @@ function SolarEngine3D({
       lastRenderedPanelsRef.current = newPanels; // prevent double-render orphan
       onPanelsChange(newPanels);
       setPanelCount(newPanels.length);
-      setStatusMsg(`✅ Ground panel placed (${groundTilt}° tilt)`);
+      setStatusMsg(`âœ… Ground panel placed (${groundTilt}Â° tilt)`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleGroundClick: ${(err as Error).message}`);
     }
   }
 
-  // ── Ground Array placement ────────────────────────────────────────────────────
+  // â”€â”€ Ground Array placement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Two-phase: Click 1 = row start, Click 2 = row end (defines direction + length).
   // Subsequent clicks add more rows at auto-calculated spacing (winter solstice formula).
   // Press Enter or right-click to finalize the array.
@@ -5156,7 +5156,7 @@ function SolarEngine3D({
       // scene.pickPosition is unreliable at oblique camera angles (depth buffer
       // inaccuracy on Google 3D Tiles gives wrong world coordinates at non-top-down views).
       // getGroundPlanePosition fires a pick ray and intersects with a local tangent
-      // plane at the known terrain elevation — works correctly at ANY camera angle.
+      // plane at the known terrain elevation â€” works correctly at ANY camera angle.
       const gpp = getGroundPlanePosition(viewer, C, screenPos);
       if (!gpp) { setStatusMsg('\u274c No ground detected \u2014 click on open ground'); return; }
 
@@ -5184,7 +5184,7 @@ function SolarEngine3D({
         groundArrayFirstRowRef.current = { start: pt, end: pt, azimuthDeg: azimuthRef.current, rowSpacingM: 0 };
         try {
           // v50.6: dot at ground surface elevation (gpp.height), NOT mount plane height
-          // pt.height = groundElevM + MOUNT_HEIGHT_M (1.2m up) — at oblique angles that
+          // pt.height = groundElevM + MOUNT_HEIGHT_M (1.2m up) â€” at oblique angles that
           // causes a visible screen-space offset. Use gpp.height + 0.05 to sit on the ground.
           const mPos = safeCartesian3(C, pt.lng, pt.lat, gpp.height + 0.05);
           if (mPos) {
@@ -5221,28 +5221,28 @@ function SolarEngine3D({
         let   rowAzDeg  = (Math.atan2(localVec.x, localVec.y) * 180 / Math.PI + 360) % 360;
 
         // v6.3-canon: Canonicalize rail direction so click order doesn't flip the array.
-        // The clicked segment defines a LINE, not a direction — two equivalent rail-axis
+        // The clicked segment defines a LINE, not a direction â€” two equivalent rail-axis
         // choices exist (rowAzDeg and rowAzDeg+180).  We pick the one whose perpendicular
         // facing axis (rowAzDeg+90) best matches the configured panel-face azimuth.
-        // When flipping, also swap start/end so p1→p2 matches the canonical rowAzDeg.
+        // When flipping, also swap start/end so p1â†’p2 matches the canonical rowAzDeg.
         let canonStart = pendingStart.start;
         let canonEnd   = pt;
         {
-          const desiredFacing = azimuthRef.current;                       // UI slider (default 180° = south)
+          const desiredFacing = azimuthRef.current;                       // UI slider (default 180Â° = south)
           const candidateFacing = (rowAzDeg + 90) % 360;                  // perpendicular to raw rail axis
           // Angular difference in [-180, 180]
           let diff = candidateFacing - desiredFacing;
           if (diff > 180) diff -= 360;
           if (diff < -180) diff += 360;
           if (Math.abs(diff) > 90) {
-            // Flipping rail axis by 180° brings the facing axis closer to desired
+            // Flipping rail axis by 180Â° brings the facing axis closer to desired
             rowAzDeg = (rowAzDeg + 180) % 360;
-            // Swap start/end so p1→p2 direction matches canonical rowAzDeg
+            // Swap start/end so p1â†’p2 direction matches canonical rowAzDeg
             canonStart = pt;
             canonEnd   = pendingStart.start;
-            addLog('GROUND', `[CANON] Flipped rail axis + swapped points: raw facing=${candidateFacing.toFixed(1)}° vs desired=${desiredFacing.toFixed(1)}° (diff=${diff.toFixed(1)}°) → canonical rowAzDeg=${rowAzDeg.toFixed(1)}°`);
+            addLog('GROUND', `[CANON] Flipped rail axis + swapped points: raw facing=${candidateFacing.toFixed(1)}Â° vs desired=${desiredFacing.toFixed(1)}Â° (diff=${diff.toFixed(1)}Â°) â†’ canonical rowAzDeg=${rowAzDeg.toFixed(1)}Â°`);
           } else {
-            addLog('GROUND', `[CANON] Rail axis OK: facing=${candidateFacing.toFixed(1)}° vs desired=${desiredFacing.toFixed(1)}° (diff=${diff.toFixed(1)}°) → rowAzDeg=${rowAzDeg.toFixed(1)}°`);
+            addLog('GROUND', `[CANON] Rail axis OK: facing=${candidateFacing.toFixed(1)}Â° vs desired=${desiredFacing.toFixed(1)}Â° (diff=${diff.toFixed(1)}Â°) â†’ rowAzDeg=${rowAzDeg.toFixed(1)}Â°`);
           }
         }
 
@@ -5271,7 +5271,7 @@ function SolarEngine3D({
         // v48.21: PLP Power Rail = exactly 2 portrait rows within ONE table.
         // Row2 is placed immediately behind row1 using WITHIN-TABLE spacing.
         // Within-table offset = panelH * cos(tilt) (NOT shadow-avoidance spacing).
-        // The 2 portrait rows share the same structural table — posts connect both rows.
+        // The 2 portrait rows share the same structural table â€” posts connect both rows.
         const currentStyle = groundMountStyleRef.current ?? 'pipe';
         if (currentStyle === 'pipe' && getMaxRows('pipe') >= 2) {
           // Within-table row offset: one panel horizontal depth N-S (from groundMountRealityEngine)
@@ -5311,7 +5311,7 @@ function SolarEngine3D({
               return;
             }
           }
-          addLog('GROUND', '[v48.21] PLP auto-row2 failed — falling back to 1-row display');
+          addLog('GROUND', '[v48.21] PLP auto-row2 failed â€” falling back to 1-row display');
         }
         setStatusMsg(`\u2705 Row 1: ${row1.length} panels (${kw} kW) \u2014 click to add Row 2, or press Enter to finish`);
         try { viewer.scene.requestRender(); } catch {}
@@ -5361,11 +5361,11 @@ function SolarEngine3D({
     }
   }
 
-  // ── placeGroundArrayRow v49.2: STRUCTURE-FIRST ──────────────────────────────
+  // â”€â”€ placeGroundArrayRow v49.2: STRUCTURE-FIRST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Pipeline order:
-  //   1. buildGroundRacking() → compute ALL structural geometry (piles, rails, tubes)
+  //   1. buildGroundRacking() â†’ compute ALL structural geometry (piles, rails, tubes)
   //   2. Render ALL structure members immediately (visible during preview)
-  //   3. placePanelsControlled() → place panels with rail Z from structure
+  //   3. placePanelsControlled() â†’ place panels with rail Z from structure
   //   4. Stamp arrayRow on panels
   // Panels NEVER rendered without structure. Structure defines the grid.
   function placeGroundArrayRow(
@@ -5379,22 +5379,22 @@ function SolarEngine3D({
     const orient  = panelOrientationRef.current;
     const tiltDeg = gTiltRef.current;
     // v6.2.2-az: Derive panel-face azimuth from click-derived row bearing.
-    // rowAzDeg = bearing from startPoint → endPoint = RAIL direction.
+    // rowAzDeg = bearing from startPoint â†’ endPoint = RAIL direction.
     // Panel face azimuth = perpendicular to rail direction = (rowAzDeg + 90) % 360.
     // This matches buildPlaneFromTwoPoints: horizontal = cross(radialUp, u),
-    // which always points 90° clockwise from the row direction when viewed from above.
-    // azimuthRef.current (UI slider, defaults 180°) must NOT be used — it ignores user intent.
+    // which always points 90Â° clockwise from the row direction when viewed from above.
+    // azimuthRef.current (UI slider, defaults 180Â°) must NOT be used â€” it ignores user intent.
     const azDeg   = (rowAzDeg + 90) % 360;
     const style   = groundMountStyleRef.current ?? 'pipe';
 
     // v6.2.2-az: Validation logging
     addLog('GROUND', `[AZ-TRUTH] startPoint=(${p1.lat.toFixed(6)}, ${p1.lng.toFixed(6)}) endPoint=(${p2.lat.toFixed(6)}, ${p2.lng.toFixed(6)})`);
-    addLog('GROUND', `[AZ-TRUTH] rowBearing=${rowAzDeg.toFixed(1)}° → panelFaceAzimuth=${azDeg.toFixed(1)}° (UI slider was ${azimuthRef.current.toFixed(1)}°)`);
+    addLog('GROUND', `[AZ-TRUTH] rowBearing=${rowAzDeg.toFixed(1)}Â° â†’ panelFaceAzimuth=${azDeg.toFixed(1)}Â° (UI slider was ${azimuthRef.current.toFixed(1)}Â°)`);
 
     // basePlaneZ = terrain height locked at first click
     const basePlaneZ = p1.height - MOUNT_HEIGHT_M;
 
-    // ── STEP 1: Place panels via plane engine (get panel positions) ───────────
+    // â”€â”€ STEP 1: Place panels via plane engine (get panel positions) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const p1ECEF = engLatLngToECEF(p1.lat, p1.lng, p1.height);
     const p2ECEF = engLatLngToECEF(p2.lat, p2.lng, p2.height);
 
@@ -5411,7 +5411,7 @@ function SolarEngine3D({
     const panels = clGroundResult.panels;
 
     if (panels.length === 0) {
-      addLog('GROUND', `[v49.2] placeGroundArrayRow: 0 panels from engine — skipping`);
+      addLog('GROUND', `[v49.2] placeGroundArrayRow: 0 panels from engine â€” skipping`);
       return [];
     }
 
@@ -5420,7 +5420,7 @@ function SolarEngine3D({
 
     addLog('GROUND', `[v49.2] STRUCTURE-FIRST row${arrayRowIndex}: ${panels.length} panels style=${style}`);
 
-    // ── STEP 2: BUILD STRUCTURE FIRST ────────────────────────────────────────
+    // â”€â”€ STEP 2: BUILD STRUCTURE FIRST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Use ALL rows placed so far + this new row for a complete structural picture.
     // This ensures N/S post pairs, torque tubes, and rails span ALL rows.
     const existingRows = groundArrayRowsRef.current.flat();
@@ -5460,8 +5460,8 @@ function SolarEngine3D({
 
     // v6.2.0: Entity cleanup now handled inside renderGroundRackingOutput.
 
-    // ── STEP 4: RENDER ALL STRUCTURE MEMBERS (before panels) ─────────────────
-    // v50.0: STEP 4 — Single render path (renderGroundRackingOutput)
+    // â”€â”€ STEP 4: RENDER ALL STRUCTURE MEMBERS (before panels) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // v50.0: STEP 4 â€” Single render path (renderGroundRackingOutput)
     // REG-4: only render structure if showRacking is enabled
     let membersRendered = 0;
     if (showRackingRef.current) {
@@ -5470,7 +5470,7 @@ function SolarEngine3D({
 
     addLog('GROUND', `[v49.2] STRUCTURE rendered: ${membersRendered} members BEFORE panels. groundZ=${rackingResult.groundZ.toFixed(3)} sRailZ=${rackingResult.sRailZ.toFixed(3)}`);
 
-    // ── STEP 5: RENDER PANELS ON TOP OF STRUCTURE ────────────────────────────
+    // â”€â”€ STEP 5: RENDER PANELS ON TOP OF STRUCTURE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // v5.4: Use grid-corrected panel positions from engine (eliminates terrain drift).
     // correctedPanels[] has lat/lng/height recomputed from deterministic grid origin.
     // Merge corrected positions back onto PlacedPanel objects.
@@ -5488,7 +5488,7 @@ function SolarEngine3D({
       return p;
     });
 
-    // ═══ RENDER TRUTH VERIFICATION ═══
+    // â•â•â• RENDER TRUTH VERIFICATION â•â•â•
     // Log exact coordinates for panels vs structure to prove alignment
     if (panelsToRender.length > 0 && rackingResult.members.length > 0) {
       const p0 = panelsToRender[0];
@@ -5509,7 +5509,7 @@ function SolarEngine3D({
       const firstRail = rackingResult.members.find(m => m.memberType === 'powerrail');
       if (firstRail) {
         addLog('GROUND', `[RENDER-TRUTH] Rail[0]: ${firstRail.name} lat=${firstRail.lat.toFixed(8)} lng=${firstRail.lng.toFixed(8)} z=${firstRail.z.toFixed(4)}`);
-        addLog('GROUND', `[RENDER-TRUTH]   heading=${(firstRail.headingRad * 180 / Math.PI).toFixed(1)}° pitch=${(firstRail.pitchRad * 180 / Math.PI).toFixed(1)}°`);
+        addLog('GROUND', `[RENDER-TRUTH]   heading=${(firstRail.headingRad * 180 / Math.PI).toFixed(1)}Â° pitch=${(firstRail.pitchRad * 180 / Math.PI).toFixed(1)}Â°`);
       }
       // Log first strongback
       const firstSB = rackingResult.members.find(m => m.memberType === 'strongback');
@@ -5519,7 +5519,7 @@ function SolarEngine3D({
       // Log correctedPanels count vs panels count
       addLog('GROUND', `[RENDER-TRUTH] correctedPanels=${rackingResult.correctedPanels.length} panels=${panels.length} matched=${[...correctedMap.keys()].filter(k => panels.some(p => p.id === k)).length}`);
     }
-    // ═══ END RENDER TRUTH VERIFICATION ═══
+    // â•â•â• END RENDER TRUTH VERIFICATION â•â•â•
 
     const skipGridGround = (panelsRef.current.length + panelsToRender.length) > 12;
 
@@ -5545,7 +5545,7 @@ function SolarEngine3D({
       addPanelEntity(viewer, C, panel, skipGridGround);
     }
 
-    // ═══ v6.1 SHARED-PLANE FIX ═══
+    // â•â•â• v6.1 SHARED-PLANE FIX â•â•â•
     // When placing row 2+, the racking engine rebuilds correctedPanels for ALL rows
     // on a single shared tilted plane (solveClearancePlane). But row 1 panels were
     // already rendered from a PARTIAL (row-1-only) racking solution with different
@@ -5575,23 +5575,23 @@ function SolarEngine3D({
         addLog('GROUND', `[v6.1.1 SHARED-PLANE] Re-rendered ${reRendered}/${existingRows.length} existing panels with unified positions + heading/pitch (removed ${removedCount} stale entities)`);
       }
     }
-    // ═══ END v6.1 SHARED-PLANE FIX ═══
+    // â•â•â• END v6.1 SHARED-PLANE FIX â•â•â•
 
     // Track ghost panels for renderAllPanels diff
     const allGhostSoFar = groundArrayRowsRef.current.flat().concat(panels);
     lastRenderedPanelsRef.current = [...panelsRef.current, ...allGhostSoFar];
 
-    addLog('GROUND', `[v49.2] COMPLETE row${arrayRowIndex}: structure(${membersRendered}) → panels(${panels.length})`);
+    addLog('GROUND', `[v49.2] COMPLETE row${arrayRowIndex}: structure(${membersRendered}) â†’ panels(${panels.length})`);
     return panels;
   }
 
-  // v49.2: finalizeGroundArray — structure already rendered during preview
+  // v49.2: finalizeGroundArray â€” structure already rendered during preview
   function finalizeGroundArray() {
     // Structure-first: racking was ALREADY rendered in placeGroundArrayRow (during preview).
     // Here we just commit panels to permanent state. No second addGroundRacking call.
     const allNewPanels = groundArrayRowsRef.current.flat();
     const rowCountFinal = groundArrayRowsRef.current.length;
-    addLog('GROUND', `[v49.2] finalizeGroundArray: ${rowCountFinal} rows, ${allNewPanels.length} panels — structure already rendered`);
+    addLog('GROUND', `[v49.2] finalizeGroundArray: ${rowCountFinal} rows, ${allNewPanels.length} panels â€” structure already rendered`);
     if (allNewPanels.length === 0) { cancelGroundArray(); return; }
 
     const allPanels = [...panelsRef.current, ...allNewPanels];
@@ -5600,7 +5600,7 @@ function SolarEngine3D({
     onPanelsChange(allPanels);
     setPanelCount(allPanels.length);
 
-    // __gnd__ racking entities are already in viewer from preview — they stay permanently.
+    // __gnd__ racking entities are already in viewer from preview â€” they stay permanently.
     // resetGroundArray clears groundArrayRowsRef but does NOT touch panelMapRef racking entries.
 
     const kw = (allNewPanels.length * (selectedPanelRef.current?.wattage ?? 400) / 1000).toFixed(1);
@@ -5655,7 +5655,7 @@ function SolarEngine3D({
     }
   }
 
-  // ── Fence placement ────────────────────────────────────────────────────────
+  // â”€â”€ Fence placement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleFenceClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -5667,9 +5667,9 @@ function SolarEngine3D({
       const pLat = C.Math.toDegrees(carto.latitude);
       const pLng = C.Math.toDegrees(carto.longitude);
       // Height trust (same 3-tier rule as ground placement): only a 3D-tiles pick
-      // gives a real mesh height. terrain/ellipsoid picks return ellipsoidal h≈0,
+      // gives a real mesh height. terrain/ellipsoid picks return ellipsoidal hâ‰ˆ0,
       // which sits ABOVE true ground at coastal/low-lying sites (negative
-      // ellipsoidal ground) — the cause of fence points clicking high in CT.
+      // ellipsoidal ground) â€” the cause of fence points clicking high in CT.
       // Fall back to the resolved ground elevation (now kept even when negative).
       const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
       const trustedH = (hit.pickMethod === '3dtiles' && rawH !== null) ? rawH : null;
@@ -5728,17 +5728,17 @@ function SolarEngine3D({
       }
 
       addLog('FENCE', `Point ${count} at ${pLat.toFixed(5)},${pLng.toFixed(5)}`);
-      setStatusMsg(`🔶 Fence point ${count} — right-click to finish`);
+      setStatusMsg(`ðŸ”¶ Fence point ${count} â€” right-click to finish`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleFenceClick: ${(err as Error).message}`);
     }
   }
 
-  // ── finalizeFence v47.158: SOL Fence Nexus — posts + realistic panels ──
+  // â”€â”€ finalizeFence v47.158: SOL Fence Nexus â€” posts + realistic panels â”€â”€
   // SOL Fence Nexus specs (from datasheet):
   //   Panel:   Philadelphia Solar PS-MNB108(HCBF)-440W, 1721x1133mm, vertical
-  //            bifacial — wattage resolved from equipment-db ('panel-fence-ps1'),
+  //            bifacial â€” wattage resolved from equipment-db ('panel-fence-ps1'),
   //            never hardcoded (P0-6)
   //   Section: 7'11" (2.413m) wide x 5'10" (1.778m) tall metal-to-metal
   //   Post:    60mm square hot-dip galvanized steel, driven/buried every section
@@ -5764,21 +5764,21 @@ function SolarEngine3D({
     const PANELS_PER_SECTION = 2;   // SOL Fence Nexus: 2 panels per section
 
     // P0-6 + Ray's ruling 2026-07-19: fence panels are ALWAYS the Philadelphia
-    // Solar PS-MNB108(HCBF)-440W — resolve the wattage stamp from the
+    // Solar PS-MNB108(HCBF)-440W â€” resolve the wattage stamp from the
     // equipment-db record at placement time so the stamp can never drift from
     // the equipment authority.
     const fencePanelRec = getPanelById(FENCE_PANEL_EQUIPMENT_ID);
     if (!fencePanelRec?.watts) {
-      console.warn(`[EQUIP-AUTHORITY] equipment-db is missing '${FENCE_PANEL_EQUIPMENT_ID}' — fence wattage stamps fall back to the studio-selected panel`);
+      console.warn(`[EQUIP-AUTHORITY] equipment-db is missing '${FENCE_PANEL_EQUIPMENT_ID}' â€” fence wattage stamps fall back to the studio-selected panel`);
     }
     const fenceWattage = fencePanelRec?.watts ?? selectedPanelRef.current?.wattage ?? 400;
 
     addLog('FENCE', `finalizeFence v47.158: ${pts.length} pts, fenceH=${fenceH.toFixed(2)}m orient=${orient} panel=${FENCE_PANEL_EQUIPMENT_ID}@${fenceWattage}W`);
 
-    // Enforce minimum fence height — must fit at least one panel row
+    // Enforce minimum fence height â€” must fit at least one panel row
     const effectiveFenceH = Math.max(fenceH, dims.heightM + SOL_CLEARANCE + 0.01);
     if (fenceH < dims.heightM) {
-      addLog('FENCE', `fenceH (${fenceH.toFixed(2)}) < panel height (${dims.heightM.toFixed(3)}) — clamped to ${effectiveFenceH.toFixed(3)}m`);
+      addLog('FENCE', `fenceH (${fenceH.toFixed(2)}) < panel height (${dims.heightM.toFixed(3)}) â€” clamped to ${effectiveFenceH.toFixed(3)}m`);
     }
 
     // Per-segment: each straight run gets its own PlaneFrame
@@ -5792,28 +5792,28 @@ function SolarEngine3D({
 
       addLog('FENCE', `Seg${si}: a=(${a.lat.toFixed(5)},${a.lng.toFixed(5)},h=${a.height.toFixed(1)}) b=(${b.lat.toFixed(5)},${b.lng.toFixed(5)},h=${b.height.toFixed(1)})`);
 
-      // Place panels — routed through control layer
+      // Place panels â€” routed through control layer
       const clFenceResult = placePanelsControlled({
         mode:         'fence',
         p1ECEF,
         p2ECEF,
         fenceHeightM: effectiveFenceH,
         orientation:  orient,
-        wattage:      fenceWattage, // equipment-db 'panel-fence-ps1' (PS-MNB108(HCBF)-440W) — P0-6: never a literal
+        wattage:      fenceWattage, // equipment-db 'panel-fence-ps1' (PS-MNB108(HCBF)-440W) â€” P0-6: never a literal
         azimuthDeg:   azimuthRef.current,
         layoutId:     `fence-seg${si}-${Date.now()}`,
       });
       const segPanels = clFenceResult.panels;
 
-      addLog('FENCE', `Seg${si}: placePanelsControlled(fence) → ${segPanels.length} panels (engine=${clFenceResult.engineUsed})`);
-      // v48.11: pre-compute skipGrid from merged count — consistent rendering for all panels in batch
+      addLog('FENCE', `Seg${si}: placePanelsControlled(fence) â†’ ${segPanels.length} panels (engine=${clFenceResult.engineUsed})`);
+      // v48.11: pre-compute skipGrid from merged count â€” consistent rendering for all panels in batch
       const skipGridFence = (panelsRef.current.length + newPanels.length + segPanels.length) > 12;
       for (const panel of segPanels) {
         newPanels.push(panel);
         addPanelEntity(viewer, C, panel, skipGridFence);
       }
 
-      // ── Track sections for user editing ────────────────────────
+      // â”€â”€ Track sections for user editing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // Group panels into sections (PANELS_PER_SECTION per section).
       // Each section defaults to 'solar'. User can later convert to gate/vinyl.
       for (let secI = 0; secI < segPanels.length; secI += PANELS_PER_SECTION) {
@@ -5829,7 +5829,7 @@ function SolarEngine3D({
         });
       }
 
-      // v47.159: SOL Fence posts — 1 post per SECTION (every 2 panels).
+      // v47.159: SOL Fence posts â€” 1 post per SECTION (every 2 panels).
       // Posts are placed at panel-count boundaries: after every PANELS_PER_SECTION panels,
       // plus at the very start and end of the segment.
       // Last section may be 1 panel if remaining space < 2 panel widths.
@@ -5905,13 +5905,13 @@ function SolarEngine3D({
         const nSections = Math.ceil(totalPanels / PANELS_PER_SECTION);
         addLog('FENCE', `Seg${si}: added ${postOffsets.length} posts for ${totalPanels} panels (${nSections} sections)`);
 
-        // ── Gap infill: fill remaining space at end of segment ──────
+        // â”€â”€ Gap infill: fill remaining space at end of segment â”€â”€â”€â”€â”€â”€
         // If panels don't perfectly fill the segment, add a solid infill
         // panel matching fence color/trim to close the gap.
         // Uses last panel's actual position + offset to guarantee alignment.
         const panelCoverage = totalPanels * panelW;
         const gapM = segLen - panelCoverage;
-        const MIN_VISIBLE_GAP = 0.05; // 5cm — below this, gap is invisible
+        const MIN_VISIBLE_GAP = 0.05; // 5cm â€” below this, gap is invisible
         if (gapM > MIN_VISIBLE_GAP && segPanels.length > 0) {
           try {
             const lastPanel = segPanels[segPanels.length - 1];
@@ -5926,13 +5926,13 @@ function SolarEngine3D({
                 lastPos.z + segDir.z * offsetDist,
               );
 
-              // Use exact same heading/pitch as last panel — guaranteed alignment
+              // Use exact same heading/pitch as last panel â€” guaranteed alignment
               const infillHeading = lastPanel.heading ?? headingFromAzimuth(lastPanel.azimuth);
               const infillPitch = lastPanel.pitch ?? 0;
               const infillHPR = new C.HeadingPitchRoll(infillHeading, infillPitch, 0);
               const infillOrient = C.Transforms.headingPitchRollQuaternion(infillPos, infillHPR);
 
-              // Solid dark infill panel — matches fence panel color & trim
+              // Solid dark infill panel â€” matches fence panel color & trim
               // Box dimensions follow panel convention: (ph, pw, thickness)
               const infillEntity = viewer.entities.add({
                 name: `[FENCE-INFILL] seg${si}-gap`,
@@ -5941,7 +5941,7 @@ function SolarEngine3D({
                 box: {
                   dimensions: new C.Cartesian3(dims.heightM, gapM, 0.035),
                   material: new C.ColorMaterialProperty(
-                    new C.Color(0.12, 0.12, 0.14, 1.0) // dark charcoal — matches solar panel frame
+                    new C.Color(0.12, 0.12, 0.14, 1.0) // dark charcoal â€” matches solar panel frame
                   ),
                   outline: true,
                   outlineColor: new C.Color(0.2, 0.2, 0.22, 0.8),
@@ -5951,7 +5951,7 @@ function SolarEngine3D({
               });
               const infillKey = `__fenceinfill__seg${si}-${Date.now()}`;
               panelMapRef.current.set(infillKey, infillEntity);
-              addLog('FENCE', `Seg${si}: infill ${gapM.toFixed(3)}m gap (last panel → segment end)`);
+              addLog('FENCE', `Seg${si}: infill ${gapM.toFixed(3)}m gap (last panel â†’ segment end)`);
             }
           } catch (infillErr: unknown) {
             addLog('WARN', `Seg${si}: infill rendering failed: ${(infillErr as Error).message}`);
@@ -5974,13 +5974,13 @@ function SolarEngine3D({
     setPanelCount(allPanels.length);
     fencePtsRef.current = [];
     setFencePtCount(0);
-    setStatusMsg(`Fence: ${newPanels.length} panels placed (${orient}, ${pts.length - 1} segment(s)) — click panels to convert sections`);
+    setStatusMsg(`Fence: ${newPanels.length} panels placed (${orient}, ${pts.length - 1} segment(s)) â€” click panels to convert sections`);
     // Auto-switch to select mode so user can immediately click panels to convert sections
     onPlacementModeChange('select');
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── Convert fence section type (solar → gate/vinyl, etc.) ─────
+  // â”€â”€ Convert fence section type (solar â†’ gate/vinyl, etc.) â”€â”€â”€â”€â”€
   // Solar = normal solar panel entities (frame + glass + grid)
   // Gate  = opening (panels removed, gap between posts)
   // Vinyl = solid dark panels matching fence color/trim (recolor existing panels)
@@ -6004,7 +6004,7 @@ function SolarEngine3D({
       gatePanelIds = [selectedPanelId];
     }
 
-    // ── Step 1: Tear down old state ──────────────────────────────
+    // â”€â”€ Step 1: Tear down old state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (oldType === 'gate') {
       // Remove all gate entities for this section
       const gateKeysToRemove: string[] = [];
@@ -6031,9 +6031,9 @@ function SolarEngine3D({
         }
       }
     }
-    // For solar/vinyl → anything: panels are already rendered (either normal or recolored)
+    // For solar/vinyl â†’ anything: panels are already rendered (either normal or recolored)
 
-    // ── Step 2: Apply new state ──────────────────────────────────
+    // â”€â”€ Step 2: Apply new state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (newType === 'solar') {
       // Restore normal solar panel colors
       for (const pid of sec.panelIds) {
@@ -6107,7 +6107,7 @@ function SolarEngine3D({
       sec.entityKey = gateEntityKeys[0] ?? '';
       addLog('FENCE', `Section ${sectionId} \u2192 gate ${gateSize ?? '8ft'} (${gatePanels.length} slots, opaque steel)`);
     } else if (newType === 'vinyl') {
-      // Recolor existing panels to solid dark — matches fence panel color & trim
+      // Recolor existing panels to solid dark â€” matches fence panel color & trim
       // Hide glass sheen and grid lines for clean solid look
       const vinylColor = new C.Color(0.12, 0.12, 0.14, 1.0); // dark charcoal
       for (const pid of sec.panelIds) {
@@ -6139,13 +6139,13 @@ function SolarEngine3D({
     );
     const activeCount = panelsRef.current.filter(p => activePanelIds.has(p.id)).length;
     setPanelCount(activeCount);
-    setStatusMsg(`Section ${sectionId} → ${newType} (${activeCount} active solar panels)`);
+    setStatusMsg(`Section ${sectionId} â†’ ${newType} (${activeCount} active solar panels)`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── Auto-roof placement ────────────────────────────────────────────────────
+  // â”€â”€ Auto-roof placement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // ── Plane mode ──────────────────────────────────────────────────────────
+  // â”€â”€ Plane mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handlePlaneClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -6192,7 +6192,7 @@ function SolarEngine3D({
     } catch (err: unknown) { addLog('ERROR', `handlePlaneClick: ${(err as Error).message}`); }
   }
 
-  /** @deprecated v47.152 — mode='plane' button now redirects to 'plane3d'.
+  /** @deprecated v47.152 â€” mode='plane' button now redirects to 'plane3d'.
    *  finalizePlane() uses fillRoofSegmentWithPanels() which produces panels
    *  with no planeId and no ECEF frame. Kept for compatibility only.
    *  Do NOT add new call sites. Use finalizePlane3D() instead.
@@ -6242,18 +6242,18 @@ function SolarEngine3D({
     setPanelCount(allPanels.length);
     planePtsRef.current = [];
     setPlanePtCount(0);
-    setStatusMsg(`✅ Plane: ${newPanels.length} panels placed (pitch=${pitchDeg.toFixed(1)}° az=${azimuthDeg.toFixed(1)}°)`);
+    setStatusMsg(`âœ… Plane: ${newPanels.length} panels placed (pitch=${pitchDeg.toFixed(1)}Â° az=${azimuthDeg.toFixed(1)}Â°)`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── Row placement ────────────────────────────────────────────────────────
-  // ── Row placement (Phase 4) ───────────────────────────────────────────────────────
+  // â”€â”€ Row placement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ Row placement (Phase 4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // rowLastClickRef stores click 1. Reset on tool change / address change.
   // Click 1: null ref -> store point. Click 2: has point -> finalizeRow, clear.
   function handleRowClick(viewer: any, C: any, screenPos: any) {
     const rowHit = getWorldPosition(viewer, C, screenPos);
     if (!rowHit) {
-      setStatusMsg('❌ No surface detected — click directly on the roof or ground');
+      setStatusMsg('âŒ No surface detected â€” click directly on the roof or ground');
       return;
     }
     const carto = C.Cartographic.fromCartesian(rowHit.cartesian);
@@ -6283,7 +6283,7 @@ function SolarEngine3D({
           overlayRef.current.push(m);
         }
       } catch {}
-      setStatusMsg('🟢 Row start set — click end point to place row');
+      setStatusMsg('ðŸŸ¢ Row start set â€” click end point to place row');
     } else {
       // Click 2: finalize with local ref values (no stale state)
       const startPt = rowLastClickRef.current;
@@ -6309,7 +6309,7 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── finalizeRow v47.130: unified PlaneFrame engine ──
+  // â”€â”€ finalizeRow v47.130: unified PlaneFrame engine â”€â”€
   function finalizeRow(
     viewer: any, C: any,
     p1: { lat: number; lng: number; height: number },
@@ -6319,7 +6319,7 @@ function SolarEngine3D({
     const orient = panelOrientationRef.current;
     const dims   = getPanelDims(orient);
 
-    // Convert click endpoints to ECEF — single source of truth
+    // Convert click endpoints to ECEF â€” single source of truth
     const p1ECEF = engLatLngToECEF(p1.lat, p1.lng, p1.height);
     const p2ECEF = engLatLngToECEF(p2.lat, p2.lng, p2.height);
 
@@ -6342,9 +6342,9 @@ function SolarEngine3D({
       layoutId:    `row-${Date.now()}`,
     });
     const panels = clRowResult.panels;
-    addLog('GROUND', `[CL] placePanelsControlled(ground/finalizeRow) → ${panels.length} panels (engine=${clRowResult.engineUsed})`);
+    addLog('GROUND', `[CL] placePanelsControlled(ground/finalizeRow) â†’ ${panels.length} panels (engine=${clRowResult.engineUsed})`);
 
-    // v48.11: pre-compute skipGrid from merged count — consistent rendering for all panels in batch
+    // v48.11: pre-compute skipGrid from merged count â€” consistent rendering for all panels in batch
     const skipGridFinalizeRow = (panelsRef.current.length + panels.length) > 12;
     for (const panel of panels) {
       addPanelEntity(viewer, C, panel, skipGridFinalizeRow);
@@ -6355,7 +6355,7 @@ function SolarEngine3D({
     lastRenderedPanelsRef.current = allPanels; // prevent double-render orphan
     onPanelsChange(allPanels);
     setPanelCount(allPanels.length);
-    setStatusMsg(`✅ Row: ${panels.length} panels placed (${orient}) — click to start next row`);
+    setStatusMsg(`âœ… Row: ${panels.length} panels placed (${orient}) â€” click to start next row`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
@@ -6398,7 +6398,7 @@ function SolarEngine3D({
     hideRotateHandle(); // v62: drop the floating rotate knob when selection clears
   }
 
-  // v48.12: Shared drillPick logic — returns foundId + foundEntity (or nulls)
+  // v48.12: Shared drillPick logic â€” returns foundId + foundEntity (or nulls)
   // v48.12 audit: Only matches bare panel IDs (no __ separator).
   // Racking posts, fence posts, glass, and grid-line entities all have __ in their keys
   // and must not be treated as selectable panels.
@@ -6436,24 +6436,24 @@ function SolarEngine3D({
 
   function handleSelectClick(viewer: any, C: any, screenPos: any) {
     try {
-      // v63: paint mode — a click assigns the hit panel to the active string
+      // v63: paint mode â€” a click assigns the hit panel to the active string
       // (reported to DesignStudio) instead of selecting/moving the array.
       if (paintModeRef.current) {
         const hit = pickPanelAtScreen(viewer, screenPos);
         if (hit.foundId && onPanelPaintRef.current) {
           onPanelPaintRef.current(hit.foundId);
-          setStatusMsg('🎨 Panel painted to active string');
+          setStatusMsg('ðŸŽ¨ Panel painted to active string');
           try { viewer.scene.requestRender(); } catch {}
         } else {
-          setStatusMsg('🎨 Paint mode — click a panel to assign it to the active string');
+          setStatusMsg('ðŸŽ¨ Paint mode â€” click a panel to assign it to the active string');
         }
         return;
       }
       // v31.1: drillPick finds panel entities even when occluded by terrain/3D tiles.
-      // v62: GROUP SELECTION (Figma/PowerPoint model — no modes, no new buttons).
-      //   • plain click            → select the WHOLE array (move/rotate the array)
-      //   • double-click (drill)   → then a click selects a single panel (micro-edit)
-      //   • click empty space      → clear selection AND exit any drilled-in array
+      // v62: GROUP SELECTION (Figma/PowerPoint model â€” no modes, no new buttons).
+      //   â€¢ plain click            â†’ select the WHOLE array (move/rotate the array)
+      //   â€¢ double-click (drill)   â†’ then a click selects a single panel (micro-edit)
+      //   â€¢ click empty space      â†’ clear selection AND exit any drilled-in array
       const picked = pickPanelAtScreen(viewer, screenPos);
       const foundId = picked.foundId;
       const foundEntity = picked.foundEntity;
@@ -6470,7 +6470,7 @@ function SolarEngine3D({
       const groupKey = groupKeyOf(panel);
       const RED = new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92));
 
-      // Drilled INTO this array → a click selects just the one clicked panel.
+      // Drilled INTO this array â†’ a click selects just the one clicked panel.
       if (drilledGroupKeyRef.current && drilledGroupKeyRef.current === groupKey) {
         clearPanelSelection();
         if (foundEntity.box) foundEntity.box.material = RED;
@@ -6479,12 +6479,12 @@ function SolarEngine3D({
         selectedPanelIdsRef.current = new Set([foundId]);
         setSelectedPanelIds(new Set([foundId]));
         showRotateHandle(viewer, C); // single panel can move AND rotate
-        setStatusMsg('📌 1 panel — drag to move · drag ⟳ to rotate · Delete to remove · empty space to exit');
+        setStatusMsg('ðŸ“Œ 1 panel â€” drag to move Â· drag âŸ³ to rotate Â· Delete to remove Â· empty space to exit');
         try { viewer.scene.requestRender(); } catch {}
         return;
       }
 
-      // DEFAULT → select the WHOLE array (all panels sharing this group key).
+      // DEFAULT â†’ select the WHOLE array (all panels sharing this group key).
       drilledGroupKeyRef.current = null;
       clearPanelSelection();
       const arrayPanels = (groupKey
@@ -6500,15 +6500,15 @@ function SolarEngine3D({
       setSelectedPanelIds(ids);
       selectedPanelIdRef.current = foundId;
       setSelectedPanelId(foundId);
-      showRotateHandle(viewer, C); // floating ⟳ knob to grab-rotate the array
-      setStatusMsg(`📐 Array selected — ${ids.size} panel${ids.size !== 1 ? 's' : ''} · DRAG to move · drag the ⟳ knob to rotate · double-click to edit one panel`);
+      showRotateHandle(viewer, C); // floating âŸ³ knob to grab-rotate the array
+      setStatusMsg(`ðŸ“ Array selected â€” ${ids.size} panel${ids.size !== 1 ? 's' : ''} Â· DRAG to move Â· drag the âŸ³ knob to rotate Â· double-click to edit one panel`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleSelectClick: ${(err as Error).message}`); }
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  //  v62 — Array manipulation: grab-to-move + grab-to-rotate (mouse), shared core
-  // ════════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  v62 â€” Array manipulation: grab-to-move + grab-to-rotate (mouse), shared core
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   // Centroid / normal / eave axis of the current selection, all in ECEF.
   function arrayCentroidECEF(C: any, ids: Set<string>): any | null {
@@ -6542,7 +6542,7 @@ function SolarEngine3D({
   // Apply a per-panel transform to every selected panel, re-add entities directly
   // (selection colour survives via addPanelEntity), re-render rails, and pre-sync
   // lastRenderedPanelsRef so the [panels] diff is a no-op (no re-fill, no blink).
-  // commit=false during a live drag (skip onPanelsChange spam — commit once on drop).
+  // commit=false during a live drag (skip onPanelsChange spam â€” commit once on drop).
   function applyArrayTransform(
     viewer: any, C: any, ids: Set<string>,
     xform: (posCart: any, panel: PlacedPanel) => { pos: any; frameQuat?: { x: number; y: number; z: number; w: number }; u?: { x: number; y: number; z: number } },
@@ -6560,10 +6560,10 @@ function SolarEngine3D({
         lng:    C.Math.toDegrees(carto.longitude),
         height: carto.height };
       // frameQuat = explicit world orientation for in-plane-rotated panels. tilt/
-      // azimuth (face direction → energy) are unchanged by in-plane rotation, so we
-      // don't touch them — only the footprint yaw spins.
+      // azimuth (face direction â†’ energy) are unchanged by in-plane rotation, so we
+      // don't touch them â€” only the footprint yaw spins.
       if (r.frameQuat) next.frameQuat = r.frameQuat;
-      // Rotated eave axis → keeps rails (which derive u/v from ecefU) aligned.
+      // Rotated eave axis â†’ keeps rails (which derive u/v from ecefU) aligned.
       if (r.u) { next.ecefUx = r.u.x; next.ecefUy = r.u.y; next.ecefUz = r.u.z; }
       return next;
     });
@@ -6574,7 +6574,7 @@ function SolarEngine3D({
       if (p) addPanelEntity(viewer, C, p, skipGrid);
     });
     panelsRef.current = updated;
-    lastRenderedPanelsRef.current = updated;     // pre-sync → [panels] diff is a no-op (no blink)
+    lastRenderedPanelsRef.current = updated;     // pre-sync â†’ [panels] diff is a no-op (no blink)
     try { renderRoofRails(viewer, C, updated); } catch (e) { handleCesiumError('renderRoofRails xform', e, true); }
     if (commit) { onPanelsChange(updated); showRotateHandle(viewer, C); }
     try { viewer.scene.requestRender(); } catch {}
@@ -6587,7 +6587,7 @@ function SolarEngine3D({
     }), commit);
   }
 
-  // The body→world orientation quaternion a panel renders with TODAY (same HPR math
+  // The bodyâ†’world orientation quaternion a panel renders with TODAY (same HPR math
   // as addPanelEntity). Used as the base we spin from on the first rotation.
   function baseQuatFromHPR(C: any, pos: any, panel: PlacedPanel): any {
     let heading: number, pitchRad: number;
@@ -6626,7 +6626,7 @@ function SolarEngine3D({
     }, commit);
   }
 
-  // ── Floating rotate knob (the ⟳ handle) shown above a selected array ──────────
+  // â”€â”€ Floating rotate knob (the âŸ³ handle) shown above a selected array â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function showRotateHandle(viewer: any, C: any) {
     hideRotateHandle();
     const ids = selectedPanelIdsRef.current;
@@ -6665,7 +6665,7 @@ function SolarEngine3D({
       point: { pixelSize: 20, color: C.Color.fromCssColorString('#00e5ff'),
                outlineColor: C.Color.fromCssColorString('#00343d'), outlineWidth: 3,
                disableDepthTestDistance: Number.POSITIVE_INFINITY },
-      label: { text: '⟳', font: 'bold 16px sans-serif', fillColor: C.Color.BLACK,
+      label: { text: 'âŸ³', font: 'bold 16px sans-serif', fillColor: C.Color.BLACK,
                pixelOffset: new C.Cartesian2(0, 1), disableDepthTestDistance: Number.POSITIVE_INFINITY },
     });
     try { viewer.scene.requestRender(); } catch {}
@@ -6680,7 +6680,7 @@ function SolarEngine3D({
     rotateHandleLineRef.current = null;
   }
 
-  // ── Keyboard fallbacks (mouse drag is primary) ───────────────────────────────
+  // â”€â”€ Keyboard fallbacks (mouse drag is primary) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function moveSelectedArrayScreen(screenDx: number, screenDy: number) {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
@@ -6706,7 +6706,7 @@ function SolarEngine3D({
     } catch { dir = null; }
     if (!dir) return;
     translateArrayBy(viewer, C, ids, C.Cartesian3.multiplyByScalar(dir, STEP_M, new C.Cartesian3()), true);
-    setStatusMsg(`Array moved ${Math.round(STEP_M * 100)}cm — drag to move · drag ⟳ to rotate`);
+    setStatusMsg(`Array moved ${Math.round(STEP_M * 100)}cm â€” drag to move Â· drag âŸ³ to rotate`);
   }
   function rotateSelectedArray(deg: number) {
     const viewer = viewerRef.current;
@@ -6718,10 +6718,10 @@ function SolarEngine3D({
     const N   = arrayNormalECEF(C, ids);
     if (!cen || !N) { setStatusMsg('Rotate needs a 3D-plane array'); return; }
     rotateArrayBy(viewer, C, ids, deg * Math.PI / 180, cen, N, true);
-    setStatusMsg(`Array rotated ${deg > 0 ? '+' : ''}${deg}° — or drag the ⟳ handle`);
+    setStatusMsg(`Array rotated ${deg > 0 ? '+' : ''}${deg}Â° â€” or drag the âŸ³ handle`);
   }
 
-  // v62: SNAP a just-moved single panel into the nearest array's grid — forgiving.
+  // v62: SNAP a just-moved single panel into the nearest array's grid â€” forgiving.
   // Finds the nearest other roof panel, ADOPTS its plane frame (so a panel dragged
   // onto a different plane lies flat with rails the right way), and rounds the drop
   // to that plane's grid (step = average of the two panel sizes, so a landscape panel
@@ -6741,7 +6741,7 @@ function SolarEngine3D({
       const d = C.Cartesian3.distanceSquared(pPos, qp);
       if (d < best) { best = d; ref = q; }
     }
-    if (!ref) return; // nothing to snap to (lone panel) — leave where dropped
+    if (!ref) return; // nothing to snap to (lone panel) â€” leave where dropped
 
     const refPos = safeCartesian3(C, ref.lng, ref.lat, ref.height ?? 0);
     const u = C.Cartesian3.normalize(new C.Cartesian3(ref.ecefUx, ref.ecefUy, ref.ecefUz), new C.Cartesian3());
@@ -6755,7 +6755,7 @@ function SolarEngine3D({
     let su = Math.round(du / stepU) * stepU;
     let sv = Math.round(dv / stepV) * stepV;
     if (Math.abs(su) < 1e-3 && Math.abs(sv) < 1e-3) {
-      // landed on the ref cell — step one cell along the drag direction
+      // landed on the ref cell â€” step one cell along the drag direction
       if (Math.abs(du) >= Math.abs(dv)) su = stepU * (du >= 0 ? 1 : -1);
       else                              sv = stepV * (dv >= 0 ? 1 : -1);
     }
@@ -6788,10 +6788,10 @@ function SolarEngine3D({
     panelsRef.current = updated;
     lastRenderedPanelsRef.current = updated;
     try { renderRoofRails(viewer, C, updated); } catch {}
-    setStatusMsg(ref.planeId === panel.planeId ? 'Panel snapped to the array grid' : '↳ Panel moved to a new plane & snapped to its grid');
+    setStatusMsg(ref.planeId === panel.planeId ? 'Panel snapped to the array grid' : 'â†³ Panel moved to a new plane & snapped to its grid');
   }
 
-  // v48.12: SHIFT+click — toggle panel in/out of multi-select Set
+  // v48.12: SHIFT+click â€” toggle panel in/out of multi-select Set
   function handleShiftSelectClick(viewer: any, C: any, screenPos: any) {
     try {
       const { foundId, foundEntity } = pickPanelAtScreen(viewer, screenPos);
@@ -6807,7 +6807,7 @@ function SolarEngine3D({
           setSelectedPanelId(selectedPanelIdRef.current);
         }
       } else {
-        // Add this panel — highlight amber for multi-select
+        // Add this panel â€” highlight amber for multi-select
         foundEntity.box.material = new C.ColorMaterialProperty(
           C.Color.fromCssColorString('#ffaa00').withAlpha(0.92)
         );
@@ -6822,7 +6822,7 @@ function SolarEngine3D({
       if (count === 0) {
         setStatusMsg('Selection cleared');
       } else {
-        setStatusMsg(`📌 ${count} panel${count > 1 ? 's' : ''} selected | Press Delete to remove all`);
+        setStatusMsg(`ðŸ“Œ ${count} panel${count > 1 ? 's' : ''} selected | Press Delete to remove all`);
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleShiftSelectClick: ${(err as Error).message}`); }
@@ -6839,7 +6839,7 @@ function SolarEngine3D({
     const newPanels = panelsRef.current.filter(p => !idSet.has(p.id));
     panelsRef.current = newPanels;
     lastRenderedPanelsRef.current = newPanels;
-    // v62: rebuild rails from the remaining panels — otherwise the deleted panel's
+    // v62: rebuild rails from the remaining panels â€” otherwise the deleted panel's
     // rail run stays under empty roof (rails are separate entities, not removed above).
     const C = (window as any).Cesium;
     if (C) { try { renderRoofRails(viewer, C, newPanels); } catch {} }
@@ -6849,19 +6849,19 @@ function SolarEngine3D({
     setSelectedPanelIds(new Set());
     selectedPanelIdRef.current = null;
     setSelectedPanelId(null);
-    setStatusMsg(`🗑️ ${count} panel${count > 1 ? 's' : ''} deleted`);
+    setStatusMsg(`ðŸ—‘ï¸ ${count} panel${count > 1 ? 's' : ''} deleted`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // Legacy single-delete alias — kept for any direct calls that may remain
+  // Legacy single-delete alias â€” kept for any direct calls that may remain
   function deleteSelectedPanel() { deleteSelectedPanels(); }
 
   /**
-   * renderGroundRackingOutput — v50.0 SINGLE RENDER PATH
+   * renderGroundRackingOutput â€” v50.0 SINGLE RENDER PATH
    *
-   * THE ONLY place that converts GroundSystemOutput → Cesium entities.
+   * THE ONLY place that converts GroundSystemOutput â†’ Cesium entities.
    * Both placeGroundArrayRow (preview) and addGroundRacking (rebuild) call this.
-   * Renderer ONLY consumes engine output — generates NO geometry itself.
+   * Renderer ONLY consumes engine output â€” generates NO geometry itself.
    * Returns number of members rendered, or 0 if validation failed.
    */
   function renderGroundRackingOutput(
@@ -6872,15 +6872,15 @@ function SolarEngine3D({
   ): number {
     // VALIDATION GATE: fail-fast if engine flagged build as invalid
     if (!result.valid) {
-      addLog('WARN', `[RENDERER] ${contextLabel}: build INVALID — ${result.errors.join('; ')} — NOT rendering`);
+      addLog('WARN', `[RENDERER] ${contextLabel}: build INVALID â€” ${result.errors.join('; ')} â€” NOT rendering`);
       return 0;
     }
     if (result.members.length === 0) {
-      addLog('WARN', `[RENDERER] ${contextLabel}: 0 members — nothing to render`);
+      addLog('WARN', `[RENDERER] ${contextLabel}: 0 members â€” nothing to render`);
       return 0;
     }
 
-    // v6.2.0 → v6.2.2-fix: Only clear racking entities whose keys will be
+    // v6.2.0 â†’ v6.2.2-fix: Only clear racking entities whose keys will be
     // replaced by the incoming members. The old blanket "__gnd__" wipe destroyed
     // racking from previously-finalized ground mounts when building a new one.
     const incomingKeys = new Set(result.members.map(m => m.key));
@@ -6918,8 +6918,8 @@ function SolarEngine3D({
           box: {
             dimensions: (() => {
               // Apply visual thickness scaling to structural members only.
-              // dims[1] = LENGTH (EW span) — never scaled.
-              // dims[0] = cross-section width, dims[2] = cross-section height — scale for readability.
+              // dims[1] = LENGTH (EW span) â€” never scaled.
+              // dims[0] = cross-section width, dims[2] = cross-section height â€” scale for readability.
               const needsScale = m.memberType === 'strongback' || m.memberType === 'powerrail' || m.memberType === 'brace';
               const s = needsScale ? RENDER_SCALE_STRUCTURAL : 1.0;
               return new C.Cartesian3(m.dims[0] * s, m.dims[1], m.dims[2] * s);
@@ -6940,16 +6940,16 @@ function SolarEngine3D({
   }
 
   /**
-   * addGroundRacking — v49.0 GROUND MOUNT REALITY ENGINE
+   * addGroundRacking â€” v49.0 GROUND MOUNT REALITY ENGINE
    *
    * ROUTING GATE: ALL ground placement flows through groundMountRealityEngine.ts
    * Roof / fence systems are COMPLETELY UNTOUCHED.
    *
    * Engine: lib/3d/ground/groundMountRealityEngine.ts
-   * - STRUCTURE-FIRST: bays → piles → rails → module members → panels
+   * - STRUCTURE-FIRST: bays â†’ piles â†’ rails â†’ module members â†’ panels
    * - PLP: EXACTLY 2 portrait rows, 6.10m bay spans, driven piles
    * - IronRidge XR: EXACTLY 4 landscape rows, 3.66m bay spans
-   * - basePlaneZ LOCKED at first click — never re-sampled from terrain
+   * - basePlaneZ LOCKED at first click â€” never re-sampled from terrain
    */
   function addGroundRacking(
     viewer: any,
@@ -6959,15 +6959,15 @@ function SolarEngine3D({
   ) {
     if (!showRackingRef.current || panels.length === 0) return;
     try {
-      // ── ROUTING GATE ──────────────────────────────────────────────────────
-      // systemType === 'ground' → groundMountRealityEngine (isolated, new)
-      // All other systemTypes → UNTOUCHED (roof/fence use their own paths)
+      // â”€â”€ ROUTING GATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // systemType === 'ground' â†’ groundMountRealityEngine (isolated, new)
+      // All other systemTypes â†’ UNTOUCHED (roof/fence use their own paths)
       const style       = groundMountStyleRef.current ?? 'pipe';
       const tiltDeg     = panels[0]?.tilt    ?? 20;
       const az          = panels[0]?.azimuth ?? 180;
       const orient      = ((panels[0] as any).orientation ?? panelOrientationRef.current ?? 'portrait') as 'portrait' | 'landscape';
 
-      // Cast PlacedPanel[] → GroundPanel[] (compatible shape, add systemType/orientation)
+      // Cast PlacedPanel[] â†’ GroundPanel[] (compatible shape, add systemType/orientation)
       const groundPanels: GroundPanel[] = panels.map(p => ({
         id:          p.id,
         lat:         p.lat,
@@ -7000,7 +7000,7 @@ function SolarEngine3D({
       // v6.2.0: Debug log summary only
       addLog('GROUND', `[ENGINE] ${result.debugLog.length} debug messages, ${result.members.length} members, valid=${result.valid}`);
 
-      // v50.0: Single render path — renderer consumes ONLY engine output
+      // v50.0: Single render path â€” renderer consumes ONLY engine output
       const rendered = renderGroundRackingOutput(viewer, C, result, `addGroundRacking[${style}]`);
       addLog('GROUND', `[v50.0] addGroundRacking: ${rendered} members rendered valid=${result.valid} groundZ=${result.groundZ.toFixed(3)}`);
 
@@ -7021,7 +7021,7 @@ function SolarEngine3D({
       // v62: with an array selected, arrow keys MOVE it (screen-relative) and
       // , / . ROTATE it about its plane normal.
       if (modeRef.current === 'select' && selectedPanelIdsRef.current.size > 0) {
-        // screenDx/screenDy: window coords (+x right, +y DOWN) → up arrow = -y.
+        // screenDx/screenDy: window coords (+x right, +y DOWN) â†’ up arrow = -y.
         const moves: Record<string, [number, number]> = {
           ArrowRight: [ 1,  0], ArrowLeft: [-1,  0],
           ArrowUp:    [ 0, -1], ArrowDown: [ 0,  1],
@@ -7030,7 +7030,7 @@ function SolarEngine3D({
           e.preventDefault();
           moveSelectedArrayScreen(moves[e.key][0], moves[e.key][1]);
         } else if (!e.repeat && (e.key === ',' || e.key === '<')) {
-          e.preventDefault(); rotateSelectedArray(-2);   // CCW (no key-repeat → no runaway spin)
+          e.preventDefault(); rotateSelectedArray(-2);   // CCW (no key-repeat â†’ no runaway spin)
         } else if (!e.repeat && (e.key === '.' || e.key === '>')) {
           e.preventDefault(); rotateSelectedArray(2);    // CW
         }
@@ -7073,7 +7073,7 @@ function SolarEngine3D({
           flippedArrowsRef.current.clear();
           blockPtsRef.current = [];
           setBlockPtCount(0);
-          setStatusMsg('🧱 Block cancelled');
+          setStatusMsg('ðŸ§± Block cancelled');
         }
         clearGhostPanel();
       }
@@ -7081,7 +7081,7 @@ function SolarEngine3D({
     window.addEventListener('keydown', onKey);
   }
 
-  // ── Measure tool ─────────────────────────────────────────────────────────
+  // â”€â”€ Measure tool â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleMeasureClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -7150,13 +7150,13 @@ function SolarEngine3D({
             }
           }
         } catch {}
-        setStatusMsg(`📏 Distance: ${distStrFull} (horizontal: ${horizStrFull})`);
+        setStatusMsg(`ðŸ“ Distance: ${distStrFull} (horizontal: ${horizStrFull})`);
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleMeasureClick: ${(err as Error).message}`); }
   }
 
-  // ── v66: Measurements tool — multi-pair (Aurora TIER 2 #10) ─────────────
+  // â”€â”€ v66: Measurements tool â€” multi-pair (Aurora TIER 2 #10) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleMeasurementsClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -7197,7 +7197,7 @@ function SolarEngine3D({
         const bundle = renderMeasurement(viewer, C, m);
         if (bundle) {
           measurementsRef.current.push(m);
-          setStatusMsg(`📏 Measurement ${measurementsRef.current.length}: ${m.slopeDistM.toFixed(1)} m / ${(m.slopeDistM * 3.28084).toFixed(1)} ft`);
+          setStatusMsg(`ðŸ“ Measurement ${measurementsRef.current.length}: ${m.slopeDistM.toFixed(1)} m / ${(m.slopeDistM * 3.28084).toFixed(1)} ft`);
         }
         measurePtsRef.current = [];
         setMeasurePtCount(0);
@@ -7208,7 +7208,7 @@ function SolarEngine3D({
     }
   }
 
-  // ── v66: Ruler tool — click+drag, single persistent measurement ─────────
+  // â”€â”€ v66: Ruler tool â€” click+drag, single persistent measurement â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleRulerDown(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -7298,7 +7298,7 @@ function SolarEngine3D({
       if (bundle) {
         rulerEntitiesRef.current = bundle;
         rulerRef.current = ruler;
-        setStatusMsg(`📐 Ruler: ${ruler.slopeDistM.toFixed(1)} m / ${(ruler.slopeDistM * 3.28084).toFixed(1)} ft`);
+        setStatusMsg(`ðŸ“ Ruler: ${ruler.slopeDistM.toFixed(1)} m / ${(ruler.slopeDistM * 3.28084).toFixed(1)} ft`);
       }
       try { viewer.scene.requestRender(); } catch { /* ignore */ }
     } catch (err: unknown) {
@@ -7310,9 +7310,9 @@ function SolarEngine3D({
     }
   }
 
-  // ── v65: Block tool — line-trace mode (click N points to define any polygon,
+  // â”€â”€ v65: Block tool â€” line-trace mode (click N points to define any polygon,
   //   right-click to finalize). Rendered as a Cesium extruded polygon (3D prism
-  //   with real vertical walls, visible from any angle). ──
+  //   with real vertical walls, visible from any angle). â”€â”€
   // v65.1: each click stores its actual elevation (where the user clicked on the
   // satellite drape or 3D tile), not 0. The prism's base height is the average
   // of the click heights so the walls sit on the visible surface.
@@ -7334,7 +7334,7 @@ function SolarEngine3D({
 
       // Update the in-progress preview polyline so the user sees the line trace.
       // Use the actual click elevations (no clampToGround) so the polyline is
-      // at the right height — not buried below the visible drape.
+      // at the right height â€” not buried below the visible drape.
       if (blockPreviewRef.current) {
         try { viewer.entities.remove(blockPreviewRef.current); } catch { /* ignore */ }
         blockPreviewRef.current = null;
@@ -7406,9 +7406,9 @@ function SolarEngine3D({
       }
 
       if (blockPtsRef.current.length === 1) {
-        setStatusMsg(`🧱 Block point 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}, h=${pt.h.toFixed(1)}m) — click more points, right-click to finish`);
+        setStatusMsg(`ðŸ§± Block point 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}, h=${pt.h.toFixed(1)}m) â€” click more points, right-click to finish`);
       } else {
-        setStatusMsg(`🧱 ${blockPtsRef.current.length} block points — right-click to finish (need 3+), Esc to cancel`);
+        setStatusMsg(`ðŸ§± ${blockPtsRef.current.length} block points â€” right-click to finish (need 3+), Esc to cancel`);
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleBlockClick: ${(err as Error).message}`); }
@@ -7421,7 +7421,7 @@ function SolarEngine3D({
   function finalizeBlock(viewer: any, C: any) {
     const pts = blockPtsRef.current;
     if (pts.length < 3) {
-      setStatusMsg('🧱 Block needs at least 3 points — keep clicking, then right-click to finish');
+      setStatusMsg('ðŸ§± Block needs at least 3 points â€” keep clicking, then right-click to finish');
       return;
     }
     // Clean up the preview polyline + dots
@@ -7434,7 +7434,7 @@ function SolarEngine3D({
       blockPreviewRef.current = null;
     }
     const eaveHeightM = newBlockEaveHeightM; // user-settable eave height for new blocks
-    // Average elevation of the click points — that's the ground level for the prism.
+    // Average elevation of the click points â€” that's the ground level for the prism.
     // The drape at Pocahontas IL is ~136m above the WGS84 ellipsoid; using the
     // average click height puts the bottom of the prism flush with the drape.
     const groundLevelM = pts.reduce((s, p) => s + (p.h || 0), 0) / pts.length;
@@ -7443,7 +7443,7 @@ function SolarEngine3D({
       .map(p => safeCartesian3(C, p.lng, p.lat, p.h || 0))
       .filter((p): p is any => p != null);
     if (polyPositions.length < 3) {
-      setStatusMsg('🧱 Block: failed to build polygon — try again');
+      setStatusMsg('ðŸ§± Block: failed to build polygon â€” try again');
       blockPtsRef.current = [];
       setBlockPtCount(0);
       return;
@@ -7451,8 +7451,8 @@ function SolarEngine3D({
     // Centroid for the handle = average of the points
     const centroidLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
     const centroidLng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
-    // Compute approximate area in m² for the info box (using the lat/lng bounding box
-    // as a rough estimate — accurate area would need a polygon area algorithm).
+    // Compute approximate area in mÂ² for the info box (using the lat/lng bounding box
+    // as a rough estimate â€” accurate area would need a polygon area algorithm).
     const minLat = Math.min(...pts.map(p => p.lat));
     const maxLat = Math.max(...pts.map(p => p.lat));
     const minLng = Math.min(...pts.map(p => p.lng));
@@ -7461,7 +7461,7 @@ function SolarEngine3D({
     const widthM  = Math.abs(maxLng - minLng) * 111_320 * Math.cos(midLat * Math.PI / 180);
     const depthM  = Math.abs(maxLat - minLat) * 111_320;
     const approxAreaM2 = widthM * depthM;
-    // 3D extruded polygon — a real prism with vertical walls.
+    // 3D extruded polygon â€” a real prism with vertical walls.
     // v65.2: perPositionHeight:true so each wall goes from the individual
     // click elevation (matching the drape) up to (click_elevation + eaveHeightM).
     // This avoids Z-fighting with the drape at the bottom and makes the
@@ -7489,7 +7489,7 @@ function SolarEngine3D({
       description: `<table class="cesium-infoBox-defaultTable">
         <tr><th>Block</th><td>${pts.length} footprint points, eave ${eaveHeightM.toFixed(1)}m</td></tr>
         <tr><th>Ground level</th><td>${groundLevelM.toFixed(1)}m (avg click elevation)</td></tr>
-        <tr><th>Approx footprint</th><td>${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m ≈ ${approxAreaM2.toFixed(0)} m²</td></tr>
+        <tr><th>Approx footprint</th><td>${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m â‰ˆ ${approxAreaM2.toFixed(0)} mÂ²</td></tr>
         <tr><th>Centroid</th><td>${centroidLat.toFixed(6)}, ${centroidLng.toFixed(6)}</td></tr>
       </table>`,
     });
@@ -7499,9 +7499,9 @@ function SolarEngine3D({
     if (centroidCartesian) {
       try { (prismEntity as any).__centroidCart = centroidCartesian; } catch { /* ignore */ }
     }
-    // Drag handle on top of the prism — small bright box the user can grab
+    // Drag handle on top of the prism â€” small bright box the user can grab
     // to resize the block height by dragging up/down. The handle is at
-    // (centroid_lat, centroid_lng, groundLevel + eaveHeightM + 0.3) and is 0.4m³.
+    // (centroid_lat, centroid_lng, groundLevel + eaveHeightM + 0.3) and is 0.4mÂ³.
     const handlePos = safeCartesian3(C, centroidLng, centroidLat, groundLevelM + eaveHeightM + 0.3);
     const handleEntity = viewer.entities.add({
       id: `block-handle-${Date.now()}`,
@@ -7528,10 +7528,10 @@ function SolarEngine3D({
       vertices: pts.map(p => ({ lat: p.lat, lng: p.lng, h: p.h || 0 })),
       blockExtrudeHeightM: eaveHeightM,
     }]);
-    addLog('BLOCK', `Finalized: ${pts.length} points, ≈${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ground ${groundLevelM.toFixed(1)}m, eave ${eaveHeightM}m`);
-    setStatusMsg(`🧱 Block placed — ${pts.length} footprint points, eave ${eaveHeightM}m. Click more points to add another, or Esc.`);
+    addLog('BLOCK', `Finalized: ${pts.length} points, â‰ˆ${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m, ground ${groundLevelM.toFixed(1)}m, eave ${eaveHeightM}m`);
+    setStatusMsg(`ðŸ§± Block placed â€” ${pts.length} footprint points, eave ${eaveHeightM}m. Click more points to add another, or Esc.`);
     // v68: drop the in-progress segment arrows now that the prism
-    // takes over. We do NOT clear the flip set — if the user starts
+    // takes over. We do NOT clear the flip set â€” if the user starts
     // a new block immediately, their previous flips don't carry
     // over (the new edges get default normalDir), but the set is
     // also cleaned on tool change.
@@ -7542,7 +7542,7 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── v64: Gable roof tool — 2 eave corners, render 2 sloped faces ──
+  // â”€â”€ v64: Gable roof tool â€” 2 eave corners, render 2 sloped faces â”€â”€
   // The eave is a rectangle in lat/lng. The ridge runs along the long edge
   // (the longer of the two eave dimensions) at the rectangle centroid. Two
   // sloped polygons (south face + north face) meet at the ridge.
@@ -7568,7 +7568,7 @@ function SolarEngine3D({
         const { sw, ne, ridgeA, ridgeB, ridgeRiseM, longIsLng, eaveSW, eaveSE, eaveNW, eaveNE } = g;
         const { widthM, depthM } = computeBlockDimensions(sw, ne, eaveHeightM);
         if (widthM < 0.5 || depthM < 0.5) {
-          setStatusMsg('Gable: eave too small (<0.5m) — try again with a bigger rectangle');
+          setStatusMsg('Gable: eave too small (<0.5m) â€” try again with a bigger rectangle');
           gablePtsRef.current = [];
           setGablePtCount(0);
           return;
@@ -7581,7 +7581,7 @@ function SolarEngine3D({
         const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeA.h);
         const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeB.h);
         if (!swC || !seC || !nwC || !neC || !rAC || !rBC) {
-          setStatusMsg('Gable: failed to compute 3D positions — try again');
+          setStatusMsg('Gable: failed to compute 3D positions â€” try again');
           gablePtsRef.current = [];
           setGablePtCount(0);
           return;
@@ -7590,7 +7590,7 @@ function SolarEngine3D({
         // Face 1: from eave on one side to ridge
         // Face 2: from eave on the other side to ridge
         const faceAPositions = longIsLng
-          ? [swC, seC, rBC, rAC]   // south face (low latitude) — eave SW→SE, ridge A→B
+          ? [swC, seC, rBC, rAC]   // south face (low latitude) â€” eave SWâ†’SE, ridge Aâ†’B
           : [swC, nwC, rAC, rBC];  // west face
         const faceBPositions = longIsLng
           ? [nwC, neC, rBC, rAC]   // north face (high latitude)
@@ -7657,18 +7657,18 @@ function SolarEngine3D({
           eaveHeightM,
           pitchDeg: roofPitchDeg,
         }]);
-        addLog('GABLE', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${roofPitchDeg}°`);
-        setStatusMsg(`🏠 Gable placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge ${ridgeRiseM.toFixed(1)}m up — click again to place another`);
+        addLog('GABLE', `Placed ${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${roofPitchDeg}Â°`);
+        setStatusMsg(`ðŸ  Gable placed: ${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m eave, ridge ${ridgeRiseM.toFixed(1)}m up â€” click again to place another`);
         gablePtsRef.current = [];
         setGablePtCount(0);
       } else {
-        setStatusMsg(`🏠 Eave corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click corner 2 (NE)`);
+        setStatusMsg(`ðŸ  Eave corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) â€” click corner 2 (NE)`);
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleGableClick: ${(err as Error).message}`); }
   }
 
-  // ── v64: Hip roof tool — 2 eave corners, 4 sloped faces meeting at a short ridge ──
+  // â”€â”€ v64: Hip roof tool â€” 2 eave corners, 4 sloped faces meeting at a short ridge â”€â”€
   // The ridge is set back from BOTH short eave edges (typical hip setback = 1/3 of short edge).
   // 4 faces: 2 trapezoid slopes (long sides) + 2 triangular hip ends (short sides).
   function handleHipClick(viewer: any, C: any, screenPos: any) {
@@ -7693,7 +7693,7 @@ function SolarEngine3D({
         const { sw, ne, ridgeA, ridgeB, ridgeRiseM, hipSetbackM, longIsLng, eaveSW, eaveSE, eaveNW, eaveNE } = h;
         const { widthM, depthM } = computeBlockDimensions(sw, ne, eaveHeightM);
         if (widthM < 0.5 || depthM < 0.5) {
-          setStatusMsg('Hip: eave too small (<0.5m) — try again with a bigger rectangle');
+          setStatusMsg('Hip: eave too small (<0.5m) â€” try again with a bigger rectangle');
           hipPtsRef.current = [];
           setHipPtCount(0);
           return;
@@ -7703,24 +7703,24 @@ function SolarEngine3D({
         const seC = safeCartesian3(C, eaveSE.lng, eaveSE.lat, eaveSE.h);
         const nwC = safeCartesian3(C, eaveNW.lng, eaveNW.lat, eaveNW.h);
         const neC = safeCartesian3(C, eaveNE.lng, eaveNE.lat, eaveNE.h);
-        // Ridge endpoints — at the centroid, set back from the short edges by hipSetback
+        // Ridge endpoints â€” at the centroid, set back from the short edges by hipSetback
         const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeA.h);
         const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeB.h);
         if (!swC || !seC || !nwC || !neC || !rAC || !rBC) {
-          setStatusMsg('Hip: failed to compute 3D positions — try again');
+          setStatusMsg('Hip: failed to compute 3D positions â€” try again');
           hipPtsRef.current = [];
           setHipPtCount(0);
           return;
         }
         // 4 faces:
-        //   - 2 trapezoid slopes (south slope: SW→SE→rB→rA, north slope: NW→NE→rB→rA)
-        //   - 2 triangular hip ends (south end: SW→SE→rA is wrong, actually SW→hipCorner→SE where
+        //   - 2 trapezoid slopes (south slope: SWâ†’SEâ†’rBâ†’rA, north slope: NWâ†’NEâ†’rBâ†’rA)
+        //   - 2 triangular hip ends (south end: SWâ†’SEâ†’rA is wrong, actually SWâ†’hipCornerâ†’SE where
         //     hipCorner is the ridge endpoint A on the south side)
         // For the hip ends, the triangle is (eave SW corner, eave SE corner, ridge A). But that's
         // only correct for the LONG-axis sides. For a true hip:
-        //   - South face (long axis, south side of ridge): eave SW, eave SE, ridge B, ridge A — but
+        //   - South face (long axis, south side of ridge): eave SW, eave SE, ridge B, ridge A â€” but
         //     we want the OUTSIDE of the slope. The slope is a trapezoid.
-        //   - South end (short axis, south end of ridge): eave SW, eave SE, ridge A — triangle.
+        //   - South end (short axis, south end of ridge): eave SW, eave SE, ridge A â€” triangle.
         // We have 4 slopes total: 2 long-axis trapezoids (south slope + north slope) + 2 short-axis
         // triangle hip ends (south hip + north hip). But for a true hip, the 2 long-axis faces are
         // already trapezoids (ridge is shorter than eave), and the 2 short-axis faces are triangles.
@@ -7774,18 +7774,18 @@ function SolarEngine3D({
           eaveHeightM,
           pitchDeg: roofPitchDeg,
         }]);
-        addLog('HIP', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m, setback ${hipSetbackM.toFixed(2)}m`);
-        setStatusMsg(`🏠 Hip placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ridge ${ridgeRiseM.toFixed(1)}m up, setback ${hipSetbackM.toFixed(1)}m — click again to place another`);
+        addLog('HIP', `Placed ${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m, setback ${hipSetbackM.toFixed(2)}m`);
+        setStatusMsg(`ðŸ  Hip placed: ${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m, ridge ${ridgeRiseM.toFixed(1)}m up, setback ${hipSetbackM.toFixed(1)}m â€” click again to place another`);
         hipPtsRef.current = [];
         setHipPtCount(0);
       } else {
-        setStatusMsg(`🏠 Eave corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click corner 2 (NE)`);
+        setStatusMsg(`ðŸ  Eave corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) â€” click corner 2 (NE)`);
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleHipClick: ${(err as Error).message}`); }
   }
 
-  // ── v64: Tree tool — single click drops a decorative tree (sphere + trunk) ──
+  // â”€â”€ v64: Tree tool â€” single click drops a decorative tree (sphere + trunk) â”€â”€
   // Decorative only; doesn't affect solar production. Used to add visual context
   // around a house schematic, matching the 3D-After-at-Noon reference image.
   function handleTreeClick(viewer: any, C: any, screenPos: any) {
@@ -7843,12 +7843,12 @@ function SolarEngine3D({
         vertices: [{ lat, lng, h: 0 }],
       }]);
       addLog('TREE', `Placed at (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
-      setStatusMsg(`\u{1F333} Tree placed at (${lat.toFixed(5)}, ${lng.toFixed(5)}) — click to place another`);
+      setStatusMsg(`\u{1F333} Tree placed at (${lat.toFixed(5)}, ${lng.toFixed(5)}) â€” click to place another`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleTreeClick: ${(err as Error).message}`); }
   }
 
-  // ── Ghost panel preview (sequential auto-connect) ────────────────────────
+  // â”€â”€ Ghost panel preview (sequential auto-connect) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function showGhostPanel(viewer: any, C: any, lastLat: number, lastLng: number, lastH: number, tiltDeg: number, azimuthDeg: number) {
     if (ghostEntityRef.current) { try { viewer.entities.remove(ghostEntityRef.current); } catch {} ghostEntityRef.current = null; }
     const orient = panelOrientationRef.current;
@@ -7890,25 +7890,25 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── Auto Fill: fill all eligible roof segments ────────────────────────────────────────────────────────
+  // â”€â”€ Auto Fill: fill all eligible roof segments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // v31.5: Fills each eligible segment using fillRoofSegmentWithPanels().
   //        Eligible = sunshineHours >= 50% of best segment AND areaM2 >= one panel.
   //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
-  // ── Auto Fill: fill all eligible roof segments ──────────────────────────────────────────────────
+  // â”€â”€ Auto Fill: fill all eligible roof segments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // v34.3: PRIMARY PATH now filters against original boundary polygon only (Google panels already have setbacks).
   //        Fills each eligible segment (sunshineHours >= 50% of best AND areaM2 >= one panel).
   //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
-  // ── Auto Fill (v47.89): CAD engine-based auto-fill ────────────────────────────────
+  // â”€â”€ Auto Fill (v47.89): CAD engine-based auto-fill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // Replaces the old roofSegments/Solar API path.
   // Now consumes roofPlanes prop (user-drawn planes from DesignStudio)
-  // and calls generatePanelGridCAD() — the same engine as the 2D view.
-  // ══════════════════════════════════════════════════════════════════════════════
-  //  v47.121 — 3D Roof Plane Creation Tool
-  // ══════════════════════════════════════════════════════════════════════════════
+  // and calls generatePanelGridCAD() â€” the same engine as the 2D view.
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  v47.121 â€” 3D Roof Plane Creation Tool
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /**
-   * clearPlane3DPreview — remove in-progress markers + preview line, reset arrays.
+   * clearPlane3DPreview â€” remove in-progress markers + preview line, reset arrays.
    */
   function clearPlane3DPreview(viewer: any) {
     for (const e of pts3DMarkersRef.current) {
@@ -7925,10 +7925,10 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // v47.126: Set Layout Direction handler
   // User clicks two points; the vector between them becomes the u-axis override.
-  // ────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleSetDirectionClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -7942,7 +7942,7 @@ function SolarEngine3D({
       dirClickPtsRef.current = [...dirClickPtsRef.current, pt];
 
       if (dirClickPtsRef.current.length === 1) {
-        setStatusMsg('Set Direction: first point set — click second point along the roof edge');
+        setStatusMsg('Set Direction: first point set â€” click second point along the roof edge');
         // Show a marker
         const marker = viewer.entities.add({
           name: '[DIR-PT1]',
@@ -7966,7 +7966,7 @@ function SolarEngine3D({
         const dy = (p2.lat - p1.lat) * MPD;
         const len = Math.sqrt(dx*dx + dy*dy);
         if (len < 0.5) {
-          setStatusMsg('Set Direction: points too close — click further apart');
+          setStatusMsg('Set Direction: points too close â€” click further apart');
           dirClickPtsRef.current = [];
           return;
         }
@@ -7994,7 +7994,7 @@ function SolarEngine3D({
         layoutBBoxRef.current.push(arrowEnt);
 
         addLog('DIR', `u-axis set: dx=${dx.toFixed(2)} dy=${dy.toFixed(2)}`);
-        setStatusMsg('✓ Layout direction locked — panels will align to this axis');
+        setStatusMsg('âœ“ Layout direction locked â€” panels will align to this axis');
         onPlacementModeChange('select');
         try { viewer.scene.requestRender(); } catch {}
       }
@@ -8003,10 +8003,10 @@ function SolarEngine3D({
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // v47.126: Set Origin handler
   // User clicks one point; this becomes the layout grid origin.
-  // ────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleSetOriginClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -8047,7 +8047,7 @@ function SolarEngine3D({
       layoutBBoxRef.current.push(originMarker);
 
       addLog('ORIGIN', `origin set: ${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)}`);
-      setStatusMsg('✓ Layout origin set — first panel starts here');
+      setStatusMsg('âœ“ Layout origin set â€” first panel starts here');
       onPlacementModeChange('select');
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
@@ -8055,9 +8055,9 @@ function SolarEngine3D({
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // v47.126: Clear layout customization overlays
-  // ────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function clearLayoutOverlays(viewer: any) {
     for (const e of layoutBBoxRef.current) {
       try { viewer.entities.remove(e); } catch {}
@@ -8070,40 +8070,40 @@ function SolarEngine3D({
   }
 
   /**
-   * handlePlane3DClick — left-click in 'plane3d' mode.
-   * Picks 3D position using full getWorldPosition() chain (3D tiles → terrain → ellipsoid).
+   * handlePlane3DClick â€” left-click in 'plane3d' mode.
+   * Picks 3D position using full getWorldPosition() chain (3D tiles â†’ terrain â†’ ellipsoid).
    * v47.125: upgraded from raw pickPosition to robust 3-fallback chain.
-   * v62: defensive no-3D-tiles guard — reject any pick whose pickMethod !== '3dtiles'
+   * v62: defensive no-3D-tiles guard â€” reject any pick whose pickMethod !== '3dtiles'
    *   so a bare 2D map trace (terrain/ellipsoid fallback) can't accumulate
    *   degenerate horizontal-frame points. See mode-entry guard for Layer A.
    */
   function handlePlane3DClick(viewer: any, C: any, screenPos: any) {
     try {
-      // v47.125: Use full picking chain (3D tiles → terrain → ellipsoid)
+      // v47.125: Use full picking chain (3D tiles â†’ terrain â†’ ellipsoid)
       // Raw pickPosition() alone fails when cursor misses the mesh or DEPTH_TEST is off.
       const hit = getWorldPosition(viewer, C, screenPos);
       if (!hit) {
-        setStatusMsg('3D Plane: could not pick surface — ensure 3D tiles are loaded and zoom closer to roof');
-        addLog('PLANE3D', 'getWorldPosition failed — no valid 3D position from any picking method');
+        setStatusMsg('3D Plane: could not pick surface â€” ensure 3D tiles are loaded and zoom closer to roof');
+        addLog('PLANE3D', 'getWorldPosition failed â€” no valid 3D position from any picking method');
         return;
       }
       // v62 (3D-plane no-tiles guard, Layer C): on a bare 2D map, getWorldPosition
       // falls through to terrain (globe.pick on a hidden globe is skipped) or
-      // ellipsoid. Either way, the point is on the WGS84 ellipsoid (h=0) — NOT
+      // ellipsoid. Either way, the point is on the WGS84 ellipsoid (h=0) â€” NOT
       // on the roof. Reject so the user gets a clear "this region has no 3D
       // coverage" message instead of building a horizontal frame with arbitrary
       // u-axis and seeing "wonky" panels on Auto Fill.
       if (hit.pickMethod !== '3dtiles') {
         setStatusMsg(
-          `3D Plane: point must be on a 3D roof surface — ${hit.pickMethod} pick detected (this region has no 3D tile coverage). Try Auto Fill on detected roof segments, or pick an address in a 3D-covered region.`
+          `3D Plane: point must be on a 3D roof surface â€” ${hit.pickMethod} pick detected (this region has no 3D tile coverage). Try Auto Fill on detected roof segments, or pick an address in a 3D-covered region.`
         );
-        addLog('PLANE3D', `Rejected click — pickMethod=${hit.pickMethod} (expected 3dtiles); only 3D tiles carry roof elevation`);
+        addLog('PLANE3D', `Rejected click â€” pickMethod=${hit.pickMethod} (expected 3dtiles); only 3D tiles carry roof elevation`);
         return;
       }
-      // v62: STITCH — snap this corner to a shared roof point (existing plane vertex
+      // v62: STITCH â€” snap this corner to a shared roof point (existing plane vertex
       // or edge, or a point in the current trace) so adjacent planes meet at EXACT
       // common points. This is how the roof connects (ridge/hip/valley/dormer all
-      // share vertices) → a watertight, CAD-accurate structure built as you mark.
+      // share vertices) â†’ a watertight, CAD-accurate structure built as you mark.
       const snapHit = ENABLE_TRACE_SNAP ? snapTracedPoint(C, hit.cartesian) : null;
       const pickedPos = snapHit ?? hit.cartesian;
       addLog('PLANE3D', `pick method: ${hit.pickMethod}${snapHit ? ' (snapped to shared point)' : ''}`);
@@ -8114,7 +8114,7 @@ function SolarEngine3D({
       // Store plain Cart3 (for geometry math, no Cesium dep)
       const cart: Cart3 = { x: pickedPos.x, y: pickedPos.y, z: pickedPos.z };
       pts3DCartRef.current = [...pts3DCartRef.current, cart];
-      if (snapHit) setStatusMsg('🔗 Snapped to a shared roof point');
+      if (snapHit) setStatusMsg('ðŸ”— Snapped to a shared roof point');
 
       const count = pts3DCesiumRef.current.length;
       setPts3DCount(count);
@@ -8131,9 +8131,9 @@ function SolarEngine3D({
       );
 
       if (count < 3) {
-        setStatusMsg(`3D Plane: ${count} pt${count > 1 ? 's' : ''} placed — click ${3 - count} more corner${3 - count > 1 ? 's' : ''}`);
+        setStatusMsg(`3D Plane: ${count} pt${count > 1 ? 's' : ''} placed â€” click ${3 - count} more corner${3 - count > 1 ? 's' : ''}`);
       } else {
-        setStatusMsg(`3D Plane: ${count} points — right-click or press "Create Roof Plane" to finalize`);
+        setStatusMsg(`3D Plane: ${count} points â€” right-click or press "Create Roof Plane" to finalize`);
       }
 
       addLog('PLANE3D', `Point ${count}: (${pickedPos.x.toFixed(0)}, ${pickedPos.y.toFixed(0)}, ${pickedPos.z.toFixed(0)})`);
@@ -8145,7 +8145,7 @@ function SolarEngine3D({
   }
 
   /**
-   * finalizePlane3D — build RoofPlane from pts3D, render surface,
+   * finalizePlane3D â€” build RoofPlane from pts3D, render surface,
    * auto-fill with panels, notify DesignStudio via onRoofPlaneCreated.
    */
   function finalizePlane3D(viewer: any, C: any, fillPanels = true) {
@@ -8153,7 +8153,7 @@ function SolarEngine3D({
     const cartPts   = pts3DCartRef.current;
 
     if (cartPts.length < 3) {
-      setStatusMsg('3D Plane: need at least 3 points — keep clicking roof corners');
+      setStatusMsg('3D Plane: need at least 3 points â€” keep clicking roof corners');
       return;
     }
 
@@ -8176,7 +8176,7 @@ function SolarEngine3D({
         (plane as any).__eaveDirENU = { x: Math.cos(azR), y: -Math.sin(azR) };
       }
 
-      addLog('PLANE3D', `Plane: id=${plane.id.slice(0,8)} az=${plane.azimuth.toFixed(1)} tilt=${plane.pitch.toFixed(1)} area=${plane.area.toFixed(1)}m²`);
+      addLog('PLANE3D', `Plane: id=${plane.id.slice(0,8)} az=${plane.azimuth.toFixed(1)} tilt=${plane.pitch.toFixed(1)} area=${plane.area.toFixed(1)}mÂ²`);
 
       // Step 3: Convert PROJECTED points to Cesium Cartesian3 for rendering
       // This ensures the rendered polygon is mathematically planar (no mesh warping)
@@ -8200,7 +8200,7 @@ function SolarEngine3D({
       // Clear in-progress preview
       clearPlane3DPreview(viewer);
 
-      // v62: frame-axis arrows + geometry audit are DEBUG overlays — off by default
+      // v62: frame-axis arrows + geometry audit are DEBUG overlays â€” off by default
       // (they cluttered the scene once multiple faces were marked).
       if (DEBUG_PLANE_OVERLAYS) {
         try { renderFrameAxes(viewer, C, plane, cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0, `plane3d-${plane.id.slice(0, 6)}`); } catch (e) { console.warn('[finalizePlane3D] renderFrameAxes failed:', (e as Error).message); }
@@ -8210,7 +8210,7 @@ function SolarEngine3D({
       // Notify DesignStudio (adds plane to roofPlanes state)
       onRoofPlaneCreated?.(plane);
 
-      // v62: MARK-ONLY — outline the face for the roof model / permit WITHOUT placing
+      // v62: MARK-ONLY â€” outline the face for the roof model / permit WITHOUT placing
       // panels. The plane is already stored (plane3DCesiumPtsMap/FrameMap) so the Roof
       // Model + setback zones pick it up; stay in mark mode so the next face can be traced.
       if (!fillPanels) {
@@ -8218,7 +8218,7 @@ function SolarEngine3D({
         activePlane3DIdRef.current = plane.id; setActivePlane3DId(plane.id);
         if (showRoofModel)    { try { renderRoofWireframe(viewer, C); } catch {} }
         if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
-        setStatusMsg(`⬡ Plane marked — Az ${plane.azimuth.toFixed(0)}° Tilt ${plane.pitch.toFixed(0)}° · trace the next face (right-click to finish) · 🔗 Roof Model to see edges`);
+        setStatusMsg(`â¬¡ Plane marked â€” Az ${plane.azimuth.toFixed(0)}Â° Tilt ${plane.pitch.toFixed(0)}Â° Â· trace the next face (right-click to finish) Â· ðŸ”— Roof Model to see edges`);
         try { viewer.scene.requestRender(); } catch {}
         return;
       }
@@ -8247,9 +8247,9 @@ function SolarEngine3D({
       });
       const newPanels = clResult.panels;
 
-      addLog('PLANE3D', `[CL] placePanelsControlled(plane3d) → ${newPanels.length} panels (engine=${clResult.engineUsed})`);
+      addLog('PLANE3D', `[CL] placePanelsControlled(plane3d) â†’ ${newPanels.length} panels (engine=${clResult.engineUsed})`);
 
-      // v47.149: Per-plane data consistency audit (read-only — no mutations)
+      // v47.149: Per-plane data consistency audit (read-only â€” no mutations)
       // Groups panels by planeId and verifies all panels share identical heading/pitch.
       if (newPanels.length > 0) {
         const h0 = newPanels[0].heading ?? NaN;
@@ -8270,7 +8270,7 @@ function SolarEngine3D({
       if (newPanels.length > 0) {
         const filtered = removeObstructedPanels(newPanels, obstructionsRef.current);
         const merged   = [...panelsRef.current, ...filtered];
-        // v48.7: pre-compute skipGrid from final merged count — consistent for all panels in batch
+        // v48.7: pre-compute skipGrid from final merged count â€” consistent for all panels in batch
         const skipGridBatch3D = merged.length > 12;
         filtered.forEach(p => addPanelEntity(viewer, C, p, skipGridBatch3D));
         lastRenderedPanelsRef.current = merged;
@@ -8280,19 +8280,19 @@ function SolarEngine3D({
         // Phase 2: render roof rails after plane3d fill
         try { renderRoofRails(viewer, C, merged); } catch (e) { handleCesiumError('renderRoofRails plane3d', e, true); }
 
-        // v47.126: bounding-box overlay — debug only
+        // v47.126: bounding-box overlay â€” debug only
         if (DEBUG_PLANE_OVERLAYS) {
           try { renderLayoutBBox(viewer, C, filtered, plane.id); } catch (e) { console.warn('[PLANE3D] renderLayoutBBox failed:', (e as Error).message); }
         }
 
         setStatusMsg(
-          `▣ Roof Plane Active — Az ${plane.azimuth.toFixed(0)}°  Tilt ${plane.pitch.toFixed(0)}° | ` +
-          `${filtered.length} panels · ${(filtered.length * (selectedPanelRef.current?.wattage ?? 400) / 1000).toFixed(1)} kW`
+          `â–£ Roof Plane Active â€” Az ${plane.azimuth.toFixed(0)}Â°  Tilt ${plane.pitch.toFixed(0)}Â° | ` +
+          `${filtered.length} panels Â· ${(filtered.length * (selectedPanelRef.current?.wattage ?? 400) / 1000).toFixed(1)} kW`
         );
       } else {
         setStatusMsg(
-          `◻ Roof plane created — Az ${plane.azimuth.toFixed(0)}°  Tilt ${plane.pitch.toFixed(0)}° | ` +
-          `No panels fit — try reducing setbacks or enlarging the polygon`
+          `â—» Roof plane created â€” Az ${plane.azimuth.toFixed(0)}Â°  Tilt ${plane.pitch.toFixed(0)}Â° | ` +
+          `No panels fit â€” try reducing setbacks or enlarging the polygon`
         );
       }
 
@@ -8301,23 +8301,23 @@ function SolarEngine3D({
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `finalizePlane3D: ${(err as Error).message}`);
-      setStatusMsg(`3D Plane error: ${(err as Error).message} — try placing points more spread apart on the roof`);
+      setStatusMsg(`3D Plane error: ${(err as Error).message} â€” try placing points more spread apart on the roof`);
       clearPlane3DPreview(viewer);
     }
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  //  v47.119 — Surface-Based Placement Handlers
-  // ════════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  v47.119 â€” Surface-Based Placement Handlers
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /**
-   * handleSurfaceSelectClick — click on roof surface to select a plane
+   * handleSurfaceSelectClick â€” click on roof surface to select a plane
    * and immediately place a full surface grid using buildSurfaceGrid().
    *
    * Flow:
-   *   1. scene.pickPosition → lat/lng/height of click
-   *   2. assignRoofPlane() → find nearest matching RoofPlane
-   *   3. buildSurfaceGrid() → place full panel grid on that surface
+   *   1. scene.pickPosition â†’ lat/lng/height of click
+   *   2. assignRoofPlane() â†’ find nearest matching RoofPlane
+   *   3. buildSurfaceGrid() â†’ place full panel grid on that surface
    *   4. Render panels + update state
    */
   function handleSurfaceSelectClick(viewer: any, C: any, screenPos: any) {
@@ -8325,7 +8325,7 @@ function SolarEngine3D({
       const pickedPos = viewer.scene.pickPosition(screenPos);
       if (!pickedPos || !isFinite(pickedPos.x)) {
         addLog('SURFACE', 'pickPosition returned invalid position');
-        setStatusMsg('Surface click — no 3D position found. Ensure tiles are loaded.');
+        setStatusMsg('Surface click â€” no 3D position found. Ensure tiles are loaded.');
         return;
       }
 
@@ -8341,7 +8341,7 @@ function SolarEngine3D({
 
       const planes = roofPlanesRef.current ?? [];
       if (planes.length === 0) {
-        setStatusMsg('No roof planes — draw planes in 2D mode first, then use Surface Select');
+        setStatusMsg('No roof planes â€” draw planes in 2D mode first, then use Surface Select');
         return;
       }
 
@@ -8391,12 +8391,12 @@ function SolarEngine3D({
       // v47.131 Issue 2: If switching to a DIFFERENT plane, clear all prior
       // frame state so extend_row / add_row start fresh on the new plane's axes.
       if (selectedPlaneRef.current && selectedPlaneRef.current.id !== plane.id) {
-        addLog('SURFACE', `Plane switch: ${selectedPlaneRef.current.id.slice(0,6)} → ${plane.id.slice(0,6)} — resetting frame state`);
+        addLog('SURFACE', `Plane switch: ${selectedPlaneRef.current.id.slice(0,6)} â†’ ${plane.id.slice(0,6)} â€” resetting frame state`);
         }
       selectedPlaneRef.current = plane as any;
 
       const groundElev    = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      // v48.7: orientation is now resolved once here and passed explicitly — no ref fallback chain
+      // v48.7: orientation is now resolved once here and passed explicitly â€” no ref fallback chain
       const orient        = panelOrientationRef.current ?? 'portrait';
       const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
       const ridgeSetbackM = fireSetbacks?.ridgeSetbackM ?? 0.457;
@@ -8415,9 +8415,9 @@ function SolarEngine3D({
       });
       const newPanels = clResult.panels;
 
-      addLog('SURFACE', `[CL] placePanelsControlled(surface_select) → ${newPanels.length} panels (engine=${clResult.engineUsed})`);
+      addLog('SURFACE', `[CL] placePanelsControlled(surface_select) â†’ ${newPanels.length} panels (engine=${clResult.engineUsed})`);
 
-      // v47.149: Per-plane data consistency audit (read-only — kept from original)
+      // v47.149: Per-plane data consistency audit (read-only â€” kept from original)
       if (newPanels.length > 0) {
         const h0 = newPanels[0].heading ?? NaN;
         const p0 = newPanels[0].pitch   ?? NaN;
@@ -8431,7 +8431,7 @@ function SolarEngine3D({
       }
 
       if (newPanels.length === 0) {
-        setStatusMsg(`Surface select: plane ${plane.id} — no panels fit (check setbacks/plane size)`);
+        setStatusMsg(`Surface select: plane ${plane.id} â€” no panels fit (check setbacks/plane size)`);
         return;
       }
 
@@ -8447,7 +8447,7 @@ function SolarEngine3D({
         removePanelEntities(viewer, p.id); // v47.159
       });
 
-      // Render new panels — v48.7: pre-compute skipGrid from merged count
+      // Render new panels â€” v48.7: pre-compute skipGrid from merged count
       const skipGridSurface = mergedPanels.length > 12;
       filtered.forEach(p => addPanelEntity(viewer, C, p, skipGridSurface));
       lastRenderedPanelsRef.current = mergedPanels;
@@ -8457,7 +8457,7 @@ function SolarEngine3D({
       // Phase 2: render roof rails after surface-select fill
       try { renderRoofRails(viewer, C, mergedPanels); } catch (e) { handleCesiumError('renderRoofRails surface', e, true); }
 
-      setStatusMsg(`Surface grid: ${filtered.length} panels on plane ${plane.id.slice(0,8)}… | Extend Row / Add Row to expand`);
+      setStatusMsg(`Surface grid: ${filtered.length} panels on plane ${plane.id.slice(0,8)}â€¦ | Extend Row / Add Row to expand`);
 
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
@@ -8467,17 +8467,17 @@ function SolarEngine3D({
   }
 
   /**
-   * handleExtendRowClick — in 'extend_row' mode, clicking on a plane
+   * handleExtendRowClick â€” in 'extend_row' mode, clicking on a plane
    * adds one more column to the highest row on that plane.
    */
-  // v62: SNAP PANEL — manually place ONE panel flush against the nearest existing panel,
+  // v62: SNAP PANEL â€” manually place ONE panel flush against the nearest existing panel,
   // on the side the user clicked. Inherits the array's plane frame + facing (and rotation
-  // if the array was rotated), and uses the current orientation toggle — so you can start a
+  // if the array was rotated), and uses the current orientation toggle â€” so you can start a
   // landscape row below a portrait array. Click again next to the new panel to keep going.
   function handleSnapPanelClick(viewer: any, C: any, screenPos: any) {
     try {
       const pickedPos = viewer.scene.pickPosition(screenPos);
-      if (!pickedPos || !isFinite(pickedPos.x)) { setStatusMsg('Snap Panel — click on the roof near the array'); return; }
+      if (!pickedPos || !isFinite(pickedPos.x)) { setStatusMsg('Snap Panel â€” click on the roof near the array'); return; }
 
       // Nearest existing roof panel that carries an ECEF frame.
       let ref: PlacedPanel | null = null; let bestD = Infinity;
@@ -8490,7 +8490,7 @@ function SolarEngine3D({
         const d = dx * dx + dy * dy + dz * dz;
         if (d < bestD) { bestD = d; ref = p; }
       }
-      if (!ref) { setStatusMsg('No array yet — fill or place an array first, then snap panels to it'); return; }
+      if (!ref) { setStatusMsg('No array yet â€” fill or place an array first, then snap panels to it'); return; }
 
       const refPos = safeCartesian3(C, ref.lng, ref.lat, ref.height ?? 0);
       const U = C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefUx, (ref as any).ecefUy, (ref as any).ecefUz), new C.Cartesian3());
@@ -8528,7 +8528,7 @@ function SolarEngine3D({
         if (!c) continue;
         const ddx = c.x - center.x, ddy = c.y - center.y, ddz = c.z - center.z;
         if (ddx * ddx + ddy * ddy + ddz * ddz < occ * occ) {
-          setStatusMsg('A panel is already there — click an open edge of the array');
+          setStatusMsg('A panel is already there â€” click an open edge of the array');
           return;
         }
       }
@@ -8557,7 +8557,7 @@ function SolarEngine3D({
       try { renderRoofRails(viewer, C, updated); } catch {}
       onPanelsChange(updated);
       setPanelCount(updated.length);
-      setStatusMsg(`➕ Panel snapped (${newOrient}) — ${updated.length} total · click again to add more`);
+      setStatusMsg(`âž• Panel snapped (${newOrient}) â€” ${updated.length} total Â· click again to add more`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleSnapPanelClick: ${(err as Error).message}`); }
   }
@@ -8575,12 +8575,12 @@ function SolarEngine3D({
       if (!plane) { setStatusMsg('Click on a roof plane to extend a row'); return; }
 
       const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      // v48.7: orientation resolved once, passed explicitly — no ref fallback chain
+      // v48.7: orientation resolved once, passed explicitly â€” no ref fallback chain
       const orient  = panelOrientationRef.current ?? 'portrait';
       const layoutId = panelsRef.current.find(p => p.planeId === plane.id)?.layoutId ?? `surface-${plane.id}`;
 
       // v48.7: Route through control layer (extend_row mode)
-      // Control layer resolves targetRow from clickECEF — fixes the global-maxCol bug.
+      // Control layer resolves targetRow from clickECEF â€” fixes the global-maxCol bug.
       const clickECEF = { x: pickedPos.x, y: pickedPos.y, z: pickedPos.z };
       const clExtResult = placePanelsControlled({
         mode:           'extend_row',
@@ -8597,9 +8597,9 @@ function SolarEngine3D({
       if (!newPanel) {
         // v48.11: distinguish boundary rejection from no-panels-on-plane
         if (clExtResult.rejectionReason === 'boundary') {
-          setStatusMsg('⛔ Row cannot be extended — panel would exceed roof boundary');
+          setStatusMsg('â›” Row cannot be extended â€” panel would exceed roof boundary');
         } else {
-          setStatusMsg('No panels on this plane yet — use Surface Select first');
+          setStatusMsg('No panels on this plane yet â€” use Surface Select first');
         }
         return;
       }
@@ -8612,7 +8612,7 @@ function SolarEngine3D({
       setPanelCount(updated.length);
       // Phase 2: rebuild rails after extend row
       try { renderRoofRails(viewer, C, updated); } catch {}
-      setStatusMsg(`Row extended — ${updated.length} total panels`);
+      setStatusMsg(`Row extended â€” ${updated.length} total panels`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleExtendRowClick: ${(err as Error).message}`);
@@ -8620,7 +8620,7 @@ function SolarEngine3D({
   }
 
   /**
-   * handleAddRowClick — v47.136: Grid-locked Add Row.
+   * handleAddRowClick â€” v47.136: Grid-locked Add Row.
    *
    * Projects the click position onto the plane's v-axis, snaps to the nearest
    * grid row index (rowIndex = round(vProj / stepV)), then generates a FULL ROW
@@ -8641,7 +8641,7 @@ function SolarEngine3D({
       if (!plane) { setStatusMsg('Click on a roof plane to add a row'); return; }
 
       const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      const orient = panelOrientationRef.current ?? 'portrait'; // single source — no surfaceOrientationRef fallback
+      const orient = panelOrientationRef.current ?? 'portrait'; // single source â€” no surfaceOrientationRef fallback
       const layoutId = panelsRef.current.find(p => p.planeId === plane.id)?.layoutId ?? `surface-${plane.id}`;
 
       // Pass click ECEF position for grid-locked row snapping
@@ -8658,10 +8658,10 @@ function SolarEngine3D({
         layoutId,
       });
       const newPanels = clAddResult.panels;
-      addLog('SURFACE', `[CL] placePanelsControlled(add_row) → ${newPanels.length} panels (engine=${clAddResult.engineUsed})`);
+      addLog('SURFACE', `[CL] placePanelsControlled(add_row) â†’ ${newPanels.length} panels (engine=${clAddResult.engineUsed})`);
 
       if (!newPanels || newPanels.length === 0) {
-        setStatusMsg('No panels on this plane yet — use Surface Select first');
+        setStatusMsg('No panels on this plane yet â€” use Surface Select first');
         return;
       }
 
@@ -8679,7 +8679,7 @@ function SolarEngine3D({
       }
 
       const updated = [...panelsRef.current, ...newPanels];
-      // v48.7: pre-compute skipGrid from final count — consistent rendering for all new panels
+      // v48.7: pre-compute skipGrid from final count â€” consistent rendering for all new panels
       const skipGridAddRow = updated.length > 12;
       newPanels.forEach(p => addPanelEntity(viewer, C, p, skipGridAddRow));
       lastRenderedPanelsRef.current = updated;
@@ -8688,7 +8688,7 @@ function SolarEngine3D({
       setPanelCount(updated.length);
       // Phase 2: rebuild rails after add row
       try { renderRoofRails(viewer, C, updated); } catch {}
-      setStatusMsg(`Row added (${newPanels.length} panels) — ${updated.length} total`);
+      setStatusMsg(`Row added (${newPanels.length} panels) â€” ${updated.length} total`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleAddRowClick: ${(err as Error).message}`);
@@ -8696,10 +8696,10 @@ function SolarEngine3D({
   }
 
   /**
-   * handleObstructionClick — v66 (obstruction-primitive): Aurora-parity
+   * handleObstructionClick â€” v66 (obstruction-primitive): Aurora-parity
    * "Add Obstruction". Single click places a small rectangular prism
    * (chimney, vent, dormer) centered on the click point. Default
-   * 0.6m × 0.6m × 1.0m, configurable via the right-panel sliders.
+   * 0.6m Ã— 0.6m Ã— 1.0m, configurable via the right-panel sliders.
    *
    * Replaces the v47 red-sphere marker (which used a hidden circular
    * keep-out radius and a label that said "Vent"). The new visual is
@@ -8715,7 +8715,7 @@ function SolarEngine3D({
     try {
       const pickedPos = viewer.scene.pickPosition(screenPos);
       if (!pickedPos || !isFinite(pickedPos.x)) {
-        setStatusMsg('Obstruction: could not pick position — ensure tiles are loaded');
+        setStatusMsg('Obstruction: could not pick position â€” ensure tiles are loaded');
         return;
       }
 
@@ -8742,7 +8742,7 @@ function SolarEngine3D({
         .map(c => safeCartesian3(C, c.lng, c.lat, obsH))
         .filter((p): p is any => p != null);
       if (polyPositions.length < 4) {
-        setStatusMsg('Obstruction: failed to build footprint — try again');
+        setStatusMsg('Obstruction: failed to build footprint â€” try again');
         return;
       }
 
@@ -8788,8 +8788,8 @@ function SolarEngine3D({
             closeBottom: false,
           },
           description: `<table class="cesium-infoBox-defaultTable">
-            <tr><th>Obstruction</th><td>${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${prismHeightM.toFixed(1)}m</td></tr>
-            <tr><th>Footprint area</th><td>${obstructionFootprintAreaM2(widthM, depthM).toFixed(2)} m²</td></tr>
+            <tr><th>Obstruction</th><td>${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m Ã— ${prismHeightM.toFixed(1)}m</td></tr>
+            <tr><th>Footprint area</th><td>${obstructionFootprintAreaM2(widthM, depthM).toFixed(2)} mÂ²</td></tr>
             <tr><th>Center</th><td>${obsLat.toFixed(6)}, ${obsLng.toFixed(6)}</td></tr>
           </table>`,
         });
@@ -8816,19 +8816,19 @@ function SolarEngine3D({
         panelsRef.current = filtered;
         onPanelsChange(filtered);
         setPanelCount(filtered.length);
-        setStatusMsg(`Obstruction placed — ${removed} panel(s) removed within ${widthM.toFixed(1)}×${depthM.toFixed(1)}m footprint`);
+        setStatusMsg(`Obstruction placed â€” ${removed} panel(s) removed within ${widthM.toFixed(1)}Ã—${depthM.toFixed(1)}m footprint`);
       } else {
-        setStatusMsg(`Obstruction placed at ${widthM.toFixed(1)}×${depthM.toFixed(1)}×${prismHeightM.toFixed(1)}m (no panels removed)`);
+        setStatusMsg(`Obstruction placed at ${widthM.toFixed(1)}Ã—${depthM.toFixed(1)}Ã—${prismHeightM.toFixed(1)}m (no panels removed)`);
       }
 
-      addLog('OBS', `Placed obstruction at ${obsLat.toFixed(5)}, ${obsLng.toFixed(5)} — ${widthM.toFixed(2)}×${depthM.toFixed(2)}×${prismHeightM.toFixed(2)}m, ${removed} panels removed`);
+      addLog('OBS', `Placed obstruction at ${obsLat.toFixed(5)}, ${obsLng.toFixed(5)} â€” ${widthM.toFixed(2)}Ã—${depthM.toFixed(2)}Ã—${prismHeightM.toFixed(2)}m, ${removed} panels removed`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleObstructionClick: ${(err as Error).message}`);
     }
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   //
   // 3D height placement:
@@ -8837,14 +8837,14 @@ function SolarEngine3D({
   //   3. height = groundElev + planeHeightAtCenter + tanPitch * slopeProjection + PANEL_OFFSET
   //   This places panels flush with the roof plane defined by pitch + azimuth.
   /**
-   * renderFrameAxes — debug visualization of the locked coordinate frame.
-   * v47.124: REQUIRED visual validation — arrows MUST be perfectly straight.
+   * renderFrameAxes â€” debug visualization of the locked coordinate frame.
+   * v47.124: REQUIRED visual validation â€” arrows MUST be perfectly straight.
    *
    *   RED   arrow = u direction (along roof edge / ridge)
    *   GREEN arrow = v direction (up slope)
    *   BLUE  arrow = n direction (surface normal, outward)
    *
-   * If any arrow is not straight → frame is not being used correctly.
+   * If any arrow is not straight â†’ frame is not being used correctly.
    *
    * @param plane      RoofPlane with localFrame3D
    * @param groundElevM Ground elevation in meters
@@ -8863,7 +8863,7 @@ function SolarEngine3D({
     if (!frame) return; // only render for stable-frame planes
 
     const { u, v: vv, n } = frame;
-    const ARROW_LEN = 3.0; // 3m arrows — clearly visible
+    const ARROW_LEN = 3.0; // 3m arrows â€” clearly visible
     const DEG_TO_RAD = Math.PI / 180;
     const cosLat = Math.cos(originLat * DEG_TO_RAD);
     const MPD = 111_320; // meters per degree latitude
@@ -8879,7 +8879,7 @@ function SolarEngine3D({
     const [oLat, oLng, oH] = [originLat, originLng, baseHeight];
     const origin3 = C.Cartesian3.fromDegrees(oLng, oLat, oH);
 
-    // ── RED: u-axis (along roof edge) ───────────────────────────────────────
+    // â”€â”€ RED: u-axis (along roof edge) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [uLat, uLng, uH] = enuToLatLngH(u.x * ARROW_LEN, u.y * ARROW_LEN, u.z * ARROW_LEN);
     const uTip = C.Cartesian3.fromDegrees(uLng, uLat, uH);
     const uEntity = viewer.entities.add({
@@ -8894,7 +8894,7 @@ function SolarEngine3D({
     });
     overlayRef.current.push(uEntity);
 
-    // ── GREEN: v-axis (up slope) ─────────────────────────────────────────────
+    // â”€â”€ GREEN: v-axis (up slope) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [vLat, vLng, vH] = enuToLatLngH(vv.x * ARROW_LEN, vv.y * ARROW_LEN, vv.z * ARROW_LEN);
     const vTip = C.Cartesian3.fromDegrees(vLng, vLat, vH);
     const vEntity = viewer.entities.add({
@@ -8909,7 +8909,7 @@ function SolarEngine3D({
     });
     overlayRef.current.push(vEntity);
 
-    // ── BLUE: n-axis (surface normal) ────────────────────────────────────────
+    // â”€â”€ BLUE: n-axis (surface normal) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [nLat, nLng, nH] = enuToLatLngH(n.x * ARROW_LEN, n.y * ARROW_LEN, n.z * ARROW_LEN);
     const nTip = C.Cartesian3.fromDegrees(nLng, nLat, nH);
     const nEntity = viewer.entities.add({
@@ -8924,11 +8924,11 @@ function SolarEngine3D({
     });
     overlayRef.current.push(nEntity);
 
-    // ── Labels at arrow tips ──────────────────────────────────────────────────
+    // â”€â”€ Labels at arrow tips â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     [
-      { pos: uTip, text: 'u →', color: C.Color.RED },
-      { pos: vTip, text: 'v ↑', color: C.Color.LIME },
-      { pos: nTip, text: 'n ⊥', color: C.Color.CYAN },
+      { pos: uTip, text: 'u â†’', color: C.Color.RED },
+      { pos: vTip, text: 'v â†‘', color: C.Color.LIME },
+      { pos: nTip, text: 'n âŠ¥', color: C.Color.CYAN },
     ].forEach(({ pos, text, color }) => {
       const labelEnt = viewer.entities.add({
         name: `[FRAME-LBL] ${tag} ${text}`,
@@ -8948,11 +8948,11 @@ function SolarEngine3D({
     });
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // v47.126: renderLayoutBBox — draw a dashed bounding box around the placed
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // v47.126: renderLayoutBBox â€” draw a dashed bounding box around the placed
   // panel grid to show the installer exactly where panels are going.
   // Also shows a panel count label at the top-center of the bbox.
-  // ────────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function renderLayoutBBox(viewer: any, C: any, panels: PlacedPanel[], tag: string) {
     if (panels.length === 0) return;
 
@@ -9011,7 +9011,7 @@ function SolarEngine3D({
       name: `${prefix}-count`,
       position: labelPos,
       label: {
-        text:                     `${panels.length} panels · ${kw} kW`,
+        text:                     `${panels.length} panels Â· ${kw} kW`,
         font:                     'bold 13px monospace',
         fillColor:                C.Color.fromCssColorString('#00ffcc'),
         style:                    C.LabelStyle.FILL_AND_OUTLINE,
@@ -9030,19 +9030,19 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── v47.141: Plane Debug Audit ────────────────────────────────────────────
+  // â”€â”€ v47.141: Plane Debug Audit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /**
-   * renderPlaneDebugAudit — full visual audit of a roof plane's geometry.
+   * renderPlaneDebugAudit â€” full visual audit of a roof plane's geometry.
    *
    * Renders directly from ECEF origin3D + ecefFrame3D + polygon3D so the
    * debug display matches EXACTLY what the panel placement engine sees.
    *
    * Visualizations:
-   *   1. Polygon boundary      — white polyline through polygon3D vertices
-   *   2. Vertex labels         — numbered point+label at each projected vertex
-   *   3. Frame axes (ECEF)     — RED=u, GREEN=v, BLUE=n from origin3D
-   *   4. UV bounding box       — orange dashed rectangle in plane-local UV space
-   *   5. Ortho check log       — dot(u,v), dot(u,n), dot(v,n) to addLog
+   *   1. Polygon boundary      â€” white polyline through polygon3D vertices
+   *   2. Vertex labels         â€” numbered point+label at each projected vertex
+   *   3. Frame axes (ECEF)     â€” RED=u, GREEN=v, BLUE=n from origin3D
+   *   4. UV bounding box       â€” orange dashed rectangle in plane-local UV space
+   *   5. Ortho check log       â€” dot(u,v), dot(u,n), dot(v,n) to addLog
    */
   function renderPlaneDebugAudit(
     viewer: any,
@@ -9057,14 +9057,14 @@ function SolarEngine3D({
     const poly3D  = (plane as any).polygon3D  as Array<{x:number;y:number;z:number}> | undefined;
 
     if (!origin || !ef || !poly3D || poly3D.length < 3) {
-      addLog('AUDIT', `[${tag}] Missing origin3D/ecefFrame3D/polygon3D — skipping audit`);
+      addLog('AUDIT', `[${tag}] Missing origin3D/ecefFrame3D/polygon3D â€” skipping audit`);
       return;
     }
 
     const auditEntities: any[] = [];
 
     try {
-      // ── 1. Polygon boundary ──────────────────────────────────────────────
+      // â”€â”€ 1. Polygon boundary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const boundaryPts = [...poly3D, poly3D[0]].map(
         (p: {x:number;y:number;z:number}) => new C.Cartesian3(p.x, p.y, p.z)
       );
@@ -9080,7 +9080,7 @@ function SolarEngine3D({
       });
       auditEntities.push(boundaryLine);
 
-      // ── 2. Vertex labels (numbered) ──────────────────────────────────────
+      // â”€â”€ 2. Vertex labels (numbered) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       poly3D.forEach((p: {x:number;y:number;z:number}, i: number) => {
         const pos = new C.Cartesian3(p.x, p.y, p.z);
         const vLabel = viewer.entities.add({
@@ -9112,7 +9112,7 @@ function SolarEngine3D({
         auditEntities.push(vLabel);
       });
 
-      // ── 3. Frame axes from ECEF origin3D ────────────────────────────────
+      // â”€â”€ 3. Frame axes from ECEF origin3D â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const originPt = new C.Cartesian3(origin.x, origin.y, origin.z);
       const ALEN = 4.0; // 4m arrows
 
@@ -9160,7 +9160,7 @@ function SolarEngine3D({
         auditEntities.push(axLabel);
       }
 
-      // ── 4. UV bounding box (plane-local space → ECEF) ──────────────────
+      // â”€â”€ 4. UV bounding box (plane-local space â†’ ECEF) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
       for (const p of poly3D) {
         const d = { x: p.x - origin.x, y: p.y - origin.y, z: p.z - origin.z };
@@ -9223,7 +9223,7 @@ function SolarEngine3D({
       });
       auditEntities.push(bboxDimsLabel);
 
-      // ── 5. Frame orthogonality check → log ──────────────────────────────
+      // â”€â”€ 5. Frame orthogonality check â†’ log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const u = ef.u, v = ef.v, n = ef.n;
       const uvDot = Math.abs(u.x*v.x + u.y*v.y + u.z*v.z);
       const unDot = Math.abs(u.x*n.x + u.y*n.y + u.z*n.z);
@@ -9245,7 +9245,7 @@ function SolarEngine3D({
       });
 
       auditEntities.forEach(e => overlayRef.current.push(e));
-      addLog('AUDIT', `[${tag}] Done — ${auditEntities.length} audit entities`);
+      addLog('AUDIT', `[${tag}] Done â€” ${auditEntities.length} audit entities`);
       try { viewer.scene.requestRender(); } catch {}
 
     } catch (err: unknown) {
@@ -9253,7 +9253,7 @@ function SolarEngine3D({
     }
   }
 
-  // v62: Convert a Google Solar roof segment → a clean tilted 3D RoofPlane so the
+  // v62: Convert a Google Solar roof segment â†’ a clean tilted 3D RoofPlane so the
   // standard flush grid engine (placePanelsControlled) can fill it like a hand-drawn
   // plane. Builds the segment's convexHull as a 3D polygon at the correct heights for
   // its pitch+azimuth (downslope = lower), then buildRoofPlane3D computes the frame.
@@ -9285,7 +9285,7 @@ function SolarEngine3D({
       if (!(maxEv - minEv > 0.5) || !(maxSl - minSl > 0.5)) return null; // too small
 
       // Build the plane from the REAL hull (tilted to pitch/azimuth) so the grid
-      // CLIPS to the actual roof face — no overshoot onto the ground. Then attach
+      // CLIPS to the actual roof face â€” no overshoot onto the ground. Then attach
       // the EAVE direction as an ENU unit vector: handleAutoRoof passes it to the
       // grid as customDir, forcing the columns along the eave regardless of the
       // hull's most-horizontal edge. Real shape (clipping) + forced eave (no
@@ -9313,7 +9313,7 @@ function SolarEngine3D({
     }
     // v47.217: Do not start auto-fill if panels are being cleared
     if (clearingRef.current) {
-      addLog('AUTO', 'handleAutoRoof: skipped — clear in progress');
+      addLog('AUTO', 'handleAutoRoof: skipped â€” clear in progress');
       return;
     }
     autoFillRunningRef.current = true;
@@ -9322,9 +9322,9 @@ function SolarEngine3D({
     const confirmedPlanes = planes.filter(rp => rp.vertices && rp.vertices.length >= 3 && rp.confirmed !== false);
     let eligiblePlanes = confirmedPlanes.length > 0 ? confirmedPlanes : planes.filter(rp => rp.vertices && rp.vertices.length >= 3);
 
-    // ── "Only my building" (Ray, 2026-06-30) ────────────────────────────────
+    // â”€â”€ "Only my building" (Ray, 2026-06-30) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Auto-fill must panel ONLY the subject building, never the neighbours whose
-    // planes are also in roofPlanes (from a block-wide detect / saved data) — that
+    // planes are also in roofPlanes (from a block-wide detect / saved data) â€” that
     // was the "50 on my roof + 84 elsewhere = 134" bug. Applied HERE, the single
     // 3D-fill chokepoint, so it covers EVERY trigger (Design Studio buttons AND the
     // in-scene "Auto Fill" tool). Keep the facet cluster under the house (lat,lng)
@@ -9352,7 +9352,7 @@ function SolarEngine3D({
       }
     }
 
-    // De-dup: drop a detected (aerial_*) plane that overlaps a hand-traced plane —
+    // De-dup: drop a detected (aerial_*) plane that overlaps a hand-traced plane â€”
     // the same roof captured twice was double-filling (Melvin: 54 traced + 80 on the
     // overlapping aerial plane = 134). The manual trace wins.
     if (eligiblePlanes.length > 1) {
@@ -9367,12 +9367,12 @@ function SolarEngine3D({
       }
     }
 
-    // ── v62: AUTO-DETECT — no hand-drawn planes → build CLEAN planes from Google
+    // â”€â”€ v62: AUTO-DETECT â€” no hand-drawn planes â†’ build CLEAN planes from Google
     // Solar's detected roof segments and run them through the SAME flush grid engine
     // (placePanelsControlled below) the hand-drawn tool uses. Accurate per-face
-    // geometry + the proven 0-gap aligned grid → tight rectangular layout on every
+    // geometry + the proven 0-gap aligned grid â†’ tight rectangular layout on every
     // covered address, no tracing. (Previous attempt used the gappy/staggered
-    // fillRoofSegmentWithPanels engine — wrong engine.)
+    // fillRoofSegmentWithPanels engine â€” wrong engine.)
     if (eligiblePlanes.length === 0) {
       const gElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       const segPlanes = (twinRef.current?.roofSegments ?? [])
@@ -9380,12 +9380,12 @@ function SolarEngine3D({
         .filter((p: RoofPlane | null): p is RoofPlane => !!p);
       if (segPlanes.length > 0) {
         eligiblePlanes = segPlanes;
-        addLog('AUTO', `handleAutoRoof: no drawn planes → built ${segPlanes.length} clean planes from Google roof segments`);
+        addLog('AUTO', `handleAutoRoof: no drawn planes â†’ built ${segPlanes.length} clean planes from Google roof segments`);
       }
     }
 
     if (eligiblePlanes.length === 0) {
-      setStatusMsg('No roof detected — use "Pick House" to select the building, then Auto Fill');
+      setStatusMsg('No roof detected â€” use "Pick House" to select the building, then Auto Fill');
       addLog('AUTO', 'handleAutoRoof: no drawn planes AND no Solar segments');
       autoFillRunningRef.current = false;
       onPlacementModeChange('select');
@@ -9394,7 +9394,7 @@ function SolarEngine3D({
 
     addLog('AUTO', `handleAutoRoof: ${eligiblePlanes.length} planes, groundElev=${cesiumGroundElevRef.current.toFixed(1)}m`);
 
-    // ── Clear existing panels ────────────────────────────────────────────────
+    // â”€â”€ Clear existing panels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     panelMapRef.current.clear();
     lastRenderedPanelsRef.current = [];
@@ -9402,7 +9402,7 @@ function SolarEngine3D({
     try { clearRoofRails(viewer); } catch {}
 
     const orientRaw   = (panelOrientationRef.current ?? 'portrait') as string;
-    // v50.23: 'hybrid' in 3D mode → use 'portrait' orientation + layoutStrategy:'mixed'
+    // v50.23: 'hybrid' in 3D mode â†’ use 'portrait' orientation + layoutStrategy:'mixed'
     // The control layer's 'mixed' strategy fills portrait rows then sweeps landscape in remainder.
     const orient      = (orientRaw === 'hybrid' ? 'portrait' : orientRaw) as 'portrait' | 'landscape';
     const isHybrid    = orientRaw === 'hybrid';
@@ -9415,7 +9415,7 @@ function SolarEngine3D({
     const newPanels: PlacedPanel[] = [];
 
     eligiblePlanes.forEach((plane, planeIdx) => {
-      // ── v47.124: Use buildSurfaceGrid — mandatory frame-locked placement ──
+      // â”€â”€ v47.124: Use buildSurfaceGrid â€” mandatory frame-locked placement â”€â”€
       // buildSurfaceGrid checks plane.localFrame3D FIRST (stable longest-edge frame).
       // Falls back to azimuth-derived only if localFrame3D not set (legacy planes).
       // All panels share identical heading/pitch/roll from the locked frame.
@@ -9427,7 +9427,7 @@ function SolarEngine3D({
       const planeIsHybrid  = planeOrientRaw === 'hybrid' || (!planeOrientRaw && isHybrid);
       const planeOrient    = planeOrientRaw === 'portrait' ? 'portrait'
                            : planeOrientRaw === 'landscape' ? 'landscape'
-                           : orient; // hybrid or undefined → use base orient (portrait for mixed)
+                           : orient; // hybrid or undefined â†’ use base orient (portrait for mixed)
 
       // v48.7: Route through control layer (auto_roof mode)
       const clAutoResult = placePanelsControlled({
@@ -9450,7 +9450,7 @@ function SolarEngine3D({
 
       addLog('AUTO', `[CL] plane[${planeIdx}] id=${plane.id.slice(0,8)} -> ${planePanels.length} panels (engine=${clAutoResult.engineUsed}, frame: ${(plane as any).localFrame3D ? 'stable' : 'fallback'})`);
 
-      // ── Debug frame axes (red=u, green=v, blue=n) — off by default ──────────
+      // â”€â”€ Debug frame axes (red=u, green=v, blue=n) â€” off by default â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (DEBUG_PLANE_OVERLAYS) {
         try { renderFrameAxes(viewer, C, plane as any, groundElev, `auto-${planeIdx}`); } catch (e) { console.warn('[AUTO] renderFrameAxes failed:', (e as Error).message); }
       }
@@ -9461,14 +9461,14 @@ function SolarEngine3D({
     addLog('AUTO', `total: ${newPanels.length} panels from ${eligiblePlanes.length} planes`);
 
     if (newPanels.length === 0) {
-      setStatusMsg('Auto-roof: no panels placed — check roof plane vertices and setback settings');
+      setStatusMsg('Auto-roof: no panels placed â€” check roof plane vertices and setback settings');
       autoFillRunningRef.current = false;
       onPlacementModeChange('select');
       return;
     }
 
-    // ── Render all panels ────────────────────────────────────────────────────
-    // v48.7: pre-compute skipGrid from final count — consistent rendering for all auto panels
+    // â”€â”€ Render all panels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // v48.7: pre-compute skipGrid from final count â€” consistent rendering for all auto panels
     const skipGridAuto = newPanels.length > 12;
     let entityCount = 0;
     newPanels.forEach(panel => {
@@ -9477,10 +9477,10 @@ function SolarEngine3D({
     });
     addLog('AUTO', `entities added: ${entityCount}/${newPanels.length}`);
 
-    // v47.217: Guard against clear — if clearPanels() ran while autoFill was computing,
+    // v47.217: Guard against clear â€” if clearPanels() ran while autoFill was computing,
     // discard these results to prevent ghost panels from reappearing.
     if (clearingRef.current) {
-      addLog('AUTO', 'handleAutoRoof: discarding results — clear was triggered during fill');
+      addLog('AUTO', 'handleAutoRoof: discarding results â€” clear was triggered during fill');
       autoFillRunningRef.current = false;
       return;
     }
@@ -9492,7 +9492,7 @@ function SolarEngine3D({
     try { renderRoofRails(viewer, C, newPanels); } catch (e) { handleCesiumError('renderRoofRails auto', e, true); }
     setStatusMsg(`Auto-roof: ${newPanels.length} panels on ${eligiblePlanes.length} roof planes (frame-locked)`);
 
-    // v47.126: bounding box for auto-filled panels — debug only
+    // v47.126: bounding box for auto-filled panels â€” debug only
     if (DEBUG_PLANE_OVERLAYS) {
       try { renderLayoutBBox(viewer, C, newPanels, 'auto'); } catch (e) { console.warn('[AUTO] renderLayoutBBox failed:', (e as Error).message); }
     }
@@ -9516,7 +9516,7 @@ function SolarEngine3D({
         const o = orbitRef.current;
         o.targetLat = centLat; o.targetLng = centLng;
         o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-        o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = radius;  // -45° Aurora parity (Reset View)
+        o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = radius;  // -45Â° Aurora parity (Reset View)
         applyOrbitRef.current?.();
       } catch {}
     }
@@ -9528,7 +9528,7 @@ function SolarEngine3D({
   }
 
 
-  // ── Fill roof segment with panels ──────────────────────────────────────────────────────────────
+  // â”€â”€ Fill roof segment with panels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // v31.9: Complete audit + fix.
   //
   // ELEVATION FORMULA (critical):
@@ -9556,10 +9556,10 @@ function SolarEngine3D({
       return panels;
     }
 
-    // ── Upper bound: seg.maxPanels is computed from actual roof area with setbacks ──
+    // â”€â”€ Upper bound: seg.maxPanels is computed from actual roof area with setbacks â”€â”€
     const maxPanelsLimit = (isFinite(seg.maxPanels) && seg.maxPanels > 0) ? seg.maxPanels : 60;
 
-    // ── Shared geometry constants ──────────────────────────────────────────────────
+    // â”€â”€ Shared geometry constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const mLat = 111320;
     const cosLat = Math.cos(seg.center.lat * Math.PI / 180);
     const mLng = isFinite(cosLat) && cosLat > 0.001 ? 111320 * cosLat : 111320;
@@ -9570,7 +9570,7 @@ function SolarEngine3D({
     const tanPitch = Math.tan(pitchDeg * Math.PI / 180);
     if (!isFinite(tanPitch)) { addLog('FILL', `seg ${seg?.id}: invalid tanPitch`); return panels; }
 
-    // ── Elevation: cesiumGroundElevRef + heightAboveGround ─────────────────────────
+    // â”€â”€ Elevation: cesiumGroundElevRef + heightAboveGround â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const heightAboveGround = isFinite(seg.heightAboveGround) ? seg.heightAboveGround : 3.0;
     // v47.216: lat-based EGM96 geoid approximation for CONUS (fallback when terrain not sampled)
     const segLatRad = seg.center.lat * Math.PI / 180;
@@ -9582,13 +9582,13 @@ function SolarEngine3D({
 
     addLog('FILL', `seg ${seg?.id}: groundElev=${groundElev.toFixed(1)} hAG=${heightAboveGround.toFixed(2)} segElev=${segElev.toFixed(1)} pitch=${pitchDeg.toFixed(1)} az=${azDeg.toFixed(1)}`);
 
-    // ── Panel dimensions ───────────────────────────────────────────────────────────
+    // â”€â”€ Panel dimensions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const orient = panelOrientationRef.current ?? 'portrait';
     const { pw: PW_O, ph: PH_O } = panelDims(orient);
     const panelW = PW_O + 0.05;
     const panelH = PH_O + 0.10;
 
-    // ── Point-in-polygon (ray casting) ────────────────────────────────────────────
+    // â”€â”€ Point-in-polygon (ray casting) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function pointInPolygon(
       lat: number, lng: number,
       poly: Array<{ lat: number; lng: number }>
@@ -9606,7 +9606,7 @@ function SolarEngine3D({
       return inside;
     }
 
-    // ── Clip polygon with setback ───────────────────────────────────────────────────────
+    // â”€â”€ Clip polygon with setback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Use actual fire setback values from UI config (passed as prop), fallback to IFC defaults
     const edgeSetbackM  = (fireSetbacks?.edgeSetbackM  ?? 0.457); // 18 inches default
     const ridgeSetbackM = (fireSetbacks?.ridgeSetbackM ?? 0.457); // 18 inches default
@@ -9656,7 +9656,7 @@ function SolarEngine3D({
       const ridgeE = Math.cos(azRad);
       const ridgeN = -Math.sin(azRad);
 
-      // ── Step 1: Filter valid panels and compute roof-local coordinates ──
+      // â”€â”€ Step 1: Filter valid panels and compute roof-local coordinates â”€â”€
       type GpWithCoords = {
         lat: number; lng: number; orientation: string;
         slopeProj: number; ridgeProj: number; height: number;
@@ -9673,9 +9673,9 @@ function SolarEngine3D({
         validGp.push({ lat: gp.lat, lng: gp.lng, orientation: gp.orientation, slopeProj, ridgeProj, height });
       }
 
-      // ── Step 2: Boundary-clip Google panels against ORIGINAL (unshrunk) polygon ──
+      // â”€â”€ Step 2: Boundary-clip Google panels against ORIGINAL (unshrunk) polygon â”€â”€
       // IMPORTANT: Google Solar API already places panels with fire setbacks applied.
-      // We must NOT filter against the shrunk polygon (clipPoly) — that rejects
+      // We must NOT filter against the shrunk polygon (clipPoly) â€” that rejects
       // all Google panels since they are already inset from the roof edge.
       // Instead, filter against the original roof boundary (rawClipPoly) to remove
       // any panels truly outside the roof footprint (data quality guard only).
@@ -9689,10 +9689,10 @@ function SolarEngine3D({
         addLog('FILL', `seg ${seg?.id}: PRIMARY boundary-clip: ${boundaryFiltered.length}/${validGp.length} kept (safety=${boundaryFiltered.length === 0 ? 'BYPASSED' : 'ok'})`);
       } else {
         setbackFilteredGp = validGp;
-        addLog('FILL', `seg ${seg?.id}: PRIMARY no boundary polygon — using all ${validGp.length} Google panels`);
+        addLog('FILL', `seg ${seg?.id}: PRIMARY no boundary polygon â€” using all ${validGp.length} Google panels`);
       }
 
-      // ── Step 3: Sort into clean aligned rows (by slopeProj then ridgeProj) ──
+      // â”€â”€ Step 3: Sort into clean aligned rows (by slopeProj then ridgeProj) â”€â”€
       // Quantize slopeProj into rows using panel height as bucket size.
       // This groups Google panels into neat rows matching the roof slope direction,
       // producing the same clean appearance as the manual Row tool.
@@ -9704,7 +9704,7 @@ function SolarEngine3D({
         return a.ridgeProj - b.ridgeProj; // left to right within row
       });
 
-      // ── Step 4: Place panels up to maxPanelsLimit ──
+      // â”€â”€ Step 4: Place panels up to maxPanelsLimit â”€â”€
       let placed = 0, skipped = 0;
       const limit = Math.min(setbackFilteredGp.length, maxPanelsLimit);
       for (let i = 0; i < limit; i++) {
@@ -9834,13 +9834,13 @@ function SolarEngine3D({
   }
 
 
-  // ── Compute surface normal ─────────────────────────────────────────────────
+  // â”€â”€ Compute surface normal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function computeSurfaceNormal(
     viewer: any, C: any, screenPos: any, cartesian: any, pickMethod: string
   ): { tiltDeg: number; azimuthDeg: number } {
     try {
       if (pickMethod === '3dtiles') {
-        // 8-direction sampling at 15px offsets — more reliable slope detection on 3D tiles
+        // 8-direction sampling at 15px offsets â€” more reliable slope detection on 3D tiles
         const D = 15;
         const offsets = [
           { dx: D, dy: 0 }, { dx: -D, dy: 0 },
@@ -9928,7 +9928,7 @@ function SolarEngine3D({
     return { tiltDeg: tiltRef.current, azimuthDeg: azimuthRef.current };
   }
 
-  // ── Create panel object ────────────────────────────────────────────────────
+  // â”€â”€ Create panel object â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function createPanel(opts: {
     lat: number; lng: number; height: number;
     tilt: number; azimuth: number; systemType: SystemType;
@@ -9942,7 +9942,7 @@ function SolarEngine3D({
       lat: opts.lat, lng: opts.lng, x: 0, y: 0,
       tilt: opts.tilt, azimuth: opts.azimuth,
       // P0-6: fence panels ALWAYS stamp the equipment-db fence record (Ray's
-      // ruling 2026-07-19 — PS-MNB108(HCBF)-440W only); other system types
+      // ruling 2026-07-19 â€” PS-MNB108(HCBF)-440W only); other system types
       // stamp the studio-selected panel (the placement-time equipment authority).
       wattage: opts.systemType === 'fence'
         ? (getPanelById(FENCE_PANEL_EQUIPMENT_ID)?.watts ?? selectedPanel?.wattage ?? 400)
@@ -9958,57 +9958,57 @@ function SolarEngine3D({
     return p;
   }
 
-  // ── Clear all panels ───────────────────────────────────────────────────────
-  // v47.217: Atomic clear — sets clearingRef to block any in-flight async operations
+  // â”€â”€ Clear all panels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // v47.217: Atomic clear â€” sets clearingRef to block any in-flight async operations
   // (autoFill, row generation, snapping) from re-injecting panels after clear.
   // Also clears: pendingPanelsRef, panel selection, lastRenderedPanels diff state.
   function clearPanels() {
     const viewer = viewerRef.current;
     if (!viewer) return;
 
-    // ── Debug logging (Phase 1: before clear) ──
+    // â”€â”€ Debug logging (Phase 1: before clear) â”€â”€
     const panelsBefore = panelsRef.current.length;
     const entitiesBefore = panelMapRef.current.size;
     addLog('CLEAR', `clearPanels triggered: panelsBefore=${panelsBefore}, entitiesBefore=${entitiesBefore}`);
 
-    // ── Step 1: Set mutex to block any async ops ──
+    // â”€â”€ Step 1: Set mutex to block any async ops â”€â”€
     clearingRef.current = true;
     // Also abort any in-flight autoFill so its onPanelsChange([...]) doesn't re-add panels
     autoFillRunningRef.current = false;
 
-    // ── Step 2: Remove all panel entities from the 3D scene ──
+    // â”€â”€ Step 2: Remove all panel entities from the 3D scene â”€â”€
     panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     panelMapRef.current.clear();
     // Phase 2: clear roof rail entities alongside panels
     try { clearRoofRails(viewer); } catch {}
 
-    // ── Step 3: Reset all panel data state ──
+    // â”€â”€ Step 3: Reset all panel data state â”€â”€
     lastRenderedPanelsRef.current = []; // reset incremental diff state
     panelsRef.current = [];
     pendingPanelsRef.current = [];     // prevent boot-time stale panels from reappearing
 
-    // ── Step 4: Clear panel selection ──
+    // â”€â”€ Step 4: Clear panel selection â”€â”€
     clearPanelSelection();
 
-    // ── Step 5: Notify parent (resets panel count, system size, proposal metrics) ──
+    // â”€â”€ Step 5: Notify parent (resets panel count, system size, proposal metrics) â”€â”€
     onPanelsChange([]);
     setPanelCount(0);
 
-    // ── Debug logging (Phase 2: after clear) ──
+    // â”€â”€ Debug logging (Phase 2: after clear) â”€â”€
     const panelsAfter = panelsRef.current.length;
     const entitiesAfter = panelMapRef.current.size;
     addLog('CLEAR', `clearPanels complete: panelsAfter=${panelsAfter}, entitiesAfter=${entitiesAfter}`);
-    if (entitiesAfter > 0) addLog('CLEAR', `WARNING: ${entitiesAfter} entities remain after clear — possible ghost panels`);
+    if (entitiesAfter > 0) addLog('CLEAR', `WARNING: ${entitiesAfter} entities remain after clear â€” possible ghost panels`);
 
-    setStatusMsg('🗑️ All panels cleared');
+    setStatusMsg('ðŸ—‘ï¸ All panels cleared');
     try { viewer.scene.requestRender(); } catch {}
 
-    // ── Step 6: Release mutex after a short delay to allow React state flush ──
+    // â”€â”€ Step 6: Release mutex after a short delay to allow React state flush â”€â”€
     // 200ms is enough for any synchronous React updates to complete before new ops can run.
     setTimeout(() => { clearingRef.current = false; }, 200);
   }
 
-  // ── Sun animation ──────────────────────────────────────────────────────────
+  // â”€â”€ Sun animation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (animating) {
       const interval = setInterval(() => {
@@ -10046,7 +10046,7 @@ function SolarEngine3D({
     const elev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : (twinRef.current?.elevation ?? 0);
     const o = orbitRef.current;
     o.targetLat = lat; o.targetLng = lng; o.targetAlt = elev;
-    o.heading = Math.PI; o.pitch = -0.785; o.radius = 200;  // -45° pitch, look NORTH
+    o.heading = Math.PI; o.pitch = -0.785; o.radius = 200;  // -45Â° pitch, look NORTH
     applyOrbitRef.current?.();
   }
 
@@ -10056,8 +10056,8 @@ function SolarEngine3D({
     return `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
   }
 
-  // Sun position for display — use UTC hours to match fixed getSunPosition
-  // simHour is now LOCAL solar time (5–22). Convert to UTC for getSunPosition.
+  // Sun position for display â€” use UTC hours to match fixed getSunPosition
+  // simHour is now LOCAL solar time (5â€“22). Convert to UTC for getSunPosition.
   const localSolarHourClamped = ((simHour % 24) + 24) % 24;
   const simHourUTC = ((simHour - lng / 15) % 24 + 24) % 24;
   const sunPos = getSunPosition(lat, lng, (() => {
@@ -10076,7 +10076,7 @@ function SolarEngine3D({
     return dirs[Math.round(az / 22.5) % 16];
   };
 
-  // ── RENDER ─────────────────────────────────────────────────────────────────
+  // â”€â”€ RENDER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#0a0a1a', overflow: 'hidden' }}>
 
@@ -10090,7 +10090,7 @@ function SolarEngine3D({
       <div ref={cesiumRef} style={{ width: '100%', height: '100%' }} />
 
       {/* v66: Aurora-style top-bar map-source picker
-          (`Details ▾` / `LiDAR | Street View` / `[Google ▾]`).
+          (`Details â–¾` / `LiDAR | Street View` / `[Google â–¾]`).
           Floating bar at the top-center of the canvas. State is local for now;
           the imagery/LiDAR swap is the integration step for the next session. */}
       <MapSourcePicker
@@ -10101,8 +10101,8 @@ function SolarEngine3D({
 
       {/* v70: Aurora-style Save / Undo / Redo toolbar (top-left chip).
        * Renders the three icon+label buttons from lib/state/Buttons.tsx.
-       * Persistence is intentionally a no-op for this slice — the host
-       * component owns the onSave contract (see lib/state/DESIGN.md §8). */}
+       * Persistence is intentionally a no-op for this slice â€” the host
+       * component owns the onSave contract (see lib/state/DESIGN.md Â§8). */}
       {historyStoreRef.current ? (
         <UndoRedoToolbar
           store={historyStoreRef.current}
@@ -10110,9 +10110,9 @@ function SolarEngine3D({
         />
       ) : null}
 
-      {/* v65 (roof-wizard): 3-step sticky wizard — Aurora parity
-          (HANDOFF_2026-08-25 §2). Appears during any roof-draw mode.
-          × cancels the whole flow. */}
+      {/* v65 (roof-wizard): 3-step sticky wizard â€” Aurora parity
+          (HANDOFF_2026-08-25 Â§2). Appears during any roof-draw mode.
+          Ã— cancels the whole flow. */}
       <RoofWizard
         placementMode={placementMode}
         vertexCount={
@@ -10134,8 +10134,12 @@ function SolarEngine3D({
         canopyRadiusM={TREE_CANOPY_RADIUS_M}
       />
 
-      {/* v63: String / equipment legend overlay */}
+      {/* v63: String / equipment legend overlay.
+          v70: wrapped in DraggablePanel. Drag from the panel background
+          or the header text to move. The whole legend (strings +
+          equipment) moves as one. */}
       {(colorByString || showEquipment) && ((stringLegend && stringLegend.length > 0) || showEquipment) ? (
+        <DraggablePanel id="legend-strings" zIndex={20}>
         <div style={{
           position: 'absolute', top: 12, right: 12, zIndex: 20,
           maxHeight: '46%', overflowY: 'auto',
@@ -10173,9 +10177,10 @@ function SolarEngine3D({
             </div>
           ) : null}
         </div>
+        </DraggablePanel>
       ) : null}
 
-      {/* Debug Panel removed — was QA-only overlay */}
+      {/* Debug Panel removed â€” was QA-only overlay */}
 
       {/* Loading overlay */}
       {stage !== 'done' && stage !== 'error' ? (
@@ -10198,7 +10203,7 @@ function SolarEngine3D({
             <div style={{
               position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 28,
-            }}>☀️</div>
+            }}>â˜€ï¸</div>
           </div>
 
           <div style={{ color: '#ff8c00', fontSize: 20, fontWeight: 800, marginBottom: 6, letterSpacing: '-0.5px' }}>
@@ -10227,11 +10232,11 @@ function SolarEngine3D({
           {/* Stage steps */}
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
             {([
-              { key: 'cesium', label: 'Engine', icon: '⚙️' },
-              { key: 'viewer', label: 'Viewer', icon: '🗺️' },
-              { key: 'tiles', label: '3D Tiles', icon: '🏙️' },
-              { key: 'solar', label: 'Solar API', icon: '☀️' },
-              { key: 'done', label: 'Ready', icon: '✅' },
+              { key: 'cesium', label: 'Engine', icon: 'âš™ï¸' },
+              { key: 'viewer', label: 'Viewer', icon: 'ðŸ—ºï¸' },
+              { key: 'tiles', label: '3D Tiles', icon: 'ðŸ™ï¸' },
+              { key: 'solar', label: 'Solar API', icon: 'â˜€ï¸' },
+              { key: 'done', label: 'Ready', icon: 'âœ…' },
             ] as const).map(s => {
               const stages = ['idle','cesium','viewer','tiles','solar','done'];
               const currentIdx = stages.indexOf(stage);
@@ -10267,7 +10272,7 @@ function SolarEngine3D({
           position: 'absolute', inset: 0, background: 'rgba(10,10,26,0.95)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 100,
         }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>âš ï¸</div>
           <div style={{ color: '#ff4444', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>3D Engine Error</div>
           <div style={{ color: '#aaa', fontSize: 13, maxWidth: 400, textAlign: 'center', marginBottom: 24 }}>{stageMsg}</div>
           <button
@@ -10280,12 +10285,12 @@ function SolarEngine3D({
             }}
             style={{ padding: '10px 24px', background: '#ff8c00', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700 }}
           >
-            🔄 Retry 3D Load
+            ðŸ”„ Retry 3D Load
           </button>
         </div>
       ) : null}
 
-      {/* ── Collapsible grouped toolbar ── */}
+      {/* â”€â”€ Collapsible grouped toolbar â”€â”€ */}
       {stage === 'done' ? ((() => {
         const btnBase: React.CSSProperties = {
           width: 36, height: 36, borderRadius: 8, fontSize: 16,
@@ -10324,7 +10329,7 @@ function SolarEngine3D({
               { mode: 'ground'  as PlacementMode, icon: '\u{1F331}', label: 'Ground',   tip: 'Ground mount: click start \u2192 end to place a row' },
               { mode: 'fence'   as PlacementMode, icon: '\u26A1',    label: 'Fence',    tip: 'SOL Fence: click points, right-click to finish' },
               { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: 'Custom Array', tip: 'Outline the panel area: click 3+ roof corners, right-click to place an array' },
-              { mode: 'mark_plane' as PlacementMode, icon: '⬡', label: 'Mark Plane', tip: 'Outline a roof face for the model/permit WITHOUT panels (3+ corners, right-click to finish). Use 🔗 Roof Model to see all edges.' },
+              { mode: 'mark_plane' as PlacementMode, icon: 'â¬¡', label: 'Mark Plane', tip: 'Outline a roof face for the model/permit WITHOUT panels (3+ corners, right-click to finish). Use ðŸ”— Roof Model to see all edges.' },
               { mode: 'row'     as PlacementMode, icon: '\u27A1',    label: 'Row',      tip: 'Row Tool: click two points to place a panel row' },
             ],
           },
@@ -10343,7 +10348,7 @@ function SolarEngine3D({
             id: 'tools', icon: '\u{1F4CF}', label: 'Tools',
             tools: [
               { mode: 'measure'       as PlacementMode, icon: '\u{1F4CF}', label: 'Measure',   tip: 'Click two points to measure distance on terrain' },
-              { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruction', tip: 'Add Obstruction (Aurora parity): click the roof to drop a chimney-class prism. Default 0.6m × 0.6m × 1.0m, configurable via the right panel. Removes panels inside the footprint.' },
+              { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruction', tip: 'Add Obstruction (Aurora parity): click the roof to drop a chimney-class prism. Default 0.6m Ã— 0.6m Ã— 1.0m, configurable via the right panel. Removes panels inside the footprint.' },
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
               { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block by line-tracing its footprint: click N points to define any shape (rectangle, L, T, etc.), right-click to finish. Use when Google 3D Tiles has no coverage for this address.' },
@@ -10358,14 +10363,19 @@ function SolarEngine3D({
 
         return (
           <>
-            {/* ── LEFT: spine + flyout ── */}
+            {/* â”€â”€ LEFT: spine + flyout â”€â”€
+                v70: wrapped in DraggablePanel so the user can grab the
+                tool spine and move the whole tool column. The spine
+                (first child) is the drag handle. The flyout opens to
+                the right of the spine and follows when dragged. */}
+            <DraggablePanel id="tool-spine" zIndex={50}>
             <div style={{
               position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
               display: 'flex', flexDirection: 'row', alignItems: 'flex-start',
               gap: 0, zIndex: 50, pointerEvents: 'none',
             }}>
 
-              {/* ── Spine: always-visible icon column ── */}
+              {/* â”€â”€ Spine: always-visible icon column â”€â”€ */}
               <div style={{
                 display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center',
                 background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(10px)',
@@ -10373,7 +10383,7 @@ function SolarEngine3D({
                 padding: '6px 4px', pointerEvents: 'all',
               }}>
 
-                {/* SELECT — standalone, always visible */}
+                {/* SELECT â€” standalone, always visible */}
                 <button
                   onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Select: click panels. SHIFT+click = multi-select.', x: r.left + r.width / 2, y: r.top - 8 }); }}
                   onMouseLeave={() => setTooltipInfo(null)}
@@ -10412,7 +10422,7 @@ function SolarEngine3D({
                         }}
                       >
                         {headerIcon}
-                        {/* Mini chevron — rotates when open */}
+                        {/* Mini chevron â€” rotates when open */}
                         <span style={{
                           position: 'absolute', bottom: 1, right: 2, fontSize: 6,
                           color: hasActive ? '#000' : '#666',
@@ -10446,7 +10456,7 @@ function SolarEngine3D({
 
               </div>{/* end spine */}
 
-              {/* ── Flyout panel (slides out to the right when a group is open) ── */}
+              {/* â”€â”€ Flyout panel (slides out to the right when a group is open) â”€â”€ */}
               {openGroup ? ((() => {
                 const grp = groups.find(g => g.id === openGroup)!;
                 return (
@@ -10490,11 +10500,18 @@ function SolarEngine3D({
               })()) : null}
 
             </div>{/* end toolbar row */}
+            </DraggablePanel>
 
             {/* Flyout slide-in animation */}
             <style>{'@keyframes toolFlyout { from { opacity:0; transform:translateX(-8px); } to { opacity:1; transform:translateX(0); } }'}</style>
 
-            {/* ── TOP-RIGHT: stats + orientation + active tool + context controls ── */}
+            {/* â”€â”€ TOP-RIGHT: stats + orientation + active tool + context controls â”€â”€
+                v70: wrapped in DraggablePanel so the user can grab the
+                stats row and move the whole stack (stats + active tool
+                badge + ground/plane/obstruction context controls).
+                The stats row is the first child so it becomes the
+                drag handle. */}
+            <DraggablePanel id="top-right-stack" zIndex={50}>
             <div style={{
               position: 'absolute', top: 12, right: 12,
               display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
@@ -10518,7 +10535,7 @@ function SolarEngine3D({
                     panelOrientationRef.current  = next;
                     surfaceOrientationRef.current = next;
                     // v48.32: Re-render existing panels with new orientation.
-                    // IMPORTANT: do NOT call onPanelsChange here — that would push
+                    // IMPORTANT: do NOT call onPanelsChange here â€” that would push
                     // orientation-cloned panels back to DesignStudio, which can cause
                     // the panels useEffect to fire a second render pass and multiply panels.
                     // Instead: directly rebuild entities in the Cesium viewer only,
@@ -10583,7 +10600,7 @@ function SolarEngine3D({
                  placementMode}
               </div>
 
-              {/* ── Ground mode context controls (v48.28) ── */}
+              {/* â”€â”€ Ground mode context controls (v48.28) â”€â”€ */}
               {(placementMode === 'ground' || placementMode === 'ground_array') ? (
                 <div style={{
                   display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'stretch',
@@ -10593,7 +10610,7 @@ function SolarEngine3D({
                 }}>
                   {/* Header */}
                   <div style={{ color: '#14b8a6', fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', textAlign: 'center', borderBottom: '1px solid rgba(20,184,166,0.2)', paddingBottom: 4, marginBottom: 2 }}>
-                    🌱 Ground Mount
+                    ðŸŒ± Ground Mount
                   </div>
 
                   {/* Tilt row */}
@@ -10601,14 +10618,14 @@ function SolarEngine3D({
                     <span style={{ color: '#aaa', fontSize: 10 }}>Panel Tilt</span>
                     <select value={gTilt} onChange={e => setGTilt(Number(e.target.value))}
                       style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 5, padding: '3px 6px', fontSize: 11, cursor: 'pointer' }}>
-                      <option value={0}>0° (Flat)</option>
-                      <option value={10}>10°</option>
-                      <option value={20}>20°</option>
-                      <option value={25}>25°</option>
-                      <option value={30}>30°</option>
-                      <option value={35}>35°</option>
-                      <option value={40}>40°</option>
-                      <option value={90}>90° (Vertical)</option>
+                      <option value={0}>0Â° (Flat)</option>
+                      <option value={10}>10Â°</option>
+                      <option value={20}>20Â°</option>
+                      <option value={25}>25Â°</option>
+                      <option value={30}>30Â°</option>
+                      <option value={35}>35Â°</option>
+                      <option value={40}>40Â°</option>
+                      <option value={90}>90Â° (Vertical)</option>
                     </select>
                   </div>
 
@@ -10632,7 +10649,7 @@ function SolarEngine3D({
                   {showRacking ? (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                       <span style={{ color: '#aaa', fontSize: 10 }}>Style</span>
-                      {/* v48.30: IronRidge XR is a 4-row landscape system — not yet built.
+                      {/* v48.30: IronRidge XR is a 4-row landscape system â€” not yet built.
                           Power Rail is the only active style. IronRidge button is disabled
                           with a "coming soon" tooltip so clicking it doesn't wipe the array. */}
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -10646,8 +10663,8 @@ function SolarEngine3D({
                           }}
                         >Power Rail</button>
                         <button
-                          title="IronRidge XR — 4-row landscape system (coming soon)"
-                          onClick={() => setStatusMsg('🔧 IronRidge XR (4-row landscape) coming soon')}
+                          title="IronRidge XR â€” 4-row landscape system (coming soon)"
+                          onClick={() => setStatusMsg('ðŸ”§ IronRidge XR (4-row landscape) coming soon')}
                           style={{
                             padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
                             cursor: 'not-allowed', opacity: 0.38,
@@ -10663,31 +10680,31 @@ function SolarEngine3D({
                   {groundArrayRowCount > 0 ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 4, borderTop: '1px solid rgba(20,184,166,0.15)' }}>
                       <span style={{ color: '#14b8a6', fontSize: 11, fontWeight: 600, textAlign: 'center' }}>
-                        {groundArrayRowCount} row{groundArrayRowCount !== 1 ? 's' : ''} · {groundArrayPanelCount} panels
+                        {groundArrayRowCount} row{groundArrayRowCount !== 1 ? 's' : ''} Â· {groundArrayPanelCount} panels
                       </span>
                       <div style={{ display: 'flex', gap: 5 }}>
                         <button onClick={finalizeGroundArray}
                           style={{ flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none',
                             background: 'linear-gradient(135deg, #14b8a6, #0d9488)', color: '#fff' }}>
-                          ✓ Place Array
+                          âœ“ Place Array
                         </button>
                         <button onClick={cancelGroundArray}
                           title="Discard this array and start over"
                           style={{ padding: '5px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
                             border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>
-                          ✗
+                          âœ—
                         </button>
                       </div>
                     </div>
                   ) : (
                     <div style={{ color: '#888', fontSize: 10, textAlign: 'center', paddingTop: 3 }}>
-                      Click start → end to place a row
+                      Click start â†’ end to place a row
                     </div>
                   )}
                 </div>
               ) : null}
 
-              {/* ── 3D Plane context controls ── */}
+              {/* â”€â”€ 3D Plane context controls â”€â”€ */}
               {placementMode === 'plane3d' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -10718,7 +10735,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Fence context controls ── */}
+              {/* â”€â”€ Fence context controls â”€â”€ */}
               {placementMode === 'fence' && fencePtCount > 0 ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -10737,7 +10754,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Select context controls ── */}
+              {/* â”€â”€ Select context controls â”€â”€ */}
               {placementMode === 'select' && selectedPanelIds.size > 0 ? (
                 <div style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
@@ -10831,7 +10848,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Measure context ── */}
+              {/* â”€â”€ Measure context â”€â”€ */}
               {placementMode === 'measure' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -10852,7 +10869,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Row context ── */}
+              {/* â”€â”€ Row context â”€â”€ */}
               {placementMode === 'row' ? (
                 <div style={{
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,204,0.2)',
@@ -10862,7 +10879,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Set Direction context ── */}
+              {/* â”€â”€ Set Direction context â”€â”€ */}
               {placementMode === 'set_direction' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -10883,7 +10900,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── 3D Primitives Properties (v66: eave height + roof pitch inputs) ── */}
+              {/* â”€â”€ 3D Primitives Properties (v66: eave height + roof pitch inputs) â”€â”€ */}
               {(placementMode === 'block' || placementMode === 'roof_gable' || placementMode === 'roof_hip') ? (
                 <div style={{
                   display: 'flex', flexDirection: 'column', gap: 6,
@@ -10897,7 +10914,7 @@ function SolarEngine3D({
                   }}>
                     3D Primitives
                   </div>
-                  {/* Eave height — for new blocks */}
+                  {/* Eave height â€” for new blocks */}
                   {placementMode === 'block' ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>New block eave</span>
@@ -10919,7 +10936,7 @@ function SolarEngine3D({
                       <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
                     </div>
                   ) : null}
-                  {/* Selected block height — update last placed block */}
+                  {/* Selected block height â€” update last placed block */}
                   {placementMode === 'block' && lastPlacedBlockId ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ color: '#ffd28a', fontSize: 11, minWidth: 100 }}>Selected height</span>
@@ -10968,7 +10985,7 @@ function SolarEngine3D({
                       <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
                     </div>
                   ) : null}
-                  {/* Eave height — for new roofs (gable / hip) */}
+                  {/* Eave height â€” for new roofs (gable / hip) */}
                   {(placementMode === 'roof_gable' || placementMode === 'roof_hip') ? (
                     <>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -11007,14 +11024,14 @@ function SolarEngine3D({
                           }}
                           style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
                         />
-                        <span style={{ color: '#aaa', fontSize: 10 }}>°</span>
+                        <span style={{ color: '#aaa', fontSize: 10 }}>Â°</span>
                       </div>
                     </>
                   ) : null}
                   {/* v66: Lift Roofs / Flatten Roofs for 3D Primitives (block / gable / hip).
-                   *  Aurora parity: HANDOFF_2026-08-25 §4 (frame_0130, frame_0135).
+                   *  Aurora parity: HANDOFF_2026-08-25 Â§4 (frame_0130, frame_0135).
                    *  Only renders when LiDAR is loaded. Operates on the 3D Primitive
-                   *  entities the user drew with the in-canvas tools — distinct from
+                   *  entities the user drew with the in-canvas tools â€” distinct from
                    *  the sibling's `roofPlanes` buttons in the LiDAR Properties panel
                    *  (which operate on the data-model roof planes). */}
                   {lidar.state.dataset ? (
@@ -11027,7 +11044,7 @@ function SolarEngine3D({
                         fontSize: 9, color: '#88aaff', textAlign: 'left',
                         fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase',
                       }}>
-                        LiDAR — 3D Primitives
+                        LiDAR â€” 3D Primitives
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button
@@ -11042,7 +11059,7 @@ function SolarEngine3D({
                             opacity: (placedBlockCount + placedGableCount + placedHipCount) === 0 ? 0.4 : 1,
                           }}
                         >
-                          ⤴ Lift Roofs
+                          â¤´ Lift Roofs
                         </button>
                         <button
                           onClick={handleFlattenPrimitives}
@@ -11056,7 +11073,7 @@ function SolarEngine3D({
                             opacity: (placedBlockCount + placedGableCount + placedHipCount) === 0 ? 0.4 : 1,
                           }}
                         >
-                          ⤓ Flatten Roofs
+                          â¤“ Flatten Roofs
                         </button>
                       </div>
                     </div>
@@ -11064,10 +11081,10 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Add Obstruction Properties (v66: obstruction-primitive) ──
+              {/* â”€â”€ Add Obstruction Properties (v66: obstruction-primitive) â”€â”€
                   Right-panel input block for the Aurora-parity "Add Obstruction"
-                  primitive. Three sliders (width, depth, height) — matches the
-                  parity bar: "a small block (e.g. 0.6m × 0.6m × 1.0m,
+                  primitive. Three sliders (width, depth, height) â€” matches the
+                  parity bar: "a small block (e.g. 0.6m Ã— 0.6m Ã— 1.0m,
                   configurable)". Same visual language as the 3D Primitives panel
                   so the two read as siblings. */}
               {placementMode === 'obstruction' ? (
@@ -11085,7 +11102,7 @@ function SolarEngine3D({
                   </div>
                   <div style={{ color: '#bbb', fontSize: 10, lineHeight: 1.35 }}>
                     Click the roof to drop a chimney-class prism.
-                    Default 0.6m × 0.6m × 1.0m.
+                    Default 0.6m Ã— 0.6m Ã— 1.0m.
                   </div>
                   {/* Width (east-west) */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -11166,13 +11183,13 @@ function SolarEngine3D({
                         setNewObstructionWidthM(DEFAULT_OBSTRUCTION_FOOTPRINT_W_M);
                         setNewObstructionDepthM(DEFAULT_OBSTRUCTION_FOOTPRINT_D_M);
                         setNewObstructionHeightM(DEFAULT_OBSTRUCTION_HEIGHT_M);
-                        setStatusMsg('Obstruction dimensions reset to 0.6×0.6×1.0m');
+                        setStatusMsg('Obstruction dimensions reset to 0.6Ã—0.6Ã—1.0m');
                       }}
-                      title="Reset to Aurora defaults (0.6m × 0.6m × 1.0m)"
+                      title="Reset to Aurora defaults (0.6m Ã— 0.6m Ã— 1.0m)"
                       style={{ flex: 1, padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
                         background: 'rgba(255,170,0,0.12)', color: '#ffaa00',
                         border: '1px solid rgba(255,170,0,0.3)' }}>
-                      Reset to 0.6×0.6×1.0m
+                      Reset to 0.6Ã—0.6Ã—1.0m
                     </button>
                     <button
                       onClick={() => {
@@ -11195,7 +11212,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Block context (v65: line-trace block placement) ── */}
+              {/* â”€â”€ Block context (v65: line-trace block placement) â”€â”€ */}
               {placementMode === 'block' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -11204,8 +11221,8 @@ function SolarEngine3D({
                 }}>
                   <span style={{ color: '#e0e0e0', fontSize: 12 }}>
                     {blockPtCount === 0
-                      ? '🧱 Click to add footprint points — right-click to finish, Esc to cancel'
-                      : `🧱 ${blockPtCount} points — right-click to finish (need 3+), Esc to cancel`}
+                      ? 'ðŸ§± Click to add footprint points â€” right-click to finish, Esc to cancel'
+                      : `ðŸ§± ${blockPtCount} points â€” right-click to finish (need 3+), Esc to cancel`}
                   </span>
                   {blockPtCount >= 3 ? (
                     <button
@@ -11219,7 +11236,7 @@ function SolarEngine3D({
                         background: 'rgba(255,170,0,0.20)', color: '#ffd28a',
                         border: '1px solid rgba(255,170,0,0.4)', cursor: 'pointer' }}
                     >
-                      Finish ✓
+                      Finish âœ“
                     </button>
                   ) : null}
                   {placedBlockCount > 0 ? (
@@ -11251,7 +11268,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Gable Roof context (v64: 3D gable roof placement) ── */}
+              {/* â”€â”€ Gable Roof context (v64: 3D gable roof placement) â”€â”€ */}
               {placementMode === 'roof_gable' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -11262,7 +11279,7 @@ function SolarEngine3D({
                     {gablePtCount === 0
                       ? '\u{1F3D7} Click eave corner 1 (SW)'
                       : gablePtCount === 1
-                        ? '\u{1F3D7} Click eave corner 2 (NE) — gable placed with ridge along long edge'
+                        ? '\u{1F3D7} Click eave corner 2 (NE) â€” gable placed with ridge along long edge'
                         : `${placedGableCount} gable${placedGableCount === 1 ? '' : 's'} placed`}
                   </span>
                   {gablePtCount > 0 || placedGableCount > 0 ? (
@@ -11290,7 +11307,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Hip Roof context (v64: 3D hip roof placement) ── */}
+              {/* â”€â”€ Hip Roof context (v64: 3D hip roof placement) â”€â”€ */}
               {placementMode === 'roof_hip' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -11301,7 +11318,7 @@ function SolarEngine3D({
                     {hipPtCount === 0
                       ? '\u{1F3D7} Click eave corner 1 (SW)'
                       : hipPtCount === 1
-                        ? '\u{1F3D7} Click eave corner 2 (NE) — hip placed with ridge shorter than eave'
+                        ? '\u{1F3D7} Click eave corner 2 (NE) â€” hip placed with ridge shorter than eave'
                         : `${placedHipCount} hip${placedHipCount === 1 ? '' : 's'} placed`}
                   </span>
                   {hipPtCount > 0 || placedHipCount > 0 ? (
@@ -11328,7 +11345,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Tree context (v64: decorative tree placement) ── */}
+              {/* â”€â”€ Tree context (v64: decorative tree placement) â”€â”€ */}
               {placementMode === 'tree' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -11338,7 +11355,7 @@ function SolarEngine3D({
                   <span style={{ color: '#7ab86a', fontSize: 12 }}>
                     {placedTreeCount === 0
                       ? '\u{1F333} Click anywhere to drop a tree (sphere + trunk)'
-                      : `\u{1F333} ${placedTreeCount} tree${placedTreeCount === 1 ? '' : 's'} placed — click to add more`}
+                      : `\u{1F333} ${placedTreeCount} tree${placedTreeCount === 1 ? '' : 's'} placed â€” click to add more`}
                   </span>
                   {placedTreeCount > 0 ? (
                     <button
@@ -11363,7 +11380,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Set Origin context ── */}
+              {/* â”€â”€ Set Origin context â”€â”€ */}
               {placementMode === 'set_origin' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -11384,7 +11401,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Plane (legacy) context ── */}
+              {/* â”€â”€ Plane (legacy) context â”€â”€ */}
               {placementMode === 'plane' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -11405,6 +11422,7 @@ function SolarEngine3D({
                 </div>
               ) : null}
             </div>
+            </DraggablePanel>
           </>
         );
       })()) : null}
@@ -11412,12 +11430,12 @@ function SolarEngine3D({
 
 
 
-      {/* v67: INSTRUCTIONS panel — context-aware helper text per placement mode.
+      {/* v67: INSTRUCTIONS panel â€” context-aware helper text per placement mode.
           Aurora frame 0070 parity.
 
           v5: wrapped in DraggablePanel. Drag the header (cursor: grab)
           to move the panel anywhere; position persists to localStorage.
-          Click any button or text in the panel — those are NOT the drag
+          Click any button or text in the panel â€” those are NOT the drag
           handle and remain clickable. */}
       {stage === 'done' ? (
         <DraggablePanel id="instructions-panel" zIndex={50}>
@@ -11457,9 +11475,9 @@ function SolarEngine3D({
       ) : null}
 
       {/* v68 (canvas-controls): Aurora-parity bottom-left control strip
-          (HANDOFF_2026-08-25 §1) — floating vertical dock at the canvas
+          (HANDOFF_2026-08-25 Â§1) â€” floating vertical dock at the canvas
           corner. Compass needle rotates with `viewer.camera.heading`.
-          Click compass → reset to north. Zoom +/-, three layer toggles.
+          Click compass â†’ reset to north. Zoom +/-, three layer toggles.
           Sits at `left: 200, bottom: 12` (clear of Report a Bug at
           bottom:16,left:16).
 
@@ -11472,7 +11490,7 @@ function SolarEngine3D({
           ready={stage === 'done'}
           onResetNorth={() => {
             const o = orbitRef.current;
-            o.heading = Math.PI;            // camera south → look north
+            o.heading = Math.PI;            // camera south â†’ look north
             o.pitch   = -Math.PI / 4;       // Aurora tilted-aerial default
             applyOrbitRef.current?.();
             if (typeof setStatusMsg === 'function') setStatusMsg('\u{1F9ED} North up');
@@ -11503,7 +11521,7 @@ function SolarEngine3D({
       {/* Overlay toggles (bottom area, clear of Report a Bug at bottom-left).
           v67 was at left:60,bottom:16 which collided with both the
           tool spine (left:10,top:50%) and the Report a Bug button
-          (page-level at fixed bottom-4 left-4 z-60) — making the toggle
+          (page-level at fixed bottom-4 left-4 z-60) â€” making the toggle
           buttons unclickable. v68 sits at bottom:12,left:260 (right of
           the Report Bug), shares the bottom row with CanvasControls
           (left:200,bottom:12) for a clean bottom-left-to-center dock.
@@ -11520,10 +11538,10 @@ function SolarEngine3D({
           border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '6px 10px', zIndex: 50,
         }}>
           {[
-            { key: 'parcel', label: '📐 Parcel', value: showParcel, color: '#00ff88' },
-            { key: 'roof', label: '🏠 Roof Segs', value: showRoofSegs, color: '#ffd700' },
-            { key: 'shade', label: '🌡 Shade', value: showShadeLocal, color: '#ff6644' },
-            { key: 'irradiance', label: irradianceLoading ? '⏳ Heatmap' : '☀ Heatmap', value: showIrradianceLocal, color: '#f97316' },
+            { key: 'parcel', label: 'ðŸ“ Parcel', value: showParcel, color: '#00ff88' },
+            { key: 'roof', label: 'ðŸ  Roof Segs', value: showRoofSegs, color: '#ffd700' },
+            { key: 'shade', label: 'ðŸŒ¡ Shade', value: showShadeLocal, color: '#ff6644' },
+            { key: 'irradiance', label: irradianceLoading ? 'â³ Heatmap' : 'â˜€ Heatmap', value: showIrradianceLocal, color: '#f97316' },
           ].map(({ key, label, value, color }) => (
             <button
               key={key}
@@ -11572,7 +11590,7 @@ function SolarEngine3D({
           {/* Row 1: time + sun position + play */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 18 }}>{sunPos.elevation > 0 ? '☀️' : '🌙'}</span>
+              <span style={{ fontSize: 18 }}>{sunPos.elevation > 0 ? 'â˜€ï¸' : 'ðŸŒ™'}</span>
               <div>
                 <div style={{ color: '#ffd700', fontSize: 14, fontWeight: 800, lineHeight: 1.1 }}>
                   {localSolarTimeStr} Solar
@@ -11584,9 +11602,9 @@ function SolarEngine3D({
               {sunPos.elevation > 0 ? (
                 <>
                   <div style={{ color: '#ff8c00', fontSize: 13, fontWeight: 700 }}>
-                    {azToDir(sunPos.azimuth)} {sunPos.azimuth.toFixed(0)}°
+                    {azToDir(sunPos.azimuth)} {sunPos.azimuth.toFixed(0)}Â°
                   </div>
-                  <div style={{ color: '#888', fontSize: 10 }}>El: {sunPos.elevation.toFixed(1)}°</div>
+                  <div style={{ color: '#888', fontSize: 10 }}>El: {sunPos.elevation.toFixed(1)}Â°</div>
                 </>
               ) : (
                 <div style={{ color: '#555', fontSize: 12 }}>Below horizon</div>
@@ -11598,11 +11616,11 @@ function SolarEngine3D({
                 background: animating ? '#ff8c00' : 'rgba(255,255,255,0.1)',
                 color: animating ? '#000' : '#ccc', border: 'none', cursor: 'pointer', fontWeight: 700,
               }}>
-              {animating ? '⏸' : '▶'}
+              {animating ? 'â¸' : 'â–¶'}
             </button>
           </div>
 
-          {/* Row 2: slider in LOCAL solar time (5am–10pm) */}
+          {/* Row 2: slider in LOCAL solar time (5amâ€“10pm) */}
           <div style={{ width: '100%', position: 'relative' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
               {Array.from({length: 18}, (_, i) => i + 5).map(h => (
@@ -11615,7 +11633,7 @@ function SolarEngine3D({
             </div>
             <input type="range" min={5} max={22} step={0.25} value={localSolarHourClamped}
               onChange={e => {
-                // simHour is LOCAL solar time — set directly
+                // simHour is LOCAL solar time â€” set directly
                 const localH = Number(e.target.value);
                 simHourRef.current = localH;
                 setSimHour(localH);
@@ -11654,8 +11672,9 @@ function SolarEngine3D({
         </DraggablePanel>
       ) : null}
 
-      {/* v48.13: Rotating compass rose — needle always points to true North */}
+      {/* v48.13: Rotating compass rose â€” needle always points to true North */}
       {stage === 'done' ? (
+        <DraggablePanel id="compass-rose" zIndex={50}>
         <div style={{
           position: 'absolute', bottom: 120, right: 12, width: 72, height: 72, zIndex: 50,
           background: 'rgba(10,12,24,0.88)', borderRadius: '50%',
@@ -11664,7 +11683,7 @@ function SolarEngine3D({
           backdropFilter: 'blur(6px)',
           boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
         }}>
-          {/* Outer ring with cardinal labels — fixed to DOM, does NOT rotate */}
+          {/* Outer ring with cardinal labels â€” fixed to DOM, does NOT rotate */}
           <div style={{ position: 'absolute', width: 72, height: 72 }}>
             <svg width="72" height="72" viewBox="0 0 72 72">
               {/* Tick marks */}
@@ -11678,11 +11697,11 @@ function SolarEngine3D({
                     stroke="rgba(255,255,255,0.25)" strokeWidth="1"/>
                 );
               })}
-              {/* Cardinal direction label ring — camera-heading offset so they stay fixed */}
+              {/* Cardinal direction label ring â€” camera-heading offset so they stay fixed */}
               {/* We render N/S/E/W fixed; the needle rotates INSIDE */}
             </svg>
           </div>
-          {/* Rotating needle group — rotates by -cameraHeadingDeg so N points to true north */}
+          {/* Rotating needle group â€” rotates by -cameraHeadingDeg so N points to true north */}
           <div style={{
             position: 'absolute',
             width: 60, height: 60,
@@ -11691,9 +11710,9 @@ function SolarEngine3D({
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <svg width="60" height="60" viewBox="0 0 60 60">
-              {/* North half — red */}
+              {/* North half â€” red */}
               <polygon points="30,5 26,30 30,26 34,30" fill="#ff3333" opacity="0.95"/>
-              {/* South half — white */}
+              {/* South half â€” white */}
               <polygon points="30,55 26,30 30,34 34,30" fill="rgba(255,255,255,0.75)" opacity="0.95"/>
               {/* Center dot */}
               <circle cx="30" cy="30" r="3.5" fill="rgba(255,255,255,0.95)" stroke="rgba(0,0,0,0.4)" strokeWidth="0.5"/>
@@ -11703,6 +11722,7 @@ function SolarEngine3D({
           </div>
           {/* Fixed camera-direction indicator label below compass */}
         </div>
+        </DraggablePanel>
       ) : null}
       {/* Camera heading readout label under compass */}
       {stage === 'done' ? (
@@ -11711,7 +11731,7 @@ function SolarEngine3D({
           color: 'rgba(255,255,255,0.45)', fontSize: 9, zIndex: 50, fontFamily: 'monospace',
           letterSpacing: 0.5,
         }}>
-          {Math.round(cameraHeadingDeg)}° {
+          {Math.round(cameraHeadingDeg)}Â° {
             cameraHeadingDeg < 22.5 || cameraHeadingDeg >= 337.5 ? 'N' :
             cameraHeadingDeg < 67.5 ? 'NE' :
             cameraHeadingDeg < 112.5 ? 'E' :
@@ -11723,7 +11743,7 @@ function SolarEngine3D({
         </div>
       ) : null}
 
-      {/* v48.12: Floating tooltip — shown on toolbar button hover */}
+      {/* v48.12: Floating tooltip â€” shown on toolbar button hover */}
       {tooltipInfo ? (
         <div style={{
           position: 'fixed',
@@ -11749,149 +11769,206 @@ function SolarEngine3D({
         </div>
       ) : null}
 
-      {/* Status bar */}
+      {/* Status bar - v70: draggable. Grab the bar to move. */}
       {stage === 'done' && statusMsg ? (
-        <div style={{
-          position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(4px)',
-          border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '4px 16px',
-          color: '#ccc', fontSize: 12, zIndex: 50, maxWidth: '80%', textAlign: 'center',
-        }}>
-          {statusMsg}
-        </div>
+        <DraggablePanel id="status-bar" zIndex={50}>
+          <div style={{
+            position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
+            background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(4px)',
+            border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '4px 16px',
+            color: '#ccc', fontSize: 12, zIndex: 50, maxWidth: '80%', textAlign: 'center',
+          }}>
+            {statusMsg}
+          </div>
+        </DraggablePanel>
       ) : null}
 
-      {/* v62: Stitched roof-model toggle — classify + draw every edge across all planes */}
+      {/* v62: Stitched roof-model toggle + Stitch button.
+          v70: combined into a single draggable "top-left dock".
+          A small grip handle (⠿) on the left is the drag handle;
+          the buttons keep their own click semantics. */}
       {stage === 'done' ? (
-        <button
-          onClick={() => setShowRoofModel(v => !v)}
-          title="Roof Model: classify & stitch every plane's edges (ridge/hip/valley/eave/rake)"
-          style={{
-            position: 'absolute', top: 12, left: 12, zIndex: 51,
-            background: showRoofModel ? 'rgba(34,184,255,0.18)' : 'rgba(15,15,30,0.9)',
-            border: `1px solid ${showRoofModel ? 'rgba(34,184,255,0.6)' : 'rgba(255,255,255,0.12)'}`,
-            color: showRoofModel ? '#22b8ff' : '#bbb', borderRadius: 8, padding: '5px 10px',
-            fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
-          }}
-        >
-          🔗 Roof Model{showRoofModel ? ' ✓' : ''}
-        </button>
+        <DraggablePanel id="top-left-dock" zIndex={51}>
+          <div
+            data-drag-handle
+            style={{
+              position: 'absolute', top: 12, left: 12, zIndex: 51,
+              display: 'flex', alignItems: 'center', gap: 4,
+              background: 'rgba(15,15,30,0.7)', borderRadius: 8,
+              padding: '4px 8px 4px 6px',
+              cursor: 'grab', touchAction: 'none',
+              border: '1px solid rgba(255,255,255,0.08)',
+              backdropFilter: 'blur(6px)',
+            }}
+          >
+            <span
+              aria-label="Drag"
+              title="Drag to move"
+              style={{
+                color: 'rgba(255,255,255,0.45)', fontSize: 12, lineHeight: 1,
+                fontFamily: 'sans-serif', letterSpacing: -1, userSelect: 'none',
+                cursor: 'grab', pointerEvents: 'none',
+              }}
+            >⠿</span>
+            <button
+              onClick={() => setShowRoofModel(v => !v)}
+              title="Roof Model: classify & stitch every plane's edges (ridge/hip/valley/eave/rake)"
+              data-no-drag
+              style={{
+                background: showRoofModel ? 'rgba(34,184,255,0.18)' : 'rgba(15,15,30,0.6)',
+                border: `1px solid ${showRoofModel ? 'rgba(34,184,255,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                color: showRoofModel ? '#22b8ff' : '#bbb', borderRadius: 6, padding: '4px 8px',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
+              }}
+            >
+              ðű—” Roof Model{showRoofModel ? ' âż”' : ''}
+            </button>
+            <button
+              onClick={() => { const v = viewerRef.current; const Cz = (window as any).Cesium; if (v && Cz) stitchRoofVertices(v, Cz); }}
+              title="Stitch: pull marked planes together - averages corners that should be shared (hips/ridges/valleys) into one natural point"
+              data-no-drag
+              style={{
+                background: 'rgba(15,15,30,0.6)', border: '1px solid rgba(255,255,255,0.12)',
+                color: '#bbb', borderRadius: 6, padding: '4px 8px',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
+              }}
+            >
+              ✂ Stitch
+            </button>
+          </div>
+        </DraggablePanel>
       ) : null}
 
-      {/* v62: Stitch — average shared corners so marked faces meet at natural points */}
-      {stage === 'done' ? (
-        <button
-          onClick={() => { const v = viewerRef.current; const Cz = (window as any).Cesium; if (v && Cz) stitchRoofVertices(v, Cz); }}
-          title="Stitch: pull marked planes together — averages corners that should be shared (hips/ridges/valleys) into one natural point"
-          style={{
-            position: 'absolute', top: 12, left: 132, zIndex: 51,
-            background: 'rgba(15,15,30,0.9)', border: '1px solid rgba(255,255,255,0.12)',
-            color: '#bbb', borderRadius: 8, padding: '5px 10px',
-            fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
-          }}
-        >
-          ✂ Stitch
-        </button>
-      ) : null}
+      {/* Stitch button moved into the top-left-dock (Roof Model + Stitch) above. */}
 
-      {/* v66 (create-design-modal): Aurora-parity "Save → Create Design" trigger.
+      {/* v66 (create-design-modal): Aurora-parity "Save â†’ Create Design" trigger.
           The parent owns the modal state and is expected to render
           <CreateDesignModal> + switch to Design phase when fired. See
           components/3d/designs/DESIGN.md.
 
-          POSITIONING: v1 was top:12,right:12 → covered the top-right
+          POSITIONING: v1 was top:12,right:12 â†’ covered the top-right
           column (stats + 3D Primitives Properties + context controls).
-          v2 was bottom:70,left:50% → conflicted with the 12:00 Solar
+          v2 was bottom:70,left:50% â†’ conflicted with the 12:00 Solar
           widget (also at bottom:40,left:50%). v3 places it at
-          bottom:50,right:100 (bottom-right) — to the right of the
+          bottom:50,right:100 (bottom-right) â€” to the right of the
           12:00 Solar widget, above the last log, left of the compass.
           The trigger is visible without occluding the 12:00 Solar
           widget or the right-side tool panel column. */}
-      {stage === 'done' && onCreateDesign ? (
-        <button
-          onClick={onCreateDesign}
-          title="Save the site model and open the Create Design dialog"
-          data-testid="solarengine-save-create-design"
-          style={{
-            position: 'absolute', bottom: 50, right: 100, zIndex: 51,
-            background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
-            color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px',
-            fontSize: 13, fontWeight: 700, cursor: 'pointer',
-            boxShadow: '0 4px 14px rgba(20,184,166,0.35)',
-            letterSpacing: 0.3,
-          }}
-        >
-          💾 Save → Create Design
-        </button>
+            {stage === 'done' && onCreateDesign ? (
+        <DraggablePanel id="save-create-design" zIndex={51}>
+          <div
+            data-drag-handle
+            style={{
+              position: 'absolute', bottom: 50, right: 100, zIndex: 51,
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'rgba(15,15,30,0.85)', borderRadius: 8, padding: '4px 6px 4px 8px',
+              border: '1px solid rgba(20,184,166,0.4)', backdropFilter: 'blur(6px)',
+              boxShadow: '0 4px 14px rgba(20,184,166,0.35)', cursor: 'grab', touchAction: 'none',
+            }}
+          >
+            <span
+              aria-label="Drag"
+              title="Drag to move"
+              style={{
+                color: 'rgba(255,255,255,0.5)', fontSize: 12, lineHeight: 1,
+                fontFamily: 'sans-serif', letterSpacing: -1, userSelect: 'none',
+                cursor: 'grab', pointerEvents: 'none',
+              }}
+            >⠿</span>
+            <button
+              onClick={onCreateDesign}
+              title="Save the site model and open the Create Design dialog"
+              data-testid="solarengine-save-create-design"
+              data-no-drag
+              style={{
+                background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
+                color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(20,184,166,0.4)',
+                letterSpacing: 0.3,
+              }}
+            >
+              💾 Save â Create Design
+            </button>
+          </div>
+        </DraggablePanel>
       ) : null}
 
-      {/* v62: Roof-model edge legend */}
+      {/* v62: Roof-model edge legend - v70: draggable. */}
       {stage === 'done' && showRoofModel ? (
-        <div style={{
-          position: 'absolute', top: 46, left: 12, zIndex: 50,
-          background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
-          border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 9px',
-          color: '#ddd', fontSize: 10, lineHeight: '15px',
-        }}>
-          <div style={{ fontWeight: 700, color: '#22b8ff', marginBottom: 3 }}>🔗 Roof edges</div>
-          {([['#ff2d2d', 'Ridge'], ['#ff9500', 'Hip'], ['#22b8ff', 'Valley'], ['#34d399', 'Eave'], ['#facc15', 'Rake']] as const).map(([c, label]) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />
-              {label}
-            </div>
-          ))}
-        </div>
+        <DraggablePanel id="roof-edges-legend" zIndex={50}>
+          <div style={{
+            position: 'absolute', top: 46, left: 12, zIndex: 50,
+            background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
+            border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 9px',
+            color: '#ddd', fontSize: 10, lineHeight: '15px',
+          }}>
+            <div style={{ fontWeight: 700, color: '#22b8ff', marginBottom: 3 }}>🔗 Roof edges</div>
+            {([['#ff2d2d', 'Ridge'], ['#ff9500', 'Hip'], ['#22b8ff', 'Valley'], ['#34d399', 'Eave'], ['#facc15', 'Rake']] as const).map(([c, label]) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />
+                {label}
+              </div>
+            ))}
+          </div>
+        </DraggablePanel>
       ) : null}
 
-      {/* v62: Fire setback legend — explains the keep-out zone colours */}
+      {/* v62: Fire setback legend - v70: draggable. */}
       {stage === 'done' && showSetbackZones && !showRoofModel ? (
-        <div style={{
-          position: 'absolute', top: 54, left: 12, zIndex: 50,
-          background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
-          border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 9px',
-          color: '#ddd', fontSize: 10, lineHeight: '15px',
-        }}>
-          <div style={{ fontWeight: 700, color: '#ff6464', marginBottom: 3 }}>🔥 Fire setbacks</div>
-          {([['#ff2d2d', 'Ridge'], ['#ff9500', 'Hip'], ['#22b8ff', 'Valley'], ['#ff6464', 'Rake / eave']] as const).map(([c, label]) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />
-              {label}
-            </div>
-          ))}
-        </div>
+        <DraggablePanel id="fire-setbacks-legend" zIndex={50}>
+          <div style={{
+            position: 'absolute', top: 54, left: 12, zIndex: 50,
+            background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
+            border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 9px',
+            color: '#ddd', fontSize: 10, lineHeight: '15px',
+          }}>
+            <div style={{ fontWeight: 700, color: '#ff6464', marginBottom: 3 }}>🔥 Fire setbacks</div>
+            {([['#ff2d2d', 'Ridge'], ['#ff9500', 'Hip'], ['#22b8ff', 'Valley'], ['#ff6464', 'Rake / eave']] as const).map(([c, label]) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />
+                {label}
+              </div>
+            ))}
+          </div>
+        </DraggablePanel>
       ) : null}
 
-      {/* Coordinates bar */}
+      {/* Coordinates bar - v70: draggable. Grab the bar to move. */}
       {stage === 'done' ? (
-        <div style={{
-          position: 'absolute', bottom: 8, left: 8,
-          background: 'rgba(0,0,0,0.6)', borderRadius: 6, padding: '3px 8px',
-          color: '#666', fontSize: 10, zIndex: 50, fontFamily: 'monospace',
-        }}>
-          {lat.toFixed(5)}, {lng.toFixed(5)} | h={ftStr(cesiumGroundElevRef.current)} ({cesiumGroundElevRef.current.toFixed(0)}m)
-        </div>
+        <DraggablePanel id="coordinates-bar" zIndex={50}>
+          <div style={{
+            position: 'absolute', bottom: 8, left: 8,
+            background: 'rgba(0,0,0,0.6)', borderRadius: 6, padding: '3px 8px',
+            color: '#666', fontSize: 10, zIndex: 50, fontFamily: 'monospace',
+          }}>
+            {lat.toFixed(5)}, {lng.toFixed(5)} | h={ftStr(cesiumGroundElevRef.current)} ({cesiumGroundElevRef.current.toFixed(0)}m)
+          </div>
+        </DraggablePanel>
       ) : null}
 
       {/* v66: Bottom-right status panel (Aurora frame 0147 parity).
           Sits above the "Last log" bar (which is at bottom: 8px) so
           both are visible. The panel is a pure read of panels.length;
-          no $/W plumbing yet — the design-panel agent's Create Design
+          no $/W plumbing yet â€” the design-panel agent's Create Design
           modal will thread costPerWatt through this prop when it lands. */}
       {isDesignPhase ? <StatusPanel modules={panels.length} /> : null}
 
-      {/* Last log */}
+      {/* Last log - v70: draggable. Grab the bar to move. */}
       {stage === 'done' && lastLog ? (
-        <div style={{
-          position: 'absolute', bottom: 8, right: 8,
-          background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 8px',
-          color: '#555', fontSize: 9, zIndex: 50, fontFamily: 'monospace', maxWidth: 300,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {lastLog}
-        </div>
+        <DraggablePanel id="last-log" zIndex={50}>
+          <div style={{
+            position: 'absolute', bottom: 8, right: 8,
+            background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 8px',
+            color: '#555', fontSize: 9, zIndex: 50, fontFamily: 'monospace', maxWidth: 300,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {lastLog}
+          </div>
+        </DraggablePanel>
       ) : null}
 
-      {/* v66: LiDAR Properties panel (Aurora parity — top-left). Mounted
+      {/* v66: LiDAR Properties panel (Aurora parity â€” top-left). Mounted
           only after the Cesium viewer is ready so the panel can show
           error states from real load attempts. The "LiDAR is running..."
           toast mirrors Aurora's top-right loader indicator.
@@ -11920,7 +11997,7 @@ function SolarEngine3D({
   );
 }
 
-// ── React.memo wrapper ─────────────────────────────────────────────────────
+// â”€â”€ React.memo wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Prevents SolarEngine3D from re-rendering when unrelated parent state changes
 // (e.g. right-panel config edits, proposal values, etc.)
 // Only re-renders when 3D-relevant props actually change.

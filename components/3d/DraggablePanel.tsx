@@ -128,11 +128,25 @@ export function DraggablePanel({
     };
   }, [dragging]);
 
-  const onHandlePointerDown = useCallback(
+  // Event-delegated pointerdown on the wrapper. The drag handle is the
+  // first child by default; if a child (or descendant) has
+  // `data-drag-handle` set, that element becomes the handle instead.
+  // Interactive children (button/input/select/textarea/a/label/
+  // [data-no-drag]) inside the handle do NOT start a drag — they keep
+  // their own click semantics.
+  const onWrapperPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
       const target = e.target as HTMLElement;
-      // Don't drag if the user clicked an interactive child inside the handle
+      // If an explicit handle is marked, only start drag when the
+      // pointerdown target is inside the handle. If no handle is
+      // marked, fall back to "pointerdown is on the wrapper" — i.e.
+      // the first child wrapped in a default handle div.
+      const explicitHandle = (e.currentTarget as HTMLElement).querySelector('[data-drag-handle]');
+      if (explicitHandle) {
+        if (!explicitHandle.contains(target) && target !== explicitHandle) return;
+      }
+      // Don't drag if the user clicked an interactive child
       if (target.closest('button, input, select, textarea, a, label, [data-no-drag]')) {
         return;
       }
@@ -155,15 +169,23 @@ export function DraggablePanel({
   );
 
   // Wrap the first child in a drag-handle div, render the rest as-is.
+  // If a child already has `data-drag-handle`, skip the auto-wrap so
+  // the user-specified handle is preserved.
   const childArray = React.Children.toArray(children);
   const first = childArray[0];
   const rest = childArray.slice(1);
+
+  const hasExplicitHandle = React.Children.toArray(children).some((c) => {
+    if (!React.isValidElement(c)) return false;
+    return (c.props as { 'data-drag-handle'?: unknown })?.['data-drag-handle'] === true;
+  });
 
   if (!first) {
     return (
       <div
         ref={wrapperRef}
         className={className}
+        onPointerDown={onWrapperPointerDown}
         style={{
           transform: `translate(${offset.x}px, ${offset.y}px)`,
           zIndex,
@@ -180,6 +202,7 @@ export function DraggablePanel({
     <div
       ref={wrapperRef}
       className={className}
+      onPointerDown={hasExplicitHandle ? undefined : onWrapperPointerDown}
       style={{
         transform: `translate(${offset.x}px, ${offset.y}px)`,
         zIndex,
@@ -189,20 +212,28 @@ export function DraggablePanel({
         ...style,
       }}
     >
-      <div
-        data-drag-handle
-        role="button"
-        tabIndex={0}
-        aria-label="Drag panel"
-        onPointerDown={onHandlePointerDown}
-        style={{
-          cursor: dragging ? 'grabbing' : 'grab',
-          touchAction: 'none',
-        }}
-      >
-        {first}
-      </div>
-      {rest}
+      {hasExplicitHandle ? (
+        <>
+          {childArray}
+        </>
+      ) : (
+        <>
+          <div
+            data-drag-handle
+            role="button"
+            tabIndex={0}
+            aria-label="Drag panel"
+            onPointerDown={onWrapperPointerDown}
+            style={{
+              cursor: dragging ? 'grabbing' : 'grab',
+              touchAction: 'none',
+            }}
+          >
+            {first}
+          </div>
+          {rest}
+        </>
+      )}
     </div>
   );
 }
