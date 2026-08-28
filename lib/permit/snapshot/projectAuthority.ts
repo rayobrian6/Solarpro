@@ -57,6 +57,7 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'RACEWAY-BONDING-AUTHORITY': 'electrical',
   'EQUIPMENT-IDENTITY-CONFLICT': 'equipment',
   'CODE-AUTHORITY-INCOMPLETE': 'code',
+  'CODE-AUTHORITY-CONFLICT': 'code',
   'PROJECT-AUTHORITY-UNVERIFIED': 'document',
   'ENGINEERING-REVIEW-PENDING': 'review',
   'FRAMING-AUTHORITY-UNVERIFIED': 'structural',   // canonical (framing-authority gate)
@@ -71,6 +72,7 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   // so the review-status registry groups them correctly (never a generic 'other'
   // for a known-domain gap) and the empty-sheets default is avoided.
   'PENDING-RACKING-ASSEMBLY-SELECTION': 'structural',
+  'RACKING-RAIL-CAPACITY-UNBOUNDED': 'structural',
   'FASTENER-ASSEMBLY-UNVERIFIED': 'structural',        // §13 — own fastener-authority code
   'EQUIPMENT-DOCUMENT-APPLICABILITY': 'document',       // §12 — product-version applicability gap
   'CONDUIT-FILL-PENDING': 'electrical',

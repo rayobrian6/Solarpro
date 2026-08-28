@@ -288,11 +288,16 @@ describe('W1-B — ProcurementAuthorityState consolidation', () => {
     // two survivors do, and the assertion that it never blocks a row stands.)
     const openCodes = (fixture.snap.permitReadiness.registry ?? []).filter(b => !b.resolved).map(b => b.code);
     expect(openCodes).toContain('FRAMING-AUTHORITY-UNVERIFIED');
-    expect(openCodes).toContain('CODE-AUTHORITY-INCOMPLETE');
+    // NATIONWIDE BASELINE (2026-08-27) — CODE-AUTHORITY-INCOMPLETE no longer fires on a localized
+    // project (the NEC edition resolves from the state adoption table with its basis printed), so
+    // it is no longer available as the "open, non-procurement requirement" example. Swapped for
+    // PROJECT-AUTHORITY-UNVERIFIED, which is open on this fixture and likewise declares no
+    // procurement impact. The RULE under test is unchanged and still asserted below.
+    expect(openCodes).toContain('PROJECT-AUTHORITY-UNVERIFIED');
     const all = fixture.bom.flatMap(r => r.procurement!.blockingRequirementCodes);
     expect(all).not.toContain('CONDUIT-FILL-PENDING');
     expect(all).not.toContain('FRAMING-AUTHORITY-UNVERIFIED');
-    expect(all).not.toContain('CODE-AUTHORITY-INCOMPLETE');
+    expect(all).not.toContain('PROJECT-AUTHORITY-UNVERIFIED');
   });
 });
 

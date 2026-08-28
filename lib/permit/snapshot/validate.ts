@@ -220,13 +220,38 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
         add('V11', 'project.ahj.localAmendments', s.project.ahj.localAmendments, 'W4 code-authority record',
           ['COVER', 'CERT'], 'project amendments diverge from the code-authority record — amendments must attach to the code record');
       }
-      // Verification currency: unverified/incomplete ⇒ CODE-AUTHORITY-INCOMPLETE
-      // blocker MUST be present (honest surfacing, never silently permit-ready).
-      if (ca.verificationStatus !== 'verified'
+      // NATIONWIDE BASELINE (2026-08-27) — this invariant used to demand a blocker whenever the
+      // record was not `verified`, and `verified` requires an ARCHIVED, operator-confirmed adoption
+      // ordinance that effectively never exists. It therefore pinned "every package in the country
+      // is permanently blocked" as a structural invariant.
+      //
+      // What the invariant is actually protecting is that a package may never go permit-ready with
+      // NO STATED CODE BASIS, and that a KNOWN CONFLICT can never be silent. Both are still
+      // enforced, and both are now enforced on the real condition rather than on a proxy:
+      //   • no NEC edition resolved at all      ⇒ CODE-AUTHORITY-INCOMPLETE must be present;
+      //   • governed ordinances disagree        ⇒ CODE-AUTHORITY-CONFLICT must be present.
+      // A stated, sourced, unverified basis (the state adoption, labelled as such on the sheet) is
+      // a legitimate design basis and no longer has to block.
+      const _necEd = ca.editions?.nec as unknown as {
+        edition?: string | null; source?: string | null;
+        conflictingClaims?: unknown[] | null;
+      } | undefined;
+      const _hasBasis = _necEd?.edition != null;
+      const _conflicted = _necEd?.source === 'conflicting-adoption-authorities'
+        || (_necEd?.conflictingClaims?.length ?? 0) > 0;
+      if (!_hasBasis
           && !s.permitReadiness.blockers.some(b => b.code === 'CODE-AUTHORITY-INCOMPLETE')) {
         add('V11', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
           'W4 code authority', ['PV-0', 'VAL-1'],
-          `code authority is ${ca.verificationStatus} but no CODE-AUTHORITY-INCOMPLETE blocker present — the gap must actively block permit-ready`);
+          'no adopted NEC edition is established and no CODE-AUTHORITY-INCOMPLETE blocker is present — '
+            + 'a package with no stated code basis must actively block permit-ready');
+      }
+      if (_conflicted
+          && !s.permitReadiness.blockers.some(b => b.code === 'CODE-AUTHORITY-CONFLICT')) {
+        add('V11', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          'W4 code authority', ['PV-0', 'VAL-1'],
+          'governed adoption authorities disagree but no CODE-AUTHORITY-CONFLICT blocker is present — '
+            + 'a known contradiction between ordinances must never be silent');
       }
     }
   }

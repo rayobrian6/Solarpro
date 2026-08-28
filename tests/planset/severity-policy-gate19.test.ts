@@ -52,12 +52,22 @@ function rs1Fragment(html: string): string {
 // ─── 1. the pure severity policy (documented rule + fail-closed) ──────────────
 
 describe('§17 severity policy — pure function', () => {
-  it('severityFromImpact is BLOCKING as soon as any axis is touched, else advisory', () => {
+  // PROCUREMENT IS NOT A PERMIT AXIS (2026-08-27). This severity is the PERMIT-readiness verdict.
+  // Procurement readiness is a separate release with its own authority — ECD W1-B holds BOM rows
+  // non-orderable via `procurement.blockingRequirementCodes` — so counting procurement here too
+  // double-counted it and made a package unissuable over a missing distributor part number, which
+  // no AHJ asks for. Every PERMIT axis still blocks on its own, which is what this case now pins.
+  it('severityFromImpact is BLOCKING as soon as any PERMIT axis is touched, else advisory', () => {
     const none = { safety: false, codeCompliance: false, procurement: false, engineeringApproval: false, permitAcceptance: false };
     expect(severityFromImpact(none)).toBe('warning');
-    for (const axis of Object.keys(none) as (keyof typeof none)[]) {
-      expect(severityFromImpact({ ...none, [axis]: true })).toBe('blocking');
+    const permitAxes = ['safety', 'codeCompliance', 'engineeringApproval', 'permitAcceptance'] as const;
+    for (const axis of permitAxes) {
+      expect(severityFromImpact({ ...none, [axis]: true }), `${axis} must block`).toBe('blocking');
     }
+    // procurement ALONE is advisory for permit purposes...
+    expect(severityFromImpact({ ...none, procurement: true })).toBe('warning');
+    // ...but never masks a permit axis when both are declared.
+    expect(severityFromImpact({ ...none, procurement: true, safety: true })).toBe('blocking');
   });
 
   it('the three §17 codes classify BLOCKING with no advisory justification', () => {

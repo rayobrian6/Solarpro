@@ -45,7 +45,15 @@ const NO_IMPACT: SeverityImpact = {
 /** The documented rule made executable: advisory IFF the fact can affect none of
  *  the five axes; blocking as soon as any single axis is touched. */
 export function severityFromImpact(i: SeverityImpact): BlockerSeverity {
-  return (i.safety || i.codeCompliance || i.procurement || i.engineeringApproval || i.permitAcceptance)
+  // PROCUREMENT IS NOT A PERMIT AXIS (2026-08-27). This severity is the PERMIT-readiness verdict —
+  // "may this package be issued". Procurement readiness is a different release with its own
+  // authority: ECD W1-B tracks it per BOM row (`procurement.blockingRequirementCodes`) and rows are
+  // held non-orderable there. Counting procurement here as well double-counted it, and made a
+  // package unissuable over a missing distributor part number — which no AHJ asks for.
+  // A requirement that touches procurement AND a permit axis still blocks, on that other axis.
+  // Blast radius when this changed: exactly one code, RACKING-ASSEMBLY-SKU-PROCUREMENT (measured;
+  // 18 other codes declare procurement alongside a permit axis and are unaffected).
+  return (i.safety || i.codeCompliance || i.engineeringApproval || i.permitAcceptance)
     ? 'blocking'
     : 'warning';
 }
@@ -227,6 +235,13 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     impact: { safety: false, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
     justification: '',
   },
+  // Governed ordinances disagree. A stated basis IS printed (the state adoption) and both claims
+  // are disclosed, so the set is reviewable — but the LOCAL edition cannot be called established,
+  // and a code rule shown satisfied against the wrong edition is a code-compliance exposure.
+  'CODE-AUTHORITY-CONFLICT': {
+    impact: { safety: false, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
   // Project legal authority operator-posted / postally inferred: the AHJ would
   // reject or question the submitted identity. No engineering value changes.
   'PROJECT-AUTHORITY-UNVERIFIED': {
@@ -266,7 +281,25 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
   },
   // Exact rail/splice SKU unpinned ⇒ the ordered assembly is undetermined AND its
   // span/capacity basis is unverified — all five axes.
+  // GOVERNING-CANDIDATE ENVELOPE (2026-08-27) — an unpinned rail SKU used to declare all five axes
+  // and hold an entire drawing set on a distributor line item. It only fires now when the rail
+  // bending envelope HAS been bounded: the demand M = w·L²/8 does not depend on which rail is
+  // fitted, so when the WEAKEST span-screened candidate carries it, every listed candidate does.
+  // The drawing specifies the rail by performance and is complete; only the orderable part number
+  // is outstanding, which touches procurement ALONE. When the envelope canNOT be bounded, the
+  // design really does depend on the rail and RACKING-RAIL-CAPACITY-UNBOUNDED fires instead —
+  // blocking, with all five axes, exactly as this code used to.
   'PENDING-RACKING-ASSEMBLY-SELECTION': {
+    impact: { safety: false, codeCompliance: false, procurement: true, engineeringApproval: false, permitAcceptance: false },
+    justification: 'The rail is specified by performance on the drawing and the weakest span-screened listed '
+      + 'candidate carries the bending demand (M = w·L²/8 does not depend on the rail fitted), so every listed '
+      + 'candidate is adequate and the design does not change with the choice. Only the orderable part number is '
+      + 'outstanding: it is held on the BOM row by the procurement authority, and no AHJ conditions a permit on a '
+      + 'distributor line item.',
+  },
+  // The blocking sibling: the SKU is unpinned AND the bending envelope could not be bounded from
+  // the screened candidates, so the design genuinely depends on which rail is fitted.
+  'RACKING-RAIL-CAPACITY-UNBOUNDED': {
     impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
     justification: '',
   },

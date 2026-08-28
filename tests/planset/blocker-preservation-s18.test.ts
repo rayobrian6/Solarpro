@@ -24,9 +24,20 @@ const LEGIT_BLOCKERS = [
   'PROJECT-NAME-NONPRODUCTION',
   'DESIGNER-OF-RECORD-MISSING',
   'PROJECT-AUTHORITY-UNVERIFIED',
-  'CODE-AUTHORITY-INCOMPLETE',
+  // NATIONWIDE BASELINE (2026-08-27) — CODE-AUTHORITY-INCOMPLETE is deliberately NOT in this list
+  // any more. It used to fire on every package in existence, because clearing it required an
+  // archived, operator-confirmed adoption ordinance. The NEC edition now resolves from the state
+  // adoption table and prints WITH that basis named, so there is a stated, checkable code basis and
+  // nothing to block on. It still fires when there is no basis at all (an unlocalized project), and
+  // the new CODE-AUTHORITY-CONFLICT still fires when governed ordinances disagree — both are
+  // asserted directly in tests/planset/code-authority-w4.test.ts.
   'ROUTE-LENGTH-ESTIMATE',
-  'PENDING-RACKING-ASSEMBLY-SELECTION',
+  // GOVERNING-CANDIDATE ENVELOPE (2026-08-27) — no longer in the BLOCKING set. The rail bending
+  // demand M = w·L²/8 does not depend on which rail is fitted, so once the weakest span-screened
+  // candidate carries it, every listed candidate does: the design is complete and specified by
+  // performance, and only the distributor part number is outstanding. It is still raised (advisory)
+  // on every unpinned assembly, and RACKING-RAIL-CAPACITY-UNBOUNDED still BLOCKS when the envelope
+  // cannot be bounded. Asserted in structural-correction-w and release-gate-model-rgm.
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
   'RACKING-CAPACITY-APPLICABILITY-GAP',
   'ENGINEERING-REVIEW-PENDING',

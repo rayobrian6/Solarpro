@@ -563,8 +563,13 @@ describe('AAC WS-8 · the separated structural requirements', () => {
   it('PENDING-RACKING-ASSEMBLY-SELECTION is a SELECTION statement, not a document statement', () => {
     const r = snap.permitReadiness.registry.find(x => x.code === 'PENDING-RACKING-ASSEMBLY-SELECTION');
     expect(r).toBeTruthy();
-    expect(r!.explanation).toMatch(/design \+ procurement decision, not a document/);
+    // GOVERNING-CANDIDATE ENVELOPE (2026-08-27) — the wording changed because the FINDING changed:
+    // with the rail bending envelope bounded by the weakest screened candidate, this is no longer a
+    // "design + procurement decision" but a procurement one alone. What this case actually guards —
+    // that it is a SELECTION statement and never a document/archival statement — is unchanged.
+    expect(r!.explanation).toMatch(/SKU is not pinned|procurement/i);
     expect(r!.explanation).not.toMatch(/archive the capacity/i);
+    expect(r!.explanation).not.toMatch(/not archived|archive the/i);
   });
 
   it('every structural requirement still declares exactly one gate — none reached RG-UNMAPPED', () => {

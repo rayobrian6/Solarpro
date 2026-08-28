@@ -44,8 +44,8 @@ const KNOWN_EMITTABLE_CODES = [
   // structuralAuthority
   'STRUCTURAL-BOM-RECONCILIATION-FAILED', 'STRUCTURAL-REACTION-RECONCILIATION-FAILED',
   'MOUNT-TOPOLOGY-UNKNOWN', 'FRAMING-AUTHORITY-UNVERIFIED', 'ATTACHMENT-CAPACITY-SOURCE-MISSING',
-  'FASTENER-CONFIG-MISSING', 'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED',
-  'PENDING-RACKING-ASSEMBLY-SELECTION', 'FASTENER-ASSEMBLY-UNVERIFIED',
+  'FASTENER-CONFIG-MISSING', 'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED', 'PENDING-RACKING-ASSEMBLY-SELECTION',
+  'RACKING-RAIL-CAPACITY-UNBOUNDED', 'FASTENER-ASSEMBLY-UNVERIFIED',
   'EQUIPMENT-DOCUMENT-APPLICABILITY', 'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED',
   'DIRECT-MOUNT-GEOMETRY-MISSING', 'REACTIONS-UNTRACEABLE', 'STRUCTURAL-UTILIZATION-EXCEEDED',
   'RAIL-QUANTITY-UNTRACEABLE', 'SITE-GEOMETRY-MISSING', 'MODULE-DIMENSIONS-UNVERIFIED',
@@ -68,7 +68,7 @@ const BRAIDON_19: string[] = [
   // gate 3 (1)
   'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED',
   // gate 4 (6)
-  'FRAMING-AUTHORITY-UNVERIFIED', 'PENDING-RACKING-ASSEMBLY-SELECTION', 'FASTENER-ASSEMBLY-UNVERIFIED',
+  'FRAMING-AUTHORITY-UNVERIFIED', 'RACKING-RAIL-CAPACITY-UNBOUNDED', 'FASTENER-ASSEMBLY-UNVERIFIED',
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED', 'RACKING-CAPACITY-APPLICABILITY-GAP', 'EQUIPMENT-DOCUMENT-APPLICABILITY',
   // gate 5 (3)
   'ROUTE-LENGTH-ESTIMATE', 'CONDUIT-FILL-PENDING', 'TAP-CONDUCTOR-LENGTH-PENDING',
@@ -149,9 +149,14 @@ describe('RGM §3 — the canonical requirement→gate map is self-consistent', 
   it('the added impact declarations changed NO severity outcome (blocking + empty justification)', () => {
     for (const code of KNOWN_EMITTABLE_CODES) {
       const c = classifyBlockerSeverity(code);
-      if (code === 'EQUIPMENT-DOCUMENT-UNVERIFIED') {
-        expect(c.severity).toBe('warning');
-        expect(c.justification.length).toBeGreaterThan(40);
+      // GOVERNING-CANDIDATE ENVELOPE (2026-08-27) — PENDING-RACKING-ASSEMBLY-SELECTION joined the
+      // advisory set. It now fires only when the rail bending envelope HAS been bounded, i.e. the
+      // design is complete and specified by performance and only the distributor part number is
+      // outstanding. When the envelope cannot be bounded, RACKING-RAIL-CAPACITY-UNBOUNDED fires
+      // instead and is blocking on all five axes — so nothing structural became silent.
+      if (code === 'EQUIPMENT-DOCUMENT-UNVERIFIED' || code === 'PENDING-RACKING-ASSEMBLY-SELECTION') {
+        expect(c.severity, code).toBe('warning');
+        expect(c.justification.length, code).toBeGreaterThan(40);
       } else {
         expect(c.severity, code).toBe('blocking');
         expect(c.justification, code).toBe('');
@@ -298,7 +303,7 @@ describe('RGM §7 — technical vs workflow condition is explicit and never misl
     expect(q('CODE-AUTHORITY-INCOMPLETE').responsibleRole).toBe('admin');
     expect(q('ENGINEERING-REVIEW-PENDING').responsibleRole).toBe('engineer-of-record');
     expect(q('EQUIPMENT-IDENTITY-CONFLICT').responsibleRole).toBe('operator');   // operator-only reconciliation
-    expect(q('PENDING-RACKING-ASSEMBLY-SELECTION').responsibleRole).toBe('designer');
+    expect(q('RACKING-RAIL-CAPACITY-UNBOUNDED').responsibleRole).toBe('designer');
     expect(q('ROUTE-LENGTH-ESTIMATE').responsibleRole).toBe('operator');         // a field measurement is owed
     expect(q('QCABLE-PROCUREMENT-INSUFFICIENT').responsibleRole).toBe('designer');
     expect(q('FRAMING-AUTHORITY-UNVERIFIED').responsibleRole).toBe('operator');  // archive the source document
@@ -451,7 +456,7 @@ describe('RGM anti-vacuity — ONE structural child clears', () => {
 
 describe('RGM anti-vacuity — ALL structural children clear ⇒ the gate is CLEARED', () => {
   const STRUCT = [
-    'FRAMING-AUTHORITY-UNVERIFIED', 'PENDING-RACKING-ASSEMBLY-SELECTION', 'FASTENER-ASSEMBLY-UNVERIFIED',
+    'FRAMING-AUTHORITY-UNVERIFIED', 'RACKING-RAIL-CAPACITY-UNBOUNDED', 'FASTENER-ASSEMBLY-UNVERIFIED',
     'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED', 'RACKING-CAPACITY-APPLICABILITY-GAP', 'EQUIPMENT-DOCUMENT-APPLICABILITY',
   ];
   const m = model(BRAIDON_19, reg => {

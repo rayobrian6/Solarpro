@@ -130,8 +130,16 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
 
   it('the package TOTALS are still stated on every banner (gate line unchanged)', () => {
     expect(DR.html).toMatch(/data-release-package-line="1"/);
-    const total = DR.snap.permitReadiness.registry.filter(r => !r.resolved).length;
-    expect(DR.html).toContain(`${total} UNRESOLVED REQUIREMENTS`);
+    // The headline states BLOCKING and ADVISORY as two separate figures
+    // ("… / N UNRESOLVED REQUIREMENTS / M ADVISORIES"), so "unresolved requirements" is the
+    // BLOCKING count. Counting every unresolved registry row against it only agreed while the
+    // advisory count happened to be zero; it silently became wrong the moment one existed
+    // (2026-08-27, when a bounded rail envelope made the SKU advisory). Assert both figures.
+    const open = DR.snap.permitReadiness.registry.filter(r => !r.resolved);
+    const blocking = open.filter(r => r.severity !== 'warning').length;
+    const advisory = open.length - blocking;
+    expect(DR.html).toContain(`${blocking} UNRESOLVED REQUIREMENTS`);
+    expect(DR.html).toMatch(new RegExp(`${advisory} ADVISOR(Y|IES)`));
   });
 
   it('per-sheet + remainder always reconciles to the full active registry', () => {

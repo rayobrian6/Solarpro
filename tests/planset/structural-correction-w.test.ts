@@ -211,7 +211,12 @@ describe('§10 — RT-MINI exact racking assembly', () => {
 
   it('W6 — an unpinned/unverified racking assembly emits PENDING-RACKING-ASSEMBLY-SELECTION + no "compatible rail" token', () => {
     const { snap } = genWith('rooftech-mini');
-    const codes = snap.permitReadiness.blockers.map(b => b.code);
+    // GOVERNING-CANDIDATE ENVELOPE (2026-08-27) — `permitReadiness.blockers` is the BLOCKING-only
+    // back-compat list. The requirement is still raised on every unpinned assembly; it is now
+    // advisory when the rail bending envelope is bounded (design complete, SKU is procurement), so
+    // read the full registry. If the envelope cannot be bounded it appears here as
+    // RACKING-RAIL-CAPACITY-UNBOUNDED and still blocks — asserted in release-gate-model-rgm.
+    const codes = snap.permitReadiness.registry.filter(r => !r.resolved).map(r => r.code);
     expect(codes).toContain('PENDING-RACKING-ASSEMBLY-SELECTION');
     const a = buildRackingAssembly(getMountingSystemById('rooftech-mini'))! as any;
     // no "compatible rail" prose survives on the rendered-facing record fields

@@ -132,6 +132,7 @@ export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
   // ── structural (structuralAuthority.blockers) ─────────────────────────────
   'FRAMING-AUTHORITY-UNVERIFIED': 'generic',
   'PENDING-RACKING-ASSEMBLY-SELECTION': 'generic',
+  'RACKING-RAIL-CAPACITY-UNBOUNDED': 'generic',
   'FASTENER-ASSEMBLY-UNVERIFIED': 'generic',
   'FASTENER-CONFIG-MISSING': 'generic',
   'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': 'generic',
@@ -157,6 +158,7 @@ export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
   'MODULE-EXACT-DATASHEET-PENDING': 'generic',
   // ── code / project / review ───────────────────────────────────────────────
   'CODE-AUTHORITY-INCOMPLETE': 'generic',
+  'CODE-AUTHORITY-CONFLICT': 'generic',
   'PROJECT-AUTHORITY-UNVERIFIED': 'generic',
   'PROJECT-NAME-NONPRODUCTION': 'generic',
   'DESIGNER-OF-RECORD-MISSING': 'generic',

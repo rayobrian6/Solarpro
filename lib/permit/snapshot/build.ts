@@ -2010,7 +2010,9 @@ export function buildPermitDesignSnapshot(
       // operator-entered-without-provenance case. Cleared ONLY by a verified,
       // archived, currency-reviewed climate-hazard source covering this project.
       'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'structural.env.environmentalLoadAuthority', sheets: ['PV-0', 'PV-4C', 'PE-1'], resolution: 'Resolve the design wind speed, exposure category, risk category and ground snow load from an ARCHIVED climate-hazard source for this exact site (ASCE 7 Hazard-Tool report or the AHJ climate/design-criteria ordinance): archive the document through the document registry (hash + verified state), record its dataset, version/date, the coordinates/address looked up, and the lookup timestamp, and confirm its CURRENCY (no automatic staleness rule exists — verification requires a recorded currency review). Operator-entered values are an OBSERVATION/OVERRIDE and can never clear this; a code-minimum default is preliminary only.' },
-      'CODE-AUTHORITY-INCOMPLETE': { severity: 'blocking', authorityPath: 'codeAuthority.editions', sheets: ['PV-0', 'CERT', 'PE-1'], resolution: 'Archive + verify the AHJ adoption ordinance (W4-D); no edition inference.' },
+      'CODE-AUTHORITY-INCOMPLETE': { severity: 'blocking', authorityPath: 'codeAuthority.editions', sheets: ['PV-0', 'CERT', 'PE-1'], resolution: 'Resolve the project jurisdiction — a state is enough to establish the NEC baseline. Archiving the AHJ adoption ordinance upgrades it; no edition is ever inferred.' },
+      'CODE-AUTHORITY-CONFLICT': { severity: 'blocking', authorityPath: 'codeAuthority.editions.nec.conflictingClaims', sheets: ['PV-0', 'CERT', 'PE-1'], resolution: 'Two governed ordinances disagree. Determine which governs and archive it; the sheets print the state adoption as the stated basis meanwhile and disclose both claims.' },
+      'RACKING-RAIL-CAPACITY-UNBOUNDED': { severity: 'blocking', authorityPath: 'structural.rackingAssembly.railSku', sheets: ['PV-3', 'PV-4C', 'SCHED'], resolution: 'The rail bending envelope could not be bounded from the screened candidates, so the design depends on which rail is fitted. Select the rail explicitly (project record / selected_equipment / the mount product) or supply a candidate list with published moment capacities.' },
       'PROJECT-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'projectAuthority', sheets: ['PV-0', 'CERT'], resolution: 'Verify address / APN / municipal boundary / AHJ / fire authority via the document registry (no postal inference).' },
       'PROJECT-NAME-NONPRODUCTION': { severity: 'blocking', authorityPath: 'project.projectName', sheets: ['PV-0'], resolution: 'Replace the non-production ("TEST") project name with the real project identity before issue.' },
       'DESIGNER-OF-RECORD-MISSING': { severity: 'blocking', authorityPath: 'project.designer', sheets: ['PV-0', 'CERT'], resolution: 'Assign the designer / engineer-of-record before issue.' },
@@ -2345,15 +2347,35 @@ export function buildPermitDesignSnapshot(
     }
     // W4 §1/§2: code authority must be VERIFIED and CURRENT for the project
     // jurisdiction. An unverified or edition-incomplete record blocks permit-ready.
-    if (codeAuthority.verificationStatus !== 'verified') {
+    // NATIONWIDE BASELINE (2026-08-27) — this used to fire on `!== 'verified'`, and `verified`
+    // requires an ARCHIVED, operator-confirmed adoption ordinance. No such document exists for
+    // essentially any jurisdiction, so every package in the country carried this blocker forever
+    // and the only documented way to clear it was to phone the AHJ. That does not scale to a
+    // national product.
+    //
+    // The distinction that matters is not "verified vs unverified" — it is whether the package
+    // STATES A CODE BASIS a plan reviewer can check. It now does: the NEC edition resolves from the
+    // state adoption table and is printed with that basis named, and the I-code editions are
+    // explicitly deferred to the AHJ. So:
+    //   • no basis at all (nothing resolved, e.g. an unlocalized project) → BLOCKING, as before;
+    //   • a basis stated but not document-verified                        → advisory.
+    // An UNRESOLVED CONFLICT between governed sources stays blocking regardless — two contradictory
+    // ordinances is a real, actionable defect, not a missing document.
+    const _necConflicted = codeAuthority.editions.nec.source === 'conflicting-adoption-authorities'
+      || (codeAuthority.editions.nec.conflictingClaims?.length ?? 0) > 0;
+    const _hasStatedBasis = codeAuthority.editions.nec.edition != null;
+    if (codeAuthority.incompleteEditions.length > 0 || !_hasStatedBasis) {
       const _missing = codeAuthority.incompleteEditions.map(k => k.toUpperCase());
-      const _detail = _missing.length
-        ? `unknown adopted edition for ${_missing.join(', ')} (printed PENDING — no inference)`
-        : `code authority unverified (no archived adoption document)`;
       push('CODE-AUTHORITY-INCOMPLETE',
-        `Code authority is ${codeAuthority.verificationStatus} for `
-          + `${codeAuthority.ahjName ?? 'the project jurisdiction'} — ${_detail}. `
-          + `Archive + verify the adoption document (W4-D) before permit-ready.`);
+        `No adopted code basis could be resolved for ${codeAuthority.ahjName ?? 'the project jurisdiction'}`
+          + `${_missing.length ? ` — unknown adopted edition for ${_missing.join(', ')} (printed PENDING; no inference)` : ''}. `
+          + 'Resolve the jurisdiction (state is enough for the NEC baseline) or archive the adoption document.');
+    } else if (_necConflicted) {
+      push('CODE-AUTHORITY-CONFLICT',
+        `Two or more governed adoption authorities DISAGREE on the NEC edition for `
+          + `${codeAuthority.ahjName ?? 'this jurisdiction'}. The sheets print the state-level adoption `
+          + `(NEC ${codeAuthority.editions.nec.edition}) as the stated basis and disclose both claims. `
+          + 'Resolve which ordinance governs before treating the local edition as established.');
     }
     // §14 — PROJECT LEGAL AUTHORITY VERIFICATION (postal inference is NOT
     // verification). Any unverified-derived field blocks permit-ready.

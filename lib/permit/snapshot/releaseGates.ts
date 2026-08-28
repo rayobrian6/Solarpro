@@ -366,6 +366,22 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'as a CORROBORATOR only and can never establish an edition alone. OPERATOR_CONFIRMATION only for boundary conflicts '
       + '/ disagreeing sources, with both sources shown.',
   },
+  // NATIONWIDE BASELINE (2026-08-27) — two GOVERNED adoption authorities disagree about the
+  // adopted edition for this jurisdiction. This is the case CODE-AUTHORITY-INCOMPLETE used to
+  // absorb, and the two are genuinely different: "we have nothing" is closed by resolving a
+  // jurisdiction, while "we hold two contradictory ordinances" is closed only by determining which
+  // one governs. The package still prints a stated basis (the state adoption) and DISCLOSES both
+  // claims, so the set is reviewable — but the local edition may not be called established.
+  'CODE-AUTHORITY-CONFLICT': {
+    gateId: 'RG-1', findingType: 'PENDING_AUTHORITY',
+    title: 'Governed adoption authorities disagree on the adopted code edition',
+    resolutionMode: 'OPERATOR_CONFIRMATION', residualMode: 'OPERATOR_CONFIRMATION',
+    // No resolverId: the map validator correctly refuses an automatic resolver on a
+    // non-automatic mode, and there IS no automatic resolution here by construction.
+    modeBasis: 'No automatic resolution is admissible: preferring one governed ordinance over another by recency, '
+      + 'rank or mailing city is exactly the silent-winner defect A.4 removed. Both claims are carried on the record '
+      + 'and an operator determines which governs.',
+  },
   // Address / APN / municipal boundary / AHJ / fire authority are operator-posted
   // or postally inferred. Postal inference is not verification.
   'PROJECT-AUTHORITY-UNVERIFIED': {
@@ -472,6 +488,18 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + '(OPERATOR_CONFIRMATION). What automation still owes, and now delivers, is that the operator never RESEARCHES: the '
       + 'resolver derives the span-screened candidate list from the mount own documented compatibility statement, so the '
       + 'remaining act is one pick from a scored shortlist.',
+  },
+  // GOVERNING-CANDIDATE ENVELOPE (2026-08-27) — the BLOCKING sibling of the code above. It fires
+  // only when the rail bending envelope could NOT be bounded from the screened candidates, i.e.
+  // the design genuinely depends on which rail is fitted. When the envelope IS bounded (the normal
+  // case), PENDING-RACKING-ASSEMBLY-SELECTION fires instead and is advisory.
+  'RACKING-RAIL-CAPACITY-UNBOUNDED': {
+    gateId: 'RG-4', findingType: 'PENDING_SELECTION',
+    title: 'Rail bending envelope not bounded — the design depends on which rail is fitted',
+    resolutionMode: 'OPERATOR_CONFIRMATION', residualMode: 'OPERATOR_CONFIRMATION',
+    modeBasis: 'Bending demand M = w·L²/8 is independent of the rail fitted, so a screened shortlist with published '
+      + 'moment capacities normally bounds the whole design. When no such bound can be formed — no eligible candidate, '
+      + 'or no published capacity — the rail is a real design decision and the engine must not fabricate one.',
   },
   'FASTENER-ASSEMBLY-UNVERIFIED': {
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',

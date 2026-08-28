@@ -215,14 +215,18 @@ describe('AAC WS-3 · A1 · a sourced retrieval establishes AHJ + editions and c
     expect(rec.editions.nec.source).toBe('ahj-registry-retrieval');
     // and it is DISTINGUISHABLE from the operator-typed / table state
     const typed = buildCodeAuthority({ ahjRecord: curated(), capturedAtIso: NOW });
-    expect(typed.verificationStatus).toBe('incomplete');
-    // A.4 — the curated-table state is distinguishable precisely BECAUSE it no
-    // longer adopts: a retrieval populates `edition` + 'ahj-registry-retrieval';
-    // the bundled table populates only `fallbackEdition` and stays 'unknown'.
-    expect(typed.editions.nec.source).toBe('unknown');
-    expect(typed.editions.nec.edition).toBeNull();
+    // A.4's distinction is INTACT and is what this case exists to prove: a retrieval is
+    // distinguishable from the un-retrieved state. NATIONWIDE BASELINE (2026-08-27) changed only
+    // what the un-retrieved state IS — it used to be "nothing at all", and is now the STATE-level
+    // adoption, labelled `state-adoption-table` and never `verified`. The curated PER-AHJ table
+    // still does not adopt (it remains `fallbackEdition` only), which is the thing A.4 fixed.
+    expect(typed.editions.nec.source).toBe('state-adoption-table');
+    expect(typed.editions.nec.source).not.toBe('ahj-registry-retrieval');
+    expect(typed.editions.nec.source).not.toBe('ahj-record');
     expect(typed.editions.nec.fallbackEdition).toBeTruthy();
+    // the decisive separator: only a retrieval can attribute a verifier.
     expect(typed.verifiedBy).toBeNull();
+    expect(typed.verificationStatus).not.toBe('verified');
   });
 
   it('persists into the EXISTING projectAuthority record as PER-FIELD states, not one boolean', async () => {

@@ -25,6 +25,7 @@ import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { classifyMountTopology } from '@/lib/mounting-hardware-db';
 import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
 import { buildRackingAssembly, type RackingCapacityDocumentEvidence } from './rackingAssembly';
+import { railCandidatesFor } from './resolution/railSelection';
 import type { AsceEditionAuthority, AsceEditionSource } from './asceAuthority';
 import { getManufacturerAsset, evaluateDocumentApplicability, type DocumentRegistryFacts } from '@/lib/manufacturer-assets-db';
 import {
@@ -939,17 +940,67 @@ function collectBlockers(
   const _sel = ctx.rackingAssemblySelection ?? null;
   const _railUnselected = _sel ? _sel.state === 'unselected' : _railUnpinned;
   if (a.rackingAssembly && _railUnselected) {
-    const _shortlist = _sel && _sel.eligibleCandidateCount > 0
+    // Screen from the mount itself when the resolver trace is absent. `rackingAssemblySelection`
+    // is only populated on the resolver path, so relying on it alone made both the shortlist AND
+    // the envelope silently unavailable on exactly the builds that need them. railCandidatesFor
+    // reads the mount's OWN documented compatibility statement — the same source the resolver uses.
+    const _candidates = (_sel?.candidates ?? []).length
+      ? _sel!.candidates
+      : (ctx.mountSystem ? railCandidatesFor(ctx.mountSystem) : []);
+    const _eligible = _candidates.filter(c => c.refusedReason == null);
+    const _shortlist = _eligible.length
       ? ' Span-screened listed candidates: '
-        + _sel.candidates.filter(c => c.refusedReason == null)
-          .map(c => `${c.manufacturer} ${c.railModel} (${c.maxSpanIn}" max span)`).join(', ')
+        + _eligible.map(c => `${c.manufacturer} ${c.railModel} (${c.maxSpanIn}" max span)`).join(', ')
         + '. The catalog carries no rail part number, so the orderable SKU comes from the distributor line item.'
       : '';
-    b.push({ code: 'PENDING-RACKING-ASSEMBLY-SELECTION',
-      message: 'Rail / splice SKU is UNSELECTED for this mixed-manufacturer assembly — PENDING RACKING ASSEMBLY '
-        + 'SELECTION, NOT FOR PERMIT SUBMISSION. This is a design + procurement decision, not a document: no rail is '
-        + 'recorded in the project record, the canonical equipment store or the mount product, and the engine does not '
-        + 'choose between compatible manufacturers.' + _shortlist });
+    // ── GOVERNING-CANDIDATE ENVELOPE (2026-08-27) ────────────────────────────
+    // An unpinned rail SKU used to be BLOCKING with safety + code + engineering-approval impact,
+    // which held a whole drawing set on a distributor line item. But the structural question a rail
+    // has to answer is bounded and answerable WITHOUT naming the SKU: bending demand depends only
+    // on the load, the tributary width and the span (M = w·L²/8) — never on which rail is fitted.
+    // So evaluate the WEAKEST span-screened candidate. If the governing candidate carries the
+    // demand, EVERY candidate on the list does, the design is adequate as drawn, and what remains
+    // is genuinely a purchasing choice between listed equivalents.
+    // If the weakest candidate does NOT carry it (or nothing screens), the requirement keeps its
+    // full blocking weight — the drawing would then depend on which rail is bought.
+    const _governingMoment = _eligible.length
+      ? Math.min(..._eligible.map(c => c.momentCapacityInLbs).filter(n => Number.isFinite(n) && n > 0))
+      : null;
+    // The rail-bending CHECK only exists once a rail is selected, so derive the demand from the
+    // quantities that do not depend on the rail: the engine's rail line load and the design span.
+    // This is the same expression analyzeRail uses — M = (w · L² / 8) · 12, w in lb/ft, L in ft.
+    const _railSpanIn = _eligible.find(c => c.requiredSpanIn != null)?.requiredSpanIn ?? null;
+    const _railLoadLbsPerFt = (a.engine?.totalRailLoadLbsPerFt ?? null) as number | null;
+    const _railDemand = (_railSpanIn != null && _railLoadLbsPerFt != null && _railLoadLbsPerFt > 0)
+      ? (_railLoadLbsPerFt * Math.pow(_railSpanIn / 12, 2) / 8) * 12
+      : null;
+    const _envelopeHolds = _governingMoment != null && _railDemand != null
+      && Number.isFinite(_governingMoment) && _railDemand > 0
+      && _railDemand <= _governingMoment;
+    const _envelopeNote = _envelopeHolds
+      ? ` GOVERNING-CANDIDATE ENVELOPE: the weakest screened candidate carries ${_governingMoment!.toFixed(0)} in-lb `
+        + `against a demand of ${_railDemand!.toFixed(0)} in-lb (M = w·L²/8, independent of the rail fitted), so EVERY `
+        + 'listed candidate above is structurally adequate at the design spacing. Specify on the drawing as "any listed '
+        + 'UL 2703 rail from the schedule"; the exact SKU is a procurement choice and does not change the design.'
+      : ' The rail bending envelope could NOT be established from the screened candidates, so the design still depends '
+        + 'on which rail is fitted — this remains a design decision, not a purchasing one.';
+    // Severity is per-CODE and fail-closed by design (severityPolicy), so the two outcomes are two
+    // different findings, not one finding with a flag: when the envelope holds this is a
+    // procurement line item (advisory); when it does not, it is still a design decision (blocking).
+    // Naming: PENDING-RACKING-ASSEMBLY-SELECTION keeps its meaning — "the SKU is not pinned" — and
+    // is now declared procurement-only, so it stays in the registry as an ADVISORY. The genuinely
+    // blocking case (the design DOES depend on which rail is fitted) gets its own code, because
+    // severity is per-code and must stay fail-closed.
+    b.push(_envelopeHolds
+      ? { code: 'PENDING-RACKING-ASSEMBLY-SELECTION',
+          message: 'Rail / splice SKU is not pinned to a distributor part number. The DESIGN is complete: '
+            + 'the rail is specified by performance on the drawing and every screened candidate satisfies it.'
+            + _shortlist + _envelopeNote }
+      : { code: 'RACKING-RAIL-CAPACITY-UNBOUNDED',
+          message: 'Rail / splice SKU is UNSELECTED for this mixed-manufacturer assembly AND the rail bending '
+            + 'envelope could not be bounded from the screened candidates, so the design depends on which rail is '
+            + 'fitted. No rail is recorded in the project record, the canonical equipment store or the mount product, '
+            + 'and the engine does not choose between compatible manufacturers.' + _shortlist + _envelopeNote });
   }
   // §13 (CO-C) — FASTENER-ASSEMBLY-UNVERIFIED. The roof-attachment fastener
   // assembly is mount-BASE hardware, verifiable independent of the rail selection,

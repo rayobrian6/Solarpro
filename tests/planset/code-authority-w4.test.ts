@@ -31,7 +31,12 @@ describe('W4 §1 — buildCodeAuthority (honest verification state)', () => {
     expect(ca.editions.ifc.edition).toBeNull();
     // No NEC→IFC inference: IFC stays null even if NEC were known.
     expect(ca.verificationStatus).toBe('incomplete');
-    expect(ca.incompleteEditions).toEqual(['nec', 'ibc', 'irc', 'ifc', 'asce']);
+    // NATIONWIDE BASELINE (2026-08-27) — with nothing supplied at all, the NEC has no basis (a real
+    // gap) and the ASCE engine basis is absent (also real). The I-codes are DEFERRED to the AHJ
+    // rather than counted as gaps; their editions are still null and still never inferred.
+    expect(ca.incompleteEditions).toEqual(['nec', 'asce']);
+    expect(ca.editions.irc.edition).toBeNull();
+    expect(ca.editions.ibc.source).toBe('edition-per-ahj-adoption');
   });
 
   it('A.4 — an enriched/static NEC value is FALLBACK METADATA, never the adopted edition', () => {
@@ -39,24 +44,35 @@ describe('W4 §1 — buildCodeAuthority (honest verification state)', () => {
       ahjRecord: null, necVersionEnriched: 'NEC 2023', asceEngineBasis: 'ASCE 7-22',
       capturedAtIso: '2026-07-21',
     });
-    // Previously this asserted edition '2023' with source 'ahj-record' — the
-    // bundled year published as the jurisdiction's ADOPTED code. Only a governed
-    // retrieval adopts; a curated table with no ordinance, source URL or hash
-    // cannot. It is carried, clearly labelled, where it can inform a lookup but
-    // never be quoted as adoption.
-    expect(ca.editions.nec.edition).toBeNull();
-    expect(ca.editions.nec.source).toBe('unknown');
+    // A.4's target was the CURATED PER-AHJ TABLE being published as the jurisdiction's adopted
+    // ordinance. That remains prohibited (see the curated-record case below: `source` is never
+    // 'ahj-record'). But `compliance.jurisdiction.necVersion` is not that table — it is an OPERATOR
+    // ENTRY for this specific project, and 'operator-entry' is a declared source in its own right.
+    // NATIONWIDE BASELINE (2026-08-27): an operator who states the edition is supplying better
+    // evidence than a state default, so it adopts and outranks the state baseline. It is still
+    // never `verified`, and the value is still carried as fallback metadata for traceability.
+    expect(ca.editions.nec.edition).toBe('2023');
+    expect(ca.editions.nec.source).toBe('operator-entry');
     expect(ca.editions.nec.fallbackEdition).toBe('2023');
     expect(ca.editions.nec.fallbackSource).toBe('compliance.jurisdiction.necVersion');
-    expect(String(ca.editions.nec.provenance.note)).toMatch(/NON-AUTHORITATIVE fallback/i);
+    expect(ca.verificationStatus).not.toBe('verified');
     expect(ca.editions.asce.edition).toBe('7-22');
     expect(ca.editions.asce.source).toBe('structural-engine-basis');
-    // IBC/IRC/IFC are NOT carried by the AHJ DB → still unknown.
+    // IBC/IRC/IFC are NOT carried by the AHJ DB → edition still null, never inferred.
     expect(ca.editions.ibc.edition).toBeNull();
     expect(ca.editions.ifc.edition).toBeNull();
-    // NEC now joins them: unresolved adoption ⇒ incomplete.
-    expect(ca.verificationStatus).toBe('incomplete');
-    expect(ca.incompleteEditions).toEqual(['nec', 'ibc', 'irc', 'ifc']);
+    // NATIONWIDE BASELINE (2026-08-27) — a null I-code edition is now DEFERRED, not INCOMPLETE:
+    // the standard is cited, the AHJ confirms the year at plan review, and no design value depends
+    // on it (the structural basis is ASCE, resolved separately and asserted just above). The
+    // edition stays null — this is a classification change, never an inference.
+    expect(ca.editions.ibc.source).toBe('edition-per-ahj-adoption');
+    expect(ca.editions.irc.source).toBe('edition-per-ahj-adoption');
+    expect(ca.editions.ifc.source).toBe('edition-per-ahj-adoption');
+    // Every family now has a stated basis — NEC from the operator entry, ASCE from the engine, the
+    // I-codes deferred to the AHJ — so nothing is INCOMPLETE. The record is still `unverified`,
+    // because none of that is an archived adoption ordinance.
+    expect(ca.incompleteEditions).toEqual([]);
+    expect(ca.verificationStatus).toBe('unverified');
     // sourceHash shaped for the W4-D SHA-256 registry — null until archived.
     expect(ca.sourceHash).toBeNull();
     expect(ca.verifiedBy).toBeNull();
@@ -77,12 +93,21 @@ describe('W4 §1 — buildCodeAuthority (honest verification state)', () => {
     if (rec) {
       const ca = buildCodeAuthority({ ahjRecord: rec, asceEngineBasis: 'ASCE 7-22', capturedAtIso: '2026-07-21' });
       expect(ca.ahjRecordId).toBe(rec.id);
-      // A.4 — the curated record's NEC year is fallback metadata, not adoption.
-      expect(ca.editions.nec.edition).toBeNull();
+      // A.4 IS INTACT: the CURATED PER-AHJ year is still fallback metadata and is still never
+      // presented as this AHJ's adopted ordinance.
       expect(ca.editions.nec.fallbackEdition).toBe(rec.necVersion);
       expect(ca.editions.nec.fallbackSource).toBe(`ahj-national:${rec.id}`);
+      expect(ca.editions.nec.source).not.toBe('ahj-record');
+      // NATIONWIDE BASELINE (2026-08-27) — what changed is that a resolved jurisdiction now yields
+      // a STATED BASIS instead of nothing: the STATE-level adoption (a published NFPA figure),
+      // labelled `state-adoption-table` so no sheet can present it as the local ordinance. Leaving
+      // this null meant every planset in the country printed "NEC PENDING" and could only be
+      // cleared by phoning the AHJ.
+      expect(ca.editions.nec.edition).not.toBeNull();
+      expect(ca.editions.nec.source).toBe('state-adoption-table');
+      expect(ca.editions.nec.provenance.note ?? '').toMatch(/STATE level/i);
       expect(ca.recordProvenance).toBe(rec.dataProvenance ?? null);
-      // Still unverified/incomplete — a real record is not an archived adoption doc.
+      // Still unverified — a state adoption is a stated basis, NOT an archived adoption document.
       expect(ca.verificationStatus).not.toBe('verified');
     }
   });
@@ -130,9 +155,15 @@ describe('W4 §2 — V11 blocking single-source', () => {
     expect(vs.some(x => /fabricated|single-source/.test(x.message))).toBe(true);
   });
 
-  it('FAILS when the authority is unverified but no CODE-AUTHORITY-INCOMPLETE blocker is present', () => {
+  // NATIONWIDE BASELINE (2026-08-27) — V11 no longer keys on `verificationStatus !== 'verified'`.
+  // `verified` requires an ARCHIVED, operator-confirmed adoption ordinance that effectively never
+  // exists, so that form of the invariant pinned "every package in the country blocks forever" as a
+  // structural rule. What V11 actually protects is that a package may never go permit-ready with NO
+  // STATED CODE BASIS — which is now asserted directly, on the real condition.
+  it('FAILS when NO code basis is established and no CODE-AUTHORITY-INCOMPLETE blocker is present', () => {
     const s = clone(baseSnapshot());
-    s.codeAuthority.verificationStatus = 'unverified';
+    (s.codeAuthority.editions.nec as { edition: string | null }).edition = null;
+    s.codeAuthority.verificationStatus = 'incomplete';
     // no blocker added → V11 consistency must fire
     const vs = v11(s);
     expect(vs.some(x => x.authorityPath === 'permitReadiness.blockers')).toBe(true);

@@ -6,11 +6,25 @@
 // sheets, structural sheets, labels, certificates and engineer letters must all
 // print IDENTICAL editions, and every edition must come from THIS record.
 //
-// HONESTY CONTRACT (W4 §1, binding):
-//   • No generic state default when a local AHJ governs.
+// HONESTY CONTRACT (W4 §1, binding — AMENDED 2026-08-27, see NATIONWIDE BASELINE):
 //   • No silent edition inference — an unknown adoption stays `null` (never a
-//     guessed year, never NEC→IFC derivation). A null edition renders PENDING on
-//     the sheet and drives the CODE-AUTHORITY-INCOMPLETE permit blocker.
+//     guessed year, never NEC→IFC derivation).
+//   • A stated basis is not an inference. The state-level NEC adoption is
+//     PUBLISHED and it may be printed, PROVIDED the sheet says it is the state
+//     adoption and not this AHJ's ordinance. See `state-adoption-table`.
+//
+// NATIONWIDE BASELINE (2026-08-27). The rule "no generic state default when a
+// local AHJ governs" was written for the case where we HAVE the local adoption
+// and might override it. It was being applied to the case where we have NOTHING,
+// which is not the same thing and produced "NEC PENDING" on every planset in the
+// country. Closing that per-project required phoning each AHJ — unworkable for a
+// national product, and not actually more honest, because the electrical
+// analysis IS performed against specific NEC rules. Precedence is now:
+//     archived adoption document  >  governed registry retrieval
+//                                 >  STATE adoption table (labelled as such)
+//                                 >  null
+// A local AHJ adoption still wins outright whenever we have one. What changed is
+// only what happens when we have none.
 //   • Nothing in-repo is a verified adoption ordinance: every record is
 //     `unverified` until W4-D's document registry archives the adoption document
 //     and an operator verifies it. `sourceHash` is shaped as a SHA-256 registry
@@ -26,6 +40,7 @@ import {
   getAhjByCity, cityFromAddress, getAhjsByState,
 } from '@/lib/jurisdictions/ahj-national';
 import type { CodeAdoptionAuthorityRecord } from './resolution/jurisdictionAuthority';
+import { getJurisdiction } from '@/lib/jurisdictions/necVersions';
 
 export const CODE_AUTHORITY_SCHEMA_VERSION = '1.0.0';
 
@@ -50,6 +65,31 @@ export type CodeEditionSource =
    *  they already hold two conflicting copies of. `edition` stays null — no
    *  source is preferred by recency, rank, mailing city or engine default. */
   | 'conflicting-adoption-authorities'
+  /** NATIONWIDE ADOPTION BASELINE (2026-08-27). The state-level NEC adoption
+   *  table (lib/jurisdictions/necVersions.ts, NFPA state adoption tracker, 51
+   *  jurisdictions, with the city/county overrides the table itself carries).
+   *
+   *  WHY THIS TIER EXISTS. A.4 correctly stopped the curated table from being
+   *  published as the AHJ's own ordinance — but it left `edition` null whenever a
+   *  LIVE registry retrieval was unavailable, which is almost always. Every
+   *  planset in the country therefore printed "NEC PENDING", and closing that
+   *  required a phone call per jurisdiction. That does not scale to a national
+   *  product, and it is not more honest: the electrical analysis is performed
+   *  against specific NEC rules, so printing no edition at all misrepresents the
+   *  basis the calculations actually used.
+   *
+   *  WHAT THIS TIER CLAIMS. Exactly what it is: the edition adopted at STATE
+   *  level, named as such on the sheet, ranked BELOW a governed retrieval and
+   *  below an archived adoption document, and never `verified`. It is a stated,
+   *  checkable design basis a plan reviewer can correct — which is how permit
+   *  sets normally declare their code basis — not an assertion about a specific
+   *  AHJ's ordinance. A local amendment supersedes it, and the sheet says so. */
+  | 'state-adoption-table'
+  /** The code family has no adoption source we can resolve, but the design does
+   *  not depend on its edition (IBC/IRC/IFC are cited as applicable codes; the
+   *  structural basis is ASCE, which is stated separately). The sheet names the
+   *  standard and defers the edition to the AHJ instead of printing PENDING. */
+  | 'edition-per-ahj-adoption'
   | 'unknown';                // no authority — edition null, never inferred
 
 /** One adopted code edition, individually sourced and individually honest. */
@@ -352,10 +392,27 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
   const necFallbackSource = necFromRecord
     ? (rec ? `ahj-national:${rec.id}` : 'ahj-national')
     : necFromEnriched ? 'compliance.jurisdiction.necVersion' : null;
-  const nec = necRetrieved ?? null;
+
+  // ── NATIONWIDE ADOPTION BASELINE ──────────────────────────────────────────
+  // The state adoption table, consulted ONLY when no governed retrieval adopted.
+  // getJurisdiction applies the table's own city → county → state precedence, so
+  // Chicago correctly resolves 2017 inside an otherwise-2020 Illinois.
+  const _stateJur = rec?.stateCode
+    ? getJurisdiction(rec.stateCode, rec.county ?? undefined, rec.city ?? undefined)
+    : null;
+  const necFromStateTable = normalizeNecEdition(_stateJur?.necVersion);
+
+  // Precedence: governed retrieval > explicit operator entry > state adoption > nothing.
+  // An operator who states the edition for THIS jurisdiction is supplying better evidence than a
+  // state default, so `necVersionEnriched` is promoted from fallback metadata to a real (still
+  // unverified) source. A.4's concern was the CURATED PER-AHJ table being published as the AHJ's
+  // ordinance — that table is still fallback-only and still never adopts.
+  const nec = necRetrieved ?? necFromEnriched ?? necFromStateTable ?? null;
   const necSource: CodeEditionSource = necRetrieved
     ? 'ahj-registry-retrieval'
-    : adoptConflicted ? 'conflicting-adoption-authorities' : 'unknown';
+    : necFromEnriched ? 'operator-entry'
+      : necFromStateTable ? 'state-adoption-table'
+        : adoptConflicted ? 'conflicting-adoption-authorities' : 'unknown';
   const necRef = necRetrieved
     ? `${adopt!.sourcesQueried[0] ?? 'ahj-registry'}#${adopt!.sourceHash.slice(0, 16)}`
     : undefined;
@@ -390,6 +447,19 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
       })
       .filter(c => c.edition);
 
+  // NATIONWIDE BASELINE — there is no state adoption table for the I-codes, and one must NOT be
+  // invented. But an unresolved I-code edition is not a defect that should stop a package:
+  // IBC/IRC/IFC are cited here as the applicable code FAMILIES, while the analysis basis that
+  // actually drives numbers (ASCE) is resolved and stated separately. So the sheet names the
+  // standard and DEFERS the edition to the AHJ — "IBC — EDITION PER AHJ ADOPTION" — instead of the
+  // bare "IBC PENDING" that reads like missing work. The edition stays null: this is a LABELLING
+  // change, never an inference.
+  const perAhjProv: Provenance = {
+    source: 'code-authority',
+    note: 'no resolvable adoption source for this code family. The standard applies; its EDITION is '
+      + 'whatever the AHJ has adopted, confirmed at plan review. No design value depends on it — the '
+      + 'structural analysis basis (ASCE) is resolved and stated separately.',
+  };
   const kindEdition = (k: CodeEditionKind): CodeEdition => {
     const v = adoptFor(k);
     if (v) return edition(k, v, 'ahj-registry-retrieval', retrievedProv(k));
@@ -398,7 +468,7 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
     return adoptConflicted
       ? { ...edition(k, null, 'conflicting-adoption-authorities', unknownProv),
           conflictingClaims: conflictingClaimsFor(k) }
-      : edition(k, null, 'unknown', unknownProv);
+      : edition(k, null, 'edition-per-ahj-adoption', perAhjProv);
   };
 
   // ── ASCE — D13 ─────────────────────────────────────────────────────────────
@@ -426,15 +496,34 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
             note: `adopted NEC edition retrieved from ${adopt!.ahjName} at ${adopt!.retrievedAtIso}`
               + `${adopt!.editions.find(e => e.kind === 'nec')?.corroboratedBy ? ` — corroborated by ${adopt!.editions.find(e => e.kind === 'nec')!.corroboratedBy}` : ''}`,
           }
-        : adoptConflicted
-          ? unknownProv
-          : {
-              source: 'code-authority',
-              note: necFallback
-                ? `no governed NEC adoption is established for this jurisdiction. A bundled/static year (${necFallback}) `
-                  + 'is carried as NON-AUTHORITATIVE fallback metadata only and is NOT the adopted edition.'
-                : 'no AHJ adoption authority for the NEC — edition left null (no inference)',
-            }),
+        : necFromEnriched
+          ? {
+              source: 'operator-entry',
+              note: `NEC ${necFromEnriched} was entered for this project by the operator. It outranks the state `
+                + 'adoption baseline but is NOT a verified reading of an adoption ordinance; confirm at plan review.',
+            }
+          : necFromStateTable
+          ? {
+              source: 'state-adoption-table',
+              ref: `necVersions:${rec?.stateCode ?? '??'}`,
+              note: `NEC ${necFromStateTable} is the edition adopted at STATE level for `
+                + `${_stateJur?.stateName ?? rec?.stateCode ?? 'this state'} (NFPA state adoption tracker). `
+                + 'It is the stated design basis, NOT a verified reading of the local ordinance: a local '
+                + 'amendment supersedes it. Verify with the AHJ at plan review.'
+                + (adoptConflicted
+                  ? ' ⚠ GOVERNED SOURCES FOR THIS AHJ DISAGREE — both claims are carried in conflictingClaims '
+                    + 'and must be resolved before the local edition can be treated as established.'
+                  : ''),
+            }
+          : adoptConflicted
+            ? unknownProv
+            : {
+                source: 'code-authority',
+                note: necFallback
+                  ? `no governed NEC adoption is established for this jurisdiction. A bundled/static year (${necFallback}) `
+                    + 'is carried as NON-AUTHORITATIVE fallback metadata only and is NOT the adopted edition.'
+                  : 'no AHJ adoption authority for the NEC — edition left null (no inference)',
+              }),
       fallbackEdition: necFallback,
       fallbackSource: necFallbackSource,
       ...(adoptConflicted ? { conflictingClaims: conflictingClaimsFor('nec') } : {}),
@@ -460,7 +549,15 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
         : unknownProv),
   };
 
-  const incompleteEditions = CODE_EDITION_KINDS.filter(k => editions[k].edition == null);
+  // NATIONWIDE BASELINE — "incomplete" now means an edition we NEEDED and could not resolve, not
+  // merely a null. An I-code family carrying `edition-per-ahj-adoption` is a DEFERRED edition: the
+  // standard is cited, no design value depends on the year, and the AHJ confirms it at plan review.
+  // Counting those as incomplete is what held every package in the country at "incomplete" forever.
+  const incompleteEditions = CODE_EDITION_KINDS.filter(
+    k => editions[k].edition == null && editions[k].source !== 'edition-per-ahj-adoption');
+  /** Families whose edition is deliberately deferred to the AHJ (not a gap). */
+  const deferredEditions = CODE_EDITION_KINDS.filter(
+    k => editions[k].edition == null && editions[k].source === 'edition-per-ahj-adoption');
 
   // Verification: `verified` requires every applicable edition AND an attributed
   // verifier AND a source hash. Those two are no longer hardcoded null: a
@@ -483,6 +580,17 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
   if (incompleteEditions.length > 0) {
     applicabilityNotes.push(
       `Adopted edition unknown for: ${incompleteEditions.map(k => k.toUpperCase()).join(', ')} — printed as PENDING; no edition inferred.`);
+  }
+  if (deferredEditions.length > 0) {
+    applicabilityNotes.push(
+      `${deferredEditions.map(k => k.toUpperCase()).join(', ')}: the standard applies; the adopted EDITION is `
+      + 'confirmed by the AHJ at plan review. No design value depends on it.');
+  }
+  if (editions.nec.source === 'state-adoption-table') {
+    applicabilityNotes.push(
+      `NEC ${editions.nec.edition} is the STATE-level adoption for ${_stateJur?.stateName ?? rec?.stateCode ?? 'this state'} `
+      + '(NFPA state adoption tracker) and is the stated design basis. It is NOT a verified reading of this '
+      + 'AHJ’s ordinance — a local amendment supersedes it; confirm at plan review.');
   }
   if (adoptConflicted) {
     for (const c of args.codeAdoption!.conflicts) applicabilityNotes.push(`ADOPTION SOURCE CONFLICT — ${c}`);
