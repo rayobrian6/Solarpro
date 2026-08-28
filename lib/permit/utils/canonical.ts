@@ -281,7 +281,14 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
     // to the operator. (Verification state is unaffected — an operator entry is
     // still an OBSERVATION/OVERRIDE and still fires
     // ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED.)
-    groundSnowLoad:   Number(struct?.snow?.groundSnowLoad) || Number(input.project.ahjGroundSnowPsf) || Number(input.project.groundSnowPsf) || 0,
+    // 2026-08-28 — the trailing `|| 0` turned an ABSENT ground snow load into a
+    // decided zero, which then travelled as far as the sheets and the
+    // environmental authority as "0 psf, code-minimum default" on an ILLINOIS
+    // roof. Zero is not conservative and it is not a code minimum; it is the
+    // absence of a value wearing a number's clothes. Absent is now NULL, and the
+    // authority reports it as NOT ESTABLISHED. The preliminary analysis still
+    // runs (callers coalesce at the engine boundary, where it is visible).
+    groundSnowLoad:   Number(struct?.snow?.groundSnowLoad) || Number(input.project.ahjGroundSnowPsf) || Number(input.project.groundSnowPsf) || null,
     exposureCategory: struct?.wind?.exposureCategory       || input.project.exposureCategory || 'C',
     // Post-AAC seismic repair: the hardcoded 'D' fallback is DEAD (it disagreed
     // with the fixtures' 'B' by construction — two invented defaults feeding two

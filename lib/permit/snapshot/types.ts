@@ -1407,7 +1407,15 @@ export interface StructuralEnv {
  *  code default is PRELIMINARY only; only an archived, currency-reviewed source is
  *  verified design criteria. */
 export type EnvironmentalLoadBasis =
-  'verified-source' | 'operator-entered' | 'code-minimum-default' | 'unavailable';
+  'verified-source' | 'operator-entered' | 'code-minimum-default'
+  /** 2026-08-28 — the value is PRESENT but nothing established it: it is the
+   *  engine's own fallback, reached because no source, no AHJ record and no
+   *  operator entry supplied one. Distinct from 'code-minimum-default', which
+   *  claims a code actually prescribes the number. Braidon carried a ground snow
+   *  load of ZERO in Illinois, reported as a code minimum — ASCE 7 prescribes no
+   *  such minimum, and a reviewer reading "0 psf" reads a decided value. */
+  | 'not-established'
+  | 'unavailable';
 export type EnvironmentalVerificationStatus = 'verified' | 'unverified' | 'unknown';
 
 /** §2 (BAR) — THE canonical environmental load authority. Presence of a value is

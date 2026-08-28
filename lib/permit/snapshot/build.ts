@@ -1230,7 +1230,11 @@ export function buildPermitDesignSnapshot(
     postSpacingFt: _cStruct?.postSpacingFt ?? (_cadAny?.fence?.postSpacingM ? _cadAny.fence.postSpacingM * 3.28084 : 8.0),
     postEmbedFt: _cStruct?.postEmbedFt ?? 3.5,
     soilResistancePsf: _cStruct?.soilResistance ?? 200,
-    groundSnowPsf: _cSite?.groundSnowLoad ?? (struct?.snow as any)?.groundSnowLoad ?? proj.ahjGroundSnowPsf ?? 0,
+    // 2026-08-28 — the trailing `?? 0` re-introduced the decided zero that
+    // canonical.ts stopped producing. The AUTHORITY records what was actually
+    // established: null when nothing was. The engine coalesces at its own
+    // boundary, where the substitution is visible.
+    groundSnowPsf: _cSite?.groundSnowLoad ?? (struct?.snow as any)?.groundSnowLoad ?? proj.ahjGroundSnowPsf ?? null,
   } : null;
   const structAuth = buildStructuralAuthority({
     isRoofSystem,

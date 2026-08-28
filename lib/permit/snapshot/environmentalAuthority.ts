@@ -213,14 +213,24 @@ export function resolveSeismicAuthority(args: {
   return { established: false, sdc: null, ss: null, s1: null, siteClass: null, source: null, sourceRef: null, sha256: null };
 }
 
-/** Per-field basis: verified source wins; else operator entry is an override; else
- *  a present value is a code-minimum default (preliminary); else unavailable. */
+/** Per-field basis: a verified source wins; else an operator entry is an
+ *  override; else a value the ENGINE fell back to is NOT-ESTABLISHED; else
+ *  unavailable.
+ *
+ *  2026-08-28 — the last branch used to return 'code-minimum-default' for every
+ *  unsourced value, which asserts that a code prescribes the number. For the
+ *  Braidon package that put "ground snow load 0 psf, code-minimum default" on an
+ *  Illinois roof: ASCE 7 prescribes no 0-psf minimum anywhere, the value came
+ *  from a `|| 0`, and a reviewer reads a decided number. A caller that genuinely
+ *  applies a code minimum says so by passing `codeMinimumApplied`. */
 function basisFor(
   valuePresent: boolean, operatorEntered: boolean, verified: boolean,
+  codeMinimumApplied = false,
 ): EnvironmentalLoadBasis {
   if (!valuePresent) return 'unavailable';
   if (verified) return 'verified-source';
-  return operatorEntered ? 'operator-entered' : 'code-minimum-default';
+  if (operatorEntered) return 'operator-entered';
+  return codeMinimumApplied ? 'code-minimum-default' : 'not-established';
 }
 
 /**
@@ -247,8 +257,12 @@ export function buildEnvironmentalLoadAuthority(
   // decorate an unverified record with retrieval fields.
   const r = verified ? (input.retrievalRecord ?? null) : null;
 
-  const windSpeedBasis = basisFor(wind != null, input.windOperatorEntered, verified);
-  const snowLoadBasis = basisFor(snow != null, input.snowOperatorEntered, verified);
+  // WIND: the engine's fallback IS an ASCE 7 code minimum (§26.5 gives a floor
+  // for Risk Category II), so it may legitimately claim that basis.
+  const windSpeedBasis = basisFor(wind != null, input.windOperatorEntered, verified, true);
+  // SNOW: there is no code-minimum ground snow load — ASCE 7 Fig. 7.2-1 is a map,
+  // not a floor. An unsourced snow value is NOT-ESTABLISHED, whatever its number.
+  const snowLoadBasis = basisFor(snow != null, input.snowOperatorEntered, verified, false);
 
   // operator overrides = every present field posted WITHOUT a verified source.
   const operatorOverrides: string[] = [];
@@ -267,6 +281,10 @@ export function buildEnvironmentalLoadAuthority(
     ? `verified + archived climate-hazard source (${e?.documentId}) covering ${e?.projectApplicability ?? 'the project'} — currency reviewed`
     : anyValue
       ? 'environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission.'
+        + (snowLoadBasis === 'not-established'
+            ? ` GROUND SNOW LOAD IS NOT ESTABLISHED (the record carries ${snow ?? 'no value'}`
+              + ' — nothing supplied one, and ASCE 7 has no code-minimum ground snow load to fall back on).'
+            : '')
       : 'no environmental design values and no verified source';
 
   return {
