@@ -88,7 +88,7 @@ describe('the evaluator still refuses everything it used to', () => {
   });
 
   it('WRONG CLASS — a document that is not a module_datasheet clears nothing', () => {
-    expect(evalWith({ documentClass: 'brochure' }).clears).toBe(false);
+    expect(evalWith({ documentClass: 'inverter_datasheet' }).clears).toBe(false);
   });
 
   it('NOT CURRENT / NOT ARCHIVED / NO HASH — custody is still required', () => {
@@ -99,7 +99,7 @@ describe('the evaluator still refuses everything it used to', () => {
   });
 
   it('NOT VERIFIED — an unverified row clears nothing', () => {
-    expect(evalWith({ verificationState: 'draft' }).clears).toBe(false);
+    expect(evalWith({ verificationState: 'in_review' }).clears).toBe(false);
   });
 
   it('NO COVERAGE CLAIM — a document with no module claims clears nothing', () => {
