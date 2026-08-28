@@ -573,7 +573,13 @@ describe('AAC WS-1 · the resolution-mode declaration table', () => {
     expect(D['MODULE-EXACT-DATASHEET-PENDING'].residualMode).toBe('AUTO_RETRIEVED');
     expect(D['EQUIPMENT-IDENTITY-CONFLICT'].residualMode).toBe('OPERATOR_CONFIRMATION');
     // the legitimately non-automatic survivors
-    expect(D['TAP-CONDUCTOR-LENGTH-PENDING'].resolutionMode).toBe('FIELD_VERIFICATION');
+// 2026-08-28 TAP MIGRATION - reclassified. The 10-ft rule is a DESIGN
+    // constraint the drawing imposes and the AHJ inspects, not a measurement a
+    // nationwide product waits on, so the mode is the engine's own derivation of
+    // the placement constraint with an operator residual.
+    expect(D['TAP-CONDUCTOR-LENGTH-PENDING'].resolutionMode).toBe('AUTO_DERIVED');
+    expect(D['TAP-CONDUCTOR-LENGTH-PENDING'].residualMode).toBe('OPERATOR_CONFIRMATION');
+    expect(D['TAP-CONDUCTOR-LENGTH-EXCEEDED'].resolutionMode).toBe('OPERATOR_CONFIRMATION');
     expect(D['ENGINEERING-REVIEW-PENDING'].resolutionMode).toBe('PROFESSIONAL_APPROVAL');
     expect(D['MOUNT-TOPOLOGY-UNKNOWN'].resolutionMode).toBe('OPERATOR_CONFIRMATION');
     // the deterministic ones

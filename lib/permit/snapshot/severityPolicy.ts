@@ -88,6 +88,13 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
     justification: '',
   },
+  // The span HAS a position and that position busts NEC 705.11(C). Every axis the
+  // PENDING code carries, plus it is an actual violation rather than an unknown:
+  // the interconnection as drawn is not code-compliant and cannot be built.
+  'TAP-CONDUCTOR-LENGTH-EXCEEDED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
   // Missing exact selected-module electrical/mechanical datasheet: a family/range
   // page is not the exact source — the exact module drives conductor sizing /
   // structural load inputs (code + engineering), fixes procurement identity, and

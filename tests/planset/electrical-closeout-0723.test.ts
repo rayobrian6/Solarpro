@@ -224,7 +224,11 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
     expect(ids).toContain('BRANCH_RUN');
     expect(ids).toContain('BRANCH_HOMERUN_RUN');
     expect(ids).toContain('COMBINER_TO_DISCO_RUN');
-    expect(ids).toContain('svc-tap-conductors');
+    // 2026-08-28 — the disconnect↔tap span is ONE section (see gate 3b): the
+    // physical route segment, with the 705.11(C) rule folded onto it. It used to
+    // be listed twice, the second time as the `svc-tap-conductors` topology
+    // object with a different raceway and a different EGC for the same conduit.
+    expect(ids).toContain('DISCO_TO_METER_RUN');
     // per-branch Q-Cable rows: one per canonical branch, never merged.
     expect(ids.filter(id => id === 'BRANCH_RUN').length).toBe(snap.electrical.branches.length);
     // the schedule renders ONCE, on PV-4B.1 (post-AAC E-1 repair — E-1 is the
@@ -265,15 +269,43 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
     expect(svg).toContain(`${ccc}#10 THWN-2`);
   });
 
-  it('gate 3 — no E-1 section shows PASS while its route length is an estimate / fill blank / tap pending', () => {
+  it('gate 3 — no E-1 section shows PASS while ITS OWN length is an estimate / fill blank / tap pending', () => {
     const { snap } = gen('SUPPLY_SIDE_TAP');
     const secs = projectE1PhysicalSchedule(snap);
     expect(secs.length).toBeGreaterThan(0);
+    // 2026-08-28 MIGRATION — this used to assert that NO section may PASS, which
+    // was only true because EVERY section was estimate-length. That is an
+    // accident of the fixture, not the gate. The gate is per-section: a section
+    // whose own length is an estimate (or whose fill is blank) may not read PASS.
+    // The tap span now carries a DESIGN-FIXED length, so it is allowed to — and
+    // the assertion below still fails loudly if an ESTIMATE ever reads PASS.
+    const ESTIMATE_SOURCES = new Set(['cad-derived-estimate', 'unknown', 'operator-entry', null]);
+    let sawEstimate = false;
     for (const s of secs) {
-      // every section here is estimate-length or tap-pending → never PASS.
-      expect(s.compliance.state).not.toBe('PASS');
-      expect(['FAIL', 'PENDING-REVIEW-REQUIRED']).toContain(s.compliance.state);
+      if (ESTIMATE_SOURCES.has(s.lengthSource as string | null)) {
+        sawEstimate = true;
+        expect(s.compliance.state, `${s.sectionId} PASSED on an estimate length`).not.toBe('PASS');
+        expect(['FAIL', 'PENDING-REVIEW-REQUIRED']).toContain(s.compliance.state);
+      }
     }
+    // the gate is only meaningful if the fixture still contains an estimate run
+    expect(sawEstimate, 'fixture no longer exercises the estimate path').toBe(true);
+  });
+
+  it('gate 3b — the disconnect↔tap span appears EXACTLY ONCE on E-1', () => {
+    const { snap } = gen('SUPPLY_SIDE_TAP');
+    const secs = projectE1PhysicalSchedule(snap);
+    // It used to be printed twice: as the DISCO_TO_METER_RUN route row (PVC,
+    // EGC-in-raceway, route length) and again as a free-standing TAP CONDUCTORS
+    // row (raceway "PER SERVICE ENTRANCE", service bonding, tap length). One
+    // physical conduit, two raceway treatments, two EGC treatments.
+    const spanRows = secs.filter(s =>
+      s.sectionId === 'DISCO_TO_METER_RUN' || s.sectionId === 'svc-tap-conductors');
+    expect(spanRows).toHaveLength(1);
+    expect(spanRows[0].sectionId).toBe('DISCO_TO_METER_RUN');
+    // and the 705.11(C) rule rides ON that one row
+    expect(spanRows[0].sectionLabel).toMatch(/705\.11/);
+    expect(spanRows[0].sectionLabel).toMatch(/tap/i);
   });
 
   it('§2 tri-state — fail-closed: blank required ⇒ PENDING, violation ⇒ FAIL, all-present+passing ⇒ PASS', () => {
@@ -300,9 +332,19 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
     // every electrical registry code is projected onto PV-4A (the registry, not a
     // hardcoded allowlist), and the blocking count == the registry's blocking count.
     for (const r of elecReg) expect(html).toContain(r.code);
-    // the exact `TAP-CONDUCTOR-LENGTH-PENDING` code (not the old mismatched
-    // `TAP-LENGTH-PENDING`) is the one PV-4A now carries.
-    expect(html).toContain('TAP-CONDUCTOR-LENGTH-PENDING');
+    // 2026-08-28 MIGRATION — this asserted the literal presence of
+    // `TAP-CONDUCTOR-LENGTH-PENDING`, which only held because that code fired
+    // unconditionally on every supply-side design. It no longer does (a
+    // design-constrained span raises nothing), so the assertion is restated as
+    // the property it was standing in for: PV-4A projects the REGISTRY, so a tap
+    // code appears on the sheet exactly when the registry carries it, and the old
+    // mismatched `TAP-LENGTH-PENDING` never appears at all.
+    const tapCodes = elecReg.map(r => r.code).filter(c => /^TAP-CONDUCTOR-LENGTH-/.test(c));
+    for (const c of tapCodes) expect(html).toContain(c);
+    if (tapCodes.length === 0) {
+      expect(html).not.toContain('TAP-CONDUCTOR-LENGTH-PENDING');
+      expect(html).not.toContain('TAP-CONDUCTOR-LENGTH-EXCEEDED');
+    }
     expect(html).not.toContain('TAP-LENGTH-PENDING<');
   });
 

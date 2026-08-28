@@ -37,7 +37,7 @@ const KNOWN_EMITTABLE_CODES = [
   // build.ts
   'ROUTE-LENGTH-ESTIMATE', 'EQUIPMENT-IDENTITY-CONFLICT', 'FEEDER-RACEWAY-AUTHORITY',
   'CONDUIT-FILL-PENDING', 'BRANCH-RACEWAY-AUTHORITY', 'RACEWAY-SEGMENT-CONFLICT',
-  'TAP-CONDUCTOR-LENGTH-PENDING', 'QCABLE-PROCUREMENT-INSUFFICIENT',
+  'TAP-CONDUCTOR-LENGTH-PENDING', 'TAP-CONDUCTOR-LENGTH-EXCEEDED', 'QCABLE-PROCUREMENT-INSUFFICIENT',
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED', 'CODE-AUTHORITY-INCOMPLETE',
   'PROJECT-AUTHORITY-UNVERIFIED', 'PROJECT-NAME-NONPRODUCTION',
   'DESIGNER-OF-RECORD-MISSING', 'ENGINEERING-REVIEW-PENDING',
@@ -263,7 +263,14 @@ describe('RGM §7 — technical vs workflow condition is explicit and never misl
     expect(q('EQUIPMENT-IDENTITY-CONFLICT').findingType).toBe('TECHNICAL_CONFLICT');
     expect(q('ROUTE-LENGTH-ESTIMATE').findingType).toBe('FIELD_VERIFICATION');
     expect(q('CONDUIT-FILL-PENDING').findingType).toBe('FIELD_VERIFICATION');
-    expect(q('TAP-CONDUCTOR-LENGTH-PENDING').findingType).toBe('FIELD_VERIFICATION');
+// 2026-08-28 TAP MIGRATION - the span is no longer a thing a crew
+    // discovers: an unconstrained span is a PENDING_SELECTION (the designer has
+    // not placed the disconnect), and a constrained span that BUSTS the limit is a
+    // VERIFIED_DEFICIENCY, not a pending measurement.
+    expect(q('TAP-CONDUCTOR-LENGTH-PENDING').findingType).toBe('PENDING_SELECTION');
+    // EXCEEDED does not fire on this fixture (the span is design-constrained), so
+    // its mandate is asserted where the mandate lives — the declaration table.
+    expect(REQUIREMENT_DECLARATIONS['TAP-CONDUCTOR-LENGTH-EXCEEDED'].findingType).toBe('VERIFIED_DEFICIENCY');
     expect(q('QCABLE-PROCUREMENT-INSUFFICIENT').findingType).toBe('VERIFIED_DEFICIENCY');
     expect(q('QCABLE-GROUNDING-AUTHORITY-UNVERIFIED').findingType).toBe('PENDING_AUTHORITY');
     expect(q('ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED').findingType).toBe('PENDING_AUTHORITY');

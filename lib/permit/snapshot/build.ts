@@ -54,6 +54,15 @@ import { recalculateRouteVoltageDrop } from './routeVoltageDropRecalc';
 // WS-5 §14 — the NAMED closure policy for ROUTE-LENGTH-ESTIMATE, shared with the
 // derived resolver so the two emitters cannot drift.
 import { sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
+import {
+  buildTapSpanAuthority,
+  NEC_705_11_C_TAP_LIMIT_FT,
+  TAP_SPAN_PHYSICAL_SEGMENT_ID,
+  TAP_SPAN_DESIGN_CONSTRAINT_TEXT,
+  TAP_SPAN_EXCEEDED_CODE,
+  TAP_SPAN_PENDING_CODE,
+  type TapSpanAuthority,
+} from '@/lib/electrical/tapSpan';
 // AAC WS-5 — the deterministic Q-Cable topology + procurement SOLUTION engine.
 import { buildQCableTopology, evaluateQCableSolutions } from './qcableTopology';
 import { resolveQCableProcurement } from './qcableProcurement';
@@ -576,9 +585,19 @@ export function buildPermitDesignSnapshot(
     const s = id.toUpperCase();
     if (/BRANCH/.test(s)) return isOpenAir ? 'micro AC branch (Q-Cable trunk, open air)' : 'branch home-run raceway';
     if (/JBOX|J_BOX|JB/.test(s)) return 'roof junction box';
+    // ROOF_RUN also fell through to the generic 'electrical run'. It is the
+    // module-to-device DC leg on a micro/optimizer design and the array DC
+    // home-run on a string design — either way it is not 'an electrical run'.
+    if (/^ROOF_RUN$/.test(s)) return isOpenAir ? 'array DC leg (module → device, open air)' : 'array DC leg (module → device)';
     if (/PV_TO/.test(s)) return isOpenAir ? 'array wiring (open air, 690.31(C))' : 'array wiring in raceway';
     if (/COMBINER_TO_DISCO|INV_TO_DISCO/.test(s)) return 'combiner/inverter feeder → disconnect';
-    if (/DISCO_TO_(MSP|TAP|POI)/.test(s)) return 'disconnect → point of interconnection / tap';
+    // BRAIDON 08-28 — `DISCO_TO_METER_RUN` matched NONE of these and fell through
+    // to the generic 'electrical run', which is how the one span the 705.11(C)
+    // rule governs came to be listed unnamed in the ROUTE-LENGTH-ESTIMATE
+    // blocker beside a `tap conductors` object that had no length. The engine
+    // now names this run itself (electricalFunction is set on the segment), and
+    // the fallback below covers any caller that does not.
+    if (/DISCO_TO_(MSP|TAP|POI|METER)/.test(s)) return 'disconnect → point of interconnection / tap';
     if (/TAP/.test(s)) return 'tap conductors';
     if (/SERVICE|MSP/.test(s)) return 'service equipment connection';
     return 'electrical run';
@@ -707,10 +726,18 @@ export function buildPermitDesignSnapshot(
       // is upgraded to geometry-derived below, where the geometry is known. No
       // path here produces field evidence — that requires a recorded, verified
       // measurement, which is a domain record, not a mapper default.
-      lengthSource: 'cad-derived-estimate',
-      verificationStatus: 'cad-derived-estimate',
-      lengthProvenance: 'estimated',
-      verificationState: 'cad-derived-estimate',
+      //
+      // ONE EXCEPTION, and it is not a default: a run the DESIGN FIXES rather
+      // than estimates. The supply-side tap span is the only one today — its
+      // length is the NEC 705.11(C) placement requirement the drawing prints,
+      // so calling it an estimate misdescribes it in the direction that matters
+      // (it made ROUTE-LENGTH-ESTIMATE demand a field measurement of a distance
+      // the design dictates). The engine marks such a run explicitly; nothing
+      // here infers it.
+      lengthSource: r.lengthAuthority === 'design-constraint' ? 'known-design' : 'cad-derived-estimate',
+      verificationStatus: r.lengthAuthority === 'design-constraint' ? 'design-constraint' : 'cad-derived-estimate',
+      lengthProvenance: r.lengthAuthority === 'design-constraint' ? 'design-constraint' : 'estimated',
+      verificationState: r.lengthAuthority === 'design-constraint' ? 'design-constraint' : 'cad-derived-estimate',
       // the length ELECTRICAL CALCULATIONS use (voltage drop, resistance). Kept
       // distinct from procurementLengthFt: a conductor is sized on the run it
       // actually covers, but purchased with slack and terminations.
@@ -791,6 +818,10 @@ export function buildPermitDesignSnapshot(
   // tap-conductor length is PENDING (never a fabricated compliant 10-ft claim),
   // and is reflected in ROUTE-LENGTH-ESTIMATE. The 60-ft PV feeder run lives on
   // the feeder route segment, NOT on any tap object (the conflation the audit hit).
+  // The tap-span authority is built inside the topology builder (it needs the
+  // resolved route segments) and read by the release gates below — ONE record,
+  // not a second evaluation of the same question at the consumer.
+  let _tapSpanAuthority: TapSpanAuthority | null = null;
   const serviceTopology: import('./types').ServiceTopologyObject[] = (() => {
     const method = String(proj.interconnectionMethod ?? 'LOAD_SIDE');
     const isSupply = /SUPPLY|LINE/i.test(method);
@@ -907,73 +938,87 @@ export function buildPermitDesignSnapshot(
     // D10 — the tap conductors: the span from the fused AC disconnect to the tap
     // point. Emitted here so the array order matches the electrical chain.
     if (isSupply) {
-      // ── BRAIDON PDF AUDIT 2026-08-27 (N5) — THE TAP RUN WAS MODELLED TWICE ──────
-      // This object declared `lengthFt: null / lengthSource: 'unknown'` and an
-      // UNCONDITIONAL `state: 'pending'` — while DISCO_TO_METER_RUN, whose endpoints are
-      // the same two devices in the opposite order ("FUSED DISCONNECT → SERVICE / TAP"),
-      // carried a 15 ft CAD estimate. PV-4B.1 printed both rows adjacent: one saying the
-      // ≤10-ft rule cannot be evaluated because no length exists, immediately below a row
-      // stating 15 ft for that very span. A 15 ft estimate does not merely fail to help —
-      // it is positive evidence the layout does NOT satisfy NEC 705.11(C), and the sheet
-      // said "PENDING (length unknown)" instead.
+      // ── 2026-08-28 — ONE PHYSICAL SPAN, ONE LENGTH AUTHORITY ──────────────────
+      // `svc-tap-conductors` and the `DISCO_TO_METER_RUN` route segment are the
+      // same two devices: fused AC disconnect ↔ supply-side tap point. They used to
+      // be two independently authoritative lengths — the segment asserting 15 ft
+      // "cad-derived-estimate" (in fact the `?? 15` fallback), the topology object
+      // asserting `null / unknown` and a permanent PENDING. PV-4B.1 printed both
+      // rows adjacent, one saying the ≤10-ft rule could not be evaluated for want
+      // of a length, directly under a row stating a length for that very span.
       //
-      // `state: 'pending'` being a hardcoded literal is also why the prior audit classed
-      // TAP-CONDUCTOR-LENGTH-PENDING as unclearable: a grep for `state: 'pass'` / `'fail'`
-      // across lib/ returned zero writers. This is that writer.
+      // The route segment is now the SINGLE physical authority (endpoints, route,
+      // conductors, raceway, EGC, length + provenance). This object is a
+      // COMPLIANCE VIEW of it: it references the segment by id and READS its
+      // length. It does not copy one, and there is nothing left to keep in sync.
       //
-      // Grading rule. Only a MEASUREMENT decides compliance. DISCO_TO_METER_RUN's estimate is a
-      // heuristic ("65% of the array→MSP distance"), and asserting a 705.11(C) violation from a
-      // heuristic would be the same over-claim as the original bug, pointed the other way. So:
-      //   • DISCO_TO_METER_RUN field-measured ≤ limit → 'pass'  (the ONLY way this clears; if a
-      //                                                          crew measured disconnect→service
-      //                                                          they measured the tap run)
-      //   • DISCO_TO_METER_RUN field-measured > limit → 'fail'
-      //   • otherwise                                 → 'pending', length stays NULL/unknown —
-      //     but when the MODELLED span already exceeds the limit, the constraint and the blocker
-      //     SAY SO. That is the actual defect being fixed: the sheet printed "PENDING (length
-      //     unknown)" one row below a 15 ft estimate for the same physical span, with nothing
-      //     connecting the two. The estimate is a design warning, never a verdict.
-      const _TAP_LIMIT_FT = 10;
-      const _tapSeg = routeSegments.find(r => r.segmentId === 'DISCO_TO_METER_RUN');
-      const _tapModelledFt = _tapSeg?.oneWayFt ?? null;
-      const _tapMeasured = _tapSeg?.lengthSource === 'field-measurement' && _tapModelledFt != null;
-      const _tapState: 'pass' | 'fail' | 'pending' = !_tapMeasured
-        ? 'pending'
-        : (_tapModelledFt as number) <= _TAP_LIMIT_FT ? 'pass' : 'fail';
-      // Only a measurement may populate the tap object's own length. An estimate for the
-      // disconnect→service route is NOT a tap-conductor measurement, and the two objects stay
-      // separate by design (see tests/planset/tar-tap-topology.test.ts).
-      const _tapLenFt = _tapMeasured ? _tapModelledFt : null;
-      const _tapLengthSource: 'known-design' | 'cad-derived-estimate' | 'field-measurement' | 'unknown' | 'not-applicable' =
-        _tapMeasured ? 'field-measurement' : 'unknown';
-      // The cross-check that was missing entirely.
-      const _tapModelledExceeds = !_tapMeasured && _tapModelledFt != null && _tapModelledFt > _TAP_LIMIT_FT;
+      // The grade comes from lib/electrical/tapSpan.ts — the ≤10-ft rule is a
+      // DESIGN CONSTRAINT the drawing imposes and the AHJ inspects, not a
+      // measurement a nationwide product waits on. See that module for the state
+      // machine (positional authority grades the number; otherwise the design
+      // constraint passes it; otherwise honest PENDING).
+      const _tapSeg = routeSegments.find(r => r.segmentId === TAP_SPAN_PHYSICAL_SEGMENT_ID);
+      _tapSpanAuthority = buildTapSpanAuthority({
+        interconnectionMethod: method,
+        physicalSegment: _tapSeg
+          ? {
+              segmentId: _tapSeg.segmentId,
+              oneWayFt: _tapSeg.oneWayFt,
+              lengthSource: _tapSeg.lengthSource,
+              sourceNode: _tapSeg.from,
+              destinationNode: _tapSeg.to,
+            }
+          : null,
+      });
+      const _tap = _tapSpanAuthority;
+      // The topology object's own length fields MIRROR the physical segment.
+      // `lengthSource: 'referenced'` is deliberately not a new enum member: the
+      // source IS the segment's source, restated, so the two can never disagree.
+      const _tapLenFt = _tap?.spanLengthFt ?? null;
+      const _tapLengthSource: import('./types').ServiceTopologyObject['lengthSource'] =
+        _tap?.spanLengthSource === 'field-measurement' ? 'field-measurement'
+        : _tap?.spanLengthSource === 'known-design' ? 'known-design'
+        : _tap?.spanLengthSource === 'cad-route' ? 'cad-derived-estimate'
+        : 'unknown';
+      // The constraint state maps the four-state span grade onto the three-state
+      // constraint enum the schema already carries. `pass-by-design` IS a pass:
+      // the design constrains the span and the drawing says so.
+      const _constraintState: 'pass' | 'fail' | 'pending' =
+        _tap?.state === 'fail' ? 'fail'
+        : (_tap?.state === 'pass-verified' || _tap?.state === 'pass-by-design') ? 'pass'
+        : 'pending';
       objs.push({
         objectId: 'svc-tap-conductors', type: 'tap-conductors',
-        label: 'Tap conductors', description: 'Tap point → fused AC disconnect; sized ≥ 125% of PV output current',
+        label: 'Tap conductors',
+        // The DRAWING gets the physical statement; the "this is a view of that
+        // segment" explanation is model metadata and lives in the provenance
+        // note. A 30%-wide 8px cell is not the place for architecture prose —
+        // the first draft of this pushed PV-4B past the printable box.
+        description: 'Supply-side tap point → fused AC disconnect; sized ≥ 125% of PV output current',
         conductorSpec: feederGauge ? `${feederGauge} THWN-2${pvContA != null ? ` (≥ ${pvContA.toFixed(1)}A)` : ''}` : null,
         ocpdRatingA: null,
         lengthFt: _tapLenFt, lengthSource: _tapLengthSource,
+        physicalRouteSegmentId: TAP_SPAN_PHYSICAL_SEGMENT_ID,
         constraints: [{
-          code: 'NEC-705.11(C)-TAP-10FT',
-          description: _tapState === 'pass'
-            ? `Fused disconnect within ${_TAP_LIMIT_FT} ft of the tap; field-measured ${_tapLenFt} ft ≤ ${_TAP_LIMIT_FT} ft`
-            : _tapState === 'fail'
-              ? `Fused disconnect within ${_TAP_LIMIT_FT} ft of the tap; field-measured ${_tapLenFt} ft EXCEEDS the ${_TAP_LIMIT_FT} ft limit — relocate the disconnect or the tap point`
-              : _tapModelledExceeds
-                ? `Fused disconnect within ${_TAP_LIMIT_FT} ft of the tap; tap-conductor length NOT MEASURED. `
-                  + `WARNING — the modelled disconnect→service span (DISCO_TO_METER_RUN) is ${_tapModelledFt} ft, which already exceeds the ${_TAP_LIMIT_FT} ft limit. `
-                  + `That figure is a CAD estimate, not a tap measurement, so no violation is asserted — but the layout as drawn is unlikely to comply. `
-                  + `Verify the disconnect location before the crew mobilises.`
-                : 'Fused disconnect within 10 ft of the tap; tap-conductor length ≤ 10 ft — NOT MEASURED',
-          limitFt: _TAP_LIMIT_FT,
-          state: _tapState,
+          code: _tap?.limitCode ?? 'NEC-705.11(C)-TAP-10FT',
+          description: _tap?.statement ?? 'Fused disconnect within 10 ft of the tap',
+          limitFt: _tap?.limitFt ?? NEC_705_11_C_TAP_LIMIT_FT,
+          state: _constraintState,
         }],
         upstreamObjectId: 'svc-fused-ocpd',
         downstreamObjectId: _separateUtilityDisconnect ? 'svc-utility-disconnect' : 'svc-tap-point',
         deviceModel: null, electricalRole: 'tap-conductors', utilityRole: null,
         fusedState: 'not-applicable', lockable: null, rsdRole: 'none',
-        provenance: { source: 'design rule (tap-conductor length not measured)', note: 'FIELD-VERIFY ≤10ft' },
+        provenance: {
+          source: `tapSpanAuthority (${_tap?.positionalAuthority ?? 'none'})`,
+          ref: TAP_SPAN_PHYSICAL_SEGMENT_ID,
+          note: `COMPLIANCE VIEW of the physical span ${TAP_SPAN_PHYSICAL_SEGMENT_ID} — that route segment owns the `
+            + 'endpoints, geometry, conductor inventory, raceway, EGC and length; this object carries no independent length. '
+            + (_tap?.state === 'pass-by-design'
+              ? 'The length is the design placement requirement the drawing prints, not an estimate; '
+                + 'field inspection verifies the installation follows the drawing.'
+              : ''),
+        },
       });
     }
     // Optional SEPARATE utility disconnect — ONLY when the project specifies it.
@@ -1993,7 +2038,8 @@ export function buildPermitDesignSnapshot(
       // §17 — PROMOTED to BLOCKING (permit-critical). The authoritative severity is
       // set by severityPolicy.ts; these META fields are documentary and kept in sync.
       'CONDUIT-FILL-PENDING': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
-      'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.serviceTopology[svc-tap-conductors].constraints', sheets: ['PV-4B', 'E-1'], resolution: 'Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).' },
+      'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.routeSegments[DISCO_TO_METER_RUN] (viewed by serviceTopology[svc-tap-conductors])', sheets: ['PV-4B', 'E-1'], resolution: 'Constrain the span in the design — place the fused AC disconnect within 10 ft of the tap point — or record a routed/field-measured length for DISCO_TO_METER_RUN.' },
+      'TAP-CONDUCTOR-LENGTH-EXCEEDED': { severity: 'blocking', authorityPath: 'electrical.routeSegments[DISCO_TO_METER_RUN] (viewed by serviceTopology[svc-tap-conductors])', sheets: ['PV-4B', 'E-1'], resolution: 'Relocate the fused AC disconnect (or the tap point) so the tap conductors are ≤10 ft, then re-route/re-measure the span.' },
       // GROUNDING AUTHORITY (2026-07-25) — the open-air branch grounding method is
       // not established by any verified, exactly-applicable manufacturer document.
       'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'electrical.openAirGroundingAuthority', sheets: ['E-1', 'PV-1B', 'PV-4B', 'SCHED'], resolution: 'Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this.' },
@@ -2098,7 +2144,8 @@ export function buildPermitDesignSnapshot(
         push('ROUTE-LENGTH-ESTIMATE',
           `${_residual.length} of ${_projectRoutes.length} PROJECT-OWNED electrical run(s) have no routed geometry in the CAD model and require a field-measured route: `
             + `${_residual.map(r => `${r.segmentId} (${r.electricalFunction ?? 'run'})`).join(', ')}`
-            + (_derivedSegs.length ? `. ${_derivedSegs.length} run(s) ARE geometry-derived and are not blocked: ${_derivedSegs.map(r => r.segmentId).join(', ')}.` : '')
+            + (_derivedSegs.length ? `. ${_derivedSegs.length} run(s) have a NON-ESTIMATE length and are not blocked: `
+                + `${_derivedSegs.map(r => `${r.segmentId} (${r.lengthSource === 'known-design' ? 'fixed by design' : r.lengthSource === 'field-measurement' ? 'field-measured' : 'routed geometry'})`).join(', ')}.` : '')
             + (_excludedRoutes.length
               ? ` ${_excludedRoutes.length} run(s) are EXCLUDED from project route authority: ${_excludedRoutes.map(r => `${r.segmentId} (${r.routeOwnership === 'UTILITY_OWNED' ? 'utility-owned service equipment' : 'not applicable'})`).join(', ')}.`
               : ''),
@@ -2168,31 +2215,44 @@ export function buildPermitDesignSnapshot(
       push('RACEWAY-SEGMENT-CONFLICT',
         `Segment id(s) ${_racewaySegmentConflicts.join(', ')} resolve to more than one raceway type/size — one physical run must carry ONE raceway`);
     }
-    // W10a: tap-conductor length is PENDING (no CAD/field datum) — the ≤10-ft
-    // NEC 705.11(C) rule cannot be evaluated. §17 — surface it as a BLOCKING
-    // blocker (no compliant claim without a length) rather than only a
-    // service-topology PENDING cell.
-    // BRAIDON PDF AUDIT 2026-08-27 (N5) — this predicate fired ONLY on 'pending'. Now that the
-    // constraint has a real writer, a 'fail' (the modelled tap span EXCEEDS 10 ft) would have
-    // slipped through and raised NO blocker at all — the worst outcome quieter than the
-    // uncertain one. Block on pending AND fail; only a field-measured pass clears it.
-    const _tapConstraints = serviceTopology
-      .filter(o => o.type === 'tap-conductors')
-      .flatMap(o => o.constraints ?? []);
-    const _tapFailed = _tapConstraints.find(k => k.state === 'fail');
-    if (_tapFailed) {
-      push('TAP-CONDUCTOR-LENGTH-PENDING',
-        `Supply-side tap-conductor run EXCEEDS the NEC 705.11(C) ≤10-ft limit — ${_tapFailed.description}. `
-        + 'This is a LAYOUT defect, not a missing measurement: relocate the fused AC disconnect closer to the tap point '
-        + '(or move the tap point) so the tap conductors are ≤10 ft, then re-verify by field measurement.');
-    } else if (_tapConstraints.some(k => k.state === 'pending')) {
-      const _pendingTap = _tapConstraints.find(k => k.state === 'pending');
-      // N5 — when the modelled span already busts the limit, the blocker must carry that warning
-      // rather than the bare "not measured" line the sheet printed beside a 15 ft estimate.
-      push('TAP-CONDUCTOR-LENGTH-PENDING',
-        /WARNING/.test(_pendingTap?.description ?? '')
-          ? (_pendingTap as { description: string }).description
-          : 'Supply-side tap-conductor length is not field-measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a measured length)');
+    // ── SUPPLY-SIDE TAP SPAN — THE THREE HONEST OUTCOMES ─────────────────────
+    // Decided ONCE, in lib/electrical/tapSpan.ts, from the single physical span.
+    // Nothing is re-derived here; this block only projects the grade.
+    //
+    //   pass-verified / pass-by-design → NO blocker. A design that constrains the
+    //     placement is complete; the AHJ inspects the installation against the
+    //     drawing. Holding a permit package open for an as-built measurement of a
+    //     distance the drawing dictates is not a defect the design has.
+    //   fail                           → TAP-CONDUCTOR-LENGTH-EXCEEDED (blocking).
+    //     A KNOWN VIOLATION MUST NEVER BE REPORTED AS "…LENGTH-PENDING": the old
+    //     model routed both through one code, so the worse outcome read quieter
+    //     than the uncertain one.
+    //   pending                        → TAP-CONDUCTOR-LENGTH-PENDING (blocking).
+    //     Genuinely nothing constrains the span — no design placement rule and no
+    //     routed geometry — so there is no limit anyone could inspect against.
+    if (_tapSpanAuthority) {
+      const _t = _tapSpanAuthority;
+      if (_t.state === 'fail') {
+        push(TAP_SPAN_EXCEEDED_CODE, `${_t.statement} ${_t.resolutionAction ?? ''}`.trim(), {
+          payload: {
+            physicalRouteSegmentId: _t.physicalRouteSegmentId,
+            spanLengthFt: _t.spanLengthFt,
+            limitFt: _t.limitFt,
+            positionalAuthority: _t.positionalAuthority,
+          },
+          resolutionAction: _t.resolutionAction ?? undefined,
+        });
+      } else if (_t.state === 'pending') {
+        push(TAP_SPAN_PENDING_CODE, _t.statement, {
+          payload: {
+            physicalRouteSegmentId: _t.physicalRouteSegmentId,
+            advisoryEstimateFt: _t.advisoryEstimateFt,
+            estimateExceedsLimit: _t.estimateExceedsLimit,
+            limitFt: _t.limitFt,
+          },
+          resolutionAction: _t.resolutionAction ?? undefined,
+        });
+      }
     }
     // TIGO KEEP-ALIVE SOURCE. When the design carries add-on module-level RSD
     // devices (TS4-A-F), those devices are SLAVES: each holds its module on only

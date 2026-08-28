@@ -688,15 +688,38 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'verification — here it had been executed and thrown away.',
   },
   'TAP-CONDUCTOR-LENGTH-PENDING': {
-    gateId: 'RG-5', findingType: 'FIELD_VERIFICATION',
-    title: 'Supply-side tap-conductor length not measured',
+    gateId: 'RG-5', findingType: 'PENDING_SELECTION',
+    title: 'Supply-side tap span is not constrained by the design',
     affects:
-      'The NEC 705.11(C) ≤10-ft tap-length VERIFICATION only. The tap conductor ampacity / OCPD and the '
+      'The NEC 705.11(C) ≤10-ft tap-length rule only. The tap conductor ampacity / OCPD and the '
       + 'interconnection method are established independently and are not blocked by this requirement.',
-    resolutionMode: 'FIELD_VERIFICATION', residualMode: 'AUTO_DERIVED',
-    resolverId: null, resolverPhase: 'AAC-4 (survey-field tier)',
-    modeBasis: 'Audit §2.15 — LEGITIMATE field verification: the tap point → fused disconnect run on the EXISTING service is '
-      + 'not in any CAD model. It becomes AUTO_DERIVED only for projects whose site-survey capture carries a measured tap length.',
+    resolutionMode: 'AUTO_DERIVED', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: null, resolverPhase: 'delivered (tapSpanAuthority)',
+    modeBasis:
+      '2026-08-28 — RECLASSIFIED from FIELD_VERIFICATION. The ≤10-ft rule is a DESIGN CONSTRAINT the drawing imposes and '
+      + 'the AHJ inspects, not a measurement a nationwide product waits on: on a supply-side tap the fused disconnect is '
+      + 'REQUIRED beside the tap point, so its placement is decided by the designer, not discovered by a crew. The engine '
+      + 'now fixes the span at the 705.11(C) maximum and the drawing carries the placement requirement, so a constrained '
+      + 'design does not raise this at all. It fires only when NOTHING constrains the span — no design placement rule and '
+      + 'no routed geometry — i.e. when there is no limit an inspector could check against. A span that is constrained '
+      + 'and BUSTS the limit is a different, louder finding: TAP-CONDUCTOR-LENGTH-EXCEEDED.',
+  },
+  // A KNOWN VIOLATION IS NOT A PENDING MEASUREMENT. When the span HAS positional
+  // authority (routed geometry or a field measurement) and that number exceeds
+  // the 10-ft limit, the design is wrong — reporting that as "…LENGTH-PENDING"
+  // made the worse outcome read quieter than the uncertain one.
+  'TAP-CONDUCTOR-LENGTH-EXCEEDED': {
+    gateId: 'RG-5', findingType: 'VERIFIED_DEFICIENCY',
+    title: 'Supply-side tap span EXCEEDS the NEC 705.11(C) 10-ft limit',
+    affects:
+      'The supply-side interconnection as drawn. The tap conductor ampacity / OCPD sizing is unaffected — this is a '
+      + 'PLACEMENT defect: the fused AC disconnect or the tap point has to move.',
+    resolutionMode: 'OPERATOR_CONFIRMATION', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: null, resolverPhase: 'delivered (tapSpanAuthority)',
+    modeBasis:
+      '2026-08-28 — raised ONLY from positional authority (a routed CAD geometry between the placed devices, or a field '
+      + 'measurement). A heuristic route estimate never reaches this code: an estimate can neither certify nor condemn, '
+      + 'and asserting a code violation from one would be the original over-claim pointed the other way.',
   },
   'FEEDER-RACEWAY-AUTHORITY': {
     gateId: 'RG-5', findingType: 'PENDING_SELECTION',

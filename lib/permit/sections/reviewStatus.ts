@@ -129,6 +129,7 @@ export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
   'RACEWAY-SEGMENT-CONFLICT': 'generic',
   'CONDUIT-FILL-PENDING': 'generic',
   'TAP-CONDUCTOR-LENGTH-PENDING': 'generic',
+  'TAP-CONDUCTOR-LENGTH-EXCEEDED': 'generic',
   // ── structural (structuralAuthority.blockers) ─────────────────────────────
   'FRAMING-AUTHORITY-UNVERIFIED': 'generic',
   'PENDING-RACKING-ASSEMBLY-SELECTION': 'generic',

@@ -11,8 +11,22 @@
 // objects up by `type`), which is exactly why this survived — and exactly why it
 // had to be fixed before any route derivation starts traversing the chain.
 //
-// These tests pin the corrected chain AND pin that the repair did not close the
-// requirement: the length is still unknown and the constraint is still pending.
+// These tests pin the corrected chain.
+//
+// 2026-08-28 MIGRATION - two tests here encoded the OLD DUPLICATE MODEL and were
+// rewritten, not relaxed. They asserted `tap.lengthFt === null`,
+// `tap.lengthSource === 'unknown'`, a permanently `pending` constraint and a
+// permanently open TAP-CONDUCTOR-LENGTH-PENDING. All four were assertions ABOUT
+// THE DUPLICATION: `svc-tap-conductors` had to carry null because a SECOND
+// object (the DISCO_TO_METER_RUN route segment) carried the real number, and the
+// two were kept apart so an estimate could not certify the 10-ft rule.
+//
+// The span now has ONE physical authority (that route segment) and this object
+// is a COMPLIANCE VIEW of it, so "the view carries null" is no longer a property
+// worth having - it is the defect. What replaces those assertions is the actual
+// lifecycle: a design-constrained span PASSES BY DESIGN and raises nothing; a
+// span with positional authority over the limit FAILS and raises the EXCEEDED
+// code; a span with no constraint at all is honestly PENDING.
 // ═══════════════════════════════════════════════════════════════════════════
 import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
@@ -70,37 +84,67 @@ describe('D10 · supply-side tap topology', () => {
     expect(owners[0].objectId).toBe('svc-tap-conductors');
   });
 
-  it('THE REPAIR DOES NOT CLOSE THE REQUIREMENT — length unknown, constraint pending', () => {
-    const t = topology();
-    const tap = byId(t, 'svc-tap-conductors')!;
-    expect(tap.lengthFt).toBeNull();
-    expect(tap.lengthSource).toBe('unknown');
-    const c = (tap.constraints ?? []).find(x => x.code === 'NEC-705.11(C)-TAP-10FT')!;
-    expect(c.state).toBe('pending');
-    expect(c.limitFt).toBe(10);
-  });
-
-  it('TAP-CONDUCTOR-LENGTH-PENDING is still an open requirement', () => {
+  it('the compliance view carries NO independent length - it MIRRORS the physical span', () => {
     const input: any = clone(braidonOriginalAuditFixture);
     input.generatedAtIso = '2026-07-22T12:00:00Z';
     generatePermitHTML(input);
     const snap = input._snapshot as PermitDesignSnapshot;
-    const reg = snap.permitReadiness.registry;
-    const tapReq = reg.find(r => r.code === 'TAP-CONDUCTOR-LENGTH-PENDING');
-    expect(tapReq, 'the tap-length requirement must still exist').toBeTruthy();
-    expect(tapReq!.resolved).toBe(false);
+    const t = (snap.electrical.serviceTopology ?? []) as ServiceTopologyObject[];
+    const tap = byId(t, 'svc-tap-conductors')!;
+    const seg = (snap.electrical.routeSegments ?? []).find(s => s.segmentId === 'DISCO_TO_METER_RUN')!;
+
+    // The view NAMES the physical object it is a view of ...
+    expect(tap.physicalRouteSegmentId).toBe('DISCO_TO_METER_RUN');
+    // ... and its length fields are that object's, not a second opinion.
+    expect(tap.lengthFt).toBe(seg.oneWayFt);
+    expect(tap.lengthSource).toBe(seg.lengthSource);
   });
 
-  it('DISCO_TO_METER_RUN remains a SEPARATE route, not merged with the tap span', () => {
+  it('a DESIGN-CONSTRAINED span PASSES BY DESIGN and raises no requirement', () => {
+    const input: any = clone(braidonOriginalAuditFixture);
+    input.generatedAtIso = '2026-07-22T12:00:00Z';
+    generatePermitHTML(input);
+    const snap = input._snapshot as PermitDesignSnapshot;
+    const seg = (snap.electrical.routeSegments ?? []).find(s => s.segmentId === 'DISCO_TO_METER_RUN')!;
+
+    // The engine fixed the span at the 705.11(C) maximum ...
+    expect(seg.lengthSource).toBe('known-design');
+    expect(seg.oneWayFt!).toBeLessThanOrEqual(10);
+    // ... the constraint passes ...
+    const t = (snap.electrical.serviceTopology ?? []) as ServiceTopologyObject[];
+    const c = (byId(t, 'svc-tap-conductors')!.constraints ?? [])
+      .find(x => x.code === 'NEC-705.11(C)-TAP-10FT')!;
+    expect(c.state).toBe('pass');
+    expect(c.limitFt).toBe(10);
+    // ... and NEITHER tap requirement is raised. A design that constrains the
+    // placement is complete; waiting on an as-built measurement of a distance the
+    // drawing dictates is not a defect the design has.
+    const codes = snap.permitReadiness.registry.map(r => r.code);
+    expect(codes).not.toContain('TAP-CONDUCTOR-LENGTH-PENDING');
+    expect(codes).not.toContain('TAP-CONDUCTOR-LENGTH-EXCEEDED');
+  });
+
+  it('DISCO_TO_METER_RUN is the ONE physical object - the tap is a view, not a second route', () => {
     const input: any = clone(braidonOriginalAuditFixture);
     input.generatedAtIso = '2026-07-22T12:00:00Z';
     generatePermitHTML(input);
     const snap = input._snapshot as PermitDesignSnapshot;
     const segs = snap.electrical.routeSegments ?? [];
-    const disco = segs.find(s => s.segmentId === 'DISCO_TO_METER_RUN');
-    expect(disco, 'DISCO_TO_METER_RUN must still exist as its own route').toBeTruthy();
-    // It is a route segment, not a service-topology tap object.
-    const t = topology();
+    // Exactly ONE route segment covers the disconnect-to-tap span.
+    const spans = segs.filter(s => /DISCO_TO_(METER|TAP|POI|MSP)/.test(s.segmentId));
+    expect(spans).toHaveLength(1);
+    expect(spans[0].segmentId).toBe('DISCO_TO_METER_RUN');
+    // No TAP_CONDUCTOR_RUN was introduced as a second physical route.
+    expect(segs.some(s => /TAP_CONDUCTOR/.test(s.segmentId))).toBe(false);
+    // And exactly ONE physical raceway serves it - one installation, one
+    // material quantity (the duplication check the BOM depends on).
+    const rwId = spans[0].physicalRacewayId;
+    expect(rwId, 'the tap span must declare its physical raceway').toBeTruthy();
+    const rw = (snap.electrical.physicalRaceways ?? [])
+      .filter(r => r.physicalRacewayId === rwId);
+    expect(rw).toHaveLength(1);
+    // The tap object is a topology view, never a route segment id.
+    const t = (snap.electrical.serviceTopology ?? []) as ServiceTopologyObject[];
     expect(t.some(o => o.objectId === 'DISCO_TO_METER_RUN')).toBe(false);
   });
 

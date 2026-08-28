@@ -1620,6 +1620,12 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
   const raceways = elec.physicalRaceways ?? [];
   const runRow = (
     segId: string, label: string, applicableFillFromRw?: string,
+    extra?: {
+      label?: string;
+      checks?: Array<{ label: string; pass: boolean | null }>;
+      pending?: string[];
+      requiredValues?: Array<{ label: string; value: unknown; numeric?: boolean }>;
+    },
   ): void => {
     const seg = _seg(snap!, segId);
     if (!seg) return;
@@ -1635,16 +1641,18 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
         { label: 'conductor size', value: seg.conductorGauge },
         { label: 'raceway type', value: seg.raceway },
         ...(fillApplicable ? [{ label: 'conduit fill %', value: fillPct, numeric: true }] : []),
+        ...(extra?.requiredValues ?? []),
       ],
       checks: [
         { label: 'conduit fill ≤ 40%', pass: !fillApplicable ? true : (fillPct == null ? null : fillPct <= 40) },
         { label: 'feeder VD ≤ 3%', pass: vd == null ? null : vd <= 3 },
+        ...(extra?.checks ?? []),
       ],
-      pending,
+      pending: [...pending, ...(extra?.pending ?? [])],
     });
     sections.push({
       sectionId: segId,
-      sectionLabel: label,
+      sectionLabel: extra?.label ?? label,
       fromDevice: seg.from,
       toDevice: seg.to,
       cableType: seg.insulation ?? 'THWN-2',
@@ -1694,12 +1702,46 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
     });
   };
   runRow('COMBINER_TO_DISCO_RUN', 'COMBINER FEEDER → AC DISCONNECT', 'RW-COMBINER_TO_DISCO_RUN');
-  runRow('DISCO_TO_METER_RUN', 'FUSED DISCONNECT → SERVICE / TAP', 'RW-DISCO_TO_METER_RUN');
 
-  // ── Tap conductors (supply-side) — its OWN section, honest ≤10-ft PENDING ───
+  // ── THE DISCONNECT↔TAP SPAN — ONE SECTION, NOT TWO ──────────────────────
+  // E-1 used to print this physical run TWICE: once as the DISCO_TO_METER_RUN
+  // route row (PVC Sch 80 1-1/4", EGC in raceway, route length) and again as a
+  // free-standing "TAP CONDUCTORS" row (raceway "PER SERVICE ENTRANCE", bonding
+  // "EGC with the service conductors", tap length). Same two devices, two
+  // raceway treatments, two EGC treatments, two length authorities — the reader
+  // had no way to tell they were one conduit.
+  //
+  // `svc-tap-conductors` is a COMPLIANCE VIEW of that route segment (it carries
+  // `physicalRouteSegmentId`). So the 705.11(C) rule now rides ON the physical
+  // section as one of its checks, and no second physical row is emitted. The
+  // service-object table on PV-4B still lists the tap object in the chain — that
+  // table is explicitly a topology view, not a conductor schedule.
   const tap = (elec.serviceTopology ?? []).find(o => o.type === 'tap-conductors');
-  if (tap) {
-    const rule = (tap.constraints ?? []).find(c => c.code === 'NEC-705.11(C)-TAP-10FT');
+  const tapRule = (tap?.constraints ?? []).find(c => c.code === 'NEC-705.11(C)-TAP-10FT');
+  const tapIsViewOfRun = tap?.physicalRouteSegmentId === 'DISCO_TO_METER_RUN';
+  runRow(
+    'DISCO_TO_METER_RUN',
+    'FUSED DISCONNECT → SERVICE / TAP',
+    'RW-DISCO_TO_METER_RUN',
+    tap && tapIsViewOfRun
+      ? {
+          label: 'FUSED DISCONNECT → SUPPLY-SIDE TAP POINT (tap conductors, NEC 705.11(C))',
+          checks: [{
+            label: 'tap conductors ≤ 10 ft (NEC 705.11(C))',
+            pass: tapRule?.state === 'pass' ? true : tapRule?.state === 'fail' ? false : null,
+          }],
+          pending: tapRule?.state === 'pending'
+            ? ['supply-side tap span is not constrained by the design — NEC 705.11(C) ≤10-ft rule cannot be inspected against']
+            : [],
+        }
+      : undefined,
+  );
+
+  // A tap object that is NOT a view of the route segment (an older snapshot, or a
+  // design that models the tap separately) keeps its own honest section rather
+  // than being silently dropped.
+  if (tap && !tapIsViewOfRun) {
+    const rule = tapRule;
     const pending: string[] = [];
     if (rule?.state === 'pending') pending.push('tap-conductor length not measured — NEC 705.11(C) ≤10-ft rule PENDING');
     const failures = rule?.state === 'fail' ? [{ label: 'tap conductors > 10 ft (NEC 705.11(C))', pass: false as const }] : [];
@@ -1743,15 +1785,11 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       voltageDropPct: null,
       vdLimitPct: 3,
       vdCalculationLengthFt: num(tap.lengthFt),
-      // D5 — the tap has no computed voltage drop, so the canonical resolver
-      // returns INDETERMINATE. That is the honest calculation state and it is
-      // NOT the same statement as the open NEC 705.11(C) ≤10-ft review below.
       voltageDrop: gradeVoltageDrop({
         pct: null, limitPct: 3, lengthFt: num(tap.lengthFt),
         lengthSource: tap.lengthSource ?? null,
         verificationState: tap.lengthSource === 'field-measurement' ? 'field-measured' : 'unverified-estimate',
       }),
-      // §4 — tap conductors: length/current unmeasured on a live design ⇒ PENDING.
       ampacity: projectAmpacityAdjustment({
         conductorGauge: tap.conductorSpec?.match(/#\d+(?:\/0)?\s*AWG/i)?.[0] ?? null,
         insulation: 'THWN-2',

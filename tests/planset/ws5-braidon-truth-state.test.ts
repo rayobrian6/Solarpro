@@ -71,12 +71,27 @@ describe('WS-5 §16 — Braidon carries ZERO field measurements', () => {
 });
 
 describe('WS-5 §16 — the route source distribution is unchanged', () => {
-  it('four project-owned runs are UNRESOLVED (estimate-grade)', () => {
+// 2026-08-28 TAP MIGRATION - DISCO_TO_METER_RUN left this list.
+  // It is the supply-side tap span, whose length the DESIGN now fixes at the NEC
+  // 705.11(C) 10-ft maximum (the drawing prints the placement requirement). It is
+  // therefore no longer an ESTIMATE of anything, which is precisely the question
+  // ROUTE-LENGTH-ESTIMATE asks. The three runs below genuinely have no route in
+  // the model and are unchanged.
+  it('three project-owned runs are UNRESOLVED (estimate-grade)', () => {
     const unresolved = segs.filter(s => applic(s) === 'REQUIRED' && s.lengthSource === 'cad-derived-estimate');
     expect(unresolved.map(s => s.segmentId).sort()).toEqual(
-      ['BRANCH_HOMERUN_RUN', 'COMBINER_TO_DISCO_RUN', 'DISCO_TO_METER_RUN', 'ROOF_RUN'],
+      ['BRANCH_HOMERUN_RUN', 'COMBINER_TO_DISCO_RUN', 'ROOF_RUN'],
     );
-    expect(unresolved).toHaveLength(4);
+    expect(unresolved).toHaveLength(3);
+  });
+
+  it('the tap span is DESIGN-FIXED, not an estimate and not field evidence', () => {
+    const tap = segs.find(s => s.segmentId === 'DISCO_TO_METER_RUN')!;
+    expect(applic(tap)).toBe('REQUIRED');
+    expect(tap.lengthSource).toBe('known-design');
+    expect(tap.verificationState).toBe('design-constraint');
+    // it closes ROUTE-LENGTH-ESTIMATE and NOTHING else
+    expect(tap.verifiedFieldLengthFt ?? null).toBeNull();
   });
 
   it('one project-owned run is GEOMETRY-DERIVED — BRANCH_RUN, cad-route', () => {
@@ -102,11 +117,16 @@ describe('WS-5 §16 — ROUTE-LENGTH-ESTIMATE is OPEN, and was not suppressed', 
     expect(blocker, 'ROUTE-LENGTH-ESTIMATE must remain OPEN on a project with no field measurements').toBeTruthy();
   });
 
-  it('it names the four unresolved runs and excuses neither the derived nor the excluded one', () => {
-    expect(blocker!.message).toContain('4 of 5 PROJECT-OWNED');
-    for (const id of ['ROOF_RUN', 'BRANCH_HOMERUN_RUN', 'COMBINER_TO_DISCO_RUN', 'DISCO_TO_METER_RUN']) {
+  it('it names the three unresolved runs and excuses neither the non-estimate nor the excluded ones', () => {
+    // 2026-08-28 TAP MIGRATION — 4 → 3. DISCO_TO_METER_RUN is the supply-side tap
+    // span, whose length the DESIGN fixes at the NEC 705.11(C) maximum; it is no
+    // longer an estimate, so it is named on the NOT-BLOCKED side instead.
+    expect(blocker!.message).toContain('3 of 5 PROJECT-OWNED');
+    for (const id of ['ROOF_RUN', 'BRANCH_HOMERUN_RUN', 'COMBINER_TO_DISCO_RUN']) {
       expect(blocker!.message).toContain(id);
     }
+    // still NAMED, with the reason it is not blocked — never silently dropped
+    expect(blocker!.message).toMatch(/DISCO_TO_METER_RUN \(fixed by design\)/);
     expect(blocker!.message).toContain('BRANCH_RUN');
     expect(blocker!.message).toContain('MSP_TO_UTILITY_RUN');
   });

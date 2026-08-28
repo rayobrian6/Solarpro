@@ -137,8 +137,12 @@ describe('§18 — RS-1 prints every active blocker at the enlarged (≥6.5pt) s
   const { html, snap } = render();
   const registry = (snap.permitReadiness?.registry ?? []).filter((r: any) => !r.resolved);
 
+// 2026-08-28 TAP MIGRATION - the threshold was a head-count of the
+  // fixture's requirements at the time (11). Requirements are supposed to close,
+  // so a magic number here fails every time one does. The sanity check is that
+  // RS-1 has something to render, which is what the tests below need.
   it('the review-status registry has blockers to show (fixture sanity)', () => {
-    expect(registry.length).toBeGreaterThan(10);
+    expect(registry.length).toBeGreaterThan(0);
   });
 
   it('core RS-1 blocker text is enlarged to an effective >=6.5pt (8.7px)', () => {

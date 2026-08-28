@@ -30,7 +30,16 @@ const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 // longer an ACTIVE promoted blocker. Its severity POLICY is unchanged and is
 // still asserted in the policy table above; what changed is the fixture's truth.
 // The AAC-4 case below proves the fill is computed rather than absent.
-const PROMOTED = ['TAP-CONDUCTOR-LENGTH-PENDING', 'MODULE-EXACT-DATASHEET-PENDING'] as const;
+// 2026-08-28 TAP MIGRATION — TAP-CONDUCTOR-LENGTH-PENDING left this list.
+// §17 promoted it from advisory to blocking, and that promotion still holds:
+// the severity POLICY below is unchanged and still marks it permit-critical.
+// What changed is that it no longer FIRES on this fixture — the tap span is now
+// constrained by the design, so there is nothing to promote. Asserting its
+// presence here would pin a requirement OPEN, which is the opposite of the
+// property §17 is about. `PROMOTED_POLICY` keeps the policy assertion (which is
+// what §17 actually mandates); `PROMOTED_ON_FIXTURE` keeps the on-snapshot one.
+const PROMOTED_POLICY = ['TAP-CONDUCTOR-LENGTH-PENDING', 'MODULE-EXACT-DATASHEET-PENDING'] as const;
+const PROMOTED = ['MODULE-EXACT-DATASHEET-PENDING'] as const;
 
 function renderWith(mut?: (fx: any) => void): { html: string; snap: PermitDesignSnapshot } {
   const input: any = clone(braidonOriginalAuditFixture);
@@ -71,7 +80,8 @@ describe('§17 severity policy — pure function', () => {
   });
 
   it('the three §17 codes classify BLOCKING with no advisory justification', () => {
-    for (const code of PROMOTED) {
+    // POLICY assertion — unchanged by whether the code fires on a given fixture.
+    for (const code of PROMOTED_POLICY) {
       const c = classifyBlockerSeverity(code);
       expect(c.severity, `${code} must be blocking`).toBe('blocking');
       expect(c.justification).toBe('');
@@ -106,13 +116,26 @@ describe('§17 — permit-critical advisories are promoted to blockers on the sn
   const { snap } = renderWith();
   const reg = snap.permitReadiness.registry;
 
-  it('CONDUIT-FILL / TAP-CONDUCTOR-LENGTH / MODULE-EXACT datasheet all fire as BLOCKING', () => {
+  it('the §17-promoted codes that FIRE do so as BLOCKING', () => {
     for (const code of PROMOTED) {
       const entry = reg.find(r => r.code === code);
       expect(entry, `${code} must be present on the Braidon snapshot`).toBeTruthy();
       expect(entry!.severity, `${code} must be blocking`).toBe('blocking');
       expect(entry!.justification).toBe('');
     }
+  });
+
+  // ANTI-VACUITY counterpart for the code that left PROMOTED: it is absent
+  // because the design CONSTRAINS the tap span, not because the requirement was
+  // softened — the same shape as the CONDUIT-FILL-PENDING case below.
+  it('TAP-CONDUCTOR-LENGTH-PENDING is absent because the span is DESIGN-CONSTRAINED', () => {
+    expect(reg.find(r => r.code === 'TAP-CONDUCTOR-LENGTH-PENDING')).toBeFalsy();
+    expect(reg.find(r => r.code === 'TAP-CONDUCTOR-LENGTH-EXCEEDED')).toBeFalsy();
+    const seg = (snap.electrical.routeSegments ?? []).find(s => s.segmentId === 'DISCO_TO_METER_RUN')!;
+    expect(seg.lengthSource).toBe('known-design');
+    expect(seg.oneWayFt!).toBeLessThanOrEqual(10);
+    // and the policy that would have made it block is still on the books
+    expect(classifyBlockerSeverity('TAP-CONDUCTOR-LENGTH-PENDING').severity).toBe('blocking');
   });
 
   it('the promoted codes now appear in the back-compat BLOCKING blockers list', () => {

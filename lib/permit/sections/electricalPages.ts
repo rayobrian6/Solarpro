@@ -18,6 +18,7 @@ import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRace
 import { projectRackingBondingAuthority } from '../snapshot/rackingBonding';
 import { GROUNDING_PENDING_LABEL, GROUNDING_PENDING_BONDING_CELL_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { escapeH } from '../utils/drawing';
+import { TAP_SPAN_DESIGN_CONSTRAINT_NOTE } from '@/lib/electrical/tapSpan';
 // D6 — every project-facing date on a sheet resolves in the DOCUMENT's timezone.
 import { formatInDocumentTimezone, documentIssueContextOf } from '../utils/documentIssueContext';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
@@ -1347,12 +1348,21 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           const _svcDisco = _svc('service-disconnect');
           const _tapRule = _tap?.constraints.find(c => c.code === 'NEC-705.11(C)-TAP-10FT');
           const _tapLenTxt = _tap?.lengthFt != null
-            ? `${_tap.lengthFt} ft` : 'PENDING — tap-conductor length not measured (FIELD-VERIFY ≤10 ft)';
+            ? `run ${_tap.lengthFt} ft` : 'span not constrained by the design';
           const _ruleStateTxt = _tapRule
             ? (_tapRule.state === 'pass' ? '✓ within 10 ft'
                : _tapRule.state === 'fail' ? '✗ EXCEEDS 10 ft'
-               : 'PENDING — length unknown')
+               : 'PENDING — span not constrained')
             : 'PENDING';
+          // 2026-08-28 — ONE PHYSICAL SPAN. `svc-tap-conductors` is a compliance
+          // VIEW of the route segment named here; it carries no independent
+          // length. When the DESIGN fixes the span (the normal supply-side case)
+          // the drawing must print the placement requirement an inspector checks
+          // the installation against — otherwise "pass by design" asserts a
+          // constraint the construction set never states.
+          const _tapSegId = _tap?.physicalRouteSegmentId ?? 'DISCO_TO_METER_RUN';
+          const _tapDesignFixed = _tap?.lengthSource === 'known-design';
+          const _tapConstraintText = TAP_SPAN_DESIGN_CONSTRAINT_NOTE;
           const _fusedA = _fused?.ocpdRatingA ?? bfAmps;
           const _svcA = _svcDisco?.ocpdRatingA ?? mainA;
           return `
@@ -1371,7 +1381,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         </table>
         <div style="padding:2px 6px;font-size:7px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
           <strong>SUPPLY-SIDE INTERCONNECTION — NEC 705.11:</strong>
-          PV output connects to the supply (line) side of the ${_svcA}A service disconnect. Distinct objects, each with its OWN length: the <em>tap conductors</em> (tap point → ${_fusedA}A fused AC disconnect, ≥125% of PV output = ${continuousA.toFixed(1)}A) carry the 705.11(C)/240.21(B) ≤10-ft rule (<strong>${_ruleStateTxt}</strong>; run = ${_tapLenTxt}) — a SEPARATE segment from the <em>PV AC feeder</em> (combiner → disconnect, ${_feedLenTxt}${_feed.lengthSource === 'cad-derived-estimate' ? ' CAD est' : ''}, ${_feedVdTxt} drop). The 10-ft rule does not govern the feeder; the 120% busbar rule (705.12(B)) applies only load-side. Service/metering adequacy field-verified with the utility.
+          PV output connects to the supply (line) side of the ${_svcA}A service disconnect. The <em>tap conductors</em> (${_fusedA}A fused AC disconnect ↔ tap point, ≥125% of PV output = ${continuousA.toFixed(1)}A) are ONE physical span — route segment ${_tapSegId} — under the 705.11(C)/240.21(B) ≤10-ft rule (<strong>${_ruleStateTxt}</strong>; ${_tapLenTxt}). The <em>PV AC feeder</em> (combiner → disconnect, ${_feedLenTxt}${_feed.lengthSource === 'cad-derived-estimate' ? ' CAD est' : ''}, ${_feedVdTxt} drop) is a different span: the 10-ft rule does not govern it, and 705.12(B) applies only load-side.${_tapDesignFixed ? ` <strong>CONSTRUCTION REQUIREMENT — ${_tapConstraintText}</strong>` : ''}
         </div>`;
         })()}
         ${''/* formula-tutorial box removed — displaced project content */}` : `

@@ -133,25 +133,55 @@ describe('§5 SERVICE TOPOLOGY — canonical objects (build + projection + valid
     for (const o of topo) { expect(o.objectId).toBeTruthy(); expect(o.provenance?.source).toBeTruthy(); }
   });
 
-  it('tap-conductor 10-ft rule is PENDING while its length is unknown (no fabricated compliant claim)', () => {
+  // 2026-08-28 MIGRATION — this test asserted `lengthFt === null` /
+  // `lengthSource === 'unknown'` / a permanently `pending` rule. Those were
+  // properties of the DUPLICATE model: the tap object had to carry null because
+  // the DISCO_TO_METER_RUN segment carried the real number for the same span.
+  // The object is now a compliance VIEW of that segment, so what has to hold is
+  // the honesty rule, not the null: the rule may only read 'pass' from a length
+  // that exists, and it may never read 'pass' from a bare estimate.
+  it('tap-conductor 10-ft rule mirrors the physical span and never passes on an estimate', () => {
     const { snap } = buildSupplySide();
     const tap = snap.electrical.serviceTopology.find(o => o.type === 'tap-conductors')!;
-    expect(tap.lengthFt).toBeNull();               // no CAD datum → honest PENDING
-    expect(tap.lengthSource).toBe('unknown');
+    const seg = (snap.electrical.routeSegments ?? []).find(s => s.segmentId === 'DISCO_TO_METER_RUN')!;
     const rule = tap.constraints.find(c => c.code === 'NEC-705.11(C)-TAP-10FT')!;
+
     expect(rule.limitFt).toBe(10);
-    expect(rule.state).toBe('pending');            // never 'pass' on an unknown length
-    // the 60-ft feeder run is a SEPARATE object (route segment), not this one
+    // ONE authority: the view mirrors the physical span, never a second number.
+    expect(tap.physicalRouteSegmentId).toBe('DISCO_TO_METER_RUN');
+    expect(tap.lengthFt).toBe(seg.oneWayFt);
+    expect(tap.lengthSource).toBe(seg.lengthSource);
+    // A 'pass' requires a length that exists AND is within the limit — an
+    // estimate can never produce one (V42 pins the first half of this too).
+    if (rule.state === 'pass') {
+      expect(tap.lengthFt).not.toBeNull();
+      expect(tap.lengthFt!).toBeLessThanOrEqual(10);
+      expect(tap.lengthSource).not.toBe('cad-derived-estimate');
+    }
+    // the feeder run is a SEPARATE object, never conflated with this span
     expect(tap.lengthFt).not.toBe(60);
   });
 
-  it('PV-4B projects the objects (not restated) — service chain table + PENDING tap rule', () => {
-    const { html } = buildSupplySide();
+  it('PV-4B projects the objects (not restated) — service chain table + the printed design constraint', () => {
+    const { html, snap } = buildSupplySide();
     expect(html).toContain('Tap conductors');
     // §9: the fused device label now names its dual role (tap OCPD + utility-accessible).
     expect(html).toContain('Fused AC disconnect (tap OCPD');
     expect(html).toContain('Main service disconnect');
-    expect(html).toMatch(/PENDING[^<]*length/i);   // honest tap-length state rendered
+    // 2026-08-28 — the old assertion demanded the literal text "PENDING … length".
+    // A span the DESIGN constrains is not pending, so the invariant that replaces
+    // it is the one that matters: whatever the sheet claims, it must state the
+    // BASIS. A pass-by-design span must print the placement requirement an
+    // inspector checks the installation against — otherwise the drawing asserts
+    // a constraint it never states.
+    const tap = snap.electrical.serviceTopology.find(o => o.type === 'tap-conductors')!;
+    const rule = tap.constraints.find(c => c.code === 'NEC-705.11(C)-TAP-10FT')!;
+    if (rule.state === 'pass' && tap.lengthSource === 'known-design') {
+      expect(html).toContain('CONSTRUCTION REQUIREMENT');
+      expect(html).toMatch(/WITHIN 10 FT OF THE TAP POINT/i);
+    } else {
+      expect(html).toMatch(/PENDING[^<]*(length|span)/i);
+    }
   });
 
   it('V42 — no object may claim a PASS length-limit rule without a known length', () => {

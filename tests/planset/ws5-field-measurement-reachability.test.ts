@@ -38,7 +38,7 @@ import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 import { gradeVoltageDrop, projectCanonicalFeeder } from '@/lib/permit/snapshot/electricalProjection';
 import { inMemoryMeasurementService, type FieldMeasurementService } from '@/lib/fieldMeasurement/service';
-import { buildFieldMeasurementAuthority } from '@/lib/fieldMeasurement/resolver';
+import { buildFieldMeasurementAuthority, sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
 import type { FieldRouteMeasurementAuthority } from '@/lib/fieldMeasurement/resolver';
 import type { RouteApplicabilityFact } from '@/lib/fieldMeasurement/types';
 import { routeFactsFromSnapshot } from '@/lib/fieldMeasurement/permitAccess';
@@ -139,11 +139,23 @@ describe('WS-5 §15 stage 0 — the baseline is an estimate and the requirement 
     expect(residualIds.length).toBeGreaterThan(0);
   });
 
+  // 2026-08-28 TAP MIGRATION - `residualIds` is a hand-written list of segment
+  // ids, so it kept naming DISCO_TO_METER_RUN after that run stopped being an
+  // estimate (the design now fixes the supply-side tap span at the NEC 705.11(C)
+  // maximum). The assertion is restated so it reads the residual set the CLOSURE
+  // POLICY produces rather than a literal: a run that no longer owes a field
+  // measurement is not a weakened assertion, it is one fewer residual.
   it('every residual run reads CAD_DERIVED_ESTIMATE / cad-derived-estimate', () => {
-    for (const id of residualIds) {
+    const residual = residualIds.filter(id => !sourceClosesRouteLengthRequirement(seg(baseline, id)?.lengthSource));
+    expect(residual.length, 'the fixture must still exercise the estimate path').toBeGreaterThan(0);
+    for (const id of residual) {
       const s = seg(baseline, id)!;
       expect(s.lengthSource, id).toBe('cad-derived-estimate');
       expect(s.verificationState, id).toBe('cad-derived-estimate');
+    }
+    // and the run that LEFT the residual set left it for a stated reason
+    for (const id of residualIds.filter(i => !residual.includes(i))) {
+      expect(seg(baseline, id)!.lengthSource, id).toBe('known-design');
     }
   });
 

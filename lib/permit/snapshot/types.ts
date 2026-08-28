@@ -293,6 +293,14 @@ export type RouteVerificationState =
    *  `verificationStatus: 'cad-derived-estimate'`, because there was no state to
    *  express "geometry-derived, but not field evidence". */
   | 'geometry-derived'
+  /** A length the DESIGN FIXES rather than estimates or measures — a placement
+   *  requirement the drawing prints and an inspector checks the installation
+   *  against (today: the supply-side tap span, NEC 705.11(C) ≤10 ft). Stronger
+   *  than an estimate, because nobody is guessing: the number is a requirement.
+   *  Weaker than field evidence, because nobody has been to site — so it never
+   *  closes a field-verification requirement and never grades a voltage drop
+   *  VERIFIED_PASS. */
+  | 'design-constraint'
   /** WS-5 — an operator-entered measurement that has NOT been verified. Entry is
    *  not authority: this may become the calculation length, and must NOT close a
    *  field-verification requirement. */
@@ -308,6 +316,8 @@ export type RouteVerificationState =
 export type RouteLengthSource =
   | 'cad-derived-estimate'
   | 'cad-route'
+  /** the DESIGN fixes this length (see 'design-constraint' above). */
+  | 'known-design'
   | 'field-reported'
   | 'field-verified';
 
@@ -320,6 +330,7 @@ export const ROUTE_LENGTH_AUTHORITY_PAIRS: ReadonlyArray<
 > = [
   ['cad-derived-estimate', 'cad-derived-estimate'],
   ['cad-route', 'geometry-derived'],
+  ['known-design', 'design-constraint'],
   ['field-reported', 'field-reported'],
   ['field-verified', 'field-verified'],
 ];
@@ -380,7 +391,7 @@ export interface RouteSegmentRecord {
    *  'service connection'. */
   electricalFunction?: string | null;
   oneWayFt: number | null;
-  lengthSource: 'cad-route' | 'cad-derived-estimate' | 'field-measurement' | 'operator-entry' | 'unknown';
+  lengthSource: 'cad-route' | 'cad-derived-estimate' | 'known-design' | 'field-measurement' | 'operator-entry' | 'unknown';
   /** W1 — the ONE verification state derived from lengthSource + blockers. Route
    *  notes/callouts project THIS (never a renderer "field-verified" literal). */
   verificationStatus?: RouteVerificationState;
@@ -436,7 +447,7 @@ export interface RouteSegmentRecord {
   wasteFactor?: number | null;
   /** where oneWayFt / the taxonomy lengths came from (mirrors lengthSource but
    *  distinguishes a coordinate derivation from a plane-width estimate). */
-  lengthProvenance?: 'geometry-derived' | 'estimated' | 'field-measured' | 'unknown';
+  lengthProvenance?: 'geometry-derived' | 'estimated' | 'design-constraint' | 'field-measured' | 'unknown';
   /** the ONE verification state for the length taxonomy (mirrors verificationStatus). */
   verificationState?: RouteVerificationState;
   voltageDropPct: number | null;
@@ -1017,6 +1028,13 @@ export interface ServiceTopologyObject {
   ocpdRatingA: number | null;        // where applicable (fused OCPD / service disco)
   lengthFt: number | null;           // per-object run length (null ⇒ PENDING)
   lengthSource: 'known-design' | 'cad-derived-estimate' | 'field-measurement' | 'unknown' | 'not-applicable';
+  /** 2026-08-28 — when this object is a COMPLIANCE VIEW of a physical route
+   *  segment rather than a physical object in its own right, the id of the
+   *  segment that owns the endpoints, geometry, conductors, raceway, EGC and
+   *  length. `lengthFt`/`lengthSource` above MIRROR that segment; they are not a
+   *  second authority. Set today on `svc-tap-conductors`, which is the same
+   *  physical span as `DISCO_TO_METER_RUN`. */
+  physicalRouteSegmentId?: string | null;
   constraints: ServiceTopologyConstraint[];
   // ── §9 (closeout 2026-07-23) PHYSICAL-ORDER GRAPH + DEVICE-ROLE AUTHORITY ──
   /** upstream (PV-source-side) neighbor objectId — proves physical order. */

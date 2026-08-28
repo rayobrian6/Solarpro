@@ -31,6 +31,7 @@ import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
 import { computeBatteryBusImpact, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { nextStandardOcpd } from './electrical/stdSizes';
+import { NEC_705_11_C_TAP_LIMIT_FT, TAP_SPAN_PHYSICAL_SEGMENT_ID } from './electrical/tapSpan';
 
 // ─── Equipment Spec ──────────────────────────────────────────────────────────
 
@@ -159,6 +160,14 @@ export interface RunSegment {
   upsizingReason?: string | null;
   /** what this physical section carries (single-sourced route description). */
   electricalFunction?: string;
+  /** SUPPLY-SIDE TAP SPAN — set ONLY on the run whose length the DESIGN fixes
+   *  rather than estimates. `onewayLengthFt` on such a run is a design
+   *  requirement the drawing prints and an inspector checks, not a heuristic, so
+   *  the snapshot maps it to `lengthSource: 'known-design'` instead of
+   *  'cad-derived-estimate'. Absent on every other run. */
+  lengthAuthority?: 'design-constraint';
+  /** the design rule that fixed it, and the figure it replaced. */
+  lengthAuthorityBasis?: string;
   /** Owning subsystem (contract §1.3 permit carriage). Absent on the legacy
    *  single-system path (N=1 keeps bare run ids — Invariant I-1); stamped by
    *  computeMultiSystem (Wave 2a) only when N>1. */
@@ -1462,6 +1471,36 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     ATS_TO_MSP_RUN:       input.runLengthsBatteryGen?.atsToMsp       ?? 20,
   };
 
+  // ── SUPPLY-SIDE TAP: THE DISCONNECT→TAP SPAN IS FIXED BY DESIGN ───────────
+  // On a supply-side tap the fused AC disconnect is not placed wherever a
+  // heuristic lands it — NEC 705.11(C)/240.21(B)(1) REQUIRES it within 10 ft of
+  // the tap point, and the drawing prints that requirement. Every value that
+  // ever reached DISCO_TO_METER_RUN on a supply-side design is a heuristic about
+  // a device nobody has placed: `?? 15` here, "DISCO_TO_METER_RUN: 15" in the
+  // page's roof branch, "65% of the array→MSP distance" in deriveRunLengths.
+  // None of them is a position, and letting one of them exceed 10 ft made the
+  // package assert 15 ft for the very span it also said was unmeasurable.
+  //
+  // So the DESIGN fixes it: the span is the 705.11(C) maximum (or shorter, if a
+  // heuristic already lands inside the limit — never lengthened to the limit).
+  // The conductors are sized on that length, which is the worst case the design
+  // permits. A field measurement still overrides this downstream (build.ts
+  // WS-5 precedence) — a person who walked the run knows more than the design
+  // intent, and a measurement over the limit is a real, blocking violation.
+  const _tapSpanDesignFixed = _isSupplySideTap
+    && defaultRunLengths[TAP_SPAN_PHYSICAL_SEGMENT_ID as RunSegmentId] > NEC_705_11_C_TAP_LIMIT_FT;
+  const _tapSpanPreDesignFt = defaultRunLengths[TAP_SPAN_PHYSICAL_SEGMENT_ID as RunSegmentId];
+  if (_tapSpanDesignFixed) {
+    defaultRunLengths[TAP_SPAN_PHYSICAL_SEGMENT_ID as RunSegmentId] = NEC_705_11_C_TAP_LIMIT_FT;
+  }
+  const _tapSpanAuthorityBasis = _isSupplySideTap
+    ? `NEC 705.11(C) / 240.21(B)(1) design constraint — the fused AC disconnect is located within `
+      + `${NEC_705_11_C_TAP_LIMIT_FT} ft of the supply-side tap point and the drawing carries that requirement`
+      + (_tapSpanDesignFixed
+        ? `; the unrouted ${_tapSpanPreDesignFt} ft heuristic it replaces described no placed device.`
+        : `; the derived route already lies inside the limit.`)
+    : undefined;
+
   // ── Wire Sizing for Each Run ───────────────────────────────────────────────
   const runs: RunSegment[] = [];
 
@@ -1824,7 +1863,19 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     false,
     '#10 AWG'
   );
-  runs.push(makeRunSegment('DISCO_TO_METER_RUN', 'AC DISCO TO MSP', 'AC DISCONNECT', 'MAIN SERVICE PANEL', {
+  runs.push(makeRunSegment('DISCO_TO_METER_RUN',
+    _isSupplySideTap ? 'AC DISCO TO SUPPLY-SIDE TAP' : 'AC DISCO TO MSP',
+    'AC DISCONNECT',
+    _isSupplySideTap ? 'SUPPLY-SIDE TAP POINT' : 'MAIN SERVICE PANEL', {
+    // ONE PHYSICAL SPAN. On a supply-side design this run IS the tap-conductor
+    // span the 705.11(C) rule governs — `svc-tap-conductors` is a compliance
+    // VIEW of this object, not a second physical route with its own length.
+    ...(_isSupplySideTap
+      ? { lengthAuthority: 'design-constraint' as const, lengthAuthorityBasis: _tapSpanAuthorityBasis }
+      : {}),
+    electricalFunction: _isSupplySideTap
+      ? 'supply-side tap conductors (fused AC disconnect → tap point, NEC 705.11(C))'
+      : 'AC disconnect → main service panel',
     sourceTerminal: 'LINE',         // AC Disconnect LINE terminals (utility/MSP side)
     destTerminal:   'MSP_BKFD',     // MSP backfed breaker lug (load-side tap) or MSP_BUS (supply-side)
     conductorCount: discoToMeterConductorCount,

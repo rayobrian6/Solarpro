@@ -313,7 +313,11 @@ describe('PPC §6 (gate 8) — generic PASS cannot hide branch blockers', () => 
     expect(t).toMatch(/GROUNDING — IQ8A PRODUCT:/);            // grounding authority
     expect(t).toMatch(/ARRAY\/RACKING BONDING:/);              // and it stays separate
     expect(t).toMatch(/ROUTE AUTHORITY:/);
-    expect(t).toMatch(/PENDING — CAD-DERIVED ESTIMATE/);          // route authority
+    // 2026-08-28 TAP MIGRATION - the branch ROUTE AUTHORITY cell reports the
+    // worst source among the branch's runs. Its literal text changed once one
+    // of those runs stopped being an estimate; what this test guards - that
+    // route authority is NAMED and is not a bare PASS - is unchanged.
+    expect(t).toMatch(/ROUTE AUTHORITY: (PENDING|BLOCKED)/);      // route authority, never a bare PASS
     expect(t).toMatch(/OVERALL RELEASE: BLOCKED/);
   });
 

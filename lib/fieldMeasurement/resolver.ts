@@ -253,7 +253,7 @@ export function buildFieldMeasurementAuthority(
 export const ROUTE_LENGTH_CLOSURE_POLICY = {
   requirementCode: 'ROUTE-LENGTH-ESTIMATE',
   /** the length SOURCES that satisfy this requirement's closure. */
-  sufficientSources: ['cad-route', 'field-measurement', 'field-verified'] as const,
+  sufficientSources: ['cad-route', 'known-design', 'field-measurement', 'field-verified'] as const,
   /** …and the ones that never do, restated so the exclusion is visible. */
   insufficientSources: ['cad-derived-estimate', 'field-reported'] as const,
   basis:
@@ -262,7 +262,12 @@ export const ROUTE_LENGTH_CLOSURE_POLICY = {
     + 'length is an ESTIMATE, not whether a tape was on the run. A bare FIELD REPORT does NOT satisfy it: an '
     + 'operator-entered number that no one has checked is a claim, and the requirement it would close is the one '
     + 'that exists to catch exactly that. Geometry never produces a VERIFIED_PASS voltage-drop grade — that '
-    + 'remains field evidence only (gradeVoltageDrop).',
+    + 'remains field evidence only (gradeVoltageDrop). '
+    + 'KNOWN-DESIGN closes it for the same reason and no further: a length the DESIGN FIXES is not an estimate of '
+    + 'anything — it is a placement requirement the drawing prints and the inspector checks (today the supply-side '
+    + 'tap span, NEC 705.11(C) ≤10 ft). Asking a crew to field-measure a distance the design DICTATES inverts the '
+    + 'direction of authority. It is emitted ONLY by the engine, only where a code rule bounds the span, and it is '
+    + 'still not field evidence: it never closes a field-verification requirement and never grades a VERIFIED_PASS.',
 } as const;
 
 /** Does this length source satisfy ROUTE-LENGTH-ESTIMATE closure? Fail-closed:

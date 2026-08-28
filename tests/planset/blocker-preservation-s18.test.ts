@@ -104,10 +104,20 @@ describe('§18 — legitimate project blockers are preserved (Braidon state)', (
     // AAC WS-7 (2026-07-27): CONDUIT-FILL-PENDING is no longer among them — the
     // NEC Ch.9 Table 1 fill is COMPUTED and reaches the snapshot, so the
     // requirement is resolved rather than promoted. Asserted positively below.
-    for (const code of ['TAP-CONDUCTOR-LENGTH-PENDING', 'MODULE-EXACT-DATASHEET-PENDING']) {
+    for (const code of ['MODULE-EXACT-DATASHEET-PENDING']) {
       expect(blockingCodes.has(code), `${code} promoted`).toBe(true);
     }
     expect(blockingCodes.has('CONDUIT-FILL-PENDING'), 'conduit fill is computed, not pending').toBe(false);
+    // 2026-08-28 TAP MIGRATION - the same shape as the CONDUIT-FILL case above:
+    // TAP-CONDUCTOR-LENGTH-PENDING is absent because the DESIGN now constrains
+    // the tap span (the drawing carries the placement requirement and the engine
+    // fixes the span at the NEC 705.11(C) maximum), not because the requirement
+    // was softened. Asserted positively, with the reason, so a future regression
+    // that merely stops emitting it cannot pass here.
+    expect(blockingCodes.has('TAP-CONDUCTOR-LENGTH-PENDING'), 'tap span is design-constrained').toBe(false);
+    const tapSeg = (snap.electrical.routeSegments ?? []).find(s => s.segmentId === 'DISCO_TO_METER_RUN')!;
+    expect(tapSeg.lengthSource).toBe('known-design');
+    expect(tapSeg.oneWayFt!).toBeLessThanOrEqual(10);
     expect((snap.electrical as unknown as { conduitFillAuthority?: { state?: string } }).conduitFillAuthority?.state).toBe('computed');
     for (const code of LEGIT_BLOCKERS) expect(blockingCodes.has(code), `${code} preserved`).toBe(true);
   });
