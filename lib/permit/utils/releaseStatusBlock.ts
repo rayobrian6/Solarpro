@@ -23,6 +23,9 @@ import type { PermitInput } from '../types';
 import {
   projectReleaseGatesFromInput, releaseHeadline, openReleaseGates, topConfirmedConflict,
 } from '../snapshot/releaseGates';
+import {
+  deriveReleasePhase, RELEASE_PHASE_STYLE, submissionLine, type ReleasePhase,
+} from '../snapshot/releasePhase';
 import { peekSnapshot } from '../snapshot/read';
 import { escapeH } from './drawing';
 import {
@@ -49,6 +52,24 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
 
   const total = model.summary.unresolvedRequirementCount + model.summary.advisoryCount;
 
+  // ══ WHERE THE PACKAGE ACTUALLY IS ══════════════════════════════
+  // Both branches below used to open with a hardcoded pair of lines — the count
+  // headline, then "PENDING ENGINEERING REVIEW — NOT FOR PERMIT SUBMISSION" — in
+  // the same red whatever the package's actual state. A set missing ten facts
+  // and a set that is finished and waiting on a signature read identically.
+  //
+  // The phase is now derived (lib/permit/snapshot/releasePhase.ts) and LEADS:
+  // one actionable sentence, coloured by whether the state is a defect or a
+  // correct workflow step. The counts and the gate names stay — underneath,
+  // where they inform rather than alarm.
+  const phase = deriveReleasePhase({
+    model,
+    reviewCoversCurrentDigest: model.issueStatePredicates.professionalReleaseComplete,
+    gatePasses: model.issueStatePredicates.readyForPermitSubmission,
+    hasDesign: (snap?.derived?.moduleCount ?? 0) > 0,
+  });
+  const style = RELEASE_PHASE_STYLE[phase.kind];
+
   // ── AAC WS-10 — the PERMIT profile prints ONE concise release status ───────
   // The gate-count line, the open gates named, and one pointer to the in-app
   // review record (RS-1 is not in the permit set, so pointing at it would be a
@@ -70,17 +91,21 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
       : `OUTPUT PROFILE: ${PROFILE_DISPLAY_NAMES[_profile]}${_profile === 'design-review' ? ' &mdash; NOT FOR PERMIT SUBMISSION' : ''}`;
     return `
   <div class="release-status-block" data-release-status-block="1" data-release-status-profile="${_profile}"${_preview ? ' data-permit-submission-preview="1"' : ''}
-       style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid #b91c1c;background:#fef2f2;padding:${opts?.compact ? '4px 8px' : '8px 12px'};page-break-inside:avoid;">
-    <div data-release-headline="1" style="font-weight:900;font-size:12.5px;letter-spacing:0.6px;color:#b91c1c;text-align:center;">
-      RELEASE STATUS &mdash; ${escapeH(releaseHeadline(model.summary))}
+       data-release-phase="${phase.id}" data-release-phase-kind="${phase.kind}"
+       style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid ${style.border};background:${style.bg};padding:${opts?.compact ? '4px 8px' : '8px 12px'};page-break-inside:avoid;">
+    <div data-release-phase-label="1" style="font-weight:900;font-size:12.5px;letter-spacing:0.6px;color:${style.fg};text-align:center;">
+      ${escapeH(phase.label)}
     </div>
-    <div style="font-weight:900;font-size:10px;letter-spacing:0.6px;color:#b91c1c;text-align:center;margin-top:1px;">
-      PENDING ENGINEERING REVIEW &mdash; NOT FOR PERMIT SUBMISSION
+    <div data-release-phase-statement="1" style="font-weight:700;font-size:9px;line-height:1.3;color:${style.fg};text-align:center;margin-top:1px;">
+      ${escapeH(phase.statement)}
+    </div>
+    <div data-release-submission-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.6px;color:${style.fg};text-align:center;margin-top:1px;">
+      ${escapeH(submissionLine(phase))}
     </div>
     <div data-release-output-profile="${_profile}" style="font-weight:900;font-size:8.5px;letter-spacing:0.5px;color:#111;text-align:center;margin-top:1px;">
       ${_profileLine}
     </div>
-    <div style="font-size:8px;color:#7f1d1d;text-align:center;line-height:1.3;margin-top:2px;">
+    <div data-release-headline="1" style="font-size:8px;color:${style.fg};text-align:center;line-height:1.3;margin-top:2px;">
       <span data-release-open-gate-count="${model.summary.openGateCount}" style="font-weight:900;">${model.summary.openGateCount}</span> open release gate${model.summary.openGateCount === 1 ? '' : 's'}
       / <span data-release-requirement-count="${model.summary.unresolvedRequirementCount}" style="font-weight:900;">${model.summary.unresolvedRequirementCount}</span> unresolved requirement${model.summary.unresolvedRequirementCount === 1 ? '' : 's'}
       &mdash; ${names || '—'}
@@ -114,14 +139,18 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
   const pad = opts?.compact ? '4px 8px' : '8px 12px';
   return `
   <div class="release-status-block" data-release-status-block="1"
-       style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid #b91c1c;background:#fef2f2;padding:${pad};page-break-inside:avoid;">
-    <div data-release-headline="1" style="font-weight:900;font-size:12.5px;letter-spacing:0.6px;color:#b91c1c;text-align:center;">
-      RELEASE STATUS &mdash; ${escapeH(releaseHeadline(model.summary))}
+       data-release-phase="${phase.id}" data-release-phase-kind="${phase.kind}"
+       style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid ${style.border};background:${style.bg};padding:${pad};page-break-inside:avoid;">
+    <div data-release-phase-label="1" style="font-weight:900;font-size:12.5px;letter-spacing:0.6px;color:${style.fg};text-align:center;">
+      ${escapeH(phase.label)}
     </div>
-    <div style="font-weight:900;font-size:10px;letter-spacing:0.6px;color:#b91c1c;text-align:center;margin-top:1px;">
-      PENDING ENGINEERING REVIEW &mdash; NOT FOR PERMIT SUBMISSION
+    <div data-release-phase-statement="1" style="font-weight:700;font-size:8.5px;line-height:1.3;color:${style.fg};text-align:center;margin-top:1px;">
+      ${escapeH(phase.statement)}
     </div>
-    <div style="font-size:7.2px;color:#7f1d1d;text-align:center;line-height:1.25;margin-top:1px;">
+    <div data-release-submission-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.6px;color:${style.fg};text-align:center;margin-top:1px;">
+      ${escapeH(submissionLine(phase))}
+    </div>
+    <div data-release-headline="1" style="font-size:7.2px;color:${style.fg};text-align:center;line-height:1.25;margin-top:1px;">
       <span data-release-open-gate-count="${model.summary.openGateCount}">${model.summary.openGateCount}</span> unresolved ROOT release gate${model.summary.openGateCount === 1 ? '' : 's'}
       contain <span data-release-requirement-count="${model.summary.unresolvedRequirementCount}">${model.summary.unresolvedRequirementCount}</span> unresolved requirement${model.summary.unresolvedRequirementCount === 1 ? '' : 's'}
       &mdash; not ${model.summary.unresolvedRequirementCount} unrelated engineering failures. A gate is OPEN while ANY of its child requirements is unresolved.

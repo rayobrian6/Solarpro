@@ -362,10 +362,18 @@ describe('RGM §6 — the cover states RELEASE STATUS in gate semantics', () => 
     expect(cover).not.toMatch(/more active release blocker/);
   });
 
-  it('it prints the headline, the identity lines and the pointer to RS-1', () => {
-    expect(cover).toContain(releaseHeadline(MODEL.summary));
-    expect(cover).toContain('PENDING ENGINEERING REVIEW');
+  it('it prints the PHASE, the counts and the pointer to RS-1', () => {
+    // 2026-08-28 RELEASE-PHASE MIGRATION — the cover used to LEAD with the count
+    // headline and a hardcoded "PENDING ENGINEERING REVIEW" line printed on every
+    // unissued package regardless of state. It now leads with the derived phase
+    // and one actionable sentence; the counts and the gate list stay underneath.
+    // Everything this test guarded is still asserted — counts, identity, pointer
+    // — just read from the phase rather than from a fixed string.
+    expect(cover).toMatch(/data-release-phase="[A-Z_]+"/);
+    expect(cover).toMatch(/data-release-phase-statement="1"/);
     expect(cover).toContain('NOT FOR PERMIT SUBMISSION');
+    expect(cover).toContain(`data-release-open-gate-count="${MODEL.summary.openGateCount}"`);
+    expect(cover).toContain(`data-release-requirement-count="${MODEL.summary.unresolvedRequirementCount}"`);
     expect(cover).toContain(`SEE RS-1 FOR ALL ${MODEL.summary.unresolvedRequirementCount + MODEL.summary.advisoryCount} REQUIREMENT`);
   });
 

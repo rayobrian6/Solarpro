@@ -229,7 +229,12 @@ describe('WS-10 (5) — unresolved work is stated, never hidden', () => {
     // the printed count is the model's, not a shrunken one
     const m = PERMIT.html.match(/data-release-requirement-count="(\d+)"/);
     expect(Number(m?.[1])).toBeGreaterThan(0);
-    expect(PERMIT.html).toContain('PENDING ENGINEERING REVIEW &mdash; NOT FOR PERMIT SUBMISSION');
+    // 2026-08-28 RELEASE-PHASE MIGRATION — that pairing was a HARDCODED literal
+    // printed on every unissued package regardless of state, which is exactly
+    // what the phase model replaced. The property this line stood for — the
+    // cover states the package is not submittable — is asserted from the phase.
+    expect(PERMIT.html).toMatch(/data-release-phase="(DESIGN_INCOMPLETE|AWAITING_PROFESSIONAL_REVIEW|AWAITING_SEAL_AND_ISSUE)"/);
+    expect(PERMIT.html).toMatch(/NOT FOR PERMIT SUBMISSION/);
   });
 
   it('the permit profile never reaches an ISSUED identity while gates are open', () => {
