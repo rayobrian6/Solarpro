@@ -23,7 +23,9 @@
 import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
-import { getMountingSystemById, resolveMountingSystemId } from '@/lib/mounting-hardware-db';
+import { getMountingSystemById, getMountingSystemRecordById, resolveMountingSystemId } from '@/lib/mounting-hardware-db';
+import { findManufacturerStructuralDocument, toRackingClearanceEvidenceFromCatalogue } from '@/lib/documents/manufacturerStructuralCatalogue';
+import { evaluateRackingCapacityClearance } from '@/lib/permit/snapshot/rackingAssembly';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
@@ -38,10 +40,18 @@ const PKG = gen();
 const RA = PKG.snap.structural.rackingAssembly as any;
 
 describe('WS-4 — the stored selection is found and its architecture is READ, not inferred', () => {
-  it('the project selection resolves to the RT-MINI record', () => {
+  // 2026-08-28 RT-MINI MIGRATION - the stored id is unchanged; what it
+  // RESOLVES to now follows the manufacturer's stated supersession, because Roof
+  // Tech replaced the first generation and publishes structural authority only
+  // for RT-MINI II. The substitution is stated on the record (see below), not
+  // silent, and the applicability rule it must not be confused with is asserted
+  // separately: a gen-2 document still never clears a gen-1 SELECTION.
+  it('the project selection resolves to the current Roof Tech generation', () => {
     expect(PKG.input.project.mountingSystemId).toBe('rooftech-mini');
+    const raw = getMountingSystemRecordById('rooftech-mini')!;
+    expect(raw.model).toBe('RT-MINI');
     const m = getMountingSystemById('rooftech-mini')!;
-    expect(m.model).toBe('RT-MINI');
+    expect(m.model).toBe('RT-MINI II');
     expect(m.manufacturer).toBe('Roof Tech');
   });
 
@@ -53,7 +63,10 @@ describe('WS-4 — the stored selection is found and its architecture is READ, n
 
   it('the mount MODEL is pinned even though no SKU exists anywhere', () => {
     expect(RA.mountManufacturer).toBe('Roof Tech');
-    expect(RA.mountModel).toBe('RT-MINI');
+    expect(RA.mountModel).toBe('RT-MINI II');
+    // and the substitution that produced it is STATED on the record
+    expect(RA.notes.join(' ')).toMatch(/PRODUCT SUPERSESSION/);
+    expect(RA.notes.join(' ')).toMatch(/RT-MINI II/);
     // the catalogue genuinely has no orderable part number — not a guess, not a
     // silent fill, and not evidence that the mount is unselected
     expect(RA.mountSku).toBeNull();
@@ -70,8 +83,15 @@ describe('WS-4 — the stored selection is found and its architecture is READ, n
     expect(RA.attachmentSpacingSource).toMatch(/maxSpacingIn/);
   });
 
+  // 2026-08-28 RT-MINI MIGRATION - the gen-2 record does not publish a
+  // Roof Tech-branded bonding clip: the PE letter delegates the rail and its
+  // clamps/bonding to the rail manufacturer ("by others"). The property under
+  // test is that the value comes from the CANONICAL assembly rather than being
+  // invented by a renderer, which a literal string cannot express.
   it('the bonding hardware comes from the canonical assembly', () => {
-    expect(RA.groundingBonding).toBe('RT-MINI Bond Clip');
+    const m = getMountingSystemById('rooftech-mini')!;
+    expect(RA.groundingBonding).toBe(m.hardware.bondingHardware);
+    expect(String(RA.groundingBonding ?? '').length).toBeGreaterThan(0);
   });
 });
 
@@ -126,16 +146,34 @@ describe('WS-4 — attachment mode: rafter and deck are different designs', () =
 });
 
 describe('WS-4 — RT-MINI and RT-MINI II are different products', () => {
-  it("'rooftech-mini' does not silently map to RT-MINI II", () => {
+  // 2026-08-28 RT-MINI MIGRATION - the rule this describes is UNCHANGED and
+  // is asserted below; what changed is that the resolution is no longer silent
+  // OR inferred. It follows an explicit `supersededById` on the catalogue record
+  // whose basis is the manufacturer's own sentence, and the substitution is
+  // printed. A SUBSTRING or family-prefix match is still forbidden.
+  it("'rooftech-mini' maps to RT-MINI II only through a STATED supersession", () => {
     expect(resolveMountingSystemId('rooftech-mini')).toBe('rooftech-mini');
-    expect(getMountingSystemById('rooftech-mini')!.model).toBe('RT-MINI');
-    expect(getMountingSystemById('rooftech-mini')!.model).not.toMatch(/II/);
+    const raw = getMountingSystemRecordById('rooftech-mini')!;
+    expect(raw.model).toBe('RT-MINI');
+    expect(raw.supersededById).toBe('rooftech-mini-ii');
+    expect(String(raw.supersessionBasis ?? '')).toMatch(/second generation/i);
+    expect(getMountingSystemById('rooftech-mini')!.model).toBe('RT-MINI II');
   });
 
-  it('the assembly names the selected generation, not the document\'s generation', () => {
-    // The archived install document is the RT-MINI II manual; the SELECTED
-    // product is RT-MINI. The assembly must state what was selected.
-    expect(RA.mountModel).toBe('RT-MINI');
+  it('a document for one generation still never clears a selection of another', () => {
+    // THE PROHIBITION, restated where it now lives. A supersession changes the
+    // SELECTION; it never lets a gen-2 document stand in for a gen-1 selection.
+    const doc = findManufacturerStructuralDocument({ mountModel: 'RT-MINI II', stateCode: 'IL' })!;
+    const ev = toRackingClearanceEvidenceFromCatalogue(doc, { engagesFraming: true, fastenerCount: 2, screwLengthMm: 90 })!;
+    const r = evaluateRackingCapacityClearance(
+      { mountModel: 'RT-MINI', projectJurisdiction: 'City of Granite City', projectStateCode: 'IL' }, ev);
+    expect(r.cleared).toBe(false);
+    expect(r.missing).toContain('exact_model');
+  });
+
+  it('the assembly names the SPECIFIED generation, with the substitution stated', () => {
+    expect(RA.mountModel).toBe('RT-MINI II');
+    expect(RA.notes.join(' ')).toMatch(/PRODUCT SUPERSESSION: the stored design specifies RT-MINI,/);
   });
 
   it('cross-generation document applicability is CLOSED by a version-exact archived document', () => {

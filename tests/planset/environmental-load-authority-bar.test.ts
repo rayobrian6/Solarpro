@@ -301,8 +301,15 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
 
   it('TAC WS-4 — element completeness alone never yields "verified"', () => {
     // The elements ARE all present on the mount record…
-    expect(fa.diameterLabel).toBe('5/16');
-    expect(fa.embedmentIn).toBe(2.5);
+    // 2026-08-28 RT-MINI MIGRATION - the roof fastener is the PE letter's
+    // SS304 5.0 mm wood screw. The 5/16" the catalogue used to publish is the
+    // L-FOOT FLANGE BOLT - a different fastener in a different joint.
+    expect(fa.diameterLabel).toBe('M5 (5.0 mm)');
+    // 2026-08-28 RT-MINI MIGRATION - the RT-MINI II record carries the PE letter's
+    // own fastener: an SS304 5.0 mm x 90 mm wood screw, embedding 3.07 in (90 mm
+    // less 15/32 in sheathing). 2.5 in and 'structural wood screw' were the
+    // gen-1 record's generic values.
+    expect(fa.embedmentIn).toBe(3.07);
     expect(fa.qtyPerMount).not.toBeNull();
     // …and the assembly is still UNVERIFIED, because presence is not evidence.
     expect(fa.verification).not.toBe('verified');

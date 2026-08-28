@@ -22,9 +22,15 @@ import {
   evaluateRackingCapacityClearance,
   type RackingCapacityDocumentEvidence,
 } from '@/lib/permit/snapshot/rackingAssembly';
-import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { getMountingSystemById, getMountingSystemRecordById } from '@/lib/mounting-hardware-db';
 
-const RT_MINI = getMountingSystemById('rooftech-mini')!;
+// 2026-08-28 RT-MINI MIGRATION — this suite is ABOUT the wrong-generation
+// refusal, so it needs a gen-1 selection to refuse. `getMountingSystemById`
+// now follows the manufacturer's stated supersession and returns RT-MINI II,
+// which would have quietly turned every case here into a matching-document
+// case. The LITERAL record keeps the scenario intact; the rule under test
+// (authenticity is not applicability) is unchanged.
+const RT_MINI = getMountingSystemRecordById('rooftech-mini')!;
 
 /** The live ASCE 7-10 RT-MINI II letter, as the registry actually records it. */
 function rtMiniIiPeLetter(over: Partial<RackingCapacityDocumentEvidence> = {}): RackingCapacityDocumentEvidence {
@@ -172,10 +178,15 @@ describe('D6 · one document, one role', () => {
     expect(a.documentRoles.structuralCapacityAuthority.established).toBe(false);
   });
 
-  it('the RT-MINI vs RT-MINI II product distinction is stated on the record', () => {
+  it('the per-generation capacity rule is stated on the record', () => {
+    // 2026-08-28 RT-MINI MIGRATION — the note used to REPORT the defect as live
+    // ("the 613.2 figure is published for RT-MINI II; the selected mount is
+    // RT-MINI"). It is fixed at source, so the note states the RULE and what
+    // covers the selection. The words that carry the rule are unchanged.
     const a = buildRackingAssembly(RT_MINI)!;
-    expect(a.notes.join(' ')).toMatch(/PRODUCT DISTINCTION/);
+    expect(a.notes.join(' ')).toMatch(/PRODUCT GENERATION/);
     expect(a.notes.join(' ')).toMatch(/authenticity is not applicability/i);
+    expect(a.notes.join(' ')).toMatch(/No capacity document covers this exact generation/);
   });
 });
 

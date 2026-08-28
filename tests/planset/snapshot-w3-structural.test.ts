@@ -157,10 +157,13 @@ describe('W3 §10 — structural BOM derived from canonical objects', () => {
 describe('W3 — RT-MINI capacity sourcing (600 allowable is authority)', () => {
   it('RT-MINI cites the 600 lb ASD allowable and records the 900-ultimate discrepancy', () => {
     const a = buildRackingAssembly(getMountingSystemById('rooftech-mini'))!;
-    expect(a.publishedCapacityAllowableLbs).toBe(600);
+// 2026-08-28 RT-MINI MIGRATION - 613.2 is the PE letter's own allowable for
+    // the governing rafter assembly; 600 was that number rounded down and
+    // attributed to no document.
+    expect(a.publishedCapacityAllowableLbs).toBe(613.2);
     expect(a.capacityBasis).toBe('allowable');
     expect(a.capacitySource).toBeTruthy();
-    expect(a.notes.join(' ')).toMatch(/600 lb ASD ALLOWABLE/);
+    expect(a.notes.join(' ')).toMatch(/613\.2 lb ASD ALLOWABLE/);
     expect(a.notes.join(' ')).toMatch(/NOT structural authority/);
     // RT-MINI has no own rail spec → compatible rail (documented) → supported.
     expect(a.mixedManufacturer).toBe(true);

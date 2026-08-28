@@ -222,12 +222,22 @@ describe('PPC §5 (gate 7) — pending racking components are non-orderable', ()
     }
   });
 
-  it('assembly-dependent components + the mount base + the fastener are class B', () => {
+  it('assembly-dependent components + the mount base are class B', () => {
     const byKey = new Map(rows().map(r => [r.key, r]));
     for (const k of ['rails', 'railSplices', 'mounts', 'midClamps', 'endClamps',
-      'mountingBolts', 'bondingClips', 'lagBolts']) {
+      'mountingBolts', 'bondingClips']) {
       expect(byKey.get(k)?.procurementClass, k).toBe('B');
     }
+  });
+
+  it('the FASTENER is class C now that its assembly is document-verified', () => {
+    // 2026-08-28 RT-MINI MIGRATION - `lagBolts` was class B because
+    // FASTENER-ASSEMBLY-UNVERIFIED was open. The shipped RT-Mini II PE letter
+    // states the fastener assembly for the exact model, so the element is
+    // verified and the row is orderable. The class still FOLLOWS the verdict -
+    // which is the property this suite is about - it is not pinned to a letter.
+    const byKey = new Map(rows().map(r => [r.key, r]));
+    expect(byKey.get('lagBolts')?.procurementClass).toBe('C');
   });
 
   it('the class-B label is Ray\'s exact wording and reaches the rendered schedule', () => {

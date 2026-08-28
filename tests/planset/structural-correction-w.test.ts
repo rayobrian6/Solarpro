@@ -164,7 +164,7 @@ describe('§10 — RT-MINI exact racking assembly', () => {
     expect(a.railSku).toBeNull();
     expect(a.splice).toMatch(/PENDING RACKING ASSEMBLY SELECTION/);
     // one verified fastener product spec (2× 5/16" wood screw), its source recorded
-    expect(a.screwLagModel).toMatch(/5\/16.*wood screw/i);
+    expect(a.screwLagModel).toMatch(/SS304 5\.0 mm.*wood screw/i);
     expect(a.screwLagModel).not.toMatch(/3\/8/);
     // no 'or equivalent' / 'RAIL-COMPAT' anywhere on the assembly record
     const json = JSON.stringify(a);

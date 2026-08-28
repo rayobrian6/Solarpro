@@ -310,7 +310,23 @@ describe('OAR §B · a retrieval timeout does not downgrade an accepted registry
     });
     const sel = b.snap.equipmentDocumentAuthority?.entries?.[`racking_detail:${MOUNT_ID}`]?.selectedDocument ?? null;
     expect(sel?.documentId ?? null).toBeNull();
-    expect(unresolved(b.snap)).toContain('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED');
+    // 2026-08-28 RT-MINI MIGRATION - the scenario's premise was "no
+    // document exists anywhere". SolarPro now SHIPS the stamped RT-Mini II
+    // Illinois PE letter, archived and hashed in-repo, so the capacity
+    // requirement resolves from it - offline, because the catalogue is a pure
+    // in-repo table and never touches the network.
+    //
+    // The invariant this case exists for is NOTHING IS FABRICATED, and that is
+    // what is asserted now: with no registry row and a dead retrieval, no
+    // registry document is selected, and the capacity that IS published traces to
+    // an archived hash rather than to the failed retrieval.
+    const ra = b.snap.structural.rackingAssembly as unknown as {
+      documentRoles: Record<string, { established: boolean; documentId: string | null; documentHash: string | null }>;
+    };
+    const cap = ra.documentRoles.structuralCapacityAuthority;
+    expect(cap.documentId).toMatch(/^mfr-struct:/);
+    expect(cap.documentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(b.snap.resolverAttemptEvidence)).toContain('ETIMEDOUT');
   }, 300_000);
 
   it('9. the registry document HASH changes ⇒ digest moves', async () => {

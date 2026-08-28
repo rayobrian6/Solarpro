@@ -267,14 +267,24 @@ export function deriveRailSelection(input: RailSelectionInput): RailSelectionVer
   // selection made against a different mount is reported, and does not answer
   // this assembly's question.
   if (active) {
-    if (active.mountingSystemId !== mount.id) {
+    // 2026-08-28 — compare through the SUPERSESSION. A pin is stored against the
+    // id the operator selected; `mount` is that id resolved to the generation
+    // that ships. Comparing the raw strings made a pin made against a superseded
+    // id look like a pin for "a different mount", so a real selection silently
+    // read as unselected. They are the same assembly, and the compatibility
+    // statement that admitted the rail carries across a generation change the
+    // manufacturer itself declares. A pin for a genuinely different mount still
+    // fails, which is what this branch is for.
+    const _activeResolvedId = getMountingSystemById(active.mountingSystemId)?.id ?? active.mountingSystemId;
+    if (_activeResolvedId !== mount.id) {
       return {
         state: 'unselected', selectedRailModel: null, selectedRailSystemId: null, pinned: null, probes,
         compatibilityStatement: mount.hardware?.railSplice ?? null,
         requiredSpanIn: mount.mount?.maxSpacingIn ?? null,
         candidates, eligibleCandidateCount: eligible.length,
         basis: `a rail selection exists (${active.manufacturer} ${active.railModel}) but it was pinned to a different mount `
-          + `(${active.mountingSystemId}), not the selected ${mount.id}. The compatibility statement that admitted it `
+          + `(${active.mountingSystemId}${_activeResolvedId !== active.mountingSystemId ? ` → ${_activeResolvedId}` : ''}), `
+          + `not the selected ${mount.id}. The compatibility statement that admitted it `
           + 'belongs to that assembly, so it does not carry over — the rail must be pinned again for this mount',
         operatorAction: `Re-pin the rail for the ${mount.model} assembly; the previous selection was made for `
           + `${active.mountingSystemId}.`,

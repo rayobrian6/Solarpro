@@ -21,6 +21,7 @@ import {
   buildEnvironmentalLoadAuthority, type EnvironmentalLoadSourceEvidence,
 } from './environmentalAuthority';
 import type { StructuralResultV4, StructuralInputV4 } from '@/lib/structural-engine-v4';
+import { mountingSystemSupersession } from '@/lib/mounting-hardware-db';
 import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { classifyMountTopology } from '@/lib/mounting-hardware-db';
 import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
@@ -57,6 +58,8 @@ export interface StructuralAuthorityCtx {
   roofPlanes: { planeId: string; pitchDeg: number | null; azimuthDeg: number | null; moduleCount: number }[];
   cadPlanes: any[];
   mountSystem: MountingSystemSpec | null;
+  /** the id the DESIGN stored, before supersession was followed. */
+  mountSystemStoredId?: string | null;
   structuralRuns: StructuralRunsBundle | null;
   framing: FramingInputs;
   /** §2 (BAR) — a wind/snow VALUE is present (operator-entered or default). This
@@ -103,6 +106,9 @@ export interface StructuralAuthorityCtx {
   projectJurisdiction?: string | null;
   /** PHASE A.2 / D25 — canonical legal-AHJ record id (ahj_registry). */
   legalJurisdictionAuthorityId?: string | null;
+  /** the project's two-letter US state code (governed state authority). Lets the
+   *  SHIPPED manufacturer structural catalogue resolve on the pure build path. */
+  projectStateCode?: string | null;
   /** FRAMING-AUTHORITY GATE — the resolved evidence for the framing CAPACITY
    *  authority. The document path is resolved async THROUGH lib/documents (a
    *  verified + archived truss-drawing / manufacturer-calc / stamped-analysis
@@ -180,6 +186,9 @@ function fastenerVerdictFor(
       ?? !!(ra.screwLagModel && ra.screwLagQtyPerMount != null && ra.embedmentRequirementIn != null),
     citedSourceDocument: ra.datasheetSource ?? ra.capacitySource ?? null,
     documentApplicabilityVerified: docApplicable,
+    fastenerAuthorityDocument:
+      (ra as { documentRoles?: { fastenerAuthority?: { established: boolean; documentIdentity: string | null } } })
+        .documentRoles?.fastenerAuthority ?? null,
   });
 }
 
@@ -197,6 +206,14 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
     // name that was the MAILING city. `ctx.projectJurisdiction` above is kept
     // for the pre-migration-119 compatibility path only.
     projectJurisdictionAuthorityId: ctx.legalJurisdictionAuthorityId ?? null,
+    projectStateCode: ctx.projectStateCode ?? null,
+    // The stored id, not the resolved record: the supersession chain is a
+    // property of what the DESIGN named, and the resolved record no longer
+    // remembers being reached through one.
+    supersession: ctx.mountSystemStoredId
+      ? mountingSystemSupersession(ctx.mountSystemStoredId)
+          .map(x => ({ fromModel: x.from.model, toModel: x.to.model, basis: x.basis }))
+      : undefined,
     requiredSubstrate: ctx.roofCovering ?? null,
     // D12 — the operator's pinned rail, already validated by `planRailPin`
     // against the mount's own compatibility statement and span. The verdict is

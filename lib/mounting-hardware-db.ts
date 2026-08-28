@@ -195,6 +195,23 @@ export interface MountingSystemSpec {
   // Provenance/basis for the topology classification — especially the alias
   // confirmation for an RT-MINI variant, or the reason a record is 'unknown'.
   mountTopologyBasis?: string;
+  // ── PRODUCT SUPERSESSION (2026-08-28) ──────────────────────────────
+  // A generation the manufacturer has replaced. `supersededById` names the
+  // CURRENT generation; `supersessionBasis` states who says so, in their words.
+  //
+  // This exists because a superseded record was publishing its SUCCESSOR's
+  // structural capacity. RT-MINI (gen 1) carried a 600 lb allowable that its own
+  // comment described as the RT-MINI **II** PE-letter value rounded down. A
+  // document covering one generation does not establish capacity for another --
+  // authenticity is not applicability -- so the number had no source, the
+  // snapshot said so in its notes, and the structural engine consumed it anyway.
+  //
+  // getMountingSystemById() follows the supersession, so a stored design naming
+  // the old generation resolves to the product that actually ships and to the
+  // capacity that actually has a source. The substitution is STATED, never
+  // silent: the racking record carries the basis and the sheets print it.
+  supersededById?: string;
+  supersessionBasis?: string;
   compatibleRoofTypes: RoofType[];
   description: string;
 
@@ -580,6 +597,24 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     model: 'RT-MINI',
     category: 'roof_residential',
     systemType: 'rail_based',
+    // ── SUPERSEDED BY RT-MINI II (2026-08-28) ────────────────────
+    // Verified two ways. Roof Tech's own product page says so. And the design
+    // portal only publishes stamped PE letters for the second generation: every
+    // gen-1 URL under /Stamped-PE-Letters/ returns the site's SPA catch-all
+    // (HTTP 200, text/html, ~3 KB -- a 200 is not a document) while every
+    // RT-MINI II state URL returns a real application/pdf.
+    //
+    // The capacity numbers below are LEFT AS THEY WERE and are now unreachable
+    // through getMountingSystemById, which follows the supersession. They are
+    // not corrected in place because there is nothing to correct them TO: no
+    // structural source exists for this generation. Deleting the record would
+    // lose the supersession fact that a stored design naming it needs.
+    supersededById: 'rooftech-mini-ii',
+    supersessionBasis:
+      'Roof Tech, Inc. product page (roof-tech.us/pages/rt-mini): "We have now moved to engineering the '
+      + 'second generation of the RT-MINI to the RT-MINI II." No stamped PE letter is published for the '
+      + 'first generation on the manufacturer design portal; the RT-MINI II letters are (verified 2026-08-28). '
+      + 'The 600 lb allowable this record published was itself an RT-MINI II value.',
     // W4.1 §1 — RT-MINI / RT-MINI II are RAIL-PAIRED standoff bases (module → rail
     // → RT-MINI pad → roof), NOT rail-less module mounts. Routes the railed path.
     mountTopology: 'rail_paired',
@@ -635,6 +670,114 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     iccEsReport: 'ICC-ES ESR-3575',
     engineeringDataSource: 'Roof Tech RT-MINI ICC-ES ESR-3575 Rev 2023',
     lastUpdated: '2023-01',
+  },
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // ROOF TECH — RT-MINI II (current generation; rail-paired self-flashing base)
+  //
+  // THE CAPACITY HERE HAS A SOURCE. Every structural number below is transcribed
+  // from the stamped PE letter archived at
+  //   public/manufacturer-assets/structural/RT_Mini_II_ASCE_7-16_IL.pdf
+  // (Starling Madison Lofquist, Inc., SML Job No. 471-22, 2023-03-07, 253 pp.,
+  // sealed by Jesse Light S.E./P.E. and Rusmir Begic P.E.; ASCE/SEI 7-16, IBC
+  // 2018 & 2021). The record of that document -- identity, seal, source URL,
+  // SHA-256, and the extracted claims with the page each came from -- lives in
+  // lib/documents/manufacturerStructuralCatalogue.ts.
+  //
+  // 613.2 lb is the letter's own ALLOWABLE uplift for the governing rafter
+  // assembly (15/32" plywood sheathing over a 2x4 DF-L #2 rafter, 2 x 90 mm
+  // screws), page 2. The safety factor of 3.0 is already applied BY THE SOURCE,
+  // so capacityBasis is 'allowable' and the engine must not reduce it again.
+  // The prior 600 lb was this number rounded down with no source recorded, and
+  // it was published on the WRONG GENERATION.
+  // ═════════════════════════════════════════════════════════════════════════
+  {
+    id: 'rooftech-mini-ii',
+    manufacturer: 'Roof Tech',
+    productLine: 'RT-MINI',
+    model: 'RT-MINI II',
+    category: 'roof_residential',
+    systemType: 'rail_based',
+    mountTopology: 'rail_paired',
+    mountTopologyBasis:
+      'The PE letter states it directly (page 1): an appropriately load rated "L-Foot", by others, attaches to '
+      + 'the RT-Mini II base with an SS304 5/16" flange bolt, and an appropriately load rated rail, by others, '
+      + 'attaches to that L-foot. Module -> rail -> RT-MINI II pad -> roof. Rail-paired, not rail-less.',
+    compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
+    description:
+      'Roof Tech RT-MINI II — SELF-FLASHING pad standoff (AlphaSeal / RT Butyl seals the screw penetration; no '
+      + 'separate flashing kit). Fastened with SS304 5.0 mm wood screws directly through the roof covering, no '
+      + 'pilot hole: 2 screws at a rafter/truss attachment, 5 screws at a deck-only or rafter-offset attachment. '
+      + 'The pad is installed with its LONG DIRECTION PARALLEL to the roof framing. L-foot and conventional rail '
+      + 'are separate, load-rated add-ons "by others". Structural capacity per the state-stamped SML PE letter; '
+      + 'ICC-ES ESR-3575 covers listing and flashing/water-resistance ONLY.',
+    mount: {
+      model: 'RT-MINI II',
+      attachmentMethod: 'l_foot_lag',
+      // PE letter p.2, governing rafter assembly: 15/32" plywood over 2x4 DF-L #2,
+      // 2 x 90 mm screws. SF 3.0 already applied by the source.
+      upliftCapacityLbs: 613.2,
+      capacityBasis: 'allowable',
+      // p.2 tested downward (compression bears on the sheathing either way).
+      // The WEAKEST tested substrate is taken, not the friendliest: 7/16" OSB
+      // only = 258.0 lb; 15/32" plywood only = 556.0 lb. No release predicate
+      // reads this field today (only upliftCapacityLbs does) -- it is recorded
+      // so the catalogue stops publishing an unsourced 1200.
+      downwardCapacityLbs: 258.0,
+      shearCapacityLbs: 469.9,      // p.2, same governing rafter assembly
+      fastenersPerMount: 2,         // AT A RAFTER. Deck-only / offset needs 5 (p.1)
+      fastenerDiameterIn: 0.19685,  // SS304 5.0 mm wood screw = 0.197 in
+      fastenerEmbedmentIn: 3.07,    // 90 mm screw (3.543 in) less 15/32 in sheathing
+      fastenerLengthIn: 3.543,      // 90 mm
+      fastenerType: 'SS304 5.0 mm x 90 mm wood screw (no pilot hole)',
+      // Per-screw withdrawal is NOT published separately by the letter; the
+      // allowable is stated for the ASSEMBLY. Recording assembly/count keeps the
+      // per-fastener field consistent rather than inventing a split.
+      fastenerPulloutLbs: 613.2 / 2,
+      // 48 in, UNCHANGED from the prior record and deliberately conservative.
+      // The letter's tables DO reach 96 in -- but every cell in them is
+      // conditioned on wind speed, roof zone, roof slope, mean roof height,
+      // module orientation and exposure, across 240 pages. Publishing a flat 96
+      // would assert the best cell of that table for every project, which is
+      // inventing precision. Consuming the tables properly is its own piece of
+      // work; until then the manufacturer's conservative maximum stands.
+      maxSpacingIn: 48,
+      minRafterDepthIn: 3.5,        // 2x4 DF-L #2 is the tested minimum member
+      iccEsReport: 'ICC-ES ESR-3575',
+      ul2703Listed: true,
+      compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
+      selfFlashing: true,
+    },
+    hardware: {
+      midClamp: 'Module clamp per the selected rail system',
+      endClamp: 'Module end clamp per the selected rail system',
+      // The PE letter delegates the rail: "an appropriately load rated rail, by
+      // others" (p.1). The attachment capacity above is therefore RAIL-
+      // INDEPENDENT by the source's own statement, which is why an unpinned rail
+      // SKU is a procurement item and not an attachment-capacity gap.
+      // NAMES THE COMPATIBLE RAILS, and states the delegation. Both matter and
+      // for different reasons: `railCandidatesFor` parses this statement to
+      // build the span-screened candidate envelope (drop the brand names and
+      // the envelope goes empty, which reads as UNBOUNDED), while the "by
+      // others" clause is the PE letter's own words and is what keeps an
+      // unpinned SKU out of the ATTACHMENT-capacity predicate.
+      railSplice: 'Listed UL 2703 rail + splice — IronRidge XR100/XR1000, UniRac SFM/SolarMount, or Pegasus '
+        + '(SKU PENDING SELECTION). Rail BY OTHERS, appropriately load rated, per the SML PE letter p.1.',
+      groundLug: 'Bonding per the selected rail system (UL 2703)',
+      lagBolt: 'SS304 5.0 mm x 90 mm wood screw — 2 per pad at a rafter (5 x 60 mm at deck-only / offset), no pilot hole',
+      bondingHardware: 'Bonding clip per the selected rail system (UL 2703)',
+    },
+    maxWindSpeedMph: 180,
+    maxSnowLoadPsf: 90,
+    maxRoofPitchDeg: 45,
+    minRoofPitchDeg: 0,
+    ul2703Listed: true,
+    iccEsReport: 'ICC-ES ESR-3575',
+    engineeringDataSource:
+      'Roof Tech RT-Mini II Mount — Structural Analysis, Starling Madison Lofquist Inc., SML Job No. 471-22, '
+      + '2023-03-07 (ASCE/SEI 7-16; IBC 2018 & 2021). ICC-ES ESR-3575 is the LISTING / flashing basis only and '
+      + 'carries no structural capacity (its Sec. 5.2 says so).',
+    lastUpdated: '2026-08',
   },
 
 
@@ -2759,8 +2902,55 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
 // LOOKUP FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function getMountingSystemById(id: string): MountingSystemSpec | undefined {
+/** The LITERAL record for an id, superseded or not. Use this only when you
+ *  genuinely need the historical record (e.g. to read its supersession basis). */
+export function getMountingSystemRecordById(id: string): MountingSystemSpec | undefined {
   return MOUNTING_SYSTEMS.find(s => s.id === id);
+}
+
+/**
+ * The CURRENT product for an id — supersession followed.
+ *
+ * A stored design names a mounting system by id, and that id can outlive the
+ * generation it named. RT-MINI is the case that forced this: the manufacturer
+ * replaced it with RT-MINI II, publishes structural authority only for the
+ * successor, and the old record had quietly adopted the successor's capacity
+ * number without its document. Following the supersession makes the design
+ * resolve to the product that ships AND to the capacity that has a source,
+ * instead of to a number with neither.
+ *
+ * The substitution is never silent: `supersessionBasis` on the superseded record
+ * states who says so, and the racking record carries it onto the sheets.
+ *
+ * Cycle-safe: bounded walk, and a chain that does not terminate resolves to the
+ * last real record rather than looping.
+ */
+export function getMountingSystemById(id: string): MountingSystemSpec | undefined {
+  let cur = MOUNTING_SYSTEMS.find(s => s.id === id);
+  const seen = new Set<string>();
+  while (cur?.supersededById && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    const next = MOUNTING_SYSTEMS.find(s => s.id === cur!.supersededById);
+    if (!next) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/** The supersession chain for an id, oldest first, or [] when nothing is
+ *  superseded. Consumers that must PRINT the substitution read this. */
+export function mountingSystemSupersession(id: string): Array<{ from: MountingSystemSpec; to: MountingSystemSpec; basis: string }> {
+  const out: Array<{ from: MountingSystemSpec; to: MountingSystemSpec; basis: string }> = [];
+  let cur = MOUNTING_SYSTEMS.find(s => s.id === id);
+  const seen = new Set<string>();
+  while (cur?.supersededById && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    const next = MOUNTING_SYSTEMS.find(s => s.id === cur!.supersededById);
+    if (!next) break;
+    out.push({ from: cur, to: next, basis: cur.supersessionBasis ?? 'superseded (no basis recorded)' });
+    cur = next;
+  }
+  return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

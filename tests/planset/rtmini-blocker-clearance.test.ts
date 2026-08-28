@@ -13,7 +13,11 @@ function goodEvidence(over: Partial<RackingCapacityDocumentEvidence> = {}): Rack
     documentIdentity: 'RT-MINI II PE letter (archived)', verificationState: 'verified',
     status: 'current', archivedInRepo: true, sha256: 'b'.repeat(64),
     hasStructuralCapacityClaim: true,
-    exactModel: 'RT-MINI', fastenerModel: '5/16 structural wood screw', fastenerCount: 2,
+    // 2026-08-28 RT-MINI MIGRATION - the SELECTION resolves to RT-MINI II via the
+    // manufacturer's stated supersession, so the synthetic "good" document has to
+    // cover that generation. The exact-model rule is unchanged and is what the
+    // wrong-generation case below still exercises.
+    exactModel: 'RT-MINI II', fastenerModel: '5/16 structural wood screw', fastenerCount: 2,
     substrate: '15/32 sheathing, 2x4 DF-L #2', rafterDeckCondition: 'sound rafter',
     embedmentIn: 2.5, railLFootAssembly: 'compatible-rail (SKU unpinned)',
     loadBasis: 'ASD allowable', adjustmentFactors: { omega: 1.5 },
@@ -35,7 +39,7 @@ const brochure: RackingCapacityDocumentEvidence = {
   jurisdiction: null, asdAllowableLbs: null, revisionOrDate: '2023',
 };
 
-const ctx = { mountModel: 'RT-MINI', requiredRail: 'compatible-rail (SKU unpinned)', projectJurisdiction: 'Kentucky' };
+const ctx = { mountModel: 'RT-MINI II', requiredRail: 'compatible-rail (SKU unpinned)', projectJurisdiction: 'Kentucky' };
 
 describe('W4 §9 — evaluateRackingCapacityClearance (pure, both directions)', () => {
   it('CLEARS when a verified structural doc covers every §9 field', () => {
@@ -124,7 +128,10 @@ describe('W4 §9 — buildRackingAssembly consults the registry evidence', () =>
     expect(a.capacityProvenance.sourceDocument.documentHash).toBe('b'.repeat(64));
     expect(a.notes.join(' ')).toMatch(/NOW ARCHIVED and VERIFIED/);
     // 600 lb authority is unchanged
-    expect(a.publishedCapacityAllowableLbs).toBe(600);
+// 2026-08-28 RT-MINI MIGRATION - 613.2 is the PE letter's own allowable for
+    // the governing rafter assembly; 600 was that number rounded down and
+    // attributed to no document.
+    expect(a.publishedCapacityAllowableLbs).toBe(613.2);
   });
 
   it('does NOT clear when the document jurisdiction is wrong for the project', () => {

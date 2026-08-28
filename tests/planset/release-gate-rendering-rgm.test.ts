@@ -109,7 +109,13 @@ describe('RGM §5 — RS-1 leads with the ROOT-GATE table, read from the model',
     expect(rs1).toContain(releaseHeadline(MODEL.summary));
     expect(rs1).toContain(`data-release-open-gate-count="${MODEL.summary.openGateCount}"`);
     expect(rs1).toContain(`data-release-requirement-count="${MODEL.summary.unresolvedRequirementCount}"`);
-    expect(MODEL.summary.openGateCount).toBeLessThan(MODEL.summary.unresolvedRequirementCount);
+    // 2026-08-28 RT-MINI MIGRATION - with fewer requirements open, one
+    // gate can now carry exactly one of them, so a STRICT inequality is an
+    // accident of the fixture rather than the property. What must never happen is
+    // the two counts being CONFLATED - more gates than requirements, or a gate
+    // open with nothing under it.
+    expect(MODEL.summary.openGateCount).toBeLessThanOrEqual(MODEL.summary.unresolvedRequirementCount);
+    expect(MODEL.summary.openGateCount).toBeGreaterThan(0);
   });
 
   it('the retired flat "N OPEN RELEASE BLOCKERS" headline is gone', () => {
@@ -196,9 +202,25 @@ describe('RGM §7 — the rendered wording never mislabels a condition', () => {
   };
 
   it('a pending authority prints PENDING AUTHORITY / DOCUMENT, never a failure', () => {
-    const row = rowOf('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED');
-    expect(row).toContain('PENDING DOCUMENT');
-    expect(row).not.toMatch(/\bFAILED\b|\bFAILURE\b/i);
+    // 2026-08-28 RT-MINI MIGRATION - RACKING-CAPACITY-SOURCE-NOT-ARCHIVED
+    // no longer fires (SolarPro ships the document), so the case is exercised on
+    // whichever PENDING_AUTHORITY / PENDING_DOCUMENT requirement is still open.
+    // The wording rule itself is unchanged.
+    const pendingDocCodes = MODEL.requirements
+      .filter(r => r.status === 'OPEN'
+        && (r.findingType === 'PENDING_DOCUMENT' || r.findingType === 'PENDING_AUTHORITY'))
+      .map(r => r.requirementCode);
+    expect(pendingDocCodes.length, 'the fixture must still carry a pending-document requirement')
+      .toBeGreaterThan(0);
+    let checked = 0;
+    for (const code of pendingDocCodes) {
+      const row = rowOf(code);
+      if (!row) continue;
+      checked += 1;
+      expect(row).toMatch(/PENDING (DOCUMENT|AUTHORITY)/);
+      expect(row).not.toMatch(/\bFAILED\b|\bFAILURE\b/i);
+    }
+    expect(checked, 'at least one such requirement must be RENDERED').toBeGreaterThan(0);
   });
 
   it('the professional-release requirement prints PROFESSIONAL RELEASE, not a defect', () => {

@@ -295,13 +295,23 @@ export const rackingCapacityDocumentResolver: RequirementResolver = {
       () => resolveRackingCapacityDocument({ equipmentId: mountId, mountModel: mount?.model ?? null, jurisdiction }),
       null,
     );
+    // NOTE — the SHIPPED manufacturer structural catalogue is deliberately NOT
+    // consulted here. This resolver's job is to report the REGISTRY RETRIEVAL
+    // faithfully, and folding a second source into its outcome would make a DB
+    // outage change the evidence it records (the transient-resolver and
+    // outage-resilience invariants both depend on it not doing that).
+    //
+    // The catalogue is a PURE, in-repo product-master table, so it resolves
+    // inside buildRackingAssembly instead — which is the digest-covered
+    // evaluation, resolves identically online and offline, and is the path the
+    // frozen fixtures take. See lib/documents/manufacturerStructuralCatalogue.ts.
     const doc = read.value;
     const refs = documentSourceRefs(doc);
     return {
       result: !read.ok ? 'FAILED' : doc ? 'RESOLVED' : 'FAILED',
       clearance: {
         cleared: doc != null,
-        missing: doc ? [] : ['manufacturer_document_registry: structural_pe_letter | evaluation_report covering the exact mount + jurisdiction'],
+        missing: doc ? [] : ['a structural_pe_letter / evaluation_report covering the exact mount model + jurisdiction, from the operator\'s document registry or the shipped manufacturer catalogue'],
         // ── TR — THE MATERIAL REASON DOES NOT DEPEND ON HOW THE LOOKUP WENT ──
         // This sentence reaches `blockingReason` → the registry payload → the
         // DESIGN DIGEST. It is therefore stated so that it is equally true when

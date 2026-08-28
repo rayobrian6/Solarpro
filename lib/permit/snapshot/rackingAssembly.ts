@@ -33,6 +33,10 @@ import type { RackingAssemblyRecord, Provenance } from './types';
 import { contentRevision } from './digest';
 import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { allowableUpliftLbs } from '@/lib/structural/attachmentCapacity';
+import {
+  findManufacturerStructuralDocument,
+  toRackingClearanceEvidenceFromCatalogue,
+} from '@/lib/documents/manufacturerStructuralCatalogue';
 
 // ── W3.1 §4 — provenance shapes (declared locally; types.ts is not edited here) ──
 
@@ -195,6 +199,14 @@ export interface RackingClearanceContext {
   projectJurisdiction?: string | null;
   /** D4 — the project's STABLE legal-AHJ identity (ahj_registry record id). */
   projectJurisdictionAuthorityId?: string | null;
+  /** the project's two-letter US state code. Lets a STATE-scoped manufacturer PE
+   *  letter be recognised as covering a county/municipal AHJ inside that state
+   *  without having to parse the state out of the AHJ's display name. */
+  projectStateCode?: string | null;
+  /** manufacturer-stated product supersessions applied when resolving the stored
+   *  mounting-system id to the generation that ships. Recorded on the assembly so
+   *  the substitution is STATED, never silent. */
+  supersession?: ReadonlyArray<{ fromModel: string; toModel: string; basis: string }>;
 }
 
 /** D4 — normalise a jurisdiction NAME for the compatibility comparison.
@@ -209,6 +221,71 @@ export function normalizeJurisdictionName(s: string | null | undefined): string 
     .replace(/[.,''`"()]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// A JURISDICTION IS A CONTAINER, NOT A STRING (2026-08-28)
+//
+// The comparison was equality on a normalised name. Manufacturer PE letters are
+// stamped PER STATE -- "Illinois" -- while a project's legal AHJ is a county or
+// municipality -- "Madison County Building & Zoning". Under equality, a document
+// stamped for the whole state could never satisfy a project inside that state.
+// The gate was unclearable for the entire class of document that actually exists.
+//
+// Containment, not equality: a document whose applicability boundary is a STATE
+// covers every AHJ inside it. Narrow-covers-broad is still refused (a county
+// letter does not license the state), and an unrelated state is still refused.
+// ════════════════════════════════════════════════════════════════════════
+const US_STATE_BY_NAME: Record<string, string> = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA', colorado: 'CO',
+  connecticut: 'CT', delaware: 'DE', 'district of columbia': 'DC', florida: 'FL', georgia: 'GA',
+  hawaii: 'HI', idaho: 'ID', illinois: 'IL', indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY',
+  louisiana: 'LA', maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN',
+  mississippi: 'MS', missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV',
+  'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+  'north carolina': 'NC', 'north dakota': 'ND', ohio: 'OH', oklahoma: 'OK', oregon: 'OR',
+  pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC', 'south dakota': 'SD',
+  tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT', virginia: 'VA', washington: 'WA',
+  'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY',
+};
+
+/** The US state a jurisdiction string denotes, when it denotes exactly one.
+ *  Returns null for anything ambiguous — never a guess. */
+export function jurisdictionStateCode(s: string | null | undefined): string | null {
+  const t = normalizeJurisdictionName(s);
+  if (!t) return null;
+  const exact = US_STATE_BY_NAME[t];
+  if (exact) return exact;
+  const bare = t.replace(/\bstate of\b/g, '').trim();
+  if (US_STATE_BY_NAME[bare]) return US_STATE_BY_NAME[bare];
+  if (/^[a-z]{2}$/.test(t)) {
+    const up = t.toUpperCase();
+    return Object.values(US_STATE_BY_NAME).includes(up) ? up : null;
+  }
+  return null;
+}
+
+/**
+ * Does `docJurisdiction` COVER `projectJurisdiction`?
+ *  - identical names cover (the original rule, unchanged);
+ *  - a document scoped to a whole STATE covers a project inside that state,
+ *    established from the project's own state code when the caller supplies it,
+ *    or from the project jurisdiction naming the state otherwise;
+ *  - everything else fails closed.
+ */
+export function jurisdictionCovers(
+  docJurisdiction: string | null | undefined,
+  projectJurisdiction: string | null | undefined,
+  projectStateCode?: string | null,
+): boolean {
+  const d = normalizeJurisdictionName(docJurisdiction);
+  const p = normalizeJurisdictionName(projectJurisdiction);
+  if (!d) return false;
+  if (d === p) return true;
+  const docState = jurisdictionStateCode(docJurisdiction);
+  if (!docState) return false;
+  const projState = (projectStateCode ?? '').trim().toUpperCase() || jurisdictionStateCode(projectJurisdiction);
+  return !!projState && projState === docState;
 }
 
 export interface RackingClearanceResult {
@@ -275,8 +352,22 @@ export function evaluateRackingCapacityClearance(
   }
   if (!norm(evidence.rafterDeckCondition)) fail('rafter_deck_condition', 'rafter / deck condition not stated');
   if (evidence.embedmentIn == null || !(evidence.embedmentIn > 0)) fail('embedment', 'embedment not stated');
+  // ── RAIL ── 2026-08-28. This required the document to NAME the selected rail,
+  // which made an unpinned rail SKU an ATTACHMENT-CAPACITY gap. It is not one,
+  // and the source says so itself: the SML PE letter for the RT-Mini II states
+  // "An appropriately load rated rail, by others, may be attached to the
+  // 'L-Foot' per the rail manufacturer's installation instructions." A document
+  // that DELEGATES the rail has covered the rail interface completely -- it has
+  // declared the attachment capacity rail-independent. Demanding it also name a
+  // part number asks it for a fact it deliberately does not assert.
+  //
+  // This is narrow on purpose. A document that does NOT delegate must still name
+  // an assembly that covers the selection, exactly as before; and the rail's own
+  // structural adequacy is unaffected -- that is the rail-capacity envelope
+  // (PENDING-RACKING-ASSEMBLY-SELECTION), a separate question with its own gate.
+  const _railDelegated = /\bby others\b/i.test(evidence.railLFootAssembly ?? '');
   if (!norm(evidence.railLFootAssembly)) fail('rail_lfoot_assembly', 'rail / L-foot assembly not covered');
-  else if (ctx.requiredRail && norm(evidence.railLFootAssembly).indexOf(norm(ctx.requiredRail)) === -1 && norm(ctx.requiredRail).indexOf(norm(evidence.railLFootAssembly)) === -1) {
+  else if (!_railDelegated && ctx.requiredRail && norm(evidence.railLFootAssembly).indexOf(norm(ctx.requiredRail)) === -1 && norm(ctx.requiredRail).indexOf(norm(evidence.railLFootAssembly)) === -1) {
     fail('rail_lfoot_assembly', `document rail/L-foot assembly '${evidence.railLFootAssembly}' does not cover the selected rail '${ctx.requiredRail}'`);
   }
   if (!/allowable|asd/i.test(evidence.loadBasis ?? '')) {
@@ -306,7 +397,7 @@ export function evaluateRackingCapacityClearance(
   } else if (!norm(evidence.jurisdiction)) {
     fail('jurisdiction', 'jurisdiction / applicability boundary not stated');
   } else if (ctx.projectJurisdiction
-      && normalizeJurisdictionName(evidence.jurisdiction) !== normalizeJurisdictionName(ctx.projectJurisdiction)) {
+      && !jurisdictionCovers(evidence.jurisdiction, ctx.projectJurisdiction, ctx.projectStateCode ?? null)) {
     fail('jurisdiction',
       `document jurisdiction '${evidence.jurisdiction}' is not confirmed for the project jurisdiction `
       + `'${ctx.projectJurisdiction}'`
@@ -392,6 +483,17 @@ export function resolveAsdAllowableLbs(
 export interface BuildRackingAssemblyOptions {
   capacityDocument?: RackingCapacityDocumentEvidence | null;
   projectJurisdiction?: string | null;
+  /** the project's two-letter US state code, from the governed state authority.
+   *  Lets the SHIPPED manufacturer structural catalogue resolve on the PURE build
+   *  path. Without it a document SolarPro itself ships was reachable only through
+   *  the async resolver lifecycle, so every pure generation -- the frozen
+   *  fixtures, the digest computation, every test -- saw the gap as though no
+   *  such document existed anywhere. */
+  projectStateCode?: string | null;
+  /** manufacturer-stated product supersessions applied when resolving the stored
+   *  mounting-system id to the generation that ships. Recorded on the assembly so
+   *  the substitution is STATED, never silent. */
+  supersession?: ReadonlyArray<{ fromModel: string; toModel: string; basis: string }>;
   /** PHASE A.2 / D25 — the project's STABLE legal-AHJ identity. The clearance
    *  context has accepted this since D4, but no caller ever supplied it, so the
    *  comparison always fell through to the NAME path — and the name it received
@@ -436,6 +538,45 @@ export function buildRackingAssembly(
   const hw = system.hardware;
   const mountBrand = system.manufacturer;
 
+  // ══ CAPACITY DOCUMENT — TWO TIERS, RESOLVED ONCE ════════════════════
+  //   1. an operator-archived registry row (resolved async upstream) — wins;
+  //   2. SolarPro's own SHIPPED manufacturer structural catalogue — an in-repo
+  //      table, consulted purely, no I/O.
+  //
+  // Tier 2 exists because a stamped manufacturer PE letter is PRODUCT-MASTER
+  // data. The Roof Tech RT-Mini II Illinois letter is byte-for-byte the same
+  // document for every Illinois RT-Mini II job in the country; making each
+  // operator find, upload, hash and verify it kept this requirement permanently
+  // open for the whole product.
+  //
+  // It is resolved HERE, in the pure evaluation, rather than only in the async
+  // resolver, so the frozen fixtures and the digest path see it too.
+  const _shippedCapDoc = opts?.capacityDocument == null
+    ? toRackingClearanceEvidenceFromCatalogue(
+        findManufacturerStructuralDocument({
+          mountModel: system.model,
+          stateCode: opts?.projectStateCode ?? null,
+        }),
+        {
+          // The letter grades a FRAMING attachment (2 screws) apart from a
+          // deck-only / offset one (5 screws). Read the design's own count; an
+          // unrecognised count matches no row and the catalogue returns null,
+          // leaving the gap exactly as it was.
+          engagesFraming: (mount.fastenersPerMount ?? 0) === 2,
+          fastenerCount: mount.fastenersPerMount ?? null,
+          screwLengthMm: mount.fastenerLengthIn != null
+            ? Math.round(mount.fastenerLengthIn * 25.4) : null,
+          jurisdictionAuthorityId: opts?.projectJurisdictionAuthorityId ?? null,
+        },
+      )
+    : null;
+  /** THE capacity document for this evaluation, whichever tier supplied it. */
+  const _capacityDocument: RackingCapacityDocumentEvidence | null =
+    opts?.capacityDocument ?? _shippedCapDoc;
+  const _capacityDocumentTier: 'operator-archived-registry' | 'shipped-manufacturer-catalogue' | null =
+    opts?.capacityDocument ? 'operator-archived-registry'
+    : _shippedCapDoc ? 'shipped-manufacturer-catalogue' : null;
+
   const isRailBased = system.systemType === 'rail_based' || system.systemType === 'standing_seam';
   // A rail-based mount that carries NO own rail spec is paired with a COMPATIBLE
   // rail from a different manufacturer (documented in hw.railSplice).
@@ -453,16 +594,53 @@ export function buildRackingAssembly(
   // NO "compatible rail" / "or equivalent" / RAIL-PENDING-SELECTION raw tokens on
   // any renderer: an unpinned assembly reads as the blocked state it is.
   const RAIL_PENDING = 'PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION';
-  // Documented compatibility (hw.railSplice names the accepted rails) ⇒ supported.
+  // ── IS THE MIXED ASSEMBLY SUPPORTED? ───────────────────────────
+  // This was a SUBSTRING MATCH ON A PROSE SENTENCE: a structural conclusion
+  // decided by whether `hw.railSplice` happened to contain 'compatible' or a
+  // brand name. Rewording the catalogue string flipped a blocker.
+  //
+  // The question the code is actually asking is "does anything establish that
+  // this mount may carry a rail from another manufacturer?", and there is now a
+  // document that answers it directly. The Roof Tech RT-Mini II PE letter says:
+  // "An appropriately load rated rail, by others, may be attached to the
+  // 'L-Foot' per the rail manufacturer's installation instructions." A capacity
+  // document that DELEGATES the rail has authorised the mixed assembly in as
+  // many words -- that is stronger evidence than any prose match.
+  //
+  // The prose test survives BELOW it, unchanged, for mounts with no document.
+  const _capDocDelegatesRail = /\bby others\b/i.test(_capacityDocument?.railLFootAssembly ?? '');
   const assemblySupported = !mixedManufacturer
-    || /compatible|xr100|xr1000|pegasus|unirac|sfm|equivalent/i.test(hw.railSplice ?? '');
+    || _capDocDelegatesRail
+    || /compatible|xr100|xr1000|pegasus|unirac|sfm|equivalent|by others|rail schedule/i.test(hw.railSplice ?? '');
 
   const notes: string[] = [];
+  // ── A PRODUCT SUBSTITUTION IS NEVER SILENT ───────────────────────
+  // `getMountingSystemById` follows a manufacturer-stated supersession, so a
+  // stored design naming a replaced generation resolves to the one that ships.
+  // That is a real change to what the package specifies, so it is STATED on the
+  // record (and on every sheet that projects it) with the manufacturer's own
+  // words as the basis.
+  //
+  // Not to be confused with the applicability rule, which is unchanged and still
+  // enforced: a document covering one generation never clears a SELECTION of
+  // another. A supersession changes the selection, not that rule.
+  if (opts?.supersession?.length) {
+    for (const step of opts.supersession) {
+      notes.push(
+        `PRODUCT SUPERSESSION: the stored design specifies ${step.fromModel}, which the manufacturer has `
+        + `replaced with ${step.toModel}. This package specifies ${step.toModel}. Basis: ${step.basis}`);
+    }
+  }
   const isRtMini = system.id === 'rooftech-mini' || /RT-?MINI/i.test(system.model);
   if (isRtMini) {
+    // 2026-08-28 — this note hardcoded "600 lb" and the sentence that derived it.
+    // The catalogue value is the record's own now, so the note READS it: a note
+    // that restates a number is a second copy of it, and the two drifted the
+    // moment the record was corrected to the source's actual 613.2 lb.
     notes.push(
-      'CAPACITY AUTHORITY = 600 lb ASD ALLOWABLE (Roof Tech RT-MINI II PE letter, 613.2 lb '
-      + 'weakest standard assembly, conservative round-down). The 900 lb "ultimate" (2×450) '
+      `CAPACITY AUTHORITY = ${system.mount.upliftCapacityLbs} lb `
+      + `${system.mount.capacityBasis === 'allowable' ? 'ASD ALLOWABLE' : String(system.mount.capacityBasis ?? 'UNKNOWN BASIS').toUpperCase()} `
+      + `for ${system.model}, per ${system.engineeringDataSource}. The 900 lb "ultimate" (2×450) `
       + 'entries in equipment-db / equipment-registry-v4 are NOT structural authority '
       + '(ESR-3575 is a flashing / water-resistance report and carries no structural value).');
     // D3 — this note used to assert "NOT archived in this repository". Archive
@@ -479,9 +657,18 @@ export function buildRackingAssembly(
     // figure is published for RT-MINI II. RT-MINI is a different product, and
     // authenticating an RT-MINI II letter does not make it applicable here.
     notes.push(
-      `PRODUCT DISTINCTION: the 613.2 lb figure the 600 lb round-down derives from is published for `
-      + `RT-MINI II. The selected mount is ${mount.model}. A document covering RT-MINI II does NOT `
-      + `establish capacity applicability to RT-MINI — authenticity is not applicability.`);
+      // 2026-08-28 — this note used to report the defect as a live one: the
+      // catalogue published an RT-MINI II value on the RT-MINI record. It is
+      // fixed at source (RT-MINI is marked superseded and resolution follows the
+      // supersession to RT-MINI II, where the value has its document), so the
+      // note now states the RULE and what actually covers this selection.
+      `PRODUCT GENERATION: capacity is established per EXACT generation — a document covering one `
+      + `generation never establishes capacity for another (authenticity is not applicability). `
+      + `Selected: ${mount.model}. `
+      + (_capacityDocument
+          ? `Covered by ${_capacityDocument.documentIdentity ?? _capacityDocument.documentId} `
+            + `(exact model ${_capacityDocument.exactModel}, ${_capacityDocumentTier}).`
+          : `No capacity document covers this exact generation.`));
   }
   if (mixedManufacturer) {
     notes.push(
@@ -524,15 +711,34 @@ export function buildRackingAssembly(
           // applicability; the name comparison survives only for rows archived
           // before migration 119.
           projectJurisdictionAuthorityId: opts?.projectJurisdictionAuthorityId ?? null,
-          requiredSubstrate: opts?.requiredSubstrate ?? null,
+          // A manufacturer PE letter is stamped PER STATE while the project's
+          // legal AHJ is a county or a municipality. Without the state code the
+          // comparison fell back to name equality, under which a letter stamped
+          // for the whole of Illinois could never satisfy a project in Madison
+          // County -- i.e. the gate refused the only kind of document that
+          // actually exists for this class of product.
+          projectStateCode: opts?.projectStateCode ?? null,
+          // ── SUBSTRATE — A COVERING IS NOT A STRUCTURAL SUBSTRATE ────────
+          // This was passed `roofCovering` ("Composition Shingle"), and compared
+          // by equality against the document's STRUCTURAL substrate ("15/32 in
+          // plywood sheathing over a 2x4 DF-L #2 rafter"). Those are different
+          // facts about different layers, so the test could never pass on any
+          // real document. The letter governs the covering separately (table
+          // note 13: through a maximum of 2 layers of composite asphalt
+          // shingles), and it assigns the SHEATHING/FRAMING evaluation to the
+          // project Engineer of Record -- which is FRAMING-AUTHORITY-UNVERIFIED,
+          // not a racking-document gap. So no required substrate is asserted
+          // here: the document must still STATE its substrate (it does, and the
+          // unmet-field check below still fires when it does not).
+          requiredSubstrate: null,
         },
-        opts?.capacityDocument ?? null,
+        _capacityDocument,
       )
     : null;
   const rtCleared = rtClearance?.cleared === true;
   /** The supplied registry document, if any. D3: every document FACT below is
    *  read from this record — never asserted by this module. */
-  const _capDoc = opts?.capacityDocument ?? null;
+  const _capDoc = _capacityDocument;
 
   if (isRtMini) {
     capacityProvenance = {
@@ -597,7 +803,10 @@ export function buildRackingAssembly(
               + 'project jurisdiction is UNESTABLISHED.')
         : 'No capacity document is selected, so no jurisdiction / applicability boundary is established. '
           + 'The design basis is NOT inferred from the mount catalog.',
-      fastenerPattern: '2× 5/16" (8mm/M8) structural wood screw, ~3.5" (90mm) into the rafter, no pilot hole',
+      // 2026-08-28 — was a hardcoded literal describing the gen-1 fastener. It
+      // survived the catalogue being corrected, so the provenance record went on
+      // describing a screw the selected product does not use. Read the record.
+      fastenerPattern,
       substrateInstallationCondition: 'Weakest standard assembly governing the 613.2 lb allowable: '
         + '15/32" sheathing, 2×4 DF-L #2, 2 screws. Compatible roof types: '
         + (installationCondition ?? 'unspecified') + '. Self-flashing (integrated AlphaSeal/RT Butyl).',
@@ -676,7 +885,7 @@ export function buildRackingAssembly(
     } else {
       // A VERIFIED registry document covers the exact assembly + installation
       // condition on every required field. Reflect the ARCHIVED source of record.
-      const doc = opts!.capacityDocument!;
+      const doc = _capacityDocument!;
       capacityProvenance.sourceDocument = {
         identity: doc.documentIdentity ?? 'Roof Tech RT-MINI structural capacity document (verified registry record)',
         revisionOrDate: doc.revisionOrDate ?? capacityProvenance.sourceDocument.revisionOrDate,
@@ -913,9 +1122,38 @@ export function buildRackingAssembly(
       installationAuthority: unfilledRole(
         'No version-exact installation document is resolved into this record. Installation authority '
         + 'is owned by manufacturer_document_registry and must cover the SELECTED product exactly.'),
-      fastenerAuthority: unfilledRole(
-        'No fastener-installation authority is established. An ICC-ES flashing / water-resistance '
-        + 'evaluation report carries no fastener-installation authority.'),
+      // ── FASTENER AUTHORITY — THIS ROLE NOW HAS A WRITER ──────────────
+      // It was hardcoded unfilled, so FASTENER-ASSEMBLY-UNVERIFIED could never
+      // clear no matter what document arrived. A stamped structural PE letter
+      // for the EXACT model that states the fastener model and count IS
+      // fastener-installation authority -- the RT-Mini II letter specifies the
+      // SS304 5.0 mm screw, two at a rafter and five at a deck-only or offset
+      // attachment, no pilot hole, through a maximum of two shingle layers, the
+      // SS304 5/16" L-foot bolt, and the pad's orientation relative to the
+      // framing. That is the fastener assembly, from the source that governs it.
+      //
+      // The old refusal survives verbatim for the case it was written about: an
+      // ICC-ES flashing / water-resistance evaluation is still never fastener
+      // authority, and a document that does not name the fastener still fills
+      // nothing.
+      fastenerAuthority: (rtCleared && _capDoc
+        && _capDoc.documentClass === 'structural_pe_letter'
+        && !!(_capDoc.fastenerModel ?? '').trim()
+        && _capDoc.fastenerCount != null)
+        ? {
+            established: true,
+            documentIdentity: _capDoc.documentIdentity,
+            documentId: _capDoc.documentId,
+            documentHash: _capDoc.sha256,
+            archivedInRepo: _capDoc.archivedInRepo,
+            basis: `Stamped structural PE letter for the exact selected model states the fastener `
+              + `assembly: ${_capDoc.fastenerCount} × ${_capDoc.fastenerModel}`
+              + `${_capDoc.embedmentIn != null ? `, ${_capDoc.embedmentIn}" embedment` : ''}`
+              + `, ${_capDoc.rafterDeckCondition ?? 'installation condition per the source'}.`,
+          }
+        : unfilledRole(
+            'No fastener-installation authority is established. An ICC-ES flashing / water-resistance '
+            + 'evaluation report carries no fastener-installation authority.'),
       structuralCapacityAuthority: rtCleared && _capDoc
         ? {
             established: true,

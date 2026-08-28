@@ -469,9 +469,31 @@ export interface FastenerAssembly {
  *  and quantity while the assembly is not verified. */
 export const FASTENER_NON_ORDERABLE_LABEL = 'DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY';
 
-const _fracFast = (v: number | null | undefined): string | null =>
-  v == null || !isFinite(v) ? null
-    : v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : String(v);
+// A fastener diameter LABEL. Inch products get their inch fraction; METRIC
+// products get their metric designation, because printing 0.19685 on a drawing
+// is not a size anyone can order or check.
+//
+// 2026-08-28 — metric was added because the Roof Tech RT-Mini II roof screw is
+// an SS304 5.0 mm wood screw, not the 5/16" the catalogue used to claim. (The
+// 5/16" on that product is the L-FOOT FLANGE BOLT, a different fastener in a
+// different joint; the old record had conflated the two.) With only the inch
+// table, the corrected value fell through to a bare decimal.
+const _METRIC_FASTENER_MM: ReadonlyArray<readonly [number, string]> = [
+  [4.0, 'M4 (4.0 mm)'], [4.5, 'M4.5 (4.5 mm)'], [5.0, 'M5 (5.0 mm)'],
+  [5.5, 'M5.5 (5.5 mm)'], [6.0, 'M6 (6.0 mm)'], [8.0, 'M8 (8.0 mm)'],
+];
+const _fracFast = (v: number | null | undefined): string | null => {
+  if (v == null || !isFinite(v)) return null;
+  if (v === 0.25) return '1/4';
+  if (v === 0.3125) return '5/16';
+  if (v === 0.375) return '3/8';
+  if (v === 0.5) return '1/2';
+  const mm = v * 25.4;
+  for (const [m, label] of _METRIC_FASTENER_MM) {
+    if (Math.abs(mm - m) < 0.05) return label;
+  }
+  return String(v);
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TAC WS-4 — THE ONE FASTENER-VERIFICATION PREDICATE.
@@ -509,6 +531,15 @@ export interface FastenerVerificationInput {
   /** the decided applicability of the mount's installation document to the
    *  SELECTED product (from the equipment document authority). */
   documentApplicabilityVerified: boolean;
+  /** 2026-08-28 — the racking record's `documentRoles.fastenerAuthority`, when a
+   *  document actually FILLS that role: a stamped structural PE letter for the
+   *  exact selected model that states the fastener model and count. That is
+   *  fastener-installation authority by definition, and it is decided once, in
+   *  rackingAssembly, rather than re-derived from a source STRING here.
+   *
+   *  Its absence changes nothing: the two rules below still decide, and an
+   *  ICC-ES flashing report is still refused. */
+  fastenerAuthorityDocument?: { established: boolean; documentIdentity: string | null } | null;
 }
 
 export interface FastenerVerificationResult {
@@ -521,6 +552,14 @@ export interface FastenerVerificationResult {
 
 export function resolveFastenerVerification(i: FastenerVerificationInput): FastenerVerificationResult {
   const src = isFlashingOnlyEvaluationReport(i.citedSourceDocument) ? null : (i.citedSourceDocument ?? null);
+  // The ELEMENTS still have to be complete — a document naming the fastener does
+  // not excuse a record that fails to record it. But once they are, a document
+  // that FILLS the fastener-authority role settles both remaining questions
+  // (is there a real source, and does it cover this product), because filling
+  // the role already required an exact-model match.
+  if (i.elementsComplete && i.fastenerAuthorityDocument?.established) {
+    return { verified: true, sourceDocument: i.fastenerAuthorityDocument.documentIdentity ?? src, reason: null };
+  }
   if (!i.elementsComplete) {
     return { verified: false, sourceDocument: src, reason: 'the fastener element is incomplete (model / count / embedment not all established on the mount record)' };
   }

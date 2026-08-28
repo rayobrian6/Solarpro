@@ -8,23 +8,33 @@ import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 describe('W3.1 §4 — RT-MINI capacity provenance (records only in-repo-verifiable evidence)', () => {
   const a = buildRackingAssembly(getMountingSystemById('rooftech-mini'))!;
 
-  it('keeps the 600 lb ASD allowable authority (unchanged from W3)', () => {
-    expect(a.publishedCapacityAllowableLbs).toBe(600);
+  // 2026-08-28 RT-MINI MIGRATION - the 600 lb was the RT-MINI II PE
+  // letter's 613.2 lb rounded down and published on the gen-1 record, with no
+  // document recorded. The catalogue now carries the source's ACTUAL value on
+  // the generation the source covers. What this test is really about - an
+  // ALLOWABLE-basis authority, with the 900 lb ultimate records excluded - is
+  // unchanged and still asserted.
+  it('publishes the ASD allowable the SOURCE states, not a rounded copy of it', () => {
+    expect(a.publishedCapacityAllowableLbs).toBe(613.2);
     expect(a.capacityBasis).toBe('allowable');
     expect(a.recordRevision).toBeTruthy();
-    expect(a.notes.join(' ')).toMatch(/600 lb ASD ALLOWABLE/);
+    expect(a.notes.join(' ')).toMatch(/CAPACITY AUTHORITY = 613.2 lb ASD ALLOWABLE/);
     expect(a.notes.join(' ')).toMatch(/NOT structural authority/);
+    // the number and the note come from ONE place - the record - so they cannot
+    // drift apart the way the hardcoded 600 did
+    expect(a.notes.join(' ')).toContain(String(a.publishedCapacityAllowableLbs));
   });
 
   it('carries a full capacity-provenance record', () => {
     const p = a.capacityProvenance;
     expect(p).toBeTruthy();
-    expect(p.mountModel).toBe('RT-MINI');
+    expect(p.mountModel).toBe('RT-MINI II');
     expect(p.capacityBasis).toBe('allowable');
-    expect(p.asdAllowableLbs).toBe(600);
+    expect(p.asdAllowableLbs).toBe(613.2);
     expect(p.ultimateBasisRefusedForAsd).toBe(false);
-    expect(p.fastenerPattern).toMatch(/2× 5\/16"/);
-    expect(p.substrateInstallationCondition).toMatch(/2×4 DF-L #2/);
+    // the fastener pattern is the PE letter's: 2 x SS304 5.0 mm x 90 mm screws
+    expect(p.fastenerPattern).toMatch(/2× SS304 5\.0 mm/);
+    expect(p.substrateInstallationCondition).toMatch(/2x4 DF-L #2|2×4 DF-L #2/);
     // ── D3 (2026-08-05) — NO HARDCODED DESIGN BASIS ────────────────────────
     // This used to assert the boundary text contained "ASCE 7-10", which came
     // from a hardcoded literal reading "Source basis = ASCE 7-10, Kentucky".

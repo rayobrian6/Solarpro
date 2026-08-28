@@ -59,10 +59,17 @@ describe('§12 (Gate 12) — one fastener assembly, identical projection across 
 
   it('the fastener projection is populated from canonical mount/racking data', () => {
     expect(fa.present).toBe(true);
-    expect(fa.diameterLabel).toBe('5/16');
-    expect(fa.fastenerType).toBe('structural wood screw');
+    // 2026-08-28 RT-MINI MIGRATION - the roof fastener is the PE letter's
+    // SS304 5.0 mm wood screw. The 5/16" the catalogue used to publish is the
+    // L-FOOT FLANGE BOLT - a different fastener in a different joint.
+    expect(fa.diameterLabel).toBe('M5 (5.0 mm)');
+    expect(fa.fastenerType).toBe('SS304 5.0 mm x 90 mm wood screw (no pilot hole)');
     expect(fa.pilotHoleRequired).toBe(false);
-    expect(fa.embedmentIn).toBe(2.5);
+    // 2026-08-28 RT-MINI MIGRATION - the RT-MINI II record carries the PE letter's
+    // own fastener: an SS304 5.0 mm x 90 mm wood screw, embedding 3.07 in (90 mm
+    // less 15/32 in sheathing). 2.5 in and 'structural wood screw' were the
+    // gen-1 record's generic values.
+    expect(fa.embedmentIn).toBe(3.07);
     // TAC WS-4 — element completeness is NOT verification. The elements are all
     // present (model + count + embedment), but the only cited source is
     // ICC-ES ESR-3575 — a FLASHING / water-resistance evaluation report, which
@@ -98,8 +105,15 @@ describe('§12 (Gate 12) — one fastener assembly, identical projection across 
     expect(fa.nonOrderable).toBe(true);
     expect(fa.line).not.toContain('5/16');
     expect(fa.line).not.toContain('structural wood screw');
-    expect(fa.diameterLabel).toBe('5/16');       // retained on the object
-    expect(fa.embedmentIn).toBe(2.5);            // retained on the object
+    // 2026-08-28 RT-MINI MIGRATION - the roof fastener is the PE letter's
+    // SS304 5.0 mm wood screw. The 5/16" the catalogue used to publish is the
+    // L-FOOT FLANGE BOLT - a different fastener in a different joint.
+    expect(fa.diameterLabel).toBe('M5 (5.0 mm)');       // retained on the object
+    // 2026-08-28 RT-MINI MIGRATION - the RT-MINI II record carries the PE letter's
+    // own fastener: an SS304 5.0 mm x 90 mm wood screw, embedding 3.07 in (90 mm
+    // less 15/32 in sheathing). 2.5 in and 'structural wood screw' were the
+    // gen-1 record's generic values.
+    expect(fa.embedmentIn).toBe(3.07);            // retained on the object
     // …and the ONE predicate names WHY it is not verified (the flashing report).
     const v = resolveFastenerVerification({
       elementsComplete: true,

@@ -68,26 +68,47 @@ describe('W3.1 §1/§5 — originally-audited failure classes corrected on the f
   });
 });
 
-describe('W3.1 §4 — RT-MINI racking-capacity blocking gaps promoted to blockers', () => {
+// 2026-08-28 RT-MINI MIGRATION - these three pinned the ABSENCE of a
+// capacity document as correct behaviour: a null hash, both gaps open, and a
+// V32 check that needed an open gap to have something to tamper with. SolarPro
+// now ships the stamped Roof Tech RT-Mini II Illinois PE letter, archived and
+// hashed in-repo, so the absence is gone. The properties worth keeping are the
+// ones underneath: the provenance is COMPLETE (whatever it says, it says with a
+// hash or an honest null), and V32 still fires when a blocking gap is hidden.
+describe('W3.1 §4 — RT-MINI racking-capacity gaps and their promotion to blockers', () => {
   const snap = fixtureSnapshot();
 
-  it('capacity provenance carries a null documentHash (source not archived in-repo)', () => {
+  it('capacity provenance states its source document completely', () => {
     const cp = (snap.structural.rackingAssembly as any)?.capacityProvenance;
     expect(cp).toBeTruthy();
-    expect(cp.sourceDocument.documentHash).toBeNull();
-    expect(cp.sourceDocument.archivedInRepo).toBe(false);
+    const sd = cp.sourceDocument;
+    // archived  =>  a real SHA-256;  not archived  =>  an honest null.
+    // What is refused is the third state: a claim of archive with no hash.
+    if (sd.archivedInRepo) expect(sd.documentHash).toMatch(/^[0-9a-f]{64}$/);
+    else expect(sd.documentHash).toBeNull();
+    expect(String(sd.hashNote ?? '').length).toBeGreaterThan(20);
   });
 
-  it('both blocking gaps are surfaced as permit-readiness blockers (build.ts + V32)', () => {
+  it('the racking gaps are CLEARED, and cleared by a resolved document', () => {
     const codes = snap.permitReadiness.blockers.map(b => b.code);
-    expect(codes).toContain('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED');
-    expect(codes).toContain('RACKING-CAPACITY-APPLICABILITY-GAP');
-    expect(snap.permitReadiness.ready).toBe(false);
+    expect(codes).not.toContain('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED');
+    expect(codes).not.toContain('RACKING-CAPACITY-APPLICABILITY-GAP');
+    // ANTI-VACUITY: not because the gate stopped asking.
+    const ra = snap.structural.rackingAssembly as any;
+    expect(ra.structuralAuthorityGaps).toEqual([]);
+    expect(ra.documentRoles.structuralCapacityAuthority.established).toBe(true);
   });
 
-  it('V32 fires if a blocking racking gap is NOT surfaced as a blocker', () => {
+  it('V32 still fires if a blocking racking gap is NOT surfaced as a blocker', () => {
+    // The invariant is unchanged; the fixture no longer supplies a gap, so one
+    // is INJECTED. That is the honest way to keep testing a rule whose real-world
+    // trigger has been fixed - the alternative is deleting the check.
     const tampered = clone(snap) as any;
-    // remove the promoted blockers but keep the blocking gaps on the record
+    tampered.structural.rackingAssembly.structuralAuthorityGaps = [{
+      code: 'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
+      severity: 'blocking',
+      message: 'injected by the test - a blocking gap that no blocker surfaces',
+    }];
     tampered.permitReadiness.blockers = tampered.permitReadiness.blockers.filter(
       (b: any) => !/^RACKING-CAPACITY/.test(b.code));
     const v = validatePermitDesignSnapshot(tampered);

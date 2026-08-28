@@ -38,8 +38,18 @@ const LEGIT_BLOCKERS = [
   // performance, and only the distributor part number is outstanding. It is still raised (advisory)
   // on every unpinned assembly, and RACKING-RAIL-CAPACITY-UNBOUNDED still BLOCKS when the envelope
   // cannot be bounded. Asserted in structural-correction-w and release-gate-model-rgm.
-  'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
-  'RACKING-CAPACITY-APPLICABILITY-GAP',
+  // SHIPPED MANUFACTURER STRUCTURAL CATALOGUE (2026-08-28) — both
+  // RACKING-CAPACITY-* codes leave this list, for the same reason
+  // CODE-AUTHORITY-INCOMPLETE did: they fired on every Roof Tech package in
+  // existence because clearing them required each operator to archive a
+  // manufacturer PE letter by hand. SolarPro now ships the stamped RT-Mini II
+  // Illinois letter — identity, seal, source URL, SHA-256 and the archived bytes
+  // in-repo — so there is a real source of record and nothing to block on.
+  //
+  // Nothing was relaxed: the clearance predicate is untouched and still refuses a
+  // wrong generation, a wrong state, a wrong document class, an unarchived file
+  // or a missing hash. Every one of those refusals is asserted directly in
+  // tests/planset/manufacturer-structural-catalogue.test.ts.
   'ENGINEERING-REVIEW-PENDING',
   'FRAMING-AUTHORITY-UNVERIFIED',
 ] as const;
@@ -115,6 +125,15 @@ describe('§18 — legitimate project blockers are preserved (Braidon state)', (
     // was softened. Asserted positively, with the reason, so a future regression
     // that merely stops emitting it cannot pass here.
     expect(blockingCodes.has('TAP-CONDUCTOR-LENGTH-PENDING'), 'tap span is design-constrained').toBe(false);
+    // …and the racking-capacity codes are absent because a document RESOLVED,
+    // not because the gate stopped asking.
+    expect(blockingCodes.has('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED')).toBe(false);
+    const ra = snap.structural.rackingAssembly as unknown as {
+      structuralAuthorityGaps: unknown[];
+      documentRoles: Record<string, { established: boolean; documentHash: string | null }>;
+    };
+    expect(ra.structuralAuthorityGaps).toEqual([]);
+    expect(ra.documentRoles.structuralCapacityAuthority.documentHash).toMatch(/^[0-9a-f]{64}$/);
     const tapSeg = (snap.electrical.routeSegments ?? []).find(s => s.segmentId === 'DISCO_TO_METER_RUN')!;
     expect(tapSeg.lengthSource).toBe('known-design');
     expect(tapSeg.oneWayFt!).toBeLessThanOrEqual(10);

@@ -54,6 +54,7 @@ import { recalculateRouteVoltageDrop } from './routeVoltageDropRecalc';
 // WS-5 §14 — the NAMED closure policy for ROUTE-LENGTH-ESTIMATE, shared with the
 // derived resolver so the two emitters cannot drift.
 import { sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
+import { resolveProjectStateAuthority, isUnknownStateSentinel } from './locationAuthority';
 import {
   buildTapSpanAuthority,
   NEC_705_11_C_TAP_LIMIT_FT,
@@ -818,6 +819,28 @@ export function buildPermitDesignSnapshot(
   // tap-conductor length is PENDING (never a fabricated compliant 10-ft claim),
   // and is reflected in ROUTE-LENGTH-ESTIMATE. The 60-ft PV feeder run lives on
   // the feeder route segment, NOT on any tap object (the conflation the audit hit).
+  // ══ THE CANONICAL STATE, DERIVED ONCE, EARLY ═════════════════════
+  // `buildProjectAuthority` derives this too, but it runs LATER in this function
+  // than the structural build does. Rather than re-deriving the state with
+  // different rules (the class of bug that gave the package a mailing city where
+  // a legal jurisdiction belonged), the SAME resolver is called here, from the
+  // same inputs, so both consumers get the same answer with the same conflict
+  // detection. It is what the nationwide NEC adoption table already resolves
+  // from, and now what the shipped manufacturer structural catalogue resolves
+  // from as well.
+  const _canonicalStateCode: string | null = (() => {
+    const st = resolveProjectStateAuthority({
+      projectState: (proj.state as string | undefined) ?? null,
+      address: (proj.address as string | undefined) ?? null,
+      // codeAuthority is built later in this function; the project record and the
+      // postal address are the two inputs available at this point, and the
+      // resolver already reconciles them with conflict detection.
+      ahjStateCode: null,
+      complianceState: null,
+    });
+    return st.stateCode && !isUnknownStateSentinel(st.stateCode) ? st.stateCode : null;
+  })();
+
   // The tap-span authority is built inside the topology builder (it needs the
   // resolved route segments) and read by the release gates below — ONE record,
   // not a second evaluation of the same question at the consumer.
@@ -1217,6 +1240,7 @@ export function buildPermitDesignSnapshot(
     roofPlanes,
     cadPlanes,
     mountSystem: mountDb ?? null,
+    mountSystemStoredId: (proj.mountingSystemId as string | undefined) ?? null,
     structuralRuns: structRuns,
     framing: {
       framingType: proj.framingType ?? null,
@@ -1262,6 +1286,10 @@ export function buildPermitDesignSnapshot(
     // blockers firing (fail-soft).
     capacityDocument: opts?.capacityDocument ?? null,
     projectJurisdiction: opts?.projectJurisdiction ?? null,
+    // the governed state authority (projectAuthority.stateAuthority) — the SAME
+    // source the nationwide NEC adoption table resolves from. Lets the shipped
+    // manufacturer structural catalogue resolve on the pure build path.
+    projectStateCode: _canonicalStateCode,
     legalJurisdictionAuthorityId: opts?.legalJurisdictionAuthorityId ?? null,
     // FRAMING-AUTHORITY GATE — evidence for the framing CAPACITY authority.
     framingCapacityDocument: opts?.framingCapacityDocument ?? null,
