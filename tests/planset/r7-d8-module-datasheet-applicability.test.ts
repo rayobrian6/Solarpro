@@ -237,8 +237,14 @@ describe('D8 · every module gap reaches the readiness registry', () => {
     expect(b[0].explanation).toMatch(/no hash|unverified|not established/i);
   });
 
-  it('12 — the Braidon module still emits exactly one, and claims nothing from a title', () => {
-    const b = moduleBlockers(fleet(['Q.PEAK DUO BLK ML-G10+ 400W', 400]));
+  it('12 — an uncovered module emits exactly one, and claims nothing from a title', () => {
+    // 2026-08-28 MODULE-DATASHEET MIGRATION - the Qcells module is now covered by
+    // the SHIPPED datasheet catalogue (archived + hashed in-repo, cleared by the
+    // SAME evaluator), so it emits no blocker. The D8 rules this suite is about -
+    // one blocker per DISTINCT module, never per string, and nothing claimed from
+    // a title - are asserted on a module the catalogue does NOT cover.
+    expect(moduleBlockers(fleet(['Q.PEAK DUO BLK ML-G10+ 400W', 400]))).toHaveLength(0);
+    const b = moduleBlockers(fleet(['Solar Panel TSP-415', 415]));
     expect(b).toHaveLength(1);
     // CMDA — the blocker no longer asserts what the on-file document IS
     // ("the 385–405 W family datasheet") from a static asset's title. Whether a
@@ -250,10 +256,15 @@ describe('D8 · every module gap reaches the readiness registry', () => {
   });
 
   it('13 — one blocker per DISTINCT module, never per string', () => {
+    // 2026-08-28 MODULE-DATASHEET MIGRATION - the Qcells module is now covered by
+    // the SHIPPED datasheet catalogue (archived + hashed in-repo, cleared by the
+    // SAME evaluator), so it emits no blocker. The D8 rules this suite is about -
+    // one blocker per DISTINCT module, never per string, and nothing claimed from
+    // a title - are asserted on a module the catalogue does NOT cover.
     const b = moduleBlockers(fleet(
-      ['Q.PEAK DUO BLK ML-G10+ 400W', 400],
-      ['Q.PEAK DUO BLK ML-G10+ 400W', 400],
       ['Solar Panel TSP-415', 415],
+      ['Solar Panel TSP-415', 415],
+      ['Some Other Module 500W', 500],
     ));
     expect(b).toHaveLength(2);
   });
@@ -334,8 +345,11 @@ describe('D8 · the binding never reports bound from an empty archive', () => {
   });
 
   it('17b — a binding for one model cannot suppress the gap on another', () => {
+    // 2026-08-28 MODULE-DATASHEET MIGRATION - the Qcells module is covered by the
+    // SHIPPED datasheet catalogue, so it is no longer the uncovered one. The rule
+    // is unchanged and is exercised with two modules the catalogue does not cover.
     const b = collectEquipmentDocumentBlockers(
-      fleet(['Solar Panel TSP-415', 415], ['Q.PEAK DUO BLK ML-G10+ 400W', 400]),
+      fleet(['Solar Panel TSP-415', 415], ['Some Other Module 500W', 500]),
       { modules: [{
         moduleModel: 'Solar Panel TSP-415',
         registryLookup: { boundDocumentId: 'doc-tesla-1' },
@@ -343,7 +357,7 @@ describe('D8 · the binding never reports bound from an empty archive', () => {
       }] },
     ).filter(x => x.code === MODULE_CODE);
     expect(b).toHaveLength(1);
-    expect(b[0].explanation).toMatch(/Q\.PEAK/);
+    expect(b[0].explanation).toMatch(/Some Other Module/);
   });
 
   it('17 — one bound module does not bind the others', () => {

@@ -15,6 +15,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { PermitInput } from '../types';
+import {
+  findManufacturerDatasheet, toRegistryDocumentFromCatalogue,
+} from '@/lib/documents/manufacturerDatasheetCatalogue';
+import { evaluateModuleDatasheetApplicability } from './moduleDocumentAuthority';
 import { MICROINVERTERS, SOLAR_PANELS, type Microinverter, type SolarPanel } from '@/lib/equipment-db';
 import { getManufacturerAsset, type ManufacturerAsset } from '@/lib/manufacturer-assets-db';
 
@@ -475,7 +479,37 @@ export function collectEquipmentDocumentBlockers(
       const model = str?.panelModel;
       if (!model || seen.has(model)) continue;
       seen.add(model);
-      const canonicalVerdict = canonicalByModel.get(model) ?? null;
+      // ══ TIER 2 — THE SHIPPED MANUFACTURER DATASHEET CATALOGUE ═══════════
+      // An operator-archived registry row (resolved async, above) always wins.
+      // With none, SolarPro's own shipped datasheet catalogue is consulted here
+      // — purely, from an in-repo table, no I/O — because the Qcells sheet is the
+      // same document for every job in the country that uses that module.
+      //
+      // It changes NO predicate: the record is projected into a RegistryDocument
+      // and handed to `evaluateModuleDatasheetApplicability` unchanged, so class,
+      // status, archived bytes, SHA-256, governed verification, an explicit
+      // coverage claim, an evidence LOCATION and the presence of the electrical +
+      // mechanical specifications are all still required. A brochure clears
+      // nothing.
+      //
+      // Doing it HERE rather than only in the resolver matters for the same
+      // reason it did for the racking letter: this is the pure, digest-covered
+      // path the frozen fixtures and the digest computation take.
+      const shippedVerdict = canonicalByModel.get(model) ? null : (() => {
+        const doc = toRegistryDocumentFromCatalogue(
+          findManufacturerDatasheet({ equipmentId: str?.panelId ?? null, model }));
+        if (!doc) return null;
+        return evaluateModuleDatasheetApplicability({
+          selected: {
+            equipmentId: str?.panelId ?? null,
+            manufacturer: str?.panelManufacturer ?? null,
+            model,
+            watts: typeof str?.panelWatts === 'number' ? str.panelWatts : null,
+          },
+          document: doc,
+        });
+      })();
+      const canonicalVerdict = canonicalByModel.get(model) ?? shippedVerdict ?? null;
       if (canonicalVerdict) {
         // PROJECTION ONLY — the canonical authority cleared it, or it did not.
         if (canonicalVerdict.clears) continue;

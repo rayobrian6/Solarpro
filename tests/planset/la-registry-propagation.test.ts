@@ -18,7 +18,7 @@ import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
-import { projectReleaseGates } from '@/lib/permit/snapshot/releaseGates';
+import { projectReleaseGates, REQUIREMENT_DECLARATIONS } from '@/lib/permit/snapshot/releaseGates';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
@@ -35,7 +35,16 @@ const stateFor = (code: string, over: Record<string, unknown> = {}) => ({
 });
 
 const AUDIT_REF = 'AAC-RESOLVER:module-datasheet-binding@v1 document:doc-400w sha256:abcdef0123456789 @2026-08-04T12:00:00Z';
-const CODE = 'MODULE-EXACT-DATASHEET-PENDING';
+// 2026-08-28 MODULE-DATASHEET MIGRATION - MODULE-EXACT-DATASHEET-PENDING no
+// longer fires on this fixture: SolarPro SHIPS the Qcells Q.PEAK DUO BLK
+// ML-G10+ 395-415 Rev06 datasheet, archived and hashed in-repo, and the SAME
+// evaluator clears it. This suite needs a requirement that still FIRES to drive
+// the lifecycle machinery it is actually about, so it uses one.
+// See tests/planset/manufacturer-datasheet-catalogue.test.ts for the refusals.
+const CODE = 'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED';
+// The gate is READ from the declaration rather than hardcoded, so repointing
+// CODE can never leave the gate assertion pointing at a different gate.
+const GATE = REQUIREMENT_DECLARATIONS[CODE].gateId;
 
 /** The REAL construction path: generatePermitHTML → buildPermitDesignSnapshot. */
 function build(states?: Record<string, unknown>): { snap: PermitDesignSnapshot; html: string } {
@@ -55,7 +64,7 @@ describe('LA §3 · a resolver clearance reaches the release gate', () => {
     expect(rec(snap)?.resolved).toBe(false);
     expect(snap.permitReadiness.blockers.map(b => b.code)).toContain(CODE);
     const model = projectReleaseGates(snap);
-    const rg2 = model.gates.find(g => g.gateId === 'RG-2');
+    const rg2 = model.gates.find(g => g.gateId === GATE);
     expect(rg2?.status).toBe('OPEN');
   });
 
@@ -70,7 +79,7 @@ describe('LA §3 · a resolver clearance reaches the release gate', () => {
     // 3. deriveRequirementStatus, via the REAL gate model over the REAL snapshot:
     //    the code is DECLARED on its gate but no longer counted as unresolved.
     const model = projectReleaseGates(snap);
-    const rg2 = model.gates.find(g => g.gateId === 'RG-2');
+    const rg2 = model.gates.find(g => g.gateId === GATE);
     expect(rg2?.requirementCodes).toContain(CODE);
     expect(rg2?.unresolvedRequirementCodes).not.toContain(CODE);
     expect(rg2?.clearedRequirementCodes).toContain(CODE);

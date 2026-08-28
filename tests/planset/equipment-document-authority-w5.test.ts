@@ -207,9 +207,13 @@ describe('W5 §3 — module datasheet exactness', () => {
     expect(html).not.toMatch(/Attach the exact .* datasheet/);
   });
 
-  it('emits a canonical blocker for the pending exact module document', () => {
+  it('emits NO module-document blocker once a covering datasheet is on file', () => {
+    // 2026-08-28 MODULE-DATASHEET MIGRATION - MODULE-EXACT-DATASHEET-PENDING no
+    // longer fires: SolarPro SHIPS the Qcells datasheet, archived and hashed
+    // in-repo, and the SAME evaluator clears it. Every refusal it still enforces
+    // is asserted in tests/planset/manufacturer-datasheet-catalogue.test.ts.
     const blockers = collectEquipmentDocumentBlockers(braidonLikeInput());
-    expect(blockers.some(b => b.code === 'MODULE-EXACT-DATASHEET-PENDING')).toBe(true);
+    expect(blockers.some(b => b.code === 'MODULE-EXACT-DATASHEET-PENDING')).toBe(false);
   });
 });
 

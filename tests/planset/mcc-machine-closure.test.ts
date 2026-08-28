@@ -15,6 +15,12 @@
 // test that touches release state asserts it still fails closed.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// 2026-08-28 MODULE-DATASHEET MIGRATION - MODULE-EXACT-DATASHEET-PENDING no
+// longer fires on this fixture: SolarPro SHIPS the Qcells Q.PEAK DUO BLK
+// ML-G10+ 395-415 Rev06 datasheet, archived and hashed in-repo, and the SAME
+// evaluator clears it. This suite needs a requirement that still FIRES to drive
+// the lifecycle machinery it is actually about, so it uses one.
+// See tests/planset/manufacturer-datasheet-catalogue.test.ts for the refusals.
 import { describe, it, expect } from 'vitest';
 import { computeSnapshotDigest } from '@/lib/permit/snapshot/digest';
 import { buildProjectLegalAuthority } from '@/lib/permit/snapshot/resolution/jurisdictionAuthority';
@@ -99,7 +105,7 @@ describe('MCC §1 · registry records carry the lifecycle clearance', () => {
   };
 
   const stateFor = (over: Record<string, unknown>) => ({
-    requirementCode: 'MODULE-EXACT-DATASHEET-PENDING',
+    requirementCode: 'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED',
     resolutionMode: 'AUTO_DERIVED', residualMode: null,
     resolverId: 'module-datasheet-binding@v1', resolverImplemented: true,
     plannedResolverPhase: null, attemptedResolverIds: ['module-datasheet-binding@v1'],
@@ -110,7 +116,7 @@ describe('MCC §1 · registry records carry the lifecycle clearance', () => {
   });
 
   const entry = (s: PermitDesignSnapshot) =>
-    s.permitReadiness.registry.find(r => r.code === 'MODULE-EXACT-DATASHEET-PENDING');
+    s.permitReadiness.registry.find(r => r.code === 'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED');
 
   it('with no lifecycle the record is unresolved — unchanged behaviour', () => {
     const e = entry(buildWith(null));
@@ -120,14 +126,14 @@ describe('MCC §1 · registry records carry the lifecycle clearance', () => {
 
   it('cleared WITH an audit reference marks the record resolved and drops the blocker', () => {
     const snap = buildWith({
-      'MODULE-EXACT-DATASHEET-PENDING': stateFor({
+      'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': stateFor({
         cleared: true, resolutionAuditRef: 'AAC-RESOLVER:module-datasheet-binding@v1 document:doc-1 @2026-08-04T12:00:00Z',
       }),
     });
     const e = entry(snap);
     expect(e?.resolved).toBe(true);
     expect(e?.resolutionAuditRef).toMatch(/module-datasheet-binding@v1/);
-    expect(snap.permitReadiness.blockers.map(b => b.code)).not.toContain('MODULE-EXACT-DATASHEET-PENDING');
+    expect(snap.permitReadiness.blockers.map(b => b.code)).not.toContain('ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED');
   });
 
   it('cleared WITHOUT an audit reference is NOT a clearance (fail closed)', () => {
@@ -135,7 +141,7 @@ describe('MCC §1 · registry records carry the lifecycle clearance', () => {
     // can never claim a resolution the release gate would reject.
     for (const ref of [null, '', '   ']) {
       const e = entry(buildWith({
-        'MODULE-EXACT-DATASHEET-PENDING': stateFor({ cleared: true, resolutionAuditRef: ref }),
+        'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': stateFor({ cleared: true, resolutionAuditRef: ref }),
       }));
       expect(e?.resolved).toBe(false);
       expect(e?.resolutionAuditRef).toBeNull();
@@ -144,7 +150,7 @@ describe('MCC §1 · registry records carry the lifecycle clearance', () => {
 
   it('an audit reference WITHOUT cleared is not a clearance either', () => {
     const e = entry(buildWith({
-      'MODULE-EXACT-DATASHEET-PENDING': stateFor({ cleared: false, resolutionAuditRef: 'AAC-RESOLVER:x @t' }),
+      'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': stateFor({ cleared: false, resolutionAuditRef: 'AAC-RESOLVER:x @t' }),
     }));
     expect(e?.resolved).toBe(false);
   });

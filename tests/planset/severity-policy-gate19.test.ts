@@ -39,7 +39,17 @@ const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 // property §17 is about. `PROMOTED_POLICY` keeps the policy assertion (which is
 // what §17 actually mandates); `PROMOTED_ON_FIXTURE` keeps the on-snapshot one.
 const PROMOTED_POLICY = ['TAP-CONDUCTOR-LENGTH-PENDING', 'MODULE-EXACT-DATASHEET-PENDING'] as const;
-const PROMOTED = ['MODULE-EXACT-DATASHEET-PENDING'] as const;
+// 2026-08-28 MODULE-DATASHEET MIGRATION - MODULE-EXACT-DATASHEET-PENDING no
+  // longer fires: SolarPro SHIPS the Qcells Q.PEAK DUO BLK ML-G10+ 395-415 Rev06
+  // datasheet, archived and hashed in-repo, and the SAME evaluator clears it.
+  // Nothing was relaxed - class, status, archived bytes, SHA-256, verification,
+  // an explicit coverage claim, an evidence location and the presence of the
+  // electrical + mechanical specs are all still required, and every refusal is
+  // asserted in tests/planset/manufacturer-datasheet-catalogue.test.ts.
+// `PROMOTED_POLICY` keeps the policy assertion (which is what section 17 mandates);
+// nothing on this fixture FIRES any more, so `PROMOTED` is empty and the
+// anti-vacuity counterparts below carry the on-snapshot half.
+const PROMOTED = [] as readonly string[];
 
 function renderWith(mut?: (fx: any) => void): { html: string; snap: PermitDesignSnapshot } {
   const input: any = clone(braidonOriginalAuditFixture);

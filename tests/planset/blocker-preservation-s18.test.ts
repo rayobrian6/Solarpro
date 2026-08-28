@@ -125,9 +125,15 @@ describe('§18 — legitimate project blockers are preserved (Braidon state)', (
     // AAC WS-7 (2026-07-27): CONDUIT-FILL-PENDING is no longer among them — the
     // NEC Ch.9 Table 1 fill is COMPUTED and reaches the snapshot, so the
     // requirement is resolved rather than promoted. Asserted positively below.
-    for (const code of ['MODULE-EXACT-DATASHEET-PENDING']) {
-      expect(blockingCodes.has(code), `${code} promoted`).toBe(true);
-    }
+    // 2026-08-28 MODULE-DATASHEET MIGRATION - MODULE-EXACT-DATASHEET-PENDING no
+  // longer fires: SolarPro SHIPS the Qcells Q.PEAK DUO BLK ML-G10+ 395-415 Rev06
+  // datasheet, archived and hashed in-repo, and the SAME evaluator clears it.
+  // Nothing was relaxed - class, status, archived bytes, SHA-256, verification,
+  // an explicit coverage claim, an evidence location and the presence of the
+  // electrical + mechanical specs are all still required, and every refusal is
+  // asserted in tests/planset/manufacturer-datasheet-catalogue.test.ts.
+    expect(blockingCodes.has('MODULE-EXACT-DATASHEET-PENDING'),
+      'module datasheet is covered by the shipped catalogue').toBe(false);
     expect(blockingCodes.has('CONDUIT-FILL-PENDING'), 'conduit fill is computed, not pending').toBe(false);
     // 2026-08-28 TAP MIGRATION - the same shape as the CONDUIT-FILL case above:
     // TAP-CONDUCTOR-LENGTH-PENDING is absent because the DESIGN now constrains

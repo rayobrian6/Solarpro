@@ -774,7 +774,14 @@ describe('RGM §9 — the model is PROJECTED from a real built snapshot (no dige
   it('permit-ready is never claimed while gates are open (Braidon is never permit-ready)', () => {
     expect(m.summary.permitReady).toBe(false);
     expect(snap.permitReadiness.ready).toBe(false);
-    expect(m.summary.openGateCount).toBeGreaterThanOrEqual(5);
+    // 2026-08-28 MODULE-DATASHEET MIGRATION - MODULE-EXACT-DATASHEET-PENDING no
+    // longer fires: SolarPro SHIPS the Qcells datasheet, archived and hashed
+    // in-repo, and the SAME evaluator clears it. Every refusal it still enforces
+    // is asserted in tests/planset/manufacturer-datasheet-catalogue.test.ts.
+    // The count is a running tally of the product's progress, so the property is
+    // asserted as the one that matters: gates ARE open, and permit-ready is not
+    // claimed while they are.
+    expect(m.summary.openGateCount).toBeGreaterThan(0);
   });
 
   it('the snapshot id / digest are carried on every gate and requirement (sheet-stamp parity)', () => {

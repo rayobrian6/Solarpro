@@ -256,10 +256,14 @@ describe('W1-B — ProcurementAuthorityState consolidation', () => {
     // identity + count are canonical for BOTH …
     expect(module.procurement!.quantitySource).toBe('count-derived');
     expect(micro.procurement!.quantitySource).toBe('count-derived');
-    // … but MODULE-EXACT-DATASHEET-PENDING is OPEN and severityPolicy declares
-    // it procurement-impacting, so the module row is honestly NOT orderable.
-    expect(module.procurement!.blockingRequirementCodes).toContain('MODULE-EXACT-DATASHEET-PENDING');
-    expect(module.procurement!.authorityState).toBe('CANDIDATE_NON_ORDERABLE');
+    // 2026-08-28 MODULE-DATASHEET MIGRATION - MODULE-EXACT-DATASHEET-PENDING no
+    // longer fires: SolarPro SHIPS the Qcells datasheet, archived and hashed
+    // in-repo, and the SAME evaluator clears it. The module row is therefore
+    // orderable on its own merits, which is the honest outcome. Every refusal
+    // the evaluator still enforces is asserted in
+    // tests/planset/manufacturer-datasheet-catalogue.test.ts.
+    expect(module.procurement!.blockingRequirementCodes).not.toContain('MODULE-EXACT-DATASHEET-PENDING');
+    expect(module.procurement!.authorityState).toBe('VERIFIED_ORDERABLE');
     expect(micro.procurement!.blockingRequirementCodes).toEqual([]);
     expect(micro.procurement!.authorityState).toBe('VERIFIED_ORDERABLE');
   });
