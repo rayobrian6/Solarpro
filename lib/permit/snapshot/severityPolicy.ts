@@ -91,6 +91,13 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
   // The span HAS a position and that position busts NEC 705.11(C). Every axis the
   // PENDING code carries, plus it is an actual violation rather than an unknown:
   // the interconnection as drawn is not code-compliant and cannot be built.
+  // The run as laid out fails the Vd limit its own schedule grades it against:
+  // a code-compliance and engineering-approval defect, and an AHJ will not accept
+  // a conductor schedule that contradicts itself.
+  'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': {
+    impact: { safety: false, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
   'TAP-CONDUCTOR-LENGTH-EXCEEDED': {
     impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
     justification: '',

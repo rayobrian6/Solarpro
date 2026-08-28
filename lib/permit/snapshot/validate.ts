@@ -303,11 +303,37 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
   // Fail-closed on the applicability decision, as every other D1 consumer is.
   const _v18Applicable = s.electrical.routeSegments.filter(
     r => (r.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
-  if (_v18Applicable.some(r => r.lengthSource === 'cad-derived-estimate' || r.lengthSource === 'unknown')
-      && !s.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-ESTIMATE')) {
+  // 2026-08-28 — V18 admitted two answers for an estimate-grade run: it is
+  // blocked, or the invariant fires. There is a third, and it is the one the
+  // trade actually uses: the DESIGN BOUNDS the run. A run carrying a stated
+  // maximum one-way length is accounted for — the conductor is valid for any
+  // installed length at or under it and the drawing says so.
+  //
+  // The invariant is NOT weakened. An estimate-grade run that is neither blocked
+  // nor bounded still fires, and a run whose estimate EXCEEDS its bound is not
+  // "accounted for" here either — that case must raise its own requirement, and
+  // this invariant checks that it did.
+  const _v18Unaccounted = _v18Applicable.filter(r =>
+    (r.lengthSource === 'cad-derived-estimate' || r.lengthSource === 'unknown')
+    && r.lengthBoundState !== 'bounded');
+  const _v18OverBound = _v18Applicable.filter(r => r.lengthBoundState === 'exceeds-bound');
+  if (_v18Unaccounted.length > 0
+      && !s.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-ESTIMATE')
+      && !(_v18OverBound.length > 0
+           && s.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND'))) {
     add('V18', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
       'snapshot builder', ['PV-0', 'VAL-1'],
-      'estimate-grade route lengths present on PROJECT-OWNED runs but not reflected as a permit-readiness blocker');
+      `estimate-grade route lengths present on PROJECT-OWNED runs (${_v18Unaccounted.map(r => r.segmentId).join(', ')}) `
+      + 'that are neither bounded by the design nor reflected as a permit-readiness blocker');
+  }
+  // A run whose own estimate busts its design bound must ALWAYS carry a
+  // requirement — a bound that fails silently is worse than no bound.
+  if (_v18OverBound.length > 0
+      && !s.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND')) {
+    add('V18', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+      'snapshot builder', ['PV-0', 'VAL-1'],
+      `run(s) ${_v18OverBound.map(r => r.segmentId).join(', ')} exceed the maximum one-way length the selected `
+      + 'conductor permits, with no requirement raised');
   }
 
   // ── §3 (07-22) ELECTRICAL VALUE INTEGRITY — no NaN/Infinity ever renders ─────

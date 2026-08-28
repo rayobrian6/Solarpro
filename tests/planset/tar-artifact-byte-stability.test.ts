@@ -129,7 +129,16 @@ describe('D9 · whole-artifact invariant', () => {
     const registry = (input._snapshot?.permitReadiness?.registry ?? []) as PermitReadinessBlocker[];
     expect(registry.length).toBeGreaterThan(0);
     // Every payload the build attached is still intact on the snapshot object.
-    const withPayload = registry.filter(r => r.payload && typeof r.payload === 'object');
-    expect(withPayload.length).toBeGreaterThan(0);
+    // 2026-08-28 ROUTE-BOUND MIGRATION - the fixture's payload-carrying
+    // requirement was ROUTE-LENGTH-ESTIMATE, which no longer fires (the design
+    // bounds the runs). The property is "the build's structured audit data
+    // survives onto the snapshot", so it is asserted over the fields EVERY
+    // record carries, plus any payload that is present.
+    for (const r of registry) {
+      expect(r.authorityPath, r.code).toBeTruthy();
+      expect(r.explanation, r.code).toBeTruthy();
+      expect(r.provenance?.source, r.code).toBeTruthy();
+      if (r.payload) expect(typeof r.payload).toBe('object');
+    }
   });
 });

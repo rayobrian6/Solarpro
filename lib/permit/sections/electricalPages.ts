@@ -140,7 +140,13 @@ function subSectionLabel(sub: SubSystemConductorAuthority): string {
 // its full CCC inventory, feeder, disconnect→tap, tap conductors) with every §1
 // field. Never merges sections into one generalized row; every verdict is the ONE
 // shared tri-state result (no PASS on a pending length / blank fill).
-function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
+function renderE1PhysicalSchedule(
+  sections: E1PhysicalSection[],
+  // the snapshot the sections came from — the design length BOUNDS live on the
+  // route segments, and the construction-requirement line below states every
+  // one of them, including runs the section schedule does not list.
+  _snapE1?: { electrical?: { routeSegments?: Array<Record<string, unknown>> } } | null,
+): string {
   if (!sections.length) return '';
   const n = (v: number | null, d = 1, suf = '') => v == null ? '—' : `${v.toFixed(d)}${suf}`;
   const s = (v: string | null | undefined) => v == null || v === '' ? '—' : v;
@@ -228,6 +234,26 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${(() => {
+        // ── CONSTRUCTION REQUIREMENT — THE DESIGN LENGTH BOUNDS ───────────
+        // A run whose length the DESIGN bounds clears ROUTE-LENGTH-ESTIMATE, and
+        // that is only honest if the construction set states the limit the
+        // installation is bound by. The per-row label carries it for the runs
+        // that ARE rows; this line carries EVERY bounded run, including the ones
+        // (the array DC leg) that the section schedule does not list.
+        const _bounded = (_snapE1?.electrical?.routeSegments ?? [])
+          .filter((r: { lengthBoundState?: string | null; designMaxOneWayFt?: number | null }) =>
+            r.lengthBoundState === 'bounded' && r.designMaxOneWayFt != null);
+        if (_bounded.length === 0) return '';
+        const _items = _bounded.map((r: { segmentId: string; designMaxOneWayFt?: number | null; conductorGauge?: string | null }) =>
+          `${escapeH(r.segmentId)} ≤ ${r.designMaxOneWayFt} FT${r.conductorGauge ? ` (${escapeH(r.conductorGauge)})` : ''}`).join(' &nbsp;·&nbsp; ');
+        return `
+      <div data-design-length-bounds="1" style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#111;background:#fff;">
+        <strong>CONSTRUCTION REQUIREMENT &mdash; MAXIMUM ONE-WAY CONDUCTOR LENGTHS.</strong>
+        The lengths shown above are ESTIMATES for procurement. The installed one-way run shall not exceed:
+        ${_items}. A field route longer than the stated maximum requires upsizing per this schedule.
+      </div>`;
+      })()}
       <div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fafafa;">
         Each row is a DISTINCT canonical physical section — the open-air Enphase Q Cable branch trunks (NEC 690.31(C)),
         the shared jbox→combiner home-run raceway (conductor count = its physical-raceway current-carrying inventory),
@@ -1848,7 +1874,7 @@ export function pageConductorScheduleCont(input: PermitInput, cad: CADModel, pag
     <div class="page-content">
       <div class="section-title">Physical Conductor / Raceway Schedule — Canonical Section Objects (continued from PV-4B)</div>
       ${_sections.length
-        ? `${renderE1PhysicalSchedule(_sections)}
+        ? `${renderE1PhysicalSchedule(_sections, _snap as never)}
       ${renderQCableProcurementDerivation(_snap)}
       ${renderOpenAirBranchGroundingNote(_snap)}`
         : `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);background:#fafafa;color:#b45309;">

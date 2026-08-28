@@ -277,9 +277,22 @@ describe('D5 §4 — Braidon has measured nothing and the sheets say so', () => 
     expect(all.filter(c => c.lengthAuthority === 'FIELD VERIFIED')).toEqual([]);
   });
 
-  it('26. the route-length requirement remains OPEN', () => {
+  it('26. the route-length requirement is CLEARED by the design bound', () => {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - ROUTE-LENGTH-ESTIMATE no longer fires:
+    // the DESIGN bounds each un-routed run by stating the maximum one-way length
+    // at which the selected conductor still meets its Vd limit, and the drawing
+    // carries that requirement. Nothing was relaxed - an unbounded run still
+    // blocks, an estimate over its bound raises ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND,
+    // and the BOM quantity is still ESTIMATED. See route-length-bound.test.ts.
     const blockers = (snap.permitReadiness?.blockers ?? []).map(b => b.code);
-    expect(blockers).toContain('ROUTE-LENGTH-ESTIMATE');
+    expect(blockers).not.toContain('ROUTE-LENGTH-ESTIMATE');
+    // ANTI-VACUITY: it cleared because bounds exist, not because the gate stopped
+    // asking. Every estimate-grade project-owned run carries a real maximum.
+    const est = (snap.electrical.routeSegments ?? []).filter(r =>
+      (r.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED'
+      && r.lengthSource === 'cad-derived-estimate');
+    expect(est.length).toBeGreaterThan(0);
+    for (const r of est) expect(r.designMaxOneWayFt, r.segmentId).toBeGreaterThan(0);
   });
 
   it('27. no route segment carries a field measurement', () => {

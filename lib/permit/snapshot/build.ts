@@ -54,6 +54,9 @@ import { recalculateRouteVoltageDrop } from './routeVoltageDropRecalc';
 // WS-5 §14 — the NAMED closure policy for ROUTE-LENGTH-ESTIMATE, shared with the
 // derived resolver so the two emitters cannot drift.
 import { sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
+import {
+  deriveRouteLengthBound, vdLimitPctForSegment, ROUTE_LENGTH_EXCEEDS_BOUND_CODE, type RouteLengthBound,
+} from '@/lib/electrical/routeLengthBound';
 import { resolveProjectStateAuthority, isUnknownStateSentinel } from './locationAuthority';
 import {
   buildTapSpanAuthority,
@@ -2071,6 +2074,7 @@ export function buildPermitDesignSnapshot(
       // set by severityPolicy.ts; these META fields are documentary and kept in sync.
       'CONDUIT-FILL-PENDING': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
       'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.routeSegments[DISCO_TO_METER_RUN] (viewed by serviceTopology[svc-tap-conductors])', sheets: ['PV-4B', 'E-1'], resolution: 'Constrain the span in the design — place the fused AC disconnect within 10 ft of the tap point — or record a routed/field-measured length for DISCO_TO_METER_RUN.' },
+      'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].conductorGauge vs the design length bound', sheets: ['PV-4B', 'E-1', 'SCHED'], resolution: 'Upsize the conductor on the named run, or shorten the route so the one-way length is at or under the stated maximum.' },
       'TAP-CONDUCTOR-LENGTH-EXCEEDED': { severity: 'blocking', authorityPath: 'electrical.routeSegments[DISCO_TO_METER_RUN] (viewed by serviceTopology[svc-tap-conductors])', sheets: ['PV-4B', 'E-1'], resolution: 'Relocate the fused AC disconnect (or the tap point) so the tap conductors are ≤10 ft, then re-route/re-measure the span.' },
       // GROUNDING AUTHORITY (2026-07-25) — the open-air branch grounding method is
       // not established by any verified, exactly-applicable manufacturer document.
@@ -2170,19 +2174,91 @@ export function buildPermitDesignSnapshot(
       // the permit-set banner and the internal-set requirement cannot disagree.
       // 'operator-entry' (an UNVERIFIED field report) is deliberately residual:
       // it has already become the calculation length and it closes nothing.
-      const _residual = _projectRoutes.filter(r => !sourceClosesRouteLengthRequirement(r.lengthSource));
-      const _derivedSegs = _projectRoutes.filter(r => sourceClosesRouteLengthRequirement(r.lengthSource));
+      const _sourceClosed = _projectRoutes.filter(r => sourceClosesRouteLengthRequirement(r.lengthSource));
+      // ══ THE DESIGN BOUND — THE THIRD ANSWER ═════════════════════════
+      // This requirement asks whether a run length is an ESTIMATE, and it used to
+      // admit exactly two answers: routed geometry, or a field measurement. On a
+      // nationwide product that means no package closes until somebody walks the
+      // attic.
+      //
+      // A run whose length the DESIGN BOUNDS is not an estimate of anything. The
+      // drawing states the maximum one-way length at which the SELECTED conductor
+      // still meets its voltage-drop limit, and the installation is bound by that
+      // — which is what every permit set in the trade already does. The estimate
+      // is untouched and stays an estimate: it is what the BOM orders from, and it
+      // is printed and labelled as one.
+      //
+      // The bound is not free. It cannot be computed without a real conductor
+      // (gauge + current + system voltage + a Vd limit), and it FAILS in a way an
+      // estimate never could: when the estimated route already exceeds the bound,
+      // the run as laid out will not meet its own voltage-drop limit. That is a
+      // known deficiency with its own code, not a missing measurement.
+      const _bounds = new Map<string, RouteLengthBound>();
+      for (const r of _projectRoutes) {
+        if (sourceClosesRouteLengthRequirement(r.lengthSource)) continue;
+        _bounds.set(r.segmentId, deriveRouteLengthBound({
+          segmentId: r.segmentId,
+          conductorGauge: r.conductorGauge,
+          // the SAME current the voltage-drop projection consumes, so the bound
+          // and the printed Vd cannot describe two different circuits.
+          currentA: r.continuousCurrentA ?? r.operatingCurrentA ?? _segCurrentA.get(r.segmentId) ?? null,
+          systemVoltage: _segSystemVoltage.get(r.segmentId) ?? null,
+          vdLimitPct: vdLimitPctForSegment(r.segmentId),
+          estimatedOneWayFt: r.oneWayFt,
+        }));
+      }
+      // The bound is a property of the RUN. Stamping it on the record is what
+      // lets the conductor schedule print it, the V18 invariant see it, and the
+      // fact survive the requirement clearing.
+      for (const r of _projectRoutes) {
+        const b = _bounds.get(r.segmentId);
+        if (!b) continue;
+        r.designMaxOneWayFt = b.maxOneWayFt;
+        r.lengthBoundState = b.state;
+        r.designLengthNote = b.constructionNote;
+      }
+      const _boundedSegs = _projectRoutes.filter(r => _bounds.get(r.segmentId)?.state === 'bounded');
+      const _overBoundSegs = _projectRoutes.filter(r => _bounds.get(r.segmentId)?.state === 'exceeds-bound');
+      const _derivedSegs = [..._sourceClosed, ..._boundedSegs];
+      const _residual = _projectRoutes.filter(r =>
+        !sourceClosesRouteLengthRequirement(r.lengthSource)
+        && _bounds.get(r.segmentId)?.state === 'unbounded');
+
+      // A run whose OWN estimate busts the bound its conductor permits is a
+      // deficiency, and must never be reported as an unknown length.
+      for (const r of _overBoundSegs) {
+        const b = _bounds.get(r.segmentId)!;
+        push(ROUTE_LENGTH_EXCEEDS_BOUND_CODE, b.basis, {
+          payload: {
+            segmentId: b.segmentId, maxOneWayFt: b.maxOneWayFt,
+            estimatedOneWayFt: b.estimatedOneWayFt, conductorGauge: b.conductorGauge,
+            vdLimitPct: b.vdLimitPct,
+          },
+          resolutionAction: `Upsize the conductor on ${b.segmentId} or shorten the route so the one-way `
+            + `length is at or under ${b.maxOneWayFt} ft.`,
+        });
+      }
+
       if (_residual.length > 0) {
         push('ROUTE-LENGTH-ESTIMATE',
           `${_residual.length} of ${_projectRoutes.length} PROJECT-OWNED electrical run(s) have no routed geometry in the CAD model and require a field-measured route: `
             + `${_residual.map(r => `${r.segmentId} (${r.electricalFunction ?? 'run'})`).join(', ')}`
             + (_derivedSegs.length ? `. ${_derivedSegs.length} run(s) have a NON-ESTIMATE length and are not blocked: `
-                + `${_derivedSegs.map(r => `${r.segmentId} (${r.lengthSource === 'known-design' ? 'fixed by design' : r.lengthSource === 'field-measurement' ? 'field-measured' : 'routed geometry'})`).join(', ')}.` : '')
+                + `${_derivedSegs.map(r => `${r.segmentId} (${
+                    r.lengthSource === 'known-design' ? 'fixed by design'
+                    : r.lengthSource === 'field-measurement' ? 'field-measured'
+                    : _bounds.get(r.segmentId)?.state === 'bounded'
+                      ? `bounded by design at ${_bounds.get(r.segmentId)!.maxOneWayFt} ft`
+                      : 'routed geometry'})`).join(', ')}.` : '')
             + (_excludedRoutes.length
               ? ` ${_excludedRoutes.length} run(s) are EXCLUDED from project route authority: ${_excludedRoutes.map(r => `${r.segmentId} (${r.routeOwnership === 'UTILITY_OWNED' ? 'utility-owned service equipment' : 'not applicable'})`).join(', ')}.`
               : ''),
           {
             payload: {
+              designBounds: _projectRoutes
+                .map(r => _bounds.get(r.segmentId))
+                .filter((b): b is RouteLengthBound => !!b && b.maxOneWayFt != null)
+                .map(b => ({ segmentId: b.segmentId, maxOneWayFt: b.maxOneWayFt, state: b.state })),
               residualSegmentIds: _residual.map(r => r.segmentId),
               residualSegments: _residual.map(r => ({ segmentId: r.segmentId, electricalFunction: r.electricalFunction ?? null, oneWayFt: r.oneWayFt, lengthSource: r.lengthSource })),
               geometryDerivedSegmentIds: _derivedSegs.map(r => r.segmentId),

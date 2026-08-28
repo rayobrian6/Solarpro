@@ -78,6 +78,7 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'CONDUIT-FILL-PENDING': 'electrical',
   'TAP-CONDUCTOR-LENGTH-PENDING': 'electrical',
   'TAP-CONDUCTOR-LENGTH-EXCEEDED': 'electrical',
+  'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': 'electrical',
   'QCABLE-PROCUREMENT-INSUFFICIENT': 'electrical',   // §Q — procurement deficit gate
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': 'electrical',  // grounding-authority gate (2026-07-25)
   'TIGO-RSS-TRANSMITTER-UNVERIFIED': 'electrical',   // rapid-shutdown keep-alive source

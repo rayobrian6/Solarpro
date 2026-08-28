@@ -1461,6 +1461,22 @@ const CLASSIFIABLE_CATEGORIES = new Set(Object.keys(CATEGORY_QUANTITY_BASIS));
 export interface ProcurementClassificationContext {
   /** OPEN requirement codes that DECLARE a procurement-axis impact. */
   openProcurementRequirementCodes: string[];
+  // ── 2026-08-28 — PROCUREMENT IS NOT A SHADOW OF A COMPLIANCE REQUIREMENT ──
+  // The ESTIMATED_FIELD_VERIFY branch below used to be gated on
+  // ROUTE-LENGTH-ESTIMATE being OPEN, on the assumption that "no open route
+  // requirement ⇒ the routes are verified". That held while the only ways to
+  // close it were routed geometry or a field measurement.
+  //
+  // It stopped holding when a run could also be closed by the DESIGN BOUNDING it
+  // (lib/electrical/routeLengthBound.ts). A bounded run's COMPLIANCE question is
+  // answered — the conductor is valid for any installed length under the
+  // maximum the drawing states — but its QUANTITY is still Σ heuristic length.
+  // Ordering conduit and sweeps off that, marked VERIFIED_ORDERABLE, is exactly
+  // the over-claim the ESTIMATED state exists to prevent.
+  //
+  // So the quantity state is decided by the LENGTH SOURCE, which is the fact it
+  // was always about. These are the route ids whose length is estimate-grade.
+  estimateGradeRouteIds: readonly string[];
   /** every OPEN requirement code (evidence/provenance, not blocking). */
   openRequirementCodes: string[];
   /** resolution action per code, from the registry (rendered verbatim). */
@@ -1478,11 +1494,24 @@ export function buildProcurementClassificationContextFromSnapshot(
 ): ProcurementClassificationContext {
   const registry = (snap?.permitReadiness?.registry ?? []).filter(b => !b.resolved);
   const openRequirementCodes = registry.map(b => b.code);
+  // Every route id whose length is estimate-grade. Fail-closed: a segment with
+  // no recognised source counts as an estimate. The PHYSICAL RACEWAY ids are
+  // included alongside the segment ids because a raceway row's
+  // `affectedRouteIds` names both, and the raceway inherits its members' source.
+  const estimateGradeRouteIds: string[] = (() => {
+    const segs = snap?.electrical?.routeSegments ?? [];
+    const NON_ESTIMATE = new Set(['cad-route', 'field-measurement', 'field-verified']);
+    const bad = segs.filter(r => !NON_ESTIMATE.has(String(r.lengthSource ?? '')));
+    const ids = new Set<string>(bad.map(r => r.segmentId));
+    for (const r of bad) if (r.physicalRacewayId) ids.add(r.physicalRacewayId);
+    return [...ids];
+  })();
   const resolutionByCode: Record<string, string> = {};
   for (const b of registry) resolutionByCode[b.code] = b.resolutionAction;
   return {
     openRequirementCodes,
     openProcurementRequirementCodes: openRequirementCodes.filter(c => severityImpactForCode(c).procurement),
+    estimateGradeRouteIds,
     resolutionByCode,
     cableExtensionSolutions: snap?.electrical?.procurementSufficiency?.solutions ?? [],
     supplySideTap: snap?.electrical?.supplySideTapConnection ?? null,
@@ -1500,7 +1529,8 @@ export function buildProcurementClassificationContext(input: PermitInput): Procu
 
 /** The empty context — for pure callers classifying without a snapshot. */
 export const EMPTY_PROCUREMENT_CONTEXT: ProcurementClassificationContext = {
-  openProcurementRequirementCodes: [], openRequirementCodes: [], resolutionByCode: {},
+  openProcurementRequirementCodes: [], estimateGradeRouteIds: [],
+  openRequirementCodes: [], resolutionByCode: {},
   cableExtensionSolutions: [], supplySideTap: null, snapshotId: null, snapshotDigest: null,
 };
 
@@ -1683,6 +1713,21 @@ export function classifyProcurementAuthority(
     return make('CANDIDATE_NON_ORDERABLE', 'pending-authority',
       `OPEN procurement-impacting requirement(s): ${blockingRequirementCodes.join(', ')}`,
       codeResolution(blockingRequirementCodes, 'Resolve the listed requirement(s) — see RS-1.'));
+  }
+  // 6b. A ROUTE-DERIVED quantity whose underlying length is still an ESTIMATE is
+  //     ESTIMATED — whatever the requirement registry says. This runs OUTSIDE the
+  //     open-requirement branch above precisely because it must not depend on one:
+  //     a design-BOUNDED run closes the compliance question and leaves the
+  //     quantity exactly as estimated as it was.
+  if (quantitySource === 'route-derived') {
+    const touched = (row.affectedRouteIds ?? []).filter(id => ctx.estimateGradeRouteIds.includes(id));
+    if (touched.length > 0) {
+      return make('ESTIMATED_FIELD_VERIFY', 'pending-measurement',
+        `Σ route length for ${touched.join(', ')} is CAD-derived, neither routed nor field-measured — `
+        + 'budgeting quantity only. The design may BOUND these runs (which answers the voltage-drop '
+        + 'question) without making the quantity a measurement.',
+        'Route or field-measure the runs, record them on the canonical route objects, then re-derive.');
+    }
   }
   // 7. FAIL-CLOSED identity + rule checks — the ONLY path to VERIFIED_ORDERABLE.
   //    (A route-derived row with NO open route requirement reaches here: the

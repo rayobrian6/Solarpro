@@ -450,6 +450,22 @@ export interface RouteSegmentRecord {
   lengthProvenance?: 'geometry-derived' | 'estimated' | 'design-constraint' | 'field-measured' | 'unknown';
   /** the ONE verification state for the length taxonomy (mirrors verificationStatus). */
   verificationState?: RouteVerificationState;
+  // ── DESIGN LENGTH BOUND (2026-08-28) ────────────────────────────
+  // The MAXIMUM one-way length at which the SELECTED conductor still meets the
+  // voltage-drop limit the conductor schedule grades this run against, and the
+  // drawing states. A run the design BOUNDS is not an estimate of anything: the
+  // conductor is valid for any installed length at or under the bound, and the
+  // installation is bound by the drawing.
+  //
+  // It lives on the RUN rather than only in a requirement payload because it is
+  // a property of the run — the schedule prints it, the validator reads it, and
+  // it must survive the requirement clearing.
+  /** max one-way length (whole ft) the design permits. null ⇒ no bound computable. */
+  designMaxOneWayFt?: number | null;
+  /** 'bounded' | 'exceeds-bound' | 'unbounded'. */
+  lengthBoundState?: 'bounded' | 'exceeds-bound' | 'unbounded' | null;
+  /** the construction requirement the drawing prints for this run. */
+  designLengthNote?: string | null;
   voltageDropPct: number | null;
   /** which current the voltage-drop formula consumed (states the basis). */
   voltageDropCurrentBasis?: 'operating' | 'continuous' | 'calculated' | null;

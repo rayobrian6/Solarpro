@@ -74,7 +74,14 @@ describe('W10 — permit-readiness registry is canonical + structured', () => {
   it('the always-present engineering-review + route-estimate blockers are present', () => {
     const codes = snap.permitReadiness.registry.map(r => r.code);
     expect(codes).toContain('ENGINEERING-REVIEW-PENDING');
-    expect(codes).toContain('ROUTE-LENGTH-ESTIMATE');
+    // 2026-08-28 ROUTE-BOUND MIGRATION - ROUTE-LENGTH-ESTIMATE no longer fires on
+  // this fixture: the DESIGN bounds each un-routed run by stating the maximum
+  // one-way length at which the selected conductor still meets its Vd limit, and
+  // the drawing carries that requirement. Nothing was relaxed - an unbounded run
+  // still blocks, an estimate over its bound raises
+  // ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND, and the BOM quantity is still ESTIMATED.
+  // See tests/planset/route-length-bound.test.ts.
+  expect(codes).not.toContain('ROUTE-LENGTH-ESTIMATE');
   });
 });
 

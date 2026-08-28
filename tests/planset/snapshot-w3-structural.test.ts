@@ -89,9 +89,17 @@ describe('W3 structural authority — canonical objects on the real snapshot', (
   });
 
   it('carry-forward electrical blockers remain', () => {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - ROUTE-LENGTH-ESTIMATE no longer fires:
+    // the DESIGN bounds each un-routed run by stating the maximum one-way length
+    // at which the selected conductor still meets its Vd limit, and the drawing
+    // carries that requirement. Nothing was relaxed - an unbounded run still
+    // blocks, an estimate over its bound raises ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND,
+    // and the BOM quantity is still ESTIMATED. See route-length-bound.test.ts.
     const codes = snap.permitReadiness.blockers.map(b => b.code);
-    expect(codes).toContain('ROUTE-LENGTH-ESTIMATE');
+    expect(codes).not.toContain('ROUTE-LENGTH-ESTIMATE');
+    // the package is still NOT ready - which is what this test is about
     expect(snap.permitReadiness.ready).toBe(false);
+    expect(codes.length).toBeGreaterThan(0);
   });
 
   it('the real snapshot is internally consistent (no blocking invariant violations)', () => {

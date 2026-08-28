@@ -31,7 +31,18 @@ const LEGIT_BLOCKERS = [
   // nothing to block on. It still fires when there is no basis at all (an unlocalized project), and
   // the new CODE-AUTHORITY-CONFLICT still fires when governed ordinances disagree — both are
   // asserted directly in tests/planset/code-authority-w4.test.ts.
-  'ROUTE-LENGTH-ESTIMATE',
+  // SHIPPED DESIGN LENGTH BOUND (2026-08-28) - ROUTE-LENGTH-ESTIMATE leaves this
+  // list for the same reason CODE-AUTHORITY-INCOMPLETE and the RACKING-CAPACITY-*
+  // codes did: it fired on every package with an un-routed run, and its only
+  // clearance was somebody walking the attic. The DESIGN now bounds each run by
+  // stating the maximum one-way length at which the selected conductor still
+  // meets its voltage-drop limit, and the drawing carries that requirement.
+  //
+  // Nothing was relaxed. A run with no conductor selected is still unbounded and
+  // still blocks; a run whose estimate EXCEEDS its bound raises
+  // ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND; and the BOM quantity is still
+  // ESTIMATED - FIELD VERIFY, because the length source is still an estimate.
+  // All three are asserted in tests/planset/route-length-bound.test.ts.
   // GOVERNING-CANDIDATE ENVELOPE (2026-08-27) — no longer in the BLOCKING set. The rail bending
   // demand M = w·L²/8 does not depend on which rail is fitted, so once the weakest span-screened
   // candidate carries it, every listed candidate does: the design is complete and specified by

@@ -159,7 +159,12 @@ describe('Q-Cable length reconciliation — C. E-1 prints the labeled canonical 
     const routeSecs = sections.filter(s => s.sectionId === 'BRANCH_HOMERUN_RUN' || s.sectionId === 'COMBINER_TO_DISCO_RUN');
     for (const sec of routeSecs) {
       expect(sec.lengthKind).toBe('route-one-way');
-      expect(sec.lengthLabel).toBe('route (one-way)');
+      // 2026-08-28 ROUTE-BOUND MIGRATION - a bounded run states its MAXIMUM on
+      // the schedule, because pass-by-design is only honest if the construction
+      // set carries the limit. The property under test - a route quantity
+      // DISTINCT from the cable-path quantity - is unchanged.
+      expect(sec.lengthLabel).toMatch(/^route \(one-way\)/);
+      expect(sec.lengthLabel).not.toMatch(/cable path/i);
       expect(sec.lengthObjectId).toBe(sec.sectionId);
     }
   });

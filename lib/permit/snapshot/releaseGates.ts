@@ -721,6 +721,23 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'measurement). A heuristic route estimate never reaches this code: an estimate can neither certify nor condemn, '
       + 'and asserting a code violation from one would be the original over-claim pointed the other way.',
   },
+  // A run whose OWN estimated route already exceeds the length its selected
+  // conductor permits at the schedule's Vd limit. This is a KNOWN DEFICIENCY,
+  // not a missing measurement, and it must never be reported as one.
+  'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': {
+    gateId: 'RG-5', findingType: 'VERIFIED_DEFICIENCY',
+    title: 'Routed length exceeds the maximum the selected conductor permits',
+    affects:
+      'The named run only. Its conductor will not meet the voltage-drop limit the conductor schedule grades '
+      + 'it against at the length the layout implies.',
+    resolutionMode: 'OPERATOR_CONFIRMATION', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: null, resolverPhase: 'delivered (routeLengthBound)',
+    modeBasis:
+      '2026-08-28 \u2014 the counterpart to the design LENGTH BOUND. A run the design bounds is not an estimate, '
+      + 'and its bound has a failure mode: when the indicative route already exceeds the maximum the selected '
+      + 'conductor permits, the run as laid out fails its own Vd limit. Resolved by upsizing the conductor or '
+      + 'shortening the route \u2014 a design change, not a field measurement.',
+  },
   'FEEDER-RACEWAY-AUTHORITY': {
     gateId: 'RG-5', findingType: 'PENDING_SELECTION',
     title: 'Feeder raceway / conduit type not resolved on the canonical feeder segment',

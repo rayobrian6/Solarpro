@@ -39,6 +39,7 @@ import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 import { gradeVoltageDrop, projectCanonicalFeeder } from '@/lib/permit/snapshot/electricalProjection';
 import { inMemoryMeasurementService, type FieldMeasurementService } from '@/lib/fieldMeasurement/service';
 import { buildFieldMeasurementAuthority, sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
+import { closesFieldVerification } from '@/lib/permit/snapshot/types';
 import type { FieldRouteMeasurementAuthority } from '@/lib/fieldMeasurement/resolver';
 import type { RouteApplicabilityFact } from '@/lib/fieldMeasurement/types';
 import { routeFactsFromSnapshot } from '@/lib/fieldMeasurement/permitAccess';
@@ -159,10 +160,21 @@ describe('WS-5 §15 stage 0 — the baseline is an estimate and the requirement 
     }
   });
 
-  it('ROUTE-LENGTH-ESTIMATE is OPEN and names those runs', () => {
-    const b = routeBlocker(baseline);
-    expect(b).toBeTruthy();
-    for (const id of residualIds) expect(b!.message).toContain(id);
+  it('the residual runs carry an ESTIMATE length authority, not field evidence', () => {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - ROUTE-LENGTH-ESTIMATE no longer fires
+    // on this fixture: the DESIGN bounds each un-routed run by stating the
+    // maximum one-way length at which the selected conductor still meets its Vd
+    // limit. That closes the PERMIT question and leaves this suite's actual
+    // subject untouched - the field-measurement authority lifecycle, and the
+    // rule that RECORDING IS NOT VERIFICATION. Both are asserted directly on the
+    // segment's length authority, which is where they were always true.
+    expect(routeBlocker(baseline)).toBeFalsy();
+    for (const id of residualIds) {
+      const s = seg(baseline, id)!;
+      if (sourceClosesRouteLengthRequirement(s.lengthSource)) continue;
+      expect(s.lengthSource, id).toBe('cad-derived-estimate');
+      expect(s.verifiedFieldLengthFt ?? null, id).toBeNull();
+    }
   });
 
   it('the voltage drop on a residual run grades PROVISIONAL_PASS or FAIL — never VERIFIED_PASS', () => {
@@ -223,10 +235,22 @@ describe('WS-5 §15 stage 1 — a recorded measurement moves the calculation and
     }
   });
 
-  it('41. the requirement REMAINS OPEN — recording is not verification', () => {
-    const b = routeBlocker(reported);
-    expect(b, 'ROUTE-LENGTH-ESTIMATE must still be present after an unverified report').toBeTruthy();
-    expect(b!.message).toContain(target());
+  it('41. RECORDING IS NOT VERIFICATION — the report never becomes field evidence', () => {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - ROUTE-LENGTH-ESTIMATE no longer fires
+    // on this fixture: the DESIGN bounds each un-routed run by stating the
+    // maximum one-way length at which the selected conductor still meets its Vd
+    // limit. That closes the PERMIT question and leaves this suite's actual
+    // subject untouched - the field-measurement authority lifecycle, and the
+    // rule that RECORDING IS NOT VERIFICATION. Both are asserted directly on the
+    // segment's length authority, which is where they were always true.
+    const s = seg(reported, target())!;
+    // the number MOVED (an operator report becomes the calculation length) …
+    expect(s.lengthSource).toBe('operator-entry');
+    // … and it is still NOT verified: no verified field length, and the
+    // verification state is the unverified report, not field evidence.
+    expect(s.verifiedFieldLengthFt ?? null).toBeNull();
+    expect(s.verificationState).toBe('field-reported');
+    expect(closesFieldVerification(s.verificationState)).toBe(false);
   });
 
   it('the voltage-drop grade stays PROVISIONAL for an unverified report', () => {
@@ -355,10 +379,11 @@ describe('WS-5 §15 stage 3 — the requirement REOPENS', () => {
     });
 
     const after = build(await currentAuthority());
-    const b = routeBlocker(after);
-    expect(b, 'withdrawing a verification must REOPEN ROUTE-LENGTH-ESTIMATE').toBeTruthy();
-    expect(b!.message).toContain(id);
-    // …and the segment falls back to the CAD source, not to the rejected number.
+    // 2026-08-28 ROUTE-BOUND MIGRATION - the REOPEN is now asserted on the length
+    // AUTHORITY rather than on ROUTE-LENGTH-ESTIMATE, which no longer fires here
+    // (the design bounds the run). Withdrawing a verification must still undo the
+    // field evidence, and it does.
+    // the segment falls back to the CAD source, not to the rejected number.
     const s = seg(after, id)!;
     expect(s.lengthSource).toBe('cad-derived-estimate');
     // Unpopulated on a CAD-source segment (the WS-5 block never runs for it), so
@@ -390,9 +415,11 @@ describe('WS-5 §15 stage 3 — the requirement REOPENS', () => {
     // …and it is NOT verified, so it does not close anything.
     expect(s.verificationState).toBe('field-reported');
     expect(s.verifiedFieldLengthFt).toBeNull();
-    const b = routeBlocker(after);
-    expect(b, 'superseding a verified record with an unverified one must REOPEN the requirement').toBeTruthy();
-    expect(b!.message).toContain(id);
+    // 2026-08-28 ROUTE-BOUND MIGRATION - asserted on the length AUTHORITY, which
+    // is where "superseding a verified record with an unverified one undoes the
+    // verification" is actually true. The permit requirement no longer fires
+    // here because the design bounds the run.
+    expect(closesFieldVerification(seg(after, id)!.verificationState)).toBe(false);
 
     const hist = await svc.listHistory(USER_A_ADMIN, PROJECT_A, id);
     expect(hist.measurements.some(m => m.verificationState === 'SUPERSEDED')).toBe(true);

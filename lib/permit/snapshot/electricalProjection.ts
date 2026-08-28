@@ -11,6 +11,7 @@
 // feeder + its route segment. Same field, same rounding, everywhere.
 // ═══════════════════════════════════════════════════════════════════════════
 import type { PermitDesignSnapshot, RouteSegmentRecord, GroundingSegment } from './types';
+import { ROUTE_VD_LIMIT_PCT } from '@/lib/electrical/routeLengthBound';
 import { closesFieldVerification, type RouteVerificationState } from './types';
 import { evaluateCompliance, type ComplianceResult } from './complianceState';
 import { GROUNDING_PENDING_BONDING_CELL_LABEL } from './groundingAuthority';
@@ -1508,7 +1509,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingFactor: num(branchSeg?.tempDeratingFactor),
       deratingBasis: 'free-air (no raceway fill adjustment)',
       voltageDropPct: vd,
-      vdLimitPct: 2,
+      vdLimitPct: ROUTE_VD_LIMIT_PCT.branch,
       vdCalculationLengthFt: _vdLenOf(branchSeg),
       // D5 — the SAME canonical resolver PV-4B uses. Not a PV-4B.1 variant.
       voltageDrop: _gradeSeg(branchSeg, vd, 2),
@@ -1592,7 +1593,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingFactor: num(hrSeg?.tempDeratingFactor),
       deratingBasis: null,
       voltageDropPct: vd,
-      vdLimitPct: 2,
+      vdLimitPct: ROUTE_VD_LIMIT_PCT.branch,
       vdCalculationLengthFt: _vdLenOf(hrSeg),
       voltageDrop: _gradeSeg(hrSeg, vd, 2),
       // §4 — THE shared 6-CCC ampacity chain (the row that used to print a lone
@@ -1680,7 +1681,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingFactor: num(seg.tempDeratingFactor),
       deratingBasis: rw?.deratingBasis ?? null,
       voltageDropPct: vd,
-      vdLimitPct: 3,
+      vdLimitPct: ROUTE_VD_LIMIT_PCT.feeder,
       vdCalculationLengthFt: _vdLenOf(seg),
       voltageDrop: _gradeSeg(seg, vd, 3),
       // §4 — feeder / downstream service run ampacity chain.
@@ -1783,7 +1784,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingFactor: null,
       deratingBasis: null,
       voltageDropPct: null,
-      vdLimitPct: 3,
+      vdLimitPct: ROUTE_VD_LIMIT_PCT.feeder,
       vdCalculationLengthFt: num(tap.lengthFt),
       voltageDrop: gradeVoltageDrop({
         pct: null, limitPct: 3, lengthFt: num(tap.lengthFt),
@@ -1802,6 +1803,23 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       }),
       compliance,
     });
+  }
+
+  // ══ THE DESIGN LENGTH BOUND, STATED ON EVERY SECTION THAT HAS ONE ══════
+  // Applied HERE rather than in each section builder, because "the drawing
+  // states the limit the installation is bound by" has to hold for every run,
+  // and four builders each remembering to do it is four chances to forget.
+  //
+  // Pass-by-design is only honest if the construction set carries the
+  // requirement. The estimate keeps its own label and stays an estimate.
+  for (const sec of sections) {
+    const seg = (elec.routeSegments ?? []).find(r => r.segmentId === sec.sectionId);
+    if (!seg || seg.designMaxOneWayFt == null) continue;
+    if (seg.lengthBoundState === 'bounded') {
+      sec.lengthLabel = `${sec.lengthLabel} — MAX ${seg.designMaxOneWayFt} FT BY DESIGN`;
+    } else if (seg.lengthBoundState === 'exceeds-bound') {
+      sec.lengthLabel = `${sec.lengthLabel} — EXCEEDS THE ${seg.designMaxOneWayFt} FT MAX FOR THIS CONDUCTOR`;
+    }
   }
 
   return sections;

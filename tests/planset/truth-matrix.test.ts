@@ -74,7 +74,18 @@ describe('truth matrix — activated classes (W2)', () => {
     expect(snap.electrical.routeSegments.length).toBeGreaterThan(0);
     for (const r of snap.electrical.routeSegments) expect(r.lengthSource).toBeTruthy();
     expect(snap.permitReadiness.ready).toBe(false);
-    expect(snap.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-ESTIMATE')).toBe(true);
+    // 2026-08-28 ROUTE-BOUND MIGRATION - ROUTE-LENGTH-ESTIMATE no longer fires on
+    // this fixture: the DESIGN bounds each un-routed run. Nothing was relaxed -
+    // an unbounded run still blocks and the BOM quantity is still ESTIMATED.
+    // See tests/planset/route-length-bound.test.ts.
+    // An estimate no longer blocks BY ITSELF - an UNBOUNDED estimate does. Every
+    // estimate-grade run here carries a stated design maximum instead.
+    expect(snap.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-ESTIMATE')).toBe(false);
+    const est = snap.electrical.routeSegments.filter(r =>
+      r.lengthSource === 'cad-derived-estimate'
+      && (r.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
+    expect(est.length).toBeGreaterThan(0);
+    for (const r of est) expect(r.lengthBoundState, r.segmentId).toBe('bounded');
   });
 
   it('V15: engine thermal basis matches the snapshot (no legacy -10C regime)', () => {

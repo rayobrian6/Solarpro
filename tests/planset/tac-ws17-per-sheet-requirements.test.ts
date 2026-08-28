@@ -51,12 +51,17 @@ const FRAMING = /EXISTING FRAMING CAPACITY NOT VERIFIED/;
 describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content', () => {
   const DR = gen('design-review');
 
-  it('PV-1 (site & array plan) carries the route-geometry requirement, NOT Q-Cable procurement or the tap length', () => {
-    const b = bulletsOn(DR.html, 'PV-1');
-    expect(b.some(x => ROUTE.test(x))).toBe(true);
+  // 2026-08-28 ROUTE-BOUND MIGRATION - PV-1's own requirement was
+  // ROUTE-LENGTH-ESTIMATE, which no longer fires: the DESIGN bounds each
+  // un-routed run. WS-17's property is that a sheet enumerates the requirements
+  // gating ITS OWN content rather than the package union, and it is asserted
+  // here on a sheet the fixture still gates. The rule is unchanged.
+  it('PV-3 (attachment detail) carries the FRAMING requirement, NOT Q-Cable procurement, the tap length or the route', () => {
+    const b = bulletsOn(DR.html, 'PV-3');
+    expect(b.some(x => FRAMING.test(x))).toBe(true);
     expect(b.some(x => QCABLE.test(x))).toBe(false);
     expect(b.some(x => TAP.test(x))).toBe(false);
-    expect(b.some(x => FRAMING.test(x))).toBe(false);
+    expect(b.some(x => ROUTE.test(x))).toBe(false);
   });
 
   it('PV-3 (attachment detail) carries the structural requirements, NOT the electrical ones', () => {
@@ -75,8 +80,10 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     expect(b.some(x => ROUTE.test(x))).toBe(false);
   });
 
-  it('the four banner sheets no longer print the SAME list', () => {
-    const lists = ['PV-1', 'PV-1B', 'PV-3'].map(id =>
+  it('the banner sheets do not print the SAME list', () => {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - PV-1 / PV-1B no longer carry an own
+    // requirement, so the differentiation is asserted on sheets that do.
+    const lists = ['PV-3', 'PE-1'].map(id =>
       bulletsOn(DR.html, id).filter(x => !/more unresolved release requirement/.test(x)).join('|'));
     expect(new Set(lists).size).toBe(lists.length);
   });
@@ -90,7 +97,10 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     // entirely and states the package totals once, on the cover. The package
     // total is re-asserted below, so nothing is dropped either way.
     const banner = structuralBanner(DR.snap);
-    for (const id of ['PV-1', 'PV-1B', 'PV-3', 'PE-1']) {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - PV-1 / PV-1B have no own requirement on
+    // this fixture any more (the route one closed), so the case is exercised on
+    // the sheets that DO own one. The rule is unchanged.
+    for (const id of ['PV-3', 'PE-1']) {
       const per = bannerRequirementsForSheet(banner, id);
       const bullets = bulletsOn(DR.html, id);
       const rem = bullets.find(x => /unresolved release requirement/.test(x)
@@ -119,7 +129,10 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     // four sheets owns, so all four must state the remainder.
     const P = gen('design-review', pendingGroundingAuthority('wrongConnectorArchitecture'));
     const banner = structuralBanner(P.snap);
-    for (const id of ['PV-1', 'PV-1B', 'PV-3', 'PE-1']) {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - PV-1 / PV-1B have no own requirement on
+    // this fixture any more (the route one closed), so the case is exercised on
+    // the sheets that DO own one. The rule is unchanged.
+    for (const id of ['PV-3', 'PE-1']) {
       expect(bannerRequirementsForSheet(banner, id).otherCount,
         `${id} owns the entire registry — the remainder case is not exercised`).toBeGreaterThan(0);
       const rem = bulletsOn(P.html, id).find(x => /unresolved release requirement/.test(x)

@@ -364,8 +364,15 @@ describe('W1-C — one counter over one population', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 describe('W1-D — route-derived rows are ESTIMATED, never orderable', () => {
   it('ROUTE-LENGTH-ESTIMATE is OPEN and every route-derived row is ESTIMATED_FIELD_VERIFY', () => {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - the dependency was the open
+    // requirement; it is now the LENGTH SOURCE, which is the fact the ESTIMATED
+    // state was always about. A design-BOUNDED run answers the voltage-drop
+    // question and leaves the quantity exactly as estimated as it was.
+    const estimateGrade = (fixture.snap.electrical.routeSegments ?? [])
+      .filter(r => r.lengthSource === 'cad-derived-estimate' || r.lengthSource === 'unknown');
+    expect(estimateGrade.length, 'anti-vacuity: the design must carry estimate-grade runs').toBeGreaterThan(0);
     const open = (fixture.snap.permitReadiness.registry ?? []).filter(b => !b.resolved).map(b => b.code);
-    expect(open, 'anti-vacuity: the dependency must actually be open').toContain('ROUTE-LENGTH-ESTIMATE');
+
     const routeRows = fixture.bom.filter(r => r.procurement!.quantitySource === 'route-derived');
     expect(routeRows.length, 'anti-vacuity: the design must carry route-derived rows').toBeGreaterThanOrEqual(20);
     for (const r of routeRows) {
@@ -375,8 +382,12 @@ describe('W1-D — route-derived rows are ESTIMATED, never orderable', () => {
       expect(st, `${r.partNumber}`).not.toBe('VERIFIED_ORDERABLE');
       if (!String(r.partNumber).startsWith('GRN-OPENAIR')) {
         expect(st, `${r.partNumber}`).toBe('ESTIMATED_FIELD_VERIFY');
-        expect(r.procurement!.blockingRequirementCodes).toContain('ROUTE-LENGTH-ESTIMATE');
+        // 2026-08-28 ROUTE-BOUND MIGRATION - the row no longer cites an open
+        // REQUIREMENT, because the state no longer depends on one. It cites the
+        // estimate-grade ROUTES it is derived from, which is the reason it is an
+        // estimate whether or not any requirement is open.
         expect(r.procurement!.affectedRouteIds.length).toBeGreaterThan(0);
+        expect(r.procurement!.authoritySource, `${r.partNumber}`).toMatch(/CAD-derived|route length/i);
       }
     }
   });

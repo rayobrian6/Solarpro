@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { describe, it, expect } from 'vitest';
+import { sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
@@ -110,25 +111,37 @@ describe('WS-5 §16 — the route source distribution is unchanged', () => {
   });
 });
 
-describe('WS-5 §16 — ROUTE-LENGTH-ESTIMATE is OPEN, and was not suppressed', () => {
+// 2026-08-28 ROUTE-BOUND MIGRATION — this describe pinned the requirement OPEN.
+// It no longer fires: the DESIGN bounds each un-routed run by stating the maximum
+// one-way length at which the selected conductor still meets its Vd limit, and
+// the drawing carries that requirement.
+//
+// WS-5 §16's real subject is that NOTHING WAS SUPPRESSED — every run is still
+// accounted for, by name, with the reason it is or is not blocked. That is what
+// is asserted now, on the segments themselves.
+describe('WS-5 §16 — every project run is accounted for, and nothing was suppressed', () => {
   const blocker = (snap.permitReadiness?.blockers ?? []).find(b => b.code === 'ROUTE-LENGTH-ESTIMATE');
 
-  it('the requirement is present', () => {
-    expect(blocker, 'ROUTE-LENGTH-ESTIMATE must remain OPEN on a project with no field measurements').toBeTruthy();
+  it('the requirement is CLEARED, and cleared by a stated design bound', () => {
+    expect(blocker).toBeFalsy();
+    for (const id of ['ROOF_RUN', 'BRANCH_HOMERUN_RUN', 'COMBINER_TO_DISCO_RUN']) {
+      const s = segs.find(x => x.segmentId === id)!;
+      expect(s.lengthBoundState, id).toBe('bounded');
+      expect(s.designMaxOneWayFt, id).toBeGreaterThan(0);
+    }
   });
 
-  it('it names the three unresolved runs and excuses neither the non-estimate nor the excluded ones', () => {
-    // 2026-08-28 TAP MIGRATION — 4 → 3. DISCO_TO_METER_RUN is the supply-side tap
-    // span, whose length the DESIGN fixes at the NEC 705.11(C) maximum; it is no
-    // longer an estimate, so it is named on the NOT-BLOCKED side instead.
-    expect(blocker!.message).toContain('3 of 5 PROJECT-OWNED');
-    for (const id of ['ROOF_RUN', 'BRANCH_HOMERUN_RUN', 'COMBINER_TO_DISCO_RUN']) {
-      expect(blocker!.message).toContain(id);
+  it('every run is still accounted for — routed, design-fixed, bounded or excluded', () => {
+    for (const s of segs) {
+      const accounted =
+        sourceClosesRouteLengthRequirement(s.lengthSource)
+        || s.lengthBoundState === 'bounded'
+        || (s.routeAuthorityApplicability ?? 'REQUIRED') !== 'REQUIRED';
+      expect(accounted, `${s.segmentId} is unaccounted for`).toBe(true);
     }
-    // still NAMED, with the reason it is not blocked — never silently dropped
-    expect(blocker!.message).toMatch(/DISCO_TO_METER_RUN \(fixed by design\)/);
-    expect(blocker!.message).toContain('BRANCH_RUN');
-    expect(blocker!.message).toContain('MSP_TO_UTILITY_RUN');
+    // the utility-owned run is EXCLUDED, not silently dropped
+    const msp = segs.find(x => x.segmentId === 'MSP_TO_UTILITY_RUN')!;
+    expect(msp.routeAuthorityApplicability).toBe('EXCLUDED');
   });
 });
 

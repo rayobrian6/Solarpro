@@ -617,14 +617,21 @@ describe('the built package: WS-7 clears the fill, WS-5 evaluates the option spa
     expect(segs.some(s => s.lengthSource === 'cad-derived-estimate')).toBe(true);
   });
 
-  it('R2 — ROUTE-LENGTH-ESTIMATE names ONLY the residual segments', () => {
-    const entry = (snap.permitReadiness.registry ?? []).find(r => r.code === 'ROUTE-LENGTH-ESTIMATE')!;
-    expect(entry).toBeTruthy();
-    const p = entry.payload as any;
-    expect(p.residualSegmentIds).not.toContain('BRANCH_RUN');
-    expect(p.geometryDerivedSegmentIds).toContain('BRANCH_RUN');
-    expect(p.residualSegmentIds.length).toBeGreaterThan(0);
-    expect(entry.explanation).not.toMatch(/^Electrical run lengths are CAD-derived estimates/);
+  it('R2 — the AAC §2.13 SPLIT survives: BRANCH_RUN is routed, the rest are not', () => {
+    // 2026-08-28 ROUTE-BOUND MIGRATION - ROUTE-LENGTH-ESTIMATE no longer fires on
+    // this fixture: the DESIGN bounds each un-routed run. Nothing was relaxed -
+    // an unbounded run still blocks and the BOM quantity is still ESTIMATED.
+    // See tests/planset/route-length-bound.test.ts.
+    // The split this pinned is a property of the SEGMENTS, and it is unchanged:
+    // BRANCH_RUN is routed geometry; the others are estimates that the design
+    // BOUNDS rather than measures.
+    expect((snap.permitReadiness.registry ?? []).some(r => r.code === 'ROUTE-LENGTH-ESTIMATE')).toBe(false);
+    const segs = snap.electrical.routeSegments ?? [];
+    expect(segs.find(s => s.segmentId === 'BRANCH_RUN')!.lengthSource).toBe('cad-route');
+    const est = segs.filter(s => s.lengthSource === 'cad-derived-estimate'
+      && (s.routeAuthorityApplicability ?? 'REQUIRED') === 'REQUIRED');
+    expect(est.length).toBeGreaterThan(0);
+    for (const s2 of est) expect(s2.designMaxOneWayFt, s2.segmentId).toBeGreaterThan(0);
   });
 
   it('the topology object is on the snapshot with the directive field list', () => {
