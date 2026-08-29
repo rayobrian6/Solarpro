@@ -381,20 +381,39 @@ export function evaluateDocumentApplicability(
   const documentProduct = documentProductFromAsset(asset);
   const assetModel = _normP(asset.model);
   const docProduct = _normP(documentProduct);
-  // The document names the SAME product version as the asset's model ⇒ no version
-  // conflation ⇒ applicable (naming variance is fine; the equipment id keyed it).
-  if (!assetModel || !docProduct || assetModel === docProduct) {
-    return _mk('APPLICABLE', true, {
-      documentProduct, crossReferenceEvidence: null,
-      reason: 'The on-file document matches the asset product version (no version conflation).',
-    });
-  }
-  // The asset's document is a DIFFERENT version than the asset's model. If the
-  // SELECTED mount is the asset's BASE product (not the document's version) and no
-  // verified alias evidence bridges them, applicability is PENDING.
   const sel = _normP(selectedModel);
-  const selMatchesBase = !!sel && (sel === assetModel || sel.includes(assetModel) || assetModel.includes(sel));
-  const selIsDocVersion = !!sel && sel === docProduct;
+
+  // ══ 2026-08-29 - THE GATE ASKS ABOUT THE SELECTED PRODUCT, NOT ABOUT ITSELF ══
+  // This used to begin `if (!assetModel || !docProduct || assetModel === docProduct)
+  // return APPLICABLE` - a comparison of the asset's own model against the product
+  // parsed from the asset's OWN document title. Those two agree by construction for
+  // any well-formed row, so the branch fired first and `selectedModel` was NEVER
+  // COMPARED. A document is not evidence about itself: the `racking_detail:
+  // rooftech-mini` row (model "RT-MINI", title "Roof Tech RT-MINI Installation
+  // Manual") is perfectly self-consistent, and it was therefore returned as
+  // APPLICABLE for an installed RT-MINI **II** - so PV-3 printed "DOCUMENT
+  // APPLICABILITY: VERIFIED FOR SELECTED RT-MINI II" two notes above the note
+  // naming that first-generation manual, and DS-3 attached it as the mount's
+  // document.
+  //
+  // The question is, and always was: does THIS DOCUMENT cover THE PRODUCT BEING
+  // INSTALLED. Everything below compares those two.
+
+  // These read the DISPLAY names, BEFORE `_normP`. `_normP` strips every
+  // non-alphanumeric, so "RT-MINI II" becomes "rtminiii": a version token can no
+  // longer be anchored on a word boundary, and "rtminiii".includes("rtmini") is
+  // true — which is exactly how a second-generation product reads as its first.
+  const _verRe = new RegExp('(?:^|\\s)(' + _VERSION_TOKEN + ')\\s*$', 'i');
+  /** the trailing version differentiator of a product name ('II', 'Gen 2', 'v2'), or ''. */
+  const _versionOf = (p: string): string => {
+    const m = _verRe.exec(String(p ?? '').trim());
+    return m ? m[1].toLowerCase().replace(/\s+/g, ' ') : '';
+  };
+  const selDisp = String(selectedModel ?? '');
+  const docDisp = String(documentProduct ?? '');
+
+  // A verified, non-fabricated alias record is the one way across a genuine
+  // version difference. Unchanged.
   if (aliasEvidence && aliasEvidence.verified
     && _normP(aliasEvidence.selectedModel) === sel
     && _normP(aliasEvidence.documentProduct) === docProduct) {
@@ -404,16 +423,46 @@ export function evaluateDocumentApplicability(
       reason: 'A verified cross-reference/alias evidence record establishes applicability across product versions.',
     });
   }
-  if (selMatchesBase && !selIsDocVersion) {
+
+  // FAIL CLOSED with nothing to compare. Returning APPLICABLE on an unanswerable
+  // question is how it used to read as a cleared one.
+  if (!sel) {
     return _mk('PENDING_APPLICABILITY', false, {
       documentProduct, crossReferenceEvidence: null,
-      reason: `The on-file document covers ${documentProduct ?? 'a different product version'}, a different product `
-        + `version than the selected ${selectedModel ?? asset.model}, and no verified cross-reference/alias evidence establishes applicability.`,
+      reason: 'No selected product model was supplied, so this document cannot be shown to cover the installed product.',
     });
   }
-  // Selected model already matches the document's version, or is unrelated — no gate.
-  return _mk('APPLICABLE', true, {
+
+  // WHAT THIS GATE IS FOR: PRODUCT-VERSION CONFLATION, and nothing else.
+  //
+  // The asset row was retrieved BY EQUIPMENT ID, so "is this the document on file
+  // for this product" is already answered by the lookup - string-matching a model
+  // against a manual's marketing title ("IronRidge XR100" vs "XR100 rail" vs "XR
+  // Flush Mount Installation Manual") is weak evidence and was never the point.
+  //
+  // The point is the GENERATION. A version differentiator is not naming variance:
+  // it is the whole difference between two products. So the selected product's
+  // version must match BOTH the row it resolved to AND the document that row
+  // carries. Comparing all three is what catches the live defect - a design
+  // installing RT-MINI **II** resolving to the `rooftech-mini` row whose document
+  // is the first-generation manual - which the old self-comparison could not see,
+  // because the row and its own document agreed with each other perfectly.
+  const _selV = _versionOf(selDisp);
+  const _docV = _versionOf(docDisp);
+  const _assetV = _versionOf(String(asset.model ?? ''));
+
+  if (_selV === _docV && _selV === _assetV) {
+    return _mk('APPLICABLE', true, {
+      documentProduct, crossReferenceEvidence: null,
+      reason: `The on-file document covers ${documentProduct}, the same product version as the selected ${selectedModel ?? asset.model}.`,
+    });
+  }
+
+  const _conflatedWith = _selV !== _docV ? documentProduct : (asset.model ?? null);
+  return _mk('PENDING_APPLICABILITY', false, {
     documentProduct, crossReferenceEvidence: null,
-    reason: 'The selected model matches the document product version.',
+    reason: `The on-file document covers ${_conflatedWith ?? 'a different product version'}, a different product `
+      + `version than the selected ${selectedModel ?? asset.model}, and no verified cross-reference/alias evidence establishes applicability.`,
   });
+
 }

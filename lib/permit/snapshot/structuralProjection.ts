@@ -521,6 +521,34 @@ export interface FastenerAssembly {
   substrate: string | null;        // installation condition / substrate
   rafterDeckMethod: string | null;
   sourceDocument: string | null;   // archived datasheet / capacity source
+  // ── 2026-08-29 - TWO FACETS, BECAUSE THEY ARE TWO QUESTIONS ───────────────
+  // "Which fastener?" and "How is it installed?" are answered by different
+  // documents, and the package was collapsing them into one boolean. On the
+  // audited job a STAMPED structural PE letter for the exact mount named the
+  // assembly - 2 x SS304 5.0 mm x 90 mm wood screw, 3.07" embedment, no pilot
+  // hole, archived in-repo with a SHA-256 - and `documentRoles.fastenerAuthority`
+  // recorded it as established. The projection never asked: the
+  // `fastenerAuthorityDocument` argument that short-circuits the verdict was
+  // simply never passed by the caller, so the whole branch was dead code and the
+  // verdict fell through to a racking_detail INSTALLATION manual that does not
+  // exist for this product version.
+  //
+  // The result was a package that printed "SS304 5.0 mm x 90 mm wood screw (no
+  // pilot hole)" on PE-1, computed a 613 lb allowable from that exact screw, and
+  // said "FASTENER ASSEMBLY: PENDING VERIFIED SELECTION" and "FASTENER DIA.
+  // PENDING VERIF." on the same sheet and on PV-3.
+  /** WHICH fastener - manufacturer, model, diameter, length, quantity per mount,
+   *  embedment, pilot rule. A stamped structural PE letter naming the assembly for
+   *  the exact selected product establishes this. A flashing / water-resistance
+   *  evaluation report never does. */
+  selection: { established: boolean; sourceDocument: string | null; reason: string | null };
+  /** HOW it is installed - torque, drive sequence, flashing method, and any
+   *  condition the manufacturer imposes. This needs the installation document for
+   *  the SELECTED product version; a previous generation's manual is not it. */
+  installation: { established: boolean; sourceDocument: string | null; reason: string | null };
+  /** legacy single verdict = selection AND installation. Kept so procurement and
+   *  the BOM behave exactly as before - the orderable/non-orderable question is a
+   *  third thing again, and moving it is not this repair. */
   verification: 'verified' | 'unverified' | 'pending';
   /** §6 (BAR) — while NOT verified the fastener assembly is NON-ORDERABLE: no
    *  manufacturer/SKU/diameter/length/coating/capacity may render, the calculated
@@ -726,17 +754,59 @@ export function projectFastenerAssemblyFromSnapshot(
   // document authority (the SAME verdict PV-3 / DS-n consume). Absent ⇒ not
   // established — an RT-MINI II manual never verifies an RT-MINI fastener.
   const _docEntry = projectDocumentAuthority(snap, 'racking_detail', mountingSystemId ?? null);
+  const _elementsComplete = ra?.fastenerElementsComplete
+    ?? !!(ra?.screwLagModel && ra?.screwLagQtyPerMount != null && ra?.embedmentRequirementIn != null);
+  // ── THE ROLE OBJECT IS THE AUTHORITY, AND IT IS NOW ASKED ──────────────────
+  // `documentRoles.fastenerAuthority` is decided once, in rackingAssembly.ts, from
+  // a document class check plus an exact-model match; it carries the document
+  // identity, its SHA-256 and whether it is archived in-repo. It was never passed
+  // here, so `resolveFastenerVerification`'s first branch could never fire.
+  const _fastenerRole = (ra as { documentRoles?: { fastenerAuthority?: {
+    established?: boolean; documentIdentity?: string | null } } } | null)
+    ?.documentRoles?.fastenerAuthority ?? null;
+  // ONE applicability verdict for this projection. An explicitly-supplied override
+  // is the caller's already-decided answer (TAC WS-4) and must govern BOTH the
+  // legacy verdict and the installation facet - reading the snapshot region for
+  // one and the override for the other is how one object comes to hold two
+  // different applicability facts, which is the defect this whole seam exists to
+  // prevent.
+  const _applicabilityVerified = applicabilityOverride
+    ? applicabilityOverride.documentApplicabilityVerified
+    : _docEntry?.applicability?.applicabilityVerified === true;
   const _fv = resolveFastenerVerification({
-    elementsComplete: ra?.fastenerElementsComplete
-      ?? !!(ra?.screwLagModel && ra?.screwLagQtyPerMount != null && ra?.embedmentRequirementIn != null),
+    elementsComplete: _elementsComplete,
     citedSourceDocument: ra?.datasheetSource ?? ra?.capacitySource ?? null,
-    documentApplicabilityVerified: applicabilityOverride
-      ? applicabilityOverride.documentApplicabilityVerified
-      : _docEntry?.applicability?.applicabilityVerified === true,
+    documentApplicabilityVerified: _applicabilityVerified,
+    fastenerAuthorityDocument: _fastenerRole
+      ? { established: _fastenerRole.established === true, documentIdentity: _fastenerRole.documentIdentity ?? null }
+      : null,
   });
-  const sourceDocument = _fv.sourceDocument;
+  // SELECTION IS A WIDENING, NEVER A NARROWING. The stamped-letter path is ADDED
+  // to the path that already worked (complete elements + an applicable
+  // installation document, which also names the fastener); it does not replace
+  // it. Making the role the only route would have quietly demoted every assembly
+  // verified through a manual.
+  const _selectionEstablished = _elementsComplete
+    && (_fastenerRole?.established === true || _fv.verified);
+  const selection = {
+    established: _selectionEstablished,
+    sourceDocument: _selectionEstablished ? (_fastenerRole?.documentIdentity ?? null) : null,
+    reason: _selectionEstablished ? null
+      : !_elementsComplete
+        ? 'the fastener element is incomplete (model / count / embedment not all established on the mount record)'
+        : 'no document that NAMES the fastener assembly for the selected product is established',
+  };
+  const _installEstablished = _applicabilityVerified;
+  const installation = {
+    established: _installEstablished,
+    sourceDocument: _installEstablished ? (_docEntry?.documentTitle ?? null) : null,
+    reason: _installEstablished ? null
+      : 'no installation document verified as applicable to the SELECTED product version is on file',
+  };
+  const sourceDocument = _fv.sourceDocument ?? selection.sourceDocument;
   const verification: FastenerAssembly['verification'] =
-    !present ? 'pending' : (_fv.verified ? 'verified' : 'unverified');
+    !present ? 'pending'
+      : (selection.established && installation.established) ? 'verified' : 'unverified';
 
   // §6 (BAR) — the exact manufacturer/SKU/diameter/length/coating/embedment
   // description prints ONLY when verified. While NON-ORDERABLE the line reveals no
@@ -753,20 +823,33 @@ export function projectFastenerAssemblyFromSnapshot(
     pilotRuleLabel,
     substrate ? `substrate: ${substrate}` : null,
   ].filter(Boolean).join(' · ');
+  // THE LINE FOLLOWS SELECTION. Withholding the description while a stamped
+  // letter names the fastener is what made the package say "PENDING VERIFIED
+  // SELECTION" beside its own "SS304 5.0 mm x 90 mm wood screw". Whether the row
+  // may be ORDERED is a separate question (it needs a part number) and is still
+  // answered by `nonOrderable` below, unchanged.
   const line = !present
     ? FASTENER_NON_ORDERABLE_LABEL
-    : verification === 'verified'
+    : selection.established
       ? descParts
       : FASTENER_NON_ORDERABLE_LABEL;
-  const certLabel = verification === 'verified'
-    ? 'VERIFIED FASTENER ASSEMBLY'
-    : 'PENDING VERIFIED FASTENER ASSEMBLY';
+  // THE LABEL NAMES THE FACET THAT IS ACTUALLY MISSING. "PENDING VERIFIED
+  // FASTENER ASSEMBLY" on a package that names the fastener, its quantity, its
+  // embedment and its pilot rule from a stamped letter told the reader the wrong
+  // thing was outstanding.
+  const certLabel = !present
+    ? 'PENDING VERIFIED FASTENER ASSEMBLY'
+    : selection.established && installation.established
+      ? 'VERIFIED FASTENER ASSEMBLY'
+      : selection.established
+        ? 'FASTENER ASSEMBLY ESTABLISHED — INSTALLATION DETAILS PENDING'
+        : 'PENDING VERIFIED FASTENER ASSEMBLY';
 
   return {
     present, manufacturer, model, sku: ra?.mountSku ?? null, fastenerType,
     diameterIn, diameterLabel, lengthIn, qtyPerMount, material, headDrive,
     pilotHoleRequired, pilotRuleLabel, embedmentIn, substrate, rafterDeckMethod,
-    sourceDocument, verification, nonOrderable, line, certLabel,
+    sourceDocument, selection, installation, verification, nonOrderable, line, certLabel,
   };
 }
 

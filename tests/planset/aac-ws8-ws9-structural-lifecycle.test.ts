@@ -700,8 +700,12 @@ describe('AAC WS-9 · the renderer determines no authority', () => {
     const region = buildEquipmentDocumentAuthority([], {
       'racking_detail:rooftech-mini': { archivedInRepo: true, sha256: sha, status: 'current' },
     }, null);
+    // 2026-08-29 - the selected model must be the one the on-file document covers;
+    // AUTHORITATIVE is about archival + hashing, not about spanning two product
+    // generations. Passing 'RT-MINI II' against the first-generation manual is the
+    // conflation the applicability gate now refuses.
     const verdict = sheetDocumentApplicability({
-      region, category: 'racking_detail', equipmentId: 'rooftech-mini', selectedModel: 'RT-MINI II',
+      region, category: 'racking_detail', equipmentId: 'rooftech-mini', selectedModel: 'RT-MINI',
     });
     expect(verdict.authoritative).toBe(true);
   });

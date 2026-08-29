@@ -215,8 +215,14 @@ describe('§3 — manufacturer structural documents: applicability + inclusion h
     // EQUIPMENT-DOCUMENT-APPLICABILITY. The MARKING MECHANISM is what this case guards, and it is
     // pinned directly against a synthetic conflating document in the case above (line ~195),
     // which does not depend on production data staying wrong.
-    expect(DR.html).not.toContain('data-ds-applicability="unverified"');
-    expect(DR.html).not.toContain('EQUIPMENT-DOCUMENT-APPLICABILITY');
+    // 2026-08-29 - REVERSED, and this is the correction the 08-27 note above got
+    // wrong. The row is version-exact against ITSELF (model RT-MINI, gen-1 manual),
+    // which is what the old gate compared - but the design installs RT-MINI **II**,
+    // and no installation document for that generation is on file. The honest
+    // verdict is therefore UNVERIFIED, and EQUIPMENT-DOCUMENT-APPLICABILITY is
+    // correctly raised again. It closes when the RT-Mini II installation manual is
+    // archived, not when the gate stops looking.
+    expect(DR.html).toContain('data-ds-applicability="unverified"');
     // the appendix still states a document state on the racking page rather than going silent
     expect(DR.html).toMatch(/Roof Tech RT-MINI Installation Manual \(Jan 2021\)/);
   });

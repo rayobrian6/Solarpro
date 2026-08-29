@@ -292,11 +292,22 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
   const fa = projectFastenerAssembly(input);
 
   it('the fastener assembly is unverified ⇒ non-orderable, dimensionless line', () => {
+    // 2026-08-29 - TWO FACETS. A stamped structural PE letter for the exact mount
+  // names the fastener assembly (model, 2/mount, 3.07" embedment, no pilot hole,
+  // archived in-repo with a SHA-256) and `documentRoles.fastenerAuthority` records
+  // it as established - the projection simply never asked. So the SELECTION is
+  // established and prints; what is still pending is the INSTALLATION detail, which
+  // needs the manufacturer's installation document for the SELECTED product
+  // version. `nonOrderable` and `verification` are unchanged (both facets are still
+  // required for those), so procurement behaves exactly as before.
     expect(fa.verification).not.toBe('verified');
     expect(fa.nonOrderable).toBe(true);
-    expect(fa.line).toBe(FASTENER_NON_ORDERABLE_LABEL);
-    // no diameter / length / embedment leaked into the printed line
-    expect(fa.line).not.toMatch(/\d+\/\d+|embedment|dia\b/i);
+    // the SELECTION is established by the stamped letter, so the assembly is named.
+    expect(fa.selection.established).toBe(true);
+    expect(fa.line).not.toBe(FASTENER_NON_ORDERABLE_LABEL);
+    expect(fa.line).toMatch(/SS304/);
+    // ...and the INSTALLATION detail is what is actually outstanding.
+    expect(fa.installation.established).toBe(false);
   });
 
   it('TAC WS-4 — element completeness alone never yields "verified"', () => {
@@ -322,7 +333,11 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
     expect(fa.present).toBe(true);
     // when verified, the line WOULD carry the description — the branch is guarded
     // solely on verification, so unverified can never render as orderable.
-    expect(fa.certLabel).toBe('PENDING VERIFIED FASTENER ASSEMBLY');
+    // The label now names the facet that is MISSING. "PENDING VERIFIED FASTENER
+    // ASSEMBLY" on a package that names the fastener, its quantity, its embedment
+    // and its pilot rule from a stamped letter told the reader the wrong thing was
+    // outstanding.
+    expect(fa.certLabel).toBe('FASTENER ASSEMBLY ESTABLISHED \u2014 INSTALLATION DETAILS PENDING');
   });
 
   it('the rendered Roof Attachment Hardware row is flagged NON-ORDERABLE (TAC WS-4)', () => {
