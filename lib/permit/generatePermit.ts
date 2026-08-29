@@ -1483,16 +1483,31 @@ export function generatePermitHTML(
   // drawing-set composition; they differ only in the certification tail (the
   // design-review package ENDS on PE-1 in its current pending state).
   const _compact = isCompactProfile(_profile);
+  // ══ RS-1 IS THE PROJECT REVIEW RECORD ═══════════════════════════
+  // It was dropped from EVERY compact profile, and the app only ever generates
+  // one profile: design-review. So the sheet that enumerates each requirement
+  // with its authority path, explanation, resolution action and evidence was in
+  // no artifact any user could obtain — while the banner and the cover both
+  // told the reader to "see the project review record in the application".
+  // No API returns `permitReadiness.registry` and no screen renders it. The
+  // destination was never built, so the pointer resolved to nothing and a
+  // designer looking at "4 UNRESOLVED REQUIREMENTS" had no way to learn what
+  // they were.
+  //
+  // It stays out of the AHJ PERMIT submittal — our internal review record is
+  // not part of a permit application, and that was the sound half of the
+  // original decision. It belongs in design-review, which is what we read.
+  const _rsIncluded = _profile !== 'permit';
   const _certDone = certificationIsCompleted(input);
   const pageFns: Array<(n: number, t: number) => string> = [
     (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
-    ...(_compact ? [] : [(n: number, t: number) => pageReviewStatus(input, cad, n, t)]),  // RS-1: Review status — root gate table + child requirements (RGM §5)
+    ...(_rsIncluded ? [(n: number, t: number) => pageReviewStatus(input, cad, n, t)] : []),  // RS-1: Review status — root gate table + child requirements (RGM §5)
     // RGM §5: RS-1.1 … RS-1.n — formal continuations of the review-status
     // registry. The count comes from the SAME layout function the sheet manifest
     // uses (reviewStatusContPageCount over the snapshot registry), so the cover
     // index and the rendered page set can never disagree.
-    ...(_compact ? [] : Array.from({ length: _rsContCount }, (_unused, ci) =>
-      (n: number, t: number) => pageReviewStatus(input, cad, n, t, ci))),
+    ...(_rsIncluded ? Array.from({ length: _rsContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageReviewStatus(input, cad, n, t, ci)) : []),
     // PV-1 (standalone site plan) folded into the array sheet 2026-07-08 —
     // the roof/array drawing now carries the integrated site context (parcel,
     // street, driveway, service equipment). Renamed PV-2→PV-1, PV-2B→PV-1B.

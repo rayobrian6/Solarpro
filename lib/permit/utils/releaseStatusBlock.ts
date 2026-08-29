@@ -28,6 +28,7 @@ import {
 } from '../snapshot/releasePhase';
 import { peekSnapshot } from '../snapshot/read';
 import { escapeH } from './drawing';
+import { sheetRef } from './sheetRef';
 import {
   resolvePlansetProfile, isCompactProfile, permitSubmissionPreviewState, PROFILE_DISPLAY_NAMES,
 } from '../plansetProfile';
@@ -86,6 +87,15 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
     // package generated while the engineering review is pending is marked a
     // NON-SUBMITTABLE PREVIEW (never silently emitted as the submittal).
     const _preview = permitSubmissionPreviewState(input).isPreview;
+    // THE POINTER NAMES WHAT THIS PACKAGE ACTUALLY CONTAINS. This hardcoded
+    // "SEE THE PROJECT REVIEW RECORD IN THE APPLICATION" on every compact
+    // profile - and the application has no such screen: no API returns
+    // permitReadiness.registry and no component renders it. RS-1 is back in the
+    // design-review set, so `sheetRef` resolves to "see sheet RS-1"; on the AHJ
+    // permit submittal, which correctly omits our internal review record, it
+    // still falls back to the application wording rather than a dangling
+    // reference to a sheet the reader does not have.
+    const _rs = sheetRef(input, 'review-status');
     const _profileLine = _preview
       ? `OUTPUT PROFILE: ${PROFILE_DISPLAY_NAMES[_profile]} &mdash; NON-SUBMITTABLE PREVIEW (ENGINEERING REVIEW PENDING)`
       : `OUTPUT PROFILE: ${PROFILE_DISPLAY_NAMES[_profile]}${_profile === 'design-review' ? ' &mdash; NOT FOR PERMIT SUBMISSION' : ''}`;
@@ -110,8 +120,8 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
       / <span data-release-requirement-count="${model.summary.unresolvedRequirementCount}" style="font-weight:900;">${model.summary.unresolvedRequirementCount}</span> unresolved requirement${model.summary.unresolvedRequirementCount === 1 ? '' : 's'}
       &mdash; ${names || '—'}
     </div>
-    <div data-release-record-pointer="1" style="margin-top:2px;font-weight:900;font-size:8.5px;letter-spacing:0.5px;color:#111;text-align:center;">
-      SEE THE PROJECT REVIEW RECORD IN THE APPLICATION FOR ALL ${total} REQUIREMENT${total === 1 ? '' : 'S'} AND THEIR RESOLUTION EVIDENCE
+    <div data-release-record-pointer="1"${_rs.present ? ` data-release-record-sheet="${_rs.sheetId}"` : ''} style="margin-top:2px;font-weight:900;font-size:8.5px;letter-spacing:0.5px;color:#111;text-align:center;">
+      ${escapeH(_rs.see.toUpperCase())} FOR ALL ${total} ITEM${total === 1 ? '' : 'S'} AND THEIR RESOLUTION EVIDENCE
     </div>
   </div>`;
   }

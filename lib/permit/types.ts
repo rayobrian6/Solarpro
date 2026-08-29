@@ -820,6 +820,7 @@ export interface PermitSheetIndexEntry {
 //   7=PV-5  8=SCHED  9=APP-A  10=CERT  11=PE-1  12=E-1  13=VAL-1  14=APP-CAD
 export type PermitSheetId =
   | 'PV-0'   // Cover Sheet
+  | 'RS-1'   // Review Status — release gates & requirements (design-review)
   | 'PV-1'   // Site & Array Plan (Roof / Ground / Fence — system-routed; integrated site context)
   | 'PV-1B'  // Array Geometry & String Layout
   | 'PV-3'   // Structural Details (Roof / Ground / Fence — system-routed)
@@ -837,6 +838,10 @@ export type PermitSheetId =
 
 export const PERMIT_SHEET_INDEX: PermitSheetIndexEntry[] = [
   { id: 'PV-0',  title: 'Cover Sheet',                 description: 'Project overview, sheet index, aerial view, design criteria, governing codes' },
+  // 2026-08-29 - RS-1 was missing from the navigator, so even a package that
+  // CONTAINED the review record had no tab that could open it. This list is what
+  // /engineering/permit iterates.
+  { id: 'RS-1',  title: 'Review Status',                description: 'Every open release gate and its requirements: authority path, explanation, resolution action, affected sheets, evidence' },
   { id: 'PV-1',  title: 'Site & Array Plan',            description: 'Integrated site + roof/ground/fence array: property line, street, service equipment, panel placement, fire setbacks' },
   { id: 'PV-1B', title: 'Array Geometry',               description: 'Array dimensions, string assignments, tilt, spacing, module layout detail' },
   { id: 'PV-3',  title: 'Structural Details',           description: 'Attachment cross-section / pile detail / fence post detail (system-specific)' },

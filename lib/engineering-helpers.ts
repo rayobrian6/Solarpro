@@ -92,7 +92,15 @@ export interface ProjectConfig {
   conduitType: string;
   wireLength: number;
   windSpeed: number;
-  windExposure: 'B' | 'C' | 'D';
+  /** ASCE 7 §26.7 surface-roughness / exposure category.
+   *
+   *  '' is UNSTATED, and it is the default. This is a DESIGNER DETERMINATION of
+   *  the upwind ground roughness — no hazard dataset supplies it — so the
+   *  platform must be able to tell "a designer chose C" from "nobody has said".
+   *  The engines coalesce to 'C' at their own boundary so a calculation always
+   *  has a number; the permit authority record does not, and that is the point:
+   *  RG-3 stays open until a human states it. */
+  windExposure: '' | 'B' | 'C' | 'D';
   groundSnowLoad: number;
   roofPitch: number;
   rafterSpacing: number;

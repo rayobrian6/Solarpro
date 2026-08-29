@@ -57,9 +57,18 @@ describe('WS-18 — no package points at a sheet it does not contain', () => {
     });
   }
 
-  it('design-review carries ZERO prose references to RS-1 (was 25)', () => {
-    const { html } = gen('design-review');
-    expect(proseOnly(html)).not.toContain('RS-1');
+  // 2026-08-29 MIGRATED - design-review CONTAINS RS-1 again, so it must point at
+  // it. The WS-18 invariant is unchanged and is what this now asserts: a package
+  // never points at a sheet it does not contain. Previously design-review was
+  // stripped of RS-1 and told the reader to "see the project review record in
+  // the application" - a screen that was never built, so the pointer of last
+  // resort resolved to nothing and a reader could not learn what the unresolved
+  // requirements were. The dangling-reference sweep above (line ~56) is the test
+  // that actually guards the invariant, and it runs over every profile.
+  it('design-review POINTS AT RS-1, because it carries it', () => {
+    const { html, input } = gen('design-review');
+    expect(activeSheetIds(input)).toContain('RS-1');
+    expect(proseOnly(html)).toContain('RS-1');
   });
 
   it('permit carries ZERO prose references to RS-1', () => {
@@ -73,10 +82,14 @@ describe('WS-18 — no package points at a sheet it does not contain', () => {
     expect(proseOnly(html)).toContain('RS-1');
   });
 
-  it('the compact packages degrade the pointer to the project review record', () => {
-    const prose = proseOnly(gen('design-review').html);
+  // 2026-08-29 MIGRATED - the degraded pointer is now correct for the AHJ
+  // PERMIT submittal ONLY. Our internal review record is not part of a permit
+  // application, so that package legitimately has no RS-1 to name; design-review
+  // does, and names it.
+  it('the PERMIT submittal degrades the pointer to the project review record', () => {
+    const prose = proseOnly(gen('permit').html);
     expect(prose).toContain('the project review record');
-    expect(prose).toMatch(/SEE THE PROJECT REVIEW RECORD.{0,40}FOR ALL \d+ REQUIREMENTS/);
+    expect(prose).toMatch(/SEE THE PROJECT REVIEW RECORD.{0,40}FOR ALL \d+ ITEMS?/);
   });
 
   it('the PV-6 merge stamp and title-block sheet ids are NOT rewritten', () => {
@@ -93,14 +106,19 @@ describe('WS-18 — no package points at a sheet it does not contain', () => {
 });
 
 describe('WS-18 — the resolver answers with THIS package sheet', () => {
-  it('review-status resolves to RS-1 in full, to the review record in the compact profiles', () => {
+  it('review-status resolves to RS-1 in full and design-review, to the review record in the permit submittal', () => {
     const full = sheetRef(gen('full').input, 'review-status');
     expect(full.present).toBe(true);
     expect(full.sheetId).toBe('RS-1');
+    // 2026-08-29 - design-review resolves to the SHEET now; only the AHJ
+    // submittal degrades.
     const dr = sheetRef(gen('design-review').input, 'review-status');
-    expect(dr.present).toBe(false);
-    expect(dr.sheetId).toBeNull();
-    expect(dr.short).toBe('the project review record');
+    expect(dr.present).toBe(true);
+    expect(dr.sheetId).toBe('RS-1');
+    const pm = sheetRef(gen('permit').input, 'review-status');
+    expect(pm.present).toBe(false);
+    expect(pm.sheetId).toBeNull();
+    expect(pm.short).toBe('the project review record');
   });
 
   it('disconnect-directory resolves PV-6 → the merged labels sheet when PV-6 is composed away', () => {

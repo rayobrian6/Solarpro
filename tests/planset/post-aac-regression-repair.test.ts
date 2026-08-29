@@ -110,7 +110,14 @@ describe('§2 — output profiles: DESIGN_REVIEW / FULL_INTERNAL / PERMIT_SUBMIS
     const seq = pageSeq(DR.html);
     expect(seq[0]).toBe('PV-0');
     expect(seq[seq.length - 1]).toBe('PE-1');
-    expect(seq).not.toContain('RS-1');
+    // 2026-08-29 MIGRATED - RS-1 is BACK in design-review, immediately after the
+    // cover. Removing it stripped the only enumeration of the open release
+    // requirements from the only profile the application generates, while the
+    // cover and every gated sheet went on telling the reader to "see the project
+    // review record in the application" - a screen that does not exist. It stays
+    // out of the AHJ PERMIT submittal (asserted in the PERMIT_SUBMISSION case
+    // below); this profile is the one we read.
+    expect(seq[1]).toBe('RS-1');
     expect(seq).not.toContain('APP-A');
     expect(seq).not.toContain('CERT');                               // review pending ⇒ no certification sheet
     expect(seq.filter(id => id === 'PE-1').length).toBe(1);

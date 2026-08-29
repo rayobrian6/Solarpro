@@ -169,6 +169,18 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     ];
     return [
       { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
+      // 2026-08-29 — RS-1 RESTORED TO DESIGN-REVIEW, and inserted HERE rather
+      // than by falling the profile through to the full manifest: the page
+      // assembly emits it in exactly this position (immediately after the
+      // cover), and the two lists must stay byte-for-byte in step or V12/V35
+      // fail on a page-count-vs-sheet-index desync. It remains out of the
+      // PERMIT submittal — our internal review record is not part of an AHJ
+      // application.
+      ...(designReview ? [
+        { id: 'RS-1', title: 'REVIEW STATUS — RELEASE GATES & REQUIREMENTS' },
+        ...Array.from({ length: Math.max(0, o.reviewStatusContCount ?? 0) },
+          (_unused, i) => ({ id: `RS-1.${i + 1}`, title: 'REVIEW STATUS (CONTINUED) — RELEASE REQUIREMENTS' })),
+      ] : []),
       { id: 'PV-1',  title: o.pv1Title },
       ...extras.map(sub => ({ id: hybridSheetId('PV-1', sub), title: HYBRID_PLAN_TITLE[sub] })),
       { id: 'PV-1B', title: pv1bTitle(o.isMicro, primaryLabel) },

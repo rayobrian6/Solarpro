@@ -538,7 +538,13 @@ const defaultProject: ProjectConfig = {
   acDisconnect: true, dcDisconnect: true, productionMeter: true, rapidShutdown: true,
   roofType: 'shingle', mountingId: 'ironridge-xr100',
   wireGauge: '#10 AWG THWN-2', conduitType: 'EMT', wireLength: 50,
-  windSpeed: 115, windExposure: 'C', groundSnowLoad: 20, roofPitch: 20,
+  // windExposure is UNSTATED by default. It used to default to 'C', which meant
+  // every project shipped an exposure category no designer had ever chosen —
+  // and once it is threaded to the permit path (below) a laundered default
+  // would CLEAR the ASCE 7 §26.7 release gate by accident instead of by
+  // statement. The engines coalesce to 'C' at their own boundary, so no
+  // calculation changes; only the authority record can now tell the difference.
+  windSpeed: 115, windExposure: '', groundSnowLoad: 20, roofPitch: 20,
   meanRoofHeight: 15,         // ft — ASCE 7-22 Kz (1-story≈15ft, 2-story≈25ft, 3-story≈35ft)
   rafterSpacing: 24, rafterSpan: 12, rafterSize: '2x6', rafterSpecies: 'Douglas Fir-Larch',
   framingType: 'unknown',  // V2 structural engine — auto-detected or user-specified
@@ -3623,7 +3629,10 @@ function EngineeringPageInner() {
         rafterSpecies: config.rafterSpecies,
         attachmentSpacing: config.attachmentSpacing,
         windSpeed: config.windSpeed,
-        windExposure: config.windExposure,
+        // ENGINE BOUNDARY — a calculation always needs a number. `||` not `??`:
+        // '' is unstated, and `??` would pass the empty string straight into
+        // KZ_TABLE[''] and silently produce no exposure coefficient at all.
+        windExposure: config.windExposure || 'C',
         groundSnowLoad: config.groundSnowLoad,
       },
       mountingId: config.mountingId,
@@ -5864,7 +5873,7 @@ function EngineeringPageInner() {
         } : undefined;
         return {
           windSpeed: config.windSpeed,
-          windExposure: config.windExposure,
+          windExposure: config.windExposure || 'C',   // engine boundary — see above
           groundSnowLoad: config.groundSnowLoad,
           roofType: config.roofType,
           roofPitch: config.roofPitch,
@@ -6185,7 +6194,9 @@ function EngineeringPageInner() {
                 netUpliftPressure:   wind?.netUpliftPressurePsf,
                 upliftPerAttachment: ml?.upliftPerMountLbs,
                 designWindSpeed:     config.windSpeed,
-                exposureCategory:    config.windExposure,
+                // WRITES compliance.structural.wind.exposureCategory, which the
+                // snapshot build reads — unguarded, this posts '' as a stated value.
+                exposureCategory:    config.windExposure || 'C',
                 Kz:                  wind?.exposureCoeff,
                 Kzt: 1.0, Kd: 0.85,
                 GCp:                 wind?.gcpUplift,
@@ -8015,6 +8026,17 @@ function EngineeringPageInner() {
           roofType: config.roofType,
           mountingSystem: _mountSys ? `${_mountSys.manufacturer} ${_mountSys.model}` : config.mountingId || 'IronRidge XR100',
           mountingSystemId: config.mountingId,
+          // ASCE 7 §26.7 exposure category — the ONE field standing
+          // between this package and its environmental-load release
+          // gate. It has had a UI control for a long time and was
+          // never threaded here, so `environmental-load-authority@v1`
+          // saw `undefined` on every real generate and RG-3 could not
+          // clear no matter what the designer picked. `|| undefined`
+          // deliberately sends NOTHING when unstated: an empty string
+          // would read as an answer.
+          windExposure: config.windExposure || undefined,
+          windSpeed: config.windSpeed,
+          groundSnowLoad: config.groundSnowLoad,
           roofPitch: config.roofPitch,
           rafterSize: config.rafterSize,
           rafterSpacing: config.rafterSpacing,
@@ -8254,7 +8276,7 @@ function EngineeringPageInner() {
     } else if (ql.includes('rapid shutdown') || ql.includes('rsd') || ql.includes('690.12')) {
       response = `**Rapid Shutdown (NEC 690.12)**\n\nRapid shutdown is ${config.rapidShutdown ? 'ENABLED' : 'DISABLED'} for this system. NEC 690.12 requires module-level shutdown within 30 seconds for rooftop arrays. ${config.inverters[0]?.type === 'micro' ? 'Microinverters (Enphase IQ series) have integrated RSD compliance.' : 'Ensure your inverter has RSD-compliant firmware or add a dedicated RSD device.'} Required for all rooftop PV systems per NEC 2017+.`;
     } else if (ql.includes('structural') || ql.includes('wind') || ql.includes('attachment') || ql.includes('rafter')) {
-      response = `**Structural Analysis (ASCE 7-22)**\n\nDesign wind: ${config.windSpeed} mph, Exposure ${config.windExposure}. Rafter: ${config.rafterSize} @ ${config.rafterSpacing}" O.C., ${config.rafterSpan}ft span. Attachment spacing: ${config.attachmentSpacing}". ${compliance.structural ? `Safety factor: ${compliance.structural.attachment?.safetyFactor?.toFixed(2)}. Status: ${compliance.structural.status}.` : 'Run compliance check for full structural analysis.'}`;
+      response = `**Structural Analysis (ASCE 7-22)**\n\nDesign wind: ${config.windSpeed} mph, Exposure ${config.windExposure || 'not stated (calculations assume C)'}. Rafter: ${config.rafterSize} @ ${config.rafterSpacing}" O.C., ${config.rafterSpan}ft span. Attachment spacing: ${config.attachmentSpacing}". ${compliance.structural ? `Safety factor: ${compliance.structural.attachment?.safetyFactor?.toFixed(2)}. Status: ${compliance.structural.status}.` : 'Run compliance check for full structural analysis.'}`;
     } else if (ql.includes('topology') || ql.includes('microinverter') || ql.includes('optimizer')) {
       response = `**Topology: ${topo}**\n\nCurrent topology: ${topo}. ${config.inverters[0]?.type === 'micro' ? 'Microinverter systems eliminate string mismatch, ideal for shaded/complex roofs. Each module operates independently. Requires IQ Gateway for monitoring.' : config.inverters[0]?.type === 'optimizer' ? 'Optimizer topology adds per-module MPPT while keeping string inverter simplicity. Requires optimizer-compatible inverter.' : 'String inverter topology is most cost-effective for unshaded, simple roofs. Strings must be matched in panel count and orientation.'}`;
     } else if (ql.includes('nec') || ql.includes('code') || ql.includes('compliance')) {
@@ -12380,12 +12402,24 @@ function EngineeringPageInner() {
                   </div>
                   <div>
                     <label className="eng-label">Wind Exposure Category</label>
-                    <select value={config.windExposure} onChange={e => updateConfig({ windExposure: e.target.value as 'B' | 'C' | 'D' })}
+                    {/* THE ONE FIELD THAT CLOSES RG-3. ASCE 7 §26.7 exposure is a
+                        designer determination of upwind surface roughness — the
+                        hazard datasets supply wind speed and ground snow, never
+                        this. Leaving it unstated is a legitimate answer and keeps
+                        the release gate honestly open; picking B/C/D is an
+                        affirmative act by the person whose name goes on the set. */}
+                    <select value={config.windExposure} onChange={e => updateConfig({ windExposure: e.target.value as '' | 'B' | 'C' | 'D' })}
                       className="eng-select">
+                      <option value="">— not stated —</option>
                       <option value="B">B — Suburban/Wooded</option>
                       <option value="C">C — Open Terrain</option>
                       <option value="D">D — Coastal/Water</option>
                     </select>
+                    {!config.windExposure && (
+                      <div className="text-[10px] text-amber-400 mt-1 leading-tight">
+                        Required for permit release (ASCE 7 §26.7). Calculations use C until stated.
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="eng-label">Ground Snow Load (psf)</label>
@@ -14890,7 +14924,7 @@ function EngineeringPageInner() {
                           </div>
                           <div className="bg-slate-800/50 rounded-lg p-2">
                             <div className="text-slate-500">Exposure Cat.</div>
-                            <div className="text-white font-bold">{compliance.structural.wind?.exposureCategory ?? config.windExposure ?? '—'}</div>
+                            <div className="text-white font-bold">{compliance.structural.wind?.exposureCategory || config.windExposure || 'not stated'}</div>
                           </div>
                           <div className="bg-slate-800/50 rounded-lg p-2">
                             <div className="text-slate-500">Net Uplift Pressure</div>
@@ -15258,6 +15292,17 @@ function EngineeringPageInner() {
                                 roofType: config.roofType,
                                 mountingSystem: _mountSys2 ? `${_mountSys2.manufacturer} ${_mountSys2.model}` : config.mountingId || 'IronRidge XR100',
                                 mountingSystemId: config.mountingId,
+                                // ASCE 7 §26.7 exposure category — the ONE field standing
+                                // between this package and its environmental-load release
+                                // gate. It has had a UI control for a long time and was
+                                // never threaded here, so `environmental-load-authority@v1`
+                                // saw `undefined` on every real generate and RG-3 could not
+                                // clear no matter what the designer picked. `|| undefined`
+                                // deliberately sends NOTHING when unstated: an empty string
+                                // would read as an answer.
+                                windExposure: config.windExposure || undefined,
+                                windSpeed: config.windSpeed,
+                                groundSnowLoad: config.groundSnowLoad,
                                 roofPitch: config.roofPitch,
                                 rafterSize: config.rafterSize,
                                 rafterSpacing: config.rafterSpacing,

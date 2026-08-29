@@ -649,6 +649,20 @@ describe('AAC WS-4 · V2 · anti-vacuity: empty evidence cannot clear the enviro
     expect(ev.operatorAction).toMatch(/§26\.7 exposure category/);
   });
 
+  it('an EMPTY STRING is not a statement either — the picker\'s "not stated" option', async () => {
+    // 2026-08-29 — the engineering page's exposure picker now defaults to '' and
+    // offers an explicit "— not stated —" choice, because it used to default to
+    // 'C' and the field was never threaded to the permit payload at all. Once it
+    // IS threaded, a falsy-but-present value must read as unstated: the whole
+    // point of the change is that RG-3 clears by a designer's statement, never
+    // by a laundered default that nobody chose.
+    const input = braidonInput(i => { i.project.windExposure = ''; i.project.exposureCategory = ''; });
+    const { outcome } = await runLifecycle(input, bag());
+    const st = outcome.states['ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED'];
+    expect(st.cleared).toBe(false);
+    expect(st.blockingReason).toMatch(/exposure category/i);
+  });
+
   it('a bare operator-typed wind/snow with NO source can never verify the record', () => {
     const env = buildEnvironmentalLoadAuthority({
       windSpeedMph: 110, groundSnowPsf: 20, exposureCategory: 'C', riskCategory: 'II',

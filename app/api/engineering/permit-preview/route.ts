@@ -49,6 +49,7 @@ export const maxDuration = 30;
 //   7=PV-5  8=SCHED  9=APP-A  10=CERT  11=PE-1  12=E-1  13=VAL-1  14=APP-CAD
 const SHEET_PAGE_INDEX: Record<string, number> = {
   'PV-0':  0,   // Cover Sheet
+  'RS-1':  1,   // Review Status - release gates & requirements (design-review profile)
   'PV-1':  1,   // Site & Array Plan (Roof / Ground / Fence — system-routed)
   'PV-1B': 2,   // Array Geometry & String Layout
   'PV-3':  3,   // Structural Details (system-routed)
@@ -157,8 +158,22 @@ export async function GET(req: NextRequest) {
     // ── Extract the Nth .page div ─────────────────────────────────────────────
     // Strategy: split on class="page" boundaries. Each page is a top-level div.
     // We use a simple regex to find all <div class="page"...>...</div> blocks.
+    // ══ RESOLVE BY SHEET ID, NOT BY ORDINAL ════════════════════════
+    // SHEET_PAGE_INDEX is a HARDCODED ordinal, and the rendered page order has
+    // been variable for a long time: hybrid packages insert PV-1G / PV-1F /
+    // PV-3G, PV-4B.1 and PV-4C.1 appear conditionally, SCHED / DS-n counts
+    // depend on the equipment, and RS-1 (+ its RS-1.n continuations) is
+    // profile-dependent. Any of those shifts every later sheet by one and the
+    // viewer silently serves the WRONG SHEET under the right label — which is
+    // worse than an error page, because it looks like it worked.
+    //
+    // Every rendered page carries its own identity in the title block
+    // (`tb-sheet-id`), which is the same fact the manifest and the cover index
+    // are built from. Match on that; keep the ordinal only as a fallback for a
+    // legacy saved artifact that predates the title-block id.
+    const pageHtml  = extractPageBySheetId(raw, sheetId)
+      ?? extractPageByIndex(raw, SHEET_PAGE_INDEX[sheetId] ?? 0);
     const pageIndex = SHEET_PAGE_INDEX[sheetId] ?? 0;
-    const pageHtml  = extractPageByIndex(raw, pageIndex);
 
     if (!pageHtml) {
       return new NextResponse(
@@ -190,6 +205,30 @@ export async function GET(req: NextRequest) {
 // ── extractPageByIndex ─────────────────────────────────────────────────────────
 // Finds the Nth top-level <div class="page"> element in the HTML string.
 // Uses a simple character-walking approach to handle nested divs correctly.
+
+/** Find the page whose TITLE BLOCK declares this sheet id. Returns null when the
+ *  artifact carries no such sheet (or predates the title-block id), so the
+ *  caller can fall back to the legacy ordinal. */
+function extractPageBySheetId(html: string, sheetId: string): string | null {
+  // The ids are a closed set (PV-0 … APP-CAD, RS-1, RS-1.n), so a literal scan
+  // beats regex-escaping a value that only ever contains letters, digits, a
+  // hyphen and a dot.
+  const needle = `tb-sheet-id">`;
+  let at = -1;
+  for (let i = html.indexOf(needle); i !== -1; i = html.indexOf(needle, i + 1)) {
+    const seg = html.slice(i + needle.length, i + needle.length + 40);
+    const lt = seg.indexOf('<');
+    if (lt === -1) continue;
+    if (seg.slice(0, lt).trim().toUpperCase() === sheetId.toUpperCase()) { at = i; break; }
+  }
+  if (at === -1) return null;
+  const m = { index: at };
+  // walk back to the enclosing page div, then reuse the existing extractor by
+  // counting how many page starts precede it
+  const before = html.slice(0, m.index);
+  const idx = (before.match(/class="page"/g) ?? []).length - 1;
+  return idx >= 0 ? extractPageByIndex(html, idx) : null;
+}
 
 function extractPageByIndex(html: string, index: number): string | null {
   // Find all starting positions of class="page" divs

@@ -66,7 +66,9 @@ export function buildStructuralInputV4(
   return {
     installationType: structural.installationType ?? 'roof_residential',
     windSpeed:        Number(structural.windSpeed ?? defaults.windSpeed),
-    windExposure:     structural.windExposure ?? 'C',
+    // `||` not `??` — '' now means UNSTATED (see engineering-helpers ProjectConfig),
+    // and `??` would pass the empty string through into KZ_TABLE[''].
+    windExposure:     structural.windExposure || 'C',
     groundSnowLoad:   Number(structural.groundSnowLoad ?? defaults.groundSnowLoad),
     meanRoofHeight:   Number(structural.meanRoofHeight ?? 15),
     roofPitch:        Number(structural.roofPitch ?? 20),
