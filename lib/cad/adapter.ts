@@ -308,6 +308,8 @@ function originalProject(original: PermitInputShape): DraftingProject {
       (original as unknown as { compliance?: { structural?: { attachment?: { maxAllowedSpacing?: number } } } })
         .compliance?.structural?.attachment?.maxAllowedSpacing,
     rafterSize:        original.project?.rafterSize,
+    framingType:       (original as unknown as { compliance?: { structural?: { rafter?: { framingType?: string } } } })
+                         .compliance?.structural?.rafter?.framingType,
     rafterSpacing:     original.project?.rafterSpacing,
     attachmentSpacing: original.project?.attachmentSpacing,
     panelLengthIn:     original.project?.panelLengthIn,

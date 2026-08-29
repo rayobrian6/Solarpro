@@ -66,6 +66,7 @@ import {
   northArrowRotationDeg, rotateSiteContext,
 } from './roofSiteContext';
 import { buildHybridOverlays, rotateHybridOverlays, fenceInsetSVG } from './hybridOverlay';
+import { formatPitchDeg, framingMember } from '@/lib/structural/roofPitch';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -201,6 +202,11 @@ export function drawRoofPlan(
   const pitchNum    = project.roofPitch       || 5;
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
+  // 2026-08-29 - the plan sheet named the member too ("FEET ON RAFTERS",
+  // "RAIL + RAFTER FOOT") while its own note two lines away said "into trusses".
+  const _FRAME_PLAN = project.framingType
+    ? framingMember({ framingType: project.framingType }).term
+    : 'FRAMING';
   // W3 §4/§6 — attachment O.C. spacing PROJECTS from the canonical snapshot
   // (engine-RESOLVED spacing on the rail/attachment objects), never the invented
   // 48" literal. Feet are then geo-registered onto the real rafter grid at this
@@ -1568,7 +1574,9 @@ export function drawRoofPlan(
       n: i + 1,
       mods: _facetCounts[i],
       az: rp.azimuth != null && isFinite(rp.azimuth) ? `${_snapAz(rp.azimuth)}°` : '—',
-      tilt: rp.pitch != null && isFinite(rp.pitch) ? `${Math.round(rp.pitch)}°` : '—',
+      // 2026-08-29 - Math.round printed 17 deg for a 16.5178 deg plane, beside
+      // CERT's 16.5 deg for the same facet. One precision, one place.
+      tilt: formatPitchDeg(rp.pitch) ?? '—',
       truss: trussSize,
       oc: trussSpacing,
     }));
@@ -1596,7 +1604,9 @@ export function drawRoofPlan(
       { key: 'mods',  hdr: 'MODULES', w: 52 },
       { key: 'az',    hdr: 'AZIMUTH', w: 50 },
       { key: 'tilt',  hdr: 'TILT',    w: 38 },
-      { key: 'truss', hdr: 'TRUSS',   w: 44 },
+      // 2026-08-29 - a THIRD place naming the member; the column header is now
+      // the same word the rest of the package uses.
+      { key: 'truss', hdr: _FRAME_PLAN, w: 44 },
       { key: 'oc',    hdr: 'SPACING', w: 50 },
     ] as const;
     const tblW = cols.reduce((s, c) => s + c.w, 0);
@@ -1678,7 +1688,7 @@ export function drawRoofPlan(
       ...(!isRailless
         ? [
             `3B. RAILS ON FEET @ ${_ocLabelP} STAGGERED,`,
-            '   FEET ON RAFTERS; RAILS AT 25%/75% OF',
+            `   FEET ON ${_FRAME_PLAN}S; RAILS AT 25%/75% OF`,
             '   MODULE. END OVERHANG ≤ 18". ATTACH TO',
             '   FRAMING ONLY — NO DECK-ONLY ATTACHMENT.',
           ]
@@ -1801,8 +1811,8 @@ export function drawRoofPlan(
     const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="3.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="3.5" cy="1.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="1.8" r="1" fill="#2a5db0"/>`, label: 'PV MODULE + ATTACHMENT PTS' },
-      ...(!isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + RAFTER FOOT @ ${_ocLabelP}` }] : [{ swatch: `<rect x="4" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/><rect x="9" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/>`, label: 'DIRECT-ATTACH MOUNTS (RAIL-LESS)' }]),
-      ...(_deckMountUsed ? [{ swatch: `<rect x="4.5" y="-2.5" width="5" height="5" fill="#fff" stroke="#b45309" stroke-width="1"/>`, label: 'DECK-MOUNTED FOOT (NO RAFTER)' }] : []),
+      ...(!isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + ${_FRAME_PLAN} FOOT @ ${_ocLabelP}` }] : [{ swatch: `<rect x="4" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/><rect x="9" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/>`, label: 'DIRECT-ATTACH MOUNTS (RAIL-LESS)' }]),
+      ...(_deckMountUsed ? [{ swatch: `<rect x="4.5" y="-2.5" width="5" height="5" fill="#fff" stroke="#b45309" stroke-width="1"/>`, label: `DECK-MOUNTED FOOT (NO ${_FRAME_PLAN})` }] : []),
       ...(_encroachCount > 0 ? [{
         swatch: `<rect x="4" y="-3.5" width="6" height="6" fill="none" stroke="#cc0000" stroke-width="1" transform="rotate(45 7 -0.5)"/>`,
         label: 'SETBACK ENCROACHMENT',
@@ -2050,6 +2060,20 @@ export function drawRoofStructural(
   const pitchStr   = _pitchAuth.pitchStr;
   const rafterSz   = project.rafterSize         || '2x6';
   const rafterSp   = project.rafterSpacing      || 24;
+  // ══ 2026-08-29 - PV-3 SAID BOTH WORDS ABOUT ONE MEMBER ═══════════════════
+  // Its own specs table printed "TRUSS SIZE 2x6 / TRUSS SPACING 24 O.C." (from
+  // the drafting descriptor, which asks the structural record) while the
+  // cross-section, the callouts and the structural notes on the SAME SHEET
+  // hardcoded RAFTER eight times. That is not a wording preference: cutting,
+  // notching or drilling a truss chord voids its engineering, and a rafter is
+  // site-framed lumber. The sheet was telling an installer two different things
+  // about the member they are screwing into.
+  // The member type now travels with its size and spacing. Absent (standalone
+  // preview, or a design with no structural analysis) the sheet says FRAMING and
+  // asserts neither kind - it never guesses one.
+  const _FRAME = project.framingType
+    ? framingMember({ framingType: project.framingType }).term
+    : 'FRAMING';
   // SINGLE-SOURCE with the specs table (sheetComposition getRoofData): the
   // drawing/notes/callouts printed hardcoded 3/8" lag + 4'-0" spacing while
   // the specs table said 5/16" @ 24" O.C. — contradictions ON ONE SHEET.
@@ -2202,7 +2226,7 @@ export function drawRoofStructural(
     { label: 'FLASHING',               fill: '#c8dce8', stroke: '#4488aa', h: 3  },
     { label: roofType + ' ROOF',       fill: '#b89060', stroke: '#665030', h: 8  },
     { label: 'SHEATHING (5/8" OSB)',   fill: 'url(#rafter-wood)', stroke: '#886030', h: 7,  hatch: 'url(#hatch-wood)', hatchOpacity: 0.35 },
-    { label: 'RAFTER (' + rafterSz + ')', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 16, hatch: 'url(#hatch-wood)', hatchOpacity: 0.5 },
+    { label: _FRAME + ' (' + rafterSz + ')', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 16, hatch: 'url(#hatch-wood)', hatchOpacity: 0.5 },
   ];
 
   let curY = detY;
@@ -2434,7 +2458,7 @@ export function drawRoofStructural(
     // instruction/product assertion; it may print only under verified applicability.
     { ax: _cx + _butW / 2 - 4,  ay: _padTop + 1.5,               text: _exactD ? 'ALPHASEAL BUTYL FLASHING (SELF-SEAL)' : 'MOUNT BASE FLASHING — PENDING VERIFIED SELECTION' },
     { ax: _rlx + roofW - 8,     ay: deckTop + _shH / 2,          text: `${roofType} SHINGLE / UNDERLAYMENT` },
-    { ax: _rlx + roofW - 8,     ay: _rafTop + _rafH / 2,         text: `SHEATHING (5/8" OSB) + ${rafterSz} RAFTER @ ${rafterSp}" O.C.` },
+    { ax: _rlx + roofW - 8,     ay: _rafTop + _rafH / 2,         text: `SHEATHING (5/8" OSB) + ${rafterSz} ${_FRAME} @ ${rafterSp}" O.C.` },
   ];
   const _clX = dcx + dcr - 6;
   _callouts.forEach((c, i) => {
@@ -2473,7 +2497,7 @@ export function drawRoofStructural(
   els.push(drawLinearDimension(
     secX + bayW, secX + bayW * 2,
     roofBaseY + 36, 12,
-    `${rafterSp}" RAFTER O.C. (TYP.)`
+    `${rafterSp}" ${_FRAME} O.C. (TYP.)`
   ));
 
   // Row 2 — attachment spacing at its true scaled length, on the next row
@@ -2512,7 +2536,7 @@ export function drawRoofStructural(
       ? [
         ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
         ['FASTENER', lagLabelD],
-        ['EMBEDMENT', `${_embedD}" MIN INTO RAFTER`],
+        ['EMBEDMENT', `${_embedD}" MIN INTO ${_FRAME}`],
         ['PILOT HOLE', _attD.fastener.pilotRuleLabel.toUpperCase()],
         ['MATERIAL / COATING', (_attD.fastener.material ?? 'PER MANUFACTURER DOCUMENT').toUpperCase()],
         ['FLASHING', 'PER THE VERIFIED MANUFACTURER DOCUMENT'],
@@ -2617,11 +2641,11 @@ export function drawRoofStructural(
   // `4'-0" O.C. MAX`). The coating claim ('316 SS OR HOT-DIP GALVANIZED') is
   // withheld while `FastenerAssembly.material` is an honest null.
   const notes = [
-    'VERIFY RAFTER SIZE + SPACING IN FIELD.',
+    `VERIFY ${_FRAME} SIZE + SPACING IN FIELD.`,
     ...(_exactD
       ? [
         `ALL HARDWARE: ${(_attD.fastener.material ?? 'PER MANUFACTURER DOCUMENT').toUpperCase()}.`,
-        `MIN. THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
+        `MIN. THREAD EMBEDMENT INTO ${_FRAME}: ${_embedD}".`,
         `FASTENER: ${lagLabelD}.`,
       ]
       : [
@@ -2672,7 +2696,7 @@ export function drawRoofStructural(
   // so no installer can build from it.
   els.push(drawText(zones.dims.left, H - 8,
     _exactD
-      ? 'CROSS-SECTION SCHEMATIC — VERIFY RAFTER SIZE, SPACING + EMBEDMENT IN FIELD — NTS'
+      ? `CROSS-SECTION SCHEMATIC — VERIFY ${_FRAME} SIZE, SPACING + EMBEDMENT IN FIELD — NTS`
       : `CROSS-SECTION REFERENCE FIGURE — ${_attD.referenceDetailBanner} — NTS`, {
       anchor: 'start', fontSize: 6.5, fill: _exactD ? '#888' : '#b00', italic: true,
       fontWeight: _exactD ? 'normal' : 'bold',

@@ -34,6 +34,8 @@ import {
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { RELEASE_PHASE_STYLE } from '../snapshot/releasePhase';
 import { requirementLane } from '../snapshot/releaseGates';
+import { formatPitchBoth } from '@/lib/structural/roofPitch';
+import { framingMember } from '@/lib/structural/roofPitch';
 import {
   projectProjectAuthorityFromInput, projectIssueStateLanguageFromInput,
   projectProjectStateFromInput,
@@ -785,7 +787,10 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const totalLoadPsf = structural?.rafter?.totalLoadPsf ? structural.rafter.totalLoadPsf.toFixed(1) : '—';
   const rafterSpanFt = structural?.rafter?.rafterSpan ? structural.rafter.rafterSpan.toFixed(1) : (project.rafterSpan ?? '—');
   const framingType = structural?.rafter?.framingType ?? '—';
-  const _isTruss    = framingType === 'truss';
+  // 2026-08-29 - this test was NARROWER than the other two copies: it asked only
+  // for the declared field, so a record identifiable as a truss only by its
+  // zero-demand analysis read as stick framing HERE and as a truss on PV-3/PV-4C.
+  const _isTruss    = framingMember(structural?.rafter).isTruss;
   const bendingMoment = structural?.rafter?.bendingMoment ? structural.rafter.bendingMoment.toFixed(1) : '—';
   const allowableBM = structural?.rafter?.allowableBendingMoment ? structural.rafter.allowableBendingMoment.toFixed(1) : '—';
   const deflection = structural?.rafter?.deflection ? structural.rafter.deflection.toFixed(3) : '—';
@@ -816,7 +821,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   // the letter used to claim project.roofPitch (20 deg) while the analysis ran
   // on the CAD plane pitch (17 deg).
   const _pitchDeg   = cad.roof?.planes?.[0]?.pitch ?? project.roofPitch;
-  const roofPitch   = _pitchDeg ? `${(Math.tan(_pitchDeg * Math.PI / 180) * 12).toFixed(1)}:12 (${_pitchDeg.toFixed(1)}&deg;)` : '—';
+  // 2026-08-29 - one of six independent pitch conversions; see lib/structural/roofPitch.ts.
+  const roofPitch   = (formatPitchBoth(_pitchDeg) ?? '—').replace('°', '&deg;');
   const roofType    = roofTypeLabel(project.roofType);
   const exposure    = _sp.present ? fmtStr(_sp.exposure) : (structural?.wind?.exposureCategory || '—');
   const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'IronRidge XR100';
@@ -848,7 +854,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
             <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = _eqRoof ?? getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—' && s !== '&mdash;').join(' ') || '—'; })()}</td></tr>
             <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${escapeH(mountSys)}</td></tr>
-            <tr><td class="il">Rail Orientation</td><td class="iv">Perpendicular to rafters</td><td class="il">Attachment</td><td class="iv">${escapeH(_fa.present ? (_fa.fastenerType ?? 'Structural fastener') : 'Per fastener assembly')} w/ flashing</td></tr>
+            <tr><td class="il">Rail Orientation</td><td class="iv">Perpendicular to ${_isTruss ? 'trusses' : 'rafters'}</td><td class="il">Attachment</td><td class="iv">${escapeH(_fa.present ? (_fa.fastenerType ?? 'Structural fastener') : 'Per fastener assembly')} w/ flashing</td></tr>
           </table>
 
           <div class="section-title">Existing Roof Construction</div>
@@ -856,7 +862,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">Roof Type</td><td class="iv">${roofType}</td><td class="il">Roof Pitch</td><td class="iv">${roofPitch}</td></tr>
             <tr><td class="il">Rafter / Framing</td><td class="iv">${_isTruss ? `Pre-Engineered Truss (${rafterSize} chords)` : `${rafterSize} Lumber`}</td><td class="il">Spacing</td><td class="iv">${rafterSpace}" O.C.</td></tr>
             <tr><td class="il">Attach Spacing</td><td class="iv">${_spc.designSpacingIn != null ? _spc.designSpacingIn : attachSpace}&quot; O.C. ${_spc.verificationState === 'verified' ? `(MAX ALLOWED, VERIFIED)` : `<span style="color:#b45309;font-weight:bold;">(design; PENDING VERIF.)</span>`}</td><td class="il">Fastener Dia.</td><td class="iv">${_fa.nonOrderable ? '<span style="color:#b45309;font-weight:bold;">PENDING VERIF.</span>' : lagDia}</td></tr>
-            <tr><td class="il">Min. Embedment</td><td class="iv">${_fa.nonOrderable ? '<span style="color:#b45309;font-weight:bold;">PENDING VERIF.</span>' : lagEmbed + '" into ' + escapeH(_fa.substrate ?? 'rafter')}</td><td class="il">Fastener Status</td><td class="iv" style="font-weight:bold;color:${_fa.verification === 'verified' ? '#000' : '#b45309'};">${escapeH(_fa.certLabel)}</td></tr>
+            <tr><td class="il">Min. Embedment</td><td class="iv">${_fa.nonOrderable ? '<span style="color:#b45309;font-weight:bold;">PENDING VERIF.</span>' : lagEmbed + '" into ' + escapeH(_fa.substrate ?? framingMember(structural?.rafter).termLower)}</td><td class="il">Fastener Status</td><td class="iv" style="font-weight:bold;color:${_fa.verification === 'verified' ? '#000' : '#b45309'};">${escapeH(_fa.certLabel)}</td></tr>
             <tr><td class="il">Fastener Assembly</td><td class="iv" colspan="3" data-pe-field="fastener">${escapeH(_fa.line)}</td></tr>
             <tr><td class="il">Roof Sheathing</td><td class="iv">No attachment to sheathing only</td><td class="il">Underlayment</td><td class="iv">Maintained per mfr. req.</td></tr>
           </table>
@@ -879,11 +885,16 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Rafter Span</td><td class="iv">${rafterSpanFt} ft${!project.rafterSpan ? ' (ASSUMED &mdash; FIELD VERIFY)' : ''}</td></tr>
             <tr><td class="il">Line Load</td><td class="iv">${lineLoad} lb/ft</td><td class="il">Bending Moment</td><td class="iv">${bendingMoment} / ${allowableBM} lb-ft</td></tr>
             <tr><td class="il">Bending Utilization</td><td class="iv" style="font-weight:bold;color:${_bendRatio == null ? '#b45309' : _bendPass ? '#000' : '#cc0000'};">${bendUtil}%</td><td class="il">Deflection</td><td class="iv" style="color:${_deflRatio == null ? '#b45309' : _deflPass ? '#000' : '#cc0000'};">${deflection} in (&Delta;_allow = ${allowableDefl} in &mdash; ${deflUtil}%)</td></tr>`}
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment ${_capGated ? '&mdash; Capacity Source Pending' : 'Capacity Analysis'}</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Fastener Attachment ${_capGated ? '&mdash; Capacity Source Pending' : 'Capacity Analysis'}</td></tr>
             ${_capGated ? `
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs (ASD 0.6W, canonical)</td><td class="il">Published Allowable</td><td class="iv" style="font-weight:bold;color:#b45309;">CAPACITY SOURCE UNVERIFIED</td></tr>
             <tr><td class="il">Capacity Comparison</td><td class="iv" colspan="3" style="font-weight:bold;color:#b45309;">ENGINEERING REVIEW REQUIRED &mdash; NO PASS/FAIL CONCLUSION ISSUED (RT-MINI structural capacity source not archived / applicability to the selected assembly unconfirmed &mdash; &sect;9)</td></tr>` : `
-            <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs${_capCite.line ? `<div style="font-size:5.6px;font-weight:normal;">SOURCE: ${escapeH(_capCite.line)}</div>` : ''}</td></tr>
+            <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><!-- 2026-08-29 - was "Lag Bolt". This design's fastener is an SS304 5.0 mm x 90 mm
+                 WOOD SCREW, named as such by the PE letter, the manual and the row
+                 directly below. A lag bolt is a different fastener with a different
+                 withdrawal basis; the heading contradicted its own table. The generic
+                 noun cannot contradict the product, and the product is stated in full
+                 by the fastener-assembly authority. --><td class="il">Fastener Withdrawal Capacity</td><td class="iv">${lagCap} lbs${_capCite.line ? `<div style="font-size:5.6px;font-weight:normal;">SOURCE: ${escapeH(_capCite.line)}</div>` : ''}</td></tr>
             <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_sfRaw == null ? '#b45309' : _lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_concl.attachment?.passes ? '#000' : '#cc0000'};">${escapeH(_concl.attachmentGoverningCheckLabel)}</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} &sect;2.4 &mdash; ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">${asce} &sect;26/27</td></tr>
@@ -897,8 +908,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the roof-mounted solar
                 photovoltaic array installation at <strong>${escapeH(project.address || '—')}</strong> and determined that ${_mayCertifyStructure
-                  ? `the <strong>existing roof structure and lag bolt
-                attachment system are adequate to support the additional loads imposed by the proposed roof-mounted
+                  ? `the <strong>existing roof structure and roof-attachment
+                system are adequate to support the additional loads imposed by the proposed roof-mounted
                 PV array</strong>,`
                   : _authorityIncomplete
                   ? `<strong>this certification does NOT extend to the ${_concl.framingReviewRequired ? 'existing framing capacity' : 'roof-attachment capacity source'}, which is not established &mdash; see below</strong>,`

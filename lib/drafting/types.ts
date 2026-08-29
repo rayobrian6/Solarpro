@@ -27,6 +27,14 @@ export interface DraftingProject {
   resolvedAttachSpacingIn?: number;
   rafterSize?: string;
   rafterSpacing?: number;
+  /** 2026-08-29 - the framing MEMBER TYPE ('truss' | 'rafter'), from the
+   *  structural analysis record. The drafting layer already carried the member's
+   *  SIZE and SPACING from that same record and simply never carried what the
+   *  member IS - so PV-3's cross-section, callouts and notes hardcoded "RAFTER"
+   *  eight times while its own spec table, built from the same record one layer
+   *  up, printed "TRUSS SIZE 2x6 / TRUSS SPACING 24 O.C.". Absent ⇒ the sheet
+   *  says FRAMING and asserts neither. */
+  framingType?: string;
   attachmentSpacing?: number;
   panelLengthIn?: number;
   panelWidthIn?: number;

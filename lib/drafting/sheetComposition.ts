@@ -41,6 +41,8 @@ import {
 import { resolveSiteDesignLoads } from '../permit/snapshot/siteDesignLoads';
 // AAC WS-9 — the ONE document-applicability seam every sheet may use.
 import { projectRackingBondingAuthority } from '../permit/snapshot/rackingBonding';
+import { pitchRatioFromDeg } from '@/lib/structural/roofPitch';
+import { framingMember } from '@/lib/structural/roofPitch';
 
 // §3 (closeout 2026-07-23) — the PV-1/PV-3 conduit-run callout descriptor. Every
 // conduit description routes through the CANONICAL physical-raceway projection —
@@ -452,7 +454,7 @@ export function resolveRoofPitch(
   const source: RoofPitchAuthority['source'] =
     fromPlane != null ? 'cad-plane' : fromProject != null ? 'project-input' : 'default';
   const isDegrees = raw > 12 && raw <= 90;
-  const ratio = isDegrees ? Math.round(Math.tan(raw * Math.PI / 180) * 12 * 10) / 10 : raw;
+  const ratio = isDegrees ? (pitchRatioFromDeg(raw) ?? raw) : raw;
   return { ratio, degrees: isDegrees ? raw : null, pitchStr: `${ratio}:12`, source };
 }
 
@@ -565,9 +567,8 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     rafterSpacing: (p?.rafterSpacing as number) || 24,
     // Framing type mirrors the SAME determination PV-4C/PE-1/CERT use, so PV-3
     // labels the framing consistently with the structural sheets (truss vs stick).
-    isTruss: ((c?.structural as any)?.rafter?.framingType === 'truss')
-      || (((c?.structural as any)?.rafter?.bendingMoment === 0)
-        && (((c?.structural as any)?.rafter?.allowableBendingMoment as number) || 0) > 0),
+    // 2026-08-29 - one of THREE independent truss determinations; see framingMember().
+    isTruss: framingMember((c?.structural as any)?.rafter).isTruss,
     // PPC §3/§4 — the canonical attachment authority (design spacing + status +
     // fastener/document gating). NO renderer-local spacing or dimension source.
     attachment,

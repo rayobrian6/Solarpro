@@ -30,6 +30,7 @@ import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../uti
 import { peekSnapshot } from '../snapshot/read';
 import { projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
 import { GROUNDING_PENDING_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
+import { formatPitchDeg, formatPitchRangeDeg } from '@/lib/structural/roofPitch';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -205,11 +206,14 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // Multi-plane roofs: show the RANGE across facets, not plane[0] only —
   // PV-2's per-facet table shows 17-19° while this sheet claimed "16.5°".
   const _pitches = (cad.roof?.planes ?? []).map((p: any) => p.pitch).filter((v: any) => isFinite(v));
-  const avgTilt = isRoof(cadSystemType) && _pitches.length > 0
-    ? (Math.min(..._pitches).toFixed(0) === Math.max(..._pitches).toFixed(0)
-        ? Math.max(..._pitches).toFixed(1)
-        : `${Math.min(..._pitches).toFixed(0)}–${Math.max(..._pitches).toFixed(0)}`)
-    : (count > 0 ? (sumTilt / count).toFixed(1) : (project.roofPitch || 20).toString());
+  // 2026-08-29 - the RANGE was printed at toFixed(0) while each facet printed at
+  // one decimal elsewhere, so this said "17–18" for the same two planes CERT
+  // called 16.5 deg. And the fallback invented a 20 deg roof out of nothing: a
+  // design with no pitch on file has no pitch to print.
+  const _rangeDeg = isRoof(cadSystemType) && _pitches.length > 0
+    ? formatPitchRangeDeg(_pitches)
+    : (count > 0 ? formatPitchDeg(sumTilt / count) : null);
+  const avgTilt = (_rangeDeg ?? 'PENDING').replace(/°$/, '');
   // Multi-plane roofs face MULTIPLE directions — claiming plane[0]'s azimuth
   // for the whole system printed "Azimuth 3° (N)" on a 4-plane N/S/E/W array.
   const _azList = (cad.roof?.planes ?? [])

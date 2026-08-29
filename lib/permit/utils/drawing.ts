@@ -15,6 +15,7 @@ import {
 import { drawingEngine } from '@/lib/drafting';
 import { titleBlock } from './titleBlock';
 import { resolveEquipment } from './helpers';
+import { formatPitchPlanLabel } from '@/lib/structural/roofPitch';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DIMENSION ENGINE — drawDimension()
@@ -375,8 +376,11 @@ export function buildSchemSVG(
     const cx2    = verts.reduce((s,v)=>s+v.x,0)/verts.length;
     const cy2    = verts.reduce((s,v)=>s+v.y,0)/verts.length;
     const pitchDeg = plane.pitch ?? 0;
-    const rise12   = Math.round(Math.tan(pitchDeg * Math.PI / 180) * 12);
-    const pitchStr = rise12 > 0 ? `${rise12}/12` : `FLAT`;
+    // 2026-08-29 - this rounded 3.558 to 4 and printed "4/12" in a box on the
+    // site plan: 4:12 is 18.4 deg, a different roof from the 16.5 deg the
+    // structural analysis ran on and the 3.6:12 every other sheet printed. The
+    // label box being narrow is not a reason to state a different roof.
+    const pitchStr = formatPitchPlanLabel(pitchDeg) ?? 'FLAT';
     svgInner += `<rect x="${(cx2-17).toFixed(1)}" y="${(cy2-13).toFixed(1)}" width="34" height="15" rx="3"
       fill="rgba(255,255,255,0.93)" stroke="rgba(100,116,139,0.6)" stroke-width="0.6"/>`;
     svgInner += `<text x="${cx2.toFixed(1)}" y="${(cy2-2).toFixed(1)}" text-anchor="middle"

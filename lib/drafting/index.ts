@@ -179,6 +179,8 @@ export function adaptPermitInput(input: PermitInputShape): DraftingInput {
       roofPitch:         input.project?.roofPitch,
       mountingSystem:    input.project?.mountingSystem,
       rafterSize:        input.project?.rafterSize,
+      framingType:       (input as unknown as { compliance?: { structural?: { rafter?: { framingType?: string } } } })
+                           .compliance?.structural?.rafter?.framingType,
       rafterSpacing:     input.project?.rafterSpacing,
       attachmentSpacing: input.project?.attachmentSpacing,
       panelLengthIn:     input.project?.panelLengthIn,

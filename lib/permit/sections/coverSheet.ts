@@ -24,6 +24,7 @@ import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLeg
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
 import { PLANSET_ENGINE_VERSION } from '../constants';
+import { formatPitchRatio } from '@/lib/structural/roofPitch';
 
 // ═══════════════════════════════════════════════════════════════════
 // PAGE GENERATORS
@@ -86,9 +87,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // default, and keep 1 decimal — integer rounding made PV-0 say "4:12" while
   // PV-2 said "3.6:12" and PE-1 said "4/12 (20.0°)" on one package.
   const _pitchDegCover = cad.roof?.planes?.[0]?.pitch ?? project.roofPitch;
-  const pitch       = _pitchDegCover
-    ? `${(Math.tan(_pitchDegCover * Math.PI / 180) * 12).toFixed(1)}:12`
-    : '';
+  const pitch       = formatPitchRatio(_pitchDegCover) ?? '';
 
   // ── Derived electrical values — W2 SNAPSHOT PROJECTION ─────────────
   // The cover's former local 120% math + backfeed re-derivation (one of six

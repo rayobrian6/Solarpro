@@ -61,6 +61,7 @@ import { buildProcurementApproval, type PermitBOMItem } from '../utils/bomForPer
 // CMDA — the ONLY correct inline font-family spelling (single-quoted names
 // nest safely inside a double-quoted style attribute).
 import { CSS_FONT_SANS_STACK, CSS_FONT_MONO_STACK } from '../fonts/fontPack';
+import { framingMember } from '@/lib/structural/roofPitch';
 export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   const inputRec = input as unknown as Record<string, unknown>;
   const comp = getSheetComposition('roof', 'structural', cad, inputRec);
@@ -828,7 +829,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const addedDL = _addedRaw != null ? _addedRaw.toFixed(2) : '—';  // 2dp so the component rows sum to it
   // Truss framing is analyzed by load capacity (PSF), not rafter bending (ft-lbs).
   // Rendering its 0-demand / capacity-in-PSF as "0 ft-lbs / 45 ft-lbs" read as broken.
-  const _isTruss      = (structural?.rafter?.framingType === 'truss') || (structural?.rafter?.bendingMoment === 0 && (structural?.rafter?.allowableBendingMoment || 0) > 0);
+  const _isTruss      = framingMember(structural?.rafter).isTruss;
   const trussCapPsf   = structural?.rafter?.allowableBendingMoment?.toFixed(0) || '—';
   const trussLoadPsf  = structural?.rafter?.totalLoadPsf?.toFixed(1) || '—';
   const totalUplift = structural?.attachment?.totalUpliftPerAttachment?.toFixed(0) || '—';
@@ -956,7 +957,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
 
         <!-- Attachment Analysis -->
         <div class="struct-card">
-          <div class="sct">Lag Bolt Attachment Analysis</div>
+          <div class="sct">Fastener Attachment Analysis</div>
           <table class="calc-table">
             <tr><td>Attachment Capacity (allowable)</td><td class="cv"${_capGated ? ' style="color:#b45309;font-weight:bold;"' : ''}>${lagCapDisp}${_capCite.line ? `<div style="font-size:5.4px;font-weight:normal;">SOURCE: ${escapeH(_capCite.line)}</div>` : ''}</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
@@ -1043,7 +1044,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <!-- rafter (wood, hatched) -->
             <rect x="20" y="134" width="260" height="60" fill="#efe0c4" stroke="#7a5a2e" stroke-width="1.4"/>
             <rect x="20" y="134" width="260" height="60" fill="url(#rt-woodhatch)"/>
-            <text x="40" y="178" font-size="8.5" font-weight="bold" fill="#5a4322">RAFTER (${rafterSize})</text>
+            <text x="40" y="178" font-size="8.5" font-weight="bold" fill="#5a4322">${_isTruss ? 'TRUSS' : 'RAFTER'} (${rafterSize})</text>
             <!-- sheathing -->
             <rect x="20" y="119" width="260" height="15" fill="#f2ead8" stroke="#8a7a58" stroke-width="1"/>
             <text x="40" y="130" font-size="6.5" fill="#5a5340">ROOF SHEATHING (5/8" OSB)</text>
