@@ -92,7 +92,11 @@ function titleOf(r: ReleaseRequirement): string {
   if (head.length <= 46) return head;
   const cut = head.slice(0, 46);
   const sp = cut.lastIndexOf(' ');
-  return `${(sp > 20 ? cut.slice(0, sp) : cut).trim()}…`;
+  // 2026-08-29 - NO ELLIPSIS. The caller appends a full stop to the joined list,
+  // so a truncated title produced "...engineering-review record....' on the cover
+  // - an ellipsis immediately followed by a period. A clipped clause reads as a
+  // clause; the full title is on RS-1 either way.
+  return (sp > 20 ? cut.slice(0, sp) : cut).trim();
 }
 
 /** Join a few titles readably; beyond `max`, count the remainder rather than

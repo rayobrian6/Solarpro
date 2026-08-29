@@ -72,9 +72,15 @@ describe('the certification gate states the PHASE, not a constant', () => {
 
 describe('a certification sheet carries one line per requirement', () => {
   it('no gate row is a review-record paragraph, and none is truncated', () => {
+    // 2026-08-29 - at least ONE certification page carries rows, not every one:
+    // 'CERT' was removed from every requirement's affectedSheets because the
+    // package does not contain a CERT sheet (the content merged into PE-1), so a
+    // CERT page in the full profile now correctly owns nothing.
+    const _allRows = certPages(HTML).map(gateOf).flatMap(g =>
+      [...g.matchAll(/<li style="margin:0 0 1px 0;[^"]*"[^>]*data-banner-requirement[^>]*>([\s\S]*?)<\/li>/g)]);
+    expect(_allRows.length, 'the fixture gates a certification sheet').toBeGreaterThan(0);
     for (const g of certPages(HTML).map(gateOf)) {
       const rows = [...g.matchAll(/<li style="margin:0 0 1px 0;[^"]*"[^>]*data-banner-requirement[^>]*>([\s\S]*?)<\/li>/g)];
-      expect(rows.length, 'the fixture gates these sheets').toBeGreaterThan(0);
       for (const m of rows) {
         const row = text(m[1]);
         expect(row.length, `row too long for a sheet: ${row}`).toBeLessThanOrEqual(SHEET_LINE_MAX_CHARS + 12);

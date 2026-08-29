@@ -16,7 +16,7 @@ import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import {
   projectStructuralFromInput, fmt, fmtStr, findCheck, checkResultLabel,
   checkThresholdLabel, projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL,
-  projectStructuralConclusion,
+  projectStructuralConclusion, projectCapacityCitation,
   type StructuralProjection,
 } from '../snapshot/structuralProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
@@ -718,6 +718,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // (PASS)". Same concept, two gates, two answers, one package. Both now project
   // this object, so a conclusion that may not be stated is not handed to either.
   const _concl      = projectStructuralConclusion(_proj, structural?.rafter ?? null);
+  // R3 - the capacity and its citation are ONE object; this number printed four
+  // times across the package with no document reference on any sheet.
+  const _capCite    = projectCapacityCitation(_proj);
   const _capGated   = _concl.capacitySourceGated;
   const _attChk = findCheck(_proj, 'attachment-uplift');
   const _framingChk = findCheck(_proj, 'framing-capacity');
@@ -908,7 +911,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             ${_windFactors.length ? `<tr><td>Coefficients</td><td class="cv" style="font-size:5.6px;">${
               _windFactors.map(f => `${escapeH(f.symbol)} ${f.value.toFixed(2)}`).join(' &middot; ')
             }${_windDerivation ? ` &mdash; ${escapeH(_windDerivation)}` : ''}</td></tr>` : ''}
-            <tr><td>Pressure Coefficient</td><td class="cv" style="font-size:5.6px;color:${_gcpExceeded ? '#b45309' : '#000'};">${escapeH(_gcpBasis)}</td></tr>
+            ${_wind.gcpBasis ? `<tr><td>Pressure Coefficient</td><td class="cv" style="font-size:5.6px;color:${_gcpExceeded ? '#b45309' : '#000'};">${escapeH(_gcpBasis)}</td></tr>` : ''}
             ${_gcpExceeded && _gcpNote ? `<tr><td colspan="2" style="font-size:5.6px;color:#b45309;font-weight:bold;">${escapeH(_gcpNote)}</td></tr>` : ''}
           </table>
         </div>
@@ -952,7 +955,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         <div class="struct-card">
           <div class="sct">Lag Bolt Attachment Analysis</div>
           <table class="calc-table">
-            <tr><td>Attachment Capacity (allowable)</td><td class="cv"${_capGated ? ' style="color:#b45309;font-weight:bold;"' : ''}>${lagCapDisp}</td></tr>
+            <tr><td>Attachment Capacity (allowable)</td><td class="cv"${_capGated ? ' style="color:#b45309;font-weight:bold;"' : ''}>${lagCapDisp}${_capCite.line ? `<div style="font-size:5.4px;font-weight:normal;">SOURCE: ${escapeH(_capCite.line)}</div>` : ''}</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
             <tr><td>Capacity Check (SF)</td><td class="cv">${sfCellHtml}</td></tr>
             <tr><td>Attach Spacing (design)</td><td class="cv">${_spc.designSpacingIn != null ? _spc.designSpacingIn + '&quot; O.C.' : (maxSpacing !== '—' ? maxSpacing + '&quot;' : '—')} <span style="font-weight:bold;color:${_spcVerified ? '#000' : '#b45309'};">${_spcVerified ? '&mdash; MAX ALLOWED (VERIFIED)' : '&mdash; PENDING VERIF.'}</span></td></tr>

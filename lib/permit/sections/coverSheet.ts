@@ -363,8 +363,10 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     infoRow('WIND SPEED',         windSpeedMph !== '' ? `${Math.round(Number(windSpeedMph))} MPH` : ''),
     infoRow('WIND EXPOSURE',      windExposure ? `CAT. ${windExposure}` : ''),
     infoRow('GROUND SNOW LOAD',   snowPsf !== '' ? `${Number(Number(snowPsf).toFixed(1))} PSF` : ''),
+    // 2026-08-29 — the label already says "CAT.", so prefixing the value repeated
+    // it: the cover read "SEISMIC DESIGN CAT.  CAT. D".
     infoRow('SEISMIC DESIGN CAT.',
-      seismic && seismic !== 'PENDING' ? `CAT. ${seismic}` : 'PENDING — NOT ESTABLISHED'),
+      seismic && seismic !== 'PENDING' ? String(seismic) : 'PENDING — NOT ESTABLISHED'),
     // machine-readable seismic evidence stamp (infoRow escapes values, so the
     // tags ride their own hidden row-less element the harness reads).
     `<tr style="display:none"><td colspan="2"><span data-seismic-sdc="${escapeH(seismic && seismic !== 'PENDING' ? seismic : '')}" data-seismic-source="${escapeH(_seisAuth?.established ? (_seisAuth.source ?? '') : (seismic && seismic !== 'PENDING' ? 'input' : 'none'))}" data-seismic-source-ref="${escapeH(_seisAuth?.established ? (_seisAuth.sourceRef ?? '') : '')}"></span></td></tr>`,

@@ -28,7 +28,7 @@ import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import {
   projectStructuralFromInput, bannerRequirementsForSheet, fmt, fmtStr, findCheck,
-  projectFastenerAssembly, projectStructuralConclusion,
+  projectFastenerAssembly, projectStructuralConclusion, projectCapacityCitation,
 } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { RELEASE_PHASE_STYLE } from '../snapshot/releasePhase';
@@ -723,6 +723,10 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   // under this sheet's own "no utilization asserted". One accessor now decides
   // whether a conclusion may be stated at all, and hands back only what may.
   const _concl          = projectStructuralConclusion(_sp, structural?.rafter ?? null);
+  // R3 - the capacity and its citation are ONE thing. This number appeared four
+  // times across the package with no document reference anywhere in twenty
+  // sheets, while other sheets said the fastener had no verified source.
+  const _capCite        = projectCapacityCitation(_sp);
   const _capGated       = _concl.capacitySourceGated;
   const _framingChk     = findCheck(_sp, 'framing-capacity');
   const _reviewRequired = _concl.framingReviewRequired;
@@ -880,7 +884,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             ${_capGated ? `
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs (ASD 0.6W, canonical)</td><td class="il">Published Allowable</td><td class="iv" style="font-weight:bold;color:#b45309;">CAPACITY SOURCE UNVERIFIED</td></tr>
             <tr><td class="il">Capacity Comparison</td><td class="iv" colspan="3" style="font-weight:bold;color:#b45309;">ENGINEERING REVIEW REQUIRED &mdash; NO PASS/FAIL CONCLUSION ISSUED (RT-MINI structural capacity source not archived / applicability to the selected assembly unconfirmed &mdash; &sect;9)</td></tr>` : `
-            <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
+            <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs${_capCite.line ? `<div style="font-size:5.6px;font-weight:normal;">SOURCE: ${escapeH(_capCite.line)}</div>` : ''}</td></tr>
             <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_sfRaw == null ? '#b45309' : _lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_concl.attachment?.passes ? '#000' : '#cc0000'};">${escapeH(_concl.attachmentGoverningCheckLabel)}</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} &sect;2.4 &mdash; ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">${asce} &sect;26/27</td></tr>

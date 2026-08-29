@@ -1198,3 +1198,69 @@ export function projectStructuralConclusion(
       : 'CAPACITY SOURCE UNVERIFIED — NO CONCLUSION ISSUED',
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// R3 — THE CAPACITY VALUE AND ITS CITATION ARE ONE THING (2026-08-29)
+//
+// The 613 lb allowable withdrawal appeared four times in the audited package —
+// PV-4C's summary, the reaction schedule's CAP column, PV-4C.1's "demand 396
+// lbs, allowable 613 lbs, SF 1.55 — PASS" and PE-1's Lag Bolt Capacity — with NO
+// document reference anywhere in twenty sheets. No PE letter, no test standard,
+// no substrate, no safety factor, no report section. Meanwhile other sheets in
+// the same set said the fastener had no verified source.
+//
+// The value is not unsourced: `rackingAssembly.capacityProvenance` carries the
+// Roof Tech RT-Mini II Illinois PE letter (SML Job 471-22, 2023-03-07), its
+// SHA-256 and the fact that it is archived in-repo. It was simply never printed
+// beside the number it justifies. An engineering value a reviewer cannot trace
+// to a document is indistinguishable from one somebody typed.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface CapacityCitation {
+  /** the published allowable, lbs. */
+  valueLbs: number | null;
+  /** 'allowable' | 'ultimate' — which basis the number is on. */
+  basis: string | null;
+  documentIdentity: string | null;
+  revisionOrDate: string | null;
+  sha256: string | null;
+  archivedInRepo: boolean;
+  /** the one line a sheet prints beside the capacity. Empty when there is no
+   *  source — a blank is honest; a bare number is not. */
+  line: string;
+}
+
+/** The citation for the attachment capacity, from the SAME record that produced
+ *  the value. */
+export function projectCapacityCitation(proj: StructuralProjection): CapacityCitation {
+  const ra = proj.rackingAssembly as ({
+    capacityProvenance?: {
+      publishedValueLbs?: number | null; capacityBasis?: string | null;
+      sourceDocument?: {
+        identity?: string | null; revisionOrDate?: string | null;
+        documentHash?: string | null; archivedInRepo?: boolean;
+      } | null;
+    } | null;
+  } | null);
+  const prov = ra?.capacityProvenance ?? null;
+  const doc = prov?.sourceDocument ?? null;
+  const valueLbs = typeof prov?.publishedValueLbs === 'number' ? prov.publishedValueLbs : null;
+  const identity = doc?.identity ?? null;
+  const sha = doc?.documentHash ?? null;
+  const archived = doc?.archivedInRepo === true;
+  // Keep the drawing line short: the issuing document and its date, plus the
+  // hash prefix that makes it the SAME document a reviewer can be handed. The
+  // full identity stays on the review record.
+  const _short = identity
+    ? identity.split(/\s+—\s+/)[0].trim()
+    : null;
+  const line = !identity ? ''
+    : `${_short}${doc?.revisionOrDate ? `, ${doc.revisionOrDate}` : ''}`
+      + `${sha ? ` · SHA-256 ${String(sha).slice(0, 12)}…` : ''}`
+      + `${archived ? ' · archived' : ''}`;
+  return {
+    valueLbs, basis: prov?.capacityBasis ?? null,
+    documentIdentity: identity, revisionOrDate: doc?.revisionOrDate ?? null,
+    sha256: sha, archivedInRepo: archived, line,
+  };
+}

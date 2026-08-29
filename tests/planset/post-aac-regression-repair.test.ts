@@ -296,9 +296,13 @@ describe('§5 — ONE canonical resolved seismic result; no hardcoded B/D substi
   it('an established authority propagates ONE value to cover + canonical + CERT/PE-1 surfaces', () => {
     const { html } = gen('full', undefined, { environmentalSource: VERIFIED_DOC });
     expect(html).toContain('data-seismic-source="archived-climate-document"');
-    expect(html).toContain('CAT. D');
-    expect(html).not.toContain('CAT. B');
+    // 2026-08-29 - the cover's VALUE cell no longer repeats the label's "CAT.":
+    // the row read "SEISMIC DESIGN CAT.  CAT. D". The propagation property is
+    // unchanged and is asserted on the machine-readable stamp, which is the
+    // right surface for it anyway.
     expect(html).toContain('data-seismic-sdc="D"');
+    expect(html).not.toContain('data-seismic-sdc="B"');
+    expect(html).not.toContain('CAT. B');
   });
 
   it('with NO seismic authority nothing substitutes a category — surfaces print the input or PENDING', () => {
