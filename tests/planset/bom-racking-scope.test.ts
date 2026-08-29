@@ -96,7 +96,12 @@ describe('(a) hybrid + RT-MINI roof authority — ONE racking system, roof-subse
     const lots = struct.filter(i => i.category === 'racking');
     expect(lots).toHaveLength(1);
     expect(lots[0].manufacturer).toBe('Roof Tech');
-    expect(lots[0].partNumber).toBe('RT-MINI-01');
+    // 2026-08-29 - the BOM names the product that SHIPS. `rooftech-mini` is
+    // superseded by RT-MINI II (mounting-hardware-db, which every structural
+    // fact already followed), so the equipment-registry row's gen-1 name and
+    // its gen-1 part number no longer describe this mount. Roof Tech publishes
+    // no gen-2 part number we hold, and TBD is this engine's token for that.
+    expect(lots[0].partNumber).toBe('TBD');
 
     // RT-MINI's own hardware: pads per attachment, 2 lags per pad.
     expect(structBy(json, 'attachment', 'RT-MINI-ASSY')?.quantity).toBe(96);
@@ -257,7 +262,7 @@ describe('(d) legacy single-system BOMs (no subSystemCounts) are byte-identical'
 
   it('rooftech-mini legacy racking lines match the pre-change snapshot (rail lines INTACT)', () => {
     expect(lines('rooftech-mini')).toEqual([
-      'racking|Roof Tech|RT-MINI Flush Mount|RT-MINI-01|1|lot',
+      'racking|Roof Tech|RT-MINI II|TBD|1|lot',
       'attachment|Roof Tech|RT-MINI Pad Assembly|RT-MINI-ASSY|10|ea',
       'lag_bolt|Generic|5/16" × 3" Lag Bolt SS|LAG-516-3-SS|20|ea',
       'l_foot|IronRidge|L-Foot Universal|LFT-001-B|10|ea',

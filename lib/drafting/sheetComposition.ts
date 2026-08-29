@@ -37,11 +37,9 @@ import {
   projectAttachmentInstallationAuthority,
   type AttachmentInstallationAuthority,
 } from '../permit/snapshot/structuralProjection';
-import { getManufacturerAsset } from '../manufacturer-assets-db';
 // AAC WS-9 — THE site design-load seam (no wind/snow literal in drafting).
 import { resolveSiteDesignLoads } from '../permit/snapshot/siteDesignLoads';
 // AAC WS-9 — the ONE document-applicability seam every sheet may use.
-import { sheetDocumentApplicability, type EquipmentDocumentAuthority } from '../permit/snapshot/documentAuthority';
 import { projectRackingBondingAuthority } from '../permit/snapshot/rackingBonding';
 
 // §3 (closeout 2026-07-23) — the PV-1/PV-3 conduit-run callout descriptor. Every
@@ -528,27 +526,13 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     : undefined;
   const _snapRoof = (input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null;
   const _mountIdRoof = (p?.mountingSystemId as string) ?? null;
-  const _rackAsset = _mountIdRoof ? getManufacturerAsset(_mountIdRoof, 'racking_detail') : null;
-  const _applRoof = _rackAsset
-    // AAC WS-9 RENDERER PURITY — the drafting stack projects the snapshot's
-    // decided verdict; with no snapshot (standalone preview) the snapshot layer
-    // answers with the honest no-facts evaluation, flagged as such.
-    ? sheetDocumentApplicability({
-        region: (input as { _snapshot?: { equipmentDocumentAuthority?: EquipmentDocumentAuthority } } | undefined)
-          ?._snapshot?.equipmentDocumentAuthority ?? null,
-        category: 'racking_detail', equipmentId: _mountIdRoof,
-        selectedModel: _mountSel?.model ?? _rackAsset.model, asset: _rackAsset,
-      })
-    : null;
-  const attachment = projectAttachmentInstallationAuthority(
-    _snapRoof, _mountIdRoof,
-    _rackAsset ? { model: _rackAsset.model, docTitle: _rackAsset.docTitle } : null,
-    _applRoof ? {
-      state: _applRoof.state,
-      applicabilityVerified: _applRoof.applicabilityVerified,
-      documentProduct: _applRoof.documentProduct,
-    } : null,
-  );
+  // 2026-08-29 - THIS RENDERER NO LONGER DECIDES DOCUMENT APPLICABILITY.
+  // It used to fetch the racking asset by the STORED mounting id and evaluate
+  // applicability itself, then hand the result to the authority as an override -
+  // so a drawing template was deciding which manufacturer document covers the
+  // installed mount. It is an engineering fact with one owner; the authority
+  // resolves it from the frozen region, keyed by the product that ships.
+  const attachment = projectAttachmentInstallationAuthority(_snapRoof, _mountIdRoof);
   const _mountName = ((input?.project as any)?._canonical?.mountSystem as string)
     || (p?.mountingSystem as string)
     || (_mountSel ? `${_mountSel.manufacturer} ${_mountSel.model}` : 'IRONRIDGE XR100');
@@ -826,12 +810,20 @@ function roofComposition(
     (input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null);
   const _fa = _att.fastener;
   const _lagRow = _exact
-    ? `${_fa.diameterLabel ?? '—'}" DIA × ${_fa.lengthIn ?? '—'}" ${(_fa.fastenerType ?? '').toUpperCase()}`.trim()
+    ? `${_fa.diameterLabel ?? '—'} DIA × ${_fa.lengthIn ?? '—'}" ${(_fa.fastenerType ?? '').toUpperCase()}`.trim()
     : _att.fastenerStateLabel;
   const _embedRow = _exact
     ? `${_fa.embedmentIn ?? '—'}" MIN THREAD EMBEDMENT`
     : 'NOT ESTABLISHED';
-  const _hardwareRow = _exact && _fa.material ? _fa.material.toUpperCase() : 'PENDING VERIFIED SELECTION';
+  // 2026-08-29 — two different facts, one label. This printed "PENDING VERIFIED
+  // SELECTION" whenever the MATERIAL was absent, even with the selection fully
+  // verified and this same table printing the screw's exact diameter and
+  // embedment one row above. The selection state has one owner
+  // (`fastenerStateLabel`); an unpublished material is a gap in the DOCUMENT and
+  // says so in its own words.
+  const _hardwareRow = !_exact
+    ? _att.fastenerStateLabel
+    : (_fa.material ? _fa.material.toUpperCase() : 'PER MANUFACTURER SPECIFICATION');
   // Framing term matches the structural authority (PV-4C/PE-1/CERT) so the set
   // doesn't say "RAFTER" on PV-3 while the calcs certify a pre-engineered truss.
   const _frameLabel = d.isTruss ? 'TRUSS' : 'RAFTER';

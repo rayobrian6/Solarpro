@@ -18,6 +18,7 @@ import {
   checkThresholdLabel, projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL,
   projectStructuralConclusion, projectCapacityCitation,
   type StructuralProjection,
+  formatFastenerDiameter,
 } from '../snapshot/structuralProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
 import { resolvePlansetProfile, isCompactProfile } from '../plansetProfile';
@@ -841,14 +842,12 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // .maxAllowedSpacing` (the same legacy field whose NAME was the §3 root cause)
   // and had NO consumer. The canonical spacing authority (`_spc`, below) is the
   // ONE source every PV-4C/PV-4C.1 spacing string projects.
-  const _fracIn = (v: number) =>
-    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
   // §12 — the ONE canonical fastener assembly (identical projection on PV-3 /
   // APP-A / PE-1 / SCHED). PV-4C's attachment detail reads its diameter, embedment
   // and TYPE from here — never a generic "5/16 stainless lag" literal (RT-MINI is
   // a structural wood screw). While unverified, the cert label reads PENDING.
   const _fa       = projectFastenerAssembly(input);
-  const lagDia    = _fa.diameterLabel ?? _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
+  const lagDia    = _fa.diameterLabel ?? formatFastenerDiameter(_mountSel?.mount?.fastenerDiameterIn) ?? '—';
   const lagEmbed  = _fa.embedmentIn ?? _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
   const _faType   = _fa.fastenerType ?? 'structural fastener';
   // §14 — the ONE canonical spacing authority. "MAXIMUM ALLOWED" language renders
@@ -1071,7 +1070,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <line x1="150" y1="92" x2="150" y2="184" stroke="#6b7280" stroke-width="2.4"/>
             <g stroke="#3b4250" stroke-width="0.5"><line x1="146" y1="152" x2="154" y2="152"/><line x1="146" y1="158" x2="154" y2="158"/><line x1="146" y1="164" x2="154" y2="164"/><line x1="146" y1="170" x2="154" y2="170"/><line x1="146" y1="176" x2="154" y2="176"/></g>
             <text x="160" y="130" font-size="6.5" fill="#1a2230">FASTENER</text>
-            <text x="160" y="138" font-size="6.5" fill="#1a2230">${_fa.nonOrderable ? 'PENDING' : lagDia + '&quot; DIA'}</text>
+            <text x="160" y="138" font-size="6.5" fill="#1a2230">${_fa.nonOrderable ? 'PENDING' : lagDia + ' DIA'}</text>
             <!-- embedment dimension -->
             <line x1="163" y1="134" x2="212" y2="134" stroke="#5b6472" stroke-width="0.5"/>
             <line x1="163" y1="184" x2="212" y2="184" stroke="#5b6472" stroke-width="0.5"/>
@@ -1090,7 +1089,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">ROOF ATTACHMENT REQUIREMENTS</div>
           <div style="margin-bottom:3px;">1. Fastener: ${_fa.nonOrderable
             ? `<strong style="color:#b45309;">${escapeH(FASTENER_NON_ORDERABLE_LABEL)}</strong> — manufacturer / diameter / length / embedment withheld until a verified fastener assembly is archived.`
-            : `${escapeH(_faType)}, ${lagDia}" diameter, <strong>${lagEmbed}" minimum embedment into ${escapeH(_fa.substrate ?? 'rafter')}</strong> (${escapeH(_fa.pilotRuleLabel)}).`}</div>
+            : `${escapeH(_faType)}, ${lagDia} diameter, <strong>${lagEmbed}" minimum embedment into ${escapeH(_fa.substrate ?? 'rafter')}</strong> (${escapeH(_fa.pilotRuleLabel)}).`}</div>
           <div style="margin-bottom:3px;font-size:6.8px;color:${_fa.verification === 'verified' ? '#333' : '#b45309'};"><strong>FASTENER ASSEMBLY:</strong> ${escapeH(_fa.line)} — <strong>${escapeH(_fa.certLabel)}</strong>.</div>
           <div style="margin-bottom:3px;">2. Flashing: Aluminum or stainless steel base flashing installed under existing roofing material per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">3. Sealant: Polyurethane or silicone roofing sealant at all roof penetrations per manufacturer requirements.</div>

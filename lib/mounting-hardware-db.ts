@@ -114,6 +114,16 @@ export interface MountSpec {
   fastenerLengthIn?: number;
   /** §10 — the exact fastener TYPE wording ('structural wood screw', 'SS lag'…). */
   fastenerType?: string;
+  /** 2026-08-29 — the fastener MATERIAL / alloy, present ONLY when the
+   *  manufacturer document states it. `projectFastenerAssembly` hardcoded
+   *  `material = null` with the comment "NOT carried in mounting-hardware-db",
+   *  and PV-3's hardware row read that null as "PENDING VERIFIED SELECTION" —
+   *  announcing an unverified SELECTION on a sheet that was, two rows above,
+   *  printing the verified screw's exact diameter and embedment. An unpublished
+   *  field is not a failed verification. The RT-Mini II PE letter and manual both
+   *  state SS304, so the fact exists and belongs in the record; anywhere a
+   *  document does not state it, this stays undefined and nothing is invented. */
+  fastenerMaterial?: string;
   fastenerPulloutLbs: number;      // lbs per fastener (NDS withdrawal)
   maxSpacingIn: number;            // max mount spacing (inches)
   minRafterDepthIn: number;        // minimum rafter depth for fastener
@@ -730,6 +740,9 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       fastenerEmbedmentIn: 3.07,    // 90 mm screw (3.543 in) less 15/32 in sheathing
       fastenerLengthIn: 3.543,      // 90 mm
       fastenerType: 'SS304 5.0 mm x 90 mm wood screw (no pilot hole)',
+      // SML PE letter p.1 ("SS304 5.0 mm wood screws") and the RT-MINI II
+      // Installation Manual Part A item 1B. Stated by the source, not inferred.
+      fastenerMaterial: 'SS304 stainless steel',
       // Per-screw withdrawal is NOT published separately by the letter; the
       // allowable is stated for the ASSEMBLY. Recording assembly/count keeps the
       // per-fastener field consistent rather than inventing a split.

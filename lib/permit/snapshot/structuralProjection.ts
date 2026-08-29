@@ -510,7 +510,9 @@ export interface FastenerAssembly {
   sku: string | null;
   fastenerType: string | null;     // e.g. 'structural wood screw', 'SS lag'
   diameterIn: number | null;
-  diameterLabel: string | null;    // e.g. '5/16'
+  /** the diameter WITH its unit - '5/16"' or 'M5 (5.0 mm)'. Consumers print it
+   *  verbatim; appending an inch mark is what produced `M5 (5.0 mm)" DIA`. */
+  diameterLabel: string | null;
   lengthIn: number | null;
   qtyPerMount: number | null;
   material: string | null;         // coating/material — honest null when not in record
@@ -546,6 +548,24 @@ export interface FastenerAssembly {
    *  condition the manufacturer imposes. This needs the installation document for
    *  the SELECTED product version; a previous generation's manual is not it. */
   installation: { established: boolean; sourceDocument: string | null; reason: string | null };
+  /** WHAT IT HOLDS - the published allowable withdrawal and the document that
+   *  publishes it. A per-STATE stamped PE letter establishes this; an installation
+   *  manual never does, and a flashing evaluation report never does. */
+  capacity: {
+    established: boolean; valueLbs: number | null; basis: string | null;
+    sourceDocument: string | null; sha256: string | null; reason: string | null;
+  };
+  /** WHETHER IT CAN BE ORDERED - an exact, purchasable part number. This is a
+   *  supply question and it is the ONLY facet a missing SKU may gate.
+   *
+   *  2026-08-29 - `exactInstructionsAllowed` used to AND in `exactSkuSelected`,
+   *  which requires the RAIL sku to be pinned. So an unpinned rail - a pure
+   *  procurement item, and an ADVISORY in the release model - suppressed the
+   *  roof-attachment installation instructions and printed "INSTALLATION
+   *  DETAILS: NOT ESTABLISHED" over a manufacturer manual that establishes them.
+   *  The PE letter itself says the rail is "by others": which listed rail is
+   *  bought cannot change how the pad is fastened to the roof. */
+  procurement: { established: boolean; mountSku: string | null; railSku: string | null; reason: string | null };
   /** legacy single verdict = selection AND installation. Kept so procurement and
    *  the BOM behave exactly as before - the orderable/non-orderable question is a
    *  third thing again, and moving it is not this repair. */
@@ -582,17 +602,27 @@ const _METRIC_FASTENER_MM: ReadonlyArray<readonly [number, string]> = [
   [4.0, 'M4 (4.0 mm)'], [4.5, 'M4.5 (4.5 mm)'], [5.0, 'M5 (5.0 mm)'],
   [5.5, 'M5.5 (5.5 mm)'], [6.0, 'M6 (6.0 mm)'], [8.0, 'M8 (8.0 mm)'],
 ];
-const _fracFast = (v: number | null | undefined): string | null => {
+// 2026-08-29 - THE UNIT TRAVELS WITH THE VALUE. This returned a bare '5/16' or
+// 'M5 (5.0 mm)' and left every consumer to append an inch mark, which five of
+// them did unconditionally - so a METRIC fastener printed as
+//     M5 (5.0 mm)" DIA x 3.543"
+// on PV-3, PE-1, CERT and the schedules: a millimetre value wearing an inch
+// mark, in the diameter column of a structural detail. A number and its unit are
+// one fact; formatting them apart is how they came to disagree.
+/** THE fastener-diameter formatter. certPages and structuralPages each carried a
+ *  private `_fracIn` copy that knew only the four inch fractions, so an RT-MINI II
+ *  M5 screw fell through both to a bare `0.19685`. One formatter, exported. */
+export const formatFastenerDiameter = (v: number | null | undefined): string | null => {
   if (v == null || !isFinite(v)) return null;
-  if (v === 0.25) return '1/4';
-  if (v === 0.3125) return '5/16';
-  if (v === 0.375) return '3/8';
-  if (v === 0.5) return '1/2';
+  if (v === 0.25) return '1/4"';
+  if (v === 0.3125) return '5/16"';
+  if (v === 0.375) return '3/8"';
+  if (v === 0.5) return '1/2"';
   const mm = v * 25.4;
   for (const [m, label] of _METRIC_FASTENER_MM) {
-    if (Math.abs(mm - m) < 0.05) return label;
+    if (Math.abs(mm - m) < 0.05) return label;   // already carries 'mm'
   }
-  return String(v);
+  return `${v}"`;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -714,7 +744,7 @@ export function projectFastenerAssemblyFromSnapshot(
   const model = ra?.screwLagModel ?? null;
   const fastenerType = m?.fastenerType ?? (present ? 'SS lag' : null);
   const diameterIn = m?.fastenerDiameterIn != null && m.fastenerDiameterIn > 0 ? m.fastenerDiameterIn : null;
-  const diameterLabel = _fracFast(diameterIn);
+  const diameterLabel = formatFastenerDiameter(diameterIn);
   const lengthIn = m?.fastenerLengthIn ?? null;
   const qtyPerMount = ra?.screwLagQtyPerMount ?? (m?.fastenersPerMount != null && m.fastenersPerMount > 0 ? m.fastenersPerMount : null);
   const embedmentIn = ra?.embedmentRequirementIn ?? (m?.fastenerEmbedmentIn != null && m.fastenerEmbedmentIn > 0 ? m.fastenerEmbedmentIn : null);
@@ -737,8 +767,12 @@ export function projectFastenerAssemblyFromSnapshot(
   const compatibleRoofCoverings: string[] = ra?.compatibleRoofCoverings
     ?? (ra?.installationCondition ? ra.installationCondition.split(',').map(s => s.trim()).filter(Boolean) : []);
   const rafterDeckMethod = ra?.rafterDeckAttachmentMethod ?? m?.attachmentMethod ?? null;
-  // Material / head-drive are NOT carried in mounting-hardware-db — honest nulls.
-  const material: string | null = null;
+  // 2026-08-29 — the MATERIAL is carried now, on the mount record, sourced from
+  // the manufacturer document (see `fastenerMaterial`). It was hardcoded null
+  // here, and PV-3 rendered that null as "PENDING VERIFIED SELECTION" — an
+  // absent field reported as a failed verification. Head-drive genuinely is not
+  // published for these products and stays an honest null; nothing is invented.
+  const material: string | null = m?.fastenerMaterial ?? null;
   const headDrive: string | null = null;
   // ── TAC WS-4 — THE ONE FASTENER PREDICATE ──────────────────────────────────
   // What counts as a fastener SOURCE DOCUMENT. `iccEsReport` (ESR-3575) is a
@@ -808,6 +842,41 @@ export function projectFastenerAssemblyFromSnapshot(
     reason: _installEstablished ? null
       : 'no installation document verified as applicable to the SELECTED product version is on file',
   };
+  // CAPACITY - from the same provenance record the value itself comes from, so a
+  // number and its citation can never be separated (R3).
+  const _capProv = (ra as { capacityProvenance?: {
+    publishedValueLbs?: number | null; capacityBasis?: string | null;
+    sourceDocument?: { identity?: string | null; documentHash?: string | null } | null;
+  } | null } | null)?.capacityProvenance ?? null;
+  const _capDoc = _capProv?.sourceDocument ?? null;
+  const _capEstablished = typeof _capProv?.publishedValueLbs === 'number' && !!_capDoc?.identity;
+  const capacity = {
+    established: _capEstablished,
+    valueLbs: _capEstablished ? (_capProv!.publishedValueLbs as number) : null,
+    basis: _capProv?.capacityBasis ?? null,
+    sourceDocument: _capDoc?.identity ?? null,
+    sha256: _capDoc?.documentHash ?? null,
+    reason: _capEstablished ? null
+      : 'no published allowable withdrawal is established from a stamped structural source for this product',
+  };
+
+  // PROCUREMENT - an exact orderable part number. A rail-based assembly needs its
+  // rail pinned as well as its mount.
+  const _railSku = (ra as { railSku?: string | null; railModel?: string | null } | null)?.railSku ?? null;
+  const _railModel = (ra as { railModel?: string | null } | null)?.railModel ?? null;
+  const _railPinned = _railSku != null || (_railModel != null && !/PENDING/i.test(_railModel));
+  const _mountSku = ra?.mountSku ?? null;
+  const procurement = {
+    established: !!ra && _mountSku != null && _railPinned,
+    mountSku: _mountSku,
+    railSku: _railSku,
+    reason: !ra ? 'no racking assembly record'
+      : _mountSku == null && !_railPinned ? 'no exact mount or rail part number is selected'
+      : _mountSku == null ? 'no exact mount part number is selected'
+      : !_railPinned ? 'no exact rail part number is selected (procurement item; the design specifies the rail by performance)'
+      : null,
+  };
+
   const sourceDocument = _fv.sourceDocument ?? selection.sourceDocument;
   const verification: FastenerAssembly['verification'] =
     !present ? 'pending'
@@ -820,7 +889,7 @@ export function projectFastenerAssemblyFromSnapshot(
   const nonOrderable = verification !== 'verified';
   const descParts = [
     [manufacturer, model].filter(Boolean).join(' ') || fastenerType || 'Structural fastener',
-    diameterLabel ? `${diameterLabel}" dia` : null,
+    diameterLabel ? `${diameterLabel} dia` : null,
     lengthIn != null ? `× ${lengthIn}"` : null,
     fastenerType,
     qtyPerMount != null ? `${qtyPerMount}/mount` : null,
@@ -854,7 +923,7 @@ export function projectFastenerAssemblyFromSnapshot(
     present, manufacturer, model, sku: ra?.mountSku ?? null, fastenerType,
     diameterIn, diameterLabel, lengthIn, qtyPerMount, material, headDrive,
     pilotHoleRequired, pilotRuleLabel, embedmentIn, substrate, rafterDeckMethod,
-    sourceDocument, selection, installation, verification, nonOrderable, line, certLabel,
+    sourceDocument, selection, installation, capacity, procurement, verification, nonOrderable, line, certLabel,
   };
 }
 
@@ -945,6 +1014,42 @@ export function projectAttachmentInstallationAuthority(
 ): AttachmentInstallationAuthority {
   const proj = projectStructural(snap);
   const spacing = proj.spacingAuthority;
+  // == 2026-08-29 - THE AUTHORITY RESOLVES ITS OWN DOCUMENT =================
+  // `asset` and `applicability` were the CALLER's job, and all three drafting
+  // call sites did that job independently: each looked the asset up by the
+  // STORED mounting id and evaluated applicability itself. Three renderers each
+  // deciding "which document covers this mount" is three chances to decide it
+  // differently, and they did - a superseded stored id resolved the gen-1 row,
+  // so a false applicability verdict was handed IN and overrode the correct one,
+  // printing "INSTALLATION DETAILS: NOT ESTABLISHED" across a manufacturer
+  // manual that establishes them in detail.
+  //
+  // A renderer must not decide an engineering fact. Both parameters are now
+  // OPTIONAL OVERRIDES: when a caller does not supply one, it is resolved here
+  // from the frozen document region - which already follows supersession, so the
+  // verdict describes the product that SHIPS - and every consumer that simply
+  // asks gets the one answer.
+  const _selfDocEntry = (asset === undefined || asset === null
+    || applicability === undefined || applicability === null)
+    ? projectDocumentAuthority(snap, 'racking_detail', mountingSystemId)
+    : null;
+  if (asset === undefined || asset === null) {
+    asset = _selfDocEntry
+      ? {
+          model: _selfDocEntry.selectedModel,
+          docTitle: _selfDocEntry.selectedDocument?.title ?? _selfDocEntry.documentTitle ?? null,
+        }
+      : null;
+  }
+  if (applicability === undefined || applicability === null) {
+    applicability = _selfDocEntry?.applicability
+      ? {
+          state: _selfDocEntry.applicability.state,
+          applicabilityVerified: _selfDocEntry.applicability.applicabilityVerified,
+          documentProduct: _selfDocEntry.applicability.documentProduct,
+        }
+      : null;
+  }
   // TAC WS-4 — when the CALLER supplies the document applicability explicitly
   // (the drafting stack does, from the decided document authority), the fastener
   // verdict must be computed against THAT same fact rather than re-reading the
@@ -995,8 +1100,23 @@ export function projectAttachmentInstallationAuthority(
   //     of this snapshot's digest), not a stale sidecar.
   const selectionBoundToCurrentDigest = !!snap?.meta?.digest && !!ra;
 
-  const exactInstructionsAllowed = exactSkuSelected
-    && documentApplicabilityVerified
+  // ══ 2026-08-29 — PROCUREMENT NO LONGER GATES INSTALLATION ═════════════════
+  // This ANDed in `exactSkuSelected`, which requires the RAIL part number to be
+  // pinned. An unpinned rail is a procurement item — the release model already
+  // classifies it as an ADVISORY — and it was suppressing the roof-attachment
+  // installation instructions, printing "INSTALLATION DETAILS: NOT ESTABLISHED"
+  // across a manufacturer manual that establishes them in detail.
+  //
+  // The authority itself says why that is wrong: the RT-Mini II PE letter
+  // specifies "an appropriately load rated rail, by others". Which listed rail is
+  // BOUGHT cannot change how the pad is FASTENED TO THE ROOF. Those are two
+  // facts, and only one of them is missing.
+  //
+  // What genuinely authorises printing exact manufacturer installation
+  // instructions: an applicable, archived, hash-bound document for the selected
+  // product, a fastener assembly established from it, and a selection bound to
+  // the current digest.
+  const exactInstructionsAllowed = documentApplicabilityVerified
     && documentArchivedHashBound
     && fastenerAssemblyVerified
     && selectionBoundToCurrentDigest;
@@ -1013,13 +1133,19 @@ export function projectAttachmentInstallationAuthority(
   // fastener ELEMENT is verified but exact instructions stay gated (SKU /
   // document authority), the label says exactly that. ONE label, consumed by
   // this block AND the lib/drafting descriptor surfaces.
-  const fastenerStateLabel = fastenerAssemblyVerified
-    ? 'VERIFIED — EXACT INSTALLATION INSTRUCTIONS PENDING DOCUMENT/SKU AUTHORITY'
-    : 'PENDING VERIFIED SELECTION';
+  // THE LABEL NAMES THE FACET THAT IS ACTUALLY MISSING, and the pending list
+  // carries only lines that are TRUE. A blanket "INSTALLATION DETAILS: NOT
+  // ESTABLISHED" over an applicable manufacturer manual is a false statement, and
+  // it is the one a reviewer would have caught first.
+  const fastenerStateLabel = fastener.selection.established && fastener.installation.established
+    ? 'VERIFIED'
+    : fastener.selection.established
+      ? 'ESTABLISHED — INSTALLATION DETAILS PENDING'
+      : 'PENDING VERIFIED SELECTION';
   const pendingLines = exactInstructionsAllowed ? [] : [
     `FASTENER ASSEMBLY: ${fastenerStateLabel}`,
-    'INSTALLATION DETAILS: NOT ESTABLISHED',
-    _docLine,
+    ...(fastener.installation.established ? [] : ['INSTALLATION DETAILS: NOT ESTABLISHED']),
+    ...(documentApplicabilityVerified ? [] : [_docLine]),
     REFERENCE_DETAIL_BANNER,
   ];
 

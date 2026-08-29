@@ -29,6 +29,7 @@ import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import {
   projectStructuralFromInput, bannerRequirementsForSheet, fmt, fmtStr, findCheck,
   projectFastenerAssembly, projectStructuralConclusion, projectCapacityCitation,
+  formatFastenerDiameter,
 } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { RELEASE_PHASE_STYLE } from '../snapshot/releasePhase';
@@ -799,8 +800,6 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
     || project.attachmentSpacing
     || _mountSel?.mount?.maxSpacingIn
     || 48;
-  const _fracIn = (v: number) =>
-    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
   // §12 — the ONE canonical fastener assembly (identical to PV-3 / APP-A / SCHED).
   // The PE letter no longer asserts a generic "5/16 minimum stainless lag"; while
   // the assembly is unverified it prints PENDING VERIFIED FASTENER ASSEMBLY.
@@ -809,7 +808,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   // the DESIGN spacing + PENDING STRUCTURAL VERIFICATION unless a verified source
   // establishes a maximum-allowed — the letter never asserts "max O.C." unproven.
   const _spc      = _sp.spacingAuthority;
-  const lagDia    = _fa.diameterLabel ?? _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
+  const lagDia    = _fa.diameterLabel ?? formatFastenerDiameter(_mountSel?.mount?.fastenerDiameterIn) ?? '—';
   const lagEmbed  = _fa.embedmentIn ?? _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
   // 1-decimal ratio so the printed pair is self-consistent -- Math.round gave
   // "4/12 (20.0 deg)" where 4:12 is actually 18.4 deg (a checkable contradiction).
@@ -856,7 +855,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
           <table class="info-table mb-xs">
             <tr><td class="il">Roof Type</td><td class="iv">${roofType}</td><td class="il">Roof Pitch</td><td class="iv">${roofPitch}</td></tr>
             <tr><td class="il">Rafter / Framing</td><td class="iv">${_isTruss ? `Pre-Engineered Truss (${rafterSize} chords)` : `${rafterSize} Lumber`}</td><td class="il">Spacing</td><td class="iv">${rafterSpace}" O.C.</td></tr>
-            <tr><td class="il">Attach Spacing</td><td class="iv">${_spc.designSpacingIn != null ? _spc.designSpacingIn : attachSpace}&quot; O.C. ${_spc.verificationState === 'verified' ? `(MAX ALLOWED, VERIFIED)` : `<span style="color:#b45309;font-weight:bold;">(design; PENDING VERIF.)</span>`}</td><td class="il">Fastener Dia.</td><td class="iv">${_fa.nonOrderable ? '<span style="color:#b45309;font-weight:bold;">PENDING VERIF.</span>' : lagDia + '"'}</td></tr>
+            <tr><td class="il">Attach Spacing</td><td class="iv">${_spc.designSpacingIn != null ? _spc.designSpacingIn : attachSpace}&quot; O.C. ${_spc.verificationState === 'verified' ? `(MAX ALLOWED, VERIFIED)` : `<span style="color:#b45309;font-weight:bold;">(design; PENDING VERIF.)</span>`}</td><td class="il">Fastener Dia.</td><td class="iv">${_fa.nonOrderable ? '<span style="color:#b45309;font-weight:bold;">PENDING VERIF.</span>' : lagDia}</td></tr>
             <tr><td class="il">Min. Embedment</td><td class="iv">${_fa.nonOrderable ? '<span style="color:#b45309;font-weight:bold;">PENDING VERIF.</span>' : lagEmbed + '" into ' + escapeH(_fa.substrate ?? 'rafter')}</td><td class="il">Fastener Status</td><td class="iv" style="font-weight:bold;color:${_fa.verification === 'verified' ? '#000' : '#b45309'};">${escapeH(_fa.certLabel)}</td></tr>
             <tr><td class="il">Fastener Assembly</td><td class="iv" colspan="3" data-pe-field="fastener">${escapeH(_fa.line)}</td></tr>
             <tr><td class="il">Roof Sheathing</td><td class="iv">No attachment to sheathing only</td><td class="il">Underlayment</td><td class="iv">Maintained per mfr. req.</td></tr>

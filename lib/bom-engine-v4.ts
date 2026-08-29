@@ -21,6 +21,7 @@ import {
   BOMStageDefinition,
 } from './topology-manager';
 import { resolveIntegratedEquipment } from './equipment/integratedBos';
+import { getMountingSystemById } from './mounting-hardware-db';
 import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
 import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
@@ -685,6 +686,36 @@ const SUB_SYSTEM_EMIT_ORDER: readonly SubSystemKey[] = ['roof', 'ground', 'fence
 // pinned"; when it is set the lot line withholds its manufacturer and SKU and is
 // excluded from the authoritative procurement total. The QUANTITY (1 lot) is real
 // and stays.
+// ── 2026-08-29 - ONE RACKING IDENTITY ───────────────────────────────────────
+// The BOM named the racking system from the equipment-REGISTRY row, looked up by
+// the id the design stored. Every other racking fact - capacity, fastener,
+// topology, spacing, the applicable manufacturer document - comes from
+// mounting-hardware-db, which follows SUPERSESSION: `rooftech-mini` resolves to
+// the RT-MINI II that Roof Tech actually ships and stamps. The registry does not
+// follow it, so a single design printed "RT-MINI II" on the structural sheets and
+// "RT-MINI Flush Mount" on the BOM - a first-generation product name on the
+// procurement export for a second-generation mount.
+//
+// Naming the product is one fact. It is resolved here, once, at the point the
+// entry enters the BOM, so every consumer downstream is already correct rather
+// than each remembering to ask. Only the identity is overridden; formulas,
+// accessories and topology stay the registry's.
+function withCanonicalMountIdentity<T extends {
+  id: string; manufacturer: string; model: string; partNumber?: string | null;
+} | undefined>(entry: T): T {
+  if (!entry) return entry;
+  const canonical = getMountingSystemById(entry.id);
+  if (!canonical || canonical.id === entry.id) return entry;
+  return {
+    ...entry,
+    manufacturer: canonical.manufacturer,
+    model: canonical.model,
+    // A superseded row's part number belongs to the superseded product. Dropping
+    // it is the honest answer; the SKU pipeline already prints the pending state.
+    partNumber: canonical.mount?.model === entry.model ? entry.partNumber : null,
+  };
+}
+
 function _rackingLotState(rb: { mounts?: { pending?: boolean; orderable?: boolean } } | undefined): {
   pending: boolean;
   mfr: (m: string) => string;
@@ -853,7 +884,8 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   const microDb = (!inverterEntry && input.inverterId) ? getMicroinverterById(input.inverterId) : undefined;
   const invDb = (!inverterEntry && !microDb && input.inverterId) ? getInverterById(input.inverterId) : undefined;
   const optimizerEntry = input.optimizerId ? getRegistryEntryV4(input.optimizerId) : undefined;
-  const rackingEntry = input.rackingId ? getRegistryEntryV4(input.rackingId) : undefined;
+  const rackingEntry = withCanonicalMountIdentity(
+    input.rackingId ? getRegistryEntryV4(input.rackingId) : undefined);
   const batteryEntry = input.batteryId ? getRegistryEntryV4(input.batteryId) : undefined;
   const panelEntry = input.panelId ? getRegistryEntryV4(input.panelId) : undefined;
   // Fallback to the MAIN equipment catalog when the sparse V4 registry misses
@@ -1850,7 +1882,11 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // Primary racking system
     const _lot = _rackingLotState(_roofRB);
     items.push(addItem('structural', 'racking', _lot.mfr(rackingEntry.manufacturer), rackingEntry.model,
-      _lot.sku(rackingEntry.partNumber ?? rackingEntry.id),
+      // 2026-08-29 - was `?? rackingEntry.id`, which printed SolarPro's own
+      // internal catalogue key ('rooftech-mini') in the PART NUMBER column of a
+      // procurement export. An id is not a purchasable SKU; 'TBD' is the token
+      // this engine already uses for one that is not established.
+      _lot.sku(rackingEntry.partNumber ?? 'TBD'),
       `${_lot.pending ? '' : `${rackingEntry.manufacturer} `}${rackingEntry.model} — ${_suppressRailFormulas ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`
       + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
       1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem', '1', true,
@@ -3029,7 +3065,8 @@ function generateBOMV4PerSubSystem(
   const roofSub = subs.find(s => s.key === 'roof');
   const roofModules = roofSub ? roofSub.modules : 0;
   const roofRackingId = subMap.roof?.mountingId ?? input.rackingId;
-  const rackingEntry = roofRackingId ? getRegistryEntryV4(roofRackingId) : undefined;
+  const rackingEntry = withCanonicalMountIdentity(
+    roofRackingId ? getRegistryEntryV4(roofRackingId) : undefined);
   const _roofRB = (input.rackingBOM && roofModules > 0) ? input.rackingBOM : undefined;
   const roofStrings = (() => {
     if (roofModules <= 0) return 0;
@@ -3059,7 +3096,11 @@ function generateBOMV4PerSubSystem(
     const suppressRail = RAIL_LESS_ROOF_RACKING.has(rackingEntry.id) && !_roofRB;
     const _lot = _rackingLotState(_roofRB);
     push('roof', addItem('structural', 'racking', _lot.mfr(rackingEntry.manufacturer), rackingEntry.model,
-      _lot.sku(rackingEntry.partNumber ?? rackingEntry.id),
+      // 2026-08-29 - was `?? rackingEntry.id`, which printed SolarPro's own
+      // internal catalogue key ('rooftech-mini') in the PART NUMBER column of a
+      // procurement export. An id is not a purchasable SKU; 'TBD' is the token
+      // this engine already uses for one that is not established.
+      _lot.sku(rackingEntry.partNumber ?? 'TBD'),
       `${_lot.pending ? '' : `${rackingEntry.manufacturer} `}${rackingEntry.model} — ${suppressRail ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`
       + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
       1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem (roof sub-system)', '1', true,

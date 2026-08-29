@@ -42,6 +42,25 @@ function gen(): { html: string; input: any; snap: PermitDesignSnapshot } {
 
 const PKG = gen();
 
+// ── 2026-08-29 - THE RULE MOVED OFF THE FIXTURE ────────────────────────────
+// SolarPro now archives the Roof Tech RT-MINI II Installation Manual (Jun 2025,
+// 40 pp, SHA-256 6d868692...) from the manufacturer's own portal, and the
+// document lookup follows the same supersession the PRODUCT lookup always did.
+// Braidon's attachment authority is therefore genuinely VERIFIED: an applicable,
+// archived, hash-bound document for the selected product, naming the assembly.
+//
+// The §4 rule is unchanged and must stay proven - a package with NO verified
+// document may print no exact instruction. So it is proven where it applies: on
+// a mount with nothing on file. A rule demonstrated only on production data
+// stops being demonstrated the moment that data is corrected, and the fixture
+// then quietly pins the DEFECT instead of the rule.
+const UNDOCUMENTED = (() => {
+  const input = clone(braidonOriginalAuditFixture) as any;
+  input.project.mountingSystemId = 'unobtainium-mount';
+  const html = generatePermitHTML(input);
+  return { html, input, snap: input._snapshot as PermitDesignSnapshot };
+})();
+
 /** Strip tags AND decode the entities the sheets emit, so prose assertions are
  *  not defeated by inline markup or by `&mdash;` standing in for an em dash. */
 const text = (html: string): string =>
@@ -123,8 +142,8 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
     expect(att.conditions.fastenerAssemblyVerified).toBe(false);
   });
 
-  it('PV-3 renders the state-derived PENDING block (fastener + instructions both pending)', () => {
-    const t = pv3();
+  it('PV-3 renders the state-derived PENDING block when NOTHING is on file', () => {
+    const t = text(sheetWith(UNDOCUMENTED.html, 'ATTACHMENT DETAIL'));
     expect(t).toContain('FASTENER ASSEMBLY: PENDING VERIFIED SELECTION');
     expect(t).not.toContain('FASTENER ASSEMBLY: VERIFIED');
     expect(t).toContain('INSTALLATION DETAILS: NOT ESTABLISHED');
@@ -139,7 +158,7 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
   });
 
   it('PV-3 prints NO exact diameter / length / torque / pilot / coating / sealant instruction', () => {
-    const t = pv3();
+    const t = text(sheetWith(UNDOCUMENTED.html, 'ATTACHMENT DETAIL'));
     expect(t).not.toMatch(/5\/16|3\/8"\s*DIA|\bDIA\s*×/i);
     expect(t).not.toMatch(/FT-LBS|ft-lbs?/i);          // the fabricated torque
     expect(t).not.toMatch(/PILOT HOLE/i);              // the fabricated pilot diameter
@@ -148,6 +167,19 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
     expect(t).not.toMatch(/SEALANT AT EVERY/i);
     expect(t).not.toMatch(/\d+(\.\d+)?"\s*MIN\.?\s*(THREAD\s*)?EMBED/i);
     expect(t).not.toMatch(/ALPHASEAL/i);               // hardcoded product name
+  });
+
+  it('and the CONVERSE on the fixture: a verified authority STATES the assembly', () => {
+    // The other half of the same rule, and the reason it exists. With the manual
+    // archived and version-exact, PV-3 must print the manufacturer's own
+    // instruction rather than withhold it - and must not print a pending token
+    // beside the exact screw it is simultaneously specifying, which is what the
+    // package did for weeks.
+    const t = pv3();
+    expect(t).not.toContain('FASTENER ASSEMBLY: PENDING VERIFIED SELECTION');
+    expect(t).not.toContain('INSTALLATION DETAILS: NOT ESTABLISHED');
+    expect(t).toContain('SS304');
+    expect(t).toMatch(/RT-MINI II Installation Manual/i);
   });
 
   it('the fabricated diameter-keyed torque + pilot derivations are DELETED from the source', async () => {
@@ -160,7 +192,7 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
   });
 
   it('the detail still RENDERS (geometry kept) — it is bannered, not deleted', () => {
-    const pv3sheet = sheetWith(PKG.html, 'ATTACHMENT DETAIL');
+    const pv3sheet = sheetWith(UNDOCUMENTED.html, 'ATTACHMENT DETAIL');
     expect(pv3sheet).toMatch(/<svg/);
     expect(text(pv3sheet)).toContain('NON-AUTHORITATIVE');
   });
