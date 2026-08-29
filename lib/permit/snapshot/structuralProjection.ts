@@ -24,7 +24,7 @@ import { observedFramingLine, observedSourceLabel } from './framingAuthority';
 import { environmentalSourceLabel, environmentalStateTag } from './environmentalAuthority';
 import { peekSnapshot } from './read';
 import { REQUIREMENT_DECLARATIONS } from './releaseGates';
-import { deriveReleasePhase, submissionLine, type ReleasePhaseKind } from './releasePhase';
+import { releasePhaseFor, submissionLine, type ReleasePhaseKind } from './releasePhase';
 import { projectDocumentAuthority } from './documentAuthority';
 import { projectReleaseGates, releasePackageLine, type ReleaseSummary } from './releaseGates';
 // TAC WS-17 — ONE definition of "does this requirement gate this sheet?", shared
@@ -328,14 +328,7 @@ export function structuralBanner(snap: PermitDesignSnapshot | null | undefined):
 
   // The phase is derived from the same release model, so a sheet and the cover
   // can never state different things about one package.
-  const phase = release
-    ? deriveReleasePhase({
-        model: release,
-        reviewCoversCurrentDigest: release.issueStatePredicates.professionalReleaseComplete,
-        gatePasses: release.issueStatePredicates.readyForPermitSubmission,
-        hasDesign: (snap?.derived?.moduleCount ?? 0) > 0,
-      })
-    : null;
+  const phase = release ? releasePhaseFor(release, snap) : null;
 
   return {
     show: notReady || structuralBlocking.length > 0,

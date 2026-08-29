@@ -166,8 +166,19 @@ describe('WS-5 §16 — every printed conclusion carries its grade', () => {
       });
       expect(g.conclusion, s.segmentId).toBe('PROVISIONAL_PASS');
       expect(g.label).toBe('PROVISIONAL PASS');
-      expect(g.basis, s.segmentId).toMatch(/CAD-routed geometry|CAD-derived estimate/);
-      expect(g.basis, s.segmentId).toMatch(/Field-verified route length required/);
+      // 2026-08-29 - the tap span is FIXED BY DESIGN, not estimated. See the note
+      // in d5-voltage-drop-cross-sheet.test.ts case 23. It is still PROVISIONAL
+      // (inspection confirms the install follows the drawing); what it does not
+      // owe is a measurement, because the number is a requirement.
+      const designFixed = s.verificationState === 'design-constraint' || s.lengthSource === 'known-design';
+      if (designFixed) {
+        expect(g.basis, s.segmentId).toMatch(/FIXED BY DESIGN/);
+        expect(g.basis, s.segmentId).toMatch(/inspection confirms the installation follows it/);
+        expect(g.fieldVerificationPending, s.segmentId).toBe(false);
+      } else {
+        expect(g.basis, s.segmentId).toMatch(/CAD-routed geometry|CAD-derived estimate/);
+        expect(g.basis, s.segmentId).toMatch(/Field-verified route length required/);
+      }
     }
   });
 });

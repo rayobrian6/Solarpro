@@ -31,6 +31,8 @@ import {
   type StructuralBomRowDraft,
 } from '@/lib/permit/snapshot/structuralBom';
 import { projectIssueStateLanguage } from '@/lib/permit/snapshot/projectAuthorityProjection';
+import { projectReleaseGatesFromInput } from '@/lib/permit/snapshot/releaseGates';
+import { releasePhaseFor } from '@/lib/permit/snapshot/releasePhase';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
@@ -365,8 +367,28 @@ describe('PPC §6 (gate 8) — generic PASS cannot hide branch blockers', () => 
     // worst source among the branch's runs. Its literal text changed once one
     // of those runs stopped being an estimate; what this test guards - that
     // route authority is NAMED and is not a bare PASS - is unchanged.
-    expect(t).toMatch(/ROUTE AUTHORITY: (PENDING|BLOCKED)/);      // route authority, never a bare PASS
-    expect(t).toMatch(/OVERALL RELEASE: BLOCKED/);
+    // 2026-08-29 - THIS PINNED A SECOND RELEASE MODEL. The branch matrix computed
+    // its own RELEASED/BLOCKED from four ad-hoc predicates, two of which are not
+    // release gates: route PROVENANCE (answered by the declared
+    // ROUTE-LENGTH-ESTIMATE requirement, which is resolved here) and racking
+    // bonding (an advisory, which by ruling may decorate a banner but never
+    // summon one). So SCHED printed BLOCKED on every branch of a package the
+    // release model, the cover and PV-3 all called DESIGN COMPLETE.
+    //
+    // The cell now projects the PACKAGE phase, and what stays per-branch is the
+    // one thing that genuinely is. What this case guards is unchanged and is
+    // asserted more strictly below: the release state is NAMED per branch, it is
+    // never a bare PASS, and it agrees with the package.
+    expect(t).toMatch(/ROUTE AUTHORITY: (FIXED BY DESIGN|FIELD-VERIFIED|ESTIMATE)/);
+    expect(t).toMatch(/OVERALL RELEASE: /);
+    expect(t).not.toMatch(/OVERALL RELEASE: PASS/);
+    // ONE package, ONE verdict: the branch cell says exactly what the sheet
+    // banner says. A branch may add its own procurement block on top; it may not
+    // disagree about the package.
+    const _pkg = releasePhaseFor(projectReleaseGatesFromInput(PKG.input), PKG.snap);
+    for (const m of t.matchAll(/OVERALL RELEASE: ([^<]{0,60}?)(?= B\d| GROUNDING|$)/g)) {
+      expect(m[1]).toContain(_pkg.terse);
+    }
   });
 
   it('the Q-Cable deficit is never apportioned per branch', () => {

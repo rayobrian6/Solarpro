@@ -262,9 +262,26 @@ describe('D5 §4 — Braidon has measured nothing and the sheets say so', () => 
     expect(html).not.toContain('VERIFIED PASS');
   });
 
-  it('23. every voltage-drop cell reports field verification as still pending', () => {
+  it('23. every ESTIMATED voltage-drop cell reports field verification as still pending', () => {
+    // 2026-08-29 - ONE SEGMENT IS NOT AN ESTIMATE. DISCO_TO_METER_RUN is the
+    // NEC 705.11(C) supply-side tap span: the DESIGN fixes it at the 10 ft
+    // maximum, the conductors are sized on that, and the snapshot has always
+    // recorded it as `design-constraint` / `known-design`. The grader had no
+    // branch for either value, so it flattened them to "CAD-derived estimate" -
+    // the row printed `design-constraint` in its provenance column and
+    // CAD-DERIVED ESTIMATE two columns to the right, and told the installer to
+    // field-verify a distance the drawing REQUIRES them to achieve.
+    //
+    // The rule these cases defend is unchanged: nothing claims VERIFIED PASS,
+    // and every genuinely estimated length still reports its field requirement
+    // as open. What is corrected is the one segment where that was never true.
     const all = [...vdCells('PV-4B'), ...vdCells('PV-4B.1')];
-    expect(all.every(c => c.fieldPending === 'true')).toBe(true);
+    const designFixed = all.filter(c => /FIXED BY DESIGN/i.test(c.lengthAuthority ?? ''));
+    const estimated = all.filter(c => !/FIXED BY DESIGN/i.test(c.lengthAuthority ?? ''));
+    expect(estimated.length).toBeGreaterThan(0);
+    expect(estimated.every(c => c.fieldPending === 'true')).toBe(true);
+    // ...and the design-fixed one does NOT carry a field requirement it cannot owe.
+    expect(designFixed.every(c => c.fieldPending !== 'true')).toBe(true);
   });
 
   it('24. no voltage-drop conclusion is an unqualified tick — a pass is always graded', () => {

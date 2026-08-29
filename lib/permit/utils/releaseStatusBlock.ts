@@ -24,7 +24,7 @@ import {
   projectReleaseGatesFromInput, releaseHeadline, openReleaseGates, topConfirmedConflict,
 } from '../snapshot/releaseGates';
 import {
-  deriveReleasePhase, RELEASE_PHASE_STYLE, submissionLine, type ReleasePhase,
+  releasePhaseFor, RELEASE_PHASE_STYLE, submissionLine, type ReleasePhase,
 } from '../snapshot/releasePhase';
 import { peekSnapshot } from '../snapshot/read';
 import { escapeH } from './drawing';
@@ -63,12 +63,7 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
   // one actionable sentence, coloured by whether the state is a defect or a
   // correct workflow step. The counts and the gate names stay — underneath,
   // where they inform rather than alarm.
-  const phase = deriveReleasePhase({
-    model,
-    reviewCoversCurrentDigest: model.issueStatePredicates.professionalReleaseComplete,
-    gatePasses: model.issueStatePredicates.readyForPermitSubmission,
-    hasDesign: (snap?.derived?.moduleCount ?? 0) > 0,
-  });
+  const phase = releasePhaseFor(model, snap);
   const style = RELEASE_PHASE_STYLE[phase.kind];
 
   // ── AAC WS-10 — the PERMIT profile prints ONE concise release status ───────

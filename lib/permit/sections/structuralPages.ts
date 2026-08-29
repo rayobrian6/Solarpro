@@ -49,7 +49,9 @@ import { peekSnapshot } from '../snapshot/read';
 // re-derives any of them, and none is invented per branch: route carries a GLOBAL
 // verification state + a per-branch length PROVENANCE, grounding is ONE global
 // outcome scoped by branchIds, only procurement genuinely varies per branch.
-import { routeVerificationStatus, routeVerificationLabel, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
+import { routeVerificationStatus, routeVerificationLabel, isRouteFieldVerified, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
+import { projectReleaseGatesFromInput } from '../snapshot/releaseGates';
+import { releasePhaseFor } from '../snapshot/releasePhase';
 import { projectListedCableAssembly } from '../snapshot/electricalProjection';
 // PPC §5/§9 — the AUTHORITATIVE PROCUREMENT TOTAL / orderable-export subset. The
 // schedule renders this COMPUTED object; it no longer asserts exclusions in prose.
@@ -2077,7 +2079,13 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
     const _rows = _schedAuth.microBranches;
     if (!_rows.length) return '';
     const _routeSt = routeVerificationStatus(_schedSnap);
-    const _routeVerified = _routeSt === 'field-measured' || _routeSt === 'field-verified' || _routeSt === 'as-built-verified';
+    // 2026-08-29 - the second implementation of "is this run field-checked".
+    // Written out longhand here AND in electricalProjection; this copy fed a
+    // release verdict, so a length the DESIGN fixes read as an open item.
+    const _routeVerified = isRouteFieldVerified(_routeSt);
+    // THE package release state, from the model that decides it. Everything below
+    // states what is genuinely PER BRANCH; the package-level verdict is not.
+    const _schedPhase = releasePhaseFor(projectReleaseGatesFromInput(input), _schedSnap);
     const _gnd = projectOpenAirBranchGrounding(_schedSnap);
     const _schedQPCell = _schedSnap.electrical?.qcableProcurement ?? null;
     const _schedQPResolved = _schedQPCell?.present === true && _schedQPCell.compatibilityStatus === 'VERIFIED';
@@ -2099,9 +2107,17 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       ?? _paths[b.index - 1] ?? null)?.lengthProvenance ?? null);
     const _provUniform = _provAll.length > 0 && _provAll.every(v => v === _provAll[0]);
     // The two SCHEDULE-LEVEL authority statements (identical for every branch).
+    // 2026-08-29 - PROVENANCE, not a grade. The amber PENDING branch fired for
+    // every state that is not field evidence, including `design-constraint` -
+    // whose label was `undefined` because the reader's status list was behind the
+    // writer's, so SCHED literally printed "ROUTE AUTHORITY: PENDING - undefined".
+    // A length the drawing FIXES is a requirement the install must meet, not an
+    // outstanding item, and it says so in its own words.
     const _routeCellShared = _routeVerified
-      ? `ROUTE AUTHORITY: VERIFIED (${escapeH(routeVerificationLabel(_routeSt))})`
-      : `ROUTE AUTHORITY: ${_amber('PENDING')} &mdash; ${escapeH(routeVerificationLabel(_routeSt))}`;
+      ? `ROUTE AUTHORITY: FIELD-VERIFIED (${escapeH(routeVerificationLabel(_routeSt))})`
+      : _routeSt === 'design-constraint'
+        ? `ROUTE AUTHORITY: ${escapeH(routeVerificationLabel(_routeSt))}`
+        : `ROUTE AUTHORITY: ${_amber('ESTIMATE')} &mdash; ${escapeH(routeVerificationLabel(_routeSt))}`;
     // WS-2 SCHED REPAIR — the grounding line states the SEPARATED authorities.
     // "All pending" was false once the product question closed; "all verified"
     // would be equally false while racking bonding is unresolved. Each domain
@@ -2141,9 +2157,27 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
               : ((_affected.has(_path?.branchId ?? '') || _affected.size === 0)
                   ? _amber('AFFECTED &mdash; QCABLE-PROCUREMENT-INSUFFICIENT')
                   : 'NOT AFFECTED')));
-      const _release = (_routeVerified && !_gndPending && !_bondPending
-        && (_schedQPResolved || !_schedPS?.insufficient) && !_schedHasBlockers)
-        ? 'RELEASED' : _amber('BLOCKED');
+      // ══ 2026-08-29 - A SECOND RELEASE MODEL LIVED HERE ══════════════════
+      // This ANDed four unrelated predicates of its own and printed RELEASED or
+      // BLOCKED from the result - a release verdict decided on a schedule sheet,
+      // beside the one the release model decides for the whole package. They
+      // disagreed: the registry held no open DESIGN requirement, the cover read
+      // "DESIGN COMPLETE", and every branch line on SCHED read
+      // "OVERALL RELEASE: BLOCKED".
+      //
+      // Two of its four inputs are not release gates at all. Route provenance is
+      // answered by the declared ROUTE-LENGTH-ESTIMATE requirement (resolved on
+      // this design, and its length is FIXED BY DESIGN besides), and racking
+      // bonding rides the racking-assembly ADVISORY, which by ruling may decorate
+      // a banner but never summon one.
+      //
+      // The package verdict is now the package's. What stays per-branch is the
+      // one thing that genuinely is: this branch's procurement sufficiency.
+      const _branchShort = !_schedQPResolved && _schedPS?.insufficient
+        && (_affected.has(_path?.branchId ?? '') || _affected.size === 0);
+      const _release = _branchShort
+        ? _amber('BLOCKED &mdash; QCABLE-PROCUREMENT-INSUFFICIENT')
+        : (_schedPhase.kind === 'defect' ? _amber(_schedPhase.terse) : _schedPhase.terse);
       // The two SCHEDULE-LEVEL authorities (route verification state, grounding
       // outcome) are stated ONCE in the header, not repeated verbatim on every
       // branch: they carry the SAME value for every branch by construction, and

@@ -133,6 +133,20 @@ export type RouteVerificationStatus =
   | 'cad-derived-estimate'     // deriveRunLengths / CAD geometry, not field-checked
   | 'geometry-derived'         // WS-5: taken from ROUTED CAD geometry — stronger than
                                // an estimate, still not field evidence
+  // 2026-08-29 — THE READER'S LIST WAS BEHIND THE WRITER'S. `build.ts` has been
+  // stamping `verificationStatus: 'design-constraint'` on every route segment
+  // whose length the DESIGN fixes (the NEC 705.11(C) tap span: "FIXED BY DESIGN
+  // at the 10 ft maximum", state `pass-by-design`). This union never listed it,
+  // so `ROUTE_STATUS_RANK.indexOf(...)` returned -1, which is lower than every
+  // real rank — the value therefore won the weakest-status comparison outright
+  // and governed the whole package, and `ROUTE_STATUS_LABEL[...]` returned
+  // `undefined`, which SCHED printed verbatim:
+  //     "ROUTE AUTHORITY: PENDING — undefined"
+  // A length the drawing FIXES is not an unverified guess to be field-checked;
+  // it is a design requirement the installation must follow. It ranks above the
+  // estimates and below field evidence, because field inspection still confirms
+  // the install matches the drawing.
+  | 'design-constraint'        // the DESIGN fixes this length (NEC 705.11(C) tap span)
   | 'field-reported'           // WS-5: operator-entered, NOT yet verified
   | 'field-measured'           // a tech measured the run in the field
   | 'field-verified'           // measured AND verified against the installed route
@@ -142,6 +156,7 @@ const ROUTE_STATUS_LABEL: Record<RouteVerificationStatus, string> = {
   'unverified-estimate': 'UNVERIFIED ESTIMATE — FIELD VERIFY',
   'cad-derived-estimate': 'CAD-DERIVED ESTIMATE — FIELD VERIFY',
   'geometry-derived': 'CAD ROUTE — GEOMETRY DERIVED — FIELD VERIFY',
+  'design-constraint': 'FIXED BY DESIGN — INSTALL PER DRAWING',
   'field-reported': 'FIELD REPORTED — UNVERIFIED',
   'field-measured': 'FIELD-MEASURED',
   'field-verified': 'FIELD-VERIFIED',
@@ -153,9 +168,19 @@ const ROUTE_STATUS_RANK: RouteVerificationStatus[] = [
   // WS-5 — weakest→strongest. geometry-derived outranks a bare estimate (the
   // route is really in the model) but sits BELOW any field evidence; a
   // field REPORT outranks geometry but is not verification.
-  'unverified-estimate', 'cad-derived-estimate', 'geometry-derived', 'field-reported',
-  'field-measured', 'field-verified', 'as-built-verified',
+  'unverified-estimate', 'cad-derived-estimate', 'geometry-derived', 'design-constraint',
+  'field-reported', 'field-measured', 'field-verified', 'as-built-verified',
 ];
+
+/** THE predicate for "did somebody actually go and check this run". It was
+ *  written out longhand in two places - here and in structuralPages' SCHED block
+ *  - and the SCHED copy was wired straight into a release verdict, so a route
+ *  whose length the design FIXES printed OVERALL RELEASE: BLOCKED on every
+ *  branch. Provenance is not a release gate; ROUTE-LENGTH-ESTIMATE is the
+ *  declared requirement that answers that, and it is resolved on this design. */
+export function isRouteFieldVerified(status: RouteVerificationStatus): boolean {
+  return status === 'field-measured' || status === 'field-verified' || status === 'as-built-verified';
+}
 
 /** Map a RouteSegmentRecord.lengthSource → a verification status. Conservative:
  *  operator-entry and cad-route are estimate-grade until field measurement is
@@ -204,8 +229,13 @@ export function routeVerificationLabel(status: RouteVerificationStatus): string 
  *  routeVerificationLabel(routeVerificationStatus(snap)) directly. */
 export function routeProvenanceLabel(snap: PermitDesignSnapshot | null | undefined): string {
   const st = routeVerificationStatus(snap);
-  const verified = st === 'field-measured' || st === 'field-verified' || st === 'as-built-verified';
-  return verified ? 'ROUTE FIELD-VERIFIED' : 'CAD-DERIVED ESTIMATE — FIELD VERIFY';
+  if (isRouteFieldVerified(st)) return 'ROUTE FIELD-VERIFIED';
+  // A design-constraint length is not a CAD estimate awaiting a tape measure -
+  // the drawing carries the placement requirement and the conductors are sized on
+  // it. Calling it an estimate told the installer to go verify a number that is
+  // theirs to ACHIEVE.
+  if (st === 'design-constraint') return 'LENGTH FIXED BY DESIGN — INSTALL PER DRAWING';
+  return 'CAD-DERIVED ESTIMATE — FIELD VERIFY';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -572,6 +602,13 @@ export function gradeVoltageDrop(args: {
     : lengthSource === 'field-reported' ? 'field-reported measurement (UNVERIFIED)'
     : lengthSource === 'field-measurement' || lengthSource === 'operator-entry'
       ? (verified ? 'FIELD-VERIFIED measurement' : 'field-reported measurement (UNVERIFIED)')
+    // 2026-08-29 - `known-design` fell through to "CAD-derived estimate" here and
+    // to 'CAD-DERIVED ESTIMATE' below, so PV-4B.1's DISCO_TO_METER_RUN row printed
+    // `design-constraint` in its provenance column and CAD-DERIVED ESTIMATE two
+    // columns to the right. One row, one length, two accounts of where it came
+    // from - and the wrong one told the installer to go field-verify a distance
+    // the drawing REQUIRES them to achieve (NEC 705.11(C), 10 ft maximum).
+    : lengthSource === 'known-design' ? 'a length FIXED BY DESIGN'
     : 'CAD-derived estimate';
 
   // D5 — the LENGTH AUTHORITY, stated on its own terms. It reads the canonical
@@ -583,12 +620,20 @@ export function gradeVoltageDrop(args: {
       || lengthSource === 'field-measurement' || lengthSource === 'field-reported'
       || lengthSource === 'operator-entry'
       ? 'FIELD-REPORTED (UNVERIFIED)'
+    : verificationState === 'design-constraint' || lengthSource === 'known-design'
+      ? 'FIXED BY DESIGN — INSTALL PER DRAWING'
     : verificationState === 'geometry-derived' || lengthSource === 'cad-route'
       ? 'CAD ROUTE — GEOMETRY DERIVED'
     : 'CAD-DERIVED ESTIMATE';
+  const _designFixed = verificationState === 'design-constraint' || lengthSource === 'known-design';
   // Open while nothing FIELD-VERIFIED backs the length. A length that does not
   // exist yet cannot have a satisfied field requirement either.
-  const fieldVerificationPending = !verified;
+  //
+  // 2026-08-29 - EXCEPT a length the DESIGN fixes. The tap span is not an estimate
+  // waiting on a tape measure: the drawing states the maximum, the conductors are
+  // sized on it, and the installer's job is to MEET it. Flagging it pending said
+  // we owed a measurement on a number that is a requirement, not an observation.
+  const fieldVerificationPending = !verified && !_designFixed;
   const rest = {
     pct, limitPct, lengthFt, lengthSource, verificationState,
     lengthAuthorityLabel, fieldVerificationPending,
@@ -618,7 +663,13 @@ export function gradeVoltageDrop(args: {
   }
   return {
     conclusion: 'PROVISIONAL_PASS', label: 'PROVISIONAL PASS',
-    basis: `Length basis: ${lengthFt} ft ${sourceLabel}. Field-verified route length required for final acceptance.`,
+    // A design-fixed length is still PROVISIONAL - inspection confirms the install
+    // follows the drawing - but the outstanding step is compliance with a stated
+    // requirement, not the supply of a measurement we are missing.
+    basis: _designFixed
+      ? `Length basis: ${lengthFt} ft ${sourceLabel}. The drawing carries this as a requirement; `
+        + `inspection confirms the installation follows it.`
+      : `Length basis: ${lengthFt} ft ${sourceLabel}. Field-verified route length required for final acceptance.`,
     ...rest,
   };
 }

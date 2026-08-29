@@ -73,6 +73,11 @@ export interface ReleasePhase {
   designRequirementCodes: string[];
   professionalRequirementCodes: string[];
   advisoryCount: number;
+  /** the phase in a table CELL - a few words, same vocabulary as `label`. Sheets
+   *  that need a one-line verdict take THIS rather than composing their own; the
+   *  SCHED branch matrix used to compute its own from four ad-hoc predicates and
+   *  printed BLOCKED on a package the release model called complete. */
+  terse: string;
   /** why this phase and not the next one — for the review record, never the drawing. */
   basis: string;
 }
@@ -138,6 +143,14 @@ export function deriveReleasePhase(input: ReleasePhaseInput): ReleasePhase {
   const designCodes = design.map(r => r.requirementCode);
   const professionalCodes = professional.map(r => r.requirementCode);
 
+  const TERSE: Record<ReleasePhaseId, string> = {
+    DESIGN_INCOMPLETE: design.length > 0
+      ? `BLOCKED — ${design.length} DESIGN REQUIREMENT${design.length === 1 ? '' : 'S'}`
+      : 'BLOCKED — NO DESIGN',
+    AWAITING_PROFESSIONAL_REVIEW: 'DESIGN COMPLETE — PENDING ENGINEER OF RECORD',
+    AWAITING_SEAL_AND_ISSUE: 'REVIEWED — AWAITING SEAL',
+    ISSUED_FOR_PERMIT: 'RELEASED',
+  };
   const make = (
     id: ReleasePhaseId, label: string, statement: string,
     kind: ReleasePhaseKind, submittable: boolean, basis: string,
@@ -145,7 +158,7 @@ export function deriveReleasePhase(input: ReleasePhaseInput): ReleasePhase {
     id, label, statement, kind, submittable,
     designRequirementCodes: designCodes,
     professionalRequirementCodes: professionalCodes,
-    advisoryCount, basis,
+    advisoryCount, terse: TERSE[id], basis,
   });
 
   if (!input.hasDesign) {
@@ -195,6 +208,21 @@ export function deriveReleasePhase(input: ReleasePhaseInput): ReleasePhase {
   return make('ISSUED_FOR_PERMIT', 'ISSUED FOR PERMIT',
     'ISSUED FOR PERMIT.', 'released', true,
     'review covers the current digest and every ISSUED-FOR-PERMIT precondition passes');
+}
+
+/** THE way a sheet gets the phase. Three call sites assembled this same input
+ *  object by hand; a fourth (the SCHED branch matrix) did not, and invented its
+ *  own verdict from four unrelated predicates instead. One package, one phase. */
+export function releasePhaseFor(
+  model: ReleaseGateModel,
+  snap: { derived?: { moduleCount?: number } } | null | undefined,
+): ReleasePhase {
+  return deriveReleasePhase({
+    model,
+    reviewCoversCurrentDigest: model.issueStatePredicates.professionalReleaseComplete,
+    gatePasses: model.issueStatePredicates.readyForPermitSubmission,
+    hasDesign: (snap?.derived?.moduleCount ?? 0) > 0,
+  });
 }
 
 /** The palette a renderer takes from the phase. Kept here so no sheet decides

@@ -458,7 +458,11 @@ function impactLabel(g: ReleaseGateResult): string {
     i.construction ? 'CONSTRUCTION' : '',
     i.administrativeRelease ? 'ADMINISTRATIVE RELEASE' : '',
   ].filter(Boolean);
-  return on.length ? on.join(' · ') : 'NONE BLOCKED';
+  // 2026-08-29 - was 'NONE BLOCKED'. Correct English, but on a CLEARED row in a
+  // table where BLOCKED is the loaded word, "CLEARED ... NONE BLOCKED" scans as a
+  // block. The column is RELEASE IMPACT; 'NONE' answers it without borrowing the
+  // vocabulary of the state it is denying.
+  return on.length ? on.join(' · ') : 'NONE';
 }
 
 /** The gate's BASE description (the model appends the per-child `affects`
