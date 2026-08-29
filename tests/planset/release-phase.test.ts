@@ -85,7 +85,7 @@ describe('the four phases', () => {
     expect(p.statement).toMatch(/Licensed review follows/);
   });
 
-  it('DESIGN COMPLETE — AWAITING PROFESSIONAL REVIEW is a WORKFLOW state, not a defect', () => {
+  it('DESIGN COMPLETE — READY FOR PROFESSIONAL REVIEW is a WORKFLOW state, not a defect', () => {
     const p = deriveReleasePhase({
       ...base,
       model: modelWith([
@@ -99,7 +99,11 @@ describe('the four phases', () => {
     expect(p.kind).toBe('workflow');
     expect(p.kind).not.toBe('defect');
     expect(p.designRequirementCodes).toEqual([]);
-    expect(p.statement).toMatch(/DESIGN COMPLETE — AWAITING PROFESSIONAL REVIEW/);
+    // 2026-08-29 - the statement leads with the achievement and then names the
+    // reviewer's task; the LABEL carries 'READY FOR PROFESSIONAL REVIEW'.
+    expect(p.label).toBe('DESIGN COMPLETE — READY FOR PROFESSIONAL REVIEW');
+    expect(p.statement).toMatch(/DESIGN COMPLETE — no design requirement is outstanding/);
+    expect(p.statement).toMatch(/Ready for engineer-of-record review and seal/);
     expect(p.statement).toMatch(/existing framing capacity/i);
     // …and it is still honestly not submittable
     expect(p.submittable).toBe(false);

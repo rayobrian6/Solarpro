@@ -34,6 +34,7 @@ import { resolvePlansetProfile, isCompactProfile, sheetIsDirectlyGated } from '.
 // TAC WS-18 — one cross-sheet reference resolver over the ACTIVE sheet index.
 import { sheetRef } from './sheetRef';
 import { RELEASE_PHASE_STYLE } from '../snapshot/releasePhase';
+import { requirementLane } from '../snapshot/releaseGates';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -101,12 +102,20 @@ export function structuralBannerHtml(
   // falls back to the paragraph this replaced.
   const _line = (x: { code: string; sheetLine: string | null }): string =>
     x.sheetLine ?? `${x.code} — see the project review record.`;
-  const _blockingRows = _shown.filter(x => x.severity !== 'warning');
+  // 2026-08-29 - THREE ROW CLASSES, not two. A requirement only a licensed
+  // professional can close is the REVIEWER'S item, not an open item against the
+  // design, and printing it in the same undifferentiated list said the package
+  // was deficient when it was finished and waiting for a seal. It is still
+  // printed - the engineer needs to see exactly what to look at - but it is
+  // named as theirs. The lane comes from the requirement's own declaration.
+  const _blockingRows = _shown.filter(x => x.severity !== 'warning' && requirementLane(x.code) === 'design');
+  const _professionalRows = _shown.filter(x => x.severity !== 'warning' && requirementLane(x.code) !== 'design');
   const _advisoryRows = _shown.filter(x => x.severity === 'warning');
   const reasons = _shown.length
     ? _blockingRows.map(x => `<li style="margin:0 0 1px 0;" data-banner-requirement="${esc(x.code)}">${esc(_line(x))}</li>`).join('')
       // An advisory is LABELLED. It is not a release blocker and must not read
       // as one — the gate line one row above already counts it separately.
+      + _professionalRows.map(x => `<li style="margin:0 0 1px 0;" data-banner-requirement="${esc(x.code)}" data-banner-lane="professional"><strong>FOR ENGINEER OF RECORD — </strong>${esc(_line(x))}</li>`).join('')
       + _advisoryRows.map(x => `<li style="margin:0 0 1px 0;opacity:0.85;" data-banner-requirement="${esc(x.code)}" data-banner-advisory="1"><strong>ADVISORY — </strong>${esc(_line(x))}</li>`).join('')
       + (_remainder > 0
         ? `<li style="${_italic}">+ ${_remainder} more ${_remainderNoun}${_remainder === 1 ? '' : 's'}`

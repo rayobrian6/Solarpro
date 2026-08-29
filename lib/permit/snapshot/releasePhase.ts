@@ -37,7 +37,10 @@
 //
 // PURE + deterministic. Reads the model; counts, groups and words nothing twice.
 // ═══════════════════════════════════════════════════════════════════════════
-import { REQUIREMENT_DECLARATIONS, type ReleaseGateModel, type ReleaseRequirement } from './releaseGates';
+import {
+  REQUIREMENT_DECLARATIONS, requirementLane,
+  type ReleaseGateModel, type ReleaseRequirement,
+} from './releaseGates';
 
 export type ReleasePhaseId =
   | 'DESIGN_INCOMPLETE'
@@ -45,8 +48,12 @@ export type ReleasePhaseId =
   | 'AWAITING_SEAL_AND_ISSUE'
   | 'ISSUED_FOR_PERMIT';
 
-/** Which lane a requirement belongs to. */
-export type RequirementLane = 'design' | 'professional';
+// RequirementLane + requirementLane() MOVED to releaseGates.ts (2026-08-29):
+// the release SUMMARY now counts by lane too, and releaseGates cannot import
+// from this module without a cycle. It lives beside REQUIREMENT_DECLARATIONS,
+// which is the table it reads. Re-exported here so every existing caller is
+// unaffected and there is still exactly ONE implementation.
+export { requirementLane, type RequirementLane } from './releaseGates';
 
 /** How the phase should READ. A defect state warns; a workflow state informs; a
  *  released state states. The renderer takes its colour from this, so nothing
@@ -68,19 +75,6 @@ export interface ReleasePhase {
   advisoryCount: number;
   /** why this phase and not the next one — for the review record, never the drawing. */
   basis: string;
-}
-
-/**
- * Which lane does this requirement belong to? Fail-closed toward DESIGN: an
- * undeclared code is treated as a design requirement, because calling an unknown
- * gap "awaiting a signature" would understate it.
- */
-export function requirementLane(code: string): RequirementLane {
-  const d = REQUIREMENT_DECLARATIONS[code];
-  if (!d) return 'design';
-  if (d.findingType === 'PROFESSIONAL_RELEASE') return 'professional';
-  const terminal = d.residualMode ?? d.resolutionMode;
-  return terminal === 'PROFESSIONAL_APPROVAL' ? 'professional' : 'design';
 }
 
 /** The requirement's short human title, for the one-sentence statement.
@@ -173,8 +167,12 @@ export function deriveReleasePhase(input: ReleasePhaseInput): ReleasePhase {
 
   if (!input.reviewCoversCurrentDigest) {
     const what = professional.length > 0 ? listTitles(professional.map(titleOf)) : 'engineering review';
-    return make('AWAITING_PROFESSIONAL_REVIEW', 'DESIGN COMPLETE — AWAITING PROFESSIONAL REVIEW',
-      `DESIGN COMPLETE — AWAITING PROFESSIONAL REVIEW. Licensed review required: ${what}.`,
+    // 2026-08-29 - READY FOR, not AWAITING. Ray's ruling: the engineer-of-
+    // record step is not a qualifier against us, and an unstamped set that owes
+    // nothing else IS the finished product. The label states what the package
+    // has ACHIEVED; the sentence still names exactly what the reviewer must do.
+    return make('AWAITING_PROFESSIONAL_REVIEW', 'DESIGN COMPLETE — READY FOR PROFESSIONAL REVIEW',
+      `DESIGN COMPLETE — no design requirement is outstanding. Ready for engineer-of-record review and seal: ${what}.`,
       // NOT a defect. Every design and authority requirement is closed; what
       // remains is a licensed professional's judgement, which is the next step
       // in a correct workflow rather than something wrong with the package.

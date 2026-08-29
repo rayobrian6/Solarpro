@@ -212,8 +212,15 @@ describe('RGM §3/§4 — the Braidon 19-requirement condition derives exactly s
   });
 
   it('the §4 headline replaces "19 OPEN RELEASE BLOCKERS" and never conflates the counts', () => {
+    // 2026-08-29 LANE SPLIT - the release summary now reports what SolarPro can
+  // close separately from what only a licensed professional can. Nothing is
+  // deleted or suppressed: the TOTALS below are unchanged and RS-1 still
+  // accounts for every requirement. The split is additive.
+    const d = m.summary.designRequirementCount, e = m.summary.professionalRequirementCount;
+    expect(d + e).toBe(19);
     expect(releaseHeadline(m.summary))
-      .toBe('7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION');
+      .toBe(`7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS (${d} DESIGN / ${e} ENGINEER OF RECORD)`
+        + ' / 0 ADVISORIES / NOT FOR PERMIT SUBMISSION');
   });
 
   it('all 19 requirements are preserved — nothing suppressed, nothing merged', () => {
@@ -404,8 +411,9 @@ describe('RGM §10 — the independent verification checks', () => {
     expect(ev.gateRollup.reduce((s, r) => s + r.unresolvedCount, 0)).toBe(19);
     expect(ev.headline).toBe(releaseHeadline(m.summary));
     expect(Object.keys(ev.releaseSummary).sort()).toEqual([
-      'advisoryCount', 'engineeringReviewReady', 'openGateCount', 'permitReady',
-      'procurementReady', 'unresolvedRequirementCount',
+      'advisoryCount', 'designComplete', 'designRequirementCount', 'engineeringReviewReady',
+      'openDesignGateCount', 'openGateCount', 'permitReady', 'procurementReady',
+      'professionalRequirementCount', 'unresolvedRequirementCount',
     ]);
   });
 });
@@ -616,6 +624,9 @@ describe('RGM anti-vacuity — no active requirements', () => {
     expect(m.summary).toEqual({
       openGateCount: 0, unresolvedRequirementCount: 0, advisoryCount: 0,
       permitReady: true, procurementReady: true, engineeringReviewReady: true,
+      // an empty registry owes nothing in either lane
+      designRequirementCount: 0, openDesignGateCount: 0,
+      professionalRequirementCount: 0, designComplete: true,
     });
     expect(releaseHeadline(m.summary))
       .toBe('0 OPEN RELEASE GATES / 0 UNRESOLVED REQUIREMENTS / 0 ADVISORIES / NO PERMIT-IMPACTING GATE OPEN');

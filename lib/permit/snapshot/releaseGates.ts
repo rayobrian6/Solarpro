@@ -132,6 +132,22 @@ export interface ReleaseRequirement {
 }
 
 /** §4 top-level count semantics — EXACTLY the six directive fields. */
+/** Which lane a requirement belongs to. */
+export type RequirementLane = 'design' | 'professional';
+
+/**
+ * Which lane does this requirement belong to? Fail-closed toward DESIGN: an
+ * undeclared code is treated as a design requirement, because calling an unknown
+ * gap "awaiting a signature" would understate it.
+ */
+export function requirementLane(code: string): RequirementLane {
+  const d = REQUIREMENT_DECLARATIONS[code];
+  if (!d) return 'design';
+  if (d.findingType === 'PROFESSIONAL_RELEASE') return 'professional';
+  const terminal = d.residualMode ?? d.resolutionMode;
+  return terminal === 'PROFESSIONAL_APPROVAL' ? 'professional' : 'design';
+}
+
 export interface ReleaseSummary {
   openGateCount: number;
   unresolvedRequirementCount: number;
@@ -139,6 +155,39 @@ export interface ReleaseSummary {
   permitReady: boolean;
   procurementReady: boolean;
   engineeringReviewReady: boolean;
+
+  // == 2026-08-29 - THE LANE SPLIT (Ray's ruling) ==========================
+  // "If the remaining are ones that we can never truly fix, like the PE stamp,
+  //  remove them. That is no qualifier for us. Our objective is to get this
+  //  ready to be stamped."
+  //
+  // An unstamped engineering set is the TERMINAL state of a correct workflow -
+  // it IS the product. Counting the engineer-of-record's signature as one of
+  // OUR unresolved requirements said the package was deficient when it was
+  // finished, and it made "2 requirements outstanding" mean the same thing
+  // whether we still owed real work or owed nothing at all.
+  //
+  // The lane is NOT a hand-kept list: `requirementLane()` reads the declaration
+  // each requirement already carries - PROFESSIONAL when its finding type is
+  // PROFESSIONAL_RELEASE or its TERMINAL resolution mode is
+  // PROFESSIONAL_APPROVAL, DESIGN otherwise. A new requirement lands in the
+  // right lane by declaring what it is.
+  //
+  // NOTHING IS DELETED. The professional requirements stay in the registry,
+  // stay on RS-1, still hold their gates OPEN, and still keep
+  // `readyForPermitSubmission` false - an unsealed set can never print ISSUED
+  // FOR PERMIT. What changed is whose scorecard they appear on.
+
+  /** requirements SolarPro can close: data, derivation, retrieval, operator entry. */
+  designRequirementCount: number;
+  /** gates holding at least one open DESIGN requirement. */
+  openDesignGateCount: number;
+  /** requirements only a licensed professional can close. Reported, never counted
+   *  against the design. */
+  professionalRequirementCount: number;
+  /** true iff nothing SolarPro can act on is outstanding - THE SET IS READY TO BE
+   *  STAMPED. This is the number the product is judged on. */
+  designComplete: boolean;
 }
 
 /** §8 one readiness axis: ready + the OPEN gates that block it. */
@@ -1322,6 +1371,12 @@ export function deriveReleaseGateModel(input: ReleaseGateModelInput): ReleaseGat
   // engineeringReviewReady: nothing outside the PROFESSIONAL_RELEASE gate is open
   // — i.e. the technical + administrative package is ready to GO to the engineer.
   const engineeringReviewReady = openGates.every(g => g.gateCategory === 'PROFESSIONAL_WORKFLOW');
+  // The lane split. `requirementLane` reads the SAME declaration table the
+  // release phase reads, so the phase, the counts and the sheets can never
+  // disagree about which lane a requirement is in.
+  const _design = unresolved.filter(q => requirementLane(q.requirementCode) === 'design');
+  const _professional = unresolved.filter(q => requirementLane(q.requirementCode) !== 'design');
+  const _designGateIds = new Set(_design.map(q => q.gateId));
   const summary: ReleaseSummary = {
     openGateCount: openGates.length,
     unresolvedRequirementCount: unresolved.length,
@@ -1329,6 +1384,10 @@ export function deriveReleaseGateModel(input: ReleaseGateModelInput): ReleaseGat
     permitReady: readinessAxes.permitSubmission.ready,
     procurementReady: readinessAxes.procurement.ready,
     engineeringReviewReady,
+    designRequirementCount: _design.length,
+    openDesignGateCount: _designGateIds.size,
+    professionalRequirementCount: _professional.length,
+    designComplete: _design.length === 0,
   };
 
   // ── 6. §8 gate-derived qualification of the EXISTING issue states ──────────
@@ -1399,25 +1458,49 @@ export function releaseHeadline(summary: ReleaseSummary): string {
   const r = `${summary.unresolvedRequirementCount} UNRESOLVED REQUIREMENT${summary.unresolvedRequirementCount === 1 ? '' : 'S'}`;
   const a = `${summary.advisoryCount} ADVISOR${summary.advisoryCount === 1 ? 'Y' : 'IES'}`;
   const tail = summary.permitReady ? 'NO PERMIT-IMPACTING GATE OPEN' : 'NOT FOR PERMIT SUBMISSION';
-  return `${g} / ${r} / ${a} / ${tail}`;
+  // 2026-08-29 - RS-1 IS THE FULL RECORD. It keeps the TOTAL, because it is the
+  // one surface that must account for every requirement and a reader (or the
+  // cross-surface harness) has to be able to reconcile it against the registry.
+  // What it gains is the LANE SPLIT, so the same header says both "everything
+  // that is open" and "what is ours". The drawings carry the design scorecard
+  // (releasePackageLine); this carries the whole truth.
+  const split = summary.unresolvedRequirementCount > 0
+    ? ` (${summary.designRequirementCount} DESIGN / ${summary.professionalRequirementCount} ENGINEER OF RECORD)` : '';
+  const done = summary.designComplete && summary.unresolvedRequirementCount > 0 ? ' — DESIGN COMPLETE' : '';
+  return `${g} / ${r}${split}${done} / ${a} / ${tail}`;
 }
+
 
 /** §4 — the PACKAGE-LEVEL count line every OTHER sheet prints above its own
  *  sheet-scoped requirement rows. A sheet states the package total in GATE
  *  semantics ("7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS") and points at
  *  RS-1 for the requirement detail — it never states "19 blockers", which
  *  misrepresents 19 children of 7 root gates as 19 independent failures. */
-export function releasePackageLine(summary: ReleaseSummary): string {
-  const g = `${summary.openGateCount} OPEN RELEASE GATE${summary.openGateCount === 1 ? '' : 'S'}`;
-  const r = `${summary.unresolvedRequirementCount} UNRESOLVED REQUIREMENT${summary.unresolvedRequirementCount === 1 ? '' : 'S'}`;
+export function releasePackageLine(summary: ReleaseSummary, recordRef = 'SEE RS-1'): string {
   const a = summary.advisoryCount > 0
     ? ` / ${summary.advisoryCount} ADVISOR${summary.advisoryCount === 1 ? 'Y' : 'IES'}` : '';
-  // 2026-08-28 — the tail said "ALL N REQUIREMENTS" where N summed requirements
+  // 2026-08-28 - the tail said "ALL N REQUIREMENTS" where N summed requirements
   // AND advisories, re-labelling an advisory a requirement in the same sentence
   // that had just counted it separately. ITEMS is the honest collective noun.
   const _total = summary.unresolvedRequirementCount + summary.advisoryCount;
-  return `PACKAGE RELEASE STATUS: ${g} / ${r}${a} — SEE RS-1 FOR ALL ${_total} ITEM${_total === 1 ? '' : 'S'}`;
+  const _tail = _total > 0
+    ? ` — ${recordRef} FOR ALL ${_total} ITEM${_total === 1 ? '' : 'S'}` : '';
+
+  // THE DESIGN SCORECARD. A sheet states what the DESIGN still owes; the
+  // engineer-of-record step is NAMED as the next step in the workflow rather
+  // than counted as one of our unresolved requirements.
+  if (summary.designComplete) {
+    const pe = summary.professionalRequirementCount > 0
+      ? ' — READY FOR ENGINEER-OF-RECORD REVIEW AND SEAL' : '';
+    return `PACKAGE RELEASE STATUS: DESIGN COMPLETE — 0 OPEN DESIGN REQUIREMENTS${a}${pe}${_tail}`;
+  }
+  const g = `${summary.openDesignGateCount} OPEN DESIGN GATE${summary.openDesignGateCount === 1 ? '' : 'S'}`;
+  const r = `${summary.designRequirementCount} UNRESOLVED DESIGN REQUIREMENT${summary.designRequirementCount === 1 ? '' : 'S'}`;
+  const pe = summary.professionalRequirementCount > 0
+    ? ' — THEN ENGINEER-OF-RECORD REVIEW AND SEAL' : '';
+  return `PACKAGE RELEASE STATUS: ${g} / ${r}${a}${pe}${_tail}`;
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §10 — EVIDENCE EXPORT + INDEPENDENT VERIFICATION (reusable by the harness)

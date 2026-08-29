@@ -29,6 +29,7 @@ import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { projectStructuralFromInput, bannerRequirementsForSheet, fmt, fmtStr, findCheck, projectFastenerAssembly } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { RELEASE_PHASE_STYLE } from '../snapshot/releasePhase';
+import { requirementLane } from '../snapshot/releaseGates';
 import {
   projectProjectAuthorityFromInput, projectIssueStateLanguageFromInput,
   projectProjectStateFromInput,
@@ -141,13 +142,19 @@ export function certificationGateBanner(input: PermitInput, sheetId?: string | n
   // out of _esc() as the literal text "&mdash;" on the sheet.
   const _certLine = (x: { code: string; sheetLine: string | null }): string =>
     (x.sheetLine ? _esc(x.sheetLine) : `${_esc(x.code)} &mdash; see the project review record.`);
-  const _blocking = _shownReasons.filter(b => b.severity !== 'warning');
+  const _blocking = _shownReasons.filter(b => b.severity !== 'warning' && requirementLane(b.code) === 'design');
+  // A professional-lane row is the REVIEWER'S item. On a certification sheet
+  // that distinction is the whole point: it separates what the design still
+  // owes from what this engineer is here to do.
+  const _professional = _shownReasons.filter(b => b.severity !== 'warning' && requirementLane(b.code) !== 'design');
   const _advisory = _shownReasons.filter(b => b.severity === 'warning');
   const _reasons = _blocking
     .map(b => `<li style="margin:0 0 1px 0;" data-banner-requirement="${_esc(b.code)}">${_certLine(b)}</li>`).join('')
     // An advisory is LABELLED here too. The gate line directly above already
     // counts it separately; printing it as an undifferentiated red bullet
     // contradicted that line on the sheet that matters most.
+    + _professional
+      .map(b => `<li style="margin:0 0 1px 0;" data-banner-requirement="${_esc(b.code)}" data-banner-lane="professional"><strong>FOR ENGINEER OF RECORD &mdash; </strong>${_certLine(b)}</li>`).join('')
     + _advisory
       .map(b => `<li style="margin:0 0 1px 0;opacity:0.85;" data-banner-requirement="${_esc(b.code)}" data-banner-advisory="1"><strong>ADVISORY &mdash; </strong>${_certLine(b)}</li>`).join('')
     // RGM §4 — the remainder is a PACKAGE-level statement ⇒ requirement (child)

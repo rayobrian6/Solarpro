@@ -80,6 +80,12 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
   // HIERARCHY explanation — that lesson belongs in the review record, not on
   // every submittal.
   const _profile = resolvePlansetProfile(input);
+  // 2026-08-29 - THE COVER STATES THE SAME SCORECARD AS THE DRAWINGS. It counted
+  // every open requirement, so a package that owed nothing but a seal read "2
+  // unresolved requirements" on the cover while PV-3 read "0 OPEN DESIGN
+  // REQUIREMENTS" - one package contradicting itself in two places. The gate
+  // NAMES below are unchanged and still list every open gate, and RS-1 still
+  // carries the full account.
   if (isCompactProfile(_profile)) {
     const names = open.map(g => `${escapeH(g.title)} (${g.unresolvedCount})`).join(' &nbsp;·&nbsp; ');
     // Post-AAC profile contract — the profile distinction is EXPLICIT on the
@@ -116,8 +122,14 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
       ${_profileLine}
     </div>
     <div data-release-headline="1" style="font-size:8px;color:${style.fg};text-align:center;line-height:1.3;margin-top:2px;">
-      <span data-release-open-gate-count="${model.summary.openGateCount}" style="font-weight:900;">${model.summary.openGateCount}</span> open release gate${model.summary.openGateCount === 1 ? '' : 's'}
-      / <span data-release-requirement-count="${model.summary.unresolvedRequirementCount}" style="font-weight:900;">${model.summary.unresolvedRequirementCount}</span> unresolved requirement${model.summary.unresolvedRequirementCount === 1 ? '' : 's'}
+      ${model.summary.designComplete
+        ? `<span data-release-design-complete="1" style="font-weight:900;">0</span> open design requirements`
+          + ` &mdash; <span data-release-professional-count="${model.summary.professionalRequirementCount}" style="font-weight:900;">${model.summary.professionalRequirementCount}</span>`
+          + ` for the engineer of record`
+        : `<span data-release-open-gate-count="${model.summary.openDesignGateCount}" style="font-weight:900;">${model.summary.openDesignGateCount}</span> open design gate${model.summary.openDesignGateCount === 1 ? '' : 's'}`
+          + ` / <span data-release-requirement-count="${model.summary.designRequirementCount}" style="font-weight:900;">${model.summary.designRequirementCount}</span> unresolved design requirement${model.summary.designRequirementCount === 1 ? '' : 's'}`
+          + (model.summary.professionalRequirementCount > 0
+            ? ` / <span data-release-professional-count="${model.summary.professionalRequirementCount}" style="font-weight:900;">${model.summary.professionalRequirementCount}</span> for the engineer of record` : '')}
       &mdash; ${names || '—'}
     </div>
     <div data-release-record-pointer="1"${_rs.present ? ` data-release-record-sheet="${_rs.sheetId}"` : ''} style="margin-top:2px;font-weight:900;font-size:8.5px;letter-spacing:0.5px;color:#111;text-align:center;">

@@ -38,6 +38,7 @@ import { join } from 'path';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import { activeSheetIds, sheetRef } from '@/lib/permit/utils/sheetRef';
+import { resolveSnapshotAuthorityInputs } from '@/lib/permit/snapshot/authorityInputs';
 
 const ROOT = join(__dirname, '..', '..');
 const PAGE = readFileSync(join(ROOT, 'app', 'engineering', 'page.tsx'), 'utf8');
@@ -177,4 +178,52 @@ describe('the project review record is reachable', () => {
     expect(route).toContain('extractPageBySheetId(raw, sheetId)');
     expect(route).toMatch(/'RS-1':\s*1,/);
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE SHIPPED DATASHEET MUST SURVIVE THE ASYNC PATH (2026-08-29)
+//
+// The pure build path already consults SolarPro's own shipped datasheet
+// catalogue when no governed registry row exists. The RESOLVER did not - it
+// recomputed the verdict from the database alone and overwrote the pure answer,
+// so on any deployment with no archived Qcells row (which is every deployment)
+// the async path REOPENED a requirement the product had already closed with a
+// document it ships. That was the last design-lane item standing between a
+// finished package and DESIGN COMPLETE.
+//
+// The precedence is delicate and these tests pin all three cases.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('the shipped module datasheet survives the resolver', () => {
+  const CODE = 'MODULE-EXACT-DATASHEET-PENDING';
+  const openCodes = async (read: unknown) => {
+    const input: any = clone(braidonOriginalAuditFixture);
+    input.plansetProfile = 'design-review';
+    const authority = await resolveSnapshotAuthorityInputs(input, { safeDbRead: read, providers: {} } as never);
+    generatePermitHTML(input, undefined, authority as never);
+    return ((input._snapshot?.permitReadiness?.registry ?? []) as any[])
+      .filter(r => !r.resolved).map(r => r.code);
+  };
+
+  it('a READABLE registry holding no row lets the shipped document answer', async () => {
+    // The shape of every real deployment today.
+    const readable = async (label: string, _r: unknown, failSoftTo: unknown) => {
+      if (label.startsWith('findVerifiedDocument(module_datasheet')) return { value: null, ok: true, error: null };
+      if (label.startsWith('listDocuments(module_datasheet')) return { value: [], ok: true, error: null };
+      return { value: failSoftTo, ok: false, error: 'offline (test)' };
+    };
+    expect(await openCodes(readable)).not.toContain(CODE);
+  }, 300_000);
+
+  it('an UNREADABLE registry fails CLOSED - an outage may not overturn a revoked row', async () => {
+    // `ok: false` means we could not look, NOT that nothing is on file.
+    // Substituting the catalogue there would let a database outage clear a
+    // requirement an operator had deliberately reopened.
+    const offline = async (_l: string, _r: unknown, failSoftTo: unknown) =>
+      ({ value: failSoftTo, ok: false, error: 'offline (test)' });
+    expect(await openCodes(offline)).toContain(CODE);
+  }, 300_000);
+
+  // The third case - a row that EXISTS but is revoked or does not cover the
+  // selected wattage - is pinned in cmda-module-document-authority.test.ts
+  // (12 and 13c). The catalogue must never overturn an operator's refusal.
 });

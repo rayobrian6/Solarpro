@@ -17,7 +17,7 @@
 import {
   resolveRackingCapacityDocument, resolveFramingCapacityDocument,
   resolveCableExtensionSolutions, resolveClimateHazardDocument,
-  findVerifiedDocument,
+  findVerifiedDocument, listDocuments,
 } from '@/lib/documents/registry';
 import {
   listActiveInvalidations, readProjectEquipmentStores, reconcileEquipmentIdentity,
@@ -72,6 +72,9 @@ export {
 // WS-5 — the field route measurement read (migration 118). Read-only: it is the
 // resolver half of a workflow whose WRITE half is the authenticated API.
 import { fieldRouteMeasurementResolver } from './fieldMeasurementResolver';
+import {
+  findManufacturerDatasheet, toRegistryDocumentFromCatalogue,
+} from '@/lib/documents/manufacturerDatasheetCatalogue';
 export { fieldRouteMeasurementResolver } from './fieldMeasurementResolver';
 
 const DOC_REGISTRY_SOURCE = 'manufacturer_document_registry (lib/documents/registry, migration 113)';
@@ -836,7 +839,57 @@ export const moduleDatasheetBindingResolver: RequirementResolver = {
         }),
         null,
       );
-      const doc = read.ok ? read.value : null;
+      // ── SHIPPED CATALOGUE RESOLVES *BELOW* THE OPERATOR ROW ────────────────
+      // 2026-08-29 — the pure build path already consults SolarPro's own shipped
+      // datasheet catalogue when no governed registry row exists
+      // (equipmentProjection.ts). This resolver did not, so it recomputed the
+      // verdict from the database alone and OVERWROTE the pure answer: on any
+      // deployment with no archived Qcells row — which is every deployment — the
+      // async path reopened MODULE-EXACT-DATASHEET-PENDING that the product had
+      // already closed with a document it ships.
+      //
+      // That is the failure mode the racking letter taught us: a fact the
+      // product OWNS must not depend on a database row existing. An
+      // operator-archived row still wins; the catalogue only answers when there
+      // is none. It is projected into the same RegistryDocument shape and graded
+      // by the same evaluator, so no predicate is weakened — class, status,
+      // archived bytes, SHA-256, governed verification, an explicit coverage
+      // claim and the electrical + mechanical specs are all still required.
+      //
+      // PRECEDENCE IS "NO ROW AT ALL", NOT "NO QUALIFYING ROW". This is the
+      // whole difficulty: `findVerifiedDocument` returns null both when the
+      // registry is EMPTY and when an operator's row exists but was revoked, is
+      // superseded, or does not cover the selected wattage. Falling back on the
+      // second case would let a shipped catalogue overturn a deliberate operator
+      // refusal — a revoked verification would stop reopening the requirement,
+      // which is precisely the check CMDA 12 / 13c exist to make. So the
+      // catalogue answers only when NOTHING is on file for this module in any
+      // state, exactly as the pure path does (it consults the catalogue only
+      // when the canonical authority produced no verdict at all).
+      const registryDoc = read.ok ? read.value : null;
+      let doc = registryDoc;
+      if (!doc) {
+        // The probe is an EXACT equality query on `equipment_id` — never a
+        // substring test on the model string, which is the construction CMEI
+        // bans for module identity and the reason four separate matchers once
+        // existed. With no equipment id to scope by we ask whether the class is
+        // empty outright: conservative, and it errs toward leaving the
+        // requirement open.
+        const anyRow = await ctx.safeDbRead(
+          `listDocuments(${MODULE_DATASHEET_DOCUMENT_CLASS}${equipmentId ? `, ${equipmentId}` : ''})`,
+          () => listDocuments({ documentClass: MODULE_DATASHEET_DOCUMENT_CLASS, equipmentId }),
+          [] as Awaited<ReturnType<typeof listDocuments>>,
+        );
+        // FAIL CLOSED ON AN UNREADABLE REGISTRY. `anyRow.ok === false` means we
+        // could not look — not that nothing is there — and substituting the
+        // catalogue on that basis would let a database outage overturn a
+        // revoked verification. Only a SUCCESSFUL read returning no row
+        // licenses the shipped document to answer.
+        const provenEmpty = anyRow.ok && anyRow.value.length === 0;
+        if (provenEmpty) {
+          doc = toRegistryDocumentFromCatalogue(findManufacturerDatasheet({ equipmentId, model }));
+        }
+      }
       const applicability = evaluateModuleDatasheetApplicability({
         selected: {
           equipmentId,
