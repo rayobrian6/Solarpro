@@ -26,6 +26,18 @@ const FUSED_PART_BY_FRAME: Record<number, string> = {
   30: 'DPF221RP', 60: 'DPF222RP', 100: 'DPF222RB', 200: 'DPF224RB',
 };
 
+// ── 2026-08-29 - THE FUSE CLASS BELONGS TO THE FUSE ────────────────────────
+// `drawingLabel` typed "RK5" into its template while `fusePartNumber` selected
+// an LLNRK, which is Littelfuse's POWR-PRO 250 V time-delay line and is
+// **Class RK1**. So E-1 printed "60A RK5 FUSES  ...  2x Littelfuse LLNRK60SP"
+// and the equipment schedule printed "60A 250V Class RK1 time-delay fuse" for
+// the same two fuses in the same switch. RK1 and RK5 are different
+// interrupting/let-through classes: RK1 is the current-limiting one, and an
+// RK5 called out where an RK1 is required is a real coordination error, not a
+// typo. The class is a PROPERTY of the selected fuse; it is returned with the
+// part number that carries it, and every label reads it from there.
+const FUSE_LINE = { series: 'LLNRK', fuseClass: 'RK1', voltsAc: 250, timeDelay: true } as const;
+
 export interface AcDisconnectSpec {
   /** Enclosure / switch FRAME rating (A) — what you order. */
   frameA: number;
@@ -37,10 +49,15 @@ export interface AcDisconnectSpec {
   typeLabel: 'Fusible' | 'Non-Fusible';
   fuseManufacturer: string | null;
   fusePartNumber: string | null;
+  /** UL fuse class of the SELECTED fuse ('RK1'), null on a non-fused switch.
+   *  Never typed into a label - see FUSE_LINE. */
+  fuseClass: string | null;
+  /** the schedule's full description of that fuse, from the same selection. */
+  fuseDescription: string | null;
   /** BOM line name, e.g. "30A Fusible AC Disconnect". */
   itemName: string;
   /** Drawing label naming BOTH ratings, e.g.
-   *  "30A FUSIBLE DISCONNECT — 25A RK5 FUSES". */
+   *  "30A FUSIBLE DISCONNECT — 25A RK1 FUSES". */
   drawingLabel: string;
 }
 
@@ -77,10 +94,15 @@ export function resolveAcDisconnect(input: AcDisconnectInput): AcDisconnectSpec 
     partNumber,
     typeLabel,
     fuseManufacturer: fused ? 'Littelfuse' : null,
-    fusePartNumber: fused && fuseA !== null ? `LLNRK${fuseA}SP` : null,
+    fusePartNumber: fused && fuseA !== null ? `${FUSE_LINE.series}${fuseA}SP` : null,
+    fuseClass: fused && fuseA !== null ? FUSE_LINE.fuseClass : null,
+    fuseDescription: fused && fuseA !== null
+      ? `${fuseA}A ${FUSE_LINE.voltsAc}V Class ${FUSE_LINE.fuseClass}`
+        + `${FUSE_LINE.timeDelay ? ' time-delay' : ''} fuse`
+      : null,
     itemName: `${frameA}A ${typeLabel} AC Disconnect`,
     drawingLabel: fused && fuseA !== null
-      ? `${frameA}A FUSIBLE DISCONNECT — ${fuseA}A RK5 FUSES`
+      ? `${frameA}A FUSIBLE DISCONNECT — ${fuseA}A ${FUSE_LINE.fuseClass} FUSES`
       : `${frameA}A NON-FUSIBLE DISCONNECT`,
   };
 }

@@ -23,6 +23,7 @@ import {
 import { resolveIntegratedEquipment } from './equipment/integratedBos';
 import { getMountingSystemById } from './mounting-hardware-db';
 import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
+import { resolveAcDisconnect } from './electrical/acDisconnect';
 import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
 import {
@@ -1662,20 +1663,22 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // Enclosure size = next standard enclosure ≥ required amps
     // For fused: enclosure must hold the fuse, so enclosure ≥ fuse amps
     // For non-fused: enclosure ≥ required amps (or the E-1 target when given)
-    const enclosureRequirement = isFusedDisc ? (fuseAmps ?? acRequiredAmps) : (_targetDiscA ?? acRequiredAmps);
-    const acDiscAmps = nextEnclosure(enclosureRequirement);
-
-    // Part number:
-    //   Non-fused: Square D DU{amps}RB  (e.g. DU60RB, DU100RB)
-    //   Fused:     Eaton DPF2{code}RP   (30A→DPF221RP, 60A→DPF222RP, 100A→DPF222RB, 200A→DPF224RB)
-    const nonFusedPartNum = `DU${acDiscAmps}RB`;
-    const fusedPartNumMap: Record<number, string> = {
-      30: 'DPF221RP', 60: 'DPF222RP', 100: 'DPF222RB', 200: 'DPF224RB',
-    };
-    const fusedPartNum = fusedPartNumMap[acDiscAmps] ?? `DPF-${acDiscAmps}A`;
-    const acDiscPartNum = isFusedDisc ? fusedPartNum : nonFusedPartNum;
-    const acDiscMfr     = isFusedDisc ? 'Eaton' : 'Square D';
-    const discTypeLabel = isFusedDisc ? 'Fusible' : 'Non-Fusible';
+    // ══ 2026-08-29 - THE THIRD IN-FILE COPY, RETIRED ═══════════════════════
+    // lib/electrical/acDisconnect.ts exists precisely because this file carried
+    // duplicate frame/fuse/part rules; two copies were replaced then and this one
+    // survived, re-deriving the frame ladder, the Eaton part map, the make and
+    // the fuse. It is what let E-1 print "60A RK5 FUSES" beside a schedule row
+    // reading "60A 250V Class RK1" for the same two fuses - a real coordination
+    // difference (RK1 is the current-limiting class), not a typo.
+    const _acDisc = resolveAcDisconnect({
+      requiredAmps: acRequiredAmps,
+      targetAmps: _targetDiscA ?? null,
+      fused: isFusedDisc,
+    });
+    const acDiscAmps    = _acDisc.frameA;
+    const acDiscPartNum = _acDisc.partNumber;
+    const acDiscMfr     = _acDisc.manufacturer;
+    const discTypeLabel = _acDisc.typeLabel;
 
     items.push(addItem('ac', 'disconnect', acDiscMfr,
       `${acDiscAmps}A ${discTypeLabel} AC Disconnect`,
@@ -1688,11 +1691,11 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // Add fuse line item for fused disconnect
     if (isFusedDisc && fuseAmps !== null) {
       items.push(addItem('ac', 'fuse', 'Littelfuse',
-        `${fuseAmps}A Class RK1 Fuse`,
-        `LLNRK${fuseAmps}SP`,
-        `${fuseAmps}A 250V Class RK1 time-delay fuse — 2 per fused disconnect (NEC 690.9)`,
+        `${fuseAmps}A Class ${_acDisc.fuseClass ?? 'RK1'} Fuse`,
+        _acDisc.fusePartNumber ?? `LLNRK${fuseAmps}SP`,
+        `${_acDisc.fuseDescription ?? `${fuseAmps}A 250V Class RK1 time-delay fuse`} — 2 per fused disconnect (NEC 690.9)`,
         2, 'ea', 'NEC 690.9', 'perSystem', '2 per fused disconnect', true));
-      log.push({ stageId: 'ac', category: 'fuse', item: `${fuseAmps}A Class RK1 Fuse`,
+      log.push({ stageId: 'ac', category: 'fuse', item: `${fuseAmps}A Class ${_acDisc.fuseClass ?? 'RK1'} Fuse`,
         quantity: 2, derivedFrom: 'fused disconnect',
         formula: `nextFuse(continuous × 1.25) = ${fuseAmps}A × 2 poles`,
         necReference: 'NEC 690.9' });
@@ -2976,11 +2979,16 @@ function generateBOMV4PerSubSystem(
     const enclosureRequirement = isFusedDisc
       ? (fuseAmps ?? acRequiredAmps)
       : (_targetDiscA ?? acRequiredAmps);
-    const acDiscAmps = nextEnclosure(enclosureRequirement);
-    const fusedPartNumMap: Record<number, string> = { 30: 'DPF221RP', 60: 'DPF222RP', 100: 'DPF222RB', 200: 'DPF224RB' };
-    const acDiscPartNum = isFusedDisc ? (fusedPartNumMap[acDiscAmps] ?? `DPF-${acDiscAmps}A`) : `DU${acDiscAmps}RB`;
-    const acDiscMfr = isFusedDisc ? 'Eaton' : 'Square D';
-    const discTypeLabel = isFusedDisc ? 'Fusible' : 'Non-Fusible';
+    // 2026-08-29 - the FOURTH copy. Same retirement as the legacy path above.
+    const _acDisc = resolveAcDisconnect({
+      requiredAmps: acRequiredAmps,
+      targetAmps: _targetDiscA ?? null,
+      fused: isFusedDisc,
+    });
+    const acDiscAmps    = _acDisc.frameA;
+    const acDiscPartNum = _acDisc.partNumber;
+    const acDiscMfr     = _acDisc.manufacturer;
+    const discTypeLabel = _acDisc.typeLabel;
     push(undefined, addItem('ac', 'disconnect', acDiscMfr,
       `${acDiscAmps}A ${discTypeLabel} AC Disconnect`, acDiscPartNum,
       `${acDiscAmps}A ${discTypeLabel} AC disconnect — NEC 690.13` +
@@ -2991,8 +2999,9 @@ function generateBOMV4PerSubSystem(
         ? `Σ source backfeed OCPD = ${_targetDiscA}A → ${acDiscAmps}A enclosure (matches E-1)`
         : `nextEnclosure(${acRequiredAmps.toFixed(1)}A × 1.25) = ${acDiscAmps}A`, true));
     if (isFusedDisc && fuseAmps !== null) {
-      push(undefined, addItem('ac', 'fuse', 'Littelfuse', `${fuseAmps}A Class RK1 Fuse`,
-        `LLNRK${fuseAmps}SP`, `${fuseAmps}A 250V Class RK1 time-delay fuse — 2 per fused disconnect (NEC 690.9)`,
+      push(undefined, addItem('ac', 'fuse', 'Littelfuse', `${fuseAmps}A Class ${_acDisc.fuseClass ?? 'RK1'} Fuse`,
+        _acDisc.fusePartNumber ?? `LLNRK${fuseAmps}SP`,
+        `${_acDisc.fuseDescription ?? `${fuseAmps}A 250V Class RK1 time-delay fuse`} — 2 per fused disconnect (NEC 690.9)`,
         2, 'ea', 'NEC 690.9', 'perSystem', '2 per fused disconnect', true));
     }
     log.push({ stageId: 'ac', category: 'ac_disconnect', item: `${acDiscAmps}A ${discTypeLabel} AC Disconnect`,

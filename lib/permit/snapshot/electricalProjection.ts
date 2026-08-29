@@ -76,9 +76,21 @@ export function projectCanonicalFeeder(snap: PermitDesignSnapshot | null | undef
   // Raceway + size single-source from the feeder conduit (which the build derives
   // from the same feederRun the segment mirrors). The segment is the length/callout
   // carrier; feeder.conduit is the raceway/size carrier — one underlying run.
-  const raceway = feeder?.conduit?.raceway ?? segment?.raceway ?? null;
-  const tradeSizeIn = feeder?.conduit?.tradeSizeIn ?? segment?.tradeSizeIn ?? null;
-  const fillPct = num(feeder?.conduit?.fillPct) ?? num(segment?.fillPct);
+  // ══ 2026-08-29 - THE PHYSICAL RACEWAY WINS ═══════════════════════════════
+  // The precedence was backwards. `feeder.conduit.fillPct` comes from
+  // electrical-calc.ts's own Chapter 9 tables - a parallel fill engine, computed
+  // from a nominal conductor count - while `segment.fillPct` is read off the
+  // PHYSICAL RACEWAY OBJECT, the same object E-1's sectioned schedule prints and
+  // the same one the ampacity derations are taken against. They disagreed:
+  // PV-4A's "Conduit Fill Analysis" read 32.0% while every raceway on the
+  // package read 26.2% / 32.5% / 32.5%. 32.0% described no conduit in the design.
+  //
+  // A raceway's fill is a property OF THAT RACEWAY. The physical object answers;
+  // the legacy feeder field is only a fallback for snapshots built before those
+  // objects existed.
+  const raceway = segment?.raceway ?? feeder?.conduit?.raceway ?? null;
+  const tradeSizeIn = segment?.tradeSizeIn ?? feeder?.conduit?.tradeSizeIn ?? null;
+  const fillPct = num(segment?.fillPct) ?? num(feeder?.conduit?.fillPct);
   const voltageDropPct = num(feeder?.voltageDropPct) ?? num(segment?.voltageDropPct);
   const oneWayFt = num(segment?.oneWayFt);
   const gauge = elec.conductors?.find(c => c.conductorId === feeder?.conductorId)?.gauge
