@@ -144,7 +144,7 @@ describe('W10 — the structural-else-everything ternary is fixed (UNION banner)
     const htmlBanner = structuralBannerHtml(b);
     // The equipment-identity conflict message mentions the REC panel — it must
     // appear even though structural blockers are also present.
-    expect(htmlBanner).toMatch(/rec-alpha-pure-405|EQUIPMENT IDENTITY/i);
+    expect(htmlBanner).toMatch(/MODULE IDENTITY CONFLICT/i);
   });
 });
 

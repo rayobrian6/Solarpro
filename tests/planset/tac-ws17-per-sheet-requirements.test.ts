@@ -39,14 +39,21 @@ function bulletsOn(html: string, sheetId: string): string[] {
   const pages = html.split(/(?=<div class="page)/);
   const page = pages.find(p => new RegExp(`tb-sheet-id">\\s*${sheetId.replace('.', '\\.')}\\s*<`).test(p));
   expect(page, `sheet ${sheetId} not found`).toBeTruthy();
-  return [...(page as string).matchAll(/<li style="margin:0 0 1px 0;[^"]*">([\s\S]*?)<\/li>/g)]
+  // 2026-08-28 - the banner rows gained `data-banner-requirement` /
+  // `data-banner-advisory` attributes after the style attribute, so the pattern
+  // allows trailing attributes. Same rows, richer markup.
+  return [...(page as string).matchAll(/<li style="margin:0 0 1px 0;[^"]*"[^>]*>([\s\S]*?)<\/li>/g)]
     .map(m => m[1].replace(/<[^>]*>/g, ''));
 }
 
-const QCABLE = /Q-Cable procurement is SHORT/;
-const TAP = /tap-conductor length is not measured/;
-const ROUTE = /no routed geometry in the CAD model/;
-const FRAMING = /EXISTING FRAMING CAPACITY NOT VERIFIED/;
+// 2026-08-28 SHEET-LINE MIGRATION - a drawing now carries the requirement's
+// one-line `sheetLine`, not the review-record `explanation`. These matchers were
+// phrases from the explanation, so they moved to the corresponding sheet line.
+// The property under test - a sheet enumerates ITS OWN requirements - is unchanged.
+const QCABLE = /BRANCH CABLE SHORT/;
+const TAP = /TAP SPAN (UNCONSTRAINED|EXCEEDS)/;
+const ROUTE = /RUN LENGTHS ARE ESTIMATES/;
+const FRAMING = /STRUCTURAL RELEASE PENDING/;
 
 describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content', () => {
   const DR = gen('design-review');
@@ -73,8 +80,17 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
   });
 
   it('PE-1 gate box no longer prints Q-Cable / tap / route requirements', () => {
+    // PE-1 / CERT are rendered by `certificationGateBanner` (certPages.ts), a
+  // SEPARATE banner that has NOT been migrated to the sheet-line form yet:
+  // invariant V13 (generatePermit.ts) requires the literal string
+  // 'PENDING ENGINEERING REVIEW' on an unapproved CERT/PE-1 page, so rewiring
+  // it is a change that can hard-fail generation and lands on its own. Until
+  // then PE-1 still prints the review-record explanation, and the matcher
+  // accepts EITHER form so this test keeps testing per-sheet scoping rather
+  // than which of the two banners happens to be rendering.
+    const FRAMING_EITHER = /STRUCTURAL RELEASE PENDING|EXISTING FRAMING CAPACITY NOT VERIFIED/;
     const b = bulletsOn(DR.html, 'PE-1');
-    expect(b.some(x => FRAMING.test(x))).toBe(true);
+    expect(b.some(x => FRAMING_EITHER.test(x))).toBe(true);
     expect(b.some(x => QCABLE.test(x))).toBe(false);
     expect(b.some(x => TAP.test(x))).toBe(false);
     expect(b.some(x => ROUTE.test(x))).toBe(false);
@@ -103,11 +119,11 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     for (const id of ['PV-3', 'PE-1']) {
       const per = bannerRequirementsForSheet(banner, id);
       const bullets = bulletsOn(DR.html, id);
-      const rem = bullets.find(x => /unresolved release requirement/.test(x)
+      const rem = bullets.find(x => /unresolved (release requirement|item)/.test(x)
         && /elsewhere in this package/.test(x));
       if (per.own.length === 0) {
         // no gated content of its own ⇒ no requirement list at all on this sheet
-        expect(bullets.filter(x => /unresolved release requirement/.test(x))).toEqual([]);
+        expect(bullets.filter(x => /unresolved (release requirement|item)/.test(x))).toEqual([]);
         continue;
       }
       if (per.otherCount > 0) {
@@ -135,7 +151,7 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     for (const id of ['PV-3', 'PE-1']) {
       expect(bannerRequirementsForSheet(banner, id).otherCount,
         `${id} owns the entire registry — the remainder case is not exercised`).toBeGreaterThan(0);
-      const rem = bulletsOn(P.html, id).find(x => /unresolved release requirement/.test(x)
+      const rem = bulletsOn(P.html, id).find(x => /unresolved (release requirement|item)/.test(x)
         && /elsewhere in this package/.test(x));
       expect(rem, `${id} has no remainder line`).toBeTruthy();
     }
@@ -189,10 +205,16 @@ describe('WS-17 — the selector', () => {
     const FULL = gen('full');
     const html = structuralBannerHtml(projectStructuralFromInput(FULL.input).banner,
       { input: FULL.input, sheetId: 'PV-5' });
-    expect(html).toContain('No unresolved requirement is projected onto this sheet');
+    // 2026-08-28 - reworded: "Nothing on this sheet is gated". Same statement,
+    // one line instead of two, per the drawing-brevity rule.
+    expect(html).toContain('Nothing on this sheet is gated');
     expect(html).not.toMatch(QCABLE);
-    // the package state is still stated
-    expect(html).toContain('PENDING STRUCTURAL ENGINEERING REVIEW');
+    // the package state is still stated - as the derived PHASE now, not as the
+    // two constants this used to pin. 'PENDING STRUCTURAL ENGINEERING REVIEW'
+    // asserted a structural cause on any not-ready package, including one whose
+    // only open item was its project name.
+    expect(html).toMatch(/data-release-phase="[A-Z_]+"/);
+    expect(html).toMatch(/data-banner-phase-label="1"/);
     expect(html).toContain('NOT FOR PERMIT SUBMISSION');
   });
 

@@ -161,7 +161,7 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
     </div>
     ${conflictLine}
     <div style="margin-top:2px;font-weight:900;font-size:8.5px;letter-spacing:0.6px;color:#111;text-align:center;">
-      SEE RS-1 FOR ALL ${total} REQUIREMENT${total === 1 ? '' : 'S'}
+      SEE RS-1 FOR ALL ${total} ITEM${total === 1 ? '' : 'S'}
     </div>
   </div>`;
 }

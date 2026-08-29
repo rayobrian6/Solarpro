@@ -349,13 +349,36 @@ export interface RequirementDeclaration {
   resolverStage?: 'lifecycle' | 'derived';
   /** WHY this mode — the audit anchor. Required (validateReleaseGateMap). */
   modeBasis: string;
+  // ══ WHAT A CONSTRUCTION DRAWING SAYS ABOUT THIS REQUIREMENT ════════════
+  // A sheet banner used to print the registry `explanation` verbatim. On PV-3
+  // that meant ~95 words of derivation across the top of an attachment detail:
+  // "GOVERNING-CANDIDATE ENVELOPE: the weakest screened candidate carries 21600
+  // in-lb against a demand of 2433 in-lb (M = w·L²/8, independent of the rail
+  // fitted)…", a four-product distributor shortlist, and an instruction to our
+  // own drafter. None of that is something a reviewer standing at a roof can act
+  // on, and the longest paragraph on the sheet belonged to an ADVISORY.
+  //
+  // `sheetLine` is the one line a drawing carries: CONDITION — action required.
+  // The explanation, the remediation, the authority path and the evidence all
+  // stay in the registry and are re-printed in full by the review record.
+  //
+  // It lives on the DECLARATION, not on the snapshot, so writing one is
+  // digest-neutral: it can never re-date a design or void a PE's approval.
+  // `validateReleaseGateMap` enforces the length, so a new requirement cannot
+  // land a paragraph on a drawing again.
+  sheetLine?: string;
 }
+
+/** The longest line a construction drawing may carry for one requirement.
+ *  ~15 words. Beyond this it stops being a callout and becomes a paragraph. */
+export const SHEET_LINE_MAX_CHARS = 110;
 
 export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = {
   // ── RG-1 PROJECT_AND_AHJ_AUTHORITY (3) ────────────────────────────────────
   // Adopted editions are not established from an archived adoption ordinance —
   // an authority record is missing, no code check has failed.
   'CODE-AUTHORITY-INCOMPLETE': {
+    sheetLine: 'ADOPTED CODE EDITIONS UNCONFIRMED — Verify with the authority having jurisdiction.',
     gateId: 'RG-1', findingType: 'PENDING_AUTHORITY',
     title: 'Adopted code editions not established from an archived AHJ adoption document',
     resolutionMode: 'AUTO_RETRIEVED', residualMode: 'OPERATOR_CONFIRMATION',
@@ -373,6 +396,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // one governs. The package still prints a stated basis (the state adoption) and DISCLOSES both
   // claims, so the set is reviewable — but the local edition may not be called established.
   'CODE-AUTHORITY-CONFLICT': {
+    sheetLine: 'CODE ADOPTION CONTESTED — Governing ordinance edition to be confirmed.',
     gateId: 'RG-1', findingType: 'PENDING_AUTHORITY',
     title: 'Governed adoption authorities disagree on the adopted code edition',
     resolutionMode: 'OPERATOR_CONFIRMATION', residualMode: 'OPERATOR_CONFIRMATION',
@@ -385,6 +409,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // Address / APN / municipal boundary / AHJ / fire authority are operator-posted
   // or postally inferred. Postal inference is not verification.
   'PROJECT-AUTHORITY-UNVERIFIED': {
+    sheetLine: 'SITE AUTHORITY PENDING — Jurisdiction and AHJ to be confirmed from official record.',
     gateId: 'RG-1', findingType: 'PENDING_AUTHORITY',
     title: 'Project legal authority (address, APN, boundary, AHJ, fire) not verified from an official source',
     resolutionMode: 'AUTO_RETRIEVED', residualMode: 'OPERATOR_CONFIRMATION',
@@ -398,6 +423,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // §7 MANDATED: a non-production project name is an ADMINISTRATIVE HOLD — it is
   // NOT a structural or electrical failure and must never be presented as one.
   'PROJECT-NAME-NONPRODUCTION': {
+    sheetLine: 'NON-PRODUCTION PROJECT IDENTITY — Not for issue under this project name.',
     gateId: 'RG-1', findingType: 'ADMINISTRATIVE_HOLD',
     title: 'Non-production project identity (name contains "TEST")',
     resolutionMode: 'OPERATOR_CONFIRMATION', resolverId: null,
@@ -410,6 +436,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // §7 MANDATED: two stored authorities disagree about WHICH module is installed
   // ⇒ a TECHNICAL CONFLICT (not a pending document). Operator-only reconciliation.
   'EQUIPMENT-IDENTITY-CONFLICT': {
+    sheetLine: 'MODULE IDENTITY CONFLICT — Two stored records name different modules.',
     gateId: 'RG-2', findingType: 'TECHNICAL_CONFLICT',
     title: 'Stored module identity conflicts with the fleet module of record',
     resolutionMode: 'AUTO_DERIVED', residualMode: 'OPERATOR_CONFIRMATION',
@@ -421,6 +448,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // The on-file document is a family/range page — the exact-wattage source is
   // absent. A missing DOCUMENT, not a failed value.
   'MODULE-EXACT-DATASHEET-PENDING': {
+    sheetLine: 'MODULE DATASHEET PENDING — No governed datasheet covers the selected module.',
     gateId: 'RG-2', findingType: 'PENDING_DOCUMENT',
     title: 'Exact-wattage module datasheet not on file (family/range page only)',
     resolutionMode: 'AUTO_DERIVED', residualMode: 'AUTO_RETRIEVED',
@@ -434,6 +462,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // forced to ADVISORY from the registry severity, and it is counted in
   // advisoryCount, never in unresolvedRequirementCount.
   'EQUIPMENT-DOCUMENT-UNVERIFIED': {
+    sheetLine: 'PRODUCT DOCUMENT UNVERIFIED — Manufacturer datasheet not archived.',
     gateId: 'RG-2', findingType: 'ADVISORY',
     title: 'Microinverter manufacturer datasheet not archived (parameters already from the equipment record)',
     resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-5',
@@ -443,6 +472,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
 
   // ── RG-3 ENVIRONMENTAL_LOAD_AUTHORITY (1) ─────────────────────────────────
   'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': {
+    sheetLine: 'DESIGN LOADS PRELIMINARY — Site wind and snow criteria pending an archived source.',
     gateId: 'RG-3', findingType: 'PENDING_AUTHORITY',
     title: 'Wind / exposure / risk / snow criteria not established from an archived climate-hazard source',
     resolutionMode: 'AUTO_RETRIEVED',
@@ -464,6 +494,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
 
   // ── RG-4 STRUCTURAL_ASSEMBLY_AUTHORITY (6 Braidon + the rest of the lane) ──
   'FRAMING-AUTHORITY-UNVERIFIED': {
+    sheetLine: 'STRUCTURAL RELEASE PENDING — Licensed review of existing framing capacity required.',
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Framing CAPACITY authority not established (operator-entered geometry is observation, not capacity)',
     resolutionMode: 'AUTO_RETRIEVED', residualMode: 'PROFESSIONAL_APPROVAL',
@@ -474,6 +505,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'geometry (AAC-5); (c) PROFESSIONAL_APPROVAL for a stick-framed existing residence with neither — licensed judgement, correctly.',
   },
   'PENDING-RACKING-ASSEMBLY-SELECTION': {
+    sheetLine: 'RAIL PART NUMBER PENDING — Procurement item; any listed UL 2703 rail per schedule.',
     gateId: 'RG-4', findingType: 'PENDING_SELECTION',
     title: 'Exact racking assembly (rail / splice SKU) not selected',
     resolutionMode: 'AUTO_DERIVED', residualMode: 'OPERATOR_CONFIRMATION',
@@ -494,6 +526,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // the design genuinely depends on which rail is fitted. When the envelope IS bounded (the normal
   // case), PENDING-RACKING-ASSEMBLY-SELECTION fires instead and is advisory.
   'RACKING-RAIL-CAPACITY-UNBOUNDED': {
+    sheetLine: 'RAIL SELECTION REQUIRED — The design depends on which rail is fitted.',
     gateId: 'RG-4', findingType: 'PENDING_SELECTION',
     title: 'Rail bending envelope not bounded — the design depends on which rail is fitted',
     resolutionMode: 'OPERATOR_CONFIRMATION', residualMode: 'OPERATOR_CONFIRMATION',
@@ -502,6 +535,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'or no published capacity — the rail is a real design decision and the engine must not fabricate one.',
   },
   'FASTENER-ASSEMBLY-UNVERIFIED': {
+    sheetLine: 'ATTACHMENT FASTENER PENDING — Manufacturer withdrawal-capacity document required.',
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Roof-attachment fastener assembly withdrawal-capacity authority not established',
     resolutionMode: 'AUTO_RETRIEVED',
@@ -515,6 +549,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // §7 MANDATED: capacity NOT YET ESTABLISHED from verified authority — a PENDING
   // DOCUMENT. Never failure wording; no capacity has been shown to be inadequate.
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED': {
+    sheetLine: 'ATTACHMENT CAPACITY PENDING — Manufacturer capacity document not on file.',
     gateId: 'RG-4', findingType: 'PENDING_DOCUMENT',
     title: 'Racking capacity source document not archived — capacity not yet established',
     resolutionMode: 'AUTO_RETRIEVED',
@@ -526,6 +561,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'verification — a fetched PDF is evidence, never a clearance.',
   },
   'RACKING-CAPACITY-APPLICABILITY-GAP': {
+    sheetLine: 'ATTACHMENT CAPACITY PENDING — The document on file does not cover this assembly.',
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Archived capacity source does not cover the exact selected assembly / jurisdiction',
     resolutionMode: 'AUTO_RETRIEVED',
@@ -538,6 +574,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'applicability legitimately remains one bounded confirmation.',
   },
   'EQUIPMENT-DOCUMENT-APPLICABILITY': {
+    sheetLine: 'PRODUCT DOCUMENT VERSION GAP — The document does not cover the selected version.',
     gateId: 'RG-4', findingType: 'PENDING_DOCUMENT',
     title: 'Cited manufacturer document covers a different product version than the selected mount',
     resolutionMode: 'AUTO_RETRIEVED', resolverId: 'racking-documents@v1',
@@ -556,12 +593,14 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // honest mode its resolution WOULD take, so no declared code can reach the
   // lifecycle without a classification (validateReleaseGateMap enforces it).
   'ATTACHMENT-CAPACITY-SOURCE-MISSING': {
+    sheetLine: 'ATTACHMENT CAPACITY PENDING — No capacity source for the selected mount.',
     gateId: 'RG-4', findingType: 'PENDING_DOCUMENT',
     title: 'No published allowable attachment-capacity source resolved for the assembly',
     resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-5',
     modeBasis: 'A published manufacturer capacity source — the same retrieval class as §2.9. Not active on Braidon.',
   },
   'FASTENER-CONFIG-MISSING': {
+    sheetLine: 'FASTENER SCHEDULE INCOMPLETE — Specify fastener type, size and embedment.',
     gateId: 'RG-4', findingType: 'PENDING_SELECTION',
     title: 'Exact fastener configuration (model / count / embedment) incomplete',
     resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
@@ -569,6 +608,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'catalog completion, not an operator question. Not active on Braidon.',
   },
   'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED': {
+    sheetLine: 'MIXED-BRAND ASSEMBLY — Manufacturer approval of the combined assembly required.',
     gateId: 'RG-4', findingType: 'TECHNICAL_CONFLICT',
     title: 'Mixed-manufacturer racking assembly without documented compatibility authority',
     resolutionMode: 'AUTO_RETRIEVED', residualMode: 'OPERATOR_CONFIRMATION',
@@ -579,6 +619,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // Standing rule: product-name topology inference is PROHIBITED — the topology
   // must be DECLARED, so this is a pending selection, never an inference gap.
   'MOUNT-TOPOLOGY-UNKNOWN': {
+    sheetLine: 'MOUNT TYPE UNCONFIRMED — Rail-paired vs rail-less load path not established.',
     gateId: 'RG-4', findingType: 'PENDING_SELECTION',
     title: 'Mounting topology not declared (neither verified rail-paired nor verified rail-less)',
     resolutionMode: 'OPERATOR_CONFIRMATION', resolverId: null,
@@ -586,6 +627,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'never become an automatic mode.',
   },
   'DIRECT-MOUNT-GEOMETRY-MISSING': {
+    sheetLine: 'MOUNT GEOMETRY INCOMPLETE — Attachment layout not established for this mount.',
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Rail-less attachment coordinates could not be derived — mount geometry authority absent',
     resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
@@ -593,12 +635,14 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'derivation failure, not a field observation. Not active on Braidon.',
   },
   'REACTIONS-UNTRACEABLE': {
+    sheetLine: 'POINT LOADS UNTRACEABLE — Attachment reactions must trace to the load case.',
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Module instances present but no canonical attachment objects — reactions not traceable',
     resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
     modeBasis: 'An internal object-model gap the engine must close from its own geometry. Not active on Braidon.',
   },
   'RAIL-QUANTITY-UNTRACEABLE': {
+    sheetLine: 'RAIL QUANTITY UNTRACEABLE — The rail schedule must reconcile to the array.',
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Rail-based assembly with no canonical rail objects — rail quantities not traceable',
     resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
@@ -606,6 +650,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   },
   // A COMPUTED result exceeds a capacity: a verified engineering deficiency.
   'STRUCTURAL-UTILIZATION-EXCEEDED': {
+    sheetLine: 'FRAMING OVERSTRESSED — Reinforcement or layout revision required before permit.',
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Structural utilization exceeded — computed demand exceeds allowable capacity',
     resolutionMode: 'PROFESSIONAL_APPROVAL', resolverId: null,
@@ -613,18 +658,21 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'plus licensed structural judgement.',
   },
   'STRUCTURAL-BOM-RECONCILIATION-FAILED': {
+    sheetLine: 'RACKING BOM UNRECONCILED — Structural quantities disagree with the array.',
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Structural BOM quantities do not reconcile with the canonical objects',
     resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
     modeBasis: 'An internal reconciliation defect between two engine outputs — never operator work. Not active on Braidon.',
   },
   'STRUCTURAL-REACTION-RECONCILIATION-FAILED': {
+    sheetLine: 'REACTIONS UNRECONCILED — Attachment loads disagree with the load case.',
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Attachment reactions do not reconcile with the applied load',
     resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
     modeBasis: 'An internal reconciliation defect between two engine outputs — never operator work. Not active on Braidon.',
   },
   'SITE-GEOMETRY-MISSING': {
+    sheetLine: 'ROOF GEOMETRY INCOMPLETE — Field-verify plane dimensions and slope.',
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'No canonical roof-plane geometry available',
     resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-5',
@@ -632,12 +680,14 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'all already wired elsewhere in the route. Not active on Braidon.',
   },
   'MODULE-DIMENSIONS-UNVERIFIED': {
+    sheetLine: 'MODULE DIMENSIONS UNVERIFIED — Confirm module size from the datasheet.',
     gateId: 'RG-4', findingType: 'PENDING_DOCUMENT',
     title: 'Selected module record lacks exact catalog dimensions',
     resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-2',
     modeBasis: 'Catalog dimensions come from the module datasheet binding (the same retrieval as §2.5). Not active on Braidon.',
   },
   'RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED': {
+    sheetLine: 'ATTACHMENT CAPACITY PENDING — Published value is ultimate, not an ASD allowable.',
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Ultimate-basis capacity refused as an ASD allowable — stamped report not verified',
     resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-5',
@@ -657,6 +707,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // §7 MANDATED: ROUTE / FILL / TAP are FIELD_VERIFICATION conditions — a real
   // measurement is owed. They are not conflicts and not verified deficiencies.
   'ROUTE-LENGTH-ESTIMATE': {
+    sheetLine: 'RUN LENGTHS ARE ESTIMATES — Field-measure the named runs before ordering conductor.',
     gateId: 'RG-5', findingType: 'FIELD_VERIFICATION',
     title: 'Run lengths are CAD-derived estimates, not routed or field-measured',
     affects:
@@ -673,6 +724,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'segment in the blocker payload. FIELD_VERIFICATION for that residual only.',
   },
   'CONDUIT-FILL-PENDING': {
+    sheetLine: 'CONDUIT FILL UNRESOLVED — NEC Ch.9 Table 1 fill not established for this raceway.',
     gateId: 'RG-5', findingType: 'FIELD_VERIFICATION',
     title: 'Feeder conduit fill not computed',
     affects:
@@ -688,6 +740,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'verification — here it had been executed and thrown away.',
   },
   'TAP-CONDUCTOR-LENGTH-PENDING': {
+    sheetLine: 'TAP SPAN UNCONSTRAINED — Locate the fused disconnect within 10 ft of the tap.',
     gateId: 'RG-5', findingType: 'PENDING_SELECTION',
     title: 'Supply-side tap span is not constrained by the design',
     affects:
@@ -709,6 +762,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // the 10-ft limit, the design is wrong — reporting that as "…LENGTH-PENDING"
   // made the worse outcome read quieter than the uncertain one.
   'TAP-CONDUCTOR-LENGTH-EXCEEDED': {
+    sheetLine: 'TAP SPAN EXCEEDS 10 FT — Relocate the disconnect or the tap point.',
     gateId: 'RG-5', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Supply-side tap span EXCEEDS the NEC 705.11(C) 10-ft limit',
     affects:
@@ -725,6 +779,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // conductor permits at the schedule's Vd limit. This is a KNOWN DEFICIENCY,
   // not a missing measurement, and it must never be reported as one.
   'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': {
+    sheetLine: 'RUN EXCEEDS ITS DESIGN LIMIT — Upsize the conductor or shorten the route.',
     gateId: 'RG-5', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Routed length exceeds the maximum the selected conductor permits',
     affects:
@@ -739,6 +794,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'shortening the route \u2014 a design change, not a field measurement.',
   },
   'FEEDER-RACEWAY-AUTHORITY': {
+    sheetLine: 'FEEDER RACEWAY UNRESOLVED — Raceway type and bonding method required.',
     gateId: 'RG-5', findingType: 'PENDING_SELECTION',
     title: 'Feeder raceway / conduit type not resolved on the canonical feeder segment',
     affects:
@@ -751,6 +807,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'feeder segment and records the verdict as evidence.',
   },
   'BRANCH-RACEWAY-AUTHORITY': {
+    sheetLine: 'BRANCH RACEWAY MODEL INCOMPLETE — Open-air trunk and home-run must be distinct.',
     gateId: 'RG-5', findingType: 'PENDING_AUTHORITY',
     title: 'Branch raceway model incomplete — open-air trunk and shared home-run not distinct sections',
     affects:
@@ -763,6 +820,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'home-run raceway with a documented shared-circuit count + fill, open-air trunk not stamped in-conduit) and evidences it.',
   },
   'RACEWAY-SEGMENT-CONFLICT': {
+    sheetLine: 'RACEWAY CONFLICT — One physical run resolves to two raceway types.',
     gateId: 'RG-5', findingType: 'TECHNICAL_CONFLICT',
     title: 'A single physical segment resolves to more than one raceway type / size',
     affects:
@@ -785,6 +843,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // the QUANTITY is derived and the SELECTION is unverified — a candidate row,
   // never an orderable one, and never silent.
   'TIGO-RSS-TRANSMITTER-UNVERIFIED': {
+    sheetLine: 'RAPID-SHUTDOWN SIGNAL SOURCE UNCONFIRMED — Verify the keep-alive transmitter.',
     gateId: 'RG-5', findingType: 'PENDING_SELECTION',
     title: 'Rapid-shutdown keep-alive source not established for the specified TS4 devices',
     affects:
@@ -839,6 +898,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // A MEASURED shortfall (Σ geometric installed path vs drop-based procurement
   // footage) — a verified deficiency, not a pending value.
   'QCABLE-PROCUREMENT-INSUFFICIENT': {
+    sheetLine: 'BRANCH CABLE SHORT — Ordered cable does not cover the routed branch length.',
     gateId: 'RG-6', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Ordered Q-Cable footage is SHORT of the designed-installed path',
     affects:
@@ -853,6 +913,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'object it reasons over; cable-extension-solutions@v1 (async) contributes the registry-backed extension half.',
   },
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': {
+    sheetLine: 'BRANCH GROUNDING METHOD PENDING — Manufacturer bonding document required.',
     gateId: 'RG-6', findingType: 'PENDING_AUTHORITY',
     title: 'Open-air branch grounding / bonding method not established by an exactly-applicable document',
     affects:
@@ -869,6 +930,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // ── RG-7 PROFESSIONAL_RELEASE (2) ─────────────────────────────────────────
   // An unassigned role is an ADMINISTRATIVE hold on the professional lane.
   'DESIGNER-OF-RECORD-MISSING': {
+    sheetLine: 'DESIGNER OF RECORD NOT ASSIGNED — Assign before issue.',
     gateId: 'RG-7', findingType: 'ADMINISTRATIVE_HOLD',
     title: 'No designer / engineer-of-record assigned',
     resolutionMode: 'AUTO_DERIVED',
@@ -885,6 +947,7 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // this requirement's existence is decided by build.ts from the certification
   // record, and this module only classifies the record it finds.
   'ENGINEERING-REVIEW-PENDING': {
+    sheetLine: 'AWAITING ENGINEER-OF-RECORD REVIEW AND SEAL.',
     gateId: 'RG-7', findingType: 'PROFESSIONAL_RELEASE',
     title: 'No approved engineering-review record covering the current snapshot digest',
     resolutionMode: 'PROFESSIONAL_APPROVAL', resolverId: null,
@@ -1349,7 +1412,11 @@ export function releasePackageLine(summary: ReleaseSummary): string {
   const r = `${summary.unresolvedRequirementCount} UNRESOLVED REQUIREMENT${summary.unresolvedRequirementCount === 1 ? '' : 'S'}`;
   const a = summary.advisoryCount > 0
     ? ` / ${summary.advisoryCount} ADVISOR${summary.advisoryCount === 1 ? 'Y' : 'IES'}` : '';
-  return `PACKAGE RELEASE STATUS: ${g} / ${r}${a} — SEE RS-1 FOR ALL ${summary.unresolvedRequirementCount + summary.advisoryCount} REQUIREMENTS`;
+  // 2026-08-28 — the tail said "ALL N REQUIREMENTS" where N summed requirements
+  // AND advisories, re-labelling an advisory a requirement in the same sentence
+  // that had just counted it separately. ITEMS is the honest collective noun.
+  const _total = summary.unresolvedRequirementCount + summary.advisoryCount;
+  return `PACKAGE RELEASE STATUS: ${g} / ${r}${a} — SEE RS-1 FOR ALL ${_total} ITEM${_total === 1 ? '' : 'S'}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

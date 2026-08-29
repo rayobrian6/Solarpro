@@ -23,6 +23,8 @@ import type { DocumentApplicabilityState } from '@/lib/manufacturer-assets-db';
 import { observedFramingLine, observedSourceLabel } from './framingAuthority';
 import { environmentalSourceLabel, environmentalStateTag } from './environmentalAuthority';
 import { peekSnapshot } from './read';
+import { REQUIREMENT_DECLARATIONS } from './releaseGates';
+import { deriveReleasePhase, submissionLine, type ReleasePhaseKind } from './releasePhase';
 import { projectDocumentAuthority } from './documentAuthority';
 import { projectReleaseGates, releasePackageLine, type ReleaseSummary } from './releaseGates';
 // TAC WS-17 — ONE definition of "does this requirement gate this sheet?", shared
@@ -190,13 +192,33 @@ export interface BannerRequirement {
   message: string;
   /** snapshot affectedSheets; empty ⇒ package-wide, not any one sheet's */
   sheets: readonly string[];
+  // ── 2026-08-28 ───────────────────────────────────────────
+  /** the row's severity. It EXISTS on the registry entry and was being dropped
+   *  here, so a procurement ADVISORY rendered as an undifferentiated red bullet
+   *  — and, on the audited package, as the LONGEST paragraph on the sheet, one
+   *  line under a gate line that had just called it an advisory. */
+  severity: 'blocking' | 'warning';
+  /** the ONE line a construction drawing carries for this requirement
+   *  (RequirementDeclaration.sheetLine). Null for a code with no declaration —
+   *  the renderer then names the code and points at the record, and NEVER falls
+   *  back to `message`, which is the paragraph this field exists to replace. */
+  sheetLine: string | null;
 }
 
 export interface StructuralBanner {
-  /** true ⇒ the planset must visibly print the PENDING / NOT-FOR-SUBMISSION lines. */
+  /** true ⇒ the sheet must visibly state the package's release state. */
   show: boolean;
-  line1: string;   // 'PENDING STRUCTURAL ENGINEERING REVIEW'
-  line2: string;   // 'NOT FOR PERMIT SUBMISSION'
+  /** the phase LABEL — derived, never a constant. */
+  line1: string;
+  /** the honest submission line for that phase — derived, never a constant. */
+  line2: string;
+  /** the phase's one actionable sentence. */
+  statement: string;
+  /** 'defect' | 'workflow' | 'released' — the renderer takes its palette from
+   *  this, so no sheet decides independently whether the package looks alarming.
+   *  A package awaiting a signature is a WORKFLOW state, not a defect. */
+  kind: ReleasePhaseKind;
+  phaseId: string;
   /** the permit-readiness blocker codes/messages driving the banner.
    *  TAC WS-17 — each carries the sheets its authority is projected onto, so a
    *  sheet banner can enumerate ITS OWN requirements instead of the whole
@@ -242,8 +264,13 @@ export const CAPACITY_GATE_BLOCKER_CODES = new Set([
   'ATTACHMENT-CAPACITY-SOURCE-MISSING',
 ]);
 
-export const BANNER_LINE_1 = 'PENDING STRUCTURAL ENGINEERING REVIEW';
-export const BANNER_LINE_2 = 'NOT FOR PERMIT SUBMISSION';
+// BANNER_LINE_1 / BANNER_LINE_2 are GONE (2026-08-28). They were two constants
+// asserted on every gated sheet regardless of the package's actual state:
+//   'PENDING STRUCTURAL ENGINEERING REVIEW'  — asserted a STRUCTURAL cause even
+//     when the only open requirement was the project name or the code edition;
+//   'NOT FOR PERMIT SUBMISSION'              — asserted on a package that was
+//     reviewed, signed and released (see the `show` gate below).
+// Both now come from the release phase.
 
 /** Compute the §12 banner state from a snapshot's permit readiness. The banner
  *  shows whenever readiness is false OR any structural blocker is present.
@@ -263,17 +290,61 @@ export function structuralBanner(snap: PermitDesignSnapshot | null | undefined):
   // per-sheet filter falls back to showing everything (see bannerRequirementsForSheet).
   const blockers: BannerRequirement[] = (registry && registry.length)
     ? registry.filter(r => !r.resolved)
-      .map(r => ({ code: r.code, message: r.explanation, sheets: r.affectedSheets ?? [] }))
-    : (snap?.permitReadiness?.blockers ?? []).map(b => ({ ...b, sheets: [] as readonly string[] }));
+      .map(r => ({
+        code: r.code,
+        message: r.explanation,
+        sheets: r.affectedSheets ?? [],
+        severity: r.severity === 'warning' ? 'warning' as const : 'blocking' as const,
+        sheetLine: REQUIREMENT_DECLARATIONS[r.code]?.sheetLine ?? null,
+      }))
+    : (snap?.permitReadiness?.blockers ?? []).map(b => ({
+        ...b,
+        sheets: [] as readonly string[],
+        severity: 'blocking' as const,
+        sheetLine: REQUIREMENT_DECLARATIONS[b.code]?.sheetLine ?? null,
+      }));
   const structuralBlockers = blockers.filter(b => STRUCTURAL_BLOCKER_CODES.has(b.code));
   const notReady = snap ? snap.permitReadiness.ready === false : false;
   // RGM §4 — the gate model is a deterministic projection of the SAME registry
   // this banner reads; nothing is re-derived and no requirement is filtered out.
   const release = snap ? projectReleaseGates(snap) : null;
+
+  // ══ THE SHOW GATE — SEVERITY, NOT MERE PRESENCE ════════════════════
+  // This read `notReady || structuralBlockers.length > 0`, and
+  // `structuralBlockers` had no severity filter while
+  // `STRUCTURAL_BLOCKER_CODES` contains PENDING-RACKING-ASSEMBLY-SELECTION — an
+  // ADVISORY that by design never gates `ready`.
+  //
+  // So a package that was reviewed, signed, sealed and RELEASED still printed
+  // 'NOT FOR PERMIT SUBMISSION' across PV-3 and PV-4C, forever, because nobody
+  // had pinned a rail part number. That is a false statement on a construction
+  // drawing, and it is the direction of error nobody catches: a red banner never
+  // looks like a bug.
+  //
+  // An advisory may DECORATE a banner the package has earned; it may not SUMMON
+  // one. Proven both ways in tests/planset/sheet-banner-phase.test.ts.
+  const structuralBlocking = structuralBlockers.filter(b => b.severity === 'blocking');
+
+  // The phase is derived from the same release model, so a sheet and the cover
+  // can never state different things about one package.
+  const phase = release
+    ? deriveReleasePhase({
+        model: release,
+        reviewCoversCurrentDigest: release.issueStatePredicates.professionalReleaseComplete,
+        gatePasses: release.issueStatePredicates.readyForPermitSubmission,
+        hasDesign: (snap?.derived?.moduleCount ?? 0) > 0,
+      })
+    : null;
+
   return {
-    show: notReady || structuralBlockers.length > 0,
-    line1: BANNER_LINE_1,
-    line2: BANNER_LINE_2,
+    show: notReady || structuralBlocking.length > 0,
+    line1: phase?.label ?? 'RELEASE STATE NOT ESTABLISHED',
+    line2: phase ? submissionLine(phase) : 'NOT FOR PERMIT SUBMISSION',
+    statement: phase?.statement ?? '',
+    // Fail-closed: with no snapshot to derive a phase from, the sheet reads as a
+    // defect rather than quietly reassuring anyone.
+    kind: phase?.kind ?? 'defect',
+    phaseId: phase?.id ?? 'DESIGN_INCOMPLETE',
     blockers,
     structuralBlockers,
     releaseSummary: release ? release.summary : null,

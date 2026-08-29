@@ -389,7 +389,7 @@ describe('RGM §6 — the cover states RELEASE STATUS in gate semantics', () => 
     expect(cover).toContain('NOT FOR PERMIT SUBMISSION');
     expect(cover).toContain(`data-release-open-gate-count="${MODEL.summary.openGateCount}"`);
     expect(cover).toContain(`data-release-requirement-count="${MODEL.summary.unresolvedRequirementCount}"`);
-    expect(cover).toContain(`SEE RS-1 FOR ALL ${MODEL.summary.unresolvedRequirementCount + MODEL.summary.advisoryCount} REQUIREMENT`);
+    expect(cover).toContain(`SEE RS-1 FOR ALL ${MODEL.summary.unresolvedRequirementCount + MODEL.summary.advisoryCount} ITEM`);
   });
 
   it('it NUMBERS every open root gate — and only those', () => {
