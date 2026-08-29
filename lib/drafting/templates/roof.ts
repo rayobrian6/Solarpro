@@ -2122,7 +2122,9 @@ export function drawRoofStructural(
     ? [
         _attD.fastener.diameterLabel ? `${_attD.fastener.diameterLabel} DIA` : null,
         _attD.fastener.lengthIn != null ? `× ${_attD.fastener.lengthIn}"` : null,
-        (_attD.fastener.fastenerType ?? '').toUpperCase() || null,
+        // the SHORT class: diameter, length, alloy and pilot rule each have their
+        // own row in this very table (and the long form overran the table border).
+        (_attD.fastener.fastenerTypeShort ?? _attD.fastener.fastenerType ?? '').toUpperCase() || null,
       ].filter(Boolean).join(' ')
     : `FASTENER ASSEMBLY: ${_attD.fastenerStateLabel}`;
   const roofType   = (project.roofType          || 'SHINGLE').toUpperCase();
@@ -2539,7 +2541,9 @@ export function drawRoofStructural(
         ['EMBEDMENT', `${_embedD}" MIN INTO ${_FRAME}`],
         ['PILOT HOLE', _attD.fastener.pilotRuleLabel.toUpperCase()],
         ['MATERIAL / COATING', (_attD.fastener.material ?? 'PER MANUFACTURER DOCUMENT').toUpperCase()],
-        ['FLASHING', 'PER THE VERIFIED MANUFACTURER DOCUMENT'],
+        // 2026-08-29 - trimmed: the value ran past the table's right border on the
+        // rendered sheet. General note 2 names the document in full.
+        ['FLASHING', 'PER MFR DOCUMENT ON FILE'],
         // ECD §7 — PROJECTED, never a literal: the method label the canonical
         // bonding authority establishes (integrated-listed / separate components /
         // pending). The REQUIREMENT row below it is code and always prints.

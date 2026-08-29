@@ -502,6 +502,12 @@ export interface FastenerAssembly {
   model: string | null;            // fastener product (screwLagModel)
   sku: string | null;
   fastenerType: string | null;     // e.g. 'structural wood screw', 'SS lag'
+  /** the PRODUCT CLASS alone - 'wood screw', 'lag'. The full `fastenerType`
+   *  restates the diameter, the length, the alloy and the pilot rule, every one
+   *  of which has its OWN row in the PV-3 hardware schedule; printing the long
+   *  form in the FASTENER cell stated four facts four times and ran the row past
+   *  the table's right border on the rendered sheet. */
+  fastenerTypeShort: string | null;
   diameterIn: number | null;
   /** the diameter WITH its unit - '5/16"' or 'M5 (5.0 mm)'. Consumers print it
    *  verbatim; appending an inch mark is what produced `M5 (5.0 mm)" DIA`. */
@@ -870,6 +876,26 @@ export function projectFastenerAssemblyFromSnapshot(
       : null,
   };
 
+  // The product class, with the facts that have their own rows removed: the
+  // parenthetical (pilot rule), any leading alloy token (material row) and any
+  // metric/imperial dimension token (diameter + length are printed beside it).
+  const fastenerTypeShort: string | null = (() => {
+    const raw = fastenerType;   // the ONE type value this projection resolved
+    if (!raw) return null;
+    const cleaned = raw
+      // the pilot rule - it has its own row (PILOT HOLE)
+      .replace(/\([^)]*\)/g, ' ')
+      // the alloy / finish - its own row (MATERIAL / COATING)
+      .replace(/\b(SS\s?\d{3}|SS|stainless(\s+steel)?|galvanized|zinc)\b/gi, ' ')
+      // the dimensions - printed immediately to the left of this text
+      .replace(/\b\d+(\.\d+)?\s*(mm\b|in\b|")\s*(x|\u00d7)?\s*/gi, ' ')
+      .replace(/\b\d+\/\d+\s*"?\s*/g, ' ')
+      .replace(/^\s*(x|\u00d7)\s*/i, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned || raw;
+  })();
+
   const sourceDocument = _fv.sourceDocument ?? selection.sourceDocument;
   const verification: FastenerAssembly['verification'] =
     !present ? 'pending'
@@ -880,11 +906,26 @@ export function projectFastenerAssemblyFromSnapshot(
   // dimensions (the observed geometry stays in the fields above for regeneration);
   // it prints the DESIGN-QUANTITY / NON-ORDERABLE label instead.
   const nonOrderable = verification !== 'verified';
+  // ══ 2026-08-29 — EVERY FACT ONCE ═══════════════════════════════════════
+  // The head was `manufacturer + model`, and `model` is `screwLagModel` — the
+  // manufacturer's whole PROSE sentence ("SS304 5.0 mm x 90 mm wood screw — 2
+  // per pad at a rafter (5 x 60 mm at deck-only / offset), no pilot hole").
+  // Every structured part after it then restated a piece of that sentence, so
+  // the one line PE-1, SCHED and APP-A all print said the diameter, the length,
+  // the alloy, the count and the pilot rule TWICE:
+  //   "Roof Tech SS304 5.0 mm x 90 mm wood screw — 2 per pad at a rafter …,
+  //    no pilot hole · M5 (5.0 mm) dia · × 3.543" · SS304 5.0 mm x 90 mm wood
+  //    screw (no pilot hole) · 2/mount · 3.07" min embedment · no pilot hole"
+  //
+  // The structured fields ARE the authority; the prose sentence is one of the
+  // record's inputs. The head now names the product (manufacturer + class) and
+  // each fact appears exactly once, in its own part.
   const descParts = [
-    [manufacturer, model].filter(Boolean).join(' ') || fastenerType || 'Structural fastener',
+    [manufacturer, fastenerTypeShort ?? fastenerType].filter(Boolean).join(' ')
+      || fastenerType || 'Structural fastener',
     diameterLabel ? `${diameterLabel} dia` : null,
     lengthIn != null ? `× ${lengthIn}"` : null,
-    fastenerType,
+    material,
     qtyPerMount != null ? `${qtyPerMount}/mount` : null,
     embedmentIn != null ? `${embedmentIn}" min embedment` : null,
     pilotRuleLabel,
@@ -915,6 +956,7 @@ export function projectFastenerAssemblyFromSnapshot(
   return {
     present, manufacturer, model, sku: ra?.mountSku ?? null, fastenerType,
     diameterIn, diameterLabel, lengthIn, qtyPerMount, material, headDrive,
+    fastenerTypeShort,
     pilotHoleRequired, pilotRuleLabel, embedmentIn, substrate, rafterDeckMethod,
     sourceDocument, selection, installation, capacity, procurement, verification, nonOrderable, line, certLabel,
   };
