@@ -288,7 +288,13 @@ export function subScopedInput(input: PermitInput, cad: CADModel, key: SubSystem
 // ═══════════════════════════════════════════════════════════════
 
 interface V4ResultLike {
-  wind?: { designWindSpeedMph?: number; velocityPressurePsf?: number; netUpliftPressurePsf?: number };
+  wind?: {
+    designWindSpeedMph?: number; velocityPressurePsf?: number; netUpliftPressurePsf?: number;
+    // 2026-08-29 — the DERIVATION crosses this boundary too, not only the products.
+    factors?: Array<{ symbol: string; value: number; basis: string }>;
+    derivation?: string; gcpBasis?: string;
+    gcpApplicabilityExceeded?: boolean; gcpApplicabilityNote?: string | null;
+  };
   snow?: { groundSnowLoadPsf?: number; roofSnowLoadPsf?: number };
   mountLayout?: { upliftPerMountLbs?: number; safetyFactor?: number; mountSpacingIn?: number };
   rafterAnalysis?: {
@@ -327,6 +333,16 @@ export function mapSubStructural(
       velocityPressure: wa.velocityPressurePsf ?? fb.wind?.velocityPressure,
       netUpliftPressure: wa.netUpliftPressurePsf ?? fb.wind?.netUpliftPressure,
       upliftPerAttachment: ml.upliftPerMountLbs ?? fb.wind?.upliftPerAttachment,
+      // 2026-08-29 - THE DERIVATION TRAVELS WITH THE RESULT. Only the PRODUCTS
+      // (qz, uplift) used to cross this boundary, so no sheet could state Kz,
+      // Kzt, Kd, Ke, the mean roof height, or which figure the pressure
+      // coefficients came from - and the engineer being asked to seal the number
+      // could not check it.
+      factors: wa.factors ?? fb.wind?.factors,
+      derivation: wa.derivation ?? fb.wind?.derivation,
+      gcpBasis: wa.gcpBasis ?? fb.wind?.gcpBasis,
+      gcpApplicabilityExceeded: wa.gcpApplicabilityExceeded ?? fb.wind?.gcpApplicabilityExceeded,
+      gcpApplicabilityNote: wa.gcpApplicabilityNote ?? fb.wind?.gcpApplicabilityNote,
     },
     snow: {
       ...(fb.snow ?? {}),

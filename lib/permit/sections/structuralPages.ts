@@ -858,6 +858,19 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // compact tag in the value cell (no added rows — PV-4C is page-fit critical);
   // the full "SOURCE: … — NOT VERIFIED" line prints on the page conclusion below
   // and on PE-1's Site Loading Parameters.
+  // The wind derivation record the engine now publishes (ASCE 7-22 Eq. 26.10-1
+  // factors + where the pressure coefficients came from). Absent on a legacy
+  // snapshot ⇒ the rows simply do not render; nothing is invented.
+  const _wind = (structural?.wind ?? {}) as {
+    factors?: Array<{ symbol: string; value: number; basis: string }>;
+    derivation?: string; gcpBasis?: string;
+    gcpApplicabilityExceeded?: boolean; gcpApplicabilityNote?: string | null;
+  };
+  const _windFactors = Array.isArray(_wind.factors) ? _wind.factors : [];
+  const _windDerivation = _wind.derivation ?? '';
+  const _gcpBasis = _wind.gcpBasis ?? 'pressure coefficient basis not recorded';
+  const _gcpExceeded = _wind.gcpApplicabilityExceeded === true;
+  const _gcpNote = _wind.gcpApplicabilityNote ?? null;
   const _envTag      = _proj.environmentalStateTag;
   const _envTagColor = _proj.environmentalUnverified ? '#b45309' : '#000';
 
@@ -888,6 +901,15 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <tr><td>Velocity Pressure (qz)</td><td class="cv">${velPressure} psf</td></tr>
             <tr><td>Net Uplift Pressure</td><td class="cv">${upliftPsf} psf</td></tr>
             <tr><td>Uplift per Attachment</td><td class="cv" style="font-weight:bold;">${upliftAtt} lbs</td></tr>
+            ${/* 2026-08-29 — THE DERIVATION, ON THE SHEET. Across all twenty sheets
+                  this package published qz and the net uplift and nothing else: not
+                  one occurrence of Kz, Kzt, Kd, Ke or the mean roof height. The
+                  engineer being asked to seal it could not check the number. */ ''}
+            ${_windFactors.length ? `<tr><td>Coefficients</td><td class="cv" style="font-size:5.6px;">${
+              _windFactors.map(f => `${escapeH(f.symbol)} ${f.value.toFixed(2)}`).join(' &middot; ')
+            }${_windDerivation ? ` &mdash; ${escapeH(_windDerivation)}` : ''}</td></tr>` : ''}
+            <tr><td>Pressure Coefficient</td><td class="cv" style="font-size:5.6px;color:${_gcpExceeded ? '#b45309' : '#000'};">${escapeH(_gcpBasis)}</td></tr>
+            ${_gcpExceeded && _gcpNote ? `<tr><td colspan="2" style="font-size:5.6px;color:#b45309;font-weight:bold;">${escapeH(_gcpNote)}</td></tr>` : ''}
           </table>
         </div>
 

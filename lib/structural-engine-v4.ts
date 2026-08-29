@@ -14,6 +14,7 @@ import { allowableUpliftLbs, asdUpliftDemandLbs, MIN_ATTACHMENT_SF } from './str
 
 // ── Types: imported from canonical source ─────────────────────────────────
 import { calcRoofSnow } from '@/lib/structural/asce7Snow';
+import { velocityPressure, rooftopSolarPressureCoefficient } from '@/lib/structural/asce7Wind';
 import type {
   InstallationType,
   WindExposure,
@@ -108,6 +109,21 @@ export interface WindAnalysis {
   gcpDownward: number;
   exposureCoeff: number;
   designWindSpeedMph: number;
+  // ── 2026-08-29 — THE DERIVATION TRAVELS WITH THE RESULT ──────────────────
+  // The package published qz and the net uplift and nothing else: across all
+  // twenty sheets there was not one occurrence of Kz, Kzt, Kd, Ke, the mean roof
+  // height, the enclosure classification or the effective wind area. The
+  // engineer being asked to seal it could not check the number they were sealing.
+  /** every factor in Eq. 26.10-1 with the table it came from. */
+  factors?: Array<{ symbol: string; value: number; basis: string }>;
+  /** the arithmetic, spelled out for a reviewer to redo. */
+  derivation?: string;
+  /** where the pressure coefficients came from. */
+  gcpBasis?: string;
+  /** true ⇒ the cited figure's slope limit is exceeded; the coefficients are an
+   *  ENGINEERING ASSUMPTION and the note says why. */
+  gcpApplicabilityExceeded?: boolean;
+  gcpApplicabilityNote?: string | null;
 }
 
 export interface SnowAnalysis {
@@ -1416,7 +1432,20 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
   // PASS on a field-failing design. Without a per-attachment zone map, the safe,
   // conservative basis is the corner zone (a design that passes there passes everywhere).
   const roofZone: RoofZone = 'corner';
-  const gcp = getGCp(roofZone, input.roofPitch);
+  // ONE wind authority (lib/structural/asce7Wind.ts). `getGCp` returned a
+  // hardcoded {−1.5, −2.0, −2.5} under the comment "ASCE 7-22 Figure 29.4-7" —
+  // with no dependence on effective wind area, panel tilt or the array-edge
+  // factor the figure requires, and Fig. 29.4-7 governs roofs with slopes LESS
+  // THAN 7°. The audited roof is 16.5°, so the cited figure never applied to it.
+  // The values are unchanged; what is new is that the record now SAYS they are
+  // an assumption when the figure does not govern, instead of citing a figure
+  // that does not.
+  const gcp = rooftopSolarPressureCoefficient(roofZone, input.roofPitch);
+  const _qzRec = velocityPressure({
+    windSpeedMph: input.windSpeed,
+    exposure: input.windExposure as 'B' | 'C' | 'D',
+    meanRoofHeightFt: heightFt,
+  });
   const netUpliftPsf = Math.abs(qz * gcp.uplift);
   const netDownwardPsf = qz * gcp.downward;
 
@@ -1429,6 +1458,11 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
     gcpDownward: gcp.downward,
     exposureCoeff: getKz(heightFt, input.windExposure),
     designWindSpeedMph: input.windSpeed,
+    factors: _qzRec.factors,
+    derivation: _qzRec.derivation,
+    gcpBasis: gcp.basis,
+    gcpApplicabilityExceeded: gcp.applicabilityExceeded,
+    gcpApplicabilityNote: gcp.applicabilityNote,
   };
 
   // ── 4. Snow analysis (ASCE 7-22) ────────────────────────────────────────
