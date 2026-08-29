@@ -80,17 +80,11 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
   });
 
   it('PE-1 gate box no longer prints Q-Cable / tap / route requirements', () => {
-    // PE-1 / CERT are rendered by `certificationGateBanner` (certPages.ts), a
-  // SEPARATE banner that has NOT been migrated to the sheet-line form yet:
-  // invariant V13 (generatePermit.ts) requires the literal string
-  // 'PENDING ENGINEERING REVIEW' on an unapproved CERT/PE-1 page, so rewiring
-  // it is a change that can hard-fail generation and lands on its own. Until
-  // then PE-1 still prints the review-record explanation, and the matcher
-  // accepts EITHER form so this test keeps testing per-sheet scoping rather
-  // than which of the two banners happens to be rendering.
-    const FRAMING_EITHER = /STRUCTURAL RELEASE PENDING|EXISTING FRAMING CAPACITY NOT VERIFIED/;
+      // PE-1 / CERT are rendered by `certificationGateBanner` (certPages.ts), a
+    // SEPARATE banner - migrated to the same sheet-line form on 2026-08-28, so
+    // the two now agree on wording as well as on scoping.
     const b = bulletsOn(DR.html, 'PE-1');
-    expect(b.some(x => FRAMING_EITHER.test(x))).toBe(true);
+    expect(b.some(x => FRAMING.test(x))).toBe(true);
     expect(b.some(x => QCABLE.test(x))).toBe(false);
     expect(b.some(x => TAP.test(x))).toBe(false);
     expect(b.some(x => ROUTE.test(x))).toBe(false);

@@ -14,6 +14,7 @@ import { projectProjectStateFromInput } from '../snapshot/projectAuthorityProjec
 export {
   PE_LETTER_TITLES, certificationApproved, peLetterTitles, peLetterTitlesFromInput,
   peLetterSheetTitle, peLetterManifestTitle, peLetterHeadingBlock,
+  certGateViolationReason,
 } from './peLetterIdentity';
 export type { PELetterTitleSet } from './peLetterIdentity';
 
@@ -80,6 +81,3 @@ export function _peSiteLoading(input: PermitInput): string {
   <tr><td class="il">Ground Snow Load (pg)</td><td class="iv">${snowLoad} psf</td><td class="il">Risk Category</td><td class="iv">II (Residential)</td></tr>
   <tr><td class="il">Seismic Design Category</td><td class="iv">${sdc}</td><td class="il">Importance Factor</td><td class="iv">1.0</td></tr>`;
 }
-
-
-

@@ -57,7 +57,7 @@ import {
 import { hybridSheetId } from './sheetManifest';
 // TAC WS-18 — cross-sheet references resolved against the ACTIVE sheet index.
 import { activeSheetIds, normalizeAbsentSheetReferences, findDanglingSheetReferences } from './utils/sheetRef';
-import { certificationApproved } from './utils/peLetterIdentity';
+import { certificationApproved, certGateViolationReason } from './utils/peLetterIdentity';
 import { resolvePlansetProfile, certificationIsCompleted, isCompactProfile } from './plansetProfile';
 import { resolveSeismicAuthority } from './snapshot/environmentalAuthority';
 import { pageValidationSummary } from './sections/validationPage';
@@ -1711,12 +1711,35 @@ export function generatePermitHTML(
       if (!_isCertSheet(p)) return [];
       const pn = i + 1;
       if (!_certApproved) {
-        // UNAPPROVED ⇒ the pending gate is mandatory. Unchanged behaviour.
-        return p.includes('PENDING ENGINEERING REVIEW') ? [] : [{
+        // UNAPPROVED ⇒ the pending gate is mandatory.
+        //
+        // 2026-08-28 — WHAT IS ASSERTED CHANGED; WHAT IS PROTECTED DID NOT.
+        // This required the literal string 'PENDING ENGINEERING REVIEW' on the
+        // page. That string was the cert banner's hardcoded headline, and the
+        // headline is now DERIVED from the release phase, so the literal check
+        // would have hard-failed generation on every unapproved package the
+        // moment the banner started telling the truth about which phase the
+        // package is in.
+        //
+        // Worse, the literal was never a sound test even before that. The
+        // revision block on the same sheet prints `projectAuthority.issueStatus`,
+        // and 'PENDING ENGINEERING REVIEW' is one of its eight legal values — so
+        // a cert sheet that had LOST its gate banner entirely could still satisfy
+        // V13 on the strength of a title-block field, while a sheet in a
+        // genuinely different state ('PENDING STRUCTURAL REVIEW') failed it while
+        // carrying a perfectly correct gate.
+        //
+        // The invariant is the same one it always meant: an unapproved
+        // certification sheet must CARRY THE GATE, and that gate must not claim
+        // release. It now asserts exactly that, against the gate's own marker.
+        // ONE predicate, in peLetter.ts next to certificationApproved(), so the
+        // invariant and its tests cannot drift into testing separate copies.
+        const _why = certGateViolationReason(p);
+        return _why ? [{
           invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: false,
           sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
-          message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
-        }];
+          message: `certification sheet ${pn} ${_why}`, enforcement: 'blocking' as const,
+        }] : [];
       }
       // APPROVED ⇒ the sheet must NOT still say pending, and must name the
       // licensed approver and the exact digest approved. An "approved" sheet

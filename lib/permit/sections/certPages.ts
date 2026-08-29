@@ -28,6 +28,7 @@ import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { projectStructuralFromInput, bannerRequirementsForSheet, fmt, fmtStr, findCheck, projectFastenerAssembly } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { RELEASE_PHASE_STYLE } from '../snapshot/releasePhase';
 import {
   projectProjectAuthorityFromInput, projectIssueStateLanguageFromInput,
   projectProjectStateFromInput,
@@ -125,35 +126,70 @@ export function certificationGateBanner(input: PermitInput, sheetId?: string | n
   // bullet silently clipped the cert footer under `overflow:hidden`. The cap is
   // deterministic and loses nothing: RS-1 prints every requirement in full, and
   // the truncation says so on the bullet itself.
-  const _CERT_REASON_CHARS = 200;
-  const _capReason = (m: string): string => (m.length <= _CERT_REASON_CHARS
-    ? m
-    : `${m.slice(0, _CERT_REASON_CHARS).replace(/\s+\S*$/, '')}… (full text on RS-1)`);
-  const _reasons = _shownReasons
-    .map(b => `<li style="margin:0 0 1px 0;">${_capReason(String(b.message)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')
+  //
+  // 2026-08-28 -- the 200-char cap is GONE, because what it was capping is
+  // gone. It truncated the REVIEW-RECORD EXPLANATION mid-sentence and appended
+  // "(full text on RS-1)"; on the audited package that meant a certification
+  // sheet carried 200 characters of a moment-envelope derivation. A row now
+  // prints the requirement's declared one-line `sheetLine` (capped at
+  // SHEET_LINE_MAX_CHARS by a guard test), and a code with no declared line
+  // names itself and points at the record. Neither can run long, so there is
+  // nothing left to truncate and no bullet that ends mid-word.
+  const _esc = (m: string): string => m.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // NOTE the escape order: the fallback is assembled from ALREADY-ESCAPED
+  // pieces and returns HTML, because an `&mdash;` built before escaping comes
+  // out of _esc() as the literal text "&mdash;" on the sheet.
+  const _certLine = (x: { code: string; sheetLine: string | null }): string =>
+    (x.sheetLine ? _esc(x.sheetLine) : `${_esc(x.code)} &mdash; see the project review record.`);
+  const _blocking = _shownReasons.filter(b => b.severity !== 'warning');
+  const _advisory = _shownReasons.filter(b => b.severity === 'warning');
+  const _reasons = _blocking
+    .map(b => `<li style="margin:0 0 1px 0;" data-banner-requirement="${_esc(b.code)}">${_certLine(b)}</li>`).join('')
+    // An advisory is LABELLED here too. The gate line directly above already
+    // counts it separately; printing it as an undifferentiated red bullet
+    // contradicted that line on the sheet that matters most.
+    + _advisory
+      .map(b => `<li style="margin:0 0 1px 0;opacity:0.85;" data-banner-requirement="${_esc(b.code)}" data-banner-advisory="1"><strong>ADVISORY &mdash; </strong>${_certLine(b)}</li>`).join('')
     // RGM §4 — the remainder is a PACKAGE-level statement ⇒ requirement (child)
     // semantics with the root-gate total stated on its own line above.
     + (_remainderReasons > 0
-      ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_remainderReasons} more unresolved release requirement${_remainderReasons === 1 ? '' : 's'}`
+      ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_remainderReasons} more unresolved item${_remainderReasons === 1 ? '' : 's'}`
         + `${_perSheet.otherCount > 0 ? ' elsewhere in this package' : ''} — see sheet RS-1 (REVIEW STATUS)</li>`
       : '')
     + (!_shownReasons.length && _remainderReasons > 0
-      ? `<li style="margin:0 0 1px 0;font-style:italic;">No unresolved requirement is projected onto this sheet's own content.</li>`
+      ? `<li style="margin:0 0 1px 0;font-style:italic;">Nothing on this sheet's own content is gated.</li>`
       : '');
-  const _hasStructural = _sp.banner.structuralBlockers.length > 0;
+  // SEVERITY, NOT MERE PRESENCE. This read `.length > 0` over a list that
+  // includes the PENDING-RACKING-ASSEMBLY-SELECTION advisory, so a certification
+  // sheet announced "STRUCTURAL ENGINEERING REVIEW REQUIRED" because a rail part
+  // number had not been pinned -- on the one sheet whose whole purpose is to
+  // state what a licensed engineer must do.
+  const _hasStructural = _sp.banner.structuralBlockers.some(b => b.severity === 'blocking');
   // RGM §4 — package total in GATE semantics (7 root gates over 19 requirements),
   // single-sourced from the release-gate model via the structural projection.
   const _gateLine = _sp.banner.releasePackageLine
-    ? `<div data-release-package-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.4px;color:#7a0000;margin-top:2px;">${String(_sp.banner.releasePackageLine).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
+    ? `<div data-release-package-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.4px;color:${RELEASE_PHASE_STYLE[_sp.banner.kind].fg};margin-top:2px;">${String(_sp.banner.releasePackageLine).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
     : '';
+  // THE HEADLINE IS DERIVED -- the same phase the drawing sheets and the cover
+  // print, from the same release model. It used to be the constant "PENDING
+  // ENGINEERING REVIEW", which said the same thing about a package missing ten
+  // facts and a package whose design and authority data are complete and which
+  // is genuinely waiting on a licensed reviewer. Those are different states and
+  // an engineer needs to be able to tell them apart at a glance.
+  //
+  // The certification-specific line stays underneath: this sheet is unsigned and
+  // unsealed, which is a fact about THIS SHEET rather than about the package,
+  // and it is the sentence the cert box exists to carry.
+  const _st = RELEASE_PHASE_STYLE[_sp.banner.kind];
   return `
-  <div style="border:3px solid #b00000;background:#fff2f2;margin:10px 14px 6px;padding:8px 12px;text-align:center;">
-    <div style="font-weight:900;font-size:13px;letter-spacing:1px;color:#b00000;">PENDING ENGINEERING REVIEW</div>
-    ${_hasStructural ? `<div style="font-weight:900;font-size:11px;letter-spacing:0.8px;color:#b00000;">STRUCTURAL ENGINEERING REVIEW REQUIRED</div>` : ''}
+  <div data-cert-gate="1" data-release-phase="${escapeH(_sp.banner.phaseId)}" data-release-phase-kind="${escapeH(_sp.banner.kind)}"
+       style="border:3px solid ${_st.border};background:${_st.bg};margin:10px 14px 6px;padding:8px 12px;text-align:center;">
+    <div data-banner-phase-label="1" style="font-weight:900;font-size:13px;letter-spacing:1px;color:${_st.fg};">${escapeH(_sp.banner.line1)}</div>
+    ${_hasStructural ? `<div style="font-weight:900;font-size:11px;letter-spacing:0.8px;color:${_st.fg};">STRUCTURAL ENGINEERING REVIEW REQUIRED</div>` : ''}
     ${_gateLine}
-    <div style="font-weight:800;font-size:10px;letter-spacing:0.8px;color:#b00000;">NOT FOR PERMIT SUBMISSION &mdash; UNSIGNED / UNSEALED</div>
-    <div style="font-size:7.5px;color:#7a0000;margin-top:2px;">Certification activates only upon an approved engineering-review record covering this snapshot digest, with engineer identity, license, jurisdiction and seal on file. A design change that alters the snapshot digest invalidates any prior approval.</div>
-    ${_reasons ? `<ul style="margin:4px auto 0;padding-left:16px;max-width:520px;text-align:left;font-size:7px;color:#7a0000;line-height:1.35;">${_reasons}</ul>` : ''}
+    <div style="font-weight:800;font-size:10px;letter-spacing:0.8px;color:${_st.fg};">${escapeH(_sp.banner.line2)} &mdash; UNSIGNED / UNSEALED</div>
+    <div style="font-size:7.5px;color:${_st.fg};margin-top:2px;">Certification activates only upon an approved engineering-review record covering this snapshot digest, with engineer identity, license, jurisdiction and seal on file. A design change that alters the snapshot digest invalidates any prior approval.</div>
+    ${_reasons ? `<ul style="margin:4px auto 0;padding-left:16px;max-width:520px;text-align:left;font-size:7px;color:${_st.fg};line-height:1.35;">${_reasons}</ul>` : ''}
   </div>`;
 }
 

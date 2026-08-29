@@ -113,3 +113,33 @@ export function peLetterHeadingBlock(input: PermitInput, subject: string, codeLi
         <div class="f-lg c555 mt-xs">${subject}</div>
         <div class="f-sm muted">${codeLine}</div>`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE CERTIFICATION GATE PREDICATE (invariant V13's reader)
+//
+// V13 used to assert the literal 'PENDING ENGINEERING REVIEW' appeared
+// somewhere on an unapproved CERT / PE-1 page. That was never a sound test.
+// The revision block on the SAME sheet prints `projectAuthority.issueStatus`,
+// and that exact string is one of its eight legal values -- so a cert sheet
+// that had lost its gate banner entirely could still satisfy V13 off a
+// title-block field, while a sheet in a different but perfectly honest state
+// ('PENDING STRUCTURAL REVIEW') failed it while carrying a correct gate.
+//
+// It lives HERE, next to certificationApproved(), so the invariant and its
+// tests read the same function. A test that re-implements the predicate proves
+// only its own copy -- exactly the closed loop this file exists to avoid.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Why this unapproved certification page violates V13, or null if it does not.
+ *  Reads the rendered page, which is what the invariant itself has to work
+ *  from -- the gate is HTML by the time V13 runs. */
+export function certGateViolationReason(page: string): string | null {
+  const gate = /data-cert-gate="1"[^>]*data-release-phase="([A-Z_]+)"/.exec(page);
+  if (!gate) return 'lacks the certification gate banner';
+  // A gate that says the package is issued, on a sheet with no approval
+  // covering the digest, is the affirmative lie V13 exists to stop.
+  if (gate[1] === 'ISSUED_FOR_PERMIT' || !page.includes('NOT FOR PERMIT SUBMISSION')) {
+    return `is unapproved but its gate reads "${gate[1]}" without a not-for-submission statement`;
+  }
+  return null;
+}
