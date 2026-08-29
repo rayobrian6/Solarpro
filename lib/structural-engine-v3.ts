@@ -35,6 +35,7 @@ import { getRackingSpecById as getRackingById, type RackingSystemSpec } from './
 // ─── INPUT TYPES ─────────────────────────────────────────────────────────────
 
 // ── Types: imported from canonical source ─────────────────────────────────
+import { calcRoofSnow } from '@/lib/structural/asce7Snow';
 import type {
   WindExposure,
   WindExposureCategory,
@@ -310,28 +311,17 @@ function getGCp(roofZone: RoofZone, pitchDeg: number): { uplift: number; downwar
   }
 }
 
-// ASCE 7-22 Section 7 — Roof snow load
-function calcRoofSnowLoad(groundSnow: number, pitchDeg: number): { roofSnow: number; Cs: number; Ct: number; Is: number } {
-  const Is = 1.0;   // importance factor (residential)
-  const Ct = 1.0;   // thermal factor (heated building)
-  const Ce = 1.0;   // exposure factor (partially exposed)
-  const pg = groundSnow;
-
-  // Flat roof snow load: pf = 0.7 × Ce × Ct × Is × pg
-  const pf = 0.7 * Ce * Ct * Is * pg;
-
-  // Slope factor Cs (ASCE 7-22 Fig. 7.4-1b, warm roof)
-  let Cs: number;
-  if (pitchDeg <= 30) {
-    Cs = 1.0;
-  } else if (pitchDeg <= 70) {
-    Cs = 1.0 - (pitchDeg - 30) / 40;
-  } else {
-    Cs = 0.0;
-  }
-
-  const roofSnow = pf * Cs;
-  return { roofSnow, Cs, Ct, Is };
+// ASCE 7-22 Section 7 - Roof snow load.
+//
+// 2026-08-29 - this file had the RIGHT curve (Cs = 1.0 to 30 deg, then linear to
+// 0 at 70) while structural-engine-v4 - the one that actually ships - used
+// `Cs = cos(pitch)` under the same section citation. Two implementations of one
+// figure, and the wrong one was the live one. Both now read
+// lib/structural/asce7Snow.ts, which additionally selects the SLIPPERY-surface
+// curve from the roof covering instead of assuming every roof is the same.
+function calcRoofSnowLoad(groundSnow: number, pitchDeg: number, roofCovering?: string | null): { roofSnow: number; Cs: number; Ct: number; Is: number } {
+  const r = calcRoofSnow({ groundSnowPsf: groundSnow, pitchDeg, roofCovering });
+  return { roofSnow: r.roofSnowPsf, Cs: r.Cs, Ct: r.Ct, Is: r.Is };
 }
 
 // ─── RAFTER ANALYSIS (NDS 2018) ──────────────────────────────────────────────

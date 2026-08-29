@@ -83,6 +83,10 @@ export function buildStructuralInputForPermit(
     groundSnowLoad: groundSnow,
     meanRoofHeight: 15,
     roofPitch: roofPitchDeg,
+    // ASCE 7-22 Fig. 7.4-1 picks a different snow slope-factor curve for an
+    // unobstructed SLIPPERY surface. Asphalt shingle is not one, and the engine
+    // used to apply cos(pitch) to every roof regardless.
+    roofCovering: input.project.roofType ?? null,
     framingType,
     rafterSize,
     rafterSpacingIn: rafterSpIn,

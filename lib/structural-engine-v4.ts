@@ -13,6 +13,7 @@ import { allowableUpliftLbs, asdUpliftDemandLbs, MIN_ATTACHMENT_SF } from './str
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Types: imported from canonical source ─────────────────────────────────
+import { calcRoofSnow } from '@/lib/structural/asce7Snow';
 import type {
   InstallationType,
   WindExposure,
@@ -46,6 +47,11 @@ export interface StructuralInputV4 {
   groundSnowLoad: number;      // psf
   meanRoofHeight: number;      // ft
   roofPitch: number;           // degrees
+  /** the roof COVERING, e.g. 'shingle' / 'metal' / 'tile'. ASCE 7-22 Fig. 7.4-1
+   *  selects a different snow slope-factor curve for an unobstructed SLIPPERY
+   *  surface, and asphalt shingle is not one. Absent ⇒ treated as NON-slippery,
+   *  which is the conservative direction (it keeps the snow on the roof). */
+  roofCovering?: string | null;
 
   // Framing (residential roof)
   framingType: FramingType;
@@ -444,20 +450,20 @@ function getGCp(zone: RoofZone, pitchDeg: number): { uplift: number; downward: n
 // ASCE 7-22 SNOW CALCULATIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-function calcRoofSnowLoad(groundSnow: number, pitchDeg: number): {
-  roofSnow: number; Cs: number; Ct: number; Is: number;
+// 2026-08-29 - `Cs = cos(pitch)` was DELETED. It sat under a comment citing
+// "ASCE 7-22 Section 7.4" and is not any curve in Figure 7.4-1. The real factor
+// depends on the roof's thermal condition and on whether its surface is
+// SLIPPERY: a warm roof that is NOT slippery - asphalt shingle is the textbook
+// case - holds Cs = 1.0 all the way to 30 degrees. On the audited job (3.6:12 =
+// 16.5 deg, shingle, heated) the engine applied cos(16.5) = 0.959 and published
+// 15.6 psf where the code gives 16.30: a 4.3% UNDERSTATEMENT of a design load,
+// in the unconservative direction, on a number a reviewer redoes in one line.
+// lib/structural/asce7Snow.ts reads the figure and records which curve it took.
+function calcRoofSnowLoad(groundSnow: number, pitchDeg: number, roofCovering?: string | null): {
+  roofSnow: number; Cs: number; Ct: number; Is: number; snowDerivation: string;
 } {
-  const Ce = 1.0;   // exposure factor (fully exposed)
-  const Ct = 1.0;   // thermal factor (heated building)
-  const Is = 1.0;   // importance factor (residential)
-
-  // Slope factor Cs (ASCE 7-22 Section 7.4)
-  const Cs = pitchDeg <= 5 ? 1.0 : Math.max(0, Math.cos(pitchDeg * Math.PI / 180));
-
-  const pf = 0.7 * Ce * Ct * Is * groundSnow;  // flat roof snow
-  const roofSnow = Cs * pf;
-
-  return { roofSnow, Cs, Ct, Is };
+  const r = calcRoofSnow({ groundSnowPsf: groundSnow, pitchDeg, roofCovering });
+  return { roofSnow: r.roofSnowPsf, Cs: r.Cs, Ct: r.Ct, Is: r.Is, snowDerivation: r.derivation };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1426,7 +1432,7 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
   };
 
   // ── 4. Snow analysis (ASCE 7-22) ────────────────────────────────────────
-  const { roofSnow, Cs, Ct, Is } = calcRoofSnowLoad(input.groundSnowLoad, input.roofPitch);
+  const { roofSnow, Cs, Ct, Is } = calcRoofSnowLoad(input.groundSnowLoad, input.roofPitch, input.roofCovering);
   const snowAnalysis: SnowAnalysis = {
     groundSnowLoadPsf: input.groundSnowLoad,
     roofSnowLoadPsf: roofSnow,

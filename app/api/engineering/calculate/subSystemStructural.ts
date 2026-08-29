@@ -72,6 +72,7 @@ export function buildStructuralInputV4(
     groundSnowLoad:   Number(structural.groundSnowLoad ?? defaults.groundSnowLoad),
     meanRoofHeight:   Number(structural.meanRoofHeight ?? 15),
     roofPitch:        Number(structural.roofPitch ?? 20),
+    roofCovering:     structural.roofType ?? structural.roofCovering ?? null,
     framingType:      structural.framingType ?? 'unknown',
     rafterSize:       structural.rafterSize ?? '2x6',
     rafterSpacingIn:  Number(structural.rafterSpacing ?? structural.rafterSpacingIn ?? 24),
