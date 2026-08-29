@@ -137,3 +137,54 @@ describe('the rendered package - no framing conclusion escapes onto any sheet', 
     expect(TEXT).toMatch(/withdrawal \u2014 SF [\d.]+ \u2265 [\d.]+ \(PASS\)/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// R1b - THE CLAIM SITES (2026-08-29)
+//
+// Repointing the Governing Check cell fixed the number a reviewer reads. It did
+// not fix the SENTENCES, and those were worse:
+//
+//   · certPages ENGINEER'S CERTIFICATION STATEMENT was gated on `approved &&
+//     _allPass` and on NEITHER structural authority - so an approved PE letter
+//     could affirmatively certify that "the existing roof structure ... [is]
+//     adequate", quoting a utilization computed from defaulted span, species and
+//     spacing, on a package whose own results table says the framing capacity was
+//     never verified;
+//   · the CERT sheet's `_structFlag` fired only on an OVER-UNITY ratio, so an
+//     unverified framing sitting at 0.60 printed the unqualified "complies with
+//     the following applicable codes and standards" - a list including ASCE 7 and
+//     the IBC/IRC structural provisions;
+//   · PV-4C's `_reviewRequired` fell back to `false` - FAIL OPEN - where the
+//     authority falls back to fail-CLOSED, so with no engine record PV-4C would
+//     print a utilization while PE-1 withheld one.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('a claim may not outrun the authority behind it', () => {
+  it('no sheet affirms the structure is adequate while the authority is missing', () => {
+    expect(TEXT).not.toMatch(/are adequate to support the additional loads/i);
+    expect(TEXT).not.toMatch(/confirms the existing framing has adequate capacity/i);
+    expect(TEXT).not.toMatch(/All structural parameters are within acceptable limits/i);
+  });
+
+  it('a missing authority is stated as missing, NOT as a failed check', () => {
+    // The three states are distinct and the reader must be able to tell them
+    // apart: established-and-passing, established-and-failing, never-established.
+    expect(TEXT).not.toMatch(/STRUCTURAL REVIEW REQUIRED\s*[\u2014-]\s*DO NOT ISSUE/i);
+    expect(TEXT).toMatch(/NOT VERIFIED|NOT ESTABLISHED|REVIEW REQ/i);
+  });
+
+  it('PV-4C fails CLOSED when there is no engine record', () => {
+    // The old local gate was `engine?.engineeringReviewRequired ?? false`.
+    const noEngine = { ...PROJ, engine: null } as unknown as StructuralProjection;
+    expect(projectStructuralConclusion(noEngine, { utilizationRatio: 0.6 }).framingReviewRequired)
+      .toBe(true);
+  });
+
+  it('an unverified framing at 60% is NOT a clean bill of health', () => {
+    // `_structFlag = _u > 1.0` treated "never established" as "passing".
+    const c = projectStructuralConclusion(PROJ, { utilizationRatio: 0.6 });
+    const notCertifiable = c.framingReviewRequired || c.capacitySourceGated
+      || (c.framing != null && !c.framing.passes);
+    expect(notCertifiable, '0.60 under an unverified framing must still qualify the certification').toBe(true);
+  });
+});
+

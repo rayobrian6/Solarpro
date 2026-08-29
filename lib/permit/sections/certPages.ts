@@ -230,8 +230,18 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
   // authority is unverified/pending -- the code list is only shown in the
   // approved template (which requires codeAuthorityVerified), and even there the
   // IFC edition projects from codeAuthority (PENDING when unknown).
-  const _u = compliance?.structural?.rafter?.utilizationRatio;
-  const _structFlag = _u != null && _u > 1.0;
+  // 2026-08-29 - THE STRUCTURAL SCOPE IS NOT CERTIFIABLE UNLESS IT WAS ESTABLISHED.
+  // This flagged ONLY an over-unity ratio (`_u > 1.0`). On the audited package the
+  // framing capacity was never verified and the ratio read 0.60, so the flag was
+  // false and this sheet printed the UNQUALIFIED sentence "complies with the
+  // following applicable codes and standards" - a list that includes ASCE 7 and
+  // the IBC/IRC structural provisions - over a framing capacity the same package
+  // says was never established. A missing authority is not a passing check.
+  const _certConcl = projectStructuralConclusion(projectStructuralFromInput(input), compliance?.structural?.rafter ?? null);
+  const _u = _certConcl.framing?.utilizationPct != null ? _certConcl.framing.utilizationPct / 100 : null;
+  const _structFlag =
+    _certConcl.framingReviewRequired || _certConcl.capacitySourceGated
+    || (_certConcl.framing != null && !_certConcl.framing.passes);
 
   return `
   <div class="page cert-compact">
@@ -246,7 +256,9 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
       ${_structFlag ? `
       <div style="border:3px solid #cc0000;background:#fff5f5;padding:var(--xs);margin-bottom:var(--xs);font-size:var(--f-md);line-height:1.5;">
         <strong style="color:#cc0000;">STRUCTURAL REVIEW REQUIRED:</strong>
-        The roof framing analysis (PV-4C / PE-1) computes a governing utilization of ${((_u as number) * 100).toFixed(0)}% under the modeled assumptions.
+        ${_u != null
+          ? `The roof framing analysis (PV-4C / PE-1) computes a governing utilization of ${(_u * 100).toFixed(0)}% under the modeled assumptions.`
+          : `The structural authority for this roof is NOT ESTABLISHED (PV-4C / PE-1): ${_certConcl.framingReviewRequired ? 'the existing framing capacity has not been verified from a project-specific source' : 'the roof-attachment capacity source is not archived or its applicability is unconfirmed'}, so no structural conclusion is available to certify.`}
         This certification is limited to the electrical design until the structural condition is resolved by field verification of framing
         (size, spacing, span, species) or engineered reinforcement. Do not issue for construction on the structural scope.
       </div>` : ''}
@@ -729,14 +741,35 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const _bendRatio = (_bmRaw != null && _abmRaw) ? _bmRaw / _abmRaw : null;
   const _deflRatio = (_deflRaw != null && _adRaw) ? _deflRaw / _adRaw : null;
   const _sfRaw     = _attChk?.safetyFactor ?? structural?.attachment?.safetyFactor;
-  const _bendPass  = _bendRatio == null || _bendRatio <= 1.0;
-  const _deflPass  = _deflRatio == null || _deflRatio <= 1.0;
+  // ABSENT IS NOT PASSING. These were `ratio == null || ratio <= 1.0`, so a check
+  // that was never computed rendered in passing black and counted toward the
+  // certification. A null ratio is now neither pass nor fail - it is indeterminate,
+  // and `_concl.framing` is null in that state anyway.
+  const _bendPass  = _bendRatio != null && _bendRatio <= 1.0;
+  const _deflPass  = _deflRatio != null && _deflRatio <= 1.0;
   // ASD basis: demand (0.6W) and capacity (allowable) are BOTH ASD -- the margin
   // lives inside the allowable, so the pass bar is the canonical attachment
   // check threshold (MIN_ATTACHMENT_SF = 1.0), not a second 2.0 on top.
   const _attThreshold = _attChk?.requiredThreshold ?? MIN_ATTACHMENT_SF;
-  const _lagPass   = _sfRaw == null || _sfRaw >= _attThreshold;
-  const _allPass   = _bendPass && _deflPass && _lagPass;
+  const _lagPass   = _sfRaw != null && _sfRaw >= _attThreshold;
+  // ══ WHAT A CERTIFICATION MAY AFFIRM ═══════════════════════════════════════
+  // `_allPass` is three vacuously-true flags ANDed together: each is
+  // `ratio == null || ratio <= 1.0`, so an UNCOMPUTED check counts as a passing
+  // one. It also mixes the framing and attachment limit states into a single
+  // verdict. It drove the ENGINEER'S CERTIFICATION STATEMENT below, which was
+  // gated on nothing else — so an approved PE letter could affirmatively certify
+  // that "the existing roof structure ... [is] adequate", quoting a utilization
+  // computed from DEFAULTED span, species and spacing, on a package whose own
+  // results table two inches above says the framing capacity was never verified.
+  //
+  // A certification may affirm only what the authority actually established.
+  // Absent is not passing, and an unestablished authority is not a failed check:
+  // the three states are distinct and the statement now says which one it is.
+  const _mayCertifyStructure =
+    !_concl.framingReviewRequired && !_concl.capacitySourceGated
+    && _concl.framing != null && _concl.framing.passes
+    && _concl.attachment != null && _concl.attachment.passes;
+  const _authorityIncomplete = _concl.framingReviewRequired || _concl.capacitySourceGated;
   const bendUtil   = _bendRatio != null ? (_bendRatio * 100).toFixed(0) : '—';
   const deflUtil   = _deflRatio != null ? (_deflRatio * 100).toFixed(0) : '—';
   const _governs   = (_deflRatio ?? 0) > (_bendRatio ?? 0) ? 'deflection' : 'bending';
@@ -842,13 +875,13 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">F'b (Adjusted)</td><td class="iv">${fbPrime} psi</td><td class="il">Framing</td><td class="iv">Stick (${framingType})</td></tr>
             <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Rafter Span</td><td class="iv">${rafterSpanFt} ft${!project.rafterSpan ? ' (ASSUMED &mdash; FIELD VERIFY)' : ''}</td></tr>
             <tr><td class="il">Line Load</td><td class="iv">${lineLoad} lb/ft</td><td class="il">Bending Moment</td><td class="iv">${bendingMoment} / ${allowableBM} lb-ft</td></tr>
-            <tr><td class="il">Bending Utilization</td><td class="iv" style="font-weight:bold;color:${_bendPass ? '#000' : '#cc0000'};">${bendUtil}%</td><td class="il">Deflection</td><td class="iv" style="color:${_deflPass ? '#000' : '#cc0000'};">${deflection} in (&Delta;_allow = ${allowableDefl} in &mdash; ${deflUtil}%)</td></tr>`}
+            <tr><td class="il">Bending Utilization</td><td class="iv" style="font-weight:bold;color:${_bendRatio == null ? '#b45309' : _bendPass ? '#000' : '#cc0000'};">${bendUtil}%</td><td class="il">Deflection</td><td class="iv" style="color:${_deflRatio == null ? '#b45309' : _deflPass ? '#000' : '#cc0000'};">${deflection} in (&Delta;_allow = ${allowableDefl} in &mdash; ${deflUtil}%)</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment ${_capGated ? '&mdash; Capacity Source Pending' : 'Capacity Analysis'}</td></tr>
             ${_capGated ? `
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs (ASD 0.6W, canonical)</td><td class="il">Published Allowable</td><td class="iv" style="font-weight:bold;color:#b45309;">CAPACITY SOURCE UNVERIFIED</td></tr>
             <tr><td class="il">Capacity Comparison</td><td class="iv" colspan="3" style="font-weight:bold;color:#b45309;">ENGINEERING REVIEW REQUIRED &mdash; NO PASS/FAIL CONCLUSION ISSUED (RT-MINI structural capacity source not archived / applicability to the selected assembly unconfirmed &mdash; &sect;9)</td></tr>` : `
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
-            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_concl.attachment?.passes ? '#000' : '#cc0000'};">${escapeH(_concl.attachmentGoverningCheckLabel)}</td></tr>`}
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_sfRaw == null ? '#b45309' : _lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_concl.attachment?.passes ? '#000' : '#cc0000'};">${escapeH(_concl.attachmentGoverningCheckLabel)}</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} &sect;2.4 &mdash; ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">${asce} &sect;26/27</td></tr>
           </table>
@@ -860,16 +893,18 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
               <div class="f-xs" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the roof-mounted solar
-                photovoltaic array installation at <strong>${escapeH(project.address || '—')}</strong> and determined that ${_allPass
+                photovoltaic array installation at <strong>${escapeH(project.address || '—')}</strong> and determined that ${_mayCertifyStructure
                   ? `the <strong>existing roof structure and lag bolt
                 attachment system are adequate to support the additional loads imposed by the proposed roof-mounted
                 PV array</strong>,`
+                  : _authorityIncomplete
+                  ? `<strong>this certification does NOT extend to the ${_concl.framingReviewRequired ? 'existing framing capacity' : 'roof-attachment capacity source'}, which is not established &mdash; see below</strong>,`
                   : `<strong>the modeled framing does not satisfy all code checks &mdash; see below</strong>,`}
                 based on the structural analysis performed in accordance with
                 <strong>${asce} &sect;26/27</strong>, <strong>${ibcVer} IBC</strong>, <strong>${ibcVer} IRC</strong>,
                 and NEC ${necVer}.
               </div>
-              ${_allPass ? `
+              ${_mayCertifyStructure ? `
               <div class="f-sm mt-xs" style="line-height:1.6;">
                 ${_isTruss
                   ? `Lag bolt attachment capacity (safety factor ${safetyFact}) and the pre-engineered truss load capacity (governing utilization ${utilization}%; member deflection to be verified with the truss manufacturer for the added PV load) are confirmed adequate for`
@@ -880,16 +915,32 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                 Field conditions shall be verified by the installing contractor.
                 Any deviations from ${escapeH(deviationReference(input))} shall be reported to the engineer of record prior to installation.
               </div>` : `
+              ${_authorityIncomplete ? `
+              <div class="f-sm mt-xs" style="line-height:1.6;border:2px solid #b45309;padding:var(--xs);">
+                <strong style="color:#b45309;">STRUCTURAL AUTHORITY NOT ESTABLISHED:</strong>
+                ${_concl.framingReviewRequired
+                  ? `the existing framing capacity has not been established from a project-specific source. The framing
+                     geometry on this sheet is OBSERVATION (${rafterSize} ${_isTruss ? 'truss' : 'stick'} @ ${rafterSpace}" O.C.,
+                     span ${rafterSpanFt} ft) and the code-default member capacity is not engineering authority, so
+                     <strong>no framing utilization or adequacy conclusion is certified here</strong>.`
+                  : ''}
+                ${_concl.capacitySourceGated
+                  ? `The roof-attachment allowable capacity source is not archived, or its applicability to the selected
+                     assembly is unconfirmed, so <strong>no attachment pass is certified here</strong>.`
+                  : ''}
+                This is a MISSING AUTHORITY, not a failed check &mdash; nothing on this sheet asserts that the structure is
+                inadequate. Establish the authority and re-run before this set is issued.
+              </div>` : `
               <div class="f-sm mt-xs" style="line-height:1.6;border:2px solid #cc0000;padding:var(--xs);">
                 <strong style="color:#cc0000;">STRUCTURAL REVIEW REQUIRED &mdash; DO NOT ISSUE:</strong>
                 under the modeled assumptions (${rafterSize} ${_isTruss ? 'truss' : 'stick'} framing @ ${rafterSpace}" O.C., span ${rafterSpanFt} ft,
                 combined load ${totalLoadPsf} psf), the ${_governs} check exceeds its code limit
                 (bending ${bendUtil}% of allowable; deflection &Delta; = ${deflection} in vs &Delta;_allow = ${allowableDefl} in).
-                Lag bolt attachment safety factor is ${safetyFact}${_lagPass ? ' (adequate)' : ` (below the ${_attThreshold.toFixed(1)} ASD minimum)`}.
+                Lag bolt attachment safety factor is ${safetyFact}${_sfRaw == null ? ' (not established)' : _lagPass ? ' (adequate)' : ` (below the ${_attThreshold.toFixed(1)} ASD minimum)`}.
                 Field-verify the actual framing type, member size, and clear span (pre-engineered trusses frequently
                 resolve this check), correct the structural inputs, and re-run the analysis &mdash; or provide reinforcement
                 designed by the engineer of record &mdash; before this letter is signed or sealed.
-              </div>`}
+              </div>`}`}
             </div>
           </div>`}
 

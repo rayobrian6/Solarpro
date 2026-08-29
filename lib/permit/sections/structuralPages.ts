@@ -710,9 +710,26 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // limit state is honest (review-required when framing unverified — no
   // fabricated truss pass). No sheet-local wind default, no `?? 2` multiplier.
   const _proj = projectStructuralFromInput(input);
+  // 2026-08-29 - THE ONE STRUCTURAL CONCLUSION AUTHORITY (structuralProjection).
+  // This sheet and PE-1 each derived these gates and ratios independently, and
+  // they disagreed: PV-4C gated its Governing Check on the framing-review state
+  // and correctly printed REVIEW REQ., while PE-1 gated the identical cell on the
+  // capacity gate and leaked a defaulted framing utilization as "bending - 60%
+  // (PASS)". Same concept, two gates, two answers, one package. Both now project
+  // this object, so a conclusion that may not be stated is not handed to either.
+  const _concl      = projectStructuralConclusion(_proj, structural?.rafter ?? null);
+  const _capGated   = _concl.capacitySourceGated;
   const _attChk = findCheck(_proj, 'attachment-uplift');
   const _framingChk = findCheck(_proj, 'framing-capacity');
-  const _reviewRequired = _proj.engine?.engineeringReviewRequired ?? false;
+  // 2026-08-29 - FROM THE AUTHORITY, NOT A SHEET-LOCAL COPY. This fell back to
+  // `false` - FAIL OPEN - where the conclusion authority and PE-1 fall back to
+  // `framingChk?.passes == null` - FAIL CLOSED. With no engine record on the
+  // snapshot this sheet therefore said review NOT required and printed a
+  // utilization while PE-1 said review WAS required: the same disagreement that
+  // produced 'bending - 60% (PASS)', one gate lower down. Every adequacy
+  // sentence on this sheet and its continuation branches on this flag, so a
+  // single wrong fallback governed six separate claims.
+  const _reviewRequired = _concl.framingReviewRequired;
   const _attThreshold = _attChk?.requiredThreshold ?? MIN_ATTACHMENT_SF;
   const windSpeed   = _proj.present ? fmt(_proj.windSpeedMph) : (structural?.wind?.windSpeed || '—');
   const exposure    = _proj.present ? fmtStr(_proj.exposure) : (structural?.wind?.exposureCategory || '—');
@@ -750,37 +767,26 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // racking-capacity gap is active. No sheet may render a capacity PASS from it:
   // gate the capacity value, the safety factor and the verdict to PENDING. The
   // DEMAND numbers (uplift/snow per attachment) stay printed — they are canonical.
-  // 2026-08-29 - THE ONE STRUCTURAL CONCLUSION AUTHORITY (structuralProjection).
-  // This sheet and PE-1 each derived these gates and ratios independently, and
-  // they disagreed: PV-4C gated its Governing Check on the framing-review state
-  // and correctly printed REVIEW REQ., while PE-1 gated the identical cell on the
-  // capacity gate and leaked a defaulted framing utilization as "bending - 60%
-  // (PASS)". Same concept, two gates, two answers, one package. Both now project
-  // this object, so a conclusion that may not be stated is not handed to either.
-  const _concl      = projectStructuralConclusion(_proj, structural?.rafter ?? null);
-  const _capGated   = _concl.capacitySourceGated;
   const lagCapDisp  = _capGated ? 'UNVERIFIED / PENDING STRUCTURAL SOURCE' : `${lagCap} lbs`;
   const sfCellHtml  = _capGated
     ? `<span style="font-weight:bold;color:#b45309;">PENDING — CAPACITY SOURCE UNVERIFIED</span>`
     : `<span style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < _attThreshold ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${_attThreshold.toFixed(1)})` : ''}</span>`;
   const _attVerdict = _capGated ? 'PENDING — CAPACITY SOURCE UNVERIFIED' : (_attChk ? checkResultLabel(_attChk) : '—');
   const maxSpacing  = _proj.attachmentSpacingIn ?? structural?.attachment?.maxAllowedSpacing ?? '—';
-  const _utilRatio = structural?.rafter?.utilizationRatio; // GOVERNING ratio (max of bending/deflection)
-  const utilization = _utilRatio != null ? (_utilRatio * 100).toFixed(0) : '—';
+  // The NUMBERS come from the conclusion as well, not just the gate: a ratio the
+  // authority refuses to publish must not be reachable through a second path.
+  const _utilRatio = _concl.framing?.utilizationPct != null ? _concl.framing.utilizationPct / 100 : null;
+  const utilization = _concl.framing != null ? _concl.framing.utilizationPct.toFixed(0) : '—';
   const rafterBM    = structural?.rafter?.bendingMoment?.toFixed(0) || '—';
   const rafterABM   = structural?.rafter?.allowableBendingMoment?.toFixed(0) || '—';
   const rafterDefl  = structural?.rafter?.deflection?.toFixed(3) || '—';
   const rafterAD    = structural?.rafter?.allowableDeflection?.toFixed(3) || '—';
   // Per-check ratios — printing the governing ratio beside the bending numbers
   // read as "1116 of 1246 allowable = 145%", an impossible line an AHJ rejects.
-  const _bmRaw   = structural?.rafter?.bendingMoment;
-  const _abmRaw  = structural?.rafter?.allowableBendingMoment;
-  const _bendRatio = (_bmRaw != null && _abmRaw) ? _bmRaw / _abmRaw : null;
-  const _deflRaw = structural?.rafter?.deflection;
-  const _adRaw   = structural?.rafter?.allowableDeflection;
-  const _deflRatio = (_deflRaw != null && _adRaw) ? _deflRaw / _adRaw : null;
+  const _bendRatio = _concl.framing?.bendingPct != null ? _concl.framing.bendingPct / 100 : null;
+  const _deflRatio = _concl.framing?.deflectionPct != null ? _concl.framing.deflectionPct / 100 : null;
   const bendUtil = _bendRatio != null ? (_bendRatio * 100).toFixed(0) : '—';
-  const _governs = (_deflRatio ?? 0) > (_bendRatio ?? 0) ? 'deflection' : 'bending';
+  const _governs = _concl.framing?.governs ?? 'bending';
   // BRAIDON PDF AUDIT 2026-08-27 (N4) — this table published a dead load the attachment
   // reactions never saw, and it was inflated three ways:
   //   • generatePermit.ts set moduleLoadPsf = pvDeadLoadPsf, which is ALREADY panel + racking;
