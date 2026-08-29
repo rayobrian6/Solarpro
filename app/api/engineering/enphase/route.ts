@@ -136,16 +136,16 @@ const ENPHASE_PARTS = {
     },
   },
 
-  // AC Disconnect — NEC 690.14
+  // AC Disconnect — NEC 690.13
   acDisconnect: {
     '30a': {
       partNumber: 'DU30RB',
       model: 'Square D 30A AC Disconnect',
-      description: '30A, 240V AC disconnect switch, NEMA 3R, per NEC 690.14',
+      description: '30A, 240V AC disconnect switch, NEMA 3R, per NEC 690.13',
       manufacturer: 'Square D',
       amps: 30,
       voltage: 240,
-      necReference: 'NEC 690.14',
+      necReference: 'NEC 690.13',
     },
   },
 } as const;

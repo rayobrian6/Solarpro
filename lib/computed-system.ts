@@ -2551,7 +2551,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       { tag: 'PV-1', description: 'PV Modules', manufacturer: input.panelManufacturer, model: input.panelModel, qty: input.totalPanels, rating: `${input.panelWatts}W`, necReference: 'NEC 690.4' },
       { tag: 'MICRO-1', description: 'Microinverters', manufacturer: input.inverterManufacturer, model: input.inverterModel, qty: microDeviceCount, rating: `${(input.inverterAcKw * 1000).toFixed(0)}W AC`, necReference: 'NEC 690.4' },
       { tag: 'COMB-1', description: 'AC Combiner / IQ Combiner', manufacturer: input.inverterManufacturer, model: 'IQ Combiner 4C', qty: 1, rating: `${acOcpdAmps}A`, necReference: 'NEC 690.9' },
-      { tag: 'AC-DISC-1', description: 'AC Disconnect', manufacturer: '', model: 'Non-Fused AC Disconnect', qty: 1, rating: `${acOcpdAmps}A / 240V`, necReference: 'NEC 690.14' },
+      { tag: 'AC-DISC-1', description: 'AC Disconnect', manufacturer: '', model: 'Non-Fused AC Disconnect', qty: 1, rating: `${acOcpdAmps}A / 240V`, necReference: 'NEC 690.13' },
       { tag: 'METER-1', description: 'Production Meter', manufacturer: 'Utility', model: 'Revenue Grade Meter', qty: 1, rating: '240V AC', necReference: 'NEC 705.12' },
       { tag: 'MSP-1', description: 'Main Service Panel', manufacturer: input.mainPanelBrand, model: `${input.mainPanelAmps}A Panel`, qty: 1, rating: `${input.mainPanelAmps}A / 120/240V`, necReference: 'NEC 705.12(B)' },
     );
@@ -2560,7 +2560,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       { tag: 'PV-1', description: 'PV Modules', manufacturer: input.panelManufacturer, model: input.panelModel, qty: input.totalPanels, rating: `${input.panelWatts}W`, necReference: 'NEC 690.4' },
       { tag: 'INV-1', description: 'String Inverter', manufacturer: input.inverterManufacturer, model: input.inverterModel, qty: physicalInverterUnits, rating: `${input.inverterAcKw}kW AC`, necReference: 'NEC 690.4' },
       { tag: 'DC-DISC-1', description: 'DC Disconnect', manufacturer: '', model: 'DC Disconnect Switch', qty: 1, rating: `${strings[0]?.ocpdAmps ?? 20}A / ${Math.round(strings[0]?.stringVoc ?? 600)}V DC`, necReference: 'NEC 690.15' },
-      { tag: 'AC-DISC-1', description: 'AC Disconnect', manufacturer: '', model: 'Non-Fused AC Disconnect', qty: 1, rating: `${acOcpdAmps}A / 240V`, necReference: 'NEC 690.14' },
+      { tag: 'AC-DISC-1', description: 'AC Disconnect', manufacturer: '', model: 'Non-Fused AC Disconnect', qty: 1, rating: `${acOcpdAmps}A / 240V`, necReference: 'NEC 690.13' },
       { tag: 'METER-1', description: 'Production Meter', manufacturer: 'Utility', model: 'Revenue Grade Meter', qty: 1, rating: '240V AC', necReference: 'NEC 705.12' },
       { tag: 'MSP-1', description: 'Main Service Panel', manufacturer: input.mainPanelBrand, model: `${input.mainPanelAmps}A Panel`, qty: 1, rating: `${input.mainPanelAmps}A / 120/240V`, necReference: 'NEC 705.12(B)' },
     );

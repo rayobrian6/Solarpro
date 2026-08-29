@@ -821,7 +821,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     condRaceway, feederBundle, rl.discoToMeter,
     acCurrentA, feederOcpd, conduitType,
     ambientC, sysV, input.maxACVoltageDropPct,
-    ['NEC 690.14', 'NEC 705.12', 'NEC 310.15', 'NEC 200.3'],
+    ['NEC 690.13', 'NEC 705.12', 'NEC 310.15', 'NEC 200.3'],
     feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating,
     nextSegId()
   ));

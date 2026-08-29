@@ -301,11 +301,11 @@ function buildComplianceFlags(
     autoSatisfied: norm === 'MICROINVERTER' || norm === 'AC_COUPLED_BATTERY',
   });
 
-  // NEC 690.14 — AC Disconnect
+  // NEC 690.13 — AC Disconnect
   flags.push({
     ruleId: 'NEC_690_14_AC_DISC',
     description: 'AC disconnect required for all PV systems',
-    necReference: 'NEC 690.14',
+    necReference: 'NEC 690.13',
     autoSatisfied: false, // always needs explicit sizing
   });
 
@@ -737,7 +737,7 @@ function buildMicroinverterGraph(inp: SLDGraphInput): SLDTopologyGraph {
       ratedVoltage: '240V AC',
       ratedCurrent: `${inp.acOCPD}A`,
       ocpdRating: `${inp.acOCPD}A`,
-      necReference: 'NEC 690.14',
+      necReference: 'NEC 690.13',
       layoutOrder: 6,
     },
     // 7 — DISCO_TO_METER_RUN
@@ -910,7 +910,7 @@ function buildStringInverterGraph(inp: SLDGraphInput): SLDTopologyGraph {
       ratedVoltage: '240V AC',
       ratedCurrent: `${inp.acOCPD}A`,
       ocpdRating: `${inp.acOCPD}A`,
-      necReference: 'NEC 690.14',
+      necReference: 'NEC 690.13',
       layoutOrder: 6,
     },
     // 7 — DISCO_TO_METER_RUN
@@ -1075,7 +1075,7 @@ function buildOptimizerGraph(inp: SLDGraphInput): SLDTopologyGraph {
       ratedVoltage: '240V AC',
       ratedCurrent: `${inp.acOCPD}A`,
       ocpdRating: `${inp.acOCPD}A`,
-      necReference: 'NEC 690.14',
+      necReference: 'NEC 690.13',
       layoutOrder: 6,
     },
     makeRunNode('DISCO_TO_METER_RUN', 'DISCO TO METER RUN', 7, {

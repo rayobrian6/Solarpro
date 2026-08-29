@@ -72,7 +72,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
     requiredAccessoryClasses: [
       { category: 'dc_disconnect',  label: 'DC Disconnect Switch',    required: true,  necReference: 'NEC 690.15' },
       { category: 'rapid_shutdown', label: 'Rapid Shutdown Device',   required: true,  necReference: 'NEC 690.12' },
-      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',    required: true,  necReference: 'NEC 690.14' },
+      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',    required: true,  necReference: 'NEC 690.13' },
       { category: 'grounding',      label: 'System Grounding',        required: true,  necReference: 'NEC 690.43' },
       { category: 'arc_fault',      label: 'Arc Fault Protection',    required: true,  necReference: 'NEC 690.11' },
     ],
@@ -100,7 +100,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
     complianceChecks: [
       { ruleId: 'NEC_690_12_RSD',     necReference: 'NEC 690.12',  description: 'Rapid shutdown required for rooftop PV' },
       { ruleId: 'NEC_690_15_DC_DISC', necReference: 'NEC 690.15',  description: 'DC disconnect required' },
-      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.14',  description: 'AC disconnect required' },
+      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.13',  description: 'AC disconnect required' },
       { ruleId: 'NEC_690_11_AFCI',    necReference: 'NEC 690.11',  description: 'Arc fault circuit interrupter required' },
     ],
   },
@@ -112,7 +112,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
       { category: 'optimizer',      label: 'DC Power Optimizer (per module)', required: true,  necReference: 'NEC 690.8' },
       { category: 'gateway',        label: 'Optimizer Gateway/Monitor',       required: true,  necReference: 'NEC 690.4' },
       { category: 'dc_disconnect',  label: 'DC Disconnect Switch',            required: true,  necReference: 'NEC 690.15' },
-      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.14' },
+      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.13' },
       { category: 'grounding',      label: 'System Grounding',                required: true,  necReference: 'NEC 690.43' },
     ],
     optionalAccessoryClasses: [
@@ -138,7 +138,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
     complianceChecks: [
       { ruleId: 'NEC_690_12_RSD',     necReference: 'NEC 690.12',  description: 'RSD integrated in optimizers', autoSatisfiedBy: ['STRING_WITH_OPTIMIZER'] },
       { ruleId: 'NEC_690_15_DC_DISC', necReference: 'NEC 690.15',  description: 'DC disconnect required' },
-      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.14',  description: 'AC disconnect required' },
+      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.13',  description: 'AC disconnect required' },
     ],
   },
 
@@ -150,7 +150,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
       { category: 'terminator',     label: 'Trunk Cable Terminator',          required: true,  necReference: 'NEC 690.31', notes: '2 per trunk section' },
       { category: 'gateway',        label: 'Communication Gateway',           required: true,  necReference: 'NEC 690.4' },
       { category: 'combiner',       label: 'AC Branch Combiner',              required: true,  necReference: 'NEC 690.4' },
-      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.14' },
+      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.13' },
       { category: 'grounding',      label: 'System Grounding',                required: true,  necReference: 'NEC 690.43' },
     ],
     optionalAccessoryClasses: [
@@ -175,7 +175,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
     ],
     complianceChecks: [
       { ruleId: 'NEC_690_12_RSD',     necReference: 'NEC 690.12',  description: 'RSD integrated in microinverters', autoSatisfiedBy: ['MICROINVERTER'] },
-      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.14',  description: 'AC disconnect required' },
+      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.13',  description: 'AC disconnect required' },
       { ruleId: 'NEC_690_4_LISTING',  necReference: 'NEC 690.4',   description: 'All equipment must be listed for PV use' },
     ],
   },
@@ -187,7 +187,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
       { category: 'optimizer',      label: 'DC Power Optimizer (per module)', required: true,  necReference: 'NEC 690.8' },
       { category: 'gateway',        label: 'Optimizer/Battery Gateway',       required: true,  necReference: 'NEC 690.4' },
       { category: 'dc_disconnect',  label: 'DC Disconnect Switch',            required: true,  necReference: 'NEC 690.15' },
-      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.14' },
+      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.13' },
       { category: 'grounding',      label: 'System Grounding',                required: true,  necReference: 'NEC 690.43' },
     ],
     optionalAccessoryClasses: [
@@ -212,7 +212,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
     complianceChecks: [
       { ruleId: 'NEC_690_12_RSD',     necReference: 'NEC 690.12',  description: 'RSD integrated in optimizers', autoSatisfiedBy: ['HYBRID_INVERTER'] },
       { ruleId: 'NEC_690_15_DC_DISC', necReference: 'NEC 690.15',  description: 'DC disconnect required' },
-      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.14',  description: 'AC disconnect required' },
+      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.13',  description: 'AC disconnect required' },
       { ruleId: 'NEC_706_BATTERY',    necReference: 'NEC 706',     description: 'Battery system requirements' },
     ],
   },
@@ -225,7 +225,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
       { category: 'battery',        label: 'DC-Coupled Battery',              required: true,  necReference: 'NEC 706' },
       { category: 'gateway',        label: 'Battery Management Gateway',      required: true,  necReference: 'NEC 690.4' },
       { category: 'dc_disconnect',  label: 'DC Disconnect Switch',            required: true,  necReference: 'NEC 690.15' },
-      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.14' },
+      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.13' },
       { category: 'grounding',      label: 'System Grounding',                required: true,  necReference: 'NEC 690.43' },
     ],
     optionalAccessoryClasses: [],
@@ -258,7 +258,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
     requiredAccessoryClasses: [
       { category: 'battery',        label: 'AC-Coupled Battery System',       required: true,  necReference: 'NEC 706' },
       { category: 'gateway',        label: 'Battery Management Gateway',      required: true,  necReference: 'NEC 690.4' },
-      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.14' },
+      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.13' },
       { category: 'grounding',      label: 'System Grounding',                required: true,  necReference: 'NEC 690.43' },
     ],
     optionalAccessoryClasses: [],
@@ -280,7 +280,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
     ],
     complianceChecks: [
       { ruleId: 'NEC_706_BATTERY',    necReference: 'NEC 706',     description: 'Battery system requirements' },
-      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.14',  description: 'AC disconnect required' },
+      { ruleId: 'NEC_690_14_AC_DISC', necReference: 'NEC 690.13',  description: 'AC disconnect required' },
     ],
   },
 
@@ -293,7 +293,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
       { category: 'grounding',      label: 'Grounding Electrode System',      required: true,  necReference: 'NEC 250.52' },
       { category: 'conduit',        label: 'Underground Conduit (DC home run)',required: true,  necReference: 'NEC 300.5' },
       { category: 'dc_disconnect',  label: 'DC Disconnect Switch',            required: true,  necReference: 'NEC 690.15' },
-      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.14' },
+      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.13' },
     ],
     optionalAccessoryClasses: [
       { category: 'rapid_shutdown', label: 'Rapid Shutdown Device',           required: false, notes: 'Not required for ground mount per NEC 690.12(B)(2)' },
@@ -330,7 +330,7 @@ export const TOPOLOGY_RULES: Record<string, TopologyRuleSet> = {
       { category: 'grounding',      label: 'Grounding Electrode System',      required: true,  necReference: 'NEC 250.52' },
       { category: 'conduit',        label: 'Underground Conduit (DC home run)',required: true,  necReference: 'NEC 300.5' },
       { category: 'dc_disconnect',  label: 'DC Disconnect Switch',            required: true,  necReference: 'NEC 690.15' },
-      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.14' },
+      { category: 'ac_disconnect',  label: 'AC Disconnect Switch',            required: true,  necReference: 'NEC 690.13' },
     ],
     optionalAccessoryClasses: [
       { category: 'rapid_shutdown', label: 'Rapid Shutdown Device',           required: false, notes: 'Not required for ground mount per NEC 690.12(B)(2)' },

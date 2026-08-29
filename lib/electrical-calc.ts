@@ -399,7 +399,7 @@ export interface ACSizingResult {
   // Step 3 — OCPD (NEC 240.6)
   ocpdAmps: number;                // next standard breaker ≥ continuousCurrentAmps
   ocpdLabel: string;               // e.g. "60A Circuit Breaker"
-  // Step 4 — Disconnect (NEC 690.14)
+  // Step 4 — Disconnect (NEC 690.13)
   disconnectAmps: number;          // ≥ OCPD
   disconnectType: DisconnectType;  // 'non-fused' | 'fused'
   disconnectLabel: string;         // e.g. "60A Non-Fused AC Disconnect"
@@ -1160,7 +1160,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       code: 'E-AC-DISCONNECT',
       severity: 'error',
       message: 'AC disconnect required at utility interconnection',
-      necReference: 'NEC 690.14',
+      necReference: 'NEC 690.13',
       suggestion: 'Install utility-accessible AC disconnect switch',
     });
   }
@@ -1333,7 +1333,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   const acSizingContinuousAmps = acSizingAggregate.continuousAmps;
   const acSizingOcpdAmps = acSizingAggregate.ocpdAmps;
 
-  // Step 4: Disconnect — enclosure must be rated ≥ OCPD (NEC 690.14)
+  // Step 4: Disconnect — enclosure must be rated ≥ OCPD (NEC 690.13)
   // Placeholder: final enclosure size is computed in Step 5 after fuse sizing.
   // We pre-set to OCPD here; Step 5 will override with proper enclosure size.
   const acSizingDisconnectAmps_preliminary = acSizingOcpdAmps;
@@ -1345,7 +1345,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   const acSizingConductorGauge = acSizingConductor?.gauge ?? acWireGauge;
   const acSizingConductorAmpacity = acSizingConductor?.ampacity_75c ?? 0;
 
-  // ── Step 5: Disconnect Type Engine (NEC 690.14 / 705.60 / 705.11) ─────────
+  // ── Step 5: Disconnect Type Engine (NEC 690.13 / 690.15 / 705.11) ─────────
   //
   // FUSED disconnect:
   //   Use when interconnection = SUPPLY_SIDE_TAP (NEC 705.11).
@@ -1357,7 +1357,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   //   Use for LOAD_SIDE / MAIN_BREAKER_DERATE / PANEL_UPGRADE (NEC 705.12).
   //   The backfed breaker at the panel IS the OCPD.
   //   Disconnect only needs to interrupt — no fuse required.
-  //   Enclosure = next standard size ≥ continuous current (NEC 690.14).
+  //   Enclosure = next standard size ≥ continuous current (NEC 690.13).
   //
   // Standard disconnect enclosure sizes (residential/light-commercial catalog):
   //   30A, 60A, 100A, 200A, 400A, 600A
@@ -1459,7 +1459,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       code: 'E-ENGINEERING-MODEL-INVALID',
       severity: 'error',
       message: (e as Error).message,
-      necReference: 'NEC 690.9 / 690.14',
+      necReference: 'NEC 690.9 / 690.13',
     });
   }
 
@@ -1497,10 +1497,10 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     engineeringModel: engineeringModelData,
     // NEC references
     necRefs: [
-      'NEC 705.60 — Continuous Load (125%)',
+      'NEC 690.8(B) — Continuous Load (125%)',
       'NEC 240.6 — Standard OCPD Sizes',
-      'NEC 690.14 — AC Disconnect',
-      acSizingDisconnectType === 'fused' ? 'NEC 690.9 — Fuse Sizing' : 'NEC 690.14 — Non-Fused Disconnect',
+      'NEC 690.13 — AC Disconnect',
+      acSizingDisconnectType === 'fused' ? 'NEC 690.9 — Fuse Sizing' : 'NEC 690.13 — Non-Fused Disconnect',
       'NEC 310.16 — Conductor Ampacity (75°C)',
       'NEC Chapter 9 — Conduit Fill',
       'NEC 250.66 — Grounding Conductor',

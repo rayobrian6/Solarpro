@@ -1511,7 +1511,7 @@ function renderDisco(
   const poleY2 = cy + 8;
 
   // ── LOAD terminals on LEFT (combiner feeds load side) ──────────────────
-  // Arc shield is on LINE side (right/utility side) per NEC 690.14.
+  // Arc shield is on LINE side (right/utility side) per NEC 690.13.
   // Combiner output → LOAD terminals (left side of disconnect).
   p.push(lug(bx+10, poleY1));
   p.push(lug(bx+10, poleY2));
@@ -1570,8 +1570,8 @@ function renderDisco(
     {sz:F.tiny, anc:'middle'}));
   p.push(txt(cx, by2+H2+28,
     fusedTapOcpd
-      ? `TAP OCPD — NEC 705.11(C), 690.14 — UTILITY ACCESSIBLE`
-      : 'NEC 690.14 — UTILITY ACCESSIBLE',
+      ? `TAP OCPD — NEC 705.11(C), 690.13 — UTILITY ACCESSIBLE`
+      : 'NEC 690.13 — UTILITY ACCESSIBLE',
     {sz:F.tiny, anc:'middle', italic:true}));
 
   // Callout

@@ -6289,9 +6289,9 @@ function EngineeringPageInner() {
           const sysV = calcData?.summary?.systemVoltage ?? 240;
           const totalAcKw = calcData?.summary?.totalAcKw ?? 0;
           logDecision('NEC Step 1', `Inverter Output: (${totalAcKw.toFixed(2)}kW × 1000) ÷ ${sysV}V = ${ac.acCurrentAmps}A`, 'info');
-          logDecision('NEC Step 2', `Continuous Load (NEC 705.60): ${ac.acCurrentAmps}A × 1.25 = ${ac.continuousCurrentAmps}A`, 'info');
+          logDecision('NEC Step 2', `Continuous Load (NEC 690.8(B)): ${ac.acCurrentAmps}A × 1.25 = ${ac.continuousCurrentAmps}A`, 'info');
           logDecision('NEC Step 3', `OCPD (NEC 240.6): next standard ≥ ${ac.continuousCurrentAmps}A → ${ac.ocpdAmps}A breaker`, 'auto');
-          logDecision('NEC Step 4', `AC Disconnect (NEC 690.14): rated ≥ OCPD → ${ac.disconnectLabel}`, 'auto');
+          logDecision('NEC Step 4', `AC Disconnect (NEC 690.13): rated ≥ OCPD → ${ac.disconnectLabel}`, 'auto');
           logDecision('NEC Step 5', `Fuse: ${ac.fuseLabel}`, ac.disconnectType === 'fused' ? 'auto' : 'info');
           logDecision('NEC Step 6', `Conductor (NEC 310.16 75°C): ampacity ≥ ${ac.ocpdAmps}A OCPD → ${ac.conductorLabel}`, 'auto');
           logDecision('NEC Step 7', `Conduit (NEC Ch.9): 3 CC + 1 EGC → ${ac.conduitLabel}`, 'auto');
@@ -9351,10 +9351,10 @@ function EngineeringPageInner() {
                       <div className={`flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border cursor-pointer hover:brightness-110 transition-all min-w-[90px] ${
                         config.acDisconnect ? 'border-emerald-500/40 bg-emerald-500/8 text-emerald-300' : 'border-slate-700/50 bg-slate-800/40 text-slate-500'
                       }`}
-                        title="AC Disconnect (NEC 690.14)">
+                        title="AC Disconnect (NEC 690.13)">
                         <Power size={18} className={config.acDisconnect ? 'text-emerald-400' : 'text-slate-600'} />
                         <div className="text-xs font-bold text-white">Disconnect</div>
-                        <div className="text-[10px] text-slate-400">NEC 690.14</div>
+                        <div className="text-[10px] text-slate-400">NEC 690.13</div>
                         <div className={`text-[9px] font-bold uppercase tracking-wide ${config.acDisconnect ? 'text-emerald-400' : 'text-slate-500'}`}>
                           {config.acDisconnect ? 'Installed' : 'Not Set'}
                         </div>
@@ -9892,7 +9892,7 @@ function EngineeringPageInner() {
                       {/* Disconnects & toggles */}
                       <div className="mt-3 grid grid-cols-2 gap-2">
                         {([
-                          { key: 'acDisconnect', label: 'AC Disconnect', sub: 'NEC 690.14' },
+                          { key: 'acDisconnect', label: 'AC Disconnect', sub: 'NEC 690.13' },
                           ...(config.inverters[0]?.type !== 'micro' ? [{ key: 'dcDisconnect', label: 'DC Disconnect', sub: 'NEC 690.15' }] : []),
                           { key: 'productionMeter', label: 'Production Meter', sub: '' },
                           { key: 'rapidShutdown', label: 'Rapid Shutdown', sub: 'NEC 690.12' },
@@ -11932,7 +11932,7 @@ function EngineeringPageInner() {
                         Electrical Sizing
                       </h2>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        NEC 705.60 · 310.16 · Ch.9 · {cs.isMicro ? 'Microinverter topology' : 'String inverter topology'}
+                        NEC 690.8(B) · 310.16 · Ch.9 · {cs.isMicro ? 'Microinverter topology' : 'String inverter topology'}
                       </p>
                     </div>
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-black ${_sGlow(_st)}`}>
@@ -12053,7 +12053,7 @@ function EngineeringPageInner() {
                             <h4 className="text-xs font-bold text-amber-400 flex items-center gap-2">
                               <Power size={12} /> Disconnect & OCPD
                             </h4>
-                            <span className="text-[10px] font-mono text-amber-500/70 bg-amber-500/10 px-2 py-0.5 rounded">NEC 690.14</span>
+                            <span className="text-[10px] font-mono text-amber-500/70 bg-amber-500/10 px-2 py-0.5 rounded">NEC 690.13</span>
                           </div>
                           <div className="grid grid-cols-2 gap-3">
                             <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
@@ -13552,15 +13552,15 @@ function EngineeringPageInner() {
                 {(compliance.electrical as any)?.acSizing ? (
                   <div className="card p-4">
                     <h4 className="text-xs font-bold text-amber-400 mb-3 flex items-center gap-2">
-                      <Activity size={12} /> Conductor & Disconnect Callouts — NEC 705.60 · 310.16 · Ch.9
+                      <Activity size={12} /> Conductor & Disconnect Callouts — NEC 690.8(B) · 310.16 · Ch.9
                     </h4>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                       {[
                         { label: 'AC Conductor', value: (compliance.electrical as any).acSizing.conductorLabel, nec: 'NEC 310.16' },
                         { label: 'Conduit', value: (compliance.electrical as any).acSizing.conduitLabel, nec: 'NEC Ch. 9' },
-                        { label: 'AC Disconnect', value: (compliance.electrical as any).acSizing.disconnectLabel, nec: 'NEC 690.14' },
+                        { label: 'AC Disconnect', value: (compliance.electrical as any).acSizing.disconnectLabel, nec: 'NEC 690.13' },
                         { label: 'OCPD', value: (compliance.electrical as any).acSizing.ocpdLabel, nec: 'NEC 240.6' },
-                        { label: 'Fuses', value: (compliance.electrical as any).acSizing.fuseLabel, nec: (compliance.electrical as any).acSizing.disconnectType === 'fused' ? 'NEC 690.9' : 'NEC 690.14' },
+                        { label: 'Fuses', value: (compliance.electrical as any).acSizing.fuseLabel, nec: (compliance.electrical as any).acSizing.disconnectType === 'fused' ? 'NEC 690.9' : 'NEC 690.13' },
                         { label: 'Grounding', value: `${(compliance.electrical as any).acSizing.groundingConductor} Copper`, nec: 'NEC 250.66' },
                       ].map(item => (
                         <div key={item.label} className="bg-slate-800/50 rounded-lg p-2.5">
@@ -13890,13 +13890,13 @@ function EngineeringPageInner() {
                             <td className="border border-slate-200 px-3 py-2 font-semibold">AC OCPD / Backfeed Breaker</td>
                             <td className="border border-slate-200 px-3 py-2">{ac.ocpdLabel || `${ac.ocpdAmps}A, 240V, 2-Pole Breaker`}</td>
                             <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">{ac.ocpdAmps}A</td>
-                            <td className="border border-slate-200 px-3 py-2 text-slate-500">NEC 705.60 · NEC 240.6</td>
+                            <td className="border border-slate-200 px-3 py-2 text-slate-500">NEC 690.8(B) · NEC 240.6</td>
                           </tr>
                           <tr className="bg-slate-50">
                             <td className="border border-slate-200 px-3 py-2 font-semibold">AC Disconnect Switch</td>
                             <td className="border border-slate-200 px-3 py-2">{ac.disconnectAmps}A, 240V, {ac.disconnectType === 'fused' ? 'Fusible' : 'Non-Fusible'} AC Disconnect</td>
                             <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">{ac.disconnectAmps}A</td>
-                            <td className="border border-slate-200 px-3 py-2 text-slate-500">NEC 690.14</td>
+                            <td className="border border-slate-200 px-3 py-2 text-slate-500">NEC 690.13</td>
                           </tr>
                           {ac.disconnectType === 'fused' && ac.fuseAmps ? (
                             <tr className="bg-white">

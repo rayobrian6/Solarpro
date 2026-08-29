@@ -337,7 +337,7 @@ function deriveBomItems(
       partNumber: `DU${disconnectAmps}${sizing.disconnectType === 'fused' ? 'FB' : 'RB'}`,
       quantity: 1,
       unit: 'ea',
-      necReference: 'NEC 690.14',
+      necReference: 'NEC 690.13',
       derivedFrom: `combined: totalAcKw=${em.totalAcKw?.toFixed(1)}kW → ${disconnectAmps}A`,
       _source: 'computePlan',
     });
@@ -355,7 +355,7 @@ function deriveBomItems(
       partNumber: `DU${perInvAmps}${sizing.disconnectType === 'fused' ? 'FB' : 'RB'}`,
       quantity: inverterCount,
       unit: 'ea',
-      necReference: 'NEC 690.14',
+      necReference: 'NEC 690.13',
       derivedFrom: `separate: ${inverterCount} inverters × ${perInvAmps}A each`,
       _source: 'computePlan',
     });
@@ -687,7 +687,7 @@ function deriveComplianceIssues(
         severity: 'error',
         title: 'Engineering Model Validation Failed',
         message: ve,
-        necReference: 'NEC 690.9 / 690.14',
+        necReference: 'NEC 690.9 / 690.13',
         autoFixed: false,
         overridable: false,
       });

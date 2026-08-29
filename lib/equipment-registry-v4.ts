@@ -681,10 +681,10 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
       },
       {
         category: 'ac_disconnect',
-        description: 'AC disconnect sized for total AC output per NEC 690.14',
+        description: 'AC disconnect sized for total AC output per NEC 690.13',
         required: true, quantityRule: 'perSystem',
         defaultManufacturer: 'Square D', defaultModel: 'AC Disconnect Switch',
-        defaultPartNumber: 'DU30RB', necReference: 'NEC 690.14',
+        defaultPartNumber: 'DU30RB', necReference: 'NEC 690.13',
         notes: 'Size = modules × 1.21A × 125%, rounded to next standard breaker',
       },
     ],
@@ -750,7 +750,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         description: 'AC disconnect sized for total AC output',
         required: true, quantityRule: 'perSystem',
         defaultManufacturer: 'Square D', defaultModel: 'AC Disconnect Switch',
-        defaultPartNumber: 'DU30RB', necReference: 'NEC 690.14',
+        defaultPartNumber: 'DU30RB', necReference: 'NEC 690.13',
       },
     ],
     compatibilityRules: [
