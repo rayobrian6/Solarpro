@@ -90,6 +90,42 @@ describe('the exposure category reaches the resolver', () => {
 // reach the network from a test). The case this change adds there is that an
 // EMPTY STRING is not a statement.
 
+describe('Auto-Fill may not name the engineer of record', () => {
+  it('does not seat the software vendor as the designer', () => {
+    // One click used to patch `designer = 'SolarPro Engineer'`. The release gate
+    // only tests that the field is NON-EMPTY, so that CLEARED
+    // DESIGNER-OF-RECORD-MISSING and printed the vendor on the sheet that
+    // carries professional responsibility. The permit route refuses to do this
+    // on the server (a teardown P1: the platform is not a licensed design
+    // firm) - the client was undoing it.
+    expect(PAGE).not.toMatch(/patches\.designer\s*=\s*'SolarPro Engineer'/);
+    expect(PAGE).not.toMatch(/patches\.designer\s*=/);
+  });
+
+  it('the field is marked required for release, so the gate is discoverable', () => {
+    expect(PAGE).toMatch(/\{ label: 'Designer', key: 'designer'[^}]*required: true \}/);
+    expect(PAGE).toContain('Required for permit release &mdash; Auto-Fill will not supply it.');
+  });
+
+  it('and the blocker still fires on a blank designer', () => {
+    // The gate is a NON-EMPTY test on project.designer (build.ts), so removing
+    // the vendor patch is exactly what keeps it open until a human answers.
+    const input: any = clone(braidonOriginalAuditFixture);
+    input.project.designer = '';
+    input.plansetProfile = 'design-review';
+    generatePermitHTML(input);
+    const codes = ((input._snapshot?.permitReadiness?.registry ?? []) as any[]).map(r => r.code);
+    expect(codes).toContain('DESIGNER-OF-RECORD-MISSING');
+
+    // control: a stated name closes it
+    const ok: any = clone(braidonOriginalAuditFixture);
+    ok.plansetProfile = 'design-review';
+    generatePermitHTML(ok);
+    const okCodes = ((ok._snapshot?.permitReadiness?.registry ?? []) as any[]).map(r => r.code);
+    expect(okCodes).not.toContain('DESIGNER-OF-RECORD-MISSING');
+  });
+});
+
 describe('the project review record is reachable', () => {
   it('design-review — the profile the app generates — CONTAINS RS-1', () => {
     const { html, input } = gen('design-review');

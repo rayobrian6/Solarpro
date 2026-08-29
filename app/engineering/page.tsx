@@ -7206,7 +7206,17 @@ function EngineeringPageInner() {
       patches.projectName = `${invData?.manufacturer || 'Solar'} ${(totalWatts / 1000).toFixed(1)}kW System`;
       filled++;
     }
-    if (!config.designer) { patches.designer = 'SolarPro Engineer'; filled++; }
+    // AUTO-FILL MAY NOT NAME THE ENGINEER OF RECORD. This seated
+    // 'SolarPro Engineer' - the software vendor - as the designer with one
+    // click, and because the release gate only tests that the field is
+    // NON-EMPTY, that CLEARED DESIGNER-OF-RECORD-MISSING and put a vendor
+    // string on the sheet that carries professional responsibility for the
+    // design. The permit route already refuses to do exactly this on the server
+    // ("NEVER default the Designer/Engineer-of-Record to the software vendor -
+    // the platform is not a licensed design firm", a teardown P1); the client
+    // was quietly undoing it. A person's name is a statement, not a default, so
+    // Auto-Fill leaves it to a human - the same rule as the ASCE 7 26.7
+    // exposure category.
     if (!config.date) { patches.date = new Date().toISOString().split('T')[0]; filled++; }
     // NOTE: Do NOT patch wireGauge for micro systems — wire gauge comes from
     // ComputedSystem.runs (cs.runs), not config.wireGauge.
@@ -9481,11 +9491,19 @@ function EngineeringPageInner() {
                           { label: 'Project Name', key: 'projectName' },
                           { label: 'Client Name', key: 'clientName' },
                           { label: 'Address', key: 'address', placeholder: 'e.g. 123 Main St, Austin, TX 78701' },
-                          { label: 'Designer', key: 'designer' },
+                          // `required` here means "required for permit RELEASE", not for
+                          // the form to submit: DESIGNER-OF-RECORD-MISSING stays open until a
+                          // human states who is responsible for the design.
+                          { label: 'Designer', key: 'designer', placeholder: 'Name of the designer of record', required: true },
                           { label: 'Date', key: 'date', type: 'date' },
                         ] as any[]).map(f => (
                           <div key={f.key} className={f.key === 'address' ? 'col-span-2' : ''}>
-                            <label className="eng-label">{f.label}</label>
+                            <label className="eng-label">
+                              {f.label}
+                              {f.required && !(config as any)[f.key] && (
+                                <span className="text-amber-400 font-bold ml-1" title="Required for permit release">*</span>
+                              )}
+                            </label>
                             <input type={f.type || 'text'} value={(config as any)[f.key]} placeholder={f.placeholder || ''}
                               onChange={e => updateConfig({ [f.key]: e.target.value } as any)}
                               onBlur={f.key === 'address' ? (e) => {
@@ -9504,6 +9522,11 @@ function EngineeringPageInner() {
                                 }
                               } : undefined}
                               className="eng-input" />
+                            {f.required && !(config as any)[f.key] && (
+                              <div className="text-[10px] text-amber-400 mt-1 leading-tight">
+                                Required for permit release &mdash; Auto-Fill will not supply it.
+                              </div>
+                            )}
                           </div>
                         ))}
 
