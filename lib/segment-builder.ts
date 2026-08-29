@@ -15,6 +15,10 @@ import {
   EngineeringIssue,
 } from './segment-model';
 import { nextStandardOcpd } from './electrical/stdSizes';
+import {
+  selectSmallestConduit as necSelectSmallestConduit,
+  conduitTotalAreaIn2 as necConduitTotalAreaIn2,
+} from '@/lib/nec/chapter9';
 
 // NEC 310.16 75°C Ampacity Table
 const AMPACITY_TABLE_75C: Record<string, number> = {
@@ -57,17 +61,12 @@ const CONDUCTOR_AREA_IN2: Record<string, number> = {
   '500': 0.6178,
 };
 
-// Conduit area in square inches (NEC Ch.9 Table 4)
-const CONDUIT_AREA_IN2: Record<string, number> = {
-  '1/2"': 0.304,
-  '3/4"': 0.533,
-  '1"': 0.868,
-  '1-1/4"': 1.493,
-  '1-1/2"': 2.036,
-  '2"': 3.356,
-  '2-1/2"': 4.860,
-  '3"': 7.928,
-};
+// CONDUIT_AREA_IN2 was DELETED (2026-08-29). It was TYPE-BLIND - one column used
+// for EMT, PVC Sch 40 and PVC Sch 80 alike, while `calcConduitSize` accepted a
+// `conduitType` argument and then never used it - and it drifted from the code at
+// the top: 2-1/2" at 4.860 where EMT is 5.858, 3" at 7.928 where EMT is 8.846,
+// both understating the interior by ~11% and forcing needless upsizing.
+// lib/nec/chapter9.ts is keyed by type.
 
 // ============================================================
 // Helper Functions
@@ -215,21 +214,11 @@ function calcVoltageDrop(
 
 function calcConduitSize(bundle: ConductorBundle, conduitType: string): { size: string; fillPercent: number } {
   const bundleArea = bundle.totalAreaIn2;
-  const maxFillPercent = 0.40; // NEC Ch.9 Table 1
-  
-  const conduitSizes = ['1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"', '3"'];
-  
-  for (const size of conduitSizes) {
-    const conduitArea = CONDUIT_AREA_IN2[size];
-    const fillPercent = bundleArea / conduitArea;
-    
-    if (fillPercent <= maxFillPercent) {
-      return { size, fillPercent };
-    }
-  }
-  
-  // If we get here, 3" is not enough
-  return { size: '3"', fillPercent: bundleArea / CONDUIT_AREA_IN2['3"'] };
+  const _count = bundle.conductors?.reduce?.((n: number, c: { qty?: number }) => n + (c.qty ?? 1), 0) ?? 3;
+  const picked = necSelectSmallestConduit(conduitType, bundleArea, _count);
+  if (picked) return { size: picked.tradeSize, fillPercent: bundleArea / picked.totalAreaIn2 };
+  const _largest = necConduitTotalAreaIn2(conduitType, '4"') ?? necConduitTotalAreaIn2('EMT', '4"') ?? 14.753;
+  return { size: '4"', fillPercent: bundleArea / _largest };
 }
 
 function buildConductorCallout(bundle: ConductorBundle, conduitSize: string, conduitType: string, fillPercent: number): string {

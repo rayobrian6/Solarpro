@@ -28,7 +28,7 @@ exports[`Wave 0 golden — electrical-calc legacy STRING parity numbers > per-st
 
 exports[`Wave 0 golden — electrical-calc legacy STRING parity numbers > status / acWireGauge / OCPD / backfeed match the pre-contract snapshot 1`] = `
 {
-  "acConductorCallout": "3#8 AWG THWN-2 + 1#10 AWG GND in 1" EMT",
+  "acConductorCallout": "3#8 AWG THWN-2 + 1#10 AWG GND in 3/4" EMT",
   "acSizing": {
     "acCurrentAmps": 31.67,
     "conductorAmpacity": 50,

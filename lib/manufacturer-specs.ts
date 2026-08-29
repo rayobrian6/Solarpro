@@ -5,6 +5,11 @@
 // ============================================================
 
 import {
+  selectSmallestConduit as necSelectSmallestConduit,
+  normalizeConduitType as necNormalizeConduitType,
+  conductorAreaIn2 as necConductorAreaIn2,
+} from '@/lib/nec/chapter9';
+import {
   SOLAR_PANELS,
   STRING_INVERTERS,
   MICROINVERTERS,
@@ -85,12 +90,30 @@ export function getConductorByMinAmpacity(
 
 export function getSmallestConduit(
   conduitType: string,
-  totalFillAreaSqIn: number
+  totalFillAreaSqIn: number,
+  conductorCount = 3,
 ): Conduit | null {
-  const matching = CONDUITS
-    .filter(c => c.type === conduitType && c.maxFillArea_3plus >= totalFillAreaSqIn)
-    .sort((a, b) => a.innerDiameter - b.innerDiameter);
-  return matching[0] ?? null;
+  // 2026-08-29 - SOURCED FROM NEC CHAPTER 9, not from the partial CONDUITS table.
+  // That table held the only CORRECT areas in the repo and was missing the rows
+  // that matter: no PVC Sch 80 at ALL, nothing above 2", no RMC, no FMC. Its
+  // `c.type === conduitType` was also an exact string match, so the UI's
+  // "PVC Schedule 80" found nothing - and a null here made electrical-calc report
+  // conduitFillPercent = 100, raise E-CONDUIT-FILL on a perfectly sound raceway,
+  // and the autosizer fall back to a hardcoded 3/4".
+  const picked = necSelectSmallestConduit(conduitType, totalFillAreaSqIn, conductorCount);
+  if (!picked) return null;
+  const t = necNormalizeConduitType(conduitType) ?? conduitType;
+  const total = picked.totalAreaIn2;
+  return {
+    id: `${String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${picked.tradeSize.replace(/[^0-9a-z]+/gi, '')}`,
+    type: String(t),
+    tradeSize: picked.tradeSize,
+    innerDiameter: 2 * Math.sqrt(total / Math.PI),
+    area: total,
+    maxFillArea_1wire: total * 0.53,
+    maxFillArea_2wire: total * 0.31,
+    maxFillArea_3plus: total * 0.40,
+  };
 }
 
 // ─── NEC Standard OCPD Sizes ─────────────────────────────────────────────────
@@ -200,6 +223,13 @@ export function calcStringIscCorrected(
 // ─── Conductor Wire Area (for conduit fill) ───────────────────────────────────
 
 export function getConductorArea(gauge: string): number {
+  // NEC Chapter 9 Table 5 IS the insulated conductor area, and it is what a plan
+  // reviewer recomputes. Deriving it from the catalogue's outer diameter produced
+  // a materially larger number, which then inflated every conduit-fill percentage
+  // and drove needless upsizing. The geometric form survives only for a gauge
+  // Table 5 does not tabulate.
+  const tabulated = necConductorAreaIn2(gauge);
+  if (tabulated != null) return tabulated;
   const cond = getConductorSpec(gauge);
   if (!cond) return 0;
   return Math.PI * Math.pow(cond.outerDiameter / 2, 2);

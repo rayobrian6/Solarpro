@@ -15,6 +15,11 @@
 // ============================================================
 
 import { nextStandardOcpd } from './electrical/stdSizes';
+import {
+  conductorAreaIn2 as necConductorAreaIn2,
+  selectSmallestConduit as necSelectSmallestConduit,
+  conduitTotalAreaIn2 as necConduitTotalAreaIn2,
+} from '@/lib/nec/chapter9';
 
 // ─── Conductor Bundle ────────────────────────────────────────────────────────
 // Represents one or more identical conductors in a raceway
@@ -187,22 +192,17 @@ const CONDUCTOR_AREA_IN2: Record<string, number> = {
   '#4/0 AWG': 0.3237,
 };
 
-// NEC Chapter 9 Table 4 — Conduit full internal areas (in²)
-const CONDUIT_FULL_AREA: Record<string, Record<string, number>> = {
-  'EMT': {
-    '1/2"': 0.122, '3/4"': 0.213, '1"': 0.346, '1-1/4"': 0.598,
-    '1-1/2"': 0.814, '2"': 1.342, '2-1/2"': 2.343, '3"': 3.538,
-  },
-  'PVC Sch 40': {
-    '1/2"': 0.122, '3/4"': 0.217, '1"': 0.355, '1-1/4"': 0.610,
-    '1-1/2"': 0.829, '2"': 1.363, '2-1/2"': 2.361, '3"': 3.538,
-  },
-  'PVC Sch 80': {
-    '1/2"': 0.093, '3/4"': 0.171, '1"': 0.285, '1-1/4"': 0.508,
-    '1-1/2"': 0.695, '2"': 1.150, '2-1/2"': 2.018, '3"': 3.085,
-  },
-};
-
+// CONDUIT_FULL_AREA was DELETED (2026-08-29). Its comment said "Conduit full
+// internal areas" and its values were the NEC 40% column, so `calcConduitSize`
+// below divided by a 40% area and then accepted at <=40% - an effective
+// threshold of 16% of the real interior, over-sizing conduit by roughly two
+// trade sizes, while the percentage it printed on the sheets was 2.5x the truth.
+// It also had no PVC Sch 80 entry the UI could actually hit and fell back to the
+// EMT column on any key miss.
+//
+// lib/nec/chapter9.ts now holds the published Table 4 TOTAL areas, the Table 1
+// fill percentages as their own numbers, and a type resolver that maps the UI's
+// "PVC Schedule 80" to the canonical key instead of silently landing on steel.
 const CONDUIT_SIZES = ['1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"', '3"'];
 
 // NEC 310.15(B)(2) Table — Ambient Temperature Correction Factors (NEC 2023)
@@ -299,26 +299,29 @@ function calcConduitSize(
 ): { size: string; fillPercent: number; totalAreaIn2: number } {
   // Sum all conductor areas
   const totalAreaIn2 = conductorBundle.reduce((sum, c) => {
-    const area = CONDUCTOR_AREA_IN2[c.gauge] ?? 0.0211;
+    const area = necConductorAreaIn2(c.gauge) ?? 0.0211;
     return sum + area * c.qty;
   }, 0);
+  const _count = conductorBundle.reduce((n, c) => n + c.qty, 0);
 
-  const fullTable = CONDUIT_FULL_AREA[conduitType] ?? CONDUIT_FULL_AREA['EMT'];
-
-  for (const size of CONDUIT_SIZES) {
-    const fullArea = fullTable[size] ?? 0;
-    const fillPct = (totalAreaIn2 / fullArea) * 100;
-    if (fillPct <= 40) {
-      console.log(`[CONDUIT SIZING] selected_conduit_size: ${size}, calculated_fill_percent: ${fillPct.toFixed(1)}%`);
-      return { size, fillPercent: fillPct, totalAreaIn2 };
-    }
+  // ONE authority. The selection compares the bundle against the Table 1
+  // ALLOWANCE; the reported percentage is of the Table 4 TOTAL. Those are two
+  // different numbers and conflating them is what produced a 16% threshold and a
+  // 2.5x fill reading from the same table.
+  const picked = necSelectSmallestConduit(conduitType, totalAreaIn2, _count);
+  if (picked) {
+    const fillPct = (totalAreaIn2 / picked.totalAreaIn2) * 100;
+    console.log(`[CONDUIT SIZING] selected_conduit_size: ${picked.tradeSize}, calculated_fill_percent: ${fillPct.toFixed(1)}%`);
+    return { size: picked.tradeSize, fillPercent: fillPct, totalAreaIn2 };
   }
 
-  // Fallback: 3"
-  const fullArea = fullTable['3"'] ?? 3.538;
+  // Nothing tabulated is large enough (or the type is unrecognised). Report
+  // against the largest tabulated size rather than inventing one.
+  const fullArea = necConduitTotalAreaIn2(conduitType, '4"')
+    ?? necConduitTotalAreaIn2('EMT', '4"') ?? 14.753;
   const fillPct = (totalAreaIn2 / fullArea) * 100;
-  console.log(`[CONDUIT SIZING] selected_conduit_size: 3", calculated_fill_percent: ${fillPct.toFixed(1)}% (exceeds standard sizes)`);
-  return { size: '3"', fillPercent: fillPct, totalAreaIn2 };
+  console.log(`[CONDUIT SIZING] selected_conduit_size: 4", calculated_fill_percent: ${fillPct.toFixed(1)}% (exceeds standard sizes)`);
+  return { size: '4"', fillPercent: fillPct, totalAreaIn2 };
 }
 
 // ─── Voltage Drop ─────────────────────────────────────────────────────────────

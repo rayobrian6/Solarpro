@@ -32,6 +32,11 @@ import { computeBatteryBusImpact, getBatteryById, getGeneratorById, getATSById, 
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { nextStandardOcpd } from './electrical/stdSizes';
 import { NEC_705_11_C_TAP_LIMIT_FT, TAP_SPAN_PHYSICAL_SEGMENT_ID } from './electrical/tapSpan';
+import {
+  CONDUCTOR_AREA_IN2 as NEC_CONDUCTOR_AREA_IN2,
+  selectSmallestConduit as necSelectSmallestConduit,
+  conduitTotalAreaIn2 as necConduitTotalAreaIn2,
+} from '@/lib/nec/chapter9';
 
 // ─── Equipment Spec ──────────────────────────────────────────────────────────
 
@@ -660,8 +665,11 @@ function getEGCGauge(ocpdAmps: number): string {
   return '#2 AWG';
 }
 
-// NEC Chapter 9 Table 5 — Conductor cross-sectional areas (in²) for THWN-2
-const CONDUCTOR_AREA_IN2: Record<string, number> = {
+// NEC Chapter 9 Table 5 - re-exported from the one authority so this module and
+// segment-schedule cannot drift (they already had, at #3/0: 0.2660 here against
+// the published 0.2679).
+const CONDUCTOR_AREA_IN2: Record<string, number> = NEC_CONDUCTOR_AREA_IN2;
+const _RETIRED_CONDUCTOR_AREA_IN2: Record<string, number> = {
   '#14 AWG': 0.0097,
   '#12 AWG': 0.0133,
   '#10 AWG': 0.0211,
@@ -677,72 +685,48 @@ const CONDUCTOR_AREA_IN2: Record<string, number> = {
   '#4/0 AWG': 0.3237,
 };
 
-// NEC Chapter 9 Table 4 — Conduit internal areas (in²) at 40% fill
-// Format: { conduitType: { tradeSize: totalArea } }
-const CONDUIT_40PCT_AREA: Record<string, Record<string, number>> = {
-  'EMT': {
-    '1/2"': 0.122 * 0.40,
-    '3/4"': 0.213 * 0.40,
-    '1"':   0.346 * 0.40,
-    '1-1/4"': 0.598 * 0.40,
-    '1-1/2"': 0.814 * 0.40,
-    '2"':   1.342 * 0.40,
-    '2-1/2"': 2.343 * 0.40,
-    '3"':   3.538 * 0.40,
-  },
-  'PVC Sch 40': {
-    '1/2"': 0.122 * 0.40,
-    '3/4"': 0.217 * 0.40,
-    '1"':   0.355 * 0.40,
-    '1-1/4"': 0.610 * 0.40,
-    '1-1/2"': 0.829 * 0.40,
-    '2"':   1.363 * 0.40,
-    '2-1/2"': 2.361 * 0.40,
-    '3"':   3.538 * 0.40,
-  },
-  'PVC Sch 80': {
-    '1/2"': 0.093 * 0.40,
-    '3/4"': 0.171 * 0.40,
-    '1"':   0.285 * 0.40,
-    '1-1/4"': 0.508 * 0.40,
-    '1-1/2"': 0.695 * 0.40,
-    '2"':   1.150 * 0.40,
-    '2-1/2"': 2.018 * 0.40,
-    '3"':   3.085 * 0.40,
-  },
-};
+// CONDUIT_40PCT_AREA and CONDUIT_FULL_AREA were DELETED (2026-08-29).
+//
+// The first was the SELECTION threshold, written as `X * 0.40` where X was
+// ALREADY the NEC 40% column - so every entry was 16% of the real interior and a
+// raceway was only accepted when the bundle fitted in a sixth of it. The second
+// was the FILL DENOMINATOR, commented "Full conduit areas (100%)" and populated
+// with that same 40% column, so every printed percentage was 2.5x the truth.
+// One table wrong in two different directions, feeding one function.
+//
+// Table 4 holds TOTAL areas; Table 1 holds the ALLOWANCE as a percentage of them.
+// lib/nec/chapter9.ts keeps those as two separate numbers, covers PVC Sch 80 /
+// RMC / FMC and every trade size to 4", and resolves the UI's "PVC Schedule 80"
+// to the canonical key rather than falling through to EMT.
+/** Size a SHARED raceway from every conductor it carries: `circuits` copies of
+ *  the per-circuit hots plus one EGC. Returns the run fields so the caller cannot
+ *  set a size without the matching fill. */
+function _sharedHomerunConduit(
+  conduitType: string, gauge: string, egcGauge: string,
+  conductorsPerCircuit: number, circuits: number, fallbackFillPct: number,
+): { conduitSize: string; conduitFillPct: number } {
+  const hots = Math.max(1, conductorsPerCircuit) * Math.max(1, circuits);
+  const area = (CONDUCTOR_AREA_IN2[gauge] ?? 0.0211) * hots
+    + (CONDUCTOR_AREA_IN2[egcGauge] ?? 0.0211);
+  const picked = necSelectSmallestConduit(conduitType, area, hots + 1);
+  if (!picked) return { conduitSize: '4"', conduitFillPct: fallbackFillPct };
+  return {
+    conduitSize: picked.tradeSize,
+    conduitFillPct: +((area / picked.totalAreaIn2) * 100).toFixed(1),
+  };
+}
 
-// Full conduit areas (100%) for fill % calculation
-const CONDUIT_FULL_AREA: Record<string, Record<string, number>> = {
-  'EMT': {
-    '1/2"': 0.122, '3/4"': 0.213, '1"': 0.346, '1-1/4"': 0.598,
-    '1-1/2"': 0.814, '2"': 1.342, '2-1/2"': 2.343, '3"': 3.538,
-  },
-  'PVC Sch 40': {
-    '1/2"': 0.122, '3/4"': 0.217, '1"': 0.355, '1-1/4"': 0.610,
-    '1-1/2"': 0.829, '2"': 1.363, '2-1/2"': 2.361, '3"': 3.538,
-  },
-  'PVC Sch 80': {
-    '1/2"': 0.093, '3/4"': 0.171, '1"': 0.285, '1-1/4"': 0.508,
-    '1-1/2"': 0.695, '2"': 1.150, '2-1/2"': 2.018, '3"': 3.085,
-  },
-};
-
-function getSmallestConduit(conduitType: string, totalFillAreaIn2: number): { size: string; fillPct: number } {
-  const table = CONDUIT_40PCT_AREA[conduitType] ?? CONDUIT_40PCT_AREA['EMT'];
-  const fullTable = CONDUIT_FULL_AREA[conduitType] ?? CONDUIT_FULL_AREA['EMT'];
-  const sizes = ['1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"', '3"'];
-  for (const size of sizes) {
-    const maxFill = table[size] ?? 0;
-    if (totalFillAreaIn2 <= maxFill) {
-      const fullArea = fullTable[size] ?? 1;
-      const fillPct = (totalFillAreaIn2 / fullArea) * 100;
-      // BUG 2 FIX: Add validation logging for conduit sizing
-      console.log(`[CONDUIT SIZING] selected_conduit_size: ${size}, calculated_fill_percent: ${fillPct.toFixed(1)}%`);
-      return { size, fillPct };
-    }
+function getSmallestConduit(
+  conduitType: string, totalFillAreaIn2: number, conductorCount = 3,
+): { size: string; fillPct: number } {
+  const picked = necSelectSmallestConduit(conduitType, totalFillAreaIn2, conductorCount);
+  if (picked) {
+    const fillPct = (totalFillAreaIn2 / picked.totalAreaIn2) * 100;
+    console.log(`[CONDUIT SIZING] selected_conduit_size: ${picked.tradeSize}, calculated_fill_percent: ${fillPct.toFixed(1)}%`);
+    return { size: picked.tradeSize, fillPct };
   }
-  const fillPct = (totalFillAreaIn2 / (fullTable['3"'] ?? 3.538)) * 100;
+  const _largest = necConduitTotalAreaIn2(conduitType, '4"') ?? necConduitTotalAreaIn2('EMT', '4"') ?? 14.753;
+  const fillPct = (totalFillAreaIn2 / _largest) * 100;
   // BUG 2 FIX: Add validation logging for fallback case
   console.log(`[CONDUIT SIZING] selected_conduit_size: 3", calculated_fill_percent: ${fillPct.toFixed(1)}% (exceeds available sizes)`);
   return { size: '3"', fillPct };
@@ -839,7 +823,7 @@ function autoSizeWire(
         const hotArea = (CONDUCTOR_AREA_IN2[finalGauge] ?? 0.0211) * conductorCount;
         const egcArea = CONDUCTOR_AREA_IN2[finalEgcGauge] ?? 0.0211;
         const totalArea = hotArea + egcArea;
-        const result = getSmallestConduit(conduitType, totalArea);
+        const result = getSmallestConduit(conduitType, totalArea, conductorCount + 1);
         conduitSize = result.size;
         fillPct = result.fillPct;
         if (fillPct <= 40) break;
@@ -880,7 +864,7 @@ function autoSizeWire(
   const egcGauge = getEGCGauge(ocpdAmps);
   const hotArea = (CONDUCTOR_AREA_IN2[gauge] ?? 0.3237) * conductorCount;
   const egcArea = CONDUCTOR_AREA_IN2[egcGauge] ?? 0.0211;
-  const { size: conduitSize, fillPct } = getSmallestConduit(conduitType, hotArea + egcArea);
+  const { size: conduitSize, fillPct } = getSmallestConduit(conduitType, hotArea + egcArea, conductorCount + 1);
   const vdropPct = calcVoltageDrop(continuousCurrent, onewayFt, gauge, systemVoltage);
   const vdropVolts = (vdropPct / 100) * systemVoltage;
   const tableAmpacity = isDC ? (AMPACITY_TABLE_90C[gauge] ?? 260) : (AMPACITY_TABLE_75C[gauge] ?? 230);
@@ -1620,8 +1604,19 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       systemVoltage: systemVoltageAC,
       phase: '1Ø',
       conduitType: _homerunConduitType,
-      conduitSize: branchWire.conduitSize,
-      conduitFillPct: branchWire.conduitFillPct,
+      // ── THE RACEWAY IS SIZED FOR WHAT IS IN IT (2026-08-29) ─────────────────
+      // `branchWire` sizes ONE branch circuit. This raceway carries
+      // `acBranchCount` of them - it is the shared jbox->combiner conduit, and
+      // `sharedCircuitCount` two lines below says so. Taking the per-circuit size
+      // under-sized it, and the segment schedule (which does bundle the shared
+      // conductors) then reported a different trade size for the same physical
+      // run. The old 16%-of-interior threshold masked this by over-sizing
+      // everything until the two answers happened to agree; correcting the
+      // threshold made the disagreement visible.
+      ..._sharedHomerunConduit(
+        _homerunConduitType, branchWire.gauge, branchWire.egcGauge,
+        2, acBranchCount, branchWire.conduitFillPct,   // micro AC branch = 2 current-carrying
+      ),
       onewayLengthFt: defaultRunLengths.ARRAY_CONDUIT_RUN,
       continuousCurrent: acBranchCurrentA,
       requiredAmpacity: acBranchCurrentA * 1.25,
