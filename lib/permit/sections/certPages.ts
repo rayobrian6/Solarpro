@@ -26,7 +26,10 @@ import type { SubSystemKey } from '../utils/subSystems';
 export interface PELetterOpts { sheetId?: string; subKey?: SubSystemKey; }
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { projectStructuralFromInput, bannerRequirementsForSheet, fmt, fmtStr, findCheck, projectFastenerAssembly } from '../snapshot/structuralProjection';
+import {
+  projectStructuralFromInput, bannerRequirementsForSheet, fmt, fmtStr, findCheck,
+  projectFastenerAssembly, projectStructuralConclusion,
+} from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { RELEASE_PHASE_STYLE } from '../snapshot/releasePhase';
 import { requirementLane } from '../snapshot/releaseGates';
@@ -700,9 +703,17 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   // renders INDETERMINATE (no utilization %, no PASS). PE-1 reads the honest
   // snapshot framing check (passes:null) rather than the legacy compliance.structural
   // .rafter.* numbers that were computed off the fabricated 45-psf / 12-ft defaults.
-  const _capGated       = _sp.capacityGated === true;
+  // 2026-08-29 - THE ONE STRUCTURAL CONCLUSION AUTHORITY. These gates and the
+  // ratios below were derived here AND, independently, in structuralPages.ts.
+  // PV-4C gated its Governing Check on the FRAMING-review state; PE-1 gated the
+  // identical cell on the CAPACITY gate, so a framing utilization computed from
+  // defaulted span/species/spacing printed as "bending - 60% (PASS)" five rows
+  // under this sheet's own "no utilization asserted". One accessor now decides
+  // whether a conclusion may be stated at all, and hands back only what may.
+  const _concl          = projectStructuralConclusion(_sp, structural?.rafter ?? null);
+  const _capGated       = _concl.capacitySourceGated;
   const _framingChk     = findCheck(_sp, 'framing-capacity');
-  const _reviewRequired = _sp.engine?.engineeringReviewRequired ?? (_framingChk?.passes == null);
+  const _reviewRequired = _concl.framingReviewRequired;
   const windSpeed   = _sp.present ? fmt(_sp.windSpeedMph) : (structural?.wind?.windSpeed || '—');
   const uplift      = _attChk?.demand != null ? _attChk.demand.toFixed(0) : (structural?.wind?.upliftPerAttachment?.toFixed(0) || '—');
   const lagCap      = _attChk?.capacity != null ? _attChk.capacity.toFixed(0) : (structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—');
@@ -837,7 +848,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs (ASD 0.6W, canonical)</td><td class="il">Published Allowable</td><td class="iv" style="font-weight:bold;color:#b45309;">CAPACITY SOURCE UNVERIFIED</td></tr>
             <tr><td class="il">Capacity Comparison</td><td class="iv" colspan="3" style="font-weight:bold;color:#b45309;">ENGINEERING REVIEW REQUIRED &mdash; NO PASS/FAIL CONCLUSION ISSUED (RT-MINI structural capacity source not archived / applicability to the selected assembly unconfirmed &mdash; &sect;9)</td></tr>` : `
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
-            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} &mdash; ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : '—'}</td></tr>`}
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_concl.attachment?.passes ? '#000' : '#cc0000'};">${escapeH(_concl.attachmentGoverningCheckLabel)}</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} &sect;2.4 &mdash; ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">${asce} &sect;26/27</td></tr>
           </table>

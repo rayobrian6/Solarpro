@@ -160,6 +160,15 @@ describe('§13 (Gate 13) — unverified framing renders no capacity/adequacy', (
     expect(html).toContain('EXISTING FRAMING CAPACITY NOT VERIFIED');
     // no path prints an adequacy/utilization verdict for the unverified framing
     expect(html).not.toContain('confirms the existing framing has adequate capacity');
+    // 2026-08-29 - THE SENTENCE WAS NOT THE LEAK. This assertion pinned one
+    // English phrase, so PE-1 could print a bare "bending - 60% (PASS)" - a
+    // framing capacity conclusion computed from defaulted span/species/spacing -
+    // and stay green. Assert on the TOKENS a conclusion is made of.
+    const _t = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+    expect(_t, 'a framing limit state carries a utilization %')
+      .not.toMatch(/(bending|deflection)\s*[—-]\s*\d+\s*%/i);
+    expect(_t, 'a framing check carries a PASS')
+      .not.toMatch(/(bending|deflection)[^.]{0,40}\(PASS\)/i);
   });
 
   it('the FRAMING-AUTHORITY-UNVERIFIED blocker covers the framing authority gap', () => {

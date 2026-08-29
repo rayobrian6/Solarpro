@@ -31,6 +31,7 @@ import { projectReleaseGates, releasePackageLine, type ReleaseSummary } from './
 // with the show/hide gate so a banner's presence and its contents always agree.
 import { requirementAffectsSheet } from '../plansetProfile';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 
 export const EMDASH = '—';
 
@@ -956,5 +957,161 @@ export function projectAttachmentInstallationAuthority(
     spacingShortLabel: spacing.verificationState === 'verified'
       ? `${_designStr}" O.C. (VERIFIED)`
       : `${_designStr}" O.C. (DESIGN)`,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE STRUCTURAL CONCLUSION AUTHORITY (2026-08-29)
+//
+// ── THE DEFECT ────────────────────────────────────────────────────────────
+// PE-1 printed, five rows apart, in the same table:
+//
+//     RESULT   ENGINEERING REVIEW REQUIRED — NO FRAMING PASS/FAIL CONCLUSION
+//              ISSUED (no utilization asserted)
+//     …
+//     GOVERNING CHECK   bending — 60% (PASS)
+//
+// Both statements are about the framing. One is the truth; the other is a
+// capacity conclusion computed from DEFAULTED span, species and spacing — the
+// very thing the review record says is not engineering authority — printed with
+// a PASS, on the sheet an engineer of record seals.
+//
+// ── WHY IT SURVIVED: TWO IMPLEMENTATIONS OF ONE DECISION ──────────────────
+// `certPages.ts` and `structuralPages.ts` each derived `_reviewRequired`,
+// `_capGated`, `_bendRatio`, `_deflRatio`, `_governs` and `utilization` from
+// the raw records, independently. PV-4C gated its Governing Check on the
+// FRAMING-review state and correctly collapsed to "REVIEW REQ."; PE-1 gated the
+// identical cell on the CAPACITY-SOURCE gate, which was closed, so the framing
+// ratio leaked through. Same concept, two gates, two answers, one package.
+//
+// Three further defects lived in that one cell:
+//   · it printed a FRAMING ratio inside the "Lag Bolt Attachment Capacity
+//     Analysis" block, so a reviewer read it as the attachment verdict;
+//   · its PASS was `_bendPass && _deflPass && _lagPass`, folding framing checks
+//     into an attachment conclusion;
+//   · with both ratios null, `_governs` defaulted to 'bending' and the framing
+//     passes were VACUOUSLY true, so "(PASS)" could be asserted with no
+//     computation at all.
+//
+// ── THE RULE ──────────────────────────────────────────────────────────────
+// A conclusion belongs to the check that produced it. Framing conclusions are
+// gated by framing authority; attachment conclusions by the capacity source.
+// Neither may borrow the other's number or the other's gate. When a conclusion
+// may not be stated, this object does not carry it — a renderer cannot print
+// what it was never handed.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** A framing (bending / deflection) conclusion. Present ONLY when framing
+ *  authority is established — otherwise the whole object is null. */
+export interface FramingConclusion {
+  governs: 'bending' | 'deflection';
+  utilizationPct: number;
+  bendingPct: number | null;
+  deflectionPct: number | null;
+  passes: boolean;
+}
+
+/** An attachment (withdrawal) conclusion. Present ONLY when the capacity source
+ *  is established. Carries NO framing ratio. */
+export interface AttachmentConclusion {
+  demandLbs: number | null;
+  capacityLbs: number | null;
+  safetyFactor: number | null;
+  threshold: number;
+  passes: boolean;
+}
+
+export interface StructuralConclusionAuthority {
+  /** framing capacity is not established ⇒ NO framing conclusion may be stated. */
+  framingReviewRequired: boolean;
+  /** the attachment capacity source is not archived/applicable ⇒ no attachment
+   *  conclusion may be stated. */
+  capacitySourceGated: boolean;
+  framing: FramingConclusion | null;
+  attachment: AttachmentConclusion | null;
+  /** the already-gated cell text for a FRAMING governing-check row. */
+  framingGoverningCheckLabel: string;
+  /** the already-gated cell text for the ATTACHMENT's own governing check. It
+   *  never names bending or deflection: the attachment's governing limit state
+   *  is withdrawal, and saying otherwise is the category error that put a
+   *  framing ratio in the attachment block. */
+  attachmentGoverningCheckLabel: string;
+}
+
+const _pct = (r: number | null): number | null => (r == null ? null : r * 100);
+
+/**
+ * THE one accessor. Both PE-1 and PV-4C project this; neither re-derives a gate.
+ *
+ * `legacyRafter` is `compliance.structural.rafter` — the pre-snapshot record.
+ * It is read ONLY to supply the numbers, never to decide whether they may be
+ * shown: that decision comes from the snapshot's own authority state, which is
+ * the whole point of the repair.
+ */
+export function projectStructuralConclusion(
+  proj: StructuralProjection,
+  legacyRafter?: {
+    bendingMoment?: number | null; allowableBendingMoment?: number | null;
+    deflection?: number | null; allowableDeflection?: number | null;
+    utilizationRatio?: number | null;
+  } | null,
+): StructuralConclusionAuthority {
+  const framingChk = findCheck(proj, 'framing-capacity');
+  const attachChk = findCheck(proj, 'attachment-uplift');
+  const framingReviewRequired =
+    proj.engine?.engineeringReviewRequired ?? (framingChk?.passes == null);
+  const capacitySourceGated = proj.capacityGated === true;
+
+  const bm = legacyRafter?.bendingMoment ?? null;
+  const abm = legacyRafter?.allowableBendingMoment ?? null;
+  const dfl = legacyRafter?.deflection ?? null;
+  const adf = legacyRafter?.allowableDeflection ?? null;
+  const bendRatio = bm != null && abm ? bm / abm : null;
+  const deflRatio = dfl != null && adf ? dfl / adf : null;
+  const govRatio = legacyRafter?.utilizationRatio ?? null;
+
+  // A framing conclusion requires BOTH the authority AND a real computed ratio.
+  // The old code's `_bendPass = _bendRatio == null || _bendRatio <= 1.0` made an
+  // ABSENT calculation read as a passing one.
+  const framing: FramingConclusion | null =
+    framingReviewRequired || govRatio == null
+      ? null
+      : {
+          governs: (deflRatio ?? 0) > (bendRatio ?? 0) ? 'deflection' : 'bending',
+          utilizationPct: govRatio * 100,
+          bendingPct: _pct(bendRatio),
+          deflectionPct: _pct(deflRatio),
+          passes: govRatio <= 1.0,
+        };
+
+  const sf = attachChk?.safetyFactor ?? null;
+  const threshold = attachChk?.requiredThreshold ?? MIN_ATTACHMENT_SF;
+  const attachment: AttachmentConclusion | null =
+    capacitySourceGated
+      ? null
+      : {
+          demandLbs: attachChk?.demand ?? null,
+          capacityLbs: attachChk?.capacity ?? null,
+          safetyFactor: sf,
+          threshold,
+          // Absent is NOT passing.
+          passes: sf != null && sf >= threshold,
+        };
+
+  return {
+    framingReviewRequired,
+    capacitySourceGated,
+    framing,
+    attachment,
+    framingGoverningCheckLabel: framing
+      ? `${framing.governs} — ${framing.utilizationPct.toFixed(0)}% ${framing.passes ? '(PASS)' : '(EXCEEDS LIMIT)'}`
+      : framingReviewRequired
+        ? 'REVIEW REQUIRED — NO CONCLUSION ISSUED'
+        : '—',
+    attachmentGoverningCheckLabel: attachment
+      ? (attachment.safetyFactor != null
+          ? `withdrawal — SF ${attachment.safetyFactor.toFixed(2)} ${'≥'} ${attachment.threshold.toFixed(1)} ${attachment.passes ? '(PASS)' : '(BELOW REQUIRED)'}`
+          : '—')
+      : 'CAPACITY SOURCE UNVERIFIED — NO CONCLUSION ISSUED',
   };
 }

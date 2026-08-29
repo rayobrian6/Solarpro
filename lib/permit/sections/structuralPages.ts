@@ -16,6 +16,7 @@ import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import {
   projectStructuralFromInput, fmt, fmtStr, findCheck, checkResultLabel,
   checkThresholdLabel, projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL,
+  projectStructuralConclusion,
   type StructuralProjection,
 } from '../snapshot/structuralProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
@@ -749,7 +750,15 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // racking-capacity gap is active. No sheet may render a capacity PASS from it:
   // gate the capacity value, the safety factor and the verdict to PENDING. The
   // DEMAND numbers (uplift/snow per attachment) stay printed — they are canonical.
-  const _capGated   = _proj.capacityGated === true;
+  // 2026-08-29 - THE ONE STRUCTURAL CONCLUSION AUTHORITY (structuralProjection).
+  // This sheet and PE-1 each derived these gates and ratios independently, and
+  // they disagreed: PV-4C gated its Governing Check on the framing-review state
+  // and correctly printed REVIEW REQ., while PE-1 gated the identical cell on the
+  // capacity gate and leaked a defaulted framing utilization as "bending - 60%
+  // (PASS)". Same concept, two gates, two answers, one package. Both now project
+  // this object, so a conclusion that may not be stated is not handed to either.
+  const _concl      = projectStructuralConclusion(_proj, structural?.rafter ?? null);
+  const _capGated   = _concl.capacitySourceGated;
   const lagCapDisp  = _capGated ? 'UNVERIFIED / PENDING STRUCTURAL SOURCE' : `${lagCap} lbs`;
   const sfCellHtml  = _capGated
     ? `<span style="font-weight:bold;color:#b45309;">PENDING — CAPACITY SOURCE UNVERIFIED</span>`
@@ -906,7 +915,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <tr><td>Allowable Moment</td><td class="cv">${rafterABM} ft-lbs</td></tr>
             <tr><td>Bending Utilization</td><td class="cv" style="font-weight:bold;color:${_bendRatio != null && _bendRatio > 1.0 ? '#cc0000' : '#000'};">${bendUtil}${_bendRatio != null ? '%' : ''}</td></tr>
             <tr><td>Deflection / Allowed</td><td class="cv" style="color:${_deflRatio != null && _deflRatio > 1.0 ? '#cc0000' : '#000'};">${rafterDefl}" / ${rafterAD}"</td></tr>
-            <tr><td>Governing Check</td><td class="cv" style="font-weight:bold;color:${_utilRatio != null && _utilRatio > 1.0 ? '#cc0000' : '#000'};">${_utilRatio != null ? `${_governs} — ${utilization}%` : '—'}</td></tr>
+            <tr><td>Governing Check</td><td class="cv" style="font-weight:bold;color:${_concl.framing && !_concl.framing.passes ? '#cc0000' : '#000'};">${escapeH(_concl.framingGoverningCheckLabel)}</td></tr>
             `}
           </table>
         </div>
