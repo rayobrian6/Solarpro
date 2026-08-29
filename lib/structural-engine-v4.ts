@@ -1036,7 +1036,8 @@ function calcRackingBOM(
       description: isRailBased
         ? (system.rail?.model
             ? `${system.manufacturer} ${system.rail.model} — ${railLengthFt.toFixed(1)} ft each`
-            : 'RAIL / SPLICE SKU PENDING RACKING ASSEMBLY SELECTION — NOT FOR PERMIT SUBMISSION')
+            // same rule: the row states its procurement state, not the package's.
+            : 'RAIL / SPLICE SKU PENDING RACKING ASSEMBLY SELECTION')
         : 'N/A — Rail-less or ballasted system',
       partNumber: system.rail?.model ?? null,
     },
@@ -1127,7 +1128,16 @@ function calcRackingBOM(
   // UI data, never permit BOM authority, until then.
   const railUnpinned = isRailBased && !system.rail;
   if (railUnpinned) {
-    const PENDING_TAIL = `${PROCUREMENT_CLASS_LABEL.B} — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION`;
+    // ══ 2026-08-29 - A BOM ROW MAY NOT ISSUE A RELEASE VERDICT ═════════════
+    // Seven racking rows ended "· NOT FOR PERMIT SUBMISSION". That is the
+    // PACKAGE's release state, decided by the release model and stated by the
+    // sheet banner - and on this design the model says DESIGN COMPLETE, because
+    // an unpinned rail SKU is an ADVISORY (a procurement item; the PE letter
+    // delegates the rail "by others"). So the schedule declared the whole
+    // submittal blocked, seven times, over something the release model had
+    // already classified as not blocking. A line item states its own
+    // PROCUREMENT status; whether the set may be submitted is not its to say.
+    const PENDING_TAIL = `${PROCUREMENT_CLASS_LABEL.B} — assembly-dependent on the unselected rail SKU`;
     const gate = (row: RackingBOMRow, part: string): void => {
       row.partNumber = null;
       row.pending = true;

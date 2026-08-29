@@ -54,6 +54,19 @@ export interface CodeAuthorityProjection {
  *  no design value depends on it. PENDING is still used for a genuinely unresolved edition. */
 export const PER_AHJ_EDITION = 'PER AHJ ADOPTION';
 
+// ── 2026-08-29 - "PENDING IBC" WAS NEVER A CODE EDITION ────────────────────
+// These sheets read the RAW edition token (`cp.ibc ?? 'PENDING'`) and prepended
+// it to the family name, so an unresolved adoption printed as though PENDING
+// were a year:
+//     "Prepared under ASCE 7-22 - PENDING IBC - PENDING IRC - NEC 2020"
+//     "...per ASCE 7-22 26/27 and PENDING IBC/IRC."
+// The projection has published the correct label all along - `cp.ibcLabel`,
+// which reads "IBC PER AHJ ADOPTION" when the family governs but the year is the
+// AHJ's to confirm, and "IBC PENDING" only when the adoption is genuinely
+// unresolved. 63 places on this package already printed it correctly; these did
+// not, and they are the ones a reviewer reads first.
+
+
 function labelOf(kind: CodeEditionKind, ed: string | null, source?: string | null): string {
   if (ed) return `${FAMILY_PREFIX[kind]} ${ed}`;
   return `${FAMILY_PREFIX[kind]} ${source === 'edition-per-ahj-adoption' ? PER_AHJ_EDITION : PENDING_EDITION}`;

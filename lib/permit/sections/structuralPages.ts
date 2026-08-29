@@ -411,8 +411,8 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;">
         <table class="info-table" style="margin-bottom:var(--xs);">
           <tr><td class="il" style="width:100px;">${asce}</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
-          <tr><td class="il">${ibcVer} IBC</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
-          <tr><td class="il">${ibcVer} IRC</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
+          <tr><td class="il">${cp.ibcLabel}</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
+          <tr><td class="il">${cp.ircLabel}</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
           <strong>GOVERNING LOAD COMBINATION (${asce} §2.3) — FENCE-MOUNTED PV:</strong>
@@ -438,7 +438,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — FENCE STRUCTURAL ANALYSIS:</strong>
         The proposed solar fence photovoltaic array and post foundation system have been analyzed for wind
-        overturning, dead load, and post embedment capacity per ${asce} §29.4 and ${ibcVer} IBC.
+        overturning, dead load, and post embedment capacity per ${asce} §29.4 and ${cp.ibcLabel}.
         ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 1.5
           ? `All structural parameters are within acceptable limits. The fence post foundation system is adequate
              to support the proposed solar fence PV array without modification. Post embedment and footing
@@ -641,8 +641,8 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;">
         <table class="info-table" style="margin-bottom:var(--xs);">
           <tr><td class="il" style="width:100px;">${asce}</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
-          <tr><td class="il">${ibcVer} IBC</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
-          <tr><td class="il">${ibcVer} IRC</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
+          <tr><td class="il">${cp.ibcLabel}</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
+          <tr><td class="il">${cp.ircLabel}</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
           <strong>GOVERNING LOAD COMBINATION (${asce} §2.3) — GROUND-MOUNTED PV:</strong>
@@ -665,7 +665,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — GROUND MOUNT STRUCTURAL ANALYSIS:</strong>
         The proposed ground-mounted photovoltaic array and pile/pier foundation system have been analyzed for
-        wind uplift, snow, dead load, and pile capacity per ${asce} §27 and ${ibcVer} IBC.
+        wind uplift, snow, dead load, and pile capacity per ${asce} §27 and ${cp.ibcLabel}.
         ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= GROUND_PILE_MIN_SF
           ? `All structural parameters are within acceptable limits. The proposed ground mount pile/pier foundation
              system is adequate to support the proposed PV array without modification.`
@@ -1113,8 +1113,8 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;">
         <table class="info-table" style="margin-bottom:var(--xs);">
           <tr><td class="il" style="width:100px;">${asce}</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
-          <tr><td class="il">${ibcVer} IBC</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
-          <tr><td class="il">${ibcVer} IRC</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
+          <tr><td class="il">${cp.ibcLabel}</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
+          <tr><td class="il">${cp.ircLabel}</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
           <strong>GOVERNING LOAD COMBINATION (${asce} §2.4 — ASD) — ROOF-MOUNTED PV:</strong>
@@ -1142,7 +1142,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
-        wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ${asce} §26/27 and ${ibcVer} IBC/IRC.
+        wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ${asce} §26/27 and ${cp.ibcLabel} / ${cp.ircLabel}.
         ${_reviewRequired && _capGated
           ? 'Roof framing authority is UNVERIFIED (member size / spacing / species / span defaulted) AND the attachment-capacity source is UNVERIFIED (§9 — structural source not archived / applicability unconfirmed). Demand analysis is complete, but NO framing pass and NO attachment pass are asserted; a licensed structural review of the existing framing and a verified attachment-capacity source are both required before this set is submitted for permit.'
           : _reviewRequired

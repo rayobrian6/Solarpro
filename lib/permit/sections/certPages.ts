@@ -522,7 +522,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
       <div class="bb-hvy pb-xs mb-sm">
         ${peLetterHeadingBlock(input,
           'Solar Photovoltaic System &mdash; Solar Fence Array',
-          `Prepared under ${asce} &bull; ${ibcVer} IBC &bull; NEC ${necVer}`)}
+          `Prepared under ${asce} &bull; ${_cpF.ibcLabel} &bull; NEC ${necVer}`)}
       </div>
 
       <div class="two-col-layout">
@@ -568,7 +568,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
                 fence array installation and determined that the <strong>proposed solar fence post foundation system
                 is adequate to support the additional loads imposed by the proposed fence-mounted PV array</strong>,
                 based on the structural analysis performed in accordance with <strong>${asce} &sect;29.4</strong>,
-                <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
+                <strong>${_cpF.ibcLabel}</strong>, and NEC ${necVer}.
               </div>
               <div class="f-sm mt-xs" style="line-height:1.6;">
                 Post embedment depth, concrete footing size, and post section are confirmed adequate to resist
@@ -631,7 +631,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
       <div class="bb-hvy pb-xs mb-sm">
         ${peLetterHeadingBlock(input,
           'Solar Photovoltaic System &mdash; Ground Mount Array',
-          `Prepared under ${asce} &bull; ${ibcVer} IBC &bull; NEC ${necVer}`)}
+          `Prepared under ${asce} &bull; ${_cpG.ibcLabel} &bull; NEC ${necVer}`)}
       </div>
 
       <div class="two-col-layout">
@@ -676,7 +676,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
                 solar photovoltaic array installation and determined that the <strong>proposed driven-pylon
                 (Speck PLP POWER DRIVE&trade;) foundation system is adequate to support the loads imposed by the
                 proposed ground-mounted PV array</strong>, based on the structural analysis performed in accordance
-                with <strong>${asce} &sect;27</strong>, <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
+                with <strong>${asce} &sect;27</strong>, <strong>${_cpG.ibcLabel}</strong>, and NEC ${necVer}.
               </div>
               <div class="f-sm mt-xs" style="line-height:1.6;">
                 Pylon embedment depth, pylon capacity, and foundation system design are confirmed adequate to resist
@@ -837,7 +837,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
         <div>
           ${peLetterHeadingBlock(input,
             'Solar Photovoltaic System &mdash; Roof-Mounted Array',
-            `Prepared under ${asce} &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}`)}
+            `Prepared under ${asce} &bull; ${_cpR.ibcLabel} &bull; ${_cpR.ircLabel} &bull; NEC ${necVer}`)}
         </div>
         <div class="f-sm" style="text-align:right;color:#555;line-height:1.6;">
           <div>RE: <strong style="color:#000;">${escapeH(project.address || '—')}</strong></div>
@@ -915,7 +915,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                   ? `<strong>this certification does NOT extend to the ${_concl.framingReviewRequired ? 'existing framing capacity' : 'roof-attachment capacity source'}, which is not established &mdash; see below</strong>,`
                   : `<strong>the modeled framing does not satisfy all code checks &mdash; see below</strong>,`}
                 based on the structural analysis performed in accordance with
-                <strong>${asce} &sect;26/27</strong>, <strong>${ibcVer} IBC</strong>, <strong>${ibcVer} IRC</strong>,
+                <strong>${asce} &sect;26/27</strong>, <strong>${_cpR.ibcLabel}</strong>, <strong>${_cpR.ircLabel}</strong>,
                 and NEC ${necVer}.
               </div>
               ${_mayCertifyStructure ? `
