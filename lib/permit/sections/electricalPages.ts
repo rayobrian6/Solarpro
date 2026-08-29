@@ -507,7 +507,13 @@ export function renderGroundingSegmentRows(
   // 5.5px/1.1 (was 5.8px/1.18) — PV-4B's page-content flex child cannot shrink and
   // this block grows with the open-air grounding explanation; at 5.8px a
   // procurement-insufficient design clipped the page conclusion by 5.6px (gate 17).
-  return `<tr style="background:#f4fbf6"><td colspan="9" style="font-size:5.5px;line-height:1.1;padding:1px 4px;">`
+  // 2026-08-29 — 5.0px/1.0 (was 5.5px/1.1). Correcting the raceway MATERIAL from
+  // a mis-defaulted PVC Sch 80 to the EMT the project actually selected changes
+  // the fitting set the schedule carries — EMT needs couplings, connectors,
+  // straps, bushings and sweeps where PVC needs fewer — so this sheet gained
+  // rows and clipped its page conclusion by 7.42px. The block is the same
+  // content; PV-4B's page-content flex child cannot shrink, so the block must.
+  return `<tr style="background:#f4fbf6"><td colspan="9" style="font-size:5.0px;line-height:1.0;padding:0 4px;">`
     + `<strong style="color:#0f5c30;">GROUNDING &amp; BONDING &mdash; CANONICAL GroundingSegment OBJECTS</strong> `
     + `(own id / size / raceway / length / authority &mdash; nothing borrowed; NEC basis + BOM line machine-tagged): `
     + rows

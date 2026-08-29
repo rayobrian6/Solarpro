@@ -1254,10 +1254,12 @@ export function projectCapacityCitation(proj: StructuralProjection): CapacityCit
   const _short = identity
     ? identity.split(/\s+—\s+/)[0].trim()
     : null;
+  // Kept SHORT: PV-4C is page-fit critical (it already spills to PV-4C.1), and a
+  // citation that pushes a sheet past the printable box is a different defect.
+  // The full identity is on RS-1.
   const line = !identity ? ''
     : `${_short}${doc?.revisionOrDate ? `, ${doc.revisionOrDate}` : ''}`
-      + `${sha ? ` · SHA-256 ${String(sha).slice(0, 12)}…` : ''}`
-      + `${archived ? ' · archived' : ''}`;
+      + `${sha ? ` · ${String(sha).slice(0, 8)}` : ''}${archived ? ' · archived' : ''}`;
   return {
     valueLbs, basis: prov?.capacityBasis ?? null,
     documentIdentity: identity, revisionOrDate: doc?.revisionOrDate ?? null,

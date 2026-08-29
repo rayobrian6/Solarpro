@@ -319,10 +319,24 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
     expect(evaluateCompliance({ requiredValues: [{ label: 'x', value: 25, numeric: true }], checks: [{ label: 'ok', pass: true }] }).state).toBe('PASS');
   });
 
-  it('gate 4 — the rendered package carries NO live EMT text (no EMT raceway object exists)', () => {
+  it('gate 4 — the rendered raceway text matches the raceway the PROJECT selected', () => {
+    // 2026-08-29 REVERSED, because the original assertion was pinning a defect.
+    // `computedRuns` packed the trade size into the raceway-TYPE field (`3/4" EMT`),
+    // and two exact-equality lookups then missed it and defaulted in OPPOSITE
+    // directions: the raceway ternary fell through to PVC Sch 80 — which is what
+    // PRINTED — while the conduit-area lookup fell back to EMT, which is what it
+    // was SIZED against. So "no EMT text" held only because the material had been
+    // silently replaced; the fixture selects EMT, and the fill was 0.1399 in² over
+    // 0.533 — the EMT interior — the entire time.
+    //
+    // The property worth guarding is that the printed material IS the selected
+    // material, and that no other raceway material appears beside it.
     const { html } = gen('SUPPLY_SIDE_TAP');
     const noB64 = html.replace(/data:image[^"')]+/g, '');
-    expect(noB64).not.toMatch(/\bEMT\b/);
+    expect(noB64).toMatch(/\bEMT\b/);
+    for (const other of ['PVC Sch 80', 'PVC Sch 40']) {
+      expect(noB64, `${other} printed on an EMT design`).not.toContain(other);
+    }
   });
 
   it('gate 5 — PV-4A electrical blocker multiset EQUALS the RS-1 electrical domain subset', () => {

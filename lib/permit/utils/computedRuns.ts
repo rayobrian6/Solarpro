@@ -30,6 +30,7 @@ import { getDesignTemps } from './designTemps';
 // length, shared with the canonical run model in generatePermit.
 import { applyFieldMeasurementsToRuns } from '../snapshot/applyFieldMeasurements';
 import type { FieldRouteMeasurementAuthority } from '@/lib/fieldMeasurement/resolver';
+import { normalizeConduitType as necNormalizeConduitType } from '@/lib/nec/chapter9';
 
 /**
  * Wave 2a (contract §3, 2a Compute): per-subsystem scoping for the permit-path
@@ -158,7 +159,27 @@ export function buildComputedRunsForPermit(
       panelBusRating: input.project.panelBusRating || input.project.mainPanelAmps || 200,
       mainPanelAmps: input.project.mainPanelAmps || 200,
       mainPanelBrand: input.project.mainPanelBrand || 'Square D',
-      conduitType: `${input.project.conduitSize || '3/4'}" ${(input.project.conduitType || 'EMT').toUpperCase()}`,
+      // ══ 2026-08-29 — THE RACEWAY MATERIAL, NOT A DISPLAY LABEL ══════════════
+      // This packed the SIZE and the TYPE into one string — `3/4" EMT` — and
+      // handed it to a field whose contract is a canonical type key
+      // ('EMT' | 'PVC Sch 40' | 'PVC Sch 80'). Downstream, TWO different
+      // exact-equality lookups then missed it and fell back in OPPOSITE
+      // directions:
+      //
+      //   · segment-schedule's raceway ternary is
+      //     `t === 'EMT' ? 'EMT' : t === 'PVC Sch 40' ? … : 'PVC_SCH80'`, so an
+      //     unrecognised string became PVC Sch 80 — which is what PRINTED;
+      //   · the conduit-area lookup ended `TABLE[t] ?? TABLE['EMT']`, so the same
+      //     string was SIZED against steel.
+      //
+      // One malformed value, two silent fallbacks, and a package that stated a
+      // PVC raceway whose 26.2% fill was 0.1399 in² over 0.533 — the EMT
+      // interior. The project had selected EMT the whole time.
+      //
+      // The type is now passed through as the type. Trade size travels in
+      // `conduitSizeInch`, where a size belongs.
+      conduitType: necNormalizeConduitType(input.project.conduitType) ?? 'EMT',
+      conduitSizeInch: input.project.conduitSize || undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
       interconnectionMethod: (input.project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE'),

@@ -16,6 +16,7 @@
 
 import { nextStandardOcpd } from './electrical/stdSizes';
 import {
+  normalizeConduitType as necNormalizeConduitType,
   conductorAreaIn2 as necConductorAreaIn2,
   selectSmallestConduit as necSelectSmallestConduit,
   conduitTotalAreaIn2 as necConduitTotalAreaIn2,
@@ -292,6 +293,38 @@ const AWG_ORDER = [
 ];
 
 // ─── Conduit Sizing ───────────────────────────────────────────────────────────
+
+/** The raceway ENUM for a canonical conduit type.
+ *
+ *  2026-08-29 — this was an inline chain of exact-equality checks ending in a
+ *  bare `: 'PVC_SCH80'`, so ANY value the chain did not recognise silently became
+ *  PVC Sch 80. The permit path was handing it `3/4" EMT` — size and type packed
+ *  into one string — so every job printed a PVC raceway while the conduit-area
+ *  lookup, whose own fallback was `?? TABLE['EMT']`, sized it against steel. One
+ *  malformed value, two fallbacks, opposite directions.
+ *
+ *  It now resolves through the NEC Chapter 9 type resolver, and an unrecognised
+ *  type raises rather than defaulting: a raceway material nobody can name is not
+ *  a PVC raceway. */
+function _racewayEnum(conduitType: string): RacewayType {
+  // ABSENT is not MALFORMED. A caller that never set a raceway type gets the
+  // documented engine default; a caller that set one nobody can resolve is the
+  // defect this guard exists for, and it fails loudly.
+  if (conduitType == null || String(conduitType).trim() === '') return 'EMT' as RacewayType;
+  const t = necNormalizeConduitType(conduitType);
+  switch (t) {
+    case 'EMT': return 'EMT' as RacewayType;
+    case 'PVC Sch 40': return 'PVC_SCH40' as RacewayType;
+    case 'PVC Sch 80': return 'PVC_SCH80' as RacewayType;
+    case 'RMC': return 'RMC' as RacewayType;
+    case 'FMC': return 'FMC' as RacewayType;
+    default:
+      throw new Error(
+        `[segment-schedule] unrecognised raceway type ${JSON.stringify(conduitType)}. `
+        + `The raceway material must be a canonical key ('EMT' | 'PVC Sch 40' | 'PVC Sch 80' | 'RMC' | 'FMC'); `
+        + `a display label such as '3/4" EMT' silently became PVC Sch 80 here while the area lookup used EMT.`);
+  }
+}
 
 function calcConduitSize(
   conductorBundle: ConductorBundle[],
@@ -653,7 +686,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
     segments.push(buildSegment(
       'JBOX_TO_COMBINER', 'JUNCTION BOX', 'AC COMBINER',
-      conduitType === 'EMT' ? 'EMT' : conduitType === 'PVC Sch 40' ? 'PVC_SCH40' : 'PVC_SCH80' as RacewayType,
+      _racewayEnum(conduitType),
       seg2Bundle, rl.jboxToCombiner,
       branchCurrentA, branchOcpd, conduitType,
       ambientC, sysV, input.maxACVoltageDropPct,
@@ -688,7 +721,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
     segments.push(buildSegment(
       'COMBINER_TO_DISCO', 'AC COMBINER', 'AC DISCONNECT (LOAD SIDE)',
-      conduitType === 'EMT' ? 'EMT' : conduitType === 'PVC Sch 40' ? 'PVC_SCH40' : 'PVC_SCH80' as RacewayType,
+      _racewayEnum(conduitType),
       seg3Bundle, rl.combinerToDisco,
       totalCurrentA, feederOcpd, conduitType,
       ambientC, sysV, input.maxACVoltageDropPct,
@@ -748,7 +781,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
     segments.push(buildSegment(
       'JBOX_TO_INVERTER', 'JUNCTION BOX', 'STRING INVERTER',
-      conduitType === 'EMT' ? 'EMT' : conduitType === 'PVC Sch 40' ? 'PVC_SCH40' : 'PVC_SCH80' as RacewayType,
+      _racewayEnum(conduitType),
       seg2Bundle, rl.jboxToInverter,
       stringCurrentA, stringOcpd, conduitType,
       ambientC, sysV, input.maxDCVoltageDropPct,
@@ -775,7 +808,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
     segments.push(buildSegment(
       'INVERTER_TO_DISCO', 'STRING INVERTER', 'AC DISCONNECT',
-      conduitType === 'EMT' ? 'EMT' : conduitType === 'PVC Sch 40' ? 'PVC_SCH40' : 'PVC_SCH80' as RacewayType,
+      _racewayEnum(conduitType),
       seg3Bundle, rl.inverterToDisco,
       acCurrentA, feederOcpd, conduitType,
       ambientC, sysV, input.maxACVoltageDropPct,

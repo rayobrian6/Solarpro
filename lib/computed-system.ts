@@ -481,7 +481,15 @@ export interface ComputedSystemInput {
   runLengths: Partial<Record<RunSegmentId, number>>;
 
   // Conduit
-  conduitType: string;        // 'EMT' | 'PVC Sch 40'
+  /** The raceway MATERIAL, as a canonical key — never a display label. Callers
+   *  used to pack the trade size into this field (`3/4" EMT`), which two separate
+   *  exact-equality lookups then missed, falling back in OPPOSITE directions: the
+   *  raceway ternary defaulted to PVC Sch 80 (what printed) while the area lookup
+   *  defaulted to EMT (what it was sized against). */
+  conduitType: string;        // 'EMT' | 'PVC Sch 40' | 'PVC Sch 80' | 'RMC' | 'FMC'
+  /** Optional operator-selected trade size. The engine still computes the
+   *  minimum code size; this records what was asked for. */
+  conduitSizeInch?: string;
 
   // MSP
   mainPanelAmps: number;

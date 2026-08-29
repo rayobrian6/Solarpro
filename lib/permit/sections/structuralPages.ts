@@ -908,9 +908,11 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
                   this package published qz and the net uplift and nothing else: not
                   one occurrence of Kz, Kzt, Kd, Ke or the mean roof height. The
                   engineer being asked to seal it could not check the number. */ ''}
+            ${/* the SYMBOLS and their values fit on one line; the full arithmetic
+                  rides the page conclusion, because PV-4C is page-fit critical. */ ''}
             ${_windFactors.length ? `<tr><td>Coefficients</td><td class="cv" style="font-size:5.6px;">${
               _windFactors.map(f => `${escapeH(f.symbol)} ${f.value.toFixed(2)}`).join(' &middot; ')
-            }${_windDerivation ? ` &mdash; ${escapeH(_windDerivation)}` : ''}</td></tr>` : ''}
+            }</td></tr>` : ''}
             ${_wind.gcpBasis ? `<tr><td>Pressure Coefficient</td><td class="cv" style="font-size:5.6px;color:${_gcpExceeded ? '#b45309' : '#000'};">${escapeH(_gcpBasis)}</td></tr>` : ''}
             ${_gcpExceeded && _gcpNote ? `<tr><td colspan="2" style="font-size:5.6px;color:#b45309;font-weight:bold;">${escapeH(_gcpNote)}</td></tr>` : ''}
           </table>
