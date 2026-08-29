@@ -64,7 +64,12 @@ export function projectRapidShutdownAuthority(
   edition: NecEdition = '2020',
 ): RapidShutdownAuthority {
   const objs = snap?.electrical?.serviceTopology ?? [];
-  const initiator = objs.find(o => o.rsdRole === 'initiator' || o.type === 'rsd-initiator') ?? null;
+  // The ROLE first, the dedicated type second: on the common design the fused AC
+  // disconnect carries `rsdRole: 'initiator'` and there is no separate device
+  // (see build.ts). Asking for the type alone is what made a phantom node
+  // necessary in the first place.
+  const initiator = objs.find(o => o.rsdRole === 'initiator')
+    ?? objs.find(o => o.type === 'rsd-initiator') ?? null;
 
   const requirementSection = necSection('pv-rapid-shutdown', edition);
   const initiationDeviceSection = `${requirementSection}${INITIATION_DEVICE_SUBSECTION}`;
@@ -73,12 +78,21 @@ export function projectRapidShutdownAuthority(
   // The design's own description, minus the citation it already carries (the
   // note states the citation itself, and printing it twice in one sentence reads
   // as two separate references).
+  // WHERE it is, in the device's own words. When the role rides an existing
+  // device the note names that device; when a dedicated initiator exists it
+  // names its stated location. Either way the words come from the object.
   const location = initiator
-    ? (initiator.description ?? initiator.label ?? '')
-        .replace(/\s*\(NEC[^)]*\)\s*/i, ' ')
-        .replace(/^PV rapid-shutdown initiation device\s*/i, '')
-        .replace(/\s+/g, ' ')
-        .trim() || null
+    ? (initiator.type === 'rsd-initiator'
+        ? ((initiator.description ?? initiator.label ?? '')
+            .replace(/\s*\(NEC[^)]*\)\s*/i, ' ')
+            .replace(/^PV rapid-shutdown initiation device\s*/i, '')
+            .replace(/\s+/g, ' ').trim() || null)
+        : (() => {
+            // the label with its parenthetical role note stripped, de-capitalised
+            // only at the first character - "AC" is an acronym, not a word.
+            const l = (initiator.label ?? initiator.type).replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+            return `at the ${l.charAt(0).toLowerCase()}${l.slice(1)}`;
+          })())
     : null;
 
   const required = !!initiator || (snap?.project as { rapidShutdown?: boolean } | undefined)?.rapidShutdown === true;
@@ -93,7 +107,7 @@ export function projectRapidShutdownAuthority(
           // The DESIGN's placement, then the code requirement it answers. Never
           // the reverse: the code does not name a utility meter, and this design
           // does not put an initiator on one.
-          ? `The rapid-shutdown initiation device is located ${location} (see the device schedule on E-1); `
+          ? `The rapid-shutdown initiation device is located ${location} (see the service-object schedule); `
             + `it shall be readily accessible and installed per NEC ${initiationDeviceSection}.`
           : `The rapid-shutdown initiation device shall be readily accessible and installed per `
             + `NEC ${initiationDeviceSection}.`,

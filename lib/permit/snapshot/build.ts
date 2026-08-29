@@ -859,6 +859,12 @@ export function buildPermitDesignSnapshot(
     const mainA = proj.mainPanelAmps ?? proj.mainBreakerA ?? null;
     const isMicroTopo = !!cs?.isMicro;
     const rsd = proj.rapidShutdown === true || proj.rapidShutdownIntegrated === true;
+    // Declared beside `rsd` because the load-break edge below needs it too: an
+    // initiation ROLE that rides an existing device changes where that edge
+    // points, and a `const` declared further down would be a dead-zone read.
+    const _separateRsdInitiator = (proj as { separateRsdInitiator?: boolean;
+      rapidShutdownInitiatorDevice?: string | null }).separateRsdInitiator === true
+      || !!(proj as { rapidShutdownInitiatorDevice?: string | null }).rapidShutdownInitiatorDevice;
     // §9 ONE-vs-TWO device DETERMINATION. Nothing in the design asserts a SECOND
     // physical lockable disconnect distinct from the fused AC disconnect: no
     // project field specifies a separate utility-disconnect device/model, and a
@@ -893,12 +899,28 @@ export function buildPermitDesignSnapshot(
       constraints: [], upstreamObjectId: 'svc-combiner',
       // D10 — the fused OCPD is the next device in BOTH interconnection modes now;
       // the tap conductors follow it rather than preceding it.
-      downstreamObjectId: rsd ? 'svc-rsd-initiator' : 'svc-fused-ocpd',
+      downstreamObjectId: (rsd && _separateRsdInitiator) ? 'svc-rsd-initiator' : 'svc-fused-ocpd',
       deviceModel: null, electricalRole: 'pv-system-disconnect', utilityRole: null,
       fusedState: 'non-fused', lockable: true, rsdRole: 'none',
       provenance: { source: 'design (combiner integral load-break)' },
     });
-    if (rsd) {
+    // ══ 2026-08-29 - THE INITIATION ROLE, NOT A PHANTOM DEVICE ═════════════
+    // This emitted a discrete `rsd-initiator` node in the conductor path for
+    // every design with rapid shutdown - a device the BOM never buys (it buys
+    // only the 690.56 LABEL), E-1 never draws, and E-1's own equipment schedule
+    // calls "Rapid Shutdown INTEGRATED" on the same package. One design, two
+    // accounts of what hardware is on the wall.
+    //
+    // It is the SAME question §9 above already answers for the utility
+    // disconnect, and it gets the same answer: nothing in the design asserts a
+    // second physical device, and on an integrated (microinverter) system
+    // opening the fused AC disconnect IS the documented initiation. So the
+    // initiation ROLE attaches to the device that performs it, and a separate
+    // node is emitted only when the project explicitly specifies one.
+    //
+    // `rsdRole` already existed to carry exactly this; nothing outside build.ts
+    // had ever read it, which is how the phantom survived.
+    if (rsd && _separateRsdInitiator) {
       objs.push({
         objectId: 'svc-rsd-initiator', type: 'rsd-initiator',
         label: 'Rapid-shutdown initiator', description: 'PV rapid-shutdown initiation device (NEC 690.12) at the service location',
@@ -911,7 +933,7 @@ export function buildPermitDesignSnapshot(
         provenance: { source: 'design (NEC 690.12 rapid shutdown)' },
       });
     }
-    const _afterRsd = rsd ? 'svc-rsd-initiator' : 'svc-combiner-loadbreak';
+    const _afterRsd = (rsd && _separateRsdInitiator) ? 'svc-rsd-initiator' : 'svc-combiner-loadbreak';
     // ── D10 — THE TAP CONDUCTORS ARE THE EDGE THEIR OWN DESCRIPTION NAMES ────
     // `svc-tap-conductors` is the object that OWNS the NEC 705.11(C) ≤10-ft
     // constraint, and it described itself as "Tap point → fused AC disconnect".
@@ -956,7 +978,9 @@ export function buildPermitDesignSnapshot(
       downstreamObjectId: isSupply ? 'svc-tap-conductors' : 'svc-meter',
       deviceModel: _fusedModel, electricalRole: 'overcurrent-protection',
       utilityRole: (isSupply && !_separateUtilityDisconnect) ? 'utility-accessible-disconnect' : null,
-      fusedState: 'fused', lockable: true, rsdRole: 'none',
+      fusedState: 'fused', lockable: true,
+      // it IS the initiation means unless a distinct device is specified
+      rsdRole: (rsd && !_separateRsdInitiator) ? 'initiator' : 'none',
       dualPurposeListing: isSupply && !_separateUtilityDisconnect ? true : null,
       dualPurposeRoles: isSupply && !_separateUtilityDisconnect
         ? ['705.11-tap-ocpd', 'utility-accessible-lockable-disconnect'] : null,

@@ -37,15 +37,32 @@ describe('the initiation device is a DESIGN fact, projected — not asserted', (
   it('the design carries a discrete initiator object, and the authority finds it', () => {
     expect(RSD.required).toBe(true);
     expect(RSD.initiatorPresent).toBe(true);
-    expect(RSD.initiatorObjectId).toBe('svc-rsd-initiator');
+    // 2026-08-29 (root 3) - the design does NOT buy a discrete initiator box.
+    // The BOM buys only the 690.56 label, E-1 draws no such device, and E-1's
+    // equipment schedule calls rapid shutdown INTEGRATED - so a separate
+    // `svc-rsd-initiator` node was a device that existed nowhere but the object
+    // model. The initiation ROLE now attaches to the device that performs it:
+    // opening the fused AC disconnect is the documented initiation on an
+    // integrated microinverter system. A dedicated node is emitted only when the
+    // project explicitly specifies one.
+    expect(RSD.initiatorObjectId).toBe('svc-fused-ocpd');
   });
 
   it('its location comes from that object, not from a sentence', () => {
-    const obj = (snap.electrical?.serviceTopology ?? []).find(o => o.objectId === 'svc-rsd-initiator');
+    const obj = (snap.electrical?.serviceTopology ?? [])
+      .find(o => o.objectId === RSD.initiatorObjectId);
     expect(obj, 'the object the note describes must exist').toBeTruthy();
+    expect(obj!.rsdRole).toBe('initiator');
     expect(RSD.initiatorLocation).toBeTruthy();
-    // whatever the object says, the authority says — no independent wording.
-    expect(String(obj!.description)).toContain(RSD.initiatorLocation!);
+    // whatever the object is called, the authority says - no independent wording.
+    const words = RSD.initiatorLocation!.replace(/^at the /, '');
+    expect(String(obj!.label).toLowerCase()).toContain(words.toLowerCase());
+  });
+
+  it('no phantom initiator device is modelled', () => {
+    const phantom = (snap.electrical?.serviceTopology ?? [])
+      .filter(o => o.type === 'rsd-initiator');
+    expect(phantom).toEqual([]);
   });
 
   it('the package no longer places the initiator at the utility meter', () => {
