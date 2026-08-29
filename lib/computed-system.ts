@@ -2397,7 +2397,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         run.physicalRacewayId = 'RW-BRANCH-HOMERUN';
         run.minimumCodeRacewaySize = seg.conduitSize;
         run.upsizingReason = null;
-        run.physicalRaceway = {
+          run.physicalRaceway = {
           physicalRacewayId: 'RW-BRANCH-HOMERUN',
           racewayType: run.conduitType,
           necArticle: _art.article,

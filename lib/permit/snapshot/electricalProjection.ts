@@ -18,6 +18,7 @@ import { GROUNDING_PENDING_BONDING_CELL_LABEL } from './groundingAuthority';
 // ECD W1-A — the stable, content-derived BOM row identity (same function the
 // BOM stamping pass uses, so a pre-BOM projection can reference a real row id).
 import { bomLineIdFor } from '@/lib/bom/bomLineId';
+import { recalculateRouteVoltageDrop } from './routeVoltageDropRecalc';
 import {
   ampacityTable75C, ampacityTable90C, ambientCorrectionFactor, conductorCountAdjustmentFactor,
 } from '@/lib/computed-system';
@@ -1454,7 +1455,34 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
     const verified = branchSeg ? _VERIFIED_ROUTE.has(String(branchSeg.verificationStatus)) : false;
     const pending: string[] = [];
     if (branchSeg && !verified) pending.push('branch route length is a CAD-derived estimate (not field-verified)');
-    const vd = num(branchSeg?.voltageDropPct);
+    // ══ THE DROP IS DERIVED FROM THIS BRANCH (2026-08-29) ═══════════════════
+    // `branchSeg` is ONE shared BRANCH_RUN segment read inside a per-branch loop,
+    // so all three rows printed the SAME voltage drop - 0.08% on the audited
+    // package - beside three different lengths (64 / 63.2 / 39.3 ft) and three
+    // different currents (16.0 / 14.5 / 14.5 A) taken from the per-branch model.
+    // One row assembled from two incompatible sources, and each still carried its
+    // own "PROVISIONAL PASS - 0.08% <= 2.0%", so the margin claimed on the sheet
+    // was not the margin the branch has.
+    //
+    // The shared segment's own percentage was computed from a length that appears
+    // nowhere on the sheet: build.ts moves the LENGTH onto that segment from the
+    // cable paths and never recomputes the percentage - the exact failure the
+    // field-measurement block one screen away was written to prevent ("THE
+    // PERCENTAGE IS RECOMPUTED, NOT RETAINED").
+    //
+    // A branch's drop is a function of ITS length and ITS current, so it is
+    // computed here from the two per-branch facts this row already prints, through
+    // the same recalculator the field-measurement path uses. It falls back to the
+    // shared segment only when this branch has no geometry of its own.
+    const _bLengthFt = _bPath?.designedInstalledLengthFt ?? num(branchSeg?.oneWayFt);
+    const _bVd = recalculateRouteVoltageDrop({
+      lengthFt: _bLengthFt,
+      continuousCurrentA: num(b.continuousA),
+      operatingCurrentA: num(b.currentA),
+      conductorGauge: _asmProj.assembly?.conductorGauge ?? branchSeg?.conductorGauge ?? null,
+      systemVoltage: 240,   // micro AC branch, split-phase 240 V
+    });
+    const vd = _bVd.voltageDropPct ?? num(branchSeg?.voltageDropPct);
     const compliance = evaluateCompliance({
       requiredValues: [
         { label: 'branch conductor size', value: branchSeg?.conductorGauge },
