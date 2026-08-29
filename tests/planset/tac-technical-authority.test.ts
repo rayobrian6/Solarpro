@@ -248,12 +248,22 @@ describe('TAC WS-4 — ONE fastener predicate; presence is not evidence', () => 
 
   it('"verified" text requires evidence — the live package says PENDING everywhere, never both', () => {
     const fa = projectFastenerAssembly(PKG.input);
-    expect(fa.verification).toBe('unverified');
-    expect(PKG.html).toContain('PENDING VERIFIED FASTENER ASSEMBLY');
-    // the contradiction this workstream removes: the same package asserting a
-    // verified assembly while another sheet says the instructions are unknown.
-    // Every occurrence must be the PENDING form.
-    expect(PKG.html).not.toMatch(/(?<!PENDING )VERIFIED FASTENER ASSEMBLY/);
+    // 2026-08-29 - THE DOCUMENT IS ON FILE NOW. SolarPro archives the Roof Tech
+    // RT-MINI II Installation Manual (Jun 2025, 40 pp, SHA-256 6d868692...) from the
+    // manufacturer's own portal, and the document lookup follows the same
+    // supersession the PRODUCT lookup always did, so the gen-2 mount resolves to the
+    // gen-2 manual. This assertion recorded the honest state on the day the document
+    // was missing.
+    // THE INVARIANT IS "NEVER BOTH", NOT "ALWAYS PENDING". The package must not
+    // assert a verified assembly on one sheet while another says the instructions
+    // are unknown - it must say ONE thing. Pinning the text to the PENDING form
+    // only tested that while a document was missing; it would have passed a
+    // package that could never verify anything.
+    const _pending = PKG.html.includes('PENDING VERIFIED FASTENER ASSEMBLY');
+    const _verified = /(?<!PENDING )VERIFIED FASTENER ASSEMBLY/.test(PKG.html);
+    expect(_pending && _verified, 'the package states BOTH verified and pending').toBe(false);
+    // and the text agrees with the projection that decided it
+    expect(fa.verification === 'verified' ? _verified : _pending).toBe(true);
   });
 
   it('WS-5 — no roof COVERING may be stated as a structural embedment substrate', () => {

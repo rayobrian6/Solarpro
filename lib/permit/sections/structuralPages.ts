@@ -29,7 +29,7 @@ import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } fro
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { isHybridPlanset, primarySubKey, SUB_LABEL, inverterSubKey } from './subSystemSheets';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
-import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { getMountingSystemById, effectiveMountingSystemId } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset, DOCUMENT_APPLICABILITY_CHIP } from '@/lib/manufacturer-assets-db';
 // AAC WS-9 — the ONE document-applicability seam every sheet may use.
 import { sheetDocumentApplicability } from '@/lib/permit/snapshot/documentAuthority';
@@ -78,7 +78,7 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
   // CITED here (provenance strip) and reproduced full-page in the DS appendix
   // alongside the other manufacturer datasheets.
   const mountId = (input.project as { mountingSystemId?: string }).mountingSystemId;
-  const rackAsset = getManufacturerAsset(mountId, 'racking_detail');
+  const rackAsset = getManufacturerAsset(effectiveMountingSystemId(mountId) ?? '', 'racking_detail');
   if (rackAsset) {
     const src = rackAsset.docTitle || (rackAsset.sourceUrl ? new URL(rackAsset.sourceUrl).hostname : '');
     // §12 — is the cited document APPLICABLE to the selected mount version?
@@ -86,7 +86,7 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
     // AAC WS-9 RENDERER PURITY — projected, not re-decided (audit §7.12).
     const _appl = sheetDocumentApplicability({
       region: peekSnapshot(input)?.equipmentDocumentAuthority ?? null,
-      category: 'racking_detail', equipmentId: mountId,
+      category: 'racking_detail', equipmentId: effectiveMountingSystemId(mountId) ?? undefined,
       selectedModel: _mountSys?.model ?? rackAsset.model, asset: rackAsset,
     });
     // Provenance as a GENERAL NOTE in the data rail — a one-line citation must

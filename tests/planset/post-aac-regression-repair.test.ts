@@ -222,9 +222,15 @@ describe('§3 — manufacturer structural documents: applicability + inclusion h
     // verdict is therefore UNVERIFIED, and EQUIPMENT-DOCUMENT-APPLICABILITY is
     // correctly raised again. It closes when the RT-Mini II installation manual is
     // archived, not when the gate stops looking.
-    expect(DR.html).toContain('data-ds-applicability="unverified"');
+    // 2026-08-29 - THE DOCUMENT IS ON FILE NOW. SolarPro archives the Roof Tech
+    // RT-MINI II Installation Manual (Jun 2025, 40 pp, SHA-256 6d868692...) from the
+    // manufacturer's own portal, and the document lookup follows the same
+    // supersession the PRODUCT lookup always did, so the gen-2 mount resolves to the
+    // gen-2 manual. This assertion recorded the honest state on the day the document
+    // was missing.
+    expect(DR.html).not.toContain('data-ds-applicability="unverified"');
     // the appendix still states a document state on the racking page rather than going silent
-    expect(DR.html).toMatch(/Roof Tech RT-MINI Installation Manual \(Jan 2021\)/);
+    expect(DR.html).toMatch(/Roof Tech RT-MINI II Installation Manual \(Jun 2025\)/);
   });
 
   it('the appendix index describes EXACTLY the pages that are emitted (no registry-only inclusion claims)', () => {

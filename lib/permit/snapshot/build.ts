@@ -78,6 +78,7 @@ import { runDerivedResolutionStage, mergeResolutionStates } from './resolution/d
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, getPanelById } from '@/lib/equipment-db';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
+import { effectiveMountingSystemId } from '@/lib/mounting-hardware-db';
 import { buildEquipmentDocumentAuthority } from './documentAuthority';
 // ECD §7 (WS-2) — racking BONDING authority (requirement vs method).
 import { buildRackingBondingAuthority } from './rackingBonding';
@@ -3047,7 +3048,10 @@ export function buildPermitDesignSnapshot(
         },
         {
           category: 'racking_detail',
-          equipmentId: (proj.mountingSystemId as string | undefined) ?? null,
+          // The document is looked up for the product that SHIPS, following the
+          // same supersession the model above already followed. Passing the
+          // stored id here is what put a gen-1 manual behind a gen-2 mount.
+          equipmentId: effectiveMountingSystemId(proj.mountingSystemId as string | undefined),
           selectedModel: mountDb?.model ?? null,
         },
       ],

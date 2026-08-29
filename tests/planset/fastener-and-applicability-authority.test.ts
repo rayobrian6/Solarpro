@@ -89,9 +89,13 @@ describe('the fastener has two facets, and each names its own source', () => {
     expect(FA.selection.sourceDocument).toMatch(/Starling Madison Lofquist|SML Job/i);
   });
 
-  it('INSTALLATION is not, because no manual for the SELECTED version is on file', () => {
-    expect(FA.installation.established).toBe(false);
-    expect(FA.installation.reason).toMatch(/SELECTED product version/i);
+  it('INSTALLATION is established too, now that the manual is archived', () => {
+    // 2026-08-29 - the RT-MINI II Installation Manual (Jun 2025) is archived
+    // in-repo and the lookup follows supersession, so the gen-2 mount resolves to
+    // the gen-2 manual. This case asserted the honest PENDING state on the day the
+    // document was missing; the document is here now.
+    expect(FA.installation.established).toBe(true);
+    expect(FA.installation.sourceDocument).toMatch(/RT-MINI II Installation Manual/i);
   });
 
   it('so the assembly is DESCRIBED, not withheld', () => {
@@ -101,16 +105,20 @@ describe('the fastener has two facets, and each names its own source', () => {
     expect(FA.line).toMatch(/embedment/i);
   });
 
-  it('and the label names the facet that is actually missing', () => {
-    expect(FA.certLabel).toBe('FASTENER ASSEMBLY ESTABLISHED — INSTALLATION DETAILS PENDING');
+  it('and with both facets established the label says so', () => {
+    expect(FA.certLabel).toBe('VERIFIED FASTENER ASSEMBLY');
   });
 
-  it('procurement is UNCHANGED — both facets are still required to order', () => {
+  it('procurement follows BOTH facets — and both are now established', () => {
     // Deliberately not widened: whether a row may be ORDERED is a third question
     // (it needs a part number), and moving it was not this repair. The memory of
     // a requirement closure silently flipping BOM rows to VERIFIED_ORDERABLE is
     // exactly why this is pinned.
-    expect(FA.verification).toBe('unverified');
-    expect(FA.nonOrderable).toBe(true);
+    // The rule is unchanged: `verification` is selection AND installation, and
+    // `nonOrderable` follows it. Both are established now, so the row is orderable
+    // - which is the correct consequence of holding both documents, not a
+    // loosening of the rule.
+    expect(FA.verification).toBe('verified');
+    expect(FA.nonOrderable).toBe(false);
   });
 });

@@ -16,7 +16,7 @@ import { getManufacturerAsset, getManufacturerAssetsByCategory, type Manufacture
 import { sheetDocumentApplicability } from '@/lib/permit/snapshot/documentAuthority';
 import { peekSnapshot } from '@/lib/permit/snapshot/read';
 import { getRegistryEntryV4 } from '@/lib/equipment-registry-v4';
-import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { getMountingSystemById, effectiveMountingSystemId } from '@/lib/mounting-hardware-db';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 // CMDA — DS-1 PROJECTS the canonical module authority; it never re-derives it.
 import {
@@ -119,14 +119,14 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
   // a product-version mismatch with no verified alias evidence. Label the page
   // non-authoritative (label-not-omit: the mount IS selected and the doc is
   // probably applicable but unproven). No alias is fabricated.
-  const _mountAsset = getManufacturerAsset(mountId, 'racking_detail');
+  const _mountAsset = getManufacturerAsset(effectiveMountingSystemId(mountId) ?? '', 'racking_detail');
   const _mountSys = mountId ? getMountingSystemById(mountId) : undefined;
   // AAC WS-9 RENDERER PURITY — projected from the frozen snapshot region, with
   // the real registry facts the retrieval resolver established. Never decided
   // here, and never with a `null` facts argument.
   const _mountAppl = sheetDocumentApplicability({
     region: peekSnapshot(input)?.equipmentDocumentAuthority ?? null,
-    category: 'racking_detail', equipmentId: mountId,
+    category: 'racking_detail', equipmentId: effectiveMountingSystemId(mountId) ?? undefined,
     selectedModel: _mountSys?.model ?? _mountAsset?.model, asset: _mountAsset,
   });
   push('RACKING MOUNT', _mountAsset, { docApplicability: _mountAppl });

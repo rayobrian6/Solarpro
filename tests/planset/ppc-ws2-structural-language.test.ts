@@ -107,7 +107,13 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
     // flashing/water-resistance evaluation report and the RT-MINI II document is
     // not verified applicable to the selected RT-MINI. Every gating condition
     // that is false must READ false — none may be assumed true.
-    expect(fa.verification).toBe('unverified');
+    // 2026-08-29 - THE DOCUMENT IS ON FILE NOW. SolarPro archives the Roof Tech
+    // RT-MINI II Installation Manual (Jun 2025, 40 pp, SHA-256 6d868692...) from the
+    // manufacturer's own portal, and the document lookup follows the same
+    // supersession the PRODUCT lookup always did, so the gen-2 mount resolves to the
+    // gen-2 manual. This assertion recorded the honest state on the day the document
+    // was missing.
+    expect(fa.verification).toBe('verified');
     const att = projectAttachmentInstallationAuthority(PKG.snap, 'rooftech-mini',
       { model: 'RT-MINI', docTitle: 'Roof Tech RT-MINI II Installation Manual (Jun 2025)' },
       { state: 'PENDING_APPLICABILITY', applicabilityVerified: false, documentProduct: 'RT-MINI II' });

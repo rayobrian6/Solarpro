@@ -84,7 +84,13 @@ const failingDocumentRetrieval = (message: string): Record<string, unknown> => (
 });
 
 // ── a durable registry row for the live mount ────────────────────────────────
+// 2026-08-29 - the document region is keyed by the product that SHIPS.
+// `rooftech-mini` is superseded by `rooftech-mini-ii`, which is what
+// getMountingSystemById has always returned, so the DOCUMENT key follows it
+// too - one id, one answer. The stored id still enters the build; only the
+// key this test reaches into directly moved.
 const MOUNT_ID = 'rooftech-mini';
+const MOUNT_DOC_ID = 'rooftech-mini-ii';
 function registryRow(over: Partial<RegistryDocument> = {}): RegistryDocument {
   return {
     id: 'doc-rooftech-rtmini-install-manual-2f6035586e94',
@@ -287,7 +293,7 @@ describe('OAR §B · a retrieval timeout does not downgrade an accepted registry
       },
     });
     const sel = (b: Built) =>
-      b.snap.equipmentDocumentAuthority?.entries?.[`racking_detail:${MOUNT_ID}`]?.selectedDocument ?? null;
+      b.snap.equipmentDocumentAuthority?.entries?.[`racking_detail:${MOUNT_DOC_ID}`]?.selectedDocument ?? null;
     expect(sel(withTimeout), 'a document must be selected at all').toBeTruthy();
     expect(sel(withTimeout)!.documentId).toBe(rows[0].id);
     expect(sel(withTimeout)!.sha256).toBe(rows[0].sha256);
@@ -308,7 +314,7 @@ describe('OAR §B · a retrieval timeout does not downgrade an accepted registry
         documentRetrieval: failingDocumentRetrieval('ETIMEDOUT connection timed out'),
       },
     });
-    const sel = b.snap.equipmentDocumentAuthority?.entries?.[`racking_detail:${MOUNT_ID}`]?.selectedDocument ?? null;
+    const sel = b.snap.equipmentDocumentAuthority?.entries?.[`racking_detail:${MOUNT_DOC_ID}`]?.selectedDocument ?? null;
     expect(sel?.documentId ?? null).toBeNull();
     // 2026-08-28 RT-MINI MIGRATION - the scenario's premise was "no
     // document exists anywhere". SolarPro now SHIPS the stamped RT-Mini II
@@ -344,7 +350,7 @@ describe('OAR §B · a retrieval timeout does not downgrade an accepted registry
     expect(isUsableRegistryAuthority(registryRowToIdentity(registryRow({ archivedInRepo: false })))).toBe(false);
     expect(isUsableRegistryAuthority(registryRowToIdentity(registryRow({ sha256: null })))).toBe(false);
     const withdrawn = await build({ read: registryRead([registryRow({ status: 'withdrawn' as RegistryDocument['status'] })]) });
-    const sel = withdrawn.snap.equipmentDocumentAuthority?.entries?.[`racking_detail:${MOUNT_ID}`]?.selectedDocument ?? null;
+    const sel = withdrawn.snap.equipmentDocumentAuthority?.entries?.[`racking_detail:${MOUNT_DOC_ID}`]?.selectedDocument ?? null;
     expect(sel?.documentId ?? null).toBeNull();
     expect(withdrawn.digest).not.toBe(a.digest);
   }, 300_000);
@@ -401,11 +407,11 @@ describe('OAR §C · one frozen authority value, and no earlier guarantee regres
     expect(b.html).toContain(String(jurisdiction.ahjName).replace(/&/g, '&amp;'));
 
     // the selected document is decided ONCE and frozen; renderers read it
-    const entry = snap.equipmentDocumentAuthority.entries[`racking_detail:${MOUNT_ID}`];
+    const entry = snap.equipmentDocumentAuthority.entries[`racking_detail:${MOUNT_DOC_ID}`];
     expect(Object.isFrozen(entry.selectedDocument)).toBe(true);
     // re-running the pure precedence rule over the SAME frozen candidate pool
     // reproduces the stored selection — it is a projection of it, not a rival
-    const pool = snap.equipmentDocumentAuthority.registryDocuments[`racking_detail:${MOUNT_ID}`] ?? [];
+    const pool = snap.equipmentDocumentAuthority.registryDocuments[`racking_detail:${MOUNT_DOC_ID}`] ?? [];
     const reselected = selectEquipmentDocument({
       selectedModel: snap.equipment.mount?.model ?? null,
       candidates: pool,

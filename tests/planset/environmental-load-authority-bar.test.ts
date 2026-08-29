@@ -16,7 +16,8 @@ import { pickVerifiedDocument, toEnvironmentalLoadSourceEvidence } from '@/lib/d
 import { isDocumentClass, type RegistryDocument } from '@/lib/documents/types';
 import { classifyBlockerSeverity } from '@/lib/permit/snapshot/severityPolicy';
 import { classifyBlockerDomain } from '@/lib/permit/snapshot/projectAuthority';
-import { projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL } from '@/lib/permit/snapshot/structuralProjection';
+import { peekSnapshot } from '@/lib/permit/snapshot/read';
+import { projectFastenerAssemblyFromSnapshot, projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL } from '@/lib/permit/snapshot/structuralProjection';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
@@ -281,6 +282,16 @@ describe('§3 — SCHED conclusion is registry-derived (no false global complian
 });
 
 describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderable)', () => {
+  // 2026-08-29 - THE DOCUMENT IS NOW ON FILE. SolarPro archives the Roof Tech
+  // RT-MINI II Installation Manual (Jun 2025, 40 pp, SHA-256 6d868692...), fetched
+  // from the manufacturer's own design portal, and the document lookup follows the
+  // same supersession the PRODUCT lookup always did - so the gen-2 mount finally
+  // resolves to the gen-2 manual. The fixture's fastener assembly is therefore
+  // VERIFIED, and this section's premise no longer holds for it.
+  //
+  // The INVARIANT is unchanged and is what these cases now assert, against a
+  // synthetic mount with no document on file. A rule proven only on production
+  // data stops being proven the moment the data is corrected.
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-25T12:00:00Z';
   const html = generatePermitHTML(input);
@@ -289,7 +300,14 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
   // report (ESR-3575), which carries no fastener-installation authority, and the
   // on-file RT-MINI II document is not verified applicable to the selected
   // RT-MINI. §6's invariant therefore applies to the fixture directly.
-  const fa = projectFastenerAssembly(input);
+  // THE INVARIANT, exercised through the documented override seam rather than
+  // through production data: with no applicable installation document the
+  // assembly is unverified and the row is non-orderable. Asserting this on the
+  // fixture stopped proving anything the moment the real document was archived.
+  const fa = projectFastenerAssemblyFromSnapshot(
+    peekSnapshot(input), (input.project as { mountingSystemId?: string }).mountingSystemId,
+    { documentApplicabilityVerified: false },
+  );
 
   it('the fastener assembly is unverified ⇒ non-orderable, dimensionless line', () => {
     // 2026-08-29 - TWO FACETS. A stamped structural PE letter for the exact mount
@@ -341,8 +359,17 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
   });
 
   it('the rendered Roof Attachment Hardware row is flagged NON-ORDERABLE (TAC WS-4)', () => {
-    expect(html).toContain('data-fastener-orderable="false"');
-    expect(html).not.toContain('data-fastener-orderable="true"');
-    expect(html).toContain(FASTENER_NON_ORDERABLE_LABEL);
+    // 2026-08-29 - the RENDERED package is now genuinely orderable (both the
+    // capacity letter and the installation manual are archived for this exact
+    // product), so the flag must TRACK the projection rather than be pinned to
+    // one value. Pinning it to `false` was only ever true while a document was
+    // missing.
+    const _live = projectFastenerAssembly(input);
+    expect(html).toContain(`data-fastener-orderable="${_live.nonOrderable ? 'false' : 'true'}"`);
+    expect(html).not.toContain(`data-fastener-orderable="${_live.nonOrderable ? 'true' : 'false'}"`);
+    // The label appears only while the row is actually non-orderable. Asserting
+    // it unconditionally pinned the state, not the rule.
+    if (_live.nonOrderable) expect(html).toContain(FASTENER_NON_ORDERABLE_LABEL);
+    else expect(html).not.toContain(FASTENER_NON_ORDERABLE_LABEL);
   });
 });

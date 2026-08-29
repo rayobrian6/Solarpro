@@ -26,6 +26,7 @@
 // silently re-derive a verdict.
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { effectiveMountingSystemId } from '@/lib/mounting-hardware-db';
 import {
   getManufacturerAsset, evaluateDocumentApplicability,
   type DocumentApplicability, type DocumentApplicabilityAlias, type DocumentRegistryFacts,
@@ -408,7 +409,21 @@ export function projectDocumentAuthority(
   const id = (equipmentId ?? '').trim();
   const region = snapshot?.equipmentDocumentAuthority;
   if (!id || !region?.entries) return null;
-  return region.entries[documentAuthorityKey(category, id)] ?? null;
+  const direct = region.entries[documentAuthorityKey(category, id)] ?? null;
+  if (direct) return direct;
+  // ── 2026-08-29 — ASK FOR THE PRODUCT THAT SHIPS ──────────────────────────
+  // A mounting id can be SUPERSEDED. `getMountingSystemById` has always followed
+  // that chain, so every PRODUCT fact on the sheets came from the successor
+  // while the DOCUMENT was fetched for the stored id — one id, two answers, and
+  // that is how a first-generation installation manual came to sit behind a
+  // second-generation mount. The region is keyed by the shipping product, so a
+  // caller holding the stored id is resolved here, once, rather than every call
+  // site remembering to do it.
+  const effective = effectiveMountingSystemId(id);
+  if (effective && effective !== id) {
+    return region.entries[documentAuthorityKey(category, effective)] ?? null;
+  }
+  return null;
 }
 
 /**

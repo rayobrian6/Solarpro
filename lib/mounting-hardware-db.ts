@@ -2937,6 +2937,29 @@ export function getMountingSystemById(id: string): MountingSystemSpec | undefine
   return cur;
 }
 
+/**
+ * The id of the product that ACTUALLY SHIPS for a stored mounting id — the same
+ * supersession `getMountingSystemById` already follows, exposed as an id so a
+ * caller can look up that product's DOCUMENTS with it.
+ *
+ * 2026-08-29 — this is the gap that put a first-generation installation manual
+ * behind a second-generation mount. A design storing `rooftech-mini` resolved,
+ * through `getMountingSystemById`, to the RT-MINI **II** record — so every
+ * PRODUCT fact on the sheets was gen-2 — while the document lookup passed the
+ * STORED id straight to `getManufacturerAsset`, which has no notion of
+ * supersession and returned the gen-1 row. One id, two answers, and the
+ * applicability gate could not see the difference because it compared the asset
+ * against its own title rather than against the selected model.
+ *
+ * Falls back to the id it was given: an id nothing supersedes is its own
+ * effective id, and an id in no catalogue is not silently renamed.
+ */
+export function effectiveMountingSystemId(id: string | null | undefined): string | null {
+  const key = String(id ?? '').trim();
+  if (!key) return null;
+  return getMountingSystemById(key)?.id ?? key;
+}
+
 /** The supersession chain for an id, oldest first, or [] when nothing is
  *  superseded. Consumers that must PRINT the substitution read this. */
 export function mountingSystemSupersession(id: string): Array<{ from: MountingSystemSpec; to: MountingSystemSpec; basis: string }> {

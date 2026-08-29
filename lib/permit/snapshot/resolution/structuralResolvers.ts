@@ -33,7 +33,7 @@ import {
   registryRowToIdentity, isUsableRegistryAuthority, mergeRegistryIdentities,
   type RegistryAuthorityRetentionState,
 } from './retainedAuthority';
-import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { getMountingSystemById, effectiveMountingSystemId } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { resolveEngineeringReviewCoverage } from '@/lib/engineeringReview/store';
 import { uncoveredReview, type EngineeringReviewCoverage } from '@/lib/engineeringReview/types';
@@ -116,7 +116,11 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
 
   async run(ctx: ResolverContext): Promise<ResolverOutcome> {
     const proj = (ctx.input.project ?? {}) as Record<string, unknown>;
-    const mountId = str(proj.mountingSystemId);
+    // 2026-08-29 — the DOCUMENT keys follow the product that ships. `mount` below
+    // already resolves through supersession, so keying the registry facts by the
+    // STORED id filed them under a product the document region no longer uses,
+    // and the archived hash never met the entry it belonged to.
+    const mountId = effectiveMountingSystemId(str(proj.mountingSystemId)) ?? str(proj.mountingSystemId);
     const mount = mountId ? getMountingSystemById(mountId) ?? null : null;
     const selectedModel = mount?.model ?? null;
     const stateCode = stateCodeOf(proj);

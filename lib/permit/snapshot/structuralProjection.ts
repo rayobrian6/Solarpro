@@ -30,7 +30,7 @@ import { projectReleaseGates, releasePackageLine, type ReleaseSummary } from './
 // TAC WS-17 — ONE definition of "does this requirement gate this sheet?", shared
 // with the show/hide gate so a banner's presence and its contents always agree.
 import { requirementAffectsSheet } from '../plansetProfile';
-import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { getMountingSystemById, effectiveMountingSystemId } from '@/lib/mounting-hardware-db';
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 
 export const EMDASH = '—';
@@ -753,7 +753,12 @@ export function projectFastenerAssemblyFromSnapshot(
   // the exact-product document applicability decided ONCE by the build's
   // document authority (the SAME verdict PV-3 / DS-n consume). Absent ⇒ not
   // established — an RT-MINI II manual never verifies an RT-MINI fastener.
-  const _docEntry = projectDocumentAuthority(snap, 'racking_detail', mountingSystemId ?? null);
+  // The document region is KEYED by the product that ships, so it must be READ
+  // with that id too. Asking with the stored id is how a design storing
+  // `rooftech-mini` came to be handed the gen-1 row while every product fact
+  // on the sheets was gen-2.
+  const _docEntry = projectDocumentAuthority(
+    snap, 'racking_detail', effectiveMountingSystemId(mountingSystemId));
   const _elementsComplete = ra?.fastenerElementsComplete
     ?? !!(ra?.screwLagModel && ra?.screwLagQtyPerMount != null && ra?.embedmentRequirementIn != null);
   // ── THE ROLE OBJECT IS THE AUTHORITY, AND IT IS NOW ASKED ──────────────────
