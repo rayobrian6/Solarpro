@@ -11,6 +11,7 @@ import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjecti
 import { projectProjectAuthorityFromInput, projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
 import { projectRacewayDescriptor, projectGroundingSummary } from '../snapshot/electricalProjection';
 import type { PermitDesignSnapshot } from '../snapshot/types';
+import { projectRapidShutdownAuthority } from '../snapshot/rapidShutdownAuthority';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { projectFastenerAssembly } from '../snapshot/structuralProjection';
 
@@ -227,9 +228,18 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     project.interconnectionMethod === 'SUPPLY_SIDE_TAP'
       ? `System shall interconnect via supply-side tap per NEC 705.11. Tap conductors shall be sized ≥ 125% of PV output current and terminate in a fused disconnect within 10 ft of the tap per NEC 705.11(C). The 120% busbar rule (NEC 705.12(B)) does not apply to supply-side connections.`
       : `System shall comply with NEC 705.12 for interconnected power production equipment. Backfeed breaker shall be sized per NEC 705.12(B)(2)(3)(b). Sum of all supply breakers shall not exceed 120% of bus rating.`,
-    project.rapidShutdown
-      ? `Rapid shutdown system required per NEC 690.12. Module-level rapid shutdown (MLRS) shall reduce array conductors to \u2264 30V within 30 seconds. Initiator shall be located at utility meter per NEC 690.56(B).`
-      : `Rapid shutdown initiator shall be installed per NEC 690.12. Array boundary conductors shall be de-energized to \u2264 30V within 30 seconds of initiation.`,
+    // 2026-08-29 - THE NOTE NO LONGER STATES A DEVICE LOCATION OF ITS OWN.
+    // It read "Initiator shall be located at utility meter per NEC 690.56(B)":
+    // 690.56(B) is the plaque/directory requirement (a LABEL, not a location),
+    // and this design puts no initiator on the meter - build.ts emits
+    // `svc-rsd-initiator` at the SERVICE location and wires it between the
+    // combiner load-break and the fused AC disconnect. E-1's device schedule
+    // printed that all along, two sheets from this sentence. Both facts now come
+    // from the one authority: the design's device object, and the citation table.
+    projectRapidShutdownAuthority(
+      (input as unknown as { _snapshot?: PermitDesignSnapshot })._snapshot ?? null,
+      (necVer === '2017' || necVer === '2023' ? necVer : '2020'),
+    ).noteText,
     `All conductors shall be sized per NEC 310.15. Temperature correction (NEC 310.15(B)(1)) and conduit fill derating (NEC 310.15(C)(1)) shall be applied. PV conductor ampacity minimum 125% of maximum circuit current per NEC 690.8(B).`,
     // §2/§7 (closeout 2026-07-23): the conduit note DERIVES from the actual
     // physical raceway objects via the ONE canonical route-description accessor —
