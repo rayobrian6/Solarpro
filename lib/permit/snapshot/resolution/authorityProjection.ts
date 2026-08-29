@@ -44,6 +44,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { RESOLUTION_RESULT_DISPLAY } from './evidence';
+import { isAutomaticMode } from './types';
 import type {
   RequirementResolutionState, ResolutionEvidenceRecord, ResolutionMode,
 } from './types';
@@ -79,6 +80,16 @@ export type ResolvedAuthorityState =
   | 'NOT_ESTABLISHED'         // attempted; nothing accepted
   | 'NOT_APPLICABLE'          // the requirement does not apply to this design
   | 'RESOLVER_NOT_IMPLEMENTED'// no owning resolver exists yet (a different fact)
+  // ── 2026-08-29 ────────────────────────────────────────────────────────────
+  // A requirement whose resolution mode is PROFESSIONAL_APPROVAL,
+  // FIELD_VERIFICATION or OPERATOR_CONFIRMATION is closed by somebody's ACT, not
+  // by code. `authorityStateOf` had no branch for that, so a missing resolver
+  // read as RESOLVER_NOT_IMPLEMENTED - and ENGINEERING-REVIEW-PENDING, which no
+  // resolver can ever close, was reported as SolarPro owing an unwritten
+  // resolver. The lifecycle already knew better ("non-automatic modes
+  // legitimately have no resolver"); this projection carried the opposite rule
+  // over the same field.
+  | 'AWAITING_EXTERNAL_AUTHORITY'
   | 'NOT_YET_ATTEMPTED';      // nobody has run
 
 /** The RELEASE-RELEVANT unresolved reason, enumerated and stable. Provider prose
@@ -86,6 +97,7 @@ export type ResolvedAuthorityState =
 export type UnresolvedReasonCode =
   | 'AUTHORITY_NOT_ESTABLISHED'
   | 'RESOLVER_NOT_IMPLEMENTED'
+  | 'AWAITING_EXTERNAL_AUTHORITY'
   | 'NOT_YET_ATTEMPTED';
 
 /**
@@ -128,7 +140,15 @@ function isEstablished(s: RequirementResolutionState): boolean {
 function authorityStateOf(s: RequirementResolutionState): ResolvedAuthorityState {
   if (isEstablished(s)) return 'ESTABLISHED';
   if (s.lastResolutionResult === 'SKIPPED') return 'NOT_APPLICABLE';
-  if (!s.resolverImplemented && s.attemptedResolverIds.length === 0) return 'RESOLVER_NOT_IMPLEMENTED';
+  if (!s.resolverImplemented && s.attemptedResolverIds.length === 0) {
+    // THE SAME RULE THE LIFECYCLE APPLIES. A non-automatic mode legitimately has
+    // no resolver: the requirement waits on a licensed signature, a field
+    // measurement or an operator's confirmation. Calling that an unimplemented
+    // resolver books somebody else's outstanding act as our engineering debt.
+    return isAutomaticMode(s.resolutionMode)
+      ? 'RESOLVER_NOT_IMPLEMENTED'
+      : 'AWAITING_EXTERNAL_AUTHORITY';
+  }
   if (s.lastResolutionResult === 'NOT_ATTEMPTED' && s.attemptedResolverIds.length === 0) return 'NOT_YET_ATTEMPTED';
   return 'NOT_ESTABLISHED';
 }
@@ -138,6 +158,10 @@ function unresolvedReasonCodeOf(state: ResolvedAuthorityState): UnresolvedReason
     case 'ESTABLISHED': return null;
     case 'NOT_APPLICABLE': return null;
     case 'RESOLVER_NOT_IMPLEMENTED': return 'RESOLVER_NOT_IMPLEMENTED';
+    // A `default` here would have folded the new state into
+    // AUTHORITY_NOT_ESTABLISHED, which reads as "we looked and found nothing" -
+    // the opposite of "this waits on someone else's act".
+    case 'AWAITING_EXTERNAL_AUTHORITY': return 'AWAITING_EXTERNAL_AUTHORITY';
     case 'NOT_YET_ATTEMPTED': return 'NOT_YET_ATTEMPTED';
     default: return 'AUTHORITY_NOT_ESTABLISHED';
   }

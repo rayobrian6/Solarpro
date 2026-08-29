@@ -408,7 +408,12 @@ export function pageWarningLabels(
     const topoTxt = sub.isMicro ? 'MICROINVERTERS' : sub.topology === 'OPTIMIZER' ? 'OPTIMIZER INVERTER' : 'STRING INVERTER';
     srcRows.push({
       name: `${_subName(sub.key)} &mdash; SOLAR PV (${topoTxt})`,
-      rating: `${kw > 0 ? kw.toFixed(1) : '&mdash;'} kW AC &middot; ${sub.panelCount} MODULES`,
+      // 2026-08-29 - AC kW is printed to TWO decimals everywhere else (cover, E-1,
+      // PV-5, the equipment schedule). These four device-card ratings used one, so
+      // the same system read 10.82 kW AC on six sheets and 10.8 kW AC on the
+      // disconnect schedule. One number, one precision - the rule root 6 applied to
+      // the roof pitch is the same rule here.
+      rating: `${kw > 0 ? kw.toFixed(2) : '&mdash;'} kW AC &middot; ${sub.panelCount} MODULES`,
       disco: auth.isHybrid
         ? `${sub.key.charAt(0).toUpperCase() + sub.key.slice(1)} circuit breaker at the PV AC combiner panel &#8594; PV system disconnect at the point of interconnection`
         : 'PV AC disconnect &mdash; adjacent to utility meter (see PV-1)',
@@ -773,14 +778,14 @@ export function pageDisconnectDirectory(
       const nm = `${se.inverterManufacturer} ${se.inverterModel}`.trim();
       const subLabel = sub.key.toUpperCase();
       if (sub.isMicro) {
-        discos.push({ name: `MICROINVERTERS — ${subLabel} (×${sub.deviceCount})`, rating: `${subAcKw.toFixed(1)} kW AC · ${nm}`.trim(), loc: 'On the array — one per module' });
+        discos.push({ name: `MICROINVERTERS — ${subLabel} (×${sub.deviceCount})`, rating: `${subAcKw.toFixed(2)} kW AC · ${nm}`.trim(), loc: 'On the array — one per module' });
       } else {
         const word = sub.topology === 'OPTIMIZER' ? 'INVERTER (OPTIMIZER)' : 'INVERTER';
-        discos.push({ name: `${word} — ${subLabel}`, rating: `${subAcKw.toFixed(1)} kW AC · ${nm}`.trim(), loc: `${sub.key} sub-system — at the inverter location` });
+        discos.push({ name: `${word} — ${subLabel}`, rating: `${subAcKw.toFixed(2)} kW AC · ${nm}`.trim(), loc: `${sub.key} sub-system — at the inverter location` });
       }
     }
   } else {
-    discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(getSnapshot(input).derived.acWattsContinuous / 1000 || system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
+    discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(getSnapshot(input).derived.acWattsContinuous / 1000 || system.totalAcKw || 0).toFixed(2)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
   }
   if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN INITIATOR', rating: isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL', loc: bos.brains ? `Hosted by the ${bos.brains.model}` : 'Adjacent to the PV AC disconnect' });
   if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${battKwh.toFixed(1)} kWh · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });
