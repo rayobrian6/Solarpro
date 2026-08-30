@@ -1,0 +1,74 @@
+{
+  "producers": [
+    {
+      "id": "ahj-national.necVersion",
+      "module": "lib/jurisdictions/ahj-national.ts",
+      "dataset": "curated + bulk-expanded AHJ rows",
+      "authorityLevel": "municipal/county (claimed)",
+      "canProduceEdition": true,
+      "canProduceAdoptionEvidence": false,
+      "canProduceAmendmentStatus": false,
+      "precedence": "fallback metadata only — never adopts (A.4)",
+      "note": "per-row year with no ordinance, no URL, no date. 0/4,016 provenanced."
+    },
+    {
+      "id": "necVersions.JURISDICTION_DATA",
+      "module": "lib/jurisdictions/necVersions.ts",
+      "dataset": "NFPA state adoption tracker, 51 jurisdictions + city/county overrides",
+      "authorityLevel": "state",
+      "canProduceEdition": true,
+      "canProduceAdoptionEvidence": false,
+      "canProduceAmendmentStatus": false,
+      "precedence": "state-adoption-table tier — stated DESIGN BASIS, never verified",
+      "note": "JurisdictionData carries NO sourceUrl/retrievedAt/effectiveDate/adoptedDate field at all."
+    },
+    {
+      "id": "jurisdiction.STATE_NEC_ADOPTION",
+      "module": "lib/jurisdiction.ts",
+      "dataset": "a SECOND per-state NEC table",
+      "authorityLevel": "state",
+      "canProduceEdition": true,
+      "canProduceAdoptionEvidence": false,
+      "canProduceAmendmentStatus": false,
+      "precedence": "not consulted by codeAuthority",
+      "note": "duplicate of the above by purpose; disagreements are invisible to the permit path."
+    },
+    {
+      "id": "ahjRegistry (SunSpec/Orange Button)",
+      "module": "lib/jurisdictions/ahjRegistry.ts",
+      "dataset": "live registry retrieval, token-gated",
+      "authorityLevel": "municipal/county",
+      "canProduceEdition": true,
+      "canProduceAdoptionEvidence": true,
+      "canProduceAmendmentStatus": false,
+      "precedence": "HIGHEST — ahj-registry-retrieval",
+      "note": "the ONLY producer that can carry adoption evidence. Returns NOT_CONFIGURED without AHJ_REGISTRY_TOKEN."
+    },
+    {
+      "id": "compliance.jurisdiction.necVersion",
+      "module": "project record (client/route)",
+      "dataset": "per-project field",
+      "authorityLevel": "unknown",
+      "canProduceEdition": true,
+      "canProduceAdoptionEvidence": false,
+      "canProduceAmendmentStatus": false,
+      "precedence": "project-record-unprovenanced (was falsely operator-entry until c4f6b397)",
+      "note": "the route no longer fabricates it; a value here now means something actually set it."
+    },
+    {
+      "id": "computed-plan AHJ table",
+      "module": "lib/computed-plan.ts",
+      "dataset": "a second ~10-entry AHJ table",
+      "authorityLevel": "unknown",
+      "canProduceEdition": true,
+      "canProduceAdoptionEvidence": false,
+      "canProduceAmendmentStatus": false,
+      "precedence": "independent of codeAuthority",
+      "note": "contains an id (il-icc) absent from ahj-national. Not yet consumer-mapped."
+    }
+  ],
+  "producersWithAdoptionEvidence": [
+    "ahjRegistry (SunSpec/Orange Button)"
+  ],
+  "conflictCount": 1757
+}

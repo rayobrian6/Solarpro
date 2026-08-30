@@ -29,7 +29,8 @@
     "gov:coverage-national": "tsx scripts/gov-coverage-national.mjs",
     "campaign:proof": "tsx scripts/campaign-proof.mjs --artifacts",
     "jurisdiction:audit-solar-authority": "tsx scripts/jurisdiction-audit-solar-authority.mjs",
-    "authority:audit-nec-provenance": "tsx scripts/authority-audit-nec-provenance.mjs"
+    "authority:audit-nec-provenance": "tsx scripts/authority-audit-nec-provenance.mjs",
+    "authority:audit-nec-sources": "tsx scripts/authority-audit-nec-sources.mjs"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",
