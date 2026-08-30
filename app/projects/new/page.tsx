@@ -11,6 +11,7 @@ import { useAppStore } from '@/store/appStore';
 import { Upload, Zap, Building2, Loader2, CheckCircle, MapPin } from 'lucide-react';
 import BillUploadFlow from '@/components/onboarding/BillUploadFlow';
 import AddressAutocomplete, { type AddressSuggestion } from '@/components/ui/AddressAutocomplete';
+import { composePostalAddress } from '@/lib/address/postalAddress';
 
 const SYSTEM_TYPES = [
   {
@@ -93,7 +94,13 @@ function NewProjectContent() {
   useEffect(() => {
     const client = clients.find(c => c.id === selectedClient);
     if (!client) return;
-    const composed = [client.address, client.city, client.state, client.zip].filter(Boolean).join(', ');
+    // Same composer as the server write path (app/api/projects/route.ts), so the
+    // form and the API cannot disagree about what this client's address is. It
+    // is idempotent, so a client record that already holds a complete address
+    // line is not re-suffixed with its own city/state/ZIP.
+    const composed = composePostalAddress({
+      line1: client.address, city: client.city, state: client.state, zip: client.zip,
+    });
     if (composed && !address.trim()) {
       setAddress(composed);
       resolveAddress(composed);

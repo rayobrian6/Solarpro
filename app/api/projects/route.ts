@@ -8,6 +8,7 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getProjectsByUser, createProject, getClientById, isValidUUID , handleRouteDbError } from '@/lib/db-neon';
 import { geocodeAddress } from '@/lib/geocode';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { composePostalAddress } from '@/lib/address/postalAddress';
 
 export async function GET(req: NextRequest) {
   try {
@@ -63,10 +64,17 @@ export async function POST(req: NextRequest) {
 
     // ── Resolve project address ──────────────────────────────────────────────
     // Priority: explicit address > client address
+    // composePostalAddress, not a join: `client.address` is frequently ALREADY a
+    // full address (the clients form geocodes a complete line), and the plain
+    // join produced "3 MELVIN DR APT A, GRANITE CITY, IL 62040, GRANITE CITY,
+    // IL, 62040" — which was then stored on the project and handed to the
+    // geocoder, the AHJ resolver and the title block.
     let projectAddress = (address && typeof address === 'string' && address.trim())
       ? address.trim()
       : client
-        ? [client.address, client.city, client.state, client.zip].filter(Boolean).join(', ')
+        ? composePostalAddress({
+            line1: client.address, city: client.city, state: client.state, zip: client.zip,
+          })
         : '';
 
     // ── Geocode address → lat/lng ────────────────────────────────────────────
