@@ -1,0 +1,295 @@
+{
+  "measuredAt": "AFTER — a1f0dc15 (current)",
+  "universe": {
+    "entities": 72120,
+    "active": 39093,
+    "statistical": 32606,
+    "superseded": 421
+  },
+  "registry": {
+    "ahjRecords": 4016,
+    "stableIdentity": 3904,
+    "specificDepartment": 0,
+    "buildingScopeVerified": 0,
+    "electricalScopeVerified": 0,
+    "fireScopeVerified": 0,
+    "codeAdoptionProvenance": 0,
+    "officialSourceUrl": 0,
+    "contactWebsite": 304,
+    "retrievalDate": 0,
+    "placeholderInspector": 4016,
+    "fullyGoverned": 0,
+    "retiredAliases": 5
+  },
+  "plausibleBuildingAuthorities": 17683,
+  "heldCount": 3869,
+  "missingCount": 13814,
+  "fullyGoverned": 0,
+  "byState": {
+    "10": {
+      "plausible": 16,
+      "held": 8,
+      "missing": 8
+    },
+    "12": {
+      "plausible": 356,
+      "held": 91,
+      "missing": 265
+    },
+    "13": {
+      "plausible": 591,
+      "held": 197,
+      "missing": 394
+    },
+    "15": {
+      "plausible": 5,
+      "held": 2,
+      "missing": 3
+    },
+    "16": {
+      "plausible": 244,
+      "held": 55,
+      "missing": 189
+    },
+    "17": {
+      "plausible": 1384,
+      "held": 121,
+      "missing": 1263
+    },
+    "18": {
+      "plausible": 211,
+      "held": 107,
+      "missing": 104
+    },
+    "19": {
+      "plausible": 1041,
+      "held": 116,
+      "missing": 925
+    },
+    "20": {
+      "plausible": 729,
+      "held": 120,
+      "missing": 609
+    },
+    "21": {
+      "plausible": 537,
+      "held": 137,
+      "missing": 400
+    },
+    "22": {
+      "plausible": 239,
+      "held": 10,
+      "missing": 229
+    },
+    "23": {
+      "plausible": 39,
+      "held": 22,
+      "missing": 17
+    },
+    "24": {
+      "plausible": 58,
+      "held": 28,
+      "missing": 30
+    },
+    "25": {
+      "plausible": 351,
+      "held": 14,
+      "missing": 337
+    },
+    "26": {
+      "plausible": 616,
+      "held": 101,
+      "missing": 515
+    },
+    "27": {
+      "plausible": 940,
+      "held": 102,
+      "missing": 838
+    },
+    "28": {
+      "plausible": 213,
+      "held": 101,
+      "missing": 112
+    },
+    "29": {
+      "plausible": 949,
+      "held": 133,
+      "missing": 816
+    },
+    "30": {
+      "plausible": 108,
+      "held": 66,
+      "missing": 42
+    },
+    "31": {
+      "plausible": 622,
+      "held": 107,
+      "missing": 515
+    },
+    "32": {
+      "plausible": 36,
+      "held": 26,
+      "missing": 10
+    },
+    "33": {
+      "plausible": 23,
+      "held": 15,
+      "missing": 8
+    },
+    "34": {
+      "plausible": 77,
+      "held": 26,
+      "missing": 51
+    },
+    "35": {
+      "plausible": 118,
+      "held": 45,
+      "missing": 73
+    },
+    "36": {
+      "plausible": 658,
+      "held": 69,
+      "missing": 589
+    },
+    "37": {
+      "plausible": 198,
+      "held": 116,
+      "missing": 82
+    },
+    "38": {
+      "plausible": 410,
+      "held": 63,
+      "missing": 347
+    },
+    "39": {
+      "plausible": 1014,
+      "held": 117,
+      "missing": 897
+    },
+    "40": {
+      "plausible": 242,
+      "held": 93,
+      "missing": 149
+    },
+    "41": {
+      "plausible": 267,
+      "held": 52,
+      "missing": 215
+    },
+    "42": {
+      "plausible": 126,
+      "held": 76,
+      "missing": 50
+    },
+    "44": {
+      "plausible": 39,
+      "held": 6,
+      "missing": 33
+    },
+    "45": {
+      "plausible": 115,
+      "held": 57,
+      "missing": 58
+    },
+    "46": {
+      "plausible": 224,
+      "held": 75,
+      "missing": 149
+    },
+    "47": {
+      "plausible": 277,
+      "held": 111,
+      "missing": 166
+    },
+    "48": {
+      "plausible": 1243,
+      "held": 337,
+      "missing": 906
+    },
+    "49": {
+      "plausible": 174,
+      "held": 46,
+      "missing": 128
+    },
+    "50": {
+      "plausible": 55,
+      "held": 20,
+      "missing": 35
+    },
+    "51": {
+      "plausible": 171,
+      "held": 130,
+      "missing": 41
+    },
+    "53": {
+      "plausible": 250,
+      "held": 59,
+      "missing": 191
+    },
+    "54": {
+      "plausible": 140,
+      "held": 65,
+      "missing": 75
+    },
+    "55": {
+      "plausible": 674,
+      "held": 87,
+      "missing": 587
+    },
+    "56": {
+      "plausible": 42,
+      "held": 34,
+      "missing": 8
+    },
+    "60": {
+      "plausible": 80,
+      "held": 3,
+      "missing": 77
+    },
+    "69": {
+      "plausible": 4,
+      "held": 4,
+      "missing": 0
+    },
+    "72": {
+      "plausible": 78,
+      "held": 75,
+      "missing": 3
+    },
+    "01": {
+      "plausible": 239,
+      "held": 83,
+      "missing": 156
+    },
+    "02": {
+      "plausible": 165,
+      "held": 23,
+      "missing": 142
+    },
+    "04": {
+      "plausible": 61,
+      "held": 38,
+      "missing": 23
+    },
+    "05": {
+      "plausible": 388,
+      "held": 87,
+      "missing": 301
+    },
+    "06": {
+      "plausible": 519,
+      "held": 101,
+      "missing": 418
+    },
+    "08": {
+      "plausible": 139,
+      "held": 82,
+      "missing": 57
+    },
+    "09": {
+      "plausible": 188,
+      "held": 10,
+      "missing": 178
+    }
+  }
+}

@@ -26,7 +26,8 @@
     "ahj:backfill-identities": "tsx scripts/ahj-backfill-identities.mjs",
     "ahj:resolver-dryrun": "tsx scripts/ahj-resolver-dryrun.mjs",
     "gov:ingest-national": "tsx scripts/gov-ingest-national.mjs",
-    "gov:coverage-national": "tsx scripts/gov-coverage-national.mjs"
+    "gov:coverage-national": "tsx scripts/gov-coverage-national.mjs",
+    "campaign:proof": "tsx scripts/campaign-proof.mjs --artifacts"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",
