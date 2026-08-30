@@ -415,3 +415,54 @@ describe('every scope in the default list has a rule to match', () => {
     expect(p.allScopesResolved).toBe(false);
   });
 });
+
+describe('identityKey never falls across ENTITY TYPES', () => {
+  const ent = (over) => ({
+    type: 'place', name: 'Testville', stateFips: '99', countyFips: '99001',
+    placeGeoid: null, countySubdivisionGeoid: null, ...over,
+  });
+
+  it('a place with no GEOID does not borrow its county identity', () => {
+    // THE DEFECT the canonical-vs-legacy dry run caught. `entityFromGeography`
+    // puts the county FIPS on EVERY entity as context, and the old single
+    // fallback chain (place -> cousub -> county -> state) meant a municipality
+    // whose GEOID we do not hold degraded to its COUNTY's key — so the registry
+    // returned the county's row for a city. It bound 51 cities to their
+    // counties, including Nashville to Davidson County, Boise to Ada County and
+    // Louisville to Jefferson County: the exact substitution this module exists
+    // to prevent, committed by the module itself.
+    const place = identityKey(ent({ type: 'place', placeGeoid: null }));
+    const county = identityKey(ent({ type: 'county', name: 'Testcounty' }));
+    expect(place).not.toBe(county);
+    expect(place.startsWith('county:'), 'a place borrowed a county identity').toBe(false);
+  });
+
+  it('an unidentified government is not matchable by the registry', () => {
+    // It must not collide with any GEOID-keyed row, so the resolver reports the
+    // record missing rather than finding something that is not this government.
+    for (const t of ['place', 'county', 'county-subdivision', 'state']) {
+      const k = identityKey(ent({ type: t, placeGeoid: null, countyFips: null, stateFips: null }));
+      expect(k.startsWith('name:'), t).toBe(true);
+    }
+  });
+
+  it('an MCD with no GEOID does not borrow the county either', () => {
+    const mcd = identityKey(ent({ type: 'county-subdivision', name: 'Testtown', countySubdivisionGeoid: null }));
+    expect(mcd.startsWith('cousub:')).toBe(false);
+    expect(mcd.startsWith('county:')).toBe(false);
+  });
+
+  it('each type still keys on its OWN identity when it has one', () => {
+    expect(identityKey(ent({ type: 'place', placeGeoid: '9912345' }))).toBe('place:9912345');
+    expect(identityKey(ent({ type: 'county', countyFips: '99001' }))).toBe('county:99001');
+    expect(identityKey(ent({ type: 'county-subdivision', countySubdivisionGeoid: '9900112345' })))
+      .toBe('cousub:9900112345');
+    expect(identityKey(ent({ type: 'state', stateFips: '99' }))).toBe('state:99');
+  });
+
+  it('a consolidated city-county may key on either hat', () => {
+    // One government wearing both; place is the more specific, so it wins.
+    expect(identityKey(ent({ type: 'consolidated', placeGeoid: '9912345' }))).toBe('place:9912345');
+    expect(identityKey(ent({ type: 'consolidated', placeGeoid: null }))).toBe('county:99001');
+  });
+});

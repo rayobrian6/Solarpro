@@ -23,7 +23,8 @@
     "check:assisted-evidence-boundaries": "node scripts/check-assisted-evidence-boundaries.js",
     "test:e2e": "playwright test",
     "ahj:audit-national": "tsx scripts/ahj-audit-national.mjs",
-    "ahj:backfill-identities": "tsx scripts/ahj-backfill-identities.mjs"
+    "ahj:backfill-identities": "tsx scripts/ahj-backfill-identities.mjs",
+    "ahj:resolver-dryrun": "tsx scripts/ahj-resolver-dryrun.mjs"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",

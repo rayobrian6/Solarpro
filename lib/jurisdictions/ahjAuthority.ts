@@ -291,17 +291,50 @@ export function resolveProjectAhjAuthority(
  * so a caller can see it is not identity-grade.
  */
 export function identityKey(e: GoverningEntity): string {
-  if (e.placeGeoid) return `place:${e.placeGeoid}`;
-  if (e.countySubdivisionGeoid) return `cousub:${e.countySubdivisionGeoid}`;
-  // Accept a county code that is already the 5-digit national FIPS, or compose
-  // it from the state. Never key on the 3-digit code by itself.
-  if (e.countyFips) {
+  /** 5-digit national county FIPS, composed from the state when needed. Never
+   *  the bare 3-digit code, which collides across all 50 states. */
+  const countyKey = (): string | null => {
+    if (!e.countyFips) return null;
     const c = e.countyFips.trim();
     if (c.length >= 5) return `county:${c}`;
     if (e.stateFips) return `county:${e.stateFips.trim().padStart(2, '0')}${c.padStart(3, '0')}`;
+    return null;
+  };
+  /** No identity of the RIGHT KIND exists. Deliberately not matchable by the
+   *  registry, which indexes on GEOID — so the resolver reports the record as
+   *  missing instead of finding something that is not this government. */
+  const unidentified = () => `name:${e.type}:${e.name.toUpperCase()}`;
+
+  // ── THE KEY MAY NEVER FALL ACROSS ENTITY TYPES ──────────────────────────
+  // This used to try placeGeoid, then cousub, then countyFips, then stateFips
+  // in one chain regardless of what KIND of government `e` is. But
+  // `entityFromGeography` puts the county FIPS on EVERY entity as context, so a
+  // PLACE whose GEOID we do not hold degraded to its county's key — and the
+  // registry then returned the COUNTY's row for a municipality.
+  //
+  // The dry run caught it binding 51 cities to their counties, including
+  // Nashville to Davidson County, Boise to Ada County and Louisville to
+  // Jefferson County. That is the substitution this entire module exists to
+  // prevent, committed by the module itself.
+  //
+  // A government with no identity of its own kind is UNIDENTIFIED. That is a
+  // real and useful answer: it becomes AHJ_RECORD_MISSING, which names the gap.
+  switch (e.type) {
+    case 'place':
+      return e.placeGeoid ? `place:${e.placeGeoid}` : unidentified();
+    case 'county-subdivision':
+      return e.countySubdivisionGeoid ? `cousub:${e.countySubdivisionGeoid}` : unidentified();
+    case 'county':
+      return countyKey() ?? unidentified();
+    case 'consolidated':
+      // A consolidated city-county is one government wearing both hats, so
+      // either identity legitimately names it — place first, as the more specific.
+      return e.placeGeoid ? `place:${e.placeGeoid}` : (countyKey() ?? unidentified());
+    case 'state':
+      return e.stateFips ? `state:${e.stateFips}` : unidentified();
+    default:
+      return unidentified();
   }
-  if (e.stateFips) return `state:${e.stateFips}`;
-  return `name:${e.type}:${e.name.toUpperCase()}`;
 }
 
 /** Rules an invariant test can assert directly, and the resolver upholds. */
