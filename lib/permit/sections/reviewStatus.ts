@@ -43,6 +43,7 @@ import { peekSnapshot } from '../snapshot/read';
 import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
 import {
   deriveReleaseGateModel, projectReleaseGates, releaseHeadline, requirementAffects,
+  requirementLane,
   RELEASE_GATE_DEFINITIONS,
   type ReleaseFindingType, type ReleaseGateModel, type ReleaseGateResult, type ReleaseRequirement,
 } from '../snapshot/releaseGates';
@@ -844,6 +845,49 @@ export function pageReviewStatus(
   const ready = snap?.permitReadiness?.ready === true;
   const headline = releaseHeadline(model.summary);
 
+  // == 2026-08-29 - THE ENGINEER SHOULD NOT HAVE TO DECODE GATE MATH ========
+  // AUDITED FIRST, and the counting is CORRECT. On this package the registry
+  // holds three open records - framing capacity (blocking, RG-4), the rail SKU
+  // (advisory, RG-4) and engineering review (blocking, RG-7) - and the strip
+  // reports 2 open gates / 2 unresolved requirements / 1 advisory. Two gates
+  // hold them, blocking requirements are counted separately from advisories, and
+  // every number reconciles. Nothing about the backend counting changes here.
+  //
+  // What the strip does NOT do is tell a professional what is being asked OF HIM.
+  // "2 root gates contain 2 unresolved requirements", a seven-row gate table
+  // whose cleared rows read "CLEARED 0 of 0", and a lane split expressed as
+  // arithmetic are the machine's view of the same three facts.
+  //
+  // This block states them as a scope of work, derived from the SAME model: the
+  // lane split decides which column each requirement lands in, so it cannot
+  // disagree with the counts beside it. The machine detail stays below, intact.
+  const _scopeOpen = model.requirements.filter(q => q.status === 'OPEN');
+  const _designScope = _scopeOpen.filter(q =>
+    q.severity !== 'warning' && requirementLane(q.requirementCode) === 'design');
+  const _eorScope = _scopeOpen.filter(q =>
+    q.severity !== 'warning' && requirementLane(q.requirementCode) === 'professional');
+  const _advisoryScope = _scopeOpen.filter(q => q.severity === 'warning');
+  const _scopeItem = (q: ReleaseRequirement): string =>
+    `<li style="margin:0 0 1px 0;">${escapeH(q.title || q.requirementCode)}<span style="color:#555;"> &mdash; ${escapeH(q.resolutionAction || '')}</span></li>`;
+  const _scopeCol = (title: string, colour: string, rows: ReleaseRequirement[], empty: string): string => `
+          <div style="padding:3px 8px;border-right:var(--border);">
+            <div style="font-size:7.5px;font-weight:900;letter-spacing:0.4px;color:${rows.length ? colour : '#166534'};">${title}</div>
+            ${rows.length
+              ? `<ul style="margin:1px 0 0 12px;padding:0;font-size:7px;line-height:1.3;">${rows.map(_scopeItem).join('')}</ul>`
+              : `<div style="font-size:7.5px;font-weight:700;color:#166534;margin-top:1px;">${empty}</div>`}
+          </div>`;
+  const reviewScope = `
+      <div data-review-scope="1" style="border:2px solid #111;margin-top:2px;background:#fff;">
+        <div style="background:#111;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.7px;padding:2px 8px;">
+          WHAT IS BEING ASKED &mdash; SCOPE BY OWNER (projected from the same release model as the counts below)
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;">
+          ${_scopeCol('DESIGN STATUS &mdash; SOLARPRO', '#b91c1c', _designScope, '0 open SolarPro design requirements')}
+          ${_scopeCol('EOR REVIEW SCOPE', '#1e3a5f', _eorScope, 'none outstanding')}
+          ${_scopeCol('PROCUREMENT ADVISORY', '#b45309', _advisoryScope, 'none')}
+        </div>
+      </div>`;
+
   // ── §4 release-status strip (RS-1) ────────────────────────────────────────
   const strip = `
       <div data-release-status-strip="1" style="display:flex;gap:8px;align-items:stretch;margin-top:1px;">
@@ -903,6 +947,7 @@ export function pageReviewStatus(
     <div class="page-content">
 
       ${isCont ? contHeader : strip}
+      ${isCont ? '' : reviewScope}
       ${isCont ? '' : (active.length ? rootGateTable(model) : '')}
       ${active.length ? groups : emptyState}
       ${rsFooter(snap?.meta.snapshotId ?? '—')}
