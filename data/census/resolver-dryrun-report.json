@@ -1,9 +1,10 @@
 {
   "corpus": 4016,
   "tally": {
-    "SAME_RESULT": 3903,
-    "MISSING_IDENTITY": 102,
-    "DELEGATION_UNKNOWN": 11
+    "SAME_RESULT": 3898,
+    "MISSING_IDENTITY": 80,
+    "DELEGATION_UNKNOWN": 11,
+    "ROW_IS_NOT_THE_AUTHORITY": 27
   },
   "differences": [
     {
@@ -393,8 +394,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Fairfield (county FIPS 09001), established from legal geography and baseline:county-administers-unincorporated-building. SolarPr"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Fairfield township (county-subdivision FIPS 09001), established from legal geography and ne:ct-town-administers-outside-a-munici"
     },
     {
       "id": "ct-hartford-hartford-county",
@@ -406,8 +407,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Hartford (county FIPS 09003), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Hartford township (county-subdivision FIPS 09003), established from legal geography and ne:ct-town-administers-outside-a-municip"
     },
     {
       "id": "ct-litchfield-litchfield-county",
@@ -419,8 +420,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Litchfield (county FIPS 09005), established from legal geography and baseline:county-administers-unincorporated-building. SolarP"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Litchfield township (county-subdivision FIPS 09005), established from legal geography and ne:ct-town-administers-outside-a-munic"
     },
     {
       "id": "ct-middlesex-middlesex-county",
@@ -432,8 +433,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Middlesex (county FIPS 09007), established from legal geography and baseline:county-administers-unincorporated-building. SolarPr"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Middlesex township (county-subdivision FIPS 09007), established from legal geography and ne:ct-town-administers-outside-a-munici"
     },
     {
       "id": "ct-new-haven-new-haven-county",
@@ -445,8 +446,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is New Haven (county FIPS 09009), established from legal geography and baseline:county-administers-unincorporated-building. SolarPr"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is New Haven township (county-subdivision FIPS 09009), established from legal geography and ne:ct-town-administers-outside-a-munici"
     },
     {
       "id": "ct-new-london-new-london-county",
@@ -458,8 +459,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is New London (county FIPS 09011), established from legal geography and baseline:county-administers-unincorporated-building. SolarP"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is New London township (county-subdivision FIPS 09011), established from legal geography and ne:ct-town-administers-outside-a-munic"
     },
     {
       "id": "ct-tolland-tolland-county",
@@ -471,8 +472,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Tolland (county FIPS 09013), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro "
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Tolland township (county-subdivision FIPS 09013), established from legal geography and ne:ct-town-administers-outside-a-municipa"
     },
     {
       "id": "ct-windham-windham-county",
@@ -484,8 +485,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Windham (county FIPS 09015), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro "
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Windham township (county-subdivision FIPS 09015), established from legal geography and ne:ct-town-administers-outside-a-municipa"
     },
     {
       "id": "ga-bibb-macon",
@@ -657,6 +658,19 @@
       "basis": "the governing building authority for this parcel is Houma (place FIPS 22109), established from legal geography and baseline:incorporated-place-administers-building. SolarPro holds "
     },
     {
+      "id": "ma-barnstable-barnstable-county",
+      "state": "MA",
+      "county": "Barnstable",
+      "city": "Unincorporated",
+      "hasIdentity": true,
+      "legacy": "ma-barnstable-barnstable-county",
+      "legacyMethod": "county-unincorporated",
+      "canonical": null,
+      "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Barnstable township (county-subdivision FIPS 25001), established from legal geography and ne:ma-town-administers-outside-a-munic"
+    },
+    {
       "id": "ma-berkshire-berkshire-county",
       "state": "MA",
       "county": "Berkshire",
@@ -666,8 +680,34 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Berkshire (county FIPS 25003), established from legal geography and baseline:county-administers-unincorporated-building. SolarPr"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Berkshire township (county-subdivision FIPS 25003), established from legal geography and ne:ma-town-administers-outside-a-munici"
+    },
+    {
+      "id": "ma-bristol-bristol-county",
+      "state": "MA",
+      "county": "Bristol",
+      "city": "Unincorporated",
+      "hasIdentity": true,
+      "legacy": "ma-bristol-bristol-county",
+      "legacyMethod": "county-unincorporated",
+      "canonical": null,
+      "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Bristol township (county-subdivision FIPS 25005), established from legal geography and ne:ma-town-administers-outside-a-municipa"
+    },
+    {
+      "id": "ma-dukes-dukes-county",
+      "state": "MA",
+      "county": "Dukes",
+      "city": "Unincorporated",
+      "hasIdentity": true,
+      "legacy": "ma-dukes-dukes-county",
+      "legacyMethod": "county-unincorporated",
+      "canonical": null,
+      "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Dukes township (county-subdivision FIPS 25007), established from legal geography and ne:ma-town-administers-outside-a-municipali"
     },
     {
       "id": "ma-essex-essex-county",
@@ -679,8 +719,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Essex (county FIPS 25009), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro ho"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Essex township (county-subdivision FIPS 25009), established from legal geography and ne:ma-town-administers-outside-a-municipali"
     },
     {
       "id": "ma-franklin-franklin-county",
@@ -692,8 +732,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Franklin (county FIPS 25011), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Franklin township (county-subdivision FIPS 25011), established from legal geography and ne:ma-town-administers-outside-a-municip"
     },
     {
       "id": "ma-hampden-hampden-county",
@@ -705,8 +745,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Hampden (county FIPS 25013), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro "
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Hampden township (county-subdivision FIPS 25013), established from legal geography and ne:ma-town-administers-outside-a-municipa"
     },
     {
       "id": "ma-hampshire-hampshire-county",
@@ -718,8 +758,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Hampshire (county FIPS 25015), established from legal geography and baseline:county-administers-unincorporated-building. SolarPr"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Hampshire township (county-subdivision FIPS 25015), established from legal geography and ne:ma-town-administers-outside-a-munici"
     },
     {
       "id": "ma-middlesex-middlesex-county",
@@ -731,8 +771,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Middlesex (county FIPS 25017), established from legal geography and baseline:county-administers-unincorporated-building. SolarPr"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Middlesex township (county-subdivision FIPS 25017), established from legal geography and ne:ma-town-administers-outside-a-munici"
     },
     {
       "id": "ma-nantucket-nantucket-county",
@@ -744,8 +784,34 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Nantucket (county FIPS 25019), established from legal geography and baseline:county-administers-unincorporated-building. SolarPr"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Nantucket township (county-subdivision FIPS 25019), established from legal geography and ne:ma-town-administers-outside-a-munici"
+    },
+    {
+      "id": "ma-norfolk-norfolk-county",
+      "state": "MA",
+      "county": "Norfolk",
+      "city": "Unincorporated",
+      "hasIdentity": true,
+      "legacy": "ma-norfolk-norfolk-county",
+      "legacyMethod": "county-unincorporated",
+      "canonical": null,
+      "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Norfolk township (county-subdivision FIPS 25021), established from legal geography and ne:ma-town-administers-outside-a-municipa"
+    },
+    {
+      "id": "ma-plymouth-plymouth-county",
+      "state": "MA",
+      "county": "Plymouth",
+      "city": "Unincorporated",
+      "hasIdentity": true,
+      "legacy": "ma-plymouth-plymouth-county",
+      "legacyMethod": "county-unincorporated",
+      "canonical": null,
+      "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Plymouth township (county-subdivision FIPS 25023), established from legal geography and ne:ma-town-administers-outside-a-municip"
     },
     {
       "id": "ma-suffolk-suffolk-county",
@@ -757,8 +823,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Suffolk (county FIPS 25025), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro "
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Suffolk township (county-subdivision FIPS 25025), established from legal geography and ne:ma-town-administers-outside-a-municipa"
     },
     {
       "id": "ma-worcester-worcester-county",
@@ -770,8 +836,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Worcester (county FIPS 25027), established from legal geography and baseline:county-administers-unincorporated-building. SolarPr"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Worcester township (county-subdivision FIPS 25027), established from legal geography and ne:ma-town-administers-outside-a-munici"
     },
     {
       "id": "md-charles-waldorf",
@@ -1225,8 +1291,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Bristol (county FIPS 44001), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro "
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Bristol township (county-subdivision FIPS 44001), established from legal geography and ne:ri-town-administers-outside-a-municipa"
     },
     {
       "id": "ri-kent-kent-county",
@@ -1238,8 +1304,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Kent (county FIPS 44003), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro hol"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Kent township (county-subdivision FIPS 44003), established from legal geography and ne:ri-town-administers-outside-a-municipalit"
     },
     {
       "id": "ri-newport-newport-county",
@@ -1251,8 +1317,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Newport (county FIPS 44005), established from legal geography and baseline:county-administers-unincorporated-building. SolarPro "
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Newport township (county-subdivision FIPS 44005), established from legal geography and ne:ri-town-administers-outside-a-municipa"
     },
     {
       "id": "ri-providence-providence-county",
@@ -1264,8 +1330,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Providence (county FIPS 44007), established from legal geography and baseline:county-administers-unincorporated-building. SolarP"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Providence township (county-subdivision FIPS 44007), established from legal geography and ne:ri-town-administers-outside-a-munic"
     },
     {
       "id": "ri-washington-washington-county",
@@ -1277,8 +1343,8 @@
       "legacyMethod": "county-unincorporated",
       "canonical": null,
       "canonicalStatus": "BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING",
-      "category": "MISSING_IDENTITY",
-      "basis": "the governing building authority for this parcel is Washington (county FIPS 44009), established from legal geography and baseline:county-administers-unincorporated-building. SolarP"
+      "category": "ROW_IS_NOT_THE_AUTHORITY",
+      "basis": "the governing building authority for this parcel is Washington township (county-subdivision FIPS 44009), established from legal geography and ne:ri-town-administers-outside-a-munic"
     },
     {
       "id": "sc-beaufort-hilton-head",

@@ -466,3 +466,61 @@ describe('identityKey never falls across ENTITY TYPES', () => {
     expect(identityKey(ent({ type: 'consolidated', placeGeoid: null }))).toBe('county:99001');
   });
 });
+
+describe('delegation where the county is not a government', () => {
+  const policy = baselinePolicy();
+  const withMcd = (state: string, fips: string, county: string, cFips: string, mcd: string) => {
+    const g = geography({ place: null, state: { code: state, fips }, county: { name: county, fips: cFips } });
+    return { ...g, countySubdivision: facet({ name: mcd, geoid: `${cFips}99999` }, 'VERIFIED', 'census', PROV) };
+  };
+
+  for (const [state, fips, county, cFips, town] of [
+    ['CT', '09', 'Litchfield', '09005', 'Goshen town'],
+    ['RI', '44', 'Newport', '44005', 'Middletown town'],
+    ['MA', '25', 'Berkshire', '25003', 'Lenox town'],
+  ] as const) {
+    it(`${state}: the TOWN administers outside a municipality, not the county`, () => {
+      // CT has 0 of 8 counties functioning as governments, RI 0 of 5, MA 5 of 14
+      // (Census FUNCSTAT). Naming a county building department there names a body
+      // that does not exist — and 22 registry rows currently do exactly that.
+      const a = resolveScopeAuthority('building', withMcd(state, fips, county, cFips, town), policy, EMPTY_REGISTRY);
+      expect(a.entity?.type).toBe('county-subdivision');
+      expect(a.entity?.name).toBe(town);
+      expect(a.delegationRuleId).toContain(state.toLowerCase());
+    });
+  }
+
+  it('a state WITH county government is unaffected', () => {
+    // Illinois has active counties; the baseline rule must still govern there.
+    const a = resolveScopeAuthority('building',
+      withMcd('IL', '17', 'Madison', '17119', 'Nameoki township'), policy, EMPTY_REGISTRY);
+    expect(a.entity?.type).toBe('county');
+    expect(a.delegationRuleId).toBe('baseline:county-administers-unincorporated-building');
+  });
+
+  it('an incorporated city in New England still governs its own limits', () => {
+    const a = resolveScopeAuthority('building',
+      geography({ place: { name: 'Hartford', geoid: '0937000' }, state: { code: 'CT', fips: '09' },
+        county: { name: 'Hartford', fips: '09003' } }), policy, EMPTY_REGISTRY);
+    expect(a.entity?.type).toBe('place');
+    expect(a.entity?.name).toBe('Hartford');
+  });
+});
+
+describe('a consolidated city-county is a resolvable entity', () => {
+  it('produces an entity instead of vanishing', () => {
+    // entityFromGeography returned null for 'consolidated', so any rule naming
+    // one produced AUTHORITY_SCOPE_UNRESOLVED and the parcel had no authority.
+    const g = geography({ place: { name: 'Testville', geoid: '9912345' } });
+    const policy = baselinePolicy([{
+      id: 'test:consolidated', state: 'ZZ', scope: 'building',
+      territory: { type: 'incorporated' },
+      delegator: 'place', delegate: 'consolidated',
+      grade: 'GOVERNED', provenance: null,
+    }]);
+    const a = resolveScopeAuthority('building', g, policy, EMPTY_REGISTRY);
+    expect(a.entity, 'a consolidated government resolved to nothing').not.toBeNull();
+    expect(a.entity!.type).toBe('consolidated');
+    expect(identityKey(a.entity!)).toBe('place:9912345');
+  });
+});

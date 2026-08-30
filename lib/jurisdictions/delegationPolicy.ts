@@ -160,6 +160,43 @@ export const BASELINE_DELEGATION_RULES: JurisdictionDelegationRule[] = [
       + 'states have no county zoning at all, which is a specific rule.',
     grade: 'CURATED', provenance: null,
   },
+  // ── WHERE THE COUNTY IS NOT A GOVERNMENT ────────────────────────────────
+  // The baseline "county administers unincorporated territory" rule assumes the
+  // county EXISTS as a government. In New England it frequently does not:
+  //
+  //   Connecticut    0 of 8 counties are governments   169 active towns
+  //   Rhode Island   0 of 5                             31 active towns
+  //   Massachusetts  5 of 14                           293 active towns
+  //
+  // (Counted from the Census county file by FUNCSTAT: CT and RI county rows are
+  // all 'N', nonfunctioning. CT and RI abolished county government outright.)
+  //
+  // So a parcel outside an incorporated place in CT or RI has no county to fall
+  // back to, and the town — a county SUBDIVISION in Census terms — is the
+  // general-purpose government and the building authority. Without these rules
+  // the resolver names a county building department that does not exist, which
+  // is the registry defect these same states already exhibit: 22 rows assert
+  // exactly such a department.
+  //
+  // Graded GOVERNED, not CURATED: it is read off authoritative federal data
+  // about which entities function as governments, not inferred from practice.
+  ...(['CT', 'RI', 'MA'] as const).map(state => ({
+    id: `ne:${state.toLowerCase()}-town-administers-outside-a-municipality`,
+    state,
+    scope: 'building' as AuthorityScope,
+    territory: { type: 'unincorporated' as TerritoryType },
+    delegator: 'county' as AuthorityEntityType,
+    delegate: 'county-subdivision' as AuthorityEntityType,
+    conditions: `${state} county government is nonfunctioning or absent (US Census FUNCSTAT), so the `
+      + 'TOWN (county subdivision) is the general-purpose government and the building authority for '
+      + 'territory outside an incorporated place. A county building department here would name a body '
+      + 'that does not exist.',
+    grade: 'GOVERNED' as FacetGrade,
+    provenance: {
+      source: 'US Census Bureau national geographic reference codes (codes2020), county FUNCSTAT',
+      sourceUrl: 'https://www2.census.gov/geo/docs/reference/codes2020/national_county2020.txt',
+    },
+  })),
   {
     id: 'baseline:fire-is-a-separate-authority',
     state: '*', scope: 'fire',

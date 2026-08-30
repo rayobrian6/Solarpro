@@ -135,7 +135,23 @@ function entityFromGeography(
     case 'state':
       if (!st) return null;
       return { ...base, type, name: st.name ?? st.code };
+    case 'consolidated':
+      // A consolidated city-county is ONE government wearing both hats —
+      // Nashville-Davidson, Athens-Clarke, Augusta-Richmond, Louisville/Jefferson,
+      // Honolulu. It was returning null, so any delegation rule naming it
+      // produced AUTHORITY_SCOPE_UNRESOLVED and the parcel had no authority at
+      // all. It carries BOTH identities: the place where one exists, and the
+      // county it is coextensive with. `identityKey` prefers the place.
+      if (!pl && !co) return null;
+      return {
+        ...base, type,
+        name: pl?.name ?? co!.name,
+        placeGeoid: pl?.geoid ?? null,
+      };
     default:
+      // 'special-district' has no boundary provider — nothing in SolarPro
+      // retrieves fire-district geography, and a fire district does not follow
+      // municipal limits, so it stays unresolved rather than inheriting one.
       return null;
   }
 }

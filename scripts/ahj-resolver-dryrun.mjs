@@ -85,6 +85,14 @@ function geographyFor(row) {
       cFips ? 'VERIFIED' : 'UNKNOWN', 'census', PROV),
   };
   const isCountyRow = row.ahjType === 'county' || String(row.city).toLowerCase() === 'unincorporated';
+  // The geocoder always returns the county subdivision, so the probe must too —
+  // otherwise the New England rules (which delegate to the TOWN) are starved of
+  // the entity they name and report AUTHORITY_SCOPE_UNRESOLVED for the wrong
+  // reason. A synthetic MCD stands in; the probe is testing DELEGATION here, not
+  // which particular town.
+  g.countySubdivision = cFips
+    ? LG.facet({ name: `${row.county} township`, geoid: `${cFips}99999` }, 'VERIFIED', 'census', PROV)
+    : LG.unknownFacet();
   g.incorporatedPlace = isCountyRow
     // Proven OUTSIDE every incorporated place — a real determination, not a null.
     ? LG.facet(null, 'VERIFIED', 'no incorporated place contains this coordinate', PROV)
@@ -121,10 +129,19 @@ for (const row of AHJ_NATIONAL) {
 
   let category;
   if (canonicalId && legacyId && canonicalId === legacyId) category = 'SAME_RESULT';
+  // Checked BEFORE the missing-record branch: when the delegation policy names a
+  // TOWN and the registry row claims the COUNTY, the row cannot be the authority
+  // for this parcel in the first place. Reporting that as "record missing" would
+  // hide the actual finding, which is that the row asserts a county building
+  // department in a state whose counties are not governments.
+  else if (canonical.entity?.type === 'county-subdivision' && isCountyRow) {
+    category = 'ROW_IS_NOT_THE_AUTHORITY';
+  }
   else if (canonical.status === 'BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING') {
     category = row.legalIdentity ? 'MISSING_IDENTITY_IN_REGISTRY' : 'MISSING_IDENTITY';
   } else if (canonical.status === 'AUTHORITY_SCOPE_UNRESOLVED' || canonical.status === 'BOUNDARY_UNRESOLVED') {
     category = 'DELEGATION_UNKNOWN';
+
   } else if (canonicalId && !legacyId) category = 'EXPECTED_CORRECTION';
   else if (canonicalId && legacyId && canonicalId !== legacyId) {
     // Both bound, but to different rows. If they resolve to the same GOVERNMENT
