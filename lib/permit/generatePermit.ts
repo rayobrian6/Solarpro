@@ -593,6 +593,24 @@ export function generatePermitHTML(
       if (!input.project.windExposure)   input.project.windExposure = structInput.windExposure;
       s.wind.velocityPressure    = wa.velocityPressurePsf;
       s.wind.netUpliftPressure   = wa.netUpliftPressurePsf;
+      // ══ 2026-08-29 - THE DERIVATION WAS COMPUTED AND THEN DROPPED ═════════
+      // The engine publishes the Eq. 26.10-1 factor table, the derivation
+      // sentence, the pressure-coefficient basis and the Fig. 29.4-7
+      // applicability verdict. PV-4C READS all five (structuralPages `_wind`)
+      // and this mapping carried none of them, so the sheet printed
+      // "pressure coefficient basis not recorded" about a basis the engine had
+      // recorded, and the applicability note - the one place the package tells
+      // an engineer the cited figure does not govern this geometry - reached
+      // the sub-system sheets but never the roof sheet.
+      (s.wind as Record<string, unknown>).factors                  = wa.factors;
+      (s.wind as Record<string, unknown>).derivation               = wa.derivation;
+      (s.wind as Record<string, unknown>).gcpBasis                 = wa.gcpBasis;
+      (s.wind as Record<string, unknown>).gcpApplicabilityExceeded = wa.gcpApplicabilityExceeded;
+      (s.wind as Record<string, unknown>).gcpApplicabilityNote     = wa.gcpApplicabilityNote;
+      (s.wind as Record<string, unknown>).roofSlopeDeg             = wa.roofSlopeDeg;
+      (s.wind as Record<string, unknown>).roofSlopeEstablished     = wa.roofSlopeEstablished;
+      (s.wind as Record<string, unknown>).roofSlopePlaneId         = wa.roofSlopePlaneId;
+      (s.wind as Record<string, unknown>).roofSlopeBasis           = wa.roofSlopeBasis;
       if (ml?.upliftPerMountLbs) s.wind.upliftPerAttachment = ml.upliftPerMountLbs;
       s.snow = s.snow || {};
       s.snow.groundSnowLoad      = sa.groundSnowLoadPsf;

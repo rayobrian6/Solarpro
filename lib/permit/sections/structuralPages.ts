@@ -876,6 +876,13 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const _gcpBasis = _wind.gcpBasis ?? 'pressure coefficient basis not recorded';
   const _gcpExceeded = _wind.gcpApplicabilityExceeded === true;
   const _gcpNote = _wind.gcpApplicabilityNote ?? null;
+  // 2026-08-29 - THE SLOPE THE ANALYSIS RAN ON, AND THE PLANE IT CAME FROM.
+  // The note states a slope ("this roof is 18.2 deg"); without its provenance a
+  // reviewer cannot tell a measured plane from a fabricated default - and a
+  // fabricated 20 deg is exactly what used to reach it. Rendered only when the
+  // record carries the provenance, so nothing is invented on a legacy snapshot.
+  const _slopeBasis = (_wind as { roofSlopeBasis?: string | null }).roofSlopeBasis ?? null;
+  const _slopeEstablished = (_wind as { roofSlopeEstablished?: boolean | null }).roofSlopeEstablished;
   const _envTag      = _proj.environmentalStateTag;
   const _envTagColor = _proj.environmentalUnverified ? '#b45309' : '#000';
 
@@ -917,6 +924,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             }</td></tr>` : ''}
             ${_wind.gcpBasis ? `<tr><td>Pressure Coefficient</td><td class="cv" style="font-size:5.6px;color:${_gcpExceeded ? '#b45309' : '#000'};">${escapeH(_gcpBasis)}</td></tr>` : ''}
             ${_gcpExceeded && _gcpNote ? `<tr><td colspan="2" style="font-size:5.6px;color:#b45309;font-weight:bold;">${escapeH(_gcpNote)}</td></tr>` : ''}
+            ${_slopeBasis ? `<tr><td>Roof Slope Basis</td><td class="cv" style="font-size:5.6px;color:${_slopeEstablished === false ? '#b45309' : '#000'};">${escapeH(_slopeBasis)}</td></tr>` : ''}
           </table>
         </div>
 

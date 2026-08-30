@@ -48,6 +48,15 @@ export interface StructuralInputV4 {
   groundSnowLoad: number;      // psf
   meanRoofHeight: number;      // ft
   roofPitch: number;           // degrees
+  /** 2026-08-29 - WHERE THE SLOPE CAME FROM. `roofPitch` decides whether ASCE
+   *  7-22 Fig. 29.4-7 governs at all (slope > 7 deg) and which snow slope factor
+   *  applies, and it used to arrive as a bare number that could be a fabricated
+   *  20. These three fields travel with it so any consumer can state the plane
+   *  the analysis ran on - and so an invariant can assert the slope traces to a
+   *  canonical roof plane. See lib/structural/roofSlopeAuthority.ts. */
+  roofSlopeEstablished?: boolean;
+  roofSlopePlaneId?: string | null;
+  roofSlopeBasis?: string;
   /** the roof COVERING, e.g. 'shingle' / 'metal' / 'tile'. ASCE 7-22 Fig. 7.4-1
    *  selects a different snow slope-factor curve for an unobstructed SLIPPERY
    *  surface, and asphalt shingle is not one. Absent ⇒ treated as NON-slippery,
@@ -124,6 +133,10 @@ export interface WindAnalysis {
    *  ENGINEERING ASSUMPTION and the note says why. */
   gcpApplicabilityExceeded?: boolean;
   gcpApplicabilityNote?: string | null;
+  roofSlopeDeg?: number;
+  roofSlopeEstablished?: boolean | null;
+  roofSlopePlaneId?: string | null;
+  roofSlopeBasis?: string | null;
 }
 
 export interface SnowAnalysis {
@@ -1473,6 +1486,14 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
     gcpBasis: gcp.basis,
     gcpApplicabilityExceeded: gcp.applicabilityExceeded,
     gcpApplicabilityNote: gcp.applicabilityNote,
+    // The applicability verdict is ABOUT this slope, so the slope and its
+    // provenance ride with it. A note reading "this roof is 20.0 deg" is only
+    // checkable if the record also says which plane 20.0 came from - and when
+    // nothing established it, that is the fact worth printing.
+    roofSlopeDeg: input.roofPitch,
+    roofSlopeEstablished: input.roofSlopeEstablished ?? null,
+    roofSlopePlaneId: input.roofSlopePlaneId ?? null,
+    roofSlopeBasis: input.roofSlopeBasis ?? null,
   };
 
   // ── 4. Snow analysis (ASCE 7-22) ────────────────────────────────────────

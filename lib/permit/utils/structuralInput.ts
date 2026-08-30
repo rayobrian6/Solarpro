@@ -19,6 +19,7 @@ import type { CADModel } from '@/lib/cad/types';
 import type { StructuralInputV4 } from '@/lib/structural-engine-v4';
 import { resolveArrayStructuralLayout } from './arrayLayout';
 import { getMountingSystemById, resolveMountingSystemId } from '@/lib/mounting-hardware-db';
+import { projectGoverningRoofSlope } from '@/lib/structural/roofSlopeAuthority';
 
 /**
  * Build the V4 structural-engine input from the permit input + CAD + canonical
@@ -32,7 +33,32 @@ export function buildStructuralInputForPermit(
   /** Hybrid (P2): scope the array layout to one sub-system's panels. */
   subSystemKey?: 'roof' | 'ground' | 'fence',
 ): StructuralInputV4 {
-  const roofPitchDeg = cad.roof?.planes?.[0]?.pitch ?? input.project.roofPitch ?? 20;
+  // ══ 2026-08-29 — THE SLOPE THAT REACHES THE WIND AND SNOW ANALYSIS ═══════
+  // This was `cad.roof?.planes?.[0]?.pitch ?? input.project.roofPitch ?? 20`.
+  //
+  // That 20 is not decoration: `roofPitch` below feeds
+  // `rooftopSolarPressureCoefficient`, whose whole job is to decide whether
+  // ASCE 7-22 Fig. 29.4-7 governs (the test is `slope > 7°`), and
+  // `calcRoofSnowLoad`, which picks the Cs slope factor. So a design whose CAD
+  // planes carried no pitch produced PV-4C's
+  //     "Fig. 29.4-7 applies to roof slopes LESS THAN 7°; this roof is 20.0°"
+  // for a roof whose canonical planes are 16.5° and 18.2°. Meanwhile the
+  // drafting layer's own fallback invented 5° for the same missing data — two
+  // fabricated roofs on one design.
+  //
+  // `projectGoverningRoofSlope` reads every record that holds planes, prefers
+  // the ones carrying modules, takes the steepest, and NAMES the plane id. When
+  // nothing is on file it returns `established:false` with a named nominal, and
+  // the unverified-geometry gate says so rather than a number pretending to be
+  // a measurement.
+  const _slope = projectGoverningRoofSlope({
+    cadPlanes: cad.roof?.planes,
+    projectPlanes: (input.project as { roofPlanes?: unknown }).roofPlanes,
+    layoutPlanes: (input as { layout?: { geometry?: { roofPlanes?: unknown } } })
+      .layout?.geometry?.roofPlanes,
+    projectRoofPitchDeg: input.project.roofPitch,
+  });
+  const roofPitchDeg = _slope.slopeDeg;
   const windSpeed    = canonical.site.windSpeed || 115;
   const groundSnow   = canonical.site.groundSnowLoad || 0;
   const rafterSize   = input.project.rafterSize || '2x6';
@@ -83,6 +109,11 @@ export function buildStructuralInputForPermit(
     groundSnowLoad: groundSnow,
     meanRoofHeight: 15,
     roofPitch: roofPitchDeg,
+    // The slope's PROVENANCE travels with it, so every consumer can say which
+    // plane the analysis ran on instead of restating a bare number.
+    roofSlopeEstablished: _slope.established,
+    roofSlopePlaneId: _slope.planeId,
+    roofSlopeBasis: _slope.basis,
     // ASCE 7-22 Fig. 7.4-1 picks a different snow slope-factor curve for an
     // unobstructed SLIPPERY surface. Asphalt shingle is not one, and the engine
     // used to apply cos(pitch) to every roof regardless.
