@@ -7,6 +7,9 @@
 
 import { JURISDICTION_DATA } from './necVersions';
 
+import type { LegalGovernmentIdentity } from './legalGovernmentIdentity';
+import { AHJ_LEGAL_IDENTITY } from './ahj-legal-identity.generated';
+
 export interface AhjRecord {
   id: string;                    // unique slug: state-county-city
   stateCode: string;
@@ -78,6 +81,18 @@ export interface AhjRecord {
   // the SunSpec/Orange Button AHJ Registry (real, maintained source). Setbacks,
   // CA NEC cycle and FL wind are normalized to real code logic (see applyCodeBasis).
   dataProvenance?: 'curated' | 'expanded' | 'registry_live';
+
+  // ── STABLE LEGAL-GEOGRAPHY IDENTITY ──────────────────────────────────────
+  // WHICH GOVERNMENT this row is, as a national Census identity rather than a
+  // name. Attached from the generated table below, and ABSENT when the identity
+  // could not be deterministically proven — absent means "not established",
+  // which is the honest answer and the one that keeps a wrong GEOID from binding
+  // a package to the wrong government.
+  //
+  // It proves identity ONLY. It says nothing about whether this government
+  // issues building permits or which codes it adopted; that is a separate,
+  // currently unmeasured dimension.
+  legalIdentity?: LegalGovernmentIdentity;
 }
 
 // ── Helper to build a standard record ────────────────────────────────────────
@@ -4616,6 +4631,11 @@ function applyCodeBasis(r: AhjRecord, provenance: 'curated' | 'expanded'): AhjRe
     roofSetbackInches: code ? code.roofSetbackInches : r.roofSetbackInches,
     ridgeSetbackInches: code ? code.ridgeSetbackInches : r.ridgeSetbackInches,
     dataProvenance: provenance,
+    // One registry, one identity: the generated table is keyed by this same
+    // row id, so the identity travels with the record every consumer already
+    // reads. Undefined (not null) when unproven, so it vanishes from JSON
+    // rather than asserting an empty identity.
+    legalIdentity: AHJ_LEGAL_IDENTITY[r.id] ?? undefined,
   };
 }
 

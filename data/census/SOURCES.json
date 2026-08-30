@@ -1,0 +1,27 @@
+{
+  "retrievedAtIso": "2026-08-30",
+  "vintage": "2020 Census (codes2020)",
+  "files": [
+    {
+      "file": "national_place2020.txt",
+      "url": "https://www2.census.gov/geo/docs/reference/codes2020/national_place2020.txt",
+      "bytes": 2518110,
+      "lines": 32189,
+      "sha256": "302ff3cf031217aca032d89f42c0dd93611a76d72ab2036944fa40d5c23c6613"
+    },
+    {
+      "file": "national_county2020.txt",
+      "url": "https://www2.census.gov/geo/docs/reference/codes2020/national_county2020.txt",
+      "bytes": 126622,
+      "lines": 3236,
+      "sha256": "9f6e5f6eb6ac2f5e9a36d5fd01dec77991bddc75118f748a069441a4782970d6"
+    },
+    {
+      "file": "national_cousub2020.txt",
+      "url": "https://www2.census.gov/geo/docs/reference/codes2020/national_cousub2020.txt",
+      "bytes": 2259318,
+      "lines": 36641,
+      "sha256": "2f292e90e56b1c1b085402bef6e4dc9d9404b0006e44988860226759217c7cf3"
+    }
+  ]
+}
