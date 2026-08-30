@@ -58,7 +58,26 @@ export type CodeEditionSource =
   | 'ahj-record'              // resolved from the AHJ adoption record (NEC)
   | 'ahj-registry-retrieval'  // AAC WS-3 — retrieved live from the AHJ registry
   | 'structural-engine-basis' // ASCE edition the structural engine ran under
-  | 'operator-entry'          // manual operator authority (future)
+  /** A value an AUTHENTICATED OPERATOR actually supplied for this project.
+   *  Nothing may be classified this way without a real operator action behind
+   *  it — SolarPro has no operator-attribution mechanism today, so nothing
+   *  currently produces this. It is retained for when one exists. */
+  | 'operator-entry'
+  /** A value that arrived on `compliance.jurisdiction` with NO evidence of who
+   *  put it there.
+   *
+   *  This class exists because the alternative was a lie. The enriched value was
+   *  classified 'operator-entry' and published as "NEC <year> was entered for
+   *  this project by the operator" — while the actual upstream source was a
+   *  hardcoded route skeleton literal, or a client-computed state-table value,
+   *  with no operator anywhere in the chain. A cross-cutting audit put the reach
+   *  of that mis-attribution at 1,757 of 4,016 jurisdictions.
+   *
+   *  It keeps its PRECEDENCE (a project that states its edition still wins over a
+   *  state default) because demoting it would change WHICH edition is chosen —
+   *  a behaviour change, not a provenance fix. What it loses is the false claim
+   *  that an operator said it. */
+  | 'project-record-unprovenanced'
   /** A.4 — TWO OR MORE GOVERNED ADOPTION AUTHORITIES DISAGREE. Distinct from
    *  `unknown`, which claims we have nothing. Reporting a contradiction as
    *  "unknown" is a lie of omission: it sends the operator to obtain evidence
@@ -481,10 +500,35 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
   // state default, so `necVersionEnriched` is promoted from fallback metadata to a real (still
   // unverified) source. A.4's concern was the CURATED PER-AHJ table being published as the AHJ's
   // ordinance — that table is still fallback-only and still never adopts.
+  // ── PRECEDENCE, AND WHY THE ENRICHED VALUE NO LONGER OUTRANKS THE STATE ──
+  // It used to be: retrieval > enriched > state table, on the reasoning that "an
+  // operator who states the edition for THIS jurisdiction is supplying better
+  // evidence than a state default". That reasoning is sound — for an actual
+  // operator. But nothing in the chain establishes that an operator supplied it:
+  // the value arrives on `compliance.jurisdiction.necVersion`, which the permit
+  // route itself used to populate with a hardcoded '2020' skeleton literal. So
+  // the branch promoted a DEFAULT above a published state adoption and then
+  // described it as operator testimony.
+  //
+  // An anonymous project field is not better evidence than a state's published
+  // adoption, so the state table now wins and the enriched value is used only
+  // when there is nothing else — carried honestly as unprovenanced.
+  // PRECEDENCE IS UNCHANGED. Only the ATTRIBUTION is corrected.
+  //
+  // An earlier attempt at this fix also demoted the enriched value below the
+  // state table, reasoning that an anonymous project field is not better
+  // evidence than a published state adoption. That is true of an anonymous
+  // field — but it would also stop a project that legitimately knows its local
+  // edition from stating it, which is a behaviour change rather than a
+  // provenance correction, and it broke a test that sets the edition
+  // deliberately. Containment must not quietly redesign precedence.
+  //
+  // So the value still wins where it always did. What changed is that it is no
+  // longer described as something an operator said.
   const nec = necRetrieved ?? necFromEnriched ?? necFromStateTable ?? null;
   const necSource: CodeEditionSource = necRetrieved
     ? 'ahj-registry-retrieval'
-    : necFromEnriched ? 'operator-entry'
+    : necFromEnriched ? 'project-record-unprovenanced'
       : necFromStateTable ? 'state-adoption-table'
         : adoptConflicted ? 'conflicting-adoption-authorities' : 'unknown';
   const necRef = necRetrieved
@@ -572,11 +616,11 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
           }
         : necFromEnriched
           ? {
-              source: 'operator-entry',
-              note: `NEC ${necFromEnriched} was entered for this project by the operator. It outranks the state `
-                + 'adoption baseline but is NOT a verified reading of an adoption ordinance; confirm at plan review.',
+              source: 'project-record-unprovenanced',
+              note: `NEC ${necFromEnriched} is carried on the project record with NO evidence of who established it. It is NOT an operator attestation and NOT a reading of an adoption ordinance` 
+                + '; it is used only because no state adoption resolved. Confirm at plan review.',
             }
-          : necFromStateTable
+        : necFromStateTable
           ? {
               source: 'state-adoption-table',
               ref: `necVersions:${rec?.stateCode ?? '??'}`,

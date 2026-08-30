@@ -403,7 +403,10 @@ export interface PermitInput {
     overallStatus: string;
     jurisdiction?: {
       state: string;
-      necVersion: string;
+      /** ABSENT is a real state: it means no adoption source has resolved yet.
+       *  It used to be filled with a hardcoded '2020' skeleton literal that was
+       *  then published as an operator attestation. */
+      necVersion?: string;
       ahj: string;
       permitNotes?: string;
     };

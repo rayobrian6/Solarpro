@@ -44,15 +44,19 @@ describe('W4 §1 — buildCodeAuthority (honest verification state)', () => {
       ahjRecord: null, necVersionEnriched: 'NEC 2023', asceEngineBasis: 'ASCE 7-22',
       capturedAtIso: '2026-07-21',
     });
-    // A.4's target was the CURATED PER-AHJ TABLE being published as the jurisdiction's adopted
-    // ordinance. That remains prohibited (see the curated-record case below: `source` is never
-    // 'ahj-record'). But `compliance.jurisdiction.necVersion` is not that table — it is an OPERATOR
-    // ENTRY for this specific project, and 'operator-entry' is a declared source in its own right.
-    // NATIONWIDE BASELINE (2026-08-27): an operator who states the edition is supplying better
-    // evidence than a state default, so it adopts and outranks the state baseline. It is still
-    // never `verified`, and the value is still carried as fallback metadata for traceability.
+    // MIGRATED 2026-08-30. This previously asserted `source === 'operator-entry'`, on the
+    // reasoning quoted here: "compliance.jurisdiction.necVersion ... is an OPERATOR ENTRY for
+    // this specific project". A six-domain audit proved that false. Nothing in the chain
+    // establishes an operator: the permit route ITSELF populated that field with a hardcoded
+    // '2020' skeleton literal, and the value was then published as
+    // "NEC 2020 was entered for this project by the operator". The reach of the
+    // mis-attribution was put at 1,757 of 4,016 jurisdictions.
+    //
+    // The value is still usable and still carried — it is simply described truthfully now.
+    // 'operator-entry' is reserved for a real operator action, which SolarPro cannot yet
+    // attribute, so nothing produces it.
     expect(ca.editions.nec.edition).toBe('2023');
-    expect(ca.editions.nec.source).toBe('operator-entry');
+    expect(ca.editions.nec.source).toBe('project-record-unprovenanced');
     expect(ca.editions.nec.fallbackEdition).toBe('2023');
     expect(ca.editions.nec.fallbackSource).toBe('compliance.jurisdiction.necVersion');
     expect(ca.verificationStatus).not.toBe('verified');

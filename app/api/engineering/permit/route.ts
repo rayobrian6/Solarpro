@@ -670,7 +670,10 @@ export async function POST(req: NextRequest) {
         overallStatus: 'PASS',
         jurisdiction: {
           state:      project.address?.match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '—',
-          necVersion: '2020',
+          // NO SKELETON NEC LITERAL. This injected '2020', which reached codeAuthority as
+          // `necVersionEnriched` and was classified 'operator-entry' with the sentence "NEC
+          // 2020 was entered for this project by the operator" — when no operator entered
+          // anything. Absent, the honestly-labelled state-adoption tier resolves it instead.
           ahj:        project.ahj || '—',
           permitNotes: undefined,
         },
@@ -678,7 +681,10 @@ export async function POST(req: NextRequest) {
     } else if (!body.compliance.jurisdiction) {
       body.compliance.jurisdiction = {
         state:      project.address?.match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '—',
-        necVersion: '2020',
+        // NO SKELETON NEC LITERAL. This injected '2020', which reached codeAuthority as
+        // `necVersionEnriched` and was classified 'operator-entry' with the sentence "NEC
+        // 2020 was entered for this project by the operator" — when no operator entered
+        // anything. Absent, the honestly-labelled state-adoption tier resolves it instead.
         ahj:        project.ahj || '—',
       };
     }
