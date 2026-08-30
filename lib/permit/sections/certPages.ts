@@ -276,7 +276,8 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
           ${hasRealBattery(project) ? `<li>National Electrical Code (NEC) ${necVer}, Article 706 &mdash; Energy Storage Systems; NFPA 855</li>` : ''}
           <li>${asce} &mdash; Minimum Design Loads and Associated Criteria for Buildings and Other Structures</li>
           <li>International Building Code (IBC) / International Residential Code (IRC) &mdash; Structural requirements</li>
-          <li>International Fire Code (IFC) ${ifcVer} &mdash; &sect;1204 Solar Photovoltaic Systems (rooftop access &amp; pathways)</li>
+          <!-- 2026-08-29 - the raw token printed "(IFC) PENDING"; the projection's label is the one presentation. -->
+          <li>International Fire Code &mdash; ${cp.label('ifc')} &mdash; &sect;1204 Solar Photovoltaic Systems (rooftop access &amp; pathways)</li>
           <li>All applicable local amendments adopted by ${state} and the Authority Having Jurisdiction (${pa.present ? pa.tag('ahj') : escapeH(ahj)})</li>
         </ul>
       </div>` : `
@@ -296,7 +297,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
             <li>NEC ${necVer} Articles 690 &amp; 705${hasRealBattery(project) ? ' &amp; 706 (NFPA 855)' : ''}</li>
             <li>${asce} &mdash; Minimum Design Loads and Associated Criteria</li>
             <li>International Building Code (IBC) / International Residential Code (IRC) &mdash; Structural requirements</li>
-            <li>International Fire Code (IFC) ${ifcVer} &mdash; &sect;1204 rooftop PV access &amp; pathways (setback geometry shown on PV-1; compliance verdict pending code authority)</li>
+            <li>International Fire Code &mdash; ${cp.label('ifc')} &mdash; &sect;1204 rooftop PV access &amp; pathways (setback geometry shown on PV-1; compliance verdict pending code authority)</li>
             <li>Local amendments adopted by ${state} and the AHJ (${pa.present ? pa.tag('ahj') : escapeH(ahj)})</li>
           </ul>
         </div>

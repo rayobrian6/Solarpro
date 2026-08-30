@@ -111,6 +111,31 @@ export function projectCodeAuthority(
 /** Convenience: project straight from a PermitInput (renderers hold `input`).
  *  Non-throwing — an absent snapshot yields an empty projection whose labels are
  *  all PENDING, so a standalone path degrades honestly instead of fabricating. */
+// ══ 2026-08-29 — ONE ADOPTION STATE, ONE WORDING ══════════════════
+// `PER_AHJ_EDITION` exists because "IBC PENDING" reads as unfinished work on a
+// drawing while "IBC PER AHJ ADOPTION" states the truth: the family governs, the
+// year is the AHJ's to confirm at plan review, and no design value depends on
+// it. `labelOf` applies that, and 21 places per family already printed it.
+//
+// These consumers did not. They read the RAW edition token
+// (`cp.ibc ?? 'PENDING'`) and composed their own sentence, so the SAME package
+// said, on the SAME sheet:
+//     governing codes strip .... IBC PER AHJ ADOPTION / IRC PER AHJ ADOPTION
+//     engineering summary ...... AHJ-ADOPTED IBC / IRC / IFC: PENDING VERIFICATION
+// Two presentations of one adoption state, and a reviewer cannot tell whether
+// they describe the same thing.
+//
+// The label is the projection's to decide. A consumer that needs the family
+// names in a sentence asks for them.
+export const ADOPTED_ICODE_KINDS: CodeEditionKind[] = ['ibc', 'irc', 'ifc'];
+
+/** The ONE sentence fragment naming the AHJ-adopted I-code editions. Every sheet
+ *  that mentions them prints THIS, so the cover strip and the engineering
+ *  summary cannot describe one adoption state two ways. */
+export function adoptedICodePhrase(cp: CodeAuthorityProjection): string {
+  return ADOPTED_ICODE_KINDS.map(k => cp.label(k)).join(' / ');
+}
+
 export function projectCodeAuthorityFromInput(input: PermitInput): CodeAuthorityProjection {
   return projectCodeAuthority(peekSnapshot(input));
 }

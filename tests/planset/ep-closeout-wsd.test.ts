@@ -137,9 +137,19 @@ describe('§17 (gate 17) — pending adopted codes are never a compliance claim'
   const html = renderBraidon();
 
   it('the cover splits calculation basis (NEC/ASCE) from adopted authority (IBC/IRC/IFC)', () => {
+    // 2026-08-29 - the SPLIT is what this guards, and it is unchanged. What moved
+    // is the adopted-authority WORDING: this sentence composed its own
+    // "PENDING VERIFICATION" from the raw edition token while the governing-codes
+    // strip on the same sheet printed "IBC PER AHJ ADOPTION" from the projection.
+    // One adoption state, two presentations, and a reviewer cannot tell whether
+    // they describe the same thing. Both now project `adoptedICodePhrase`.
     expect(html).toContain('CALC BASIS:');
-    expect(html).toContain('AHJ-ADOPTED IBC / IRC / IFC:');
-    expect(html).toContain('PENDING VERIFICATION');
+    expect(html).toContain('AHJ-ADOPTED CODES:');
+    // the adopted-authority half still names all three families, separately from
+    // the calculation basis
+    expect(html).toMatch(/AHJ-ADOPTED CODES:[^.]*IBC[^.]*IRC[^.]*IFC/);
+    // ...and still does NOT assert a conformance year nobody verified
+    expect(html).not.toMatch(/AHJ-ADOPTED CODES:[^.]*IBC 20\d\d/);
   });
 
   it('the cover never says "designed per … IBC PENDING"', () => {

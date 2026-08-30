@@ -13,7 +13,7 @@ import { hybridSheetSections, SUB_LABEL } from './subSystemSheets';
 import { hybridSubmissionGate } from './hybridReadiness';
 import { resolveInterconnection } from './electricalPages';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
-import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { projectCodeAuthorityFromInput, adoptedICodePhrase } from '../snapshot/codeAuthorityProjection';
 import { projectProjectAuthorityFromInput, projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
 import { computePlansetManifest } from '../plansetManifest';
 import { releaseStatusBlockHtml } from '../utils/releaseStatusBlock';
@@ -648,12 +648,13 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
               // Never "designed per IBC PENDING" — that reads as compliance with a
               // pending edition. Adopted editions are an authority status, not a
               // design basis. Kept tight so the cover left column still fits (§19).
-              const adoptedParts = [`IBC ${ibcVer}`, `IRC ${ircVer}`, `IFC ${ifcVer}`];
-              const allAdoptedPending = [ibcVer, ircVer, ifcVer].every(v => v === 'PENDING');
-              const adopted = allAdoptedPending ? 'PENDING VERIFICATION' : adoptedParts.join(' / ');
+              // 2026-08-29 - composed its own "PENDING VERIFICATION" while the
+              // governing-codes strip on this same sheet printed "IBC PER AHJ
+              // ADOPTION" from the projection. One adoption state, one wording.
+              const adopted = adoptedICodePhrase(cp);
               return `${system.totalDcKw?.toFixed(2) || '—'} kW DC grid-tied PV system at ${escapeH(project.address || '—')}. `
                 + `<strong>CALC BASIS:</strong> NEC ${necVer} / ASCE ${asceVer}. `
-                + `<strong>AHJ-ADOPTED IBC / IRC / IFC:</strong> ${adopted}. `
+                + `<strong>AHJ-ADOPTED CODES:</strong> ${adopted}. `
                 + (_permitIssued
                     ? 'Issued for permit review — requires PE review and wet stamp before AHJ submission.'
                     : `DESIGN REVIEW PACKAGE — NOT FOR PERMIT SUBMISSION (${escapeH(pa.issueStatus ?? 'DESIGN DRAFT')}); requires PE review and wet stamp before AHJ submission.`);

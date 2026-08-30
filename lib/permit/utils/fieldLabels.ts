@@ -331,7 +331,10 @@ function resolveRef(codeRefs: RawLabel['codeRefs'], necEd: string | null, ifcEd:
     // asserted an edition neither governed Madison County source supports.
     if (necSection) parts.push(necEd ? `NEC ${necEd} ${necSection}` : `NEC §${necSection}`);
   }
-  if (ifcPick) parts.push(`IFC ${ifcEd ?? 'PENDING'} ${ifcPick.section}`);
+  // 2026-08-29 - the same edition-neutral rule the NEC branch above already
+  // applies. "IFC PENDING 1207" reads as an edition; with no adoption on file the
+  // section stands on its own, exactly as `NEC §690.56(C)` does.
+  if (ifcPick) parts.push(ifcEd ? `IFC ${ifcEd} ${ifcPick.section}` : `IFC §${ifcPick.section}`);
   // PPC §6 — SANITIZER BYPASS FIX. The old fallback returned `codeRefs[0]`
   // UNFILTERED whenever the topology filter stripped the only NEC clause and no
   // IFC ref existed — which printed the load-side-only clause

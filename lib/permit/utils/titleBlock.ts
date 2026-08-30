@@ -7,7 +7,7 @@ import type { PermitInput } from '../types';
 import { utilityDisplayName, resolveEquipment } from './helpers';
 import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
-import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { projectCodeAuthorityFromInput, adoptedICodePhrase } from '../snapshot/codeAuthorityProjection';
 import { projectProjectAuthorityFromInput, projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
 import { projectRacewayDescriptor, projectGroundingSummary } from '../snapshot/electricalProjection';
 import type { PermitDesignSnapshot } from '../snapshot/types';
@@ -216,9 +216,9 @@ export function buildConstructionNotes(input: PermitInput): string[] {
   // from the AHJ-adopted IBC/IRC/IFC editions (a jurisdictional authority status,
   // verified before submission). When adopted editions are unknown they read
   // PENDING VERIFICATION, never "conform to PENDING IBC".
-  const _adopted = [ibcVer, ircVer, ifcVer].every(v => v === 'PENDING')
-    ? 'the AHJ-adopted IBC / IRC / IFC editions (PENDING VERIFICATION)'
-    : `the AHJ-adopted IBC ${ibcVer} / IRC ${ircVer} / IFC ${ifcVer} editions`;
+  // 2026-08-29 - a THIRD wording of the same adoption state. The projection's
+  // label is the one presentation; the sentence only supplies the grammar.
+  const _adopted = `the AHJ-adopted ${adoptedICodePhrase(cp)}`;
   const notes: string[] = [
     `Analysis basis: NEC ${necVer} and ASCE ${asceVer}. All work shall additionally conform to ${_adopted}, applicable state amendments, and AHJ requirements once verified. All equipment shall be listed and labeled per NEC 110.3(B).`,
     `Solar PV wiring shall comply with NEC Article 690. DC wiring methods shall be per NEC 690.31. PV source and output circuit conductors shall be identified at all access points per NEC 690.31(B).`,
@@ -292,7 +292,7 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
     // PPC §6 — 705.12(B)(2)(3)(e) is a LOAD-SIDE marking clause; on a supply-side
     // (705.11) design the applicable interconnection marking clause is 705.10 / 705.11.
-    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC ${project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? '705.10 / 705.11' : '705.12(B)(2)(3)(e)'}, and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
+    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC ${project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? '705.10 / 705.11' : '705.12(B)(2)(3)(e)'}, and ${cp.label('ifc')} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
     // Statutory site/clearance notes \u2014 migrated from the retired PV-1 site sheet
     // (2026-07-08 fold) so they persist in the set's general notes.
     `All electrical equipment \u2014 inverters, disconnects, main service panel, and junction/combiner boxes \u2014 shall be located a minimum of 3 ft from the gas meter supply and demand piping.`,
