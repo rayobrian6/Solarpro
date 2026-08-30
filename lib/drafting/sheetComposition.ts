@@ -20,7 +20,7 @@
 import type { CADModel } from '../cad/types';
 import { getMountingSystemById, classifyMountTopology } from '../mounting-hardware-db';
 import { getRackingById } from '../equipment-db';
-import { resolveFireSetbackIn, arrayCoverageFrac, resolveFireSetbackBasis } from '../permit/utils/fireSetback';
+import { resolveAccessPathwayIn, resolveFireSetbackIn, arrayCoverageFrac, resolveFireSetbackBasis } from '../permit/utils/fireSetback';
 import { projectCodeAuthority } from '../permit/snapshot/codeAuthorityProjection';
 // W3 §route-verification — the CONDUIT RUN callout projects the ONE canonical
 // route provenance authority (never a hardcoded "route field-verified" literal;
@@ -514,7 +514,9 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     _covPitch,   // plan-projected basis — same 18"-vs-36" decision as the drawing
   );
   const fireSetbackFt = Math.round((resolveFireSetbackIn(_fireIn, _covFrac) / 12) * 10) / 10;
-  const pathwayFt     = (_pathwayIn && _pathwayIn > 0) ? Math.round((_pathwayIn / 12) * 10) / 10 : 3;
+  // CANONICAL — same accessor the drawing uses, so the data zone and the plan
+  // can never state different pathway widths again.
+  const pathwayFt     = Math.round((resolveAccessPathwayIn(null) / 12) * 10) / 10;
 
   // PPC §3/§4 — the ONE attachment authority. The old block read
   // mounting-hardware-db directly (`fastenerDiameterIn` / `fastenerEmbedmentIn`

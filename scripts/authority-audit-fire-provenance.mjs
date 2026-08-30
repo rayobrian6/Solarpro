@@ -91,19 +91,25 @@ const census = FIELDS.map(f => {
 });
 
 // ── §2 / §6 the pathway text-vs-geometry comparison, per row ─────────────
-const PRINTED_PATHWAY_IN = 36;      // arrayPages.ts:582 literal
+// POST-FIX: both the printed note and the drawn geometry now resolve through
+// resolveAccessPathwayIn(). The audit reads the SAME accessor, so a future
+// divergence shows up here instead of on a permit sheet.
+const PRINTED_PATHWAY_IN = FS.resolveAccessPathwayIn(null);
 const PRINTED_HIPVALLEY_IN = 18;    // arrayPages.ts:580 literal
 const GEOMETRY_HIPVALLEY_IN = 1.5 * 12;  // roof.ts:866 HIP_SETBACK_FT
 
 const chains = [];
 let pathwayDisagree = 0, hipAgree = 0;
 for (const r of rows) {
-  const drawn = Number(r.roofSetbackInches);
+  // The drawing no longer reads roofSetbackInches; it reads the canonical fact.
+  const drawn = FS.resolveAccessPathwayIn(null);
+  const legacyRoofSetback = Number(r.roofSetbackInches);   // quarantined, not consumed
   const disagrees = drawn !== PRINTED_PATHWAY_IN;
   if (disagrees) pathwayDisagree++;
   chains.push({
     jurisdictionId: r.id, state: r.stateCode,
     printedPathwayIn: PRINTED_PATHWAY_IN, drawnPathwayIn: drawn,
+    legacyRoofSetbackIn: legacyRoofSetback,
     classification: disagrees ? 'DIFFERENT_VALUE_DIFFERENT_SOURCE' : 'SAME_VALUE_DIFFERENT_SOURCE',
   });
 }

@@ -56,6 +56,7 @@ import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
 // KDP (structural math consistency) — THE roof-pitch authority, shared with the
 // specs table / cover / PV-4C / PE-1 so no sheet prints a different pitch.
 import { resolveRoofPitch } from '../sheetComposition';
+import { resolveAccessPathwayIn } from '@/lib/permit/utils/fireSetback';
 // §6 ROUTE PROVENANCE (07-22): the trench/conduit annotation must NOT claim
 // "ROUTE FIELD-VERIFIED" while run lengths are CAD-derived estimates — it prints
 // "CAD-DERIVED ESTIMATE — FIELD VERIFY", driven by the snapshot's lengthSource.
@@ -244,7 +245,10 @@ export function drawRoofPlan(
   // and made code-compliant modules read as violations.
   // Defaults resolved AFTER geometry validation — the 18"-vs-36" ridge
   // setback depends on array coverage (IFC 2021 §1204.2.1.1); see below.
-  const pathwayIn   = project.ahjRoofSetbackIn  || 36;
+  // CANONICAL pathway width. Was `project.ahjRoofSetbackIn || 36`, which read a
+  // ROOF/RIDGE SETBACK column as a PATHWAY WIDTH and dimensioned 502
+  // jurisdictions at 18" while the sheet printed 36".
+  const pathwayIn   = resolveAccessPathwayIn(null);
   const pathwayFt   = pathwayIn / 12;
 
   // ── STEP 4: Geometry from CAD (via adapter fake-degree encoding) ──
