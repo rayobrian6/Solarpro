@@ -151,3 +151,20 @@ export function resolveAccessPathwayIn(governedOverrideIn?: number | null): numb
     ? governedOverrideIn
     : MODELED_ACCESS_PATHWAY_IN;
 }
+
+/** The modeled hip/valley clear setback, in inches. IFC §1204.2.1.2.
+ *
+ *  Consolidates two independent literals that happened to agree: the printed
+ *  18" in arrayPages.ts and `HIP_SETBACK_FT = 1.5` in roof.ts. Agreement by
+ *  coincidence is still a latent same-fact defect — nothing forced them to stay
+ *  equal, and the pathway pair proves what happens when such a pair drifts.
+ *
+ *  Modeled design basis, NOT a proven local adoption. Same authority state as
+ *  ACCESS_PATHWAY_BASIS. */
+export const MODELED_HIP_VALLEY_SETBACK_IN = 18;
+
+export function resolveHipValleySetbackIn(governedOverrideIn?: number | null): number {
+  return (governedOverrideIn && governedOverrideIn > 0)
+    ? governedOverrideIn
+    : MODELED_HIP_VALLEY_SETBACK_IN;
+}

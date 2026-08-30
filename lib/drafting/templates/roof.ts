@@ -56,7 +56,7 @@ import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
 // KDP (structural math consistency) — THE roof-pitch authority, shared with the
 // specs table / cover / PV-4C / PE-1 so no sheet prints a different pitch.
 import { resolveRoofPitch } from '../sheetComposition';
-import { resolveAccessPathwayIn } from '@/lib/permit/utils/fireSetback';
+import { resolveAccessPathwayIn, resolveHipValleySetbackIn } from '@/lib/permit/utils/fireSetback';
 // §6 ROUTE PROVENANCE (07-22): the trench/conduit annotation must NOT claim
 // "ROUTE FIELD-VERIFIED" while run lengths are CAD-derived estimates — it prints
 // "CAD-DERIVED ESTIMATE — FIELD VERIFY", driven by the snapshot's lengthSource.
@@ -867,7 +867,9 @@ export function drawRoofPlan(
           edgeKind = Math.min(d, 360 - d) > 135 ? 'ridge' : 'hip';
         } else edgeKind = 'ridge';   // no azimuths → conservative
       }
-      const HIP_SETBACK_FT = 1.5;   // IFC 2021 §1204.2.1.2 — 18" clear at hips/valleys
+      // CANONICAL — was a hard literal 1.5 here and an independent "18\"" literal
+      // in the printed note. Both now resolve from one fact.
+      const HIP_SETBACK_FT = resolveHipValleySetbackIn(null) / 12;
       const edgeSetbackFt = edgeKind === 'ridge' ? setbackFt : HIP_SETBACK_FT;
       // Inward unit normal (screen space) — probe a point just off the midpoint.
       const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey);
