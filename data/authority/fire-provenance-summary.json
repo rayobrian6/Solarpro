@@ -1,0 +1,73 @@
+{
+  "factsAudited": 5,
+  "chainClassification": {
+    "SAME_VALUE_SAME_SOURCE": 0,
+    "SAME_VALUE_DIFFERENT_SOURCE": 3514,
+    "DIFFERENT_VALUE_DIFFERENT_SOURCE": 502,
+    "INTENTIONALLY_DIFFERENT_FACT": 0,
+    "UNRESOLVED": 0
+  },
+  "hipValley": {
+    "printedIn": 18,
+    "geometryIn": 18,
+    "agreeToday": true,
+    "classification": "SAME_VALUE_DIFFERENT_SOURCE — two independent literals that happen to match",
+    "rows": 4016
+  },
+  "census": [
+    {
+      "field": "roofSetbackInches",
+      "rowCount": 4016,
+      "distinctValues": 2,
+      "mostCommonValue": "36",
+      "rowsAtMostCommonValue": 3514,
+      "allValues": "36×3514 18×502",
+      "actualAuthorityClassification": "UNPROVENANCED_LEGACY — varies, but 0/4,016 rows carry adoption evidence"
+    },
+    {
+      "field": "ridgeSetbackInches",
+      "rowCount": 4016,
+      "distinctValues": 1,
+      "mostCommonValue": "18",
+      "rowsAtMostCommonValue": 4016,
+      "allValues": "18×4016",
+      "actualAuthorityClassification": "MODEL_CODE_RULE — a national constant in a jurisdiction-shaped column"
+    },
+    {
+      "field": "valleySetbackInches",
+      "rowCount": 4016,
+      "distinctValues": 1,
+      "mostCommonValue": "18",
+      "rowsAtMostCommonValue": 4016,
+      "allValues": "18×4016",
+      "actualAuthorityClassification": "MODEL_CODE_RULE — a national constant in a jurisdiction-shaped column"
+    },
+    {
+      "field": "hipRoofSetbackInches",
+      "rowCount": 4016,
+      "distinctValues": 1,
+      "mostCommonValue": "18",
+      "rowsAtMostCommonValue": 4016,
+      "allValues": "18×4016",
+      "actualAuthorityClassification": "MODEL_CODE_RULE — a national constant in a jurisdiction-shaped column"
+    },
+    {
+      "field": "eaveSetbackInches",
+      "rowCount": 4016,
+      "distinctValues": 1,
+      "mostCommonValue": "0",
+      "rowsAtMostCommonValue": 4016,
+      "allValues": "0×4016",
+      "actualAuthorityClassification": "MODEL_CODE_RULE — a national constant in a jurisdiction-shaped column"
+    },
+    {
+      "field": "pathwayWidthInches",
+      "rowCount": 4016,
+      "distinctValues": 1,
+      "mostCommonValue": "36",
+      "rowsAtMostCommonValue": 4016,
+      "allValues": "36×4016",
+      "actualAuthorityClassification": "MODEL_CODE_RULE — a national constant in a jurisdiction-shaped column"
+    }
+  ]
+}

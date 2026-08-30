@@ -1,0 +1,59 @@
+{
+  "facts": [
+    {
+      "factId": "FIRE-PATHWAY-WIDTH",
+      "factName": "roof access pathway width",
+      "calculationProducer": "ahjRoofSetbackIn (project) ← ahj-national.roofSetbackInches",
+      "calculationProducerLocation": "app/api/engineering/permit/route.ts (ahjRoofSetbackIn) → lib/drafting/templates/roof.ts:247-248",
+      "geometryProducer": "roof.ts pathway corridor from ahjRoofSetbackIn",
+      "geometryProducerLocation": "lib/drafting/templates/roof.ts:247-248; lib/drafting/sheetComposition.ts:501,517",
+      "rendererProducer": "HARD LITERAL 36\"",
+      "rendererProducerLocation": "lib/permit/sections/arrayPages.ts:582",
+      "registryStorage": "ahj-national.roofSetbackInches"
+    },
+    {
+      "factId": "FIRE-RIDGE-SETBACK",
+      "factName": "ridge fire setback",
+      "calculationProducer": "resolveFireSetbackIn(ahjRidgeSetbackIn, coverageFrac)",
+      "calculationProducerLocation": "lib/permit/utils/fireSetback.ts:12-18",
+      "geometryProducer": "roof.ts edgeSetbackFt for edgeKind===\"ridge\"",
+      "geometryProducerLocation": "lib/drafting/templates/roof.ts:866-867",
+      "rendererProducer": "projected from the same resolver",
+      "rendererProducerLocation": "lib/permit/sections/arrayPages.ts (ridge line)",
+      "registryStorage": "ahj-national.ridgeSetbackInches"
+    },
+    {
+      "factId": "FIRE-HIPVALLEY-SETBACK",
+      "factName": "hip / valley setback",
+      "calculationProducer": "none — not resolved, taken as a constant",
+      "calculationProducerLocation": "n/a",
+      "geometryProducer": "HARD LITERAL HIP_SETBACK_FT = 1.5 (=18\")",
+      "geometryProducerLocation": "lib/drafting/templates/roof.ts:866",
+      "rendererProducer": "HARD LITERAL 18\"",
+      "rendererProducerLocation": "lib/permit/sections/arrayPages.ts:580",
+      "registryStorage": "ahj-national.hipRoofSetbackInches / valleySetbackInches (unread)"
+    },
+    {
+      "factId": "FIRE-COVERAGE-THRESHOLD",
+      "factName": "array coverage exception threshold",
+      "calculationProducer": "HARD LITERAL > 0.33",
+      "calculationProducerLocation": "lib/permit/utils/fireSetback.ts:17",
+      "geometryProducer": "same resolver",
+      "geometryProducerLocation": "via resolveFireSetbackIn",
+      "rendererProducer": "prose",
+      "rendererProducerLocation": "lib/permit/sections/arrayPages.ts",
+      "registryStorage": "none"
+    },
+    {
+      "factId": "FIRE-EAVE",
+      "factName": "eave access requirement",
+      "calculationProducer": "none",
+      "calculationProducerLocation": "n/a",
+      "geometryProducer": "no band drawn at perimeter",
+      "geometryProducerLocation": "lib/drafting/templates/roof.ts:858-867",
+      "rendererProducer": "HARD LITERAL \"Modules may extend to eave (no eave req.)\"",
+      "rendererProducerLocation": "lib/permit/sections/arrayPages.ts:581",
+      "registryStorage": "ahj-national.eaveSetbackInches (unread)"
+    }
+  ]
+}
