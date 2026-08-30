@@ -196,6 +196,13 @@ export type AhjMatchMethod =
   | 'incorporated-city'
   | 'county-unincorporated'
   | 'address-parse'
+  /** The boundary layer DID resolve and named a governing government, and
+   *  SolarPro holds no row for it. Distinct from 'unresolved', which means the
+   *  geography itself is unknown. This one is a known jurisdiction and a known
+   *  registry gap — the case the national registry is mostly in, holding ~4,000
+   *  rows against ~19,500 municipalities. It terminates resolution: see
+   *  resolveAhjRecordTraced. */
+  | 'boundary-established-record-missing'
   | 'unresolved';
 
 export interface AhjResolution {
@@ -207,6 +214,12 @@ export interface AhjResolution {
   /** the alternative record the previous precedence would have chosen, when it
    *  differs — recorded so a binding change is auditable rather than silent. */
   supersededRecordId: string | null;
+  /** With 'boundary-established-record-missing': the government the boundary
+   *  determination named, which SolarPro has no row for. Carrying the name is
+   *  the point — it is what turns a dead end into an actionable gap ("we need a
+   *  record for X") and what the discovery path is given to work from. Null in
+   *  every other outcome. */
+  missingAuthorityFor: string | null;
 }
 
 /**
@@ -259,16 +272,50 @@ export function resolveAhjRecordTraced(hints: {
     const finish = (record: AhjRecord | null, method: AhjMatchMethod, inc: boolean | null): AhjResolution => ({
       record, matchMethod: method, incorporated: inc,
       supersededRecordId: record && _legacyB && _legacyB !== record.id ? _legacyB : null,
+      missingAuthorityFor: null,
+    });
+    // A KNOWN JURISDICTION WE HAVE NO ROW FOR IS A GAP, NOT A REASON TO GUESS.
+    //
+    // These two branches used to fall through to the hint chain when the
+    // registry had no row for the government the boundary named. The hint chain
+    // then tried, in order: the stored ahjName (which the permit route had
+    // force-written from the mailing city), the postal city, the address parse,
+    // and finally getAhjByCounty — so a parcel PROVEN to sit inside an
+    // incorporated municipality was bound to the COUNTY's building department.
+    // Wrong permit office, wrong fee schedule, wrong plan-check queue, on a
+    // package whose geography had been resolved correctly.
+    //
+    // That fall-through is the whole national failure mode: SolarPro holds
+    // ~4,000 rows against ~19,500 municipalities, so "the boundary resolved and
+    // we have no record" is the ORDINARY case outside the covered cities, and
+    // it was silently answered with a neighbouring government.
+    //
+    // Resolution now STOPS here, carrying the name of the authority we are
+    // missing. Nothing downstream is asked to guess, and the gap is nameable.
+    const missing = (name: string | null, inc: boolean | null): AhjResolution => ({
+      record: null,
+      matchMethod: 'boundary-established-record-missing',
+      incorporated: inc,
+      supersededRecordId: null,
+      missingAuthorityFor: name,
     });
     if (b.unincorporated === true) {
       const byCounty = hints.county ? getAhjByCounty(state, hints.county) : null;
       if (byCounty) return finish(byCounty, 'county-unincorporated', false);
+      // Positively outside every municipality, and no county row: the COUNTY is
+      // the authority and it is the one we are missing. Falling through would
+      // reach getAhjByCity on the postal city and bind a municipality that has
+      // been PROVEN not to contain this parcel.
+      if (hints.county) return missing(`${hints.county} County, ${state}`, false);
     } else if (b.unincorporated === false && b.incorporatedPlace) {
       // Use the OFFICIAL place name, not the postal city line.
       const byPlace = getAhjByCity(state, b.incorporatedPlace);
       if (byPlace) return finish(byPlace, 'incorporated-city', true);
+      return missing(`${b.incorporatedPlace}, ${state}`, true);
     }
-    // Boundary resolved but no matching record — fall through to the hint chain.
+    // Boundary resolved but it named no government we can act on (no place and
+    // no county) — that is genuinely unknown geography, so the hint chain below
+    // still applies.
   }
   // What the pre-WS-12 precedence would have chosen, for the audit trail.
   const _legacy = (state && hints.county ? getAhjByCounty(state, hints.county) : null)?.id ?? null;
@@ -277,6 +324,7 @@ export function resolveAhjRecordTraced(hints: {
     matchMethod,
     incorporated: record ? (record.ahjType !== 'county' && record.city.toLowerCase() !== 'unincorporated') : null,
     supersededRecordId: record && _legacy && _legacy !== record.id ? _legacy : null,
+    missingAuthorityFor: null,
   });
 
   if (hints.ahjRecordId) {
@@ -574,7 +622,23 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
         : 'unverified';
 
   const applicabilityNotes: string[] = [];
-  if (!rec && !nec) {
+  // A NAMED GAP, NOT A DEAD END.
+  //
+  // When the boundary layer established which government has jurisdiction and
+  // SolarPro simply holds no row for it, that is a different — and far more
+  // actionable — state than "we could not localize this project". Say which
+  // authority is missing, and say plainly that nothing was substituted for it,
+  // so a reviewer reads a registry gap rather than an unexplained blank.
+  const _missingFor = args.ahjResolution?.matchMethod === 'boundary-established-record-missing'
+    ? args.ahjResolution.missingAuthorityFor
+    : null;
+  if (_missingFor) {
+    applicabilityNotes.push(
+      `The municipal-boundary layer places this parcel under ${_missingFor}. SolarPro holds no AHJ record `
+      + 'for that authority, so its adopted codes, setbacks, fees and plan-check times are UNKNOWN. No county, '
+      + 'mailing city or neighbouring jurisdiction has been substituted — the permit authority must be '
+      + 'established and added to the registry before this package is released.');
+  } else if (!rec && !nec) {
     applicabilityNotes.push('No local AHJ could be resolved for this project — code adoption is unknown; generic state defaults are NOT applied.');
   }
   if (incompleteEditions.length > 0) {
@@ -604,7 +668,14 @@ export function buildCodeAuthority(args: CodeAuthorityBuildArgs): CodeAuthorityR
 
   return {
     schemaVersion: CODE_AUTHORITY_SCHEMA_VERSION,
-    ahjName: adopt?.ahjName ?? rec?.ahjName ?? args.ahjNameHint ?? null,
+    // The stored hint is NOT consulted once the boundary has established a
+    // government we hold no record for. That hint is `compliance.jurisdiction.ahj
+    // ?? project.ahjName` — a value the app wrote earlier, historically from a
+    // mailing-city search — so falling back to it would put a DIFFERENT
+    // government's name on the document immediately after the resolver correctly
+    // refused to bind that government's record. The jurisdiction is named in the
+    // applicability note above instead, where it reads as the gap it is.
+    ahjName: adopt?.ahjName ?? rec?.ahjName ?? (_missingFor ? null : args.ahjNameHint) ?? null,
     jurisdictionType: adopt?.jurisdictionType ?? rec?.ahjType ?? 'unknown',
     stateCode: rec?.stateCode ?? args.stateCodeHint ?? null,
     stateName: rec?.stateName ?? null,
