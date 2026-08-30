@@ -2786,6 +2786,17 @@ export function buildPermitDesignSnapshot(
       'ALL DIMENSIONS ARE NOMINAL. FIELD VERIFY PRIOR TO INSTALLATION.',
       'DO NOT SCALE FROM DRAWINGS.',
       'CONTRACTOR RESPONSIBLE FOR VERIFICATION OF ALL SITE CONDITIONS.',
+      // ⚠ LEGACY_DIGEST_COMPATIBILITY_ONLY — N7. This sentence is FALSE: it is a
+      // hardcoded claim with zero jurisdiction input, zero state-licensing input,
+      // no thresholds and no exemptions. The cover sheet was corrected in
+      // 812b62cc; this copy was deliberately NOT, because it sits inside the
+      // DIGESTED snapshot body and changing it moved the approval digest
+      //   8d7fcfa38d9a25ef8775e398 -> 91dea260df821482f7f88185
+      // which retires every active PE approval (findActiveApproval matches the
+      // digest exactly). Removal is an approval-version migration, not a string
+      // edit. It is proven INERT by tests/planset/legacy-pe-digest-isolation
+      // .test.ts — no renderer, projection, readiness path or artifact consumes
+      // it. Do not treat it as current authority. Do not edit it without N7.
       'PE STAMP REQUIRED FOR PERMIT SUBMISSION PER AHJ.',
       'SUBSTITUTIONS REQUIRE WRITTEN ENGINEER APPROVAL.',
     ],
