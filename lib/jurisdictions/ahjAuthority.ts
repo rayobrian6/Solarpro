@@ -1,0 +1,292 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// THE CANONICAL PROJECT AHJ AUTHORITY — one object, per scope, with evidence.
+//
+// ── THE RULE THIS FILE EXISTS TO ENFORCE ──────────────────────────────────
+// REGISTRY ABSENCE MUST NEVER BECOME AUTHORITY SUBSTITUTION.
+//
+// If legal geography proves the parcel is inside Municipality X, and the
+// delegation policy says X administers building permits, and SolarPro holds no
+// AHJ row for X, then the answer is:
+//
+//     governing authority identified · registry record missing · discovery required
+//
+// It is NOT "the county". It is not the neighbouring municipality. It is not the
+// existing row whose name happens to resemble the mailing address. Those
+// substitutions all produce a package that names a government which does not
+// administer the parcel — and every one of them was reachable before this file.
+//
+// The reverse is equally forbidden: an unincorporated parcel administered by the
+// county must not acquire the mailing municipality.
+//
+// ── WHY A TYPED MISSING STATE ─────────────────────────────────────────────
+// `AHJ_RECORD_MISSING` is deliberately NOT the same as "unverified". Unverified
+// means we do not know who governs. Record-missing means WE KNOW EXACTLY WHO
+// GOVERNS and have no row for them — which is an entirely different piece of
+// work (discovery + ingestion, §5), and a state a coverage audit can count.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import {
+  atLeast, requiredFacetsSatisfied, completenessBasis, BUILDING_AUTHORITY_CONTRACT,
+  type LegalGeographyAuthority, type FacetGrade, type FacetProvenance,
+} from './legalGeography';
+import {
+  resolveDelegation, type AuthorityScope, type AuthorityEntityType,
+  type DelegationPolicy, type JurisdictionDelegationRule,
+} from './delegationPolicy';
+
+/** Where the resolution got to. Every value is a DIFFERENT piece of work. */
+export type AhjResolutionStatus =
+  /** legal geography is not established — we do not yet know who governs. */
+  | 'BOUNDARY_UNRESOLVED'
+  /** geography is established but no delegation policy covers it. */
+  | 'AUTHORITY_SCOPE_UNRESOLVED'
+  /** THE governing entity is identified and SolarPro has no registry row for it. */
+  | 'BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING'
+  /** a registry row was matched on stable identity. */
+  | 'AHJ_RECORD_FOUND'
+  /** matched, and the row itself carries official-source provenance. */
+  | 'AHJ_VERIFIED'
+  /** sources of comparable standing disagree about who governs. */
+  | 'AUTHORITY_CONFLICT';
+
+/** The government a scope resolves to, whether or not we hold a row for it. */
+export interface GoverningEntity {
+  type: AuthorityEntityType;
+  name: string;
+  /** stable legal-geography identity — the primary key, never the name. */
+  stateFips: string | null;
+  countyFips: string | null;
+  placeGeoid: string | null;
+  countySubdivisionGeoid: string | null;
+}
+
+export interface ScopeAuthority {
+  scope: AuthorityScope;
+  status: AhjResolutionStatus;
+  /** who governs — present whenever the status is anything but BOUNDARY_UNRESOLVED. */
+  entity: GoverningEntity | null;
+  /** the SolarPro registry row, when one exists for that entity. */
+  ahjRecordId: string | null;
+  ahjName: string | null;
+  /** the delegation rule that decided it, cited by id. */
+  delegationRuleId: string | null;
+  delegatedFrom: AuthorityEntityType | null;
+  delegatedTo: AuthorityEntityType | null;
+  grade: FacetGrade;
+  provenance: FacetProvenance[];
+  /** one sentence a reviewer can act on. */
+  basis: string;
+}
+
+export interface ProjectAhjAuthority {
+  /** the geography every scope was derived from — carried so no consumer has to
+   *  (or is able to) re-derive it from an address string. */
+  legalGeography: LegalGeographyAuthority;
+  scopes: Record<AuthorityScope, ScopeAuthority>;
+  /** true ⇔ every scope reached AHJ_RECORD_FOUND or AHJ_VERIFIED. */
+  complete: boolean;
+  /** entities we know govern something here but hold no row for — the input to
+   *  the discovery pipeline, and the thing the national coverage audit counts. */
+  missingRecords: GoverningEntity[];
+}
+
+/** What a registry lookup must provide. Kept as a function type so this module
+ *  never imports a concrete table — the registry is a CACHE, not the resolver. */
+export interface AhjRegistryLookup {
+  /** find a row by STABLE IDENTITY. Name matching is deliberately not offered
+   *  here: a name match is a search hint, and hints do not select authorities. */
+  byIdentity(e: GoverningEntity): { id: string; name: string; hasOfficialProvenance: boolean } | null;
+}
+
+function entityFromGeography(
+  type: AuthorityEntityType, geo: LegalGeographyAuthority,
+): GoverningEntity | null {
+  const st = geo.state.value, co = geo.county.value;
+  const pl = geo.incorporatedPlace.value, cs = geo.countySubdivision.value;
+  const base = {
+    stateFips: st?.fips ?? null,
+    countyFips: co?.fips ?? null,
+    placeGeoid: null as string | null,
+    countySubdivisionGeoid: null as string | null,
+  };
+  switch (type) {
+    case 'place':
+      if (!pl) return null;
+      return { ...base, type, name: pl.name, placeGeoid: pl.geoid };
+    case 'county':
+      if (!co) return null;
+      return { ...base, type, name: co.name };
+    case 'county-subdivision':
+      if (!cs) return null;
+      return { ...base, type, name: cs.name, countySubdivisionGeoid: cs.geoid };
+    case 'state':
+      if (!st) return null;
+      return { ...base, type, name: st.name ?? st.code };
+    default:
+      return null;
+  }
+}
+
+const UNRESOLVED = (scope: AuthorityScope, status: AhjResolutionStatus, basis: string): ScopeAuthority => ({
+  scope, status, entity: null, ahjRecordId: null, ahjName: null,
+  delegationRuleId: null, delegatedFrom: null, delegatedTo: null,
+  grade: 'UNKNOWN', provenance: [], basis,
+});
+
+/**
+ * Resolve ONE scope's governing authority.
+ *
+ * Order is the campaign's canonical order and is not negotiable:
+ *   legal geography → delegation policy → governing entity → registry match.
+ * A registry row is consulted LAST and only to attach a cached record to an
+ * entity the geography and policy already named.
+ */
+export function resolveScopeAuthority(
+  scope: AuthorityScope,
+  geo: LegalGeographyAuthority,
+  policy: DelegationPolicy,
+  registry: AhjRegistryLookup,
+): ScopeAuthority {
+  // 1 — geography, to the grade the decision requires.
+  if (!requiredFacetsSatisfied(geo, BUILDING_AUTHORITY_CONTRACT)) {
+    return UNRESOLVED(scope, 'BOUNDARY_UNRESOLVED',
+      `legal geography is not established, so no governing authority can be named: ${completenessBasis(geo)}`);
+  }
+  if (geo.incorporatedPlace.grade === 'CONFLICT' || geo.county.grade === 'CONFLICT') {
+    return UNRESOLVED(scope, 'AUTHORITY_CONFLICT',
+      'sources of comparable standing disagree about the legal geography; the governing authority '
+      + 'cannot be determined until the conflict is resolved by evidence');
+  }
+
+  const incorporated = geo.unincorporated.value === false;
+  const st = geo.state.value;
+  if (!st) {
+    return UNRESOLVED(scope, 'BOUNDARY_UNRESOLVED', 'no state identity on the legal geography');
+  }
+
+  // 2 — policy.
+  const match = resolveDelegation(policy, {
+    state: st.code, scope, incorporated,
+    placeGeoid: geo.incorporatedPlace.value?.geoid ?? null,
+    countyFips: geo.county.value?.fips ?? null,
+  });
+  if (!match) {
+    return UNRESOLVED(scope, 'AUTHORITY_SCOPE_UNRESOLVED',
+      `SolarPro holds no delegation rule for ${scope} permits in ${st.code} `
+      + `(${incorporated ? 'incorporated' : 'unincorporated'} territory) — who administers this scope is not established`);
+  }
+  if (match.ambiguous) {
+    return UNRESOLVED(scope, 'AUTHORITY_CONFLICT',
+      `two equally-specific delegation rules name different administrators for ${scope} in ${st.code}: `
+      + match.considered.slice(0, 2).map(r => `${r.id} → ${r.delegate}`).join(' vs '));
+  }
+
+  // 3 — the entity the rule points at.
+  const entity = entityFromGeography(match.rule.delegate, geo);
+  if (!entity) {
+    return UNRESOLVED(scope, 'AUTHORITY_SCOPE_UNRESOLVED',
+      `${match.rule.id} delegates ${scope} to a ${match.rule.delegate}, but the legal geography carries `
+      + `no such entity for this coordinate`);
+  }
+
+  // 4 — the registry, LAST, and only to attach a cached row.
+  const row = registry.byIdentity(entity);
+  const provenance: FacetProvenance[] = [
+    ...(geo.incorporatedPlace.provenance ? [geo.incorporatedPlace.provenance] : []),
+    ...(match.rule.provenance ? [match.rule.provenance] : []),
+  ];
+
+  if (!row) {
+    // ══ THE WHOLE POINT ══════════════════════════════════════════════════
+    return {
+      scope, status: 'BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING',
+      entity, ahjRecordId: null, ahjName: entity.name,
+      delegationRuleId: match.rule.id,
+      delegatedFrom: match.rule.delegator, delegatedTo: match.rule.delegate,
+      grade: match.rule.grade, provenance,
+      basis: `the governing ${scope} authority for this parcel is ${entity.name} `
+        + `(${entity.type}${entity.placeGeoid ? ` GEOID ${entity.placeGeoid}` : entity.countyFips ? ` FIPS ${entity.countyFips}` : ''}), `
+        + `established from legal geography and ${match.rule.id}. SolarPro holds NO AHJ record for it. `
+        + 'No other jurisdiction may be substituted; the record must be discovered and verified.',
+    };
+  }
+
+  return {
+    scope,
+    status: row.hasOfficialProvenance ? 'AHJ_VERIFIED' : 'AHJ_RECORD_FOUND',
+    entity, ahjRecordId: row.id, ahjName: row.name,
+    delegationRuleId: match.rule.id,
+    delegatedFrom: match.rule.delegator, delegatedTo: match.rule.delegate,
+    // The authority is never graded better than the weaker of the geography that
+    // located it and the rule that assigned it. A well-provenanced row does not
+    // make a CURATED delegation VERIFIED.
+    grade: weaker(geo.incorporatedPlace.grade, match.rule.grade),
+    provenance,
+    basis: `${row.name} administers ${scope} permits for this parcel: `
+      + `${incorporated ? `the coordinate is inside ${geo.incorporatedPlace.value?.name}` : 'the parcel is unincorporated'}, `
+      + `and ${match.rule.id} assigns the scope to the ${match.rule.delegate}.`,
+  };
+}
+
+function weaker(a: FacetGrade, b: FacetGrade): FacetGrade {
+  return atLeast(a, b) ? b : a;
+}
+
+/** Resolve every scope, and collect the entities we have no row for. */
+export function resolveProjectAhjAuthority(
+  geo: LegalGeographyAuthority,
+  policy: DelegationPolicy,
+  registry: AhjRegistryLookup,
+  scopes: AuthorityScope[] = ['building', 'electrical', 'fire', 'zoning'],
+): ProjectAhjAuthority {
+  const out = {} as Record<AuthorityScope, ScopeAuthority>;
+  for (const s of scopes) out[s] = resolveScopeAuthority(s, geo, policy, registry);
+
+  const missing: GoverningEntity[] = [];
+  const seen = new Set<string>();
+  for (const s of scopes) {
+    const a = out[s];
+    if (a.status !== 'BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING' || !a.entity) continue;
+    const k = identityKey(a.entity);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    missing.push(a.entity);
+  }
+
+  return {
+    legalGeography: geo,
+    scopes: out,
+    complete: scopes.every(s => out[s].status === 'AHJ_RECORD_FOUND' || out[s].status === 'AHJ_VERIFIED'),
+    missingRecords: missing,
+  };
+}
+
+/** The stable identity key for an entity — never its display name. */
+export function identityKey(e: GoverningEntity): string {
+  return e.placeGeoid ? `place:${e.placeGeoid}`
+    : e.countySubdivisionGeoid ? `cousub:${e.countySubdivisionGeoid}`
+    : e.countyFips ? `county:${e.countyFips}`
+    : e.stateFips ? `state:${e.stateFips}`
+    : `name:${e.type}:${e.name.toUpperCase()}`;
+}
+
+/** Rules an invariant test can assert directly, and the resolver upholds. */
+export const NO_SUBSTITUTION_INVARIANTS = {
+  /** A county may not stand in for a municipality, or a municipality for a
+   *  county, without a delegation rule that says so. */
+  entityMatchesDelegation(a: ScopeAuthority): boolean {
+    if (!a.entity || !a.delegatedTo) return true;
+    return a.entity.type === a.delegatedTo;
+  },
+  /** A missing record never carries a registry id — that is the substitution. */
+  missingRecordHasNoRow(a: ScopeAuthority): boolean {
+    return a.status !== 'BOUNDARY_ESTABLISHED_AHJ_RECORD_MISSING' || a.ahjRecordId === null;
+  },
+  /** Nothing is resolved without geography. */
+  resolvedImpliesGeography(a: ScopeAuthority, geo: LegalGeographyAuthority): boolean {
+    if (a.status !== 'AHJ_RECORD_FOUND' && a.status !== 'AHJ_VERIFIED') return true;
+    return requiredFacetsSatisfied(geo, BUILDING_AUTHORITY_CONTRACT);
+  },
+} as const;
+
+export type { JurisdictionDelegationRule };
