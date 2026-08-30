@@ -76,6 +76,18 @@ export interface PropertyEnrichmentResult {
   /** true only when the provider actually resolved the place layer, so "no place"
    *  (unincorporated) is distinguishable from "the layer was never queried". */
   boundary_layers_resolved?: boolean
+  // ── PER-FACET PROVENANCE ───────────────────────────────────────────────────
+  // A record may now be assembled from more than one leg (see enrichProperty),
+  // so one `provider_used` can no longer describe where every facet came from.
+  // Crediting the boundary provider with an ATTOM parcel id would print "parcel
+  // identifier published by census_geocoder", and the Census geocoder publishes
+  // no parcel identifiers. These say who established what.
+  /** the leg that published `parcel_id` (only ATTOM does). */
+  parcel_source?: string | null
+  /** the leg that resolved the municipal-boundary layers (only Census does). */
+  boundary_source?: string | null
+  /** every leg that contributed a facet, in the order they ran. */
+  provider_contributors?: string[]
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -311,20 +323,83 @@ export async function persistPropertyEnrichment(
 // Main enricher
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Fill the facets an earlier leg left null, without ever overwriting one it
+ * established. Later legs SUPPLEMENT, they do not correct — a provider that ran
+ * second because the first was incomplete has no standing to overrule it.
+ */
+function supplement(
+  base: PropertyEnrichmentResult, extra: PropertyEnrichmentResult,
+): PropertyEnrichmentResult {
+  const out: Record<string, unknown> = { ...base }
+  for (const [k, v] of Object.entries(extra)) {
+    if (k === 'provider_used' || k === 'provider_contributors') continue
+    if (v === null || v === undefined) continue
+    const cur = out[k]
+    if (cur === null || cur === undefined || cur === '') out[k] = v
+  }
+  return out as unknown as PropertyEnrichmentResult
+}
+
+/**
+ * THE CHAIN RUNS UNTIL THE FACETS ARE ESTABLISHED, NOT UNTIL A LEG ANSWERS.
+ *
+ * This used to be `if (attom) return attom` — first success wins, whole record.
+ * But the three legs do not answer the same question. ATTOM establishes parcel
+ * and assessment facts and knows nothing about legal boundaries; the Census
+ * geocoder is the ONLY leg that resolves which incorporated place contains the
+ * parcel, and it is the only source of state/county/place FIPS. Six facets have
+ * exactly one provider and that provider was the second leg of a chain that
+ * stopped at the first.
+ *
+ * So on any project where ATTOM answered — the ordinary case wherever an ATTOM
+ * key is configured — `boundary_layers_resolved` stayed undefined, the boundary
+ * was recorded as UNDETERMINED, and downstream the municipalBoundary field was
+ * filled with the mailing city. The registry gap and the AHJ substitution
+ * both trace back to this one `return`.
+ *
+ * The chain now continues while a REQUIRED facet is still missing, and merges.
+ * Nothing is overwritten: a later leg may only fill blanks.
+ */
 export async function enrichProperty(
   input: PropertyEnrichmentInput
 ): Promise<PropertyEnrichmentResult | null> {
-  // Provider 1: ATTOM
+  const contributors: string[] = []
+  let merged: PropertyEnrichmentResult | null = null
+
+  // Provider 1: ATTOM — parcel / assessment facts. Never legal boundary.
   const attom = await enrichFromATTOM(input)
-  if (attom) return attom
+  if (attom) {
+    contributors.push('attom')
+    merged = { ...attom, parcel_source: attom.parcel_id ? 'attom' : null }
+  }
 
-  // Provider 2: Census Geocoder
-  const census = await enrichFromCensus(input)
-  if (census) return census
+  // Provider 2: Census Geocoder — the ONLY leg that establishes legal geography.
+  // Run it whenever the boundary is still unresolved, INCLUDING when ATTOM has
+  // already answered. This is the fix: a successful earlier leg is not evidence
+  // about a facet it never had.
+  if (!merged || merged.boundary_layers_resolved !== true) {
+    const census = await enrichFromCensus(input)
+    if (census) {
+      contributors.push('census_geocoder')
+      const withSource = { ...census, boundary_source: 'census_geocoder' }
+      merged = merged ? supplement(merged, withSource) : withSource
+      // The boundary determination is the authority-relevant one, so the record
+      // is attributed to the leg that made it. Facet-level provenance below
+      // keeps the ATTOM contribution visible and correctly credited.
+      merged = { ...merged, provider_used: 'census_geocoder' }
+    }
+  }
 
-  // Provider 3: Nominatim
-  const nominatim = await enrichFromNominatim(input)
-  if (nominatim) return nominatim
+  // Provider 3: Nominatim — coordinate fallback only. No FIPS, no boundary.
+  if (!merged) {
+    const nominatim = await enrichFromNominatim(input)
+    if (nominatim) {
+      contributors.push('nominatim')
+      merged = nominatim
+    }
+  }
 
-  return null
+  if (!merged) return null
+  return { ...merged, provider_contributors: contributors }
 }

@@ -21,7 +21,8 @@
     "check:topology": "node scripts/check-dependency-topology.js",
     "check:engineering-boundaries": "node scripts/check-engineering-boundaries.js",
     "check:assisted-evidence-boundaries": "node scripts/check-assisted-evidence-boundaries.js",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "ahj:audit-national": "tsx scripts/ahj-audit-national.mjs"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",

@@ -831,9 +831,37 @@ export async function POST(req: NextRequest) {
         try {
           // Dynamic import to avoid build-time issues
           const ahjModule = await import('@/lib/jurisdictions/ahj-national').catch(() => null);
-          const searchAhjFn = ahjModule?.searchAhj || ahjModule?.default?.searchAhj;
-          if (typeof searchAhjFn === 'function') {
-            const ahjResults = searchAhjFn({ stateCode: sc, city: ct, county: cn });
+          // ── AUTHORITY IS RESOLVED JURISDICTIONALLY, NOT BY SEARCH RELEVANCE ──
+          //
+          // This used to call searchAhj({stateCode, city, county}) and take
+          // ahjResults[0]. searchAhj is a RELEVANCE SEARCH for the lookup UI: its
+          // city/county filters matched on substring, and (until the companion fix
+          // in ahj-national.ts) widened back to the whole state when they matched
+          // nothing. So for any address whose municipality is not in the table,
+          // ahjResults[0] was simply the first row in that state — Chicago for
+          // Illinois, Houston for Texas — and _ahjWins below then FORCED that
+          // stranger's name, NEC year, setbacks, permit fee and plan-check days
+          // over the project's own stored (and often correct) values.
+          //
+          // getAhjByAddress applies the jurisdictional order instead — incorporated
+          // municipality, then county for unincorporated territory, then a county
+          // named in the address text — and returns null rather than guessing when
+          // it cannot localize. Null is the correct answer for a jurisdiction we do
+          // not hold: the block below is skipped entirely, the project keeps its own
+          // values, and the missing record is left visible to the discovery path
+          // instead of being papered over by a neighbour.
+          const resolveAhjFn = ahjModule?.getAhjByAddress || ahjModule?.default?.getAhjByAddress;
+          if (typeof resolveAhjFn === 'function') {
+            const resolved = resolveAhjFn(
+              String(body.project?.address || ''),
+              { stateCode: sc || undefined, city: ct || undefined, county: cn || undefined },
+            );
+            const ahjResults = resolved ? [resolved] : [];
+            if (!resolved) {
+              console.warn('[permit/AHJ] no jurisdictional match for',
+                JSON.stringify({ state: sc, city: ct, county: cn }),
+                '— project AHJ fields left untouched (no substitution).');
+            }
             if (Array.isArray(ahjResults) && ahjResults.length > 0) {
               // Enrich with real NREL SolarTRACE permit-process data (online/instant
               // permitting, median permit cost, median permit days) where available.

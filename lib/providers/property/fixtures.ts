@@ -41,6 +41,7 @@ export const BRAIDON_PROPERTY_FIXTURE: RetrievedPropertyIdentity = {
   countyFips: '119',
   censusTract: '400903',
   parcelId: null,
+  parcelSource: null,
   ownerName: null,
   incorporatedPlace: null,
   countySubdivision: 'Nameoki township',

@@ -50,6 +50,12 @@ export interface RetrievedPropertyIdentity {
   censusTract: string | null;
   /** APN / parcel id — only ATTOM supplies one. */
   parcelId: string | null;
+  /** WHICH leg published `parcelId`. The record can now be assembled from more
+   *  than one provider (the chain continues past a leg that cannot establish the
+   *  legal boundary), so `providerUsed` describes the boundary determination and
+   *  no longer implies the parcel came from the same place. Null when no leg
+   *  published a parcel id. */
+  parcelSource: IdentityFieldSource | null;
   ownerName: string | null;
   // ── boundary evidence ────────────────────────────────────────────────────
   /** the incorporated municipality, or null. */

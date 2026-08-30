@@ -242,7 +242,13 @@ const AHJ_CURATED: AhjRecord[] = [
   ahj({ id:'ma-middlesex-cambridge', stateCode:'MA', stateName:'Massachusetts', county:'Middlesex', city:'Cambridge', ahjName:'City of Cambridge Inspectional Services', ahjType:'city', necVersion:'2020', utilityName:'Eversource Energy', phone:'(617) 349-6100', onlinePermitting:true, typicalPermitFee:'$200–$600', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:120, groundSnowLoadPsf:40, seismicDesignCategory:'C', specialRequirements:['Eversource interconnection','SMART program'] }),
 
   // ── MARYLAND ─────────────────────────────────────────────────────────────
-  ahj({ id:'md-prince-georges-county', stateCode:'MD', stateName:'Maryland', county:"Prince George's", city:'Unincorporated', ahjName:"Prince George's County Department of Permitting, Inspections & Enforcement", ahjType:'county', necVersion:'2020', utilityName:'Pepco (Potomac Electric Power)', phone:'(301) 636-2050', onlinePermitting:true, typicalPermitFee:'$200–$600', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', specialRequirements:['Pepco interconnection','MD PSC net metering'] }),
+  // Merged with the former `md-prince-george-county`, which was a SECOND curated
+  // row for this same government (same county, same city, same phone) carrying a
+  // website, local amendments and a wider fee range. mergeAhj only deduped
+  // expanded-against-curated, so both survived and array order decided which one
+  // the resolver returned — it returned this one, the poorer of the two. The
+  // retired id is aliased below so stored snapshots that cite it still resolve.
+  ahj({ id:'md-prince-georges-county', stateCode:'MD', stateName:'Maryland', county:"Prince George's", city:'Unincorporated', ahjName:"Prince George's County Department of Permitting, Inspections & Enforcement", ahjType:'county', necVersion:'2020', utilityName:'Pepco (Potomac Electric Power)', phone:'(301) 636-2050', website:'https://www.princegeorgescountymd.gov/pie', onlinePermitting:true, typicalPermitFee:'$200–$700', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', localAmendments:['Maryland Building Performance Standards'], specialRequirements:['Pepco interconnection','MD PSC net metering','Maryland SREC market'] }),
   ahj({ id:'md-baltimore-baltimore', stateCode:'MD', stateName:'Maryland', county:'Baltimore City', city:'Baltimore', ahjName:'Baltimore City Department of Housing & Community Development', ahjType:'city', necVersion:'2020', utilityName:'BGE (Baltimore Gas & Electric)', phone:'(410) 396-3360', onlinePermitting:true, typicalPermitFee:'$150–$500', typicalPlanCheckDays:10, typicalPermitDays:15, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', specialRequirements:['BGE interconnection','MD PSC net metering'] }),
 
   // ── CONNECTICUT ──────────────────────────────────────────────────────────
@@ -250,7 +256,7 @@ const AHJ_CURATED: AhjRecord[] = [
   // ── MICHIGAN ─────────────────────────────────────────────────────────────
 
   // ── MINNESOTA ────────────────────────────────────────────────────────────
-  ahj({ id:'mn-ramsey-saint-paul', stateCode:'MN', stateName:'Minnesota', county:'Ramsey', city:'Saint Paul', ahjName:'City of Saint Paul Safety & Inspections', ahjType:'city', necVersion:'2020', utilityName:'Xcel Energy', phone:'(651) 266-8989', onlinePermitting:true, typicalPermitFee:'$150–$500', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:50, seismicDesignCategory:'A', specialRequirements:['Xcel Energy interconnection','Snow load calcs required'] }),
+  ahj({ id:'mn-ramsey-saint-paul', stateCode:'MN', stateName:'Minnesota', county:'Ramsey', city:'Saint Paul', ahjName:'City of Saint Paul Department of Safety & Inspections', ahjType:'city', necVersion:'2020', utilityName:'Xcel Energy', phone:'(651) 266-8989', website:'https://www.stpaul.gov/departments/safety-inspections', localAmendments:['Minnesota Building Code'], onlinePermitting:true, typicalPermitFee:'$150–$500', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:50, seismicDesignCategory:'A', specialRequirements:['Xcel Energy interconnection','Snow load calcs required'] }),
 
   // ── OREGON ───────────────────────────────────────────────────────────────
   ahj({ id:'or-multnomah-portland', stateCode:'OR', stateName:'Oregon', county:'Multnomah', city:'Portland', ahjName:'City of Portland Bureau of Development Services', ahjType:'city', necVersion:'2020', utilityName:'PGE (Portland General Electric)', phone:'(503) 823-7300', website:'https://www.portland.gov/bds', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$200–$600', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:110, groundSnowLoadPsf:25, seismicDesignCategory:'D', specialRequirements:['PGE interconnection application','Oregon net metering','Seismic zone D requirements'], notes:'Portland is in seismic zone D — structural calcs must address seismic loads' }),
@@ -295,7 +301,11 @@ const AHJ_CURATED: AhjRecord[] = [
   ahj({ id:'wi-dane-madison', stateCode:'WI', stateName:'Wisconsin', county:'Dane', city:'Madison', ahjName:'City of Madison Building Inspection', ahjType:'city', necVersion:'2020', utilityName:'MG&E (Madison Gas & Electric)', phone:'(608) 266-4551', onlinePermitting:true, typicalPermitFee:'$150–$500', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:110, groundSnowLoadPsf:30, seismicDesignCategory:'A', specialRequirements:['MG&E interconnection','Wisconsin net metering'] }),
 
   // ── MISSOURI ─────────────────────────────────────────────────────────────
-  ahj({ id:'mo-st-louis-st-louis', stateCode:'MO', stateName:'Missouri', county:'St. Louis City', city:'St. Louis', ahjName:'City of St. Louis Building Division', ahjType:'city', necVersion:'2020', utilityName:'Ameren Missouri', phone:'(314) 622-3313', typicalPermitFee:'$150–$500', typicalPlanCheckDays:10, typicalPermitDays:15, windSpeedMph:115, groundSnowLoadPsf:20, seismicDesignCategory:'B', specialRequirements:['Ameren Missouri interconnection'] }),
+  // Merged with the former `mo-st-louis-city` — same government, same building
+  // division, same phone — which carried the website, online permitting, the real
+  // (faster, cheaper) fee and turnaround, and the tornado wind note. See the
+  // Prince George's note above: array order was serving the poorer row.
+  ahj({ id:'mo-st-louis-st-louis', stateCode:'MO', stateName:'Missouri', county:'St. Louis City', city:'St. Louis', ahjName:'City of St. Louis Building Division', ahjType:'city', necVersion:'2020', utilityName:'Ameren Missouri', phone:'(314) 622-3313', website:'https://www.stlouis-mo.gov/government/departments/building', onlinePermitting:true, typicalPermitFee:'$100–$400', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:115, groundSnowLoadPsf:20, seismicDesignCategory:'B', localAmendments:['Missouri Building Code'], specialRequirements:['Ameren Missouri interconnection','Missouri net metering','Tornado zone — wind calcs'] }),
 
   // ── KANSAS ───────────────────────────────────────────────────────────────
   ahj({ id:'ks-sedgwick-wichita', stateCode:'KS', stateName:'Kansas', county:'Sedgwick', city:'Wichita', ahjName:'City of Wichita Building Inspection', ahjType:'city', necVersion:'2020', utilityName:'Evergy (Westar Energy)', phone:'(316) 268-4421', onlinePermitting:true, typicalPermitFee:'$100–$400', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:115, groundSnowLoadPsf:20, seismicDesignCategory:'B', specialRequirements:['Evergy interconnection','Kansas net metering'] }),
@@ -456,7 +466,6 @@ const AHJ_CURATED: AhjRecord[] = [
   // ── MINNESOTA ────────────────────────────────────────────────────────────
   ahj({ id:'mn-hennepin-minneapolis', stateCode:'MN', stateName:'Minnesota', county:'Hennepin', city:'Minneapolis', ahjName:'City of Minneapolis Community Planning & Economic Development', ahjType:'city', necVersion:'2020', utilityName:'Xcel Energy', phone:'(612) 673-3000', website:'https://www.minneapolismn.gov', onlinePermitting:true, typicalPermitFee:'$150–$500', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:50, seismicDesignCategory:'A', localAmendments:['Minnesota Building Code'], specialRequirements:['Xcel Energy interconnection','MN net metering','Heavy snow load — 50 psf ground','Xcel Solar*Rewards program','Minneapolis Green Building Policy'] }),
 
-  ahj({ id:'mn-ramsey-st-paul', stateCode:'MN', stateName:'Minnesota', county:'Ramsey', city:'St. Paul', ahjName:'City of Saint Paul Department of Safety & Inspections', ahjType:'city', necVersion:'2020', utilityName:'Xcel Energy', phone:'(651) 266-8989', website:'https://www.stpaul.gov/departments/safety-inspections', onlinePermitting:true, typicalPermitFee:'$150–$500', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:50, seismicDesignCategory:'A', localAmendments:['Minnesota Building Code'], specialRequirements:['Xcel Energy interconnection','MN net metering','Heavy snow load — 50 psf','Xcel Solar*Rewards program'] }),
 
   // ── VIRGINIA (expanded) ──────────────────────────────────────────────────
   ahj({ id:'va-virginia-beach-city', stateCode:'VA', stateName:'Virginia', county:'Virginia Beach City', city:'Virginia Beach', ahjName:'City of Virginia Beach Department of Planning & Community Development', ahjType:'city', necVersion:'2020', utilityName:'Dominion Energy Virginia', phone:'(757) 385-8074', website:'https://www.vbgov.com/government/departments/planning', onlinePermitting:true, typicalPermitFee:'$150–$600', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:130, groundSnowLoadPsf:10, seismicDesignCategory:'B', localAmendments:['Virginia Uniform Statewide Building Code'], specialRequirements:['Dominion Energy interconnection','Virginia SCC net metering','Coastal zone — hurricane wind requirements','Virginia Clean Economy Act (VCEA) targets'], notes:'Large military base presence — verify AICUZ zones' }),
@@ -473,7 +482,6 @@ const AHJ_CURATED: AhjRecord[] = [
   // ── MARYLAND ─────────────────────────────────────────────────────────────
   ahj({ id:'md-montgomery-county', stateCode:'MD', stateName:'Maryland', county:'Montgomery', city:'Unincorporated', ahjName:'Montgomery County Department of Permitting Services', ahjType:'county', necVersion:'2020', utilityName:'PEPCO (Potomac Electric Power)', phone:'(240) 777-0311', website:'https://www.montgomerycountymd.gov/permitting', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$200–$700', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', localAmendments:['Maryland Building Performance Standards'], specialRequirements:['PEPCO interconnection','Maryland net metering','Maryland SREC market','Montgomery County Green Building requirements'], notes:'Montgomery County is largest county in Maryland; strong solar market, aggressive renewable targets' }),
 
-  ahj({ id:'md-prince-george-county', stateCode:'MD', stateName:'Maryland', county:"Prince George's", city:'Unincorporated', ahjName:"Prince George's County Department of Permitting, Inspections and Enforcement", ahjType:'county', necVersion:'2020', utilityName:'PEPCO (Potomac Electric Power)', phone:'(301) 636-2050', website:'https://www.princegeorgescountymd.gov/pie', onlinePermitting:true, typicalPermitFee:'$200–$700', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', localAmendments:['Maryland Building Performance Standards'], specialRequirements:['PEPCO interconnection','Maryland net metering','Maryland SREC market'] }),
 
   ahj({ id:'md-anne-arundel-county', stateCode:'MD', stateName:'Maryland', county:'Anne Arundel', city:'Unincorporated', ahjName:'Anne Arundel County Inspections & Permits', ahjType:'county', necVersion:'2020', utilityName:'BGE (Baltimore Gas & Electric)', phone:'(410) 222-7777', website:'https://www.aacounty.org/departments/inspections-permits', onlinePermitting:true, typicalPermitFee:'$150–$600', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', localAmendments:['Maryland Building Performance Standards'], specialRequirements:['BGE interconnection','Maryland net metering','Maryland SREC market','Chesapeake Bay critical area — check setbacks near waterways'] }),
 
@@ -498,7 +506,6 @@ const AHJ_CURATED: AhjRecord[] = [
   // ── MISSOURI ─────────────────────────────────────────────────────────────
   ahj({ id:'mo-jackson-kansas-city', stateCode:'MO', stateName:'Missouri', county:'Jackson', city:'Kansas City', ahjName:'City of Kansas City Development Services', ahjType:'city', necVersion:'2020', utilityName:'Evergy (formerly Kansas City Power & Light)', phone:'(816) 513-1500', website:'https://www.kcmo.gov/city-hall/departments/city-development/development-services', onlinePermitting:true, typicalPermitFee:'$100–$400', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:115, groundSnowLoadPsf:15, seismicDesignCategory:'B', localAmendments:['Missouri Building Code'], specialRequirements:['Evergy interconnection','Missouri net metering','Tornado zone — wind calcs required','Evergy Renewable Energy Rider'] }),
 
-  ahj({ id:'mo-st-louis-city', stateCode:'MO', stateName:'Missouri', county:'St. Louis City', city:'St. Louis', ahjName:'City of St. Louis Building Division', ahjType:'city', necVersion:'2020', utilityName:'Ameren Missouri', phone:'(314) 622-3313', website:'https://www.stlouis-mo.gov/government/departments/building', onlinePermitting:true, typicalPermitFee:'$100–$400', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:115, groundSnowLoadPsf:20, seismicDesignCategory:'B', localAmendments:['Missouri Building Code'], specialRequirements:['Ameren Missouri interconnection','Missouri net metering','Tornado zone — wind calcs'] }),
 ];
 
 // ============================================================
@@ -862,9 +869,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'ca-tulare-tulare-county', stateCode:'CA', stateName:'California', county:'Tulare', city:'Unincorporated', ahjName:'Tulare County Building Department', necVersion:'2020', utilityName:'PG&E (Pacific Gas & Electric)', localAmendments:['California Building Code (Title 24)','California Electrical Code','CA Energy Code (Title 24 Part 6)'], typicalPermitFee:'$200-$800', feeStructure:'Valuation-based per CA Building Standards', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:110, groundSnowLoadPsf:5, seismicDesignCategory:'D', specialRequirements:['CA Rule 21 compliant inverter required','Title 24 Part 6 compliance']}),
   ahj({id:'ca-tulare-visalia', stateCode:'CA', stateName:'California', county:'Tulare', city:'Visalia', ahjName:'City of Visalia Building Division', necVersion:'2020', utilityName:'PG&E', ahjType:'city', phone:'(559) 713-4436', website:'', localAmendments:['California Building Code (Title 24)'], onlinePermitting:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:21, windSpeedMph:110, seismicDesignCategory:'D', specialRequirements:['PG&E interconnection','CA Rule 21']}),
   ahj({id:'ca-tuolumne-tuolumne-county', stateCode:'CA', stateName:'California', county:'Tuolumne', city:'Unincorporated', ahjName:'Tuolumne County Building Department', necVersion:'2020', utilityName:'PG&E (Pacific Gas & Electric)', localAmendments:['California Building Code (Title 24)','California Electrical Code','CA Energy Code (Title 24 Part 6)'], typicalPermitFee:'$200-$800', feeStructure:'Valuation-based per CA Building Standards', typicalPlanCheckDays:5, typicalPermitDays:7, windSpeedMph:110, groundSnowLoadPsf:5, seismicDesignCategory:'D', specialRequirements:['CA Rule 21 compliant inverter required','Title 24 Part 6 compliance']}),
-  ahj({id:'ca-pge-solar', stateCode:'CA', stateName:'California', county:'Various', city:'Various', ahjName:'PG&E Solar Connection Program', necVersion:'2020', utilityName:'PG&E', ahjType:'special_district', phone:'(800) 743-5000', website:'https://www.pge.com/solar', localAmendments:['California Building Code (Title 24)','California Electrical Code','CA Energy Code (Title 24 Part 6)'], permitAuthority:'Special District', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based per CA Building Standards', typicalPlanCheckDays:3, typicalPermitDays:5, interconnectionDays:14, windSpeedMph:110, groundSnowLoadPsf:5, seismicDesignCategory:'D', specialRequirements:['PG&E interconnection','CA Rule 21','PG&E Solar Connection portal'], notes:'PG&E covers much of Northern/Central CA'}),
-  ahj({id:'ca-sce-solar', stateCode:'CA', stateName:'California', county:'Various', city:'Various', ahjName:'SCE Solar Connection Program', necVersion:'2020', utilityName:'SCE', ahjType:'special_district', phone:'(800) 655-4555', website:'https://www.sce.com/solar', localAmendments:['California Building Code (Title 24)','California Electrical Code','CA Energy Code (Title 24 Part 6)'], permitAuthority:'Special District', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based per CA Building Standards', typicalPlanCheckDays:3, typicalPermitDays:5, interconnectionDays:14, windSpeedMph:110, groundSnowLoadPsf:5, seismicDesignCategory:'D', specialRequirements:['SCE interconnection','CA Rule 21','SCE Solar Share community solar'], notes:'SCE covers much of Southern CA'}),
-  ahj({id:'ca-sdge-solar', stateCode:'CA', stateName:'California', county:'Various', city:'Various', ahjName:'SDG&E Solar Connection Program', necVersion:'2020', utilityName:'SDG&E', ahjType:'special_district', phone:'(800) 411-7343', website:'https://www.sdge.com/solar', localAmendments:['California Building Code (Title 24)','California Electrical Code','CA Energy Code (Title 24 Part 6)'], permitAuthority:'Special District', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based per CA Building Standards', typicalPlanCheckDays:3, typicalPermitDays:5, interconnectionDays:14, windSpeedMph:110, groundSnowLoadPsf:5, seismicDesignCategory:'D', specialRequirements:['SDG&E interconnection','CA Rule 21'], notes:'SDG&E covers San Diego metro area'}),
   ahj({id:'ca-ventura-oxnard', stateCode:'CA', stateName:'California', county:'Ventura', city:'Oxnard', ahjName:'City of Oxnard Building & Safety', necVersion:'2020', utilityName:'SCE', ahjType:'city', phone:'(805) 385-7925', website:'', localAmendments:['California Building Code (Title 24)'], onlinePermitting:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:21, windSpeedMph:110, seismicDesignCategory:'D', specialRequirements:['SCE interconnection','CA Rule 21']}),
   ahj({id:'ca-ventura-simi-valley', stateCode:'CA', stateName:'California', county:'Ventura', city:'Simi Valley', ahjName:'City of Simi Valley Building & Safety', necVersion:'2020', utilityName:'SCE', ahjType:'city', phone:'(805) 583-6773', website:'', localAmendments:['California Building Code (Title 24)'], onlinePermitting:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:21, windSpeedMph:110, seismicDesignCategory:'D', specialRequirements:['SCE interconnection','CA Rule 21']}),
   ahj({id:'ca-ventura-thousand-oaks', stateCode:'CA', stateName:'California', county:'Ventura', city:'Thousand Oaks', ahjName:'City of Thousand Oaks Building & Safety', necVersion:'2020', utilityName:'SCE', ahjType:'city', phone:'(805) 449-2538', website:'', localAmendments:['California Building Code (Title 24)'], onlinePermitting:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:14, windSpeedMph:110, seismicDesignCategory:'D', specialRequirements:['SCE interconnection','CA Rule 21']}),
@@ -953,7 +957,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'co-sedgwick-sedgwick-county', stateCode:'CO', stateName:'Colorado', county:'Sedgwick', city:'Unincorporated', ahjName:'Sedgwick County Building Department', necVersion:'2020', utilityName:'Xcel Energy', localAmendments:['Colorado Building Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:5, typicalPermitDays:7, groundSnowLoadPsf:30, specialRequirements:['CO net metering','Xcel Solar*Rewards (CO)']}),
   ahj({id:'co-summit-summit-county', stateCode:'CO', stateName:'Colorado', county:'Summit', city:'Unincorporated', ahjName:'Summit County Building Department', necVersion:'2020', utilityName:'Xcel Energy', localAmendments:['Colorado Building Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:5, typicalPermitDays:7, groundSnowLoadPsf:30, specialRequirements:['CO net metering','Xcel Solar*Rewards (CO)']}),
   ahj({id:'co-teller-teller-county', stateCode:'CO', stateName:'Colorado', county:'Teller', city:'Unincorporated', ahjName:'Teller County Building Department', necVersion:'2020', utilityName:'Xcel Energy', localAmendments:['Colorado Building Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:5, typicalPermitDays:7, groundSnowLoadPsf:30, specialRequirements:['CO net metering','Xcel Solar*Rewards (CO)']}),
-  ahj({id:'co-co-seia', stateCode:'CO', stateName:'Colorado', county:'Various', city:'Various', ahjName:'Colorado Solar & Storage Association (COSSA)', necVersion:'2020', utilityName:'Xcel Energy', ahjType:'special_district', phone:'(303) 758-9550', website:'https://www.cossa.org', localAmendments:['Colorado Building Code'], permitAuthority:'Special District', onlinePermitting:true, typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:14, groundSnowLoadPsf:30, specialRequirements:['Xcel Energy interconnection','CO net metering','Xcel Solar*Rewards (Colorado)'], notes:'COSSA coordinates state solar advocacy'}),
   ahj({id:'co-washington-washington-county', stateCode:'CO', stateName:'Colorado', county:'Washington', city:'Unincorporated', ahjName:'Washington County Building Department', necVersion:'2020', utilityName:'Xcel Energy', localAmendments:['Colorado Building Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:5, typicalPermitDays:7, groundSnowLoadPsf:30, specialRequirements:['CO net metering','Xcel Solar*Rewards (CO)']}),
   ahj({id:'co-weld-greeley', stateCode:'CO', stateName:'Colorado', county:'Weld', city:'Greeley', ahjName:'City of Greeley Building Department', necVersion:'2020', utilityName:'Xcel Energy', ahjType:'city', phone:'(970) 350-9390', website:'https://www.greeleygov.com/building', localAmendments:['Colorado Building Code'], onlinePermitting:true, typicalPermitFee:'$100-$400', feeStructure:'Flat fee', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:14, groundSnowLoadPsf:25, specialRequirements:['Xcel Energy interconnection','CO net metering']}),
   ahj({id:'co-weld-weld-county', stateCode:'CO', stateName:'Colorado', county:'Weld', city:'Unincorporated', ahjName:'Weld County Building Department', necVersion:'2020', utilityName:'Xcel Energy', localAmendments:['Colorado Building Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:5, typicalPermitDays:7, groundSnowLoadPsf:30, specialRequirements:['CO net metering','Xcel Solar*Rewards (CO)']}),
@@ -976,7 +979,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'ct-new-haven-waterbury', stateCode:'CT', stateName:'Connecticut', county:'New Haven', city:'Waterbury', ahjName:'City of Waterbury Building Department', necVersion:'2020', utilityName:'Eversource Energy', ahjType:'city', phone:'(203) 574-6824', website:'', localAmendments:['Connecticut State Building Code'], onlinePermitting:true, typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, groundSnowLoadPsf:30, specialRequirements:['Eversource interconnection','CT net metering']}),
   ahj({id:'ct-new-london-new-london-county', stateCode:'CT', stateName:'Connecticut', county:'New London', city:'Unincorporated', ahjName:'New London County Building Department', necVersion:'2020', utilityName:'Eversource Energy', localAmendments:['Connecticut State Building Code'], typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:30, specialRequirements:['CT Residential Solar Investment Program','CT net metering']}),
   ahj({id:'ct-tolland-tolland-county', stateCode:'CT', stateName:'Connecticut', county:'Tolland', city:'Unincorporated', ahjName:'Tolland County Building Department', necVersion:'2020', utilityName:'Eversource Energy', localAmendments:['Connecticut State Building Code'], typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:30, specialRequirements:['CT Residential Solar Investment Program','CT net metering']}),
-  ahj({id:'ct-ct-green-bank', stateCode:'CT', stateName:'Connecticut', county:'Various', city:'Various', ahjName:'CT Green Bank', necVersion:'2020', utilityName:'Eversource Energy', ahjType:'special_district', phone:'(860) 567-3001', website:'https://www.ctgreenbank.com', localAmendments:['Connecticut State Building Code'], permitAuthority:'Special District', onlinePermitting:true, typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, groundSnowLoadPsf:30, specialRequirements:['CT Residential Solar Investment Program','CT net metering','CT Green Bank financing','PURA net metering tariff'], notes:'CT Green Bank provides innovative solar financing'}),
   ahj({id:'ct-windham-windham-county', stateCode:'CT', stateName:'Connecticut', county:'Windham', city:'Unincorporated', ahjName:'Windham County Building Department', necVersion:'2020', utilityName:'Eversource Energy', localAmendments:['Connecticut State Building Code'], typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:30, specialRequirements:['CT Residential Solar Investment Program','CT net metering']}),
   // ── DISTRICT OF COLUMBIA ──
   ahj({id:'dc-district-of-columbia-district-of-columbia-county', stateCode:'DC', stateName:'District of Columbia', county:'District of Columbia', city:'Unincorporated', ahjName:'District of Columbia County Building Department', necVersion:'2020', utilityName:'PEPCO', typicalPermitFee:'$200-$700', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:20, specialRequirements:['DC net metering','DC SREC market','DC Sustainable Energy Utility (DCSEU)']}),
@@ -1294,7 +1296,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'hi-hawaii-hawaii-county', stateCode:'HI', stateName:'Hawaii', county:'Hawaii', city:'Unincorporated', ahjName:'Hawaii County Building Department', necVersion:'2020', utilityName:'Hawaiian Electric (HECO)', localAmendments:['Hawaii State Building Code'], typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:130, seismicDesignCategory:'D', specialRequirements:['HECO Rule 14H','HI net metering','Highest US electricity rates']}),
   ahj({id:'hi-honolulu-honolulu', stateCode:'HI', stateName:'Hawaii', county:'Honolulu', city:'Honolulu', ahjName:'City & County of Honolulu Dept of Planning & Permitting', necVersion:'2020', utilityName:'Hawaiian Electric (HECO)', ahjType:'city', phone:'(808) 768-8222', website:'https://www.honolulu.gov/dpp', localAmendments:['Hawaii State Building Code'], onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:14, windSpeedMph:130, seismicDesignCategory:'D', specialRequirements:['HECO interconnection','HI net metering','Highest US electricity rates','HECO Rule 14H interconnection']}),
   ahj({id:'hi-honolulu-kailua', stateCode:'HI', stateName:'Hawaii', county:'Honolulu', city:'Kailua', ahjName:'City & County of Honolulu Building Dept', necVersion:'2020', utilityName:'Hawaiian Electric (HECO)', ahjType:'city', phone:'(808) 768-8234', website:'', localAmendments:['Hawaii State Building Code'], onlinePermitting:true, typicalPermitFee:'$200-$500', feeStructure:'Valuation-based', windSpeedMph:130, seismicDesignCategory:'D', specialRequirements:['HECO interconnection']}),
-  ahj({id:'hi-heco-district', stateCode:'HI', stateName:'Hawaii', county:'Honolulu', city:'Oahu', ahjName:'HECO District Office - Interconnection', necVersion:'2020', utilityName:'Hawaiian Electric (HECO)', ahjType:'special_district', phone:'(808) 543-7511', website:'https://www.hawaiianelectric.com', localAmendments:['Hawaii State Building Code'], permitAuthority:'Special District', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:14, windSpeedMph:130, seismicDesignCategory:'D', specialRequirements:['HECO Rule 14H','HECO interconnection','HI net metering','Highest US electricity rates'], notes:'HECO has dedicated interconnection queue per island'}),
   ahj({id:'hi-honolulu-pearl-city', stateCode:'HI', stateName:'Hawaii', county:'Honolulu', city:'Pearl City', ahjName:'City & County of Honolulu DPP', necVersion:'2020', utilityName:'Hawaiian Electric (HECO)', ahjType:'city', phone:'(808) 768-8222', website:'https://www.honolulu.gov/dpp', localAmendments:['Hawaii State Building Code'], onlinePermitting:true, typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:14, windSpeedMph:130, seismicDesignCategory:'D', specialRequirements:['HECO interconnection','HI net metering','Highest US electricity rates']}),
   ahj({id:'hi-honolulu-honolulu-county', stateCode:'HI', stateName:'Hawaii', county:'Honolulu', city:'Unincorporated', ahjName:'Honolulu County Building Department', necVersion:'2020', utilityName:'Hawaiian Electric (HECO)', localAmendments:['Hawaii State Building Code'], typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:130, seismicDesignCategory:'D', specialRequirements:['HECO Rule 14H','HI net metering','Highest US electricity rates']}),
   ahj({id:'hi-honolulu-wahiawa', stateCode:'HI', stateName:'Hawaii', county:'Honolulu', city:'Wahiawa', ahjName:'City & County of Honolulu Building Dept', necVersion:'2020', utilityName:'Hawaiian Electric (HECO)', ahjType:'city', phone:'(808) 768-8234', website:'', localAmendments:['Hawaii State Building Code'], typicalPermitFee:'$200-$500', feeStructure:'Valuation-based', windSpeedMph:130, seismicDesignCategory:'D', specialRequirements:['HECO interconnection']}),
@@ -1583,7 +1584,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'il-stephenson-stephenson-county', stateCode:'IL', stateName:'Illinois', county:'Stephenson', city:'Unincorporated', ahjName:'Stephenson County Building Department', necVersion:'2020', utilityName:'Ameren Illinois', localAmendments:['Illinois Energy Conservation Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:20, specialRequirements:['IL Shines (SREC) program','IL net metering']}),
   ahj({id:'il-tazewell-tazewell-county', stateCode:'IL', stateName:'Illinois', county:'Tazewell', city:'Unincorporated', ahjName:'Tazewell County Building Department', necVersion:'2020', utilityName:'Ameren Illinois', localAmendments:['Illinois Energy Conservation Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:20, specialRequirements:['IL Shines (SREC) program','IL net metering']}),
   ahj({id:'il-union-union-county', stateCode:'IL', stateName:'Illinois', county:'Union', city:'Unincorporated', ahjName:'Union County Building Department', necVersion:'2020', utilityName:'Ameren Illinois', localAmendments:['Illinois Energy Conservation Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:20, specialRequirements:['IL Shines (SREC) program','IL net metering']}),
-  ahj({id:'il-ilses', stateCode:'IL', stateName:'Illinois', county:'Various', city:'Various', ahjName:'Illinois Solar Energy Association (ISEA)', necVersion:'2020', utilityName:'ComEd', ahjType:'special_district', phone:'(312) 498-1880', website:'https://www.illinoissolar.org', localAmendments:['Illinois Energy Conservation Code'], permitAuthority:'Special District', onlinePermitting:true, typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:5, typicalPermitDays:7, interconnectionDays:21, windSpeedMph:110, groundSnowLoadPsf:20, specialRequirements:['IL Shines (SREC) program','IL net metering','IL FEPA programs'], notes:'ISEA coordinates state-wide solar market info'}),
   ahj({id:'il-vermilion-vermilion-county', stateCode:'IL', stateName:'Illinois', county:'Vermilion', city:'Unincorporated', ahjName:'Vermilion County Building Department', necVersion:'2020', utilityName:'Ameren Illinois', localAmendments:['Illinois Energy Conservation Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:20, specialRequirements:['IL Shines (SREC) program','IL net metering']}),
   ahj({id:'il-wabash-wabash-county', stateCode:'IL', stateName:'Illinois', county:'Wabash', city:'Unincorporated', ahjName:'Wabash County Building Department', necVersion:'2020', utilityName:'Ameren Illinois', localAmendments:['Illinois Energy Conservation Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:20, specialRequirements:['IL Shines (SREC) program','IL net metering']}),
   ahj({id:'il-warren-warren-county', stateCode:'IL', stateName:'Illinois', county:'Warren', city:'Unincorporated', ahjName:'Warren County Building Department', necVersion:'2020', utilityName:'Ameren Illinois', localAmendments:['Illinois Energy Conservation Code'], typicalPermitFee:'$100-$400', feeStructure:'Flat fee or per kW', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:20, specialRequirements:['IL Shines (SREC) program','IL net metering']}),
@@ -2010,7 +2010,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'ma-plymouth-plymouth-county', stateCode:'MA', stateName:'Massachusetts', county:'Plymouth', city:'Unincorporated', ahjName:'Plymouth County Building Department', necVersion:'2020', utilityName:'Eversource Energy', localAmendments:['Massachusetts State Building Code 10th Ed'], typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:35, specialRequirements:['MA SMART solar incentive program','MA net metering']}),
   ahj({id:'ma-suffolk-boston', stateCode:'MA', stateName:'Massachusetts', county:'Suffolk', city:'Boston', ahjName:'City of Boston Inspectional Services', necVersion:'2020', utilityName:'Eversource Energy', ahjType:'city', phone:'(617) 635-5300', website:'https://www.boston.gov/departments/inspectional-services', localAmendments:['Massachusetts State Building Code 10th Ed'], onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, windSpeedMph:110, groundSnowLoadPsf:35, specialRequirements:['Eversource interconnection','MA SMART solar incentive program','MA net metering','Boston zoning setback requirements']}),
   ahj({id:'ma-suffolk-suffolk-county', stateCode:'MA', stateName:'Massachusetts', county:'Suffolk', city:'Unincorporated', ahjName:'Suffolk County Building Department', necVersion:'2020', utilityName:'Eversource Energy', localAmendments:['Massachusetts State Building Code 10th Ed'], typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:35, specialRequirements:['MA SMART solar incentive program','MA net metering']}),
-  ahj({id:'ma-mass-cec', stateCode:'MA', stateName:'Massachusetts', county:'Various', city:'Various', ahjName:'Massachusetts Clean Energy Center (MassCEC)', necVersion:'2020', utilityName:'Eversource Energy', ahjType:'special_district', phone:'(617) 315-9300', website:'https://www.masscec.com', localAmendments:['Massachusetts State Building Code 10th Ed'], permitAuthority:'Special District', onlinePermitting:true, typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, windSpeedMph:110, groundSnowLoadPsf:35, specialRequirements:['MA SMART solar incentive program','MA net metering','MassCEC solar loan program'], notes:'MassCEC administers state solar programs'}),
   ahj({id:'ma-worcester-worcester-county', stateCode:'MA', stateName:'Massachusetts', county:'Worcester', city:'Unincorporated', ahjName:'Worcester County Building Department', necVersion:'2020', utilityName:'Eversource Energy', localAmendments:['Massachusetts State Building Code 10th Ed'], typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:35, specialRequirements:['MA SMART solar incentive program','MA net metering']}),
   ahj({id:'ma-worcester-worcester', stateCode:'MA', stateName:'Massachusetts', county:'Worcester', city:'Worcester', ahjName:'City of Worcester Building Division', necVersion:'2020', utilityName:'National Grid', ahjType:'city', phone:'(508) 799-1190', website:'https://www.worcesterma.gov/permits-inspections', localAmendments:['Massachusetts State Building Code 9th Ed'], onlinePermitting:true, typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, windSpeedMph:110, groundSnowLoadPsf:40, specialRequirements:['National Grid interconnection','MA SMART program','MA net metering','Heavy snow load - 40 psf']}),
   // ── MARYLAND ──
@@ -2937,7 +2936,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'nj-sussex-sussex-county', stateCode:'NJ', stateName:'New Jersey', county:'Sussex', city:'Unincorporated', ahjName:'Sussex County Building Department', necVersion:'2020', utilityName:'JCP&L (Jersey Central Power & Light)', localAmendments:['NJ Uniform Construction Code'], typicalPermitFee:'$200-$700', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:25, specialRequirements:['NJ SREC/TRECs incentive','NJ Board of Public Utilities approval']}),
   ahj({id:'nj-union-elizabeth', stateCode:'NJ', stateName:'New Jersey', county:'Union', city:'Elizabeth', ahjName:'City of Elizabeth Building Department', necVersion:'2020', utilityName:'PSE&G', ahjType:'city', phone:'(908) 820-4161', website:'', localAmendments:['NJ Uniform Construction Code'], onlinePermitting:true, typicalPermitFee:'$200-$700', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, groundSnowLoadPsf:25, specialRequirements:['PSE&G interconnection','NJ SREC/TRECs','NJ net metering']}),
   ahj({id:'nj-union-union-county', stateCode:'NJ', stateName:'New Jersey', county:'Union', city:'Unincorporated', ahjName:'Union County Building Department', necVersion:'2020', utilityName:'PSE&G (Public Service Electric & Gas)', localAmendments:['NJ Uniform Construction Code'], typicalPermitFee:'$200-$700', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:25, specialRequirements:['NJ SREC/TRECs incentive','NJ Board of Public Utilities approval']}),
-  ahj({id:'nj-njcep', stateCode:'NJ', stateName:'New Jersey', county:'Various', city:'Various', ahjName:'NJ Clean Energy Program (NJCEP)', necVersion:'2020', utilityName:'PSE&G', ahjType:'special_district', phone:'(866) 656-7237', website:'https://www.njcleanenergy.com', localAmendments:['NJ Uniform Construction Code'], permitAuthority:'Special District', onlinePermitting:true, typicalPermitFee:'$200-$700', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, groundSnowLoadPsf:25, specialRequirements:['NJ SREC/TRECs incentive','NJ Board of Public Utilities approval','NJCEP rebate programs'], notes:'NJCEP administers state-wide solar incentives'}),
   ahj({id:'nj-warren-warren-county', stateCode:'NJ', stateName:'New Jersey', county:'Warren', city:'Unincorporated', ahjName:'Warren County Building Department', necVersion:'2020', utilityName:'JCP&L (Jersey Central Power & Light)', localAmendments:['NJ Uniform Construction Code'], typicalPermitFee:'$200-$700', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:25, specialRequirements:['NJ SREC/TRECs incentive','NJ Board of Public Utilities approval']}),
   // ── NEW MEXICO ──
   ahj({id:'nm-bernalillo-albuquerque', stateCode:'NM', stateName:'New Mexico', county:'Bernalillo', city:'Albuquerque', ahjName:'City of Albuquerque Planning & Development', necVersion:'2020', utilityName:'PNM (Public Service Company of NM)', ahjType:'city', phone:'(505) 924-3925', website:'https://www.cabq.gov/planning', localAmendments:[''], onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$100-$300', feeStructure:'Flat fee', typicalPlanCheckDays:3, typicalPermitDays:5, interconnectionDays:14, groundSnowLoadPsf:10, specialRequirements:['PNM interconnection','NM net metering','PNM Sky Blue solar program']}),
@@ -3076,7 +3074,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'ny-tioga-tioga-county', stateCode:'NY', stateName:'New York', county:'Tioga', city:'Unincorporated', ahjName:'Tioga County Building Department', necVersion:'2020', utilityName:'National Grid', localAmendments:['NYS Energy Conservation Construction Code'], typicalPermitFee:'$150-$600', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:40, specialRequirements:['NYSERDA NY-Sun incentive','NY State net metering']}),
   ahj({id:'ny-tompkins-tompkins-county', stateCode:'NY', stateName:'New York', county:'Tompkins', city:'Unincorporated', ahjName:'Tompkins County Building Department', necVersion:'2020', utilityName:'National Grid', localAmendments:['NYS Energy Conservation Construction Code'], typicalPermitFee:'$150-$600', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:40, specialRequirements:['NYSERDA NY-Sun incentive','NY State net metering']}),
   ahj({id:'ny-ulster-ulster-county', stateCode:'NY', stateName:'New York', county:'Ulster', city:'Unincorporated', ahjName:'Ulster County Building Department', necVersion:'2020', utilityName:'Central Hudson', localAmendments:['NYS Energy Conservation Construction Code'], typicalPermitFee:'$150-$600', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:40, specialRequirements:['NYSERDA NY-Sun incentive','NY State net metering']}),
-  ahj({id:'ny-nysun', stateCode:'NY', stateName:'New York', county:'Various', city:'Various', ahjName:'NYSERDA NY-Sun Program', necVersion:'2020', utilityName:'National Grid', ahjType:'special_district', phone:'(866) 697-8626', website:'https://www.nyserda.ny.gov/ny-sun', localAmendments:['NYS Energy Conservation Construction Code'], permitAuthority:'Special District', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$150-$600', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, groundSnowLoadPsf:40, specialRequirements:['NYSERDA NY-Sun incentive','NY State net metering','NY-Sun Megawatt Block incentive'], notes:'NY-Sun is the state incentive program for solar'}),
   ahj({id:'ny-warren-warren-county', stateCode:'NY', stateName:'New York', county:'Warren', city:'Unincorporated', ahjName:'Warren County Building Department', necVersion:'2020', utilityName:'National Grid', localAmendments:['NYS Energy Conservation Construction Code'], typicalPermitFee:'$150-$600', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:40, specialRequirements:['NYSERDA NY-Sun incentive','NY State net metering']}),
   ahj({id:'ny-washington-washington-county', stateCode:'NY', stateName:'New York', county:'Washington', city:'Unincorporated', ahjName:'Washington County Building Department', necVersion:'2020', utilityName:'National Grid', localAmendments:['NYS Energy Conservation Construction Code'], typicalPermitFee:'$150-$600', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:40, specialRequirements:['NYSERDA NY-Sun incentive','NY State net metering']}),
   ahj({id:'ny-wayne-wayne-county', stateCode:'NY', stateName:'New York', county:'Wayne', city:'Unincorporated', ahjName:'Wayne County Building Department', necVersion:'2020', utilityName:'National Grid', localAmendments:['NYS Energy Conservation Construction Code'], typicalPermitFee:'$150-$600', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:40, specialRequirements:['NYSERDA NY-Sun incentive','NY State net metering']}),
@@ -4613,21 +4610,65 @@ function applyCodeBasis(r: AhjRecord, provenance: 'curated' | 'expanded'): AhjRe
 }
 
 const ahjPlaceKey = (r: AhjRecord) =>
-  (r.stateCode + '|' + r.county + '|' + r.city).toLowerCase().trim();
+  [r.stateCode, normalizeCityName(r.county), normalizeCityName(r.city)]
+    .join('|').toLowerCase().trim();
 
-// Curated authoritative; an expanded record is dropped when it duplicates a
-// curated (or already-added) record by id OR by (state, county, city).
+/**
+ * Ids that were retired when two rows for ONE government were merged. Snapshots
+ * already issued cite the retired id (the permit route stamps `record: ar.id`),
+ * and an issued package must keep resolving, so `getAhjById` follows these.
+ *
+ * An alias is a REDIRECT, never a rename: the target must be the same legal
+ * jurisdiction. It is not a place to map a city onto its county.
+ */
+export const AHJ_RETIRED_IDS: Record<string, string> = {
+  'md-prince-george-county': 'md-prince-georges-county',
+  'mo-st-louis-city': 'mo-st-louis-st-louis',
+  'mn-ramsey-st-paul': 'mn-ramsey-saint-paul',
+};
+
+// Curated authoritative; a record is dropped when it duplicates an
+// already-added record by id OR by (state, county, city).
+//
+// CURATED WAS NEVER DEDUPED AGAINST ITSELF. `out` started as the whole curated
+// array and only `expanded` was filtered, so two curated rows for one government
+// both survived and array order silently decided which one every lookup
+// returned. It returned the first, and in both real cases the first was the
+// POORER row — missing the website, the online-permitting flag, the local
+// amendments and the true fee/turnaround. Those two pairs are now merged in the
+// data above; this loop makes the class of defect impossible to reintroduce
+// quietly, and says so out loud in dev rather than picking a winner.
 function mergeAhj(curated: AhjRecord[], expanded: AhjRecord[]): AhjRecord[] {
-  const out: AhjRecord[] = curated.map(r => applyCodeBasis(r, 'curated'));
-  const seenId = new Set(out.map(r => r.id));
-  const seenPlace = new Set(out.map(ahjPlaceKey));
-  for (const raw of expanded) {
-    const r = applyCodeBasis(raw, 'expanded');
-    if (seenId.has(r.id) || seenPlace.has(ahjPlaceKey(r))) continue;
+  const out: AhjRecord[] = [];
+  const seenId = new Set<string>();
+  const seenPlace = new Map<string, string>();   // placeKey → id that claimed it
+
+  const add = (raw: AhjRecord, provenance: 'curated' | 'expanded'): void => {
+    const r = applyCodeBasis(raw, provenance);
+    const place = ahjPlaceKey(r);
+    if (seenId.has(r.id)) {
+      if (provenance === 'curated' && process.env.NODE_ENV !== 'production') {
+        console.error(`[ahj-national] duplicate curated id "${r.id}" — the later row is discarded.`);
+      }
+      return;
+    }
+    if (seenPlace.has(place)) {
+      if (provenance === 'curated' && process.env.NODE_ENV !== 'production') {
+        console.error(
+          `[ahj-national] two curated rows describe one jurisdiction (${place}): `
+          + `"${seenPlace.get(place)}" and "${r.id}". Merge them into one row and alias the retired `
+          + `id in AHJ_RETIRED_IDS — do not leave array order to decide which one resolves.`,
+        );
+      }
+      return;
+    }
     seenId.add(r.id);
-    seenPlace.add(ahjPlaceKey(r));
+    seenPlace.set(place, r.id);
     out.push(r);
-  }
+  };
+
+  for (const r of curated) add(r, 'curated');
+  for (const r of expanded) add(r, 'expanded');
   return out;
 }
 
@@ -4652,18 +4693,37 @@ export function searchAhj(query: {
     results = results.filter(a => a.stateCode.toUpperCase() === query.stateCode!.toUpperCase());
   }
 
+  // A FILTER THAT MATCHES NOTHING MUST NARROW TO NOTHING.
+  //
+  // These two filters used to widen back to the whole state when they matched
+  // nothing (`if (matches.length > 0) results = matches`). That turned "we have
+  // no record for this city" into "here is the first record in the state", and
+  // every caller that takes results[0] then received a DIFFERENT GOVERNMENT:
+  //
+  //   searchAhj({ stateCode:'IL', city:'<any city not in the table>' })
+  //     → 124 rows, results[0] = il-cook-chicago (City of Chicago)
+  //   searchAhj({ stateCode:'TX', city:'<any city not in the table>' })
+  //     → 341 rows, results[0] = tx-harris-houston
+  //
+  // All three consumers took results[0]: the permit route wrote it into the
+  // snapshot as the AHJ of record (and _ahjWins FORCED it over the project's own
+  // correct value), the ahj-lookup route returned it as `ahj` (the "primary"),
+  // and the engineering page read `.county` off it and stored that as the
+  // project's county. Registry absence must never become authority substitution.
+  //
+  // Returning zero rows is the honest answer: it means "no record", which is a
+  // real and useful result, and it is what lets the discovery path recognize a
+  // missing jurisdiction instead of resolving against a neighbour.
   if (query.city) {
     const cityLower = query.city.toLowerCase();
-    const cityMatches = results.filter(a => a.city.toLowerCase().includes(cityLower));
-    if (cityMatches.length > 0) results = cityMatches;
+    results = results.filter(a => a.city.toLowerCase().includes(cityLower));
   }
 
   if (query.county) {
     const countyLower = query.county.toLowerCase().replace(' county', '');
-    const countyMatches = results.filter(a =>
+    results = results.filter(a =>
       a.county.toLowerCase().replace(' county', '').includes(countyLower)
     );
-    if (countyMatches.length > 0) results = countyMatches;
   }
 
   if (query.text) {
@@ -4681,11 +4741,38 @@ export function searchAhj(query: {
 }
 
 export function getAhjById(id: string): AhjRecord | null {
-  return AHJ_NATIONAL.find(a => a.id === id) || null;
+  const direct = AHJ_NATIONAL.find(a => a.id === id);
+  if (direct) return direct;
+  // A snapshot issued before two rows for one government were merged cites the
+  // retired id. Follow the redirect so an already-issued package still resolves.
+  const canonical = AHJ_RETIRED_IDS[id];
+  return (canonical && AHJ_NATIONAL.find(a => a.id === canonical)) || null;
 }
 
 export function getAhjsByState(stateCode: string): AhjRecord[] {
   return AHJ_NATIONAL.filter(a => a.stateCode.toUpperCase() === stateCode.toUpperCase());
+}
+
+/**
+ * A row that does not name a place cannot be the authority having jurisdiction
+ * over one.
+ *
+ * The table carried eight rows typed `special_district` that were not
+ * governments at all — PG&E's Solar Connection Program, the Connecticut Green
+ * Bank, MassCEC, NJCEP, NY-Sun, a HECO interconnection office, and two TRADE
+ * ASSOCIATIONS (the Illinois Solar Energy Association and the Colorado Solar &
+ * Storage Association). Seven sat at the placeholder geography
+ * `county:'Various', city:'Various'`, which meant a city lookup for the literal
+ * string "Various" returned the Illinois Solar Energy Association as the AHJ.
+ * Those rows are removed above; this predicate is the structural backstop, so a
+ * future bulk import cannot reintroduce a placeholder row into the authority
+ * path. It is a filter on RESOLUTION, not on the table: nothing is hidden, a
+ * non-jurisdiction simply cannot be returned as one.
+ */
+function isLocalizableJurisdiction(a: AhjRecord): boolean {
+  const placeholder = /^(various|multiple|statewide|n\/?a|unknown|tbd|—|-)$/i;
+  return !placeholder.test(String(a.city ?? '').trim())
+    && !placeholder.test(String(a.county ?? '').trim());
 }
 
 /**
@@ -4700,7 +4787,8 @@ export function getAhjByCounty(stateCode: string, county: string): AhjRecord | n
   const target = county.trim().toLowerCase().replace(/\s+county$/, '');
   if (!target) return null;
   const matches = getAhjsByState(stateCode).filter(
-    a => a.county.toLowerCase().replace(/\s+county$/, '') === target,
+    a => isLocalizableJurisdiction(a)
+      && a.county.toLowerCase().replace(/\s+county$/, '') === target,
   );
   if (matches.length === 0) return null;
   return matches.find(a => a.ahjType === 'county' || a.city.toLowerCase() === 'unincorporated')
@@ -4718,17 +4806,61 @@ export function getAhjByCounty(stateCode: string, county: string): AhjRecord | n
  */
 export function getAhjByCity(stateCode: string, city: string): AhjRecord | null {
   if (!stateCode || !city) return null;
-  const target = city.trim().toLowerCase();
+  const target = normalizeCityName(city);
   if (!target) return null;
   const municipal = getAhjsByState(stateCode).filter(
-    a => a.ahjType !== 'county' && a.city.toLowerCase() !== 'unincorporated',
+    a => isLocalizableJurisdiction(a)
+      && a.ahjType !== 'county' && a.city.toLowerCase() !== 'unincorporated',
   );
-  return municipal.find(a => a.city.toLowerCase() === target)
-    // "GRANITE CITY" vs a record spelled "Granite City" is handled above; a
-    // prefix hit covers "St. Louis" / "Saint Louis"-class spellings without
-    // accepting an unrelated longer name ("Madison" must not match "Madisonville").
-    ?? municipal.find(a => target.startsWith(a.city.toLowerCase()) || a.city.toLowerCase().startsWith(target))
-    ?? null;
+  // EQUALITY OF THE NORMALIZED NAME, AND NOTHING ELSE.
+  //
+  // This used to fall back to a PREFIX hit in either direction, justified in a
+  // comment as covering "St. Louis" / "Saint Louis"-class spellings. It did not
+  // cover them — `'saint louis'.startsWith('st. louis')` is false in both
+  // directions, so "Saint Louis" and "St Louis" both returned null — while it
+  // did hand back a different government whenever the queried municipality was
+  // absent and shared a name prefix with one that was present:
+  //
+  //   Chicago Heights, IL  → City of Chicago Department of Buildings
+  //   Chicago Ridge, IL    → City of Chicago Department of Buildings
+  //   Peoria Heights, IL   → City of Peoria Building Department
+  //   Columbus Grove, OH   → Columbus Building & Zoning Services
+  //   Rochester Hills, NY  → City of Rochester Bureau of Buildings
+  //   Aurora Hills, CO     → City of Aurora Building Division
+  //   Franklin Springs, TN → City of Franklin Building Department
+  //   Kansas City North, MO→ City of Kansas City Development Services
+  //   Atlanta Beach, GA    → City of Atlanta Office of Buildings
+  //
+  // Every one of those is a separate municipality with its own building
+  // department, fee schedule and plan-check queue. So the prefix rule is gone:
+  // it had no case it alone could answer and nine it answered wrongly. The
+  // spelling variance it was reaching for is handled properly by normalizing
+  // both sides and comparing for EQUALITY, which can never cross from one
+  // municipality to another.
+  return municipal.find(a => normalizeCityName(a.city) === target) ?? null;
+}
+
+/**
+ * Fold the spelling variance of a US place name WITHOUT changing which place it
+ * is. "St. Louis", "St Louis" and "Saint Louis" are one municipality spelled
+ * three ways; "Chicago" and "Chicago Heights" are two municipalities. So this
+ * only ever rewrites whole words that are standard USPS/GNIS abbreviations of
+ * each other, and never adds or removes a word.
+ */
+export function normalizeCityName(city: string | null | undefined): string {
+  if (!city) return '';
+  const WORD: Record<string, string> = {
+    st: 'saint', ste: 'sainte', mt: 'mount', ft: 'fort', pt: 'point',
+  };
+  return city
+    .toLowerCase()
+    .replace(/[.'’`]/g, '')          // "St." → "st", "Coeur d'Alene" → "coeur dalene"
+    .replace(/[-_]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => WORD[w] ?? w)
+    .join(' ')
+    .trim();
 }
 
 /** The city name a postal address carries, or null. */

@@ -73,6 +73,15 @@ export interface ProjectLegalAuthorityRecord {
     countyFips: string | null;
     censusTract: string | null;
     incorporatedPlace: string | null;
+    /** the place GEOID — the STABLE machine identity of that municipality.
+     *  The Census leg retrieves it (propertyEnricher place_fips) and it reached
+     *  the provider record, then stopped here: it was absent from `normalized`
+     *  and from the source hash, and had zero consumers repo-wide. Dropping it
+     *  forced every downstream match onto name strings, which is how a lookup
+     *  ends up choosing between two governments that share a name — 1,739 of
+     *  the registry's rows share an `ahjName` with another row, and "Washington
+     *  County Building Department" names a department in 30 different states. */
+    placeFips: string | null;
     countySubdivision: string | null;
     lat: number | null;
     lng: number | null;
@@ -185,8 +194,13 @@ export function buildProjectLegalAuthority(args: ProjectLegalAuthorityArgs): Pro
       `the project record says APN "${posted.apn}" but ${_retrievedApnSource ?? 'the parcel layer'} publishes `
       + `"${_retrievedApn}" for this location — the parcel identifier determines the legal description, so the engine may not pick one.`);
   }
+  // Attribute the APN to the leg that PUBLISHED it, not to the record's headline
+  // provider. Since the chain continues past a leg that cannot establish the
+  // legal boundary, `providerUsed` names the boundary provider, and a merged
+  // record would otherwise claim the Census geocoder published a parcel id.
+  const _apnSource = id.parcelSource ?? id.providerUsed;
   const apn = id.parcelId
-    ? fieldRec('verified', id.parcelId, id.providerUsed, `parcel identifier published by ${id.providerUsed} for this address`, posted.apn)
+    ? fieldRec('verified', id.parcelId, _apnSource, `parcel identifier published by ${_apnSource} for this address`, posted.apn)
     : (_retrievedApn && _retrievedApnSource && (!posted.apn || norm(_retrievedApn) === norm(posted.apn)))
       ? fieldRec('verified', _retrievedApn, _retrievedApnSource,
           `parcel identifier published by ${_retrievedApnSource} for this parcel`
@@ -202,8 +216,27 @@ export function buildProjectLegalAuthority(args: ProjectLegalAuthorityArgs): Pro
     ? fieldRec('verified',
         id.incorporatedPlace ?? (id.county ? `${id.county} (unincorporated${id.countySubdivision ? `, ${id.countySubdivision}` : ''})` : null),
         id.providerUsed, id.boundaryEvidence, posted.city)
-    : fieldRec('unverified-derived', posted.city ?? null, 'project-record',
-        'the municipal-boundary layer was not resolved — whether the parcel is inside an incorporated municipality is undetermined', posted.city);
+    // THE VALUE IS NULL, NOT THE MAILING CITY.
+    //
+    // This used to pass `posted.city` as the VALUE as well as the postedValue.
+    // The mailing city is a postal delivery label: it is routinely the nearest
+    // post office rather than the municipality that contains the parcel, which
+    // is exactly why the boundary layer is consulted at all. Writing it into the
+    // field whose entire job is to answer "which municipality contains this
+    // parcel", sourced 'project-record', made an unanswered question look
+    // answered — and on the production path it was the ordinary case, because
+    // the ATTOM leg short-circuits before the Census leg that resolves the
+    // boundary, so `boundaryLayersResolved` is false whenever ATTOM succeeds.
+    //
+    // `postedValue` already carries the mailing city, which is where a value the
+    // project asserted but nothing corroborated belongs. Consumers gate on
+    // `.state === 'verified'`, so nulling the value removes a false claim
+    // without weakening any gate.
+    : fieldRec('unverified-derived', null, 'project-record',
+        'the municipal-boundary layer was not resolved — whether the parcel is inside an incorporated '
+        + `municipality is undetermined${posted.city ? `; the project record's mailing city "${posted.city}" `
+          + 'is a postal label and is NOT a boundary determination' : ''}`,
+        posted.city);
 
   // ── county corroboration (a mismatch is a real conflict) ───────────────────
   if (posted.county && id.county && !countyAgrees(posted.county, id.county)) {
@@ -291,7 +324,8 @@ export function buildProjectLegalAuthority(args: ProjectLegalAuthorityArgs): Pro
     normalized: {
       address: id.normalizedAddress, county: id.county,
       stateFips: id.stateFips, countyFips: id.countyFips, censusTract: id.censusTract,
-      incorporatedPlace: id.incorporatedPlace, countySubdivision: id.countySubdivision,
+      incorporatedPlace: id.incorporatedPlace, placeFips: id.placeFips ?? null,
+      countySubdivision: id.countySubdivision,
       lat: id.lat, lng: id.lng,
     },
     boundaryEvidence: id.boundaryEvidence,
@@ -304,6 +338,11 @@ export function buildProjectLegalAuthority(args: ProjectLegalAuthorityArgs): Pro
       provider: id.providerUsed, normalizedAddress: id.normalizedAddress,
       lat: id.lat, lng: id.lng, county: id.county, stateFips: id.stateFips, countyFips: id.countyFips,
       censusTract: id.censusTract, incorporatedPlace: id.incorporatedPlace,
+      // The place GEOID belongs in the hash for the same reason the place NAME
+      // does: it is part of what the retrieval established. Without it two
+      // retrievals that named the same municipality but identified different
+      // ones — the failure mode a GEOID exists to prevent — hashed identically.
+      placeFips: id.placeFips ?? null,
       countySubdivision: id.countySubdivision, parcelId: id.parcelId,
     }),
     confidence: args.confidence,

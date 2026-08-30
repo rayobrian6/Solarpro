@@ -47,13 +47,20 @@ export function toPropertyIdentity(
   args: { retrievedAtIso: string; chainFailures?: string[] },
 ): RetrievedPropertyIdentity {
   const provider = (r.provider_used as IdentityFieldSource) ?? 'none';
+  // The leg that actually made each determination. A record can be assembled
+  // from several legs now, so "who resolved the boundary" and "who published the
+  // parcel id" are separate questions from "which provider is this record from".
+  const boundaryProvider = (r.boundary_source as IdentityFieldSource) ?? provider;
+  const parcelSource = r.parcel_id
+    ? ((r.parcel_source as IdentityFieldSource) ?? provider)
+    : null;
   const resolved = r.boundary_layers_resolved === true;
   const place = r.incorporated_place ?? null;
   const cousub = r.county_subdivision ?? null;
   // The boundary determination, stated as evidence, never as an assumption.
   const unincorporated = resolved ? place == null : null;
   const boundaryEvidence = !resolved
-    ? `${provider} did not resolve the municipal-boundary layer — whether this parcel is inside an incorporated `
+    ? `${boundaryProvider} did not resolve the municipal-boundary layer — whether this parcel is inside an incorporated `
       + 'municipality is UNDETERMINED; the AHJ may not be inferred from the mailing city.'
     : place
       ? `US Census Geocoder matched the address inside the incorporated place "${place}"`
@@ -71,6 +78,7 @@ export function toPropertyIdentity(
     countyFips: r.county_fips ?? (r.fips_code ? String(r.fips_code).slice(2, 5) : null),
     censusTract: r.census_tract ?? null,
     parcelId: r.parcel_id ?? null,
+    parcelSource,
     ownerName: r.owner_name ?? null,
     incorporatedPlace: place,
     countySubdivision: cousub,
