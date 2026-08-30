@@ -45,6 +45,7 @@ import { projectIssueStateLanguageFromInput } from '../snapshot/projectAuthority
 import { CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 // CMEI — module identity comes from THE canonical accessor.
 import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
+import { projectRapidShutdownAuthority } from '../snapshot/rapidShutdownAuthority';
 export function pageWarningLabels(
   input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
   opts?: { merged?: boolean },
@@ -722,6 +723,11 @@ export function pageDisconnectDirectory(
   // Brand-integrated BOS device ("the brains" — e.g. Enphase IQ Combiner 6C:
   // combiner + gateway + AC disconnect in one box). Single-sourced.
   const bos = buildIntegratedEquipment(input, cad);
+  // THE one rapid-shutdown authority every row/step/placard on this sheet reads.
+  const _rsdEdition = projectCodeAuthorityFromInput(input).nec;
+  const _rsd = projectRapidShutdownAuthority(
+    (input as unknown as { _snapshot?: unknown })._snapshot as never,
+    (_rsdEdition === '2017' || _rsdEdition === '2023' ? _rsdEdition : '2020'));
   const discos: Disco[] = [];
   // ── W2a §service-topology — the disconnect roles PROJECT the canonical
   // snapshot.serviceTopology objects (svc-service-disconnect, svc-fused-ocpd,
@@ -787,13 +793,32 @@ export function pageDisconnectDirectory(
   } else {
     discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(getSnapshot(input).derived.acWattsContinuous / 1000 || system.totalAcKw || 0).toFixed(2)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
   }
-  if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN INITIATOR', rating: isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL', loc: bos.brains ? `Hosted by the ${bos.brains.model}` : 'Adjacent to the PV AC disconnect' });
+  // ══ 2026-08-29 — PV-5 STOPS DECIDING WHAT THE INITIATION DEVICE IS ══════
+  // This row derived a device identity from the inverter topology and the
+  // monitoring gateway - "MODULE-LEVEL (PVRSS) · Hosted by the IQ Combiner 5C" -
+  // while the cover, from the rapid-shutdown authority, said the initiation
+  // device is the fused AC disconnect. One package, two devices, and only one of
+  // them is in the equipment topology.
+  if (_rsd.required) {
+    discos.push({
+      name: 'RAPID SHUTDOWN INITIATION DEVICE',
+      rating: _rsd.systemType === 'MODULE-LEVEL'
+        ? `MODULE-LEVEL SHUTDOWN · INITIATED AT THE ${(_rsd.initiatorLocation ?? 'SERVICE DISCONNECT').replace(/^at the /i, '').toUpperCase()}`
+        : `ARRAY-LEVEL · NEC ${_rsd.initiationDeviceSection}`,
+      loc: _rsd.initiatorLocation
+        ? `${_rsd.initiatorLocation.charAt(0).toUpperCase()}${_rsd.initiatorLocation.slice(1)} (NEC ${_rsd.initiationDeviceSection})`
+        : `Per NEC ${_rsd.initiationDeviceSection}`,
+    });
+  }
   if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${battKwh.toFixed(1)} kWh · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });
 
   // ── Emergency shutdown steps (adapt to what's present) ────────
   const steps: string[] = ['OPEN MAIN SERVICE / UTILITY DISCONNECT'];
   if (project.acDisconnect !== false) steps.push('OPEN PV AC DISCONNECT');
-  if (project.rapidShutdown) steps.push('TURN RAPID SHUTDOWN SWITCH TO THE "OFF" POSITION');
+  // The step NAMES the device. It used to say "TURN RAPID SHUTDOWN SWITCH TO THE
+  // 'OFF' POSITION" on a design containing no such switch - an instruction a
+  // firefighter cannot carry out.
+  if (_rsd.required && _rsd.operatingInstruction) steps.push(_rsd.operatingInstruction);
   if (!isMicro && project.dcDisconnect !== false) steps.push('OPEN PV DC / SYSTEM DISCONNECT');
   if (hasBattery) steps.push('OPEN ENERGY STORAGE (ESS) / BATTERY DISCONNECT');
   steps.push('ARRAY CONDUCTORS REMAIN ENERGIZED IN DAYLIGHT — TREAT AS LIVE');
@@ -886,7 +911,8 @@ export function pageDisconnectDirectory(
           <div>
             <div style="font-size:10px;font-weight:900;letter-spacing:0.5px;">RAPID SHUTDOWN${_rsdEditionPending ? ' &mdash; NOT RELEASED (PREVIEW)' : ''}</div>
             <div style="font-size:7.6px;font-weight:700;line-height:1.4;margin-top:1px;">${escapeH(rsdText)}</div>
-            <div style="font-size:7px;font-weight:800;margin-top:2px;">TYPE: ${isMicro ? 'MODULE-LEVEL — CONDUCTORS OUTSIDE THE ARRAY BOUNDARY REDUCE TO A SAFE LEVEL' : 'ARRAY-LEVEL — CONTROLLED CONDUCTORS PER ' + rsdRef} &nbsp;·&nbsp; ${escapeH(rsdRef)}</div>
+            <div style="font-size:7px;font-weight:800;margin-top:2px;">TYPE: ${_rsd.systemType === 'MODULE-LEVEL' ? 'MODULE-LEVEL — CONDUCTORS OUTSIDE THE ARRAY BOUNDARY REDUCE TO A SAFE LEVEL' : 'ARRAY-LEVEL — CONTROLLED CONDUCTORS PER ' + rsdRef} &nbsp;·&nbsp; ${escapeH(rsdRef)}</div>
+            ${_rsd.operatingInstruction ? `<div style="font-size:7px;font-weight:800;margin-top:2px;">THIS SYSTEM: ${escapeH(_rsd.operatingInstruction)}</div>` : ''}
             ${_rsdEditionPending ? `<div style="font-size:6.8px;font-weight:800;margin-top:3px;background:#fff;color:#cc0000;padding:2px 4px;">N9 &mdash; EDITION-DEPENDENT PLACARD, ADOPTED NEC EDITION NOT ESTABLISHED. DO NOT ORDER OR INSTALL. SPECIFICATION FOLLOWS THE GOVERNED ADOPTION, NEVER A DEFAULT YEAR.</div>` : ''}
           </div>
           <svg viewBox="0 0 96 60" width="96" style="flex:0 0 auto;">

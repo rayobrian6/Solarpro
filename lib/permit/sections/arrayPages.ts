@@ -31,6 +31,7 @@ import { peekSnapshot } from '../snapshot/read';
 import { projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
 import { GROUNDING_PENDING_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { formatPitchDeg, formatPitchRangeDeg } from '@/lib/structural/roofPitch';
+import { projectRapidShutdownAuthority } from '../snapshot/rapidShutdownAuthority';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -564,6 +565,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // BASIS stays PROVISIONAL until the AHJ + adopted IFC edition are verified.
   // Never assert "per AHJ" against an unverified/pending IFC adoption.
   const _fbArr = resolveFireSetbackBasis({ ifcEdition: _cpArr.ifc, verificationStatus: _cpArr.verificationStatus, ahjName: _cpArr.ahjName });
+  // THE rapid-shutdown authority — this sheet does not decide the method.
+  const _pv1Rsd = projectRapidShutdownAuthority((input as unknown as { _snapshot?: unknown })._snapshot as never);
   const _amendNote = _fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)'
     : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)'
     : (_fbArr.verified ? ' (per adopted AHJ amendment)' : ' (provisional \u2014 pending AHJ amendment verification)');
@@ -577,7 +580,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
       <div>\u2022 18" clear at hips/valleys \u2014 IFC ${_fbArr.verified ? escapeH(_cpArr.ifc as string) : '(edition pending)'} \xa71204.2.1.2</div>
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
       <div>\u2022 36" access pathway \u2014 ${_fbArr.verified ? 'per adopted AHJ requirement' : 'modeled; pending AHJ / IFC verification'}</div>
-      <div>\u2022 NEC 690.12 MLRS module-level RSD</div>
+      <!-- 2026-08-29 - asserted module-level RSD independently of the authority. -->
+      <div>\u2022 NEC ${escapeH(_pv1Rsd.requirementSection)} ${_pv1Rsd.systemType === 'MODULE-LEVEL' ? 'module-level rapid shutdown' : 'rapid shutdown'}</div>
       ${_isMicro && totalStrings > 5 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner 6C accepts 5; remaining branches land on AC subpanel, see E-1</div>` : ''}
     </div>` :
     isFence(cadSystemType) ? `

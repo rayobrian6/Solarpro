@@ -35,6 +35,7 @@ import { projectCodeAuthorityFromInput, PENDING_EDITION } from '../snapshot/code
 // CMDA — the ONLY correct inline font-family spelling (single-quoted names
 // nest safely inside a double-quoted style attribute).
 import { CSS_FONT_SANS_STACK, CSS_FONT_MONO_STACK } from '../fonts/fontPack';
+import { projectRapidShutdownAuthority } from '../snapshot/rapidShutdownAuthority';
 // ═══════════════════════════════════════════════════════════════
 // INTERCONNECTION — resolved ONCE for the whole set.
 // ───────────────────────────────────────────────────────────────
@@ -598,6 +599,8 @@ function pv4aBranchRatingTable(
 export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance, rulesResult, overrides, system } = input;
   const _auth = buildConductorAuthority(input, cad);
+  // THE rapid-shutdown authority — this sheet does not decide the method.
+  const _e1Rsd = projectRapidShutdownAuthority((input as unknown as { _snapshot?: unknown })._snapshot as never);
   const _ic = resolveInterconnection(input, cad);
   // §3 — the rules engine (legacy) reports voltage drop on a FLAT project-level
   // length (the 1.11% number). W2.1 classified the canonical basis as the routed
@@ -782,7 +785,12 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           <tr class="bg-lt" data-grounding-code-basis="true"><td class="fw7">EGC Sizing</td><td>Per NEC Table 250.122, on the OCPD of EACH circuit</td><td class="mono">NEC 690.45, 250.122</td><td>Sized per segment — not a project-wide minimum (see PV-4B GroundingSegment objects)</td></tr>
           <tr><td class="fw7">Voltage Drop</td><td>Vd = (2 × L × I × R) / 1000</td><td class="mono">NEC 210.19(A) FPN</td><td>Target ≤ 2% branch, ≤ 3% feeder</td></tr>
           <tr class="bg-lt"><td class="fw7">Conduit Fill</td><td>Per NEC Chapter 9, Table 1</td><td class="mono">NEC Ch. 9 Table 1</td><td>Max 40% fill for 3+ conductors</td></tr>
-          <tr><td class="fw7">Rapid Shutdown</td><td>Array-level: ≤ 80V within 30s</td><td class="mono">NEC 690.12</td><td>Module-level per 690.12(B)(2)</td></tr>
+          <!-- 2026-08-29 - stated BOTH methods at once ("Array-level ... Module-level per
+               690.12(B)(2)") without saying which one this design uses. The authority
+               decides; the row reports. -->
+          <tr><td class="fw7">Rapid Shutdown</td><td>${_e1Rsd.systemType === 'MODULE-LEVEL'
+            ? 'Module-level — conductors outside the array boundary ≤ 30V within 30s'
+            : 'Array-level — controlled conductors ≤ 80V within 30s'}</td><td class="mono">NEC ${escapeH(_e1Rsd.requirementSection)}</td><td>${escapeH(_e1Rsd.operatingInstruction ?? 'per the initiation device')}</td></tr>
           <tr class="bg-lt"><td class="fw7">Ground-Fault Protection</td><td>GFDI required per system type</td><td class="mono">NEC 690.41, 690.5</td><td>Inverter-integrated or standalone</td></tr>
         </tbody>
       </table>

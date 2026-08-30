@@ -34,6 +34,33 @@ import { necSection, type NecEdition } from '@/lib/nec/citations';
 export interface RapidShutdownAuthority {
   /** does this design carry the rapid-shutdown function at all? */
   required: boolean;
+  // ══ 2026-08-29 — THE FIELDS PV-5 WAS DECIDING FOR ITSELF ════════════
+  // The disconnect directory built its own row:
+  //     name  'RAPID SHUTDOWN INITIATOR'
+  //     type  isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL'
+  //     host  bos.brains ? `Hosted by the ${bos.brains.model}` : …
+  // — a device identity derived from the inverter topology and the monitoring
+  // gateway, with no reference to the initiation device this authority names. So
+  // the cover said the initiation device is the fused AC disconnect and PV-5
+  // said it was module-level PVRSS hosted by the IQ Combiner 5C, on one package.
+  //
+  // And the emergency procedure said "TURN RAPID SHUTDOWN SWITCH TO THE 'OFF'
+  // POSITION" for a design that contains no such switch — an instruction a
+  // firefighter cannot follow.
+  /** how the shutdown is ACHIEVED: module-level electronics vs an array-level
+   *  controlled-conductor scheme. A property of the equipment, not of a sheet. */
+  systemType: 'MODULE-LEVEL' | 'ARRAY-LEVEL' | 'NONE';
+  /** the equipment that HOSTS the initiation function, when it is hosted by a
+   *  larger device (the fused AC disconnect here). Null when a dedicated
+   *  initiator exists in its own right. */
+  hostEquipmentId: string | null;
+  /** the one-line instruction the emergency procedure and the directory print.
+   *  It names the actual device; it never says "the rapid shutdown switch"
+   *  unless the design contains one. */
+  operatingInstruction: string | null;
+  /** the section that governs the BUILDING PLACARD — a different requirement
+   *  from the initiation device, and edition-dependent. */
+  placardBasis: string;
   /** the design contains a discrete initiation device object. */
   initiatorPresent: boolean;
   /** where the DESIGN puts it, in the device object's own words. Null when the
@@ -72,6 +99,11 @@ export function projectRapidShutdownAuthority(
     ?? objs.find(o => o.type === 'rsd-initiator') ?? null;
 
   const requirementSection = necSection('pv-rapid-shutdown', edition);
+  // Module-level ⇔ the array's own electronics perform the shutdown. Read from
+  // the DESIGN (a microinverter or MLPE on every module), never from a sheet's
+  // local `isMicro` flag.
+  const _micro = (snap?.electrical as { topology?: string } | undefined)?.topology === 'MICRO'
+    || (snap?.electrical as { microInverterUnits?: unknown[] } | undefined)?.microInverterUnits?.length ? true : false;
   const initiationDeviceSection = `${requirementSection}${INITIATION_DEVICE_SUBSECTION}`;
   const labelSection = necSection('pv-rapid-shutdown-plaque', edition);
 
@@ -114,8 +146,25 @@ export function projectRapidShutdownAuthority(
         `Rapid-shutdown labelling per NEC ${labelSection}.`,
       ].join(' ');
 
+  // The instruction names the device. When the role rides an existing
+  // disconnect, opening THAT disconnect is the initiation; there is no separate
+  // switch to turn and the procedure must not invent one.
+  const _deviceName = initiator
+    ? (initiator.label ?? initiator.type).replace(/\s*\([^)]*\)\s*/g, ' ').trim()
+    : null;
+  const operatingInstruction = !required ? null
+    : initiator && initiator.type !== 'rsd-initiator'
+      ? `OPEN THE ${_deviceName!.toUpperCase()} — IT IS THE RAPID-SHUTDOWN INITIATION DEVICE (NEC ${initiationDeviceSection})`
+      : initiator
+        ? `TURN THE RAPID SHUTDOWN INITIATION DEVICE TO THE "OFF" POSITION (NEC ${initiationDeviceSection})`
+        : `INITIATE RAPID SHUTDOWN PER NEC ${initiationDeviceSection}`;
+
   return {
     required,
+    systemType: !required ? 'NONE' : (_micro ? 'MODULE-LEVEL' : 'ARRAY-LEVEL'),
+    hostEquipmentId: initiator && initiator.type !== 'rsd-initiator' ? initiator.objectId : null,
+    operatingInstruction,
+    placardBasis: labelSection,
     initiatorPresent: !!initiator,
     initiatorLocation: location,
     initiatorObjectId: initiator?.objectId ?? null,
