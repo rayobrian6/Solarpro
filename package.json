@@ -27,7 +27,8 @@
     "ahj:resolver-dryrun": "tsx scripts/ahj-resolver-dryrun.mjs",
     "gov:ingest-national": "tsx scripts/gov-ingest-national.mjs",
     "gov:coverage-national": "tsx scripts/gov-coverage-national.mjs",
-    "campaign:proof": "tsx scripts/campaign-proof.mjs --artifacts"
+    "campaign:proof": "tsx scripts/campaign-proof.mjs --artifacts",
+    "jurisdiction:audit-solar-authority": "tsx scripts/jurisdiction-audit-solar-authority.mjs"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",

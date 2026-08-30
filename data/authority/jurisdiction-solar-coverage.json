@@ -1,0 +1,43 @@
+{
+  "auditedRows": 4016,
+  "governedByDomain": {
+    "PERMIT DEPARTMENT": 0,
+    "BUILDING AUTHORITY SCOPE": 0,
+    "ELECTRICAL AUTHORITY SCOPE": 0,
+    "FIRE AUTHORITY SCOPE": 0,
+    "ZONING AUTHORITY SCOPE": 0,
+    "PE/STAMP REQUIREMENT": 0,
+    "STRUCTURAL-REVIEW REQUIREMENT": 0,
+    "NEC ADOPTION": 0,
+    "IBC ADOPTION": 0,
+    "IRC ADOPTION": 0,
+    "IFC ADOPTION": 0,
+    "LOCAL ELECTRICAL AMENDMENTS": 0,
+    "LOCAL BUILDING AMENDMENTS": 0,
+    "LOCAL FIRE AMENDMENTS": 0,
+    "FIRE ACCESS / PATHWAY RULE": 0,
+    "RIDGE SETBACK": 0,
+    "HIP/VALLEY SETBACK": 0,
+    "WIRING-METHOD AUTHORITY": 0,
+    "DISCONNECT REQUIREMENT": 0,
+    "INTERCONNECTION / TAP RULE": 0,
+    "LOCAL LABELING REQUIREMENTS": 0,
+    "SUBMISSION REQUIREMENTS": 0,
+    "INSPECTION REQUIREMENTS": 0
+  },
+  "fullSolarRequirementProfiles": 0,
+  "sourceDistribution": {
+    "nec": {
+      "unprovenanced curated row": 174,
+      "unprovenanced bulk-expansion row": 3842
+    },
+    "fire": {
+      "model-code default from the ahj() helper": 3514,
+      "unprovenanced row value (set by applyCodeBasis or the row)": 502
+    },
+    "permitDepartment": {
+      "helper placeholder (\"Local Building Department\")": 4016
+    }
+  },
+  "unprovenancedRows": 4016
+}
