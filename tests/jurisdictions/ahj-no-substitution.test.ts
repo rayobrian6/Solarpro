@@ -226,6 +226,55 @@ describe('retired ids stay resolvable', () => {
   });
 });
 
+describe('a consolidated city-county is ONE government', () => {
+  it('resolves to the same authority from a city and a county lookup', () => {
+    // The District of Columbia had THREE rows: the real DC Department of
+    // Buildings, a duplicate of it, and a fabricated "District of Columbia
+    // County Building Department" — a body that does not exist, which a county
+    // lookup PREFERRED over the real authority because it looked county-typed.
+    const byCity = getAhjByCity('DC', 'Washington');
+    const byCounty = getAhjByCounty('DC', 'District of Columbia');
+    expect(byCity).not.toBeNull();
+    expect(byCounty?.id).toBe(byCity!.id);
+  });
+
+  it('holds no invented "County Building Department" for a consolidated government', () => {
+    const dc = AHJ_NATIONAL.filter(a => a.stateCode === 'DC');
+    expect(dc).toHaveLength(1);
+    expect(dc[0].ahjName).not.toMatch(/county building department/i);
+  });
+});
+
+describe('a lone row does not swallow a state', () => {
+  it('auto-picks only a TERRITORY-WIDE record when a state has one row', () => {
+    // Holding one row proves our coverage is thin, not that the state has one
+    // government. Only a state-level or county/unincorporated record stands for
+    // a whole state on its own face.
+    const byState = new Map<string, AhjRecord[]>();
+    for (const a of AHJ_NATIONAL) byState.set(a.stateCode, [...(byState.get(a.stateCode) ?? []), a]);
+    for (const [st, rows] of byState) {
+      if (rows.length !== 1) continue;
+      const got = getAhjByAddress(`1 Nowhere Rd, Zzzznotarealcity, ${st} 00000`, { stateCode: st });
+      if (got) {
+        const territoryWide = got.ahjType === 'state' || got.ahjType === 'county'
+          || got.city.toLowerCase() === 'unincorporated';
+        expect(territoryWide, `${st} auto-picked the municipal row ${got.id}`).toBe(true);
+      }
+    }
+  });
+});
+
+describe('data hygiene that reaches the sheet', () => {
+  it('no record stores an empty string as a local amendment', () => {
+    // 118 rows did. It renders as a blank bullet under "Local amendments" on the
+    // code-authority sheet.
+    const offenders = AHJ_NATIONAL
+      .filter(a => (a.localAmendments ?? []).some(x => String(x ?? '').trim() === ''))
+      .map(a => a.id);
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('only governments can be an authority having jurisdiction', () => {
   it('no record carries placeholder geography', () => {
     // The table held rows for utility incentive programs, state green banks and

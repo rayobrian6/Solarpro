@@ -135,7 +135,20 @@ function audit(records) {
     // Rows standing for county territory rather than a municipality.
     if (String(r.city ?? '').trim().toLowerCase() === 'unincorporated') unincorporatedRows.push(r.id);
 
-    // AMBIGUOUS IDENTITY — two rows a name-based matcher could confuse.
+    // SHARED AUTHORITY NAME — two rows a NAME-based matcher could not tell
+    // apart. This is not automatically a defect and must not be "cleaned up":
+    // several localities legitimately share one authority. Kailua and Wahiawa
+    // are CDPs inside the consolidated City & County of Honolulu; Columbia and
+    // Ellicott City are unincorporated CDPs whose authority genuinely is Howard
+    // County. Two rows, two places, one government — correct.
+    //
+    // What IS a defect is two rows for one PLACE, and that is measured
+    // separately by the place-key uniqueness invariant in
+    // tests/jurisdictions/ahj-no-substitution.test.ts.
+    //
+    // The reason to report this at all: it is the evidence that a NAME cannot be
+    // an identity. 1,739 rows shared an ahjName with another row, and "Washington
+    // County Building Department" names a department in 30 different states.
     const key = `${st}|${String(r.ahjName ?? '').toUpperCase().trim()}`;
     collisions.set(key, [...(collisions.get(key) ?? []), r.id]);
   }
@@ -187,8 +200,9 @@ function audit(records) {
       recordsStandingForUnincorporatedTerritory: unincorporatedRows.length,
       duplicateIds: dupIds.length,
       duplicateIdExamples: dupIds.slice(0, 10),
-      ambiguousNameGroups: nameCollisions.length,
-      ambiguousNameExamples: nameCollisions.slice(0, 10).map(([k, v]) => ({ key: k, ids: v })),
+      sharedAuthorityNameGroups: nameCollisions.length,
+      sharedAuthorityNameNote: 'NOT automatically a defect — several localities legitimately share one authority (CDPs inside a consolidated city-county, or unincorporated CDPs administered by their county). Two rows for one PLACE is the defect, and that is measured by the place-key uniqueness invariant in tests/jurisdictions/ahj-no-substitution.test.ts.',
+      sharedAuthorityNameExamples: nameCollisions.slice(0, 10).map(([k, v]) => ({ key: k, ids: v })),
     },
     byState: Object.fromEntries([...byState.entries()].sort().map(([k, v]) => [k, {
       ...v,
@@ -232,8 +246,8 @@ if (process.argv.includes('--json')) {
   console.log(`  no contact channel at all           ${M.recordsWithNoContactChannel}`);
   console.log(`  stand for unincorporated territory  ${M.recordsStandingForUnincorporatedTerritory}`);
   console.log(`  duplicate ids                       ${M.duplicateIds}`);
-  console.log(`  ambiguous (state, ahjName) groups   ${M.ambiguousNameGroups}`);
-  for (const ex of M.ambiguousNameExamples) console.log(`      ${ex.key}  ->  ${ex.ids.join(', ')}`);
+  console.log(`  rows SHARING an authority name      ${M.sharedAuthorityNameGroups}  (not a defect on its own — see note)`);
+  for (const ex of M.sharedAuthorityNameExamples) console.log(`      ${ex.key}  ->  ${ex.ids.join(', ')}`);
   console.log('');
   const top = Object.entries(r.byState).sort((a, b) => b[1].total - a[1].total).slice(0, 10);
   console.log('── TOP STATES BY RECORD COUNT ──');

@@ -87,6 +87,12 @@ function ahj(partial: Partial<AhjRecord> & {
   necVersion: '2017' | '2020' | '2023';
   utilityName: string;
 }): AhjRecord {
+  const _partial = { ...partial };
+  // An empty string is not a local amendment. 118 rows stored '' as one, which
+  // reaches the code-authority sheet as a blank bullet under "Local amendments".
+  if (Array.isArray(_partial.localAmendments)) {
+    _partial.localAmendments = _partial.localAmendments.filter(a => String(a ?? '').trim() !== '');
+  }
   return {
     ahjType: 'county',
     localAmendments: [],
@@ -127,7 +133,7 @@ function ahj(partial: Partial<AhjRecord> & {
     email: undefined,
     website: undefined,
     address: undefined,
-    ...partial,
+    ..._partial,
   };
 }
 
@@ -360,7 +366,13 @@ const AHJ_CURATED: AhjRecord[] = [
   ahj({ id:'wv-kanawha-charleston', stateCode:'WV', stateName:'West Virginia', county:'Kanawha', city:'Charleston', ahjName:'City of Charleston Building Permits', ahjType:'city', necVersion:'2020', utilityName:'Appalachian Power (AEP)', phone:'(304) 348-8000', typicalPermitFee:'$100–$400', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:30, seismicDesignCategory:'B', specialRequirements:['Appalachian Power interconnection','WV net metering'] }),
 
   // ── DISTRICT OF COLUMBIA ─────────────────────────────────────────────────
-  ahj({ id:'dc-dc-washington', stateCode:'DC', stateName:'District of Columbia', county:'DC', city:'Washington', ahjName:'DC Department of Buildings', ahjType:'city', necVersion:'2020', utilityName:'Pepco (Potomac Electric Power)', phone:'(202) 671-3500', website:'https://dob.dc.gov', onlinePermitting:true, typicalPermitFee:'$200–$700', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', localAmendments:['DC Construction Codes'], specialRequirements:['Pepco interconnection','DC net metering','DC Renewable Portfolio Standard','Solar for All program'] }),
+  // The District of Columbia is a CONSOLIDATED city-county: one government, the DC
+  // Department of Buildings, with no county layer beneath it. The table carried
+  // THREE rows for it — this one, a duplicate, and a fabricated "District of
+  // Columbia County Building Department" that a county lookup preferred over the
+  // real authority. County normalized to the legal name so the merge guard can
+  // see them as one place; the other two are retired and aliased.
+  ahj({ id:'dc-dc-washington', stateCode:'DC', stateName:'District of Columbia', county:'District of Columbia', city:'Washington', ahjName:'DC Department of Buildings', ahjType:'city', necVersion:'2020', utilityName:'Pepco (Potomac Electric Power)', phone:'(202) 671-3500', website:'https://dob.dc.gov', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$200–$700', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', localAmendments:['DC Construction Codes'], specialRequirements:['Pepco interconnection','DC net metering','DC Renewable Portfolio Standard','Solar for All program'] }),
 
   // ── CALIFORNIA (expanded) ───────────────────────────────────────────────
   ahj({ id:'ca-san-bernardino-san-bernardino', stateCode:'CA', stateName:'California', county:'San Bernardino', city:'San Bernardino', ahjName:'City of San Bernardino Development Services', ahjType:'city', necVersion:'2023', utilityName:'Southern California Edison', phone:'(909) 384-5057', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$200–$700', typicalPlanCheckDays:3, typicalPermitDays:5, windSpeedMph:110, groundSnowLoadPsf:0, seismicDesignCategory:'D', localAmendments:['California Building Code','California Electrical Code','Title 24 Part 6 Energy Code'], specialRequirements:['SCE interconnection (Rule 21)','California NEM 3.0','California fire setbacks — 18\" ridge, 36\" valley','Rapid shutdown NEC 690.12','CalFire high fire hazard zone — check parcel'], notes:'San Bernardino County high fire hazard — verify parcel zone before permit application' }),
@@ -981,8 +993,6 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'ct-tolland-tolland-county', stateCode:'CT', stateName:'Connecticut', county:'Tolland', city:'Unincorporated', ahjName:'Tolland County Building Department', necVersion:'2020', utilityName:'Eversource Energy', localAmendments:['Connecticut State Building Code'], typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:30, specialRequirements:['CT Residential Solar Investment Program','CT net metering']}),
   ahj({id:'ct-windham-windham-county', stateCode:'CT', stateName:'Connecticut', county:'Windham', city:'Unincorporated', ahjName:'Windham County Building Department', necVersion:'2020', utilityName:'Eversource Energy', localAmendments:['Connecticut State Building Code'], typicalPermitFee:'$150-$600', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:30, specialRequirements:['CT Residential Solar Investment Program','CT net metering']}),
   // ── DISTRICT OF COLUMBIA ──
-  ahj({id:'dc-district-of-columbia-district-of-columbia-county', stateCode:'DC', stateName:'District of Columbia', county:'District of Columbia', city:'Unincorporated', ahjName:'District of Columbia County Building Department', necVersion:'2020', utilityName:'PEPCO', typicalPermitFee:'$200-$700', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, groundSnowLoadPsf:20, specialRequirements:['DC net metering','DC SREC market','DC Sustainable Energy Utility (DCSEU)']}),
-  ahj({id:'dc-district-of-columbia-washington', stateCode:'DC', stateName:'District of Columbia', county:'District of Columbia', city:'Washington', ahjName:'DC Department of Buildings', necVersion:'2020', utilityName:'Pepco', ahjType:'city', phone:'(202) 442-4570', website:'https://dob.dc.gov', localAmendments:[''], onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$200-$700', feeStructure:'Valuation-based', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:14, groundSnowLoadPsf:20, specialRequirements:['Pepco interconnection','DC net metering','DC Solar for All program','DC Green Bank financing'], notes:'DC has aggressive renewable targets - 100% by 2032'}),
   // ── DELAWARE ──
   ahj({id:'de-kent-dover', stateCode:'DE', stateName:'Delaware', county:'Kent', city:'Dover', ahjName:'City of Dover Building Department', necVersion:'2020', utilityName:'Delmarva Power', ahjType:'city', phone:'(302) 736-7075', website:'https://www.cityofdover.com/building', localAmendments:[''], onlinePermitting:true, typicalPermitFee:'$100-$400', feeStructure:'Flat fee', typicalPlanCheckDays:7, typicalPermitDays:10, interconnectionDays:21, groundSnowLoadPsf:15, specialRequirements:['Delmarva Power interconnection','DE net metering'], notes:'State capital'}),
   ahj({id:'de-kent-smyrna', stateCode:'DE', stateName:'Delaware', county:'Kent', city:'Smyrna', ahjName:'Town of Smyrna Building Dept', necVersion:'2020', utilityName:'Delmarva Power (Exelon)', ahjType:'city', phone:'(302) 653-4526', website:'', localAmendments:['Delaware Building Code'], typicalPermitFee:'$150-$500', feeStructure:'Valuation-based', interconnectionDays:21, groundSnowLoadPsf:10, specialRequirements:['Delmarva Power interconnection']}),
@@ -4625,6 +4635,8 @@ export const AHJ_RETIRED_IDS: Record<string, string> = {
   'md-prince-george-county': 'md-prince-georges-county',
   'mo-st-louis-city': 'mo-st-louis-st-louis',
   'mn-ramsey-st-paul': 'mn-ramsey-saint-paul',
+  'dc-district-of-columbia-washington': 'dc-dc-washington',
+  'dc-district-of-columbia-district-of-columbia-county': 'dc-dc-washington',
 };
 
 // Curated authoritative; a record is dropped when it duplicates an
@@ -4927,9 +4939,26 @@ export function getAhjByAddress(
     if (byCounty) return byCounty;
   }
 
-  // 4) Only auto-pick when the state has exactly one AHJ; otherwise null (no guess).
-  const stateResults = getAhjsByState(stateCode);
-  return stateResults.length === 1 ? stateResults[0] : null;
+  // 4) A SINGLE ROW IS NOT PROOF OF A SINGLE JURISDICTION.
+  //
+  // This used to auto-pick whenever the state held exactly one record. But
+  // holding one row proves our COVERAGE is thin, not that the state has one
+  // government — and this table covers 4.6% of US municipalities, so a thin
+  // state is the norm, not a signal. If a state's rows were ever pruned to one
+  // city, every address in that state would bind that city's building
+  // department.
+  //
+  // So the auto-pick now requires the row to be TERRITORY-WIDE on its own face:
+  // a state-level authority, or the county/unincorporated record that already
+  // stands for everything outside a municipality. Guam (one territory-wide
+  // government) still resolves; a lone municipal row no longer swallows a state.
+  const stateResults = getAhjsByState(stateCode).filter(isLocalizableJurisdiction);
+  if (stateResults.length !== 1) return null;
+  const only = stateResults[0];
+  const territoryWide = only.ahjType === 'state'
+    || only.ahjType === 'county'
+    || only.city.toLowerCase() === 'unincorporated';
+  return territoryWide ? only : null;
 }
 
 export function getTotalAhjCount(): number {
