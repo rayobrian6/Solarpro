@@ -2633,11 +2633,21 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // Source: mspResult.busOutX/Y  Dest: utility meter left edge
   {
     const run = mspUtilRun;
-    // Phase 6: conductor count from acRequiresNeutral (2=240V no-neutral, 3=neutral required)
+    // ══ 2026-08-29 — THIS SPAN IS THE EXISTING SERVICE, NOT THE PV CIRCUIT ══
+    // MSP bus-out → utility meter is the building's EXISTING service entrance:
+    // conductors that were in the ground before this project and that nobody on
+    // this job installs. The fallback below was the PV FEEDER's own conductor
+    // package - `${_acConductorCount}#${_acWireNum} THWN-2 / 1×#10 GRN EGC / IN
+    // 3/4" EMT` - so whenever the canonical run carried no bundle, the SLD drew
+    // the PV tap conductors continuing straight through the meter and out to the
+    // grid. A reviewer reads that as "the PV #6 THWN-2 IS the service entrance".
+    //
+    // A segment may not inherit the preceding segment's conductor inventory. When
+    // the existing service has not been surveyed, the honest label says so - the
+    // same wording the other SLD branch has always used for this span.
     const fb = [
-      `${_acConductorCount}#${_acWireNum} THWN-2`,
-      `1×${acFeederRun?.egcGauge??'#10 AWG'} GRN EGC`,
-      `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
+      'EXISTING SERVICE CONDUCTORS',
+      `${input.mainPanelAmps ?? '—'}A SERVICE — FIELD VERIFY`,
     ];
     const {lines, cnt} = runLines(run, fb);
     // Source: BUI LOAD port when battery present, else MSP busOut terminal.
