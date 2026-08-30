@@ -289,11 +289,51 @@ export function isRunInstantPayloadEntry(key: string, value: unknown): boolean {
  *  carries, so an unknown schema can never print another template's empty fields.
  *  Operational run instants are excluded (D9) — they remain in the payload and in
  *  audit storage, but an unchanged design must render byte-identically. */
+// ══ 2026-08-29 — AN ALLOWLIST, NOT A DENYLIST ═════════════════════
+// This printed EVERY primitive key a payload carried, using the raw identifier
+// as the label, filtered only by a run-instant DENYLIST. A denylist cannot
+// protect an engineer-facing sheet: it only excludes what somebody already
+// thought of. When the production build began merging the resolver's state into
+// every payload, RS-1 started printing `resolverImplemented true ·
+// plannedResolverPhase AAC-3 (delivered) · lastResolutionResult SKIPPED` on a
+// permit sheet, and nothing here objected.
+//
+// The producer side is fixed (resolution/evidence.ts no longer writes it), but
+// the renderer must not be the kind of component that would have printed it.
+// Only keys with a REVIEWER-FACING LABEL are rendered; anything else is dropped
+// and, in a non-production build, named on the console so it is not lost
+// silently. A new payload field is opted IN by giving it a label a professional
+// can read.
+const PAYLOAD_LABELS: Record<string, string> = {
+  // procurement / quantity facts a reviewer acts on
+  deficitFt: 'shortfall', requiredAdditionalPurchasableLengthFt: 'additional length required',
+  affectedBranchIds: 'affected branches', deficitBasis: 'basis',
+  orderedLengthFt: 'ordered length', installedLengthFt: 'installed length',
+  // document / equipment identity
+  documentId: 'document', documentTitle: 'document', sha256: 'SHA-256',
+  manufacturer: 'manufacturer', model: 'model', sku: 'SKU', partNumber: 'part number',
+  // measured / stated quantities
+  valueLbs: 'value (lb)', spanFt: 'span (ft)', lengthFt: 'length (ft)',
+  countRequired: 'required', countPresent: 'present',
+  // route / segment facts (the byte-stability gate proves a reviewer reads these)
+  segment: 'segment', oneWayFt: 'one-way (ft)', segmentId: 'segment',
+  raceway: 'raceway', tradeSizeIn: 'trade size', conductorGauge: 'conductor',
+};
+
 function payloadGeneric(p: Record<string, unknown>): string {
   const pairs = Object.entries(p)
     .filter(([, v]) => v != null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
     .filter(([k, v]) => !isRunInstantPayloadEntry(k, v))
-    .map(([k, v]) => `${escapeH(k)} ${escapeH(String(v))}`);
+    .filter(([k]) => {
+      if (PAYLOAD_LABELS[k]) return true;
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn(`[RS-1] payload key "${k}" has no reviewer-facing label — not rendered. `
+          + 'Add it to PAYLOAD_LABELS if an engineer acts on it; otherwise it belongs on '
+          + 'snapshot.resolverAttemptEvidence.');
+      }
+      return false;
+    })
+    .map(([k, v]) => `${escapeH(PAYLOAD_LABELS[k])} ${escapeH(String(v))}`);
   const nested = Object.entries(p)
     .filter(([, v]) => v != null && typeof v === 'object')
     .map(([k]) => escapeH(k));

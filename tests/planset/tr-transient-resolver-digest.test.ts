@@ -492,10 +492,28 @@ describe('TR §B · required cases', () => {
       lastResolutionAttempt: null, lastResolutionResult: 'NOT_ATTEMPTED', cleared: false,
       resolutionAuditRef: null,
     }));
-    for (const k of projectionKeys) expect(Object.keys(payloadRef as object)).toContain(k);
+    // ══ 2026-08-29 — THE OTHER HALF OF THIS RULE, FINALLY APPLIED ══════
+    // This asserted the payload CONTAINS the projection's every key. The same
+    // paragraph's own closing sentence says "no payload may carry an operational
+    // field, on any record" — and `resolverId`, `resolverImplemented`,
+    // `resolutionMode`, `plannedResolverPhase` and `lastResolutionResult` are
+    // operational by any reading: an internal resolver id, a boolean about our
+    // software, and a delivery-phase label from our own roadmap. A production
+    // export printed all five on RS-1, in a box headed BLOCKER PAYLOAD, beside a
+    // requirement a licensed engineer was reading.
+    //
+    // They now live where this test already proves operational state belongs:
+    // `snapshot.resolverAttemptEvidence`, outside the digest (asserted above).
+    // So the assertion inverts — the payload must carry NONE of them.
+    for (const k of projectionKeys) {
+      expect(Object.keys(payloadRef as object), `payload leaks operational key ${k}`).not.toContain(k);
+    }
     const RETIRED_OPERATIONAL = [
       'resolutionEvidence', 'resolutionEvidenceCount', 'attemptedResolvers',
       'retryability', 'resolutionConfidence', 'lastResolutionAttempt',
+      // 2026-08-29 — the five that reached the rendered sheet
+      'resolverId', 'resolverImplemented', 'resolutionMode', 'residualResolutionMode',
+      'plannedResolverPhase', 'authorityState', 'lastResolutionResult', 'unresolvedReasonCode',
     ];
     for (const r of registry) {
       for (const k of RETIRED_OPERATIONAL) {

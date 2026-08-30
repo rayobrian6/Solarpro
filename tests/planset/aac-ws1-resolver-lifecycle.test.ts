@@ -28,7 +28,7 @@ import {
 import { createResolverRegistry } from '@/lib/permit/snapshot/resolution/registry';
 import { PRODUCTION_RESOLVERS } from '@/lib/permit/snapshot/resolution/resolvers';
 import {
-  buildResolutionAuditRef, resolutionStatePayload, RESOLUTION_RESULT_DISPLAY,
+  buildResolutionAuditRef, resolutionStatePayload, resolutionStateOperational, RESOLUTION_RESULT_DISPLAY,
 } from '@/lib/permit/snapshot/resolution/evidence';
 import { blockerPayloadSchema } from '@/lib/permit/sections/reviewStatus';
 import type {
@@ -495,7 +495,7 @@ describe('AAC WS-1 · the payload rides the EXISTING RS-1 machinery, in AUTHORIT
     // the same class the rendered-truth harness scans for on a PENDING_AUTHORITY row
     const FAILURE_CLASS = /\b(failed|failure|fails|exceeded|exceeds|non-?compliant|does not comply|violation|rejected|unsafe|defective|inadequate)\b/i;
     for (const st of Object.values(outcome.states)) {
-      const p = resolutionStatePayload(st);
+      const p = resolutionStateOperational(st);
       const printed = Object.entries(p)
         .filter(([, v]) => v != null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
         .map(([k, v]) => `${k} ${v}`).join(' · ');
@@ -504,7 +504,11 @@ describe('AAC WS-1 · the payload rides the EXISTING RS-1 machinery, in AUTHORIT
     // the MACHINE vocabulary the directive mandates is preserved on the state
     const racking = outcome.states['RACKING-CAPACITY-SOURCE-NOT-ARCHIVED'];
     expect(racking.lastResolutionResult).toBe('FAILED');
-    expect(resolutionStatePayload(racking).lastResolutionResult).toBe('ATTEMPTED — NOT ESTABLISHED');
+    // 2026-08-29 - the AUTHORITY-language mapping is unchanged and still proven;
+    // it is read off the OPERATIONAL view, which is where this state lives now
+    // (the digested payload no longer carries it - see tr-transient-resolver-digest 12e).
+    expect(resolutionStateOperational(racking).lastResolutionResult).toBe('ATTEMPTED — NOT ESTABLISHED');
+    expect(resolutionStatePayload(racking), 'the digested payload carries no resolver state').toEqual({});
     expect(RESOLUTION_RESULT_DISPLAY.NOT_ATTEMPTED).toBe('NOT YET ATTEMPTED');
   });
 

@@ -75,7 +75,7 @@ describe('a segment carries its own conductors, and only its own', () => {
 
 describe('MUTATION — resize the PV conductor and the service span does not follow', () => {
   it('a smaller array moves BOTH PV spans and leaves the service untouched', () => {
-    const spans = (t: string) => (t.match(/\d#\d+ THWN-2/g) ?? []);
+    const spans = (t: string): string[] => (t.match(/\d#\d+ THWN-2/g) ?? []) as string[];
     const before = sldText();
     // Shrink the design so the AC current — and therefore the feeder and tap
     // conductor size — genuinely changes at its own source.

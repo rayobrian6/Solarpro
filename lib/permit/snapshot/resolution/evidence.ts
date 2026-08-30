@@ -86,7 +86,49 @@ export const RESOLUTION_RESULT_DISPLAY: Record<string, string> = {
  * `snapshot.resolverAttemptEvidence`, which the digest does not read — see
  * `./authorityProjection`.
  */
-export function resolutionStatePayload(s: RequirementResolutionState): Record<string, unknown> {
+// ══ 2026-08-29 — THE HALF THAT WAS NEVER MOVED ═══════════════════════════════
+// The doc-comment above is right about the destination and wrong about the
+// present tense: `resolutionStatePayload` still spread the WHOLE
+// `ResolvedAuthorityProjection` into the registry payload, and
+// `renderBlockerPayload` → `payloadGeneric` prints every primitive key it finds,
+// with its raw identifier. So a production export — which threads
+// `authority.resolution` and therefore populates `opts.resolutionStates` —
+// printed this on RS-1, beside a requirement a licensed engineer is reading:
+//
+//   BLOCKER PAYLOAD: resolverId project-authority@v1 · resolverImplemented true ·
+//   resolutionMode AUTO_RETRIEVED · residualResolutionMode OPERATOR_CONFIRMATION ·
+//   plannedResolverPhase AAC-3 (delivered) · authorityState NOT_APPLICABLE ·
+//   lastResolutionResult SKIPPED · unresolvedReasonCode …
+//
+// None of that is a fact about the DESIGN. It is how SolarPro's software went
+// about trying to establish one — internal scheduling vocabulary, an internal
+// resolver id, and a delivery-phase label from our own roadmap. It is also
+// digested, so a retry that changes nothing about the building moves the
+// signed artifact.
+//
+// The destination already exists and is already outside the digest:
+// `snapshot.resolverAttemptEvidence` (see ./authorityProjection §3), which
+// carries the attempt trail verbatim for troubleshooting.
+//
+// WHY THE PAYLOAD IS NOW EMPTY RATHER THAN FILTERED. The row above this box
+// already prints, for the same requirement: the condition, the explanation, the
+// authority path, the evidence references, the resolution action, the
+// responsible role and the affected sheets. There is no resolver field a
+// reviewer acts on that is not already there — `authorityState` restates the
+// row's own status in machine vocabulary, and `resolutionBlockingReason`
+// restates the explanation. A box that adds nothing is not neutral on a permit
+// sheet; it is noise a professional has to read past.
+//
+// Domain payloads (the Q-Cable procurement deficit, the grounding authority)
+// are untouched: they come from `over?.payload` and are genuinely reviewer-
+// facing.
+export function resolutionStatePayload(_s: RequirementResolutionState): Record<string, unknown> {
+  return {};
+}
+
+/** The operational view, for the evidence bundle / harness / troubleshooting —
+ *  everything the payload used to leak, kept whole, outside the digest. */
+export function resolutionStateOperational(s: RequirementResolutionState): Record<string, unknown> {
   return { ...projectResolvedAuthority(s) };
 }
 

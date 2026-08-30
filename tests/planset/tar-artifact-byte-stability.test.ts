@@ -89,9 +89,14 @@ describe('D9 · RS-1 payload rendering', () => {
     const html = renderBlockerPayload(blocker({
       segment: 'ROOF_RUN', oneWayFt: 15, lastResolutionAttempt: '2026-08-05T17:53:03.366Z',
     }));
+    // 2026-08-29 - the renderer prints a REVIEWER-FACING LABEL now, not the raw
+    // identifier, because printing every key it found is how `resolverImplemented`
+    // and `plannedResolverPhase` reached a permit sheet. What this case guards -
+    // that the SUBSTANTIVE fields render and the run instant does not - is
+    // unchanged; it just no longer requires the camelCase key on the drawing.
     expect(html).toContain('segment');
     expect(html).toContain('ROOF_RUN');
-    expect(html).toContain('oneWayFt');
+    expect(html).toContain('one-way (ft)');
     expect(html).toContain('15');
     // …but not the instant.
     expect(html).not.toContain('17:53:03');
