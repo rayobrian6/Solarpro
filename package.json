@@ -24,7 +24,8 @@
     "test:e2e": "playwright test",
     "ahj:audit-national": "tsx scripts/ahj-audit-national.mjs",
     "ahj:backfill-identities": "tsx scripts/ahj-backfill-identities.mjs",
-    "ahj:resolver-dryrun": "tsx scripts/ahj-resolver-dryrun.mjs"
+    "ahj:resolver-dryrun": "tsx scripts/ahj-resolver-dryrun.mjs",
+    "gov:ingest-national": "tsx scripts/gov-ingest-national.mjs"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",
