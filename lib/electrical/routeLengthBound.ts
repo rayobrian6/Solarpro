@@ -54,6 +54,108 @@ export const ROUTE_VD_LIMIT_PCT = {
   feeder: 3,
 } as const;
 
+// ══ 2026-08-29 — WHAT KIND OF LIMIT IS 2 %? ═══════════════════════
+// The schedule graded a branch against ROUTE_VD_LIMIT_PCT.branch as a HARD
+// compliance check, so a 2.11 % branch rendered as
+//     "FAIL — 2.11 % > 2.0 %"  under a column headed  "RELEASE / REVIEW"
+// on a package whose PV-4A summary read "0 BLOCKING / 0 PENDING / COMPLIES".
+//
+// 2 % is not a code limit. The NEC states voltage drop ONLY in informational
+// notes — 210.19(A) Inf. Note 4 (branch circuits) and 215.2(A)(1) Inf. Note 2
+// (feeders) recommend 3 % on the branch or feeder and 5 % on the combined run —
+// and NEC 90.5(C) says informational notes are explanatory and NOT enforceable
+// as requirements. SolarPro's 2 % branch figure is a DESIGN TARGET: it reserves
+// the remaining 1 % so the branch-plus-feeder total stays inside the 3 %
+// recommendation.
+//
+// Presenting a company target as a code failure is the same class of error as a
+// sheet inventing its own release model. The two limits are named separately
+// here and graded separately below; exceeding the TARGET is an advisory, and
+// only exceeding the published recommendation is a definitive failure.
+export const NEC_VD_RECOMMENDATION_PCT = {
+  /** NEC 210.19(A) Inf. Note 4 — branch circuit */
+  branch: 3,
+  /** NEC 215.2(A)(1) Inf. Note 2 — feeder */
+  feeder: 3,
+  /** both notes — feeder + branch combined */
+  combined: 5,
+} as const;
+
+export const NEC_VD_CITATION = {
+  branch: 'NEC 210.19(A) Informational Note 4',
+  feeder: 'NEC 215.2(A)(1) Informational Note 2',
+} as const;
+
+export type VoltageDropPolicyState =
+  /** at or under the SolarPro design target — nothing to say */
+  | 'WITHIN_DESIGN_TARGET'
+  /** over the target, under the published recommendation — ADVISORY, not a defect */
+  | 'DESIGN_TARGET_EXCEEDED'
+  /** over the published recommendation — a definitive design failure */
+  | 'RECOMMENDATION_EXCEEDED'
+  /** no percentage to grade */
+  | 'NOT_EVALUABLE';
+
+export interface VoltageDropPolicyGrade {
+  state: VoltageDropPolicyState;
+  /** SolarPro's design target for this run role. */
+  designTargetPct: number;
+  /** the NEC informational-note recommendation for this run role. */
+  recommendationPct: number;
+  /** the citation for that recommendation, named as the informational note it is. */
+  citation: string;
+  /** true ⇔ within the published recommendation. A design target miss does NOT
+   *  make a run non-compliant. */
+  compliant: boolean;
+  /** true ⇔ at or under SolarPro's own target. */
+  designTargetMet: boolean;
+  /** the sheet label — one wording, so no sheet composes its own. */
+  label: string;
+  /** true ⇔ this is a definitive failure a compliance verdict must carry. */
+  definitiveFailure: boolean;
+}
+
+/** Grade ONE run's voltage drop against BOTH limits. Pure. */
+export function gradeVoltageDropPolicy(
+  pct: number | null | undefined,
+  segmentId: string,
+): VoltageDropPolicyGrade {
+  const isBranch = /BRANCH/i.test(segmentId)
+    || !/COMBINER_TO_DISCO|INV_TO_DISCO|DISCO_TO_|MSP_TO_|METER_TO_/i.test(segmentId);
+  const designTargetPct = vdLimitPctForSegment(segmentId);
+  const recommendationPct = isBranch ? NEC_VD_RECOMMENDATION_PCT.branch : NEC_VD_RECOMMENDATION_PCT.feeder;
+  const citation = isBranch ? NEC_VD_CITATION.branch : NEC_VD_CITATION.feeder;
+  const base = { designTargetPct, recommendationPct, citation };
+
+  if (typeof pct !== 'number' || !Number.isFinite(pct)) {
+    return {
+      ...base, state: 'NOT_EVALUABLE', compliant: false, designTargetMet: false,
+      definitiveFailure: false,
+      label: 'VOLTAGE DROP NOT EVALUABLE — no percentage computed',
+    };
+  }
+  if (pct <= designTargetPct) {
+    return {
+      ...base, state: 'WITHIN_DESIGN_TARGET', compliant: true, designTargetMet: true,
+      definitiveFailure: false,
+      label: `WITHIN DESIGN TARGET — ${pct.toFixed(2)}% ≤ ${designTargetPct.toFixed(1)}%`,
+    };
+  }
+  if (pct <= recommendationPct) {
+    return {
+      ...base, state: 'DESIGN_TARGET_EXCEEDED', compliant: true, designTargetMet: false,
+      definitiveFailure: false,
+      label: `CODE COMPLIANT — ${designTargetPct.toFixed(1)}% DESIGN TARGET EXCEEDED `
+        + `(${pct.toFixed(2)}% ≤ ${recommendationPct.toFixed(1)}% per ${citation})`,
+    };
+  }
+  return {
+    ...base, state: 'RECOMMENDATION_EXCEEDED', compliant: false, designTargetMet: false,
+    definitiveFailure: true,
+    label: `EXCEEDS ${citation} — ${pct.toFixed(2)}% > ${recommendationPct.toFixed(1)}%`,
+  };
+}
+
 /** Which limit governs a run, from its segment id. Fail-closed to the TIGHTER
  *  limit: a bound computed against a looser limit than the schedule grades with
  *  would permit a length the run then fails at. */

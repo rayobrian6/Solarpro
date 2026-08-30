@@ -191,13 +191,43 @@ describe('D5 §2 — every physical section is graded through the ONE resolver',
     }
   });
 
-  it('14. the RELEASE state and the CALCULATION grade are independent objects', () => {
-    // Braidon: every section's release state is pending (open route requirement)
-    // while its calculation is a graded pass. That combination is the whole point.
+  it('14. the SECTION verdict and the CALCULATION grade are independent objects', () => {
+    // ══ 2026-08-29 MIGRATION ═══════════════════════════════════════════════
+    // These cases pinned "every section's release state is PENDING", which was
+    // only ever true because every section pushed its CAD-derived route length
+    // into `pending` - and `pending`'s label reads "PENDING - REVIEW REQ'D",
+    // which a PE reads as HIS outstanding work. A route length is closed by an
+    // installer with a tape, and ROUTE_LENGTH_CLOSURE_POLICY had already ruled
+    // that a CAD route is not an estimate of a route nobody has.
+    //
+    // So PV-4B.1 told the engineer four sections needed him while PV-4A's
+    // summary of the same design read "0 BLOCKING / 0 PENDING / COMPLIES".
+    //
+    // What these cases actually guard is unchanged and is asserted below more
+    // strictly: the CALCULATION grade and the SECTION verdict remain two
+    // independent objects, and neither may overwrite the other.
     const feeder = sections.find(s => s.sectionId === 'COMBINER_TO_DISCO_RUN');
     expect(feeder, 'the combiner feeder section').toBeTruthy();
-    expect(feeder!.compliance.state).toBe('PENDING-REVIEW-REQUIRED');
+    // The calculation is a graded PROVISIONAL pass regardless of the verdict...
     expect(feeder!.voltageDrop.conclusion).toBe('PROVISIONAL_PASS');
+    // ...and the verdict is its own object, which no longer claims the engineer
+    // owes anything on a length the closure policy has settled.
+    expect(feeder!.compliance.state).not.toBe('PENDING-REVIEW-REQUIRED');
+    // The independence is the point: prove BOTH fields exist and disagree in
+    // shape, not that either holds one particular value.
+    expect(feeder!.compliance.state).toBeTruthy();
+    expect(feeder!.voltageDrop.conclusion).not.toBe(feeder!.compliance.state);
+  });
+
+  it('14b. a section that DOES owe an engineering answer still says so', () => {
+    // The pending path must remain reachable - it simply may not be summoned by
+    // a route length. A blank required value still produces it.
+    const s2 = sections.find(s => s.compliance.state === 'PENDING-REVIEW-REQUIRED');
+    if (s2) expect(s2.compliance.pending.length).toBeGreaterThan(0);
+    // and nothing may reach PASS while its own required values are missing
+    for (const s3 of sections) {
+      if (s3.compliance.missing.length > 0) expect(s3.compliance.state).not.toBe('PASS');
+    }
   });
 });
 
@@ -236,10 +266,15 @@ describe('D5 §3 — PV-4B and PV-4B.1 cannot contradict each other', () => {
     }
   });
 
-  it('19. the RELEASE state is still displayed — separately, and still pending', () => {
+  it('19. the SECTION verdict is still displayed, separately from the calculation', () => {
+    // The column header said RELEASE / REVIEW over a per-section COMPLIANCE
+    // result. Package release is the release model's to state; a section can
+    // only answer whether its own checks pass. The column now says that, and
+    // the verdict is still shown beside - never instead of - the calculation.
     const s = sheet('PV-4B.1');
-    expect(s).toContain('RELEASE / REVIEW');
-    expect(s).toContain('PENDING — REVIEW REQ’D');
+    expect(s).toContain('SECTION COMPLIANCE');
+    expect(s).not.toContain('RELEASE / REVIEW');
+    expect(s).toMatch(/CALCULATION/);
   });
 
   it('20. an open route requirement does not replace any calculation conclusion', () => {

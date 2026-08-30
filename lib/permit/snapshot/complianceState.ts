@@ -23,7 +23,25 @@
 // column, and exported for RS-1 / the evidence harness (round-2 wiring points).
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type TriState = 'PASS' | 'FAIL' | 'PENDING-REVIEW-REQUIRED';
+// ══ 2026-08-29 — A FOURTH STATE, BECAUSE THERE WERE ALWAYS FOUR ════════
+// Every branch, home-run and feeder section carried
+//     pending: ['... route length is a CAD-derived estimate (not field-verified)']
+// which forced PENDING-REVIEW-REQUIRED, whose label reads "PENDING — REVIEW
+// REQ'D". A professional reads that as ENGINEERING REVIEW OUTSTANDING. It is
+// not: a CAD-derived route length is confirmed by the installer with a tape at
+// installation, and the design is complete without it.
+//
+// So PV-4B.1 told a PE that four sections needed his review while PV-4A's
+// summary of the same design read "0 BLOCKING / 0 PENDING / COMPLIES".
+//
+// The four things a section can be waiting on are different things:
+//   FAIL                       a present value violates a rule
+//   PENDING-REVIEW-REQUIRED    an ENGINEERING question is open (a required
+//                              value is missing, a check is not evaluable)
+//   FIELD-VERIFY-AT-INSTALL    the design is complete; the INSTALLER confirms
+//                              it in the field
+//   PASS                       nothing outstanding
+export type TriState = 'PASS' | 'FAIL' | 'PENDING-REVIEW-REQUIRED' | 'FIELD-VERIFY-AT-INSTALL';
 
 export interface ComplianceResult {
   state: TriState;
@@ -33,6 +51,8 @@ export interface ComplianceResult {
   missing: string[];
   /** every explicit pending-authority reason (drives PENDING). */
   pending: string[];
+  /** items the INSTALLER closes in the field. They never drive PENDING-REVIEW. */
+  fieldVerification: string[];
   /** every hard check that DEFINITIVELY failed (drives FAIL). */
   failures: string[];
 }
@@ -56,9 +76,13 @@ export interface RequiredValue {
 export interface ComplianceInput {
   requiredValues?: RequiredValue[];
   checks?: ComplianceCheck[];
-  /** authority-pending reasons (route length not verified, fill not computed,
-   *  equipment/tap unresolved). Any entry → PENDING-REVIEW-REQUIRED. */
+  /** authority-pending reasons (fill not computed, equipment/tap unresolved).
+   *  Any entry → PENDING-REVIEW-REQUIRED. An item the INSTALLER closes does NOT
+   *  belong here — see `fieldVerification`. */
   pending?: string[];
+  /** CONSTRUCTION-verification items: the design is complete and the installer
+   *  confirms the as-built. These never raise an engineering-review flag. */
+  fieldVerification?: string[];
 }
 
 /** A value counts as "present" when it is not null/undefined, not a blank string,
@@ -94,15 +118,22 @@ export function evaluateCompliance(input: ComplianceInput): ComplianceResult {
     else if (c.pass === null) unknownChecks.push(c.label);
   }
   const pending = [...(input.pending ?? []), ...missing.map(m => `${m} unresolved`), ...unknownChecks.map(u => `${u} not evaluable`)];
+  const fieldVerification = [...(input.fieldVerification ?? [])];
 
   // FAIL dominates: a present value that violates a rule is worse than a hole.
   if (failures.length > 0) {
-    return { state: 'FAIL', reason: failures[0], missing, pending, failures };
+    return { state: 'FAIL', reason: failures[0], missing, pending, fieldVerification, failures };
   }
   if (pending.length > 0) {
-    return { state: 'PENDING-REVIEW-REQUIRED', reason: pending[0], missing, pending, failures };
+    return { state: 'PENDING-REVIEW-REQUIRED', reason: pending[0], missing, pending, fieldVerification, failures };
   }
-  return { state: 'PASS', reason: '', missing, pending, failures };
+  // The design is complete; what remains is the installer's. Ranked BELOW
+  // engineering-review pending and ABOVE pass, so it is never hidden and never
+  // mistaken for an open engineering question.
+  if (fieldVerification.length > 0) {
+    return { state: 'FIELD-VERIFY-AT-INSTALL', reason: fieldVerification[0], missing, pending, fieldVerification, failures };
+  }
+  return { state: 'PASS', reason: '', missing, pending, fieldVerification, failures };
 }
 
 // ── Rendering helpers (single source for every sheet's verdict glyph/label) ──
@@ -111,12 +142,17 @@ export const COMPLIANCE_LABEL: Record<TriState, string> = {
   'PASS': '✓ PASS',
   'FAIL': '✗ FAIL',
   'PENDING-REVIEW-REQUIRED': 'PENDING — REVIEW REQ’D',
+  'FIELD-VERIFY-AT-INSTALL': 'FIELD VERIFY AT INSTALLATION',
 };
 
 export const COMPLIANCE_COLOR: Record<TriState, string> = {
   'PASS': '#127a3e',
   'FAIL': '#cc0000',
   'PENDING-REVIEW-REQUIRED': '#cc6600',
+  // Not amber: an installer's confirmation is a normal construction step, and
+  // colouring it like an open engineering question is what made four ordinary
+  // route lengths read as a PE's outstanding work.
+  'FIELD-VERIFY-AT-INSTALL': '#1e3a5f',
 };
 
 /** Short label form ('✓ PASS' | '✗ FAIL' | 'PENDING — REVIEW REQ’D'). */

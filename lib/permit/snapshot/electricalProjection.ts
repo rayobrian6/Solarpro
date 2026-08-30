@@ -11,7 +11,8 @@
 // feeder + its route segment. Same field, same rounding, everywhere.
 // ═══════════════════════════════════════════════════════════════════════════
 import type { PermitDesignSnapshot, RouteSegmentRecord, GroundingSegment } from './types';
-import { ROUTE_VD_LIMIT_PCT } from '@/lib/electrical/routeLengthBound';
+import { ROUTE_VD_LIMIT_PCT, gradeVoltageDropPolicy, type VoltageDropPolicyGrade } from '@/lib/electrical/routeLengthBound';
+import { sourceClosesRouteLengthRequirement } from '@/lib/fieldMeasurement/resolver';
 import { closesFieldVerification, type RouteVerificationState } from './types';
 import { evaluateCompliance, type ComplianceResult } from './complianceState';
 import { GROUNDING_PENDING_BONDING_CELL_LABEL } from './groundingAuthority';
@@ -1410,9 +1411,26 @@ export interface E1PhysicalSection {
   // on PV-4B.1 and `PROVISIONAL PASS` on PV-4B — the same circuit, same numbers.
   voltageDrop: VoltageDropGrade;
   compliance: ComplianceResult;
+  /** 2026-08-29 - the voltage drop graded against BOTH limits: SolarPro's design
+   *  target and the NEC informational-note recommendation. `compliance` above
+   *  can only FAIL on the recommendation, so a design-target miss reads as the
+   *  advisory it is instead of "FAIL - 2.11% > 2.0%" under a release heading.
+   *  Null on a section that carries no voltage-drop percentage. */
+  voltageDropPolicy: VoltageDropPolicyGrade | null;
 }
 
-const _VERIFIED_ROUTE = new Set(['field-measured', 'field-verified', 'as-built-verified']);
+// 2026-08-29 - `_VERIFIED_ROUTE` was a THIRD copy of "is this run field-checked",
+// with the same three values as the exported `isRouteFieldVerified` in this very
+// file. Deleted; the predicate is the exported one.
+//
+// It also answered the WRONG question for the section verdict. Whether a length
+// still owes anything is decided by ROUTE_LENGTH_CLOSURE_POLICY
+// (lib/fieldMeasurement/resolver.ts), which is deliberately WIDER: a CAD ROUTE
+// and a length the DESIGN FIXES both close ROUTE-LENGTH-ESTIMATE, because
+// neither is an estimate of a route nobody has. That is why the tap span could
+// print "FIXED BY DESIGN - INSTALL PER DRAWING" and, in the very next cell,
+// "PENDING - REVIEW REQ'D": one policy said it was settled and the section
+// verdict asked a different question and got a different answer.
 
 function _seg(snap: PermitDesignSnapshot, id: string): RouteSegmentRecord | null {
   return (snap.electrical?.routeSegments ?? []).find(r => r.segmentId === id) ?? null;
@@ -1515,9 +1533,12 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
   branches.forEach((b, i) => {
     const _bPath = _pathByBranch.get(b.branchId) ?? null;
     void i;
-    const verified = branchSeg ? _VERIFIED_ROUTE.has(String(branchSeg.verificationStatus)) : false;
+    const verified = branchSeg ? isRouteFieldVerified(String(branchSeg.verificationStatus) as never) : false;
+    const _lengthSettled = sourceClosesRouteLengthRequirement(branchSeg?.lengthSource);
     const pending: string[] = [];
-    if (branchSeg && !verified) pending.push('branch route length is a CAD-derived estimate (not field-verified)');
+    // 2026-08-29 - the installer closes this with a tape, not the engineer.
+    const fieldVerification: string[] = [];
+    if (branchSeg && !verified && !_lengthSettled) fieldVerification.push('branch route length is a CAD-derived estimate - field verify at installation');
     // ══ THE DROP IS DERIVED FROM THIS BRANCH (2026-08-29) ═══════════════════
     // `branchSeg` is ONE shared BRANCH_RUN segment read inside a per-branch loop,
     // so all three rows printed the SAME voltage drop - 0.08% on the audited
@@ -1546,6 +1567,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       systemVoltage: 240,   // micro AC branch, split-phase 240 V
     });
     const vd = _bVd.voltageDropPct ?? num(branchSeg?.voltageDropPct);
+    const _vdPolicy = gradeVoltageDropPolicy(vd, 'BRANCH_RUN');
     const compliance = evaluateCompliance({
       requiredValues: [
         { label: 'branch conductor size', value: branchSeg?.conductorGauge },
@@ -1554,9 +1576,13 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       ],
       checks: [
         { label: 'continuous ≤ OCPD (NEC 240.4)', pass: Number.isFinite(b.continuousA) && Number.isFinite(b.ocpdA) ? b.continuousA <= b.ocpdA : null },
-        { label: 'branch VD ≤ 2%', pass: vd == null ? null : vd <= 2 },
+        // 2026-08-29 - graded against the PUBLISHED RECOMMENDATION, not the
+        // company design target. A target miss is an advisory (see the
+        // voltageDropPolicy field below); only the recommendation can FAIL.
+        { label: _vdPolicy.citation, pass: _vdPolicy.state === 'NOT_EVALUABLE' ? null : !_vdPolicy.definitiveFailure },
       ],
       pending,
+      fieldVerification,
     });
     sections.push({
       sectionId: 'BRANCH_RUN',
@@ -1601,6 +1627,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: 'free-air (no raceway fill adjustment)',
       voltageDropPct: vd,
       vdLimitPct: ROUTE_VD_LIMIT_PCT.branch,
+      voltageDropPolicy: _vdPolicy,
       vdCalculationLengthFt: _vdLenOf(branchSeg),
       // D5 — the SAME canonical resolver PV-4B uses. Not a PV-4B.1 variant.
       voltageDrop: _gradeSeg(branchSeg, vd, 2),
@@ -1627,10 +1654,13 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
   const hr = projectSharedBranchRaceway(snap);
   const hrSeg = _seg(snap!, 'BRANCH_HOMERUN_RUN');
   if (hr.present) {
-    const verified = hrSeg ? _VERIFIED_ROUTE.has(String(hrSeg.verificationStatus)) : false;
+    const verified = hrSeg ? isRouteFieldVerified(String(hrSeg.verificationStatus) as never) : false;
+    const _lengthSettled = sourceClosesRouteLengthRequirement(hrSeg?.lengthSource);
     const pending: string[] = [];
-    if (!verified) pending.push('home-run route length is a CAD-derived estimate (not field-verified)');
+    const fieldVerification: string[] = [];
+    if (!verified && !_lengthSettled) fieldVerification.push('home-run route length is a CAD-derived estimate - field verify at installation');
     const vd = num(hrSeg?.voltageDropPct);
+    const _vdPolicy = gradeVoltageDropPolicy(vd, 'BRANCH_HOMERUN_RUN');
     const opA = branches.reduce((s, b) => s + (Number.isFinite(b.currentA) ? b.currentA : 0), 0);
     const contA = branches.reduce((s, b) => s + (Number.isFinite(b.continuousA) ? b.continuousA : 0), 0);
     // §4 — each #10 home-run conductor carries ONE branch; the governing
@@ -1646,9 +1676,10 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       ],
       checks: [
         { label: 'conduit fill ≤ 40%', pass: hr.fillPct == null ? null : hr.fillPct <= 40 },
-        { label: 'home-run VD ≤ 2%', pass: vd == null ? null : vd <= 2 },
+        { label: _vdPolicy.citation, pass: _vdPolicy.state === 'NOT_EVALUABLE' ? null : !_vdPolicy.definitiveFailure },
       ],
       pending,
+      fieldVerification,
     });
     sections.push({
       sectionId: 'BRANCH_HOMERUN_RUN',
@@ -1685,6 +1716,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: null,
       voltageDropPct: vd,
       vdLimitPct: ROUTE_VD_LIMIT_PCT.branch,
+      voltageDropPolicy: _vdPolicy,
       vdCalculationLengthFt: _vdLenOf(hrSeg),
       voltageDrop: _gradeSeg(hrSeg, vd, 2),
       // §4 — THE shared 6-CCC ampacity chain (the row that used to print a lone
@@ -1724,10 +1756,13 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
     const rw = applicableFillFromRw ? raceways.find(r => r.physicalRacewayId === applicableFillFromRw) : null;
     const fillPct = num(rw?.fillPct) ?? num(seg.fillPct);
     const fillApplicable = (seg.raceway ?? '') !== 'FREE_AIR' && seg.raceway != null;
-    const verified = _VERIFIED_ROUTE.has(String(seg.verificationStatus));
+    const verified = isRouteFieldVerified(String(seg.verificationStatus) as never);
+    const _lengthSettled = sourceClosesRouteLengthRequirement(seg.lengthSource);
     const vd = num(seg.voltageDropPct);
+    const _vdPolicy = gradeVoltageDropPolicy(vd, segId);
     const pending: string[] = [];
-    if (!verified) pending.push('feeder route length is a CAD-derived estimate (not field-verified)');
+    const fieldVerification: string[] = [];
+    if (!verified && !_lengthSettled) fieldVerification.push('route length is a CAD-derived estimate - field verify at installation');
     const compliance = evaluateCompliance({
       requiredValues: [
         { label: 'conductor size', value: seg.conductorGauge },
@@ -1737,10 +1772,12 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       ],
       checks: [
         { label: 'conduit fill ≤ 40%', pass: !fillApplicable ? true : (fillPct == null ? null : fillPct <= 40) },
-        { label: 'feeder VD ≤ 3%', pass: vd == null ? null : vd <= 3 },
+        // graded by the ONE policy, like every other section
+        { label: _vdPolicy.citation, pass: _vdPolicy.state === 'NOT_EVALUABLE' ? null : !_vdPolicy.definitiveFailure },
         ...(extra?.checks ?? []),
       ],
       pending: [...pending, ...(extra?.pending ?? [])],
+      fieldVerification,
     });
     sections.push({
       sectionId: segId,
@@ -1773,6 +1810,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: rw?.deratingBasis ?? null,
       voltageDropPct: vd,
       vdLimitPct: ROUTE_VD_LIMIT_PCT.feeder,
+      voltageDropPolicy: _vdPolicy,
       vdCalculationLengthFt: _vdLenOf(seg),
       voltageDrop: _gradeSeg(seg, vd, 3),
       // §4 — feeder / downstream service run ampacity chain.
@@ -1835,6 +1873,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
   if (tap && !tapIsViewOfRun) {
     const rule = tapRule;
     const pending: string[] = [];
+    const fieldVerification: string[] = [];
     if (rule?.state === 'pending') pending.push('tap-conductor length not measured — NEC 705.11(C) ≤10-ft rule PENDING');
     const failures = rule?.state === 'fail' ? [{ label: 'tap conductors > 10 ft (NEC 705.11(C))', pass: false as const }] : [];
     const compliance = evaluateCompliance({
@@ -1844,6 +1883,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       ],
       checks: failures,
       pending,
+      fieldVerification,
     });
     sections.push({
       sectionId: tap.objectId,
@@ -1876,6 +1916,8 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: null,
       voltageDropPct: null,
       vdLimitPct: ROUTE_VD_LIMIT_PCT.feeder,
+      // the standalone tap section carries no percentage of its own
+      voltageDropPolicy: null,
       vdCalculationLengthFt: num(tap.lengthFt),
       voltageDrop: gradeVoltageDrop({
         pct: null, limitPct: 3, lengthFt: num(tap.lengthFt),

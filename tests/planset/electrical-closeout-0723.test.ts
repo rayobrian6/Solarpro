@@ -284,8 +284,16 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
     for (const s of secs) {
       if (ESTIMATE_SOURCES.has(s.lengthSource as string | null)) {
         sawEstimate = true;
+        // THE GATE, unchanged: an estimate length may never read PASS.
         expect(s.compliance.state, `${s.sectionId} PASSED on an estimate length`).not.toBe('PASS');
-        expect(['FAIL', 'PENDING-REVIEW-REQUIRED']).toContain(s.compliance.state);
+        // 2026-08-29 - the allowed list gains FIELD-VERIFY-AT-INSTALL. An
+        // estimate route length is closed by the INSTALLER with a tape, not by
+        // the engineer, and reporting it as "PENDING - REVIEW REQ'D" told a PE
+        // that four ordinary route lengths were his outstanding work. The state
+        // is ranked BELOW engineering-pending and ABOVE pass, so this gate is
+        // not weakened - the section still cannot read PASS.
+        expect(['FAIL', 'PENDING-REVIEW-REQUIRED', 'FIELD-VERIFY-AT-INSTALL'])
+          .toContain(s.compliance.state);
       }
     }
     // the gate is only meaningful if the fixture still contains an estimate run

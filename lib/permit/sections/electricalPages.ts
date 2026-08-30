@@ -206,8 +206,24 @@ function renderE1PhysicalSchedule(
       // The RELEASE / review state — conductor-size holes, conduit fill, the NEC
       // 705.11(C) tap rule AND the open field-verification requirement. It stays
       // exactly as it was; it simply no longer stands in for the calculation.
+      // ══ 2026-08-29 - THIS COLUMN NEVER HELD A RELEASE STATE ═══════════════
+      // The header said "RELEASE / REVIEW" over a per-section COMPLIANCE result.
+      // Package release is decided by the release model and stated by the sheet
+      // banner; a section can only answer whether ITS OWN checks pass. So
+      // PV-4B.1 showed four sections reading "PENDING - REVIEW REQ'D" - which a
+      // PE reads as his outstanding work - beside PV-4A's "0 BLOCKING / 0
+      // PENDING / COMPLIES" for the same design.
+      //
+      // The column now says what it evaluates. The design-target advisory prints
+      // beneath it, from the ONE voltage-drop policy, so a company target miss
+      // is never mistaken for the code failure it is not.
       + `<td class="center" style="font-size:6.5px;overflow-wrap:anywhere;">`
-        + `<span style="color:#555;font-size:5.5px">RELEASE / REVIEW</span><br/>${complianceBadge(x.compliance)}</td>`
+        + `<span style="color:#555;font-size:5.5px">SECTION COMPLIANCE</span><br/>${complianceBadge(x.compliance)}`
+        + `${x.voltageDropPolicy && x.voltageDropPolicy.state === 'DESIGN_TARGET_EXCEEDED'
+            ? `<br/><span style="color:#1e3a5f;font-size:5.2px;font-weight:bold;">`
+              + `${escapeH(x.voltageDropPolicy.designTargetPct.toFixed(1))}% DESIGN TARGET EXCEEDED`
+              + `<br/>(CODE COMPLIANT — ${escapeH(x.voltageDropPolicy.citation)})</span>`
+            : ''}</td>`
       + `</tr>`;
   }).join('');
   return `
