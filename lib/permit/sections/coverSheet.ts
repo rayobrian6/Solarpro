@@ -800,7 +800,14 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
             <div class="note-row"><div class="note-num">1.</div><div class="note-txt">ALL DIMENSIONS ARE NOMINAL. FIELD VERIFY PRIOR TO INSTALLATION.</div></div>
             <div class="note-row"><div class="note-num">2.</div><div class="note-txt">DO NOT SCALE FROM DRAWINGS.</div></div>
             <div class="note-row"><div class="note-num">3.</div><div class="note-txt">CONTRACTOR RESPONSIBLE FOR VERIFICATION OF ALL SITE CONDITIONS.</div></div>
-            <div class="note-row"><div class="note-num">4.</div><div class="note-txt">PE STAMP REQUIRED FOR PERMIT SUBMISSION PER AHJ.</div></div>
+            // SolarPro PRODUCT POLICY, not a legal claim. This said "PE STAMP REQUIRED FOR PERMIT
+            // SUBMISSION PER AHJ" — a hardcoded string with zero jurisdiction input, zero
+            // state-licensing input, no project thresholds and no exemptions, rendering on every
+            // package. The renderer was the ONLY source of a material legal claim. Ray's ruling
+            // 2026-08-30: SolarPro itself requires professional review before PERMIT_READY; that
+            // is NOT evidence the AHJ or state requires a PE, a seal, or any particular
+            // discipline. Those are separate governed requirements and remain unverified.
+            <div class="note-row"><div class="note-num">4.</div><div class="note-txt">PROFESSIONAL REVIEW REQUIRED BY SOLARPRO PRIOR TO PERMIT RELEASE. JURISDICTION-SPECIFIC SIGNATURE / SEAL REQUIREMENTS PENDING AUTHORITY VERIFICATION.</div></div>
             <div class="note-row"><div class="note-num">5.</div><div class="note-txt">SUBSTITUTIONS REQUIRE WRITTEN ENGINEER APPROVAL.</div></div>
           </div>
         </div>
