@@ -220,6 +220,11 @@ export interface AhjResolution {
    *  record for X") and what the discovery path is given to work from. Null in
    *  every other outcome. */
   missingAuthorityFor: string | null;
+  /** A stored `ahjRecordId` that was REFUSED because it names a record in a
+   *  different state than the project. Recorded rather than dropped, so the
+   *  rejection is auditable — a stale id is usually a symptom (a copied project,
+   *  a bad import) and silently ignoring it hides that. */
+  rejectedRecordId: string | null;
 }
 
 /**
@@ -273,6 +278,7 @@ export function resolveAhjRecordTraced(hints: {
       record, matchMethod: method, incorporated: inc,
       supersededRecordId: record && _legacyB && _legacyB !== record.id ? _legacyB : null,
       missingAuthorityFor: null,
+      rejectedRecordId: null,
     });
     // A KNOWN JURISDICTION WE HAVE NO ROW FOR IS A GAP, NOT A REASON TO GUESS.
     //
@@ -298,6 +304,7 @@ export function resolveAhjRecordTraced(hints: {
       incorporated: inc,
       supersededRecordId: null,
       missingAuthorityFor: name,
+      rejectedRecordId: null,
     });
     if (b.unincorporated === true) {
       const byCounty = hints.county ? getAhjByCounty(state, hints.county) : null;
@@ -319,17 +326,36 @@ export function resolveAhjRecordTraced(hints: {
   }
   // What the pre-WS-12 precedence would have chosen, for the audit trail.
   const _legacy = (state && hints.county ? getAhjByCounty(state, hints.county) : null)?.id ?? null;
+  let _rejectedRecordId: string | null = null;
   const done = (record: AhjRecord | null, matchMethod: AhjMatchMethod): AhjResolution => ({
     record,
     matchMethod,
     incorporated: record ? (record.ahjType !== 'county' && record.city.toLowerCase() !== 'unincorporated') : null,
     supersededRecordId: record && _legacy && _legacy !== record.id ? _legacy : null,
     missingAuthorityFor: null,
+    rejectedRecordId: _rejectedRecordId,
   });
 
+  // A STORED RECORD ID IS ONLY EXPLICIT ABOUT THE RECORD, NOT ABOUT THE PROJECT.
+  //
+  // This bound whatever the id pointed at, with no check that the record is even
+  // in the project's state. An Illinois project carrying a stale
+  // 'ca-los-angeles-la' — a copied project, a bad import, an id left behind by an
+  // earlier resolution — bound City of Los Angeles LADBS and labelled it
+  // 'explicit-record-id', the highest-confidence method in this function. Every
+  // other branch here is state-scoped; this one was not.
+  //
+  // Geography is the better evidence when the two disagree, so the stale id is
+  // refused and the chain continues. It is carried on the result rather than
+  // dropped, because a cross-state id is usually a symptom worth surfacing.
   if (hints.ahjRecordId) {
     const byId = getAhjById(hints.ahjRecordId);
-    if (byId) return done(byId, 'explicit-record-id');
+    if (byId) {
+      const stateAgrees = !state || !byId.stateCode
+        || byId.stateCode.toUpperCase() === state.toUpperCase();
+      if (stateAgrees) return done(byId, 'explicit-record-id');
+      _rejectedRecordId = byId.id;
+    }
   }
   // The stored AHJ NAME is an already-resolved server enrichment — the app wrote
   // it from this same dataset. Honour it before re-deriving from geography.

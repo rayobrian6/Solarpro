@@ -85,6 +85,58 @@ describe('boundary established + record missing', () => {
   });
 });
 
+describe('a stored record id is only explicit about the RECORD', () => {
+  it('refuses an id that names a record in another state', () => {
+    // An Illinois project carrying a stale 'ca-los-angeles-la' — a copied
+    // project, a bad import, an id left by an earlier resolution — used to bind
+    // City of Los Angeles LADBS and label it 'explicit-record-id', the
+    // highest-confidence method in the function. Every other branch is
+    // state-scoped; this one was not.
+    const r = resolveAhjRecordTraced({
+      ahjRecordId: 'ca-los-angeles-la',
+      stateCode: 'IL', county: 'Madison', city: 'Granite City',
+      address: '3 Melvin Dr, Granite City, IL 62040',
+    });
+    expect(r.record?.stateCode).toBe('IL');
+    expect(r.matchMethod).not.toBe('explicit-record-id');
+    // The rejection is carried, not dropped — a cross-state id is a symptom.
+    expect(r.rejectedRecordId).toBe('ca-los-angeles-la');
+  });
+
+  it('still honours an id in the project’s own state', () => {
+    const r = resolveAhjRecordTraced({
+      ahjRecordId: 'il-madison-granite-city',
+      stateCode: 'IL', county: 'Madison', city: 'Granite City',
+    });
+    expect(r.matchMethod).toBe('explicit-record-id');
+    expect(r.rejectedRecordId).toBeNull();
+  });
+
+  it('honours an id when the project states no state to disagree with', () => {
+    const r = resolveAhjRecordTraced({ ahjRecordId: 'ca-los-angeles-la' });
+    expect(r.record?.id).toBe('ca-los-angeles-la');
+    expect(r.matchMethod).toBe('explicit-record-id');
+  });
+
+  it('never returns a record from a state other than the project’s', () => {
+    // The general invariant, swept across states: whatever the hints say, the
+    // bound record must belong to the project's state.
+    const STATES = ['IL', 'TX', 'CA', 'NY', 'FL', 'OH', 'MO', 'WA'];
+    const offenders: string[] = [];
+    for (const st of STATES) {
+      for (const staleId of ['ca-los-angeles-la', 'tx-harris-houston', 'ny-new-york-new-york']) {
+        const r = resolveAhjRecordTraced({
+          ahjRecordId: staleId, stateCode: st, county: 'Madison', city: 'Springfield',
+        });
+        if (r.record && r.record.stateCode.toUpperCase() !== st) {
+          offenders.push(`${st} + ${staleId} -> ${r.record.id}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('the code authority reports the gap by name', () => {
   const resolution = resolveAhjRecordTraced({
     stateCode: 'IL', county: 'Madison', city: 'Granite City',
