@@ -312,7 +312,7 @@ describe('RGM §7 — technical vs workflow condition is explicit and never misl
     expect(gate(withApproval, 'RG-7').unresolvedCount).toBe(1);   // designer-of-record still open
   });
 
-  it('responsibleRole derives from (gate category, finding type)', () => {
+  it('responsibleRole derives from (gate category, finding type, and the terminal mode)', () => {
     expect(q('PROJECT-NAME-NONPRODUCTION').responsibleRole).toBe('admin');
     expect(q('CODE-AUTHORITY-INCOMPLETE').responsibleRole).toBe('admin');
     expect(q('ENGINEERING-REVIEW-PENDING').responsibleRole).toBe('engineer-of-record');
@@ -320,7 +320,23 @@ describe('RGM §7 — technical vs workflow condition is explicit and never misl
     expect(q('RACKING-RAIL-CAPACITY-UNBOUNDED').responsibleRole).toBe('designer');
     expect(q('ROUTE-LENGTH-ESTIMATE').responsibleRole).toBe('operator');         // a field measurement is owed
     expect(q('QCABLE-PROCUREMENT-INSUFFICIENT').responsibleRole).toBe('designer');
-    expect(q('FRAMING-AUTHORITY-UNVERIFIED').responsibleRole).toBe('operator');  // archive the source document
+    // 2026-08-29 - was 'operator'. FRAMING-AUTHORITY-UNVERIFIED declares
+    // `residualMode: 'PROFESSIONAL_APPROVAL'`, and its own RS-1 row explains that
+    // existing framing capacity cannot be established automatically and must
+    // transition to professional approval - beside "RESPONSIBLE: OPERATOR". An
+    // operator cannot close it. `requirementLane` already read the same
+    // `residualMode ?? resolutionMode` to put it in the PROFESSIONAL lane, so the
+    // scorecard and the row named two different people.
+    //
+    // The role now reads that field too, and TRANSITIONS: while the automatic
+    // retrieval path is still live it is the operator's (asserted below and in
+    // tests/planset/responsibility-follows-authority.test.ts); once that path is
+    // exhausted - or when the attempt state is unknown, as here - it is the
+    // engineer's, because an OPEN requirement belongs to whoever must act if
+    // nothing else closes it.
+    expect(q('FRAMING-AUTHORITY-UNVERIFIED').responsibleRole).toBe('engineer-of-record');
+    expect(deriveResponsibleRole('STRUCTURAL_AUTHORITY', 'PENDING_AUTHORITY',
+      'FRAMING-AUTHORITY-UNVERIFIED', false)).toBe('operator');
     // the matrix itself
     expect(deriveResponsibleRole('EQUIPMENT_AUTHORITY', 'TECHNICAL_CONFLICT')).toBe('operator');
     expect(deriveResponsibleRole('ELECTRICAL_CLOSURE', 'TECHNICAL_CONFLICT')).toBe('designer');

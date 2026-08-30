@@ -1112,7 +1112,42 @@ function orImpact(a: ReleaseImpact, b: ReleaseImpact): ReleaseImpact {
  *   FIELD_VERIFICATION                 → operator           (a field measurement is owed)
  *   ADVISORY                           → operator           (surfaced, not gating)
  */
-export function deriveResponsibleRole(gateCategory: ReleaseGateCategory, findingType: ReleaseFindingType): ResponsibleRole {
+export function deriveResponsibleRole(
+  gateCategory: ReleaseGateCategory,
+  findingType: ReleaseFindingType,
+  /** 2026-08-29 - THE REQUIREMENT'S OWN CODE, so responsibility can follow the
+   *  authority workflow instead of a static finding-type map. Optional: absent,
+   *  the map below behaves exactly as it did. */
+  requirementCode?: string,
+  /** did the AUTOMATIC path already run and fail? Absent ⇒ unknown. */
+  automaticPathExhausted?: boolean,
+): ResponsibleRole {
+  // ══ RESPONSIBILITY FOLLOWS THE AUTHORITY STATE ════════════════════
+    // FRAMING-AUTHORITY-UNVERIFIED declares
+  //     resolutionMode: 'AUTO_RETRIEVED', residualMode: 'PROFESSIONAL_APPROVAL'
+  // and RS-1 explained, in its own row, that existing framing capacity cannot be
+  // established automatically and must transition to professional approval - and
+  // then printed "RESPONSIBLE: OPERATOR" on that same row. An operator cannot
+  // close it. Nobody but a licensed engineer can.
+  //
+  // `requirementLane` already reads `residualMode ?? resolutionMode` to decide
+  // the lane; responsibility must read the SAME field or the scorecard and the
+  // row can disagree about who is waiting. A requirement may therefore CHANGE
+  // owner as its authority state advances: the automatic phase belongs to
+  // whoever the finding type implies, and the residual phase belongs to the
+  // terminal actor.
+  //
+  // Default when the attempt state is unknown: the TERMINAL owner. An OPEN
+  // requirement's owner is whoever must act if nothing else closes it, and
+  // naming the operator there is what produced the contradiction.
+  const _d = requirementCode ? REQUIREMENT_DECLARATIONS[requirementCode] : undefined;
+  const _terminal = _d ? (_d.residualMode ?? _d.resolutionMode) : undefined;
+  if (_terminal === 'PROFESSIONAL_APPROVAL' && automaticPathExhausted !== false) {
+    return 'engineer-of-record';
+  }
+  if (_terminal === 'FIELD_VERIFICATION' && automaticPathExhausted !== false) {
+    return 'operator';
+  }
   switch (findingType) {
     case 'ADMINISTRATIVE_HOLD': return 'admin';
     case 'PROFESSIONAL_RELEASE': return 'engineer-of-record';
@@ -1214,6 +1249,13 @@ export interface ReleaseGateModelInput {
   registry: readonly PermitReadinessBlocker[];
   snapshotId: string;
   snapshotDigest: string;
+  /** 2026-08-29 - the lifecycle's per-requirement attempt trail
+   *  (`snapshot.resolverAttemptEvidence.byRequirement`). It is what tells the
+   *  model whether a requirement's AUTOMATIC path has already run and failed, so
+   *  responsibility can transition to the residual owner. Optional: absent, a
+   *  requirement whose terminal mode is professional is owned by the engineer
+   *  of record, which is the honest answer for an OPEN requirement either way. */
+  resolverAttempts?: Record<string, { lastResolutionResult?: string; attemptCount?: number }>;
 }
 
 /**
@@ -1230,6 +1272,14 @@ export interface ReleaseGateModelInput {
 export function deriveReleaseGateModel(input: ReleaseGateModelInput): ReleaseGateModel {
   const snapshotId = input.snapshotId ?? '';
   const snapshotDigest = input.snapshotDigest ?? '';
+  /** Has the AUTOMATIC path for this requirement already run and not closed it?
+   *  `undefined` when no lifecycle evidence is present — see the field doc. */
+  const _automaticExhausted = (code: string): boolean | undefined => {
+    const a = input.resolverAttempts?.[code];
+    if (!a) return undefined;
+    if ((a.attemptCount ?? 0) === 0) return false;         // not tried yet
+    return a.lastResolutionResult !== 'RESOLVED';
+  };
 
   // ── 1. one requirement per registry record ──────────────────────────────
   interface Row { req: ReleaseRequirement; gateIdx: number; declIdx: number; recIdx: number }
@@ -1271,7 +1321,8 @@ export function deriveReleaseGateModel(input: ReleaseGateModelInput): ReleaseGat
         severity: r.severity,
         explanation: r.explanation,                       // pass-through
         resolutionAction: r.resolutionAction,             // pass-through
-        responsibleRole: deriveResponsibleRole(gateDef.gateCategory, findingType),
+        responsibleRole: deriveResponsibleRole(
+          gateDef.gateCategory, findingType, r.code, _automaticExhausted(r.code)),
         releaseImpact,
         authorityPath: r.authorityPath,                   // pass-through
         evidenceReferences: deriveEvidenceReferences(r),
@@ -1342,7 +1393,8 @@ export function deriveReleaseGateModel(input: ReleaseGateModelInput): ReleaseGat
       totalRequirementCount: children.length,
       primaryResolutionAction: primary?.resolutionAction ?? '',
       responsibleRole: primary
-        ? deriveResponsibleRole(def.gateCategory, primary.findingType)
+        ? deriveResponsibleRole(def.gateCategory, primary.findingType,
+            primary.requirementCode, _automaticExhausted(primary.requirementCode))
         : deriveResponsibleRole(def.gateCategory, 'PENDING_AUTHORITY'),
       evidenceReferences: dedupe(open.flatMap(q => q.evidenceReferences)),
       affectedSheets: dedupe(open.flatMap(q => q.affectedSheets)),
@@ -1422,6 +1474,11 @@ export function projectReleaseGates(snap: PermitDesignSnapshot | null | undefine
     registry: snap?.permitReadiness?.registry ?? [],
     snapshotId: snap?.meta?.snapshotId ?? '',
     snapshotDigest: snap?.meta?.digest ?? '',
+    // the lifecycle's attempt trail, so responsibility can transition off the
+    // automatic actor once that path has run and not closed the requirement.
+    resolverAttempts: (snap as { resolverAttemptEvidence?: {
+      byRequirement?: Record<string, { lastResolutionResult?: string; attemptCount?: number }> } } | null | undefined)
+      ?.resolverAttemptEvidence?.byRequirement,
   });
 }
 
