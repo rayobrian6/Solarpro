@@ -1,0 +1,456 @@
+{
+  "universeEntities": 72120,
+  "activeGovernments": 39093,
+  "registryRows": 4016,
+  "plausibleBuildingAuthorities": 17683,
+  "covered": 3869,
+  "missing": 13814,
+  "missingByKind": {
+    "county": 10,
+    "county-equivalent": 60,
+    "consolidated-government": 4,
+    "independent-city": 42,
+    "municipio": 3,
+    "incorporated-place": 13202,
+    "town": 493
+  },
+  "byState": {
+    "10": {
+      "plausible": 16,
+      "covered": 8,
+      "missing": 8,
+      "byKind": {
+        "incorporated-place": 8
+      }
+    },
+    "12": {
+      "plausible": 356,
+      "covered": 91,
+      "missing": 265,
+      "byKind": {
+        "county": 1,
+        "incorporated-place": 264
+      }
+    },
+    "13": {
+      "plausible": 591,
+      "covered": 197,
+      "missing": 394,
+      "byKind": {
+        "incorporated-place": 394
+      }
+    },
+    "15": {
+      "plausible": 5,
+      "covered": 2,
+      "missing": 3,
+      "byKind": {
+        "county": 3
+      }
+    },
+    "16": {
+      "plausible": 244,
+      "covered": 55,
+      "missing": 189,
+      "byKind": {
+        "incorporated-place": 189
+      }
+    },
+    "17": {
+      "plausible": 1384,
+      "covered": 121,
+      "missing": 1263,
+      "byKind": {
+        "incorporated-place": 1263
+      }
+    },
+    "18": {
+      "plausible": 211,
+      "covered": 107,
+      "missing": 104,
+      "byKind": {
+        "incorporated-place": 104
+      }
+    },
+    "19": {
+      "plausible": 1041,
+      "covered": 116,
+      "missing": 925,
+      "byKind": {
+        "incorporated-place": 925
+      }
+    },
+    "20": {
+      "plausible": 729,
+      "covered": 120,
+      "missing": 609,
+      "byKind": {
+        "incorporated-place": 609
+      }
+    },
+    "21": {
+      "plausible": 537,
+      "covered": 137,
+      "missing": 400,
+      "byKind": {
+        "incorporated-place": 400
+      }
+    },
+    "22": {
+      "plausible": 239,
+      "covered": 10,
+      "missing": 229,
+      "byKind": {
+        "county-equivalent": 60,
+        "consolidated-government": 4,
+        "incorporated-place": 165
+      }
+    },
+    "23": {
+      "plausible": 39,
+      "covered": 22,
+      "missing": 17,
+      "byKind": {
+        "incorporated-place": 17
+      }
+    },
+    "24": {
+      "plausible": 58,
+      "covered": 28,
+      "missing": 30,
+      "byKind": {
+        "independent-city": 1,
+        "incorporated-place": 29
+      }
+    },
+    "25": {
+      "plausible": 351,
+      "covered": 14,
+      "missing": 337,
+      "byKind": {
+        "incorporated-place": 44,
+        "town": 293
+      }
+    },
+    "26": {
+      "plausible": 616,
+      "covered": 101,
+      "missing": 515,
+      "byKind": {
+        "incorporated-place": 515
+      }
+    },
+    "27": {
+      "plausible": 940,
+      "covered": 102,
+      "missing": 838,
+      "byKind": {
+        "incorporated-place": 838
+      }
+    },
+    "28": {
+      "plausible": 213,
+      "covered": 101,
+      "missing": 112,
+      "byKind": {
+        "incorporated-place": 112
+      }
+    },
+    "29": {
+      "plausible": 949,
+      "covered": 133,
+      "missing": 816,
+      "byKind": {
+        "independent-city": 1,
+        "incorporated-place": 815
+      }
+    },
+    "30": {
+      "plausible": 108,
+      "covered": 66,
+      "missing": 42,
+      "byKind": {
+        "incorporated-place": 42
+      }
+    },
+    "31": {
+      "plausible": 622,
+      "covered": 107,
+      "missing": 515,
+      "byKind": {
+        "incorporated-place": 515
+      }
+    },
+    "32": {
+      "plausible": 36,
+      "covered": 26,
+      "missing": 10,
+      "byKind": {
+        "independent-city": 2,
+        "incorporated-place": 8
+      }
+    },
+    "33": {
+      "plausible": 23,
+      "covered": 15,
+      "missing": 8,
+      "byKind": {
+        "incorporated-place": 8
+      }
+    },
+    "34": {
+      "plausible": 77,
+      "covered": 26,
+      "missing": 51,
+      "byKind": {
+        "incorporated-place": 51
+      }
+    },
+    "35": {
+      "plausible": 118,
+      "covered": 45,
+      "missing": 73,
+      "byKind": {
+        "county": 1,
+        "incorporated-place": 72
+      }
+    },
+    "36": {
+      "plausible": 658,
+      "covered": 69,
+      "missing": 589,
+      "byKind": {
+        "incorporated-place": 589
+      }
+    },
+    "37": {
+      "plausible": 198,
+      "covered": 116,
+      "missing": 82,
+      "byKind": {
+        "county": 1,
+        "incorporated-place": 81
+      }
+    },
+    "38": {
+      "plausible": 410,
+      "covered": 63,
+      "missing": 347,
+      "byKind": {
+        "incorporated-place": 347
+      }
+    },
+    "39": {
+      "plausible": 1014,
+      "covered": 117,
+      "missing": 897,
+      "byKind": {
+        "incorporated-place": 897
+      }
+    },
+    "40": {
+      "plausible": 242,
+      "covered": 93,
+      "missing": 149,
+      "byKind": {
+        "incorporated-place": 149
+      }
+    },
+    "41": {
+      "plausible": 267,
+      "covered": 52,
+      "missing": 215,
+      "byKind": {
+        "incorporated-place": 215
+      }
+    },
+    "42": {
+      "plausible": 126,
+      "covered": 76,
+      "missing": 50,
+      "byKind": {
+        "incorporated-place": 50
+      }
+    },
+    "44": {
+      "plausible": 39,
+      "covered": 6,
+      "missing": 33,
+      "byKind": {
+        "incorporated-place": 2,
+        "town": 31
+      }
+    },
+    "45": {
+      "plausible": 115,
+      "covered": 57,
+      "missing": 58,
+      "byKind": {
+        "incorporated-place": 58
+      }
+    },
+    "46": {
+      "plausible": 224,
+      "covered": 75,
+      "missing": 149,
+      "byKind": {
+        "county": 1,
+        "incorporated-place": 148
+      }
+    },
+    "47": {
+      "plausible": 277,
+      "covered": 111,
+      "missing": 166,
+      "byKind": {
+        "incorporated-place": 166
+      }
+    },
+    "48": {
+      "plausible": 1243,
+      "covered": 337,
+      "missing": 906,
+      "byKind": {
+        "incorporated-place": 906
+      }
+    },
+    "49": {
+      "plausible": 174,
+      "covered": 46,
+      "missing": 128,
+      "byKind": {
+        "incorporated-place": 128
+      }
+    },
+    "50": {
+      "plausible": 55,
+      "covered": 20,
+      "missing": 35,
+      "byKind": {
+        "incorporated-place": 35
+      }
+    },
+    "51": {
+      "plausible": 171,
+      "covered": 130,
+      "missing": 41,
+      "byKind": {
+        "county": 3,
+        "independent-city": 38
+      }
+    },
+    "53": {
+      "plausible": 250,
+      "covered": 59,
+      "missing": 191,
+      "byKind": {
+        "incorporated-place": 191
+      }
+    },
+    "54": {
+      "plausible": 140,
+      "covered": 65,
+      "missing": 75,
+      "byKind": {
+        "incorporated-place": 75
+      }
+    },
+    "55": {
+      "plausible": 674,
+      "covered": 87,
+      "missing": 587,
+      "byKind": {
+        "incorporated-place": 587
+      }
+    },
+    "56": {
+      "plausible": 42,
+      "covered": 34,
+      "missing": 8,
+      "byKind": {
+        "incorporated-place": 8
+      }
+    },
+    "60": {
+      "plausible": 80,
+      "covered": 3,
+      "missing": 77,
+      "byKind": {
+        "incorporated-place": 77
+      }
+    },
+    "69": {
+      "plausible": 4,
+      "covered": 4,
+      "missing": 0,
+      "byKind": {}
+    },
+    "72": {
+      "plausible": 78,
+      "covered": 75,
+      "missing": 3,
+      "byKind": {
+        "municipio": 3
+      }
+    },
+    "01": {
+      "plausible": 239,
+      "covered": 83,
+      "missing": 156,
+      "byKind": {
+        "incorporated-place": 156
+      }
+    },
+    "02": {
+      "plausible": 165,
+      "covered": 23,
+      "missing": 142,
+      "byKind": {
+        "incorporated-place": 142
+      }
+    },
+    "04": {
+      "plausible": 61,
+      "covered": 38,
+      "missing": 23,
+      "byKind": {
+        "incorporated-place": 23
+      }
+    },
+    "05": {
+      "plausible": 388,
+      "covered": 87,
+      "missing": 301,
+      "byKind": {
+        "incorporated-place": 301
+      }
+    },
+    "06": {
+      "plausible": 519,
+      "covered": 101,
+      "missing": 418,
+      "byKind": {
+        "incorporated-place": 418
+      }
+    },
+    "08": {
+      "plausible": 139,
+      "covered": 82,
+      "missing": 57,
+      "byKind": {
+        "incorporated-place": 57
+      }
+    },
+    "09": {
+      "plausible": 188,
+      "covered": 10,
+      "missing": 178,
+      "byKind": {
+        "incorporated-place": 9,
+        "town": 169
+      }
+    }
+  },
+  "permittingAuthorityNamed": 0,
+  "codeAuthorityEvidenced": 0
+}
