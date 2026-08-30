@@ -1321,8 +1321,16 @@ export function deriveReleaseGateModel(input: ReleaseGateModelInput): ReleaseGat
         severity: r.severity,
         explanation: r.explanation,                       // pass-through
         resolutionAction: r.resolutionAction,             // pass-through
+        // 2026-08-29 - responsibility reads the DECLARED finding type, not the
+        // severity-derived display type. `findingType` above is overridden to
+        // ADVISORY whenever the registry record is a warning, which is right for
+        // DISPLAY - but it also flattened the owner to 'operator', so the rail
+        // SKU (declared PENDING_SELECTION, i.e. the designer's) printed
+        // "RESPONSIBLE: OPERATOR" purely because it is non-blocking. Who must act
+        // does not change because an item stopped blocking.
         responsibleRole: deriveResponsibleRole(
-          gateDef.gateCategory, findingType, r.code, _automaticExhausted(r.code)),
+          gateDef.gateCategory, decl?.findingType ?? findingType, r.code,
+          _automaticExhausted(r.code)),
         releaseImpact,
         authorityPath: r.authorityPath,                   // pass-through
         evidenceReferences: deriveEvidenceReferences(r),
