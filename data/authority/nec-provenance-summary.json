@@ -1,0 +1,10 @@
+{
+  "totalJurisdictions": 4016,
+  "affectedByAttribution": 4016,
+  "unaffected": 0,
+  "selectedValueAlsoMoved": 399,
+  "categories": {
+    "FALSE_OPERATOR_ATTRIBUTION": 3617,
+    "FALSE_OPERATOR_ATTRIBUTION_VALUE_ALSO_CORRECTED": 399
+  }
+}
