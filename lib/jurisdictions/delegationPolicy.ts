@@ -106,14 +106,58 @@ export const BASELINE_DELEGATION_RULES: JurisdictionDelegationRule[] = [
       + 'In MCD states a township may hold this authority instead; that is a state-specific rule.',
     grade: 'CURATED', provenance: null,
   },
+  // ELECTRICAL RIDES WITH THE BUILDING AUTHORITY — AND SO MUST ITS TERRITORY.
+  //
+  // This was ONE statewide rule with `delegate: 'place'`. On unincorporated
+  // territory there is no place, so the delegate resolved to nothing and every
+  // unincorporated parcel in the country reported the electrical scope
+  // UNRESOLVED — while the building scope resolved fine to the county from the
+  // pair below. "Follows the building authority" has to follow it into
+  // unincorporated territory too, so it is a matching PAIR, not one statewide
+  // rule.
   {
-    id: 'baseline:electrical-follows-building',
+    id: 'baseline:electrical-follows-building-incorporated',
     state: '*', scope: 'electrical',
-    territory: { type: 'statewide' },
+    territory: { type: 'incorporated' },
     delegator: 'place', delegate: 'place',
     conditions: 'Electrical inspection ordinarily rides with the building authority. Several states '
       + 'administer it separately (a state electrical division or an independent inspection agency); '
       + 'those are specific rules and must carry evidence.',
+    grade: 'CURATED', provenance: null,
+  },
+  {
+    id: 'baseline:electrical-follows-building-unincorporated',
+    state: '*', scope: 'electrical',
+    territory: { type: 'unincorporated' },
+    delegator: 'county', delegate: 'county',
+    conditions: 'Outside every incorporated place the county administers electrical inspection with '
+      + 'the building permit, unless a state electrical division or an independent inspection agency '
+      + 'holds it — which is a specific rule and must carry evidence.',
+    grade: 'CURATED', provenance: null,
+  },
+  // ZONING — the scope was in the resolver's default list with NO rule to match,
+  // so it reported UNRESOLVED on every project nationally. Zoning is ordinarily
+  // administered by the same general-purpose government as building, which is
+  // the structural default worth stating; a jurisdiction that splits it (a
+  // separate planning commission, a county overlay inside a city) is a specific
+  // rule with evidence.
+  {
+    id: 'baseline:zoning-follows-the-general-purpose-government-incorporated',
+    state: '*', scope: 'zoning',
+    territory: { type: 'incorporated' },
+    delegator: 'place', delegate: 'place',
+    conditions: 'An incorporated municipality ordinarily administers its own zoning within its '
+      + 'corporate limits. Overlay districts and county-administered zoning inside a municipality '
+      + 'exist and are specific rules.',
+    grade: 'CURATED', provenance: null,
+  },
+  {
+    id: 'baseline:zoning-follows-the-general-purpose-government-unincorporated',
+    state: '*', scope: 'zoning',
+    territory: { type: 'unincorporated' },
+    delegator: 'county', delegate: 'county',
+    conditions: 'Territory outside every incorporated place is ordinarily zoned by the county. Some '
+      + 'states have no county zoning at all, which is a specific rule.',
     grade: 'CURATED', provenance: null,
   },
   {

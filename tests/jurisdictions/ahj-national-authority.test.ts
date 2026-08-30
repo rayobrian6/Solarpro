@@ -277,7 +277,10 @@ describe('stable identity, not display names', () => {
 describe('the project authority collects what must be discovered', () => {
   it('missing records are enumerated once, by identity', () => {
     const p = resolveProjectAhjAuthority(geography({ place: CITY }), baselinePolicy(), EMPTY_REGISTRY);
-    expect(p.complete).toBe(false);
+    // Renamed from `complete`: the flag is NOT a release gate. It is
+    // structurally unreachable while the fire scope has no boundary provider,
+    // so gating on it would block every package nationally.
+    expect(p.allScopesResolved).toBe(false);
     const keys = p.missingRecords.map(identityKey);
     expect(keys).toContain('place:9912345');
     expect(new Set(keys).size, 'deduplicated by identity').toBe(keys.length);
@@ -288,5 +291,127 @@ describe('the project authority collects what must be discovered', () => {
     const p = resolveProjectAhjAuthority(g, baselinePolicy(), EMPTY_REGISTRY);
     expect(p.legalGeography).toBe(g);
     expect(p.legalGeography.incorporatedPlace.provenance?.source).toBe('census-tiger');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. DEFECTS FOUND IN THESE MODULES BY A HOSTILE REVIEW OF THEM.
+//
+// Each of the four below was a real bug in the code above, not in its callers.
+// They are grouped here because the lesson is shared: an authority module is
+// not correct because it is well-commented, and these were all invisible while
+// the modules had no production consumer.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('a CONFLICT is resolved by evidence, never by call order', () => {
+  const same = (a: string | null, b: string | null) => a === b;
+  const F = (v: string, g: 'CURATED' | 'GOVERNED' | 'VERIFIED') =>
+    facet<string>(v, g, `claimed by a ${g} source`, PROV);
+
+  it('a third source of the SAME grade cannot break a tie', () => {
+    // `gradeOf` used to ignore its argument and return the literal 'GOVERNED',
+    // so a VERIFIED-vs-VERIFIED conflict was outranked by the next VERIFIED
+    // writer and silently resolved — by call order, which is precisely what the
+    // CONFLICT basis string says must never decide.
+    const conflict = mergeFacet(F('City A', 'VERIFIED'), F('City B', 'VERIFIED'), same);
+    expect(conflict.grade).toBe('CONFLICT');
+    const after = mergeFacet(conflict, F('City C', 'VERIFIED'), same);
+    expect(after.grade, 'a third equal source resolved the conflict').toBe('CONFLICT');
+    expect(after.value).toBeNull();
+  });
+
+  it('a genuinely STRONGER source does resolve a weaker conflict', () => {
+    // The symmetric bug: a CURATED-vs-CURATED conflict was assumed GOVERNED, so
+    // a real GOVERNED source could not beat it and a valid resolution was lost.
+    const conflict = mergeFacet(F('City A', 'CURATED'), F('City B', 'CURATED'), same);
+    expect(conflict.grade).toBe('CONFLICT');
+    const after = mergeFacet(conflict, F('City C', 'GOVERNED'), same);
+    expect(after.grade).toBe('GOVERNED');
+    expect(after.value).toBe('City C');
+  });
+
+  it('records the grade each side was claimed at', () => {
+    const conflict = mergeFacet(F('City A', 'VERIFIED'), F('City B', 'CURATED'), same);
+    // Unequal grades are not a conflict at all — the stronger wins outright.
+    expect(conflict.grade).toBe('VERIFIED');
+    const real = mergeFacet(F('City A', 'CURATED'), F('City B', 'CURATED'), same);
+    expect(real.conflict?.every(c => !!c.grade), 'every conflict entry keeps its grade').toBe(true);
+  });
+});
+
+describe('identityKey is a NATIONAL key', () => {
+  const county = (stateFips: string, countyFips: string): GoverningEntity => ({
+    type: 'county', name: 'Testcounty', stateFips, countyFips,
+    placeGeoid: null, countySubdivisionGeoid: null,
+  });
+
+  it('the same county code in two states is not the same county', () => {
+    // The provider supplies the THREE-DIGIT county code, and this keyed on it
+    // alone — so county 119 in Illinois and county 119 in every other state
+    // shared one identity. A key that collides across states is not an identity.
+    expect(identityKey(county('17', '119'))).not.toBe(identityKey(county('29', '119')));
+  });
+
+  it('composes the 5-digit national FIPS from state + county', () => {
+    expect(identityKey(county('17', '119'))).toBe('county:17119');
+    expect(identityKey(county('6', '37'))).toBe('county:06037');
+  });
+
+  it('accepts a county code that is already national', () => {
+    expect(identityKey(county('17', '17119'))).toBe('county:17119');
+  });
+
+  it('refuses to mint a county identity with no state', () => {
+    const k = identityKey({
+      type: 'county', name: 'Testcounty', stateFips: null, countyFips: '119',
+      placeGeoid: null, countySubdivisionGeoid: null,
+    });
+    expect(k.startsWith('county:'), 'a bare county code is not a national identity').toBe(false);
+    expect(k.startsWith('name:')).toBe(true);
+  });
+});
+
+describe('every scope in the default list has a rule to match', () => {
+  const policy = baselinePolicy();
+
+  it('electrical resolves on UNINCORPORATED territory', () => {
+    // The electrical baseline was one statewide rule delegating to 'place'. On
+    // unincorporated land there is no place, so electrical reported UNRESOLVED
+    // on every such parcel in the country while building resolved fine.
+    const g = geography({ place: null });   // proven outside any municipality
+    const a = resolveScopeAuthority('electrical', g, policy, EMPTY_REGISTRY);
+    expect(a.status).not.toBe('AUTHORITY_SCOPE_UNRESOLVED');
+    expect(a.entity?.type).toBe('county');
+  });
+
+  it('electrical still follows the municipality inside one', () => {
+    const a = resolveScopeAuthority('electrical', geography({ place: CITY }), policy, EMPTY_REGISTRY);
+    expect(a.entity?.type).toBe('place');
+  });
+
+  it('zoning resolves in both territories', () => {
+    // `zoning` was in resolveProjectAhjAuthority's default scope list with NO
+    // baseline rule, so it was UNRESOLVED on every project nationally.
+    for (const [label, g] of [['incorporated', geography({ place: CITY })],
+                              ['unincorporated', geography({ place: null })]] as const) {
+      const a = resolveScopeAuthority('zoning', g, policy, EMPTY_REGISTRY);
+      expect(a.status, `zoning ${label}`).not.toBe('AUTHORITY_SCOPE_UNRESOLVED');
+    }
+  });
+
+  it('fire stays UNRESOLVED, and that is correct', () => {
+    // Fire districts do not follow municipal limits and nothing retrieves their
+    // boundaries. Inheriting the building AHJ would be a substitution.
+    const a = resolveScopeAuthority('fire', geography({ place: CITY }), policy, EMPTY_REGISTRY);
+    expect(a.status).toBe('AUTHORITY_SCOPE_UNRESOLVED');
+  });
+
+  it('allScopesResolved is therefore unreachable — and must not be a gate', () => {
+    const p = resolveProjectAhjAuthority(
+      geography({ place: CITY }), policy, registryWith('place:9912345'));
+    expect(p.scopes.building.status).toBe('AHJ_RECORD_FOUND');
+    // The building permit is resolvable even though the flag is false. A gate on
+    // the flag would block 100% of packages for an unrelated reason.
+    expect(p.allScopesResolved).toBe(false);
   });
 });

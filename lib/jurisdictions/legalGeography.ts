@@ -88,8 +88,11 @@ export interface Facet<T> {
   provenance: FacetProvenance | null;
   /** one sentence a reviewer can act on: why this grade and not a higher one. */
   basis: string;
-  /** when grade is CONFLICT — the competing answers, preserved, never merged. */
-  conflict?: Array<{ value: T | null; provenance: FacetProvenance | null; basis: string }>;
+  /** when grade is CONFLICT — the competing answers, preserved, never merged.
+   *  Each entry keeps the GRADE it was recorded at. Without that, a conflict
+   *  cannot be re-resolved correctly: nothing downstream can tell whether an
+   *  incoming source outranks the sides that disagreed. */
+  conflict?: Array<{ value: T | null; provenance: FacetProvenance | null; basis: string; grade: FacetGrade }>;
 }
 
 const UNKNOWN_BASIS = 'not established — no source has been asked for this fact';
@@ -288,19 +291,32 @@ export function mergeFacet<T>(
     basis: 'two sources of equal standing disagree — the determination is NOT established '
       + 'and must be resolved by evidence, not by call order',
     conflict: [
-      { value: current.value, provenance: current.provenance, basis: current.basis },
-      { value: incoming.value, provenance: incoming.provenance, basis: incoming.basis },
+      { value: current.value, provenance: current.provenance, basis: current.basis, grade: current.grade },
+      { value: incoming.value, provenance: incoming.provenance, basis: incoming.basis, grade: incoming.grade },
     ],
   };
 }
 
-/** The grade a conflict entry was recorded at, for conflict re-resolution. */
-function gradeOf(_c: { basis: string }): FacetGrade {
-  // Conflict entries keep their basis and provenance; their grade was equal by
-  // construction (that is what made it a conflict), so the comparison above uses
-  // the recorded pair's rank via the current facet. Kept as a function so the
-  // intent is explicit rather than an inline constant.
-  return 'GOVERNED';
+/**
+ * The grade a conflict entry was recorded at.
+ *
+ * This used to IGNORE its argument and return the literal 'GOVERNED', on the
+ * reasoning that conflicting sides were equal by construction so their shared
+ * rank could be assumed. The reasoning is wrong in both directions, and the
+ * function two lines above forbids exactly the failure it caused:
+ *
+ *   • two VERIFIED sources disagree → CONFLICT. A third VERIFIED source then
+ *     outranks the assumed 'GOVERNED' and silently WINS, so the conflict is
+ *     resolved by call order — the thing the CONFLICT basis string says must
+ *     never happen.
+ *   • two CURATED sources disagree → CONFLICT. A genuinely stronger GOVERNED
+ *     source cannot beat the assumed 'GOVERNED' and is refused, so a real
+ *     resolution is thrown away.
+ *
+ * The grade is now recorded on the entry, so this reads it.
+ */
+function gradeOf(c: { grade?: FacetGrade }): FacetGrade {
+  return c.grade ?? 'GOVERNED';
 }
 
 /**

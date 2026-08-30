@@ -83,8 +83,21 @@ export interface ProjectAhjAuthority {
    *  (or is able to) re-derive it from an address string. */
   legalGeography: LegalGeographyAuthority;
   scopes: Record<AuthorityScope, ScopeAuthority>;
-  /** true ⇔ every scope reached AHJ_RECORD_FOUND or AHJ_VERIFIED. */
-  complete: boolean;
+  /**
+   * ⚠ NOT A RELEASE GATE. True only when EVERY requested scope reached a record,
+   * and today that is structurally unreachable: the `fire` scope delegates to a
+   * fire protection district, nothing in SolarPro retrieves fire-district
+   * boundaries, and fire districts do not follow municipal limits — so fire
+   * correctly stays UNRESOLVED rather than inheriting the building AHJ. Gating a
+   * package on this flag would block 100% of packages nationally, for a reason
+   * that has nothing to do with the package.
+   *
+   * Gate on the SCOPE you actually need — `scopes.building.status` for a
+   * building permit. This flag is for coverage reporting: it answers "do we know
+   * every authority for this site", which is a question about SolarPro's data,
+   * not about the design.
+   */
+  allScopesResolved: boolean;
   /** entities we know govern something here but hold no row for — the input to
    *  the discovery pipeline, and the thing the national coverage audit counts. */
   missingRecords: GoverningEntity[];
@@ -256,18 +269,39 @@ export function resolveProjectAhjAuthority(
   return {
     legalGeography: geo,
     scopes: out,
-    complete: scopes.every(s => out[s].status === 'AHJ_RECORD_FOUND' || out[s].status === 'AHJ_VERIFIED'),
+    allScopesResolved: scopes.every(s => out[s].status === 'AHJ_RECORD_FOUND' || out[s].status === 'AHJ_VERIFIED'),
     missingRecords: missing,
   };
 }
 
-/** The stable identity key for an entity — never its display name. */
+/**
+ * The stable identity key for an entity — never its display name.
+ *
+ * ── THE COUNTY KEY MUST CARRY ITS STATE ───────────────────────────────────
+ * This emitted `county:${countyFips}` from the county code alone, and the
+ * provider supplies the THREE-DIGIT county code, not the five-digit national
+ * one (censusPropertyProvider derives it as `fips_code.slice(2,5)`). So
+ * `county:119` is Madison County, Illinois — and simultaneously county 119 in
+ * every other state that has one. A key that collides across states is not an
+ * identity, and this key exists specifically so that resolution stops depending
+ * on names.
+ *
+ * A bare county code with no state is therefore NOT a national identity and is
+ * refused: it falls through to the name key, which is explicitly marked as such
+ * so a caller can see it is not identity-grade.
+ */
 export function identityKey(e: GoverningEntity): string {
-  return e.placeGeoid ? `place:${e.placeGeoid}`
-    : e.countySubdivisionGeoid ? `cousub:${e.countySubdivisionGeoid}`
-    : e.countyFips ? `county:${e.countyFips}`
-    : e.stateFips ? `state:${e.stateFips}`
-    : `name:${e.type}:${e.name.toUpperCase()}`;
+  if (e.placeGeoid) return `place:${e.placeGeoid}`;
+  if (e.countySubdivisionGeoid) return `cousub:${e.countySubdivisionGeoid}`;
+  // Accept a county code that is already the 5-digit national FIPS, or compose
+  // it from the state. Never key on the 3-digit code by itself.
+  if (e.countyFips) {
+    const c = e.countyFips.trim();
+    if (c.length >= 5) return `county:${c}`;
+    if (e.stateFips) return `county:${e.stateFips.trim().padStart(2, '0')}${c.padStart(3, '0')}`;
+  }
+  if (e.stateFips) return `state:${e.stateFips}`;
+  return `name:${e.type}:${e.name.toUpperCase()}`;
 }
 
 /** Rules an invariant test can assert directly, and the resolver upholds. */
