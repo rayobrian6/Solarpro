@@ -276,7 +276,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
           ${hasRealBattery(project) ? `<li>National Electrical Code (NEC) ${necVer}, Article 706 &mdash; Energy Storage Systems; NFPA 855</li>` : ''}
           <li>${asce} &mdash; Minimum Design Loads and Associated Criteria for Buildings and Other Structures</li>
           <li>International Building Code (IBC) / International Residential Code (IRC) &mdash; Structural requirements</li>
-          <!-- 2026-08-29 - the raw token printed "(IFC) PENDING"; the projection's label is the one presentation. -->
+          ${/* 2026-08-29 - the raw token printed "(IFC) PENDING"; the projection's label is the one presentation. */ ''}
           <li>International Fire Code &mdash; ${cp.label('ifc')} &mdash; &sect;1204 Solar Photovoltaic Systems (rooftop access &amp; pathways)</li>
           <li>All applicable local amendments adopted by ${state} and the Authority Having Jurisdiction (${pa.present ? pa.tag('ahj') : escapeH(ahj)})</li>
         </ul>
@@ -792,6 +792,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   // for the declared field, so a record identifiable as a truss only by its
   // zero-demand analysis read as stick framing HERE and as a truss on PV-3/PV-4C.
   const _isTruss    = framingMember(structural?.rafter).isTruss;
+  // Same rule as PV-4C: the noun is projected from the selected fastener.
+
   const bendingMoment = structural?.rafter?.bendingMoment ? structural.rafter.bendingMoment.toFixed(1) : '—';
   const allowableBM = structural?.rafter?.allowableBendingMoment ? structural.rafter.allowableBendingMoment.toFixed(1) : '—';
   const deflection = structural?.rafter?.deflection ? structural.rafter.deflection.toFixed(3) : '—';
@@ -810,6 +812,12 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   // The PE letter no longer asserts a generic "5/16 minimum stainless lag"; while
   // the assembly is unverified it prints PENDING VERIFIED FASTENER ASSEMBLY.
   const _fa       = projectFastenerAssembly(input);
+  const _certFastNoun = (() => {
+    const ty = (_fa.fastenerTypeShort ?? _fa.fastenerType ?? '').toLowerCase();
+    if (/lag/.test(ty)) return 'lag bolt';
+    if (/wood screw|screw/.test(ty)) return 'wood screw';
+    return 'roof attachment fastener';
+  })();
   // §14 — canonical spacing authority (design vs maximum-verified). PE-1 states
   // the DESIGN spacing + PENDING STRUCTURAL VERIFICATION unless a verified source
   // establishes a maximum-allowed — the letter never asserts "max O.C." unproven.
@@ -890,12 +898,12 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             ${_capGated ? `
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs (ASD 0.6W, canonical)</td><td class="il">Published Allowable</td><td class="iv" style="font-weight:bold;color:#b45309;">CAPACITY SOURCE UNVERIFIED</td></tr>
             <tr><td class="il">Capacity Comparison</td><td class="iv" colspan="3" style="font-weight:bold;color:#b45309;">ENGINEERING REVIEW REQUIRED &mdash; NO PASS/FAIL CONCLUSION ISSUED (RT-MINI structural capacity source not archived / applicability to the selected assembly unconfirmed &mdash; &sect;9)</td></tr>` : `
-            <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><!-- 2026-08-29 - was "Lag Bolt". This design's fastener is an SS304 5.0 mm x 90 mm
+            <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td>${/* 2026-08-29 - was "Lag Bolt". This design's fastener is an SS304 5.0 mm x 90 mm
                  WOOD SCREW, named as such by the PE letter, the manual and the row
                  directly below. A lag bolt is a different fastener with a different
                  withdrawal basis; the heading contradicted its own table. The generic
                  noun cannot contradict the product, and the product is stated in full
-                 by the fastener-assembly authority. --><td class="il">Fastener Withdrawal Capacity</td><td class="iv">${lagCap} lbs${_capCite.line ? `<div style="font-size:5.6px;font-weight:normal;">SOURCE: ${escapeH(_capCite.line)}</div>` : ''}</td></tr>
+                 by the fastener-assembly authority. */ ''}<td class="il">Fastener Withdrawal Capacity</td><td class="iv">${lagCap} lbs${_capCite.line ? `<div style="font-size:5.6px;font-weight:normal;">SOURCE: ${escapeH(_capCite.line)}</div>` : ''}</td></tr>
             <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_sfRaw == null ? '#b45309' : _lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_concl.attachment?.passes ? '#000' : '#cc0000'};">${escapeH(_concl.attachmentGoverningCheckLabel)}</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} &sect;2.4 &mdash; ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">${asce} &sect;26/27</td></tr>
@@ -951,7 +959,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                 under the modeled assumptions (${rafterSize} ${_isTruss ? 'truss' : 'stick'} framing @ ${rafterSpace}" O.C., span ${rafterSpanFt} ft,
                 combined load ${totalLoadPsf} psf), the ${_governs} check exceeds its code limit
                 (bending ${bendUtil}% of allowable; deflection &Delta; = ${deflection} in vs &Delta;_allow = ${allowableDefl} in).
-                Lag bolt attachment safety factor is ${safetyFact}${_sfRaw == null ? ' (not established)' : _lagPass ? ' (adequate)' : ` (below the ${_attThreshold.toFixed(1)} ASD minimum)`}.
+                ${_certFastNoun.charAt(0).toUpperCase()}${_certFastNoun.slice(1)} attachment safety factor is ${safetyFact}${_sfRaw == null ? ' (not established)' : _lagPass ? ' (adequate)' : ` (below the ${_attThreshold.toFixed(1)} ASD minimum)`}.
                 Field-verify the actual framing type, member size, and clear span (pre-engineered trusses frequently
                 resolve this check), correct the structural inputs, and re-run the analysis &mdash; or provide reinforcement
                 designed by the engineer of record &mdash; before this letter is signed or sealed.

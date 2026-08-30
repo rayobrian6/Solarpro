@@ -830,6 +830,22 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // Truss framing is analyzed by load capacity (PSF), not rafter bending (ft-lbs).
   // Rendering its 0-demand / capacity-in-PSF as "0 ft-lbs / 45 ft-lbs" read as broken.
   const _isTruss      = framingMember(structural?.rafter).isTruss;
+  // ══ 2026-08-29 — THE PROSE NAMES THE SELECTED HARDWARE ══════════════
+  // This sheet's paragraphs said "lag bolt withdrawal capacity", "All lag bolt
+  // attachments", "Lag bolt attachment safety factor" and "lag bolt attachment
+  // system" about a design whose selected fastener is an SS304 5.0 mm x 90 mm
+  // WOOD SCREW, and "rafter capacity" about a PRE-ENGINEERED TRUSS - three
+  // mutually contradictory member/fastener names in one package, two of them on
+  // this sheet. The numbers were right; the words described different hardware.
+  //
+  // A lag bolt and a wood screw have different withdrawal bases (NDS 12.2 vs
+  // 12.3), so this is not a wording preference on a structural sheet.
+  //
+  // The nouns come from the same authorities the tables read. Generic where the
+  // product class is not the point ("ROOF ATTACHMENT FASTENER"), specific where
+  // it is - and a genuine lag-bolt system still prints LAG BOLT, because the
+  // noun is projected, not substituted.
+
   const trussCapPsf   = structural?.rafter?.allowableBendingMoment?.toFixed(0) || '—';
   const trussLoadPsf  = structural?.rafter?.totalLoadPsf?.toFixed(1) || '—';
   const totalUplift = structural?.attachment?.totalUpliftPerAttachment?.toFixed(0) || '—';
@@ -850,6 +866,14 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // and TYPE from here — never a generic "5/16 stainless lag" literal (RT-MINI is
   // a structural wood screw). While unverified, the cert label reads PENDING.
   const _fa       = projectFastenerAssembly(input);
+  const _fastNoun = (() => {
+    const t = (_fa.fastenerTypeShort ?? _fa.fastenerType ?? '').toLowerCase();
+    if (/lag/.test(t)) return 'lag bolt';
+    if (/wood screw|screw/.test(t)) return 'wood screw';
+    return 'roof attachment fastener';
+  })();
+  const _FastNoun = _fastNoun.charAt(0).toUpperCase() + _fastNoun.slice(1);
+  const _memberNoun = framingMember(structural?.rafter).termLower;
   const lagDia    = _fa.diameterLabel ?? formatFastenerDiameter(_mountSel?.mount?.fastenerDiameterIn) ?? '—';
   const lagEmbed  = _fa.embedmentIn ?? _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
   const _faType   = _fa.fastenerType ?? 'structural fastener';
@@ -1126,9 +1150,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
           <strong>GOVERNING LOAD COMBINATION (${asce} §2.4 — ASD) — ROOF-MOUNTED PV:</strong>
-          The controlling load case for roof-mounted PV is <strong>0.6D + 0.6W</strong> (net uplift) for lag bolt
+          The controlling load case for roof-mounted PV is <strong>0.6D + 0.6W</strong> (net uplift) for ${_fastNoun}
           withdrawal capacity, and <strong>D + S</strong> for gravity/snow loading on existing framing.
-          All lag bolt attachments shall develop the required withdrawal capacity with a minimum safety factor of
+          All ${_fastNoun} attachments shall develop the required withdrawal capacity with a minimum safety factor of
           ${_attThreshold.toFixed(1)} (${_attChk ? _attChk.limitState : 'attachment-uplift'} — demand and allowable both ASD,
           Ω-normalized capacity; ${asce} §2.4). ${_attChk ? (_capGated
             ? `As analyzed: demand ${fmt(_attChk.demand)} lbs (canonical); allowable capacity is UNVERIFIED / PENDING STRUCTURAL SOURCE (§9) — the safety-factor check is INDETERMINATE, no PASS asserted.`
@@ -1141,16 +1165,16 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}) &mdash; <span data-env-source="pv-4c-conclusion" style="font-weight:bold;color:${_envTagColor};">${escapeH(_proj.environmentalSourceLine)}</span>${_proj.environmentalUnverified ? ' (preliminary design criteria; a verified climate-hazard source is required before permit submission &mdash; ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED, see RS-1)' : ''}.
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ${asce} §7).` : 'Snow loading is not a controlling factor at this location.'}
         ${_reviewRequired
-          ? `<strong style="color:#b91c1c;">ROOF FRAMING UNVERIFIED — the rafter/truss capacity is computed from code defaults and is NOT engineering authority. A licensed structural review of the existing framing is required before permit submission; no framing pass is certified on this sheet.</strong>`
-          : (_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.')}
+          ? `<strong style="color:#b91c1c;">ROOF FRAMING UNVERIFIED — the existing ${_memberNoun} capacity is computed from code defaults and is NOT engineering authority. A licensed structural review of the existing framing is required before permit submission; no framing pass is certified on this sheet.</strong>`
+          : (_utilRatio != null ? `The ${_memberNoun} utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : `${_memberNoun.charAt(0).toUpperCase()}${_memberNoun.slice(1)} utilization data not available — verify framing capacity per engineering analysis.`)}
         ${_capGated
           ? `<strong style="color:#b45309;">ATTACHMENT CAPACITY UNVERIFIED (§9) — the published allowable capacity source is not archived / its applicability to the selected assembly is unconfirmed. The demand is canonical, but the safety-factor comparison is INDETERMINATE and no attachment PASS is asserted on this sheet until a verified structural source is supplied.</strong>`
-          : (Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= _attThreshold ? 'meets' : 'DOES NOT MEET'} the required minimum of ${_attThreshold.toFixed(1)} (ASD demand vs allowable capacity per ${asce} §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.')}
+          : (Number(safetyFact) > 0 ? `${_FastNoun} attachment safety factor of ${safetyFact} ${Number(safetyFact) >= _attThreshold ? 'meets' : 'DOES NOT MEET'} the required minimum of ${_attThreshold.toFixed(1)} (ASD demand vs allowable capacity per ${asce} §2.4).` : `${_FastNoun} safety factor data not available — verify attachment capacity per engineering analysis.`)}
       </div>` : ''}
       <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
-        The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
-        wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ${asce} §26/27 and ${cp.ibcLabel} / ${cp.ircLabel}.
+        The proposed roof-mounted photovoltaic array and ${_fastNoun} attachment system have been analyzed for
+        wind uplift, snow, dead load, ${_memberNoun} capacity, and attachment withdrawal per ${asce} §26/27 and ${cp.ibcLabel} / ${cp.ircLabel}.
         ${_reviewRequired && _capGated
           ? 'Roof framing authority is UNVERIFIED (member size / spacing / species / span defaulted) AND the attachment-capacity source is UNVERIFIED (§9 — structural source not archived / applicability unconfirmed). Demand analysis is complete, but NO framing pass and NO attachment pass are asserted; a licensed structural review of the existing framing and a verified attachment-capacity source are both required before this set is submitted for permit.'
           : _reviewRequired
@@ -1682,7 +1706,14 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
       html += '<td class="mono f-lg" style="color:#888;text-align:center">' + rowNum + '</td>';
       html += '<td style="font-size:7.5px;color:#555">' + (item.stageLabel || stageLabel) + '</td>';
       if (bySub) html += '<td style="font-size:7.5px;font-weight:700;">' + bomSubLabel(item.subSystem) + '</td>';
-      html += '<td style="text-transform:capitalize;font-weight:600">' + item.category.replace(/_/g, ' ') + '</td>';
+      // 2026-08-29 - the raw category enum was printed as the display label, so
+      // the internal key `lag_bolt` rendered "lag bolt" in the CATEGORY column of
+      // a row whose own description reads "SS304 5.0 mm x 90 mm wood screw". The
+      // key stays (ids, tests and the engine depend on it); the LABEL is generic,
+      // so it can never contradict the product beside it.
+      html += '<td style="text-transform:capitalize;font-weight:600">'
+        + (item.category === 'lag_bolt' ? 'attachment fastener' : item.category.replace(/_/g, ' '))
+        + '</td>';
       html += '<td>' + (item.manufacturer || '—') + '</td>';
       html += '<td style="font-size:8px;">' + (item.model || '—') + descExtra + reqBadge + '</td>';
       html += '<td class="mono f-lg">' + (item.partNumber || '—') + '</td>';

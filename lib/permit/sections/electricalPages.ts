@@ -36,6 +36,7 @@ import { projectCodeAuthorityFromInput, PENDING_EDITION } from '../snapshot/code
 // nest safely inside a double-quoted style attribute).
 import { CSS_FONT_SANS_STACK, CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 import { projectRapidShutdownAuthority } from '../snapshot/rapidShutdownAuthority';
+import { necSection, necRequires, type NecEdition } from '@/lib/nec/citations';
 // ═══════════════════════════════════════════════════════════════
 // INTERCONNECTION — resolved ONCE for the whole set.
 // ───────────────────────────────────────────────────────────────
@@ -601,6 +602,11 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
   const _auth = buildConductorAuthority(input, cad);
   // THE rapid-shutdown authority — this sheet does not decide the method.
   const _e1Rsd = projectRapidShutdownAuthority((input as unknown as { _snapshot?: unknown })._snapshot as never);
+  // the adopted edition, for every citation this sheet looks up
+  const _necEditionForCitations: NecEdition = (() => {
+    const e = projectCodeAuthorityFromInput(input).nec;
+    return e === '2017' || e === '2023' ? e : '2020';
+  })();
   const _ic = resolveInterconnection(input, cad);
   // §3 — the rules engine (legacy) reports voltage drop on a FLAT project-level
   // length (the 1.11% number). W2.1 classified the canonical basis as the routed
@@ -785,13 +791,20 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           <tr class="bg-lt" data-grounding-code-basis="true"><td class="fw7">EGC Sizing</td><td>Per NEC Table 250.122, on the OCPD of EACH circuit</td><td class="mono">NEC 690.45, 250.122</td><td>Sized per segment — not a project-wide minimum (see PV-4B GroundingSegment objects)</td></tr>
           <tr><td class="fw7">Voltage Drop</td><td>Vd = (2 × L × I × R) / 1000</td><td class="mono">NEC 210.19(A) FPN</td><td>Target ≤ 2% branch, ≤ 3% feeder</td></tr>
           <tr class="bg-lt"><td class="fw7">Conduit Fill</td><td>Per NEC Chapter 9, Table 1</td><td class="mono">NEC Ch. 9 Table 1</td><td>Max 40% fill for 3+ conductors</td></tr>
-          <!-- 2026-08-29 - stated BOTH methods at once ("Array-level ... Module-level per
+          ${/* 2026-08-29 - stated BOTH methods at once ("Array-level ... Module-level per
                690.12(B)(2)") without saying which one this design uses. The authority
-               decides; the row reports. -->
+               decides; the row reports. */ ''}
           <tr><td class="fw7">Rapid Shutdown</td><td>${_e1Rsd.systemType === 'MODULE-LEVEL'
             ? 'Module-level — conductors outside the array boundary ≤ 30V within 30s'
             : 'Array-level — controlled conductors ≤ 80V within 30s'}</td><td class="mono">NEC ${escapeH(_e1Rsd.requirementSection)}</td><td>${escapeH(_e1Rsd.operatingInstruction ?? 'per the initiation device')}</td></tr>
-          <tr class="bg-lt"><td class="fw7">Ground-Fault Protection</td><td>GFDI required per system type</td><td class="mono">NEC 690.41, 690.5</td><td>Inverter-integrated or standalone</td></tr>
+          ${/* 2026-08-29 - this row cited the retired Ground-Fault Protection section
+                beside the one that replaced it, under a NEC 2020 title block. The
+                section was deleted in the 2017 reorganisation of Article 690 Part III
+                and its requirement folded into 690.41(B). Looked up per adopted
+                edition now. Kept as a TS comment, not an HTML one: an HTML comment
+                ships into the artifact, where the retired-section guard would rightly
+                flag it. */ ''}
+          <tr class="bg-lt"><td class="fw7">Ground-Fault Protection</td><td>${escapeH(necRequires('pv-ground-fault-protection'))}</td><td class="mono">NEC ${escapeH(necSection('pv-ground-fault-protection', _necEditionForCitations))}</td><td>Inverter-integrated or standalone</td></tr>
         </tbody>
       </table>
       ${(() => {

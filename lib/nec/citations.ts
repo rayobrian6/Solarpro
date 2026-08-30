@@ -42,6 +42,7 @@ export type NecRequirement =
   | 'pv-circuit-sizing-continuous'
   | 'pv-overcurrent-protection'
   | 'pv-conductor-marking'
+  | 'pv-ground-fault-protection'
   | 'pv-equipment-grounding'
   | 'supply-side-connection'
   | 'interconnection-ocpd'
@@ -86,6 +87,18 @@ const CITATIONS: Record<NecRequirement, CitationSpec> = {
   'pv-conductor-marking': {
     section: '690.31(B)',
     requires: 'identification of PV source and output circuits at all accessible points',
+  },
+  'pv-ground-fault-protection': {
+    // 2026-08-29 - PV-4A printed "NEC 690.41, 690.5" under a NEC 2020 title
+    // block. 690.5 ("Ground-Fault Protection") was DELETED in the 2017
+    // reorganisation of Article 690 Part III; the requirement moved INTO
+    // 690.41(B), which states that a PV system with dc circuits on or in a
+    // building shall be provided with dc ground-fault protection, and the
+    // function rides the listed inverter. So the sheet cited a section that does
+    // not exist in any edition this codebase can adopt, beside the section that
+    // replaced it.
+    section: { '2017': '690.41(B)', '2020': '690.41(B)', '2023': '690.41(B)' },
+    requires: 'dc ground-fault protection for a PV system with dc circuits on or in a building',
   },
   'pv-equipment-grounding': {
     section: '690.43',
@@ -143,8 +156,13 @@ export function necRequires(req: NecRequirement): string {
  * list that forbids it — which is exactly what happened on the first pass.
  */
 const _RETIRED_690 = ['690', '14'].join('.');
+// 2026-08-29 - 690.5 (Ground-Fault Protection) went the same way in the same
+// 2017 reorganisation: deleted, its requirement folded into 690.41(B). Built
+// from parts for the same reason as the line above - a repo-wide sweep for the
+// literal must not be able to rewrite the list that forbids it.
+const _RETIRED_690_GFP = ['690', '5'].join('.');
 export const RETIRED_SECTIONS: Partial<Record<NecEdition, string[]>> = {
-  '2017': [_RETIRED_690],
-  '2020': [_RETIRED_690],
-  '2023': [_RETIRED_690],
+  '2017': [_RETIRED_690, _RETIRED_690_GFP],
+  '2020': [_RETIRED_690, _RETIRED_690_GFP],
+  '2023': [_RETIRED_690, _RETIRED_690_GFP],
 };

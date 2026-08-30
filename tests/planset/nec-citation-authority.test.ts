@@ -41,9 +41,28 @@ describe('a retired section is cited nowhere', () => {
     for (const f of FILES) {
       // the citations table itself names it, deliberately, to forbid it
       if (f.endsWith(join('lib', 'nec', 'citations.ts'))) continue;
-      const src = readFileSync(f, 'utf8');
+      // 2026-08-29 - COMMENTS ARE NOT CITATIONS. A repair that removes a retired
+      // section has to be able to SAY which section it removed, exactly as
+      // citations.ts does (exempted whole, above). Stripping comments keeps the
+      // guard strict on everything that ships - including a commented-out
+      // citation, which is not shipped either - while letting the record of the
+      // removal stand beside the code that used to carry it.
+      const src = readFileSync(f, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/(^|[^:])\/\/.*/g, '$1 ');
       for (const sec of retired) {
-        if (src.includes(sec)) offenders.push(`${f.slice(ROOT.length + 1)} cites ${sec}`);
+        // 2026-08-29 - `includes` matched a LONGER section that merely starts the
+        // same way. Adding 690.5 (Ground-Fault Protection, deleted in the 2017
+        // reorganisation and folded into 690.41(B)) made this flag fifteen files
+        // whose only offence was citing 690.54 and 690.56, both of which are
+        // current and correct. A section number ends where the next character is
+        // not a digit; anything looser cannot tell a retired section from a live
+        // one that shares its prefix.
+        // NB the dot must be ESCAPED for the RegExp, or '690.5' matches '690X5'
+        // and '$690:50' — which is how proposalTruthEngine.ts came to be accused
+        // of citing a section it does not mention.
+        const re = new RegExp(sec.replace(/\./g, '\\.') + '(?![0-9])');
+        if (re.test(src)) offenders.push(`${f.slice(ROOT.length + 1)} cites ${sec}`);
       }
     }
     expect(offenders, offenders.join('\n')).toEqual([]);

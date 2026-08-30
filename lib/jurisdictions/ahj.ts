@@ -4,6 +4,15 @@
  */
 
 import { getJurisdiction, getNecRules, type JurisdictionData, type NecRules } from './necVersions';
+import { necSection, type NecEdition } from '@/lib/nec/citations';
+
+/** Map an AHJ's adopted NEC version string onto the editions the citation table
+ *  knows. Anything else falls back to 2020, which is what this dataset's
+ *  requirement text was written against. */
+function necEditionOf(v: unknown): NecEdition {
+  const s = String(v ?? '');
+  return s.includes('2017') ? '2017' : s.includes('2023') ? '2023' : '2020';
+}
 
 export interface AhjInfo {
   // Identity
@@ -136,7 +145,12 @@ export function generateComplianceChecklist(ahj: AhjInfo): ComplianceCheckItem[]
     id: 'gfdi_required',
     category: 'Ground Fault Protection',
     requirement: 'Ground fault detection and interruption (GFDI) required',
-    necReference: `NEC 690.5 (${ver})`,
+    // 2026-08-29 - was `NEC 690.5`. That section (Ground-Fault Protection) was
+    // DELETED in the 2017 reorganisation of Article 690 Part III; the requirement
+    // moved into 690.41(B) and the function rides the listed inverter. This is
+    // the AHJ requirement DATASET, so a stale citation here propagates to every
+    // jurisdiction that reads it.
+    necReference: `NEC ${necSection('pv-ground-fault-protection', necEditionOf(ver))} (${ver})`,
     required: true,
   });
 
