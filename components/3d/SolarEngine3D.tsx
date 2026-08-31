@@ -168,8 +168,8 @@ import { HelpPanel } from './help/HelpPanel';
 // drag persists offset to localStorage. See components/3d/DraggablePanel.tsx.
 import { DraggablePanel } from './DraggablePanel';
 
-// v65 (camera-tilt): Aurora-parity camera presets â€” default 3D view at -45Â° pitch
-// (tilted aerial) instead of -65Â° (top-down-ish). See lib/3d/cameraPresets.ts.
+// v65 (camera-tilt): Aurora-parity camera presets â€” default 3D view at -45° pitch
+// (tilted aerial) instead of -65° (top-down-ish). See lib/3d/cameraPresets.ts.
 import {
   TILTED_AERIAL_VIEW,
   computeRangeFromBounds,
@@ -1847,7 +1847,7 @@ function SolarEngine3D({
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C) return;
-    // Only fly if coordinates changed by more than ~11m (0.0001Â°)
+    // Only fly if coordinates changed by more than ~11m (0.0001°)
     if (Math.abs(lat - prevLatRef.current) < 0.0001 && Math.abs(lng - prevLngRef.current) < 0.0001) return;
     prevLatRef.current = lat;
     prevLngRef.current = lng;
@@ -1874,7 +1874,7 @@ function SolarEngine3D({
     o.targetLng = lng;
     o.targetAlt = elev;
     o.heading   = TILTED_AERIAL_VIEW.heading;  // Ï€ â†’ fly-in looks NORTH (look dir = heading + Ï€)
-    o.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45Â° Aurora parity (lib/3d/cameraPresets.ts)
+    o.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45° Aurora parity (lib/3d/cameraPresets.ts)
     // 150m default framing; only fall back to a wider 300m when the ground
     // elevation is genuinely UNRESOLVED. (Was `elev > 0`, which wrongly treated
     // legitimately-negative coastal elevations as "unknown" and zoomed out.)
@@ -2060,7 +2060,7 @@ function SolarEngine3D({
       //
       // rotate3D() (the "good" orbit function) uses rho = |camera.position| from
       // Earth centre (~6,370,100 m at roof level), so one full drag rotates by
-      // roughly 0.006Â° â€” completely invisible.  All of Cesium's built-in modes
+      // roughly 0.006° â€” completely invisible.  All of Cesium's built-in modes
       // are calibrated for distances â‰¥ 1,000 km.
       //
       // SOLUTION: disable Cesium's input system entirely and implement a clean
@@ -2093,7 +2093,7 @@ function SolarEngine3D({
         ctrl.enableZoom       = false;
         ctrl.enableLook       = false;
         ctrl.enableTranslate  = false;
-        // Keep collision detection off so we can tilt past 90Â°
+        // Keep collision detection off so we can tilt past 90°
         ctrl.enableCollisionDetection = false;
       } catch (e) { addLog('WARN', `ctrl disable: ${(e as Error).message}`); }
 
@@ -2115,7 +2115,7 @@ function SolarEngine3D({
         // Ï€ puts the camera SOUTH of the target so the fly-in looks NORTH
         // (was 0.0, which sat north of target and looked south).
         heading: Math.PI,         // radians; fly-in looks NORTH
-        pitch:   TILTED_AERIAL_VIEW.pitch,  // radians, -45Â° (Aurora parity) â€” lib/3d/cameraPresets.ts
+        pitch:   TILTED_AERIAL_VIEW.pitch,  // radians, -45° (Aurora parity) â€” lib/3d/cameraPresets.ts
         radius:  150.0,           // metres from target
 
         // Drag state
@@ -2231,7 +2231,7 @@ function SolarEngine3D({
       if (cesiumCanvas) {
         // â”€â”€ 5a. Drag sensitivity constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // ORBIT_DRAG: radians of heading/pitch change per pixel of mouse movement.
-        // At 0.004 rad/px: dragging 400px across a 1600-wide canvas rotates ~92Â°.
+        // At 0.004 rad/px: dragging 400px across a 1600-wide canvas rotates ~92°.
         const ORBIT_DRAG  = 0.004;  // rad/px for left-drag orbit
         const TILT_DRAG   = 0.003;  // rad/px for right-drag tilt (finer)
 
@@ -2549,7 +2549,7 @@ function SolarEngine3D({
       oo.targetLng = lng;
       oo.targetAlt = cesiumGroundElev;
       oo.heading   = TILTED_AERIAL_VIEW.heading;  // Ï€ â†’ fly-in looks NORTH (look dir = heading + Ï€)
-      oo.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45Â° Aurora parity (lib/3d/cameraPresets.ts)
+      oo.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45° Aurora parity (lib/3d/cameraPresets.ts)
       oo.radius    = TILTED_AERIAL_VIEW.range;
       applyOrbitRef.current?.();
 
@@ -2704,15 +2704,15 @@ function SolarEngine3D({
         }
 
         // Dynamic tile screen space error: more detail close-up, less at overview
-        // v48.29: Raised thresholds (64/32/16) to reduce tile-reload storms at oblique 45Â° angles.
-        // At 45Â° tilt many more tile faces are visible, causing SSE=4 to flood requests â†’ slow render.
+        // v48.29: Raised thresholds (64/32/16) to reduce tile-reload storms at oblique 45° angles.
+        // At 45° tilt many more tile faces are visible, causing SSE=4 to flood requests â†’ slow render.
         if (tilesetRef.current) {
           if (h > 1000) {
             tilesetRef.current.maximumScreenSpaceError = 64; // fast overview
           } else if (h > 400) {
             tilesetRef.current.maximumScreenSpaceError = 32; // balanced
           } else {
-            tilesetRef.current.maximumScreenSpaceError = 16; // full quality close-up (was 4 â€” caused 10-15s loads at 45Â°)
+            tilesetRef.current.maximumScreenSpaceError = 16; // full quality close-up (was 4 â€” caused 10-15s loads at 45°)
           }
         }
       } catch {}
@@ -2778,7 +2778,7 @@ function SolarEngine3D({
       // No panels â€” reset to site at default pose
       o.targetLat = lat; o.targetLng = lng;
       o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = TILTED_AERIAL_VIEW.range;  // -45Â° Aurora parity
+      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = TILTED_AERIAL_VIEW.range;  // -45° Aurora parity
     } else {
       const lats = panels.map((p: PlacedPanel) => p.lat);
       const lngs = panels.map((p: PlacedPanel) => p.lng);
@@ -2790,7 +2790,7 @@ function SolarEngine3D({
       const radius   = Math.max(50, spanM * 1.4);
       o.targetLat = centLat; o.targetLng = centLng;
       o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch;  // -45Â° Aurora parity (Reset View)
+      o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch;  // -45° Aurora parity (Reset View)
       o.radius  = radius;
       addLog('FIT', `Fit view: ${panels.length} panels, span=${spanM.toFixed(0)}m, radius=${radius.toFixed(0)}m`);
     }
@@ -2916,11 +2916,14 @@ function SolarEngine3D({
                 const pitchStr = isFinite(seg.pitchDegrees) ? seg.pitchDegrees.toFixed(0) : '?';
                 const azStr = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees.toFixed(0) : '?';
                 const sunStr = isFinite(seg.sunshineHours) ? seg.sunshineHours.toFixed(0) : '?';
-                const areaFt = isFinite(seg.areaM2) ? ` ${(seg.areaM2 * 10.7639).toFixed(0)}ftÂ²` : '';
+                const areaFt = isFinite(seg.areaM2) ? ` ${(seg.areaM2 * 10.7639).toFixed(0)}ft²` : '';
                 const e = viewer.entities.add({
                   position: labelPos,
                   label: {
-                    text: `${pitchStr}Â° / ${azStr}Â°\n${sunStr}h${areaFt}`,
+                    // Standard solar convention: azimuth first, then pitch.
+                    // e.g. "271° / 23°  1301h 939ft²" reads as
+                    // "west-facing, 23° tilt, 1301 annual sun-hours, 939 sqft".
+                    text: `${azStr}° / ${pitchStr}°  ${sunStr}h${areaFt}`,
                     font: '12px sans-serif', fillColor: C.Color.WHITE,
                     outlineColor: C.Color.BLACK, outlineWidth: 2,
                     style: C.LabelStyle.FILL_AND_OUTLINE,
@@ -4114,16 +4117,16 @@ function SolarEngine3D({
 
       // v47.147: Alignment guard â€” verify panel face normal matches stored pitch.
       // dot(panelNormal, Up_ENU) = cos(pitch) by construction.
-      // We check that the stored pitch produces a panel normal within 0.5Â° of
+      // We check that the stored pitch produces a panel normal within 0.5° of
       // the expected Up-component (nUp). This catches any future rotation stacking.
       {
         const pitchStored = isFinite(panel.pitch ?? NaN) ? (panel.pitch ?? 0) : 0;
         const nUpExpected = Math.cos(pitchStored);           // cos(pitch) = nUp
         const nUpActual   = Math.cos(Math.abs(pitchStored)); // |cos(pitch)| >= 0
-        // cos(pitch) = nUp â€” face normal z-component. Must be â‰¥ cos(0.5Â°) â‰ˆ 0.99996 relative to expected.
+        // cos(pitch) = nUp â€” face normal z-component. Must be â‰¥ cos(0.5°) â‰ˆ 0.99996 relative to expected.
         // Simple check: |pitchStored| must be finite and in valid range.
         if (!isFinite(pitchStored) || Math.abs(pitchStored) > Math.PI / 2 + 0.01) {
-          addLog('WARN', `Panel ${panel.id} alignment guard: pitch=${(pitchStored*180/Math.PI).toFixed(1)}Â° out of range â€” clamping`);
+          addLog('WARN', `Panel ${panel.id} alignment guard: pitch=${(pitchStored*180/Math.PI).toFixed(1)}° out of range â€” clamping`);
         }
       }
 
@@ -5083,7 +5086,7 @@ function SolarEngine3D({
       setPanelCount(newPanels.length);
       // Phase 2: rebuild rails after single-click roof placement
       try { renderRoofRails(viewer, C, newPanels); } catch {}
-      setStatusMsg(`âœ… Roof panel placed (${(panel.tilt ?? 0).toFixed(0)}Â° pitch, ${(panel.azimuth ?? 0).toFixed(0)}Â° az)${rp ? ' Â· on plane' : ''} â€” click to continue, right-click to stop`);
+      setStatusMsg(`âœ… Roof panel placed (${(panel.tilt ?? 0).toFixed(0)}° pitch, ${(panel.azimuth ?? 0).toFixed(0)}° az)${rp ? ' Â· on plane' : ''} â€” click to continue, right-click to stop`);
       showGhostPanel(viewer, C, pLat, pLng, pHeight, panel.tilt ?? 0, panel.azimuth ?? 0);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
@@ -5136,7 +5139,7 @@ function SolarEngine3D({
       lastRenderedPanelsRef.current = newPanels; // prevent double-render orphan
       onPanelsChange(newPanels);
       setPanelCount(newPanels.length);
-      setStatusMsg(`âœ… Ground panel placed (${groundTilt}Â° tilt)`);
+      setStatusMsg(`âœ… Ground panel placed (${groundTilt}° tilt)`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleGroundClick: ${(err as Error).message}`);
@@ -5228,21 +5231,21 @@ function SolarEngine3D({
         let canonStart = pendingStart.start;
         let canonEnd   = pt;
         {
-          const desiredFacing = azimuthRef.current;                       // UI slider (default 180Â° = south)
+          const desiredFacing = azimuthRef.current;                       // UI slider (default 180° = south)
           const candidateFacing = (rowAzDeg + 90) % 360;                  // perpendicular to raw rail axis
           // Angular difference in [-180, 180]
           let diff = candidateFacing - desiredFacing;
           if (diff > 180) diff -= 360;
           if (diff < -180) diff += 360;
           if (Math.abs(diff) > 90) {
-            // Flipping rail axis by 180Â° brings the facing axis closer to desired
+            // Flipping rail axis by 180° brings the facing axis closer to desired
             rowAzDeg = (rowAzDeg + 180) % 360;
             // Swap start/end so p1â†’p2 direction matches canonical rowAzDeg
             canonStart = pt;
             canonEnd   = pendingStart.start;
-            addLog('GROUND', `[CANON] Flipped rail axis + swapped points: raw facing=${candidateFacing.toFixed(1)}Â° vs desired=${desiredFacing.toFixed(1)}Â° (diff=${diff.toFixed(1)}Â°) â†’ canonical rowAzDeg=${rowAzDeg.toFixed(1)}Â°`);
+            addLog('GROUND', `[CANON] Flipped rail axis + swapped points: raw facing=${candidateFacing.toFixed(1)}° vs desired=${desiredFacing.toFixed(1)}° (diff=${diff.toFixed(1)}°) â†’ canonical rowAzDeg=${rowAzDeg.toFixed(1)}°`);
           } else {
-            addLog('GROUND', `[CANON] Rail axis OK: facing=${candidateFacing.toFixed(1)}Â° vs desired=${desiredFacing.toFixed(1)}Â° (diff=${diff.toFixed(1)}Â°) â†’ rowAzDeg=${rowAzDeg.toFixed(1)}Â°`);
+            addLog('GROUND', `[CANON] Rail axis OK: facing=${candidateFacing.toFixed(1)}° vs desired=${desiredFacing.toFixed(1)}° (diff=${diff.toFixed(1)}°) â†’ rowAzDeg=${rowAzDeg.toFixed(1)}°`);
           }
         }
 
@@ -5382,14 +5385,14 @@ function SolarEngine3D({
     // rowAzDeg = bearing from startPoint â†’ endPoint = RAIL direction.
     // Panel face azimuth = perpendicular to rail direction = (rowAzDeg + 90) % 360.
     // This matches buildPlaneFromTwoPoints: horizontal = cross(radialUp, u),
-    // which always points 90Â° clockwise from the row direction when viewed from above.
-    // azimuthRef.current (UI slider, defaults 180Â°) must NOT be used â€” it ignores user intent.
+    // which always points 90° clockwise from the row direction when viewed from above.
+    // azimuthRef.current (UI slider, defaults 180°) must NOT be used â€” it ignores user intent.
     const azDeg   = (rowAzDeg + 90) % 360;
     const style   = groundMountStyleRef.current ?? 'pipe';
 
     // v6.2.2-az: Validation logging
     addLog('GROUND', `[AZ-TRUTH] startPoint=(${p1.lat.toFixed(6)}, ${p1.lng.toFixed(6)}) endPoint=(${p2.lat.toFixed(6)}, ${p2.lng.toFixed(6)})`);
-    addLog('GROUND', `[AZ-TRUTH] rowBearing=${rowAzDeg.toFixed(1)}Â° â†’ panelFaceAzimuth=${azDeg.toFixed(1)}Â° (UI slider was ${azimuthRef.current.toFixed(1)}Â°)`);
+    addLog('GROUND', `[AZ-TRUTH] rowBearing=${rowAzDeg.toFixed(1)}° â†’ panelFaceAzimuth=${azDeg.toFixed(1)}° (UI slider was ${azimuthRef.current.toFixed(1)}°)`);
 
     // basePlaneZ = terrain height locked at first click
     const basePlaneZ = p1.height - MOUNT_HEIGHT_M;
@@ -5509,7 +5512,7 @@ function SolarEngine3D({
       const firstRail = rackingResult.members.find(m => m.memberType === 'powerrail');
       if (firstRail) {
         addLog('GROUND', `[RENDER-TRUTH] Rail[0]: ${firstRail.name} lat=${firstRail.lat.toFixed(8)} lng=${firstRail.lng.toFixed(8)} z=${firstRail.z.toFixed(4)}`);
-        addLog('GROUND', `[RENDER-TRUTH]   heading=${(firstRail.headingRad * 180 / Math.PI).toFixed(1)}Â° pitch=${(firstRail.pitchRad * 180 / Math.PI).toFixed(1)}Â°`);
+        addLog('GROUND', `[RENDER-TRUTH]   heading=${(firstRail.headingRad * 180 / Math.PI).toFixed(1)}° pitch=${(firstRail.pitchRad * 180 / Math.PI).toFixed(1)}°`);
       }
       // Log first strongback
       const firstSB = rackingResult.members.find(m => m.memberType === 'strongback');
@@ -6242,7 +6245,7 @@ function SolarEngine3D({
     setPanelCount(allPanels.length);
     planePtsRef.current = [];
     setPlanePtCount(0);
-    setStatusMsg(`âœ… Plane: ${newPanels.length} panels placed (pitch=${pitchDeg.toFixed(1)}Â° az=${azimuthDeg.toFixed(1)}Â°)`);
+    setStatusMsg(`âœ… Plane: ${newPanels.length} panels placed (pitch=${pitchDeg.toFixed(1)}° az=${azimuthDeg.toFixed(1)}°)`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
@@ -6718,7 +6721,7 @@ function SolarEngine3D({
     const N   = arrayNormalECEF(C, ids);
     if (!cen || !N) { setStatusMsg('Rotate needs a 3D-plane array'); return; }
     rotateArrayBy(viewer, C, ids, deg * Math.PI / 180, cen, N, true);
-    setStatusMsg(`Array rotated ${deg > 0 ? '+' : ''}${deg}Â° â€” or drag the âŸ³ handle`);
+    setStatusMsg(`Array rotated ${deg > 0 ? '+' : ''}${deg}° â€” or drag the âŸ³ handle`);
   }
 
   // v62: SNAP a just-moved single panel into the nearest array's grid â€” forgiving.
@@ -7657,7 +7660,7 @@ function SolarEngine3D({
           eaveHeightM,
           pitchDeg: roofPitchDeg,
         }]);
-        addLog('GABLE', `Placed ${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${roofPitchDeg}Â°`);
+        addLog('GABLE', `Placed ${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${roofPitchDeg}°`);
         setStatusMsg(`ðŸ  Gable placed: ${widthM.toFixed(1)}m Ã— ${depthM.toFixed(1)}m eave, ridge ${ridgeRiseM.toFixed(1)}m up â€” click again to place another`);
         gablePtsRef.current = [];
         setGablePtCount(0);
@@ -8218,7 +8221,7 @@ function SolarEngine3D({
         activePlane3DIdRef.current = plane.id; setActivePlane3DId(plane.id);
         if (showRoofModel)    { try { renderRoofWireframe(viewer, C); } catch {} }
         if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
-        setStatusMsg(`â¬¡ Plane marked â€” Az ${plane.azimuth.toFixed(0)}Â° Tilt ${plane.pitch.toFixed(0)}Â° Â· trace the next face (right-click to finish) Â· ðŸ”— Roof Model to see edges`);
+        setStatusMsg(`â¬¡ Plane marked â€” Az ${plane.azimuth.toFixed(0)}° Tilt ${plane.pitch.toFixed(0)}° Â· trace the next face (right-click to finish) Â· ðŸ”— Roof Model to see edges`);
         try { viewer.scene.requestRender(); } catch {}
         return;
       }
@@ -8286,12 +8289,12 @@ function SolarEngine3D({
         }
 
         setStatusMsg(
-          `â–£ Roof Plane Active â€” Az ${plane.azimuth.toFixed(0)}Â°  Tilt ${plane.pitch.toFixed(0)}Â° | ` +
+          `â–£ Roof Plane Active â€” Az ${plane.azimuth.toFixed(0)}°  Tilt ${plane.pitch.toFixed(0)}° | ` +
           `${filtered.length} panels Â· ${(filtered.length * (selectedPanelRef.current?.wattage ?? 400) / 1000).toFixed(1)} kW`
         );
       } else {
         setStatusMsg(
-          `â—» Roof plane created â€” Az ${plane.azimuth.toFixed(0)}Â°  Tilt ${plane.pitch.toFixed(0)}Â° | ` +
+          `â—» Roof plane created â€” Az ${plane.azimuth.toFixed(0)}°  Tilt ${plane.pitch.toFixed(0)}° | ` +
           `No panels fit â€” try reducing setbacks or enlarging the polygon`
         );
       }
@@ -9516,7 +9519,7 @@ function SolarEngine3D({
         const o = orbitRef.current;
         o.targetLat = centLat; o.targetLng = centLng;
         o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-        o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = radius;  // -45Â° Aurora parity (Reset View)
+        o.heading = TILTED_AERIAL_VIEW.heading; o.pitch = TILTED_AERIAL_VIEW.pitch; o.radius = radius;  // -45° Aurora parity (Reset View)
         applyOrbitRef.current?.();
       } catch {}
     }
@@ -10046,7 +10049,7 @@ function SolarEngine3D({
     const elev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : (twinRef.current?.elevation ?? 0);
     const o = orbitRef.current;
     o.targetLat = lat; o.targetLng = lng; o.targetAlt = elev;
-    o.heading = Math.PI; o.pitch = -0.785; o.radius = 200;  // -45Â° pitch, look NORTH
+    o.heading = Math.PI; o.pitch = -0.785; o.radius = 200;  // -45° pitch, look NORTH
     applyOrbitRef.current?.();
   }
 
@@ -10631,14 +10634,14 @@ function SolarEngine3D({
                     <span style={{ color: '#aaa', fontSize: 10 }}>Panel Tilt</span>
                     <select value={gTilt} onChange={e => setGTilt(Number(e.target.value))}
                       style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 5, padding: '3px 6px', fontSize: 11, cursor: 'pointer' }}>
-                      <option value={0}>0Â° (Flat)</option>
-                      <option value={10}>10Â°</option>
-                      <option value={20}>20Â°</option>
-                      <option value={25}>25Â°</option>
-                      <option value={30}>30Â°</option>
-                      <option value={35}>35Â°</option>
-                      <option value={40}>40Â°</option>
-                      <option value={90}>90Â° (Vertical)</option>
+                      <option value={0}>0° (Flat)</option>
+                      <option value={10}>10°</option>
+                      <option value={20}>20°</option>
+                      <option value={25}>25°</option>
+                      <option value={30}>30°</option>
+                      <option value={35}>35°</option>
+                      <option value={40}>40°</option>
+                      <option value={90}>90° (Vertical)</option>
                     </select>
                   </div>
 
@@ -11037,7 +11040,7 @@ function SolarEngine3D({
                           }}
                           style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
                         />
-                        <span style={{ color: '#aaa', fontSize: 10 }}>Â°</span>
+                        <span style={{ color: '#aaa', fontSize: 10 }}>°</span>
                       </div>
                     </>
                   ) : null}
@@ -11615,9 +11618,9 @@ function SolarEngine3D({
               {sunPos.elevation > 0 ? (
                 <>
                   <div style={{ color: '#ff8c00', fontSize: 13, fontWeight: 700 }}>
-                    {azToDir(sunPos.azimuth)} {sunPos.azimuth.toFixed(0)}Â°
+                    {azToDir(sunPos.azimuth)} {sunPos.azimuth.toFixed(0)}°
                   </div>
-                  <div style={{ color: '#888', fontSize: 10 }}>El: {sunPos.elevation.toFixed(1)}Â°</div>
+                  <div style={{ color: '#888', fontSize: 10 }}>El: {sunPos.elevation.toFixed(1)}°</div>
                 </>
               ) : (
                 <div style={{ color: '#555', fontSize: 12 }}>Below horizon</div>
@@ -11744,7 +11747,7 @@ function SolarEngine3D({
           color: 'rgba(255,255,255,0.45)', fontSize: 9, zIndex: 50, fontFamily: 'monospace',
           letterSpacing: 0.5,
         }}>
-          {Math.round(cameraHeadingDeg)}Â° {
+          {Math.round(cameraHeadingDeg)}° {
             cameraHeadingDeg < 22.5 || cameraHeadingDeg >= 337.5 ? 'N' :
             cameraHeadingDeg < 67.5 ? 'NE' :
             cameraHeadingDeg < 112.5 ? 'E' :
