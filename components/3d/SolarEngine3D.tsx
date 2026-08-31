@@ -2927,8 +2927,13 @@ function SolarEngine3D({
                     font: '12px sans-serif', fillColor: C.Color.WHITE,
                     outlineColor: C.Color.BLACK, outlineWidth: 2,
                     style: C.LabelStyle.FILL_AND_OUTLINE,
-                    verticalOrigin: C.VerticalOrigin.BOTTOM,
-                    pixelOffset: new C.Cartesian2(0, -5),
+                    // v71: labels were rendering upside-down on this camera
+                    // angle. Flip the text 180° so it reads right-side up
+                    // regardless of viewer heading.
+                    rotation: Math.PI,
+                    verticalOrigin: C.VerticalOrigin.CENTER,
+                    horizontalOrigin: C.HorizontalOrigin.CENTER,
+                    pixelOffset: new C.Cartesian2(0, 0),
                     disableDepthTestDistance: Number.POSITIVE_INFINITY,
                     scale: 0.9, showBackground: true,
                     backgroundColor: new C.Color(0, 0, 0, 0.6),
