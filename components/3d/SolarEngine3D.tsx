@@ -611,6 +611,55 @@ function safeCartesian3(C: any, lng: number, lat: number, alt: number): any {
   } catch { return null; }
 }
 
+/**
+ * convexHullCorners: real roof faces are always convex (you can't have a
+ * roof plane that goes concave - the geometry won't shed water). The
+ * aerial-imagery twin sometimes returns corners in a noisy order or with
+ * stray indentations, which would draw a concave yellow outline. Run the
+ * raw corners through Andrew's monotone-chain 2D convex hull on (lng,
+ * lat), then map the surviving points back to their original corner
+ * objects so we keep the per-corner altitude. Returns the hull in
+ * counter-clockwise order.
+ */
+function convexHullCorners(corners: Array<{ lat: number; lng: number; alt?: number }>): Array<{ lat: number; lng: number; alt?: number }> {
+  if (corners.length <= 3) return corners.slice();
+  // Work on a deduped working set (Andrew's algorithm needs unique points)
+  const pts = corners.map(c => ({ lat: c.lat, lng: c.lng, alt: c.alt, _key: `${c.lng.toFixed(7)},${c.lat.toFixed(7)}` }));
+  const seen = new Set<string>();
+  const uniq = pts.filter(p => {
+    if (seen.has(p._key)) return false;
+    seen.add(p._key);
+    return true;
+  });
+  if (uniq.length <= 3) return uniq.map(({ _key, ...rest }) => rest);
+
+  // Sort by lng, then lat
+  uniq.sort((a, b) => a.lng - b.lng || a.lat - b.lat);
+  const cross = (O: any, A: any, B: any) =>
+    (A.lng - O.lng) * (B.lat - O.lat) - (A.lat - O.lat) * (B.lng - O.lng);
+
+  // Lower hull
+  const lower: typeof uniq = [];
+  for (const p of uniq) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  // Upper hull
+  const upper: typeof uniq = [];
+  for (let i = uniq.length - 1; i >= 0; i--) {
+    const p = uniq[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  // Concat, dropping the duplicated endpoints
+  const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+  return hull.map(({ _key, ...rest }) => rest);
+}
+
 function SolarEngine3D({
   lat, lng, projectAddress,
   panels, onPanelsChange, roofPlanes,
@@ -2866,7 +2915,14 @@ function SolarEngine3D({
           // Build positions from corners (which have per-corner altitude accounting for roof pitch)
           let positions: any[] = [];
           if (seg.corners && seg.corners.length >= 3) {
-            const raw = seg.corners.map((c: any) => {
+            // v72: real roof faces are convex. The aerial twin sometimes
+            // returns corners with stray indentations or in a noisy order
+            // that draws a concave outline. Run the corners through a 2D
+            // convex hull first (Andrew's monotone chain on lat/lng),
+            // then build the polyline from the surviving corner set so
+            // the per-corner altitude is preserved.
+            const hullCorners = convexHullCorners(seg.corners);
+            const raw = hullCorners.map((c: any) => {
               // c.alt is in Google orthometric coords - apply geoidOffset for Cesium
               const altGoogle = isFinite(c.alt) ? c.alt : segElevGoogle;
               const alt = altGoogle + geoidOffset;
@@ -2927,13 +2983,8 @@ function SolarEngine3D({
                     font: '12px sans-serif', fillColor: C.Color.WHITE,
                     outlineColor: C.Color.BLACK, outlineWidth: 2,
                     style: C.LabelStyle.FILL_AND_OUTLINE,
-                    // v71: labels were rendering upside-down on this camera
-                    // angle. Flip the text 180° so it reads right-side up
-                    // regardless of viewer heading.
-                    rotation: Math.PI,
-                    verticalOrigin: C.VerticalOrigin.CENTER,
-                    horizontalOrigin: C.HorizontalOrigin.CENTER,
-                    pixelOffset: new C.Cartesian2(0, 0),
+                    verticalOrigin: C.VerticalOrigin.BOTTOM,
+                    pixelOffset: new C.Cartesian2(0, -5),
                     disableDepthTestDistance: Number.POSITIVE_INFINITY,
                     scale: 0.9, showBackground: true,
                     backgroundColor: new C.Color(0, 0, 0, 0.6),
