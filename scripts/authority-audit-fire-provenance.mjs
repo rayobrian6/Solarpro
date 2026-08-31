@@ -17,7 +17,7 @@
 // (SAME_VALUE_DIFFERENT_SOURCE). A pair that disagrees is an active one.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 
 const AN = await import('../lib/jurisdictions/ahj-national.ts');
 const FS = await import('../lib/permit/utils/fireSetback.ts');
@@ -150,7 +150,7 @@ for (const c of census) {
 }
 console.log('');
 console.log('── §6 PATHWAY: PRINTED vs DRAWN ──');
-console.log(`  printed literal (arrayPages.ts:582) : ${PRINTED_PATHWAY_IN}"`);
+console.log(`  canonical resolveAccessPathwayIn()  : ${PRINTED_PATHWAY_IN}"`);
 console.log(`  drawn from ahj row roofSetbackInches: varies`);
 console.log(`  rows where they AGREE   : ${rows.length - pathwayDisagree}   (SAME_VALUE_DIFFERENT_SOURCE — latent)`);
 console.log(`  rows where they DISAGREE: ${pathwayDisagree}   (DIFFERENT_VALUE_DIFFERENT_SOURCE — ACTIVE DEFECT)`);
@@ -160,10 +160,50 @@ if (pathwayDisagree) {
   console.log(`      states: ${Object.entries(st).sort((a, b) => b[1] - a[1]).map(([s, n]) => `${s}:${n}`).join(' ')}`);
   console.log(`      the sheet PRINTS 36" while the drawing uses ${chains.find(c => c.classification === 'DIFFERENT_VALUE_DIFFERENT_SOURCE').drawnPathwayIn}"`);
 }
+// ── §6 SINGLE-PRODUCER PROOF — MEASURED FROM SOURCE, NOT RESTATED ─────────
+// This section used to compare two constants declared IN THIS SCRIPT
+// (`PRINTED_HIPVALLEY_IN = 18`, `GEOMETRY_HIPVALLEY_IN = 1.5 * 12`) and report
+// "agree today: YES". It never read the codebase, so it would have gone on
+// reporting agreement after either side changed — an instrument that cannot
+// observe the defect it exists to monitor, which is the same absent-is-passing
+// shape the campaign keeps finding in the product.
+//
+// It now reads the files and proves the SHAPE: every consumer routes through
+// the canonical resolver in lib/permit/utils/fireSetback.ts, and no bare
+// literal remains.
+const SITES = [
+  ['lib/permit/sections/arrayPages.ts', 'resolveHipValleySetbackIn', 'renderer — hip/valley'],
+  ['lib/drafting/templates/roof.ts',    'resolveHipValleySetbackIn', 'geometry — hip/valley'],
+  ['lib/permit/sections/arrayPages.ts', 'resolveAccessPathwayIn',    'renderer — access pathway'],
+];
+const readSrc = f => readFileSync(f, 'utf8');   // never swallow: unreadable != absent
+
 console.log('');
-console.log('── §6 HIP/VALLEY: PRINTED vs GEOMETRY ──');
-console.log(`  printed literal (arrayPages.ts:580): ${PRINTED_HIPVALLEY_IN}"`);
-console.log(`  geometry literal (roof.ts:866)     : ${GEOMETRY_HIPVALLEY_IN}"  (HIP_SETBACK_FT = 1.5)`);
-console.log(`  agree today: ${PRINTED_HIPVALLEY_IN === GEOMETRY_HIPVALLEY_IN ? 'YES' : 'NO'} — but from TWO independent literals (latent defect)`);
+console.log('── §6 HIP/VALLEY + PATHWAY: SINGLE-PRODUCER PROOF (read from source) ──');
+let canonical = 0;
+for (const [file, fn, label] of SITES) {
+  // Presence of the NAME is not proof of USE: the import line contains it even
+  // after the call site is replaced by a literal. Require an invocation.
+  const ok = readSrc(file).split(/\r?\n/)
+    .filter(l => !/^\s*import\b/.test(l))
+    .some(l => l.includes(fn + '('));
+  if (ok) canonical++;
+  console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${label.padEnd(26)} ${file} -> ${fn}()`);
+}
+// A literal survives only inside the canonical module itself, where it belongs.
+// NOTE: no \b in these patterns. Written through a shell heredoc, \b becomes a
+// real BACKSPACE byte (0x08) in the emitted file, and the regex then matches
+// nothing at all — which is how this check first reported 0 strays against a
+// literal that was demonstrably present.
+const LITERALS = [
+  ['lib/drafting/templates/roof.ts',    /HIP_SETBACK_FT\s*=\s*1\.5/,     'HIP_SETBACK_FT = 1.5 hard literal'],
+  ['lib/permit/sections/arrayPages.ts', /18\\?"\s*clear at hips/, 'hardcoded 18" hip/valley prose'],
+];
+const strays = LITERALS.filter(([f, re]) => re.test(readSrc(f)));
+console.log(`  canonical call sites: ${canonical}/${SITES.length}`);
+console.log(`  stray literals      : ${strays.length}${strays.length ? ' -> ' + strays.map(s => s[2]).join('; ') : ''}`);
+console.log(`  VERDICT: ${canonical === SITES.length && !strays.length
+  ? 'SINGLE PRODUCER — agreement is structural, not coincidental'
+  : 'DIVERGENCE — a fire fact has more than one producer'}`);
 console.log('');
 console.log('artifacts: data/authority/fire-{producer-consumer-map,provenance-summary}.json, fire-value-comparison.csv');
