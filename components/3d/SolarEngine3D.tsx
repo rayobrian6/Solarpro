@@ -2918,15 +2918,21 @@ function SolarEngine3D({
             // v72: real roof faces are convex. The aerial twin sometimes
             // returns corners with stray indentations or in a noisy order
             // that draws a concave outline. Run the corners through a 2D
-            // convex hull first (Andrew's monotone chain on lat/lng),
-            // then build the polyline from the surviving corner set so
-            // the per-corner altitude is preserved.
+            // convex hull first (Andrew's monotone chain on lat/lng) to
+            // drop any inward-bump noise.
+            //
+            // v73: per-corner altitude was making the yellow outline tilt
+            // in 3D (ridge corners higher than eave corners), which from
+            // the camera angle looked like the polygon was concave even
+            // though the 2D hull was convex. For the OUTLINE, draw every
+            // corner at the segment's single elevation — that gives a
+            // clean 2D shape matching the actual roof outline. The 3D
+            // per-corner data is still preserved in seg.corners and
+            // gets used by the panel-placement / shading code, not here.
             const hullCorners = convexHullCorners(seg.corners);
+            const flatAlt = segElev; // already geoidOffset-corrected
             const raw = hullCorners.map((c: any) => {
-              // c.alt is in Google orthometric coords - apply geoidOffset for Cesium
-              const altGoogle = isFinite(c.alt) ? c.alt : segElevGoogle;
-              const alt = altGoogle + geoidOffset;
-              return safeCartesian3(C, c.lng, c.lat, alt);
+              return safeCartesian3(C, c.lng, c.lat, flatAlt);
             }).filter(Boolean);
             if (raw.length >= 3) positions = [...raw, raw[0]];
           }
