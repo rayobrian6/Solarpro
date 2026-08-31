@@ -7,6 +7,7 @@ import { getEngineeringDecisionDefinition, listEngineeringDecisionDefinitions } 
 import { runEngineeringDecisionAuditGuards } from './guards';
 import { stableEngineeringStateHash } from '@/lib/engineeringStateInvalidation/hash';
 import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
+import { DEFAULT_EAVE_SETBACK_IN } from '@/lib/permit/utils/fireSetback';
 import type {
   BuildEngineeringDecisionProvenanceInput,
   DecisionAwareBOMMetadata,
@@ -243,7 +244,7 @@ function selectedValueForDecision(decisionType: EngineeringDecisionType, input: 
     case 'utility_interconnection_assumption':
       return selected(project?.interconnectionMethod ?? 'LOAD_SIDE', project?.interconnectionMethod == null, 'Interconnection method selected from project input or explicit load-side default.');
     case 'setback_assumption':
-      return selected(project?.ahjRoofSetbackIn ?? cad?.roof?.setbackIn ?? 18, project?.ahjRoofSetbackIn == null && cad?.roof?.setbackIn == null, 'Setback value selected from AHJ/project/CAD metadata or explicit default.');
+      return selected(project?.ahjRoofSetbackIn ?? cad?.roof?.setbackIn ?? DEFAULT_EAVE_SETBACK_IN, project?.ahjRoofSetbackIn == null && cad?.roof?.setbackIn == null, 'Setback value selected from AHJ/project/CAD metadata or explicit default.');
     case 'conduit_routing_assumption':
       return selected(`${project?.conduitType ?? 'EMT'} / ${project?.wireLength ?? 60} ft`, project?.conduitType == null || project?.wireLength == null, 'Conduit routing metadata selected from project input or explicit defaults.');
     case 'grounding_bonding_assumption':

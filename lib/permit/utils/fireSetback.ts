@@ -168,3 +168,29 @@ export function resolveHipValleySetbackIn(governedOverrideIn?: number | null): n
     ? governedOverrideIn
     : MODELED_HIP_VALLEY_SETBACK_IN;
 }
+
+// ── 2026-08-30 — THE EAVE/RAKE DEFAULT HAD TWO VALUES, 2x APART ────────────
+// `ahjRoofSetbackIn` means EAVE / RAKE EDGE SETBACK (N33 semantic map). Two
+// places supplied a default for it when the project carries none:
+//
+//     lib/cad/roof/roofCAD.ts:42          DEFAULT_EAVE_SETBACK_IN = 36   (drawn)
+//     engineeringDecisionProvenance:246   ... ?? 18                      (reported)
+//
+// So with no CAD roof present, the provenance record stated an 18" assumption
+// while the engine's own default draws 36". Measured reach: the literal is
+// reached only when `cad.roof.setbackIn` is absent — roofCAD emits it
+// (roofCAD.ts:587) — i.e. exactly the case with no geometry to contradict it,
+// which is why it survived.
+//
+// 18 is the RIDGE constant (MODELED_HIP_VALLEY_SETBACK_IN / IFC §1204.2.1.1);
+// an eave default equal to the ridge setback is how the two facts got confused.
+//
+// This is a DEFAULT, not an authority: it is what SolarPro assumes absent a
+// project value, and it is marked as defaulted wherever it is reported.
+export const DEFAULT_EAVE_SETBACK_IN = 36;
+
+export function resolveEaveSetbackIn(projectOverrideIn?: number | null): number {
+  return (projectOverrideIn && projectOverrideIn > 0)
+    ? projectOverrideIn
+    : DEFAULT_EAVE_SETBACK_IN;
+}

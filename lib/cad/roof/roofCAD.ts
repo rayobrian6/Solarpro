@@ -30,6 +30,7 @@ import {
   metersToFt, ftToMeters, fmtFt,
 } from '../geometry';
 import { resolveCADPanelFootprint, panelFootprintWarning } from '../panelFootprint';
+import { DEFAULT_EAVE_SETBACK_IN } from '@/lib/permit/utils/fireSetback';
 
 const INCHES_TO_METERS = 0.0254;
 
@@ -39,7 +40,8 @@ const INCHES_TO_METERS = 0.0254;
 const DEFAULT_GAP_M           = 0.02; // 2 cm between panels
 
 // ── Setback defaults ──────────────────────────────────────────
-const DEFAULT_EAVE_SETBACK_IN  = 36;  // 3 ft
+// DEFAULT_EAVE_SETBACK_IN (36" / 3 ft) is imported from the canonical setback
+// module so the provenance evaluator cannot disagree with what is drawn.
 const DEFAULT_RIDGE_SETBACK_IN = 36;  // 3 ft
 const DEFAULT_RAKE_SETBACK_IN  = 36;  // 3 ft (sides)
 
