@@ -523,7 +523,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
       <div class="bb-hvy pb-xs mb-sm">
         ${peLetterHeadingBlock(input,
           'Solar Photovoltaic System &mdash; Solar Fence Array',
-          `Prepared under ${asce} &bull; ${_cpF.ibcLabel} &bull; NEC ${necVer}`)}
+          `Prepared under ${asce} &bull; ${_cpF.ibcLabel} &bull; ${_cpF.necLabel}`)}
       </div>
 
       <div class="two-col-layout">
@@ -632,7 +632,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
       <div class="bb-hvy pb-xs mb-sm">
         ${peLetterHeadingBlock(input,
           'Solar Photovoltaic System &mdash; Ground Mount Array',
-          `Prepared under ${asce} &bull; ${_cpG.ibcLabel} &bull; NEC ${necVer}`)}
+          `Prepared under ${asce} &bull; ${_cpG.ibcLabel} &bull; ${_cpG.necLabel}`)}
       </div>
 
       <div class="two-col-layout">
@@ -846,7 +846,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
         <div>
           ${peLetterHeadingBlock(input,
             'Solar Photovoltaic System &mdash; Roof-Mounted Array',
-            `Prepared under ${asce} &bull; ${_cpR.ibcLabel} &bull; ${_cpR.ircLabel} &bull; NEC ${necVer}`)}
+            `Prepared under ${asce} &bull; ${_cpR.ibcLabel} &bull; ${_cpR.ircLabel} &bull; ${_cpR.necLabel}`)}
         </div>
         <div class="f-sm" style="text-align:right;color:#555;line-height:1.6;">
           <div>RE: <strong style="color:#000;">${escapeH(project.address || '—')}</strong></div>

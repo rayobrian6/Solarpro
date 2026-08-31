@@ -31,7 +31,8 @@
     "jurisdiction:audit-solar-authority": "tsx scripts/jurisdiction-audit-solar-authority.mjs",
     "authority:audit-nec-provenance": "tsx scripts/authority-audit-nec-provenance.mjs",
     "authority:audit-nec-sources": "tsx scripts/authority-audit-nec-sources.mjs",
-    "authority:audit-fire-provenance": "tsx scripts/authority-audit-fire-provenance.mjs"
+    "authority:audit-fire-provenance": "tsx scripts/authority-audit-fire-provenance.mjs",
+    "authority:audit-rendered-claims": "tsx scripts/authority-audit-rendered-claims.mjs"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",

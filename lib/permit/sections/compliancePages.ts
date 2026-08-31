@@ -456,7 +456,7 @@ export function pageWarningLabels(
   // ── PERMANENT SIGNAGE NOTES (reference E-2 standard) ─────────────────────
   const signageNotes = [
     `Not all placards shown may be required by the local AHJ. Owner / installer shall verify placard requirements with the local AHJ before installation.`,
-    `All plaques and signage shall comply with the adopted edition of the National Electrical Code (NEC ${necVer}) and local amendments.`,
+    `All plaques and signage shall comply with the adopted edition of the National Electrical Code and local amendments; this package is prepared to ${cp.necLabel}.`,
     `Alternate power-source placards shall be metallic or plastic, engraved or machine-printed, with letters in a contrasting color to the plaque. Placards shall be attached by pop rivets, screws, or another approved permanent method &mdash; adhesive-only attachment is not permitted where prohibited by the AHJ.`,
     `Directory placard marking content and format: red background, white lettering, minimum 3/8" letter height, all capital letters, Arial or similar non-bold font, reflective, weather-resistant material suitable for the environment (UL 969).`,
     `Field-applied labels on conduit / raceways shall appear at intervals not exceeding 10 ft (3 m), at every turn, and above/below each penetration per NEC 690.31(D).`,

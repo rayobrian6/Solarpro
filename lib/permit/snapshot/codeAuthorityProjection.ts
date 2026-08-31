@@ -67,8 +67,47 @@ export const PER_AHJ_EDITION = 'PER AHJ ADOPTION';
 // not, and they are the ones a reviewer reads first.
 
 
-function labelOf(kind: CodeEditionKind, ed: string | null, source?: string | null): string {
-  if (ed) return `${FAMILY_PREFIX[kind]} ${ed}`;
+// ── 2026-08-30 — A PRESENT EDITION WAS INDISTINGUISHABLE FROM A VERIFIED ONE ──
+// `labelOf` consulted `source` ONLY when the edition was null, to choose between
+// two wordings for "unknown". When an edition was PRESENT it printed bare — so a
+// year read out of an unprovenanced state table rendered EXACTLY like one
+// retrieved from the AHJ with a source hash:
+//
+//     NEC 2020                     <- state-adoption-table, 0 evidence
+//     NEC 2020                     <- ahj-registry-retrieval, cited + hashed
+//
+// The same title block printed that bare year beside `IBC PER AHJ ADOPTION`,
+// which reads as "the NEC edition is settled and the I-codes are not". Both are
+// equally unprovenanced: the NEC producer audit puts 5 of 6 producers at zero
+// adoption evidence and finds 1,757 jurisdictions where they DISAGREE.
+//
+// The edition SELECTION is unchanged — precedence is deliberately untouched, as
+// it was when `project-record-unprovenanced` replaced the false `operator-entry`.
+// What changes is that an unverified adoption now says so.
+const EVIDENCE_BEARING_SOURCES = new Set([
+  'ahj-registry-retrieval',   // a real retrieval: sourcesQueried + sourceHash
+  'structural-engine-basis',  // self-describing — the engine RAN under this edition
+]);
+
+/** Printed after an edition that is real but whose ADOPTION is unverified. Uses
+ *  the campaign's own vocabulary: the year is what SolarPro designed to, not a
+ *  claim about what the authority adopted. The engineering summary already said
+ *  "CALC BASIS: NEC 2020" in prose; this makes the drawing agree with it. */
+export const UNVERIFIED_ADOPTION_SUFFIX = '(DESIGN BASIS)';
+
+function labelOf(
+  kind: CodeEditionKind, ed: string | null, source?: string | null, verified?: boolean,
+): string {
+  if (ed) {
+    // A record-level `verificationStatus: 'verified'` means an ARCHIVED ADOPTION
+    // DOCUMENT was obtained — codeAuthority holds a state adoption to be a
+    // "stated basis, NOT an archived adoption document" and refuses to mark it
+    // verified. So a verified record is evidence in its own right, independently
+    // of which per-edition source token carried the year.
+    return (verified || EVIDENCE_BEARING_SOURCES.has(source ?? ''))
+      ? `${FAMILY_PREFIX[kind]} ${ed}`
+      : `${FAMILY_PREFIX[kind]} ${ed} ${UNVERIFIED_ADOPTION_SUFFIX}`;
+  }
   return `${FAMILY_PREFIX[kind]} ${source === 'edition-per-ahj-adoption' ? PER_AHJ_EDITION : PENDING_EDITION}`;
 }
 
@@ -80,16 +119,17 @@ export function projectCodeAuthority(
   const ed = (k: CodeEditionKind): string | null => record?.editions?.[k]?.edition ?? null;
   const src = (k: CodeEditionKind): string | null => record?.editions?.[k]?.source ?? null;
   const nec = ed('nec'), ibc = ed('ibc'), irc = ed('irc'), ifc = ed('ifc'), asce = ed('asce');
+  const isVerified = record?.verificationStatus === 'verified';
 
   const proj: CodeAuthorityProjection = {
     present: !!record,
     record,
     nec, ibc, irc, ifc, asce,
-    necLabel: labelOf('nec', nec, src('nec')),
-    ibcLabel: labelOf('ibc', ibc, src('ibc')),
-    ircLabel: labelOf('irc', irc, src('irc')),
-    ifcLabel: labelOf('ifc', ifc, src('ifc')),
-    asceLabel: labelOf('asce', asce, src('asce')),
+    necLabel: labelOf('nec', nec, src('nec'), isVerified),
+    ibcLabel: labelOf('ibc', ibc, src('ibc'), isVerified),
+    ircLabel: labelOf('irc', irc, src('irc'), isVerified),
+    ifcLabel: labelOf('ifc', ifc, src('ifc'), isVerified),
+    asceLabel: labelOf('asce', asce, src('asce'), isVerified),
     amendments: record?.localAmendments ?? [],
     verificationStatus: record?.verificationStatus ?? 'absent',
     verified: record?.verificationStatus === 'verified',
@@ -97,12 +137,12 @@ export function projectCodeAuthority(
     stateCode: record?.stateCode ?? null,
     incompleteEditions: record?.incompleteEditions ?? CODE_EDITION_KINDS.slice(),
     edition(kind) { return ed(kind); },
-    label(kind) { return labelOf(kind, ed(kind), src(kind)); },
+    label(kind) { return labelOf(kind, ed(kind), src(kind), isVerified); },
     tag(kind) {
       // NOTE: the tag shape is a HARNESS CONTRACT — tests and the evidence scripts extract with
       // `data-code-edition="<kind>">([^<]*)`. Do not add attributes between the kind and the `>`;
       // the edition SOURCE is available on the snapshot record (codeAuthority.editions[k].source).
-      return `<span data-code-edition="${kind}">${labelOf(kind, ed(kind), src(kind))}</span>`;
+      return `<span data-code-edition="${kind}">${labelOf(kind, ed(kind), src(kind), isVerified)}</span>`;
     },
   };
   return proj;

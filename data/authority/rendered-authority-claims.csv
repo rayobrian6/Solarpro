@@ -1,0 +1,13 @@
+claim,occurrences,asserted,qualified,classification
+"PER AHJ","79","79","0","see per-occurrence"
+"AHJ REQUIRES","0","0","0","MISATTRIBUTED if present"
+"REQUIRED BY AHJ","1","0","1","MISATTRIBUTED if present"
+"ADOPTED BY","0","0","0","needs adoption evidence"
+"OPERATOR ENTERED","12","0","12","MISATTRIBUTED unless a real operator"
+"PE STAMP REQUIRED","0","0","0","MISATTRIBUTED — contained N24/N32"
+"PER UTILITY","0","0","0","utility rule, not an AHJ rule"
+"PER LOCAL CODE","0","0","0","needs local adoption evidence"
+"MANDATED","1","1","0","needs an authority"
+"MODELED (honest)","48","48","0","SOLARPRO/MODELED — honest"
+"SOLARPRO POLICY","59","59","0","SOLARPRO_POLICY — honest"
+"VERIFIED SOURCE","66","55","11","SUPPORTED — check upstream"
