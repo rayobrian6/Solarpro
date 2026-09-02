@@ -243,6 +243,27 @@ export const defaultPanels: SolarPanel[] = [
     datasheetUrl: '',
     weight: 20.5,
   },
+  // ── Hyundai Energy Solutions ──
+  // Metric mirror of 'hyundai-hin-nf-440' in lib/equipment-db.ts. The id MUST
+  // stay character-identical: equipment-library.ts:198-213 matches the two
+  // tables by id, and a mismatch yields TWO catalogue entries for one physical
+  // module. APPENDED AT THE END on purpose — defaultPanels[0] is the Design
+  // Studio's default panel (DesignStudio.tsx:1187), so inserting at the top
+  // would silently restamp the default module on every new design.
+  {
+    id: 'hyundai-hin-nf-440', manufacturer: 'Hyundai Energy Solutions', model: 'HiN-T440NF(BK)',
+    wattage: 440, width: 1.134, height: 1.722, efficiency: 22.53,
+    // From the datasheet's OWN nameplate pair: BNPI 488 W (135 W/m2 rear)
+    // / STC 440 W = 1.109. Deliberately NOT the 1.20 that panel-fence-ps1 uses
+    // at the same 80% bifaciality — that module stands VERTICALLY on a fence
+    // with both faces exposed; this is a flush-mounted residential roof module
+    // where rear irradiance is far lower. Raise it only with real yield data.
+    bifacial: true, bifacialFactor: 1.11, temperatureCoeff: -0.30,
+    // PLACEHOLDER PRICE — this is the equipment-library fallback, NOT a quote.
+    // Set from real distributor pricing before this panel is costed.
+    pricePerWatt: 0.35, warranty: 30, cellType: 'N-type TOPCon',
+    weight: 24.5,   // kg (this table is metric; equipment-db carries 50.0 lb)
+  },
   {
     id: 'panel-fence1', manufacturer: 'Jinko Solar', model: 'Tiger Neo Bifacial 400W (Fence)',
     wattage: 400, width: 1.046, height: 1.690, efficiency: 22.0,

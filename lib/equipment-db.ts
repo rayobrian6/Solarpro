@@ -520,6 +520,47 @@ export const SOLAR_PANELS: SolarPanel[] = [
     datasheetUrl: 'https://ussolarsupplier.com/products/philadelphia-solar-440w-solar-panels-108-cell-bifacial-mnb108hcbf-440w',
     active: true, // REACTIVATED 2026-06-21: the v47.406 "out of business / unreachable" premise was WRONG — Philadelphia Solar (Jordan, est. 2007) is actively manufacturing and the exact Nexus MNB108(HCBF)-440W is in stock at US distributors (US Solar Supplier, A1 SolarStore, RockSolar). This is the SolFence default fence panel (SolFence distributor price $262.50).
   },
+  // ── Hyundai Energy Solutions ─────────────────────────────────────
+  // HD HYUNDAI SOLAR MODULE, NF(BK) Series — "Premium N-Type TOPCon Module",
+  // datasheet rev 24.12.18, covering HiN-T430NF(BK) / HiN-T435NF(BK) /
+  // HiN-T440NF(BK). Every value below is transcribed from the 440 W column of
+  // that sheet's Electrical + Mechanical Characteristics tables.
+  //
+  // ⚠ THE DATASHEET PRINTS TWO COLUMNS PER MODEL — "B" (STC) and "NPI" (BNPI,
+  // measured at 1000 W/m2 front + 135 W/m2 rear). They are easy to splice by
+  // accident, and a widely-syndicated spec summary for this exact part does
+  // exactly that: it pairs Isc 14.39 (STC) with Impp 15.10 (BNPI), which is
+  // physically impossible (Impp > Isc) and would imply 32.3 x 15.10 = 488 W on
+  // a 440 W module. The values here are the STC column ONLY — what NEC 690.7 /
+  // 690.8 sizing requires:
+  //     STC   440 W | Voc 38.8 | Isc 14.39 | Vmpp 32.3 | Impp 13.63  (32.3 x 13.63 = 440.2 W)
+  //     BNPI  488 W | Voc 38.8 | Isc 15.94 | Vmpp 32.3 | Impp 15.10  (NOT used here)
+  {
+    id: 'hyundai-hin-nf-440',
+    manufacturer: 'Hyundai Energy Solutions',
+    model: 'HiN-T440NF(BK)',
+    category: 'solar_panel',
+    watts: 440, efficiency: 22.53,
+    voc: 38.8, vmp: 32.3, isc: 14.39, imp: 13.63,
+    tempCoeffVoc: -0.25, tempCoeffIsc: 0.046, tempCoeffPmax: -0.30,
+    maxSystemVoltage: 1500,
+    // DERIVED, not printed. The datasheet states "Maximum Reverse Current 30A"
+    // and never uses the phrase "maximum series fuse rating"; they are the same
+    // module overcurrent limit under UL/IEC 61730, so 30 A is the OCPD cap. It
+    // is an INFERENCE, and this field caps the calculated OCPD at
+    // lib/electrical-calc.ts:627 — confirm against the module label.
+    maxSeriesFuseRating: 30,
+    nominalOperatingTemp: 44,      // NMOT 44 C +/- 2
+    // DERIVED per NEC 690.8: (N-1) x 1.25 x Isc <= 30 A  =>  (N-1) x 17.99 <= 30
+    // => N <= 2.67 => 2 strings in parallel before fusing/combining is required.
+    // Matches every other 30 A row in this file.
+    parallelStringLimit: 2,
+    weight: 50.0, length: 67.8, width: 44.65, thickness: 1.18,  // 24.5 kg; 1722 x 1134 x 30 mm
+    warranty: '25yr product / 30yr power', ulListing: 'UL 61730',
+    // 108 (6x18) 16BB half-cut bifacial cells, glass-glass, bifaciality 80% +/- 10%
+    bifacial: true, cellType: 'N-type TOPCon',
+    datasheetUrl: 'https://www.solarelectricsupply.com/media/sparsh/product_attachment/HD_Hyundai__Energy__Solutions_PV_Module_Residential_HiN-TxxxNF_BK__Datasheet_24.12.18_.pdf',
+  },
   // ── Curated Design-Studio catalog, unified into the single source (ids match
   // lib/db.ts so a panel picked in Design resolves in Engineering). Electrical
   // specs are representative datasheet values — FIELD VERIFY against the exact
