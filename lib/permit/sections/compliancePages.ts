@@ -46,6 +46,7 @@ import { CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 // CMEI — module identity comes from THE canonical accessor.
 import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import { projectRapidShutdownAuthority } from '../snapshot/rapidShutdownAuthority';
+import { percentLabel } from '@/lib/permit/utils/percentDisplay';
 export function pageWarningLabels(
   input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
   opts?: { merged?: boolean },
@@ -1088,7 +1089,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">Vmp / Imp</td><td class="iv">${vmpS} V / ${impS} A</td></tr>
             <tr><td class="il">Temp. Coeff. Voc</td><td class="iv">${ps.tempCoeffVocPctPerC ?? '—'}%/°C</td></tr>
             <tr><td class="il">NOCT</td><td class="iv">${d?.nominalOperatingTemp ?? 45}°C ±2°C</td></tr>
-            <tr><td class="il">Module Efficiency</td><td class="iv">${effS ? effS.toFixed(1) + '%' : '—'}</td></tr>
+            <tr><td class="il">Module Efficiency</td><td class="iv">${percentLabel(effS)}</td></tr>
             <tr><td class="il">Dimensions (L × W)</td><td class="iv">${ps.lengthIn}" × ${ps.widthIn}" (${(ps.lengthIn * 25.4).toFixed(0)} × ${(ps.widthIn * 25.4).toFixed(0)} mm)</td></tr>
             <tr><td class="il">Weight</td><td class="iv">${ps.weightLbs} lbs (${(ps.weightLbs * 0.453592).toFixed(1)} kg)</td></tr>
             <tr><td class="il">Cell Type</td><td class="iv">${d ? `${d.cellType}${d.bifacial ? ' — Bifacial' : ''}` : '—'}</td></tr>
@@ -1118,7 +1119,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">Temp. Coeff. Pmax</td><td class="iv">${tempCoeff}%/°C</td></tr>
             <tr><td class="il">Temp. Coeff. Voc</td><td class="iv">${VOC_TEMP_COEFF}%/°C</td></tr>
             <tr><td class="il">NOCT</td><td class="iv">${_dbPanel?.nominalOperatingTemp ?? 45}°C ±2°C</td></tr>
-            <tr><td class="il">Module Efficiency</td><td class="iv">${moduleEff.toFixed(1)}%</td></tr>
+            <tr><td class="il">Module Efficiency</td><td class="iv">${percentLabel(moduleEff)}</td></tr>
           </table>
           <div style="font-size:7px;color:#555;margin:-2px 0 4px 0;">Vmp/Imp and temperature coefficients are typical values — verify against the manufacturer's certified datasheet before construction.</div>
 
@@ -1171,7 +1172,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               <tr><td class="il">Type</td><td class="iv">${inv.type === 'micro' ? 'MICROINVERTER' : inv.type === 'optimizer' ? 'POWER OPTIMIZER' : inv.type?.toUpperCase() || 'STRING'}</td></tr>
               <tr><td class="il">AC Output</td><td class="iv">${Number(inv.acOutputKw).toFixed(2)} kW</td></tr>
               <tr><td class="il">Max DC Voltage</td><td class="iv">${inv.maxDcVoltage} V</td></tr>
-              <tr><td class="il">Efficiency (CEC)</td><td class="iv">${inv.efficiency}%</td></tr>
+              <tr><td class="il">Efficiency (CEC)</td><td class="iv">${percentLabel(inv.efficiency)}</td></tr>
               <tr><td class="il">UL Listing</td><td class="iv">${inv.ulListing || 'UL 1741'}</td></tr>
               <tr><td class="il">Grid Standards</td><td class="iv">IEEE 1547-2018, UL 1741 SA</td></tr>
               <tr><td class="il">Anti-Islanding</td><td class="iv">Yes — Per IEEE 1547</td></tr>
@@ -1226,7 +1227,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             ${_mvRow('MPPT Voltage Range', _microProj.fields.mpptMinV, v => `${v}–${_microProj!.fields.mpptMaxV.value ?? '—'} V`)}
             ${_mvRow('Max DC Input Current', _microProj.fields.maxDcInputCurrentA, v => `${v} A`)}
             ${_microProj.fields.maxUnitsPerBranch20A.value !== null ? _mvRow('Max Units / 20A Branch', _microProj.fields.maxUnitsPerBranch20A, v => `${v}`) : ''}
-            ${_mvRow('CEC Weighted Efficiency', _microProj.fields.cecEfficiency, v => `${v}%`)}
+            ${_mvRow('CEC Weighted Efficiency', _microProj.fields.cecEfficiency, v => percentLabel(v))}
             ${_mvRow('DC Connector', _microProj.fields.connector, v => `${v}`)}
             ${_mvRow('Rapid Shutdown', _microProj.fields.rapidShutdown, v => v ? 'Integrated — NEC 690.12 MLRS' : 'External MLRS required')}
             ${_mvRow('Unit Weight', _microProj.fields.weightLb, v => `${v} lbs`)}

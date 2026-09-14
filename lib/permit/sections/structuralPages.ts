@@ -64,6 +64,7 @@ import { CSS_FONT_SANS_STACK, CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 import { framingMember } from '@/lib/structural/roofPitch';
 import { resolveFramingMemberLabel } from '@/lib/permit/utils/framingDisplay';
 import { groundSnowLabel, roofSnowLabel, riskCategoryLabel, isGroundSnowEstablished, snowNarrativeSentence, ENV_NOT_ESTABLISHED } from '@/lib/permit/utils/environmentalDisplay';
+import { percentLabel } from '@/lib/permit/utils/percentDisplay';
 export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   const inputRec = input as unknown as Record<string, unknown>;
   const comp = getSheetComposition('roof', 'structural', cad, inputRec);
@@ -2381,7 +2382,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
             <td>${inv.manufacturer || '—'}</td><td>${inv.model || '—'}</td>
             <td class="tr">${Number(inv.acOutputKw).toFixed(2)}</td>
             <td class="tr">${inv.maxDcVoltage}V</td>
-            <td class="tr">${inv.efficiency}%</td>
+            <td class="tr">${percentLabel(inv.efficiency)}</td>
             <td>${inv.ulListing || 'UL 1741'}</td>
           </tr>`).join('')}
         </tbody>
