@@ -55,7 +55,9 @@ function roofStringProject(): any {
 // rail is pending). It returns only once a rail SKU is pinned+verified.
 // RS-1 (REVIEW STATUS) follows the cover — W10 (RP-D) dedicated active-blocker
 // registry sheet, always present, referenced from the cover SHEET INDEX.
-const LEGACY_SEQ = ['PV-0', 'RS-1', 'PV-1', 'PV-1B', 'PV-3', 'PV-4C', 'E-1', 'PV-4A',
+// E-1.1 (ELECTRICAL SCHEDULES & CALCULATIONS) joins the backbone: the three
+// calculation panels moved off E-1 so the schedules are readable (4.57 -> 8.15 pt).
+const LEGACY_SEQ = ['PV-0', 'RS-1', 'PV-1', 'PV-1B', 'PV-3', 'PV-4C', 'E-1', 'E-1.1', 'PV-4A',
   'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'SCHED-2', 'APP-A', 'DS-1', 'DS-2',
   'CERT', 'PE-1'];
 // Fence: no racking-mount image asset (SolFence has no public doc) and no

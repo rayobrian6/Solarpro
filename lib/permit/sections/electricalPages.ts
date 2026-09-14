@@ -1666,7 +1666,8 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     try {
       // embedded: E-1 has its own sheet title block — the SLD's internal
       // SOLARPRO panel duplicated project/system/code data beside it.
-      liveSvg = generateLiveSLD(input, cad, { embedded: true });
+      // topologyOnly: the calculation panels render on E-1.1 (sheet split).
+      liveSvg = generateLiveSLD(input, cad, { embedded: true, topologyOnly: true });
       if (!liveSvg || !liveSvg.trim().startsWith('<svg')) {
         liveSvg = null;
       }
@@ -1773,6 +1774,52 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     ${/* the machine-readable evidence stamp goes LAST so its JSON payload never
          lands inside the diagram/schedule text ranges harnesses slice on. */
       renderBarElectricalEvidenceStamp(getSnapshot(input), _e1Sections)}
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// E-1.1 — ELECTRICAL SCHEDULES & CALCULATIONS.
+//
+// The three calculation panels (AC BRANCH CIRCUIT INFO / AC SYSTEM CALCULATIONS
+// / EQUIPMENT SCHEDULE) used to sit in a 180 uu strip across E-1's 1994 uu
+// canvas. The planset embeds that canvas into a 1402.88 uu drawing box, so
+// k = 0.7036 and every glyph printed at 4.57 pt.
+//
+// MEASURED, not assumed: raising the type to reach 6.5 pt produced 80 overlaps
+// against a baseline of 5. The drawing cannot absorb the growth — content
+// occupies 99.8% of the canvas WIDTH while 14 of 33 vertical bands are empty,
+// and WIDTH is what binds k. No type change and no vertical reclaim can fix it.
+//
+// So the schedules get their own sheet, STACKED one full-width band each on a
+// canvas sized to the drawing box (1420 x 1000). k reaches ~0.99 and the SAME
+// 8.67 uu type prints at ~6.4 pt — no value, row or column changed.
+//
+// SAME PRODUCER, so the two sheets cannot drift: this calls the identical
+// renderer with schedulesOnly, and E-1 calls it with topologyOnly. The panels
+// are emitted by one code path, never duplicated.
+// ══════════════════════════════════════════════════════════════════════════
+export function pageElectricalSchedules(
+  input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
+): string {
+  let svg: string | null = null;
+  try {
+    svg = generateLiveSLD(input, cad, { embedded: true, schedulesOnly: true });
+    if (!svg || !svg.trim().startsWith('<svg')) svg = null;
+  } catch (err: unknown) {
+    console.warn('[E-1.1] schedule render failed:', err instanceof Error ? err.message : err);
+    svg = null;
+  }
+  if (!svg) {
+    // Same fail-closed discipline as E-1: a permit sheet does not degrade to a
+    // blank or a stale fallback — the schedules are governed content.
+    throw new Error(`[E-1.1] electrical schedule render failed for snapshot ${
+      (input as unknown as { _snapshot?: { meta?: { snapshotId?: string } } })._snapshot?.meta?.snapshotId ?? '(unstamped)'
+    } — fail closed`);
+  }
+  return `
+  <div class="page sld-page">
+    ${titleBlock(input, 'E-1.1', 'ELECTRICAL SCHEDULES & CALCULATIONS', pageNum, totalPages)}
+    <div class="sld-wrap">${svg}</div>
   </div>`;
 }
 

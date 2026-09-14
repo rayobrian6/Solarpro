@@ -46,7 +46,7 @@ import { pageCoverSheet } from './sections/coverSheet';
 import { pageReviewStatus, reviewStatusContPageCount } from './sections/reviewStatus';
 import { pageArrayPrimary, pageArrayGeometry, pageGroundArrayPlan, pageFencePlan } from './sections/arrayPages';
 import { pageStructuralPrimary, pageStructural, pageStructuralRoofContinuation, roofStructuralHasContinuation, pageEquipmentSchedule, pageEquipmentScheduleCont, schedContPageCount, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
-import { pageNECCompliance, pageConductorSchedule, pageConductorScheduleCont, hasPhysicalSectionSchedule, pageSingleLineDiagram } from './sections/electricalPages';
+import { pageNECCompliance, pageConductorSchedule, pageConductorScheduleCont, hasPhysicalSectionSchedule, pageSingleLineDiagram, pageElectricalSchedules } from './sections/electricalPages';
 import { pageWarningLabels, pageDisconnectDirectory, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter, pagePELetterRoof, pagePELetterGround, pagePELetterFence } from './sections/certPages';
 import {
@@ -1555,6 +1555,7 @@ export function generatePermitHTML(
     // roofStructuralHasContinuation so page count == sheet index).
     ...(_pv4cCont ? [(n: number, t: number) => pageStructuralRoofContinuation(input, cad, n, t)] : []),
     (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD — the electrical section's key sheet, first
+    (n, t) => pageElectricalSchedules(input, cad, n, t),               // E-1.1: the calc panels, off the diagram sheet
     (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
     (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
     // PV-4B.1 — the canonical physical section schedule + full ampacity chain +

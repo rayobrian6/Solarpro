@@ -720,13 +720,31 @@ export function synthesizeFleetFromSubEquipment(
  * `embedded` = rendering inside a planset sheet that has its own title block —
  * suppresses the SLD's internal SOLARPRO title panel (pure duplication on E-1).
  */
-export function generateLiveSLD(input: PermitInput, cad?: CADModel | null, opts?: { embedded?: boolean }): string {
+export function generateLiveSLD(
+  input: PermitInput,
+  cad?: CADModel | null,
+  opts?: { embedded?: boolean; topologyOnly?: boolean; schedulesOnly?: boolean },
+): string {
   const sldInput = buildSLDInputFromPermit(input, cad);
   if (opts?.embedded) {
     sldInput.suppressTitleBlock = true;
     // E-1 repair (post-AAC): the in-SVG conductor-schedule band re-derived the
     // canonical physical sections that render once on PV-4B.1 — suppress it and
     // crop the canvas so the schematic fills E-1's drawing wrapper.
+    sldInput.suppressScheduleBand = true;
+  }
+  // E-1 / E-1.1 SPLIT (2026-09-14). E-1 carries the one-line TOPOLOGY; the three
+  // calculation panels move to E-1.1. See suppressCalcBand for the measurement
+  // that forced the split (panels in a 180 uu strip across a 1994 uu canvas
+  // embedded at k = 0.7036 printed every glyph at 4.57 pt, and the drawing
+  // cannot absorb the type growth that would fix it).
+  if (opts?.topologyOnly) sldInput.suppressCalcBand = true;
+  // E-1.1: the three calculation panels, STACKED one per full-width band on a
+  // canvas sized to the sheet's drawing box. The topology stays on E-1.
+  if (opts?.schedulesOnly) {
+    sldInput.schedulesOnly = true;
+    sldInput.calcBandStacked = true;
+    sldInput.suppressCalcBand = false;
     sldInput.suppressScheduleBand = true;
   }
   return renderSLDProfessional(sldInput);

@@ -46,7 +46,9 @@ describe('W4 §5 — canonical-only SLD (dead buildSLD deleted, snapshot-bound)'
 
   it('E-1 consumes the canonical live renderer and fails closed (no stored/inline tier)', () => {
     const s = read(ELEC);
-    expect(s).toContain('generateLiveSLD(input, cad, { embedded: true })');
+    // E-1 / E-1.1 split: E-1 renders the TOPOLOGY only; the three calculation
+    // panels render on E-1.1 from the same producer (schedulesOnly).
+    expect(s).toContain('generateLiveSLD(input, cad, { embedded: true, topologyOnly: true })');
     expect(s).toContain('fail closed (no stored/inline fallback renders');
     // No stored-SVG render assignment, no inline builder in the live path.
     expect(s).not.toMatch(/sldBodyHtml\s*=[^;]*storedSldSvg/);

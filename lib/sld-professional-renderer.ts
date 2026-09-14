@@ -61,6 +61,11 @@ const GND_Y = BUS_Y + 140;  // SOT: increased for taller symbols
 
 // Bottom panels
 const CALC_Y  = SCH_Y + SCH_H + 8;
+
+// E-1.1 (schedules sheet) canvas. Sized to the planset's own drawing box
+// (1402.88 x 992 uu) so the embed scale is ~1.0 rather than 0.7036.
+const STACK_W = 1420;
+const STACK_H = 1000;
 const CALC_H  = 180;
 const SCHED_Y = CALC_Y + CALC_H + 8;
 const SCHED_H = H - MAR - SCHED_Y;
@@ -271,6 +276,27 @@ export interface SLDProfessionalInput {
    *  emitted and the viewBox is cropped to close below the calc panels. The
    *  standalone Diagram tab keeps the band (it has no companion schedule sheet). */
   suppressScheduleBand?:   boolean;
+  /** E-1 / E-1.1 SPLIT (2026-09-14) -- suppress the three CALCULATION PANELS
+   *  (AC BRANCH CIRCUIT INFO / AC SYSTEM CALCULATIONS / EQUIPMENT SCHEDULE) so
+   *  E-1 carries the one-line TOPOLOGY only.
+   *
+   *  WHY THE SPLIT EXISTS. The panels sit in a 180 uu strip across a 1994 uu
+   *  canvas that the planset embeds into a 1402.9 uu wrapper, so k = 0.7036 and
+   *  every glyph printed at 4.57 pt. MEASURED: raising the type to reach 6.5 pt
+   *  produced 80 overlaps against a baseline of 5 -- the drawing cannot absorb
+   *  the growth, because content already occupies 99.8% of the canvas WIDTH
+   *  while 14 of 33 vertical bands are empty. Width is what binds k, so neither
+   *  a type increase nor a vertical reclaim can fix it. The schedules move to
+   *  their own sheet instead.
+   *
+   *  The panels are NOT deleted -- they render on E-1.1 from this same code. */
+  suppressCalcBand?:       boolean;
+  /** E-1.1 renders the three calculation panels STACKED — one full-width band
+   *  each — on a canvas sized to the sheet's drawing box. Side by side they span
+   *  the full 1994 uu width, and width is what binds the embed scale. */
+  calcBandStacked?:        boolean;
+  /** E-1.1 renders the SCHEDULES ONLY -- the one-line topology stays on E-1. */
+  schedulesOnly?:          boolean;
   projectName:             string;
   clientName:              string;
   address:                 string;
@@ -1895,11 +1921,19 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // band suppressed the canvas is also cropped VERTICALLY to close just below
   // the calc panels — the blank band would otherwise force letterboxing that
   // shrinks the schematic inside E-1's drawing wrapper.
-  const effW = input.suppressTitleBlock ? TB_X - 10 : W;
-  const effH = input.suppressScheduleBand ? CALC_Y + CALC_H + MAR : H;
+  const effW = input.schedulesOnly ? STACK_W : input.suppressTitleBlock ? TB_X - 10 : W;
+  // With the calc panels gone the canvas closes just below the schematic, so a
+  // blank band cannot letterbox the diagram inside E-1's drawing box.
+  const effH = input.schedulesOnly ? STACK_H
+    : input.suppressCalcBand ? CALC_Y + MAR
+    : input.suppressScheduleBand ? CALC_Y + CALC_H + MAR : H;
   parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${effH}" viewBox="0 0 ${effW} ${effH}" preserveAspectRatio="xMidYMid meet" style="background:${WHT};">`);
   parts.push(rect(0, 0, effW, effH, {fill:WHT, stroke:WHT, sw:0}));
   parts.push(rect(MAR/2, MAR/2, effW-MAR, effH-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
+  // Consumed by the schedules AND by titleBlockSvg, so it lives above both guards.
+  const dcKw = input.totalModules * input.panelWatts / 1000;
+  // E-1.1 draws the schedules only; the topology stays on E-1.
+  if (!input.schedulesOnly) {
 
   // ── Title ─────────────────────────────────────────────────────────────────
   const tcx = (DX + TB_X) / 2;
@@ -2782,13 +2816,40 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   });
 
   // ── CALCULATION PANELS ────────────────────────────────────────────────────
+  // E-1 / E-1.1 split: E-1 is the one-line TOPOLOGY; the panels render on E-1.1.
+  } // end !schedulesOnly — the one-line topology
+  if (!input.suppressCalcBand) {
   const cW = Math.floor(DW/3) - 4;
-  const dcKw = input.totalModules * input.panelWatts / 1000;
 
   // Panel 1
-  const p1x = DX;
-  parts.push(rect(p1x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
-  parts.push(rect(p1x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
+  // -- E-1.1 STACKED MODE ---------------------------------------------------
+  // Side by side, the three panels span the full 1994 uu canvas width, and WIDTH
+  // is what binds the embed scale (k = 1402.88 / 1994 = 0.7036), so every glyph
+  // printed at 4.57 pt no matter how much vertical space was free. Stacked, each
+  // panel is one full-width band on a canvas sized to the sheet's own drawing
+  // box, so k reaches ~1.0 and the same 8.67 uu type prints at ~6.5 pt with no
+  // change to a single value.
+  const _cbStack = !!input.calcBandStacked;
+  // 1340 uu inside a 1420 uu canvas. Chosen so the planset's 1402.88 uu drawing
+  // box scales it at k = 0.988 instead of 0.7036 -- the SAME 8.67 uu type then
+  // prints at 6.4 pt rather than 4.57, with no value and no row changed.
+  const PCW = _cbStack ? STACK_W - 2 * MAR : Math.floor(DW / 3) - 4;
+  const PCH = _cbStack ? Math.floor((STACK_H - 2 * MAR - 2 * 18) / 3) : CALC_H;
+  const PY1 = _cbStack ? DY + 6 : CALC_Y;
+  const PY2 = _cbStack ? PY1 + PCH + 18 : CALC_Y;
+  const PY3 = _cbStack ? PY2 + PCH + 18 : CALC_Y;
+  /** Row-height cap. The side-by-side band is 180 uu tall, so 12-13 uu is right;
+   *  a stacked band is ~288 uu and the same cap left it ~46% empty. */
+  const PRH_MAX = _cbStack ? 22 : 13;
+  /** Header-bar height. The row baseline is measured from BELOW it. */
+  const PBH = 14;
+  /** Row type, scaled with the row box so the band reads as a drafted table
+   *  rather than small text floating in white space. */
+  const PFS = _cbStack ? 11 : F.tiny;
+  const PFH = _cbStack ? 12 : F.hdr;
+  const PX1 = DX;
+  parts.push(rect(PX1, PY1, PCW, PCH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(PX1, PY1, PCW, 14, {fill:BLK, sw:0}));
 
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
@@ -2823,7 +2884,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _brWireShow = _brGaugeSet.length
       ? `${_brGaugeSet.join('/')} AWG`
       : `${branchRun?.wireGauge ?? input.branchWireGauge ?? '#10 AWG'}`;
-    parts.push(txt(p1x+cW/2, CALC_Y+10, 'AC BRANCH CIRCUIT INFO', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+    parts.push(txt(PX1+PCW/2, PY1+10, 'AC BRANCH CIRCUIT INFO', {sz:PFH, bold:true, anc:'middle', fill:WHT}));
     const rows: [string,string][] = [
       ['Topology','MICROINVERTER'],
       ['Microinverters',`${md} units`],
@@ -2838,12 +2899,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['Module Voc',`${input.panelVoc} V`],
       ['Module Isc',`${input.panelIsc} A`],
     ];
-    const rh = Math.min(13, (CALC_H-17)/rows.length);
+    const rh = Math.min(PRH_MAX, (PCH-17)/rows.length);
     rows.forEach(([l,v],i) => {
-      const ry = CALC_Y+19+i*rh;
-      if (i%2===1) parts.push(rect(p1x, ry-rh+2, cW, rh, {fill:LGY, stroke:'none', sw:0}));
-      parts.push(txt(p1x+4, ry, l, {sz:F.tiny}));
-      parts.push(txt(p1x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true}));
+      const ry = PY1+PBH+rh*0.74+i*rh;
+      if (i%2===1) parts.push(rect(PX1, ry-rh+2, PCW, rh, {fill:LGY, stroke:'none', sw:0}));
+      parts.push(txt(PX1+4, ry, l, {sz:PFS}));
+      parts.push(txt(PX1+PCW-4, ry, v, {sz:PFS, anc:'end', bold:true}));
     });
   } else {
     const pps = input.panelsPerString ?? Math.round(input.totalModules/Math.max(input.totalStrings,1));
@@ -2866,7 +2927,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const op  = input.ocpdPerString ?? input.dcOCPD;
     const dt  = input.designTempMin;
     const dar = input.dcAcRatio ?? calcDcAcRatio(dcKw, input.acOutputKw);
-    parts.push(txt(p1x+cW/2, CALC_Y+10, 'DC SYSTEM CALCULATIONS', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+    parts.push(txt(PX1+PCW/2, PY1+10, 'DC SYSTEM CALCULATIONS', {sz:PFH, bold:true, anc:'middle', fill:WHT}));
     const rows: [string,string][] = [
       ['Module Voc (STC)',`${input.panelVoc} V`],
       ['Module Isc (STC)',`${input.panelIsc} A`],
@@ -2882,20 +2943,20 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['Total DC Power',`${dcKw.toFixed(2)} kW`],
       ['DC/AC Ratio',`${dar.toFixed(2)}`],
     ];
-    const rh = Math.min(13, (CALC_H-17)/rows.length);
+    const rh = Math.min(PRH_MAX, (PCH-17)/rows.length);
     rows.forEach(([l,v],i) => {
-      const ry = CALC_Y+19+i*rh;
-      if (i%2===1) parts.push(rect(p1x, ry-rh+2, cW, rh, {fill:LGY, stroke:'none', sw:0}));
-      parts.push(txt(p1x+4, ry, l, {sz:F.tiny}));
-      parts.push(txt(p1x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true}));
+      const ry = PY1+PBH+rh*0.74+i*rh;
+      if (i%2===1) parts.push(rect(PX1, ry-rh+2, PCW, rh, {fill:LGY, stroke:'none', sw:0}));
+      parts.push(txt(PX1+4, ry, l, {sz:PFS}));
+      parts.push(txt(PX1+PCW-4, ry, v, {sz:PFS, anc:'end', bold:true}));
     });
   }
 
   // Panel 2: AC calcs
-  const p2x = DX+cW+4;
-  parts.push(rect(p2x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
-  parts.push(rect(p2x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
-  parts.push(txt(p2x+cW/2, CALC_Y+10, 'AC SYSTEM CALCULATIONS', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+  const PX2 = _cbStack ? DX : DX + PCW + 4;
+  parts.push(rect(PX2, PY2, PCW, PCH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(PX2, PY2, PCW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(PX2+PCW/2, PY2+10, 'AC SYSTEM CALCULATIONS', {sz:PFH, bold:true, anc:'middle', fill:WHT}));
   const acRows: [string,string][] = [
     ['AC Output (kW)',`${Number(input.acOutputKw).toFixed(2)} kW`],
     ['AC Output Amps',`${input.acOutputAmps} A`],
@@ -2940,21 +3001,21 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['120% Rule',`${(input.poiRulePasses ?? ((input.panelBusRating ?? input.mainPanelAmps)*1.2 >= input.mainPanelAmps+input.backfeedAmps)) ? 'PASS ✓':'FAIL ✗'}`] as [string,string],
     ]),
   ];
-  const acRh = Math.min(13, (CALC_H-17)/acRows.length);
+  const acRh = Math.min(PRH_MAX, (PCH-17)/acRows.length);
   acRows.forEach(([l,v],i) => {
-    const ry = CALC_Y+19+i*acRh;
-    if (i%2===1) parts.push(rect(p2x, ry-acRh+2, cW, acRh, {fill:LGY, stroke:'none', sw:0}));
-    parts.push(txt(p2x+4, ry, l, {sz:F.tiny}));
+    const ry = PY2+PBH+acRh*0.74+i*acRh;
+    if (i%2===1) parts.push(rect(PX2, ry-acRh+2, PCW, acRh, {fill:LGY, stroke:'none', sw:0}));
+    parts.push(txt(PX2+4, ry, l, {sz:PFS}));
     const isPF = v.includes('✓')||v.includes('✗');
     const vc2 = isPF ? (v.includes('✓')?PASS:FAIL) : BLK;
-    parts.push(txt(p2x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true, fill:vc2}));
+    parts.push(txt(PX2+PCW-4, ry, v, {sz:PFS, anc:'end', bold:true, fill:vc2}));
   });
 
   // Panel 3: Equipment schedule
-  const p3x = DX+(cW+4)*2;
-  parts.push(rect(p3x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
-  parts.push(rect(p3x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
-  parts.push(txt(p3x+cW/2, CALC_Y+10, 'EQUIPMENT SCHEDULE', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+  const PX3 = _cbStack ? DX : DX + (PCW + 4) * 2;
+  parts.push(rect(PX3, PY3, PCW, PCH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(PX3, PY3, PCW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(PX3+PCW/2, PY3+10, 'EQUIPMENT SCHEDULE', {sz:PFH, bold:true, anc:'middle', fill:WHT}));
   const md2 = input.deviceCount ?? input.totalModules;
   const pp2 = input.panelsPerString ?? Math.round(input.totalModules/Math.max(input.totalStrings,1));
   const eqRows: [string,string][] = isMicro ? [
@@ -2999,13 +3060,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ...((input.generatorKw ?? 0) > 0 ? [['Generator',`${input.generatorBrand??''} ${input.generatorKw}kW`] as [string,string]] : []),
     ...(input.atsAmpRating ? [['ATS',`${input.atsBrand??''} ${input.atsAmpRating}A`] as [string,string]] : []),
   ];
-  const eqRh = Math.min(12, (CALC_H-17)/eqRows.length);
+  const eqRh = Math.min(PRH_MAX, (PCH-17)/eqRows.length);
   eqRows.forEach(([l,v],i) => {
-    const ry = CALC_Y+19+i*eqRh;
-    if (i%2===1) parts.push(rect(p3x, ry-eqRh+2, cW, eqRh, {fill:LGY, stroke:'none', sw:0}));
-    parts.push(txt(p3x+4, ry, l, {sz:F.tiny}));
-    parts.push(txt(p3x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true}));
+    const ry = PY3+PBH+eqRh*0.74+i*eqRh;
+    if (i%2===1) parts.push(rect(PX3, ry-eqRh+2, PCW, eqRh, {fill:LGY, stroke:'none', sw:0}));
+    parts.push(txt(PX3+4, ry, l, {sz:PFS}));
+    parts.push(txt(PX3+PCW-4, ry, v, {sz:PFS, anc:'end', bold:true}));
   });
+
+  } // end !suppressCalcBand — the three calculation panels
 
   // ── CONDUIT & CONDUCTOR SCHEDULE ──────────────────────────────────────────
   // Suppressed in embedded planset mode — the canonical physical section
@@ -3526,7 +3589,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     || (input.totalModules * input.panelWatts) / 1000;
 
   // ── SVG root (same canvas + embedded-crop contract as the legacy path) ────
-  const effW = input.suppressTitleBlock ? TB_X - 10 : W;
+  const effW = input.schedulesOnly ? STACK_W : input.suppressTitleBlock ? TB_X - 10 : W;
   // preserveAspectRatio stated EXPLICITLY. "xMidYMid meet" is the spec default,
   // so this is behaviorally inert — but the page-fit harness
   // (scripts/planset-pagefit.mjs) only lets the multi-lane root through via its

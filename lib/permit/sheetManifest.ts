@@ -190,6 +190,7 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
       { id: 'PV-4C', title: 'STRUCTURAL CALCULATIONS — ASCE 7-22 ANALYSIS' },
       ...(o.includePv4cCont ? [{ id: 'PV-4C.1', title: 'STRUCTURAL CALCULATIONS (CONTINUED) — DETAIL · LOAD COMBINATION · CONCLUSION' }] : []),
       { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
+      { id: 'E-1.1', title: 'ELECTRICAL SCHEDULES & CALCULATIONS' },
       { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
       { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
       ...(o.includePv4b1 ? [{ id: 'PV-4B.1', title: 'CONDUCTOR SCHEDULE — PHYSICAL SECTIONS' }] : []),
@@ -243,6 +244,7 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     ...(o.includePv4cCont ? [{ id: 'PV-4C.1', title: 'STRUCTURAL CALCULATIONS (CONTINUED) — DETAIL · LOAD COMBINATION · CONCLUSION' }] : []),
     // ── electrical (how it's wired — the single-line leads, calcs support) ─
     { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
+    { id: 'E-1.1', title: 'ELECTRICAL SCHEDULES & CALCULATIONS' },
     { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
     { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
     // Post-AAC E-1 repair: the canonical physical section schedule sheet
