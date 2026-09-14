@@ -90,18 +90,67 @@ export interface ReleasePhase {
  *  the thing, not enough to become a paragraph. The full title, the explanation
  *  and the evidence stay in the Project Review Record. Falls back to the code so
  *  a new requirement is never silently unnamed. */
+// ── 2026-09-14 — THE CAP CUT MID-PREDICATE ────────────────────────────────
+// The cover banner read:
+//
+//     DESIGN INCOMPLETE — 2 design requirements outstanding: project legal
+//     authority and wind / exposure / risk / snow criteria not.
+//
+// "criteria not" is a sentence stopped in the middle of its own verb. The cap
+// sliced 46 characters out of a full clause and trimmed to a word boundary,
+// which lands wherever it lands — 30 of the declaration titles are longer
+// than the cap, so this was not a one-off.
+//
+// A previous pass removed the ellipsis. That addressed the punctuation and left
+// the truncation, which was the actual defect.
+//
+// THE TITLES ARE ALL <noun phrase> <predicate>: "... not established from ...",
+// "... disagree on ...", "... exceeds ...", "... lacks ...". Cutting at the
+// PREDICATE gives the noun phrase, which is exactly what the sentence wants
+// ("N requirements outstanding: <a> and <b>") and reads as English every time.
+// The full title, the explanation and the evidence stay on RS-1.
+const PREDICATE_BOUNDARY = new RegExp(
+  '\\s+(?:' + [
+    'does not', 'do not', 'could not', 'is not', 'are not', 'has no', 'with no',
+    'present but', 'not', 'is', 'are', 'was', 'were', 'disagree', 'disagrees',
+    'conflicts', 'exceeds', 'lacks', 'covers', 'cover', 'resolves', 'resolved',
+    'refused', 'without', 'covering', 'containing',
+  ].join('|') + ')\\s+', 'i');
+
+/** Trailing function words left behind by a hard cut. */
+const DANGLING = /\s+(?:not|is|are|was|were|the|a|an|and|or|of|to|by|for|from|with|on|in|at|that|than|as|its|no|does|do|be|been|covering)$/i;
+
+/** The requirement's short human title, for the one-sentence statement.
+ *
+ *  Declaration titles are written for the review record and run long ("project
+ *  legal authority (address, APN, boundary, AHJ, fire) not verified from an
+ *  official source"). A drawing gets the head of that clause — enough to name
+ *  the thing, not enough to become a paragraph. Falls back to the code so a new
+ *  requirement is never silently unnamed. */
 function titleOf(r: ReleaseRequirement): string {
-  const full = (r.title ?? REQUIREMENT_DECLARATIONS[r.requirementCode]?.title ?? r.requirementCode).trim();
-  // cut at the first parenthetical or em-dash aside, then cap on a word boundary
-  const head = full.split(/\s+\(|\s+—\s+/)[0].trim();
-  if (head.length <= 46) return head;
-  const cut = head.slice(0, 46);
-  const sp = cut.lastIndexOf(' ');
-  // 2026-08-29 - NO ELLIPSIS. The caller appends a full stop to the joined list,
-  // so a truncated title produced "...engineering-review record....' on the cover
-  // - an ellipsis immediately followed by a period. A clipped clause reads as a
-  // clause; the full title is on RS-1 either way.
-  return (sp > 20 ? cut.slice(0, sp) : cut).trim();
+  const decl = REQUIREMENT_DECLARATIONS[r.requirementCode] as { title?: string; shortTitle?: string } | undefined;
+  // An explicit short label always wins, for a title this cannot parse well.
+  const explicit = (decl?.shortTitle ?? '').trim();
+  if (explicit) return explicit;
+
+  const full = (r.title ?? decl?.title ?? r.requirementCode).trim();
+  // drop a parenthetical or em-dash aside first — it is never the head
+  let head = full.split(/\s+\(|\s+—\s+/)[0].trim();
+
+  // cut at the predicate, so the label is the subject noun phrase
+  const pm = head.match(PREDICATE_BOUNDARY);
+  if (pm && pm.index != null && pm.index >= 8) head = head.slice(0, pm.index).trim();
+
+  if (head.length > 46) {
+    const cut = head.slice(0, 46);
+    const sp = cut.lastIndexOf(' ');
+    head = (sp > 20 ? cut.slice(0, sp) : cut).trim();
+  }
+  // NO ELLIPSIS: the caller appends a full stop to the joined list, so one would
+  // sit immediately before a period. Instead, never end on a dangling word.
+  let prev = '';
+  while (head !== prev) { prev = head; head = head.replace(DANGLING, '').trim(); }
+  return head || r.requirementCode;
 }
 
 /** Join a few titles readably; beyond `max`, count the remainder rather than
