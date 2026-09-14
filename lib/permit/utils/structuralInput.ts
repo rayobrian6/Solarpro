@@ -113,7 +113,10 @@ export function buildStructuralInputForPermit(
     // plane the analysis ran on instead of restating a bare number.
     roofSlopeEstablished: _slope.established,
     roofSlopePlaneId: _slope.planeId,
-    roofSlopeBasis: _slope.basis,
+    // SHEET-SAFE: the technical basis embeds a plane UUID and an internal object
+    // path, and both were reaching the stamped calc sheet. Full provenance stays
+    // on the authority (_slope.basis) for the review trail and the logs.
+    roofSlopeBasis: _slope.sheetBasis,
     // ASCE 7-22 Fig. 7.4-1 picks a different snow slope-factor curve for an
     // unobstructed SLIPPERY surface. Asphalt shingle is not one, and the engine
     // used to apply cos(pitch) to every roof regardless.

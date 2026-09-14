@@ -68,8 +68,24 @@ export interface GoverningRoofSlope {
   /** the shallowest populated plane — the governing case for a SNOW slope
    *  factor, where a flatter roof retains more (ASCE 7-22 Fig. 7.4-1). */
   shallowestDeg: number | null;
-  /** one sentence a reviewer can act on. */
+  /** one sentence a reviewer can act on. Carries the plane id and the record it
+   *  was read from — the REVIEW TRAIL, for logs, evidence and debugging. */
   basis: string;
+  /** the same sentence, SAFE TO PRINT ON A SHEET.
+   *
+   *  `basis` embeds a raw plane UUID and an internal object path, and both were
+   *  reaching the stamped calc sheet:
+   *
+   *      Roof Slope Basis | the steepest of 2 roof planes:
+   *                         aa72d4e3-2a53-48de-9fde-88acb2a8e01a at 18.2
+   *                         (from cad.roof.planes)
+   *
+   *  A plan reviewer cannot act on a database key, and a source path advertises
+   *  our internals on a document that gets stamped. This identifies the plane by
+   *  what the drawings actually show -- its slope and how many modules sit on it
+   *  -- which a reviewer can match against the PV-1 roof table. Provenance is not
+   *  lost: `basis` keeps it for the review trail. */
+  sheetBasis: string;
 }
 
 /**
@@ -170,6 +186,11 @@ export function projectGoverningRoofSlope(src: RoofSlopeSources): GoverningRoofS
         ? `the design's single roof plane ${governing.planeId} (${governing.slopeDeg.toFixed(1)}°, from ${governing.source})`
         : `the steepest of ${planes.length} roof planes${bearing.length > 0 ? ' carrying modules' : ''}: `
           + `${governing.planeId} at ${governing.slopeDeg.toFixed(1)}° (from ${governing.source})`,
+      sheetBasis: planes.length === 1
+        ? `the design's single roof plane at ${governing.slopeDeg.toFixed(1)}°`
+        : `the steepest of ${planes.length} roof planes${bearing.length > 0 ? ' carrying modules' : ''}: `
+          + `${governing.slopeDeg.toFixed(1)}°${governing.moduleCount ? ` (${governing.moduleCount} modules)` : ''}`
+          + ' — see roof plan',
     };
   }
 
@@ -184,6 +205,7 @@ export function projectGoverningRoofSlope(src: RoofSlopeSources): GoverningRoofS
       planes: [],
       shallowestDeg: stated,
       basis: `operator-entered roof pitch (${stated.toFixed(1)}°); no roof plane geometry is on file to trace it to`,
+      sheetBasis: `operator-entered roof pitch (${stated.toFixed(1)}°); no roof plane geometry on file`,
     };
   }
 
@@ -195,5 +217,7 @@ export function projectGoverningRoofSlope(src: RoofSlopeSources): GoverningRoofS
     shallowestDeg: null,
     basis: 'NO roof slope is established — no roof plane carries a pitch and no operator pitch is recorded; '
       + 'calculations run on a non-authoritative nominal and the geometry is UNVERIFIED',
+    sheetBasis: 'NO roof slope is established — no roof plane carries a pitch and no operator pitch is '
+      + 'recorded; the roof geometry is UNVERIFIED',
   };
 }
