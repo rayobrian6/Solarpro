@@ -332,7 +332,15 @@ describe('pageValidationSummary survey evidence rendering', () => {
 
     expect(html).toContain('No survey evidence attached to this permit run');
     expect(html).toContain('plan-set assumptions are based on design/canonical inputs only');
-    expect(html).toContain('ALL CHECKS PASSED');
+    // This fixture carries `groundSnowLoad: 0` (line 253). The old check was
+    // `groundSnowLoad >= 0`, so ZERO satisfied it and the page reported
+    // 'Ground Snow Load Verified | PASS' / 'ALL CHECKS PASSED' for a value
+    // nobody established. This test's intent is that a missing SURVEY does not
+    // FAIL canonical validation -- which still holds -- so it now asserts the
+    // honest state instead of the false green.
+    expect(html).not.toContain('CHECK(S) FAILED');
+    expect(html).toContain('CHECK(S) PENDING');
+    expect(html).toContain('NOT ESTABLISHED');
   });
 
   it('does not manufacture bridge counts from raw duplicated photo arrays when manifest counts are canonical', () => {
