@@ -43,6 +43,7 @@ import { resolveSiteDesignLoads } from '../permit/snapshot/siteDesignLoads';
 import { projectRackingBondingAuthority } from '../permit/snapshot/rackingBonding';
 import { pitchRatioFromDeg } from '@/lib/structural/roofPitch';
 import { framingMember } from '@/lib/structural/roofPitch';
+import { resolveFramingMemberLabel } from '@/lib/permit/utils/framingDisplay';
 
 // §3 (closeout 2026-07-23) — the PV-1/PV-3 conduit-run callout descriptor. Every
 // conduit description routes through the CANONICAL physical-raceway projection —
@@ -565,7 +566,7 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     pathwayFt,
     roofType:      ((p?.roofType as string) || 'SHINGLE').toUpperCase(),
     mountSys:      _mountName.toUpperCase(),
-    rafterSize:    ((p?.rafterSize as string) || '2x6'),
+    rafterSize:    resolveFramingMemberLabel(p as never),
     rafterSpacing: (p?.rafterSpacing as number) || 24,
     // Framing type mirrors the SAME determination PV-4C/PE-1/CERT use, so PV-3
     // labels the framing consistently with the structural sheets (truss vs stick).

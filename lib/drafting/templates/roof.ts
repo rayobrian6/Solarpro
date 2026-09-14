@@ -57,6 +57,7 @@ import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
 // specs table / cover / PV-4C / PE-1 so no sheet prints a different pitch.
 import { resolveRoofPitch } from '../sheetComposition';
 import { resolveAccessPathwayIn, resolveHipValleySetbackIn } from '@/lib/permit/utils/fireSetback';
+import { resolveFramingMemberLabel, isFramingMemberObserved } from '@/lib/permit/utils/framingDisplay';
 // §6 ROUTE PROVENANCE (07-22): the trench/conduit annotation must NOT claim
 // "ROUTE FIELD-VERIFIED" while run lengths are CAD-derived estimates — it prints
 // "CAD-DERIVED ESTIMATE — FIELD VERIFY", driven by the snapshot's lengthSource.
@@ -1548,7 +1549,7 @@ export function drawRoofPlan(
   // (roof # / modules / azimuth / tilt / truss) + an "ARRAY & ROOF CALC" summary
   // (plan-view roof area / array area / % coverage). Rendered top-left, opaque.
   if (!isBranchColorMode) {
-    const trussSize    = ((project as any).rafterSize || (project as any).trussSize || '2×4').toString();
+    const trussSize    = resolveFramingMemberLabel(project as any);
     const trussSpacing = `${rafterSp}" O.C.`;
     // Module→facet attribution: point-in-poly first, NEAREST-PLANE fallback
     // for modules on regularized facet borders — the column MUST sum to the
@@ -2064,7 +2065,8 @@ export function drawRoofStructural(
   const _pitchAuth = resolveRoofPitch(cad, input as unknown as Record<string, unknown>);
   const pitchNum   = _pitchAuth.ratio;
   const pitchStr   = _pitchAuth.pitchStr;
-  const rafterSz   = project.rafterSize         || '2x6';
+  const rafterSz   = resolveFramingMemberLabel(project as any);
+  const _framingObserved = isFramingMemberObserved(project as any);
   const rafterSp   = project.rafterSpacing      || 24;
   // ══ 2026-08-29 - PV-3 SAID BOTH WORDS ABOUT ONE MEMBER ═══════════════════
   // Its own specs table printed "TRUSS SIZE 2x6 / TRUSS SPACING 24 O.C." (from
@@ -2213,10 +2215,15 @@ export function drawRoofStructural(
     els.push(`<rect x="${rfx.toFixed(1)}" y="${rfTop.toFixed(1)}" width="${rafWidth}" height="${rafDepth}" fill="url(#rafter-wood)" stroke="#5a3810" stroke-width="1.2"/>`);
     // Wood grain hatch
     els.push(`<rect x="${rfx.toFixed(1)}" y="${rfTop.toFixed(1)}" width="${rafWidth}" height="${rafDepth}" fill="url(#hatch-wood)" opacity="0.5"/>`);
-    // Rafter size label
-    els.push(drawText(rfx + rafWidth / 2, rfTop - 3, rafterSz, {
-      anchor: 'middle', fontSize: 6, fill: '#333', fontWeight: 'bold',
-    }));
+    // Rafter size label. Suppressed when the member was never observed: the
+    // cross-section draws one label PER BAY, so an unobserved member printed
+    // "NOT OBSERVED" four times in a row and read as a broken drawing. The
+    // legend and the sheathing callout still state the condition once.
+    if (_framingObserved) {
+      els.push(drawText(rfx + rafWidth / 2, rfTop - 3, rafterSz, {
+        anchor: 'middle', fontSize: 6, fill: '#333', fontWeight: 'bold',
+      }));
+    }
   }
 
   // ── Roof layer stack (left bay — showing all roof layers) ──
@@ -2466,7 +2473,7 @@ export function drawRoofStructural(
     // instruction/product assertion; it may print only under verified applicability.
     { ax: _cx + _butW / 2 - 4,  ay: _padTop + 1.5,               text: _exactD ? 'ALPHASEAL BUTYL FLASHING (SELF-SEAL)' : 'MOUNT BASE FLASHING — PENDING VERIFIED SELECTION' },
     { ax: _rlx + roofW - 8,     ay: deckTop + _shH / 2,          text: `${roofType} SHINGLE / UNDERLAYMENT` },
-    { ax: _rlx + roofW - 8,     ay: _rafTop + _rafH / 2,         text: `SHEATHING (5/8" OSB) + ${rafterSz} ${_FRAME} @ ${rafterSp}" O.C.` },
+    { ax: _rlx + roofW - 8,     ay: _rafTop + _rafH / 2,         text: `SHEATHING (5/8" OSB) + ${_FRAME} ${_framingObserved ? rafterSz : '(SIZE NOT OBSERVED)'} @ ${rafterSp}" O.C.` },
   ];
   const _clX = dcx + dcr - 6;
   _callouts.forEach((c, i) => {

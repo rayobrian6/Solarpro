@@ -62,6 +62,7 @@ import { buildProcurementApproval, type PermitBOMItem } from '../utils/bomForPer
 // nest safely inside a double-quoted style attribute).
 import { CSS_FONT_SANS_STACK, CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 import { framingMember } from '@/lib/structural/roofPitch';
+import { resolveFramingMemberLabel } from '@/lib/permit/utils/framingDisplay';
 export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   const inputRec = input as unknown as Record<string, unknown>;
   const comp = getSheetComposition('roof', 'structural', cad, inputRec);
@@ -850,7 +851,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const trussLoadPsf  = structural?.rafter?.totalLoadPsf?.toFixed(1) || '—';
   const totalUplift = structural?.attachment?.totalUpliftPerAttachment?.toFixed(0) || '—';
 
-  const rafterSize  = project.rafterSize || '2×6';
+  const rafterSize  = resolveFramingMemberLabel(project as never);
   const rafterSpace = project.rafterSpacing || 24;
   // Same resolution chain as PV-3/PE-1 (engineering-resolved → user input →
   // racking rated max) and lag spec from the SELECTED mounting system — the
