@@ -49,6 +49,7 @@ import {
 import {
   certificationApproved, peLetterSheetTitle, peLetterHeadingBlock,
 } from '../utils/peLetter';
+import { groundSnowLabel, riskCategoryLabel, ENV_NOT_ESTABLISHED } from '@/lib/permit/utils/environmentalDisplay';
 export { certificationApproved };
 
 /** PRR §3 — THE APPROVING ENGINEER OF RECORD, or null.
@@ -470,16 +471,17 @@ function _peSiteLoading(input: PermitInput): string {
   // risk category is the canonical env value, not a hardcoded "II (Residential)".
   const _sp = projectStructuralFromInput(input);
   const windSpeed  = _sp.present ? fmt(_sp.windSpeedMph) : (structural?.wind?.windSpeed || '—');
-  const snowLoad   = _sp.present && _sp.groundSnowPsf != null ? String(_sp.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? '—');
+  const snowLoad   = groundSnowLabel(_sp as never);
   const exposure   = _sp.present ? fmtStr(_sp.exposure) : (structural?.wind?.exposureCategory || '—');
-  const riskCat    = _sp.riskCategory ? `${_sp.riskCategory} (Residential)` : '—';
+  const _rc        = riskCategoryLabel(_sp as never);
+  const riskCat    = _rc === ENV_NOT_ESTABLISHED ? _rc : `${_rc} (Residential)`;
   // AHJ-derived category before any default -- the '|| D' fallback printed
   // SDC D on PE-1 while PV-0 printed the AHJ's CAT. B for the same site.
   const sdc        = compliance.structural?.seismic?.sdc || input.project.seismicCategory || '—';
   return `
   <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Site Loading Parameters</td></tr>
   <tr><td class="il">Design Wind Speed (Vult)</td><td class="iv">${windSpeed} mph</td><td class="il">Exposure Category</td><td class="iv">Cat. ${exposure}</td></tr>
-  <tr><td class="il">Ground Snow Load (pg)</td><td class="iv">${snowLoad} psf</td><td class="il">Risk Category</td><td class="iv">${riskCat}</td></tr>
+  <tr><td class="il">Ground Snow Load (pg)</td><td class="iv">${snowLoad}</td><td class="il">Risk Category</td><td class="iv">${riskCat}</td></tr>
   <tr><td class="il">Environmental Load Source</td><td class="iv" colspan="3" data-env-source="pe-1" style="color:${_sp.environmentalUnverified ? '#b45309' : '#000'};font-weight:bold;">${escapeH(_sp.environmentalSourceLine)}</td></tr>
   <tr><td class="il">Seismic Design Category</td><td class="iv">${sdc}</td><td class="il">Importance Factor</td><td class="iv">1.0</td></tr>`;
 }

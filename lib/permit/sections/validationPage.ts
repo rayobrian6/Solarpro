@@ -24,6 +24,7 @@ import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 // CMDA — the ONLY correct inline font-family spelling (single-quoted names
 // nest safely inside a double-quoted style attribute).
 import { CSS_FONT_MONO_STACK } from '../fonts/fontPack';
+import { groundSnowLabel, riskCategoryLabel, isGroundSnowEstablished, ENV_NOT_ESTABLISHED } from '@/lib/permit/utils/environmentalDisplay';
 // ══════════════════════════════════════════════════════════════════════════════
 // VALIDATION SUMMARY SHEET (Sheet 15)
 // Authority signal to AHJ — shows every canonical field was resolved and verified.
@@ -78,11 +79,12 @@ export function pageValidationSummary(
     qzDisp      = qz.toFixed(2) + ' psf';
   }
 
-  type CheckStatus = 'PASS' | 'FAIL' | 'N/A';
+  type CheckStatus = 'PASS' | 'FAIL' | 'PENDING' | 'N/A';
   interface CheckRow { label: string; value: string; status: CheckStatus; note: string; }
 
   function statusBadge(s: CheckStatus): string {
-    const bg = s === 'PASS' ? '#006600' : s === 'FAIL' ? '#cc0000' : '#555';
+    const bg = s === 'PASS' ? '#006600' : s === 'FAIL' ? '#cc0000'
+      : s === 'PENDING' ? '#b45309' : '#555';
     return `<span style="background:${bg};color:#fff;padding:1px 6px;font-size:7px;font-weight:900;letter-spacing:0.5px;">${s}</span>`;
   }
 
@@ -119,9 +121,14 @@ export function pageValidationSummary(
     },
     {
       label:  'Ground Snow Load Verified',
-      value:  `${canonical.site.groundSnowLoad} psf`,
-      status: canonical.site.groundSnowLoad >= 0 ? 'PASS' : 'FAIL',
-      note:   'From compliance engine — 0 psf is valid for warm climates',
+      // `>= 0` made ZERO satisfy the check, so an UNESTABLISHED snow load
+      // reported PASS — and the note rationalised it as a warm climate, on an
+      // Illinois project. A value nobody established cannot be "Verified".
+      value:  canonical.site.groundSnowLoad > 0 ? `${canonical.site.groundSnowLoad} psf` : ENV_NOT_ESTABLISHED,
+      status: canonical.site.groundSnowLoad > 0 ? 'PASS' : 'PENDING',
+      note:   canonical.site.groundSnowLoad > 0
+        ? 'From compliance engine (ground snow load)'
+        : 'No ground snow load established for this site — not verified, not defaulted to zero',
     },
     {
       label:  _isFence ? `Structural Method: Fence Post Embedment (${_asce} §29.4)`
@@ -177,8 +184,14 @@ export function pageValidationSummary(
 
   const passCount = checks.filter(c => c.status === 'PASS').length;
   const failCount = checks.filter(c => c.status === 'FAIL').length;
-  const overallStatus = failCount === 0 ? 'ALL CHECKS PASSED' : `${failCount} CHECK(S) FAILED`;
-  const overallColor  = failCount === 0 ? '#006600' : '#cc0000';
+  const pendingCount = checks.filter(c => c.status === 'PENDING').length;
+  // A PENDING check is not a passed check. Reporting "ALL CHECKS PASSED" while
+  // an input was never established is the false-certainty this sheet exists to
+  // prevent, so pending outranks the green headline without claiming failure.
+  const overallStatus = failCount > 0 ? `${failCount} CHECK(S) FAILED`
+    : pendingCount > 0 ? `${pendingCount} CHECK(S) PENDING`
+    : 'ALL CHECKS PASSED';
+  const overallColor  = failCount > 0 ? '#cc0000' : pendingCount > 0 ? '#b45309' : '#006600';
 
   function esc(value: unknown): string {
     return String(value ?? '—')
@@ -376,10 +389,10 @@ export function pageValidationSummary(
     ${titleBlock(input, 'VAL-1', 'ENGINEERING VALIDATION SUMMARY', pageNum, totalPages)}
     <div class="page-content">
 
-      <div style="display:flex;align-items:center;justify-content:space-between;border:2px solid ${overallColor};padding:var(--sm);background:${failCount===0?'#f0fff4':'#fff0f0'};margin-bottom:var(--sm);">
+      <div style="display:flex;align-items:center;justify-content:space-between;border:2px solid ${overallColor};padding:var(--sm);background:${failCount>0?'#fff0f0':pendingCount>0?'#fffbeb':'#f0fff4'};margin-bottom:var(--sm);">
         <div>
           <div style="font-size:14px;font-weight:900;color:${overallColor};letter-spacing:0.5px;">${overallStatus}</div>
-          <div style="font-size:8px;color:#555;margin-top:2px;">Canonical validation gate — ${passCount}/${checks.length} checks passed before planset generation</div>
+          <div style="font-size:8px;color:#555;margin-top:2px;">Canonical validation gate — ${passCount}/${checks.length} checks passed${pendingCount ? `, ${pendingCount} pending` : ''} before planset generation</div>
         </div>
         <div style="text-align:right;">
           <div style="font-size:10px;font-weight:bold;">PLANSET ENGINE v${PLANSET_ENGINE_VERSION}</div>
@@ -594,7 +607,7 @@ export function pageValidationSummary(
             <tr><td>System Type</td><td class="cv">${canonical.systemType}</td></tr>
             <tr><td>Wind Speed</td><td class="cv">${canonical.site.windSpeed} mph</td></tr>
             <tr><td>Exposure</td><td class="cv">Cat. ${canonical.site.exposureCategory}</td></tr>
-            <tr><td>Ground Snow</td><td class="cv">${canonical.site.groundSnowLoad} psf</td></tr>
+            <tr><td>Ground Snow</td><td class="cv">${canonical.site.groundSnowLoad > 0 ? `${canonical.site.groundSnowLoad} psf` : ENV_NOT_ESTABLISHED}</td></tr>
             <tr><td>Seismic SDC</td><td class="cv">${canonical.site.seismicSDC}</td></tr>
             <tr><td>AHJ</td><td class="cv">${canonical.site.ahj}</td></tr>
             <tr><td>State</td><td class="cv">${canonical.site.state}</td></tr>

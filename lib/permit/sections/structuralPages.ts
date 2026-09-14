@@ -63,6 +63,7 @@ import { buildProcurementApproval, type PermitBOMItem } from '../utils/bomForPer
 import { CSS_FONT_SANS_STACK, CSS_FONT_MONO_STACK } from '../fonts/fontPack';
 import { framingMember } from '@/lib/structural/roofPitch';
 import { resolveFramingMemberLabel } from '@/lib/permit/utils/framingDisplay';
+import { groundSnowLabel, roofSnowLabel, riskCategoryLabel, isGroundSnowEstablished, snowNarrativeSentence, ENV_NOT_ESTABLISHED } from '@/lib/permit/utils/environmentalDisplay';
 export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   const inputRec = input as unknown as Record<string, unknown>;
   const comp = getSheetComposition('roof', 'structural', cad, inputRec);
@@ -188,8 +189,11 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   const _proj = projectStructuralFromInput(input);
   const windSpeed   = _proj.present ? fmt(_proj.windSpeedMph) : (cSite?.windSpeed ? String(cSite.windSpeed) : '—');
   const exposure    = _proj.present ? fmtStr(_proj.exposure) : (cSite?.exposureCategory || structural?.wind?.exposureCategory || '—');
-  const groundSnow  = _proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf)
-    : (cSite?.groundSnowLoad != null ? String(cSite.groundSnowLoad) : '—');
+  const groundSnowLbl = groundSnowLabel(_proj as never);
+  const groundSnow  = isGroundSnowEstablished(_proj as never)
+    ? (_proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf)
+       : (cSite?.groundSnowLoad != null ? String(cSite.groundSnowLoad) : '—'))
+    : ENV_NOT_ESTABLISHED;
 
   // Structural geometry — canonical.structure is authoritative (CAD-patched)
   const postEmbedN  = cStr?.postEmbedFt    || 3.5;
@@ -270,7 +274,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         <div class="struct-card">
           <div class="sct">Snow Load — ${asce} §7</div>
           <table class="calc-table">
-            <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow} psf</td></tr>
+            <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow}${groundSnow === ENV_NOT_ESTABLISHED ? '' : ' psf'}</td></tr>
             <tr><td>Slope Reduction</td><td class="cv">N/A — vertical fence panels</td></tr>
             <tr><td>Controlling Load Case</td><td class="cv">0.9D + 1.0W (wind uplift governs)</td></tr>
             <tr><td>Snow Code Reference</td><td class="cv">${asce} §7 (ground snow)</td></tr>
@@ -432,7 +436,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         The overturning moment at the base of each post is ${overturnMoment} ft-lbs.
         Fence post embedment of ${postEmbed} ft (driven inner steel post — no concrete, per the manufacturer's
         published foundation) provides the required resistance to overturning and lateral loads.
-        Ground snow load of ${groundSnow} psf applies to the site; roof slope reduction factors do not apply to
+        Ground snow load of ${groundSnow}${groundSnow === ENV_NOT_ESTABLISHED ? '' : ' psf'} applies to the site; roof slope reduction factors do not apply to
         vertical fence-mounted arrays — ground snow load per ${asce} §7 governs.
         Post foundation system confirmed adequate for the imposed wind and dead loads per ${asce} §29.4.
       </div>` : ''}
@@ -492,7 +496,9 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   const velPressure = structural?.wind?.velocityPressure?.toFixed(2) || '—';
   const upliftPsf   = structural?.wind?.netUpliftPressure?.toFixed(2) || '—';
   const upliftPile  = structural?.wind?.upliftPerAttachment?.toFixed(0) || '—';
-  const groundSnow  = _proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? '—');
+  const groundSnow  = isGroundSnowEstablished(_proj as never)
+    ? (_proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? '—'))
+    : ENV_NOT_ESTABLISHED;
   const snowPile    = structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—';
   const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
   const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
@@ -532,7 +538,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         <div class="struct-card">
           <div class="sct">Snow Load — ${asce} §7</div>
           <table class="calc-table">
-            <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow} psf</td></tr>
+            <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow}${groundSnow === ENV_NOT_ESTABLISHED ? '' : ' psf'}</td></tr>
             <tr><td>Slope Reduction</td><td class="cv">Per array tilt (${tiltDeg}°)</td></tr>
             <tr><td>Snow Load / Pile</td><td class="cv">${snowPile} lbs</td></tr>
             <tr><td>Note</td><td class="cv">Roof slope reduction N/A — ground array</td></tr>
@@ -658,7 +664,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         <strong>STRUCTURAL ANALYSIS INTERPRETATION — GROUND MOUNT:</strong>
         Wind analysis per ${asce} §27 indicates a net uplift of ${upliftPile} lbs per pile at the design wind speed
         of ${windSpeed} mph (Exposure Category ${exposure}).
-        ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ${asce} §7.` : 'Snow loading is not a controlling factor at this location.'}
+        ${snowNarrativeSentence(_proj as never, () => `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ${asce} §7.`) ?? `Ground snow load is ${ENV_NOT_ESTABLISHED} for this site; snow effects are NOT evaluated in this analysis.`}
         Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ${asce} §7.
         Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ${asce} §27.
         ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= GROUND_PILE_MIN_SF ? 'above' : 'BELOW'} the required pile-withdrawal minimum of ${GROUND_PILE_MIN_SF.toFixed(1)} (demand 0.6W vs allowable capacity — ${asce} §2.4 / §12.13).` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
@@ -744,8 +750,12 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const velPressure = structural?.wind?.velocityPressure?.toFixed(2) || '—';
   const upliftPsf   = structural?.wind?.netUpliftPressure?.toFixed(2) || '—';
   const upliftAtt   = _attChk?.demand != null ? _attChk.demand.toFixed(0) : (structural?.wind?.upliftPerAttachment?.toFixed(0) || '—');
-  const groundSnow  = _proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? '—');
-  const roofSnow    = _proj.present && _proj.roofSnowPsf != null ? _proj.roofSnowPsf.toFixed(1) : (structural?.snow?.roofSnowLoad?.toFixed(1) || '—');
+  const groundSnow  = isGroundSnowEstablished(_proj as never)
+    ? (_proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? '—'))
+    : ENV_NOT_ESTABLISHED;
+  const roofSnow    = isGroundSnowEstablished(_proj as never)
+    ? (_proj.present && _proj.roofSnowPsf != null ? _proj.roofSnowPsf.toFixed(1) : (structural?.snow?.roofSnowLoad?.toFixed(1) || '—'))
+    : ENV_NOT_ESTABLISHED;
   // BRAIDON PDF AUDIT 2026-08-27 (N3) — `upliftAtt` above was migrated to the canonical
   // attachment objects (_attChk.demand) but this line was left on the legacy
   // structural.snow.snowLoadPerAttachment path, which uses a different tributary. The result:
@@ -756,13 +766,17 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // Guard: only project the canonical reaction when a roof snow load is actually ESTABLISHED.
   // On a site with no snow authority the attachment objects carry snowReactionLbs = 0, and
   // printing "0 lbs" would assert a computed zero where the honest answer is "not established".
-  const _snowEstablished = (_proj.roofSnowPsf ?? 0) > 0 || (_proj.groundSnowPsf ?? 0) > 0;
+  // Key on the AUTHORITY's basis, not on the value: groundSnowPsf is 0 when
+  // nothing was established, and 0 > 0 is false either way — but a legacy row
+  // carrying a real figure with no basis field must still count.
+  const _snowEstablished = isGroundSnowEstablished(_proj as never)
+    || (_proj.roofSnowPsf ?? 0) > 0 || (_proj.groundSnowPsf ?? 0) > 0;
   const _snowAttCanon = _snowEstablished
     ? (_proj.attachments?.find(a => a.snowReactionLbs != null)?.snowReactionLbs ?? null)
     : null;
   const snowAtt     = _snowAttCanon != null
     ? _snowAttCanon.toFixed(0)
-    : (structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—');
+    : (structural?.snow?.snowLoadPerAttachment?.toFixed(0) || ENV_NOT_ESTABLISHED);
   const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
   const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
   const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '—';
@@ -957,9 +971,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         <div class="struct-card">
           <div class="sct">Snow Analysis — ${asce} §7</div>
           <table class="calc-table">
-            <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow} psf <span data-env-source="pv-4c-snow" style="font-size:5.4px;font-weight:bold;color:${_envTagColor};">[${escapeH(_envTag)}]</span></td></tr>
-            <tr><td>Roof Snow Load (ps)</td><td class="cv">${roofSnow} psf</td></tr>
-            <tr><td>Snow per Attachment</td><td class="cv" style="font-weight:bold;">${snowAtt} lbs</td></tr>
+            <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow}${groundSnow === ENV_NOT_ESTABLISHED ? '' : ' psf'} <span data-env-source="pv-4c-snow" style="font-size:5.4px;font-weight:bold;color:${_envTagColor};">[${escapeH(_envTag)}]</span></td></tr>
+            <tr><td>Roof Snow Load (ps)</td><td class="cv">${roofSnow}${roofSnow === ENV_NOT_ESTABLISHED ? '' : ' psf'}</td></tr>
+            <tr><td>Snow per Attachment</td><td class="cv" style="font-weight:bold;">${snowAtt}${snowAtt === ENV_NOT_ESTABLISHED ? '' : ' lbs'}</td></tr>
           </table>
         </div>
 
@@ -1164,7 +1178,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         <strong>STRUCTURAL ANALYSIS INTERPRETATION — ROOF MOUNT:</strong>
         Wind analysis per ${asce} §26/27 indicates a net uplift of ${upliftAtt} lbs per attachment point at the
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}) &mdash; <span data-env-source="pv-4c-conclusion" style="font-weight:bold;color:${_envTagColor};">${escapeH(_proj.environmentalSourceLine)}</span>${_proj.environmentalUnverified ? ' (preliminary design criteria; a verified climate-hazard source is required before permit submission &mdash; ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED, see RS-1)' : ''}.
-        ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ${asce} §7).` : 'Snow loading is not a controlling factor at this location.'}
+        ${snowNarrativeSentence(_proj as never, () => `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ${asce} §7).`) ?? `Ground snow load is ${ENV_NOT_ESTABLISHED} for this site; snow effects are NOT evaluated in this analysis.`}
         ${_reviewRequired
           ? `<strong style="color:#b91c1c;">ROOF FRAMING UNVERIFIED — the existing ${_memberNoun} capacity is computed from code defaults and is NOT engineering authority. A licensed structural review of the existing framing is required before permit submission; no framing pass is certified on this sheet.</strong>`
           : (_utilRatio != null ? `The ${_memberNoun} utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : `${_memberNoun.charAt(0).toUpperCase()}${_memberNoun.slice(1)} utilization data not available — verify framing capacity per engineering analysis.`)}
