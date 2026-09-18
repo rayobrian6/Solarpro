@@ -20,7 +20,6 @@ import {
   type StructuralProjection,
   formatFastenerDiameter,
 } from '../snapshot/structuralProjection';
-import { structuralBannerHtml } from '../utils/structuralBanner';
 import { resolvePlansetProfile, isCompactProfile } from '../plansetProfile';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel, necNextStandardOcpd } from '../utils/helpers';
@@ -50,7 +49,7 @@ import { peekSnapshot } from '../snapshot/read';
 // verification state + a per-branch length PROVENANCE, grounding is ONE global
 // outcome scoped by branchIds, only procurement genuinely varies per branch.
 import { routeVerificationStatus, routeVerificationLabel, isRouteFieldVerified, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
-import { projectReleaseGatesFromInput } from '../snapshot/releaseGates';
+import { projectReleaseGatesFromInput, REQUIREMENT_DECLARATIONS } from '../snapshot/releaseGates';
 import { releasePhaseFor } from '../snapshot/releasePhase';
 import { projectListedCableAssembly } from '../snapshot/electricalProjection';
 // PPC §5/§9 — the AUTHORITATIVE PROCUREMENT TOTAL / orderable-export subset. The
@@ -112,7 +111,6 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
   return `
   <div class="page">
     ${titleBlock(input, 'PV-3', 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION', pageNum, totalPages)}
-    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: 'PV-3' })}
     ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }
@@ -242,7 +240,6 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — SOLAR FENCE', pageNum, totalPages)}
     <div class="page-content">
-      ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C' })}
       <div class="section-title">Structural Analysis — ${asce} §29.4 (Fence-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -518,7 +515,6 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — GROUND MOUNT', pageNum, totalPages)}
     <div class="page-content">
-      ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C' })}
       <div class="section-title">Structural Analysis — ${asce} §27 (Ground-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -940,7 +936,6 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — ROOF MOUNT', pageNum, totalPages)}
     <div class="page-content">
-      ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C' })}
       <div class="section-title">Structural Analysis — ${asce} §26/27 (Roof-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -1075,7 +1070,6 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   <div class="page">
     ${titleBlock(input, 'PV-4C.1', 'STRUCTURAL CALCULATIONS (CONT.) — DETAIL · LOAD COMBINATION · CONCLUSION', pageNum, totalPages)}
     <div class="page-content">
-      ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C.1' })}
       <div class="section-title">Roof Structural Calculations (Continued from PV-4C) — ${asce} §26/27 (Roof-Mounted PV)</div>
 
       <!-- §8 Reaction Reconciliation — continued from the PV-4C reaction schedule
@@ -1732,7 +1726,28 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
         + '</td>';
       html += '<td>' + (item.manufacturer || '—') + '</td>';
       html += '<td style="font-size:8px;">' + (item.model || '—') + descExtra + reqBadge + '</td>';
-      html += '<td class="mono f-lg">' + (item.partNumber || '—') + '</td>';
+      // ── A PART-NUMBER COLUMN MAY NEVER PRINT A REQUIREMENT CODE ────────────
+      // RAY'S RULING 2026-09-18, item 7. lib/bom-engine-v4.ts:730 substitutes our
+      // internal registry identifier for the SKU when the assembly is unselected
+      // (`sku: (partNumber) => pending ? 'PENDING-RACKING-ASSEMBLY-SELECTION' :
+      // partNumber`), so the RT-MINI II row printed that code in the PART NUMBER
+      // column of an outbound schedule — a reader would try to order it.
+      //
+      // Fixed HERE rather than in the engine on purpose: the engine's value feeds
+      // bomLineId / itemIdentity and the procurement export, so changing it would
+      // move row identity (and the snapshot digest) for a presentation defect.
+      // The membership test is the canonical declaration table, not a string
+      // pattern, so a code added later is caught automatically.
+      //
+      // Nothing is lost: the row's description still reads "NON-ORDERABLE /
+      // PENDING RACKING ASSEMBLY SELECTION", the quantity cell still reads
+      // "DESIGN QTY — NOT ORDERABLE", and the code itself stays machine-readable
+      // in data-bom-blocking-requirements on this same <tr>.
+      const _pn = item.partNumber || '';
+      const _pnIsRequirementCode = !!_pn && Object.prototype.hasOwnProperty.call(REQUIREMENT_DECLARATIONS, _pn);
+      html += '<td class="mono f-lg"'
+        + (_pnIsRequirementCode ? ' data-bom-part-number-pending="' + escapeH(_pn) + '"' : '')
+        + '>' + (_pnIsRequirementCode ? 'NOT SELECTED' : (_pn || '—')) + '</td>';
       // §6 (BAR) — a NON-ORDERABLE row states its DESIGN-QUANTITY status on the
       // quantity cell itself and is machine-tagged, so the quantity can never be
       // read as an authoritative procurement total.
@@ -1916,13 +1931,27 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
     html += '<strong>AUTHORITATIVE PROCUREMENT EXPORT: ' + _proc.authoritativeExportCount
       + ' row' + (_proc.authoritativeExportCount === 1 ? '' : 's') + '</strong> &mdash; every other row is EXCLUDED '
       + 'from the authoritative total AND from every procurement export; each row states its own state and reason above. ';
+    // ── RAY'S RULING 2026-09-18 ──────────────────────────────────────────────
+    // Two things came off this block, both internal release bookkeeping:
+    //   (1) the visible requirement CODES ("PENDING-RACKING-ASSEMBLY-SELECTION")
+    //       and their "(see RS-1)" pointer. The codes are our registry's
+    //       identifiers, not anything a reader of a BOM can act on.
+    //   (2) "PROCUREMENT READY: NO." — a release verdict on a schedule sheet.
+    // Both stay MACHINE-READABLE: the codes keep their own
+    // data-procurement-open-requirement attribute (which is the form the ECD
+    // evidence harness already reads), and the verdict becomes
+    // data-procurement-ready. Nothing is dropped — RS-1 lists every code in full.
+    //
+    // What REPLACES the verdict is the honest engineering statement underneath
+    // it, which was always the substantive half of the sentence: this schedule
+    // is not an approved procurement release. That is a fact about the document,
+    // not a gate counter, so it prints.
     if (_proc.openProcurementRequirementCodes.length) {
-      html += 'OPEN PROCUREMENT-IMPACT REQUIREMENTS (see RS-1): '
-        + _proc.openProcurementRequirementCodes.map(c =>
-          '<span data-procurement-open-requirement="' + escapeH(c) + '">' + escapeH(c) + '</span>').join(' &middot; ')
-        + '. ';
+      html += _proc.openProcurementRequirementCodes.map(c =>
+        '<span data-procurement-open-requirement="' + escapeH(c) + '"></span>').join('');
     }
-    html += '<strong>PROCUREMENT READY: NO.</strong> This package is NOT an approved procurement release.</div>';
+    html += '<span data-procurement-ready="no"></span>';
+    html += 'This schedule is NOT an approved procurement release.</div>';
   } else {
     html += ' <span style="font-weight:bold;" data-procurement-summary="state-derived">'
       + escapeH(_proc.statement) + '</span>';
@@ -2211,7 +2240,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           : (!_schedPS?.insufficient
               ? 'NOT AFFECTED'
               : ((_affected.has(_path?.branchId ?? '') || _affected.size === 0)
-                  ? _amber('AFFECTED &mdash; QCABLE-PROCUREMENT-INSUFFICIENT')
+                  // RAY'S RULING 2026-09-18, item 7 — plain language, not the
+                  // registry code. The code stays machine-readable below.
+                  ? _amber('AFFECTED &mdash; PROCURED CABLE BELOW DESIGNED PATH')
                   : 'NOT AFFECTED')));
       // ══ 2026-08-29 - A SECOND RELEASE MODEL LIVED HERE ══════════════════
       // This ANDed four unrelated predicates of its own and printed RELEASED or
@@ -2231,9 +2262,25 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       // one thing that genuinely is: this branch's procurement sufficiency.
       const _branchShort = !_schedQPResolved && _schedPS?.insufficient
         && (_affected.has(_path?.branchId ?? '') || _affected.size === 0);
+      // ══ RAY'S RULING 2026-09-18 — THE PACKAGE PHASE LEFT THIS CELL ═════════
+      // The else-branch printed the package's release PHASE on every branch row:
+      // `_schedPhase.terse`. On this design that reads "2 DESIGN REQUIREMENTS
+      // OUTSTANDING" — but `terse` for AWAITING_PROFESSIONAL_REVIEW is literally
+      // "DESIGN COMPLETE — PENDING ENGINEER OF RECORD", so the moment this design
+      // closes its two open requirements EVERY branch line on this schedule would
+      // print DESIGN COMPLETE. That is the exact box Ray ruled off the set, on a
+      // sheet his nine-item list never named — it would have regressed silently.
+      //
+      // The comment above is still right about what belongs here, and now the
+      // code agrees with it: what is genuinely per-branch is this branch's
+      // PROCUREMENT SUFFICIENCY, and nothing else. A branch that is not short
+      // says so; the package's phase is the package's business and lives on RS-1.
+      // Plain language, not the registry code: on a design where this fires, the
+      // old label would have printed QCABLE-PROCUREMENT-INSUFFICIENT on an
+      // outbound schedule (Ray's item 7). The code stays machine-readable.
       const _release = _branchShort
-        ? _amber('BLOCKED &mdash; QCABLE-PROCUREMENT-INSUFFICIENT')
-        : (_schedPhase.kind === 'defect' ? _amber(_schedPhase.terse) : _schedPhase.terse);
+        ? _amber('SHORT &mdash; PROCURED CABLE BELOW DESIGNED PATH')
+        : 'SUFFICIENT';
       // The two SCHEDULE-LEVEL authorities (route verification state, grounding
       // outcome) are stated ONCE in the header, not repeated verbatim on every
       // branch: they carry the SAME value for every branch by construction, and
@@ -2242,9 +2289,10 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       // per-branch: the length PROVENANCE and the procurement-sufficiency AFFECTED
       // state. (It is also what keeps this block inside SCHED's ~1 line of slack
       // when the deficit fires and the procurement cell grows — gate 17.)
-      return `<div><strong class="mono">${_label}</strong> &mdash; `
+      return `<div${_branchShort ? ' data-branch-requirement="QCABLE-PROCUREMENT-INSUFFICIENT"' : ''}>`
+        + `<strong class="mono">${_label}</strong> &mdash; `
         + `${_provUniform ? '' : `length provenance: ${_prov ? escapeH(_prov) : 'NOT ESTABLISHED'} &middot; `}`
-        + `${_procCell} &middot; OVERALL RELEASE: ${_release}</div>`;
+        + `${_procCell} &middot; BRANCH PROCUREMENT: ${_release}</div>`;
     }).join('');
     // Header line: scope + the two schedule-level authorities + the honesty caveats.
     const _b = _rows.map(r => `B${r.index}`).join(', ');
@@ -2271,7 +2319,12 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
         + `${_alloc}.${_surplusTxt}`;
     })();
     return `<div style="margin-top:1px;font-size:6px;line-height:1.15;">`
-      + `<div><strong>BRANCH RELEASE STATUS &mdash; authorities beyond the ${escapeH(SCHED_RATING_COL)} column</strong>`
+      // RAY'S RULING 2026-09-18 — "BRANCH RELEASE STATUS" named this matrix after
+      // our internal release model. What it actually tabulates is the per-branch
+      // ENGINEERING authorities (route, grounding, bonding, procurement), which
+      // is what the heading now says. The package's release phase no longer
+      // appears in it at all — see the _release cell above.
+      + `<div><strong>BRANCH AUTHORITY STATUS &mdash; authorities beyond the ${escapeH(SCHED_RATING_COL)} column</strong>`
       + ` &middot; ${_routeCellShared} (schedule-level: ONE ${escapeH(BRANCH_RUN_SEGMENT_LABEL)} segment for ${escapeH(_b)}`
       + `${_provUniform ? `; length provenance ${escapeH(String(_provAll[0] ?? 'NOT ESTABLISHED'))} on every branch` : '; per-branch length PROVENANCE below'})`
       + ` &middot; ${_gndCellShared} (ONE authority scoped to ${escapeH(_b)})`
@@ -2282,7 +2335,10 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       // branch", which stopped being true the moment the package began calculating
       // per-branch shortfalls. It now states the canonical allocation, from the
       // procurement resolution's own numbers; no literal is typed here.
-      + `<span style="color:#555;"> &middot; ${_schedQCableApportionment} &middot; open blockers: see RS-1</span></div>`
+      // RAY'S RULING 2026-09-18 — "open blockers: see RS-1" is a pointer at our
+      // internal review record on an outbound schedule. Removed; the
+      // apportionment sentence beside it is engineering content and stays.
+      + `<span style="color:#555;"> &middot; ${_schedQCableApportionment}</span></div>`
       + _lines
       + `</div>`;
   })();
@@ -2490,7 +2546,16 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           : `This system utilizes ${system.totalPanels} × ${system.inverters?.[0]?.strings?.[0]?.panelManufacturer || ''} ${system.inverters?.[0]?.strings?.[0]?.panelModel || ''} modules
         rated at ${system.inverters?.[0]?.strings?.[0]?.panelWatts || '—'}W each`} for a total DC capacity of ${system.totalDcKw?.toFixed(2) || '—'} kW.
         ${_schedHasBlockers
-          ? `<strong style="color:#b45309;">DESIGN REVIEW PACKAGE &mdash; COMPLIANCE NOT YET ESTABLISHED. SEE RS-1 FOR ACTIVE RELEASE BLOCKERS (${_schedBlocking.length} OPEN).</strong> Equipment ratings and wire sizing shown are the design basis and are NOT a certified compliance conclusion while release blockers remain open.`
+          // RAY'S RULING 2026-09-18 — this read "DESIGN REVIEW PACKAGE —
+          // COMPLIANCE NOT YET ESTABLISHED. SEE RS-1 FOR ACTIVE RELEASE BLOCKERS
+          // (4 OPEN)." A live gate counter, a pointer at our internal review
+          // record, and a status scold, on an outbound schedule.
+          //
+          // What this branch MUST do is not assert compliance — it is the
+          // alternative to the affirmative UL/NEC sentence below it. It now does
+          // that by stating the basis positively instead of announcing a
+          // deficiency. The count stays machine-readable.
+          ? `<span data-release-blocker-count="${_schedBlocking.length}">Equipment ratings and wire sizing shown are the design basis.</span>`
           : `All equipment is UL-listed; wire sizing verified per NEC 690.8 with derating; equipment complies with NEC ${_cpEq.nec ?? 'PENDING'} and UL 1741 / 61730 / 2703.`}
       </div>
     </div>

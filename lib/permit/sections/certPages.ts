@@ -127,84 +127,56 @@ export function certificationGateBanner(input: PermitInput, sheetId?: string | n
   // TAC WS-17 -- the remainder counts BOTH the rows this sheet's list was capped
   // at and the requirements gating other sheets. Nothing is silently dropped.
   const _remainderReasons = _moreReasons + _perSheet.otherCount;
-  // AAC WS-9 — PER-BULLET LENGTH CAP. The box is a FIXED-height element on a
-  // fixed page; a requirement message is not. As automation clears the short
-  // requirements the six survivors get LONGER (they are the ones carrying real
-  // enumerated detail — segment ids, candidate shortlists), and an uncapped
-  // bullet silently clipped the cert footer under `overflow:hidden`. The cap is
-  // deterministic and loses nothing: RS-1 prints every requirement in full, and
-  // the truncation says so on the bullet itself.
+  // ── RAY'S RULING 2026-09-18 — THE ROW TEMPLATE IS GONE, NOT JUST UNUSED ──
+  // Everything between here and the return used to build the gate box's visible
+  // requirement rows: the per-bullet length cap, the _certLine formatter, the
+  // blocking / professional / advisory row split, and the remainder line.
+  // The box does not render, so none of it reached the sheet any more.
   //
-  // 2026-08-28 -- the 200-char cap is GONE, because what it was capping is
-  // gone. It truncated the REVIEW-RECORD EXPLANATION mid-sentence and appended
-  // "(full text on RS-1)"; on the audited package that meant a certification
-  // sheet carried 200 characters of a moment-envelope derivation. A row now
-  // prints the requirement's declared one-line `sheetLine` (capped at
-  // SHEET_LINE_MAX_CHARS by a guard test), and a code with no declared line
-  // names itself and points at the record. Neither can run long, so there is
-  // nothing left to truncate and no bullet that ends mid-word.
-  const _esc = (m: string): string => m.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // NOTE the escape order: the fallback is assembled from ALREADY-ESCAPED
-  // pieces and returns HTML, because an `&mdash;` built before escaping comes
-  // out of _esc() as the literal text "&mdash;" on the sheet.
-  const _certLine = (x: { code: string; sheetLine: string | null }): string =>
-    (x.sheetLine ? _esc(x.sheetLine) : `${_esc(x.code)} &mdash; see the project review record.`);
-  const _blocking = _shownReasons.filter(b => b.severity !== 'warning' && requirementLane(b.code) === 'design');
-  // A professional-lane row is the REVIEWER'S item. On a certification sheet
-  // that distinction is the whole point: it separates what the design still
-  // owes from what this engineer is here to do.
-  const _professional = _shownReasons.filter(b => b.severity !== 'warning' && requirementLane(b.code) !== 'design');
-  const _advisory = _shownReasons.filter(b => b.severity === 'warning');
-  const _reasons = _blocking
-    .map(b => `<li style="margin:0 0 1px 0;" data-banner-requirement="${_esc(b.code)}">${_certLine(b)}</li>`).join('')
-    // An advisory is LABELLED here too. The gate line directly above already
-    // counts it separately; printing it as an undifferentiated red bullet
-    // contradicted that line on the sheet that matters most.
-    + _professional
-      .map(b => `<li style="margin:0 0 1px 0;" data-banner-requirement="${_esc(b.code)}" data-banner-lane="professional"><strong>FOR ENGINEER OF RECORD &mdash; </strong>${_certLine(b)}</li>`).join('')
-    + _advisory
-      .map(b => `<li style="margin:0 0 1px 0;opacity:0.85;" data-banner-requirement="${_esc(b.code)}" data-banner-advisory="1"><strong>ADVISORY &mdash; </strong>${_certLine(b)}</li>`).join('')
-    // RGM §4 — the remainder is a PACKAGE-level statement ⇒ requirement (child)
-    // semantics with the root-gate total stated on its own line above.
-    + (_remainderReasons > 0
-      ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_remainderReasons} more unresolved item${_remainderReasons === 1 ? '' : 's'}`
-        + `${_perSheet.otherCount > 0 ? ' elsewhere in this package' : ''} — see sheet RS-1 (REVIEW STATUS)</li>`
-      : '')
-    + (!_shownReasons.length && _remainderReasons > 0
-      ? `<li style="margin:0 0 1px 0;font-style:italic;">Nothing on this sheet's own content is gated.</li>`
-      : '');
+  // It is DELETED rather than left in place. This repo's recurring defect is one
+  // fact with two implementations where the live copy is the wrong one, and a
+  // complete, correct-looking row template sitting one line above a hidden div is
+  // exactly how a retired surface comes back. The requirement rows live on
+  // RS-1 / RS-1.1, which render them in full from the same projection.
+  //
+  // `_perSheet` / `_remainderReasons` are KEPT: the remainder count is still
+  // emitted as data-release-remainder-count on the hidden element below.
   // SEVERITY, NOT MERE PRESENCE. This read `.length > 0` over a list that
   // includes the PENDING-RACKING-ASSEMBLY-SELECTION advisory, so a certification
   // sheet announced "STRUCTURAL ENGINEERING REVIEW REQUIRED" because a rail part
   // number had not been pinned -- on the one sheet whose whole purpose is to
   // state what a licensed engineer must do.
   const _hasStructural = _sp.banner.structuralBlockers.some(b => b.severity === 'blocking');
-  // RGM §4 — package total in GATE semantics (7 root gates over 19 requirements),
-  // single-sourced from the release-gate model via the structural projection.
-  const _gateLine = _sp.banner.releasePackageLine
-    ? `<div data-release-package-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.4px;color:${RELEASE_PHASE_STYLE[_sp.banner.kind].fg};margin-top:2px;">${String(_sp.banner.releasePackageLine).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
-    : '';
-  // THE HEADLINE IS DERIVED -- the same phase the drawing sheets and the cover
-  // print, from the same release model. It used to be the constant "PENDING
-  // ENGINEERING REVIEW", which said the same thing about a package missing ten
-  // facts and a package whose design and authority data are complete and which
-  // is genuinely waiting on a licensed reviewer. Those are different states and
-  // an engineer needs to be able to tell them apart at a glance.
-  //
-  // The certification-specific line stays underneath: this sheet is unsigned and
-  // unsealed, which is a fact about THIS SHEET rather than about the package,
-  // and it is the sentence the cert box exists to carry.
+  // RGM §4's package total (`releasePackageLine`, "PACKAGE RELEASE STATUS: N
+  // OPEN DESIGN GATES / …") USED TO RENDER HERE. Removed 2026-09-18 per Ray's
+  // ruling — see the block comment on the return below. The producer is
+  // untouched and still single-sources RS-1; only this emission is gone, and the
+  // fact that a package line exists is kept as data-release-package-line on the
+  // gate element.
   const _st = RELEASE_PHASE_STYLE[_sp.banner.kind];
+  // ── RAY'S RULING 2026-09-18 — THE CERTIFICATION GATE BOX IS GONE ─────────
+  // PE-1 carried a red box reading "STRUCTURAL ENGINEERING REVIEW REQUIRED /
+  // PRELIMINARY — NOT FOR CONSTRUCTION · NOT FOR PERMIT SUBMISSION — UNSIGNED /
+  // UNSEALED", above a bulleted list of outstanding requirements.
+  //
+  // This sheet IS the letter we send the engineer so that he stamps it. Telling
+  // him, in red, that it is not yet stamped is the one thing he already knows.
+  //
+  // What remains on PE-1 and does the real work:
+  //   • ENGINEER'S CERTIFICATION STATEMENT — the letter's own body, in the
+  //     signature area, stating plainly that no certification is asserted yet.
+  //     That is the honest, load-bearing sentence and it is where a reviewer
+  //     looks. It is also now V13's anchor (see peLetterIdentity).
+  //   • The analysis tables — observed framing, capacity, fastener withdrawal,
+  //     load combination — with their own NOT ESTABLISHED / NOT OBSERVED /
+  //     ENGINEERING REVIEW REQUIRED cells where a value is genuinely unknown.
+  //   • RS-1 / RS-1.1, which carry every open requirement in full.
+  //
+  // The machine-readable state stays so nothing downstream lost its anchor.
   return `
   <div data-cert-gate="1" data-release-phase="${escapeH(_sp.banner.phaseId)}" data-release-phase-kind="${escapeH(_sp.banner.kind)}"
-       style="border:3px solid ${_st.border};background:${_st.bg};margin:10px 14px 6px;padding:8px 12px;text-align:center;">
-    <div data-banner-phase-label="1" style="font-weight:900;font-size:13px;letter-spacing:1px;color:${_st.fg};">${escapeH(_sp.banner.line1)}</div>
-    ${_hasStructural ? `<div style="font-weight:900;font-size:11px;letter-spacing:0.8px;color:${_st.fg};">STRUCTURAL ENGINEERING REVIEW REQUIRED</div>` : ''}
-    ${_gateLine}
-    <div style="font-weight:800;font-size:10px;letter-spacing:0.8px;color:${_st.fg};">${escapeH(_sp.banner.line2)} &mdash; UNSIGNED / UNSEALED</div>
-    <div style="font-size:7.5px;color:${_st.fg};margin-top:2px;">Certification activates only upon an approved engineering-review record covering this snapshot digest, with engineer identity, license, jurisdiction and seal on file. A design change that alters the snapshot digest invalidates any prior approval.</div>
-    ${_reasons ? `<ul style="margin:4px auto 0;padding-left:16px;max-width:520px;text-align:left;font-size:7px;color:${_st.fg};line-height:1.35;">${_reasons}</ul>` : ''}
-  </div>`;
+       ${_sp.banner.releasePackageLine ? 'data-release-package-line="1" ' : ''}data-release-remainder-count="${_remainderReasons}"
+       ${_hasStructural ? 'data-cert-structural-review-required="1" ' : ''}style="display:none;"></div>`;
 }
 
 export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
@@ -425,10 +397,20 @@ function _pePendingCertStatement(): string {
   <div class="sec" style="margin-bottom:var(--xs);">
     <div class="sec-hdr">ENGINEER'S CERTIFICATION STATEMENT &mdash; PENDING REVIEW</div>
     <div class="sec-body">
-      <div class="f-xs" style="line-height:1.6;border:2px dashed #b00000;background:#fff7f7;padding:var(--xs);">
-        <strong style="color:#b00000;">PLACEHOLDER &mdash; NO CERTIFICATION ASSERTED &mdash; NOT FOR PERMIT SUBMISSION.</strong>
-        This letter does not certify structural adequacy at this time; it is an engineer-review working document (PENDING
-        ENGINEERING REVIEW). Upon an approved engineering-review record covering this
+      ${''/* RAY'S RULING 2026-09-18 — this is the letter's OWN body, in the
+           signature area, and it stays: it is the paragraph the engineer of
+           record replaces with his certification, and without it the letter
+           would either say nothing or read as though it had been certified.
+           What changed is that it no longer shouts. It was a dashed red
+           PLACEHOLDER box repeating "NOT FOR PERMIT SUBMISSION"; it is now a
+           plain statement of what the letter does and does not assert.
+           It is also invariant V13's anchor — see data-cert-asserted below and
+           peLetterIdentity.certGateViolationReason. */}
+      <div class="f-xs" data-cert-statement="1" data-cert-asserted="0"
+           style="line-height:1.6;border:var(--border);background:#fafafa;padding:var(--xs);">
+        <strong>PENDING ENGINEER-OF-RECORD REVIEW &mdash; NO CERTIFICATION ASSERTED.</strong>
+        This letter does not certify structural adequacy at this time; it is an engineer-review working document.
+        Upon an approved engineering-review record covering this
         snapshot digest &mdash; with engineer identity, license, jurisdiction and seal on file &mdash; the engineer of record will
         state a structural certification based on the analysis tabulated on this sheet. The signature and seal areas below are
         unsigned and unsealed and confer no validity until that review is complete. A design change that alters the snapshot
@@ -565,7 +547,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
           <div class="sec" style="margin-bottom:var(--xs);">
             <div class="sec-hdr">ENGINEER'S CERTIFICATION STATEMENT</div>
             <div class="sec-body">
-              <div class="f-xs" style="line-height:1.6;">
+              <div class="f-xs" data-cert-statement="1" data-cert-asserted="1" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the above-described solar photovoltaic
                 fence array installation and determined that the <strong>proposed solar fence post foundation system
@@ -673,7 +655,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
           <div class="sec" style="margin-bottom:var(--xs);">
             <div class="sec-hdr">ENGINEER'S CERTIFICATION STATEMENT</div>
             <div class="sec-body">
-              <div class="f-xs" style="line-height:1.6;">
+              <div class="f-xs" data-cert-statement="1" data-cert-asserted="1" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the above-described ground-mounted
                 solar photovoltaic array installation and determined that the <strong>proposed driven-pylon
@@ -915,7 +897,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
           <div class="sec" style="margin-bottom:var(--xs);">
             <div class="sec-hdr">ENGINEER'S CERTIFICATION STATEMENT</div>
             <div class="sec-body">
-              <div class="f-xs" style="line-height:1.6;">
+              <div class="f-xs" data-cert-statement="1" data-cert-asserted="1" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the roof-mounted solar
                 photovoltaic array installation at <strong>${escapeH(project.address || '—')}</strong> and determined that ${_mayCertifyStructure

@@ -86,10 +86,21 @@ describe('WS-18 — no package points at a sheet it does not contain', () => {
   // PERMIT submittal ONLY. Our internal review record is not part of a permit
   // application, so that package legitimately has no RS-1 to name; design-review
   // does, and names it.
-  it('the PERMIT submittal degrades the pointer to the project review record', () => {
-    const prose = proseOnly(gen('permit').html);
-    expect(prose).toContain('the project review record');
-    expect(prose).toMatch(/SEE THE PROJECT REVIEW RECORD.{0,40}FOR ALL \d+ ITEMS?/);
+  it('the PERMIT submittal points at no review record at all', () => {
+    // RAY'S RULING 2026-09-18 — WS-18 made the pointer DEGRADE honestly rather
+    // than dangle when the profile omits RS-1. The pointer is now gone from
+    // every profile, so the degradation case it guarded cannot arise. WS-18's
+    // actual invariant — no package points at a sheet it does not contain — is
+    // the assertion below, and it is stronger now, not weaker.
+    const { html, input } = gen('permit');
+    const prose = proseOnly(html);
+    expect(activeSheetIds(input)).not.toContain('RS-1');
+    expect(prose).not.toContain('the project review record');
+    expect(prose).not.toMatch(/SEE THE PROJECT REVIEW RECORD|SEE SHEET RS-1|SEE RS-1/);
+    // NON-VACUITY: this profile really does render sheets and really does omit
+    // RS-1, so the absence above is a result rather than an empty document.
+    expect(prose.length).toBeGreaterThan(5000);
+    expect(activeSheetIds(input).length).toBeGreaterThan(5);
   });
 
   it('the PV-6 merge stamp and title-block sheet ids are NOT rewritten', () => {

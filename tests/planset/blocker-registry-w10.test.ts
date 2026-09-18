@@ -3,14 +3,19 @@
 //
 // Gate 14: no active release blocker is absent from the rendered registry (RS-1).
 // Gate 15: the equipment-identity conflict is visibly rendered while unresolved.
-// Plus: the structural-else-everything ternary is fixed (banner enumerates the
-// UNION), identity blockers (TEST name / blank designer) are emitted, and the
+// Plus: the structural-else-everything ternary is fixed (the requirement model
+// carries the UNION — 2026-09-18 Ray's ruling retired the RENDERED banner, so
+// that is now asserted on the model + RS-1, and the renderer is pinned empty),
+// identity blockers (TEST name / blank designer) are emitted, and the
 // canonical registry is structured + single-sources the back-compat list.
 // ═══════════════════════════════════════════════════════════════════════════
 import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
-import { structuralBanner } from '@/lib/permit/snapshot/structuralProjection';
+// bannerRequirementsForSheet: the per-sheet requirement MODEL the retired banner
+// renderer used to read. 2026-09-18 Ray's ruling took the rendered box off the
+// sheets; the model it read is untouched and is where the UNION is now asserted.
+import { structuralBanner, bannerRequirementsForSheet } from '@/lib/permit/snapshot/structuralProjection';
 import { structuralBannerHtml } from '@/lib/permit/utils/structuralBanner';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 
@@ -128,7 +133,8 @@ describe('W10 gate 15 — the equipment-identity conflict is visibly rendered wh
 });
 
 describe('W10 — the structural-else-everything ternary is fixed (UNION banner)', () => {
-  const { snap } = renderWith(fx => { fx.project.subSystems = { roof: { panelId: 'rec-alpha-pure-405' } }; });
+  const { html, snap } = renderWith(fx => { fx.project.subSystems = { roof: { panelId: 'rec-alpha-pure-405' } }; });
+  const rs1 = rs1Fragment(html);
 
   it('structuralBanner.blockers is the UNION (includes the non-structural equipment conflict)', () => {
     const b = structuralBanner(snap);
@@ -139,12 +145,51 @@ describe('W10 — the structural-else-everything ternary is fixed (UNION banner)
     expect(codes).toContain('EQUIPMENT-IDENTITY-CONFLICT');
   });
 
-  it('the rendered structural banner enumerates a non-structural blocker (not structural-only)', () => {
+  it('the UNION reaches the per-sheet requirement MODEL + RS-1 (the banner renderer is retired)', () => {
+    // 2026-09-18 RAY'S RULING — the red per-sheet status banner came OFF every
+    // sheet (PV-1 / PV-1B / PV-3 / PV-4C / PV-4C.1) and structuralBannerHtml()
+    // is now a no-op returning ''. This case never really guarded that HTML: it
+    // guarded the UNION — that a NON-structural requirement reaches the per-sheet
+    // requirement model, which the old structural-else-everything ternary would
+    // have dropped. That model (structuralBanner → bannerRequirementsForSheet) is
+    // untouched and still feeds RS-1 and the release model, so the property is
+    // asserted THERE, on the human-readable RS-1 record, and the removed renderer
+    // is pinned as an explicit absence below so the box cannot creep back.
     const b = structuralBanner(snap);
-    const htmlBanner = structuralBannerHtml(b);
-    // The equipment-identity conflict message mentions the REC panel — it must
-    // appear even though structural blockers are also present.
-    expect(htmlBanner).toMatch(/MODULE IDENTITY CONFLICT/i);
+
+    // ── 1. THE MODEL — the conflict reaches a sheet it is projected onto ──────
+    // EQUIPMENT-IDENTITY-CONFLICT declares affectedSheets ['SCHED','APP-A','DS-1'].
+    const perSheet = bannerRequirementsForSheet(b, 'SCHED');
+    // NON-VACUITY: an empty own[] would make every `find` below yield undefined
+    // and the case would assert nothing at all. Pin the list is populated first.
+    expect(perSheet.own.length).toBeGreaterThan(0);
+    const conflict = perSheet.own.find(r => r.code === 'EQUIPMENT-IDENTITY-CONFLICT');
+    expect(conflict, 'the equipment conflict must reach the SCHED per-sheet model').toBeTruthy();
+    // The exact line the retired banner used to print is the requirement's
+    // DECLARATION sheetLine — it still lives, on the model, verbatim.
+    expect(conflict!.sheetLine).toMatch(/MODULE IDENTITY CONFLICT/i);
+    // ...and it is genuinely non-structural, so it can only be in `own` via the
+    // UNION. Were this code structural, the assertion above would pass even under
+    // the old ternary and this case would be testing nothing.
+    expect(b.structuralBlockers.map(x => x.code)).not.toContain('EQUIPMENT-IDENTITY-CONFLICT');
+    expect(b.structuralBlockers.length).toBeGreaterThan(0);   // both kinds coexist
+
+    // ── 2. RS-1 — the human-readable account of the same requirement ─────────
+    const at = rs1.indexOf('data-release-requirement="EQUIPMENT-IDENTITY-CONFLICT"');
+    // NON-VACUITY: indexOf returns -1 when the row is missing, and slice(-1, N)
+    // would then hand the assertions below the fragment's last character.
+    expect(at, 'RS-1 must carry the conflict requirement row').toBeGreaterThan(-1);
+    const row = rs1.slice(at, at + 3000);
+    expect(row).toContain('OPEN');
+    expect(row).toMatch(/rec-alpha-pure-405/i);               // the conflicting identity, spelled out
+
+    // ── 3. THE RETIRED RENDERER — pinned as ABSENCE, not silence ─────────────
+    // Ray had to say it twice because a first pass only REWORDED the box. An
+    // empty string here (with and without a sheet identity) is what stops a
+    // re-wiring from quietly restoring it.
+    expect(structuralBannerHtml(b)).toBe('');
+    expect(structuralBannerHtml(b, { sheetId: 'SCHED' })).toBe('');
+    expect(structuralBannerHtml(snap)).toBe('');
   });
 });
 

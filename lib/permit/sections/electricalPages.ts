@@ -1629,11 +1629,21 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           // for the calculated load conditions") was a GLOBAL compliance claim
           // rendered while conduit-fill / tap-length blockers were open. The
           // conclusion now derives from the canonical registry.
+          // RAY'S RULING 2026-09-18 — the QUALIFIER stays, the BOOKKEEPING goes.
+          // "DESIGN BASIS ONLY — NOT A CERTIFIED SIZING CONCLUSION" is an honest
+          // engineering fact of the same class as "NOT ESTABLISHED", and it is
+          // the ONLY thing qualifying the unconditional NEC-compliance sentences
+          // directly above it — deleting it would leave this sheet asserting
+          // certified sizing. What comes off is the live blocker COUNTER and the
+          // "(see RS-1)" pointer; the count survives as data-release-blocker-count.
+          // The else-branch lost "with no open release blockers" / "is complete"
+          // for the same reason — otherwise the identical release language simply
+          // reappears here the moment the phase advances.
           const _n = ((peekSnapshot(input)?.permitReadiness?.registry ?? [])
             .filter(r => !r.resolved && r.severity === 'blocking')).length;
           return _n > 0
-            ? `<strong style="color:#b45309;">DESIGN BASIS ONLY &mdash; NOT A CERTIFIED SIZING CONCLUSION while ${_n} release blocker${_n === 1 ? '' : 's'} remain open (see RS-1).</strong>`
-            : `Conductor sizing for this ${system.totalDcKw?.toFixed(2) || '—'} kW DC system is complete with no open release blockers.`;
+            ? `<span data-release-blocker-count="${_n}">Conductor sizing shown is the design basis.</span>`
+            : `Conductor sizing for this ${system.totalDcKw?.toFixed(2) || '—'} kW DC system is shown as the design basis.`;
         })()}
       </div>
     </div>
@@ -1902,11 +1912,21 @@ function renderQCableProcurementDerivation(
         ${ps.deficitArithmeticNote
           ? escapeH(ps.deficitArithmeticNote)
           : 'Procurement is sufficient on both the aggregate-footage and the per-branch basis.'}
+        ${''/* D8 (Ray, 2026-09-18) — this paragraph used to assert "The AGGREGATE
+             FOOTAGE deficit is the pure subtraction (designed + allowance −
+             procured)". It is not: it is that subtraction CLAMPED AT ZERO. On
+             this design the raw subtraction is −11.5 ft, so the sentence above
+             printed "= 0 ft" and this sentence told the reader to verify it as a
+             pure subtraction — the explanation is what made the equation read as
+             a lie rather than a rounding. Both halves are now stated the way the
+             code actually computes them: a non-negative ADDITIONAL REQUIRED and a
+             non-negative AGGREGATE SURPLUS, never one signed number. */}
         <br/><strong>Why two figures:</strong> each branch is ONE continuous cable assembly, so footage cannot move
-        between branches. The AGGREGATE FOOTAGE deficit is the pure subtraction (designed + allowance − procured); the
-        TOPOLOGY-CONSTRAINED deficit is Σ of the individual branch shortfalls. When a non-short branch holds surplus,
-        the topology figure is the larger and GOVERNING one — an aggregate total can never demonstrate branch
-        sufficiency.
+        between branches. On the AGGREGATE basis, total required = designed + allowance; whichever side is larger is
+        reported as an ADDITIONAL REQUIRED or an AGGREGATE SURPLUS, never as a negative deficit. The
+        TOPOLOGY-CONSTRAINED figure is Σ of the individual branch shortfalls. When a non-short branch holds surplus,
+        the topology figure is the GOVERNING one — an aggregate total, even one in surplus, can never demonstrate
+        branch sufficiency.
       </div>
       ${_qcableProcurementBlock(snap)}
     </div>`;
@@ -1969,7 +1989,7 @@ export function pageConductorScheduleCont(input: PermitInput, cad: CADModel, pag
       ${renderOpenAirBranchGroundingNote(_snap)}`
         : `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);background:#fafafa;color:#b45309;">
         No canonical physical section objects are projected for this system — the sectioned schedule is empty.
-        See PV-4B for the circuit conductor schedule and RS-1 / the project review record for open requirements.
+        See PV-4B for the circuit conductor schedule.
       </div>`}
     </div>
   </div>`;

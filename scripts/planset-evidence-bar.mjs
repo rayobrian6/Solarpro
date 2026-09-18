@@ -224,9 +224,16 @@ const FALSE_COMPLIANCE = [
   /CLEARED FOR ISSUE/i,
 ];
 const falseHits = hasBlocking ? FALSE_COMPLIANCE.filter(re => re.test(noB64)).map(re => String(re)) : [];
+// RAY'S RULING 2026-09-18 — SCHED no longer prints "SEE RS-1 FOR ACTIVE RELEASE
+// BLOCKERS (N OPEN)": a pointer at our internal review record, with a live gate
+// counter, on an outbound schedule sheet. What gate 3 is actually about — SCHED
+// must state the honest conclusion instead of a global compliance claim — is
+// unchanged, and the blocker count is still there to be checked, as the
+// machine-readable data-release-blocker-count on the same element.
+const g3_schedCount = /data-release-blocker-count="(\d+)"/.exec(sched);
 const g3_schedHonest = !hasBlocking
-  || (sched.includes('COMPLIANCE NOT YET ESTABLISHED')
-      && (sched.includes('SEE RS-1 FOR ACTIVE RELEASE BLOCKERS') || sched.includes('SEE RS-1')));
+  || (/design basis/i.test(sched)
+      && g3_schedCount !== null && Number(g3_schedCount[1]) === blockingCodes.length);
 const g3_bannerHonest = !hasBlocking || /NOT FOR PERMIT SUBMISSION/.test(noB64);
 gate(3, 'no-global-compliance-claim-with-blockers',
   falseHits.length === 0 && g3_schedHonest && g3_bannerHonest,

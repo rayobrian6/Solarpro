@@ -258,7 +258,22 @@ describe('W8 — PE-1 projects the SAME gated state as PV-4C', () => {
     expect(html).not.toContain('LETTER OF STRUCTURAL COMPLIANCE');
     expect(html).not.toContain('PE STRUCTURAL LETTER OF COMPLIANCE');
     expect(html).toContain('STRUCTURAL ENGINEERING REVIEW SHEET — PENDING');
-    expect(pe1).toContain('NOT A LETTER OF COMPLIANCE');
+    // RAY'S RULING 2026-09-18 — the red sub-heading "PENDING PROFESSIONAL APPROVAL
+    // — NOT A LETTER OF COMPLIANCE" came OFF the outbound sheet entirely
+    // (PE_LETTER_TITLES_PENDING.headingQualifier is now ''), so the slice can no
+    // longer be asked for that string. The property underneath did not move: the
+    // pending sheet must take the REVIEW identity and may NEVER take the
+    // compliance-letter identity — which is carried by the heading block itself,
+    // so it is asserted there now. Positive first (heading text + the machine
+    // state stamp): that also proves the slice genuinely holds the heading block,
+    // which is what keeps the two negatives below from passing vacuously on an
+    // empty / mis-anchored slice.
+    expect(pe1).toContain('data-pe-letter-state="pending"');
+    expect(pe1).toContain('STRUCTURAL ENGINEERING REVIEW');
+    expect(pe1).not.toContain('LETTER OF STRUCTURAL COMPLIANCE');
+    // and the retired qualifier is pinned OFF, so Ray's removal cannot silently
+    // regress back onto the sheet the stamping engineer receives.
+    expect(pe1).not.toContain('NOT A LETTER OF COMPLIANCE');
   });
 
   it('no 600 lb allowable / safety factor / PASS on the capacity-gated PE-1 results table', () => {

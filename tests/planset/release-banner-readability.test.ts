@@ -21,6 +21,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { generatePermitHTML } from '@/lib/permit';
+import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
+import { releasePhaseFor } from '@/lib/permit/snapshot/releasePhase';
+import { projectReleaseGatesFromInput } from '@/lib/permit/snapshot/releaseGates';
 
 const WS = String.raw`\s`;
 const load = (p: string): string | null => {
@@ -35,36 +39,58 @@ function sheetText(html: string): string {
     .replace(new RegExp(WS + '+', 'g'), ' ');
 }
 
-describe('the cover banner reads as English', () => {
-  const html = load('_tmp_prod.html');
+// ── 2026-09-18, RAY'S RULING — RETARGETED FROM THE ARTIFACT TO THE PRODUCER ──
+// These three cases used to read the generated `_tmp_prod.html` from the repo
+// root and `return` early when it was absent — so on any machine that had not
+// regenerated it, the whole block passed while testing nothing. They now drive
+// `releasePhaseFor` directly, which is where the D5 predicate-boundary fix
+// actually lives.
+//
+// That is also forced by the ruling: the cover no longer PRINTS the phase
+// statement, so an artifact-based assertion could only be rewritten as an
+// assert-absence and D5's real property — that the sentence reads as English and
+// names what is outstanding — would have been lost. The sentence still exists,
+// is still derived, and still reaches a human on RS-1.
+describe('the release phase statement reads as English', () => {
+  const phase = () => {
+    const input = JSON.parse(JSON.stringify(braidonOriginalAuditFixture));
+    generatePermitHTML(input as never);
+    return releasePhaseFor(projectReleaseGatesFromInput(input as never),
+      (input as { _snapshot?: unknown })._snapshot as never);
+  };
 
   it('does not end a clause on a dangling function word', () => {
-    if (!html) return;
-    const t = sheetText(html);
-    // 2026-09-18 -- the label is now 'ISSUED FOR ENGINEERING REVIEW'. It used to
-    // be 'DESIGN INCOMPLETE', printed twice because the statement repeated it.
-    const banner = t.match(new RegExp('outstanding:[^.]*[.]'));
-    expect(banner, 'the outstanding-requirements statement is missing').toBeTruthy();
-    const s = banner![0];
+    const s = phase().statement;
+    expect(s, 'the outstanding-requirements statement is missing').toMatch(new RegExp('outstanding:'));
     // the exact defect
     expect(s).not.toMatch(new RegExp('criteria not[.]'));
     // and its general form: no clause ending on a bare function word
     const DANGLE = new RegExp(WS + '(not|is|are|the|a|an|and|or|of|to|by|for|from|with|on|in|at)[.]', 'i');
-    expect(s, `banner ends on a dangling word: ${s}`).not.toMatch(DANGLE);
+    expect(s, `statement ends on a dangling word: ${s}`).not.toMatch(DANGLE);
   });
 
   it('still names every outstanding requirement', () => {
-    if (!html) return;
-    const t = sheetText(html);
+    const s = phase().statement;
     // it must stay informative, not merely grammatical
-    expect(t).toMatch(new RegExp('design requirements outstanding: .+ and .+[.]'));
-    expect(t).toMatch(new RegExp('project legal authority', 'i'));
-    expect(t).toMatch(new RegExp('snow criteria', 'i'));
+    expect(s).toMatch(new RegExp('design requirements outstanding: .+ and .+[.]'));
+    expect(s).toMatch(new RegExp('project legal authority', 'i'));
+    expect(s).toMatch(new RegExp('snow criteria', 'i'));
   });
 
   it('carries no ellipsis immediately before the full stop', () => {
-    if (!html) return;
-    expect(sheetText(html)).not.toMatch(new RegExp('[.]{4}'));
+    expect(phase().statement).not.toMatch(new RegExp('[.]{4}'));
+  });
+
+  it('and none of it reaches an outbound sheet', () => {
+    const input = JSON.parse(JSON.stringify(braidonOriginalAuditFixture));
+    const html = generatePermitHTML(input as never) as unknown as string;
+    const p = releasePhaseFor(projectReleaseGatesFromInput(input as never),
+      (input as { _snapshot?: unknown })._snapshot as never);
+    const cover = html.split(new RegExp('(?=<div class="page)'))
+      .find(x => new RegExp('tb-sheet-id">' + WS + '*PV-0' + WS + '*<').test(x)) ?? '';
+    expect(cover, 'the cover must be found for this case to mean anything').not.toBe('');
+    expect(sheetText(cover)).not.toContain(p.statement);
+    expect(sheetText(cover)).not.toMatch(new RegExp('DESIGN COMPLETE|DESIGN INCOMPLETE'));
   });
 });
 

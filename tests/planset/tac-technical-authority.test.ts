@@ -82,12 +82,36 @@ describe('TAC WS-1 — Q-Cable deficits are named, and the arithmetic is true', 
     expect(ps.requiredAdditionalPurchasableLengthFt).toBe(ps.deficitFt);
   });
 
-  it('the printed arithmetic note states BOTH bases with their own operands', () => {
+  it('the printed arithmetic note states BOTH bases, and its aggregate clause EVALUATES', () => {
     const note = ps.deficitArithmeticNote ?? '';
     expect(note).toContain('AGGREGATE FOOTAGE');
     expect(note).toContain('TOPOLOGY-CONSTRAINED (GOVERNING)');
-    // the aggregate clause must contain the aggregate operands…
-    expect(note).toContain(`procured ${ps.procurementLengthFt} ft = ${ps.aggregateFootageDeficitFt} ft`);
+    // ── D8 (Ray, 2026-09-18) — THIS ASSERTION USED TO PIN THE LIE ───────────
+    // It required the substring `procured ${procurementLengthFt} ft =
+    // ${aggregateFootageDeficitFt} ft` — on the live design, "procured 152 ft =
+    // 0 ft" — and the suite was GREEN BECAUSE THE SENTENCE WAS FALSE.
+    // aggregateFootageDeficitFt is max(designed + allowance − procured, 0), so
+    // narrating it as the RESULT of that subtraction is wrong whenever the
+    // aggregate is in surplus (here it is: 140.5 + 0 − 152 = −11.5).
+    //
+    // A test that asserts a substring cannot tell a true sentence from a false
+    // one. This now parses the clause back out and EVALUATES it — which is the
+    // property the old assertion was reaching for and could not express.
+    const agg = /designed ([\d.]+) ft \+ allowance ([\d.]+) ft = ([\d.]+) ft total required; procured ([\d.]+) ft; AGGREGATE SURPLUS ([\d.]+) ft; ADDITIONAL REQUIRED ([\d.]+) ft\./.exec(note);
+    expect(agg, `aggregate clause is not parseable, so it cannot be checked: ${note}`).toBeTruthy();
+    const [, designed, allowance, totalRequired, procured, surplus, additional] = (agg as RegExpExecArray).map(Number);
+    expect(designed + allowance).toBeCloseTo(totalRequired, 1);
+    expect(surplus).toBeCloseTo(Math.max(procured - totalRequired, 0), 1);
+    expect(additional).toBeCloseTo(Math.max(totalRequired - procured, 0), 1);
+    // Ray's rule: never print a negative "additional required" — and, by the
+    // same token, never a negative surplus.
+    expect(additional).toBeGreaterThanOrEqual(0);
+    expect(surplus).toBeGreaterThanOrEqual(0);
+    // exactly one of the two can be non-zero
+    expect(Math.min(surplus, additional)).toBe(0);
+    // the operands are the MODEL's own numbers, not recomposed here
+    expect(procured).toBeCloseTo(ps.procurementLengthFt, 1);
+    expect(additional).toBeCloseTo(ps.aggregateFootageDeficitFt, 1);
     // …and the per-branch clause its own Σ.
     expect(note).toContain(`= ${ps.topologyConstrainedDeficitFt} ft`);
   });

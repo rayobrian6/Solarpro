@@ -751,8 +751,12 @@ describe('§9 — the insufficient Q-Cable BOM row is itself NON-ORDERABLE', () 
       expect(sched, `exclusion ${e.category} has no rendered state`)
         .toContain(`data-bom-authority-state="${e.authorityState}"`);
     }
-    expect(sched).toContain('PROCUREMENT READY: NO.');
+    // RAY'S RULING 2026-09-18 — the printed verdict came off; the machine-readable
+    // one and the honest engineering statement stay. See ecd-ws1 §10.
+    expect(sched).toContain('data-procurement-ready="no"');
     expect(sched).toContain('NOT an approved procurement release');
+    expect(sched, 'the release verdict must not print on an outbound sheet')
+      .not.toContain('PROCUREMENT READY: NO.');
     // the three retired claims must be GONE
     expect(sched).not.toContain('no manual estimates');
     expect(sched).not.toContain('items are required per NEC / manufacturer specification');

@@ -350,9 +350,9 @@ describe('PPC §6 (gate 8) — generic PASS cannot hide branch blockers', () => 
     expect(t).not.toMatch(/✓\s*PASS/);
   });
 
-  it('every branch carries route / grounding / procurement / OVERALL RELEASE status', () => {
+  it('every branch carries route / grounding / procurement status', () => {
     const t = text(sched());
-    expect(t).toContain('BRANCH RELEASE STATUS');
+    expect(t).toContain('BRANCH AUTHORITY STATUS');
     for (const b of ['B1', 'B2', 'B3']) expect(t).toContain(b);
     // WS-2 corrected this cell. It used to read 'GROUNDING AUTHORITY: PENDING
     // MANUFACTURER AUTHORITY' for EVERY outcome (the predicate compared a prose
@@ -375,20 +375,31 @@ describe('PPC §6 (gate 8) — generic PASS cannot hide branch blockers', () => 
     // summon one). So SCHED printed BLOCKED on every branch of a package the
     // release model, the cover and PV-3 all called DESIGN COMPLETE.
     //
-    // The cell now projects the PACKAGE phase, and what stays per-branch is the
-    // one thing that genuinely is. What this case guards is unchanged and is
-    // asserted more strictly below: the release state is NAMED per branch, it is
-    // never a bare PASS, and it agrees with the package.
+    // 2026-09-18 (RAY'S RULING) — THE PACKAGE PHASE LEFT THIS CELL ENTIRELY.
+    // The fix above replaced the ad-hoc per-branch verdict with the PACKAGE
+    // phase. That was right about there being one release model and wrong about
+    // where it belongs: `phase.terse` for AWAITING_PROFESSIONAL_REVIEW is
+    // literally "DESIGN COMPLETE — PENDING ENGINEER OF RECORD", so every branch
+    // row on this schedule would have printed DESIGN COMPLETE the moment the
+    // design closed — the exact box Ray ruled off the outbound set.
+    //
+    // What is genuinely per-branch is this branch's PROCUREMENT SUFFICIENCY, and
+    // that is now all the cell states. The package's phase lives on RS-1.
+    // This case's real property is preserved and still strict: the state is
+    // NAMED on every branch, it is never a bare PASS, and it agrees with the
+    // procurement model rather than being invented per branch.
     expect(t).toMatch(/ROUTE AUTHORITY: (FIXED BY DESIGN|FIELD-VERIFIED|ESTIMATE)/);
-    expect(t).toMatch(/OVERALL RELEASE: /);
-    expect(t).not.toMatch(/OVERALL RELEASE: PASS/);
-    // ONE package, ONE verdict: the branch cell says exactly what the sheet
-    // banner says. A branch may add its own procurement block on top; it may not
-    // disagree about the package.
-    const _pkg = releasePhaseFor(projectReleaseGatesFromInput(PKG.input), PKG.snap);
-    for (const m of t.matchAll(/OVERALL RELEASE: ([^<]{0,60}?)(?= B\d| GROUNDING|$)/g)) {
-      expect(m[1]).toContain(_pkg.terse);
-    }
+    expect(t).toMatch(/BRANCH PROCUREMENT: /);
+    expect(t).not.toMatch(/BRANCH PROCUREMENT: PASS/);
+    expect(t, 'the package release phase must not appear on a schedule sheet')
+      .not.toMatch(/OVERALL RELEASE/);
+    expect(t, 'no release phase label may reach this sheet').not.toMatch(/DESIGN COMPLETE|DESIGN INCOMPLETE/);
+    // every branch names one of the two legitimate per-branch procurement states
+    const cells = [...t.matchAll(/BRANCH PROCUREMENT: ([^<]{0,60}?)(?= B\d| GROUNDING|$)/g)];
+    expect(cells.length).toBeGreaterThan(0);
+    for (const m of cells) expect(m[1]).toMatch(/^SUFFICIENT|SHORT — PROCURED CABLE BELOW DESIGNED PATH/);
+    // and the registry code itself never reaches the sheet
+    expect(t).not.toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
   });
 
   it('the Q-Cable deficit is never apportioned per branch', () => {

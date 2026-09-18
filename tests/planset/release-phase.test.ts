@@ -16,8 +16,9 @@ import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 import {
-  deriveReleasePhase, requirementLane, submissionLine, RELEASE_PHASE_STYLE,
+  deriveReleasePhase, releasePhaseFor, requirementLane, submissionLine, RELEASE_PHASE_STYLE,
 } from '@/lib/permit/snapshot/releasePhase';
+import { projectReleaseGatesFromInput } from '@/lib/permit/snapshot/releaseGates';
 import type { ReleaseGateModel } from '@/lib/permit/snapshot/releaseGates';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
@@ -160,27 +161,40 @@ describe('the drawing carries the statement, not the forensics', () => {
     const input = clone(braidonOriginalAuditFixture) as unknown as Record<string, unknown>;
     input.generatedAtIso = '2026-08-28T12:00:00Z';
     const html = generatePermitHTML(input as never);
-    return { html, snap: (input as { _snapshot?: PermitDesignSnapshot })._snapshot! };
+    return { html, input, snap: (input as { _snapshot?: PermitDesignSnapshot })._snapshot! };
   };
 
-  it('the cover block leads with the PHASE and names it in the markup', () => {
+  // ── RAY'S RULING 2026-09-18 ──────────────────────────────────────────────
+  // The cover no longer PRINTS the release phase — no label, no statement, no
+  // counters, no pointer. The phase is still DERIVED and still named in the
+  // markup as machine-readable attributes, and RS-1 still carries the whole
+  // account for a human. These three cases keep their real properties and
+  // assert them where the property now lives.
+  it('the cover block names the PHASE in the markup, and prints none of it', () => {
     const { html } = build();
     expect(html).toMatch(/data-release-phase="DESIGN_INCOMPLETE"/);
     expect(html).toMatch(/data-release-phase-kind="defect"/);
-    expect(html).toMatch(/data-release-phase-statement="1"/);
+    expect(html).toMatch(/data-release-status-block="1"/);
+    // the phase label and statement must not reach the sheet
+    expect(html).not.toMatch(/data-release-phase-statement="1"/);
+    expect(html).not.toMatch(/data-release-phase-label="1"/);
   });
 
   it('the statement is ONE actionable sentence, not a paragraph', () => {
-    const { html } = build();
-    const m = html.match(/data-release-phase-statement="1"[^>]*>\s*([^<]+)</);
-    expect(m, 'the statement must be rendered').toBeTruthy();
-    const text = m![1].replace(/&mdash;/g, '—').replace(/\s+/g, ' ').trim();
+    // Asserted against the PRODUCER now that the cover does not render it. This
+    // is the stronger home for the property anyway: it holds for every phase,
+    // not only the one the live fixture happens to reach.
+    const { html, input, snap } = build();
+    const phase = releasePhaseFor(projectReleaseGatesFromInput(input as never), snap);
+    const text = phase.statement.replace(/&mdash;/g, '—').replace(/\s+/g, ' ').trim();
     expect(text.length).toBeLessThan(320);
     expect(text).toMatch(/^\d+ design requirements? outstanding/);
     // it NAMES what is outstanding …
     expect(text).toMatch(/design requirements outstanding/);
     // … and never reproduces a requirement's evidence, emitter or remediation
     expect(text).not.toMatch(/authorityPath|resolver|snapshot digest|sha256|https?:\/\//i);
+    // … and it is not on the drawing set
+    expect(html).not.toContain(phase.statement);
   });
 
   it('the forensic detail still exists — in the review record, not on the cover', () => {
@@ -190,14 +204,22 @@ describe('the drawing carries the statement, not the forensics', () => {
       expect(r.explanation.length, r.code).toBeGreaterThan(40);
       expect(r.authorityPath, r.code).toBeTruthy();
     }
-    // and the cover points at the record rather than restating it
-    expect(html).toMatch(/data-release-record-pointer="1"|SEE RS-1 FOR ALL/);
+    // RAY'S RULING 2026-09-18 — the cover no longer points at the review record
+    // either; a pointer at our internal bookkeeping is still our internal
+    // bookkeeping. The record itself is unchanged and still in the package, and
+    // the cover names it by machine attribute so nothing became unfindable.
+    expect(html).toMatch(/data-release-record-sheet="RS-1"/);
+    expect(html).not.toMatch(/SEE RS-1 FOR ALL|SEE SHEET RS-1|PROJECT REVIEW RECORD/);
   });
 
   it('the retired hardcoded pairing is gone', () => {
     const { html } = build();
-    // the block no longer asserts PENDING ENGINEERING REVIEW regardless of state
+    // NON-VACUOUS: indexOf returns -1 when the anchor is absent, and
+    // slice(-1, 2999) then yields the LAST CHARACTER of the document — against
+    // which not.toMatch passes for any pattern. Assert the anchor exists first,
+    // or this case silently stops testing anything.
     const i = html.indexOf('data-release-status-block');
+    expect(i, 'the release-status anchor must exist for this case to mean anything').toBeGreaterThan(-1);
     const block = html.slice(i, i + 3000);
     expect(block).not.toMatch(/PENDING ENGINEERING REVIEW &mdash; NOT FOR PERMIT SUBMISSION/);
   });

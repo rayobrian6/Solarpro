@@ -4,11 +4,15 @@
 //   §1 E-1 is the dedicated SLD sheet again; the canonical physical section
 //      schedule + full ampacity chain + open-air grounding note render ONCE,
 //      on PV-4B.1 — never under the diagram, never duplicated.
-//   §2 Output-profile contract: DESIGN_REVIEW ends on PE-1 (pending state,
-//      NOT FOR PERMIT SUBMISSION), FULL_INTERNAL carries the current PE-1
-//      state, PERMIT_SUBMISSION carries PE-1 only under a digest-bound
-//      approval and renders as an explicitly-marked NON-SUBMITTABLE PREVIEW
-//      while the review is pending. The profile is printed on the artifact.
+//   §2 Output-profile contract: DESIGN_REVIEW ends on PE-1 (pending state:
+//      data-cert-asserted="0", no affirmative certification), FULL_INTERNAL
+//      carries the current PE-1 state, PERMIT_SUBMISSION carries PE-1 only
+//      under a digest-bound approval and is stamped
+//      data-permit-submission-preview="1" while the review is pending.
+//      RAY'S RULING 2026-09-18 — the profile and the preview/pending state are
+//      machine-readable attributes; the internal status WORDING ("OUTPUT
+//      PROFILE", "NON-SUBMITTABLE PREVIEW", "NOT FOR PERMIT SUBMISSION") is off
+//      the outbound sheets and is pinned here as an absence.
 //   §3 Manufacturer-document accounting: an RT-MINI II document cannot satisfy
 //      RT-MINI applicability; a registry document is never described as
 //      package-included unless its pages are actually emitted.
@@ -129,11 +133,28 @@ describe('§2 — output profiles: DESIGN_REVIEW / FULL_INTERNAL / PERMIT_SUBMIS
     // only a digest-bound approval renames it to the compliance letter.
     const peStart = DR.html.lastIndexOf('tb-sheet-id">PE-1<');
     expect(peStart).toBeGreaterThan(-1);
-    const pe = DR.html.slice(DR.html.lastIndexOf('<div class="page"', peStart));
+    // NON-VACUITY — lastIndexOf returns -1 when the page wrapper is missing and
+    // slice(-1) would then hand us the single last character of the document,
+    // against which every not.toContain below passes for free. Pin the anchor.
+    const peBodyStart = DR.html.lastIndexOf('<div class="page"', peStart);
+    expect(peBodyStart).toBeGreaterThan(-1);
+    const pe = DR.html.slice(peBodyStart);
     expect(pe).not.toContain('LETTER OF STRUCTURAL COMPLIANCE');   // pending ⇒ review sheet
     expect(pe).toContain('STRUCTURAL ENGINEERING REVIEW');
     expect(pe).toContain('NO CERTIFICATION ASSERTED');
-    expect(pe).toContain('NOT FOR PERMIT SUBMISSION');
+    // RAY'S RULING 2026-09-18 — the "PRELIMINARY … NOT FOR PERMIT SUBMISSION -
+    // UNSIGNED / UNSEALED" banner line came OFF PE-1 (certificationGateBanner now
+    // emits only a hidden marker, and V13 no longer requires that literal). The
+    // property this case actually guards is "unsigned review document that
+    // asserts no certification", which now lives in the letter's own body: the
+    // data-cert-asserted flag on the certification statement. Assert it there,
+    // and pin the removed printed form as an explicit absence so it cannot
+    // silently return.
+    expect(pe).toContain('data-cert-statement="1"');
+    expect(pe).toContain('data-cert-asserted="0"');
+    expect(pe).not.toContain('data-cert-asserted="1"');            // no affirmative certification anywhere on the sheet
+    expect(pe).not.toContain('hereby certify');                    // …and not in prose either
+    expect(pe).not.toContain('NOT FOR PERMIT SUBMISSION');         // removed 2026-09-18 — stays removed
     expect(pe).toContain('PENDING ENGINEERING REVIEW');
     expect(pe).toContain('PE SEAL / STAMP');                         // blank seal field
     expect(DR.snap.meta.digest).toBeTruthy();                        // sheet set is digest-bound
@@ -142,18 +163,40 @@ describe('§2 — output profiles: DESIGN_REVIEW / FULL_INTERNAL / PERMIT_SUBMIS
     expect(certificationIsCompleted(DR.input)).toBe(false);
   });
 
+  // RAY'S RULING 2026-09-18 — "OUTPUT PROFILE: DESIGN REVIEW" and
+  // "NON-SUBMITTABLE PREVIEW" are internal workflow labels and no longer print.
+  // The profile contract they expressed is unchanged and is asserted against the
+  // machine-readable form, which is the fail-closed half of it anyway: a
+  // PERMIT_SUBMISSION package generated while review is pending is still marked,
+  // still refuses to carry PE-1/CERT, and still says it is not for submission.
   it('the OUTPUT PROFILE distinction is explicit on the artifact', () => {
     expect(DR.html).toContain('data-release-status-profile="design-review"');
-    expect(DR.html).toContain('OUTPUT PROFILE: DESIGN REVIEW');
     expect(PERMIT.html).toContain('data-release-status-profile="permit"');
-    expect(FULL.html).not.toContain('data-release-output-profile="full"'); // full keeps the gate-led block
+    expect(FULL.html).toContain('data-release-status-profile="full"');
+    // the profile is identified by attribute, never printed
+    expect(DR.html).not.toContain('OUTPUT PROFILE');
+    expect(PERMIT.html).not.toContain('OUTPUT PROFILE');
+    expect(FULL.html).not.toContain('OUTPUT PROFILE');
   });
 
   it('PERMIT_SUBMISSION while review pending = explicitly-marked NON-SUBMITTABLE PREVIEW, no PE-1', () => {
     expect(permitSubmissionPreviewState(PERMIT.input).isPreview).toBe(true);
     expect(PERMIT.html).toContain('data-permit-submission-preview="1"');
-    expect(PERMIT.html).toContain('NON-SUBMITTABLE PREVIEW');
+    expect(PERMIT.html).not.toContain('NON-SUBMITTABLE PREVIEW');
+    // RAY'S RULING 2026-09-18 — the printed "NOT FOR PERMIT SUBMISSION" line came
+    // off the cover's CALC BASIS paragraph and off PE-1/CERT with the rest of the
+    // internal release bookkeeping. The substantive guarantee is unchanged and is
+    // wholly carried by the two machine-readable facts asserted here: the package
+    // is STAMPED as a preview (data-permit-submission-preview="1", above) and it
+    // structurally REFUSES to carry the certification sheets while review is
+    // pending (below). Pin the removed wording as an absence so it cannot creep
+    // back onto an outbound sheet.
+    expect(PERMIT.html).not.toContain('NOT FOR PERMIT SUBMISSION');
     const seq = pageSeq(PERMIT.html);
+    // NON-VACUITY — an empty seq would make both not.toContain calls pass for
+    // free; this profile must have actually rendered a sheet set.
+    expect(seq.length).toBeGreaterThan(0);
+    expect(seq[0]).toBe('PV-0');
     expect(seq).not.toContain('PE-1');
     expect(seq).not.toContain('CERT');
   });

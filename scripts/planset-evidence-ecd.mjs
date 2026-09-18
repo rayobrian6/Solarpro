@@ -521,7 +521,14 @@ const eqMs = (a, b) => JSON.stringify(ms(a)) === JSON.stringify(ms(b));
     && renderedStateCounts.CANDIDATE_NON_ORDERABLE === AP.candidateNonOrderableCount
     && renderedStateCounts.QUANTITY_PENDING === AP.quantityPendingCount
     && renderedStateCounts.EXCLUDED_NOT_APPLICABLE === AP.excludedCount
-    && /PROCUREMENT READY: NO/.test(PAGE_TEXT) === (AP.procurementReady === false),
+    // RAY'S RULING 2026-09-18 — the verdict is no longer PRINTED on the schedule
+    // (it is a release verdict on an outbound sheet). The equality this gate
+    // asserts — the rendered verdict matches the model's — is unchanged, and is
+    // now read from the machine-readable attribute. `renderedProcurementReady`
+    // above already checks the same thing from data-procurement-summary; this
+    // clause keeps the independent second reading the gate was built to have.
+    && /data-procurement-ready="no"/.test(PAGE_TEXT) === (AP.procurementReady === false)
+    && !/PROCUREMENT READY: NO/.test(PAGE_TEXT),
     `retired renderer-local claims=${retired.length} · state-derived summary blocks=${summaryTagged} · `
     + `rendered total=${renderedProcurementTotal}/excluded=${renderedProcurementExcluded}/ready=${renderedProcurementReady} `
     + `vs model ${AP.verifiedOrderableCount}/${AP.excludedLineItems}/${AP.procurementReady}`,

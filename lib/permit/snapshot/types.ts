@@ -975,7 +975,14 @@ export interface ProcurementSufficiency {
    *  rather than composing a sentence from the aggregate operands (doing that
    *  produced "152 short of 166.5 by 24.2", which is arithmetically false). */
   deficitFt: number;
-  /** designed + allowance − procured. The pure footage subtraction. */
+  /** max(designed + allowance − procured, 0) — the ADDITIONAL footage required
+   *  on the aggregate basis. 🚨 NOT "the pure subtraction", which is what this
+   *  doc used to say: it is CLAMPED AT ZERO, so it is 0 both when procurement
+   *  exactly meets the threshold and when procurement EXCEEDS it. Narrating it
+   *  as "designed + allowance − procured = <this>" is therefore false whenever
+   *  the aggregate is in surplus — that was defect D8, which printed
+   *  "140.5 + 0 − 152 = 0 ft" on a package 11.5 ft in surplus. When the
+   *  aggregate side is in surplus, report the surplus; never a negative. */
   aggregateFootageDeficitFt: number;
   /** Σ per-branch shortfalls. Exceeds the aggregate figure whenever a
    *  non-short branch holds surplus that cannot be moved to a short one. */

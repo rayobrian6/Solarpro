@@ -270,14 +270,44 @@ describe('§1 — rendered multiset-equality across surfaces', () => {
 describe('§3 — SCHED conclusion is registry-derived (no false global compliance)', () => {
   const { html, snap } = renderLiveLike();
 
-  it('while blockers exist SCHED shows COMPLIANCE NOT YET ESTABLISHED, not UL-listed/complies', () => {
-    // the equipment schedule (SCHED) page fragment
+  it('while blockers exist SCHED withholds the UL-listed/complies claim and carries the design-basis conclusion', () => {
+    // RAY'S RULING 2026-09-18 — the blocked branch used to print "DESIGN REVIEW
+    // PACKAGE — COMPLIANCE NOT YET ESTABLISHED. SEE RS-1 FOR ACTIVE RELEASE
+    // BLOCKERS (N OPEN)." That is internal release bookkeeping on an outbound
+    // sheet and it came OFF. It was NOT reworded into a softer scold — the
+    // branch now states the basis positively and the count survives only as the
+    // machine-readable data-release-blocker-count attribute.
+    //
+    // What §3 actually guards is unchanged and is what is asserted below: while
+    // ANY blocking requirement is open, SCHED must not assert global compliance.
+    // The human-readable account of WHICH requirements are open lives on RS-1
+    // (covered by §1 'every BLOCKING code is rendered on RS-1'), so it is not
+    // re-asserted here.
     const parts = html.split('<div class="page">');
     const sched = parts.find(p => p.includes('PAGE CONCLUSION — EQUIPMENT SCHEDULE')) ?? '';
     expect(sched.length).toBeGreaterThan(0);
     expect(snap.permitReadiness.ready).toBe(false);
-    expect(sched).toContain('COMPLIANCE NOT YET ESTABLISHED');
+    // NON-VACUITY — this case is only meaningful while the fixture is genuinely
+    // blocked. Pin that premise on the registry (same basis the renderer uses:
+    // blocking AND unresolved) before asserting anything about the branch taken.
+    const blockingOpen = snap.permitReadiness.registry.filter(r => r.severity === 'blocking' && !r.resolved);
+    expect(blockingOpen.length).toBeGreaterThan(0);
+    // 1. THE INVARIANT: no affirmative compliance claim while blockers are open.
     expect(sched).not.toContain('All equipment is UL-listed; wire sizing verified per NEC 690.8 with derating; equipment complies');
+    // 2. The count moved to a hidden attribute — assert it there, and assert it
+    //    RECONCILES with the registry (a bare presence check would pass against
+    //    a stale or zero count). The match must exist before reading [1].
+    const count = /data-release-blocker-count="(\d+)"/.exec(sched);
+    expect(count).toBeTruthy();
+    expect(Number(count![1])).toBe(blockingOpen.length);
+    // 3. The replacement sentence is the alternative to the UL/NEC one, so the
+    //    blocked branch is proven to have rendered SOMETHING (absence of the
+    //    affirmative sentence alone would also pass on an empty conclusion).
+    expect(sched).toContain('Equipment ratings and wire sizing shown are the design basis.');
+    // 4. Ray's removal is PINNED: the retired status language cannot creep back.
+    expect(sched).not.toContain('COMPLIANCE NOT YET ESTABLISHED');
+    expect(sched).not.toContain('DESIGN REVIEW PACKAGE');
+    expect(sched).not.toMatch(/SEE RS-1 FOR ACTIVE RELEASE BLOCKERS/);
   });
 });
 

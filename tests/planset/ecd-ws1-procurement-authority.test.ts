@@ -352,7 +352,15 @@ describe('W1-C — one counter over one population', () => {
     const a = buildProcurementApproval(insufficient.bom);
     expect(a.procurementReady).toBe(false);
     expect(insufficient.html).toContain('PROCUREMENT AUTHORITY SUMMARY');
-    expect(insufficient.html).toContain('PROCUREMENT READY: NO.');
+    // RAY'S RULING 2026-09-18 — "PROCUREMENT READY: NO." is a release verdict and
+    // no longer PRINTS on an outbound schedule. The property it guarded (the
+    // sheet states the verdict, and the verdict matches the approval object) is
+    // preserved against the machine-readable form, and the honest engineering
+    // half of the sentence still prints.
+    expect(insufficient.html).toContain('data-procurement-ready="no"');
+    expect(insufficient.html).toContain('NOT an approved procurement release');
+    expect(insufficient.html, 'the release verdict must not print on an outbound sheet')
+      .not.toContain('PROCUREMENT READY: NO.');
     expect(insufficient.html).toContain(`data-procurement-state-count="VERIFIED_ORDERABLE">${a.verifiedOrderableCount} `);
     expect(insufficient.html).toContain(`data-procurement-state-count="ESTIMATED_FIELD_VERIFY">${a.estimatedFieldVerifyCount} `);
     expect(insufficient.html).toContain(`data-procurement-state-count="CANDIDATE_NON_ORDERABLE">${a.candidateNonOrderableCount} `);

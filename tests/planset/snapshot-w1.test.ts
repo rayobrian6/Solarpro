@@ -6,6 +6,9 @@ import { computeSnapshotDigest, snapshotIdFromDigest, canonicalJson, deepFreeze 
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 import { buildRackingBondingAuthority } from '@/lib/permit/snapshot/rackingBonding';
 import { resolveProjectStateAuthority } from '@/lib/permit/snapshot/locationAuthority';
+// V13's own reader (RAY'S RULING 2026-09-18 retarget) — the cert-gate case below
+// asserts through the shipped predicate instead of re-implementing it.
+import { certGateViolationReason } from '@/lib/permit/utils/peLetterIdentity';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
@@ -315,11 +318,48 @@ describe('PermitDesignSnapshot W1 — end-to-end render', () => {
 
   it('CERT and PE sheets carry the D-6 pending-review gate (V13)', () => {
     const certPages = pages.filter(p => /tb-sheet-id">\s*(CERT|PE-1)\s*</.test(p));
+    // NON-VACUITY: an empty `certPages` would make the loop below assert nothing.
     expect(certPages.length).toBeGreaterThanOrEqual(2);
     for (const p of certPages) {
       expect(p).toContain('PENDING ENGINEERING REVIEW');
-      expect(p).toContain('NOT FOR PERMIT SUBMISSION');
-      expect(p).toContain('UNSIGNED / UNSEALED');
+      // ── RAY'S RULING 2026-09-18 — THE PRINTED GATE BANNER CAME OFF ────────
+      // certificationGateBanner() no longer renders a visible box, so the
+      // literals this case used to pin ('… NOT FOR PERMIT SUBMISSION —
+      // UNSIGNED / UNSEALED') are no longer on PE-1 / CERT: PE-1 is the letter
+      // we send the engineer TO BE STAMPED, and telling him in red that it is
+      // not yet stamped is the one thing he already knows.
+      //
+      // The property underneath is unchanged — an UNAPPROVED certification
+      // sheet must not go out looking certified — and it moved to two places:
+      //   • the machine-readable state, on the hidden data-cert-gate element;
+      //   • the affirmative claim's own flag, data-cert-asserted.
+      // The human-readable account of every open requirement stays on RS-1 /
+      // RS-1.1, which this case never covered.
+      const gate = /data-cert-gate="1"[^>]*data-release-phase="([A-Z_]+)"/.exec(p);
+      // NON-VACUITY: with no marker there is no state to test, and gate![1]
+      // below would throw rather than report. Pin its presence first.
+      expect(gate).not.toBeNull();
+      // An unapproved sheet may carry any phase EXCEPT the released one …
+      expect(gate![1]).not.toBe('ISSUED_FOR_PERMIT');
+      // … and may carry no affirmative "I … hereby certify" block, every one of
+      // which is tagged data-cert-asserted="1" and gated on certificationApproved().
+      expect(p).not.toContain('data-cert-asserted="1"');
+      // V13 itself, read through the SHIPPED predicate rather than a copy of it,
+      // so this case cannot drift from the invariant it claims to prove.
+      expect(certGateViolationReason(p)).toBeNull();
+      // The removed printed forms, pinned as ABSENCES so the banner Ray took off
+      // cannot creep back onto an outbound sheet unnoticed.
+      expect(p).not.toContain('NOT FOR PERMIT SUBMISSION');
+      expect(p).not.toContain('UNSIGNED / UNSEALED');
     }
+    // The HUMAN-READABLE half of what the banner used to say is not homeless: it
+    // survives as the letter's OWN body in PE-1's signature area, which Ray kept
+    // and which V13 now anchors on. Asserted here so the loop above is not four
+    // absence checks with nothing positive left to fail — the pending sheet must
+    // still state plainly, and machine-readably, that it certifies nothing.
+    const pe1 = certPages.filter(p => /tb-sheet-id">\s*PE-1\s*</.test(p));
+    expect(pe1.length).toBe(1);   // NON-VACUITY guard for the two checks below
+    expect(pe1[0]).toMatch(/data-cert-statement="1"[^>]*data-cert-asserted="0"/);
+    expect(pe1[0]).toContain('NO CERTIFICATION ASSERTED');
   });
 });

@@ -659,9 +659,17 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
               return `${system.totalDcKw?.toFixed(2) || '—'} kW DC grid-tied PV system at ${escapeH(project.address || '—')}. `
                 + `<strong>CALC BASIS:</strong> NEC ${necVer} / ASCE ${asceVer}. `
                 + `<strong>AHJ-ADOPTED CODES:</strong> ${adopted}. `
+                // RAY'S RULING 2026-09-18 — the unissued branch used to append
+                // "DESIGN REVIEW PACKAGE — NOT FOR PERMIT SUBMISSION (PENDING
+                // ENGINEERING REVIEW); requires PE review and wet stamp before
+                // AHJ submission." to the calc basis. The set is sent to a PE to
+                // be stamped; that sentence states the obvious and puts a
+                // not-for-submission notice on the cover a client sees. The
+                // title block still carries the issue state and revision line,
+                // which is ordinary drafting practice.
                 + (_permitIssued
                     ? 'Issued for permit review — requires PE review and wet stamp before AHJ submission.'
-                    : `DESIGN REVIEW PACKAGE — NOT FOR PERMIT SUBMISSION (${escapeH(pa.issueStatus ?? 'DESIGN DRAFT')}); requires PE review and wet stamp before AHJ submission.`);
+                    : '');
             })()}
           </div>
         </div>

@@ -277,15 +277,47 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
    *  governing (topology-aware) figure, because cable bought for one branch
    *  cannot complete another. */
   const requiredAdditionalPurchasableLengthFt = deficitFt;
+  // ── D8 — AN EQUATION MUST EVALUATE (Ray, 2026-09-18) ──────────────────────
+  // This clause printed "designed D ft + allowance A ft − procured P ft = X ft"
+  // where X is `aggregateFootageDeficitFt` = max(D + A − P, 0). Whenever the
+  // aggregate is SUFFICIENT the printed sentence is arithmetically FALSE. On the
+  // live Braidon render (PV-4B.1) it read:
+  //
+  //     "designed 140.5 ft + allowance 0 ft − procured 152 ft = 0 ft"
+  //
+  // 140.5 + 0 − 152 is −11.5, not 0. The package is 11.5 ft in SURPLUS. The
+  // VALUES were never wrong — a CLAMPED result was narrated as the result of an
+  // UNCLAMPED subtraction, so a reader checking our arithmetic finds it false on
+  // exactly the sheet that exists to show the derivation.
+  //
+  // Ray's approved algebra, as three named NON-NEGATIVE quantities:
+  //     totalRequired      = designed + allowance             (already `thresholdFt`)
+  //     surplus            = max(procured − totalRequired, 0)
+  //     additionalRequired = max(totalRequired − procured, 0) (already `aggregateFootageDeficitFt`)
+  // and: NEVER print a negative "additional required".
+  //
+  // Only `surplus` is new. `thresholdFt` already IS totalRequired and
+  // `aggregateFootageDeficitFt` already IS max(totalRequired − procured, 0), so
+  // this introduces NO second implementation of a number the snapshot carries —
+  // it stops mis-narrating the ones it has. Every quantity below is ≥ 0 by
+  // construction (Math.max against 0), so no negative can reach the sheet.
+  //
+  // 🚨 This field is inside the snapshot body and IS hashed — see digest.ts
+  // canonicalDigestBody, which excludes only meta.digest, meta.snapshotId and
+  // resolverAttemptEvidence. Landing this MOVES meta.digest and therefore
+  // retires any PE approval bound to the previous one. That is intended and was
+  // sequenced deliberately: data first, then freeze, then signature.
+  const aggregateSurplusFt = round1(Math.max(procurement - thresholdFt, 0));
   const deficitArithmeticNote = !rawInsufficient
     ? null
     : `AGGREGATE FOOTAGE: designed ${totalDesigned} ft + allowance ${requiredServiceLoopAllowanceFt} ft `
-      + `− procured ${procurement} ft = ${aggregateFootageDeficitFt} ft. `
+      + `= ${thresholdFt} ft total required; procured ${procurement} ft; `
+      + `AGGREGATE SURPLUS ${aggregateSurplusFt} ft; ADDITIONAL REQUIRED ${aggregateFootageDeficitFt} ft. `
       + `TOPOLOGY-CONSTRAINED (GOVERNING): Σ per-branch shortfall = `
       + `${shortBranches.map(p => `${p.branchLabel} ${round1((p.designedInstalledLengthFt ?? 0) - (p.procurementLengthFt ?? 0))} ft`).join(' + ') || '0 ft'}`
       + ` = ${topologyConstrainedDeficitFt} ft`
       + (nonRedistributableSurplusFt > 0
-        ? `; ${nonRedistributableSurplusFt} ft of surplus on non-short branch(es) is NON-REDISTRIBUTABLE (a cable assembly is a continuous run per branch), which is why the governing deficit exceeds the aggregate subtraction.`
+        ? `; ${nonRedistributableSurplusFt} ft of surplus stranded on non-short branch(es) is NON-REDISTRIBUTABLE (a cable assembly is a continuous run per branch), which is why the governing requirement exceeds the aggregate figure.`
         : '.');
   const affectedBranchIds = rawInsufficient ? shortBranches.map(p => p.branchId) : [];
   // When no single branch individually exceeds (only the Σ does), name all branches.

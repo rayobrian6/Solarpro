@@ -46,7 +46,13 @@ const PE_LETTER_TITLES_PENDING: PELetterTitleSet = {
   sheetTitle: 'STRUCTURAL ENGINEERING REVIEW SHEET — PENDING',
   manifestTitle: 'STRUCTURAL ENGINEERING REVIEW — PENDING PROFESSIONAL APPROVAL',
   heading: 'STRUCTURAL ENGINEERING REVIEW',
-  headingQualifier: 'PENDING PROFESSIONAL APPROVAL — NOT A LETTER OF COMPLIANCE',
+  // RAY'S RULING 2026-09-18 — the red sub-heading "PENDING PROFESSIONAL APPROVAL
+  // — NOT A LETTER OF COMPLIANCE" came off. The heading already says STRUCTURAL
+  // ENGINEERING REVIEW (not LETTER OF COMPLIANCE — the approved set uses that
+  // title, and the identity swap IS the distinction), and the certification
+  // statement in the signature area states exactly what is and is not asserted.
+  // Repeating it in red under the title told the engineer he is the engineer.
+  headingQualifier: '',
   noun: 'PE structural review sheet',
 };
 
@@ -133,13 +139,44 @@ export function peLetterHeadingBlock(input: PermitInput, subject: string, codeLi
 /** Why this unapproved certification page violates V13, or null if it does not.
  *  Reads the rendered page, which is what the invariant itself has to work
  *  from -- the gate is HTML by the time V13 runs. */
+// ── V13, RETARGETED 2026-09-18 (RAY'S RULING) ──────────────────────────────
+// V13 exists to stop ONE thing: an unapproved certification sheet going out
+// looking certified. That property is unchanged and is enforced more directly
+// here than it was before.
+//
+// It used to require the literal 'NOT FOR PERMIT SUBMISSION' anywhere on the
+// page. Two problems with that, one of them ours:
+//   1. It was satisfiable PAGE-WIDE, so the string could come from anywhere on
+//      the sheet while the certification statement itself said nothing — the
+//      absence-keyed vacuity this codebase has been burned by repeatedly.
+//   2. It forced a red not-for-submission banner onto the top of the very
+//      document we send an engineer TO BE STAMPED. Ray ruled that off the set;
+//      an invariant is not a reason to keep printing it, because the invariant
+//      is ours to state correctly.
+//
+// It now anchors on the ENGINEER'S CERTIFICATION STATEMENT — the letter's own
+// body, in the signature area, which is where a reviewer actually looks and
+// which must be present on any certification sheet whatever its state. The
+// sheet must declare, in machine-readable form, whether certification is
+// ASSERTED, and that declaration must agree with the release phase.
 export function certGateViolationReason(page: string): string | null {
   const gate = /data-cert-gate="1"[^>]*data-release-phase="([A-Z_]+)"/.exec(page);
-  if (!gate) return 'lacks the certification gate banner';
-  // A gate that says the package is issued, on a sheet with no approval
-  // covering the digest, is the affirmative lie V13 exists to stop.
-  if (gate[1] === 'ISSUED_FOR_PERMIT' || !page.includes('NOT FOR PERMIT SUBMISSION')) {
-    return `is unapproved but its gate reads "${gate[1]}" without a not-for-submission statement`;
+  if (!gate) return 'lacks the certification state marker';
+  // THE AFFIRMATIVE CLAIM IS THE THING TO CATCH. Every block on a cert sheet
+  // that actually asserts certification ("I, the undersigned, … hereby certify")
+  // is tagged data-cert-asserted="1", and every such block is gated on
+  // certificationApproved(). So if ONE of them ever leaks onto a sheet with no
+  // approval covering the current digest, it announces itself here.
+  //
+  // This is a stronger test than the literal-string check it replaces: that one
+  // was satisfied by the phrase 'NOT FOR PERMIT SUBMISSION' appearing ANYWHERE
+  // on the page, so it could pass off an unrelated paragraph while the
+  // certification block said whatever it liked.
+  if (/data-cert-asserted="1"/.test(page)) {
+    return 'is unapproved but carries an affirmative engineer certification';
+  }
+  if (gate[1] === 'ISSUED_FOR_PERMIT') {
+    return `is unapproved but its state reads "${gate[1]}"`;
   }
   return null;
 }

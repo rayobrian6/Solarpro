@@ -377,26 +377,62 @@ describe('RGM §6 — the cover states RELEASE STATUS in gate semantics', () => 
     expect(cover).not.toMatch(/more active release blocker/);
   });
 
-  it('it prints the PHASE, the counts and the pointer to RS-1', () => {
+  it('it CARRIES the phase, the counts and the record reference — and prints none of them', () => {
     // 2026-08-28 RELEASE-PHASE MIGRATION — the cover used to LEAD with the count
     // headline and a hardcoded "PENDING ENGINEERING REVIEW" line printed on every
-    // unissued package regardless of state. It now leads with the derived phase
-    // and one actionable sentence; the counts and the gate list stay underneath.
-    // Everything this test guarded is still asserted — counts, identity, pointer
-    // — just read from the phase rather than from a fixed string.
+    // unissued package regardless of state. It then led with the derived phase.
+    //
+    // 2026-09-18 RAY'S RULING — it now leads with NOTHING: the release block
+    // renders no visible text at all. The engineer cannot strip our boxes, so
+    // internal release bookkeeping may not ship on an outbound drawing set.
+    // Every value this case guarded is still asserted — the phase, both counts
+    // and the record reference — against the machine-readable form that remains.
     expect(cover).toMatch(/data-release-phase="[A-Z_]+"/);
-    expect(cover).toMatch(/data-release-phase-statement="1"/);
-    expect(cover).toContain('NOT FOR PERMIT SUBMISSION');
     expect(cover).toContain(`data-release-open-gate-count="${MODEL.summary.openGateCount}"`);
     expect(cover).toContain(`data-release-requirement-count="${MODEL.summary.unresolvedRequirementCount}"`);
-    expect(cover).toContain(`SEE RS-1 FOR ALL ${MODEL.summary.unresolvedRequirementCount + MODEL.summary.advisoryCount} ITEM`);
+    expect(cover).toContain(`data-release-total-item-count="${MODEL.summary.unresolvedRequirementCount + MODEL.summary.advisoryCount}"`);
+    expect(cover).toContain('data-release-record-sheet="RS-1"');
+    // RAY'S RULING 2026-09-18, SECOND PASS — this case used to hold that the
+    // cover still STATES that the set may not be submitted, sourced from the
+    // cover's own design-basis prose rather than the release box. That prose came
+    // off too: coverSheet's CALC BASIS paragraph no longer appends "DESIGN REVIEW
+    // PACKAGE — NOT FOR PERMIT SUBMISSION (PENDING ENGINEERING REVIEW); requires
+    // PE review and wet stamp before AHJ submission." The set is sent to a PE to
+    // BE stamped — a not-for-submission notice on the cover a client sees states
+    // what the reader already knows. Rewording it was the first pass's mistake,
+    // so the removal is pinned as an ABSENCE and cannot silently come back.
+    expect(cover).not.toContain('NOT FOR PERMIT SUBMISSION');
+    expect(cover).not.toMatch(/DESIGN REVIEW PACKAGE|wet stamp before AHJ submission/);
+    // NON-VACUITY — pageOf() returns '' for a sheet it cannot find, against which
+    // every not.toContain above passes for free. The cover must be REAL, and must
+    // still print the one disposition Ray kept: the title block's ISSUE STATUS,
+    // ordinary drafting practice (item 8 of the ruling).
+    expect(cover.length).toBeGreaterThan(0);
+    expect(cover).toMatch(/data-project-field="issue-status">\s*PENDING ENGINEERING REVIEW\s*</);
+    // …and the readable account did not vanish, it MOVED: the review record's
+    // headline still ends in the literal, on RS-1 and its continuations.
+    expect(releaseHeadline(MODEL.summary)).toContain('NOT FOR PERMIT SUBMISSION');
+    expect(rsAll(PKG.html)).toContain('NOT FOR PERMIT SUBMISSION');
+    // …and NONE of the bookkeeping is printed
+    expect(cover).not.toMatch(/data-release-phase-statement="1"/);
+    expect(cover).not.toMatch(/SEE RS-1 FOR ALL|SEE SHEET RS-1/);
+    expect(cover).not.toMatch(/PACKAGE RELEASE STATUS|OPEN DESIGN GATE|DESIGN COMPLETE|DESIGN INCOMPLETE|OUTPUT PROFILE/);
   });
 
-  it('it NUMBERS every open root gate — and only those', () => {
+  it('it ENUMERATES every open root gate — and only those', () => {
+    // The gate list is machine-readable rather than printed (Ray, 2026-09-18).
+    // The property is unchanged and now holds on EVERY profile: the compact
+    // branch never emitted data-release-open-gate at all, so this case was
+    // reading zero on the profile we actually ship.
     const listed = [...cover.matchAll(/data-release-open-gate="(RG-[^"]+)"/g)].map(m => m[1]);
     expect(listed).toEqual(openReleaseGates(MODEL).map(g => g.gateId));
     expect(listed.length).toBe(MODEL.summary.openGateCount);
-    for (const g of openReleaseGates(MODEL)) expect(cover).toContain(g.title.replace(/&/g, '&amp;'));
+    for (const g of openReleaseGates(MODEL)) {
+      expect(cover).toContain(`data-release-open-gate-title="${g.title.replace(/&/g, '&amp;')}"`);
+    }
+    // the human-readable enumeration lives on RS-1, and only there
+    const rs1 = pageOf(PKG.html, 'RS-1');
+    for (const g of openReleaseGates(MODEL)) expect(rs1).toContain(g.title.replace(/&/g, '&amp;'));
   });
 
   it('cover counts equal RS-1 counts equal the model', () => {
@@ -418,9 +454,19 @@ describe('RGM §6 — the cover states RELEASE STATUS in gate semantics', () => 
     const top = topConfirmedConflict(UNRESOLVED_MODEL);
     expect(top).toBeTruthy();
     expect(top!.requirementCode).toBe('QCABLE-PROCUREMENT-INSUFFICIENT');
+    // RAY'S RULING 2026-09-18 — the confirmed-condition line named a REQUIREMENT
+    // CODE on the cover of an outbound set. It came off with the rest of the
+    // block. The property — the package names its one most-severe confirmed
+    // condition, never fabricates one, and never duplicates the registry — is
+    // unchanged and asserted where that account lives: the review record.
     const unresolvedCover = pageOf(UNRESOLVED_PKG.html, 'PV-0');
-    expect(unresolvedCover).toContain('MOST SEVERE CONFIRMED CONDITION');
-    expect(unresolvedCover).toContain(top!.requirementCode);
+    expect(unresolvedCover, 'a requirement code may not print on the cover')
+      .not.toContain(top!.requirementCode);
+    expect(unresolvedCover).not.toContain('MOST SEVERE CONFIRMED CONDITION');
+    // rsAll(), not pageOf('RS-1'): the review record spills onto RS-1.n
+    // continuations, so a single-sheet lookup would report the code missing from
+    // the record when it is simply on the next page of it.
+    expect(rsAll(UNRESOLVED_PKG.html)).toContain(top!.requirementCode);
   });
 
   it('with NO confirmed condition the cover states none — it never invents one', () => {
@@ -443,19 +489,78 @@ describe('RGM §6 — the cover states RELEASE STATUS in gate semantics', () => 
 // ─── 7. package-level totals on the OTHER sheets (§4 count semantics) ────────
 
 describe('RGM §4 — other sheets state PACKAGE totals in gate semantics', () => {
-  it('the structural banner carries the package gate line and drops "blockers" phrasing', () => {
+  // RAY'S RULING 2026-09-18 — the package gate line ("PACKAGE RELEASE STATUS: N
+  // OPEN DESIGN GATES / N UNRESOLVED DESIGN REQUIREMENTS … SEE RS-1 FOR ALL N
+  // ITEMS") no longer prints on ANY outbound sheet. `releasePackageLine` itself
+  // is untouched, still single-sources RS-1, and its own unit tests still pass —
+  // what changed is only that no drawing emits it.
+  //
+  // SECOND PASS — the first pass only stopped the drawings PRINTING the line and
+  // kept the red box carrying it as machine attributes. Ray's point was the BOX:
+  // structuralBannerHtml() is now retired to a no-op and every call site on
+  // PV-1 / PV-1B / PV-3 / PV-4C / PV-4C.1 was deleted, so the structural sheets
+  // carry no release surface at all, printed or hidden. CERT keeps its (hidden)
+  // marker because invariant V13 reads it. The two cases below therefore guard
+  // different things now: PV-3 pins the REMOVAL, CERT pins the surviving anchor.
+  it('the structural banner is GONE from PV-3 — no box, printed or hidden', () => {
     const pv3 = pageOf(PKG.html, 'PV-3');
-    expect(pv3).toContain('struct-review-banner');
-    expect(pv3).toContain('data-release-package-line="1"');
-    expect(pv3).toContain(releasePackageLine(MODEL.summary));
+    // NON-VACUITY FIRST. Every assertion in this case is now an ABSENCE, and
+    // pageOf() yields '' for a sheet it cannot find — against which all of them
+    // would pass for free, reporting a green removal on a sheet that had simply
+    // stopped rendering. Prove the sheet is real before proving what is not on it.
+    expect(pv3.length).toBeGreaterThan(0);
+    expect(pv3).toMatch(/tb-sheet-id">\s*PV-3\s*</);
+    // the box itself, and everything it used to carry
+    expect(pv3).not.toContain('struct-review-banner');
+    expect(pv3).not.toContain('data-release-package-line="1"');
+    expect(pv3).not.toMatch(/data-release-[a-z-]+=/);
+    expect(pv3).not.toContain(releasePackageLine(MODEL.summary));
     expect(pv3).not.toMatch(/more active release blocker/);
+    expect(pv3).not.toMatch(/PACKAGE RELEASE STATUS|SEE RS-1|DESIGN COMPLETE|DESIGN INCOMPLETE/);
+    // The "drafting stamp" this case used to assert was never drafting practice —
+    // it was the retired banner's own "PRELIMINARY — NOT FOR CONSTRUCTION · NOT
+    // FOR PERMIT SUBMISSION" line, and V13 no longer requires that literal
+    // anywhere. Pinned as an absence so it cannot return on a structural sheet.
+    expect(pv3).not.toContain('NOT FOR PERMIT SUBMISSION');
+    // WHAT MUST STAY (item 8 of the ruling), and the second half of this case's
+    // non-vacuity: per-field engineering FACTS are data a reviewer acts on, not
+    // status about the package, so they still print in place on the sheet that
+    // owns them. A removal that took these with it is over-removal, not the ruling.
+    expect(pv3).toContain('NOT OBSERVED');
+    expect(pv3).toContain('PENDING STRUCTURAL VERIFICATION');
+    expect(pv3).toMatch(/data-project-field="issue-status">\s*PENDING ENGINEERING REVIEW\s*</);
+    // …and the banner is gone from EVERY sheet, not just the one sampled here.
+    expect(PKG.html).not.toContain('struct-review-banner');
+    // The package account itself is unchanged and still readable — on RS-1.
+    expect(rsAll(PKG.html)).toContain('NOT FOR PERMIT SUBMISSION');
   });
 
-  it('the certification gate banner does the same, keeping its own reason rows', () => {
+  it('the certification gate does the same, keeping its own reason rows', () => {
     const cert = pageOf(PKG.html, 'CERT');
     expect(cert).toContain('PENDING ENGINEERING REVIEW');
     expect(cert).toContain('data-release-package-line="1"');
-    expect(cert).toContain(releasePackageLine(MODEL.summary));
+    expect(cert).not.toContain(releasePackageLine(MODEL.summary));
+    expect(cert).not.toMatch(/PACKAGE RELEASE STATUS|SEE RS-1/);
+    // 🚨 V13 — the certification sheet must keep the gate MARKER, or generation
+    // throws. Asserted here as well as in its home file. This is also this case's
+    // non-vacuity anchor for the absences below: the sheet is real and still
+    // carries a machine-readable release state.
+    expect(cert).toMatch(/data-cert-gate="1"[^>]*data-release-phase="[A-Z_]+"/);
+    // RAY'S RULING 2026-09-18 — V13 ITSELF WAS REWRITTEN. It used to additionally
+    // demand the literal 'NOT FOR PERMIT SUBMISSION' anywhere on the sheet, which
+    // is why certPages printed a visible gate box ending "PRELIMINARY — NOT FOR
+    // CONSTRUCTION · NOT FOR PERMIT SUBMISSION — UNSIGNED / UNSEALED". The box,
+    // the phase label and the requirement rows are all gone; certificationGateBanner()
+    // now emits only the hidden marker matched above. V13's real property — an
+    // unapproved sheet may not read as approved — is asserted by that marker plus
+    // the absence of any affirmative certification, and the removed printed form
+    // is pinned as an absence so it cannot silently come back.
+    expect(cert).not.toContain('NOT FOR PERMIT SUBMISSION');
+    expect(cert).not.toMatch(/NOT FOR CONSTRUCTION|UNSIGNED \/ UNSEALED/);
+    expect(cert).not.toContain('data-cert-asserted="1"');
+    expect(cert).not.toContain('hereby certify');
+    // …and the readable account of it still lives on the review record.
+    expect(rsAll(PKG.html)).toContain('NOT FOR PERMIT SUBMISSION');
   });
 
   it('PV-4A keeps its SHEET-SCOPED electrical rows (a domain list, not a package total)', () => {

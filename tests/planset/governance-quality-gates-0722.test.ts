@@ -98,9 +98,31 @@ describe('W4 §2 — certification gate (no affirmative cert without an approved
     // the hardcoded PASS sentence and the wire-sizing VERIFIED badge are both gone
     expect(h).not.toMatch(/equipment complies with NEC\s*\d{4}\s*and UL 1741/i);
     expect(h).not.toContain('>VERIFIED</span>');
-    // and SCHED states the registry-derived conclusion instead
-    expect(h).toContain('COMPLIANCE NOT YET ESTABLISHED');
-    expect(h).toContain('SEE RS-1 FOR ACTIVE RELEASE BLOCKERS');
+    // RAY'S RULING 2026-09-18 — the SCHED conclusion no longer prints "DESIGN
+    // REVIEW PACKAGE — COMPLIANCE NOT YET ESTABLISHED"; internal release status
+    // is off the outbound sheets entirely. Gate 3 is not that sentence — it is
+    // "no global compliance claim while blocking items exist", and that is now
+    // asserted on the branch itself: the blocking branch must render the
+    // NON-ASSERTING design-basis conclusion (with the count still machine-
+    // readable on it), and the affirmative UL/NEC alternative must be absent.
+    // The human-readable account of the open items lives on RS-1 / RS-1.1.
+    // Bound by .exec so a missing sentence FAILS here rather than leaving the
+    // count assertion below to match some other sheet's span.
+    const schedConclusion = /<span data-release-blocker-count="(\d+)">Equipment ratings and wire sizing shown are the design basis\.<\/span>/.exec(h);
+    expect(schedConclusion, 'SCHED must render the non-asserting design-basis conclusion while blockers are open').not.toBeNull();
+    expect(Number(schedConclusion![1])).toBe(blocking.length);
+    expect(h, 'the affirmative UL/NEC conclusion is the no-blockers branch only')
+      .not.toContain('All equipment is UL-listed');
+    // the removed status sentence is pinned ABSENT so it cannot creep back
+    expect(h).not.toContain('COMPLIANCE NOT YET ESTABLISHED');
+    // RAY'S RULING 2026-09-18 — the blocker COUNTER and the "SEE RS-1" pointer
+    // came off this sentence; the qualifier (which is what gate 3 is actually
+    // about — no global compliance claim while blocking items exist) stays, and
+    // the count is still machine-readable and still registry-derived.
+    expect(h).toMatch(/data-release-blocker-count="(\d+)"/);
+    expect(Number(/data-release-blocker-count="(\d+)"/.exec(h)![1])).toBe(blocking.length);
+    expect(h, 'the review-record pointer must not print on an outbound sheet')
+      .not.toContain('SEE RS-1 FOR ACTIVE RELEASE BLOCKERS');
   });
 
   it('CERT and PE-1 render the PENDING ENGINEERING REVIEW template', () => {
@@ -143,7 +165,20 @@ describe('W4 §2 — certification gate (no affirmative cert without an approved
     expect(sheet).not.toContain('LETTER OF STRUCTURAL COMPLIANCE');
     expect(sheet).toContain('STRUCTURAL ENGINEERING REVIEW SHEET — PENDING');
     expect(sheet).toContain('data-pe-letter-state="pending"');
-    expect(sheet).toContain('NOT A LETTER OF COMPLIANCE');
+    // RAY'S RULING 2026-09-18 — the red sub-heading "PENDING PROFESSIONAL
+    // APPROVAL — NOT A LETTER OF COMPLIANCE" came off the sheet;
+    // PE_LETTER_TITLES_PENDING.headingQualifier is now ''. WS-16 is about the
+    // sheet's IDENTITY, not that qualifier, so assert the identity where it now
+    // lives: the tagged heading element itself must read the PENDING heading,
+    // and neither approved title may render. .exec-bound so a MISSING heading
+    // tag fails here instead of passing vacuously on an absent match.
+    const headingTag = /data-pe-letter-heading="1" data-pe-letter-state="(pending|approved)">([^<]+)</.exec(sheet);
+    expect(headingTag, 'the PE letter must carry its identity marker').not.toBeNull();
+    expect(headingTag![1]).toBe('pending');
+    expect(headingTag![2]).toBe('STRUCTURAL ENGINEERING REVIEW');
+    expect(sheet).not.toContain('PE STRUCTURAL LETTER OF COMPLIANCE');
+    // and the retired qualifier is pinned ABSENT so it cannot silently return
+    expect(sheet).not.toContain('NOT A LETTER OF COMPLIANCE');
   });
 });
 

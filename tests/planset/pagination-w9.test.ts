@@ -125,9 +125,71 @@ describe('W9 §16 — issue wording is derived, never a hard-coded "Issued for p
     expect(html).not.toContain('Issued for permit review');
   });
 
-  it('the cover engineering summary states the honest design-review disposition', () => {
-    expect(html).toContain('DESIGN REVIEW PACKAGE — NOT FOR PERMIT SUBMISSION');
-    // and it carries the DERIVED issue-state string (single source of truth)
+  // RAY'S RULING 2026-09-18 — the cover's CALC BASIS paragraph used to append
+  // "DESIGN REVIEW PACKAGE — NOT FOR PERMIT SUBMISSION (PENDING ENGINEERING
+  // REVIEW); requires PE review and wet stamp before AHJ submission." on the
+  // unissued branch. That sentence came OFF the cover: the set is sent to a PE
+  // to be stamped, so a not-for-submission notice on the sheet a client sees
+  // states the obvious. The PROPERTY it carried — the cover prints the DERIVED
+  // issue disposition and never a fabricated issued state — did not go away; it
+  // lives in the title block ISSUE line / REV A row and the cover's own SYSTEM
+  // INFORMATION "ISSUE STATUS" + REVISIONS rows (ordinary drafting practice,
+  // explicitly kept by the ruling). Asserted there now, plus an explicit
+  // assert-ABSENCE so the removed sentence cannot silently come back.
+  it('the cover prints the honest DERIVED disposition in ISSUE STATUS / REVISIONS', () => {
+    // ── isolate the COVER sheet FIRST. A package-wide toContain would be
+    //    satisfied by any of the other 24 title blocks, and — worse for the
+    //    absence half — indexOf returning -1 would make slice() hand back the
+    //    tail of the document and every not.toContain below pass for free. So
+    //    both boundaries are asserted before anything is read out of the slice.
+    const coverStart = html.indexOf('<div class="page cover-compact"');
+    expect(coverStart, 'cover sheet (page cover-compact) not found').toBeGreaterThan(-1);
+    const nextPageRel = html.slice(coverStart + 1).search(/<div class="page[ "]/);
+    expect(nextPageRel, 'no page boundary after the cover').toBeGreaterThan(-1);
+    const cover = html.slice(coverStart, coverStart + 1 + nextPageRel);
+    expect(cover.length, 'cover slice is implausibly short').toBeGreaterThan(1000);
+
+    // ── the paragraph the sentence was removed FROM must still be rendered.
+    //    Without this, deleting the whole ENGINEERING SUMMARY section would make
+    //    the absence assertions below true for entirely the wrong reason.
+    expect(cover).toContain('<div class="sec-hdr">ENGINEERING SUMMARY</div>');
+    expect(cover).toContain('<strong>CALC BASIS:</strong>');
+
+    // ── 1. the removed wording is PINNED ABSENT on the cover.
+    //    Scoped to the cover ON PURPOSE: RS-1 / RS-1.1 (the internal review
+    //    record) and the APP-A per-field facts legitimately still print
+    //    "NOT FOR PERMIT SUBMISSION", and a package-wide not.toContain would
+    //    assert the opposite of what the same ruling deliberately KEPT.
+    expect(cover).not.toContain('DESIGN REVIEW PACKAGE');
+    expect(cover).not.toContain('NOT FOR PERMIT SUBMISSION');
+    // non-vacuity for the line above: the renderer can still emit that string
+    // (RS-1 does), so its absence on the cover is a real scoping decision and
+    // not the phrase having vanished from the corpus.
+    expect(html, 'RS-1 internal review record no longer states the phrase at all')
+      .toContain('NOT FOR PERMIT SUBMISSION');
+
+    // ── 2. the disposition itself, where it now lives. Each match is asserted
+    //    to EXIST before its capture group is compared — a non-matching regex
+    //    yields undefined and the toBe would compare nothing meaningful.
+    //    (a) cover SYSTEM INFORMATION — the tagged, single-sourced row.
+    const sysRow = /<td class="il">ISSUE STATUS<\/td>\s*<td class="iv"><span data-project-field="issue-status">([^<]+)<\/span>/.exec(cover);
+    expect(sysRow, 'cover SYSTEM INFORMATION carries no tagged ISSUE STATUS row').not.toBeNull();
+    expect(sysRow![1]).toBe(issue);
+    //    (b) cover title block ISSUE meta line.
+    const tbIssue = /<div class="tb-meta">ISSUE: <span data-project-field="issue-status">([^<]+)<\/span>/.exec(cover);
+    expect(tbIssue, 'cover title block carries no tagged ISSUE line').not.toBeNull();
+    expect(tbIssue![1]).toBe(issue);
+    //    (c) title block REVISIONS strip — REV A description is the issue state.
+    const tbRevA = /<td class="tbl">REV A<\/td><td class="tbv">([^<&]+)&mdash;/.exec(cover);
+    expect(tbRevA, 'cover title block REVISIONS strip has no REV A row').not.toBeNull();
+    expect(tbRevA![1].trim()).toBe(issue);
+    //    (d) the cover's own REVISIONS section — REV A description, same value.
+    const secRevA = /<div class="sec-hdr">REVISIONS<\/div>[\s\S]{0,900}?>A<\/td>\s*<td class="iv"[^>]*>([^<]+)<\/td>/.exec(cover);
+    expect(secRevA, 'cover REVISIONS section has no REV A description row').not.toBeNull();
+    expect(secRevA![1]).toBe(issue);
+
+    // and the package carries the DERIVED issue-state string (single source of
+    // truth) — unchanged, was already passing.
     expect(html).toContain(issue);
   });
 });

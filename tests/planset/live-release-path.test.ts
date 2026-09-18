@@ -138,20 +138,30 @@ describe('the project review record is reachable', () => {
     expect(activeSheetIds(input)).toContain('RS-1');
   });
 
-  it('and the cover pointer NAMES the sheet instead of an app screen', () => {
+  // ── RAY'S RULING 2026-09-18 — THE COVER NO LONGER POINTS AT ANYTHING ──────
+  // The printed pointer ("SEE SHEET RS-1 FOR ALL 5 ITEMS…") was a reference to
+  // our internal review record on the cover of an outbound set. It is gone; the
+  // reference survives as a machine attribute. The real property these two cases
+  // guarded — the reference RESOLVES correctly per profile and never dangles —
+  // is unchanged and is asserted against that attribute.
+  it('and the cover record reference NAMES the sheet instead of an app screen', () => {
     const { html } = gen('design-review');
-    const ptr = /data-release-record-pointer="1"[^>]*>([^<]*)</.exec(html)?.[1]?.trim();
-    expect(ptr).toMatch(/SEE SHEET RS-1/);
-    expect(ptr).not.toMatch(/IN THE APPLICATION/);
+    expect(html).toContain('data-release-record-sheet="RS-1"');
+    // nothing is printed, in either wording
+    expect(html).not.toMatch(/SEE SHEET RS-1|SEE RS-1 FOR ALL|IN THE APPLICATION/);
+    expect(html).not.toMatch(/data-release-record-pointer="1"/);
   });
 
   it('the AHJ permit submittal still omits it — our review record is not part of an application', () => {
     const { html, input } = gen('permit');
     expect(sheetsOf(html)).not.toContain('RS-1');
     expect(sheetRef(input, 'review-status').present).toBe(false);
-    // and it degrades honestly rather than dangling
-    const ptr = /data-release-record-pointer="1"[^>]*>([^<]*)</.exec(html)?.[1]?.trim();
-    expect(ptr).toMatch(/PROJECT REVIEW RECORD IN THE APPLICATION/);
+    // and it degrades honestly rather than dangling: with no RS-1 in the set the
+    // block asserts no record sheet at all, so there is nothing to dangle.
+    expect(html).not.toContain('data-release-record-sheet=');
+    expect(html).not.toMatch(/SEE SHEET RS-1|SEE RS-1 FOR ALL|PROJECT REVIEW RECORD/);
+    // the block itself is still there, carrying the state by machine
+    expect(html).toContain('data-release-status-block="1"');
   });
 
   it('RS-1 actually enumerates the open requirements, not just a count', () => {

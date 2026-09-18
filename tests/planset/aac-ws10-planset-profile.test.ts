@@ -15,17 +15,30 @@
 //   • the FULL profile is byte-identical to the pre-WS-10 output, so the
 //     in-app package, the goldens and the RGM/ECD/BAR harnesses are untouched.
 //
-// ANTI-VACUITY: the banner-suppression test proves the rule is DATA-DRIVEN (a
-// sheet named by an unresolved requirement keeps its banner), and the
-// certification test proves the permit profile refuses the CERT/PE-1 sheets
-// while the approval is only a placeholder — it never invents one.
+// ANTI-VACUITY: the banner-suppression pair proves the rule is DATA-DRIVEN (a
+// sheet named by an unresolved requirement resolves to its OWN requirements, a
+// sheet named by none resolves to nothing), and the certification test proves
+// the permit profile refuses the CERT/PE-1 sheets while the approval is only a
+// placeholder — it never invents one.
+//
+// RAY'S RULING 2026-09-18 — internal release bookkeeping is OFF the outbound
+// sheets: no per-sheet status box, and no printed "NOT FOR PERMIT SUBMISSION"
+// anywhere on the package. The three assertions that pinned that printed form
+// are now assert-ABSENCE, and the state they stood for is read from the cover's
+// hidden release-status block (phase + non-submittable-preview marker). The
+// readable account of every open requirement is unchanged on RS-1/RS-1.1.
 // ═══════════════════════════════════════════════════════════════════════════
 import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
 import { schedContPageCount } from '@/lib/permit/sections/structuralPages';
-import { resolvePlansetProfile, certificationIsCompleted, sheetIsDirectlyGated } from '@/lib/permit/plansetProfile';
+import { resolvePlansetProfile, certificationIsCompleted, sheetIsDirectlyGated, requirementAffectsSheet } from '@/lib/permit/plansetProfile';
+// RAY'S RULING 2026-09-18 — the per-sheet status box is retired, but the MODEL
+// behind it (which requirements are projected onto which sheet) is untouched and
+// still feeds RS-1 and the release model. The banner-suppression test below now
+// asserts that model directly instead of a box that no longer renders.
+import { structuralBanner, bannerRequirementsForSheet } from '@/lib/permit/snapshot/structuralProjection';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
@@ -49,6 +62,26 @@ function statusLanguageCount(html: string): number {
   const up = html.toUpperCase();
   return STATUS_PHRASES.reduce((n, p) => n + (up.split(p).length - 1), 0);
 }
+
+// 2026-09-18 — several assertions below became assert-ABSENCE of printed status
+// language. They MUST measure the visible text: the raw HTML keeps developer
+// comments that NARRATE the retired bookkeeping ("…NOT FOR PERMIT SUBMISSION…"),
+// and a comment describing something we removed must never read as the thing
+// still printing. Same construction the (4) status-language test does inline.
+const visibleText = (html: string): string => html
+  .replace(/<!--[\s\S]*?-->/g, ' ')
+  .replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ')
+  .replace(/<[^>]+>/g, ' ')
+  .toUpperCase();
+
+// Split at the PHYSICAL page boundary — `class="page"` / `class="page ` — the
+// same token the (7) page-count assertion matches. Splitting on the bare prefix
+// would also cut at `class="page-body"`, i.e. inside every sheet, and a search
+// for a requirement on "the RS-1 page" would then miss the whole sheet body.
+const pagesOf = (html: string): string[] => html.split(/(?=<div class="page[ "])/);
+/** RS-1 paginates onto RS-1.1(.n): the review record is the UNION of those sheets. */
+const rs1Html = (html: string): string =>
+  pagesOf(html).filter(p => /tb-sheet-id">\s*RS-1/.test(p)).join('\n');
 
 const FULL = render('full');
 const PERMIT = render('permit');
@@ -180,23 +213,96 @@ describe('WS-10 (3) — DS-n is an appendix, not a numbered drawing sheet', () =
 
 // ── 4. the repeated package-status language is materially reduced ───────────
 describe('WS-10 (4) — one cover statement, not a package headline on every sheet', () => {
-  it('total status-language occurrences drop by at least half', () => {
+  it('total status-language occurrences drop, and release BOOKKEEPING is zero', () => {
     const full = statusLanguageCount(FULL.html);
     const permit = statusLanguageCount(PERMIT.html);
     expect(full).toBeGreaterThan(0);
-    expect(permit).toBeLessThanOrEqual(full / 2);
+    // The ≤ full/2 ratio this used to assert has stopped measuring WS-10. Both
+    // profiles lost their printed release bookkeeping on 2026-09-18 (Ray's
+    // ruling), and the FULL profile lost more of it — so the residual count is
+    // now dominated by per-sheet title-block boilerplate ("PENDING ENGINEERING
+    // REVIEW" and the drafting stamp, once per sheet on 22 sheets), which is the
+    // same on both profiles by construction and was never what WS-10 was about.
+    // A ratio over that boilerplate would pin the sheet COUNT, not the language.
+    expect(permit).toBeLessThan(full);
+    // The property that actually matters is absolute, and is now assertable:
+    // NO release bookkeeping reaches the submittal at all.
+    //
+    // Measured on the VISIBLE TEXT. The raw HTML carries developer comments that
+    // narrate retired behaviour ("…NOT the BLOCKER LIST. The retired banner
+    // printed 8 verbatim BLOCKER messages…"), and a comment describing a defect
+    // we removed must never be read as the defect still being present.
+    const visible = PERMIT.html
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .toUpperCase();
+    // NOTE the bookkeeping phrases are specific. A bare "UNRESOLVED" is NOT one:
+    // the submittal legitimately says "Unresolved: existing service-entrance
+    // conductor SIZE not surveyed", which is an honest engineering fact of the
+    // same class as NOT SURVEYED / NOT ESTABLISHED and is exactly what the
+    // engineer is being asked to look at. Banning the word would delete that.
+    for (const p of ['RELEASE STATUS', 'RELEASE GATE', 'BLOCKER',
+      'UNRESOLVED REQUIREMENT', 'UNRESOLVED DESIGN REQUIREMENT', 'UNRESOLVED ITEM',
+      'OPEN DESIGN GATE', 'DESIGN COMPLETE', 'DESIGN INCOMPLETE',
+      'OUTPUT PROFILE', 'PROCUREMENT READY']) {
+      expect(visible, `"${p}" must not appear on the permit submittal`).not.toContain(p);
+    }
+    // …while the honest issue state and drafting stamp remain
+    expect(PERMIT.html).toMatch(/PENDING ENGINEERING REVIEW/);
+    // RAY'S RULING 2026-09-18 — this line pinned the PRINTED "NOT FOR PERMIT
+    // SUBMISSION" headline (per-sheet banner, cover CALC BASIS paragraph, the
+    // PE-1/CERT gate box). All three came OFF the outbound sheets, and that
+    // removal is the point of the ruling — so the assertion inverts: the printed
+    // form is now pinned ABSENT and cannot silently return. The property it
+    // stood for (this output is not the submittal) is machine-readable on the
+    // cover's hidden release-status block, asserted immediately below and again
+    // in the sibling "carries one release-status record" case.
+    expect(visible).not.toContain('NOT FOR PERMIT SUBMISSION');
+    const stateBlock = /<div[^>]*data-release-status-block="1"[^>]*>/.exec(PERMIT.html);
+    // NON-VACUITY: exec() yields null if the block is gone, and every attribute
+    // read off it would then be `undefined` — which proves nothing at all.
+    expect(stateBlock, 'the permit cover carries no machine-readable release state').not.toBeNull();
+    // permit profile + pending review ⇒ explicitly a NON-SUBMITTABLE PREVIEW
+    expect(stateBlock![0]).toContain('data-permit-submission-preview="1"');
+    const phase = /data-release-phase="([A-Z_]+)"/.exec(stateBlock![0]);
+    expect(phase, 'the release-status block states no release phase').not.toBeNull();
+    expect(phase![1]).not.toBe('ISSUED_FOR_PERMIT');
   });
 
-  it('the cover prints ONE concise release status pointing at the in-app record', () => {
+  it('the cover CARRIES one release-status record and prints no release status', () => {
+    // RAY'S RULING 2026-09-18 — WS-10 reduced the cover to ONE concise printed
+    // release status. That count is now ZERO: nothing about our internal release
+    // state prints on an outbound set at all. The structural property WS-10 was
+    // built on — exactly one release-status block, on the cover, and no dangling
+    // pointer at a sheet this profile does not carry — is unchanged.
     expect(PERMIT.html).toContain('data-release-status-profile="permit"');
-    expect(PERMIT.html).toContain('SEE THE PROJECT REVIEW RECORD IN THE APPLICATION');
-    // exactly one release-status block in the whole permit package
     expect((PERMIT.html.match(/data-release-status-block="1"/g) ?? []).length).toBe(1);
-    // and it does NOT point at RS-1, which is not in this set
+    // no pointer of either wording, and no dangling RS-1 reference
+    expect(PERMIT.html).not.toContain('SEE THE PROJECT REVIEW RECORD IN THE APPLICATION');
     expect(PERMIT.html).not.toContain('SEE RS-1 FOR ALL');
+    expect(PERMIT.html).not.toContain('SEE SHEET RS-1');
+    // RS-1 is not in the permit set, so the block must not claim it is
+    expect(PERMIT.html).not.toContain('data-release-record-sheet=');
+    // RAY'S RULING 2026-09-18 — "the submittal still states that it may not be
+    // submitted" no longer has a printed form anywhere on an outbound sheet.
+    // This becomes the assert-ABSENCE half of this case's own title ("prints no
+    // release status"), measured on the VISIBLE text; the CARRIES half is the
+    // hidden record below. The readable account of every open item is unchanged
+    // on RS-1/RS-1.1, which this profile deliberately does not carry.
+    const printed = visibleText(PERMIT.html);
+    // NON-VACUITY: a not.toContain against an over-stripped (empty) extraction
+    // passes for anything. Anchor on text the submittal certainly prints.
+    expect(printed, 'the visible-text extraction came back empty').toContain('PENDING ENGINEERING REVIEW');
+    expect(printed).not.toContain('NOT FOR PERMIT SUBMISSION');
+    const block = /<div[^>]*data-release-status-block="1"[^>]*>/.exec(PERMIT.html)?.[0];
+    // NON-VACUITY: without the block, both attribute assertions read `undefined`.
+    expect(block, 'the one release-status record is missing entirely').toBeTruthy();
+    expect(block!).toContain('data-permit-submission-preview="1"');
+    expect(block!).toMatch(/style="display:\s*none;?"/);   // CARRIED as data, not printed
   });
 
-  it('ANTI-VACUITY — a sheet whose own content is gated KEEPS its banner', () => {
+  it('ANTI-VACUITY — a sheet whose own content is gated is still MODELLED as gated', () => {
     const gated = PERMIT.snap.permitReadiness.registry
       .filter(r => !r.resolved)
       .flatMap(r => r.affectedSheets ?? []);
@@ -205,9 +311,30 @@ describe('WS-10 (4) — one cover statement, not a package headline on every she
     const structuralGated = gated.some(s => s === 'PV-3' || s === 'PV-4C');
     expect(structuralGated).toBe(true);
     expect(sheetIsDirectlyGated(PERMIT.input, 'PV-4C')).toBe(true);
-    // …and that sheet still carries the per-sheet banner in the permit profile
-    const pv4c = PERMIT.html.slice(PERMIT.html.indexOf('tb-sheet-id">PV-4C<'));
-    expect(pv4c.slice(0, 60000)).toContain('struct-review-banner');
+    // ── RAY'S RULING 2026-09-18 ──────────────────────────────────────────────
+    // "…and that sheet still carries the per-sheet banner" has no printed form
+    // any more: structuralBannerHtml() is retired to a no-op and every call site
+    // on PV-1/PV-1B/PV-3/PV-4C(.1) is deleted, so the old slice-for-
+    // 'struct-review-banner' can only fail. It was never the box that mattered —
+    // the anti-vacuity property is that suppression is DATA-DRIVEN, i.e. that the
+    // per-sheet requirement→sheet attribution still resolves PV-4C to its OWN
+    // open requirements (and, in the sibling case, a clean sheet to none). That
+    // model is untouched, so assert it directly.
+    const banner = structuralBanner(PERMIT.snap);
+    const own = bannerRequirementsForSheet(banner, 'PV-4C');
+    // NON-VACUITY: an empty `own` would make the every() below pass trivially,
+    // and would itself be the failure this case exists to catch.
+    expect(own.own.length, 'PV-4C resolves to NO requirements of its own — the per-sheet model went vacuous').toBeGreaterThan(0);
+    expect(own.own.every(r => requirementAffectsSheet(r.sheets, 'PV-4C'))).toBe(true);
+    // WHERE THE READABLE ACCOUNT LIVES NOW: RS-1/RS-1.1 in the internal package
+    // still enumerate every one of those requirements in full. Removing the box
+    // must not have removed the account.
+    const rs1 = rs1Html(FULL.html);
+    expect(rs1.length, 'no RS-1 sheet found in the FULL package — the account has nowhere to live').toBeGreaterThan(0);
+    for (const r of own.own) expect(rs1, `${r.code} is gating PV-4C but is not stated on RS-1`).toContain(r.code);
+    // …and the retired box prints on NO sheet, under EITHER profile.
+    expect(PERMIT.html).not.toContain('struct-review-banner');
+    expect(FULL.html).not.toContain('struct-review-banner');
   });
 
   it('ANTI-VACUITY — suppression is data-driven, not blanket', () => {
@@ -234,7 +361,17 @@ describe('WS-10 (5) — unresolved work is stated, never hidden', () => {
     // what the phase model replaced. The property this line stood for — the
     // cover states the package is not submittable — is asserted from the phase.
     expect(PERMIT.html).toMatch(/data-release-phase="(DESIGN_INCOMPLETE|AWAITING_PROFESSIONAL_REVIEW|AWAITING_SEAL_AND_ISSUE)"/);
-    expect(PERMIT.html).toMatch(/NOT FOR PERMIT SUBMISSION/);
+    // RAY'S RULING 2026-09-18 — the printed pairing is gone for good: no outbound
+    // sheet says NOT FOR PERMIT SUBMISSION. The phase assertion on the line above
+    // IS the surviving property (an unissued phase == not submittable), so this
+    // line converts to an assert-ABSENCE that pins the removal instead of a
+    // literal that now only re-asserts the phase in words the reader is told not
+    // to print. The unresolved work itself is still stated — per-field on the
+    // sheets, and in full on RS-1/RS-1.1 in the internal package.
+    const printed = visibleText(PERMIT.html);
+    // NON-VACUITY: an empty extraction would satisfy not.toContain trivially.
+    expect(printed, 'the visible-text extraction came back empty').toContain('PENDING ENGINEERING REVIEW');
+    expect(printed).not.toContain('NOT FOR PERMIT SUBMISSION');
   });
 
   it('the permit profile never reaches an ISSUED identity while gates are open', () => {

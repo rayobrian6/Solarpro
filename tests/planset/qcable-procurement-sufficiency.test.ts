@@ -306,9 +306,17 @@ describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insuff
   });
 
   it('the primary SCHED sheet states the per-branch procurement status', () => {
+    // RAY'S RULING 2026-09-18 — the affected branch is still named, and still
+    // traceable to its requirement, but in plain language rather than by our
+    // registry code (item 7), and the cell no longer reports the PACKAGE release
+    // phase (which would print "DESIGN COMPLETE" the moment the design closed).
     expect(schedPrimary).toContain('PROCUREMENT SUFFICIENCY:');
-    expect(schedPrimary).toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
-    expect(schedPrimary).toContain('OVERALL RELEASE:');
+    expect(schedPrimary).toContain('AFFECTED &mdash; PROCURED CABLE BELOW DESIGNED PATH');
+    expect(schedPrimary).toContain('BRANCH PROCUREMENT:');
+    // the code stays machine-readable on the branch row, and off the sheet
+    expect(schedPrimary).toContain('data-branch-requirement="QCABLE-PROCUREMENT-INSUFFICIENT"');
+    expect(schedPrimary.replace(/<[^>]+>/g, ' ')).not.toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
+    expect(schedPrimary).not.toContain('OVERALL RELEASE:');
   });
   it('RS-1 shows the blocker code, the payload, and the same deficit', () => {
     expect(rs1).toContain('QCABLE-PROCUREMENT-INSUFFICIENT');

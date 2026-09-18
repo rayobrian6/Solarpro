@@ -324,7 +324,19 @@ const semanticCheck = (types, expectedTreatment) => {
     && coverHeadlineGates === rsHeadlineGates && coverHeadlineReqs === rsHeadlineReqs
     && coverListedGates.length === SUMMARY.openGateCount
     && JSON.stringify(coverListedGates) === JSON.stringify(GATES.filter(g => g.status === 'OPEN').map(g => g.gateId))
-    && new RegExp(`SEE RS-1 FOR ALL ${SUMMARY.unresolvedRequirementCount + SUMMARY.advisoryCount} REQUIREMENT`).test(flat(cover));
+    // ── RAY'S RULING 2026-09-18 ────────────────────────────────────────────
+    // The cover no longer prints a pointer at the review record, so the total is
+    // read from the attribute that replaced it.
+    //
+    // 🚨 NOTE THIS CLAUSE WAS ALREADY BROKEN BEFORE THE RULING. It required the
+    // word "REQUIREMENT", but the producer has emitted "…FOR ALL n ITEMS" since
+    // 2026-08-28 (the "ITEMS is the honest collective noun" change, because the
+    // total counts advisories too). So gate 11 could not pass on any recent
+    // build — it was measuring a string that no longer existed rather than the
+    // counts it is named for.
+    && Number(/data-release-total-item-count="(\d+)"/.exec(cover)?.[1] ?? NaN)
+       === SUMMARY.unresolvedRequirementCount + SUMMARY.advisoryCount
+    && !/SEE RS-1 FOR ALL|SEE SHEET RS-1/.test(flat(cover));
   gate(11, 'cover-and-rs1-state-the-same-gate-and-requirement-counts', ok,
     `cover ${coverGateCount} gates / ${coverReqCount} requirements (listed ${coverListedGates.length}) · `
     + `rs1 ${rsGateCount} / ${rsReqCount} · model ${SUMMARY.openGateCount} / ${SUMMARY.unresolvedRequirementCount}`,
