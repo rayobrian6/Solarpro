@@ -80,7 +80,10 @@ describe('the four phases', () => {
     expect(p.submittable).toBe(false);
     expect(p.designRequirementCodes).toEqual(['PROJECT-AUTHORITY-UNVERIFIED']);
     expect(p.professionalRequirementCodes).toEqual(['ENGINEERING-REVIEW-PENDING']);
-    expect(p.statement).toMatch(/^DESIGN INCOMPLETE — 1 design requirement outstanding/);
+    expect(p.label).toBe('ISSUED FOR ENGINEERING REVIEW');
+    expect(p.statement).toMatch(/^1 design requirement outstanding/);
+    // the statement must NOT repeat the label — that printed it twice on the cover
+    expect(p.statement).not.toMatch(/DESIGN INCOMPLETE/);
     // it warns that closing the data is not the end of it
     expect(p.statement).toMatch(/Licensed review follows/);
   });
@@ -173,7 +176,7 @@ describe('the drawing carries the statement, not the forensics', () => {
     expect(m, 'the statement must be rendered').toBeTruthy();
     const text = m![1].replace(/&mdash;/g, '—').replace(/\s+/g, ' ').trim();
     expect(text.length).toBeLessThan(320);
-    expect(text).toMatch(/^DESIGN INCOMPLETE/);
+    expect(text).toMatch(/^\d+ design requirements? outstanding/);
     // it NAMES what is outstanding …
     expect(text).toMatch(/design requirements outstanding/);
     // … and never reproduces a requirement's evidence, emitter or remediation

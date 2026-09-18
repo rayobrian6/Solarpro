@@ -1082,7 +1082,7 @@ export function generateBOMForPermit(
         + `— an INSTALLED length, never an order quantity. Expected remaining stock `
         + `${_qpBom.expectedRemainingStockFt ?? '—'} ft. Method: cut listed cable + IQ Field Wireable Connector `
         + `pair per ${_ev}. ${it.description ?? ''}`;
-      it.derivedFrom = `qcableProcurement (${_qpBom.resolutionId}) — resolved procurement design`;
+      it.derivedFrom = 'resolved Q-Cable procurement design';
       log.push(`[bomForPermit] WS-2 trunk_cable ORDERABLE: ${_qpBom.stockUnitsRequired} package(s), `
         + `${_qpBom.additionalSectionsRequired} additional section(s), remainder ${_qpBom.expectedRemainingStockFt} ft`);
     }

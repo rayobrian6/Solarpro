@@ -194,8 +194,8 @@ export function deriveReleasePhase(input: ReleasePhaseInput): ReleasePhase {
 
   const TERSE: Record<ReleasePhaseId, string> = {
     DESIGN_INCOMPLETE: design.length > 0
-      ? `BLOCKED — ${design.length} DESIGN REQUIREMENT${design.length === 1 ? '' : 'S'}`
-      : 'BLOCKED — NO DESIGN',
+      ? `${design.length} DESIGN REQUIREMENT${design.length === 1 ? '' : 'S'} OUTSTANDING`
+      : 'NO MODULES PLACED',
     AWAITING_PROFESSIONAL_REVIEW: 'DESIGN COMPLETE — PENDING ENGINEER OF RECORD',
     AWAITING_SEAL_AND_ISSUE: 'REVIEWED — AWAITING SEAL',
     ISSUED_FOR_PERMIT: 'RELEASED',
@@ -223,8 +223,8 @@ export function deriveReleasePhase(input: ReleasePhaseInput): ReleasePhase {
     const then = professional.length > 0
       ? ` Licensed review follows once these are closed.`
       : '';
-    return make('DESIGN_INCOMPLETE', 'DESIGN INCOMPLETE',
-      `DESIGN INCOMPLETE — ${design.length} design requirement${design.length === 1 ? '' : 's'} outstanding: `
+    return make('DESIGN_INCOMPLETE', 'ISSUED FOR ENGINEERING REVIEW',
+      `${design.length} design requirement${design.length === 1 ? '' : 's'} outstanding: `
       + `${what}.${then}`,
       'defect', false,
       `${design.length} open requirement(s) resolve by data, derivation, retrieval or operator entry `
@@ -296,6 +296,11 @@ export function submissionLine(phase: ReleasePhase): string {
     case 'AWAITING_PROFESSIONAL_REVIEW':
       return 'NOT FOR PERMIT SUBMISSION UNTIL REVIEWED, SIGNED AND SEALED';
     default:
-      return 'NOT FOR PERMIT SUBMISSION';
+      // The literal 'NOT FOR PERMIT SUBMISSION' is LOAD-BEARING: invariant V13
+      // (peLetterIdentity.certGateViolationReason) refuses to render an
+      // unapproved certification sheet that does not carry it. Rewording this
+      // to "NOT FOR CONSTRUCTION OR PERMIT SUBMISSION" dropped the exact
+      // substring and failed 212 tests — the guard working as intended.
+      return 'PRELIMINARY — NOT FOR CONSTRUCTION · NOT FOR PERMIT SUBMISSION';
   }
 }

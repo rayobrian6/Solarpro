@@ -381,7 +381,10 @@ describe('every surface consumes the canonical resolution', () => {
     expect(trunk.nonOrderable).not.toBe(true);
     expect(trunk.description).toContain(`ORDER ${QP.stockUnitsRequired} × Q-12-10-240`);
     expect(trunk.description).toMatch(/never an order quantity/i);
-    expect(trunk.derivedFrom).toMatch(/qcableProcurement/);
+    // 2026-09-18 — `qcableProcurement` is an internal FIELD NAME and the
+    // resolutionId an internal registry code; both printed on the BOM sheet.
+    // The provenance still says where the quantity came from, in English.
+    expect(trunk.derivedFrom).toMatch(/resolved Q-Cable procurement design/);
   });
 
   it('THE BOM accessory rows carry the canonical quantities, orderable', () => {

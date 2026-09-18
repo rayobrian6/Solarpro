@@ -41,8 +41,10 @@ describe('the cover banner reads as English', () => {
   it('does not end a clause on a dangling function word', () => {
     if (!html) return;
     const t = sheetText(html);
-    const banner = t.match(new RegExp('DESIGN INCOMPLETE[^.]*outstanding:[^.]*[.]'));
-    expect(banner, 'the DESIGN INCOMPLETE banner is missing').toBeTruthy();
+    // 2026-09-18 -- the label is now 'ISSUED FOR ENGINEERING REVIEW'. It used to
+    // be 'DESIGN INCOMPLETE', printed twice because the statement repeated it.
+    const banner = t.match(new RegExp('outstanding:[^.]*[.]'));
+    expect(banner, 'the outstanding-requirements statement is missing').toBeTruthy();
     const s = banner![0];
     // the exact defect
     expect(s).not.toMatch(new RegExp('criteria not[.]'));
