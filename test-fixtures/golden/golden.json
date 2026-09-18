@@ -68,7 +68,7 @@
     "structPostSpacing": 8,
     "structPileDepth": 5,
     "structTilt": 25,
-    "structRafterSize": "2\u00d76",
+    "structRafterSize": "2×6",
     "elecTotalPanels": 40,
     "elecTotalDcKw": 17.2,
     "elecStrings": 2,
@@ -93,7 +93,7 @@
     "structPostSpacing": 8,
     "structPileDepth": 5,
     "structTilt": 20,
-    "structRafterSize": "2\u00d76",
+    "structRafterSize": "2×6",
     "elecTotalPanels": 24,
     "elecTotalDcKw": 10.32,
     "elecStrings": 1,
@@ -103,7 +103,9 @@
     "systemType": "roof",
     "totalPanels": 12,
     "totalDcKw": 5.16,
-    "warnings": [],
+    "warnings": [
+      "roofCAD: module footprint 66.9×40.9 in taken from posted project scalars, not from a catalogue module identity"
+    ],
     "hasRoof": true,
     "hasGround": false,
     "hasFence": false,
@@ -214,6 +216,7 @@
     "totalPanels": 40,
     "totalDcKw": 17.2,
     "warnings": [
+      "groundCAD: module footprint 66.9×40.9 in taken from posted project scalars, not from a catalogue module identity",
       "groundCAD: using 40 designed GPS panel position(s)"
     ],
     "hasRoof": false,
@@ -238,7 +241,9 @@
     "systemType": "solar_fence",
     "totalPanels": 24,
     "totalDcKw": 10.32,
-    "warnings": [],
+    "warnings": [
+      "fenceCAD: module footprint 66.9×40.9 in taken from posted project scalars, not from a catalogue module identity"
+    ],
     "hasRoof": false,
     "hasGround": false,
     "hasFence": true,

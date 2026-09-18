@@ -10,6 +10,7 @@ import {
   bomCostByStage,
   bomCostByCategory,
   DISTRIBUTOR_PRICE_CATALOG,
+  DISTRIBUTOR_SOURCES,
   CATEGORY_FALLBACK_PRICES,
   type DistributorPriceOverride,
 } from './distributorPricing';
@@ -377,9 +378,17 @@ describe('DISTRIBUTOR_PRICE_CATALOG integrity', () => {
   });
 
   test('all entries have a valid source', () => {
-    const validSources = new Set(['CED', 'Soligent', 'KWh', 'Internal']);
+    // The valid set is the PRODUCTION list, not a copy of it. This assertion
+    // used to hold its own ['CED','Soligent','KWh','Internal'], which went stale
+    // the moment the named product-page sellers were added for the Tigo RSS
+    // SKUs — so it failed two rows that were correctly typed and correctly
+    // sourced. A test that re-states a fact instead of reading it will disagree
+    // with production sooner or later, and the test is usually the wrong one.
+    const validSources = new Set<string>(DISTRIBUTOR_SOURCES);
+    // NON-VACUITY: the catalog must actually have rows to check.
+    expect(DISTRIBUTOR_PRICE_CATALOG.length).toBeGreaterThan(0);
     for (const entry of DISTRIBUTOR_PRICE_CATALOG) {
-      expect(validSources.has(entry.source)).toBe(true);
+      expect(validSources.has(entry.source), `${entry.partNumber} has source "${entry.source}"`).toBe(true);
     }
   });
 

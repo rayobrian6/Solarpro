@@ -28,12 +28,26 @@ import type { BOMLineItemV4 } from '../bom-engine-v4';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
-export type DistributorSource =
-  | 'CED' | 'Soligent' | 'KWh' | 'Internal'
+/** Every legal price source, as a RUNTIME value.
+ *
+ *  This used to be a bare type union, and `distributorPricing.test.ts` carried
+ *  its own hand-written copy (`['CED','Soligent','KWh','Internal']`) to validate
+ *  against. When the four named sellers were added for the Tigo RSS SKUs the
+ *  union was updated and the test's copy was not, so "all entries have a valid
+ *  source" failed on two real, correctly-typed catalog rows — a test asserting a
+ *  stale belief about a list that had legitimately grown.
+ *
+ *  One fact, one implementation: the union is DERIVED from this array, so a new
+ *  source cannot be added to one and missed by the other. */
+export const DISTRIBUTOR_SOURCES = [
+  'CED', 'Soligent', 'KWh', 'Internal',
   // Sellers whose listed prices were read directly off the product page. Named
   // rather than folded into 'Internal' so a row states WHERE its number came
   // from — several Tigo SKUs are only publicly priced by these vendors.
-  | 'NAZ Solar Electric' | 'US Solar Supplier' | 'Signature Solar' | 'PowerStore';
+  'NAZ Solar Electric', 'US Solar Supplier', 'Signature Solar', 'PowerStore',
+] as const;
+
+export type DistributorSource = typeof DISTRIBUTOR_SOURCES[number];
 
 /** How a row's numbers were obtained. Absent ⇒ the legacy Q1-2025 price-sheet
  *  baseline, where netPrice is a discount applied to list. */
