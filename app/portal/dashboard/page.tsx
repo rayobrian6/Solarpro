@@ -15,6 +15,11 @@ import {
   getInterconnectionProfile,
   getStateIcaFallback,
 } from '@/lib/utilityInterconnection';
+import {
+  estimateAnnualKwh,
+  estimateMonthlyKwh,
+  estimateCo2Tons,
+} from '@/lib/portal/production';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -833,6 +838,64 @@ function MonitoringFoundation({ stage, project }: { stage: HomeownerStage | null
   );
 }
 
+// ─── Estimated System Performance (completed stage) ──────────────────────────
+// Shows the homeowner a credible estimate of their system's expected annual +
+// monthly production + CO2 offset, derived from system_size_kw. Pure UI, no
+// API calls, no DB changes. Falls back gracefully when system_size_kw is
+// null. Visible only for completed-stage customers (MonitoringFoundation's
+// sibling). Calculations live in lib/portal/production.ts so they're
+// unit-testable without mounting React.
+
+function SystemPerformance({ project }: { project: Project | null }) {
+  if (!project?.system_size_kw || project.system_size_kw <= 0) return null;
+  if (project.homeowner_stage !== 'completed') return null;
+
+  const kw = project.system_size_kw;
+  const annualKwh = estimateAnnualKwh(kw);
+  const monthlyKwh = estimateMonthlyKwh(annualKwh);
+  const co2Tons = estimateCo2Tons(annualKwh);
+
+  return (
+    <div className="rounded-2xl border border-amber-500/[0.12] bg-amber-500/[0.02] px-6 sm:px-8 py-6">
+      <div className="flex items-center gap-2 mb-1">
+        <div className="w-2 h-2 rounded-full bg-amber-400" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-amber-500/60">System Performance</span>
+      </div>
+      <h3 className="text-lg font-black text-white mb-4">Your expected production</h3>
+
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="rounded-xl bg-white/[0.02] border border-white/[0.05] px-3 py-3 text-center">
+          <Zap size={14} className="text-amber-400 mx-auto mb-2" />
+          <p className="text-base font-black text-white">{kw.toFixed(1)} kW</p>
+          <p className="text-[9px] text-slate-500 uppercase tracking-wide mt-0.5">System size</p>
+        </div>
+        <div className="rounded-xl bg-white/[0.02] border border-white/[0.05] px-3 py-3 text-center">
+          <Activity size={14} className="text-emerald-400 mx-auto mb-2" />
+          <p className="text-base font-black text-white">{annualKwh.toLocaleString()}</p>
+          <p className="text-[9px] text-slate-500 uppercase tracking-wide mt-0.5">kWh / year (est.)</p>
+        </div>
+        <div className="rounded-xl bg-white/[0.02] border border-white/[0.05] px-3 py-3 text-center">
+          <BarChart3 size={14} className="text-sky-400 mx-auto mb-2" />
+          <p className="text-base font-black text-white">{monthlyKwh.toLocaleString()}</p>
+          <p className="text-[9px] text-slate-500 uppercase tracking-wide mt-0.5">kWh / month (est.)</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 bg-slate-800/40 border border-slate-700/30">
+        <Leaf size={12} className="text-emerald-400" />
+        <p className="text-xs text-slate-400">
+          Estimated CO₂ offset: <span className="font-bold text-emerald-300">{co2Tons} tons/year</span>
+        </p>
+      </div>
+      <p className="text-[10px] text-slate-600 mt-3 leading-relaxed">
+        Estimates based on your {kw} kW system and US-average solar irradiance.
+        Actual production varies with tilt, azimuth, shading, and weather.
+        View your monitoring dashboard above for live numbers.
+      </p>
+    </div>
+  );
+}
+
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export default function PortalDashboard() {
@@ -1277,6 +1340,9 @@ export default function PortalDashboard() {
 
             {/* ══ PHASE 6: MONITORING FOUNDATION (completed) ══════════════ */}
             <MonitoringFoundation stage={stage} project={activeProject} />
+
+            {/* ══ SYSTEM PERFORMANCE (completed) ═════════════════════════ */}
+            <SystemPerformance project={activeProject} />
 
             {/* ══ PHASE 3: PROJECT TEAM ════════════════════════════════════ */}
             {owner ? <ProjectTeam owner={owner} /> : null}

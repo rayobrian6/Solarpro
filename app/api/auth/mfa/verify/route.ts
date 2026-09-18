@@ -24,33 +24,35 @@ import { isProduction } from '@/lib/env';
 // This endpoint is called after successful password authentication
 // when the user has MFA enabled.
 export async function POST(req: NextRequest) {
-  const ip = getClientIp(req);
-  const rl = await checkRateLimit('mfa_verify', ip);
-  if (!rl.allowed) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
-  }
-
-  // ── Extract MFA pending token from cookie ───────────────────────────
-  // This is the short-lived token issued by the login route after
-  // password verification succeeded. It identifies the user but does
-  // NOT grant application access (mfa_pending = true flag).
-  const mfaCookie = req.cookies.get(MFA_PENDING_COOKIE)?.value;
-  if (!mfaCookie) {
-    return NextResponse.json(
-      { error: 'MFA session expired. Please log in again.' },
-      { status: 401 }
-    );
-  }
-
-  const mfaPending = verifyMFAPendingToken(mfaCookie);
-  if (!mfaPending) {
-    return NextResponse.json(
-      { error: 'MFA session expired or invalid. Please log in again.' },
-      { status: 401 }
-    );
-  }
-
+  // v70: the previous catch block only wrapped the body-parse +
+  // DB-query + TOTP-decrypt path. The rate-limit call and the
+  // MFA-pending cookie check were OUTSIDE the try, so any throw there
+  // surfaced as a generic 500 with no [MFA_VERIFY_ERROR] log line.
+  // Move the whole prologue (rate limit + cookie + token) into the
+  // try so every error path gets logged with the real message.
   try {
+    const ip = getClientIp(req);
+    const rl = await checkRateLimit('mfa_verify', ip);
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
+    }
+
+    const mfaCookie = req.cookies.get(MFA_PENDING_COOKIE)?.value;
+    if (!mfaCookie) {
+      return NextResponse.json(
+        { error: 'MFA session expired. Please log in again.' },
+        { status: 401 }
+      );
+    }
+
+    const mfaPending = verifyMFAPendingToken(mfaCookie);
+    if (!mfaPending) {
+      return NextResponse.json(
+        { error: 'MFA session expired or invalid. Please log in again.' },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
     const { code, recovery_code } = body;
 

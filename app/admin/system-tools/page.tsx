@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   Database, RefreshCw, Zap, Search, Trash2, Activity,
   CheckCircle, AlertCircle, Play, ChevronRight, Server,
-  Clock, Users, FolderOpen, FileText, Shield,
+  Clock, Users, FolderOpen, FileText, Shield, Power, ToggleLeft,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 
@@ -100,6 +100,55 @@ export default function SystemToolsPage() {
   const [selectedMig, setSelectedMig] = useState('');
   const [confirmTool, setConfirmTool] = useState<string | null>(null);
 
+  // ── Feature Flags (runtime toggles) ──────────────────────────────────────
+  const [flags, setFlags]                     = useState<Array<{ flagKey: string; description: string; enabled: boolean; updatedAt: string; updatedByUserId: string | null }>>([]);
+  const [flagsLoading, setFlagsLoading]       = useState(true);
+  const [flagsError, setFlagsError]           = useState<string | null>(null);
+  const [pendingFlag, setPendingFlag]         = useState<string | null>(null);
+
+  const loadFlags = async () => {
+    setFlagsLoading(true);
+    setFlagsError(null);
+    try {
+      const res = await fetch('/api/admin/feature-flags', { method: 'GET', credentials: 'include' });
+      const data = await res.json();
+      if (data.success) {
+        setFlags(data.flags ?? []);
+      } else {
+        setFlagsError(data.error ?? 'Failed to load feature flags');
+      }
+    } catch (e) {
+      setFlagsError((e as Error).message ?? 'Network error');
+    } finally {
+      setFlagsLoading(false);
+    }
+  };
+
+  const toggleFlag = async (flagKey: string, currentEnabled: boolean) => {
+    setPendingFlag(flagKey);
+    try {
+      const res = await fetch('/api/admin/feature-flags', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ key: flagKey, enabled: !currentEnabled }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFlags(prev => prev.map(f => f.flagKey === flagKey ? { ...f, enabled: data.flag.enabled, updatedAt: data.flag.updatedAt } : f));
+        toast.success(`'${flagKey}' set to ${!currentEnabled ? 'ON' : 'OFF'}`);
+      } else {
+        toast.error(data.error ?? 'Failed to toggle flag');
+      }
+    } catch (e) {
+      toast.error((e as Error).message ?? 'Network error');
+    } finally {
+      setPendingFlag(null);
+    }
+  };
+
+  useEffect(() => { loadFlags(); }, []);
+
   
 
   const runTool = async (toolId: string, params: any = {}) => {
@@ -190,6 +239,89 @@ export default function SystemToolsPage() {
             </div>
           );
         })}
+      </div>
+
+      {/* Feature Flags (runtime toggles) */}
+      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center">
+            <Power size={18} className="text-amber-400" />
+          </div>
+          <div className="flex-1">
+            <div className="font-semibold text-white text-sm">Feature Flags</div>
+            <div className="text-xs text-amber-200/80">Runtime toggles — DB row overrides the deploy-time env var. Every flip is audit-logged.</div>
+          </div>
+          <button
+            onClick={loadFlags}
+            disabled={flagsLoading}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-slate-300 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={11} className={flagsLoading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
+
+        {flagsError ? (
+          <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
+            <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
+            <div>
+              <div className="font-semibold mb-0.5">Could not load feature flags</div>
+              <div className="opacity-80">{flagsError}</div>
+              {flagsError.includes('migration 121') ? (
+                <div className="mt-1 opacity-90">Run <code className="font-mono text-[10px] bg-black/30 px-1 py-0.5 rounded">121_app_feature_flags.sql</code> via the Migration Operator Console, then refresh.</div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {flagsLoading && flags.length === 0 ? (
+          <div className="text-xs text-slate-400 py-2">Loading…</div>
+        ) : null}
+
+        {!flagsLoading && !flagsError && flags.length === 0 ? (
+          <div className="text-xs text-slate-400 py-2">No feature flags have been overridden. Default behavior is in effect (env-var → off).</div>
+        ) : null}
+
+        <div className="space-y-2">
+          {flags.map(flag => {
+            const isPending = pendingFlag === flag.flagKey;
+            return (
+              <div
+                key={flag.flagKey}
+                className="flex items-center gap-4 rounded-lg border border-white/10 bg-black/20 p-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <code className="font-mono text-xs text-white">{flag.flagKey}</code>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider ${
+                      flag.enabled ? 'bg-green-500/20 text-green-400' : 'bg-slate-500/20 text-slate-400'
+                    }`}>
+                      {flag.enabled ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  {flag.description ? <div className="text-[11px] text-slate-400">{flag.description}</div> : null}
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    Last updated: {new Date(flag.updatedAt).toLocaleString()}
+                  </div>
+                </div>
+                <button
+                  onClick={() => toggleFlag(flag.flagKey, flag.enabled)}
+                  disabled={isPending}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                    flag.enabled ? 'bg-green-500/80' : 'bg-slate-600/80'
+                  } ${isPending ? 'opacity-50' : 'hover:opacity-90'}`}
+                  title={`Toggle ${flag.flagKey}`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                      flag.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Canonical migration console pointer — the legacy runner below is

@@ -451,15 +451,27 @@ export interface RoofPlane {
 }
 
 // -- Obstruction --
-// A roof obstruction (vent, skylight, chimney, etc.).
-// Placed by clicking in 3D mode. Panels within radiusM are removed.
+// A roof obstruction (vent, skylight, chimney, dormer, etc.).
+// Placed by clicking in 3D mode. The Aurora-parity primitive uses
+// widthM × depthM as the rectangular keep-out footprint (see
+// components/3d/obstruction/). The legacy v47 field radiusM is kept
+// for backward compatibility with persisted state — if widthM/depthM
+// are absent, the panel-exclusion filter falls back to the circular
+// radiusM exclusion.
 export interface PlacedObstruction {
   id: string;
   lat: number;
   lng: number;
   height: number;         // meters above ellipsoid (at obstruction base)
-  radiusM: number;        // exclusion radius in meters
-  type: 'vent' | 'skylight' | 'chimney' | 'hvac' | 'other';
+  /** Legacy v47 keep-out: panels within `radiusM` of the center are removed. */
+  radiusM: number;        // exclusion radius in meters (legacy)
+  /** Aurora-parity rectangular keep-out (meters, east-west). */
+  widthM?: number;        // footprint width in meters (Aurora parity)
+  /** Aurora-parity rectangular keep-out (meters, north-south). */
+  depthM?: number;        // footprint depth in meters (Aurora parity)
+  /** Prism height above the click point (meters). Optional — defaults to 1.0. */
+  heightM?: number;       // extrusion height in meters (Aurora parity)
+  type: 'vent' | 'skylight' | 'chimney' | 'hvac' | 'dormer' | 'other';
   label?: string;
 }
 

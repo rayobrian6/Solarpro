@@ -250,20 +250,33 @@ describe('W1-B — ProcurementAuthorityState consolidation', () => {
     }
   });
 
-  it('per-category rules: the module row is blocked by an OPEN procurement requirement, the micro is not', () => {
-    const module = fixture.bom.find(r => r.category === 'solar_panel')!;
+  // Title corrected in the same merge: it still said the module row "is blocked
+  // by an OPEN procurement requirement", which the 08-28 datasheet migration
+  // made false — the body has asserted the opposite since. A test whose NAME
+  // contradicts its assertions is how a stale belief survives a green suite.
+  it('per-category rules: BOTH the module and the micro row are orderable on their own merits', () => {
+    const mod = fixture.bom.find(r => r.category === 'solar_panel')!;
     const micro = fixture.bom.find(r => r.category === 'microinverter')!;
     // identity + count are canonical for BOTH …
-    expect(module.procurement!.quantitySource).toBe('count-derived');
+    expect(mod.procurement!.quantitySource).toBe('count-derived');
     expect(micro.procurement!.quantitySource).toBe('count-derived');
+    // ── MERGE RESOLUTION, james-dev → dev ──────────────────────────────────
+    // Both sides are kept. james-dev renamed the local `module` -> `mod` (it
+    // shadows the CommonJS global) — that rename is adopted, here and above.
+    // The ASSERTIONS are dev's, because dev is where the fact changed:
+    //
     // 2026-08-28 MODULE-DATASHEET MIGRATION - MODULE-EXACT-DATASHEET-PENDING no
     // longer fires: SolarPro SHIPS the Qcells datasheet, archived and hashed
     // in-repo, and the SAME evaluator clears it. The module row is therefore
     // orderable on its own merits, which is the honest outcome. Every refusal
     // the evaluator still enforces is asserted in
     // tests/planset/manufacturer-datasheet-catalogue.test.ts.
-    expect(module.procurement!.blockingRequirementCodes).not.toContain('MODULE-EXACT-DATASHEET-PENDING');
-    expect(module.procurement!.authorityState).toBe('VERIFIED_ORDERABLE');
+    //
+    // james-dev branched before that migration, so its
+    // CANDIDATE_NON_ORDERABLE expectation is simply the older world — not a
+    // disagreement about behaviour.
+    expect(mod.procurement!.blockingRequirementCodes).not.toContain('MODULE-EXACT-DATASHEET-PENDING');
+    expect(mod.procurement!.authorityState).toBe('VERIFIED_ORDERABLE');
     expect(micro.procurement!.blockingRequirementCodes).toEqual([]);
     expect(micro.procurement!.authorityState).toBe('VERIFIED_ORDERABLE');
   });
