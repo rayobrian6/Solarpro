@@ -1512,10 +1512,23 @@ export function generatePermitHTML(
   // designer looking at "4 UNRESOLVED REQUIREMENTS" had no way to learn what
   // they were.
   //
-  // It stays out of the AHJ PERMIT submittal — our internal review record is
-  // not part of a permit application, and that was the sound half of the
-  // original decision. It belongs in design-review, which is what we read.
-  const _rsIncluded = _profile !== 'permit';
+  // ── RAY, 2026-09-18 — RS-1 COMES OUT OF THE OUTBOUND SET TOO ─────────────
+  //     "No there is still a fucking release gate sheet. Idk why"
+  //
+  // The reasoning above is still correct about one thing — the review record
+  // has to be READABLE somewhere, and the in-app screen was never built. It was
+  // wrong about where. DESIGN_REVIEW is the artifact we SEND to the engineer of
+  // record (PERMIT_ARTIFACT_PROFILE === 'design-review'), so putting our
+  // release-gate registry there put a sheet titled "REVIEW STATUS — RELEASE
+  // GATES & REQUIREMENTS" in front of an outside professional and a client.
+  // Ray ruled every other piece of release bookkeeping off the set; a whole
+  // SHEET of it is the same decision, and recolouring it was not the fix.
+  //
+  // RS-1 / RS-1.1 now render ONLY in FULL_INTERNAL — the profile whose name
+  // says what it is and which is never sent. Nothing is lost: it is the same
+  // sheet, from the same projection, still enumerating every requirement with
+  // its authority path, explanation, resolution action and evidence.
+  const _rsIncluded = _profile === 'full';
   const _certDone = certificationIsCompleted(input);
   const pageFns: Array<(n: number, t: number) => string> = [
     (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)

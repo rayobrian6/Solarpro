@@ -130,8 +130,15 @@ describe('LA §4 · the permit POST route uses the canonical project record', ()
     const tested = await generate('stale mirror');
 
     expect(tested.html).toContain('NORTHSIDE TEST RANGE — Solar');   // preserved verbatim
-    const count = (h: string) => Number((h.match(/(\d+)\s+UNRESOLVED REQUIREMENTS/) ?? [])[1] ?? NaN);
-    expect(count(clean.html)).toBeGreaterThan(0);
+    // RAY, 2026-09-18 — this read "N UNRESOLVED REQUIREMENTS" out of the RS-1
+    // headline, and RS-1 no longer renders in the profile the route emits (it
+    // moved to FULL_INTERNAL). The count is read from the cover's hidden
+    // data-release-requirement-count instead, which is the same model number and
+    // is what the evidence harnesses already reconcile against. The behavioural
+    // property is identical: the same design, named two ways, differs by exactly
+    // the one non-production requirement.
+    const count = (h: string) => Number((h.match(/data-release-requirement-count="(\d+)"/) ?? [])[1] ?? NaN);
+    expect(count(clean.html), 'the cover must carry the requirement count').toBeGreaterThan(0);
     expect(count(tested.html)).toBe(count(clean.html) + 1);          // the policy fired
   }, 120_000);
 

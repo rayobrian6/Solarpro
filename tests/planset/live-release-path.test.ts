@@ -128,8 +128,15 @@ describe('Auto-Fill may not name the engineer of record', () => {
 });
 
 describe('the project review record is reachable', () => {
-  it('design-review — the profile the app generates — CONTAINS RS-1', () => {
-    const { html, input } = gen('design-review');
+  // ── RAY, 2026-09-18 — RS-1 MOVED TO FULL_INTERNAL ────────────────────────
+  //     "No there is still a fucking release gate sheet. Idk why"
+  // DESIGN_REVIEW is the artifact we SEND to the engineer of record. A sheet
+  // titled "REVIEW STATUS — RELEASE GATES & REQUIREMENTS" is the same release
+  // bookkeeping he ruled off every other sheet, so it leaves the outbound set
+  // entirely. It still renders in FULL_INTERNAL, which is never sent — the
+  // review record is not lost, it is just no longer something we mail out.
+  it('FULL_INTERNAL — the profile that keeps the review record — CONTAINS RS-1', () => {
+    const { html, input } = gen('full');
     const seq = sheetsOf(html);
     expect(seq).toContain('RS-1');
     // immediately after the cover, matching the manifest position exactly:
@@ -138,18 +145,34 @@ describe('the project review record is reachable', () => {
     expect(activeSheetIds(input)).toContain('RS-1');
   });
 
+  it('and NEITHER outbound profile carries it', () => {
+    for (const p of ['design-review', 'permit'] as const) {
+      const { html, input } = gen(p);
+      const seq = sheetsOf(html);
+      // NON-VACUITY: the profile really rendered a package
+      expect(seq.length, `${p} must render sheets`).toBeGreaterThan(10);
+      expect(seq.filter(s => s.startsWith('RS-1')), `${p} carries RS-1`).toEqual([]);
+      expect(activeSheetIds(input)).not.toContain('RS-1');
+    }
+  });
+
   // ── RAY'S RULING 2026-09-18 — THE COVER NO LONGER POINTS AT ANYTHING ──────
   // The printed pointer ("SEE SHEET RS-1 FOR ALL 5 ITEMS…") was a reference to
   // our internal review record on the cover of an outbound set. It is gone; the
   // reference survives as a machine attribute. The real property these two cases
   // guarded — the reference RESOLVES correctly per profile and never dangles —
   // is unchanged and is asserted against that attribute.
-  it('and the cover record reference NAMES the sheet instead of an app screen', () => {
-    const { html } = gen('design-review');
-    expect(html).toContain('data-release-record-sheet="RS-1"');
-    // nothing is printed, in either wording
-    expect(html).not.toMatch(/SEE SHEET RS-1|SEE RS-1 FOR ALL|IN THE APPLICATION/);
-    expect(html).not.toMatch(/data-release-record-pointer="1"/);
+  it('and the cover record reference NAMES the sheet, in the profile that has it', () => {
+    // FULL_INTERNAL is the only profile carrying RS-1 now, so it is the only one
+    // whose cover may name it. Nothing is printed in either profile.
+    const full = gen('full').html;
+    expect(full).toContain('data-release-record-sheet="RS-1"');
+    expect(full).not.toMatch(/SEE SHEET RS-1|SEE RS-1 FOR ALL|IN THE APPLICATION/);
+    expect(full).not.toMatch(/data-release-record-pointer="1"/);
+    // and the outbound set names no record sheet at all — nothing to dangle
+    const dr = gen('design-review').html;
+    expect(dr).not.toContain('data-release-record-sheet=');
+    expect(dr).not.toMatch(/SEE SHEET RS-1|SEE RS-1 FOR ALL|IN THE APPLICATION/);
   });
 
   it('the AHJ permit submittal still omits it — our review record is not part of an application', () => {
@@ -165,7 +188,8 @@ describe('the project review record is reachable', () => {
   });
 
   it('RS-1 actually enumerates the open requirements, not just a count', () => {
-    const { html } = gen('design-review');
+    // exercised on FULL_INTERNAL — the profile that carries the review record
+    const { html } = gen('full');
     const i = html.indexOf('REVIEW STATUS &mdash; RELEASE GATES');
     const rs = html.slice(i, i + 40_000);
     // the root-gate table, the responsible role, and a real resolution action

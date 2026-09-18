@@ -121,6 +121,10 @@ const FRAMING = /STRUCTURAL RELEASE PENDING/;
 
 describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content', () => {
   const DR = gen('design-review');
+  // RAY, 2026-09-18 — RS-1 left the outbound set for FULL_INTERNAL. The review
+  // record is still the place nothing is dropped; it is just no longer something
+  // we send. Outbound assertions stay on DR; record assertions use FULL.
+  const FULL = gen('full');
 
   // 2026-08-28 ROUTE-BOUND MIGRATION - PV-1's own requirement was
   // ROUTE-LENGTH-ESTIMATE, which no longer fires: the DESIGN bounds each
@@ -163,6 +167,7 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     // package carries QCABLE-GROUNDING-AUTHORITY-UNVERIFIED (E-1 / PV-1B /
     // PV-4B / SCHED), so the exclusion is a real exclusion.
     const P = gen('design-review', pendingGroundingAuthority('wrongConnectorArchitecture'));
+    const PFULL = gen('full', pendingGroundingAuthority('wrongConnectorArchitecture'));
     const banner = structuralBanner(P.snap);
     const per = bannerRequirementsForSheet(banner, 'PV-3');
     const notPV3 = banner.blockers.filter(r => r.sheets.length > 0 && !r.sheets.includes('PV-3'));
@@ -264,11 +269,14 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     // still FIND a printed requirement list where one legitimately remains —
     // RS-1, the internal review record Ray kept — or the absence assertions are
     // passing because the detector went blind, not because the box is gone.
-    expect(printedRequirementRows(banner, DR.html, 'RS-1').length,
+    expect(printedRequirementRows(structuralBanner(FULL.snap), FULL.html, 'RS-1').length,
       'the printed-list detector finds nothing even on RS-1 — absence proves nothing').toBeGreaterThan(0);
-    // NOTHING IS DROPPED, in the place Ray kept for it: every open requirement is
+    // …and RS-1 is not in the outbound set at all, which is the point.
+    expect([...DR.html.matchAll(/tb-sheet-id">\s*([^<]+?)\s*</g)]
+      .map(m => m[1]).filter(x => x.startsWith('RS-1'))).toEqual([]);
+    // NOTHING IS DROPPED, in the place it now lives: every open requirement is
     // enumerated in full on the internal review record (RS-1, continuing RS-1.1).
-    const record = reviewRecordHtml(DR.html);
+    const record = reviewRecordHtml(FULL.html);
     for (const r of banner.blockers) {
       expect(record, `${r.code} is on no sheet and not on the review record`)
         .toContain(`data-release-requirement="${r.code}"`);
@@ -281,11 +289,12 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     // archived evidence) puts a requirement on RS-1/E-1/PV-4B that none of these
     // four sheets owns, so all four must state the remainder.
     const P = gen('design-review', pendingGroundingAuthority('wrongConnectorArchitecture'));
+    const PFULL = gen('full', pendingGroundingAuthority('wrongConnectorArchitecture'));
     const banner = structuralBanner(P.snap);
     // 2026-08-28 ROUTE-BOUND MIGRATION - PV-1 / PV-1B have no own requirement on
     // this fixture any more (the route one closed), so the case is exercised on
     // the sheets that DO own one. The rule is unchanged.
-    const record = reviewRecordHtml(P.html);
+    const record = reviewRecordHtml(PFULL.html);
     for (const id of ['PV-3', 'PE-1']) {
       const per = bannerRequirementsForSheet(banner, id);
       expect(per.otherCount,
@@ -319,8 +328,11 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     const open = DR.snap.permitReadiness.registry.filter(r => !r.resolved);
     const blocking = open.filter(r => r.severity !== 'warning').length;
     const advisory = open.length - blocking;
-    expect(DR.html).toContain(`${blocking} UNRESOLVED REQUIREMENTS`);
-    expect(DR.html).toMatch(new RegExp(`${advisory} ADVISOR(Y|IES)`));
+    // The printed headline lives on RS-1, which is FULL_INTERNAL only now. The
+    // OUTBOUND package states the same totals by machine and prints neither.
+    expect(FULL.html).toContain(`${blocking} UNRESOLVED REQUIREMENTS`);
+    expect(FULL.html).toMatch(new RegExp(`${advisory} ADVISOR(Y|IES)`));
+    expect(DR.html).not.toContain('UNRESOLVED REQUIREMENTS');
   });
 
   it('per-sheet + remainder always reconciles to the full active registry', () => {

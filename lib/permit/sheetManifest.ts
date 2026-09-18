@@ -169,18 +169,14 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     ];
     return [
       { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
-      // 2026-08-29 — RS-1 RESTORED TO DESIGN-REVIEW, and inserted HERE rather
-      // than by falling the profile through to the full manifest: the page
-      // assembly emits it in exactly this position (immediately after the
-      // cover), and the two lists must stay byte-for-byte in step or V12/V35
-      // fail on a page-count-vs-sheet-index desync. It remains out of the
-      // PERMIT submittal — our internal review record is not part of an AHJ
-      // application.
-      ...(designReview ? [
-        { id: 'RS-1', title: 'REVIEW STATUS — RELEASE GATES & REQUIREMENTS' },
-        ...Array.from({ length: Math.max(0, o.reviewStatusContCount ?? 0) },
-          (_unused, i) => ({ id: `RS-1.${i + 1}`, title: 'REVIEW STATUS (CONTINUED) — RELEASE REQUIREMENTS' })),
-      ] : []),
+      // 2026-09-18 (RAY) — RS-1 IS OUT OF DESIGN-REVIEW. It was added here on
+      // 2026-08-29 so the review record would be readable somewhere, since the
+      // in-app screen was never built. But DESIGN_REVIEW is the artifact we SEND
+      // to the engineer of record, so that put a sheet titled "REVIEW STATUS —
+      // RELEASE GATES & REQUIREMENTS" in front of an outside professional.
+      // It now renders only in FULL_INTERNAL. See generatePermit.ts `_rsIncluded`
+      // — the two lists must stay byte-for-byte in step or V12/V35 fail on a
+      // page-count-vs-sheet-index desync, so BOTH were changed together.
       { id: 'PV-1',  title: o.pv1Title },
       ...extras.map(sub => ({ id: hybridSheetId('PV-1', sub), title: HYBRID_PLAN_TITLE[sub] })),
       { id: 'PV-1B', title: pv1bTitle(o.isMicro, primaryLabel) },

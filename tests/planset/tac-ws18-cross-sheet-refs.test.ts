@@ -65,10 +65,23 @@ describe('WS-18 — no package points at a sheet it does not contain', () => {
   // resort resolved to nothing and a reader could not learn what the unresolved
   // requirements were. The dangling-reference sweep above (line ~56) is the test
   // that actually guards the invariant, and it runs over every profile.
-  it('design-review POINTS AT RS-1, because it carries it', () => {
-    const { html, input } = gen('design-review');
+  // RAY, 2026-09-18 — RS-1 left the outbound set for FULL_INTERNAL, so
+  // design-review now behaves the way permit always did: it carries no review
+  // record and therefore points at none. WS-18's invariant (no package points at
+  // a sheet it does not contain) is unchanged and now holds on both.
+  it('FULL_INTERNAL points at RS-1, because it is the profile that carries it', () => {
+    const { html, input } = gen('full');
     expect(activeSheetIds(input)).toContain('RS-1');
     expect(proseOnly(html)).toContain('RS-1');
+  });
+
+  it('design-review carries ZERO prose references to RS-1', () => {
+    const { html, input } = gen('design-review');
+    expect(activeSheetIds(input)).not.toContain('RS-1');
+    const prose = proseOnly(html);
+    // NON-VACUITY: it really did render a package
+    expect(prose.length).toBeGreaterThan(5000);
+    expect(prose).not.toContain('RS-1');
   });
 
   it('permit carries ZERO prose references to RS-1', () => {
@@ -117,15 +130,15 @@ describe('WS-18 — no package points at a sheet it does not contain', () => {
 });
 
 describe('WS-18 — the resolver answers with THIS package sheet', () => {
-  it('review-status resolves to RS-1 in full and design-review, to the review record in the permit submittal', () => {
+  it('review-status resolves to RS-1 in FULL only; both outbound profiles degrade', () => {
     const full = sheetRef(gen('full').input, 'review-status');
     expect(full.present).toBe(true);
     expect(full.sheetId).toBe('RS-1');
-    // 2026-08-29 - design-review resolves to the SHEET now; only the AHJ
-    // submittal degrades.
+    // 2026-09-18 (RAY) - design-review no longer carries RS-1, so like the AHJ
+    // submittal it resolves to no sheet at all. Only FULL_INTERNAL resolves.
     const dr = sheetRef(gen('design-review').input, 'review-status');
-    expect(dr.present).toBe(true);
-    expect(dr.sheetId).toBe('RS-1');
+    expect(dr.present).toBe(false);
+    expect(dr.sheetId).toBeNull();
     const pm = sheetRef(gen('permit').input, 'review-status');
     expect(pm.present).toBe(false);
     expect(pm.sheetId).toBeNull();

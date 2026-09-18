@@ -29,7 +29,15 @@ import { projectReleaseGatesFromInput, requirementLane } from '@/lib/permit/snap
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 const input: any = clone(braidonOriginalAuditFixture);
-input.plansetProfile = 'design-review';
+// ── RAY, 2026-09-18 — RS-1 LIVES IN FULL_INTERNAL NOW ──────────────────────
+//     "No there is still a fucking release gate sheet. Idk why"
+// DESIGN_REVIEW is the artifact we SEND to the engineer of record, so a sheet
+// titled "REVIEW STATUS — RELEASE GATES & REQUIREMENTS" has no business in it.
+// RS-1 / RS-1.1 render only in FULL_INTERNAL. Every property this file asserts
+// is unchanged — it is the same sheet from the same projection — so the file
+// exercises the profile that carries it, and pins its ABSENCE from the outbound
+// set at the bottom.
+input.plansetProfile = 'full';
 const html = generatePermitHTML(input) as unknown as string;
 const text = html.replace(/<[^>]+>/g, ' ').replace(/&mdash;/g, '—').replace(/\s+/g, ' ');
 const model = projectReleaseGatesFromInput(input);
@@ -148,4 +156,26 @@ describe('and the engineer is told what is being asked of him', () => {
     expect(design.length + prof.length).toBe(model.summary.unresolvedRequirementCount);
     expect(adv.length).toBe(model.summary.advisoryCount);
   });
+});
+
+// ── AND IT IS NOT IN ANYTHING WE SEND (Ray, 2026-09-18) ────────────────────
+// The point of moving RS-1 to FULL_INTERNAL is that it leaves the outbound set.
+// Asserted here rather than only where the sheet is built, so the removal is
+// pinned on the profiles that actually go out.
+describe('the review record never reaches an outbound profile', () => {
+  for (const profile of ['design-review', 'permit'] as const) {
+    it(`${profile} carries no RS-1 and no release-gate language`, () => {
+      const i: any = clone(braidonOriginalAuditFixture);
+      i.plansetProfile = profile;
+      const h = generatePermitHTML(i) as unknown as string;
+      const ids = [...h.matchAll(/tb-sheet-id">\s*([^<]+?)\s*</g)].map(m => m[1].trim());
+      // NON-VACUITY: the profile really did render a package
+      expect(ids.length, 'the profile must render sheets for this to mean anything').toBeGreaterThan(10);
+      expect(ids.filter(x => x.startsWith('RS-1'))).toEqual([]);
+      const t = h.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ');
+      for (const phrase of ['RELEASE GATE', 'REVIEW STATUS', 'OPEN RELEASE', 'UNRESOLVED REQUIREMENT']) {
+        expect(t, `"${phrase}" must not appear in the ${profile} package`).not.toContain(phrase);
+      }
+    });
+  }
 });

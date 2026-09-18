@@ -85,7 +85,10 @@ describe('responsibility follows the authority workflow — MUTATION', () => {
 
 describe('the rendered package agrees', () => {
   const input: any = clone(braidonOriginalAuditFixture);
-  input.plansetProfile = 'design-review';
+  // RAY, 2026-09-18 — RS-1 renders in FULL_INTERNAL only; it left the outbound
+  // set. These cases are about what RS-1 SAYS (responsible role per lane), so
+  // they exercise the profile that carries it. Unchanged property.
+  input.plansetProfile = 'full';
   const html = generatePermitHTML(input) as unknown as string;
   const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
