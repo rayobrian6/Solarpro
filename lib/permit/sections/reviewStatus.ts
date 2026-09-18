@@ -72,9 +72,17 @@ const RS_FONT = {
   authority: '8.5px',
 };
 
+// ── RAY, 2026-09-18: "I'd rather not send a red box to engineering." ────────
+// RS-1 is the working checklist that goes to the engineer of record with the
+// set. It is not an alarm, and an outbound document full of red boxes reads as
+// one. The whole sheet's palette moved from alarm red (#b91c1c / #7f1d1d /
+// #fef2f2) to document ink (#111 / #444 / white). NOTHING was removed or
+// softened in WORDING — every gate, requirement, status and severity is still
+// stated in full; only the colour changed. Severity stays legible by its LABEL
+// and by ink weight rather than by shouting.
 function sevBadge(sev: string): string {
   const blocking = sev === 'blocking';
-  const bg = blocking ? '#b91c1c' : '#b45309';
+  const bg = blocking ? '#111111' : '#666666';
   const label = blocking ? 'BLOCKING' : 'ADVISORY';
   return `<span style="display:inline-block;background:${bg};color:#fff;font-weight:900;font-size:${RS_FONT.badge};letter-spacing:0.5px;padding:1px 4px;border-radius:2px;white-space:nowrap;">${label}</span>`;
 }
@@ -199,10 +207,10 @@ function payloadProcurementDeficit(p: Record<string, unknown>): string {
     ? (p.resolutionOptions as Array<Record<string, unknown>>)
       .map(o => `${escapeH(String(o.kind))}=${o.selected ? 'SEL' : 'NOT SEL'}`).join(' · ')
     : '';
-  return _pBox('#b91c1c', 'DEFICIT PAYLOAD:',
+  return _pBox('#111111', 'DEFICIT PAYLOAD:',
     `SKU ${_s(p.selectedQCableSku)} @ ${_s(p.connectorDropSpacingFt)}ft drop · `
     + `designed ${_s(p.totalDesignedInstalledFt)}ft + allowance ${_s(p.requiredServiceLoopAllowanceFt)}ft (${_s(p.allowanceProvenance)}) `
-    + `vs procurement ${_s(p.procurementLengthFt)}ft ⇒ <span style="color:#b91c1c;font-weight:900;">deficit ${_s(p.deficitFt)} ft</span> · `
+    + `vs procurement ${_s(p.procurementLengthFt)}ft ⇒ <span style="color:#111111;font-weight:900;">deficit ${_s(p.deficitFt)} ft</span> · `
     + `branches ${escapeH(perBranch)} · affected ${escapeH((p.affectedBranchIds as unknown[] ?? []).join(', ') || '—')} · `
     // reads the FIELD (the retired template hardcoded the literal string "null")
     + `mfr-doc authority ${_s(p.manufacturerDocumentAuthority)} · status ${_s(p.verificationStatus)} · resolution: ${escapeH(opts)}`,
@@ -403,7 +411,7 @@ const TREATMENTS: Record<FindingTreatmentClass, FindingTreatment> = {
   // requirement treatment — double rule + darkest fill + underlined chip.
   strong: {
     cls: 'strong', fill: '#e4e4e4', borderWidth: '5px', borderStyle: 'double', borderColor: '#000000',
-    chipWeight: '900', chipStyle: 'normal', chipDecoration: 'underline', chipSpacing: '0.5px', ink: '#7f1d1d',
+    chipWeight: '900', chipStyle: 'normal', chipDecoration: 'underline', chipSpacing: '0.5px', ink: '#444444',
   },
   // PENDING authority / document / selection — an established fact is MISSING;
   // nothing has failed. Dashed rule (an open edge), light fill.
@@ -741,7 +749,7 @@ function rootGateTable(model: ReleaseGateModel): string {
           <span class="mono" style="font-size:7.6px;color:#444;">${g.gateId}</span><br/>${escapeH(g.title)}
         </td>
         <td style="font-size:7.8px;line-height:1.2;letter-spacing:0.3px;">${escapeH(CATEGORY_LABEL[g.gateCategory] ?? g.gateCategory)}</td>
-        <td style="text-align:center;font-weight:900;font-size:${RS_FONT.gateCell};color:${open ? '#b91c1c' : '#166534'};letter-spacing:0.4px;">
+        <td style="text-align:center;font-weight:900;font-size:${RS_FONT.gateCell};color:${open ? '#111111' : '#166534'};letter-spacing:0.4px;">
           ${g.status === 'OPEN' ? 'OPEN' : g.status === 'NOT_APPLICABLE' ? 'N/A' : 'CLEARED'}
         </td>
         <td style="text-align:center;font-weight:900;font-size:11px;" data-release-gate-unresolved="${g.unresolvedCount}">
@@ -922,7 +930,7 @@ export function pageReviewStatus(
           WHAT IS BEING ASKED &mdash; SCOPE BY OWNER (projected from the same release model as the counts below)
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;">
-          ${_scopeCol('DESIGN STATUS &mdash; SOLARPRO', '#b91c1c', _designScope, '0 open SolarPro design requirements')}
+          ${_scopeCol('DESIGN STATUS &mdash; SOLARPRO', '#111111', _designScope, '0 open SolarPro design requirements')}
           ${_scopeCol('EOR REVIEW SCOPE', '#1e3a5f', _eorScope, 'none outstanding')}
           ${_scopeCol('PROCUREMENT ADVISORY', '#b45309', _advisoryScope, 'none')}
         </div>
@@ -931,11 +939,11 @@ export function pageReviewStatus(
   // ── §4 release-status strip (RS-1) ────────────────────────────────────────
   const strip = `
       <div data-release-status-strip="1" style="display:flex;gap:8px;align-items:stretch;margin-top:1px;">
-        <div style="flex:1 1 auto;min-width:0;border:2px solid ${ready ? '#166534' : '#b91c1c'};background:${ready ? '#f0fdf4' : '#fef2f2'};padding:3px 10px;">
-          <div data-release-headline="1" style="font-weight:900;font-size:13px;letter-spacing:0.6px;color:${ready ? '#166534' : '#b91c1c'};">
+        <div style="flex:1 1 auto;min-width:0;border:2px solid ${ready ? '#166534' : '#111111'};background:${ready ? '#f0fdf4' : '#ffffff'};padding:3px 10px;">
+          <div data-release-headline="1" style="font-weight:900;font-size:13px;letter-spacing:0.6px;color:${ready ? '#166534' : '#111111'};">
             ${ready ? 'CLEARED FOR ISSUE &mdash; NO OPEN RELEASE GATES' : escapeH(headline)}
           </div>
-          <div style="font-size:7.5px;color:${ready ? '#166534' : '#7f1d1d'};margin-top:1px;line-height:1.25;">
+          <div style="font-size:7.5px;color:${ready ? '#166534' : '#444444'};margin-top:1px;line-height:1.25;">
             EVERY unresolved release requirement on the validated design snapshot, grouped beneath the ROOT GATE it belongs to.
             ${model.summary.openGateCount} root gate${model.summary.openGateCount === 1 ? '' : 's'} contain${model.summary.openGateCount === 1 ? 's' : ''}
             ${model.summary.unresolvedRequirementCount} unresolved requirement${model.summary.unresolvedRequirementCount === 1 ? '' : 's'} &mdash; these are NOT
@@ -946,11 +954,11 @@ export function pageReviewStatus(
         <div style="flex:0 0 292px;min-width:0;display:flex;flex-direction:column;gap:3px;justify-content:center;">
           <div style="border:2px solid #111;padding:2px 8px;display:flex;justify-content:space-between;align-items:center;background:#f4f4f4;">
             <span style="font-size:7px;font-weight:900;letter-spacing:0.4px;">OPEN RELEASE GATES</span>
-            <span data-release-open-gate-count="${model.summary.openGateCount}" style="font-size:14px;font-weight:900;color:#b91c1c;">${model.summary.openGateCount}</span>
+            <span data-release-open-gate-count="${model.summary.openGateCount}" style="font-size:14px;font-weight:900;color:#111111;">${model.summary.openGateCount}</span>
           </div>
           <div style="border:var(--border);padding:2px 8px;display:flex;justify-content:space-between;align-items:center;">
             <span style="font-size:7px;font-weight:700;letter-spacing:0.4px;">UNRESOLVED REQUIREMENTS</span>
-            <span data-release-requirement-count="${blockingCount}" style="font-size:14px;font-weight:900;color:#b91c1c;">${blockingCount}</span>
+            <span data-release-requirement-count="${blockingCount}" style="font-size:14px;font-weight:900;color:#111111;">${blockingCount}</span>
           </div>
           <div style="border:var(--border);padding:2px 8px;display:flex;justify-content:space-between;align-items:center;">
             <span style="font-size:7px;font-weight:700;letter-spacing:0.4px;">ADVISORY</span>
@@ -961,9 +969,9 @@ export function pageReviewStatus(
 
   // ── continuation status line (RS-1.n) — same counts, never re-derived ─────
   const contHeader = `
-      <div data-release-status-strip="cont" style="margin-top:1px;border:2px solid #b91c1c;background:#fef2f2;padding:2px 10px;display:flex;justify-content:space-between;align-items:center;">
-        <span data-release-headline="1" style="font-weight:900;font-size:11px;letter-spacing:0.5px;color:#b91c1c;">${escapeH(headline)}</span>
-        <span style="font-size:7.5px;color:#7f1d1d;">CONTINUATION OF RS-1 &mdash; ROOT-GATE TABLE AND RELEASE STATUS ON RS-1
+      <div data-release-status-strip="cont" style="margin-top:1px;border:2px solid #111111;background:#ffffff;padding:2px 10px;display:flex;justify-content:space-between;align-items:center;">
+        <span data-release-headline="1" style="font-weight:900;font-size:11px;letter-spacing:0.5px;color:#111111;">${escapeH(headline)}</span>
+        <span style="font-size:7.5px;color:#444444;">CONTINUATION OF RS-1 &mdash; ROOT-GATE TABLE AND RELEASE STATUS ON RS-1
           &nbsp;·&nbsp; <span data-release-open-gate-count="${model.summary.openGateCount}">${model.summary.openGateCount}</span> OPEN GATES
           &nbsp;·&nbsp; <span data-release-requirement-count="${blockingCount}">${blockingCount}</span> UNRESOLVED REQUIREMENTS</span>
       </div>`;
