@@ -73,3 +73,59 @@ export function roofPlanesSignature(planes: readonly RoofPlane[] | undefined | n
     planes.map(p => SIGNED_FIELDS.map(f => p[f] ?? null)),
   );
 }
+
+/**
+ * Fields on DesignElectrical that must NOT enter the dedup signature.
+ *
+ * 🚨 `generatedAt` is `new Date().toISOString()`, stamped fresh every time
+ * DesignStudio's `buildDesignElectrical()` runs. Including it made the whole
+ * dedup check DEAD: the signature differed on every rebuild even when nothing
+ * about the design had changed, so `if (sig === lastSavedPanelsRef.current)
+ * return;` could never be true while a design had panels. Every scheduled
+ * autosave POSTed, and the layout route runs `syncProjectPipeline()`
+ * SYNCHRONOUSLY whenever the layout has panels — rebuilding the engineering
+ * model and rewriting artifact files each time.
+ *
+ * A timestamp describes WHEN the object was built, never WHAT it contains.
+ * Anything with that property belongs in this list.
+ */
+export const UNSIGNED_ELECTRICAL_FIELDS = ['generatedAt'] as const;
+
+/** Drop the non-content fields before signing. Returns null for nullish input
+ *  so an absent electrical design and an empty one sign identically. */
+function signableElectrical(designElectrical: unknown): unknown {
+  if (designElectrical === null || designElectrical === undefined) return null;
+  if (typeof designElectrical !== 'object') return designElectrical;
+  const out: Record<string, unknown> = { ...(designElectrical as Record<string, unknown>) };
+  for (const f of UNSIGNED_ELECTRICAL_FIELDS) delete out[f];
+  return out;
+}
+
+/**
+ * THE layout dedup signature. Every call site that decides "has anything
+ * changed since the last save?" must use this and nothing else.
+ *
+ * WHY THIS EXISTS ON TOP OF roofPlanesSignature
+ * ---------------------------------------------
+ * Four call sites each built the string inline: the debounced autosave, the
+ * beforeunload beacon, and the two restore seeds. They drifted three ways at
+ * once — the two writers signed three parts while the two SEEDS signed only
+ * two (panels + electrical, no roof), so a restored layout could never compare
+ * equal to its own first save; and all four included `generatedAt`, which made
+ * the comparison meaningless anyway. The beacon even carried a comment saying
+ * "Shared helper, one definition" above a hand-rolled copy of the string.
+ *
+ * Stability contract:
+ *   • same content signed twice, any time apart → identical string
+ *   • a restore seed and the first save of that same content → identical
+ *   • any panel / signed-roof-field / electrical CONTENT change → different
+ */
+export function layoutSignature(input: {
+  panels?: unknown;
+  designElectrical?: unknown;
+  roofPlanes?: readonly RoofPlane[] | null;
+}): string {
+  return JSON.stringify(input.panels ?? [])
+    + '|' + JSON.stringify(signableElectrical(input.designElectrical))
+    + '|' + roofPlanesSignature(input.roofPlanes);
+}

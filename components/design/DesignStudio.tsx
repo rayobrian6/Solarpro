@@ -63,7 +63,7 @@ import { v4 as uuidv4 } from 'uuid';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
-import { roofPlanesSignature } from '@/lib/roofPlanesSignature';
+import { layoutSignature } from '@/lib/roofPlanesSignature';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
   Layers, Zap, Sun, RotateCcw, Save, Play, ChevronDown, ChevronUp,
@@ -1037,8 +1037,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     // v63: fold the electrical design into the dedup signature so topology /
     // modules-per-string / string-paint changes persist even when panels are unchanged.
     const designElectrical = panelList.length > 0 ? buildDesignElectrical() : undefined;
-    const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null)
-      + '|' + roofPlanesSignature(roofPlanesRef.current);
+    const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: roofPlanesRef.current });
     if (sig === lastSavedPanelsRef.current) return; // nothing changed
     lastSavedPanelsRef.current = sig;
     const payload = {
@@ -1048,8 +1047,14 @@ export default function DesignStudio({ project, onSave }: Props) {
       systemType: project.systemType,
       // v63: electrical design handoff for Engineering (string/topology/brand/equipment)
       designElectrical,
-      // Include roofPlanes so permit generator can use exact roof geometry
-      roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
+      // Include roofPlanes so permit generator can use exact roof geometry.
+      // 🚨 ALWAYS send the array, including []. The route merges with
+      // `roofPlanes ?? existingLayout?.roofPlanes`, so `undefined` means KEEP
+      // WHAT IS STORED — which made deliberately clearing the roof unsaveable:
+      // "Draw Manually Instead" and deleting the last face both reported saved
+      // and came back on reload. `[]` is not nullish, so it wins the merge, and
+      // lib/db/projects.ts writes '[]' because [] is truthy. Client-side only.
+      roofPlanes: roofPlanesRef.current,
       // Persist fence geometry on autosave too — previously only the manual
       // buildLayout()→/api/production path saved these, so an auto-saved fence
       // design lost its line/height on reload (and engineering had no geometry
@@ -1146,8 +1151,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       // v66: must match saveLayoutToDB's signature exactly, or closing the tab
       // after tracing a roof beacons nothing (sig compares equal) or beacons
       // needlessly (sig never compares equal). Shared helper, one definition.
-      const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null)
-        + '|' + roofPlanesSignature(roofPlanesRef.current);
+      const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: roofPlanesRef.current });
       if (sig === lastSavedPanelsRef.current) return;
       const payload = JSON.stringify({
         panels: panelList,
@@ -1155,7 +1159,8 @@ export default function DesignStudio({ project, onSave }: Props) {
         mapZoom: zoomRef.current,
         systemType: project.systemType,
         designElectrical,
-        roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
+        // See saveLayoutToDB — always send the array, including [].
+        roofPlanes: roofPlanesRef.current,
       });
       navigator.sendBeacon(
         `/api/projects/${project.id}/layout`,
@@ -1169,6 +1174,13 @@ export default function DesignStudio({ project, onSave }: Props) {
   // ── Restore panels from DB on mount ─────────────────────────────────────────
   useEffect(() => {
     const restorePanels = async () => {
+      // 🚨 RE-ARM THE FENCE BEFORE THE AWAIT. restoreStateRef was only ever
+      // written to 'done'/'failed' and never back to 'pending', while this
+      // effect re-runs on [project.id] and both DesignStudio mounts are keyless
+      // (app/design/page.tsx) — so React reuses the instance and project A's
+      // 'done' stayed open across project B's in-flight restore. A save firing
+      // in that window writes A's state onto B. Synchronous, before the fetch.
+      restoreStateRef.current = 'pending';
       try {
         const res = await fetch(`/api/projects/${project.id}/layout`);
         const data = await res.json();
@@ -1179,16 +1191,24 @@ export default function DesignStudio({ project, onSave }: Props) {
           roofPlaneCount: data.data?.roofPlanes?.length ?? 0,
           hasRoofPlanes: !!(data.data?.roofPlanes && data.data.roofPlanes.length > 0),
         });
-        if (data.success && data.data?.panels && data.data.panels.length > 0) {
-          setPanels(data.data.panels);
-          lastSavedPanelsRef.current = JSON.stringify(data.data.panels) + '|' + JSON.stringify(data.data?.designElectrical ?? null);
-          setRestoredPanelCount(data.data.panels.length);
+        // 🚨 A READ THAT DID NOT SUCCEED MUST NOT OPEN THE FENCE. Only a THROWN
+        // error used to reach the catch below, so a 400/401/404 — which the
+        // route returns as JSON with success:false — fell through every branch
+        // and still reached `restoreStateRef.current = 'done'`, enabling saves
+        // against a layout that was never read. A project with no saved layout
+        // is NOT this case: the route returns success:true with data:null.
+        if (!res.ok || !data?.success) {
+          restoreStateRef.current = 'failed';
+          toast.error('Could not load the saved design — saving is disabled. Reload the page to try again.');
+          return;
+        }
+        let restoredPanels: PlacedPanel[] = [];
+        if (data.data?.panels && data.data.panels.length > 0) {
+          restoredPanels = data.data.panels;
+          setPanels(restoredPanels);
+          setRestoredPanelCount(restoredPanels.length);
           setLayoutLoadedFromDB(true);
-          console.log(`[DesignStudio] Restored ${data.data.panels.length} panels from DB`);
-        } else if (data.success) {
-          // DB genuinely has no layout — seed the dedup signature so the first
-          // real edit diffs against "empty", and let saves proceed.
-          lastSavedPanelsRef.current = JSON.stringify([]) + '|' + JSON.stringify(data.data?.designElectrical ?? null);
+          console.log(`[DesignStudio] Restored ${restoredPanels.length} panels from DB`);
         }
         // v63: restore the electrical design (topology / brand / modules-per-string /
         // racking / manual string-paint overrides) so the UI reflects what was saved.
@@ -1206,7 +1226,9 @@ export default function DesignStudio({ project, onSave }: Props) {
         const savedPlanes = (data.data?.roofPlanes ?? []).filter(
           (rp: RoofPlane) => rp.vertices && rp.vertices.length >= 3
         );
-        if (data.success && savedPlanes.length > 0) {
+        let restoredPlanes: RoofPlane[] = roofPlanesRef.current;
+        if (savedPlanes.length > 0) {
+          restoredPlanes = savedPlanes;
           setRoofPlanes(savedPlanes);
           setRestoredRoofPlaneCount(savedPlanes.length);
           console.log(`[DesignStudio] Restored ${savedPlanes.length} roof planes from DB (filtered ${(data.data?.roofPlanes?.length ?? 0) - savedPlanes.length} empty planes)`);
@@ -1217,6 +1239,16 @@ export default function DesignStudio({ project, onSave }: Props) {
           setSolarApiStatus('idle');
           console.log('[DesignStudio] Skipping auto-detect — waiting for explicit building pick');
         }
+        // 🚨 ONE seed, built by the SAME function the two writers use, from the
+        // state that was actually restored. The two old seeds here signed only
+        // panels+electrical while saveLayoutToDB and the beacon signed
+        // panels+electrical+roof — so a restored layout could never compare
+        // equal to its own content and the first tick always re-POSTed it.
+        lastSavedPanelsRef.current = layoutSignature({
+          panels: restoredPanels,
+          designElectrical: data.data?.designElectrical,
+          roofPlanes: restoredPlanes,
+        });
         restoreStateRef.current = 'done';
       } catch (e) {
         console.error('Panel restore failed — saves stay DISABLED to protect the stored layout:', e);
