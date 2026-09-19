@@ -166,6 +166,67 @@ export function buildWalls(
 }
 
 /**
+ * The orientation of a face, derived from the geometry that is ACTUALLY drawn.
+ *
+ * WHY FROM THE GEOMETRY, NOT FROM plane.pitch / plane.azimuth
+ * -----------------------------------------------------------
+ * This feeds the shading that makes a pitched roof read as pitched. If it took
+ * the stored pitch instead, a face whose geometry had been flattened somewhere
+ * upstream would still be shaded as though it were tilted — the picture would
+ * lie, and the bug would be invisible precisely where it matters most. Reading
+ * the rendered polygon's own normal means what you see is what exists.
+ *
+ * Returns tilt in degrees from horizontal (0 = flat, 90 = vertical) and
+ * azimuth as a compass bearing of the downslope direction (0 = N, clockwise),
+ * matching the convention getPanelShadingFactor expects.
+ */
+export function faceOrientation(polygon3D: readonly Cart3[]): { tiltDeg: number; azimuthDeg: number } {
+  if (!polygon3D || polygon3D.length < 3) return { tiltDeg: 0, azimuthDeg: 180 };
+
+  // Newell normal in ECEF — robust to a bad vertex triple, unlike a single cross product.
+  let nx = 0, ny = 0, nz = 0;
+  const N = polygon3D.length;
+  for (let i = 0; i < N; i++) {
+    const c = polygon3D[i];
+    const n = polygon3D[(i + 1) % N];
+    if (!c || !n) continue;
+    nx += (c.y - n.y) * (c.z + n.z);
+    ny += (c.z - n.z) * (c.x + n.x);
+    nz += (c.x - n.x) * (c.y + n.y);
+  }
+  const mag = Math.sqrt(nx * nx + ny * ny + nz * nz);
+  if (!(mag > 1e-9)) return { tiltDeg: 0, azimuthDeg: 180 };
+  nx /= mag; ny /= mag; nz /= mag;
+
+  // Local ENU basis at the face centroid.
+  let cx = 0, cy = 0, cz = 0;
+  for (const p of polygon3D) { cx += p.x; cy += p.y; cz += p.z; }
+  cx /= N; cy /= N; cz /= N;
+  const geo = ecefToLatLng({ x: cx, y: cy, z: cz });
+  const latR = geo.lat * Math.PI / 180;
+  const lngR = geo.lng * Math.PI / 180;
+  const sinLat = Math.sin(latR), cosLat = Math.cos(latR);
+  const sinLng = Math.sin(lngR), cosLng = Math.cos(lngR);
+
+  const east  = { x: -sinLng,          y: cosLng,           z: 0      };
+  const north = { x: -sinLat * cosLng, y: -sinLat * sinLng, z: cosLat };
+  const up    = { x:  cosLat * cosLng, y:  cosLat * sinLng, z: sinLat };
+
+  let e = nx * east.x  + ny * east.y  + nz * east.z;
+  let n = nx * north.x + ny * north.y + nz * north.z;
+  let u = nx * up.x    + ny * up.y    + nz * up.z;
+
+  // Force the normal to point outward/upward so tilt is measured from horizontal
+  // rather than coming back as its supplement for a reversed winding.
+  if (u < 0) { e = -e; n = -n; u = -u; }
+
+  const tiltDeg = Math.acos(Math.max(-1, Math.min(1, u))) * 180 / Math.PI;
+  // Downslope bearing: the horizontal part of the normal points downhill.
+  const azimuthDeg = ((Math.atan2(e, n) * 180 / Math.PI) % 360 + 360) % 360;
+  return { tiltDeg, azimuthDeg };
+}
+
+/**
  * Signed area of a quad projected onto its own plane, used by the tests to
  * prove a wall is not self-intersecting. A bowtie's two halves cancel, so its
  * magnitude collapses toward zero while a correctly wound quad keeps the full

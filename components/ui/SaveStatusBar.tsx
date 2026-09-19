@@ -58,7 +58,9 @@ export function SaveStatusBar({ status, lastSavedAt, errorMessage, className = '
       {status === 'error' ? (
         <>
           <AlertCircle className="w-3 h-3" />
-          <span>{errorMessage || 'Save failed — retrying...'}</span>
+          {/* v66: was "Save failed — retrying...". Nothing retries anywhere;
+              the message promised recovery that never came. */}
+          <span>{errorMessage || 'Save failed'}</span>
         </>
       ) : null}
       {status === 'idle' && lastSavedAt ? (

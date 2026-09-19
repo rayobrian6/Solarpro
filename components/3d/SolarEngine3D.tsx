@@ -20,7 +20,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { MapSourcePicker, DEFAULT_PICKER_STATE, type MapPickerState } from '@/components/3d/mapSource';
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
-import { getSunPosition } from '@/lib/solarMath';
+import { getSunPosition, getPanelShadingFactor } from '@/lib/solarMath';
 import type { PlacedPanel, RoofPlane } from '@/types';
 import {
   polygonCentroid,
@@ -52,7 +52,8 @@ import {
 // outline plus pitch + azimuth, for addresses with no Photorealistic 3D Tiles.
 import { roofPlaneFromFootprint } from '@/lib/3d/footprintToRoofPlane';
 // v66: solid building — walls dropped from exterior roof edges to the ground.
-import { buildWalls } from '@/lib/3d/buildingExtrusion';
+import { buildWalls, faceOrientation } from '@/lib/3d/buildingExtrusion';
+import { composeRoofTexture, clearRoofTextureCache } from '@/lib/3d/roofTexture';
 import { deriveAzimuthFromOutline } from '@/lib/aerial/nearmapToRoofPlane';
 import {
   placeFencePanels,
@@ -228,6 +229,13 @@ const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
 // ground in the 3D scene, where on a no-coverage address there is no building
 // mesh to sit on anyway. Per-face eave height is a later step.
 const FLAT_TRACE_EAVE_HEIGHT_M = 3.0;
+
+// v66: below this measured tilt, a face picked off the mesh is treated as
+// FLAT and rebuilt from its footprint using the Tilt slider. 5 degrees is
+// comfortably under the shallowest residential pitch (1/12 is 4.8 degrees,
+// and 2/12 = 9.5 degrees is the practical minimum for shingles) yet well
+// above the sub-degree noise a genuinely flat ground pick produces.
+const MESH_FLAT_TILT_DEG = 5;
 
 // v68: Vertex Handles (in-place footprint editing for Block / Gable / Hip / Tree).
 // Math in lib/3d/vertexHandlesMath.ts (unit-tested in tests/vertexHandles.test.ts).
@@ -904,6 +912,12 @@ function SolarEngine3D({
   const setbackZoneEntitiesRef = useRef<any[]>([]); // v62: fire setback keep-out zone entities
   const roofWireframeEntitiesRef = useRef<any[]>([]); // v62: stitched roof-model edge polylines
   const buildingEntitiesRef = useRef<any[]>([]);      // v66: extruded walls + solid roof surfaces
+  // v66: drape the real aerial image on the roof faces (Aurora parity).
+  const [showRoofTexture, setShowRoofTexture] = useState(true);
+  const showRoofTextureRef = useRef(true);
+  // Guards against a slow texture fetch painting onto a scene that has since
+  // been rebuilt or toggled off. Incremented on every extrusion render.
+  const buildingRenderTokenRef = useRef(0);
   const measureOverlayRef = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
@@ -2059,7 +2073,7 @@ function SolarEngine3D({
       try { viewer.scene.requestRender(); } catch { /* ignore */ }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showBuilding3D, roofPlanes, flatTraceEaveHeightM, stage]);
+  }, [showBuilding3D, showRoofTexture, simHour, roofPlanes, flatTraceEaveHeightM, stage]);
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
   useEffect(() => { paintModeRef.current = paintMode; }, [paintMode]);
   useEffect(() => { onPanelPaintRef.current = onPanelPaint; }, [onPanelPaint]);
@@ -2130,6 +2144,7 @@ function SolarEngine3D({
 
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
+  useEffect(() => { showRoofTextureRef.current = showRoofTexture; }, [showRoofTexture]);
   useEffect(() => { showShadeRef.current = showShade; setShowShadeLocal(showShade); }, [showShade]);
   // v50.11: sync prop → local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
@@ -2355,6 +2370,9 @@ function SolarEngine3D({
     customLayoutOriginRef.current = null;
     try { clearPlane3DPreview(viewer); } catch {}
     addLog('FLY', 'reset per-location state (elevResolved/customDir/customOrigin/plane3d) on address change');
+    // v66: textures are keyed by lat/lng bounds, but drop them anyway so a new
+    // address can never paint the previous house's roof.
+    clearRoofTextureCache();
 
     const elev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     // Update orbit state for new address — snap camera to site at default pose
@@ -4254,10 +4272,51 @@ function SolarEngine3D({
 
     const walls = buildWalls(faces, groundElevM);
 
+    // ── SHADING ──────────────────────────────────────────────────────────────
+    // 🚨 THIS IS WHY A PITCHED ROOF LOOKED FLAT.
+    // The scene runs with globe.enableLighting = false and shadowMap.enabled =
+    // false (see boot, ~line 2912). Cesium entity polygons are painted with a
+    // FLAT material: two roof faces at +39° and -39°, facing opposite
+    // directions, render EXACTLY the same colour. Geometrically pitched,
+    // visually identical — which reads as one flat plane.
+    //
+    // Rather than switch global lighting on (which repaints the whole scene and
+    // costs frame time), each face is tinted by its own incidence with the sun,
+    // using the SAME getPanelShadingFactor the shade analysis already uses and
+    // the sun position from the time scrubber. So the model is lit by the
+    // building's real solar geometry, and it re-shades as you scrub the day.
+    //
+    // 🚨 The orientation comes from faceOrientation(), which reads the RENDERED
+    // polygon's own normal — never plane.pitch. If geometry is flattened
+    // somewhere upstream, this shows a flat roof instead of faking a pitched
+    // one. The picture must not lie about the model.
+    const simHourUTC = ((simHourRef.current - lng / 15) % 24 + 24) % 24;
+    const sunDate = new Date();
+    sunDate.setUTCFullYear(sunDate.getUTCFullYear(), 5, 21);
+    sunDate.setUTCHours(Math.floor(simHourUTC), Math.round((simHourUTC % 1) * 60), 0, 0);
+    const sun = getSunPosition(lat, lng, sunDate);
+
+    // Ambient floor so a face turned away from the sun is still readable rather
+    // than black — the same trick architectural renderings use.
+    const AMBIENT = 0.45;
+    const litness = (poly: Cart3[]) => {
+      const { tiltDeg, azimuthDeg } = faceOrientation(poly);
+      const direct = getPanelShadingFactor(tiltDeg, azimuthDeg, sun.elevation, sun.azimuth);
+      return AMBIENT + (1 - AMBIENT) * direct;
+    };
+    // Multiply the base colour by how lit the face is. Direct RGB scaling
+    // rather than Cesium's darken(), which interpolates toward black on a
+    // different curve and washes out the difference between two slopes — the
+    // exact difference we need to be visible.
+    const shade = (hex: string, k: number, alpha: number) => {
+      const base = C.Color.fromCssColorString(hex);
+      const f = Math.max(0, Math.min(1, k));
+      return new C.Color(base.red * f, base.green * f, base.blue * f, alpha);
+    };
+
     // ── Walls ────────────────────────────────────────────────────────────────
     // Flat white, like Aurora's. arcType NONE + perPositionHeight keeps each
     // quad an exact planar surface instead of draping it over the ellipsoid.
-    const wallFill = C.Color.fromCssColorString('#e8eaf0').withAlpha(0.92);
     const wallEdge = C.Color.fromCssColorString('#9aa3b8').withAlpha(0.85);
     for (const w of walls) {
       const pts = w.corners.map(p => new C.Cartesian3(p.x, p.y, p.z));
@@ -4265,7 +4324,7 @@ function SolarEngine3D({
         name: `[BUILD3D-WALL] ${w.faceId}#${w.edgeIndex}`,
         polygon: {
           hierarchy:         new C.PolygonHierarchy(pts),
-          material:          wallFill,
+          material:          shade('#e8eaf0', litness(w.corners), 0.95),
           outline:           true,
           outlineColor:      wallEdge,
           perPositionHeight: true,
@@ -4279,15 +4338,22 @@ function SolarEngine3D({
     // ── Roof surfaces ────────────────────────────────────────────────────────
     // Opaque, so the grainy imagery underneath stops showing through. This is
     // what turns "marked planes" into a roof.
-    const roofFill = C.Color.fromCssColorString('#6b5b52').withAlpha(0.97);
     const roofEdge = C.Color.fromCssColorString('#ff9500').withAlpha(0.9);
+    let flatFaceCount = 0;
+    const roofEntities: Array<{ ent: any; ring: Array<{ lat: number; lng: number }>; lit: number }> = [];
     for (const f of faces) {
+      const orient = faceOrientation(f.polygon3D);
+      if (orient.tiltDeg < 1) flatFaceCount++;
       const pts = f.polygon3D.map(p => new C.Cartesian3(p.x, p.y, p.z));
+      const lit = litness(f.polygon3D);
       const ent = viewer.entities.add({
         name: `[BUILD3D-ROOF] ${f.id}`,
         polygon: {
           hierarchy:         new C.PolygonHierarchy(pts),
-          material:          roofFill,
+          // Flat colour first so the roof is solid IMMEDIATELY; the aerial
+          // texture swaps in below when its tiles arrive. Never leave the user
+          // looking at nothing while the network works.
+          material:          shade('#8a7466', lit, 0.98),
           outline:           true,
           outlineColor:      roofEdge,
           perPositionHeight: true,
@@ -4296,10 +4362,57 @@ function SolarEngine3D({
         },
       });
       buildingEntitiesRef.current.push(ent);
+      roofEntities.push({
+        ent,
+        ring: f.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; }),
+        lit,
+      });
+      addLog('BUILD3D', `  face ${f.id.slice(0, 8)}: tilt=${orient.tiltDeg.toFixed(1)}° az=${orient.azimuthDeg.toFixed(0)}° (measured from rendered geometry)`);
     }
 
-    addLog('BUILD3D', `Building rendered: ${faces.length} roof face(s), ${walls.length} wall(s), ground=${groundElevM.toFixed(1)}m, lowest roof=${minRoofH.toFixed(1)}m`);
-    setStatusMsg(`🏚 Building — ${faces.length} face${faces.length === 1 ? '' : 's'} · ${walls.length} wall${walls.length === 1 ? '' : 's'} down to ground`);
+    // ── AERIAL TEXTURE ───────────────────────────────────────────────────────
+    // Ray: "Aurora, when they pull up their built 3D, it overlays the google
+    // image on the roof." This is that.
+    //
+    // The traced face is the PLAN VIEW of the roof lifted along its slope, so
+    // the imagery we want is exactly the face's lat/lng bounding box — and
+    // Cesium maps polygon texture coordinates across that same bounding
+    // rectangle, so it lines up with no custom st coordinates.
+    //
+    // Async and non-blocking: the solid colour above is already on screen. The
+    // ImageMaterialProperty `color` keeps the per-face sun shading, so a
+    // textured roof still reads as pitched rather than flattening back out.
+    if (showRoofTextureRef.current) {
+      const token = ++buildingRenderTokenRef.current;
+      void Promise.all(roofEntities.map(async ({ ent, ring, lit }) => {
+        const canvas = await composeRoofTexture(ring);
+        // A newer render (or a toggle off) superseded this one — drop the result
+        // rather than painting a stale texture onto a rebuilt scene.
+        if (!canvas || token !== buildingRenderTokenRef.current) return;
+        try {
+          ent.polygon.material = new C.ImageMaterialProperty({
+            image: canvas,
+            color: new C.Color(lit, lit, lit, 1.0),
+            transparent: false,
+          });
+        } catch (e) { addLog('WARN', `roof texture: ${(e as Error).message}`); }
+      })).then(() => {
+        if (token === buildingRenderTokenRef.current) {
+          try { viewer.scene.requestRender(); } catch { /* ignore */ }
+          addLog('BUILD3D', `Aerial texture applied to ${roofEntities.length} roof face(s)`);
+        }
+      });
+    }
+
+    addLog('BUILD3D', `Building rendered: ${faces.length} roof face(s), ${walls.length} wall(s), ground=${groundElevM.toFixed(1)}m, lowest roof=${minRoofH.toFixed(1)}m, sun el=${sun.elevation.toFixed(0)}° az=${sun.azimuth.toFixed(0)}°`);
+    // Surface a flat roof instead of quietly shading it like a roof: if the
+    // geometry really is horizontal, the user needs to know that, not see a
+    // convincing picture of a roof that does not exist.
+    setStatusMsg(
+      flatFaceCount > 0
+        ? `🏚 Building — ⚠ ${flatFaceCount} of ${faces.length} face(s) are FLAT (0° tilt measured from the geometry) · ${walls.length} walls`
+        : `🏚 Building — ${faces.length} face${faces.length === 1 ? '' : 's'} · ${walls.length} wall${walls.length === 1 ? '' : 's'} down to ground`
+    );
     try { viewer.scene.requestRender(); } catch { /* ignore */ }
   }
 
@@ -8936,13 +9049,74 @@ function SolarEngine3D({
 
         addLog('PLANE3D', `Flat trace built: az=${azimuthDeg.toFixed(1)}° (from shape) pitch=${plane.pitch.toFixed(1)}° (from Tilt slider) eave=${flatTraceEaveHeightRef.current.toFixed(1)}m area=${plane.area.toFixed(1)}m²`);
       } else {
-        // ── Unchanged pre-v66 path: derive the plane from picked 3D-tile
-        // elevations. This is the branch a covered address always takes.
+        // ── Mesh path: derive the plane from the picked elevations.
         // Step 1: Compute exact plane frame (first 3 pts define plane, rest projected)
         frame = computePlaneFromPoints3D(cartPts);
 
         // Step 2: Build complete RoofPlane using projected points (guaranteed coplanar)
         plane = buildRoofPlane3D(cartPts);
+
+        // ── v66 FALLBACK: the mesh gave us a FLAT face ────────────────────────
+        // 🚨 THIS IS THE FIX FOR "it just built another flat plane just higher".
+        //
+        // Neither entry gate can detect a missing roof mesh, because both read
+        // signals that lie:
+        //   • Layer A checks tilesetRef.current, but Google's ROOT tileset
+        //     resolves globally whenever an API key is set — so a tileset always
+        //     "exists" even where there is no building geometry.
+        //   • Layer C checks pickMethod !== '3dtiles', but getWorldPosition sets
+        //     '3dtiles' whenever scene.pick() returns ANY object. It means
+        //     "something was pickable", not "the roof was hit". Where Google
+        //     serves ground-only photogrammetry, every corner comes back
+        //     '3dtiles' at TERRAIN height.
+        // So the trace ran the mesh path, every corner landed at one height, the
+        // Newell normal came out radial, and pitch was 0 — silently, because
+        // buildRoofPlane3D only warns above 75 degrees (near-vertical).
+        //
+        // Rather than chase a better mesh-detection signal, check the RESULT:
+        // if the picks produced a horizontal face while the user's Tilt slider
+        // says otherwise, the mesh had no roof to give us. Rebuild from the
+        // footprint, which is what the flat trace would have done. Trusting the
+        // outcome cannot be defeated by a mis-reported pick method.
+        //
+        // A genuinely flat roof still works: set Tilt to 0 and the fallback is
+        // skipped, because it only fires when the slider disagrees with the mesh.
+        const meshTilt = plane.pitch ?? 0;
+        const wantedTilt = tiltRef.current ?? 0;
+        if (meshTilt < MESH_FLAT_TILT_DEG && wantedTilt >= MESH_FLAT_TILT_DEG) {
+          const outline = cartPts.map(p => {
+            const g = ecefToLatLng(p);
+            return { lat: g.lat, lng: g.lng };
+          });
+          const centroidLat = outline.reduce((s, v) => s + v.lat, 0) / outline.length;
+          const azimuthDeg = deriveAzimuthFromOutline(outline, centroidLat);
+          const pickedGroundM = cartPts.reduce((s, p) => s + ecefToLatLng(p).height, 0) / cartPts.length;
+          const rebuilt = roofPlaneFromFootprint(outline, {
+            pitchDeg: wantedTilt,
+            azimuthDeg,
+            eaveHeightM: flatTraceEaveHeightRef.current,
+            groundElevM: pickedGroundM,
+          });
+          if (rebuilt) {
+            frame = rebuilt.frame;
+            plane = rebuilt.plane;
+            plane.source = 'manual';
+            plane.confirmed = false;
+            flatTracedPlaneIdsRef.current = [...flatTracedPlaneIdsRef.current, plane.id];
+            flatTraceParamsRef.current.set(plane.id, {
+              outline, pitchDeg: wantedTilt, azimuthDeg, groundElevM: pickedGroundM,
+            });
+            addLog('PLANE3D',
+              `Mesh returned a FLAT face (${meshTilt.toFixed(1)}°) — no roof geometry at this address. ` +
+              `Rebuilt from the footprint at ${wantedTilt.toFixed(0)}° with azimuth ${azimuthDeg.toFixed(0)}° read from the shape.`);
+            setStatusMsg(
+              `🗺️ No roof mesh here — built this face from your outline at ${wantedTilt.toFixed(0)}° ` +
+              `(Tilt slider), facing ${azimuthDeg.toFixed(0)}°. Adjust pitch per face in Roof Planes.`
+            );
+          } else {
+            addLog('PLANE3D', `Mesh face is flat (${meshTilt.toFixed(1)}°) and the footprint rebuild failed — keeping the flat face`);
+          }
+        }
       }
 
       // v62: Lock the grid columns to the EAVE (horizontal, perpendicular to the
@@ -12701,6 +12875,23 @@ function SolarEngine3D({
             >
               🏚 Building{showBuilding3D ? ' ✓' : ''}
             </button>
+            {/* v66: aerial texture on the roof faces. Only meaningful while the
+                solid building is shown, so it hides with it. */}
+            {showBuilding3D ? (
+              <button
+                onClick={() => setShowRoofTexture(v => !v)}
+                title="Aerial: drape the real satellite image onto the roof faces instead of a flat colour"
+                data-no-drag
+                style={{
+                  background: showRoofTexture ? 'rgba(120,200,120,0.20)' : 'rgba(15,15,30,0.6)',
+                  border: `1px solid ${showRoofTexture ? 'rgba(120,200,120,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                  color: showRoofTexture ? '#8fd98f' : '#bbb', borderRadius: 6, padding: '4px 8px',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
+                }}
+              >
+                🛰 Aerial{showRoofTexture ? ' ✓' : ''}
+              </button>
+            ) : null}
             <button
               onClick={() => { const v = viewerRef.current; const Cz = (window as any).Cesium; if (v && Cz) stitchRoofVertices(v, Cz); }}
               title="Stitch: pull marked planes together - averages corners that should be shared (hips/ridges/valleys) into one natural point"

@@ -1068,6 +1068,26 @@ export default function DesignStudio({ project, onSave }: Props) {
     });
     // Always save to localStorage first (survives serverless cold starts)
     localSaveLayout(project.id, payload);
+
+    // v66: a Quick Design session has no DB row. app/design/page.tsx mints
+    // `demo-<timestamp>` and the layout route rejects any non-UUID id with a 400
+    // before it even reads the body, so this POST has NEVER succeeded for a
+    // Quick Design and never can.
+    //
+    // It used to fail invisibly because only a panel change triggered a save.
+    // Folding roof geometry into the trigger (correctly — it fixed real data
+    // loss) made every trace and every pitch edit light a red "Save failed"
+    // badge. The badge was also lying: nothing retries anywhere in this file.
+    //
+    // The local save above genuinely worked and still does, so say that instead
+    // of firing a request we know will be refused.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(project.id)) {
+      setSaveStatus('saved');
+      setLastSavedAt(new Date());
+      setTimeout(() => setSaveStatus(s => (s === 'saved' ? 'idle' : s)), 3000);
+      return;
+    }
+
     setSaveStatus('saving');
     try {
       const res = await fetch(`/api/projects/${project.id}/layout`, {
@@ -1080,11 +1100,19 @@ export default function DesignStudio({ project, onSave }: Props) {
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 3000);
       } else {
+        // v66: put the signature BACK. It is committed before the request so a
+        // burst of edits coalesces, but leaving it committed after a failure
+        // means this exact content can never be sent again — the next attempt
+        // compares equal and returns early. A failed save became a permanent
+        // one. Clearing it lets the next edit carry this content up with it.
+        lastSavedPanelsRef.current = '';
+        console.error('[LAYOUT SAVE] rejected', res.status, await res.text().catch(() => ''));
         setSaveStatus('error');
         setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
       }
     } catch (e) {
       console.error('Auto-save failed:', e);
+      lastSavedPanelsRef.current = ''; // same reason as above
       setSaveStatus('error');
       setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
     }
