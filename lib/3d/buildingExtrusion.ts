@@ -75,6 +75,25 @@ export interface BuildWallsOptions {
 }
 
 const DEFAULT_TOLERANCE_M = 0.35;
+
+/**
+ * Adjacency tolerance for INFERRING WHICH WAY A FACE SLOPES. 1.6 m — far looser
+ * than the wall tolerance above, deliberately.
+ *
+ * 🚨 The two uses have opposite failure costs, so they must not share a number.
+ * For walls, a loose match drops a wall that should exist or builds one through
+ * the middle of the house — visible, structural, wrong. For azimuth, a loose
+ * match only means two faces are treated as neighbours when deciding which way
+ * water runs, and neighbours is exactly what they are.
+ *
+ * At 0.35 m this failed on every hand trace. Ray clicks each half separately on
+ * blurry imagery, so before stitching the two halves share no corner within
+ * 35 cm; no ridge was found, both halves fell back to the per-face guess, and
+ * both came out SOUTH — "it made two south facing planes". 1.6 m matches the
+ * tolerance Stitch already uses for "these are the same corner on a hand
+ * trace", which is the established scale for this kind of click scatter.
+ */
+const AZIMUTH_ADJACENCY_TOLERANCE_M = 1.6;
 const DEFAULT_MIN_WALL_M = 0.05;
 
 function dist3(a: Cart3, b: Cart3): number {
@@ -216,7 +235,7 @@ export function deriveAzimuthsFromSharedEdges(
   fallback: (faceId: string) => number,
   options: BuildWallsOptions = {},
 ): Map<string, number> {
-  const tolM = options.sharedEdgeToleranceM ?? DEFAULT_TOLERANCE_M;
+  const tolM = options.sharedEdgeToleranceM ?? AZIMUTH_ADJACENCY_TOLERANCE_M;
   const out = new Map<string, number>();
   if (!faces || faces.length === 0) return out;
 
@@ -329,7 +348,9 @@ export function findSharedRidge(
   faceId: string,
   options: BuildWallsOptions = {},
 ): { a: Cart3; b: Cart3 } | null {
-  const tolM = options.sharedEdgeToleranceM ?? DEFAULT_TOLERANCE_M;
+  // Same reasoning as the azimuth tolerance: this asks "are these two faces
+  // neighbours", not "should there be a wall here".
+  const tolM = options.sharedEdgeToleranceM ?? AZIMUTH_ADJACENCY_TOLERANCE_M;
   const self = faces.find(f => f.id === faceId);
   if (!self || !self.polygon3D || self.polygon3D.length < 3) return null;
 

@@ -1968,35 +1968,19 @@ function SolarEngine3D({
     if (!viewer || !C || stage !== 'done') return;
     const planes = roofPlanes ?? [];
 
-    // ── v66: RECONCILE DELETIONS ─────────────────────────────────────────────
-    // This effect has always been ADD-ONLY, and there is not a single .delete()
-    // on plane3DEntityMap / plane3DFrameMap / plane3DCesiumPtsMap anywhere in
-    // the file. So a plane removed from the sidebar kept its Cesium entities,
-    // kept being returned by collectRoofRenderables, and kept extruding walls —
-    // a ghost face that could not be got rid of without a reload.
+    // 🚨 v66: A RECONCILE-DELETIONS BLOCK WAS HERE AND IS DELIBERATELY GONE.
     //
-    // 🚨 Guarded on roofPlanes being genuinely non-empty. During restore this
-    // effect can run with an empty array before the DB load resolves, and an
-    // unguarded reconcile would wipe every face the user had just traced. The
-    // guard costs nothing: an empty design has no ghosts to clean up.
-    if (planes.length > 0 && plane3DEntityMap.current.size > 0) {
-      const live = new Set(planes.map(p => p.id));
-      for (const pid of Array.from(plane3DEntityMap.current.keys())) {
-        if (live.has(pid)) continue;
-        (plane3DEntityMap.current.get(pid) ?? []).forEach(eid => {
-          const e = viewer.entities.getById(eid);
-          if (e) try { viewer.entities.remove(e); } catch { /* ignore */ }
-        });
-        plane3DEntityMap.current.delete(pid);
-        plane3DFrameMap.current.delete(pid);
-        plane3DCesiumPtsMap.current.delete(pid);
-        flatTraceParamsRef.current.delete(pid);
-        markOnlyPlaneIdsRef.current.delete(pid);
-        flatTracedPlaneIdsRef.current = flatTracedPlaneIdsRef.current.filter(x => x !== pid);
-        addLog('PLANE3D', `Removed entities for deleted plane ${pid.slice(0, 8)}`);
-      }
-      plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
-    }
+    // It removed entities for any plane id not present in `roofPlanes`, to stop
+    // a deleted plane leaving a ghost. It DESTROYED USER WORK: Ray traced a
+    // garage, and traced faces live in plane3DEntityMap while `roofPlanes` is
+    // the DesignStudio prop, which does not always list them at the moment this
+    // effect runs. Anything missing from that prop got silently deleted — his
+    // whole garage layout, with no undo.
+    //
+    // A ghost face is a cosmetic annoyance. Losing traced work is not. If a
+    // deletion path is ever added back, it must be driven by an explicit user
+    // delete action carrying the id to remove — never by inferring absence from
+    // a prop that has its own timing. Absence is not intent.
 
     if (planes.length === 0) return;
 
@@ -4422,6 +4406,105 @@ function SolarEngine3D({
     return updates.length;
   }
 
+  /**
+   * v66: Apply a wall-height / pitch change to the REAL roof planes.
+   *
+   * 🚨 This edits stored geometry, on an explicit button press, exactly like
+   * Square Up. The previous design applied these only at render time and never
+   * wrote back, which kept traced corners safe but produced a view that
+   * disagreed with the data: the roof drew in one place and the panels — which
+   * are placed on the actual planes — stayed in another, inside the house.
+   *
+   * Editing for real is the honest fix. The footprint is never touched; only
+   * the heights move, derived from each face's own traced outline. Panels are
+   * re-laid by the caller afterwards so they follow the roof.
+   *
+   * `scope` null means every face; otherwise just that plane id.
+   */
+  function applyBuildingShape(
+    viewer: any, C: any,
+    shape: { wallHeightM?: number; pitchDeg?: number },
+    scope: string | null,
+  ): number {
+    const groundSeed = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    const renderables = collectRoofRenderables(C, groundSeed);
+    if (renderables.length === 0) return 0;
+
+    const rawFaces = renderables.map((rp: any) => ({
+      id: rp.id as string,
+      polygon3D: rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[],
+    }));
+    const azimuths = deriveAzimuthsFromSharedEdges(rawFaces, (id) => {
+      const f = rawFaces.find(r => r.id === id);
+      if (!f) return 180;
+      const ring = f.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
+      return deriveAzimuthFromOutline(ring, ring.reduce((sum, v) => sum + v.lat, 0) / ring.length);
+    });
+
+    const updates: Array<{
+      id: string;
+      vertices: Array<{ lat: number; lng: number }>;
+      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
+      polygon3D?: Cart3[];
+      origin3D?: Cart3;
+      normal3D?: Cart3;
+    }> = [];
+
+    for (const rf of rawFaces) {
+      if (scope && rf.id !== scope) continue;
+      const outline = rf.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
+      const cur = faceOrientation(rf.polygon3D);
+      let lowest = Infinity;
+      for (const p of rf.polygon3D) { const h = ecefToLatLng(p).height; if (h < lowest) lowest = h; }
+      if (!isFinite(lowest)) continue;
+
+      // Keep whatever is not being changed, so nudging pitch does not also move
+      // the building up and down.
+      const prevWall = wallHeightRef.current;
+      const wall = shape.wallHeightM ?? prevWall;
+      const pitch = shape.pitchDeg ?? (cur.tiltDeg > 0.5 ? cur.tiltDeg : buildingPitchRef.current);
+      const groundM = lowest - prevWall;
+
+      const built = roofPlaneFromFootprint(outline, {
+        pitchDeg: pitch,
+        azimuthDeg: azimuths.get(rf.id) ?? cur.azimuthDeg,
+        eaveHeightM: wall,
+        groundElevM: groundM,
+      });
+      if (!built) continue;
+
+      (plane3DEntityMap.current.get(rf.id) ?? []).forEach((eid: string) => {
+        const e = viewer.entities.getById(eid);
+        if (e) try { viewer.entities.remove(e); } catch { /* ignore */ }
+      });
+      const cesiumPts = built.frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
+      const newIds = renderPlane3DEntity(viewer, C, cesiumPts, rf.id, built.frame,
+        selectedRoofPlaneId === rf.id, markOnlyPlaneIdsRef.current.has(rf.id));
+      plane3DEntityMap.current.set(rf.id, newIds);
+      plane3DFrameMap.current.set(rf.id, built.frame);
+      plane3DCesiumPtsMap.current.set(rf.id, cesiumPts);
+
+      if (built.plane.localFrame3D) {
+        updates.push({
+          id: rf.id,
+          vertices: built.plane.vertices,
+          localFrame3D: built.plane.localFrame3D,
+          polygon3D: built.plane.polygon3D,
+          origin3D: built.plane.origin3D,
+          normal3D: built.plane.normal3D,
+        });
+      }
+    }
+
+    plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
+    if (updates.length > 0) onRoofPlanesStitched?.(updates);
+    if (showRoofModel) { try { renderRoofWireframe(viewer, C); } catch { /* ignore */ } }
+    if (showBuilding3DRef.current) { try { renderBuildingExtrusion(viewer, C); } catch { /* ignore */ } }
+    try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    addLog('BUILD3D', `Applied shape to ${updates.length} face(s)${scope ? ' (selected only)' : ''}`);
+    return updates.length;
+  }
+
   function renderBuildingExtrusion(viewer: any, C: any) {
     clearBuildingExtrusion(viewer);
     const groundSeed = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
@@ -4453,119 +4536,24 @@ function SolarEngine3D({
       polygon3D: rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[],
     }));
 
-    // ── WHICH WAY DOES EACH FACE SLOPE ───────────────────────────────────────
-    // 🚨 Derived from the edges faces SHARE, not from each face alone.
+    // ── THE FACES THIS VIEW DRAWS ARE THE REAL ONES ──────────────────────────
+    // 🚨 No re-derivation. This used to rebuild every face at render time from
+    // its own pitch and wall-height controls, deliberately never writing back —
+    // my attempt to be safe after an automatic rebuild broke Stitch.
     //
-    // deriveAzimuthFromOutline takes a face's longest edge as the ridge and
-    // picks the equator-facing side. Run per face on the two halves of a gable
-    // — two wide rectangles either side of a shared ridge — it answers SOUTH for
-    // BOTH, and the roof comes out as two faces sloping the same way. That was
-    // Ray's "they are recognizing the same plane".
+    // It was the wrong kind of safe. Panels are placed on the ACTUAL planes, so
+    // a view with its own private geometry showed a roof in one place while the
+    // panels sat in another: "the panels are inside of the house and not on top
+    // of the planes". The aerial texture was misaligned for the same reason —
+    // it was draped on a face that was not where the roof was. A 3D view that
+    // disagrees with the data is worse than no 3D view.
     //
-    // The answer was never inside one face. Water runs toward the EAVE, and the
-    // eave is the longest edge a face does NOT share with a neighbour. That is
-    // automatic, needs no hemisphere heuristic, and handles gable, hip, dormer
-    // and shed with the same rule. A face sharing nothing (a lone shed) keeps
-    // the old per-outline estimate, which is the best available for it.
-    const azimuths = deriveAzimuthsFromSharedEdges(raw, (id) => {
-      const f = raw.find(r => r.id === id);
-      if (!f) return 180;
-      const ring = f.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
-      return deriveAzimuthFromOutline(ring, ring.reduce((s, v) => s + v.lat, 0) / ring.length);
-    });
-
-    // One ridge rise for the whole building: the nominal pitch applied to the
-    // MEAN perpendicular depth of the faces that have a ridge. Mean rather than
-    // max so one over-traced half does not inflate the whole roof, and rather
-    // than min so it is not squashed by an under-traced one.
-    const ridgeRiseM = (() => {
-      const depths: number[] = [];
-      for (const rf of raw) {
-        const r = findSharedRidge(raw, rf.id);
-        if (!r) continue;
-        const ga = ecefToLatLng(r.a), gb = ecefToLatLng(r.b);
-        const mLat = 111320, mLng = mLat * Math.cos(ga.lat * Math.PI / 180);
-        const re = (gb.lng - ga.lng) * mLng, rn = (gb.lat - ga.lat) * mLat;
-        const rm = Math.hypot(re, rn);
-        if (!(rm > 0.5)) continue;
-        let maxPerp = 0;
-        for (const p of rf.polygon3D) {
-          const g = ecefToLatLng(p);
-          const pe = (g.lng - ga.lng) * mLng, pn = (g.lat - ga.lat) * mLat;
-          const along = (pe * re + pn * rn) / rm;
-          const d = Math.hypot(pe - along * re / rm, pn - along * rn / rm);
-          if (d > maxPerp) maxPerp = d;
-        }
-        if (maxPerp > 0.5) depths.push(maxPerp);
-      }
-      if (depths.length === 0) return 0;
-      const meanDepth = depths.reduce((a, b) => a + b, 0) / depths.length;
-      return meanDepth * Math.tan(pitchDeg * Math.PI / 180);
-    })();
-
-    const faces = raw.map(rf => {
-      const outline = rf.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
-
-      // Ground under THIS face, from the TRACED geometry — per face, so a
-      // building on a slope still sits down, and from `raw` so it is stable.
-      //
-      // 🚨 THIS IS WHY THE WALLS CONTROL DID NOTHING. It previously read
-      //   groundElevM: lowest - wallH   with   eaveHeightM: wallH
-      // and the eave lands at ground + eave = (lowest - wallH) + wallH = lowest.
-      // The wall height cancelled itself out exactly, so the roof never moved
-      // however many times you clicked. Ground must be a reference that does
-      // NOT move with the control; only the eave above it may.
-      let lowest = Infinity;
-      for (const p of rf.polygon3D) { const h = ecefToLatLng(p).height; if (h < lowest) lowest = h; }
-      if (!isFinite(lowest)) return { id: rf.id, polygon3D: rf.polygon3D as Cart3[] };
-      const groundM = lowest - FLAT_TRACE_EAVE_HEIGHT_M;
-
-      // Per-face overrides win over the global controls, so selecting one face
-      // and adjusting it leaves its neighbours alone.
-      const ov = buildingOverridesRef.current.get(rf.id);
-      const facePitch = ov?.pitchDeg ?? pitchDeg;
-      const faceEave = ov?.wallHeightM ?? wallH;
-
-      // ── SHARED RIDGE ─────────────────────────────────────────────────────
-      // 🚨 A roof has ONE ridge at ONE height.
-      //
-      // Building each face independently — own eave, own pitch, own traced
-      // depth — means two faces with different depths reach DIFFERENT ridge
-      // heights and the roof cannot close. Eyeballed clicks on blurry imagery
-      // always give unequal depths, so this happened every time: mismatched
-      // halves, a ridge at two heights, wrong relative height. Exactly Ray's
-      // "these roof planes need to be uniform but they are not".
-      //
-      // So the ridge wins. ridgeHeight is set ONCE for the building from the
-      // nominal pitch and the mean depth, and every face runs from its own eave
-      // up to it. Each face's effective pitch then follows from its own depth,
-      // which is how an asymmetric roof genuinely behaves.
-      const ridge = findSharedRidge(raw, rf.id);
-      const shaped = ridge
-        ? roofPlaneFromFootprintAndRidge(
-            outline,
-            (() => { const g = ecefToLatLng(ridge.a); return { lat: g.lat, lng: g.lng }; })(),
-            (() => { const g = ecefToLatLng(ridge.b); return { lat: g.lat, lng: g.lng }; })(),
-            { ridgeHeightM: faceEave + ridgeRiseM, eaveHeightM: faceEave, groundElevM: groundM },
-          ) ?? roofPlaneFromFootprint(outline, {
-            pitchDeg: facePitch,
-            azimuthDeg: ov?.azimuthDeg ?? azimuths.get(rf.id) ?? 180,
-            eaveHeightM: faceEave,
-            groundElevM: groundM,
-          })
-        // No shared edge: a lone shed roof has no ridge to build to, so it keeps
-        // the independent construction, which is correct for a single plane.
-        : roofPlaneFromFootprint(outline, {
-            pitchDeg: facePitch,
-            azimuthDeg: ov?.azimuthDeg ?? azimuths.get(rf.id) ?? 180,
-            eaveHeightM: faceEave,
-            groundElevM: groundM,
-          });
-      return {
-        id: rf.id,
-        polygon3D: (shaped?.plane.polygon3D ?? rf.polygon3D) as Cart3[],
-      };
-    });
+    // So the Building view now draws the stored geometry, exactly as it is, and
+    // walls drop from the real roof to the ground. One geometry, one truth. The
+    // WALLS and PITCH controls perform an EXPLICIT edit of the planes instead
+    // (see applyBuildingShape) — like Square Up, on a button press, so the
+    // panels move with the roof because the roof actually moved.
+    const faces = raw;
 
     let minRoofH = Infinity;
     for (const f of faces) {
@@ -11389,35 +11377,27 @@ function SolarEngine3D({
     const nextWall = delta.wall != null
       ? Math.max(0.3048, +(effectiveWallM + delta.wall).toFixed(4)) : undefined;
 
-    if (selectedFaceId) {
-      setBuildingOverrides(prev => {
-        const next = new Map(prev);
-        const cur = next.get(selectedFaceId) ?? {};
-        next.set(selectedFaceId, {
-          ...cur,
-          ...(nextPitch != null ? { pitchDeg: nextPitch } : {}),
-          ...(nextWall != null ? { wallHeightM: nextWall } : {}),
-        });
-        return next;
-      });
-      return;
-    }
-    // No selection: move the whole building, and drop per-face overrides for
-    // whichever property changed so the global value actually takes effect
-    // everywhere instead of being silently ignored on overridden faces.
+    // Remember the new setting so the readout and the next nudge are consistent.
     if (nextPitch != null) setBuildingPitchDeg(nextPitch);
     if (nextWall != null) setWallHeightM(nextWall);
-    setBuildingOverrides(prev => {
-      if (prev.size === 0) return prev;
-      const next = new Map<string, BuildingFaceOverride>();
-      prev.forEach((v, k) => {
-        const kept: BuildingFaceOverride = { ...v };
-        if (nextPitch != null) delete kept.pitchDeg;
-        if (nextWall != null) delete kept.wallHeightM;
-        if (Object.keys(kept).length > 0) next.set(k, kept);
-      });
-      return next;
-    });
+
+    // 🚨 EDIT THE REAL PLANES. These used to be render-time only, which kept
+    // traced corners safe but left the drawn roof disagreeing with where the
+    // panels actually are — they ended up inside the house. The footprint is
+    // still never touched; only the heights move, rebuilt from each face's own
+    // traced outline.
+    const v = viewerRef.current; const Cz = (window as any).Cesium;
+    if (!v || !Cz) return;
+    const n = applyBuildingShape(v, Cz,
+      { wallHeightM: nextWall, pitchDeg: nextPitch },
+      selectedFaceIdRef.current);
+    setStatusMsg(
+      n > 0
+        ? `🏚 ${selectedFaceIdRef.current ? 'This face' : `${n} face${n === 1 ? '' : 's'}`}: ` +
+          `walls ${ftStr(nextWall ?? effectiveWallM)} · pitch ${Math.round(nextPitch ?? effectivePitchDeg)}° · ` +
+          `re-run Fill Roof so the panels follow`
+        : 'Nothing to reshape — trace a roof face first'
+    );
   }
 
   // ── RENDER ─────────────────────────────────────────────────────────────────

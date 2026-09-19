@@ -16,6 +16,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { deriveAzimuthsFromSharedEdges, type ExtrusionFace } from '@/lib/3d/buildingExtrusion';
+import { ecefToLatLng, latLngToECEF } from '@/lib/roofPlane3D';
 import { roofPlaneFromFootprint } from '@/lib/3d/footprintToRoofPlane';
 
 const LAT = 38.8306;
@@ -143,5 +144,65 @@ describe('azimuth from the shared ridge', () => {
 
   it('returns an empty map for no faces rather than throwing', () => {
     expect(deriveAzimuthsFromSharedEdges([], ALWAYS_SOUTH).size).toBe(0);
+  });
+});
+
+describe('un-stitched hand traces — the "two south facing planes" bug', () => {
+  it('still finds the ridge when the halves are traced 1m apart', () => {
+    // Ray traces each half separately by eye on blurry imagery, so before he
+    // stitches, the two halves do NOT share a corner within 35 cm. At the wall
+    // tolerance no ridge was found, both halves fell back to the per-face
+    // guess, and BOTH came out south. The adjacency tolerance is now 1.6 m,
+    // matching what Stitch already treats as "the same corner".
+    const W = 16;
+    const [s, n] = eastWestRidgeGable(W, 6, 6);
+    // Shift the north half 1 m north — a realistic miss.
+    const drifted: ExtrusionFace = {
+      id: 'north',
+      polygon3D: n.polygon3D.map(p => {
+        const g = ecefToLatLng(p);
+        return latLngToECEF(g.lat + 1 / 111320, g.lng, g.height);
+      }),
+    };
+    const az = deriveAzimuthsFromSharedEdges([s, drifted], ALWAYS_SOUTH);
+    expect(bearingDelta(az.get('south')!, az.get('north')!)).toBeGreaterThan(170);
+    expect(bearingDelta(az.get('south')!, 180)).toBeLessThan(10);
+    expect(bearingDelta(az.get('north')!, 0)).toBeLessThan(10);
+  });
+
+  it('a 1m gap DEFEATED the old 0.35m tolerance — both came out south', () => {
+    // Documents the regression explicitly, so nobody "tidies" the two
+    // tolerances back into one constant.
+    const W = 16;
+    const [s, n] = eastWestRidgeGable(W, 6, 6);
+    const drifted: ExtrusionFace = {
+      id: 'north',
+      polygon3D: n.polygon3D.map(p => {
+        const g = ecefToLatLng(p);
+        return latLngToECEF(g.lat + 1 / 111320, g.lng, g.height);
+      }),
+    };
+    const tight = deriveAzimuthsFromSharedEdges([s, drifted], ALWAYS_SOUTH,
+      { sharedEdgeToleranceM: 0.35 });
+    expect(tight.get('south')).toBe(180);
+    expect(tight.get('north')).toBe(180); // both south — the bug
+  });
+
+  it('does not fuse two genuinely separate buildings', () => {
+    // The looser tolerance must not make a garage 20 m away a neighbour of the
+    // house and start reasoning about a ridge between them.
+    const W = 16;
+    const [s] = eastWestRidgeGable(W, 6, 6);
+    const faraway: ExtrusionFace = {
+      id: 'garage',
+      polygon3D: s.polygon3D.map(p => {
+        const g = ecefToLatLng(p);
+        return latLngToECEF(g.lat + 20 / 111320, g.lng, g.height);
+      }),
+    };
+    const az = deriveAzimuthsFromSharedEdges([s, faraway], () => 217);
+    // Neither shares an edge, so both take the caller's estimate.
+    expect(az.get('south')).toBe(217);
+    expect(az.get('garage')).toBe(217);
   });
 });
