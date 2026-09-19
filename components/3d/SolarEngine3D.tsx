@@ -50,9 +50,9 @@ import {
 } from '@/lib/roofPlane3D';
 // v66: Aurora-style 2D → 3D. Builds a pitched roof face from a flat traced
 // outline plus pitch + azimuth, for addresses with no Photorealistic 3D Tiles.
-import { roofPlaneFromFootprint } from '@/lib/3d/footprintToRoofPlane';
+import { roofPlaneFromFootprint, roofPlaneFromFootprintAndRidge } from '@/lib/3d/footprintToRoofPlane';
 // v66: solid building — walls dropped from exterior roof edges to the ground.
-import { buildWalls, faceOrientation, deriveAzimuthsFromSharedEdges } from '@/lib/3d/buildingExtrusion';
+import { buildWalls, faceOrientation, deriveAzimuthsFromSharedEdges, findSharedRidge } from '@/lib/3d/buildingExtrusion';
 import { composeRoofTexture, clearRoofTextureCache } from '@/lib/3d/roofTexture';
 import { deriveAzimuthFromOutline } from '@/lib/aerial/nearmapToRoofPlane';
 import {
@@ -4355,6 +4355,35 @@ function SolarEngine3D({
       return deriveAzimuthFromOutline(ring, ring.reduce((s, v) => s + v.lat, 0) / ring.length);
     });
 
+    // One ridge rise for the whole building: the nominal pitch applied to the
+    // MEAN perpendicular depth of the faces that have a ridge. Mean rather than
+    // max so one over-traced half does not inflate the whole roof, and rather
+    // than min so it is not squashed by an under-traced one.
+    const ridgeRiseM = (() => {
+      const depths: number[] = [];
+      for (const rf of raw) {
+        const r = findSharedRidge(raw, rf.id);
+        if (!r) continue;
+        const ga = ecefToLatLng(r.a), gb = ecefToLatLng(r.b);
+        const mLat = 111320, mLng = mLat * Math.cos(ga.lat * Math.PI / 180);
+        const re = (gb.lng - ga.lng) * mLng, rn = (gb.lat - ga.lat) * mLat;
+        const rm = Math.hypot(re, rn);
+        if (!(rm > 0.5)) continue;
+        let maxPerp = 0;
+        for (const p of rf.polygon3D) {
+          const g = ecefToLatLng(p);
+          const pe = (g.lng - ga.lng) * mLng, pn = (g.lat - ga.lat) * mLat;
+          const along = (pe * re + pn * rn) / rm;
+          const d = Math.hypot(pe - along * re / rm, pn - along * rn / rm);
+          if (d > maxPerp) maxPerp = d;
+        }
+        if (maxPerp > 0.5) depths.push(maxPerp);
+      }
+      if (depths.length === 0) return 0;
+      const meanDepth = depths.reduce((a, b) => a + b, 0) / depths.length;
+      return meanDepth * Math.tan(pitchDeg * Math.PI / 180);
+    })();
+
     const faces = raw.map(rf => {
       const outline = rf.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
 
@@ -4375,12 +4404,44 @@ function SolarEngine3D({
       // Per-face overrides win over the global controls, so selecting one face
       // and adjusting it leaves its neighbours alone.
       const ov = buildingOverridesRef.current.get(rf.id);
-      const shaped = roofPlaneFromFootprint(outline, {
-        pitchDeg:    ov?.pitchDeg    ?? pitchDeg,
-        azimuthDeg:  ov?.azimuthDeg  ?? azimuths.get(rf.id) ?? 180,
-        eaveHeightM: ov?.wallHeightM ?? wallH,
-        groundElevM: groundM,
-      });
+      const facePitch = ov?.pitchDeg ?? pitchDeg;
+      const faceEave = ov?.wallHeightM ?? wallH;
+
+      // ── SHARED RIDGE ─────────────────────────────────────────────────────
+      // 🚨 A roof has ONE ridge at ONE height.
+      //
+      // Building each face independently — own eave, own pitch, own traced
+      // depth — means two faces with different depths reach DIFFERENT ridge
+      // heights and the roof cannot close. Eyeballed clicks on blurry imagery
+      // always give unequal depths, so this happened every time: mismatched
+      // halves, a ridge at two heights, wrong relative height. Exactly Ray's
+      // "these roof planes need to be uniform but they are not".
+      //
+      // So the ridge wins. ridgeHeight is set ONCE for the building from the
+      // nominal pitch and the mean depth, and every face runs from its own eave
+      // up to it. Each face's effective pitch then follows from its own depth,
+      // which is how an asymmetric roof genuinely behaves.
+      const ridge = findSharedRidge(raw, rf.id);
+      const shaped = ridge
+        ? roofPlaneFromFootprintAndRidge(
+            outline,
+            (() => { const g = ecefToLatLng(ridge.a); return { lat: g.lat, lng: g.lng }; })(),
+            (() => { const g = ecefToLatLng(ridge.b); return { lat: g.lat, lng: g.lng }; })(),
+            { ridgeHeightM: faceEave + ridgeRiseM, eaveHeightM: faceEave, groundElevM: groundM },
+          ) ?? roofPlaneFromFootprint(outline, {
+            pitchDeg: facePitch,
+            azimuthDeg: ov?.azimuthDeg ?? azimuths.get(rf.id) ?? 180,
+            eaveHeightM: faceEave,
+            groundElevM: groundM,
+          })
+        // No shared edge: a lone shed roof has no ridge to build to, so it keeps
+        // the independent construction, which is correct for a single plane.
+        : roofPlaneFromFootprint(outline, {
+            pitchDeg: facePitch,
+            azimuthDeg: ov?.azimuthDeg ?? azimuths.get(rf.id) ?? 180,
+            eaveHeightM: faceEave,
+            groundElevM: groundM,
+          });
       return {
         id: rf.id,
         polygon3D: (shaped?.plane.polygon3D ?? rf.polygon3D) as Cart3[],

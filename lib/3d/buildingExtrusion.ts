@@ -315,6 +315,46 @@ export function deriveAzimuthsFromSharedEdges(
 }
 
 /**
+ * The longest edge a face shares with a neighbour, in PLAN VIEW — its ridge.
+ *
+ * Exposed so the caller can build both halves of a roof to ONE ridge instead of
+ * building each face independently and hoping they meet. They do not meet: two
+ * faces at the same pitch with different traced depths reach different ridge
+ * heights, which is the mismatch Ray saw.
+ *
+ * Returns null for a face that shares nothing — a lone shed has no ridge.
+ */
+export function findSharedRidge(
+  faces: readonly ExtrusionFace[],
+  faceId: string,
+  options: BuildWallsOptions = {},
+): { a: Cart3; b: Cart3 } | null {
+  const tolM = options.sharedEdgeToleranceM ?? DEFAULT_TOLERANCE_M;
+  const self = faces.find(f => f.id === faceId);
+  if (!self || !self.polygon3D || self.polygon3D.length < 3) return null;
+
+  let best: { a: Cart3; b: Cart3; len: number } | null = null;
+  const poly = self.polygon3D;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    if (!a || !b) continue;
+    let shared = false;
+    for (const o of faces) {
+      if (o.id === faceId || !o.polygon3D) continue;
+      for (let j = 0; j < o.polygon3D.length; j++) {
+        const oa = o.polygon3D[j], ob = o.polygon3D[(j + 1) % o.polygon3D.length];
+        if (oa && ob && sameEdgeHorizontal(a, b, oa, ob, tolM)) { shared = true; break; }
+      }
+      if (shared) break;
+    }
+    if (!shared) continue;
+    const len = horizontalDist(a, b);
+    if (!best || len > best.len) best = { a, b, len };
+  }
+  return best ? { a: best.a, b: best.b } : null;
+}
+
+/**
  * The orientation of a face, derived from the geometry that is ACTUALLY drawn.
  *
  * WHY FROM THE GEOMETRY, NOT FROM plane.pitch / plane.azimuth

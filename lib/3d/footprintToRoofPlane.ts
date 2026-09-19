@@ -103,6 +103,120 @@ export interface FootprintPlaneResult {
   slopeAreaM2: number;
 }
 
+/**
+ * Build a face that runs from its own eave UP TO A GIVEN RIDGE LINE AT A GIVEN
+ * HEIGHT — the shared-ridge construction.
+ *
+ * 🚨 WHY THIS EXISTS, AND WHY roofPlaneFromFootprint IS NOT ENOUGH
+ * ----------------------------------------------------------------
+ * roofPlaneFromFootprint builds each face INDEPENDENTLY: own eave, own pitch,
+ * own traced depth. Give two faces the same pitch and different depths — which
+ * is what you always get from eyeballed clicks on blurry imagery — and they
+ * reach DIFFERENT ridge heights. The roof cannot close. The halves look
+ * mismatched, the ridge sits at two heights at once, and the relative height of
+ * the two slopes is simply wrong. That is exactly what Ray reported: "these
+ * specific roof planes need to be uniform but they are not... I think the
+ * relative height and pitch are wrong".
+ *
+ * A real roof has ONE ridge at ONE height. So the ridge wins, and each face's
+ * effective pitch follows from its own depth:
+ *
+ *     effectivePitch_face = atan( (ridgeHeight - eaveHeight) / depth_face )
+ *
+ * The deeper half comes out shallower, the shallower half steeper, and they
+ * meet exactly. That is not a fudge — it is how an asymmetric roof (a saltbox)
+ * genuinely works, and it is the honest reading of an asymmetric trace. The
+ * alternative, forcing equal pitch, can only close by moving the user's traced
+ * corners, which is not this function's business.
+ *
+ * @param outline      Traced corners, lat/lng, open ring.
+ * @param ridgeA/B     The two ends of the shared ridge, lat/lng.
+ * @param ridgeHeightM Ridge height above local ground.
+ * @param eaveHeightM  Eave height above local ground.
+ * @param groundElevM  Local ground elevation.
+ */
+export function roofPlaneFromFootprintAndRidge(
+  outline: readonly { lat: number; lng: number }[],
+  ridgeA: { lat: number; lng: number },
+  ridgeB: { lat: number; lng: number },
+  opts: { ridgeHeightM: number; eaveHeightM: number; groundElevM: number },
+): FootprintPlaneResult | null {
+  if (!outline || outline.length < 3) return null;
+  const { ridgeHeightM, eaveHeightM, groundElevM } = opts;
+  if (![ridgeHeightM, eaveHeightM, groundElevM].every(isFinite)) return null;
+  if (!(ridgeHeightM >= eaveHeightM)) return null; // a ridge below its eave is not a roof
+
+  let sumLat = 0, sumLng = 0;
+  for (const v of outline) {
+    if (!isFinite(v.lat) || !isFinite(v.lng)) return null;
+    sumLat += v.lat; sumLng += v.lng;
+  }
+  const cLat = sumLat / outline.length;
+  const cosLat = Math.cos(cLat * DEG);
+  const mLng = M_PER_DEG_LAT * (cosLat > 0.01 ? cosLat : 1);
+
+  // Ridge as a line in local metres, measured from ridgeA.
+  const toLocal = (v: { lat: number; lng: number }) => ({
+    e: (v.lng - ridgeA.lng) * mLng,
+    n: (v.lat - ridgeA.lat) * M_PER_DEG_LAT,
+  });
+  const rb = toLocal(ridgeB);
+  const rMag = Math.hypot(rb.e, rb.n);
+  if (!(rMag > 0.5)) return null; // a ridge shorter than half a metre is a mis-click
+  const re = rb.e / rMag, rn = rb.n / rMag;
+
+  // Perpendicular distance of every vertex from the ridge LINE (signed, then
+  // taken as magnitude — the face lies entirely on one side).
+  const perp: number[] = [];
+  let maxPerp = 0;
+  for (const v of outline) {
+    const p = toLocal(v);
+    const along = p.e * re + p.n * rn;
+    const d = Math.hypot(p.e - along * re, p.n - along * rn);
+    perp.push(d);
+    if (d > maxPerp) maxPerp = d;
+  }
+  if (!(maxPerp > 0.5)) return null; // degenerate: the whole face sits on the ridge
+
+  // Linear fall from the ridge to the furthest (eave) vertex. Linear in
+  // perpendicular distance IS a plane, so the face stays coplanar.
+  const fall = (ridgeHeightM - eaveHeightM) / maxPerp;
+  const baseH = groundElevM + ridgeHeightM;
+  const pts3D = outline.map((v, i) => latLngToECEF(v.lat, v.lng, baseH - perp[i] * fall));
+
+  let plane: RoofPlane;
+  let frame: Plane3DFrame;
+  try {
+    frame = computePlaneFromPoints3D(pts3D);
+    plane = buildRoofPlane3D(pts3D);
+  } catch {
+    return null;
+  }
+
+  // Downslope is perpendicular to the ridge, pointing away from it toward the
+  // face's own centroid — the same rule the shared-edge azimuth derivation uses.
+  const cMid = toLocal({ lat: cLat, lng: sumLng / outline.length });
+  const alongC = cMid.e * re + cMid.n * rn;
+  const de = cMid.e - alongC * re, dn = cMid.n - alongC * rn;
+  const dMag = Math.hypot(de, dn);
+  const azimuthDeg = dMag > 1e-6
+    ? ((Math.atan2(de / dMag, dn / dMag) * 180 / Math.PI) % 360 + 360) % 360
+    : 180;
+  const pitchDeg = Math.atan(fall) * 180 / Math.PI;
+
+  plane.pitch = clampPitch(pitchDeg);
+  plane.azimuth = normalizeAzimuth(azimuthDeg);
+
+  const azR = plane.azimuth * DEG;
+  return {
+    plane,
+    frame,
+    liftedPts: pts3D,
+    eaveDirENU: { x: Math.cos(azR), y: -Math.sin(azR) },
+    slopeAreaM2: plane.area,
+  };
+}
+
 /** Clamp to the range buildRoofPlane3D itself enforces, so callers see one rule. */
 export function clampPitch(pitchDeg: number): number {
   if (!isFinite(pitchDeg)) return 0;
