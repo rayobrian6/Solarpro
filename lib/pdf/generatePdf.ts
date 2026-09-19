@@ -16,6 +16,15 @@
 import { writeFile, readFile, unlink } from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import {
+  FONT_METRIC_PROBE,
+  FONT_METRIC_PROBE_PX,
+  GATED_FAMILIES,
+  REQUIRED_FONT_FACES,
+  measureAdvanceSumsInPage,
+  evaluateFontMetrics,
+  formatFontMetricFailure,
+} from '@/lib/permit/fonts/fontMetricGate.mjs';
 
 export interface PdfOptions {
   /** Puppeteer PDF format (default: 'Letter') */
@@ -102,32 +111,29 @@ async function generateWithPuppeteer(html: string, opts: PdfOptions): Promise<Ui
     // the status 'loaded'. Each canonical face is checked individually, and the
     // metrics are measured with NO fallback in the stack so a missing face
     // measures as the generic default rather than quietly passing.
-    const fontState = await page.evaluate(async () => {
+    // 🚨 The RULE — probe string, size, expected advances, tolerance and verdict
+    // — lives in ONE place: lib/permit/fonts/fontMetricGate.mjs. It used to be
+    // spelled out here AND in scripts/lib/pagination-probe.mjs, and both copies
+    // carried the same wrong assumption (that the renderer reports SUBPIXEL
+    // advances). Do not re-inline any of it; see that file for why the probe
+    // runs at the em size.
+    await page.evaluate(async () => {
       await (document as unknown as { fonts: { ready: Promise<unknown> } }).fonts.ready;
-      const d = document as unknown as { fonts: { status: string; size: number; check(f: string): boolean } };
-      const ctx = document.createElement('canvas').getContext('2d')!;
-      const S = 'MMMMMMWWWWiiiill1234567890 The quick brown fox jumps over the lazy dog';
-      const w = (f: string): number => { ctx.font = f; return +ctx.measureText(S).width.toFixed(2); };
-      return {
-        status: d.fonts.status,
-        size: d.fonts.size,
-        checks: {
-          sans400: d.fonts.check('400 16px "SolarPro Sans"'),
-          sans700: d.fonts.check('700 16px "SolarPro Sans"'),
-          mono400: d.fonts.check('400 16px "SolarPro Mono"'),
-          mono700: d.fonts.check('700 16px "SolarPro Mono"'),
-          symbols: d.fonts.check('400 16px "SolarPro Symbols"'),
-        },
-        sansPx: w('400 16px "SolarPro Sans"'),
-        monoPx: w('400 16px "SolarPro Mono"'),
-      };
     });
+    const faceChecks = await page.evaluate(
+      (faces: readonly string[]) => Object.fromEntries(
+        faces.map(f => [f, (document as unknown as { fonts: { check(s: string): boolean } }).fonts.check(f)]),
+      ),
+      REQUIRED_FONT_FACES as unknown as string[],
+    );
+    const measured = await page.evaluate(
+      measureAdvanceSumsInPage as unknown as (a: unknown) => any,
+      [FONT_METRIC_PROBE, FONT_METRIC_PROBE_PX, GATED_FAMILIES as unknown as string[]] as unknown,
+    );
     if (opts.requireCanonicalFonts !== false) {
-      const missing = Object.entries(fontState.checks).filter(([, ok]) => !ok).map(([k]) => k);
-      const TOL = 0.015;
-      const sansOff = Math.abs(fontState.sansPx - 571.73) / 571.73 > TOL;
-      const monoOff = Math.abs(fontState.monoPx - 672.11) / 672.11 > TOL;
-      if (missing.length || sansOff || monoOff) {
+      const missing = Object.entries(faceChecks).filter(([, ok]) => !ok).map(([k]) => k);
+      const verdict = evaluateFontMetrics(measured.families);
+      if (missing.length || !verdict.ok) {
         // FAIL CLOSED. Returning null here would silently fall through to
         // wkhtmltopdf, which is exactly the substitution this gate exists to
         // prevent — so it throws instead.
@@ -140,11 +146,16 @@ async function generateWithPuppeteer(html: string, opts: PdfOptions): Promise<Ui
         // refusal had never once fired.
         throw new CanonicalFontError(
           'AUTHORITATIVE PDF REFUSED — the canonical font pack did not render.\n'
-          + `  faces not loaded : ${missing.join(', ') || 'none'}\n`
-          + `  fonts.status     : ${fontState.status} (${fontState.size} faces)\n`
-          + `  SolarPro Sans    : ${fontState.sansPx}px (expected 571.73 ±1.5%)\n`
-          + `  SolarPro Mono    : ${fontState.monoPx}px (expected 672.11 ±1.5%)\n`
-          + 'A permit PDF rendered with substituted fonts has different geometry from the '
+          + formatFontMetricFailure({
+            results: verdict.results,
+            missingFaces: missing,
+            status: measured.status,
+            size: measured.size,
+            loaded: measured.loaded,
+            genericSerifPx: measured.genericSerifPx,
+            genericMonospacePx: measured.genericMonospacePx,
+          })
+          + '\nA permit PDF rendered with substituted fonts has different geometry from the '
           + 'approved artifact. Fix the embed; do not fall back.',
         );
       }

@@ -315,19 +315,30 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
       }
 
       for (const [label, m] of Object.entries(fonts as Record<string, {
-        stack: string; widthPx: number; expectedPx: number; deltaPct: number;
+        stack: string; widthPx: number; expectedPx: number; deltaPct: number; probePx: number;
         metricCompatible: boolean; genericSerifPx: number; genericMonospacePx: number;
       }>)) {
         if (label === '__faces') continue;
+        // EVERY gated face is printed, passing ones included. The original
+        // message named only the first failure, and the one fact that
+        // identifies a renderer artifact rather than a bad embed is seeing the
+        // PROPORTIONAL face pass while the FIXED-PITCH one fails by ~4% — that
+        // asymmetry is what advance quantization looks like. Printing one line
+        // hid it. See lib/permit/fonts/fontMetricGate.mjs.
+        const allFaces = Object.entries(fonts as Record<string, any>)
+          .filter(([k]) => k !== '__faces')
+          .map(([l, v]: [string, any]) =>
+            `  ${l.padEnd(30)} ${v.widthPx}px vs ${v.expectedPx} (${v.deltaPct >= 0 ? '+' : ''}${v.deltaPct}%) ${v.metricCompatible ? 'ok' : '<-- FAILED'}`)
+          .join('\n');
         expect(m.metricCompatible,
           `\n${envMsg}\n` +
           `EMBEDDED FONT METRICS WRONG — ${label} does not match the canonical reference.\n` +
-          `  stack            : ${m.stack}\n` +
-          `  measured         : ${m.widthPx}px\n` +
-          `  expected         : ${m.expectedPx}px  (±${FONT_METRIC_TOLERANCE_PCT}%)\n` +
-          `  deviation        : ${m.deltaPct}%\n` +
+          `  probe            : ${m.probePx}px (em size — advances are integers, so a renderer\n` +
+          `                     that quantizes them cannot change this number)\n` +
+          `${allFaces}\n` +
           `  generic serif    : ${m.genericSerifPx}px\n` +
           `  generic monospace: ${m.genericMonospacePx}px\n` +
+          `  faces registered : ${faceState.loaded.join(', ')}\n` +
           `This is a FONT PACK failure, not sheet clipping. The artifact embeds the canonical ` +
           `WOFF2 bytes; if their metrics do not match, the embed is corrupt or the wrong face ` +
           `is winning. Do NOT adjust any sheet layout on the strength of a measurement taken here.`,
