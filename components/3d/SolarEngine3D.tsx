@@ -1966,6 +1966,37 @@ function SolarEngine3D({
     const C = (window as any).Cesium;
     if (!viewer || !C || stage !== 'done') return;
     const planes = roofPlanes ?? [];
+
+    // ── v66: RECONCILE DELETIONS ─────────────────────────────────────────────
+    // This effect has always been ADD-ONLY, and there is not a single .delete()
+    // on plane3DEntityMap / plane3DFrameMap / plane3DCesiumPtsMap anywhere in
+    // the file. So a plane removed from the sidebar kept its Cesium entities,
+    // kept being returned by collectRoofRenderables, and kept extruding walls —
+    // a ghost face that could not be got rid of without a reload.
+    //
+    // 🚨 Guarded on roofPlanes being genuinely non-empty. During restore this
+    // effect can run with an empty array before the DB load resolves, and an
+    // unguarded reconcile would wipe every face the user had just traced. The
+    // guard costs nothing: an empty design has no ghosts to clean up.
+    if (planes.length > 0 && plane3DEntityMap.current.size > 0) {
+      const live = new Set(planes.map(p => p.id));
+      for (const pid of Array.from(plane3DEntityMap.current.keys())) {
+        if (live.has(pid)) continue;
+        (plane3DEntityMap.current.get(pid) ?? []).forEach(eid => {
+          const e = viewer.entities.getById(eid);
+          if (e) try { viewer.entities.remove(e); } catch { /* ignore */ }
+        });
+        plane3DEntityMap.current.delete(pid);
+        plane3DFrameMap.current.delete(pid);
+        plane3DCesiumPtsMap.current.delete(pid);
+        flatTraceParamsRef.current.delete(pid);
+        markOnlyPlaneIdsRef.current.delete(pid);
+        flatTracedPlaneIdsRef.current = flatTracedPlaneIdsRef.current.filter(x => x !== pid);
+        addLog('PLANE3D', `Removed entities for deleted plane ${pid.slice(0, 8)}`);
+      }
+      plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
+    }
+
     if (planes.length === 0) return;
 
     // Find planes that are NOT already rendered (not in the entity map)
@@ -4637,7 +4668,11 @@ function SolarEngine3D({
     }> = [];
     for (const [pid, pts] of work) {
       const cartPts: Cart3[] = pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
-      let frame; try { frame = computePlaneFromPoints3D(cartPts); } catch { continue; }
+      // 🚨 surfaceOffsetM: 0 — these points came OUT of a previous fit (the
+      // stitch seeds `work` from plane3DCesiumPtsMap) and are already lifted.
+      // Letting the default apply again raises the roof 12 cm per Stitch press,
+      // cumulatively, and the result is written straight back to that same map.
+      let frame; try { frame = computePlaneFromPoints3D(cartPts, { surfaceOffsetM: 0 }); } catch { continue; }
       const projected = frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
       const oldIds = plane3DEntityMap.current.get(pid) || [];
       oldIds.forEach(id => { try { const e = viewer.entities.getById(id); if (e) viewer.entities.remove(e); } catch {} });
@@ -4654,6 +4689,19 @@ function SolarEngine3D({
         if (!carto) continue;
         verts.push({ lat: C.Math.toDegrees(carto.latitude), lng: C.Math.toDegrees(carto.longitude) });
       }
+      // v66: keep the flat-trace rebuild source in step with the stitch.
+      //
+      // rebuildFlatTracedPlanes (used by the eave-height control) rebuilds a
+      // face from flatTraceParamsRef.outline. Stitch writes the merged corners
+      // to plane3DCesiumPtsMap and to roofPlanes, but NOT here — so nudging the
+      // eave after stitching rebuilt from the ORIGINAL un-stitched trace and
+      // silently pulled the faces back apart, undoing the stitch with no
+      // indication that anything had been discarded.
+      if (verts.length >= 3) {
+        const params = flatTraceParamsRef.current.get(pid);
+        if (params) flatTraceParamsRef.current.set(pid, { ...params, outline: verts });
+      }
+
       if (verts.length >= 3) {
         stitchUpdates.push({
           id: pid,

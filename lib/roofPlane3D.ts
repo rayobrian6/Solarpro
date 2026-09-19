@@ -326,7 +326,24 @@ function computePolygonCornerOrigin(
  *   Step 7. Shift origin to min-UV corner (flush grid start)
  *   Step 8. Convert to ENU for panel placement math
  */
-export function computePlaneFromPoints3D(pts: Cart3[]): Plane3DFrame {
+export interface ComputePlaneOptions {
+  /**
+   * Metres to lift the fitted polygon along its normal. Defaults to
+   * SURFACE_OFFSET_M, which keeps panels and the plane from z-fighting with the
+   * noisy 3D-tile mesh underneath.
+   *
+   * 🚨 PASS 0 WHEN RE-FITTING POINTS THAT WERE ALREADY LIFTED BY A PREVIOUS FIT.
+   * The offset is applied unconditionally, so feeding this function its own
+   * projectedPts raises the result another SURFACE_OFFSET_M every time. Stitch
+   * did exactly that — seeding from plane3DCesiumPtsMap, re-fitting, and writing
+   * the result back to the same map — so each press floated the roof, and every
+   * panel on it, 12 cm higher. Over a handful of presses that is a visibly
+   * hovering roof with no obvious cause.
+   */
+  surfaceOffsetM?: number;
+}
+
+export function computePlaneFromPoints3D(pts: Cart3[], options: ComputePlaneOptions = {}): Plane3DFrame {
   if (pts.length < 3) {
     throw new Error(`computePlaneFromPoints3D: need ≥3 points, got ${pts.length}`);
   }
@@ -390,9 +407,10 @@ export function computePlaneFromPoints3D(pts: Cart3[]): Plane3DFrame {
 
   // ── Step 4: SURFACE OFFSET — lift above noisy mesh ──────────────────────
   // Add SURFACE_OFFSET_M meters along normal to prevent clipping inside roof
-  const projectedPts: Cart3[] = projectedRaw.map(p =>
-    add3(p, scale3(normal, SURFACE_OFFSET_M))
-  );
+  const surfaceOffsetM = options.surfaceOffsetM ?? SURFACE_OFFSET_M;
+  const projectedPts: Cart3[] = surfaceOffsetM === 0
+    ? projectedRaw
+    : projectedRaw.map(p => add3(p, scale3(normal, surfaceOffsetM)));
 
   // Use projected centroid as ENU reference
   const centroid = centroid3(projectedPts);
