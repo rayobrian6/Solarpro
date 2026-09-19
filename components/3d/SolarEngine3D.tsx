@@ -55,6 +55,7 @@ import { roofPlaneFromFootprint, roofPlaneFromFootprintAndRidge } from '@/lib/3d
 import { buildWalls, faceOrientation, deriveAzimuthsFromSharedEdges, findSharedRidge } from '@/lib/3d/buildingExtrusion';
 import { composeRoofTexture, clearRoofTextureCache } from '@/lib/3d/roofTexture';
 import { regularizeOutline, joinSharedCorners } from '@/lib/3d/regularizeOutline';
+import { snapAbutments } from '@/lib/3d/abutment';
 import { deriveAzimuthFromOutline } from '@/lib/aerial/nearmapToRoofPlane';
 import {
   placeFencePanels,
@@ -4818,7 +4819,43 @@ function SolarEngine3D({
       }
       if (movedThisPass === 0) break; // converged
     }
-    if (lastShared === 0) { setStatusMsg(`Stitch — no shared corners found within ~${TOL}m`); return; }
+    // ── v66: ABUTMENTS ───────────────────────────────────────────────────────
+    // Clustering above joins CORNER to CORNER, which is right for a gable, a
+    // hip peak or a saltbox ridge — both faces genuinely own that point, so
+    // their mean is the answer and everybody converges on it.
+    //
+    // 🚨 It cannot see the other half of the problem. Ray: "my one plane of my
+    // roof meets into a covered porch... the porch roof meets into the main
+    // roof ABOVE the eave." A porch head lands partway UP the main slope, so
+    // its top corners sit in the MIDDLE of the main face, where there is no
+    // corner of the main roof to cluster with. No tolerance fixes that: the
+    // thing it attaches to is a surface, not a point. Same for shed dormers,
+    // lean-tos and lower wings — all common, none previously handled.
+    //
+    // snapAbutments lands those vertices on the surface they meet. It
+    // deliberately DECLINES any vertex that has another face's corner nearby,
+    // because that one belongs to the clustering above; taking both would make
+    // two mutually-abutting corners swap heights instead of converging.
+    let abutted = 0;
+    try {
+      const abutFaces = Array.from(work.entries()).map(([pid, pts]) => ({
+        id: pid,
+        polygon3D: pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z })),
+      }));
+      const ab = snapAbutments(abutFaces);
+      if (ab.snapped > 0) {
+        for (const [pid, poly] of ab.faces) {
+          work.set(pid, poly.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z)));
+        }
+        abutted = ab.snapped;
+        addLog('STITCH', `Abutments: landed ${ab.snapped} vertex/vertices on an adjoining roof face (max lift ${ab.maxLiftM.toFixed(2)}m)`);
+      }
+    } catch (e) { addLog('WARN', `abutment pass: ${(e as Error).message}`); }
+
+    if (lastShared === 0 && abutted === 0) {
+      setStatusMsg(`Stitch — nothing to join: no shared corners within ~${TOL}m and no face landing on another`);
+      return;
+    }
 
     // v64: collect the stitched corners (lat/lng) per plane so they can be written
     // back into roofPlanes state — the geometry every panel-placement engine reads.
@@ -4903,7 +4940,12 @@ function SolarEngine3D({
     // refill), so this stays consistent with what we just drew while making panel
     // placement + persistence use the stitched corners.
     if (stitchUpdates.length > 0) onRoofPlanesStitched?.(stitchUpdates);
-    setStatusMsg(`🔗 Stitched — ${lastShared} shared point${lastShared !== 1 ? 's' : ''} averaged (multi-pass)`);
+    setStatusMsg(
+      `🔗 Stitched — ${lastShared} shared point${lastShared !== 1 ? 's' : ''} averaged` +
+      (abutted > 0
+        ? ` · ${abutted} corner${abutted !== 1 ? 's' : ''} landed onto an adjoining roof face (porch/dormer/lean-to)`
+        : '')
+    );
   }
 
   // ── v63: Equipment overlay (optimizers / microinverters) ────────────────────
