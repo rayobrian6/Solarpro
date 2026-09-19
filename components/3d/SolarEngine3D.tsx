@@ -51,6 +51,8 @@ import {
 // v66: Aurora-style 2D → 3D. Builds a pitched roof face from a flat traced
 // outline plus pitch + azimuth, for addresses with no Photorealistic 3D Tiles.
 import { roofPlaneFromFootprint } from '@/lib/3d/footprintToRoofPlane';
+// v66: solid building — walls dropped from exterior roof edges to the ground.
+import { buildWalls } from '@/lib/3d/buildingExtrusion';
 import { deriveAzimuthFromOutline } from '@/lib/aerial/nearmapToRoofPlane';
 import {
   placeFencePanels,
@@ -901,6 +903,7 @@ function SolarEngine3D({
   const overlayRef  = useRef<any[]>([]);
   const setbackZoneEntitiesRef = useRef<any[]>([]); // v62: fire setback keep-out zone entities
   const roofWireframeEntitiesRef = useRef<any[]>([]); // v62: stitched roof-model edge polylines
+  const buildingEntitiesRef = useRef<any[]>([]);      // v66: extruded walls + solid roof surfaces
   const measureOverlayRef = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
@@ -1563,6 +1566,8 @@ function SolarEngine3D({
   const suppressClickRef = useRef<boolean>(false);
   // v62: stitched roof-model wireframe toggle (classified edges across all planes)
   const [showRoofModel, setShowRoofModel] = useState(false);
+  // v66: solid extruded building (walls to ground + filled roof surfaces).
+  const [showBuilding3D, setShowBuilding3D] = useState(false);
   const rotateHandleRef = useRef<any>(null);
   const rotateHandleLineRef = useRef<any>(null);
   // v62: true while a grab-to-move/rotate is in progress. The CUSTOM camera handler
@@ -2037,6 +2042,24 @@ function SolarEngine3D({
     else clearRoofWireframe(viewer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRoofModel, roofPlanes, panels, stage]);
+
+  // v66: rebuild the solid building whenever the roof changes. Same shape as the
+  // wireframe effect above, and deliberately NOT keyed on `panels` — panels sit
+  // on top of the building and do not change its geometry, so re-extruding on
+  // every panel edit would be pure churn.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) return;
+    if (showBuilding3D) {
+      try { renderBuildingExtrusion(viewer, C); }
+      catch (e) { addLog('WARN', `renderBuildingExtrusion: ${(e as Error).message}`); }
+    } else {
+      clearBuildingExtrusion(viewer);
+      try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showBuilding3D, roofPlanes, flatTraceEaveHeightM, stage]);
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
   useEffect(() => { paintModeRef.current = paintMode; }, [paintMode]);
   useEffect(() => { onPanelPaintRef.current = onPanelPaint; }, [onPanelPaint]);
@@ -4161,6 +4184,123 @@ function SolarEngine3D({
     });
     publishE2EDiagnostics();
     try { viewer.scene.requestRender(); } catch {}
+  }
+
+  // ── v66: SOLID BUILDING — extruded walls + filled roof surfaces ────────────
+  // Ray: "It still looks like shitty grainy mesh with some marked planes."
+  // Mark Plane renders outline-only BY DESIGN, so a traced roof reads as
+  // annotation drawn over satellite imagery rather than as a building. This
+  // closes that: every exterior roof edge drops a wall to the ground and every
+  // face gets a solid surface, so the house reads as an object — the single
+  // biggest visual difference between our canvas and Aurora's.
+  //
+  // Geometry (which edges get a wall, and the winding that avoids bowties)
+  // lives in lib/3d/buildingExtrusion.ts, pure and unit-tested. This function
+  // only turns it into Cesium entities.
+  function clearBuildingExtrusion(viewer: any) {
+    buildingEntitiesRef.current.forEach(e => { try { viewer.entities.remove(e); } catch { /* ignore */ } });
+    buildingEntitiesRef.current = [];
+  }
+
+  /**
+   * Ground level the walls drop to.
+   *
+   * Preference order matters. A flat-traced face stored the ground the user
+   * actually clicked on, which is the most trustworthy number we have and the
+   * one the face itself was built against. cesiumGroundElevRef comes from
+   * Google's elevation API plus a geoid approximation and silently degrades to
+   * about -32 m when that API returns nothing. The last resort infers ground
+   * from the roof itself so the walls are at worst the wrong LENGTH rather
+   * than running to the centre of the earth.
+   */
+  function resolveGroundForExtrusion(minRoofHeightM: number): number {
+    const firstTraced = flatTracedPlaneIdsRef.current
+      .map(id => flatTraceParamsRef.current.get(id))
+      .find(p => p && isFinite(p.groundElevM));
+    if (firstTraced) return firstTraced.groundElevM;
+    if (cesiumGroundElevResolvedRef.current && isFinite(cesiumGroundElevRef.current)) {
+      return cesiumGroundElevRef.current;
+    }
+    return minRoofHeightM - flatTraceEaveHeightRef.current;
+  }
+
+  function renderBuildingExtrusion(viewer: any, C: any) {
+    clearBuildingExtrusion(viewer);
+    const groundSeed = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    const renderables = collectRoofRenderables(C, groundSeed);
+    if (renderables.length === 0) {
+      setStatusMsg('No roof faces yet — trace a roof face first, then turn on 🏚 Building');
+      return;
+    }
+
+    // Cesium Cartesian3 → plain Cart3 for the pure geometry module.
+    const faces = renderables.map((rp: any) => ({
+      id: rp.id as string,
+      polygon3D: rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[],
+    }));
+
+    let minRoofH = Infinity;
+    for (const f of faces) {
+      for (const p of f.polygon3D) {
+        const h = ecefToLatLng(p).height;
+        if (isFinite(h) && h < minRoofH) minRoofH = h;
+      }
+    }
+    if (!isFinite(minRoofH)) {
+      addLog('BUILD3D', 'No finite roof heights — skipping extrusion');
+      return;
+    }
+    const groundElevM = resolveGroundForExtrusion(minRoofH);
+
+    const walls = buildWalls(faces, groundElevM);
+
+    // ── Walls ────────────────────────────────────────────────────────────────
+    // Flat white, like Aurora's. arcType NONE + perPositionHeight keeps each
+    // quad an exact planar surface instead of draping it over the ellipsoid.
+    const wallFill = C.Color.fromCssColorString('#e8eaf0').withAlpha(0.92);
+    const wallEdge = C.Color.fromCssColorString('#9aa3b8').withAlpha(0.85);
+    for (const w of walls) {
+      const pts = w.corners.map(p => new C.Cartesian3(p.x, p.y, p.z));
+      const ent = viewer.entities.add({
+        name: `[BUILD3D-WALL] ${w.faceId}#${w.edgeIndex}`,
+        polygon: {
+          hierarchy:         new C.PolygonHierarchy(pts),
+          material:          wallFill,
+          outline:           true,
+          outlineColor:      wallEdge,
+          perPositionHeight: true,
+          arcType:           C.ArcType.NONE,
+          shadows:           C.ShadowMode.ENABLED,
+        },
+      });
+      buildingEntitiesRef.current.push(ent);
+    }
+
+    // ── Roof surfaces ────────────────────────────────────────────────────────
+    // Opaque, so the grainy imagery underneath stops showing through. This is
+    // what turns "marked planes" into a roof.
+    const roofFill = C.Color.fromCssColorString('#6b5b52').withAlpha(0.97);
+    const roofEdge = C.Color.fromCssColorString('#ff9500').withAlpha(0.9);
+    for (const f of faces) {
+      const pts = f.polygon3D.map(p => new C.Cartesian3(p.x, p.y, p.z));
+      const ent = viewer.entities.add({
+        name: `[BUILD3D-ROOF] ${f.id}`,
+        polygon: {
+          hierarchy:         new C.PolygonHierarchy(pts),
+          material:          roofFill,
+          outline:           true,
+          outlineColor:      roofEdge,
+          perPositionHeight: true,
+          arcType:           C.ArcType.NONE,
+          shadows:           C.ShadowMode.ENABLED,
+        },
+      });
+      buildingEntitiesRef.current.push(ent);
+    }
+
+    addLog('BUILD3D', `Building rendered: ${faces.length} roof face(s), ${walls.length} wall(s), ground=${groundElevM.toFixed(1)}m, lowest roof=${minRoofH.toFixed(1)}m`);
+    setStatusMsg(`🏚 Building — ${faces.length} face${faces.length === 1 ? '' : 's'} · ${walls.length} wall${walls.length === 1 ? '' : 's'} down to ground`);
+    try { viewer.scene.requestRender(); } catch { /* ignore */ }
   }
 
   // ── v62: STITCHED ROOF MODEL wireframe ─────────────────────────────────────
@@ -12544,6 +12684,22 @@ function SolarEngine3D({
               }}
             >
               🔗 Roof Model{showRoofModel ? ' ✓' : ''}
+            </button>
+            {/* v66: solid building. Walls from every exterior roof edge down to
+                the ground, plus opaque roof surfaces, so a traced roof reads as
+                a building instead of wireframe over satellite imagery. */}
+            <button
+              onClick={() => setShowBuilding3D(v => !v)}
+              title="Building: extrude walls from the roof down to the ground and fill the roof surfaces — turns marked planes into a solid 3D model"
+              data-no-drag
+              style={{
+                background: showBuilding3D ? 'rgba(232,234,240,0.22)' : 'rgba(15,15,30,0.6)',
+                border: `1px solid ${showBuilding3D ? 'rgba(232,234,240,0.65)' : 'rgba(255,255,255,0.12)'}`,
+                color: showBuilding3D ? '#e8eaf0' : '#bbb', borderRadius: 6, padding: '4px 8px',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
+              }}
+            >
+              🏚 Building{showBuilding3D ? ' ✓' : ''}
             </button>
             <button
               onClick={() => { const v = viewerRef.current; const Cz = (window as any).Cesium; if (v && Cz) stitchRoofVertices(v, Cz); }}
