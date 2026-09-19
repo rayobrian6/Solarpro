@@ -159,11 +159,20 @@ jobs:
   # ─────────────────────────────────────────────────────────────────
   # Job 6: Build gate (deployment blocker)
   #
-  # Runs only on push to master after test + type-check + lint pass.
+  # Runs on pull_request to master AND on push to master, after
+  # test + type-check + lint pass.
+  #
+  # This job was previously guarded by
+  #     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+  # which meant it could only ever run on push-to-master — and push-to-master
+  # is the same event that auto-deploys production on Vercel. So the gate ran
+  # CONCURRENTLY WITH the deploy it was written to block, and never once ran
+  # before a merge. Guard removed 2026-09-19 so the gate actually gates.
+  #
   # Uses stub env vars — the validateBuildEnv() in next.config.js
   # uses process.exit(1) if REQUIRED vars are absent, so the build
   # job acts as a gate: if someone removes a required var from
-  # next.config.js this job would break and catch it before deploy.
+  # next.config.js this job breaks and catches it before deploy.
   #
   # NOTE: Real production env vars are set in Vercel, not here.
   # Stub values are intentional — the build validates structure,
@@ -174,7 +183,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [env-audit]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
 
     steps:
       - name: Checkout
@@ -306,24 +314,32 @@ jobs:
   ci-complete:
     name: CI Complete
     runs-on: ubuntu-latest
-    needs: [test, type-check, lint, env-audit, page-fit]
+    needs: [test, type-check, secret-guard, lint, env-audit, build, page-fit]
     if: always()
 
     steps:
+      # Every job this workflow defines must be listed in `needs` above AND
+      # asserted below. `secret-guard` and `build` were previously absent from
+      # both, so this job could report "all CI gates green" while a credential
+      # was committed or the production build was broken. Add a job to BOTH.
       - name: Report CI status
         run: |
           echo "=== CI Summary ==="
-          echo "test:        ${{ needs.test.result }}"
-          echo "type-check:  ${{ needs.type-check.result }}"
-          echo "lint:        ${{ needs.lint.result }}"
-          echo "env-audit:   ${{ needs.env-audit.result }}"
-          echo "page-fit:    ${{ needs.page-fit.result }}"
+          echo "test:         ${{ needs.test.result }}"
+          echo "type-check:   ${{ needs.type-check.result }}"
+          echo "secret-guard: ${{ needs.secret-guard.result }}"
+          echo "lint:         ${{ needs.lint.result }}"
+          echo "env-audit:    ${{ needs.env-audit.result }}"
+          echo "build:        ${{ needs.build.result }}"
+          echo "page-fit:     ${{ needs.page-fit.result }}"
           echo ""
-          if [ "${{ needs.test.result }}"       != "success" ] || \
-             [ "${{ needs.type-check.result }}" != "success" ] || \
-             [ "${{ needs.lint.result }}"        != "success" ] || \
-             [ "${{ needs.env-audit.result }}"   != "success" ] || \
-             [ "${{ needs.page-fit.result }}"    != "success" ]; then
+          if [ "${{ needs.test.result }}"         != "success" ] || \
+             [ "${{ needs.type-check.result }}"   != "success" ] || \
+             [ "${{ needs.secret-guard.result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}"          != "success" ] || \
+             [ "${{ needs.env-audit.result }}"     != "success" ] || \
+             [ "${{ needs.build.result }}"         != "success" ] || \
+             [ "${{ needs.page-fit.result }}"      != "success" ]; then
             echo "STATUS: FAILED — one or more CI jobs did not succeed"
             exit 1
           fi
