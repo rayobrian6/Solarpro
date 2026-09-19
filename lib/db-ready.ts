@@ -70,6 +70,35 @@ type SqlExecutor = NeonQueryFunction<false, false>;
 const MAX_RETRIES   = 5;
 const BASE_DELAY_MS = 50;  // 50ms, 100ms, 200ms, 400ms, 800ms
 
+/**
+ * 🚨 UNDER A TEST RUNNER, PROBE ONCE AND DO NOT BACK OFF.
+ *
+ * The retry budget above exists for ONE reason: to absorb a Neon cold start on
+ * a serverless instance, where waiting 750ms beats failing the request. Under
+ * vitest there is no sleeping database to wake — CI points DATABASE_URL at
+ * `postgresql://test:test@localhost:5432/test`, a stub with nothing listening,
+ * added so scripts/check-env.js passes without real secrets. Every probe
+ * therefore fails as a TRANSIENT error (connection refused, not misconfigured),
+ * takes the full 50+100+200+400 = 750ms backoff, and can never succeed.
+ *
+ * That cost the entire CI budget. The first pull request opened against master
+ * in 81 days logged 820 exhausted probe sequences — 4,099 failed attempts —
+ * for ~615s of pure sleeping, and the Unit Tests job hit its 10-minute
+ * timeout-minutes cap at 10m16s. GitHub reports a timed-out job as
+ * `cancelled`, so it never even read as a failure; the suite did not fail, it
+ * never FINISHED, and no one had seen it because CI had not run in 81 days.
+ *
+ * Failing fast changes nothing a test can observe: same error, same class,
+ * same call sites — only the sleeping is gone. Production behaviour is
+ * untouched, because this constant is only consulted under vitest.
+ *
+ * Tests that need a working DB mock `@/lib/db-ready` (most already do). A test
+ * that wants to exercise the backoff itself should drive `sleep`/`MAX_RETRIES`
+ * explicitly rather than rely on the ambient value.
+ */
+const IS_TEST_RUNNER = process.env.VITEST === 'true' || process.env.VITEST === '1';
+const EFFECTIVE_MAX_RETRIES = IS_TEST_RUNNER ? 1 : MAX_RETRIES;
+
 // ─── Module-level singleton ───────────────────────────────────────────────────
 //
 // v47.9: Cache the Neon executor and warm state at module level.
@@ -306,8 +335,8 @@ export async function getDbWithRetry(): Promise<SqlExecutor> {
 
   // Verify connectivity with a lightweight probe (with retry)
   let lastError: unknown;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const attemptLabel = `${attempt + 1}/${MAX_RETRIES}`;
+  for (let attempt = 0; attempt < EFFECTIVE_MAX_RETRIES; attempt++) {
+    const attemptLabel = `${attempt + 1}/${EFFECTIVE_MAX_RETRIES}`;
     console.log(`[DB_CONNECTION_ATTEMPT] SELECT 1 probe attempt ${attemptLabel}`);
     try {
       await sql`SELECT 1 AS db_ready`;
@@ -334,7 +363,7 @@ export async function getDbWithRetry(): Promise<SqlExecutor> {
         ` — retrying in ${delay}ms. Error: ${msg}`
       );
 
-      if (attempt < MAX_RETRIES - 1) {
+      if (attempt < EFFECTIVE_MAX_RETRIES - 1) {
         await sleep(delay);
       }
     }
@@ -342,7 +371,7 @@ export async function getDbWithRetry(): Promise<SqlExecutor> {
 
   // All retries exhausted — still transient, caller decides how to handle
   const msg = lastError instanceof Error ? lastError.message : String(lastError);
-  console.error(`[AUTH_DB_STARTING] All ${MAX_RETRIES} DB connection attempts failed. Last error: ${msg}`);
+  console.error(`[AUTH_DB_STARTING] All ${EFFECTIVE_MAX_RETRIES} DB connection attempts failed. Last error: ${msg}`);
   // Reset warm flag so next request will re-probe
   _instanceWarm = false;
   throw lastError;
