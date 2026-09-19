@@ -54,7 +54,7 @@ import { roofPlaneFromFootprint, roofPlaneFromFootprintAndRidge } from '@/lib/3d
 // v66: solid building — walls dropped from exterior roof edges to the ground.
 import { buildWalls, faceOrientation, deriveAzimuthsFromSharedEdges, findSharedRidge } from '@/lib/3d/buildingExtrusion';
 import { composeRoofTexture, clearRoofTextureCache } from '@/lib/3d/roofTexture';
-import { regularizeOutline, alignSharedRidge } from '@/lib/3d/regularizeOutline';
+import { regularizeOutline, joinSharedCorners } from '@/lib/3d/regularizeOutline';
 import { deriveAzimuthFromOutline } from '@/lib/aerial/nearmapToRoofPlane';
 import {
   placeFencePanels,
@@ -4344,20 +4344,22 @@ function SolarEngine3D({
       worstShift = Math.max(worstShift, res.report.maxShiftM);
     }
 
-    // 2. Make every pair of faces agree on the corners they share, so the halves
-    //    actually meet instead of nearly meeting.
-    const ids = Array.from(rings.keys());
-    let aligned = 0;
-    for (let i = 0; i < ids.length; i++) {
-      for (let j = i + 1; j < ids.length; j++) {
-        const out = alignSharedRidge(rings.get(ids[i])!, rings.get(ids[j])!);
-        if (out.alignedPairs > 0) {
-          rings.set(ids[i], out.a);
-          rings.set(ids[j], out.b);
-          aligned += out.alignedPairs;
-        }
-      }
-    }
+    // 2. Join the corners faces share, so the halves meet instead of nearly
+    //    meeting.
+    //
+    //    🚨 CLUSTERED, not pairwise. Pairwise averaging is right for two faces
+    //    and wrong for three: at a hip peak, doing A-B then A-C (moving A
+    //    again) then B-C leaves three corners chasing each other, and the
+    //    result depends on which pair was visited first. Clustering puts all N
+    //    corners in one group and moves them to its mean together.
+    //
+    //    This does NOT replace Stitch. Ray uses Stitch deliberately to pull
+    //    separate planes together into a peak — a modelling move, not a
+    //    correction — and it reaches 1.6 m with its own convergence passes.
+    //    Square Up only tidies what it just squared.
+    const joinRes = joinSharedCorners(rings);
+    for (const [id, ring] of joinRes.rings) rings.set(id, ring);
+    const aligned = joinRes.joined;
 
     // 3. Rebuild each face from its squared ring at the heights it already had.
     const updates: Array<{

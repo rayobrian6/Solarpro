@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { regularizeOutline, alignSharedRidge, dominantAxis, type LatLng } from '@/lib/3d/regularizeOutline';
+import { regularizeOutline, alignSharedRidge, joinSharedCorners, dominantAxis, type LatLng } from '@/lib/3d/regularizeOutline';
 
 const LAT = 38.8306;
 const LNG = -89.5343;
@@ -176,5 +176,83 @@ describe('alignSharedRidge', () => {
     const snapshot = JSON.stringify(south);
     alignSharedRidge(south, [at(0, -8), at(0, 8), at(6, 8), at(6, -8)]);
     expect(JSON.stringify(south)).toBe(snapshot);
+  });
+});
+
+describe('joinSharedCorners — clustered, not pairwise', () => {
+  const ring = (pts: Array<[number, number]>) => pts.map(([n, e]) => at(n, e));
+
+  it('lands THREE faces meeting at a peak on ONE point', () => {
+    // The case pairwise averaging cannot do. A-B then A-C (moving A again) then
+    // B-C leaves three corners chasing each other, order-dependently.
+    const peakish: Array<[string, Array<[number, number]>]> = [
+      ['a', [[-6, -6], [-6, 6], [0.15, 0.10]]],
+      ['b', [[-6, 6], [6, 6], [-0.12, -0.08]]],
+      ['c', [[6, 6], [6, -6], [0.05, -0.14]]],
+    ];
+    const input = new Map(peakish.map(([id, p]) => [id, ring(p)]));
+    const { rings, joined } = joinSharedCorners(input);
+    expect(joined).toBeGreaterThan(0);
+
+    const peaks = ['a', 'b', 'c'].map(id => rings.get(id)![2]);
+    // All three apex corners must now be the SAME point.
+    expect(distM(peaks[0], peaks[1])).toBeLessThan(1e-6);
+    expect(distM(peaks[1], peaks[2])).toBeLessThan(1e-6);
+  });
+
+  it('is order-independent', () => {
+    const mk = (order: string[]) => {
+      const m = new Map<string, LatLng[]>();
+      const src: Record<string, Array<[number, number]>> = {
+        a: [[-6, -6], [-6, 6], [0.15, 0.10]],
+        b: [[-6, 6], [6, 6], [-0.12, -0.08]],
+        c: [[6, 6], [6, -6], [0.05, -0.14]],
+      };
+      for (const id of order) m.set(id, ring(src[id]));
+      return joinSharedCorners(m).rings;
+    };
+    const fwd = mk(['a', 'b', 'c']).get('a')![2];
+    const rev = mk(['c', 'b', 'a']).get('a')![2];
+    expect(distM(fwd, rev)).toBeLessThan(1e-6);
+  });
+
+  it('never collapses two corners of the SAME face together', () => {
+    // That would delete a real edge. Merging duplicates within one face is the
+    // regularizer's job, with its own much tighter tolerance.
+    const skinny = new Map<string, LatLng[]>([
+      ['a', ring([[0, 0], [0, 1.0], [5, 1.0], [5, 0]])],
+      ['b', ring([[5, 0], [5, 1.0], [9, 1.0], [9, 0]])],
+    ]);
+    const { rings } = joinSharedCorners(skinny);
+    const a = rings.get('a')!;
+    // The 1.0 m wide end of face A must still be 1.0 m wide.
+    expect(distM(a[0], a[1])).toBeGreaterThan(0.9);
+  });
+
+  it('leaves far-apart corners exactly where they were', () => {
+    const far = new Map<string, LatLng[]>([
+      ['a', ring([[-6, -6], [-6, 6], [0, 6], [0, -6]])],
+      ['b', ring([[20, -6], [20, 6], [26, 6], [26, -6]])],
+    ]);
+    const before = JSON.stringify([...far.values()]);
+    const { rings, joined } = joinSharedCorners(far);
+    expect(joined).toBe(0);
+    expect(JSON.stringify([...rings.values()])).toBe(before);
+  });
+
+  it('does not mutate its input', () => {
+    const input = new Map<string, LatLng[]>([
+      ['a', ring([[-6, -6], [-6, 6], [0.1, 6]])],
+      ['b', ring([[-0.1, 6], [6, 6], [6, -6]])],
+    ]);
+    const snapshot = JSON.stringify([...input.values()]);
+    joinSharedCorners(input);
+    expect(JSON.stringify([...input.values()])).toBe(snapshot);
+  });
+
+  it('handles a single face and an empty map without throwing', () => {
+    expect(joinSharedCorners(new Map()).joined).toBe(0);
+    const one = new Map<string, LatLng[]>([['a', ring([[0, 0], [0, 5], [5, 5]])]]);
+    expect(joinSharedCorners(one).joined).toBe(0);
   });
 });

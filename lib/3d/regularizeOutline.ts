@@ -277,6 +277,87 @@ export function regularizeOutline(
  * what closes the roof; the shared-ridge construction then handles unequal
  * depths honestly by giving each half the pitch its own depth implies.
  */
+/**
+ * Join the corners that several faces share, ACROSS ALL FACES AT ONCE.
+ *
+ * 🚨 WHY NOT JUST CALL alignSharedRidge ON EVERY PAIR
+ * ---------------------------------------------------
+ * Pairwise averaging is correct for two faces and wrong for three. At a hip
+ * peak where three faces meet, doing A↔B, then A↔C (which moves A again), then
+ * B↔C leaves three corners chasing each other, and the result depends on the
+ * order the pairs happened to be visited. It may never resolve to one point,
+ * which is exactly the case a hip roof is made of.
+ *
+ * Clustering fixes that: every corner within tolerance of a cluster joins it,
+ * the cluster's mean is the answer, and all its members move there together —
+ * so N faces meeting at a peak land on ONE point regardless of ordering. This
+ * is the same approach Stitch already uses, and adopting it here means Square
+ * Up no longer needs to be followed by Stitch to get a hip right.
+ *
+ * Iterates until nothing moves (bounded), because collapsing one cluster can
+ * bring two others within reach of each other.
+ *
+ * Returns NEW rings; no input is mutated.
+ */
+export function joinSharedCorners(
+  rings: ReadonlyMap<string, readonly LatLng[]>,
+  tolM = 1.5,
+  maxPasses = 4,
+): { rings: Map<string, LatLng[]>; joined: number } {
+  const out = new Map<string, LatLng[]>();
+  for (const [id, r] of rings) out.set(id, r.map(v => ({ ...v })));
+  if (out.size < 2) return { rings: out, joined: 0 };
+
+  const all: LatLng[] = [];
+  for (const r of out.values()) all.push(...r);
+  if (all.length === 0) return { rings: out, joined: 0 };
+  const f = makeFrame(all);
+
+  let joined = 0;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    type Member = { id: string; idx: number };
+    type Cluster = { members: Member[]; sx: number; sy: number };
+    const clusters: Cluster[] = [];
+
+    for (const [id, ring] of out) {
+      for (let idx = 0; idx < ring.length; idx++) {
+        const p = toXY(ring[idx], f);
+        let target: Cluster | null = null;
+        for (const cl of clusters) {
+          const n = cl.members.length;
+          const dx = p.x - cl.sx / n, dy = p.y - cl.sy / n;
+          // One corner per FACE per cluster: a face must never have two of its
+          // own corners collapsed together here — that is the job of the
+          // duplicate-merge step, and doing it here would delete real edges.
+          if (dx * dx + dy * dy < tolM * tolM && !cl.members.some(m => m.id === id)) {
+            target = cl; break;
+          }
+        }
+        if (target) { target.members.push({ id, idx }); target.sx += p.x; target.sy += p.y; }
+        else clusters.push({ members: [{ id, idx }], sx: p.x, sy: p.y });
+      }
+    }
+
+    let movedThisPass = 0;
+    for (const cl of clusters) {
+      const n = cl.members.length;
+      if (n < 2) continue;
+      const mx = cl.sx / n, my = cl.sy / n;
+      const mid = toLL({ x: mx, y: my }, f);
+      for (const m of cl.members) {
+        const ring = out.get(m.id)!;
+        const cur = toXY(ring[m.idx], f);
+        if (Math.hypot(cur.x - mx, cur.y - my) > 1e-4) movedThisPass++;
+        ring[m.idx] = { ...mid };
+      }
+      if (pass === 0) joined += n;
+    }
+    if (movedThisPass === 0) break;
+  }
+
+  return { rings: out, joined };
+}
+
 export function alignSharedRidge(
   ringA: readonly LatLng[],
   ringB: readonly LatLng[],
