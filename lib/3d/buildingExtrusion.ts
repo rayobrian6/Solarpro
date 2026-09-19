@@ -93,6 +93,28 @@ function sameEdge(a0: Cart3, a1: Cart3, b0: Cart3, b1: Cart3, tolM: number): boo
   return forward || reverse;
 }
 
+/**
+ * Ground distance between two ECEF points, ignoring height.
+ *
+ * Used for matching a shared ridge while the faces either side of it may still
+ * be at different (wrong) heights — see deriveAzimuthsFromSharedEdges.
+ */
+function horizontalDist(a: Cart3, b: Cart3): number {
+  const ga = ecefToLatLng(a), gb = ecefToLatLng(b);
+  const mLat = 111320;
+  const mLng = mLat * Math.cos(((ga.lat + gb.lat) / 2) * Math.PI / 180);
+  const dN = (ga.lat - gb.lat) * mLat;
+  const dE = (ga.lng - gb.lng) * mLng;
+  return Math.hypot(dN, dE);
+}
+
+/** Direction-agnostic edge match in PLAN VIEW. */
+function sameEdgeHorizontal(a0: Cart3, a1: Cart3, b0: Cart3, b1: Cart3, tolM: number): boolean {
+  const forward = horizontalDist(a0, b0) <= tolM && horizontalDist(a1, b1) <= tolM;
+  const reverse = horizontalDist(a0, b1) <= tolM && horizontalDist(a1, b0) <= tolM;
+  return forward || reverse;
+}
+
 /** Project an ECEF point straight down to `groundElevM` above the ellipsoid. */
 function dropToGround(p: Cart3, groundElevM: number): Cart3 {
   const g = ecefToLatLng(p);
@@ -163,6 +185,133 @@ export function buildWalls(
   }
 
   return walls;
+}
+
+/**
+ * Derive each face's DOWNSLOPE AZIMUTH from the ridge it shares with a neighbour.
+ *
+ * 🚨 WHY NOT deriveAzimuthFromOutline PER FACE
+ * --------------------------------------------
+ * That helper takes a face's own longest edge as the ridge, goes perpendicular,
+ * and picks the equator-facing side. Run independently on the two halves of a
+ * gable — two wide rectangles either side of a shared ridge — it returns SOUTH
+ * for BOTH. The roof comes out as two faces sloping the same way instead of a
+ * gable, which is exactly what Ray saw: "they are recognizing the same plane."
+ *
+ * The information needed was never in a single face. It is in the RELATIONSHIP:
+ * two faces that share an edge slope AWAY from each other across it. So the
+ * downslope direction is the horizontal vector from the shared edge toward the
+ * face's own centroid, perpendicular to that edge. No guessing, no hemisphere
+ * heuristic, and it generalises: a hip face has a ridge and two hip edges, and
+ * the perpendicular-from-ridge still points down the slope correctly.
+ *
+ * A face with no shared edge (a lone shed roof, the first face of a trace) has
+ * no ridge to reason from, so it falls back to the caller's estimate.
+ *
+ * @param faces    Roof faces with their plan-view outlines.
+ * @param fallback Azimuth to use for a face that shares no edge, per face id.
+ */
+export function deriveAzimuthsFromSharedEdges(
+  faces: readonly ExtrusionFace[],
+  fallback: (faceId: string) => number,
+  options: BuildWallsOptions = {},
+): Map<string, number> {
+  const tolM = options.sharedEdgeToleranceM ?? DEFAULT_TOLERANCE_M;
+  const out = new Map<string, number>();
+  if (!faces || faces.length === 0) return out;
+
+  // Collect every edge with its owning face.
+  type Edge = { faceId: string; a: Cart3; b: Cart3 };
+  const edges: Edge[] = [];
+  for (const f of faces) {
+    const poly = f?.polygon3D;
+    if (!poly || poly.length < 3) continue;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      if (!a || !b) continue;
+      if (![a.x, a.y, a.z, b.x, b.y, b.z].every(isFinite)) continue;
+      edges.push({ faceId: f.id, a, b });
+    }
+  }
+
+  for (const f of faces) {
+    const poly = f?.polygon3D;
+    if (!poly || poly.length < 3) { out.set(f.id, fallback(f.id)); continue; }
+
+    // Centroid of this face.
+    let cx = 0, cy = 0, cz = 0;
+    for (const p of poly) { cx += p.x; cy += p.y; cz += p.z; }
+    cx /= poly.length; cy /= poly.length; cz /= poly.length;
+
+    // Water runs toward the EAVE, and the eave is the face's longest UNSHARED
+    // edge. Shared edges are interior — ridges, hips, valleys — so whatever is
+    // left on the outside and longest is what the slope runs down to.
+    //
+    // 🚨 Stated as "toward the eave", NOT "away from the ridge". They are the
+    // same thing on a gable half, which has one shared edge, and the ridge form
+    // is the obvious one to reach for. It is WRONG on a hip: a pyramid hip face
+    // shares TWO edges (its hip rafters), so "away from the longest shared edge"
+    // picks a rafter and points the slope sideways along the roof. The eave
+    // formulation is the dual and handles gable, hip, dormer and shed alike.
+    //
+    // 🚨 MATCHED IN PLAN VIEW, NOT IN 3D. The whole point of this function is to
+    // fix faces whose pitch is currently WRONG — and while it is wrong, the two
+    // halves carry their shared ridge at different heights (metres apart on a
+    // 30° roof). A 3D comparison would find no shared edge at exactly the moment
+    // we need one, fall back, and leave both halves sloping the same way. Edges
+    // are shared on the ground whatever heights the faces happen to have.
+    let eave: { a: Cart3; b: Cart3; len: number } | null = null;
+    for (const e of edges) {
+      if (e.faceId !== f.id) continue;
+      let shared = false;
+      for (const o of edges) {
+        if (o.faceId === f.id) continue;
+        if (sameEdgeHorizontal(e.a, e.b, o.a, o.b, tolM)) { shared = true; break; }
+      }
+      if (shared) continue;
+      const len = horizontalDist(e.a, e.b);
+      if (!eave || len > eave.len) eave = { a: e.a, b: e.b, len };
+    }
+
+    // A face with NO shared edge has nothing to reason from — its longest edge
+    // is as likely to be a rake as an eave — so defer to the caller's estimate.
+    const hasShared = edges.some(e => e.faceId === f.id && edges.some(o =>
+      o.faceId !== f.id && sameEdgeHorizontal(e.a, e.b, o.a, o.b, tolM)));
+    if (!eave || !hasShared) { out.set(f.id, fallback(f.id)); continue; }
+
+    // Local ENU at the eave midpoint.
+    const mid = { x: (eave.a.x + eave.b.x) / 2, y: (eave.a.y + eave.b.y) / 2, z: (eave.a.z + eave.b.z) / 2 };
+    const geo = ecefToLatLng(mid);
+    const latR = geo.lat * Math.PI / 180, lngR = geo.lng * Math.PI / 180;
+    const sinLat = Math.sin(latR), cosLat = Math.cos(latR);
+    const sinLng = Math.sin(lngR), cosLng = Math.cos(lngR);
+    const east  = { x: -sinLng,          y: cosLng,           z: 0      };
+    const north = { x: -sinLat * cosLng, y: -sinLat * sinLng, z: cosLat };
+
+    const toEnu = (v: Cart3) => ({
+      e: v.x * east.x + v.y * east.y + v.z * east.z,
+      n: v.x * north.x + v.y * north.y + v.z * north.z,
+    });
+
+    // Eave direction, horizontal.
+    const r = toEnu({ x: eave.b.x - eave.a.x, y: eave.b.y - eave.a.y, z: eave.b.z - eave.a.z });
+    const rMag = Math.hypot(r.e, r.n);
+    if (!(rMag > 1e-9)) { out.set(f.id, fallback(f.id)); continue; }
+    const re = r.e / rMag, rn = r.n / rMag;
+
+    // Face centroid -> eave midpoint, with the along-eave component removed.
+    // That perpendicular remainder is the downslope direction.
+    const c = toEnu({ x: mid.x - cx, y: mid.y - cy, z: mid.z - cz });
+    const along = c.e * re + c.n * rn;
+    const de = c.e - along * re;
+    const dn = c.n - along * rn;
+    const dMag = Math.hypot(de, dn);
+    if (!(dMag > 1e-6)) { out.set(f.id, fallback(f.id)); continue; }
+
+    out.set(f.id, ((Math.atan2(de / dMag, dn / dMag) * 180 / Math.PI) % 360 + 360) % 360);
+  }
+
+  return out;
 }
 
 /**

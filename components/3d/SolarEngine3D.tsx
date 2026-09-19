@@ -52,7 +52,7 @@ import {
 // outline plus pitch + azimuth, for addresses with no Photorealistic 3D Tiles.
 import { roofPlaneFromFootprint } from '@/lib/3d/footprintToRoofPlane';
 // v66: solid building — walls dropped from exterior roof edges to the ground.
-import { buildWalls, faceOrientation } from '@/lib/3d/buildingExtrusion';
+import { buildWalls, faceOrientation, deriveAzimuthsFromSharedEdges } from '@/lib/3d/buildingExtrusion';
 import { composeRoofTexture, clearRoofTextureCache } from '@/lib/3d/roofTexture';
 import { deriveAzimuthFromOutline } from '@/lib/aerial/nearmapToRoofPlane';
 import {
@@ -4283,25 +4283,50 @@ function SolarEngine3D({
     // controls cannot corrupt a design.
     const wallH = wallHeightRef.current;
     const pitchDeg = buildingPitchRef.current;
-    const faces = renderables.map((rp: any) => {
-      const raw = rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[];
-      const outline = raw.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
+
+    const raw = renderables.map((rp: any) => ({
+      id: rp.id as string,
+      polygon3D: rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[],
+    }));
+
+    // ── WHICH WAY DOES EACH FACE SLOPE ───────────────────────────────────────
+    // 🚨 Derived from the edges faces SHARE, not from each face alone.
+    //
+    // deriveAzimuthFromOutline takes a face's longest edge as the ridge and
+    // picks the equator-facing side. Run per face on the two halves of a gable
+    // — two wide rectangles either side of a shared ridge — it answers SOUTH for
+    // BOTH, and the roof comes out as two faces sloping the same way. That was
+    // Ray's "they are recognizing the same plane".
+    //
+    // The answer was never inside one face. Water runs toward the EAVE, and the
+    // eave is the longest edge a face does NOT share with a neighbour. That is
+    // automatic, needs no hemisphere heuristic, and handles gable, hip, dormer
+    // and shed with the same rule. A face sharing nothing (a lone shed) keeps
+    // the old per-outline estimate, which is the best available for it.
+    const azimuths = deriveAzimuthsFromSharedEdges(raw, (id) => {
+      const f = raw.find(r => r.id === id);
+      if (!f) return 180;
+      const ring = f.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
+      return deriveAzimuthFromOutline(ring, ring.reduce((s, v) => s + v.lat, 0) / ring.length);
+    });
+
+    const faces = raw.map(rf => {
+      const outline = rf.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
       // Ground under this face: its own lowest corner, less the current wall
       // height. Derived per face so a building on a slope still sits down.
       let lowest = Infinity;
-      for (const p of raw) { const h = ecefToLatLng(p).height; if (h < lowest) lowest = h; }
+      for (const p of rf.polygon3D) { const h = ecefToLatLng(p).height; if (h < lowest) lowest = h; }
       const shaped = isFinite(lowest)
         ? roofPlaneFromFootprint(outline, {
             pitchDeg,
-            azimuthDeg: deriveAzimuthFromOutline(
-              outline, outline.reduce((s, v) => s + v.lat, 0) / outline.length),
+            azimuthDeg: azimuths.get(rf.id) ?? 180,
             eaveHeightM: wallH,
             groundElevM: lowest - wallH,
           })
         : null;
       return {
-        id: rp.id as string,
-        polygon3D: (shaped?.plane.polygon3D ?? raw) as Cart3[],
+        id: rf.id,
+        polygon3D: (shaped?.plane.polygon3D ?? rf.polygon3D) as Cart3[],
       };
     });
 
