@@ -42,10 +42,22 @@ export function renderMesh(
     return () => { /* nothing to clean up */ };
   }
 
-  // Pre-compute lat/lng for each vertex in flat arrays.
+  // Project every vertex from the local ENU frame to ECEF metres.
+  //
+  // WAS: the raw `lng`, `lat`, `z` triple was written straight into what
+  // becomes Cesium's `position` attribute. That attribute is ECEF (a
+  // `Cartesian3`, metres from the centre of the Earth) — degrees are ~1e2
+  // where ECEF is ~6.4e6, so every vertex landed a couple of hundred metres
+  // from the Earth's CORE and the mesh was nowhere near the site at any zoom.
+  // The dataset's own doc comment (types.ts) already spells out the correct
+  // conversion, and `pointCloudRenderer` does it for the point style; the mesh
+  // path simply never made the call. NOW: `Cartesian3.fromDegrees` per vertex,
+  // through one scratch Cartesian3 so the 256×256 worst case (65,536 vertices)
+  // does not allocate 65,536 throwaway objects.
   const W = mesh.width;
   const H = mesh.height;
   const positions = new Float64Array(W * H * 3);
+  const scratchEcef = new C.Cartesian3();
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const vi = (y * W + x) * 3;
@@ -54,76 +66,73 @@ export function renderMesh(
       const z      = mesh.vertices[vi + 2];
       const lat = centroidLat + yLocal / METERS_PER_DEG_LAT;
       const lng = centroidLng + xLocal / metersPerDegLng;
-      positions[(y * W + x) * 3 + 0] = lng;
-      positions[(y * W + x) * 3 + 1] = lat;
-      positions[(y * W + x) * 3 + 2] = z;
+      const ecef = C.Cartesian3.fromDegrees(lng, lat, z, undefined, scratchEcef);
+      positions[vi + 0] = ecef.x;
+      positions[vi + 1] = ecef.y;
+      positions[vi + 2] = ecef.z;
     }
   }
 
-  // Build one GeometryInstance per quad with the quad's mean color.
-  const instances: any[] = [];
-  for (let y = 0; y < H - 1; y++) {
-    for (let x = 0; x < W - 1; x++) {
-      const i00 = (y + 0) * W + (x + 0);
-      const i10 = (y + 0) * W + (x + 1);
-      const i01 = (y + 1) * W + (x + 0);
-      const i11 = (y + 1) * W + (x + 1);
+  // Build ONE indexed Geometry for the whole grid.
+  //
+  // WAS: one `GeometryInstance` per quad — up to (256-1)² = 65,025 of them,
+  // each with its own 18-double vertex array and its own quad-mean colour —
+  // handed to a `Primitive` with `asynchronous: false`. That flag forces the
+  // instance combine, vertex-array build and shader compile to happen inside a
+  // single frame on the main thread; at 65k instances the tab simply stops
+  // responding for many seconds. NOW: `meshBuilder` already emits a shared
+  // vertex grid plus a triangle index buffer, which is exactly the shape
+  // Cesium wants, so the mesh renders as a single indexed Geometry — one
+  // instance, one draw call, nothing to combine, and 6 *shared* vertices per
+  // quad instead of 6 duplicated ones. `asynchronous: true` keeps even that
+  // one compile off the main thread. Per-quad flat colour becomes per-vertex
+  // colour, which is what `mesh.colors` was computed for to begin with.
+  //
+  // A grid that is one cell wide or tall has no quads, so `meshBuilder` emits
+  // an empty index buffer; adding a primitive with no triangles is pointless.
+  if (mesh.indices.length === 0) return () => {};
 
-      const verts = new Float64Array(18);
-      // tri 1: i00, i10, i11
-      verts[0]  = positions[i00 * 3 + 0]; verts[1]  = positions[i00 * 3 + 1]; verts[2]  = positions[i00 * 3 + 2];
-      verts[3]  = positions[i10 * 3 + 0]; verts[4]  = positions[i10 * 3 + 1]; verts[5]  = positions[i10 * 3 + 2];
-      verts[6]  = positions[i11 * 3 + 0]; verts[7]  = positions[i11 * 3 + 1]; verts[8]  = positions[i11 * 3 + 2];
-      // tri 2: i00, i11, i01
-      verts[9]  = positions[i00 * 3 + 0]; verts[10] = positions[i00 * 3 + 1]; verts[11] = positions[i00 * 3 + 2];
-      verts[12] = positions[i11 * 3 + 0]; verts[13] = positions[i11 * 3 + 1]; verts[14] = positions[i11 * 3 + 2];
-      verts[15] = positions[i01 * 3 + 0]; verts[16] = positions[i01 * 3 + 1]; verts[17] = positions[i01 * 3 + 2];
-
-      const c00 = (i: number) => [mesh.colors[i * 4], mesh.colors[i * 4 + 1], mesh.colors[i * 4 + 2], mesh.colors[i * 4 + 3]];
-      const cA = c00(i00), cB = c00(i10), cC = c00(i11), cD = c00(i01);
-      const r = (cA[0] + cB[0] + cC[0] + cD[0]) / 4;
-      const g = (cA[1] + cB[1] + cC[1] + cD[1]) / 4;
-      const b = (cA[2] + cB[2] + cC[2] + cD[2]) / 4;
-      const a = (cA[3] + cB[3] + cC[3] + cD[3]) / 4;
-
-      const geometry = new C.Geometry({
-        attributes: {
-          position: new C.GeometryAttribute({
-            componentDatatype: C.ComponentDatatype.DOUBLE,
-            componentsPerAttribute: 3,
-            values: verts,
-          }),
-        },
-        indices: new C.GeometryAttribute({
-          componentDatatype: C.ComponentDatatype.UNSIGNED_SHORT,
-          componentsPerAttribute: 1,
-          values: new Uint16Array([0, 1, 2, 3, 4, 5]),
-        }),
-        primitiveType: C.PrimitiveType.TRIANGLES,
-        boundingSphere: undefined,
-      });
-
-      const instance = new C.GeometryInstance({
-        geometry,
-        attributes: {
-          color: C.ColorGeometryInstanceAttribute.fromColor(
-            new C.Color(Math.min(1, r), Math.min(1, g), Math.min(1, b), Math.min(1, a)),
-          ),
-        },
-      });
-      instances.push(instance);
-    }
-  }
-
-  if (instances.length === 0) return () => {};
+  const geometry = new C.Geometry({
+    attributes: {
+      position: new C.GeometryAttribute({
+        componentDatatype: C.ComponentDatatype.DOUBLE,
+        componentsPerAttribute: 3,
+        values: positions,
+      }),
+      // `PerInstanceColorAppearance`'s flat vertex shader declares
+      // `in vec4 color`. Cesium only rewrites that declaration into a
+      // batch-table fetch when the *instance* carries a colour attribute;
+      // with none (below), this per-vertex attribute binds to it directly.
+      color: new C.GeometryAttribute({
+        componentDatatype: C.ComponentDatatype.FLOAT,
+        componentsPerAttribute: 4,
+        values: mesh.colors,
+      }),
+    },
+    // WAS: a `GeometryAttribute` wrapper object. Cesium's `Geometry` contract
+    // is a plain `Uint16Array|Uint32Array` here; the constructor stores
+    // whatever it is given without complaint, and the geometry pipeline then
+    // reads `indices.length` off the wrapper (undefined) — so no triangle
+    // ever reached the GPU. `mesh.indices` is already the Uint32Array Cesium
+    // asks for.
+    indices: mesh.indices,
+    primitiveType: C.PrimitiveType.TRIANGLES,
+    // WAS: `undefined`, which leaves the primitive with no volume to cull or
+    // to zoom-to. Derive it from the ECEF positions built above — the only
+    // values that describe where this mesh actually sits.
+    boundingSphere: C.BoundingSphere.fromVertices(positions),
+  });
 
   const primitive = new C.Primitive({
-    geometryInstances: instances,
+    geometryInstances: new C.GeometryInstance({ geometry }),
     appearance: new C.PerInstanceColorAppearance({
+      // `flat` matters: the lit variant of this appearance reads a `normal`
+      // vertex attribute that this mesh has never carried.
+      flat: true,
       closed: false,
       translucent: true,
     }),
-    asynchronous: false,
+    asynchronous: true,
     shadows: C.ShadowMode.DISABLED,
     releaseGeometryInstances: true,
   });

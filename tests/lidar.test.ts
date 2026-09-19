@@ -112,6 +112,70 @@ function buildLAS12(numPoints: number, format: 0 | 1 | 2 | 3 = 0): Uint8Array {
   return out;
 }
 
+/**
+ * A general LAS builder: any version (1.2 / 1.4), any point data format, and
+ * an arbitrary number of EXTRA bytes per point record. Real-world LAS files
+ * routinely carry extra bytes (per-record "Extra Bytes" payloads declared by
+ * an EVLR), so the header's Point Data Record Length — not the format's
+ * standard size — is the record stride.
+ */
+function buildLAS(opts: {
+  numPoints: number;
+  format: 0 | 1 | 2 | 3;
+  /** LAS minor version. 2 → 227-byte header, 4 → 375-byte header. */
+  version?: 2 | 4;
+  /** Extra bytes appended to each point record (stride = standard + extra). */
+  extraBytes?: number;
+  /** Override the Point Data Record Length written into the header (uint16 @105). */
+  declaredRecordLength?: number;
+  /** LAS 1.4 only: the LEGACY uint32 count at offset 107. Defaults to 0, which
+   *  is what real 1.4 writers emit when the 64-bit field is authoritative. */
+  legacyCount?: number;
+  /** LAS 1.4 only: the uint64 Number of Point Records at offset 247. */
+  count14?: number;
+}): Uint8Array {
+  const std = opts.format === 0 ? 20 : opts.format === 1 ? 28 : opts.format === 2 ? 26 : 34;
+  const stride = std + (opts.extraBytes ?? 0);
+  const version = opts.version ?? 2;
+  const headerLen = version === 4 ? 375 : 227;
+  const declaredLen = opts.declaredRecordLength ?? stride;
+
+  const buf = new ArrayBuffer(headerLen + opts.numPoints * stride);
+  const view = new DataView(buf);
+  view.setUint8(0, 0x4c); view.setUint8(1, 0x41); view.setUint8(2, 0x53); view.setUint8(3, 0x46);
+  view.setUint8(24, 1);
+  view.setUint8(25, version);
+  view.setUint16(94, headerLen, true);
+  view.setUint32(96, headerLen, true);
+  view.setUint8(104, opts.format);
+  view.setUint16(105, declaredLen, true);
+  view.setUint32(107, version === 4 ? (opts.legacyCount ?? 0) : opts.numPoints, true);
+  view.setFloat64(131, 0.01, true);
+  view.setFloat64(139, 0.01, true);
+  view.setFloat64(147, 0.01, true);
+  view.setFloat64(155, 0, true);
+  view.setFloat64(163, 0, true);
+  view.setFloat64(171, 0, true);
+  view.setFloat64(179,  1e7, true); view.setFloat64(187, -1e7, true);
+  view.setFloat64(195,  1e7, true); view.setFloat64(203, -1e7, true);
+  view.setFloat64(211,  1e6, true); view.setFloat64(219, -1e6, true);
+  if (version === 4) {
+    // 227 start of waveform, 235 start of first EVLR, 243 number of EVLRs,
+    // 247 Number of Point Records (uint64), 255 points-by-return (15 × uint64).
+    view.setBigUint64(247, BigInt(opts.count14 ?? opts.numPoints), true);
+  }
+
+  const out = new Uint8Array(buf);
+  for (let i = 0; i < opts.numPoints; i++) {
+    appendPoint(out, opts.format, headerLen + i * stride, i * 10, i * 5, i * 2);
+  }
+  return out;
+}
+
+function errorOf(r: ReturnType<typeof parseLAS>): string {
+  return r.ok === 'error' ? (r as { ok: 'error'; error: string }).error : `(no error — parse succeeded)`;
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────
 
 describe('lib/3d/lidar — types', () => {
@@ -298,6 +362,130 @@ describe('lib/3d/lidar/lasParser', () => {
     const r = parseLAS(truncated);
     expect(r.ok).toBe('success');
     if (r.ok === 'success') expect(r.dataset.count).toBe(50);
+  });
+});
+
+describe('lib/3d/lidar/lasParser — LAS 1.4 point count (defect A)', () => {
+  // Every real LAS 1.4 file was being rejected: the parser read the LEGACY
+  // uint32 at 107 as the HIGH word of a 64-bit count and the points-by-return
+  // array at 111 as the LOW word. The 64-bit count actually lives at offset
+  // 247 of the 375-byte 1.4 header.
+  it('uses the 64-bit count at offset 247 when the legacy count is 0', () => {
+    const r = parseLAS(buildLAS({ numPoints: 6, format: 0, version: 4, legacyCount: 0 }));
+    expect(errorOf(r)).toBe('(no error — parse succeeded)');
+    if (r.ok === 'success') {
+      expect(r.dataset.count).toBe(6);
+      expect(r.dataset.bounds.maxX).toBeCloseTo(0.5, 6);   // X = 5*10 * 0.01
+      expect(r.dataset.bounds.maxY).toBeCloseTo(0.25, 6);  // Y = 5*5  * 0.01
+    }
+  });
+
+  it('accepts a 1.4 file whose legacy count is populated (no false overflow)', () => {
+    // Writers that emit ≤ 2^32-1 points populate BOTH fields. The old code
+    // treated the legacy value as a high word and reported "overflow".
+    const r = parseLAS(buildLAS({ numPoints: 4, format: 0, version: 4, legacyCount: 4, count14: 4 }));
+    expect(errorOf(r)).toBe('(no error — parse succeeded)');
+    if (r.ok === 'success') expect(r.dataset.count).toBe(4);
+  });
+
+  it('decodes RGB from a LAS 1.4 format-3 file (header offsets + RGB offsets together)', () => {
+    const r = parseLAS(buildLAS({ numPoints: 3, format: 3, version: 4 }));
+    expect(errorOf(r)).toBe('(no error — parse succeeded)');
+    if (r.ok === 'success') {
+      expect(r.dataset.count).toBe(3);
+      expect(r.dataset.points[0].r).toBe(100);
+      expect(r.dataset.points[0].g).toBe(200);
+      expect(r.dataset.points[0].b).toBe(50);
+    }
+  });
+
+  it('clamps an absurd declared count to what the buffer actually holds', () => {
+    // Untrusted input: a header claiming 2^40 records must not drive an
+    // allocation — only 2 records are present.
+    const bytes = buildLAS({ numPoints: 2, format: 0, version: 4, count14: 2 ** 40 });
+    const r = parseLAS(bytes);
+    expect(errorOf(r)).toBe('(no error — parse succeeded)');
+    if (r.ok === 'success') expect(r.dataset.count).toBe(2);
+  });
+
+  it('rejects a 1.4 file whose header is too short to hold the 64-bit count', () => {
+    const bytes = buildLAS({ numPoints: 2, format: 0, version: 4 });
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    dv.setUint16(94, 227, true);   // claim a 1.2-sized header on a 1.4 file
+    const r = parseLAS(bytes);
+    expect(r.ok).toBe('error');
+    expect(errorOf(r)).toMatch(/1\.4 header/i);
+  });
+});
+
+describe('lib/3d/lidar/lasParser — record length is the stride (defect B)', () => {
+  it('honours a Point Data Record Length with extra bytes per record', () => {
+    // 8 extra bytes per record: the parser must step 28 bytes, not 20.
+    const r = parseLAS(buildLAS({ numPoints: 4, format: 0, extraBytes: 8 }));
+    expect(errorOf(r)).toBe('(no error — parse succeeded)');
+    if (r.ok === 'success') {
+      expect(r.dataset.count).toBe(4);
+      expect(r.dataset.points[1].x).toBeCloseTo(0.1, 6);   // 10 * 0.01
+      expect(r.dataset.points[3].x).toBeCloseTo(0.3, 6);   // 30 * 0.01
+      expect(r.dataset.points[3].z).toBeCloseTo(0.06, 6);  // 6 * 0.01
+    }
+  });
+
+  it('honours extra bytes on a format-3 record (RGB stays put)', () => {
+    const r = parseLAS(buildLAS({ numPoints: 3, format: 3, extraBytes: 6 }));
+    expect(errorOf(r)).toBe('(no error — parse succeeded)');
+    if (r.ok === 'success') {
+      expect(r.dataset.count).toBe(3);
+      expect(r.dataset.points[2].x).toBeCloseTo(0.2, 6);
+      expect(r.dataset.points[2].r).toBe(100);
+    }
+  });
+
+  it('rejects a record length shorter than the point format requires', () => {
+    const r = parseLAS(buildLAS({ numPoints: 2, format: 3, declaredRecordLength: 20 }));
+    expect(r.ok).toBe('error');
+    expect(errorOf(r)).toMatch(/record length/i);
+  });
+
+  it('rejects a zero record length instead of dividing by it', () => {
+    const r = parseLAS(buildLAS({ numPoints: 2, format: 0, declaredRecordLength: 0 }));
+    expect(r.ok).toBe('error');
+    expect(errorOf(r)).toMatch(/record length/i);
+  });
+});
+
+describe('lib/3d/lidar/lasParser — RGB offsets per format (defect C)', () => {
+  it('format 2 reads RGB immediately after the 20-byte core', () => {
+    const r = parseLAS(buildLAS({ numPoints: 2, format: 2 }));
+    expect(errorOf(r)).toBe('(no error — parse succeeded)');
+    if (r.ok === 'success') {
+      expect(r.dataset.points[0].r).toBe(100);
+      expect(r.dataset.points[0].g).toBe(200);
+      expect(r.dataset.points[0].b).toBe(50);
+    }
+  });
+
+  it('format 3 reads RGB AFTER the GPS time, not out of it', () => {
+    // Format 3 = core(20) + GPS time float64(8) + R/G/B uint16. Reading at
+    // +20/+22/+24 decodes the mantissa of the GPS time as colour.
+    const r = parseLAS(buildLAS({ numPoints: 2, format: 3 }));
+    expect(errorOf(r)).toBe('(no error — parse succeeded)');
+    if (r.ok === 'success') {
+      expect(r.dataset.points[0].r).toBe(100);
+      expect(r.dataset.points[0].g).toBe(200);
+      expect(r.dataset.points[0].b).toBe(50);
+    }
+  });
+
+  it('formats 0 and 1 carry no RGB', () => {
+    for (const format of [0, 1] as const) {
+      const r = parseLAS(buildLAS({ numPoints: 2, format }));
+      expect(errorOf(r)).toBe('(no error — parse succeeded)');
+      if (r.ok === 'success') {
+        expect(r.dataset.points[0].r).toBeUndefined();
+        expect(r.dataset.points[0].b).toBeUndefined();
+      }
+    }
   });
 });
 

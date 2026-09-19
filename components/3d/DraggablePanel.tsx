@@ -19,6 +19,14 @@
  * `draggable-panel-offset-v1` keyed by `id`, so the layout survives
  * page reloads.
  *
+ * WRAPPER GEOMETRY (v71 fix — see the long comment on the wrapper
+ * `style` below). The wrapper is a full-size, click-through overlay:
+ * `position:absolute; top/right/bottom/left:0; pointer-events:none`.
+ * It MUST be positioned, because the `translate()` it carries makes it
+ * the containing block for its absolutely-positioned descendants; a
+ * static zero-height wrapper sent every `top:12` panel to the bottom
+ * edge of the canvas where `overflow:hidden` ate it.
+ *
  * No external deps, no portal, no resize observer. Direct DOM via
  * React state, no CSS transition during drag (1:1 cursor tracking).
  */
@@ -187,6 +195,14 @@ export function DraggablePanel({
         className={className}
         onPointerDown={onWrapperPointerDown}
         style={{
+          // Same geometry contract as the populated wrapper below; kept
+          // identical so the empty case can never be the odd one out.
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          pointerEvents: 'none',
           transform: `translate(${offset.x}px, ${offset.y}px)`,
           zIndex,
           cursor: dragging ? 'grabbing' : 'default',
@@ -212,6 +228,49 @@ export function DraggablePanel({
       className={className}
       onPointerDown={onWrapperPointerDown}
       style={{
+        // ── v71 CONTAINING-BLOCK FIX ─────────────────────────────────
+        // WAS: no `position` at all, so the wrapper was `static`.
+        // WHY THAT WAS WRONG: this wrapper always carries a
+        // `transform` (even at offset 0,0 — `translate(0px, 0px)`
+        // computes to a matrix, not `none`), and a non-`none`
+        // transform makes the element the containing block for every
+        // absolutely-positioned descendant. All 18 call sites in
+        // SolarEngine3D pass only `id`/`zIndex` and hand us a child
+        // that positions itself absolutely (`top:12 left:12` dock,
+        // `left:10 top:50%` tool spine, `top:3 left:1/2` map-source
+        // picker, the Save/Undo/Redo toolbar, …). As a static box
+        // whose only children are out of flow, the wrapper collapsed
+        // to zero height and sat in normal flow immediately AFTER the
+        // full-height cesium div, i.e. pinned to the BOTTOM edge of
+        // the `position:relative; overflow:hidden` canvas container —
+        // so `top:12` resolved to 12px BELOW the canvas and was
+        // clipped away. Pre-merge these panels were direct children of
+        // that relative container and resolved against it correctly.
+        // `zIndex` was inert on a static element for the same reason.
+        //
+        // NOW: the wrapper is a full-size overlay pinned to the same
+        // box the panels used to resolve against, so `top:12`,
+        // `left:10`, `50%` and the bottom-anchored panels
+        // (CanvasControls `bottom:12`, sun simulator `bottom:40`,
+        // compass `bottom:120 right:12`) all resolve exactly as they
+        // did pre-merge, while the translate still moves the panel.
+        // Longhand insets rather than the `inset` shorthand so the
+        // computed value is observable in jsdom.
+        //
+        // `pointerEvents:'none'` is load-bearing: 18 of these overlays
+        // now stack over the whole canvas, and without it the topmost
+        // one would swallow every drag/click meant for the Cesium
+        // globe. The inner content div below turns hit-testing back on
+        // (`pointer-events` is inherited), and `onPointerDown` still
+        // fires on this wrapper by BUBBLING up from that content —
+        // a `pointer-events:none` element is skipped for hit-testing
+        // but is still a normal ancestor in the propagation path.
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        pointerEvents: 'none',
         transform: `translate(${offset.x}px, ${offset.y}px)`,
         zIndex,
         cursor: dragging ? 'grabbing' : 'default',
@@ -220,6 +279,14 @@ export function DraggablePanel({
         ...style,
       }}
     >
+      {/* Re-enables hit-testing for the actual panel content (see the
+          `pointerEvents:'none'` note above). Deliberately left
+          unpositioned: its children are absolutely positioned and so
+          escape it, which leaves this div a zero-size static box that
+          intercepts nothing itself and does NOT become a containing
+          block — the absolute children keep resolving against the
+          wrapper, i.e. against the canvas container. */}
+      <div data-drag-content style={{ pointerEvents: 'auto' }}>
       {hasExplicitHandle ? (
         <>
           {childArray}
@@ -241,6 +308,7 @@ export function DraggablePanel({
           {rest}
         </>
       )}
+      </div>
     </div>
   );
 }

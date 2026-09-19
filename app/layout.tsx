@@ -42,9 +42,14 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // SolarDog visibility resolution: DB row → SOLARDOG_ENABLED env var → off.
-  // Read on every request so admin flips via /admin/system-tools take effect
-  // without a redeploy. If the app_feature_flags table is missing (migration
-  // 121 not yet run), the helper fails closed to the env-var path or off.
+  // Admin flips via /admin/system-tools still take effect without a redeploy,
+  // but NOT by querying Neon on every request — this is the root layout, so
+  // "every request" meant a DB round-trip (or, while app_feature_flags is
+  // missing, a FAILED connection plus a warn line) on the critical path of
+  // every page load. getSolarDogEnabled is now memoised for
+  // FLAG_CACHE_TTL_MS (30s), which is the bound on how stale a flip can be.
+  // Fail-closed behaviour is unchanged: a missing table still resolves to the
+  // env-var path or off.
   const solarDogEnabled = await getSolarDogEnabled();
   return (
     // suppressHydrationWarning: prevents false-positive hydration errors from

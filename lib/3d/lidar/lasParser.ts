@@ -32,9 +32,25 @@ import type { LiDARDataset, LiDARPoint } from './types';
  *  the same 227-byte header; only 1.4 adds extra fields. */
 const LAS_HEADER_SIZE = 227;
 
-/** Accepted point data format → record size in bytes. */
+/** LAS 1.4 public header size (bytes). 227 + waveform start (8) + first EVLR
+ *  start (8) + number of EVLRs (4) + 64-bit point count (8) + 15 × 64-bit
+ *  points-by-return (120) = 375. We need at least this many bytes in hand
+ *  before we may read the 1.4 point count at offset 247. */
+const LAS_14_HEADER_SIZE = 375;
+
+/** Accepted point data format → MINIMUM record size in bytes. This is the
+ *  size of the fields we decode; the real stride comes from the header's
+ *  Point Data Record Length, which is ≥ this when the file carries per-point
+ *  Extra Bytes. */
 const POINT_SIZES: Record<number, number> = {
   0: 20, 1: 28, 2: 26, 3: 34,
+};
+
+/** Point data format → byte offset of the R/G/B triple within a record.
+ *  Format 2 is core(20) + RGB. Format 3 is core(20) + GPS time (float64)
+ *  + RGB, so its colour starts 8 bytes later. Formats 0/1 carry no colour. */
+const RGB_OFFSETS: Record<number, number> = {
+  2: 20, 3: 28,
 };
 
 /** "LASF" file signature. */
@@ -90,26 +106,49 @@ export function parseLAS(buf: ArrayBuffer | Uint8Array, options: ParseOptions = 
     return { ok: 'error', error: `Invalid point data offset: ${pointOffset} (headerSize=${headerSize}, fileLen=${bytes.length})` } as const;
   }
 
-  // 4. Point data format ID (uint8 at 104)
+  // 4. Point data format ID (uint8 at 104) + record stride (uint16 at 105).
   const pointFormatId = view.getUint8(104);
-  const pointSize = POINT_SIZES[pointFormatId];
-  if (!pointSize) {
+  const minPointSize = POINT_SIZES[pointFormatId];
+  if (!minPointSize) {
     return { ok: 'error', error: `Unsupported LAS point data format ${pointFormatId} (we support 0–3). Waveform formats 4–10 are out of scope.` } as const;
   }
 
-  // 5. Number of point records
-  //    LAS 1.4: uint64 at offset 107
-  //    LAS 1.0–1.3: uint32 at offset 107
-  let numPoints: number;
+  // The stride is the header's Point Data Record Length, NOT the format's
+  // standard size. Was: we assumed the standard size and stepped by it, so
+  // any file carrying per-point Extra Bytes (an Extra Bytes VLR declares
+  // them; this is very common in production tiles) had every record after
+  // the first read from the middle of the previous one — the whole cloud
+  // decoded to garbage coordinates. Now the header value is authoritative,
+  // and we only require that it be large enough to hold the fields the
+  // declared format defines. It is also the divisor below, so a zero or
+  // short value must be rejected here rather than producing Infinity.
+  const pointSize = view.getUint16(105, true);
+  if (pointSize < minPointSize) {
+    return { ok: 'error', error: `Invalid Point Data Record Length ${pointSize} for point data format ${pointFormatId} (needs ≥ ${minPointSize} bytes)` } as const;
+  }
+
+  // 5. Number of point records.
+  //    Legacy uint32 at offset 107 — present in EVERY version, including 1.4.
+  //    LAS 1.4 additionally carries the authoritative uint64 Number of Point
+  //    Records at offset 247 of its 375-byte header.
+  //    Was: for 1.4 we read offset 107 as the HIGH word and offset 111 (which
+  //    is actually the legacy points-by-return array) as the LOW word, so a
+  //    normal 1.4 file either reported a bogus "count overflow" (legacy field
+  //    populated) or decoded zero points (legacy field 0, as writers emit
+  //    when the 64-bit field is the real one). Every real LAS 1.4 file was
+  //    rejected. Now: legacy field when it is populated, else the 64-bit one.
+  let numPoints = view.getUint32(107, true);
   if (versionMinor >= 4) {
-    const hi = view.getUint32(107, true);
-    const lo = view.getUint32(111, true);
-    numPoints = hi >= 0x1 ? Number.MAX_SAFE_INTEGER : lo;
-    if (hi >= 0x1) {
-      return { ok: 'error', error: `LAS 1.4 point count overflow (${hi}*2^32 + ${lo}); refusing to parse.` } as const;
+    if (headerSize < LAS_14_HEADER_SIZE || bytes.length < LAS_14_HEADER_SIZE) {
+      return { ok: 'error', error: `Truncated LAS 1.4 header (headerSize=${headerSize}, fileLen=${bytes.length}); need ≥ ${LAS_14_HEADER_SIZE} bytes for the 64-bit point count` } as const;
     }
-  } else {
-    numPoints = view.getUint32(107, true);
+    if (numPoints === 0) {
+      const wide = view.getBigUint64(247, true);
+      if (wide > BigInt(Number.MAX_SAFE_INTEGER)) {
+        return { ok: 'error', error: `LAS 1.4 point count ${wide} exceeds the safe integer range; refusing to parse.` } as const;
+      }
+      numPoints = Number(wide);
+    }
   }
 
   // 6. Scale + offset
@@ -128,7 +167,16 @@ export function parseLAS(buf: ArrayBuffer | Uint8Array, options: ParseOptions = 
   view.getFloat64(211, true);
   view.getFloat64(219, true);
 
-  // 8. Validate that the point records fit in the file
+  // 8. Validate that the point records fit in the file.
+  //    This clamp is the allocation guard for untrusted input: `numPoints`
+  //    comes straight out of a header field, so a hostile or corrupt file can
+  //    declare 2^53 records. Nothing below may size an array or index the
+  //    buffer from the DECLARED count — only from what the bytes on hand can
+  //    actually hold. `pointSize` is guaranteed ≥ 20 above, so the division
+  //    is safe and `availablePoints` is finite.
+  if (!Number.isFinite(numPoints) || numPoints < 0) {
+    return { ok: 'error', error: `Invalid point record count in header (${numPoints})` } as const;
+  }
   const availableBytes = bytes.length - pointOffset;
   const availablePoints = Math.floor(availableBytes / pointSize);
   if (availablePoints < numPoints) {
@@ -176,10 +224,17 @@ export function parseLAS(buf: ArrayBuffer | Uint8Array, options: ParseOptions = 
     let r: number | undefined;
     let g: number | undefined;
     let b: number | undefined;
-    if (pointFormatId === 2 || pointFormatId === 3) {
-      r = view.getUint16(off + 20, true) >> 8;   // 16-bit → 8-bit
-      g = view.getUint16(off + 22, true) >> 8;
-      b = view.getUint16(off + 24, true) >> 8;
+    // Was: both formats read colour at +20/+22/+24. That is right for
+    // format 2, but format 3 puts an 8-byte GPS time between the core and
+    // the colour, so format-3 files decoded the mantissa of the GPS
+    // timestamp as RGB — every point came out a near-random colour that
+    // changed with the flight clock. RGB_OFFSETS carries the per-format
+    // start; the stride check above guarantees the triple is in bounds.
+    const rgbOffset = RGB_OFFSETS[pointFormatId];
+    if (rgbOffset !== undefined) {
+      r = view.getUint16(off + rgbOffset + 0, true) >> 8;   // 16-bit → 8-bit
+      g = view.getUint16(off + rgbOffset + 2, true) >> 8;
+      b = view.getUint16(off + rgbOffset + 4, true) >> 8;
     }
 
     points[o++] = { x, y, z, classification, r, g, b };

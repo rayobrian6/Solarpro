@@ -44,6 +44,49 @@ function rowToFlag(row: Record<string, unknown>): DbFeatureFlag {
   };
 }
 
+// ─── Hot-path cache ─────────────────────────────────────────────────────────
+
+/**
+ * How long a resolved flag value is reused before the next call re-reads it.
+ *
+ * WHAT WAS WRONG (fixed 2026-09-18). app/layout.tsx is the ROOT layout: it
+ * renders for EVERY request to EVERY page, and it awaited getSolarDogEnabled()
+ * directly. That put a Neon round-trip on the critical path of every page load
+ * in production — and while app_feature_flags is absent (migration 121 is
+ * written but not registered with the runner, so it has never been applied)
+ * it put a FAILING connection plus a console.warn there instead, once per
+ * request. The helper's doc comment even said "the layout calls this on every
+ * page render", and the SQL file's index comment calls it "the hot path",
+ * which is exactly the thing that should never have been uncached.
+ *
+ * WHY A TTL MEMO AND NOT next/cache. The value has to stay flippable from
+ * /admin/system-tools without a redeploy, so it cannot be resolved at build
+ * time; and this module is imported by a Server Component, by a route handler
+ * and by unit tests alike, so it must not require a Next request/render
+ * context to work. A module-level memo with a short TTL satisfies both: on
+ * Vercel it lives for the lifetime of one lambda instance, so an admin flip
+ * becomes visible everywhere within FLAG_CACHE_TTL_MS with no deploy, and the
+ * per-request DB cost collapses to at most one read per key per TTL.
+ */
+export const FLAG_CACHE_TTL_MS = 30_000;
+
+type FlagResolution = { enabled: boolean; source: 'db' | 'env' | 'default' };
+
+/** The PROMISE is memoised, not the resolved value, so N concurrent renders
+ *  during a cold start share ONE query instead of stampeding the pool. */
+const flagCache = new Map<string, { expiresAtMs: number; value: Promise<FlagResolution> }>();
+
+/**
+ * Drop a cached flag (or the whole cache). Called by setFeatureFlag so an
+ * admin's own flip is reflected immediately in the instance that served the
+ * write, rather than up to FLAG_CACHE_TTL_MS later. Also the seam the tests
+ * use to get a clean cache between cases.
+ */
+export function invalidateFeatureFlagCache(flagKey?: string): void {
+  if (flagKey === undefined) flagCache.clear();
+  else flagCache.delete(flagKey);
+}
+
 // ─── Reads ──────────────────────────────────────────────────────────────────
 
 /**
@@ -60,11 +103,44 @@ function rowToFlag(row: Record<string, unknown>): DbFeatureFlag {
  * happy path (zero overhead when the DB returns).
  *
  * Returns { enabled, source } so the caller can render which one won.
+ *
+ * CACHED: this is a thin TTL memo over resolveFeatureFlag below — see
+ * FLAG_CACHE_TTL_MS for why. The resolution logic itself is untouched, so the
+ * fail-closed order (DB row → env → off) is exactly what it always was; the
+ * only change is how often it is actually recomputed. `envResolver` is
+ * therefore assumed to be stable for a given flagKey (it is a deploy-time env
+ * read, and each key has exactly one call site) — the cache is keyed by
+ * flagKey alone, so two callers passing DIFFERENT resolvers for the SAME key
+ * would share one answer.
  */
 export async function getFeatureFlag(
   flagKey: string,
   envResolver?: () => boolean,
-): Promise<{ enabled: boolean; source: 'db' | 'env' | 'default' }> {
+): Promise<FlagResolution> {
+  const now = Date.now();
+  const hit = flagCache.get(flagKey);
+  if (hit && hit.expiresAtMs > now) return hit.value;
+
+  const value = resolveFeatureFlag(flagKey, envResolver);
+  flagCache.set(flagKey, { expiresAtMs: now + FLAG_CACHE_TTL_MS, value });
+  // A rejected lookup must not be pinned for the whole TTL. resolveFeatureFlag
+  // does not reject today — it catches internally and falls through to
+  // env/default — and this guard is what keeps a future change from turning
+  // one transient failure into 30 seconds of a stuck rejected promise.
+  value.catch(() => {
+    if (flagCache.get(flagKey)?.value === value) flagCache.delete(flagKey);
+  });
+  return value;
+}
+
+/** The uncached resolution — the original getFeatureFlag body, unchanged.
+ *  Note the cache above stores the FALLBACK result exactly like a DB hit, on
+ *  purpose: collapsing the per-request failed connection and its warn line
+ *  while app_feature_flags is missing is half of what the cache is for. */
+async function resolveFeatureFlag(
+  flagKey: string,
+  envResolver?: () => boolean,
+): Promise<FlagResolution> {
   try {
     const sql = await getDbReady();
 
@@ -152,6 +228,11 @@ export async function setFeatureFlag(
     // Should not happen — INSERT ... ON CONFLICT ... RETURNING always returns the row
     throw new Error('setFeatureFlag: UPSERT returned no row');
   }
+
+  // Drop the memo for this key so the admin who just flipped it sees the new
+  // value on their very next render instead of up to FLAG_CACHE_TTL_MS later.
+  // Other instances still converge on the TTL — that is the documented bound.
+  invalidateFeatureFlagCache(flagKey);
 
   return rowToFlag(rows[0]);
 }
