@@ -54,6 +54,7 @@ import { roofPlaneFromFootprint, roofPlaneFromFootprintAndRidge } from '@/lib/3d
 // v66: solid building — walls dropped from exterior roof edges to the ground.
 import { buildWalls, faceOrientation, deriveAzimuthsFromSharedEdges, findSharedRidge } from '@/lib/3d/buildingExtrusion';
 import { composeRoofTexture, clearRoofTextureCache } from '@/lib/3d/roofTexture';
+import { regularizeOutline, alignSharedRidge } from '@/lib/3d/regularizeOutline';
 import { deriveAzimuthFromOutline } from '@/lib/aerial/nearmapToRoofPlane';
 import {
   placeFencePanels,
@@ -4301,6 +4302,122 @@ function SolarEngine3D({
       return cesiumGroundElevRef.current;
     }
     return minRoofHeightM - flatTraceEaveHeightRef.current;
+  }
+
+  /**
+   * v66: SQUARE UP — the one action that moves the user's traced corners.
+   *
+   * Ray: "one plane is larger than the other after marking my points. Need to
+   * correct." Buildings are rectilinear; a trace of one is not, because the
+   * clicks are eyeballed on blurry imagery.
+   *
+   * 🚨 EXPLICIT AND REVERTIBLE BY DESIGN. An earlier automatic rebuild rewrote
+   * traced corners behind the user's back, desynchronised Stitch and shifted
+   * faces. So this only ever runs from its button, it reports exactly what it
+   * changed, and it REFUSES any face whose correction is large enough to be a
+   * redraw rather than a cleanup — there the trace is the problem, and silently
+   * "fixing" it would destroy real geometry.
+   */
+  function squareUpTracedFaces(viewer: any, C: any): number {
+    const groundSeed = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    const renderables = collectRoofRenderables(C, groundSeed);
+    if (renderables.length === 0) { setStatusMsg('Nothing to square up — trace a roof face first'); return 0; }
+
+    // 1. Regularize each outline on its own.
+    const rings = new Map<string, Array<{ lat: number; lng: number }>>();
+    let totalSnapped = 0, totalRemoved = 0, worstShift = 0, refused = 0;
+    for (const rp of renderables) {
+      const ring = rp.corners.map((c: any) => {
+        const g = ecefToLatLng({ x: c.x, y: c.y, z: c.z });
+        return { lat: g.lat, lng: g.lng };
+      });
+      const res = regularizeOutline(ring);
+      if (res.changed && res.report.maxShiftM > 1.5) {
+        refused++;
+        rings.set(rp.id, ring);
+        addLog('SQUARE', `Face ${rp.id.slice(0, 8)}: refused — would move a corner ${res.report.maxShiftM.toFixed(1)}m`);
+        continue;
+      }
+      rings.set(rp.id, res.changed ? res.outline : ring);
+      totalSnapped += res.report.snapped;
+      totalRemoved += res.report.removed;
+      worstShift = Math.max(worstShift, res.report.maxShiftM);
+    }
+
+    // 2. Make every pair of faces agree on the corners they share, so the halves
+    //    actually meet instead of nearly meeting.
+    const ids = Array.from(rings.keys());
+    let aligned = 0;
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const out = alignSharedRidge(rings.get(ids[i])!, rings.get(ids[j])!);
+        if (out.alignedPairs > 0) {
+          rings.set(ids[i], out.a);
+          rings.set(ids[j], out.b);
+          aligned += out.alignedPairs;
+        }
+      }
+    }
+
+    // 3. Rebuild each face from its squared ring at the heights it already had.
+    const updates: Array<{
+      id: string;
+      vertices: Array<{ lat: number; lng: number }>;
+      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
+      polygon3D?: Cart3[];
+      origin3D?: Cart3;
+      normal3D?: Cart3;
+    }> = [];
+    for (const rp of renderables) {
+      const ring = rings.get(rp.id);
+      if (!ring || ring.length < 3) continue;
+      const old = rp.corners.map((c: any) => ecefToLatLng({ x: c.x, y: c.y, z: c.z }));
+      const meanH = old.reduce((acc: number, g: any) => acc + g.height, 0) / old.length;
+      const pts3D = ring.map(v => engLatLngToECEF(v.lat, v.lng, meanH));
+      let frame, plane;
+      // surfaceOffsetM 0: these heights came from an earlier fit and are already
+      // lifted — see the note in computePlaneFromPoints3D about Stitch.
+      try {
+        frame = computePlaneFromPoints3D(pts3D, { surfaceOffsetM: 0 });
+        plane = buildRoofPlane3D(pts3D);
+      } catch { continue; }
+
+      (plane3DEntityMap.current.get(rp.id) ?? []).forEach((eid: string) => {
+        const e = viewer.entities.getById(eid);
+        if (e) try { viewer.entities.remove(e); } catch { /* ignore */ }
+      });
+      const cesiumPts = frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
+      const newIds = renderPlane3DEntity(viewer, C, cesiumPts, rp.id, frame,
+        selectedRoofPlaneId === rp.id, markOnlyPlaneIdsRef.current.has(rp.id));
+      plane3DEntityMap.current.set(rp.id, newIds);
+      plane3DFrameMap.current.set(rp.id, frame);
+      plane3DCesiumPtsMap.current.set(rp.id, cesiumPts);
+      const params = flatTraceParamsRef.current.get(rp.id);
+      if (params) flatTraceParamsRef.current.set(rp.id, { ...params, outline: ring });
+
+      if (plane.localFrame3D) {
+        updates.push({
+          id: rp.id, vertices: plane.vertices, localFrame3D: plane.localFrame3D,
+          polygon3D: plane.polygon3D, origin3D: plane.origin3D, normal3D: plane.normal3D,
+        });
+      }
+    }
+
+    plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
+    if (updates.length > 0) onRoofPlanesStitched?.(updates);
+    if (showRoofModel) { try { renderRoofWireframe(viewer, C); } catch { /* ignore */ } }
+    if (showBuilding3DRef.current) { try { renderBuildingExtrusion(viewer, C); } catch { /* ignore */ } }
+    try { viewer.scene.requestRender(); } catch { /* ignore */ }
+
+    addLog('SQUARE', `Squared ${updates.length} face(s): ${totalSnapped} edges snapped, ${totalRemoved} vertices removed, ${aligned} shared corners aligned, worst shift ${worstShift.toFixed(2)}m, ${refused} refused`);
+    setStatusMsg(
+      `\u{1F4D0} Squared up — ${totalSnapped} edge${totalSnapped === 1 ? '' : 's'} straightened, ` +
+      `${aligned} shared corner${aligned === 1 ? '' : 's'} joined` +
+      (totalRemoved > 0 ? `, ${totalRemoved} stray point${totalRemoved === 1 ? '' : 's'} removed` : '') +
+      (refused > 0 ? ` \u00b7 \u26a0 ${refused} face(s) left alone (correction too large — retrace those)` : '') +
+      ` \u00b7 worst move ${ftStr(worstShift)}`
+    );
+    return updates.length;
   }
 
   function renderBuildingExtrusion(viewer: any, C: any) {
@@ -13185,6 +13302,21 @@ function SolarEngine3D({
                 </span>
               </span>
             ) : null}
+            {/* v66: square up the trace itself. Sits next to Stitch because they
+                are the two corrective actions, and both move traced corners —
+                so both are explicit, and both report what they changed. */}
+            <button
+              onClick={() => { const v = viewerRef.current; const Cz = (window as any).Cesium; if (v && Cz) squareUpTracedFaces(v, Cz); }}
+              title="Square Up: straighten near-parallel edges, square near-right corners, drop stray points, and join corners the faces share. Refuses any face it would move more than 5 ft — retrace that one instead."
+              data-no-drag
+              style={{
+                background: 'rgba(160,140,255,0.16)', border: '1px solid rgba(160,140,255,0.5)',
+                color: '#c0b0ff', borderRadius: 6, padding: '4px 8px',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
+              }}
+            >
+              📐 Square Up
+            </button>
             <button
               onClick={() => { const v = viewerRef.current; const Cz = (window as any).Cesium; if (v && Cz) stitchRoofVertices(v, Cz); }}
               title="Stitch: pull marked planes together - averages corners that should be shared (hips/ridges/valleys) into one natural point"
