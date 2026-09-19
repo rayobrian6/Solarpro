@@ -63,6 +63,7 @@ import { v4 as uuidv4 } from 'uuid';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
+import { roofPlanesSignature } from '@/lib/roofPlanesSignature';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
   Layers, Zap, Sun, RotateCcw, Save, Play, ChevronDown, ChevronUp,
@@ -1018,12 +1019,26 @@ export default function DesignStudio({ project, onSave }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panels.length, systemSizeKw, tilt, azimuth]);
 
-  // ── Auto-save layout to DB (3-second debounce after panel changes) ──────────
+  // ── Auto-save layout to DB (3-second debounce after panel or roof changes) ──
+  // v66: roof geometry is a first-class reason to save. Before this, the dedup
+  // signature was panels + electrical only and the scheduling effect depended on
+  // [panels], so a design whose ONLY change was roof geometry never saved:
+  //   • trace a face and place no panels  → nothing schedules a save
+  //   • edit a face's pitch after placing → panels unchanged, so the signature
+  //     matched and saveLayoutToDB returned early even when something did fire
+  // The payload always carried roofPlanes (see below) — only the trigger was
+  // broken, so the roof was silently gone on reload.
+  //
+  // The signature itself lives in lib/roofPlanesSignature.ts so that this call
+  // site and the beforeunload beacon below CANNOT drift apart again — drift is
+  // what caused this bug, not the omission. Adding a persisted, user-editable
+  // field to RoofPlane means adding it to SIGNED_FIELDS there.
   const saveLayoutToDB = useCallback(async (panelList: PlacedPanel[]) => {
     // v63: fold the electrical design into the dedup signature so topology /
     // modules-per-string / string-paint changes persist even when panels are unchanged.
     const designElectrical = panelList.length > 0 ? buildDesignElectrical() : undefined;
-    const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null);
+    const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null)
+      + '|' + roofPlanesSignature(roofPlanesRef.current);
     if (sig === lastSavedPanelsRef.current) return; // nothing changed
     lastSavedPanelsRef.current = sig;
     const payload = {
@@ -1075,9 +1090,9 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   }, [project.id, project.systemType, buildDesignElectrical]);
 
-  // Trigger auto-save 3 seconds after panels change — but NEVER before the DB
-  // restore resolves (see restoreStateRef above; the timer checks at FIRE time
-  // so a restore finishing inside the 3s window isn't lost).
+  // Trigger auto-save 3 seconds after panels OR roof geometry change — but
+  // NEVER before the DB restore resolves (see restoreStateRef above; the timer
+  // checks at FIRE time so a restore finishing inside the 3s window isn't lost).
   useEffect(() => {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -1087,7 +1102,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [panels, saveLayoutToDB]);
+    // v66: roofPlanes is a dependency. A traced face, a detected face, or a
+    // per-face pitch/azimuth edit must schedule a save on its own instead of
+    // waiting for a panel change that may never come.
+  }, [panels, roofPlanes, saveLayoutToDB]);
 
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {
@@ -1097,7 +1115,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       if (restoreStateRef.current !== 'done') return;
       const panelList = panelsRef2.current;
       const designElectrical = designElectricalRef.current ?? undefined;
-      const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null);
+      // v66: must match saveLayoutToDB's signature exactly, or closing the tab
+      // after tracing a roof beacons nothing (sig compares equal) or beacons
+      // needlessly (sig never compares equal). Shared helper, one definition.
+      const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null)
+        + '|' + roofPlanesSignature(roofPlanesRef.current);
       if (sig === lastSavedPanelsRef.current) return;
       const payload = JSON.stringify({
         panels: panelList,
@@ -4156,6 +4178,32 @@ export default function DesignStudio({ project, onSave }: Props) {
                 setRoofPlanes(prev => [...prev, enrichedPlane]);
                 console.log('[DesignStudio] 3D plane added:', enrichedPlane.id,
                   `az=${enrichedPlane.azimuth.toFixed(1)}° tilt=${enrichedPlane.pitch.toFixed(1)}°`);
+              }}
+              onRoofPlanesDetected={(planes) => {
+                // v66: Auto Fill detected the roof from Google Solar segments.
+                // Before this, those planes placed panels and were discarded —
+                // the sidebar said "No Planes Detected" under a correctly laid
+                // out array, and the design saved with no roof geometry.
+                //
+                // MERGE BY ID, never blind-replace. The engine only emits when
+                // it found no eligible planes, and eligibility is computed from
+                // this very array — so today the array is effectively empty and
+                // replace/append/merge are identical. Merging is what keeps that
+                // true if the emit condition ever loosens: it can neither drop a
+                // plane the user still has nor stack duplicates on a second
+                // Auto Fill over the same roof.
+                if (!planes || planes.length === 0) return;
+                const enriched = planes.map(p =>
+                  enrichRoofPlaneWith3DFrame(enrichRoofPlaneWithLECS(p)),
+                );
+                setRoofPlanes(prev => {
+                  const byId = new Map(prev.map(p => [p.id, p]));
+                  for (const p of enriched) byId.set(p.id, p);
+                  return Array.from(byId.values());
+                });
+                console.log('[DesignStudio] Auto Fill detected', enriched.length,
+                  'roof plane(s):', enriched.map(p =>
+                    `az=${p.azimuth.toFixed(0)}° tilt=${p.pitch.toFixed(0)}°`).join(', '));
               }}
               onE2EDiagnostics={E2E_ENABLED ? setE2EDiagnostics : undefined}
               onRoofPlanesStitched={(updates) => {

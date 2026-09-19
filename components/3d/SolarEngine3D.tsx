@@ -41,12 +41,17 @@ import type { PlacedObstruction } from '@/types';
 import {
   buildRoofPlane3D,
   computePlaneFromPoints3D,
+  ecefToLatLng,
   renderPlane3DEntity,
   renderPoint3DMarker,
   renderPreviewPolyline,
   type Cart3,
   type Plane3DFrame,
 } from '@/lib/roofPlane3D';
+// v66: Aurora-style 2D → 3D. Builds a pitched roof face from a flat traced
+// outline plus pitch + azimuth, for addresses with no Photorealistic 3D Tiles.
+import { roofPlaneFromFootprint } from '@/lib/3d/footprintToRoofPlane';
+import { deriveAzimuthFromOutline } from '@/lib/aerial/nearmapToRoofPlane';
 import {
   placeFencePanels,
   placeGroundRow,
@@ -213,6 +218,14 @@ import {
   DEFAULT_TREE_CANOPY_RADIUS_M as _TREE_CANOPY_R_M,
 } from './tree';
 const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
+
+// v66 (flat trace): eave height for a footprint-built roof face, metres.
+// ~10 ft — a single-storey eave. A hand trace carries no measured height, and
+// this value does NOT affect pitch, azimuth or area (see
+// lib/3d/footprintToRoofPlane.ts) — it only sets how far the face floats above
+// ground in the 3D scene, where on a no-coverage address there is no building
+// mesh to sit on anyway. Per-face eave height is a later step.
+const FLAT_TRACE_EAVE_HEIGHT_M = 3.0;
 
 // v68: Vertex Handles (in-place footprint editing for Block / Gable / Hip / Tree).
 // Math in lib/3d/vertexHandlesMath.ts (unit-tested in tests/vertexHandles.test.ts).
@@ -404,6 +417,13 @@ interface Props {
   onLocationPick?: (lat: number, lng: number, address: string) => void;
   /** v47.121: Called when user finishes drawing a 3D roof plane (≥3 points picked on 3D tiles) */
   onRoofPlaneCreated?: (plane: import('@/types').RoofPlane) => void;
+  /** v66: Called when Auto Fill DETECTS roof planes (from Google Solar roof
+   *  segments) rather than the user drawing them. Batched, because a detection
+   *  produces the whole roof at once and firing onRoofPlaneCreated per face
+   *  would queue N separate state updates off one click.
+   *  Planes arrive source:'solar_api', confirmed:false — they are a detection,
+   *  not a person's decision, so they route through operator review. */
+  onRoofPlanesDetected?: (planes: import('@/types').RoofPlane[]) => void;
   /** v64: Stitch button — push the averaged/connected corners AND the recomputed
    *  plane frame back into roofPlanes state so panel placement (Auto Layout) +
    *  persistence use the stitched geometry, not the pre-stitch traced corners or a
@@ -855,6 +875,7 @@ function SolarEngine3D({
   mountingSystemId = 'ironridge-xr100',
   onTwinLoaded, onError, onLocationPick,
   onRoofPlaneCreated,
+  onRoofPlanesDetected,
   onRoofPlanesStitched,
   onE2EDiagnostics,
   selectedRoofPlaneId,
@@ -994,6 +1015,30 @@ function SolarEngine3D({
 
   // surfaceOrientationRef: current orientation for surface-placed panels (separate from ground/fence)
   const surfaceOrientationRef = useRef<PanelOrientation>('portrait');
+
+  // ── v66: FLAT TRACE (Aurora-style 2D → 3D) ─────────────────────────────────
+  // True only while a roof-face trace is running on an address with NO Google
+  // Photorealistic 3D Tiles. It is the single switch every flat-trace code path
+  // keys off, and it is set in exactly one place (the mode-entry effect).
+  //
+  // 🚨 WHY IT IS A SINGLE FLAG, AND WHY IT DEFAULTS FALSE:
+  // Where 3D tiles exist, this is false and EVERY path below behaves exactly as
+  // it did before v66 — same picks, same frame, same plane, same fill. The
+  // flat-trace branches are additive and unreachable on a covered address. That
+  // is deliberate: the tiles path works and must not move.
+  //
+  // When true, the trace collects lat/lng only (heights from an ellipsoid pick
+  // are meaningless) and the face is built from the traced FOOTPRINT plus a
+  // user-supplied pitch and a shape-inferred azimuth — see
+  // lib/3d/footprintToRoofPlane.ts.
+  const flatTraceRef = useRef<boolean>(false);
+  const [flatTrace, setFlatTrace] = useState(false); // render-visible mirror for UI copy
+  // Consecutive off-mesh first-clicks on an address that DOES have a tileset.
+  // One is a stray click and gets the normal "you missed the roof" message; two
+  // in a row means there is genuinely no mesh here and we offer the flat trace.
+  // Requiring the second click keeps a covered address behaving exactly as it
+  // always has when the user simply mis-clicks.
+  const offMeshFirstClicksRef = useRef<number>(0);
 
   // ── v47.121: plane3d tool refs ──────────────────────────────────────────────
   // pts3DCesium: raw Cesium Cartesian3 objects from scene.pickPosition (for Cesium entity rendering)
@@ -1595,19 +1640,54 @@ function SolarEngine3D({
     // arbitrary direction — not to the user's traced polygon. That's the "wonky
     // panels on bare 2D maps" bug (Auto Fill on a no-tiles address).
     //
-    // Layer A: refuse entry to these modes unless 3D tiles loaded. (Layer C lives
-    // in handlePlane3DClick — defensive pickMethod check on each click.)
+    // v66: leaving both trace modes always ends a flat trace, so the flag can
+    // never leak into an unrelated tool or survive an address change into a
+    // 3D-covered region.
+    if (placementMode !== 'plane3d' && placementMode !== 'mark_plane') {
+      offMeshFirstClicksRef.current = 0;
+      if (flatTraceRef.current) {
+        flatTraceRef.current = false;
+        setFlatTrace(false);
+      }
+    }
+
+    // Layer A: entry gate for these modes. With 3D tiles → unchanged pre-v66
+    // behaviour. Without them → v66 flat trace instead of the old refusal.
+    // (Layer C lives in handlePlane3DClick — per-click pickMethod check.)
     if ((placementMode === 'plane3d' || placementMode === 'mark_plane') && prevMode !== placementMode) {
       if (!tilesetRef.current) {
         const isLoading = tileStatus === 'loading';
-        setStatusMsg(
-          isLoading
-            ? '⏳ 3D Plane is waiting for Google 3D Tiles to finish loading…'
-            : '3D Plane needs Google Photorealistic 3D Tiles for roof elevation. This address has no 3D coverage — try Auto Fill on detected roof segments, or pick an address in a 3D-covered region.'
-        );
-        addLog('PLANE3D', `Refused entry to ${placementMode} — tilesetRef.current=${!!tilesetRef.current} tileStatus=${tileStatus}`);
-        onPlacementModeChange('select');
+        if (isLoading) {
+          // Tiles may still arrive. Don't commit to flat trace yet — bounce out
+          // and let the user re-enter once loading settles, exactly as before.
+          setStatusMsg('⏳ 3D Plane is waiting for Google 3D Tiles to finish loading…');
+          addLog('PLANE3D', `Deferred entry to ${placementMode} — tiles still loading`);
+          onPlacementModeChange('select');
+        } else {
+          // v66 FLAT TRACE — replaces the old hard refusal.
+          //
+          // The old behaviour ejected the user back to 'select' with "pick an
+          // address in a 3D-covered region", which is the whole reason this
+          // work exists: a rural address could not trace a roof at all.
+          //
+          // It was never necessary. getWorldPosition still returns a CORRECT
+          // lat/lng via its terrain and ellipsoid fallbacks — only the HEIGHT
+          // is unknown, and height is exactly what pitch + azimuth supplies.
+          // So enter the mode, collect the footprint, and build the face from
+          // the outline instead of from the mesh.
+          flatTraceRef.current = true;
+          setFlatTrace(true);
+          const pitchNow = Math.round(tiltRef.current ?? 0);
+          if (placementMode === 'mark_plane') setShowRoofModel(true);
+          setStatusMsg(
+            `🗺️ Flat trace (no 3D coverage here) — click this roof face's corners (3+), right-click to finish. ` +
+            `Direction is read from the shape you trace; pitch starts at ${pitchNow}° and is editable per face afterwards.`
+          );
+          addLog('PLANE3D', `Flat-trace entry to ${placementMode} — no tileset; footprint + pitch ${pitchNow}° will build the face`);
+        }
       } else {
+        flatTraceRef.current = false;
+        setFlatTrace(false);
         if (placementMode === 'mark_plane') {
           setShowRoofModel(true);
           setStatusMsg('⬡ Mark Plane — click a roof face\'s corners (3+), right-click to finish · edges classify live');
@@ -8362,13 +8442,67 @@ function SolarEngine3D({
       // on the roof. Reject so the user gets a clear "this region has no 3D
       // coverage" message instead of building a horizontal frame with arbitrary
       // u-axis and seeing "wonky" panels on Auto Fill.
-      if (hit.pickMethod !== '3dtiles') {
-        setStatusMsg(
-          `3D Plane: point must be on a 3D roof surface — ${hit.pickMethod} pick detected (this region has no 3D tile coverage). Try Auto Fill on detected roof segments, or pick an address in a 3D-covered region.`
-        );
-        addLog('PLANE3D', `Rejected click — pickMethod=${hit.pickMethod} (expected 3dtiles); only 3D tiles carry roof elevation`);
-        return;
+      //
+      // v66: that rejection is still exactly right MID-TRACE on a tiled address
+      // — once a corner has landed on the mesh, a later ellipsoid pick means the
+      // user missed the roof, and accepting it would drop that corner to the
+      // ground. It is wrong in two other cases, both handled below.
+      if (!flatTraceRef.current && hit.pickMethod !== '3dtiles') {
+        if (pts3DCesiumRef.current.length === 0) {
+          // FIRST corner of the trace, and there is no mesh under it.
+          //
+          // Layer A only sees whether a tileset OBJECT loaded. Google's
+          // Photorealistic 3D Tiles root loads globally, so on an address
+          // inside a coverage GAP the tileset is non-null and Layer A waves the
+          // user through — and then every single click gets rejected here and
+          // the tool is unusable with no way forward. That is the most common
+          // shape of "this address has no 3D", and it is invisible until the
+          // first pick comes back from the ellipsoid.
+          //
+          // So: no mesh under the very first corner means no mesh here. Drop
+          // into flat trace and accept the point instead of refusing.
+          //
+          // But a single off-mesh click is ambiguous: it is equally the shape of
+          // a stray click on a covered address. So the FIRST one still gets the
+          // old message and is still rejected — a mis-click on a working 3D
+          // address behaves exactly as it always has. Only a SECOND consecutive
+          // off-mesh first-click, which a mis-click essentially never produces
+          // but an uncovered address always does, switches to flat trace.
+          offMeshFirstClicksRef.current += 1;
+
+          if (offMeshFirstClicksRef.current < 2) {
+            setStatusMsg(
+              `That point isn't on a 3D roof surface (${hit.pickMethod} pick). If you're aiming at the roof, click the roof itself — ` +
+              `if this address simply has no 3D coverage, click once more and I'll trace it flat instead.`
+            );
+            addLog('PLANE3D', `Off-mesh first click #1 (${hit.pickMethod}) — offering flat trace on the next one`);
+            return;
+          }
+
+          flatTraceRef.current = true;
+          setFlatTrace(true);
+          const pitchNow = Math.round(tiltRef.current ?? 0);
+          setStatusMsg(
+            `🗺️ No 3D roof mesh here — tracing flat. Click this face's corners (3+), right-click to finish. ` +
+            `Pitch starts at ${pitchNow}° (Tilt slider) and direction comes from the shape you draw; both editable per face afterwards.`
+          );
+          addLog('PLANE3D', `Flat trace confirmed by a 2nd off-mesh first click (${hit.pickMethod}) — building from footprint`);
+          // fall through and accept this corner
+        } else {
+          // Mid-trace miss on an address that DOES have mesh. Unchanged.
+          setStatusMsg(
+            `3D Plane: that point missed the roof surface — ${hit.pickMethod} pick detected. Click on the roof itself, or hit Clear to restart the trace.`
+          );
+          addLog('PLANE3D', `Rejected click — pickMethod=${hit.pickMethod} mid-trace (${pts3DCesiumRef.current.length} pts already on mesh)`);
+          return;
+        }
       }
+      // A pick that DID land on the mesh proves there is coverage here, so the
+      // off-mesh counter starts over. Without this, two stray clicks spread
+      // across a long session would eventually offer a flat trace on an address
+      // that has perfectly good 3D.
+      if (hit.pickMethod === '3dtiles') offMeshFirstClicksRef.current = 0;
+
       // v62: STITCH — snap this corner to a shared roof point (existing plane vertex
       // or edge, or a point in the current trace) so adjacent planes meet at EXACT
       // common points. This is how the roof connects (ridge/hip/valley/dormer all
@@ -8427,13 +8561,65 @@ function SolarEngine3D({
     }
 
     try {
-      addLog('PLANE3D', `Finalizing: ${cartPts.length} points`);
+      addLog('PLANE3D', `Finalizing: ${cartPts.length} points${flatTraceRef.current ? ' (FLAT TRACE)' : ''}`);
 
-      // Step 1: Compute exact plane frame (first 3 pts define plane, rest projected)
-      const frame = computePlaneFromPoints3D(cartPts);
+      let frame: Plane3DFrame;
+      let plane: RoofPlane;
 
-      // Step 2: Build complete RoofPlane using projected points (guaranteed coplanar)
-      const plane = buildRoofPlane3D(cartPts);
+      if (flatTraceRef.current) {
+        // ── v66 FLAT TRACE: build the face from the FOOTPRINT ────────────────
+        // The picked heights are meaningless here (every click hit the WGS84
+        // ellipsoid), so we read lat/lng only and synthesize the third
+        // dimension from pitch + azimuth. See lib/3d/footprintToRoofPlane.ts
+        // for why this yields TRUE slope area rather than footprint area.
+        const outline = cartPts.map(p => {
+          const g = ecefToLatLng(p);
+          return { lat: g.lat, lng: g.lng };
+        });
+
+        // Azimuth from the SHAPE the user traced: the longest edge approximates
+        // the ridge, the slope runs perpendicular to it, and of the two normals
+        // we take the equator-facing one. This is the "minimal effort" half of
+        // Aurora's promise — the installer confirms a direction rather than
+        // knowing one. Already written, exported and unit-tested for Nearmap.
+        const centroidLat = outline.reduce((s, v) => s + v.lat, 0) / outline.length;
+        const azimuthDeg = deriveAzimuthFromOutline(outline, centroidLat);
+
+        const built = roofPlaneFromFootprint(outline, {
+          pitchDeg: tiltRef.current ?? 0,
+          azimuthDeg,
+          // A traced face has no measured eave height and it does not affect
+          // pitch, azimuth or area — only where the face floats. One storey is
+          // the right default; per-face height editing is a later step.
+          eaveHeightM: FLAT_TRACE_EAVE_HEIGHT_M,
+          groundElevM: cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0,
+        });
+
+        if (!built) {
+          setStatusMsg('🗺️ Flat trace: those corners don\'t form a roof face — they\'re collinear or under 0.5 m across. Click 3+ corners around the face and right-click to finish.');
+          addLog('PLANE3D', `Flat trace rejected: ${cartPts.length} pts did not form a face`);
+          return;
+        }
+
+        frame = built.frame;
+        plane = built.plane;
+
+        // A traced pitch is the installer's ESTIMATE, not a measurement, and it
+        // flows through to the planset. Route it through the same review step
+        // detected planes use rather than asserting it as confirmed fact.
+        plane.source = 'manual';
+        plane.confirmed = false;
+
+        addLog('PLANE3D', `Flat trace built: az=${azimuthDeg.toFixed(1)}° (from shape) pitch=${plane.pitch.toFixed(1)}° (from Tilt slider) area=${plane.area.toFixed(1)}m²`);
+      } else {
+        // ── Unchanged pre-v66 path: derive the plane from picked 3D-tile
+        // elevations. This is the branch a covered address always takes.
+        // Step 1: Compute exact plane frame (first 3 pts define plane, rest projected)
+        frame = computePlaneFromPoints3D(cartPts);
+
+        // Step 2: Build complete RoofPlane using projected points (guaranteed coplanar)
+        plane = buildRoofPlane3D(cartPts);
+      }
 
       // v62: Lock the grid columns to the EAVE (horizontal, perpendicular to the
       // plane's downslope azimuth) so a hand-traced face can't run the array
@@ -9650,6 +9836,28 @@ function SolarEngine3D({
       if (segPlanes.length > 0) {
         eligiblePlanes = segPlanes;
         addLog('AUTO', `handleAutoRoof: no drawn planes → built ${segPlanes.length} clean planes from Google roof segments`);
+
+        // v66: HAND THEM OVER. Until now these were used to place panels and
+        // then dropped on the floor: onRoofPlaneCreated is called from exactly
+        // one place (finalizePlane3D), so a correctly auto-detected roof left
+        // the Roof Planes sidebar reading "No Planes Detected", saved a design
+        // with zero roof geometry, and gave the planset nothing to stand on —
+        // even though the per-face pitch, azimuth and hull were right here.
+        //
+        // These came from Google Solar, not from a person, so they arrive
+        // UNCONFIRMED and route through the same operator review the Nearmap
+        // planes already use. buildRoofPlane3D hardcodes source:'manual' and
+        // confirmed:true (lib/roofPlane3D.ts ~582) because it was only ever
+        // called for hand-traced faces; override both rather than let a
+        // detection assert itself as a person's decision.
+        const detected = segPlanes.map((p, i) => {
+          p.source = 'solar_api';
+          p.confirmed = false;
+          if (p.solarSegmentIndex == null) p.solarSegmentIndex = i;
+          return p;
+        });
+        onRoofPlanesDetected?.(detected);
+        addLog('AUTO', `handleAutoRoof: emitted ${detected.length} detected planes to DesignStudio (unconfirmed, source=solar_api)`);
       }
     }
 
@@ -10610,8 +10818,8 @@ function SolarEngine3D({
               { mode: 'roof'    as PlacementMode, icon: '\u{1F3E0}', label: 'Roof',     tip: 'Place panels on a roof surface' },
               { mode: 'ground'  as PlacementMode, icon: '\u{1F331}', label: 'Ground',   tip: 'Ground mount: click start \u2192 end to place a row' },
               { mode: 'fence'   as PlacementMode, icon: '\u26A1',    label: 'Fence',    tip: 'SOL Fence: click points, right-click to finish' },
-              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: 'Custom Array', tip: 'Outline the panel area: click 3+ roof corners, right-click to place an array' },
-              { mode: 'mark_plane' as PlacementMode, icon: '⬡', label: 'Mark Plane', tip: 'Outline a roof face for the model/permit WITHOUT panels (3+ corners, right-click to finish). Use 🔗 Roof Model to see all edges.' },
+              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: 'Custom Array', tip: 'Outline the panel area: click 3+ roof corners, right-click to place an array. Works without 3D coverage — falls back to a flat trace using the Tilt slider pitch.' },
+              { mode: 'mark_plane' as PlacementMode, icon: '⬡', label: 'Mark Plane', tip: 'Outline a roof face for the model/permit WITHOUT panels (3+ corners, right-click to finish). Works without 3D coverage — falls back to a flat trace, with direction read from the shape you draw. Use 🔗 Roof Model to see all edges.' },
               { mode: 'row'     as PlacementMode, icon: '\u27A1',    label: 'Row',      tip: 'Row Tool: click two points to place a panel row' },
             ],
           },
@@ -10882,6 +11090,22 @@ function SolarEngine3D({
                  placementMode}
               </div>
 
+              {/* v66: flat-trace badge. The user needs to know the pitch is
+                  coming from the Tilt slider rather than being measured off a
+                  mesh — otherwise a traced face silently carries whatever the
+                  slider happened to say. Text lives in a template literal
+                  because JSX TEXT CHILDREN DO NOT PROCESS \u ESCAPES (that is
+                  the bug that made 7 buttons render their escape sequence as plain text). */}
+              {flatTrace ? (
+                <div style={{
+                  background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
+                  border: '1px solid rgba(80,180,255,0.35)', borderRadius: 8,
+                  padding: '4px 10px', fontSize: 11, color: '#66c2ff', fontWeight: 600,
+                }}>
+                  {`\u{1F5FA} Flat trace · pitch ${Math.round(tilt)}° from Tilt slider`}
+                </div>
+              ) : null}
+
               {/* ── Ground mode context controls (v48.28) ── */}
               {(placementMode === 'ground' || placementMode === 'ground_array') ? (
                 <div style={{
@@ -11003,7 +11227,7 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(0,255,136,0.15)', color: '#00ff88',
                         border: '1px solid rgba(0,255,136,0.4)', cursor: 'pointer' }}>
-                      \u2705 Create Roof Plane
+                      ✅ Create Roof Plane
                     </button>
                   ) : null}
                   {pts3DCount > 0 ? (
@@ -11011,7 +11235,7 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
                         background: 'rgba(255,60,60,0.12)', color: '#ff6666',
                         border: '1px solid rgba(255,60,60,0.3)', cursor: 'pointer' }}>
-                      \u2715 Clear
+                      ✕ Clear
                     </button>
                   ) : null}
                 </div>
@@ -11030,7 +11254,7 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(0,200,100,0.2)', color: '#00cc66',
                         border: '1px solid rgba(0,200,100,0.4)', cursor: 'pointer' }}>
-                      \u2705 Finish Fence
+                      ✅ Finish Fence
                     </button>
                   ) : null}
                 </div>
@@ -11057,7 +11281,7 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
                         background: 'rgba(255,255,255,0.08)', color: '#aaa',
                         border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>
-                      \u2715
+                      ✕
                     </button>
                   </div>
                   {selectedPanelIds.size === 1 ? (
@@ -11176,7 +11400,7 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
                         background: 'rgba(255,215,0,0.12)', color: '#ffd700',
                         border: '1px solid rgba(255,215,0,0.3)', cursor: 'pointer' }}>
-                      \u2715 Reset
+                      ✕ Reset
                     </button>
                   ) : null}
                 </div>
@@ -11677,7 +11901,7 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
                         background: 'rgba(0,255,136,0.12)', color: '#00ff88',
                         border: '1px solid rgba(0,255,136,0.3)', cursor: 'pointer' }}>
-                      \u2715 Reset
+                      ✕ Reset
                     </button>
                   ) : null}
                 </div>
@@ -11698,7 +11922,7 @@ function SolarEngine3D({
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(0,180,255,0.2)', color: '#00ccff',
                         border: '1px solid rgba(0,180,255,0.4)', cursor: 'pointer' }}>
-                      \u2705 Fill Plane
+                      ✅ Fill Plane
                     </button>
                   ) : null}
                 </div>
