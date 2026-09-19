@@ -74,7 +74,25 @@ export async function GET(req: NextRequest) {
 
   try {
     // 1. Ask the Solar API for the imagery layers (RGB lives here).
-    const dlUrl = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=${RADIUS_M}&view=IMAGERY_LAYERS&requiredQuality=HIGH&pixelSizeMeters=${PIXEL_SIZE}&key=${GOOGLE_SOLAR_API_KEY}`;
+    // 🚨 Quality ladder, not HIGH-only — same reasoning as /api/dsm. HIGH covers
+    // ~75% of the populated US, MEDIUM ~95%. Insisting on HIGH turned "we have
+    // 25 cm imagery for this address" into "no coverage", and the rural user
+    // fell back to blurry base tiles for no reason.
+    const IMAGERY_LADDER = ['HIGH', 'MEDIUM', 'BASE'] as const;
+    let dlUrl = '';
+    for (const q of IMAGERY_LADDER) {
+      const candidate = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=${RADIUS_M}&view=IMAGERY_LAYERS&requiredQuality=${q}&pixelSizeMeters=${PIXEL_SIZE}&key=${GOOGLE_SOLAR_API_KEY}`;
+      try {
+        const probe = await fetch(candidate);
+        if (!probe.ok) continue;
+        const j = await probe.json();
+        if (j.error || !j.rgbUrl) continue;
+        dlUrl = candidate;
+        console.log(`[SOLAR-RGB] ${lat},${lng} — imagery at requiredQuality=${q}`);
+        break;
+      } catch { /* try the next tier */ }
+    }
+    if (!dlUrl) dlUrl = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=${RADIUS_M}&view=IMAGERY_LAYERS&requiredQuality=BASE&pixelSizeMeters=${PIXEL_SIZE}&key=${GOOGLE_SOLAR_API_KEY}`;
     const dlRes = await fetch(dlUrl);
     if (!dlRes.ok) {
       // 404 = no coverage for this address — client keeps base tiles.

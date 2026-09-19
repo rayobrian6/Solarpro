@@ -140,12 +140,46 @@ export async function GET(req: NextRequest) {
   if (!lat || !lng) return NextResponse.json({ error: 'Missing lat/lng' }, { status: 400 });
 
   try {
-    // 1. Fetch DSM URL
-    const dlUrl = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=60&view=DSM_LAYER&requiredQuality=HIGH&pixelSizeMeters=${PIXEL_SIZE}&key=${GOOGLE_SOLAR_API_KEY}`;
-    const dlRes = await fetch(dlUrl);
-    if (!dlRes.ok) throw new Error(`dataLayers: ${dlRes.status}`);
-    const dlData = await dlRes.json();
-    if (dlData.error) throw new Error(dlData.error.message || 'dataLayers error');
+    // 1. Fetch DSM URL — TRYING EACH QUALITY TIER, NOT JUST HIGH.
+    //
+    // 🚨 THIS WAS HARDCODED TO HIGH, AND IT COST A WHOLE DAY.
+    // Google's tiers are not resolutions of the same coverage — they are
+    // DIFFERENT COVERAGE. HIGH is 0.1 m/px low-altitude aerial over roughly 75%
+    // of the populated US; MEDIUM is 0.25 m/px over roughly 95%, and Google's
+    // release notes call out that MEDIUM "now includes most of California,
+    // Texas, Massachusetts, and Illinois". Asking only for HIGH at a rural
+    // Illinois address returns nothing, so the DSM was declared unavailable and
+    // the user was left tracing every roof facet by hand on blurry imagery.
+    //
+    // Asking for a lower tier costs NOTHING in DSM detail: per Google's docs the
+    // DSM output is always 0.1 m/pixel whatever quality was requested. The tier
+    // governs which source imagery is admissible, not the raster we get back.
+    //
+    // So: take the best available rather than insisting on the best possible.
+    const QUALITY_LADDER = ['HIGH', 'MEDIUM', 'BASE'] as const;
+    let dlData: any = null;
+    let usedQuality = '';
+    const attempts: string[] = [];
+    for (const q of QUALITY_LADDER) {
+      const dlUrl = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=60&view=DSM_LAYER&requiredQuality=${q}&pixelSizeMeters=${PIXEL_SIZE}&key=${GOOGLE_SOLAR_API_KEY}`;
+      try {
+        const r = await fetch(dlUrl);
+        if (!r.ok) { attempts.push(`${q}:${r.status}`); continue; }
+        const j = await r.json();
+        if (j.error) { attempts.push(`${q}:${j.error.status || 'error'}`); continue; }
+        if (!j.dsmUrl) { attempts.push(`${q}:no-dsmUrl`); continue; }
+        dlData = j; usedQuality = q; break;
+      } catch (e) {
+        attempts.push(`${q}:${(e as Error).message}`);
+      }
+    }
+    if (!dlData) {
+      // Report which tiers were tried, so "no coverage" is a diagnosis rather
+      // than a shrug. A blanket failure here previously read as "this address
+      // has no 3D data at all", which was not true.
+      throw new Error(`dataLayers: no DSM at any quality tier (tried ${attempts.join(', ')})`);
+    }
+    console.log(`[DSM] ${lat},${lng} — DSM obtained at requiredQuality=${usedQuality}${attempts.length ? ` (after ${attempts.join(', ')})` : ''}`);
     const dsmUrl = dlData.dsmUrl + `&key=${GOOGLE_SOLAR_API_KEY}`;
 
     // 2. Download DSM GeoTIFF
