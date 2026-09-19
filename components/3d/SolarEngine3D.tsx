@@ -1058,6 +1058,10 @@ function SolarEngine3D({
     outline: Array<{ lat: number; lng: number }>;
     pitchDeg: number;
     azimuthDeg: number;
+    /** Ground reference from the ORIGINAL picks — see the note at the call site.
+     *  Stored per plane so a later eave change rebuilds against the same ground
+     *  the user traced on, instead of re-deriving it and moving the face. */
+    groundElevM: number;
   }>>(new Map());
 
   /**
@@ -1072,7 +1076,6 @@ function SolarEngine3D({
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C) return 0;
-    const groundElevM = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     const updates: Array<{
       id: string;
       vertices: Array<{ lat: number; lng: number }>;
@@ -1089,7 +1092,9 @@ function SolarEngine3D({
         pitchDeg: params.pitchDeg,
         azimuthDeg: params.azimuthDeg,
         eaveHeightM: newEaveM,
-        groundElevM,
+        // The ground the user traced on, captured at trace time. Re-deriving it
+        // here could move the face sideways in elevation on every height tweak.
+        groundElevM: params.groundElevM,
       });
       if (!built) continue;
 
@@ -8734,14 +8739,29 @@ function SolarEngine3D({
         const centroidLat = outline.reduce((s, v) => s + v.lat, 0) / outline.length;
         const azimuthDeg = deriveAzimuthFromOutline(outline, centroidLat);
 
+        // Ground reference comes from the points the user actually clicked, NOT
+        // from cesiumGroundElevRef.
+        //
+        // Those picks landed on the rendered surface — that IS the ground under
+        // this building, in the scene's own frame, by construction. The shared
+        // ref is computed separately from Google's elevation API plus a geoid
+        // approximation (see the fly effect), and when that API returns nothing
+        // it silently becomes `0 + geoidApprox` ≈ -32 m: the whole face would be
+        // built ~180 m below the terrain at an Illinois address and every panel
+        // on it would be buried out of sight. Using the picks removes that
+        // dependency entirely and cannot disagree with what the user saw.
+        const pickedGroundM = cartPts.length > 0
+          ? cartPts.reduce((s, p) => s + ecefToLatLng(p).height, 0) / cartPts.length
+          : (cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0);
+
         const built = roofPlaneFromFootprint(outline, {
           pitchDeg: tiltRef.current ?? 0,
           azimuthDeg,
           // A traced face has no measured eave height and it does not affect
-          // pitch, azimuth or area — only where the face floats. One storey is
-          // the right default; per-face height editing is a later step.
+          // pitch, azimuth or area — only where the face floats. Adjustable
+          // from the flat-trace badge.
           eaveHeightM: flatTraceEaveHeightRef.current,
-          groundElevM: cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0,
+          groundElevM: pickedGroundM,
         });
 
         if (!built) {
@@ -8771,6 +8791,7 @@ function SolarEngine3D({
           outline,
           pitchDeg: tiltRef.current ?? 0,
           azimuthDeg,
+          groundElevM: pickedGroundM,
         });
 
         addLog('PLANE3D', `Flat trace built: az=${azimuthDeg.toFixed(1)}° (from shape) pitch=${plane.pitch.toFixed(1)}° (from Tilt slider) eave=${flatTraceEaveHeightRef.current.toFixed(1)}m area=${plane.area.toFixed(1)}m²`);
