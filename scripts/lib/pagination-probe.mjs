@@ -19,11 +19,25 @@
 //   • the on-screen viewer applies a fit-to-width `transform` to #sp-sheets and
 //     shows a fixed #sp-toolbar; both are `!important`-reverted under print.
 //     Measuring the screen viewer measures the ZOOM, not the sheet.
-//   • the planset embeds NO web fonts (no @font-face / no remote CSS), so text
-//     metrics come from host-installed fonts. `document.fonts.status` is
-//     recorded on every run precisely because identical HTML can wrap
-//     differently on a host lacking the intended family.
+//   • D4: the planset EMBEDS its faces as WOFF2 (lib/permit/fonts/fontPack.ts).
+//     It no longer depends on host-installed fonts, and a bare host is now the
+//     SUPPORTED case. `document.fonts.status` is still recorded on every run,
+//     and the embedded faces are metric-checked before anything is measured —
+//     see lib/permit/fonts/fontMetricGate.mjs, which owns that rule for this
+//     module AND for the live PDF export path.
+//     (The line that used to sit here said "the planset embeds NO web fonts".
+//     That predated D4 and was false for two months.)
 // ═══════════════════════════════════════════════════════════════════════════
+
+import {
+  FONT_METRIC_PROBE,
+  FONT_METRIC_PROBE_PX,
+  GATED_FAMILIES,
+  REQUIRED_FONT_FACES as GATE_REQUIRED_FACES,
+  FONT_METRIC_TOLERANCE_PCT as GATE_TOLERANCE_PCT,
+  CANONICAL_ADVANCE_SUM,
+  measureAdvanceSumsInPage,
+} from '../../lib/permit/fonts/fontMetricGate.mjs';
 
 /** 17in x 11in at 96dpi — the physical sheet, exactly. */
 export const SHEET_W_PX = 1632;
@@ -80,94 +94,94 @@ export async function preparePrintPage(page) {
   }));
 }
 
-/** The METRIC FINGERPRINT of the two stacks the planset asks for, measured at
- *  16px on a reference host carrying genuine Arial and Courier New (Chromium
- *  149). Liberation Sans / Liberation Mono are metric-compatible substitutes and
- *  reproduce these widths; DejaVu and the bare CSS generics do not (the generic
- *  `monospace` measures 615.78 — 8.4% short of Courier New), so a fallback is
- *  detectable rather than silently mis-measured. */
-/** D4 — the fingerprint now validates the EMBEDDED canonical faces, not host
- *  fonts. Before the font pack, asking for Arial and checking its metrics was
- *  the only way to detect substitution. After embedding it is the wrong test in
- *  both directions: a host with no Arial is now the SUPPORTED case, and a host
- *  that HAS Arial would mask a broken embed by measuring the system face.
+/** D4 — the fingerprint validates the EMBEDDED canonical faces, not host fonts.
+ *  Before the font pack, asking for Arial and checking its metrics was the only
+ *  way to detect substitution. After embedding it is the wrong test in both
+ *  directions: a host with no Arial is now the SUPPORTED case, and a host that
+ *  HAS Arial would mask a broken embed by measuring the system face.
  *
- *  The expected widths are unchanged (571.73 / 672.11) because Liberation is
- *  metric-compatible with Arial / Courier New by design — which is precisely why
- *  embedding it reproduced the accepted geometry instead of reflowing it. They
- *  are now measured FROM THE EMBEDDED BYTES with no fallback in the stack, so a
- *  missing or corrupt face measures as the generic default and fails. */
-export const FONT_METRIC_REFERENCE = [
-  { label: 'SolarPro Sans 400 (embedded)', stack: `"SolarPro Sans"`, expectedPx: 571.73 },
-  { label: 'SolarPro Mono 400 (embedded)', stack: `"SolarPro Mono"`, expectedPx: 672.11 },
-];
+ *  🚨 THE NUMBERS AND THE RULE NOW LIVE IN ONE PLACE —
+ *  lib/permit/fonts/fontMetricGate.mjs — shared with the LIVE PDF export gate
+ *  in lib/pdf/generatePdf.ts, which carried a second hand-written copy of the
+ *  same constants.
+ *
+ *  What used to be here was: "the METRIC FINGERPRINT ... measured at 16px on a
+ *  reference host carrying genuine Arial and Courier New", expecting
+ *  571.73 / 672.11. Those are correct LINEAR metrics, and measuring them on a
+ *  host with those fonts is exactly how the subpixel assumption got baked in:
+ *  a renderer that quantizes glyph advances to whole pixels — bare-font Linux,
+ *  which is both CI and the production Lambda — reads fixed-pitch Mono as
+ *  70 x 10px = 700 instead of 70 x 9.6015625 = 672.109375, and fails by 4.15%
+ *  with a perfectly good font pack. The gate now probes at the em size, where
+ *  advances are integers by construction. See that module. */
+export const FONT_METRIC_REFERENCE = GATED_FAMILIES.map(family => ({
+  label: `${family} 400 (embedded)`,
+  stack: `"${family}"`,
+  family,
+}));
 
-/** The faces the artifact must actually have LOADED — `document.fonts.status`
- *  alone is not sufficient, a substituted face can still report 'loaded'. */
-export const REQUIRED_FONT_FACES = [
-  '400 16px "SolarPro Sans"',
-  '700 16px "SolarPro Sans"',
-  '400 16px "SolarPro Mono"',
-  '700 16px "SolarPro Mono"',
-  '400 16px "SolarPro Symbols"',
-];
+/** The faces the artifact must actually have LOADED. Weak on its own —
+ *  document.fonts.check() answers "can this be rendered with available fonts",
+ *  fallback INCLUDED, so it returns true for a family that does not exist. The
+ *  metric comparison is the load-bearing half. */
+export const REQUIRED_FONT_FACES = GATE_REQUIRED_FACES;
 
-/** Allowed deviation from the fingerprint. Metric-compatible families reproduce
- *  advance widths exactly; 1.5% absorbs hinting/rasteriser differences across
- *  platforms without admitting a genuinely different face. */
-export const FONT_METRIC_TOLERANCE_PCT = 1.5;
+/** Allowed deviation from the fingerprint. */
+export const FONT_METRIC_TOLERANCE_PCT = GATE_TOLERANCE_PCT;
 
 /**
- * Does this host actually resolve the families the stylesheet asks for — and
- * resolve them to something METRICALLY EQUIVALENT?
+ * Did the EMBEDDED canonical faces actually render, and render as themselves?
  *
- * The planset embeds no @font-face, so `--sans: Arial…` / `--mono: 'Courier
- * New'…` resolve against host-installed fonts. A host missing them silently
- * substitutes a different face, text rewraps, dense blocks grow, and the
- * page-fit scan then reports a LAYOUT clip that exists only on that host. That
- * is exactly how "PV-0 +10.0px / PV-4B +15.7px / SCHED +31.9px" was reported
- * against an artifact that measures clean wherever Arial exists.
+ * A host missing a requested face silently substitutes a different one, text
+ * rewraps, dense blocks grow, and the page-fit scan then reports a LAYOUT clip
+ * that exists only on that host. That is exactly how "PV-0 +10.0px /
+ * PV-4B +15.7px / SCHED +31.9px" was once reported against an artifact that
+ * measures clean elsewhere. Checking mere PRESENCE is not enough — fontconfig
+ * happily resolves a missing family to DejaVu Sans, present, non-generic and
+ * ~12% wider — so this compares advance widths against the shipped bytes.
  *
- * Checking mere *presence* is not enough: on a Linux host with neither the MS
- * core fonts nor Liberation, fontconfig happily resolves "Arial" to DejaVu Sans
- * — present, non-generic, and ~12% wider. Only a metric comparison catches that,
- * so this measures the rendered advance width of a fixed probe string against
- * the reference fingerprint above.
+ * The rule (probe, size, expectations, tolerance, verdict) comes from
+ * lib/permit/fonts/fontMetricGate.mjs and is shared with the live PDF export
+ * gate. Measurement is at the em size, so a renderer that quantizes glyph
+ * advances reads the same number as one that does not.
  */
 export async function detectFontAvailability(page, reference = FONT_METRIC_REFERENCE, tolerancePct = FONT_METRIC_TOLERANCE_PCT) {
-  return page.evaluate(([ref, tol]) => {
-    const ctx = document.createElement('canvas').getContext('2d');
-    const S = 'MMMMMMWWWWiiiill1234567890 The quick brown fox jumps over the lazy dog';
-    const widthOf = (stack) => { ctx.font = `16px ${stack}`; return ctx.measureText(S).width; };
-    const out = {};
-    // D4 — the embedded faces must be LOADED, checked per face. A malformed or
-    // substituted face can leave document.fonts.status === 'loaded'.
-    out.__faces = {
-      status: document.fonts.status,
-      size: document.fonts.size,
-      loaded: [...document.fonts].map(f => `${f.family}/${f.weight}/${f.status}`),
-      checks: Object.fromEntries([
-        '400 16px "SolarPro Sans"', '700 16px "SolarPro Sans"',
-        '400 16px "SolarPro Mono"', '700 16px "SolarPro Mono"',
-        '400 16px "SolarPro Symbols"',
-      ].map(f => [f, document.fonts.check(f)])),
+  const measured = await page.evaluate(
+    measureAdvanceSumsInPage,
+    [FONT_METRIC_PROBE, FONT_METRIC_PROBE_PX, GATED_FAMILIES],
+  );
+  const faceChecks = await page.evaluate(
+    (faces) => Object.fromEntries(faces.map(f => [f, document.fonts.check(f)])),
+    [...REQUIRED_FONT_FACES],
+  );
+  /** @type {Record<string, any>} */
+  const out = {};
+  // D4 — the embedded faces must be LOADED, checked per face. Kept because it
+  // still catches an @font-face that never registered, even though check()
+  // alone is not sufficient (it answers with fallback included).
+  out.__faces = {
+    status: measured.status,
+    size: measured.size,
+    loaded: measured.loaded,
+    checks: faceChecks,
+  };
+  for (const { label, stack, family } of reference) {
+    const widthPx = measured.families[family];
+    const expectedPx = CANONICAL_ADVANCE_SUM[family];
+    const deltaPct = ((widthPx - expectedPx) / expectedPx) * 100;
+    out[label] = {
+      stack,
+      widthPx: +widthPx.toFixed(2),
+      expectedPx,
+      deltaPct: +deltaPct.toFixed(2),
+      metricCompatible: Math.abs(deltaPct) <= tolerancePct,
+      probePx: FONT_METRIC_PROBE_PX,
+      // kept for the failure message: what the bare generics measure here
+      genericSerifPx: +measured.genericSerifPx.toFixed(2),
+      genericMonospacePx: +measured.genericMonospacePx.toFixed(2),
     };
-    for (const { label, stack, expectedPx } of ref) {
-      const w = widthOf(stack);
-      const deltaPct = ((w - expectedPx) / expectedPx) * 100;
-      out[label] = {
-        stack,
-        widthPx: +w.toFixed(2),
-        expectedPx,
-        deltaPct: +deltaPct.toFixed(2),
-        metricCompatible: Math.abs(deltaPct) <= tol,
-        // kept for the failure message: what the bare generics measure here
-        genericSerifPx: +widthOf('serif').toFixed(2),
-        genericMonospacePx: +widthOf('monospace').toFixed(2),
-      };
-    }
-    return out;
-  }, [reference, tolerancePct]);
+  }
+  return out;
 }
 
 /** Rendered width of a fixed probe string in an arbitrary font stack, in px.
