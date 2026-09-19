@@ -230,12 +230,12 @@ const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
 // mesh to sit on anyway. Per-face eave height is a later step.
 const FLAT_TRACE_EAVE_HEIGHT_M = 3.0;
 
-// v66: below this measured tilt, a face picked off the mesh is treated as
-// FLAT and rebuilt from its footprint using the Tilt slider. 5 degrees is
-// comfortably under the shallowest residential pitch (1/12 is 4.8 degrees,
-// and 2/12 = 9.5 degrees is the practical minimum for shingles) yet well
-// above the sub-degree noise a genuinely flat ground pick produces.
-const MESH_FLAT_TILT_DEG = 5;
+// v66: shared style for the Building view's stepper buttons.
+const BUILD_STEP_BTN: React.CSSProperties = {
+  padding: '1px 7px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.18)',
+  background: 'rgba(255,255,255,0.10)', color: '#e8eaf0', cursor: 'pointer',
+  fontWeight: 700, fontSize: 12, lineHeight: 1.4,
+};
 
 // v68: Vertex Handles (in-place footprint editing for Block / Gable / Hip / Tree).
 // Math in lib/3d/vertexHandlesMath.ts (unit-tested in tests/vertexHandles.test.ts).
@@ -918,6 +918,20 @@ function SolarEngine3D({
   // Guards against a slow texture fetch painting onto a scene that has since
   // been rebuilt or toggled off. Incremented on every extrusion render.
   const buildingRenderTokenRef = useRef(0);
+  // ── v66: DIRECT BUILDING CONTROLS ───────────────────────────────────────────
+  // Earlier passes tried to INFER the right roof shape — is a tileset loaded,
+  // did the pick hit real mesh, does the fitted plane look flat. Every one of
+  // those signals lied at an address with no roof geometry, and each fix chased
+  // the next symptom until one of them started rewriting traced corners and
+  // broke Stitch. The user can see the building; two knobs beat any detector
+  // and cannot be fooled.
+  //
+  // Both are VIEW state. They shape what the Building view draws, derived from
+  // the traced footprint at render time, and never write back to a plane.
+  const [wallHeightM, setWallHeightM] = useState(FLAT_TRACE_EAVE_HEIGHT_M);
+  const wallHeightRef = useRef(FLAT_TRACE_EAVE_HEIGHT_M);
+  const [buildingPitchDeg, setBuildingPitchDeg] = useState(25);
+  const buildingPitchRef = useRef(25);
   const measureOverlayRef = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
@@ -2073,7 +2087,7 @@ function SolarEngine3D({
       try { viewer.scene.requestRender(); } catch { /* ignore */ }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showBuilding3D, showRoofTexture, simHour, roofPlanes, flatTraceEaveHeightM, stage]);
+  }, [showBuilding3D, showRoofTexture, simHour, roofPlanes, wallHeightM, buildingPitchDeg, stage]);
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
   useEffect(() => { paintModeRef.current = paintMode; }, [paintMode]);
   useEffect(() => { onPanelPaintRef.current = onPanelPaint; }, [onPanelPaint]);
@@ -2145,6 +2159,8 @@ function SolarEngine3D({
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
   useEffect(() => { showRoofTextureRef.current = showRoofTexture; }, [showRoofTexture]);
+  useEffect(() => { wallHeightRef.current = wallHeightM; }, [wallHeightM]);
+  useEffect(() => { buildingPitchRef.current = buildingPitchDeg; }, [buildingPitchDeg]);
   useEffect(() => { showShadeRef.current = showShade; setShowShadeLocal(showShade); }, [showShade]);
   // v50.11: sync prop → local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
@@ -4251,11 +4267,43 @@ function SolarEngine3D({
       return;
     }
 
-    // Cesium Cartesian3 → plain Cart3 for the pure geometry module.
-    const faces = renderables.map((rp: any) => ({
-      id: rp.id as string,
-      polygon3D: rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[],
-    }));
+    // ── Build the faces this VIEW will draw ──────────────────────────────────
+    // 🚨 RENDER-TIME ONLY. Nothing below writes back to a stored plane.
+    //
+    // An earlier pass rebuilt traced planes in place whenever their fitted pitch
+    // looked wrong. That replaced the exact corners the user had clicked, which
+    // desynchronised Stitch (it operates on those corners) and shifted faces out
+    // from under the trace. The lesson: the trace is the user's data and this
+    // view does not get to edit it.
+    //
+    // So the Building view derives its own geometry from each face's PLAN-VIEW
+    // outline — the footprint the user traced, which was always correct — and
+    // applies the wall height and pitch from its own controls. Turn Building
+    // off and the traced planes are untouched, byte for byte. Adjusting these
+    // controls cannot corrupt a design.
+    const wallH = wallHeightRef.current;
+    const pitchDeg = buildingPitchRef.current;
+    const faces = renderables.map((rp: any) => {
+      const raw = rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[];
+      const outline = raw.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
+      // Ground under this face: its own lowest corner, less the current wall
+      // height. Derived per face so a building on a slope still sits down.
+      let lowest = Infinity;
+      for (const p of raw) { const h = ecefToLatLng(p).height; if (h < lowest) lowest = h; }
+      const shaped = isFinite(lowest)
+        ? roofPlaneFromFootprint(outline, {
+            pitchDeg,
+            azimuthDeg: deriveAzimuthFromOutline(
+              outline, outline.reduce((s, v) => s + v.lat, 0) / outline.length),
+            eaveHeightM: wallH,
+            groundElevM: lowest - wallH,
+          })
+        : null;
+      return {
+        id: rp.id as string,
+        polygon3D: (shaped?.plane.polygon3D ?? raw) as Cart3[],
+      };
+    });
 
     let minRoofH = Infinity;
     for (const f of faces) {
@@ -9056,67 +9104,14 @@ function SolarEngine3D({
         // Step 2: Build complete RoofPlane using projected points (guaranteed coplanar)
         plane = buildRoofPlane3D(cartPts);
 
-        // ── v66 FALLBACK: the mesh gave us a FLAT face ────────────────────────
-        // 🚨 THIS IS THE FIX FOR "it just built another flat plane just higher".
-        //
-        // Neither entry gate can detect a missing roof mesh, because both read
-        // signals that lie:
-        //   • Layer A checks tilesetRef.current, but Google's ROOT tileset
-        //     resolves globally whenever an API key is set — so a tileset always
-        //     "exists" even where there is no building geometry.
-        //   • Layer C checks pickMethod !== '3dtiles', but getWorldPosition sets
-        //     '3dtiles' whenever scene.pick() returns ANY object. It means
-        //     "something was pickable", not "the roof was hit". Where Google
-        //     serves ground-only photogrammetry, every corner comes back
-        //     '3dtiles' at TERRAIN height.
-        // So the trace ran the mesh path, every corner landed at one height, the
-        // Newell normal came out radial, and pitch was 0 — silently, because
-        // buildRoofPlane3D only warns above 75 degrees (near-vertical).
-        //
-        // Rather than chase a better mesh-detection signal, check the RESULT:
-        // if the picks produced a horizontal face while the user's Tilt slider
-        // says otherwise, the mesh had no roof to give us. Rebuild from the
-        // footprint, which is what the flat trace would have done. Trusting the
-        // outcome cannot be defeated by a mis-reported pick method.
-        //
-        // A genuinely flat roof still works: set Tilt to 0 and the fallback is
-        // skipped, because it only fires when the slider disagrees with the mesh.
-        const meshTilt = plane.pitch ?? 0;
-        const wantedTilt = tiltRef.current ?? 0;
-        if (meshTilt < MESH_FLAT_TILT_DEG && wantedTilt >= MESH_FLAT_TILT_DEG) {
-          const outline = cartPts.map(p => {
-            const g = ecefToLatLng(p);
-            return { lat: g.lat, lng: g.lng };
-          });
-          const centroidLat = outline.reduce((s, v) => s + v.lat, 0) / outline.length;
-          const azimuthDeg = deriveAzimuthFromOutline(outline, centroidLat);
-          const pickedGroundM = cartPts.reduce((s, p) => s + ecefToLatLng(p).height, 0) / cartPts.length;
-          const rebuilt = roofPlaneFromFootprint(outline, {
-            pitchDeg: wantedTilt,
-            azimuthDeg,
-            eaveHeightM: flatTraceEaveHeightRef.current,
-            groundElevM: pickedGroundM,
-          });
-          if (rebuilt) {
-            frame = rebuilt.frame;
-            plane = rebuilt.plane;
-            plane.source = 'manual';
-            plane.confirmed = false;
-            flatTracedPlaneIdsRef.current = [...flatTracedPlaneIdsRef.current, plane.id];
-            flatTraceParamsRef.current.set(plane.id, {
-              outline, pitchDeg: wantedTilt, azimuthDeg, groundElevM: pickedGroundM,
-            });
-            addLog('PLANE3D',
-              `Mesh returned a FLAT face (${meshTilt.toFixed(1)}°) — no roof geometry at this address. ` +
-              `Rebuilt from the footprint at ${wantedTilt.toFixed(0)}° with azimuth ${azimuthDeg.toFixed(0)}° read from the shape.`);
-            setStatusMsg(
-              `🗺️ No roof mesh here — built this face from your outline at ${wantedTilt.toFixed(0)}° ` +
-              `(Tilt slider), facing ${azimuthDeg.toFixed(0)}°. Adjust pitch per face in Roof Planes.`
-            );
-          } else {
-            addLog('PLANE3D', `Mesh face is flat (${meshTilt.toFixed(1)}°) and the footprint rebuild failed — keeping the flat face`);
-          }
-        }
+        // NOTE (v66): an earlier pass added a fallback here that REBUILT the
+        // plane from its footprint whenever the fitted pitch came out flat.
+        // It was removed: rebuilding after the fact silently replaced the exact
+        // corners the user placed, which desynchronised Stitch (it operates on
+        // those corners) and moved faces out from under the trace. Roof shape
+        // is now adjusted EXPLICITLY from the Building controls instead of
+        // being inferred here. Do not reintroduce an automatic rebuild in this
+        // path — what the user clicked is what this branch must produce.
       }
 
       // v62: Lock the grid columns to the EAVE (horizontal, perpendicular to the
@@ -12891,6 +12886,38 @@ function SolarEngine3D({
               >
                 🛰 Aerial{showRoofTexture ? ' ✓' : ''}
               </button>
+            ) : null}
+            {/* v66: raise/lower the walls and set the roof pitch directly.
+                No detection — you can see the building, so you shape it.
+                These only affect what the Building view draws; your traced
+                planes are never modified. */}
+            {showBuilding3D ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 2 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  <span style={{ fontSize: 10, color: '#9aa3b8', fontWeight: 700, letterSpacing: 0.3 }}>WALLS</span>
+                  <button data-no-drag title="Lower the walls by 1 ft"
+                    onClick={() => setWallHeightM(h => Math.max(0.3048, +(h - 0.3048).toFixed(4)))}
+                    style={BUILD_STEP_BTN}>{'−'}</button>
+                  <span style={{ minWidth: 40, textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#e8eaf0', fontVariantNumeric: 'tabular-nums' }}>
+                    {ftStr(wallHeightM)}
+                  </span>
+                  <button data-no-drag title="Raise the walls by 1 ft"
+                    onClick={() => setWallHeightM(h => +(h + 0.3048).toFixed(4))}
+                    style={BUILD_STEP_BTN}>+</button>
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  <span style={{ fontSize: 10, color: '#9aa3b8', fontWeight: 700, letterSpacing: 0.3 }}>PITCH</span>
+                  <button data-no-drag title="Shallower roof"
+                    onClick={() => setBuildingPitchDeg(d => Math.max(0, d - 1))}
+                    style={BUILD_STEP_BTN}>{'−'}</button>
+                  <span style={{ minWidth: 32, textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#e8eaf0', fontVariantNumeric: 'tabular-nums' }}>
+                    {buildingPitchDeg}{'°'}
+                  </span>
+                  <button data-no-drag title="Steeper roof"
+                    onClick={() => setBuildingPitchDeg(d => Math.min(60, d + 1))}
+                    style={BUILD_STEP_BTN}>+</button>
+                </span>
+              </span>
             ) : null}
             <button
               onClick={() => { const v = viewerRef.current; const Cz = (window as any).Cesium; if (v && Cz) stitchRoofVertices(v, Cz); }}
