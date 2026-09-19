@@ -219,7 +219,7 @@ import {
 } from './tree';
 const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
 
-// v66 (flat trace): eave height for a footprint-built roof face, metres.
+// v66 (flat trace): DEFAULT eave height for a footprint-built roof face, metres.
 // ~10 ft — a single-storey eave. A hand trace carries no measured height, and
 // this value does NOT affect pitch, azimuth or area (see
 // lib/3d/footprintToRoofPlane.ts) — it only sets how far the face floats above
@@ -1033,6 +1033,134 @@ function SolarEngine3D({
   // lib/3d/footprintToRoofPlane.ts.
   const flatTraceRef = useRef<boolean>(false);
   const [flatTrace, setFlatTrace] = useState(false); // render-visible mirror for UI copy
+
+  /**
+   * v66: Snap the camera straight down and remember the pose to restore.
+   *
+   * A flat trace picks corners on the ground plane, so it is only correct from
+   * a nadir camera — see the pitch lock in the orbit drag handler. Calling this
+   * on flat-trace entry is what makes a traced footprint land ON the building
+   * instead of in the field beyond it.
+   */
+  // v66: eave height for flat-traced faces, in metres above local ground.
+  // A hand trace carries no measured height, so the installer sets it. It does
+  // NOT affect pitch, azimuth or area — only how far the face floats in the 3D
+  // scene — but that is exactly what makes a traced roof look right or wrong.
+  // Editable live from the flat-trace badge; the last traced face rebuilds so
+  // the number means something immediately instead of only on the next trace.
+  const [flatTraceEaveHeightM, setFlatTraceEaveHeightM] = useState(FLAT_TRACE_EAVE_HEIGHT_M);
+  const flatTraceEaveHeightRef = useRef(FLAT_TRACE_EAVE_HEIGHT_M);
+  useEffect(() => { flatTraceEaveHeightRef.current = flatTraceEaveHeightM; }, [flatTraceEaveHeightM]);
+  /** Ids of faces built by flat trace, so a height change knows what to rebuild. */
+  const flatTracedPlaneIdsRef = useRef<string[]>([]);
+  /** planeId → the inputs that built it, so it can be rebuilt without re-tracing. */
+  const flatTraceParamsRef = useRef<Map<string, {
+    outline: Array<{ lat: number; lng: number }>;
+    pitchDeg: number;
+    azimuthDeg: number;
+  }>>(new Map());
+
+  /**
+   * v66: Re-raise every flat-traced face to a new eave height.
+   *
+   * Rebuilds from the stored outline + pitch + azimuth rather than making the
+   * user re-trace. The footprint, pitch, azimuth and area are all unchanged —
+   * only where the face sits vertically moves — but that is what decides
+   * whether a traced roof looks like a roof or like a rug in the yard.
+   */
+  const rebuildFlatTracedPlanes = (newEaveM: number) => {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) return 0;
+    const groundElevM = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    const updates: Array<{
+      id: string;
+      vertices: Array<{ lat: number; lng: number }>;
+      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
+      polygon3D?: Cart3[];
+      origin3D?: Cart3;
+      normal3D?: Cart3;
+    }> = [];
+
+    for (const id of flatTracedPlaneIdsRef.current) {
+      const params = flatTraceParamsRef.current.get(id);
+      if (!params) continue;
+      const built = roofPlaneFromFootprint(params.outline, {
+        pitchDeg: params.pitchDeg,
+        azimuthDeg: params.azimuthDeg,
+        eaveHeightM: newEaveM,
+        groundElevM,
+      });
+      if (!built) continue;
+
+      // Swap the rendered entity for one at the new height.
+      const oldIds = plane3DEntityMap.current.get(id) ?? [];
+      oldIds.forEach(eid => {
+        const ent = viewer.entities.getById(eid);
+        if (ent) try { viewer.entities.remove(ent); } catch { /* ignore */ }
+      });
+      const cesiumPts = built.frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
+      const isSelected = selectedRoofPlaneId === id;
+      const newIds = renderPlane3DEntity(
+        viewer, C, cesiumPts, id, built.frame, isSelected, markOnlyPlaneIdsRef.current.has(id),
+      );
+      plane3DEntityMap.current.set(id, newIds);
+      plane3DFrameMap.current.set(id, built.frame);
+      plane3DCesiumPtsMap.current.set(id, cesiumPts);
+
+      if (built.plane.localFrame3D) {
+        updates.push({
+          id,
+          vertices: built.plane.vertices,
+          localFrame3D: built.plane.localFrame3D,
+          polygon3D: built.plane.polygon3D,
+          origin3D: built.plane.origin3D,
+          normal3D: built.plane.normal3D,
+        });
+      }
+    }
+
+    plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
+    // Reuse the stitch channel: it already replaces geometry on existing planes
+    // by id in DesignStudio, which is exactly what a height change is.
+    if (updates.length > 0) onRoofPlanesStitched?.(updates);
+    if (showRoofModel)    { try { renderRoofWireframe(viewer, C); } catch { /* ignore */ } }
+    if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch { /* ignore */ } }
+    try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    return updates.length;
+  };
+
+  const preFlatTracePitchRef = useRef<number | null>(null);
+  const enterTopDownForFlatTrace = () => {
+    const o = orbitRef.current;
+    if (!o) return;
+    if (preFlatTracePitchRef.current === null) preFlatTracePitchRef.current = o.pitch;
+    // NEAR-nadir, not exact. applyOrbit clamps pitch to [-π/2 + 0.02, …] and a
+    // camera pose exactly overhead is degenerate anyway (the heading of a
+    // straight-down look direction is undefined). Writing the clamped value
+    // ourselves means no other consumer of orbit.pitch ever sees an
+    // out-of-range number, instead of relying on a downstream fix-up.
+    //
+    // The residual tilt is 0.02 rad = 1.15°, and parallax scales with the
+    // HEIGHT of what you trace, not with camera range: a 3 m eave is displaced
+    // by 3·tan(1.15°) = 6 cm. That is far inside a click's precision.
+    o.pitch = -Math.PI / 2 + 0.02;
+    try {
+      applyOrbitRef.current?.();
+      viewerRef.current?.scene?.requestRender?.();
+    } catch { /* boot not finished; applied on next gesture */ }
+  };
+  /** Give the user their tilted view back once the trace is over. */
+  const restorePitchAfterFlatTrace = () => {
+    const o = orbitRef.current;
+    if (!o || preFlatTracePitchRef.current === null) return;
+    o.pitch = preFlatTracePitchRef.current;
+    preFlatTracePitchRef.current = null;
+    try {
+      applyOrbitRef.current?.();
+      viewerRef.current?.scene?.requestRender?.();
+    } catch { /* ignore */ }
+  };
   // Consecutive off-mesh first-clicks on an address that DOES have a tileset.
   // One is a stray click and gets the normal "you missed the roof" message; two
   // in a row means there is genuinely no mesh here and we offer the flat trace.
@@ -1648,6 +1776,7 @@ function SolarEngine3D({
       if (flatTraceRef.current) {
         flatTraceRef.current = false;
         setFlatTrace(false);
+        restorePitchAfterFlatTrace();
       }
     }
 
@@ -1677,11 +1806,13 @@ function SolarEngine3D({
           // the outline instead of from the mesh.
           flatTraceRef.current = true;
           setFlatTrace(true);
+          enterTopDownForFlatTrace();
           const pitchNow = Math.round(tiltRef.current ?? 0);
           if (placementMode === 'mark_plane') setShowRoofModel(true);
           setStatusMsg(
-            `🗺️ Flat trace (no 3D coverage here) — click this roof face's corners (3+), right-click to finish. ` +
-            `Direction is read from the shape you trace; pitch starts at ${pitchNow}° and is editable per face afterwards.`
+            `🗺️ Flat trace (no 3D coverage here) — view snapped straight down so your corners land ON the roof. ` +
+            `Click this face's corners (3+), right-click to finish. Direction is read from the shape you trace; ` +
+            `pitch starts at ${pitchNow}° and is editable per face afterwards.`
           );
           addLog('PLANE3D', `Flat-trace entry to ${placementMode} — no tileset; footprint + pitch ${pitchNow}° will build the face`);
         }
@@ -2639,7 +2770,19 @@ function SolarEngine3D({
           } else if (orbit.dragButton === 2 || orbit.dragButton === 1) {
             // Right-drag or middle-drag: full orbit (heading + pitch)
             orbit.heading = orbit.dragStartH - dx * ORBIT_DRAG;
-            orbit.pitch   = orbit.dragStartP + dy * ORBIT_DRAG;
+            // v66: PITCH IS LOCKED TO NADIR DURING A FLAT TRACE.
+            // A flat trace picks corners on the ground plane (h=0) because there
+            // is no roof mesh to pick. From a TILTED camera, the ray through a
+            // pixel that visually sits on a roof carries on past the building
+            // and lands on the ground well beyond it — so the captured footprint
+            // is a displaced, stretched shadow of the roof rather than the roof.
+            // Straight down, the ray meets the ground directly under the pixel
+            // and the footprint is correct. This is why Aurora marks roof edges
+            // in 2D. Heading, pan and zoom stay free; only tilt is withheld,
+            // and only while a flat trace is actually running.
+            if (!flatTraceRef.current) {
+              orbit.pitch = orbit.dragStartP + dy * ORBIT_DRAG;
+            }
           }
 
           applyOrbit();
@@ -8481,13 +8624,19 @@ function SolarEngine3D({
 
           flatTraceRef.current = true;
           setFlatTrace(true);
+          enterTopDownForFlatTrace();
           const pitchNow = Math.round(tiltRef.current ?? 0);
           setStatusMsg(
-            `🗺️ No 3D roof mesh here — tracing flat. Click this face's corners (3+), right-click to finish. ` +
-            `Pitch starts at ${pitchNow}° (Tilt slider) and direction comes from the shape you draw; both editable per face afterwards.`
+            `🗺️ No 3D roof mesh here — tracing flat, and I've snapped the view straight down. ` +
+            `That's required: from a tilted camera a click aimed at a roof lands on the ground BEYOND the building, ` +
+            `so the outline comes out displaced. Now click this face's corners (3+) and right-click to finish. ` +
+            `Pitch starts at ${pitchNow}° (Tilt slider); direction comes from the shape you draw.`
           );
-          addLog('PLANE3D', `Flat trace confirmed by a 2nd off-mesh first click (${hit.pickMethod}) — building from footprint`);
-          // fall through and accept this corner
+          addLog('PLANE3D', `Flat trace confirmed by a 2nd off-mesh first click (${hit.pickMethod}) — snapped to nadir, DISCARDING this corner (picked while tilted, so it carries parallax)`);
+          // Deliberately do NOT accept this corner: it was picked from the old
+          // tilted pose and is displaced. The camera has moved under the cursor
+          // anyway, so the pixel no longer means what the user aimed at.
+          return;
         } else {
           // Mid-trace miss on an address that DOES have mesh. Unchanged.
           setStatusMsg(
@@ -8591,7 +8740,7 @@ function SolarEngine3D({
           // A traced face has no measured eave height and it does not affect
           // pitch, azimuth or area — only where the face floats. One storey is
           // the right default; per-face height editing is a later step.
-          eaveHeightM: FLAT_TRACE_EAVE_HEIGHT_M,
+          eaveHeightM: flatTraceEaveHeightRef.current,
           groundElevM: cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0,
         });
 
@@ -8609,8 +8758,22 @@ function SolarEngine3D({
         // detected planes use rather than asserting it as confirmed fact.
         plane.source = 'manual';
         plane.confirmed = false;
+        // Remember the inputs so a later eave-height change can rebuild this
+        // exact face instead of making the user re-trace it.
+        (plane as any).__flatTrace = {
+          outline,
+          pitchDeg: tiltRef.current ?? 0,
+          azimuthDeg,
+          eaveHeightM: flatTraceEaveHeightRef.current,
+        };
+        flatTracedPlaneIdsRef.current = [...flatTracedPlaneIdsRef.current, plane.id];
+        flatTraceParamsRef.current.set(plane.id, {
+          outline,
+          pitchDeg: tiltRef.current ?? 0,
+          azimuthDeg,
+        });
 
-        addLog('PLANE3D', `Flat trace built: az=${azimuthDeg.toFixed(1)}° (from shape) pitch=${plane.pitch.toFixed(1)}° (from Tilt slider) area=${plane.area.toFixed(1)}m²`);
+        addLog('PLANE3D', `Flat trace built: az=${azimuthDeg.toFixed(1)}° (from shape) pitch=${plane.pitch.toFixed(1)}° (from Tilt slider) eave=${flatTraceEaveHeightRef.current.toFixed(1)}m area=${plane.area.toFixed(1)}m²`);
       } else {
         // ── Unchanged pre-v66 path: derive the plane from picked 3D-tile
         // elevations. This is the branch a covered address always takes.
@@ -11101,8 +11264,40 @@ function SolarEngine3D({
                   background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
                   border: '1px solid rgba(80,180,255,0.35)', borderRadius: 8,
                   padding: '4px 10px', fontSize: 11, color: '#66c2ff', fontWeight: 600,
+                  display: 'flex', alignItems: 'center', gap: 8,
                 }}>
-                  {`\u{1F5FA} Flat trace · pitch ${Math.round(tilt)}° from Tilt slider`}
+                  <span>{`\u{1F5FA} Flat trace · view locked straight down · pitch ${Math.round(tilt)}°`}</span>
+                  {/* Eave height. A hand trace has no measured height, so this is
+                      the only way to sit the face on the building instead of
+                      3 m off the ground. Adjusting rebuilds every face already
+                      traced, so the number is immediate rather than applying
+                      only to the next one. */}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#9ad8ff' }}>
+                    <span style={{ opacity: 0.8 }}>{'eave'}</span>
+                    <button
+                      onClick={() => {
+                        const next = Math.max(0, +(flatTraceEaveHeightM - 0.3048).toFixed(4));
+                        setFlatTraceEaveHeightM(next);
+                        flatTraceEaveHeightRef.current = next;
+                        const n = rebuildFlatTracedPlanes(next);
+                        setStatusMsg(`\u{1F5FA} Eave height ${ftStr(next)} · ${n} face${n === 1 ? '' : 's'} re-raised`);
+                      }}
+                      title="Lower the traced roof by 1 ft"
+                      style={{ padding: '0 5px', borderRadius: 4, border: '1px solid rgba(80,180,255,0.3)', background: 'rgba(80,180,255,0.12)', color: '#9ad8ff', cursor: 'pointer', fontWeight: 700 }}
+                    >{'−'}</button>
+                    <span style={{ minWidth: 34, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{ftStr(flatTraceEaveHeightM)}</span>
+                    <button
+                      onClick={() => {
+                        const next = +(flatTraceEaveHeightM + 0.3048).toFixed(4);
+                        setFlatTraceEaveHeightM(next);
+                        flatTraceEaveHeightRef.current = next;
+                        const n = rebuildFlatTracedPlanes(next);
+                        setStatusMsg(`\u{1F5FA} Eave height ${ftStr(next)} · ${n} face${n === 1 ? '' : 's'} re-raised`);
+                      }}
+                      title="Raise the traced roof by 1 ft"
+                      style={{ padding: '0 5px', borderRadius: 4, border: '1px solid rgba(80,180,255,0.3)', background: 'rgba(80,180,255,0.12)', color: '#9ad8ff', cursor: 'pointer', fontWeight: 700 }}
+                    >{'+'}</button>
+                  </span>
                 </div>
               ) : null}
 
