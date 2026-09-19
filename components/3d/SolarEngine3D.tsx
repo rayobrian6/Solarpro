@@ -932,6 +932,16 @@ function SolarEngine3D({
   const wallHeightRef = useRef(FLAT_TRACE_EAVE_HEIGHT_M);
   const [buildingPitchDeg, setBuildingPitchDeg] = useState(25);
   const buildingPitchRef = useRef(25);
+  // Per-face overrides. A face the user has selected and adjusted keeps its own
+  // pitch / wall height / azimuth; everything else follows the global controls.
+  // Ray: "it adjusts both planes" — a real roof has a porch at a shallower
+  // pitch, a dormer, an addition. One knob for the whole building is not enough.
+  type BuildingFaceOverride = { pitchDeg?: number; wallHeightM?: number; azimuthDeg?: number };
+  const [buildingOverrides, setBuildingOverrides] = useState<Map<string, BuildingFaceOverride>>(new Map());
+  const buildingOverridesRef = useRef<Map<string, BuildingFaceOverride>>(new Map());
+  // Which face is selected for editing, by plane id. null = the whole building.
+  const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
+  const selectedFaceIdRef = useRef<string | null>(null);
   const measureOverlayRef = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
@@ -2087,7 +2097,7 @@ function SolarEngine3D({
       try { viewer.scene.requestRender(); } catch { /* ignore */ }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showBuilding3D, showRoofTexture, simHour, roofPlanes, wallHeightM, buildingPitchDeg, stage]);
+  }, [showBuilding3D, showRoofTexture, simHour, roofPlanes, wallHeightM, buildingPitchDeg, buildingOverrides, selectedFaceId, stage]);
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
   useEffect(() => { paintModeRef.current = paintMode; }, [paintMode]);
   useEffect(() => { onPanelPaintRef.current = onPanelPaint; }, [onPanelPaint]);
@@ -2161,6 +2171,10 @@ function SolarEngine3D({
   useEffect(() => { showRoofTextureRef.current = showRoofTexture; }, [showRoofTexture]);
   useEffect(() => { wallHeightRef.current = wallHeightM; }, [wallHeightM]);
   useEffect(() => { buildingPitchRef.current = buildingPitchDeg; }, [buildingPitchDeg]);
+  useEffect(() => { buildingOverridesRef.current = buildingOverrides; }, [buildingOverrides]);
+  useEffect(() => { selectedFaceIdRef.current = selectedFaceId; }, [selectedFaceId]);
+  const showBuilding3DRef = useRef(false);
+  useEffect(() => { showBuilding3DRef.current = showBuilding3D; }, [showBuilding3D]);
   useEffect(() => { showShadeRef.current = showShade; setShowShadeLocal(showShade); }, [showShade]);
   // v50.11: sync prop → local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
@@ -4312,18 +4326,30 @@ function SolarEngine3D({
 
     const faces = raw.map(rf => {
       const outline = rf.polygon3D.map(p => { const g = ecefToLatLng(p); return { lat: g.lat, lng: g.lng }; });
-      // Ground under this face: its own lowest corner, less the current wall
-      // height. Derived per face so a building on a slope still sits down.
+
+      // Ground under THIS face, from the TRACED geometry — per face, so a
+      // building on a slope still sits down, and from `raw` so it is stable.
+      //
+      // 🚨 THIS IS WHY THE WALLS CONTROL DID NOTHING. It previously read
+      //   groundElevM: lowest - wallH   with   eaveHeightM: wallH
+      // and the eave lands at ground + eave = (lowest - wallH) + wallH = lowest.
+      // The wall height cancelled itself out exactly, so the roof never moved
+      // however many times you clicked. Ground must be a reference that does
+      // NOT move with the control; only the eave above it may.
       let lowest = Infinity;
       for (const p of rf.polygon3D) { const h = ecefToLatLng(p).height; if (h < lowest) lowest = h; }
-      const shaped = isFinite(lowest)
-        ? roofPlaneFromFootprint(outline, {
-            pitchDeg,
-            azimuthDeg: azimuths.get(rf.id) ?? 180,
-            eaveHeightM: wallH,
-            groundElevM: lowest - wallH,
-          })
-        : null;
+      if (!isFinite(lowest)) return { id: rf.id, polygon3D: rf.polygon3D as Cart3[] };
+      const groundM = lowest - FLAT_TRACE_EAVE_HEIGHT_M;
+
+      // Per-face overrides win over the global controls, so selecting one face
+      // and adjusting it leaves its neighbours alone.
+      const ov = buildingOverridesRef.current.get(rf.id);
+      const shaped = roofPlaneFromFootprint(outline, {
+        pitchDeg:    ov?.pitchDeg    ?? pitchDeg,
+        azimuthDeg:  ov?.azimuthDeg  ?? azimuths.get(rf.id) ?? 180,
+        eaveHeightM: ov?.wallHeightM ?? wallH,
+        groundElevM: groundM,
+      });
       return {
         id: rf.id,
         polygon3D: (shaped?.plane.polygon3D ?? rf.polygon3D) as Cart3[],
@@ -4419,6 +4445,7 @@ function SolarEngine3D({
       if (orient.tiltDeg < 1) flatFaceCount++;
       const pts = f.polygon3D.map(p => new C.Cartesian3(p.x, p.y, p.z));
       const lit = litness(f.polygon3D);
+      const isSel = selectedFaceIdRef.current === f.id;
       const ent = viewer.entities.add({
         name: `[BUILD3D-ROOF] ${f.id}`,
         polygon: {
@@ -4426,9 +4453,12 @@ function SolarEngine3D({
           // Flat colour first so the roof is solid IMMEDIATELY; the aerial
           // texture swaps in below when its tiles arrive. Never leave the user
           // looking at nothing while the network works.
-          material:          shade('#8a7466', lit, 0.98),
+          material:          shade(isSel ? '#2f6f8f' : '#8a7466', lit, 0.98),
           outline:           true,
-          outlineColor:      roofEdge,
+          // A selected face gets a bright cyan edge — it must be obvious which
+          // face the Walls/Pitch steppers are about to move.
+          outlineColor:      isSel ? C.Color.fromCssColorString('#00e5ff') : roofEdge,
+          outlineWidth:      isSel ? 4 : 1,
           perPositionHeight: true,
           arcType:           C.ArcType.NONE,
           shadows:           C.ShadowMode.ENABLED,
@@ -7254,6 +7284,27 @@ function SolarEngine3D({
   const groupKeyOf = (p?: PlacedPanel | null): string | null =>
     p ? (((p as any).planeId ?? (p as any).layoutId ?? p.id) || null) : null;
 
+  /**
+   * v66: which Building roof face is under the cursor, or null.
+   *
+   * Roof entities are named "[BUILD3D-ROOF] <planeId>" in renderBuildingExtrusion,
+   * so the plane id is recoverable straight from the pick. drillPick rather than
+   * pick because the aerial texture and the outline sit on the same polygon and
+   * a plain pick can return either.
+   */
+  function pickBuildingFaceAtScreen(viewer: any, C: any, screenPos: any): string | null {
+    try {
+      const hits = viewer.scene.drillPick(screenPos, 8) ?? [];
+      for (const h of hits) {
+        const name: string = h?.id?.name ?? '';
+        if (typeof name === 'string' && name.startsWith('[BUILD3D-ROOF] ')) {
+          return name.slice('[BUILD3D-ROOF] '.length);
+        }
+      }
+    } catch { /* pick can throw mid-frame; treat as no hit */ }
+    return null;
+  }
+
   function handleSelectClick(viewer: any, C: any, screenPos: any) {
     try {
       // v63: paint mode — a click assigns the hit panel to the active string
@@ -7269,6 +7320,28 @@ function SolarEngine3D({
         }
         return;
       }
+      // v66: BUILDING FACE SELECTION. When the solid building is shown, a click
+      // on a roof face selects THAT face so the Walls / Pitch controls act on it
+      // alone. Ray: "I have no way of selecting a plane" and "it adjusts both
+      // planes". Checked before panel selection because with Building on the
+      // roof surfaces sit above the panels visually; a click that lands on a
+      // panel still falls through to the panel logic below.
+      if (showBuilding3DRef.current) {
+        const faceId = pickBuildingFaceAtScreen(viewer, C, screenPos);
+        if (faceId) {
+          setSelectedFaceId(prev => (prev === faceId ? null : faceId));
+          const ov = buildingOverridesRef.current.get(faceId);
+          setStatusMsg(
+            selectedFaceIdRef.current === faceId
+              ? '⬡ Face deselected — Walls and Pitch now apply to the whole building'
+              : `⬡ Face selected — Walls and Pitch now apply to THIS face only` +
+                (ov ? ` (pitch ${ov.pitchDeg ?? buildingPitchRef.current}°, walls ${ftStr(ov.wallHeightM ?? wallHeightRef.current)})` : '') +
+                ` · click it again to deselect`
+          );
+          return;
+        }
+      }
+
       // v31.1: drillPick finds panel entities even when occluded by terrain/3D tiles.
       // v62: GROUP SELECTION (Figma/PowerPoint model — no modes, no new buttons).
       //   • plain click            → select the WHOLE array (move/rotate the array)
@@ -11071,6 +11144,54 @@ function SolarEngine3D({
     return dirs[Math.round(az / 22.5) % 16];
   };
 
+  // ── v66: Building controls, scoped to the selection ────────────────────────
+  // With a face selected the steppers write a per-face override; with nothing
+  // selected they move the whole building. One control set, two scopes, so
+  // there is no separate "edit face" mode to discover.
+  const effectivePitchDeg = selectedFaceId
+    ? (buildingOverrides.get(selectedFaceId)?.pitchDeg ?? buildingPitchDeg)
+    : buildingPitchDeg;
+  const effectiveWallM = selectedFaceId
+    ? (buildingOverrides.get(selectedFaceId)?.wallHeightM ?? wallHeightM)
+    : wallHeightM;
+
+  function adjustBuilding(delta: { pitch?: number; wall?: number }) {
+    const nextPitch = delta.pitch != null
+      ? Math.max(0, Math.min(60, effectivePitchDeg + delta.pitch)) : undefined;
+    const nextWall = delta.wall != null
+      ? Math.max(0.3048, +(effectiveWallM + delta.wall).toFixed(4)) : undefined;
+
+    if (selectedFaceId) {
+      setBuildingOverrides(prev => {
+        const next = new Map(prev);
+        const cur = next.get(selectedFaceId) ?? {};
+        next.set(selectedFaceId, {
+          ...cur,
+          ...(nextPitch != null ? { pitchDeg: nextPitch } : {}),
+          ...(nextWall != null ? { wallHeightM: nextWall } : {}),
+        });
+        return next;
+      });
+      return;
+    }
+    // No selection: move the whole building, and drop per-face overrides for
+    // whichever property changed so the global value actually takes effect
+    // everywhere instead of being silently ignored on overridden faces.
+    if (nextPitch != null) setBuildingPitchDeg(nextPitch);
+    if (nextWall != null) setWallHeightM(nextWall);
+    setBuildingOverrides(prev => {
+      if (prev.size === 0) return prev;
+      const next = new Map<string, BuildingFaceOverride>();
+      prev.forEach((v, k) => {
+        const kept: BuildingFaceOverride = { ...v };
+        if (nextPitch != null) delete kept.pitchDeg;
+        if (nextWall != null) delete kept.wallHeightM;
+        if (Object.keys(kept).length > 0) next.set(k, kept);
+      });
+      return next;
+    });
+  }
+
   // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#0a0a1a', overflow: 'hidden' }}>
@@ -12918,28 +13039,39 @@ function SolarEngine3D({
                 planes are never modified. */}
             {showBuilding3D ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 2 }}>
+                <span style={{
+                  fontSize: 10, fontWeight: 800, letterSpacing: 0.3, padding: '2px 6px', borderRadius: 4,
+                  background: selectedFaceId ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.07)',
+                  color: selectedFaceId ? '#00e5ff' : '#9aa3b8',
+                  border: `1px solid ${selectedFaceId ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.12)'}`,
+                }}
+                  title={selectedFaceId
+                    ? 'Editing ONE face. Click it again in the scene to deselect.'
+                    : 'Editing the whole building. Click a roof face to edit it alone.'}>
+                  {selectedFaceId ? 'THIS FACE' : 'ALL FACES'}
+                </span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                   <span style={{ fontSize: 10, color: '#9aa3b8', fontWeight: 700, letterSpacing: 0.3 }}>WALLS</span>
                   <button data-no-drag title="Lower the walls by 1 ft"
-                    onClick={() => setWallHeightM(h => Math.max(0.3048, +(h - 0.3048).toFixed(4)))}
+                    onClick={() => adjustBuilding({ wall: -0.3048 })}
                     style={BUILD_STEP_BTN}>{'−'}</button>
                   <span style={{ minWidth: 40, textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#e8eaf0', fontVariantNumeric: 'tabular-nums' }}>
-                    {ftStr(wallHeightM)}
+                    {ftStr(effectiveWallM)}
                   </span>
                   <button data-no-drag title="Raise the walls by 1 ft"
-                    onClick={() => setWallHeightM(h => +(h + 0.3048).toFixed(4))}
+                    onClick={() => adjustBuilding({ wall: 0.3048 })}
                     style={BUILD_STEP_BTN}>+</button>
                 </span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                   <span style={{ fontSize: 10, color: '#9aa3b8', fontWeight: 700, letterSpacing: 0.3 }}>PITCH</span>
                   <button data-no-drag title="Shallower roof"
-                    onClick={() => setBuildingPitchDeg(d => Math.max(0, d - 1))}
+                    onClick={() => adjustBuilding({ pitch: -1 })}
                     style={BUILD_STEP_BTN}>{'−'}</button>
                   <span style={{ minWidth: 32, textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#e8eaf0', fontVariantNumeric: 'tabular-nums' }}>
-                    {buildingPitchDeg}{'°'}
+                    {effectivePitchDeg}{'°'}
                   </span>
                   <button data-no-drag title="Steeper roof"
-                    onClick={() => setBuildingPitchDeg(d => Math.min(60, d + 1))}
+                    onClick={() => adjustBuilding({ pitch: 1 })}
                     style={BUILD_STEP_BTN}>+</button>
                 </span>
               </span>
