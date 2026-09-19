@@ -928,6 +928,13 @@ export default function DesignStudio({ project, onSave }: Props) {
   // The beforeunload beacon had the same hole. 'failed' keeps saves disabled
   // too: if we couldn't READ the layout we must not risk WRITING over it.
   const restoreStateRef = useRef<'pending' | 'done' | 'failed'>('pending');
+  // Rendered mirror of restoreStateRef === 'done', for props. A ref cannot be a
+  // prop (no re-render), and SolarEngine3D's Lane A gate needs this signal:
+  // detection lands in React state immediately while the fence above only
+  // blocks the WRITE, so detecting before the restore resolves means the
+  // detected planes are already in state when the fence opens and the first
+  // tick persists them over the stored roof. Stays FALSE on 'failed'.
+  const [roofRestoreResolved, setRoofRestoreResolved] = useState(false);
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
   const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
   const fenceLineRef = useRef<{ lat: number; lng: number }[]>([]); // keeps fence geometry accessible in saveLayoutToDB autosave
@@ -1181,6 +1188,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       // 'done' stayed open across project B's in-flight restore. A save firing
       // in that window writes A's state onto B. Synchronous, before the fetch.
       restoreStateRef.current = 'pending';
+      setRoofRestoreResolved(false);
       try {
         const res = await fetch(`/api/projects/${project.id}/layout`);
         const data = await res.json();
@@ -1250,6 +1258,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           roofPlanes: restoredPlanes,
         });
         restoreStateRef.current = 'done';
+        setRoofRestoreResolved(true);
       } catch (e) {
         console.error('Panel restore failed — saves stay DISABLED to protect the stored layout:', e);
         restoreStateRef.current = 'failed';
@@ -4229,8 +4238,17 @@ export default function DesignStudio({ project, onSave }: Props) {
               onPanelPaint={handlePanelPaint}
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
+              roofRestoreResolved={roofRestoreResolved}
               onTwinLoaded={(twin) => {
                 if (twin.solarData) setSolarApiData(twin.solarData);
+                // Honest no-coverage reporting. solarApiStatus was only ever set
+                // inside detectRoofFromAerial, so a twin that loaded with zero
+                // roof segments — a rural address Google Solar does not cover —
+                // left the sidebar reading "No Planes Detected · Navigate to an
+                // address to auto-detect", which reads as NOT YET TRIED. The
+                // "Auto-detect Unavailable · Use Draw Roof Zone" branch already
+                // exists and is the honest degrade; this is what reaches it.
+                setSolarApiStatus(twin.roofSegments?.length ? 'loading' : 'unavailable');
                 if (twin.roofSegments) {
                   setRoofSegments(twin.roofSegments);
                   // v50.22: If an explicit Pick House / address-search pick is in flight,
@@ -4287,6 +4305,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   for (const p of enriched) byId.set(p.id, p);
                   return Array.from(byId.values());
                 });
+                setSolarApiStatus('loaded');
                 console.log('[DesignStudio] Auto Fill detected', enriched.length,
                   'roof plane(s):', enriched.map(p =>
                     `az=${p.azimuth.toFixed(0)}° tilt=${p.pitch.toFixed(0)}°`).join(', '));

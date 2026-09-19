@@ -436,6 +436,15 @@ interface Props {
    *  Planes arrive source:'solar_api', confirmed:false — they are a detection,
    *  not a person's decision, so they route through operator review. */
   onRoofPlanesDetected?: (planes: import('@/types').RoofPlane[]) => void;
+  /** 🚨 LANE A GATE. True once DesignStudio's DB restore has RESOLVED — i.e. the
+   *  stored layout is in state, or the read genuinely returned nothing. Lane A
+   *  refuses to run while this is false, because detection lands in React state
+   *  immediately while the autosave fence only blocks the WRITE: detect too
+   *  early and the detected planes are already in state when the fence opens,
+   *  and the first autosave tick persists them over the user's stored roof.
+   *  Left FALSE on a failed read, deliberately — a restore that did not succeed
+   *  must never license auto-detection. */
+  roofRestoreResolved?: boolean;
   /** v64: Stitch button — push the averaged/connected corners AND the recomputed
    *  plane frame back into roofPlanes state so panel placement (Auto Layout) +
    *  persistence use the stitched geometry, not the pre-stitch traced corners or a
@@ -876,6 +885,67 @@ export function removeBlockPreviewEntity(viewer: any, preview: any): void {
   try { viewer?.entities?.remove(preview); } catch { /* ignore */ }
 }
 
+/** Inputs to the Lane A gate. Every one is read from a REF at fire time, never
+ *  captured in a closure — the whole point is to decide against the state that
+ *  exists when the timer/promise resolves, not when it was scheduled. */
+export interface LaneAGateInput {
+  /** Engine load stage. Only 'done' means the scene is usable. */
+  stage: LoadStage;
+  /** Has ground elevation actually resolved? segmentToRoofPlane3D builds at
+   *  `groundElevM + heightAboveGround`, so firing before this puts every face
+   *  at elevation 0 — under the terrain. */
+  groundElevResolved: boolean;
+  /** Roof segments available from the digital twin (Google Solar). */
+  segmentCount: number;
+  /** Roof planes ALREADY in the design — traced, restored, or detected. */
+  existingPlaneCount: number;
+  /** Has the DB restore resolved? Firing before it means merging detected
+   *  geometry into an empty set and then persisting it over the stored roof. */
+  restoreResolved: boolean;
+  /** `lat,lng` rounded — identifies the building Lane A would run for. */
+  siteKey: string;
+  /** The last siteKey Lane A actually ran for, or null. */
+  lastRanSiteKey: string | null;
+}
+
+/**
+ * Should Lane A (zero-click roof detection from Google Solar) run right now?
+ *
+ * 🚨 THIS IS THE GUARD THAT KEEPS LANE A A *STARTING SHAPE* AND NEVER A
+ * REPLACEMENT. Every condition is a refusal, and the dangerous one is
+ * `existingPlaneCount === 0`: if the design already has ANY roof geometry —
+ * the user traced it, or the DB restored it — Lane A must not run at all.
+ * Detected faces are merged by id, so running against a populated design would
+ * append a machine's guess alongside a person's work and the autosave would
+ * persist the result.
+ *
+ * `restoreResolved` is the other half. The detection lands in React state
+ * immediately, while the autosave fence only blocks the WRITE — so firing
+ * before the restore resolves means the detected planes are already in state
+ * when the fence opens, and the first tick persists them over the stored roof.
+ * Gating the detection itself is the only thing that actually prevents it.
+ *
+ * Pure, so the whole refusal matrix is unit-testable without Cesium, a viewer,
+ * a network or a Google key.
+ */
+export function shouldRunLaneA(i: LaneAGateInput): boolean {
+  if (i.stage !== 'done') return false;
+  if (!i.groundElevResolved) return false;
+  if (!i.restoreResolved) return false;
+  if (i.segmentCount <= 0) return false;
+  if (i.existingPlaneCount !== 0) return false;
+  if (!i.siteKey) return false;
+  if (i.lastRanSiteKey === i.siteKey) return false;
+  return true;
+}
+
+/** The site identity Lane A dedupes on. Rounded to ~1 m so orbit jitter or a
+ *  re-geocode of the same address does not read as a different building. */
+export function laneASiteKey(lat: number, lng: number): string {
+  if (!isFinite(lat) || !isFinite(lng)) return '';
+  return `${lat.toFixed(5)},${lng.toFixed(5)}`;
+}
+
 function SolarEngine3D({
   lat, lng, projectAddress,
   panels, onPanelsChange, roofPlanes,
@@ -888,6 +958,7 @@ function SolarEngine3D({
   onTwinLoaded, onError, onLocationPick,
   onRoofPlaneCreated,
   onRoofPlanesDetected,
+  roofRestoreResolved = false,
   onRoofPlanesStitched,
   onE2EDiagnostics,
   selectedRoofPlaneId,
@@ -1286,6 +1357,11 @@ function SolarEngine3D({
   const cesiumGroundElevResolvedRef = useRef<boolean>(false);
 
   const [stage, setStage]         = useState<LoadStage>('idle');
+  /** Mirror of `stage` for fire-time reads. Lane A is decided inside a resolved
+   *  twin promise, where a captured `stage` would be the value from the render
+   *  that STARTED the fetch — reliably 'solar', never 'done'. */
+  const stageRef                  = useRef<LoadStage>('idle');
+  useEffect(() => { stageRef.current = stage; }, [stage]);
   const [stageMsg, setStageMsg]   = useState('Initializing...');
   const [progress, setProgress]   = useState(0);
   const [twin, setTwin]           = useState<DigitalTwinData | null>(null);
@@ -1954,6 +2030,18 @@ function SolarEngine3D({
 
   useEffect(() => { roofPlanesRef.current = roofPlanes ?? []; }, [roofPlanes]);
 
+  // ── Lane A state ─────────────────────────────────────────────────────────
+  // Both are REFS on purpose. maybeRunLaneA fires from inside a resolved
+  // promise, long after its enclosing render; a closure would decide against
+  // the state that existed when the twin fetch STARTED, which is exactly the
+  // window where the DB restore has not landed yet.
+  const roofRestoreResolvedRef = useRef<boolean>(roofRestoreResolved);
+  useEffect(() => { roofRestoreResolvedRef.current = roofRestoreResolved; }, [roofRestoreResolved]);
+  /** The siteKey Lane A last ran for. Set BEFORE emitting, so a second twin
+   *  load for the same building cannot append a duplicate set — buildRoofPlane3D
+   *  mints a fresh uuid per call, so a re-run would ADD faces, not replace them. */
+  const laneARanForRef = useRef<string | null>(null);
+
   // ── v64: Restore 3D roof-plane outlines + wireframe on project load ──────
   // After reload the panels are still there (they have their own restore effect),
   // but the roof-plane outline entities (plane3DEntityMap) and stitched wireframe
@@ -2485,6 +2573,15 @@ function SolarEngine3D({
       // Redraw overlays for new location
       drawOverlays(viewer, C, newTwin);
       viewer.scene.requestRender();
+
+      // 🚨 LANE A — zero-click roof detection, HERE and not earlier. Ground
+      // elevation resolves at cesiumGroundElevResolvedRef.current = true a few
+      // lines above; segmentToRoofPlane3D builds every face at
+      // `groundElevM + heightAboveGround`, so calling this before that point
+      // would put the whole roof at elevation 0, under the terrain.
+      // maybeRunLaneA re-checks that itself and refuses, but the ordering is
+      // the actual contract — keep this call after the elevation block.
+      maybeRunLaneA('address-change');
 
       // Lazy DSM enrichment after scene is interactive
       setTimeout(() => {
@@ -10610,6 +10707,89 @@ function SolarEngine3D({
     }
   }
 
+  /**
+   * Build roof planes from the digital twin's Google Solar segments, stamp them
+   * as machine-detected, and hand them to DesignStudio.
+   *
+   * Extracted from handleAutoRoof so Auto Fill and Lane A run the SAME code.
+   * `why` only labels the log line; behaviour is identical for both callers.
+   *
+   * v62: build CLEAN planes from Google Solar's detected roof segments and run
+   * them through the SAME flush grid engine (placePanelsControlled) the
+   * hand-drawn tool uses — accurate per-face geometry + the proven 0-gap
+   * aligned grid. (A previous attempt used the gappy/staggered
+   * fillRoofSegmentWithPanels engine — wrong engine.)
+   *
+   * v66: HAND THEM OVER. Until then these were used to place panels and then
+   * dropped on the floor: onRoofPlaneCreated is called from exactly one place
+   * (finalizePlane3D), so a correctly auto-detected roof left the Roof Planes
+   * sidebar reading "No Planes Detected", saved a design with zero roof
+   * geometry, and gave the planset nothing to stand on — even though the
+   * per-face pitch, azimuth and hull were right here.
+   *
+   * 🚨 These came from Google Solar, not from a person, so they arrive
+   * UNCONFIRMED and route through the same operator review the Nearmap planes
+   * already use. buildRoofPlane3D hardcodes source:'manual' and confirmed:true
+   * (lib/roofPlane3D.ts ~582) because it was only ever called for hand-traced
+   * faces; override both rather than let a detection assert itself as a
+   * person's decision. tests/detectedPlaneProvenance.test.ts pins this.
+   */
+  function detectPlanesFromTwin(why: string): RoofPlane[] {
+    const gElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    const segPlanes = (twinRef.current?.roofSegments ?? [])
+      .map((s: any) => segmentToRoofPlane3D(s, gElev))
+      .filter((p: RoofPlane | null): p is RoofPlane => !!p);
+    if (segPlanes.length === 0) return [];
+    addLog('AUTO', `${why}: built ${segPlanes.length} clean planes from Google roof segments`);
+    const detected = segPlanes.map((p, i) => {
+      p.source = 'solar_api';
+      p.confirmed = false;
+      if (p.solarSegmentIndex == null) p.solarSegmentIndex = i;
+      return p;
+    });
+    onRoofPlanesDetected?.(detected);
+    addLog('AUTO', `${why}: emitted ${detected.length} detected planes to DesignStudio (unconfirmed, source=solar_api)`);
+    return detected;
+  }
+
+  /**
+   * LANE A — zero-click roof detection.
+   *
+   * Runs `detectPlanesFromTwin` only when every condition in `shouldRunLaneA`
+   * holds, all read from REFS at fire time. See that function for why each
+   * refusal exists; the two that matter most are "the design already has roof
+   * geometry" and "the DB restore has not resolved yet".
+   *
+   * 🚨 EMIT-ONLY-ADD. This goes through onRoofPlanesDetected, whose handler in
+   * DesignStudio merges by id and never replaces or deletes. Lane A can only
+   * ever ADD a starting shape to an empty design. Do not "simplify" that merge
+   * into a replace, and do not call this from an effect keyed on roofPlanes —
+   * that would re-fire on the state it just caused.
+   */
+  function maybeRunLaneA(why: string): void {
+    const siteKey = laneASiteKey(lat, lng);
+    const gate: LaneAGateInput = {
+      stage: stageRef.current,
+      groundElevResolved: cesiumGroundElevResolvedRef.current,
+      segmentCount: twinRef.current?.roofSegments?.length ?? 0,
+      existingPlaneCount: (roofPlanesRef.current ?? []).length,
+      restoreResolved: roofRestoreResolvedRef.current,
+      siteKey,
+      lastRanSiteKey: laneARanForRef.current,
+    };
+    if (!shouldRunLaneA(gate)) {
+      addLog('AUTO', `LaneA(${why}): refused — ${JSON.stringify(gate)}`);
+      return;
+    }
+    // Mark BEFORE emitting: a re-entrant twin load for the same building must
+    // not append a second set (buildRoofPlane3D mints a fresh uuid per call).
+    laneARanForRef.current = siteKey;
+    const detected = detectPlanesFromTwin(`LaneA(${why})`);
+    if (detected.length === 0) {
+      addLog('AUTO', `LaneA(${why}): twin had segments but none produced a usable plane`);
+    }
+  }
+
   function handleAutoRoof(viewer: any, C: any) {
     if (autoFillRunningRef.current) {
       addLog('AUTO', 'handleAutoRoof: already running - skipped duplicate call');
@@ -10678,36 +10858,8 @@ function SolarEngine3D({
     // covered address, no tracing. (Previous attempt used the gappy/staggered
     // fillRoofSegmentWithPanels engine — wrong engine.)
     if (eligiblePlanes.length === 0) {
-      const gElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      const segPlanes = (twinRef.current?.roofSegments ?? [])
-        .map((s: any) => segmentToRoofPlane3D(s, gElev))
-        .filter((p: RoofPlane | null): p is RoofPlane => !!p);
-      if (segPlanes.length > 0) {
-        eligiblePlanes = segPlanes;
-        addLog('AUTO', `handleAutoRoof: no drawn planes → built ${segPlanes.length} clean planes from Google roof segments`);
-
-        // v66: HAND THEM OVER. Until now these were used to place panels and
-        // then dropped on the floor: onRoofPlaneCreated is called from exactly
-        // one place (finalizePlane3D), so a correctly auto-detected roof left
-        // the Roof Planes sidebar reading "No Planes Detected", saved a design
-        // with zero roof geometry, and gave the planset nothing to stand on —
-        // even though the per-face pitch, azimuth and hull were right here.
-        //
-        // These came from Google Solar, not from a person, so they arrive
-        // UNCONFIRMED and route through the same operator review the Nearmap
-        // planes already use. buildRoofPlane3D hardcodes source:'manual' and
-        // confirmed:true (lib/roofPlane3D.ts ~582) because it was only ever
-        // called for hand-traced faces; override both rather than let a
-        // detection assert itself as a person's decision.
-        const detected = segPlanes.map((p, i) => {
-          p.source = 'solar_api';
-          p.confirmed = false;
-          if (p.solarSegmentIndex == null) p.solarSegmentIndex = i;
-          return p;
-        });
-        onRoofPlanesDetected?.(detected);
-        addLog('AUTO', `handleAutoRoof: emitted ${detected.length} detected planes to DesignStudio (unconfirmed, source=solar_api)`);
-      }
+      const detected = detectPlanesFromTwin('handleAutoRoof');
+      if (detected.length > 0) eligiblePlanes = detected;
     }
 
     if (eligiblePlanes.length === 0) {
