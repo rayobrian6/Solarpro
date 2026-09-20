@@ -157,6 +157,46 @@ describe('🚨 ADVERSARIAL — the old exact-string behaviour, reproduced', () =
   });
 });
 
+describe('switchSite answers the property question too, not just hydrate', () => {
+  // The restore path was not the only exact-string comparison. `switchSite` had
+  // two: the "already here, do nothing" early return, and the lookup of the
+  // bundle being entered. Both are reached with a RAW key by any caller that has
+  // not resolved one, and the function is exported.
+
+  it('a drifted key for the property already active is a NO-OP, not a move', () => {
+    const s = stateAt(KEY_CLICK, bundle('melvin', 52));
+    const r = switchSite(s, KEY_GEOCODE);
+    expect(r.changed).toBe(false);
+    expect(r.reason).toBe('same-site');
+    expect(r.state.activeSiteKey).toBe(KEY_CLICK);
+    expect(r.state.active.panels).toHaveLength(52);
+    expect(r.archived).toBeNull();
+  });
+
+  it('a drifted key for an ARCHIVED property still finds it', () => {
+    let s = stateAt(KEY_CLICK, bundle('melvin', 52));
+    s = switchSite(s, KEY_NEIGHBOUR).state;
+    s = setActiveBundle(s, bundle('neighbour', 9));
+    // Come back with a key a few metres off the one it was filed under.
+    const r = switchSite(s, KEY_GEOCODE);
+    expect(r.changed).toBe(true);
+    expect(r.arriving.panels).toHaveLength(52);
+    expect(r.arriving.panels.map(p => p.id)).toEqual(
+      Array.from({ length: 52 }, (_, i) => `melvin-${i}`),
+    );
+    // And the property we left is filed, not dropped.
+    expect(r.state.archives[KEY_NEIGHBOUR].panels).toHaveLength(9);
+  });
+
+  it('a genuinely different property is still entered as empty', () => {
+    const s = stateAt(KEY_CLICK, bundle('melvin', 52));
+    const r = switchSite(s, KEY_NEIGHBOUR);
+    expect(r.changed).toBe(true);
+    expect(isEmptyBundle(r.arriving)).toBe(true);
+    expect(r.state.archives[KEY_CLICK].panels).toHaveLength(52);
+  });
+});
+
 describe('a genuinely different property is still a different property', () => {
   it('picking the neighbour archives this design rather than keeping it active', () => {
     const s = stateAt(KEY_CLICK, bundle('melvin', 52));

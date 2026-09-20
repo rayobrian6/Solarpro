@@ -150,6 +150,13 @@ codebase, not a third) instead of *"is this the same **string**"*. The key that 
 `parsed.activeSiteKey`, **not** the drifted `siteKeyNow`: archives are filed under the stored key
 and roof planes are stamped with it, so adopting the geocoder's key would orphan both.
 
+**The class, eliminated — not the instance.** A re-audit after the fix found *four* places asking
+the identity question, and fixed all of them: `hydrate`'s match, `hydrate`'s archive reactivation,
+`switchSite`'s "already here" early return, and `switchSite`'s arriving-bundle lookup. `isSameSite`
+(exact string) now survives only as the primitive `sitesAreSameProperty` is built on. The two
+`switchSite` cases were reachable by any caller that had not pre-resolved a key — and that function
+is exported, so correctness depended on a caller remembering.
+
 🚨 **The first fix was incomplete, and the test caught it.** Correcting the `matched` comparison
 left its sibling untouched: the reactivation branch still did `archives[siteKeyNow]`, an **exact**
 lookup, so a user returning to a property the archive genuinely held *missed it* and fell into the
@@ -731,7 +738,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
 | E2E passes | ❌ **not run by me** — see below |
-| Full suite passes | ✅ **566 files, 12,170 tests, 0 failures**, 490 skipped |
+| Full suite passes | ✅ **566 files, 12,173 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |

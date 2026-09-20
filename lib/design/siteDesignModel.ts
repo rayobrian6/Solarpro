@@ -395,7 +395,18 @@ export function switchSite(
   if (!toKey) {
     return { state, arriving: state.active, archived: null, changed: false, reason: 'unresolved-target' };
   }
-  if (isSameSite(toKey, state.activeSiteKey)) {
+  // 🚨 THE SAME PROPERTY QUESTION AGAIN — completing the set. This was
+  // `isSameSite`, exact string equality, and the codebase now has exactly one
+  // definition of "same property", so this must use it too.
+  //
+  // Today's caller resolves first, so a same-property key normally arrives
+  // byte-identical and the exact branch inside `sitesAreSameProperty` takes it.
+  // With a RAW key for the property already active, exact equality said "no"
+  // and the function archived the live bundle and then immediately took it back
+  // out again (the arriving lookup below is property-based), reporting
+  // `changed: true` for a move that never happened — churn on every write path
+  // that watches this result. Asking the right question makes it a no-op.
+  if (sitesAreSameProperty(toKey, state.activeSiteKey)) {
     return { state, arriving: state.active, archived: null, changed: false, reason: 'same-site' };
   }
   if (!state.activeSiteKey) {
