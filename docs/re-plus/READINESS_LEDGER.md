@@ -990,12 +990,25 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |
-| CI passes | ✅ **10/10 green on `de47e48a`** — Build Gate, CI Complete, Unit Tests, tsc, ESLint, secret guard, page-fit, env audit |
+| CI passes | ✅ **10/10 green on `3aa02faa`** — Build Gate, CI Complete, Unit Tests, tsc, ESLint, secret guard, page-fit, env audit |
 | Staging deploy verified | ❌ |
-| Exact tested SHA verified | ✅ **`de47e48a`** (code frozen at `f24a40c1`; `de47e48a` is docs-only) |
+| Exact tested SHA verified | ✅ **`3aa02faa`** |
 | **Visual check in a browser** | ❌ **BLOCKED — no database in this environment** (see below) |
 | Between-face geometry invariants | ✅ **CLOSED** — `tests/ridgeContinuity.test.ts` asserts shared-ridge continuity at 4:12/6:12/10:12, flat, and lift-opted-out |
-| No known P0/P1 in workstream | ✅ **all P0/P1 closed**; WS1-013 remains open at **P2**, and needs a visual judgement |
+| No known P0/P1 in workstream | ✅ **every P0 and P1 closed or owner-blocked** — see below |
+
+### What remains, and why each is not mine to decide
+
+Every unblocked defect found in Workstream 1 is closed. What is left falls into three buckets, none
+of which is more analysis:
+
+| Item | Why it is not closed |
+|---|---|
+| **Visual / browser verification** | **Owner-blocked.** No `DATABASE_URL` in this checkout; supplying one means writing the unrotated Neon credential into the tree. See below. |
+| **WS1-013** — five placement paths disagree about module stack height by 9 cm | **Needs a visual judgement.** Consistency and physical truth point at *different* values; the tie-breaker is what the 3D view should look like with a 3×-exaggerated rail. Both candidate resolutions are written up in full. |
+| **2D-traced planes have no `planeHeightAtCenterMeters`** | Same datum family as WS1-013; resolving it means picking the same convention. |
+| **Gable / Hip tools emit no roof plane** | **Owner-deferred.** This is Phase 3 roof UX, and the instruction was explicitly *"do not start Phase 3 roof-generation algorithms yet"*. Visual only — nothing downstream reads them. |
+| **The mount effect re-geocodes and overwrites `projects.lat/lng`** | **Mitigated, not removed.** WS1-002 makes the system tolerant of the drift. Removing it is a product decision — the code states *"street-level geocode always wins over stored coords"* as intent, and reversing that is the owner's call. |
 
 ### Why the visual gate is blocked, and what would unblock it
 
