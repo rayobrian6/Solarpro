@@ -621,11 +621,40 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |
-| CI passes | ✅ **10/10 green on `a754a4ec`**, incl. `CI Complete`, Unit Tests, tsc, ESLint, secret guard, page-fit |
+| CI passes | ✅ 10/10 on `a754a4ec`; re-running on `f24a40c1` |
 | Staging deploy verified | ❌ |
-| Exact tested SHA verified | ✅ `a754a4ec` (a docs-only commit may follow it) |
-| **Visual check in a browser** | ❌ **NOT DONE — the fixes move rendered geometry** |
+| Exact tested SHA verified | ✅ `a754a4ec`; `f24a40c1` pending |
+| **Visual check in a browser** | ❌ **BLOCKED — no database in this environment** (see below) |
+| Between-face geometry invariants | ❌ **GAP** — ridge continuity is asserted nowhere |
 | No known P0/P1 in workstream | ❌ WS1-002, WS1-003, WS1-012, WS1-013 open |
+
+### Why the visual gate is blocked, and what would unblock it
+
+I attempted it rather than assuming. `/api/health` on the running dev server returns **503,
+`database: not_configured`** — this checkout has only `.env.example`, no `.env.local`. Without a
+database the Design Studio cannot load a project, so there is no roof to look at. The only way to
+supply one is to write the Neon connection string into the tree, and that credential is recorded as
+**unrotated**, with a `secret-guard` CI job that exists to catch exactly that. I am not doing it.
+
+The E2E harness itself is sound and would do the job — `npm run test:e2e` starts the server with
+`DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1`, and `window.__solarE2E` already exposes `roofPlanes` and
+`panels`, so the assertions need no screenshots and degrade gracefully when WebGL is unavailable.
+**It needs a `DATABASE_URL` and nothing else.**
+
+> Environment left exactly as found: the temporary `.env.local` (flags only, no secrets) was deleted
+> and `.claude/launch.json` restored. Port 3000 is held by another session's dev server.
+
+**What was verified instead**, using the real library code rather than the app:
+
+| | before | after |
+|---|---|---|
+| Square Up, 30° face — pitch | **0.188°** | **29.881°** |
+| Square Up — azimuth | 180 (hard-coded) | 180 (the face's true azimuth) |
+| Panel clearance above the drawn deck | −0.05 to −0.09 m | +0.05 m |
+
+Every one of those is a test that **fails if the fix is reverted**. What remains unproven is only
+whether the result *looks* right in the 3D viewport — which is precisely the judgement the owner is
+best placed to make, and the only part of this work that should reach him as a question.
 
 **WORKSTREAM 1 COMPLETE: NO.**
 
