@@ -905,9 +905,38 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       const archiveIsStorable = await layoutsHasSiteArchives(sql);
       const archivedPanels: Array<{ systemType?: string }> = [];
       const arch = archiveIsStorable
-        ? (data.siteArchives as { sites?: Record<string, { panels?: unknown }> } | undefined)
+        ? (data.siteArchives as { activeSiteKey?: string; sites?: Record<string, { panels?: unknown }> } | undefined)
         : undefined;
-      if (arch && typeof arch === 'object' && arch.sites && typeof arch.sites === 'object') {
+      // 🚨 AND ONLY WHILE THE PROPERTY IS ACTUALLY CHANGING.
+      //
+      // The relaxation had no bound in TIME. An archive is never evicted, so
+      // once a project had archived a >=4-panel property, EVERY later save of
+      // that project with `panels: []` passed the guard — for ever, including
+      // the reload bug the guard was built for in July (Stowell: 81 panels ->
+      // {} -> 19 in three saves). The guard had disarmed itself permanently.
+      //
+      // A property change is identifiable: the save carries a DIFFERENT
+      // activeSiteKey than the row currently stores. Only then may archived
+      // panels count as present. A save at the same property that empties the
+      // array is an ordinary wipe and is refused exactly as before.
+      let switchingProperty = false;
+      if (arch && typeof arch.activeSiteKey === 'string') {
+        try {
+          const cur = await sql`
+            SELECT site_archives ->> 'activeSiteKey' AS k
+            FROM layouts WHERE project_id = ${data.projectId} AND user_id = ${data.userId} LIMIT 1
+          `;
+          const storedKey = cur[0]?.k ?? null;
+          // No stored key yet (first archive on this row) also counts: there is
+          // nothing to contradict, and refusing it would block the very first
+          // property change a project ever makes.
+          switchingProperty = storedKey === null || storedKey !== arch.activeSiteKey;
+        } catch {
+          // Cannot tell — assume NOT switching, which keeps the guard strict.
+          switchingProperty = false;
+        }
+      }
+      if (switchingProperty && arch?.sites && typeof arch.sites === 'object') {
         for (const bundle of Object.values(arch.sites)) {
           if (Array.isArray(bundle?.panels)) archivedPanels.push(...(bundle.panels as Array<{ systemType?: string }>));
         }
@@ -932,11 +961,28 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       console.warn('[LAYOUT_SUBSYSTEM_WIPE_GUARD] census failed, skipping guard:', (e as Error)?.message);
     }
     // UPDATE existing layout
+    // 🚨 roof_planes AND map_center USE COALESCE: `undefined` MEANS KEEP STORED,
+    // exactly as it does for obstructions, measurements and site_archives.
+    //
+    // They used to be written unconditionally, so `undefined` meant SET NULL —
+    // a roof-destroying default. Any caller that does not happen to send
+    // roofPlanes wiped the geometry, and `/api/engineering/preliminary`
+    // (reached from the bill-upload modal) sends neither it nor mapCenter. So
+    // uploading a bill deleted the roof of a designed project. After migration
+    // 123 it was worse: the active roof was destroyed while site_archives kept
+    // naming it, leaving that design neither active nor archived — the one
+    // thing the ownership model forbids.
+    //
+    // Nulling map_center also disables the legacy multi-site repair in
+    // rowToLayout, which falls back to it to decide which property a row is at.
+    //
+    // A DELIBERATE CLEAR STILL WORKS. The studio sends `[]`, which is not
+    // undefined, so COALESCE keeps the empty array. Only absence is ignored.
     const rows = await sql`
       UPDATE layouts SET
         system_type         = ${data.systemType || 'roof'},
         panels              = ${panelsJson}::jsonb,
-        roof_planes         = ${roofPlanesJson}::jsonb,
+        roof_planes         = COALESCE(${roofPlanesJson}::jsonb, roof_planes),
         ground_tilt         = ${data.groundTilt ?? 20},
         ground_azimuth      = ${data.groundAzimuth ?? 180},
         row_spacing         = ${data.rowSpacing ?? 1.5},
@@ -947,7 +993,7 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         bifacial_optimized  = ${data.bifacialOptimized ?? false},
         total_panels        = ${data.totalPanels ?? 0},
         system_size_kw      = ${sizeKw},
-        map_center          = ${mapCenterJson}::jsonb,
+        map_center          = COALESCE(${mapCenterJson}::jsonb, map_center),
         map_zoom            = ${data.mapZoom ?? null},
         updated_at          = NOW()
       WHERE project_id = ${data.projectId}

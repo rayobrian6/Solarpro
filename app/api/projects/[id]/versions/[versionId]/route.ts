@@ -88,6 +88,29 @@ export async function POST(req: NextRequest, context: RouteContext) {
       systemSizeKw: snapshotLayout.systemSizeKw,
       mapCenter: snapshotLayout.mapCenter,
       mapZoom: snapshotLayout.mapZoom,
+      // 🚨 THE ARCHIVE MUST TRAVEL WITH THE ROOF IT DESCRIBES.
+      //
+      // These four were omitted, and `undefined` means KEEP STORED — so a
+      // restore overwrote `roof_planes` from the snapshot while leaving
+      // `site_archives` (and the `activeSiteKey` inside it) naming a DIFFERENT
+      // property. rowToLayout's activeSitePlanes() then filtered out every
+      // restored plane, handed lib/pvwatts.ts an empty array to read
+      // `roofPlanes[0].pitch` from, and logged the total loss of the roof as a
+      // "repair". Restoring a version deleted the roof.
+      //
+      // It also 500'd on any snapshot taken at a property change: those carry
+      // `panels: []` (the panels moved into the archive), and without the
+      // archive the LAYOUT_SUBSYSTEM_WIPE guard correctly refuses the save.
+      // Phase 2 mints such a version on every property change, so the restore
+      // button was permanently broken for exactly the versions it creates.
+      //
+      // A pre-123 snapshot has no siteArchives; `undefined` keeps whatever is
+      // stored, and the backstop in lib/db/core.ts (never filter a roof down to
+      // nothing) covers the resulting disagreement.
+      siteArchives: (snapshotLayout as { siteArchives?: unknown }).siteArchives,
+      obstructions: snapshotLayout.obstructions,
+      measurements: snapshotLayout.measurements,
+      designElectrical: snapshotLayout.designElectrical,
     });
 
     // Save a new version recording the restore

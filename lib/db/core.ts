@@ -385,6 +385,29 @@ function activeSitePlanes(row: Record<string, unknown>): Layout['roofPlanes'] {
     return planes;
   }
   const mine = planes.filter(p => { const k = (p as { siteKey?: string })?.siteKey; return !k || k === activeKey; });
+
+  // 🚨 FILTERING TO NOTHING IS NEVER THE RIGHT ANSWER.
+  //
+  // If NO plane matches the active key, the row is not "a multi-site row we can
+  // repair" — it is a row whose active key disagrees with every plane it holds,
+  // and the honest conclusion is that we do not know which is right. Returning
+  // [] hands lib/pvwatts.ts an empty array to read `roofPlanes[0].pitch` off,
+  // and logs the total loss of the roof as a "repair".
+  //
+  // The version-restore route produced exactly this: it overwrites roof_planes
+  // from a snapshot while leaving site_archives (and its activeSiteKey) naming
+  // a different property, so every restored plane was filtered out. That route
+  // is fixed to carry the archive with it — this is the backstop for every
+  // caller that has not been thought of, and for rows already in that state.
+  //
+  // Same doctrine as the unresolved-key branch above: a visible wrong answer
+  // beats an invisible missing one.
+  if (mine.length === 0) {
+    console.warn('[rowToLayout] active site key matches NO stored plane — keeping all of them rather than returning an empty roof. layout:', row.id,
+      { total: planes.length, activeKey, sites: [...keys] });
+    return planes;
+  }
+
   console.warn('[rowToLayout] multi-site roof_planes repaired on read — layout:', row.id,
     { total: planes.length, active: mine.length, sites: [...keys] });
   return mine as Layout['roofPlanes'];
