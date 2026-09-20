@@ -957,6 +957,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   // See lib/siteIdentity.ts for why ownership is coordinate-based, and why
   // clearing roofPlanes on an address change is forbidden.
   const foreignRoofPlanesRef = useRef<RoofPlane[]>([]);
+  /** Rendered count of planes belonging to OTHER sites. A ref cannot drive UI,
+   *  and the user needs to be told their previous property's roof was kept —
+   *  otherwise "my roof disappeared when I changed the address" is a support
+   *  ticket, and the honest answer (it is saved, come back to it) is invisible. */
+  const [archivedSitePlaneCount, setArchivedSitePlaneCount] = useState(0);
   /** The site key the ACTIVE roofPlanes currently belong to. Null until the
    *  DB restore resolves — ownership must not be decided from a half-loaded
    *  design, or the first render would archive a roof it had not yet read. */
@@ -1374,6 +1379,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         );
         const { active: ownPlanes, foreign: otherSitePlanes } = partitionBySite(savedPlanes, siteKeyNow);
         foreignRoofPlanesRef.current = otherSitePlanes;
+        setArchivedSitePlaneCount(otherSitePlanes.length);
         activeSiteKeyRef.current = siteKeyNow;
         if (otherSitePlanes.length > 0) {
           console.log(`[DesignStudio] ${otherSitePlanes.length} roof plane(s) belong to a different site — retained, not active`);
@@ -1466,6 +1472,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     const arriving = pool.filter(p => isSameSite(p.siteKey, nextKey));
 
     foreignRoofPlanesRef.current = retained;
+    setArchivedSitePlaneCount(retained.length);
     activeSiteKeyRef.current = nextKey;
     roofPlanesRef.current = arriving;
     setRoofPlanes(arriving);
@@ -5763,6 +5770,25 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
                           <div className="font-semibold text-slate-300 mb-1">⚠ Auto-detect Unavailable</div>
                           <div>Use <span className="text-amber-400 font-medium">Draw Roof Zone</span> to trace planes manually.</div>
+                        </div>
+                      ) : null}
+
+                      {/* Another property's roof is saved.
+                          The one question the old UI could not answer: "will
+                          changing the address lose the work I already did?" It
+                          does not — geometry is archived per property and comes
+                          back — but nothing said so, which made a correct
+                          behaviour look like data loss. Plain language, no
+                          jargon, no new controls: the address bar is already
+                          how you go back. */}
+                      {archivedSitePlaneCount > 0 ? (
+                        <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
+                          <div className="font-semibold text-slate-300 mb-1">🏠 Saved for another address</div>
+                          <div className="leading-relaxed">
+                            {archivedSitePlaneCount} roof {archivedSitePlaneCount === 1 ? 'section' : 'sections'} you drew at a
+                            different property {archivedSitePlaneCount === 1 ? 'is' : 'are'} kept safely. Go back to that address
+                            to see {archivedSitePlaneCount === 1 ? 'it' : 'them'} again — nothing was deleted.
+                          </div>
                         </div>
                       ) : null}
 
