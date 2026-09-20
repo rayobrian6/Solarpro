@@ -471,6 +471,16 @@ interface Props {
     origin3D?: { x: number; y: number; z: number };
     /** Stitched plane outward normal in ECEF. */
     normal3D?: { x: number; y: number; z: number };
+    /** 🚨 THE RESHAPED PITCH AND AZIMUTH. Square Up, Stitch, the flat-trace
+     *  rebuild and the Building pitch/wall controls all reshape a face's
+     *  GEOMETRY and emit it here — but pitch/azimuth were not part of this
+     *  shape, so `plane.pitch` kept its original value while the 3D roof
+     *  changed underneath it. The planset, the structural engine and the
+     *  production model all read plane.pitch, so the roof the user shaped and
+     *  the pitch the permit quoted disagreed permanently, and nothing said so.
+     *  Carried here so the geometry and the number agree. */
+    pitch?: number;
+    azimuth?: number;
   }>) => void;
   /** E2E-only diagnostics bridge. Passed only when NEXT_PUBLIC_E2E=1. */
   onE2EDiagnostics?: (diagnostics: {
@@ -1188,6 +1198,9 @@ function SolarEngine3D({
       polygon3D?: Cart3[];
       origin3D?: Cart3;
       normal3D?: Cart3;
+      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
+      pitch?: number;
+      azimuth?: number;
     }> = [];
 
     for (const id of flatTracedPlaneIdsRef.current) {
@@ -1226,6 +1239,9 @@ function SolarEngine3D({
           polygon3D: built.plane.polygon3D,
           origin3D: built.plane.origin3D,
           normal3D: built.plane.normal3D,
+          // Emit the shape the face was actually BUILT to.
+          pitch: built.plane.pitch,
+          azimuth: built.plane.azimuth,
         });
       }
     }
@@ -4458,6 +4474,9 @@ function SolarEngine3D({
       polygon3D?: Cart3[];
       origin3D?: Cart3;
       normal3D?: Cart3;
+      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
+      pitch?: number;
+      azimuth?: number;
     }> = [];
     for (const rp of renderables) {
       const ring = rings.get(rp.id);
@@ -4490,6 +4509,7 @@ function SolarEngine3D({
         updates.push({
           id: rp.id, vertices: plane.vertices, localFrame3D: plane.localFrame3D,
           polygon3D: plane.polygon3D, origin3D: plane.origin3D, normal3D: plane.normal3D,
+          pitch: plane.pitch, azimuth: plane.azimuth,
         });
       }
     }
@@ -4553,6 +4573,9 @@ function SolarEngine3D({
       polygon3D?: Cart3[];
       origin3D?: Cart3;
       normal3D?: Cart3;
+      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
+      pitch?: number;
+      azimuth?: number;
     }> = [];
 
     for (const rf of rawFaces) {
@@ -4597,6 +4620,9 @@ function SolarEngine3D({
           polygon3D: built.plane.polygon3D,
           origin3D: built.plane.origin3D,
           normal3D: built.plane.normal3D,
+          // Emit the shape the face was actually BUILT to.
+          pitch: built.plane.pitch,
+          azimuth: built.plane.azimuth,
         });
       }
     }

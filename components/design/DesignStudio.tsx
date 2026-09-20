@@ -4609,6 +4609,15 @@ export default function DesignStudio({ project, onSave }: Props) {
                     ...(u.polygon3D ? { polygon3D: u.polygon3D } : {}),
                     ...(u.origin3D  ? { origin3D: u.origin3D }   : {}),
                     ...(u.normal3D  ? { normal3D: u.normal3D }   : {}),
+                    // 🚨 KEEP THE NUMBER WITH THE GEOMETRY. Square Up, Stitch,
+                    // the flat-trace rebuild and the Building pitch/wall
+                    // controls all reshape the face; before this, plane.pitch
+                    // kept its pre-reshape value. Everything downstream — the
+                    // planset, the structural engine, the production model —
+                    // reads plane.pitch, so the roof on screen and the pitch on
+                    // the permit disagreed and nothing reported it.
+                    ...(typeof u.pitch === 'number' ? { pitch: u.pitch } : {}),
+                    ...(typeof u.azimuth === 'number' ? { azimuth: u.azimuth } : {}),
                   });
                 }));
                 console.log('[DesignStudio] Stitch synced', updates.length, 'plane(s) into roofPlanes');
