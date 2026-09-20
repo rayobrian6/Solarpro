@@ -383,6 +383,81 @@ describe('hydration', () => {
     expect(r.state.active.panels).toHaveLength(52);
   });
 
+  describe('🚨 a row whose ownership was never decided', () => {
+    // A project with no stored lat/lng resolves to UNRESOLVED_SITE_KEY at
+    // restore time, so every save that follows writes `activeSiteKey: ""`.
+    // This is the second open of that project, once the coordinates are known.
+    const unknownCoords = () => hydrate(
+      { panels: [panel('p1'), panel('p2')], roofPlanes: [plane('r1')], obstructions: [obstruction('o1')], measurements: [] },
+      '',
+    );
+
+    it('the first open persists an EMPTY active key — that is the input', () => {
+      const first = unknownCoords();
+      expect(first.disposition).toBe('unresolved');
+      expect(toPersistencePayload(first.state).siteArchives.activeSiteKey).toBe('');
+    });
+
+    it('🚨 the second open ADOPTS it — it is neither dropped nor archived away', () => {
+      // Without this the design was neither active nor archived: `''` is not
+      // the current site, and the archival step skipped it because `''` is
+      // falsy. It was simply gone, on the second open of every project created
+      // before its first geocode landed.
+      const written = toPersistencePayload(unknownCoords().state);
+      const second = hydrate(JSON.parse(JSON.stringify(written)), KEY_A);
+      expect(second.disposition).toBe('adopted-legacy');
+      expect(second.needsAdoptionSave).toBe(true);
+      expect(second.state.activeSiteKey).toBe(KEY_A);
+      expect(second.state.active.panels.map(p => p.id)).toEqual(['p1', 'p2']);
+      expect(second.state.active.roofPlanes.map(p => p.id)).toEqual(['r1']);
+      expect(second.state.active.obstructions.map(o => o.id)).toEqual(['o1']);
+    });
+
+    it('…and any archive it was already carrying is kept', () => {
+      const stored = {
+        panels: [panel('p1')], roofPlanes: [], obstructions: [], measurements: [],
+        siteArchives: { version: 1, activeSiteKey: '', sites: { [KEY_B]: bundle('B', 4) } },
+      };
+      const r = hydrate(JSON.parse(JSON.stringify(stored)), KEY_A);
+      expect(r.state.active.panels).toHaveLength(1);
+      expect(r.state.archives[KEY_B].panels).toHaveLength(4);
+    });
+
+    it('the adoption settles — the third open needs no further save', () => {
+      const written = toPersistencePayload(unknownCoords().state);
+      const second = hydrate(JSON.parse(JSON.stringify(written)), KEY_A);
+      const third = hydrate(JSON.parse(JSON.stringify(toPersistencePayload(second.state))), KEY_A);
+      expect(third.disposition).toBe('matched');
+      expect(third.needsAdoptionSave).toBe(false);
+      expect(third.state.active.panels).toHaveLength(2);
+    });
+
+    it('🚨 NO hydration path can lose the stored active set', () => {
+      // The invariant, stated directly. Whatever the row says, the columns end
+      // up either on screen or in the archive — never nowhere.
+      const stored = {
+        panels: [panel('keep-me')], roofPlanes: [], obstructions: [], measurements: [],
+      };
+      for (const archiveHeader of [
+        undefined,
+        { version: 1, activeSiteKey: '', sites: {} },
+        { version: 1, activeSiteKey: KEY_A, sites: {} },
+        { version: 1, activeSiteKey: KEY_B, sites: {} },
+        { version: 1, activeSiteKey: KEY_C, sites: { [KEY_B]: emptyBundle() } },
+      ]) {
+        for (const now of [KEY_A, KEY_B, '']) {
+          const r = hydrate(JSON.parse(JSON.stringify({ ...stored, siteArchives: archiveHeader })), now);
+          const everywhere = [
+            ...r.state.active.panels,
+            ...Object.values(r.state.archives).flatMap(b => b.panels),
+          ].map(p => p.id);
+          expect(everywhere, `lost with header=${JSON.stringify(archiveHeader)} at=${now || '<unresolved>'}`)
+            .toContain('keep-me');
+        }
+      }
+    });
+  });
+
   describe('legacy rows', () => {
     it('a row with no archives column is ADOPTED onto the current site', () => {
       const legacy = { panels: [panel('p1'), panel('p2')], roofPlanes: [plane('r1')], obstructions: [], measurements: [] };

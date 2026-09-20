@@ -482,9 +482,33 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     };
   }
 
+  // 🚨 THE ROW NEVER DECIDED WHOSE THE ACTIVE COLUMNS ARE — ADOPT, NEVER DROP.
+  //
+  // A project with no stored lat/lng resolves to UNRESOLVED_SITE_KEY at restore
+  // time, so the saves that follow write `activeSiteKey: ""`. On the NEXT load
+  // the coordinates ARE known, `isSameSite('', key)` is false (an unresolved key
+  // matches nothing, deliberately), and without this branch the design fell
+  // through to "the columns describe another property" — where the archival step
+  // is `if (parsed.activeSiteKey)`, which `''` fails. The design was neither
+  // active nor archived. It was simply gone, on the second open of every project
+  // created before its first geocode landed.
+  //
+  // An unresolved stored key is not a claim that the columns belong to somewhere
+  // else; it is the absence of a claim. Same doctrine as a legacy row: adopt.
+  if (!parsed.activeSiteKey) {
+    return {
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: parsed.sites },
+      disposition: 'adopted-legacy',
+      needsAdoptionSave: true,
+    };
+  }
+
   // The columns describe a different property than the one on screen.
+  // `parsed.activeSiteKey` is non-empty here — the branch above handles the
+  // unresolved case — so the stored active set always has a key to be filed
+  // under. It is never dropped.
   const archives = { ...parsed.sites };
-  if (parsed.activeSiteKey) archives[parsed.activeSiteKey] = storedActive;
+  archives[parsed.activeSiteKey] = storedActive;
   const mine = archives[siteKeyNow];
   if (mine) {
     delete archives[siteKeyNow];
