@@ -299,6 +299,17 @@ export default function MigrationConsolePage() {
             tables="audit_log index uq_audit_log_chain_successor"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-audit-chain-closure-120" onResult={(v) => setRegistry((s) => ({ ...s, ['120']: v }))} result={registry['120']} />
+          {/* Feature flags — migration 121. The control that System Tools has
+              been telling operators to use since the .sql landed, and which did
+              not exist: the file was registered nowhere, so the instruction
+              pointed at a console with no button for it. Independent of every
+              other target. CREATE TABLE + one index, IF NOT EXISTS, seeds no
+              rows — so a flag nobody set cannot arrive switched on, and the app
+              keeps degrading DB row → env var → off until it is run. */}
+          <RegistryButton id="121" label="Run migration 121… (runtime feature-flag store)"
+            tables="app_feature_flags"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-feature-flags-121" onResult={(v) => setRegistry((s) => ({ ...s, ['121']: v }))} result={registry['121']} />
           <RegistryButton id="113" label="Run migration 113…" tables="manufacturer_document_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-registry-113" onResult={(v) => setRegistry((s) => ({ ...s, ['113']: v }))} result={registry['113']} />

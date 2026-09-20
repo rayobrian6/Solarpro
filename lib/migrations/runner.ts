@@ -414,6 +414,17 @@ export function authorizeMigration(params: {
  *     ALTER only as a bare `ADD COLUMN IF NOT EXISTS` on a table another
  *     allowlisted migration deployed, with no default and no constraint. Run
  *     AFTER 113 — its target table is 113's.
+ *   - 121: app_feature_flags — the runtime feature-flag store, so a super_admin
+ *     can flip a flag without a redeploy (resolution order: DB row → env var →
+ *     off). CREATE TABLE + one index, both IF NOT EXISTS, seeds NO rows, so a
+ *     flag nobody set cannot arrive switched on. Independent of 107 and 113-120.
+ *     🚨 ADDED 2026-09-20 because it had been MISSED: commit e6be7205 landed the
+ *     .sql and bumped the governance count tripwire but touched none of this
+ *     allowlist, the deployment registry, the API action list or the console —
+ *     so the file was discoverable by the manifest and runnable by no path an
+ *     operator could reach, while System Tools told them to run it from a
+ *     console that had no control for it. That is the failure mode this comment
+ *     block warns about two paragraphs down, reproduced exactly.
  * NOTHING else — not any historical migration, not "all pending" — can be run
  * through the targeted path. (The retired 108 Nearmap-index and 109-112
  * data-authority targeted cards were removed 2026-07-21; their identifiers are
@@ -427,7 +438,7 @@ export function authorizeMigration(params: {
  * is exactly what happened to 117. The registry-parity test asserts this set and
  * REGISTRY_DEPLOYMENT/REGISTRY_SEQUENCE agree, so the four gates cannot drift again.
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['107', '113', '114', '115', '116', '117', '118', '119', '120']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['107', '113', '114', '115', '116', '117', '118', '119', '120', '121']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;

@@ -268,7 +268,11 @@ export default function SystemToolsPage() {
               <div className="font-semibold mb-0.5">Could not load feature flags</div>
               <div className="opacity-80">{flagsError}</div>
               {flagsError.includes('migration 121') ? (
-                <div className="mt-1 opacity-90">Run <code className="font-mono text-[10px] bg-black/30 px-1 py-0.5 rounded">121_app_feature_flags.sql</code> via the Migration Operator Console, then refresh.</div>
+                <div className="mt-1 opacity-90">
+                  Open <a href="/admin/system-tools/migrations" className="underline font-semibold">Migration Operator Console</a> and run{' '}
+                  <code className="font-mono text-[10px] bg-black/30 px-1 py-0.5 rounded">Run migration 121…</code>, then refresh.
+                  {' '}Until then flags fall back to their environment-variable defaults.
+                </div>
               ) : null}
             </div>
           </div>

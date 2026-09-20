@@ -110,10 +110,16 @@ describe('121 specifically — the migration believed orphaned', () => {
     expect(manifest.files.map(f => f.filename)).toContain(FILE);
   });
 
-  it('is deliberately NOT on the targeted recovery allowlist', () => {
-    // Correct: the allowlist is a bypass for recovery targets, not a list of
-    // what may run. 121 needs no bypass.
-    expect(TARGETED_RECOVERY_ALLOWLIST.has('121')).toBe(false);
+  it('is now registered on the targeted path', () => {
+    // It was NOT, and that was the defect: the .sql landed with a bumped count
+    // tripwire and nothing else, so no path an operator could reach would run
+    // it, while System Tools told them to run it from the Migration Operator
+    // Console — which had no control for it.
+    expect(TARGETED_RECOVERY_ALLOWLIST.has('121')).toBe(true);
+  });
+
+  it('has a deployment spec naming the table it creates', () => {
+    expect(REGISTRY_SEQUENCE as readonly string[]).toContain('121');
   });
 
   it('is idempotent — safe to run twice', () => {
@@ -199,6 +205,51 @@ describe('the targeted escape hatch stays in parity with its registry', () => {
     const ids = new Set(sqlFiles.map(f => f.split('_')[0]));
     for (const id of TARGETED_RECOVERY_ALLOWLIST) {
       expect(ids.has(id), `allowlisted ${id} has no .sql file`).toBe(true);
+    }
+  });
+
+  it('🚨 INVERSE PARITY: no post-baseline migration may exist unregistered', () => {
+    // THE ASSERTION THAT WOULD HAVE CAUGHT 121.
+    //
+    // Every existing parity check walks REGISTRY_SEQUENCE -> gates: "does each
+    // governed identifier have a spec, an action, a button?" That direction can
+    // never notice a migration that is in NONE of them. 121 landed with its
+    // .sql and a bumped count tripwire and nothing else, so it was discoverable
+    // by the manifest and executable by no path an operator could reach — while
+    // System Tools told them to run it from a console with no control for it.
+    //
+    // This walks the other way: manifest -> gates. A new .sql above the
+    // historical baseline must be registered or this fails immediately.
+    const HISTORICAL_BASELINE = 106; // 107 is the first governed identifier
+
+    // DELIBERATELY RETIRED, per the runner's own note: "The retired 108
+    // Nearmap-index and 109-112 data-authority targeted cards were removed
+    // 2026-07-21; their identifiers are no longer runnable through this escape
+    // hatch." Their .sql files remain for history. Named here so "retired" and
+    // "forgotten" cannot look the same — which is exactly how 121 hid.
+    const RETIRED = new Set(['108', '109', '110', '111', '112']);
+
+    const unregistered = manifest.files
+      .map(f => f.identifier)
+      .filter(id => {
+        const n = Number(String(id).replace(/\D/g, ''));
+        return Number.isFinite(n) && n > HISTORICAL_BASELINE;
+      })
+      .filter(id => !TARGETED_RECOVERY_ALLOWLIST.has(String(id)) && !RETIRED.has(String(id)));
+
+    expect(
+      unregistered,
+      `these migrations exist but are on no execution path: ${unregistered.join(', ')}. `
+      + 'Register each at all five sites (REGISTRY_DEPLOYMENT, REGISTRY_SEQUENCE, '
+      + 'TARGETED_RECOVERY_ALLOWLIST, the API action list, the console button) or '
+      + 'move the file out of lib/migrations/.',
+    ).toEqual([]);
+  });
+
+  it('every governed identifier has a deployment spec', () => {
+    // The other direction, kept so the two cannot drift apart.
+    for (const id of TARGETED_RECOVERY_ALLOWLIST) {
+      expect(REGISTRY_SEQUENCE as readonly string[]).toContain(id);
     }
   });
 

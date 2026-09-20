@@ -184,6 +184,22 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
     expectedTables: [],
     expectedColumns: [{ table: 'manufacturer_document_registry', column: 'jurisdiction_authority_id' }],
   },
+  // 121 (2026-09-20) — app_feature_flags: the runtime feature-flag store.
+  //
+  // 🚨 REGISTERED BECAUSE IT WAS NOT. The .sql landed alone: commit e6be7205
+  // added the file and bumped the governance count tripwire, and touched none
+  // of the runner, this registry, the migrations route or the operator console
+  // — four of the five registration sites. The file was therefore discoverable
+  // by the manifest and executable by NO path an operator can currently reach,
+  // while app/admin/system-tools/page.tsx told them to "run it via the
+  // Migration Operator Console", a console with no control for it.
+  //
+  // Same migration shape as 113-118: pure additive CREATE TABLE / CREATE INDEX
+  // IF NOT EXISTS, no ALTER, no DO block, no seeded rows — so a flag nobody set
+  // cannot arrive switched on. lib/db/featureFlags.ts already degrades cleanly
+  // without the table (DB row -> env var -> off), so running this is an upgrade
+  // from "env-var only" to "admin can flip at runtime", never a repair.
+  '121': { expectedTables: ['app_feature_flags'] },
 };
 
 /** The migration identifiers this module governs, in ceremony order.
@@ -191,7 +207,7 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
  *  other migration's governance event is recorded through, so running it first
  *  means the rest are actually auditable. 119 is last because its target table
  *  is 113's. */
-export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120'] as const;
+export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120', '121'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;

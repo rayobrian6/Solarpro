@@ -251,6 +251,7 @@ export async function POST(req: NextRequest) {
     'execute-document-jurisdiction-119', // mutation: TARGETED deployment of ONLY migration 119 (jurisdiction_authority_id on manufacturer_document_registry — D4). The first ADD-COLUMN target.
     'execute-audit-org-context-107', // mutation: TARGETED deployment of ONLY migration 107 (org-context columns on audit_log — ADR-013 T-08). Repairs the durable audit path itself.
     'execute-audit-chain-closure-120', // mutation: TARGETED deployment of ONLY migration 120 (unique successor index on audit_log). Makes a concurrent chain fork impossible. The first INDEX-ONLY target.
+    'execute-feature-flags-121', // mutation: TARGETED deployment of ONLY migration 121 (app_feature_flags — the runtime feature-flag store). CREATE TABLE + index, IF NOT EXISTS, seeds no rows.
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -345,9 +346,12 @@ export async function POST(req: NextRequest) {
   // it reads and writes no row, and makes a sibling fork impossible at the
   // storage layer. Requires 107.
   const isAuditChainClosure120 = action === 'execute-audit-chain-closure-120';
+  // Feature flags — migration 121 (app_feature_flags). CREATE TABLE + one index,
+  // both IF NOT EXISTS, seeds no rows. Independent of every other target.
+  const isFeatureFlags121 = action === 'execute-feature-flags-121';
   const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115
     || isEngineeringReview116 || isAhjRegistry117 || isFieldMeasurements118 || isDocumentJurisdiction119
-    || isAuditOrgContext107 || isAuditChainClosure120;
+    || isAuditOrgContext107 || isAuditChainClosure120 || isFeatureFlags121;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
@@ -653,6 +657,7 @@ export async function POST(req: NextRequest) {
       // table(s) already exist it is a safe no-op.
       const identifier = isAuditOrgContext107 ? '107'
         : isAuditChainClosure120 ? '120'
+        : isFeatureFlags121 ? '121'
         : isRegistry113 ? '113'
         : isReconciliation114 ? '114'
         : isPersonnel115 ? '115'

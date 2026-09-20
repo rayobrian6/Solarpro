@@ -110,12 +110,15 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(SQL_118).toMatch(/verification_state <> 'VERIFIED'[\s\S]{0,200}verification_mode IS NOT NULL/);
   });
 
-  it('sequence is 107 FIRST, then 113 … 120', () => {
+  it('sequence is 107 FIRST, then 113 … 121', () => {
     // 107 leads deliberately: it repairs the durable audit path that every other
     // migration's governance event is recorded through. 120 closes that same
     // chain against concurrent forks and depends on 107's columns.
-    expect(REGISTRY_SEQUENCE).toEqual(['107', '113', '114', '115', '116', '117', '118', '119', '120']);
-    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['107', '113', '114', '115', '116', '117', '118', '119', '120']);
+    // 121 (app_feature_flags) is last and depends on nothing — it was added
+    // 2026-09-20 after being found registered NOWHERE: its .sql had landed
+    // alone, so no operator-reachable path could run it.
+    expect(REGISTRY_SEQUENCE).toEqual(['107', '113', '114', '115', '116', '117', '118', '119', '120', '121']);
+    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['107', '113', '114', '115', '116', '117', '118', '119', '120', '121']);
   });
 
   it('EVERY governed identifier resolves to a real file that passes its own gate', () => {

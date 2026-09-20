@@ -1464,7 +1464,16 @@ export default function DesignStudio({ project, onSave }: Props) {
     setSearchLoading(true);
     // Clear panels from old address before flying to new location
     setPanels([]);
-    lastSavedPanelsRef.current = '[]';
+    // 🚨 Use the helper, not a hand-rolled string. `'[]'` is NOT a signature in
+    // this format — the canonical empty is `'[]|null|[]'` — so these three
+    // address-change sites were the last copies of the drift that
+    // layoutSignature() exists to end, and none of them could ever compare
+    // equal to a real signature.
+    //
+    // This is a FLOOR, not a claim of equality: a save is expected to follow an
+    // address change, because the site-change effect archives the previous
+    // property's roof and that archive must reach the database.
+    lastSavedPanelsRef.current = layoutSignature({});
     setProduction(null);
     setCostEstimate(null);
     setCalcMessage('');
@@ -1574,7 +1583,16 @@ export default function DesignStudio({ project, onSave }: Props) {
     setAddressSuggestions([]);
     // Clear panels from old address before flying to new location
     setPanels([]);
-    lastSavedPanelsRef.current = '[]';
+    // 🚨 Use the helper, not a hand-rolled string. `'[]'` is NOT a signature in
+    // this format — the canonical empty is `'[]|null|[]'` — so these three
+    // address-change sites were the last copies of the drift that
+    // layoutSignature() exists to end, and none of them could ever compare
+    // equal to a real signature.
+    //
+    // This is a FLOOR, not a claim of equality: a save is expected to follow an
+    // address change, because the site-change effect archives the previous
+    // property's roof and that archive must reach the database.
+    lastSavedPanelsRef.current = layoutSignature({});
     setProduction(null);
     setCostEstimate(null);
     setCalcMessage('');
@@ -1685,7 +1703,16 @@ export default function DesignStudio({ project, onSave }: Props) {
   const handleLocationPick = useCallback(async (pickedLat: number, pickedLng: number, pickedAddress: string) => {
     // Clear existing panels — new house, fresh start
     setPanels([]);
-    lastSavedPanelsRef.current = '[]';
+    // 🚨 Use the helper, not a hand-rolled string. `'[]'` is NOT a signature in
+    // this format — the canonical empty is `'[]|null|[]'` — so these three
+    // address-change sites were the last copies of the drift that
+    // layoutSignature() exists to end, and none of them could ever compare
+    // equal to a real signature.
+    //
+    // This is a FLOOR, not a claim of equality: a save is expected to follow an
+    // address change, because the site-change effect archives the previous
+    // property's roof and that archive must reach the database.
+    lastSavedPanelsRef.current = layoutSignature({});
     setProduction(null);
     setCostEstimate(null);
     setCalcMessage('');
