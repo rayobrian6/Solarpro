@@ -502,11 +502,12 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Full suite passes | ✅ **564 files, 12,140 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
-| Build passes | ⏳ delegated to CI on the PR |
-| CI passes | ⏳ pushed; awaiting checks |
+| Build passes | ✅ Build Gate green in CI |
+| CI passes | ✅ **10/10 green on `a754a4ec`**, incl. `CI Complete`, Unit Tests, tsc, ESLint, secret guard, page-fit |
 | Staging deploy verified | ❌ |
-| Exact tested SHA verified | ❌ |
-| No known P0/P1 in workstream | ❌ WS1-002, WS1-003, WS1-008, WS1-012, WS1-013 open |
+| Exact tested SHA verified | ✅ `a754a4ec` (a docs-only commit may follow it) |
+| **Visual check in a browser** | ❌ **NOT DONE — the fixes move rendered geometry** |
+| No known P0/P1 in workstream | ❌ WS1-002, WS1-003, WS1-012, WS1-013 open |
 
 **WORKSTREAM 1 COMPLETE: NO.**
 
