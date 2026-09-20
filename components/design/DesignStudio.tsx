@@ -1031,6 +1031,20 @@ export default function DesignStudio({ project, onSave }: Props) {
   useEffect(() => { panelsRef2.current = panels; }, [panels]);
   useEffect(() => { roofPlanesRef.current = roofPlanes; }, [roofPlanes]);
   useEffect(() => { fenceLineRef.current = fenceLine; }, [fenceLine]);
+  // Mirror the scalar design parameters for the save paths. saveLayoutToDB is a
+  // useCallback and the beacon fires during unload, so both must read current
+  // values from refs rather than from a closure — the same reason mapCenter and
+  // zoom above are mirrored.
+  const tiltRef = useRef(tilt);
+  const azimuthRef = useRef(azimuth);
+  const rowSpacingRef = useRef(rowSpacing);
+  const groundHeightRef = useRef(groundHeight);
+  const bifacialOptimizedRef = useRef(bifacialOptimized);
+  useEffect(() => { tiltRef.current = tilt; }, [tilt]);
+  useEffect(() => { azimuthRef.current = azimuth; }, [azimuth]);
+  useEffect(() => { rowSpacingRef.current = rowSpacing; }, [rowSpacing]);
+  useEffect(() => { groundHeightRef.current = groundHeight; }, [groundHeight]);
+  useEffect(() => { bifacialOptimizedRef.current = bifacialOptimized; }, [bifacialOptimized]);
   useEffect(() => { fenceHeightRef.current = fenceHeight; }, [fenceHeight]);
 
   // QW-10: Reactive production calculation — auto-compute with 3s debounce
@@ -1079,7 +1093,20 @@ export default function DesignStudio({ project, onSave }: Props) {
       foreignRoofPlanesRef.current,
       activeSiteKeyRef.current ?? '',
     );
-    const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence });
+    // The scalar design parameters the layout row carries. They were persisted
+    // but not SIGNED, so a design whose only edit was a fence line or a row
+    // spacing scheduled no save at all — the payload carried them, only the
+    // trigger was blind.
+    const designParams = {
+      fenceLine: fenceLineRef.current.length > 1 ? fenceLineRef.current : undefined,
+      fenceHeight: project.systemType === 'fence' ? fenceHeightRef.current : undefined,
+      groundTilt: tiltRef.current,
+      groundAzimuth: azimuthRef.current,
+      rowSpacing: rowSpacingRef.current,
+      groundHeight: groundHeightRef.current,
+      bifacialOptimized: bifacialOptimizedRef.current,
+    };
+    const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams });
     if (sig === lastSavedPanelsRef.current) return; // nothing changed
     lastSavedPanelsRef.current = sig;
     const payload = {
@@ -1087,6 +1114,15 @@ export default function DesignStudio({ project, onSave }: Props) {
       mapCenter: mapCenterRef.current,
       mapZoom: zoomRef.current,
       systemType: project.systemType,
+      // The route accepts these and lib/db/projects.ts persists them, but the
+      // autosave never sent them — so a ground-mount's tilt, row spacing,
+      // height and bifacial flag only reached the database if the user pressed
+      // Save. Sent here too, so the autosave and the Save button agree.
+      groundTilt: designParams.groundTilt,
+      groundAzimuth: designParams.groundAzimuth,
+      rowSpacing: designParams.rowSpacing,
+      groundHeight: designParams.groundHeight,
+      bifacialOptimized: designParams.bifacialOptimized,
       // v63: electrical design handoff for Engineering (string/topology/brand/equipment)
       designElectrical,
       // Include roofPlanes so permit generator can use exact roof geometry.
@@ -1184,7 +1220,12 @@ export default function DesignStudio({ project, onSave }: Props) {
     // v66: roofPlanes is a dependency. A traced face, a detected face, or a
     // per-face pitch/azimuth edit must schedule a save on its own instead of
     // waiting for a panel change that may never come.
-  }, [panels, roofPlanes, saveLayoutToDB]);
+    //
+    // The scalar design parameters are dependencies for the same reason: a
+    // fence line, a row spacing or a ground tilt edit must schedule its own
+    // save. They were persisted but could not TRIGGER, so on a ground-mount or
+    // fence design — where panels may not move at all — the edit was lost.
+  }, [panels, roofPlanes, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, saveLayoutToDB]);
 
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {
@@ -1205,7 +1246,20 @@ export default function DesignStudio({ project, onSave }: Props) {
         foreignRoofPlanesRef.current,
         activeSiteKeyRef.current ?? '',
       );
-      const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence });
+      // Identical field set to saveLayoutToDB. The beacon previously omitted
+      // fence geometry and every scalar design parameter, so closing the tab
+      // within the 3s debounce lost them while closing it later did not — the
+      // worst kind of bug to report, because it depends on how fast you click.
+      const designParams = {
+        fenceLine: fenceLineRef.current.length > 1 ? fenceLineRef.current : undefined,
+        fenceHeight: project.systemType === 'fence' ? fenceHeightRef.current : undefined,
+        groundTilt: tiltRef.current,
+        groundAzimuth: azimuthRef.current,
+        rowSpacing: rowSpacingRef.current,
+        groundHeight: groundHeightRef.current,
+        bifacialOptimized: bifacialOptimizedRef.current,
+      };
+      const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams });
       if (sig === lastSavedPanelsRef.current) return;
       const payload = JSON.stringify({
         panels: panelList,
@@ -1215,6 +1269,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         designElectrical,
         // See saveLayoutToDB — always send the array, including [].
         roofPlanes: planesForPersistence,
+        ...designParams,
       });
       navigator.sendBeacon(
         `/api/projects/${project.id}/layout`,
@@ -1265,6 +1320,32 @@ export default function DesignStudio({ project, onSave }: Props) {
           setLayoutLoadedFromDB(true);
           console.log(`[DesignStudio] Restored ${restoredPanels.length} panels from DB`);
         }
+        // 🚨 READ BACK THE DESIGN PARAMETERS. These were WRITE-ONLY: the route
+        // accepted them and lib/db/projects.ts stored them, but the restore
+        // read only panels, designElectrical and roofPlanes — so a fence line,
+        // a row spacing, a ground tilt/azimuth/height or the bifacial flag came
+        // back at its component default on every reload, silently discarding
+        // the saved design. Nothing here needs a schema or type change; the
+        // fields have been on the row all along.
+        const restoredParams = {
+          fenceLine: data.data?.fenceLine as { lat: number; lng: number }[] | undefined,
+          fenceHeight: data.data?.fenceHeight as number | undefined,
+          groundTilt: data.data?.groundTilt as number | undefined,
+          groundAzimuth: data.data?.groundAzimuth as number | undefined,
+          rowSpacing: data.data?.rowSpacing as number | undefined,
+          groundHeight: data.data?.groundHeight as number | undefined,
+          bifacialOptimized: data.data?.bifacialOptimized as boolean | undefined,
+        };
+        if (Array.isArray(restoredParams.fenceLine) && restoredParams.fenceLine.length > 1) {
+          setFenceLine(restoredParams.fenceLine);
+        }
+        if (typeof restoredParams.fenceHeight === 'number') setFenceHeight(restoredParams.fenceHeight);
+        if (typeof restoredParams.groundTilt === 'number') setTilt(restoredParams.groundTilt);
+        if (typeof restoredParams.groundAzimuth === 'number') setAzimuth(restoredParams.groundAzimuth);
+        if (typeof restoredParams.rowSpacing === 'number') setRowSpacing(restoredParams.rowSpacing);
+        if (typeof restoredParams.groundHeight === 'number') setGroundHeight(restoredParams.groundHeight);
+        if (typeof restoredParams.bifacialOptimized === 'boolean') setBifacialOptimized(restoredParams.bifacialOptimized);
+
         // v63: restore the electrical design (topology / brand / modules-per-string /
         // racking / manual string-paint overrides) so the UI reflects what was saved.
         const de = data.data?.designElectrical as DesignElectrical | undefined;
@@ -1328,6 +1409,10 @@ export default function DesignStudio({ project, onSave }: Props) {
           panels: restoredPanels,
           designElectrical: data.data?.designElectrical,
           roofPlanes: mergeForPersistence(restoredPlanes, otherSitePlanes, siteKeyNow),
+          // Seed from what was RESTORED, in the same shape the writers sign.
+          // Omitting these would make the seed disagree with the first computed
+          // signature and re-POST the whole layout on the next tick.
+          designParams: restoredParams,
         });
         restoreStateRef.current = 'done';
         setRoofRestoreResolved(true);

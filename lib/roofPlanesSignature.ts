@@ -129,8 +129,45 @@ export function layoutSignature(input: {
   panels?: unknown;
   designElectrical?: unknown;
   roofPlanes?: readonly RoofPlane[] | null;
+  /** The scalar design parameters and fence geometry the layout row carries.
+   *
+   *  🚨 WITHOUT THIS THEY CANNOT TRIGGER A SAVE. The autosave effect only fires
+   *  on a signature change, so a design whose ONLY edit was a fence line, a row
+   *  spacing or a ground tilt scheduled nothing — the same shape of defect as
+   *  roof geometry before v66, and invisible for the same reason: the payload
+   *  always carried the fields, so only the trigger was blind. */
+  designParams?: LayoutDesignParams | null;
 }): string {
   return JSON.stringify(input.panels ?? [])
     + '|' + JSON.stringify(signableElectrical(input.designElectrical))
-    + '|' + roofPlanesSignature(input.roofPlanes);
+    + '|' + roofPlanesSignature(input.roofPlanes)
+    + '|' + designParamsSignature(input.designParams);
+}
+
+/** The persisted scalar/geometry fields of a layout, beyond panels, electrical
+ *  and roof planes. Named as data so the projection below and the restore path
+ *  cannot drift — the list IS the contract. */
+export interface LayoutDesignParams {
+  fenceLine?: ReadonlyArray<{ lat: number; lng: number }> | null;
+  fenceHeight?: number | null;
+  fenceAzimuth?: number | null;
+  groundTilt?: number | null;
+  groundAzimuth?: number | null;
+  rowSpacing?: number | null;
+  groundHeight?: number | null;
+  bifacialOptimized?: boolean | null;
+}
+
+/** 🚨 Every persisted design parameter must appear here, or edits to it will
+ *  not schedule a save and will be lost on reload. Declared as data so a test
+ *  can assert it against the route's accepted body. */
+export const SIGNED_DESIGN_PARAMS = [
+  'fenceLine', 'fenceHeight', 'fenceAzimuth',
+  'groundTilt', 'groundAzimuth', 'rowSpacing', 'groundHeight',
+  'bifacialOptimized',
+] as const satisfies readonly (keyof LayoutDesignParams)[];
+
+function designParamsSignature(p: LayoutDesignParams | null | undefined): string {
+  if (!p) return 'null';
+  return JSON.stringify(SIGNED_DESIGN_PARAMS.map(f => p[f] ?? null));
 }

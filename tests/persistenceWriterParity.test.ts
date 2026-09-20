@@ -112,15 +112,22 @@ describe('the restore seed stays in parity with the writers', () => {
   });
 });
 
-describe('known gap, recorded rather than silently tolerated', () => {
-  it('the beforeunload beacon still omits fenceLine and fenceHeight', () => {
-    // The debounced autosave persists fence geometry; the beacon does not. So
-    // closing the tab within 3s of drawing a fence loses the fence, while
-    // closing it later does not. Pre-existing and out of scope for the site
-    // ownership work, but asserted so it is a known quantity rather than a
-    // surprise — flip this test when the beacon is fixed.
-    const beacon = SRC.slice(SRC.indexOf('const handleBeforeUnload'), SRC.indexOf('navigator.sendBeacon'));
-    expect(beacon).not.toMatch(/fenceLine:/);
-    expect(beacon).not.toMatch(/fenceHeight:/);
+describe('the two writers on the layout route carry the SAME fields', () => {
+  const beacon = SRC.slice(SRC.indexOf('const handleBeforeUnload'), SRC.indexOf('navigator.sendBeacon'));
+
+  it('the beacon now carries fence geometry and the design parameters', () => {
+    // It used to omit them, so closing the tab inside the 3s debounce lost a
+    // fence line or a row spacing while closing it later did not — a bug whose
+    // reproduction depended on how fast the user clicked.
+    expect(beacon).toMatch(/fenceLine:/);
+    expect(beacon).toMatch(/fenceHeight:/);
+    expect(beacon).toMatch(/groundTilt:/);
+    expect(beacon).toMatch(/rowSpacing:/);
+    expect(beacon).toMatch(/bifacialOptimized:/);
+  });
+
+  it('the beacon spreads the same designParams object the debounced save signs', () => {
+    expect(beacon).toMatch(/const designParams = \{/);
+    expect(SRC.slice(SRC.indexOf('const handleBeforeUnload'))).toMatch(/\.\.\.designParams/);
   });
 });
