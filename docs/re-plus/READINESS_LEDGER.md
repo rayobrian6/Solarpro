@@ -884,6 +884,31 @@ approximate; incoherent. Deleted, which changes no production number.
 
 ---
 
+## WS1-024 — Obstructions and measurements were signed but could not trigger a save
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+Migration 122 added obstructions and measurements to the persisted payload **and** to the save
+signature (`SIGNED_DESIGN_PARAMS`), which is why this looked finished. But signing only
+**suppresses the early return** once something else has already scheduled a save — **it cannot
+schedule one.** Both were missing from the autosave effect's dependency array, so placing a vent or
+drawing a measurement started no timer, and the work persisted only if the user happened to touch a
+panel afterwards.
+
+🚨 **The same trap, twice.** The v66 comment sitting directly above that dependency array describes
+exactly this failure mode for `roofPlanes` — *"They were persisted but could not TRIGGER"* — and two
+migrations later the identical mistake was made for the entities 122 introduced. Signing a field and
+watching a field are different jobs; doing the first does not do the second.
+
+**Tests** — two added: an obstruction change and a measurement change must each schedule a save on
+their own, and the saved payload must contain the new entity **by id**. Mutation-proven: remove them
+from the deps and both fail with *"expected 0 to be greater than 0"* — zero saves scheduled.
+
+---
+
 ## WS1-018 — The render lift reached the permit site plan and split every gable ridge
 
 | | |
@@ -961,7 +986,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
 | E2E passes | ❌ **not run by me** — see below |
-| Full suite passes | ✅ **567 files, 12,198 tests, 0 failures**, 490 skipped |
+| Full suite passes | ✅ **567 files, 12,200 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |

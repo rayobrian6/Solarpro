@@ -269,6 +269,38 @@ describe('🚨 DesignStudio: picking the house next door and coming back', () =>
     expect(onNeighbour.overrides ?? {}).toEqual({});
   });
 
+  it('🚨 placing an obstruction SCHEDULES a save on its own', async () => {
+    // Migration 122 added obstructions and measurements to the persisted payload
+    // AND to the save signature, which is why this looked finished. But signing
+    // only SUPPRESSES the early return once something else has already scheduled
+    // a save — it cannot schedule one. They were missing from the autosave
+    // effect's dependency array, so drawing a vent or a measurement started no
+    // timer and persisted only if the user happened to touch a panel afterwards.
+    await mountStudio();
+    await flushAutosave();
+    posted = [];
+
+    const vent = { id: 'vent-new', lat: MELVIN.lat, lng: MELVIN.lng, height: 2, radiusM: 0.5, type: 'vent' };
+    await act(async () => { engine.props.onObstructionsChange!([...MELVIN_OBS, vent]); });
+    await flushAutosave();
+
+    expect(posted.length, 'an obstruction change scheduled no save at all').toBeGreaterThan(0);
+    expect(lastPost().obstructions.map((o: any) => o.id)).toContain('vent-new');
+  });
+
+  it('🚨 adding a measurement SCHEDULES a save on its own', async () => {
+    await mountStudio();
+    await flushAutosave();
+    posted = [];
+
+    const meas = { id: 'meas-new', a: { lat: 1, lng: 1 }, b: { lat: 1, lng: 3 }, horizDistM: 9, slopeDistM: 9.1 };
+    await act(async () => { engine.props.onMeasurementsChange!([...MELVIN_MEAS, meas]); });
+    await flushAutosave();
+
+    expect(posted.length, 'a measurement change scheduled no save at all').toBeGreaterThan(0);
+    expect(lastPost().measurements.map((m: any) => m.id)).toContain('meas-new');
+  });
+
   it('🚨 the UI can never say "loaded from DB · 0 panels" — the contradiction Ray reported', async () => {
     // HIS WORDS: 52 panels in the top bar, 52 in the System Summary,
     // "Layout loaded from DB · 0 panels", and "Saved for another address" — all

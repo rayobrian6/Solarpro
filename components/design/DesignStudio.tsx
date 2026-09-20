@@ -1326,7 +1326,18 @@ export default function DesignStudio({ project, onSave }: Props) {
     // fence line, a row spacing or a ground tilt edit must schedule its own
     // save. They were persisted but could not TRIGGER, so on a ground-mount or
     // fence design — where panels may not move at all — the edit was lost.
-  }, [panels, roofPlanes, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, saveLayoutToDB]);
+  // 🚨 `placedObstructions` and `measurements` BELONG HERE, and their absence was
+  // a half-landed fix. Migration 122 added both to the persisted payload AND to
+  // the save signature (lib/roofPlanesSignature.ts SIGNED_DESIGN_PARAMS), which
+  // is why they looked done — but signing only SUPPRESSES the early return once
+  // something else has already scheduled a save. It cannot schedule one.
+  //
+  // So placing a vent or drawing a measurement changed nothing observable: no
+  // timer started, and the work persisted only if the user happened to touch a
+  // panel afterwards. The v66 comment directly above describes exactly this
+  // failure mode for roofPlanes ("They were persisted but could not TRIGGER")
+  // and the same trap was walked into again two migrations later.
+  }, [panels, roofPlanes, placedObstructions, measurements, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, saveLayoutToDB]);
 
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {
