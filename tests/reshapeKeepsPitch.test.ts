@@ -42,9 +42,9 @@ const STUDIO = readFileSync(join(process.cwd(), 'components/design/DesignStudio.
  * is correctly extended is measuring the wrong property — and the failure looks
  * like a regression, which is worse than no test.
  */
-function updatePushBlocks(src: string): string[] {
+function pushBlocksFor(src: string, arrayName: string): string[] {
   const out: string[] = [];
-  const needle = 'updates.push({';
+  const needle = `${arrayName}.push({`;
   let i = src.indexOf(needle);
   while (i !== -1) {
     let depth = 0;
@@ -57,6 +57,30 @@ function updatePushBlocks(src: string): string[] {
     i = src.indexOf(needle, j);
   }
   return out;
+}
+
+/**
+ * Every array that is actually handed to `onRoofPlanesStitched`, found from the
+ * CALLS rather than from a name.
+ *
+ * 🚨 THIS FILE ALREADY MADE THE MISTAKE IT GUARDS AGAINST, TWICE.
+ * Version one enumerated three named callbacks and missed the two that shipped
+ * broken. Version two searched for `updates.push({` — and Stitch fills an array
+ * called `stitchUpdates`, so it was invisible too: the test asserted "all three
+ * pushes" while a FOURTH reshape path emitted no pitch, no azimuth and no ECEF
+ * frame at all.
+ *
+ * A guard that enumerates by name will always be one rename behind. So the
+ * emitters are discovered from `onRoofPlanesStitched?.(X)` — the actual channel
+ * — and every array found that way is checked.
+ */
+function reshapeEmitBlocks(src: string): string[] {
+  const arrays = new Set<string>();
+  const callRe = /onRoofPlanesStitched\?\.\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
+  for (let m = callRe.exec(src); m; m = callRe.exec(src)) arrays.add(m[1]);
+  expect(arrays.size, 'no reshape emit channel found — has the callback been renamed?')
+    .toBeGreaterThan(0);
+  return [...arrays].flatMap(name => pushBlocksFor(src, name));
 }
 
 describe('the emit carries the reshaped values', () => {
@@ -76,15 +100,15 @@ describe('the emit carries the reshaped values', () => {
 
     // And nothing may re-declare the shape inline again.
     expect(ENGINE).not.toMatch(/updates: Array<\{/);
-    expect(ENGINE.match(/const updates: RoofPlaneReshapeUpdate\[\] = \[\];/g) ?? [])
-      .toHaveLength(3);
+    // Four arrays feed the channel and every one of them is the shared type.
+    expect(ENGINE.match(/RoofPlaneReshapeUpdate\[\] = \[\];/g) ?? []).toHaveLength(4);
   });
 
-  it('EVERY reshape site emits them — all three pushes', () => {
-    // Square Up, the flat-trace rebuild and applyBuildingShape. If a fourth
-    // reshape path is added and forgets, plane.pitch silently drifts again.
-    const pushes = updatePushBlocks(ENGINE);
-    expect(pushes.length).toBe(3);
+  it('EVERY reshape site emits them — discovered from the emit channel, not by name', () => {
+    // Square Up, the flat-trace rebuild, applyBuildingShape and STITCH. If a
+    // fifth reshape path is added and forgets, plane.pitch silently drifts again.
+    const pushes = reshapeEmitBlocks(ENGINE);
+    expect(pushes.length).toBe(4);
     for (const push of pushes) {
       expect(push, `a reshape push omits pitch:\n${push}`).toMatch(/pitch:/);
       expect(push, `a reshape push omits azimuth:\n${push}`).toMatch(/azimuth:/);

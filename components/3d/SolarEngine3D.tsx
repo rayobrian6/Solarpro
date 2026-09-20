@@ -5087,18 +5087,7 @@ function SolarEngine3D({
 
     // v64: collect the stitched corners (lat/lng) per plane so they can be written
     // back into roofPlanes state — the geometry every panel-placement engine reads.
-    const stitchUpdates: Array<{
-      id: string;
-      vertices: Array<{ lat: number; lng: number }>;
-      localFrame3D: {
-        u: { x: number; y: number; z: number };
-        v: { x: number; y: number; z: number };
-        n: { x: number; y: number; z: number };
-      };
-      polygon3D?: Array<{ x: number; y: number; z: number }>;
-      origin3D?:  { x: number; y: number; z: number };
-      normal3D?:  { x: number; y: number; z: number };
-    }> = [];
+    const stitchUpdates: RoofPlaneReshapeUpdate[] = [];
     for (const [pid, pts] of work) {
       const cartPts: Cart3[] = pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
       // 🚨 surfaceOffsetM: 0 — these points came OUT of a previous fit (the
@@ -5156,6 +5145,26 @@ function SolarEngine3D({
           polygon3D: projected.map((p: any) => ({ x: p.x, y: p.y, z: p.z })),
           origin3D:  { x: frame.origin.x, y: frame.origin.y, z: frame.origin.z },
           normal3D:  { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z },
+          // 🚨 STITCH IS A RESHAPE, AND IT WAS THE ONE THAT SAID NOTHING.
+          //
+          // Ray uses Stitch deliberately to pull separate planes into a peak —
+          // a modelling move. Moving corners to a shared ridge CHANGES the
+          // plane, so pitch, azimuth and the ECEF frame all change with it. This
+          // push carried the geometry and none of the three, so `plane.pitch`
+          // kept its pre-stitch value (read by the planset, the structural
+          // engine and the production model) and `buildSurfaceGrid` kept
+          // placing panels on the pre-stitch triad while clipping them to the
+          // stitched outline.
+          //
+          // Derived exactly as buildRoofPlane3D derives them, so a stitched face
+          // and a traced one report the same numbers for the same geometry.
+          pitch:   Math.max(0, Math.min(60, frame.tiltDeg)),
+          azimuth: ((frame.azimuthDeg % 360) + 360) % 360,
+          ecefFrame3D: {
+            u: { x: frame.u.x, y: frame.u.y, z: frame.u.z },
+            v: { x: frame.v.x, y: frame.v.y, z: frame.v.z },
+            n: { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z },
+          },
         });
       }
     }

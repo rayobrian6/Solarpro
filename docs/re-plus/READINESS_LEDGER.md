@@ -737,6 +737,39 @@ Mutation-checked: removing one emit fails with the offending block named.
 
 ---
 
+## WS1-019 — Stitch was a FOURTH reshape path, and it emitted nothing about the plane
+
+| | |
+|---|---|
+| **Severity** | **P1 — reaches the planset, structural and production** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+**I claimed to have eliminated this class and had not.** WS1-016 added `ecefFrame3D` to "all three
+reshape emitters" — but there are **four**. Stitch fills an array called `stitchUpdates`, so both a
+name-based search and my own new test missed it entirely, and it carried `vertices`,
+`localFrame3D`, `polygon3D`, `origin3D` and `normal3D` — and **no `pitch`, no `azimuth`, no
+`ecefFrame3D`**.
+
+Stitch is not a cleanup. Ray uses it deliberately to pull separate planes into a peak — a modelling
+move that **changes the plane**. So `plane.pitch` kept its pre-stitch value while the 3D roof
+changed underneath it (read by the planset, the structural engine and the production model), and
+`buildSurfaceGrid` kept placing panels on the pre-stitch triad while clipping them to the stitched
+outline — the wedge and the cos²(Δ) row loss of WS1-016, on the one path that was still exposed to
+them.
+
+It also held a **fifth** inline copy of the reshape shape. Collapsed to `RoofPlaneReshapeUpdate`
+like the rest; pitch and azimuth are derived exactly as `buildRoofPlane3D` derives them, so a
+stitched face and a traced one report the same numbers for the same geometry.
+
+🚨 **The test had the same blindness twice.** Version one enumerated three named callbacks and
+missed the two that shipped broken. Version two searched for `updates.push({` and missed
+`stitchUpdates`. It now discovers emitters from the **channel** — every array passed to
+`onRoofPlanesStitched?.(…)` — because a guard that enumerates by name is always one rename behind.
+It asserts four emitters, each carrying all three fields, and that all four arrays use the shared
+type. Mutation-proven: drop `pitch` from the stitch push and it fails naming the block.
+
+---
+
 ## WS1-018 — The render lift reached the permit site plan and split every gable ridge
 
 | | |
