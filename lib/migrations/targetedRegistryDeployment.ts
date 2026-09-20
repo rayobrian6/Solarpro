@@ -220,6 +220,26 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
     ],
     altersPreexistingTables: ['layouts'],
   },
+  // 123 (2026-09-20) — site_archives on layouts. Where a project's OTHER
+  // properties live.
+  //
+  // 🚨 The column exists so that no downstream consumer can reach a foreign
+  // property's geometry. `panels` / `roof_planes` / `obstructions` /
+  // `measurements` keep the meaning every consumer already assumes — THE
+  // PROPERTY THIS PROJECT IS AT — and everything else moves out of their reach.
+  // Before it, archived roof planes were merged INTO `roof_planes`, and one
+  // live row carried 13 planes from three properties into pvwatts, the
+  // production route and the permit CAD path.
+  //
+  // One bare ADD COLUMN IF NOT EXISTS, no default and no constraint, on a table
+  // that predates the registry — same shape and same declaration as 122.
+  '123': {
+    expectedTables: [],
+    expectedColumns: [
+      { table: 'layouts', column: 'site_archives' },
+    ],
+    altersPreexistingTables: ['layouts'],
+  },
 };
 
 /** The migration identifiers this module governs, in ceremony order.
@@ -227,7 +247,7 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
  *  other migration's governance event is recorded through, so running it first
  *  means the rest are actually auditable. 119 is last because its target table
  *  is 113's. */
-export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122'] as const;
+export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;

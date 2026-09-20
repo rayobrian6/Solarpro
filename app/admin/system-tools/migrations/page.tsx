@@ -321,6 +321,18 @@ export default function MigrationConsolePage() {
             tables="layouts.obstructions, layouts.measurements"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-layout-design-entities-122" onResult={(v) => setRegistry((s) => ({ ...s, ['122']: v }))} result={registry['122']} />
+          {/* Layout site archives — migration 123. Where a project's OTHER
+              properties live. Until this runs, changing the address archives
+              nothing: the previous property's panels, obstructions and
+              measurements are simply gone, and its roof planes are merged into
+              layouts.roof_planes — the column pvwatts, the production route and
+              the permit CAD path all read UNFILTERED, so a permit can combine
+              one property's roof with another's jurisdiction. One bare ADD
+              COLUMN IF NOT EXISTS on layouts; no default, no constraint. */}
+          <RegistryButton id="123" label="Run migration 123… (other properties are kept, not deleted)"
+            tables="layouts.site_archives"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-layout-site-archives-123" onResult={(v) => setRegistry((s) => ({ ...s, ['123']: v }))} result={registry['123']} />
           <RegistryButton id="113" label="Run migration 113…" tables="manufacturer_document_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-registry-113" onResult={(v) => setRegistry((s) => ({ ...s, ['113']: v }))} result={registry['113']} />

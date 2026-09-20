@@ -64,9 +64,9 @@ import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
 import { layoutSignature } from '@/lib/roofPlanesSignature';
-import {
-  siteKeyFromCoords, partitionBySite, mergeForPersistence, isSameSite,
-} from '@/lib/siteIdentity';
+import { siteKeyFromCoords, isSameSite, coordKeyOf } from '@/lib/siteIdentity';
+import { archivesSignature } from '@/lib/design/siteDesignModel';
+import { useSiteDesign } from './useSiteDesign';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
   Layers, Zap, Sun, RotateCcw, Save, Play, ChevronDown, ChevronUp,
@@ -572,9 +572,22 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [measurePoints, setMeasurePoints] = useState<{ x: number; y: number; lat: number; lng: number }[]>([]);
   const [measureDistance, setMeasureDistance] = useState<number | null>(null);
 
-  // Layout state
-  const [panels, setPanels] = useState<PlacedPanel[]>([]);
-  const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([]);
+  // ── Layout state — OWNED BY THE SITE DESIGN MODEL ─────────────────────────
+  //
+  // 🚨 These four arrays (panels, roofPlanes, placedObstructions, measurements)
+  // are SITE-BOUND: they describe one physical property. They used to be four
+  // independent useState calls, and `handleLocationPick` cleared panels
+  // outright (`setPanels([])`) while the roof was archived — so changing
+  // property preserved the roof and DELETED everything else. That is the
+  // defect Ray hit on 3 Melvin Drive: pick the house next door, pick Melvin
+  // again, and the panels never came back.
+  //
+  // components/design/useSiteDesign.ts owns them as one bundle. The setter
+  // names and signatures are unchanged, so every call site below is unchanged;
+  // what changes is that a write can only ever reach the ACTIVE property, and
+  // changing property MOVES whole bundles instead of emptying arrays.
+  const site = useSiteDesign();
+  const { panels, setPanels, roofPlanes, setRoofPlanes } = site;
   const [e2eStitchedCorners, setE2EStitchedCorners] = useState<Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>>([]);
   const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0, setbackBandCentroids: [] as Array<{ lat: number; lng: number }>, panelMoveRebuildCount: 0 });
   const [expandedPlaneId, setExpandedPlaneId] = useState<string | null>(null);
@@ -938,30 +951,15 @@ export default function DesignStudio({ project, onSave }: Props) {
   // detected planes are already in state when the fence opens and the first
   // tick persists them over the stored roof. Stays FALSE on 'failed'.
   const [roofRestoreResolved, setRoofRestoreResolved] = useState(false);
-  const panelsRef2 = useRef<PlacedPanel[]>(panels);
-  const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
-
-  // ── SITE OWNERSHIP ────────────────────────────────────────────────────────
-  // `roofPlanes` holds ONLY the planes belonging to the site currently on
-  // screen. Planes owned by a different site live here instead: retained,
-  // persisted, invisible, and merged back into the payload on every save.
-  //
-  // 🚨 Keeping the ACTIVE set in `roofPlanes` (rather than filtering at each
-  // read) is deliberate. Dozens of consumers read roofPlanes — panel layout,
-  // racking, the structural engine, shade, BOM, permit CAD, exports. If the
-  // state held every site's planes and correctness depended on each consumer
-  // remembering to filter, one missed consumer would silently engineer against
-  // another property's roof. Holding only the active set makes every existing
-  // consumer correct by construction, including ones nobody has enumerated.
-  //
-  // See lib/siteIdentity.ts for why ownership is coordinate-based, and why
-  // clearing roofPlanes on an address change is forbidden.
-  const foreignRoofPlanesRef = useRef<RoofPlane[]>([]);
-  /** Rendered count of planes belonging to OTHER sites. A ref cannot drive UI,
-   *  and the user needs to be told their previous property's roof was kept —
-   *  otherwise "my roof disappeared when I changed the address" is a support
-   *  ticket, and the honest answer (it is saved, come back to it) is invisible. */
-  const [archivedSitePlaneCount, setArchivedSitePlaneCount] = useState(0);
+  // ── SITE-BOUND STATE MIRRORS ──────────────────────────────────────────────
+  // 🚨 These refs now come from useSiteDesign and are written SYNCHRONOUSLY
+  // inside the setters. They used to be maintained by `useEffect(() => {
+  // ref.current = state }, [state])`, so they lagged the state until React
+  // flushed effects — and the autosave, the beacon and the Save button all read
+  // them. A save landing in that window persisted the PREVIOUS value, which
+  // during a property change is the PREVIOUS PROPERTY's design.
+  const panelsRef2 = site.panelsRef;
+  const roofPlanesRef = site.roofPlanesRef;
   // Migration 122 — the last two DESIGN entities that never survived a reload.
   // Obstructions are KEEP-OUT ZONES (removeObstructedPanels runs against them),
   // so losing them silently re-filled panels over every vent the user placed.
@@ -970,16 +968,18 @@ export default function DesignStudio({ project, onSave }: Props) {
   // PLACED in the 3D engine, and they are what removeObstructedPanels runs
   // against. Two different entities that both mean "obstruction"; keeping the
   // names apart is the only thing stopping one from being saved as the other.
-  const [placedObstructions, setPlacedObstructions] = useState<PlacedObstruction[]>([]);
-  const [measurements, setMeasurements] = useState<LayoutMeasurement[]>([]);
-  const placedObstructionsRef = useRef<PlacedObstruction[]>([]);
-  const measurementsRef = useRef<LayoutMeasurement[]>([]);
-  useEffect(() => { placedObstructionsRef.current = placedObstructions; }, [placedObstructions]);
-  useEffect(() => { measurementsRef.current = measurements; }, [measurements]);
-  /** The site key the ACTIVE roofPlanes currently belong to. Null until the
-   *  DB restore resolves — ownership must not be decided from a half-loaded
-   *  design, or the first render would archive a roof it had not yet read. */
-  const activeSiteKeyRef = useRef<string | null>(null);
+  const { placedObstructions, setPlacedObstructions, measurements, setMeasurements } = site;
+  const placedObstructionsRef = site.placedObstructionsRef;
+  const measurementsRef = site.measurementsRef;
+  /** Rendered count of ENTITIES belonging to OTHER properties. The user needs
+   *  to be told their previous property's design was kept — otherwise "my roof
+   *  disappeared when I changed the address" is a support ticket, and the
+   *  honest answer (it is saved, come back to it) is invisible. */
+  const archivedSitePlaneCount = site.archivedEntityCount;
+  /** The site key the ACTIVE design belongs to. '' until the DB restore
+   *  resolves — ownership must not be decided from a half-loaded design, or
+   *  the first render would archive a design it had not yet read. */
+  const activeSiteKeyRef = site.activeSiteKeyRef;
   const fenceLineRef = useRef<{ lat: number; lng: number }[]>([]); // keeps fence geometry accessible in saveLayoutToDB autosave
   const fenceHeightRef = useRef<number>(2.0);
   // v50.22: tracks the address from an explicit user pick (address search or Pick House).
@@ -1047,8 +1047,10 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Keep refs in sync with state
   useEffect(() => { mapCenterRef.current = mapCenter; }, [mapCenter]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
-  useEffect(() => { panelsRef2.current = panels; }, [panels]);
-  useEffect(() => { roofPlanesRef.current = roofPlanes; }, [roofPlanes]);
+  // panelsRef2 / roofPlanesRef / placedObstructionsRef / measurementsRef are
+  // written synchronously by useSiteDesign's setters — see the ref block above.
+  // They are deliberately NOT mirrored by an effect here any more: an effect
+  // makes the ref lag the state, and every save path reads these refs.
   useEffect(() => { fenceLineRef.current = fenceLine; }, [fenceLine]);
   // Mirror the scalar design parameters for the save paths. saveLayoutToDB is a
   // useCallback and the beacon fires during unload, so both must read current
@@ -1101,17 +1103,6 @@ export default function DesignStudio({ project, onSave }: Props) {
     // v63: fold the electrical design into the dedup signature so topology /
     // modules-per-string / string-paint changes persist even when panels are unchanged.
     const designElectrical = panelList.length > 0 ? buildDesignElectrical() : undefined;
-    // 🚨 PERSIST EVERY SITE'S ROOF, ACTIVATE ONLY THIS ONE. `roofPlanes` holds
-    // just the current site's planes; planes belonging to other sites are
-    // retained in foreignRoofPlanesRef and merged back here. Saving the active
-    // set alone would DELETE the other property's roof from the database on the
-    // next tick — the address change would become a silent destruction, which
-    // is the exact failure the ownership model exists to prevent.
-    const planesForPersistence = mergeForPersistence(
-      roofPlanesRef.current,
-      foreignRoofPlanesRef.current,
-      activeSiteKeyRef.current ?? '',
-    );
     // The scalar design parameters the layout row carries. They were persisted
     // but not SIGNED, so a design whose only edit was a fence line or a row
     // spacing scheduled no save at all — the payload carried them, only the
@@ -1127,7 +1118,19 @@ export default function DesignStudio({ project, onSave }: Props) {
       obstructions: placedObstructionsRef.current,
       measurements: measurementsRef.current,
     };
-    const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams });
+    // 🚨 THE ACTIVE PROPERTY GOES IN THE LAYOUT COLUMNS; EVERY OTHER PROPERTY
+    // GOES IN `site_archives` (migration 123). The previous implementation
+    // merged every site's ROOF PLANES into `roofPlanes` and sent that. It kept
+    // the data — but `rowToLayout()` hands that column straight to
+    // lib/pvwatts.ts (`roofPlanes[0].pitch` is the array tilt), the production
+    // route, the sync pipeline and the permit CAD path, none of which filter.
+    // Melvin's row held 13 planes from THREE properties. Archiving into its own
+    // column means a foreign site is unreachable BY CONSTRUCTION instead of by
+    // every consumer remembering to filter.
+    const sitePayload = site.persistencePayload({ designElectrical: designElectrical ?? null });
+    const planesForPersistence = sitePayload.roofPlanes;
+    const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams })
+      + '|' + archivesSignature(sitePayload.siteArchives);
     if (sig === lastSavedPanelsRef.current) return; // nothing changed
     lastSavedPanelsRef.current = sig;
     const payload = {
@@ -1159,6 +1162,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       // and came back on reload. `[]` is not nullish, so it wins the merge, and
       // lib/db/projects.ts writes '[]' because [] is truthy. Client-side only.
       roofPlanes: planesForPersistence,
+      // 🚨 Every OTHER property this project has visited, whole (migration 123).
+      // ALWAYS sent, including an empty archive: the route merges with
+      // `?? existingLayout`, so `undefined` would mean KEEP STORED and the
+      // last archived site could never be released.
+      siteArchives: sitePayload.siteArchives,
       // Persist fence geometry on autosave too — previously only the manual
       // buildLayout()→/api/production path saved these, so an auto-saved fence
       // design lost its line/height on reload (and engineering had no geometry
@@ -1167,15 +1175,14 @@ export default function DesignStudio({ project, onSave }: Props) {
       fenceHeight: project.systemType === 'fence' ? fenceHeightRef.current : undefined,
     };
     // STEP 1 -- LAYOUT SAVE LOGGING
-    // Report what is actually WRITTEN, not just the active site — otherwise the
-    // count here disagrees with the payload the moment a second site is archived.
+    // Report what is actually WRITTEN for the ACTIVE property, and separately
+    // what is being carried for the others — the two must never be conflated.
     console.log('[LAYOUT SAVE PAYLOAD]', {
       projectId: project.id,
       panelCount: panelList.length,
       roofPlaneCount: planesForPersistence.length,
-      activeSitePlaneCount: roofPlanesRef.current.length,
-      archivedSitePlaneCount: foreignRoofPlanesRef.current.length,
       activeSiteKey: activeSiteKeyRef.current,
+      archivedSites: Object.keys(sitePayload.siteArchives.sites),
       hasRoofPlanes: planesForPersistence.length > 0,
       panels: panelList.slice(0, 3),
     });
@@ -1264,14 +1271,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       // v66: must match saveLayoutToDB's signature exactly, or closing the tab
       // after tracing a roof beacons nothing (sig compares equal) or beacons
       // needlessly (sig never compares equal). Shared helper, one definition.
-      // Same merge as saveLayoutToDB — the beacon must carry every site's roof
-      // too, or closing the tab after an address change would beacon only the
-      // active site and wipe the other property's geometry.
-      const planesForPersistence = mergeForPersistence(
-        roofPlanesRef.current,
-        foreignRoofPlanesRef.current,
-        activeSiteKeyRef.current ?? '',
-      );
+      // Same split as saveLayoutToDB — the beacon must carry every OTHER
+      // property's design in `siteArchives` too, or closing the tab after an
+      // address change would beacon only the active site and drop the rest.
+      const sitePayload = site.persistencePayload({ designElectrical: designElectrical ?? null });
+      const planesForPersistence = sitePayload.roofPlanes;
       // Identical field set to saveLayoutToDB. The beacon previously omitted
       // fence geometry and every scalar design parameter, so closing the tab
       // within the 3s debounce lost them while closing it later did not — the
@@ -1287,7 +1291,8 @@ export default function DesignStudio({ project, onSave }: Props) {
         obstructions: placedObstructionsRef.current,
         measurements: measurementsRef.current,
       };
-      const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams });
+      const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams })
+        + '|' + archivesSignature(sitePayload.siteArchives);
       if (sig === lastSavedPanelsRef.current) return;
       const payload = JSON.stringify({
         panels: panelList,
@@ -1297,6 +1302,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         designElectrical,
         // See saveLayoutToDB — always send the array, including [].
         roofPlanes: planesForPersistence,
+        siteArchives: sitePayload.siteArchives,
         ...designParams,
       });
       navigator.sendBeacon(
@@ -1306,7 +1312,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [project.id, project.systemType]);
+  }, [project.id, project.systemType, site]);
 
   // ── Restore panels from DB on mount ─────────────────────────────────────────
   useEffect(() => {
@@ -1340,14 +1346,6 @@ export default function DesignStudio({ project, onSave }: Props) {
           toast.error('Could not load the saved design — saving is disabled. Reload the page to try again.');
           return;
         }
-        let restoredPanels: PlacedPanel[] = [];
-        if (data.data?.panels && data.data.panels.length > 0) {
-          restoredPanels = data.data.panels;
-          setPanels(restoredPanels);
-          setRestoredPanelCount(restoredPanels.length);
-          setLayoutLoadedFromDB(true);
-          console.log(`[DesignStudio] Restored ${restoredPanels.length} panels from DB`);
-        }
         // 🚨 READ BACK THE DESIGN PARAMETERS. These were WRITE-ONLY: the route
         // accepted them and lib/db/projects.ts stored them, but the restore
         // read only panels, designElectrical and roofPlanes — so a fence line,
@@ -1366,8 +1364,6 @@ export default function DesignStudio({ project, onSave }: Props) {
           obstructions: (data.data?.obstructions as PlacedObstruction[] | undefined) ?? [],
           measurements: (data.data?.measurements as LayoutMeasurement[] | undefined) ?? [],
         };
-        if (Array.isArray(restoredParams.obstructions)) setPlacedObstructions(restoredParams.obstructions);
-        if (Array.isArray(restoredParams.measurements)) setMeasurements(restoredParams.measurements);
         if (Array.isArray(restoredParams.fenceLine) && restoredParams.fenceLine.length > 1) {
           setFenceLine(restoredParams.fenceLine);
         }
@@ -1388,35 +1384,38 @@ export default function DesignStudio({ project, onSave }: Props) {
           if (de.overrides && Object.keys(de.overrides).length > 0) setStringOverrides(de.overrides);
           console.log('[DesignStudio] Restored design electrical:', { topology: de.topology, overrides: Object.keys(de.overrides ?? {}).length });
         }
-        // CRITICAL FIX: Also restore roofPlanes so roofPlanesRef stays populated
-        // Without this, auto-save fires with roofPlanesRef.current = [] and roof planes are lost
-        // Only restore planes that have actual vertices — ignore placeholder planes with empty vertices
+        // ── HYDRATE THE SITE DESIGN, ATOMICALLY ───────────────────────────
+        // 🚨 ONE call decides ownership for ALL FOUR site-bound entities.
+        // Restoring them separately is how they came apart: the old code set
+        // panels unconditionally, split only the roof by site, and never gave
+        // obstructions or measurements an owner at all.
+        //
+        // Placeholder planes with fewer than 3 vertices are dropped here rather
+        // than inside the model — an unrenderable plane is not a different
+        // property's plane, it is junk, and the model must not have to know the
+        // difference.
         const savedPlanes: RoofPlane[] = ((data.data?.roofPlanes ?? []) as RoofPlane[]).filter(
           (rp: RoofPlane) => rp.vertices && rp.vertices.length >= 3
         );
-        // 🚨 SPLIT BY SITE. A stored layout can hold roofs for more than one
-        // property — the user moved the address and the old roof was kept, by
-        // design. Only the planes belonging to the site now on screen become
-        // active; the rest are held in foreignRoofPlanesRef and merged back on
-        // every save. A plane with no siteKey predates ownership and is adopted
-        // onto this site (see lib/siteIdentity.ts — hiding those would destroy
-        // every roof traced before this shipped).
         const siteKeyNow = siteKeyFromCoords(
           mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id,
         );
-        const { active: ownPlanes, foreign: otherSitePlanes } = partitionBySite(savedPlanes, siteKeyNow);
-        foreignRoofPlanesRef.current = otherSitePlanes;
-        setArchivedSitePlaneCount(otherSitePlanes.length);
-        activeSiteKeyRef.current = siteKeyNow;
-        if (otherSitePlanes.length > 0) {
-          console.log(`[DesignStudio] ${otherSitePlanes.length} roof plane(s) belong to a different site — retained, not active`);
+        const hydrated = site.hydrateFromStored({
+          panels: (data.data?.panels as PlacedPanel[] | undefined) ?? [],
+          roofPlanes: savedPlanes,
+          obstructions: restoredParams.obstructions,
+          measurements: restoredParams.measurements,
+          designElectrical: (data.data?.designElectrical as DesignElectrical | undefined) ?? null,
+          siteArchives: data.data?.siteArchives,
+        }, siteKeyNow);
+        const restoredPanels = hydrated.state.active.panels;
+        const restoredPlanes = hydrated.state.active.roofPlanes;
+        if (restoredPanels.length > 0) {
+          setRestoredPanelCount(restoredPanels.length);
+          setLayoutLoadedFromDB(true);
         }
-        let restoredPlanes: RoofPlane[] = roofPlanesRef.current;
-        if (ownPlanes.length > 0) {
-          restoredPlanes = ownPlanes;
-          setRoofPlanes(ownPlanes);
-          setRestoredRoofPlaneCount(ownPlanes.length);
-          console.log(`[DesignStudio] Restored ${ownPlanes.length} roof planes for this site (filtered ${(data.data?.roofPlanes?.length ?? 0) - savedPlanes.length} empty, ${otherSitePlanes.length} other-site)`);
+        if (restoredPlanes.length > 0) {
+          setRestoredRoofPlaneCount(restoredPlanes.length);
         } else {
           // Solar API auto-detect DISABLED on project load.
           // Project coords may be a city centre or wrong building.
@@ -1424,29 +1423,37 @@ export default function DesignStudio({ project, onSave }: Props) {
           setSolarApiStatus('idle');
           console.log('[DesignStudio] Skipping auto-detect — waiting for explicit building pick');
         }
+        console.log('[DesignStudio] site design hydrated', {
+          disposition: hydrated.disposition,
+          activeSiteKey: hydrated.state.activeSiteKey,
+          panels: restoredPanels.length,
+          roofPlanes: restoredPlanes.length,
+          obstructions: hydrated.state.active.obstructions.length,
+          measurements: hydrated.state.active.measurements.length,
+          archivedSites: Object.keys(hydrated.state.archives),
+        });
         // 🚨 ONE seed, built by the SAME function the two writers use, from the
         // state that was actually restored. The two old seeds here signed only
         // panels+electrical while saveLayoutToDB and the beacon signed
         // panels+electrical+roof — so a restored layout could never compare
         // equal to its own content and the first tick always re-POSTed it.
-        // 🚨 Sign the MERGED set, exactly as the writers do. Seeding with the
-        // active set alone would mismatch on the first tick and re-POST the
-        // whole layout — the seed/writer parity defect, returning.
         //
-        // One intended consequence: a layout whose planes predate ownership
-        // signs differently once merge stamps them, so exactly ONE adoption
-        // save fires after the upgrade. The next load reads planes that already
-        // carry a siteKey, the merge becomes a no-op, and the seed matches — so
-        // it does not repeat. tests/siteOwnership.test.ts pins both halves.
-        lastSavedPanelsRef.current = layoutSignature({
+        // `needsAdoptionSave` is the one intended mismatch: when hydration had
+        // to REWRITE ownership (a legacy row, or a reload at a site the columns
+        // do not describe) the stored row no longer matches what is now on
+        // screen, so exactly ONE save must fire to record it. Seeding with a
+        // value that can never match ('') forces it. The next load reads a row
+        // that already agrees, hydrate returns 'matched', and it does not
+        // repeat — tests/siteDesignIntegration.test.ts pins both halves.
+        lastSavedPanelsRef.current = hydrated.needsAdoptionSave ? '' : layoutSignature({
           panels: restoredPanels,
           designElectrical: data.data?.designElectrical,
-          roofPlanes: mergeForPersistence(restoredPlanes, otherSitePlanes, siteKeyNow),
+          roofPlanes: restoredPlanes,
           // Seed from what was RESTORED, in the same shape the writers sign.
           // Omitting these would make the seed disagree with the first computed
           // signature and re-POST the whole layout on the next tick.
-          designParams: restoredParams,
-        });
+          designParams: { ...restoredParams, obstructions: hydrated.state.active.obstructions, measurements: hydrated.state.active.measurements },
+        }) + '|' + archivesSignature(site.storedArchives({ designElectrical: (data.data?.designElectrical as DesignElectrical | undefined) ?? null }));
         restoreStateRef.current = 'done';
         setRoofRestoreResolved(true);
       } catch (e) {
@@ -1459,60 +1466,46 @@ export default function DesignStudio({ project, onSave }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
 
-  // ── SITE CHANGE: archive the old property's roof, activate the new one's ──
+  // ── SITE CHANGE: archive the property being left, activate the one entered ─
   //
-  // 🚨 THIS IS THE FIX FOR THE STALE-ROOF DEFECT. Before it, changing the
-  // address left the previous property's planes in state: drawn over the new
-  // building, fed to panel layout / racking / structural / shade / BOM / permit
-  // CAD, and blocking Lane A (whose gate requires zero existing planes). A
-  // permit artifact could combine one property's roof with another's
-  // jurisdiction.
+  // 🚨 A PROPERTY CHANGE IS NAVIGATION, NOT DELETION. Everything the previous
+  // property carried — panels, roof, obstructions, measurements, electrical —
+  // is archived whole and comes back exactly when the user returns to it.
   //
-  // 🚨 IT ARCHIVES, IT DOES NOT DELETE. The naive fix — clear roofPlanes when
-  // the coordinates move — would silently destroy hand-traced work, the same
-  // class of defect as the traced-garage deletion. A coordinate change is not
-  // an instruction to delete. Everything is retained, persisted, and comes back
-  // when the user returns to that site.
-  useEffect(() => {
-    // Ownership cannot be decided from a half-loaded design. Until the restore
-    // resolves, activeSiteKeyRef is null and there is nothing to archive.
-    if (restoreStateRef.current !== 'done') return;
-    if (activeSiteKeyRef.current === null) return;
-
-    const nextKey = siteKeyFromCoords(mapCenter?.lat, mapCenter?.lng, project.id);
+  // 🚨 IT IS DRIVEN BY INTENT, NOT BY COORDINATES. This used to be a
+  // `useEffect` keyed on `[mapCenter.lat, mapCenter.lng]`. `mapCenter` is also
+  // written by the 2D map's PAN and mouse-wheel ZOOM handlers, on every pointer
+  // move, and the site key resolves to about 1.1 m — so a single drag of the
+  // map archived the user's whole design and activated an empty site, then
+  // accumulated a junk archive entry per gesture. Panning a map is not moving
+  // house. A site change now happens only where the user SAYS so: Pick House,
+  // the address search, and the address suggestion list.
+  const changeSite = useCallback((lat: number, lng: number, address?: string | null) => {
+    const nextKey = siteKeyFromCoords(lat, lng, project.id);
     // An unresolved key means we cannot prove ownership — do nothing rather
-    // than archive a roof on the strength of a coordinate we do not trust.
-    if (!nextKey) return;
-    if (isSameSite(nextKey, activeSiteKeyRef.current)) return;
-
+    // than archive a design on the strength of a coordinate we do not trust.
+    if (!nextKey) return false;
     const prevKey = activeSiteKeyRef.current;
-    const leaving = roofPlanesRef.current ?? [];
-    const pool = foreignRoofPlanesRef.current ?? [];
-
-    // Everything not belonging to the site we are arriving at gets retained,
-    // stamped with the site it actually came from.
-    const retained = [
-      ...pool.filter(p => !isSameSite(p.siteKey, nextKey)),
-      ...leaving.map(p => (p.siteKey ? p : { ...p, siteKey: prevKey })),
-    ];
-    // Anything already stored for the site we are arriving at comes back.
-    const arriving = pool.filter(p => isSameSite(p.siteKey, nextKey));
-
-    foreignRoofPlanesRef.current = retained;
-    setArchivedSitePlaneCount(retained.length);
-    activeSiteKeyRef.current = nextKey;
-    roofPlanesRef.current = arriving;
-    setRoofPlanes(arriving);
-    setRestoredRoofPlaneCount(arriving.length);
+    const res = site.switchToSite(nextKey, { address: address ?? null, mapCenter: { lat, lng } });
+    if (!res.changed) return false;
+    setRestoredRoofPlaneCount(res.arriving.roofPlanes.length);
+    setRestoredPanelCount(res.arriving.panels.length);
     // The new site has no detection result yet — say so honestly rather than
     // leaving the previous site's status on screen.
     setSolarApiStatus('idle');
+    setProduction(null);
+    setCostEstimate(null);
+    setCalcMessage('');
+    setSolarApiData(null);
+    setRoofSegments([]);
+    setSolarDataAddress(null);
+    setSolarDataCityOnly(false);
     console.log(
-      `[DesignStudio] site change ${prevKey} → ${nextKey}: archived ${leaving.length} plane(s), activated ${arriving.length}`,
+      `[DesignStudio] site change ${prevKey} → ${nextKey}: archived ${res.archivedCount} entit${res.archivedCount === 1 ? 'y' : 'ies'}, activated ${res.arriving.panels.length} panel(s) / ${res.arriving.roofPlanes.length} plane(s) / ${res.arriving.obstructions.length} obstruction(s) / ${res.arriving.measurements.length} measurement(s)`,
     );
-  // mapCenter is the site coordinate; project.id scopes the key to this project.
+    return true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapCenter?.lat, mapCenter?.lng, project.id]);
+  }, [project.id, site.switchToSite]);
 
   // Load hardware
   useEffect(() => {
@@ -1581,21 +1574,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   const geocodeAddress = async (address: string) => {
     if (!address.trim()) return;
     setSearchLoading(true);
-    // Clear panels from old address before flying to new location
-    setPanels([]);
-    // 🚨 Use the helper, not a hand-rolled string. `'[]'` is NOT a signature in
-    // this format — the canonical empty is `'[]|null|[]'` — so these three
-    // address-change sites were the last copies of the drift that
-    // layoutSignature() exists to end, and none of them could ever compare
-    // equal to a real signature.
-    //
-    // This is a FLOOR, not a claim of equality: a save is expected to follow an
-    // address change, because the site-change effect archives the previous
-    // property's roof and that archive must reach the database.
-    lastSavedPanelsRef.current = layoutSignature({});
-    setProduction(null);
-    setCostEstimate(null);
-    setCalcMessage('');
+    // 🚨 NOTHING IS CLEARED HERE ANY MORE. This used to run `setPanels([])`
+    // BEFORE the geocode resolved — so a search that failed, was cancelled, or
+    // resolved to the SAME property still destroyed the current layout. The
+    // site change now happens below, once we know where we are actually going,
+    // and it archives rather than clears.
     const toastId = toast.loading('Finding address...', address);
     try {
       // Use server-side proxy to avoid CORS/rate-limit issues with Nominatim
@@ -1604,6 +1587,13 @@ export default function DesignStudio({ project, onSave }: Props) {
       if (data.success && data.data) {
         const newLat = data.data.lat;
         const newLng = data.data.lng;
+        // Explicit intent: the user searched for a different address. Archive
+        // the property being left and activate the one being entered. A search
+        // that resolves to the SAME property is a no-op — nothing is archived
+        // and nothing is cleared.
+        if (changeSite(newLat, newLng, data.data.short_name || address)) {
+          lastSavedPanelsRef.current = ''; // a save MUST follow (see handleLocationPick)
+        }
         setMapCenter({ lat: newLat, lng: newLng });
         setZoom(19);
         TILE_CACHE.clear(); TILE_INFLIGHT.clear(); setMapTiles(new Map()); // clear tiles to force reload at new location
@@ -1700,21 +1690,11 @@ export default function DesignStudio({ project, onSave }: Props) {
     setAddressSearch(s.short_name);
     setShowAddressSuggestions(false);
     setAddressSuggestions([]);
-    // Clear panels from old address before flying to new location
-    setPanels([]);
-    // 🚨 Use the helper, not a hand-rolled string. `'[]'` is NOT a signature in
-    // this format — the canonical empty is `'[]|null|[]'` — so these three
-    // address-change sites were the last copies of the drift that
-    // layoutSignature() exists to end, and none of them could ever compare
-    // equal to a real signature.
-    //
-    // This is a FLOOR, not a claim of equality: a save is expected to follow an
-    // address change, because the site-change effect archives the previous
-    // property's roof and that archive must reach the database.
-    lastSavedPanelsRef.current = layoutSignature({});
-    setProduction(null);
-    setCostEstimate(null);
-    setCalcMessage('');
+    // Explicit intent: the user chose a different address from the list.
+    // Archive the property being left rather than clearing it (see changeSite).
+    if (changeSite(s.lat, s.lng, s.short_name)) {
+      lastSavedPanelsRef.current = ''; // a save MUST follow (see handleLocationPick)
+    }
     setMapCenter({ lat: s.lat, lng: s.lng });
     setZoom(19);
     TILE_CACHE.clear(); TILE_INFLIGHT.clear(); setMapTiles(new Map());
@@ -1723,7 +1703,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     fetchSolarData(s.lat, s.lng, suggAddr, !isStreetLevelAddress(suggAddr));
     setLocationStatus('found');
     toast.info('Loading site model...', `${s.short_name} · Resetting 3D scene`);
-  }, [toast]);
+  // fetchSolarData is declared below this callback and is stable for the life
+  // of the component; listing it here would be a use-before-declaration.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast, changeSite]);
 
   // v50.13: Returns true when address string has a leading house number (e.g. "123 Main St")
   // City-only addresses like "Edwardsville, IL" have no house number — Solar API returns random building data.
@@ -1820,25 +1803,23 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Called when user clicks a house in Pick House mode.
   // Updates the map center, fetches new Solar API data, and updates the address bar.
   const handleLocationPick = useCallback(async (pickedLat: number, pickedLng: number, pickedAddress: string) => {
-    // Clear existing panels — new house, fresh start
-    setPanels([]);
-    // 🚨 Use the helper, not a hand-rolled string. `'[]'` is NOT a signature in
-    // this format — the canonical empty is `'[]|null|[]'` — so these three
-    // address-change sites were the last copies of the drift that
-    // layoutSignature() exists to end, and none of them could ever compare
-    // equal to a real signature.
+    // 🚨 THIS IS THE LINE RAY'S MELVIN TEST FAILED ON. It used to read
+    // `setPanels([])` — "new house, fresh start" — with nothing anywhere that
+    // ever put those panels back, because the only code that repopulates them
+    // is the mount-time DB restore and this does not remount. Picking the house
+    // next door therefore DELETED the current property's array, and picking the
+    // original house back gave you an empty roof.
     //
-    // This is a FLOOR, not a claim of equality: a save is expected to follow an
-    // address change, because the site-change effect archives the previous
-    // property's roof and that archive must reach the database.
-    lastSavedPanelsRef.current = layoutSignature({});
-    setProduction(null);
-    setCostEstimate(null);
-    setCalcMessage('');
-    setSolarApiData(null);
-    setRoofSegments([]);
-    setSolarDataAddress(null);
-    setSolarDataCityOnly(false);
+    // changeSite ARCHIVES the property being left, whole, and activates
+    // whatever is stored for the one being entered — an empty bundle for a
+    // property never designed, the exact previous design for one already
+    // visited. It also resets the per-site view state (production, cost, Solar
+    // API result) that used to be cleared by hand here.
+    changeSite(pickedLat, pickedLng, pickedAddress);
+    // 🚨 A FLOOR, not a claim of equality: a save MUST follow a property change,
+    // because the archive of the property just left has to reach the database.
+    // '' can never equal a real signature, so the next tick always writes.
+    lastSavedPanelsRef.current = '';
 
     // Update map center and address bar
     setMapCenter({ lat: pickedLat, lng: pickedLng });
@@ -1860,7 +1841,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         body: JSON.stringify({ lat: pickedLat, lng: pickedLng, address: pickedAddress }),
       }).catch(() => {});
     }
-  }, [fetchSolarData, project.id, toast]);
+  }, [fetchSolarData, project.id, toast, changeSite]);
 
   // ── Resolve location on load ─────────────────────────────────────────
   // v52.1: Street-level geocode always wins over stored coords.
@@ -3978,25 +3959,22 @@ export default function DesignStudio({ project, onSave }: Props) {
   const buildLayout = (): Omit<Layout, 'id' | 'createdAt' | 'updatedAt'> => {
     // Reuse buildSystemDefinition for shared tilt/azimuth/roofPlane logic
     const sysDef = buildSystemDefinition();
-    // 🚨 THE SAVE BUTTON PERSISTS TOO. buildSystemDefinition returns the ACTIVE
-    // site's planes, which is right for ENGINEERING — tilt, azimuth and the
-    // production model must only ever see the property being designed. But this
-    // payload is also WRITTEN, so sending the active set alone would delete
-    // every archived site's roof from the row that the autosave path carefully
-    // preserves. Engineering keeps the active set; storage gets the merge.
-    //
-    // Only rewrites the field when there is something archived to lose, so the
-    // no-archive case behaves exactly as before (including `undefined`, which
-    // the route treats as "keep what is stored").
-    const archived = foreignRoofPlanesRef.current ?? [];
-    const roofPlanesForStorage = archived.length > 0
-      ? mergeForPersistence(sysDef.roofPlanes ?? [], archived, activeSiteKeyRef.current ?? '')
-      : sysDef.roofPlanes;
+    // 🚨 THE SAVE BUTTON PERSISTS TOO — and it now sends exactly what the
+    // autosave sends: the ACTIVE property's roof in `roofPlanes`, every other
+    // property in `siteArchives`. The previous version merged the archive INTO
+    // `roofPlanes` so the other sites would not be deleted; that kept the data
+    // but pushed three properties' geometry into the column pvwatts, the
+    // production route and the permit CAD path all read unfiltered. Archives
+    // belong in the column nothing downstream reads.
+    const archives = site.storedArchives();
     return {
       projectId: project.id,
       systemType: project.systemType,
       panels,
-      roofPlanes: roofPlanesForStorage,
+      roofPlanes: sysDef.roofPlanes,
+      siteArchives: archives,
+      obstructions: placedObstructionsRef.current,
+      measurements: measurementsRef.current,
       groundTilt: sysDef.groundTilt,
       groundAzimuth: sysDef.groundAzimuth,
       rowSpacing, groundHeight,
@@ -4571,10 +4549,14 @@ export default function DesignStudio({ project, onSave }: Props) {
                 const lecsPlane = enrichRoofPlaneWithLECS(plane);
                 const enrichedPlane = enrichRoofPlaneWith3DFrame(lecsPlane);
                 // Stamp ownership at creation so the plane is self-describing
-                // before any save — the site-change effect can then archive it
-                // correctly even if the user moves the address within 3s.
+                // before any save — provenance that survives export, and the
+                // input hydrate() uses to repair a legacy multi-site row.
+                // 🚨 `||`, not `??`. The unresolved key is the EMPTY STRING
+                // (lib/siteIdentity.ts), which `??` passes straight through —
+                // every plane created before the restore resolved would be
+                // stamped with '' and own nothing.
                 enrichedPlane.siteKey = activeSiteKeyRef.current
-                  ?? siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id);
+                  || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id);
                 setRoofPlanes(prev => [...prev, enrichedPlane]);
                 console.log('[DesignStudio] 3D plane added:', enrichedPlane.id,
                   `az=${enrichedPlane.azimuth.toFixed(1)}° tilt=${enrichedPlane.pitch.toFixed(1)}°`);
@@ -4599,8 +4581,15 @@ export default function DesignStudio({ project, onSave }: Props) {
                 // uncancelled, so a response for the PREVIOUS address can land
                 // after the user has moved. Merging it would engineer this
                 // property against another one's roof — so it is dropped.
-                const coordsKeyNow = siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng);
-                const emittedFor = planes.find(p => p.siteKey)?.siteKey;
+                // 🚨 COMPARE AGAINST THE ACTIVE SITE, NOT THE LIVE MAP CENTRE.
+                // `mapCenterRef` moves on every pan and wheel-zoom, and the key
+                // resolves to about 1.1 m — so a user who nudged the map while
+                // a detection was in flight had the correct answer thrown away.
+                // The active site key only moves when the user changes
+                // property, which is exactly the condition this guard is for.
+                const coordsKeyNow = coordKeyOf(activeSiteKeyRef.current)
+                  || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng);
+                const emittedFor = coordKeyOf(planes.find(p => p.siteKey)?.siteKey);
                 if (emittedFor && coordsKeyNow && emittedFor !== coordsKeyNow) {
                   console.warn(
                     `[DesignStudio] dropped ${planes.length} detected plane(s) for ${emittedFor} — now at ${coordsKeyNow}`,
@@ -4609,7 +4598,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                 }
                 // Store the project-scoped key, not the engine's coords-only one.
                 const detectedForSite = activeSiteKeyRef.current
-                  ?? siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id);
+                  || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id);
                 const enriched = planes.map(p => {
                   const e = enrichRoofPlaneWith3DFrame(enrichRoofPlaneWithLECS(p));
                   e.siteKey = detectedForSite;
@@ -5817,9 +5806,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
                           <div className="font-semibold text-slate-300 mb-1">🏠 Saved for another address</div>
                           <div className="leading-relaxed">
-                            {archivedSitePlaneCount} roof {archivedSitePlaneCount === 1 ? 'section' : 'sections'} you drew at a
-                            different property {archivedSitePlaneCount === 1 ? 'is' : 'are'} kept safely. Go back to that address
-                            to see {archivedSitePlaneCount === 1 ? 'it' : 'them'} again — nothing was deleted.
+                            The design you did at {site.archivedSiteCount === 1 ? 'another address' : `${site.archivedSiteCount} other addresses`} —
+                            {' '}{archivedSitePlaneCount} {archivedSitePlaneCount === 1 ? 'item' : 'items'} in all, panels and roof included —
+                            {' '}{archivedSitePlaneCount === 1 ? 'is' : 'are'} kept safely. Go back to that address to see
+                            {' '}{archivedSitePlaneCount === 1 ? 'it' : 'them'} again — nothing was deleted.
                           </div>
                         </div>
                       ) : null}

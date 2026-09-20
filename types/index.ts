@@ -553,6 +553,22 @@ export interface Layout {
   /** Distances the user measured off the 3D model (horizontal and slope).
    *  Field evidence, not decoration — discarded on unmount before migration 122. */
   measurements?: LayoutMeasurement[];
+
+  /** EVERY OTHER PROPERTY this project has designed at, whole (migration 123).
+   *
+   *  🚨 NOTHING DOWNSTREAM MAY READ THIS. The columns above describe ONE
+   *  physical property — the one the project is currently at — and every
+   *  consumer (lib/pvwatts.ts, lib/multiArrayEngine.ts, the production route,
+   *  the sync pipeline, the permit CAD path) is written on that assumption.
+   *  Archived sites are kept here, in a column nothing engineering-facing
+   *  touches, precisely so a second property's geometry cannot reach a permit.
+   *  It exists to be restored into the studio when the user returns to that
+   *  address, and for no other purpose.
+   *
+   *  Shape: lib/design/siteDesignModel.ts `StoredSiteArchives`. Typed as
+   *  `unknown` here so the persistence layer stays free of a React-side import
+   *  and so a row written by a newer build never fails to parse. */
+  siteArchives?: unknown;
 }
 
 /** One measured distance between two points on the model. Mirrors

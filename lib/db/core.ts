@@ -17,6 +17,7 @@ import { neon } from '@neondatabase/serverless';
 import { DbConfigError, getDbWithRetry as _getDbWithRetry } from '@/lib/db-ready';
 import { Client, Project, Layout } from '@/types';
 import { hydrateBillData } from '@/lib/bill/hydrateBillData';
+import { siteKeyFromCoords } from '@/lib/siteIdentity';
 
 // v47.9: Module-level startup log — appears once per Vercel function instance cold start.
 // Searchable in Vercel function logs to trace deployment startup sequence.
@@ -333,13 +334,69 @@ export function rowToProject(row: Record<string, unknown>): Project {
   };
 }
 
+/**
+ * 🚨 ONE PROPERTY PER ROW — the read-time repair for rows written before
+ * migration 123.
+ *
+ * Between the site-ownership commit and migration 123, Design Studio merged
+ * EVERY visited property's roof planes into `roof_planes` and stamped each with
+ * a `siteKey`. That kept the data, but this function is what hands
+ * `layout.roofPlanes` to lib/pvwatts.ts (`roofPlanes[0].pitch` IS the array
+ * tilt), lib/multiArrayEngine.ts, /api/production, the sync pipeline and the
+ * permit CAD path — none of which filter, and none of which could, because the
+ * array carried no statement of which property it described. One live row held
+ * 13 planes from three properties.
+ *
+ * Rows written from migration 123 onwards never need this: the studio sends the
+ * active property's planes only. It fires solely when a row is GENUINELY
+ * AMBIGUOUS — more than one distinct siteKey present — so a single-site row
+ * whose map_center has drifted a metre keeps its whole roof.
+ *
+ * The active key is resolved by `siteKeyFromCoords`, the same and only
+ * implementation the studio uses. There is no second definition of "which
+ * property is this".
+ */
+function activeSitePlanes(row: Record<string, unknown>): Layout['roofPlanes'] {
+  const planes = row.roof_planes as (Layout['roofPlanes'] & Array<{ siteKey?: string }>) | null | undefined;
+  if (!Array.isArray(planes) || planes.length === 0) return planes ?? undefined;
+  const keys = new Set<string>();
+  for (const p of planes) { const k = (p as { siteKey?: string })?.siteKey; if (k) keys.add(k); }
+  if (keys.size < 2) return planes; // unambiguous — nothing to decide
+
+  // Prefer the key the row states; fall back to deriving it from the stored
+  // map centre, which is where the project actually is.
+  const stored = row.site_archives as { activeSiteKey?: unknown } | null | undefined;
+  let activeKey = (stored && typeof stored === 'object' && typeof stored.activeSiteKey === 'string')
+    ? stored.activeSiteKey : '';
+  if (!activeKey) {
+    const mc = row.map_center as { lat?: unknown; lng?: unknown } | null | undefined;
+    activeKey = siteKeyFromCoords(
+      typeof mc?.lat === 'number' ? mc.lat : null,
+      typeof mc?.lng === 'number' ? mc.lng : null,
+      row.project_id as string | undefined,
+    );
+  }
+  // Still unresolved: we cannot prove which property owns which plane. Return
+  // everything rather than silently deleting a roof from an engineering input —
+  // a visible wrong answer beats an invisible missing one, and the studio
+  // repairs the row on first open.
+  if (!activeKey) {
+    console.warn('[rowToLayout] roof_planes span multiple sites and no active key could be resolved — layout:', row.id);
+    return planes;
+  }
+  const mine = planes.filter(p => { const k = (p as { siteKey?: string })?.siteKey; return !k || k === activeKey; });
+  console.warn('[rowToLayout] multi-site roof_planes repaired on read — layout:', row.id,
+    { total: planes.length, active: mine.length, sites: [...keys] });
+  return mine as Layout['roofPlanes'];
+}
+
 export function rowToLayout(row: Record<string, unknown>): Layout {
   return {
     id: row.id as string,
     projectId: row.project_id as string,
     systemType: ((row.system_type as Layout['systemType']) || (() => { if (!row.system_type) console.warn('[rowToLayout] system_type missing from DB row — defaulting to roof. id:', row.id); return 'roof' as Layout['systemType']; })()) as Layout['systemType'],
     panels: (row.panels as Layout['panels']) || [],
-    roofPlanes: row.roof_planes as Layout['roofPlanes'],
+    roofPlanes: activeSitePlanes(row),
     groundTilt: row.ground_tilt as number | undefined,
     groundAzimuth: row.ground_azimuth as number | undefined,
     rowSpacing: row.row_spacing as number | undefined,
@@ -357,6 +414,11 @@ export function rowToLayout(row: Record<string, unknown>): Layout {
     // undefined rather than throwing — the same tolerance design_electrical has.
     obstructions: (row.obstructions as Layout['obstructions']) ?? undefined,
     measurements: (row.measurements as Layout['measurements']) ?? undefined,
+    // Migration 123. Same tolerance as the two above — absent on a row written
+    // before it ran. 🚨 Returned, but NOT for engineering: see the field's doc
+    // on Layout. It is here so the studio can restore a property the user
+    // returns to, and for nothing else.
+    siteArchives: (row.site_archives as Layout['siteArchives']) ?? undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };

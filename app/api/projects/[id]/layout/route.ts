@@ -41,6 +41,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
       // Migration 122. A field missing from THIS destructure is dropped with no
       // error, which is how a persisted field can look wired and never arrive.
       obstructions, measurements,
+      // Migration 123 — every OTHER property this project has designed at.
+      siteArchives,
       changeSummary
     } = body;
 
@@ -50,6 +52,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
       panelCount:     Array.isArray(panels)    ? panels.length    : 'NOT_ARRAY',
       roofPlaneCount: Array.isArray(roofPlanes) ? roofPlanes.length : (roofPlanes === undefined ? 'undefined' : 'NOT_ARRAY'),
       hasRoofPlanes:  Array.isArray(roofPlanes) && roofPlanes.length > 0,
+      archivedSites:  (siteArchives && typeof siteArchives === 'object' && (siteArchives as { sites?: object }).sites)
+        ? Object.keys((siteArchives as { sites: object }).sites) : [],
+      activeSiteKey:  (siteArchives as { activeSiteKey?: string } | undefined)?.activeSiteKey ?? null,
       systemType,
       mapCenter,
     });
@@ -96,6 +101,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       // array is how "the user deleted the last one" is expressed.
       obstructions:       obstructions       ?? existingLayout?.obstructions,
       measurements:       measurements       ?? existingLayout?.measurements,
+      // Same `?? existing` rule. An EMPTY archive ({sites:{}}) is a statement —
+      // "this project is down to one property" — so it must win the merge;
+      // only `undefined` keeps what is stored.
+      siteArchives:       siteArchives       ?? existingLayout?.siteArchives,
       groundTilt:         groundTilt         ?? existingLayout?.groundTilt         ?? 20,
       groundAzimuth:      groundAzimuth      ?? existingLayout?.groundAzimuth      ?? 180,
       rowSpacing:         rowSpacing         ?? existingLayout?.rowSpacing         ?? 1.5,

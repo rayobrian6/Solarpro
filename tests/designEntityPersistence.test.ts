@@ -137,8 +137,18 @@ describe('the whole persistence chain is wired — a miss anywhere drops the fie
   });
 
   it('the studio restores them', () => {
-    expect(STUDIO).toMatch(/setPlacedObstructions\(restoredParams\.obstructions\)/);
-    expect(STUDIO).toMatch(/setMeasurements\(restoredParams\.measurements\)/);
+    // They are no longer restored by two loose setter calls. Both entities are
+    // SITE-BOUND, so they are restored as part of the site design bundle —
+    // atomically, with panels and roof planes, by the one call that decides
+    // which property the stored row describes (lib/design/siteDesignModel.ts).
+    // Restoring them separately is exactly how they came apart: the old code
+    // set panels unconditionally, split only the roof by site, and gave these
+    // two no owner at all.
+    expect(STUDIO).toMatch(/const hydrated = site\.hydrateFromStored\(\{/);
+    expect(STUDIO).toMatch(/obstructions: restoredParams\.obstructions,/);
+    expect(STUDIO).toMatch(/measurements: restoredParams\.measurements,/);
+    // …and the hook is what actually drives the component state for them.
+    expect(STUDIO).toMatch(/const \{ placedObstructions, setPlacedObstructions, measurements, setMeasurements \} = site;/);
   });
 
   it('the write degrades gracefully before migration 122 runs', () => {
@@ -150,8 +160,17 @@ describe('the whole persistence chain is wired — a miss anywhere drops the fie
 
 describe('the two entities that share a word stay apart', () => {
   it('the PLACED keep-outs use a distinct name from the Nearmap DETECTIONS', () => {
-    expect(STUDIO).toMatch(/const \[placedObstructions, setPlacedObstructions\] = useState<PlacedObstruction\[\]>/);
+    // `placedObstructions` now comes from useSiteDesign — it is site-bound, so
+    // it is owned by the site design bundle rather than by a loose useState.
+    // `obstructions` (the Nearmap AI DETECTIONS) is a per-site FETCH RESULT,
+    // re-fetched rather than archived, and deliberately stays a plain useState.
+    // Two different entities that both mean "obstruction"; keeping the names
+    // apart is the only thing stopping one from being saved as the other.
+    expect(STUDIO).toMatch(/const \{ placedObstructions, setPlacedObstructions, measurements, setMeasurements \} = site;/);
     expect(STUDIO).toMatch(/const \[obstructions, setObstructions\] = useState<NearmapObstruction\[\]>/);
+    // The hook must declare the placed set as a site-bound entity, by that name.
+    const HOOK = readFileSync(join(process.cwd(), 'components/design/useSiteDesign.ts'), 'utf8');
+    expect(HOOK).toMatch(/placedObstructions: PlacedObstruction\[\]/);
   });
 
   it('what is persisted is the PLACED set', () => {

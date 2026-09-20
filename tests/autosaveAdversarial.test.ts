@@ -23,7 +23,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { layoutSignature, SIGNED_DESIGN_PARAMS, SIGNED_FIELDS } from '@/lib/roofPlanesSignature';
-import { mergeForPersistence, partitionBySite, siteKeyFromCoords } from '@/lib/siteIdentity';
+import { siteKeyFromCoords } from '@/lib/siteIdentity';
+// 🚨 The persistence round trip goes through the REAL model, not a two-line
+// simulation of it. See tests/helpers/siteRoundTrip.ts for why.
+import { persistAndReload } from './helpers/siteRoundTrip';
 import type { RoofPlane } from '@/types';
 
 const SRC = readFileSync(join(process.cwd(), 'components/design/DesignStudio.tsx'), 'utf8');
@@ -49,9 +52,7 @@ const roundTrip = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 describe('roof create / edit / delete round trips', () => {
   it('create roof → save → reload restores it', () => {
-    const created = [plane('a')];
-    const stored = roundTrip(mergeForPersistence(created, [], KEY));
-    expect(partitionBySite(stored, KEY).active.map(p => p.id)).toEqual(['a']);
+    expect(persistAndReload({ planes: [plane('a')], at: KEY }).active.map(p => p.id)).toEqual(['a']);
   });
 
   it('edit roof → the edit schedules a save', () => {
@@ -60,16 +61,14 @@ describe('roof create / edit / delete round trips', () => {
   });
 
   it('edit roof → save → reload restores the EDITED value', () => {
-    const stored = roundTrip(mergeForPersistence([plane('a', { pitch: 26 })], [], KEY));
-    expect(partitionBySite(stored, KEY).active[0].pitch).toBe(26);
+    expect(persistAndReload({ planes: [plane('a', { pitch: 26 })], at: KEY }).active[0].pitch).toBe(26);
   });
 
   it('delete ONE plane of several → schedules a save and reloads without it', () => {
     const before = sig([plane('a'), plane('b')]);
     const after = [plane('a')];
     expect(sig(after)).not.toBe(before);
-    const stored = roundTrip(mergeForPersistence(after, [], KEY));
-    expect(partitionBySite(stored, KEY).active.map(p => p.id)).toEqual(['a']);
+    expect(persistAndReload({ planes: after, at: KEY }).active.map(p => p.id)).toEqual(['a']);
   });
 
   it('🚨 delete ALL planes → reload stays empty', () => {
@@ -79,9 +78,9 @@ describe('roof create / edit / delete round trips', () => {
     // reported saved and came back on reload.
     const before = sig([plane('a')]);
     expect(sig([])).not.toBe(before);            // clearing is a change
-    const stored = roundTrip(mergeForPersistence([], [], KEY));
-    expect(stored).toEqual([]);                   // [] is persisted, not dropped
-    expect(partitionBySite(stored, KEY).active).toEqual([]);
+    const cleared = persistAndReload({ planes: [], at: KEY });
+    expect(cleared.storedRoofPlanes).toEqual([]); // [] is persisted, not dropped
+    expect(cleared.active).toEqual([]);           // ...and stays cleared on reload
   });
 
   it('the payload sends the array itself, never undefined', () => {
@@ -114,11 +113,11 @@ describe('the dedup survives the things that used to defeat it', () => {
     // Seed/writer parity. The seed must sign the same shape the writers do.
     const planes = [plane('a')];
     const params = { fenceHeight: 2, groundTilt: 20, rowSpacing: 1.5, groundHeight: 0.6, bifacialOptimized: true };
-    const stored = roundTrip(mergeForPersistence(planes, [], KEY));
-    const { active, foreign } = partitionBySite(stored, KEY);
-    const seed = sig(mergeForPersistence(active, foreign, KEY), params);
-    const firstTick = sig(mergeForPersistence(active, foreign, KEY), params);
+    const reloaded = persistAndReload({ planes, at: KEY });
+    const seed = sig(reloaded.active, params);
+    const firstTick = sig(reloaded.active, params);
     expect(firstTick).toBe(seed);
+    expect(reloaded.disposition).toBe('matched'); // no ownership rewrite, so no forced save
   });
 });
 
@@ -217,15 +216,15 @@ describe('stale responses cannot overwrite newer client state', () => {
   });
 
   it('an archived site cannot reappear as the active one', () => {
-    const stored = mergeForPersistence([plane('b1', { siteKey: KEY_B })], [plane('a1')], KEY_B);
-    const { active } = partitionBySite(roundTrip(stored), KEY_B);
-    expect(active.map(p => p.id)).toEqual(['b1']);
+    const r = persistAndReload({ planes: [plane('b1', { siteKey: KEY_B })], at: KEY_B, archives: { [KEY]: [plane('a1')] } });
+    expect(r.active.map(p => p.id)).toEqual(['b1']);
+    // 🚨 …and the archived property is NOT in the column engineering reads.
+    expect(r.storedRoofPlanes.map(p => p.id)).toEqual(['b1']);
   });
 
   it('...and the archived site is still there when you go back', () => {
-    const stored = mergeForPersistence([plane('b1', { siteKey: KEY_B })], [plane('a1')], KEY_B);
-    const { active } = partitionBySite(roundTrip(stored), KEY);
-    expect(active.map(p => p.id)).toEqual(['a1']);
+    const r = persistAndReload({ planes: [plane('b1', { siteKey: KEY_B })], at: KEY_B, archives: { [KEY]: [plane('a1')] }, reloadAt: KEY });
+    expect(r.active.map(p => p.id)).toEqual(['a1']);
   });
 });
 
@@ -249,17 +248,49 @@ describe('🚨 the traced-garage deletion class', () => {
     expect(engine).not.toMatch(/fetch\(\s*`?\/api\/projects/);
   });
 
-  it('an address change ARCHIVES rather than clears', () => {
-    expect(SRC).toMatch(/archived \$\{leaving\.length\} plane\(s\)/);
-    // and handleLocationPick still must not clear roofPlanes
-    const pick = SRC.slice(SRC.indexOf('const handleLocationPick'), SRC.indexOf('const handleLocationPick') + 2500);
-    expect(pick).not.toMatch(/setRoofPlanes\(\[\]\)/);
+  it('an address change ARCHIVES rather than clears — EVERY entity', () => {
+    // 🚨 THIS IS WHAT MELVIN FAILED ON. The roof was archived; the panels,
+    // placed obstructions and measurements were cleared outright and nothing
+    // ever put them back, because the only code that repopulates them is the
+    // mount-time DB restore and an address change does not remount.
+    expect(SRC).toMatch(/archived \$\{res\.archivedCount\} entit/);
+    // The three explicit-intent entry points all go through the one archiving
+    // path, and none of them clears anything.
+    // 🚨 Strip comment lines first. These functions carry a comment QUOTING the
+    // old `setPanels([])` so the defect is documented where it happened — and
+    // a source-grep assertion that reads its own documentation as code is a
+    // false failure today and a false PASS the day someone deletes the comment.
+    const code = (s: string) => s.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+    for (const fn of ['const handleLocationPick', 'const handleSelectAddressSuggestion']) {
+      const body = code(SRC.slice(SRC.indexOf(fn), SRC.indexOf(fn) + 2500));
+      expect(body, `${fn} must not clear roof planes`).not.toMatch(/setRoofPlanes\(\[\]\)/);
+      expect(body, `${fn} must not clear panels`).not.toMatch(/setPanels\(\[\]\)/);
+      expect(body, `${fn} must archive through changeSite`).toMatch(/changeSite\(/);
+    }
+    // The geocode search resolves BEFORE it switches — a search that fails, is
+    // cancelled, or lands on the same property must change nothing.
+    const geo = code(SRC.slice(SRC.indexOf('const geocodeAddress = async'), SRC.indexOf('const geocodeAddress = async') + 2500));
+    expect(geo).not.toMatch(/setPanels\(\[\]\)/);
+    expect(geo.indexOf('changeSite(')).toBeGreaterThan(geo.indexOf('await fetch(`/api/geocode'));
+  });
+
+  it('🚨 PANNING THE MAP CANNOT ARCHIVE ANYTHING', () => {
+    // The archive used to run from a `useEffect` keyed on
+    // [mapCenter.lat, mapCenter.lng]. `mapCenter` is also written by the 2D
+    // map's PAN and mouse-wheel ZOOM handlers, on every pointer move, and the
+    // site key resolves to about 1.1 m — so one drag of the map archived the
+    // whole design and activated an empty site. A site change is now an
+    // explicit act, never a coordinate observation.
+    expect(SRC).not.toMatch(/\}, \[mapCenter\?\.lat, mapCenter\?\.lng, project\.id\]\);/);
+    const changeSite = SRC.slice(SRC.indexOf('const changeSite = useCallback'), SRC.indexOf('// Load hardware'));
+    expect(changeSite).toMatch(/site\.switchToSite\(/);
+    // It is a callback the intent handlers invoke, not an effect the map fires.
+    expect(changeSite).not.toMatch(/useEffect\(/);
   });
 
   it('manual provenance survives every transition', () => {
     const traced = plane('hand', { source: 'manual', confirmed: true });
-    const stored = roundTrip(mergeForPersistence([], [traced], KEY_B));
-    const back = partitionBySite(stored, KEY).active[0];
+    const back = persistAndReload({ planes: [], at: KEY_B, archives: { [KEY]: [traced] }, reloadAt: KEY }).active[0];
     expect(back).toMatchObject({ id: 'hand', source: 'manual', confirmed: true });
   });
 });

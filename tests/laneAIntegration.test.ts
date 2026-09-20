@@ -38,7 +38,10 @@ import {
   detectionStatusFromSegmentCount, MIN_FACE_EXTENT_M, PITCH_CLAMP_DEG,
 } from '@/lib/3d/laneA';
 import { layoutSignature } from '@/lib/roofPlanesSignature';
-import { siteKeyFromCoords, partitionBySite, mergeForPersistence } from '@/lib/siteIdentity';
+import { siteKeyFromCoords, partitionBySite } from '@/lib/siteIdentity';
+// 🚨 The persistence round trip goes through the REAL model, not a local
+// simulation of it. See tests/helpers/siteRoundTrip.ts for why.
+import { persistAndReload } from './helpers/siteRoundTrip';
 import {
   NORMAL_SUBURBAN_PITCHED, MULTI_PLANE_COMPLEX, MEDIUM_QUALITY_RURAL,
   NO_COVERAGE_EMPTY, MALFORMED_SEGMENTS, OTHER_SITE_RESPONSE, INCLUDES_NEIGHBOUR,
@@ -359,13 +362,13 @@ describe('🚨 out-of-order responses must not cross sites', () => {
   it('two rapid changes leave exactly ONE site active and the other retained', () => {
     const a = acquire(NORMAL_SUBURBAN_PITCHED, POCAHONTAS, SITE_A);
     const b = acquire(OTHER_SITE_RESPONSE, OTHER_SITE, SITE_B);
-    const stored = mergeForPersistence(b, a, SITE_B);
-
-    const atB = partitionBySite(stored, SITE_B);
+    const atB = persistAndReload({ planes: b, at: SITE_B, archives: { [SITE_A]: a } });
     expect(atB.active.every(p => p.siteKey === SITE_B)).toBe(true);
     expect(atB.foreign.every(p => p.siteKey === SITE_A)).toBe(true);
+    // 🚨 The column engineering reads holds ONE property.
+    expect(atB.storedRoofPlanes.every(p => p.siteKey === SITE_B)).toBe(true);
 
-    const atA = partitionBySite(stored, SITE_A);
+    const atA = persistAndReload({ planes: b, at: SITE_B, archives: { [SITE_A]: a }, reloadAt: SITE_A });
     expect(atA.active.every(p => p.siteKey === SITE_A)).toBe(true);
   });
 });
@@ -390,26 +393,23 @@ describe('persistence round trip — payload to storage and back', () => {
     // The seed/writer parity rule: restoring a layout must not immediately
     // re-POST it.
     const planes = acquire(NORMAL_SUBURBAN_PITCHED, POCAHONTAS, SITE_A);
-    const stored = mergeForPersistence(planes, [], SITE_A);
-    const revived: RoofPlane[] = JSON.parse(JSON.stringify(stored));
-    const { active, foreign } = partitionBySite(revived, SITE_A);
-
-    const seed = layoutSignature({ panels: [], designElectrical: null, roofPlanes: mergeForPersistence(active, foreign, SITE_A) });
-    const firstSave = layoutSignature({ panels: [], designElectrical: null, roofPlanes: mergeForPersistence(active, foreign, SITE_A) });
+    const reloaded = persistAndReload({ planes, at: SITE_A });
+    const seed = layoutSignature({ panels: [], designElectrical: null, roofPlanes: reloaded.active });
+    const firstSave = layoutSignature({ panels: [], designElectrical: null, roofPlanes: reloaded.active });
     expect(firstSave).toBe(seed);
+    // Ownership already agreed with the row, so no save is forced either.
+    expect(reloaded.disposition).toBe('matched');
   });
 
   it('reload at the SAME site reactivates exactly the generated roof', () => {
     const planes = acquire(NORMAL_SUBURBAN_PITCHED, POCAHONTAS, SITE_A);
-    const stored: RoofPlane[] = JSON.parse(JSON.stringify(mergeForPersistence(planes, [], SITE_A)));
-    const { active } = partitionBySite(stored, SITE_A);
+    const { active } = persistAndReload({ planes, at: SITE_A });
     expect(active.map(p => p.id).sort()).toEqual(planes.map(p => p.id).sort());
   });
 
   it('reload at a DIFFERENT site activates nothing but loses nothing', () => {
     const planes = acquire(NORMAL_SUBURBAN_PITCHED, POCAHONTAS, SITE_A);
-    const stored: RoofPlane[] = JSON.parse(JSON.stringify(mergeForPersistence(planes, [], SITE_A)));
-    const { active, foreign } = partitionBySite(stored, SITE_B);
+    const { active, foreign } = persistAndReload({ planes, at: SITE_A, reloadAt: SITE_B });
     expect(active).toHaveLength(0);
     expect(foreign).toHaveLength(planes.length);
   });

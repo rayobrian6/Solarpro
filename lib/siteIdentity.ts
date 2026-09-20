@@ -71,6 +71,20 @@ export function siteKeyFromCoords(
   return projectId ? `${projectId}@${coord}` : coord;
 }
 
+/**
+ * The COORDINATE half of a site key, without the project scope.
+ *
+ * SolarEngine3D stamps detections with a coords-only key (it has no project
+ * id), so comparing an incoming detection against a project-scoped key would
+ * always disagree and drop every detection. This is the one place the two
+ * spellings are reconciled — there is no second way to strip the prefix.
+ */
+export function coordKeyOf(siteKey: string | null | undefined): string {
+  if (!siteKey) return UNRESOLVED_SITE_KEY;
+  const at = siteKey.lastIndexOf('@');
+  return at >= 0 ? siteKey.slice(at + 1) : siteKey;
+}
+
 /** Do two site keys denote the same property? An unresolved key matches nothing. */
 export function isSameSite(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
@@ -114,36 +128,22 @@ export function partitionBySite<T extends SiteOwned>(
   return { active, foreign };
 }
 
-/** Stamp ownership onto items that do not yet declare it. Never re-stamps an
- *  item that already names a DIFFERENT site — that would silently transfer one
- *  property's geometry to another, which is the defect, not the fix. */
-export function stampSite<T extends SiteOwned>(items: readonly T[] | null | undefined, siteKey: string): T[] {
-  if (!items || items.length === 0) return [];
-  if (!siteKey) return [...items];
-  return items.map(it => {
-    const k = it?.siteKey;
-    if (k === siteKey) return it;
-    if (k == null || k === '') return { ...it, siteKey };
-    return it; // belongs to another site — leave it alone
-  });
-}
-
-/** Are there items owned by a site other than the current one? Drives the UI
- *  affordance that tells a user their other roof is kept, not lost. */
-export function hasForeignSiteItems<T extends SiteOwned>(
-  items: readonly T[] | null | undefined,
-  currentSiteKey: string,
-): boolean {
-  return partitionBySite(items, currentSiteKey).foreign.length > 0;
-}
-
-/** Merge an active set back with retained foreign items for persistence.
- *  Active items are stamped with the current site on the way out, so a plane
- *  created before ownership existed acquires it the first time it is saved. */
-export function mergeForPersistence<T extends SiteOwned>(
-  active: readonly T[] | null | undefined,
-  foreign: readonly T[] | null | undefined,
-  currentSiteKey: string,
-): T[] {
-  return [...stampSite(active, currentSiteKey), ...(foreign ?? [])];
-}
+/**
+ * 🚨 `mergeForPersistence`, `stampSite` and `hasForeignSiteItems` WERE HERE AND
+ * ARE DELETED ON PURPOSE. DO NOT BRING THEM BACK.
+ *
+ * They implemented the first answer to site ownership: keep every visited
+ * property's roof planes in ONE array, stamped with a siteKey, and filter on
+ * read. It preserved the data, and it was wrong — `layouts.roof_planes` is
+ * handed unfiltered by `rowToLayout()` to lib/pvwatts.ts (where
+ * `roofPlanes[0].pitch` becomes the array tilt), lib/multiArrayEngine.ts,
+ * /api/production, lib/engineering/syncPipeline.ts and the permit CAD path.
+ * One live row held 13 planes from three different properties. Correctness
+ * cannot depend on ~40 consumers each remembering to filter.
+ *
+ * A property that is not the one being designed now lives in
+ * `layouts.site_archives` (migration 123), a column nothing engineering-facing
+ * reads, restored by lib/design/siteDesignModel.ts when the user returns to
+ * that address. Merging archived geometry back into an active array is the
+ * defect, not the fix.
+ */

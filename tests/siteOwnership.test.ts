@@ -23,6 +23,27 @@
  * moved: the same class of defect as the traced-garage deletion. A coordinate
  * change is not an instruction to delete. These tests pin BOTH halves: foreign
  * geometry must never be active, AND it must never be lost.
+ *
+ * WHAT THIS FILE NO LONGER COVERS, AND WHERE IT WENT
+ * -------------------------------------------------
+ * 🚨 This file was GREEN throughout the failure Ray hit on 3 Melvin Drive. It
+ * proved lib/siteIdentity.ts — a helper that only ever governed ROOF PLANES —
+ * while the product lost a 52-panel layout on the first real click. Worse, its
+ * `describe('the full site-change state machine')` block contained a local
+ * `changeSite()` that REIMPLEMENTED the transition inside the test. A test that
+ * rebuilds the feature proves the test, not the product.
+ *
+ * That block and the `stampSite` / `mergeForPersistence` / `hasForeignSiteItems`
+ * blocks are deleted. Those three functions no longer exist: merging every
+ * property's planes back into one array was the permit-grade half of the defect
+ * (see lib/siteIdentity.ts for why). The site-change machine is now
+ * lib/design/siteDesignModel.ts, covered by:
+ *
+ *   tests/siteDesignModel.test.ts        the model, exhaustively
+ *   tests/siteDesignIntegration.test.tsx the REAL hook, through React
+ *
+ * What remains here is the identity layer those two build on: naming a
+ * property, comparing two names, and splitting a set by owner.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -30,9 +51,7 @@ import {
   siteKeyFromCoords,
   isSameSite,
   partitionBySite,
-  stampSite,
-  mergeForPersistence,
-  hasForeignSiteItems,
+  coordKeyOf,
   SITE_KEY_PRECISION_DP,
   UNRESOLVED_SITE_KEY,
 } from '@/lib/siteIdentity';
@@ -129,153 +148,38 @@ describe('partitionBySite — the stale-roof defect itself', () => {
   });
 });
 
-describe('stampSite — never transfers one property geometry to another', () => {
-  it('stamps unowned planes', () => {
-    expect(stampSite([plane({ id: 'x' })], keyA)[0].siteKey).toBe(keyA);
+describe('coordKeyOf — the two spellings of a site key are reconciled once', () => {
+  // SolarEngine3D has no project id, so it stamps detections with a COORDS-ONLY
+  // key. DesignStudio holds the PROJECT-SCOPED key. Comparing them raw makes
+  // every detection look foreign and drops all of them; there must be exactly
+  // one place that strips the scope, and this is it.
+  it('strips the project scope', () => {
+    expect(coordKeyOf(keyA)).toBe(siteKeyFromCoords(SITE_A.lat, SITE_A.lng));
   });
 
-  it('leaves a plane that already names a DIFFERENT site alone', () => {
-    // Re-stamping would silently move B's roof onto A — the defect, not the fix.
-    const out = stampSite([plane({ id: 'b1', siteKey: keyB })], keyA);
-    expect(out[0].siteKey).toBe(keyB);
-  });
-
-  it('is a no-op for planes already owned by this site (identity preserved)', () => {
-    const p = plane({ id: 'a1', siteKey: keyA });
-    expect(stampSite([p], keyA)[0]).toBe(p);
-  });
-
-  it('does not stamp when the site is unresolved', () => {
-    expect(stampSite([plane({ id: 'x' })], UNRESOLVED_SITE_KEY)[0].siteKey).toBeUndefined();
-  });
-});
-
-describe('mergeForPersistence — nothing is ever silently deleted', () => {
-  it('persists BOTH sites, not just the active one', () => {
-    // Saving the active set alone would delete the other property roof from
-    // the database on the next autosave tick.
-    const active = [plane({ id: 'b1', siteKey: keyB })];
-    const foreign = [plane({ id: 'a1', siteKey: keyA })];
-    const merged = mergeForPersistence(active, foreign, keyB);
-    expect(merged.map(p => p.id).sort()).toEqual(['a1', 'b1']);
-  });
-
-  it('adopts legacy active planes onto the current site on the way out', () => {
-    const merged = mergeForPersistence([plane({ id: 'old' })], [], keyA);
-    expect(merged[0].siteKey).toBe(keyA);
-  });
-
-  it('round-trips: save then reload then save is stable', () => {
-    // The adoption write must happen ONCE. After planes carry a siteKey, a
-    // reload must not keep rewriting the layout.
-    const first = mergeForPersistence([plane({ id: 'old' })], [], keyA);
-    const { active, foreign } = partitionBySite(first, keyA);
-    const second = mergeForPersistence(active, foreign, keyA);
-    expect(second).toEqual(first);
-  });
-
-  it('an empty active set still persists the other site geometry', () => {
-    // Clearing THIS site roof must not clear the other one.
-    const merged = mergeForPersistence([], [plane({ id: 'a1', siteKey: keyA })], keyB);
-    expect(merged.map(p => p.id)).toEqual(['a1']);
-  });
-});
-
-describe('the full site-change state machine', () => {
-  /** Mirrors the DesignStudio effect: archive the leaving site, activate the
-   *  arriving one. Kept as a pure reduction so the transition is testable
-   *  without React. */
-  function changeSite(
-    active: RoofPlane[], foreign: RoofPlane[], fromKey: string, toKey: string,
-  ): { active: RoofPlane[]; foreign: RoofPlane[] } {
-    const retained = [
-      ...foreign.filter(p => !isSameSite(p.siteKey, toKey)),
-      ...active.map(p => (p.siteKey ? p : { ...p, siteKey: fromKey })),
-    ];
-    const arriving = foreign.filter(p => isSameSite(p.siteKey, toKey));
-    return { active: arriving, foreign: retained };
-  }
-
-  it('A -> B archives A and leaves B empty, so Lane A may run for B', () => {
-    const s0 = { active: [plane({ id: 'a1', siteKey: keyA })], foreign: [] as RoofPlane[] };
-    const s1 = changeSite(s0.active, s0.foreign, keyA, keyB);
-    expect(s1.active).toHaveLength(0);                    // Lane A gate sees zero -> may run
-    expect(s1.foreign.map(p => p.id)).toEqual(['a1']);    // A is kept
-  });
-
-  it('A -> B -> A restores A exactly', () => {
-    const s0 = { active: [plane({ id: 'a1', siteKey: keyA })], foreign: [] as RoofPlane[] };
-    const s1 = changeSite(s0.active, s0.foreign, keyA, keyB);
-    const s2 = changeSite(s1.active, s1.foreign, keyB, keyA);
-    expect(s2.active.map(p => p.id)).toEqual(['a1']);
-    expect(s2.foreign).toHaveLength(0);
-  });
-
-  it('hand-traced work survives a round trip through another site', () => {
-    const traced = plane({ id: 'hand', siteKey: keyA, source: 'manual', confirmed: true });
-    const s1 = changeSite([traced], [], keyA, keyB);
-    const s2 = changeSite(s1.active, s1.foreign, keyB, keyA);
-    expect(s2.active[0]).toMatchObject({ id: 'hand', source: 'manual', confirmed: true });
-  });
-
-  it('stamps unowned planes with the site they are LEAVING, not arriving', () => {
-    // Legacy planes belong to where they were made. Stamping them with the
-    // destination would transfer one property geometry to another.
-    const s1 = changeSite([plane({ id: 'legacy' })], [], keyA, keyB);
-    expect(s1.foreign[0].siteKey).toBe(keyA);
-  });
-
-  it('both sites survive persistence across the change', () => {
-    const s0 = { active: [plane({ id: 'a1', siteKey: keyA })], foreign: [] as RoofPlane[] };
-    const s1 = changeSite(s0.active, s0.foreign, keyA, keyB);
-    const withB = { active: [plane({ id: 'b1', siteKey: keyB })], foreign: s1.foreign };
-    const merged = mergeForPersistence(withB.active, withB.foreign, keyB);
-    expect(merged.map(p => p.id).sort()).toEqual(['a1', 'b1']);
-    // ...and reloading at A activates only A
-    expect(partitionBySite(merged, keyA).active.map(p => p.id)).toEqual(['a1']);
-  });
-
-  it('never duplicates when the same site is re-entered twice', () => {
-    const s0 = { active: [plane({ id: 'a1', siteKey: keyA })], foreign: [] as RoofPlane[] };
-    const s1 = changeSite(s0.active, s0.foreign, keyA, keyB);
-    const s2 = changeSite(s1.active, s1.foreign, keyB, keyA);
-    const s3 = changeSite(s2.active, s2.foreign, keyA, keyB);
-    const s4 = changeSite(s3.active, s3.foreign, keyB, keyA);
-    expect(s4.active.map(p => p.id)).toEqual(['a1']);
-    expect(mergeForPersistence(s4.active, s4.foreign, keyA)).toHaveLength(1);
-  });
-});
-
-describe('hasForeignSiteItems — drives the "your other roof is kept" affordance', () => {
-  it('is true when another site has geometry', () => {
-    expect(hasForeignSiteItems([plane({ siteKey: keyA })], keyB)).toBe(true);
-  });
-  it('is false when everything belongs here', () => {
-    expect(hasForeignSiteItems([plane({ siteKey: keyA })], keyA)).toBe(false);
-  });
-  it('is false for legacy planes (they are adopted, not foreign)', () => {
-    expect(hasForeignSiteItems([plane({})], keyA)).toBe(false);
-  });
-});
-
-describe('stale async responses cannot cross sites', () => {
-  it('a detection stamped for A is rejected while the user is at B', () => {
-    // Mirrors the DesignStudio guard: the engine stamps each detected plane
-    // with the coordinate key captured at fire time; the studio drops the emit
-    // if it does not match the site on screen.
+  it('is idempotent on a key that was already coords-only', () => {
     const coordsA = siteKeyFromCoords(SITE_A.lat, SITE_A.lng);
-    const coordsB = siteKeyFromCoords(SITE_B.lat, SITE_B.lng);
-    const emitted = [plane({ id: 'det', siteKey: coordsA })];
-    const emittedFor = emitted.find(p => p.siteKey)?.siteKey;
-    const shouldDrop = !!(emittedFor && coordsB && emittedFor !== coordsB);
-    expect(shouldDrop).toBe(true);
+    expect(coordKeyOf(coordsA)).toBe(coordsA);
   });
 
-  it('a detection for the current site is accepted', () => {
-    const coordsA = siteKeyFromCoords(SITE_A.lat, SITE_A.lng);
-    const emitted = [plane({ id: 'det', siteKey: coordsA })];
-    const emittedFor = emitted.find(p => p.siteKey)?.siteKey;
-    const shouldDrop = !!(emittedFor && coordsA && emittedFor !== coordsA);
-    expect(shouldDrop).toBe(false);
+  it('🚨 a detection for THIS property survives the comparison', () => {
+    // This is the half that fails silently: get it wrong and roof detection
+    // simply stops working, with a console warning nobody reads.
+    expect(coordKeyOf(keyA)).toBe(coordKeyOf(siteKeyFromCoords(SITE_A.lat, SITE_A.lng)));
+  });
+
+  it('a detection for ANOTHER property still does not', () => {
+    expect(coordKeyOf(keyA)).not.toBe(coordKeyOf(keyB));
+  });
+
+  it('an unresolved key stays unresolved', () => {
+    expect(coordKeyOf(UNRESOLVED_SITE_KEY)).toBe(UNRESOLVED_SITE_KEY);
+    expect(coordKeyOf(null)).toBe(UNRESOLVED_SITE_KEY);
+    expect(coordKeyOf(undefined)).toBe(UNRESOLVED_SITE_KEY);
+  });
+
+  it('a project id containing @ does not break the split', () => {
+    // lastIndexOf, not indexOf: the coordinate half is always the tail.
+    expect(coordKeyOf('a@b@38.89080,-89.57079')).toBe('38.89080,-89.57079');
   });
 });

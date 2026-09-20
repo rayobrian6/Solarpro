@@ -438,7 +438,7 @@ export function authorizeMigration(params: {
  * is exactly what happened to 117. The registry-parity test asserts this set and
  * REGISTRY_DEPLOYMENT/REGISTRY_SEQUENCE agree, so the four gates cannot drift again.
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['107', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['107', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;
