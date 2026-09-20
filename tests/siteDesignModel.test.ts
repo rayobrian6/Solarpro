@@ -22,6 +22,7 @@ import {
   switchSite, setActiveBundle, hydrate, parseStoredArchives,
   toPersistencePayload, archivesSignature,
   siteKeyFromCoords, SITE_BOUND_ENTITY_KEYS, SITE_ARCHIVE_VERSION,
+  resolveSiteKey, coordsOfSiteKey, SITE_MATCH_RADIUS_M,
   type SiteDesignBundle, type SiteDesignState,
 } from '@/lib/design/siteDesignModel';
 import { UNSIGNED_ELECTRICAL_FIELDS } from '@/lib/roofPlanesSignature';
@@ -506,6 +507,92 @@ describe('hydration', () => {
       expect(r.state.active.roofPlanes.map(p => p.id)).toEqual(['old']);
       expect(r.state.archives[KEY_B].roofPlanes.map(p => p.id)).toEqual(['b0']);
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 picking the same house twice must not mint a second property', () => {
+  // THE LIVE TRACE THIS EXISTS FOR — project 4030b664, 2026-09-20, from
+  // project_versions. Three identities for ONE building in 43 seconds:
+  //   v202 16:11:53  @38.70615,-90.04625
+  //   v204 16:13:46  @38.70630,-90.04620   (~17 m)
+  //   v205 16:13:57  @38.70613,-90.04627   (~19 m)
+  // Nothing was lost — each was archived correctly — but the user picked their
+  // own house again and got an empty roof, which is the original complaint.
+  const CLICK_1 = { lat: 38.70615, lng: -90.04625 };
+  const CLICK_2 = { lat: 38.70613, lng: -90.04627 }; // same roof, ~2.8 m away
+  const FAR = { lat: 38.70890, lng: -90.14940 };      // a different property entirely
+
+  it('a second click on the same roof reuses the first key', () => {
+    const s = stateAt(siteKeyFromCoords(CLICK_1.lat, CLICK_1.lng, PROJECT), bundle('A', 52));
+    const r = resolveSiteKey(s, CLICK_2.lat, CLICK_2.lng, PROJECT);
+    expect(r.matchedExisting).toBe(true);
+    expect(r.key).toBe(s.activeSiteKey);
+    expect(r.distanceM!).toBeLessThan(SITE_MATCH_RADIUS_M);
+  });
+
+  it('…so A → B → A returns the design even when the return click is metres off', () => {
+    let s = stateAt(siteKeyFromCoords(CLICK_1.lat, CLICK_1.lng, PROJECT), bundle('A', 52));
+    const before = ids(s.active);
+    s = switchSite(s, KEY_B).state;
+    // The user clicks their own roof again — 2.8 m from where they clicked before.
+    const back = resolveSiteKey(s, CLICK_2.lat, CLICK_2.lng, PROJECT);
+    expect(back.matchedExisting).toBe(true);
+    s = switchSite(s, back.key).state;
+    expect(ids(s.active)).toEqual(before);
+    expect(s.active.panels).toHaveLength(52);
+  });
+
+  it('an ARCHIVED property is matched too, not just the active one', () => {
+    let s = stateAt(siteKeyFromCoords(CLICK_1.lat, CLICK_1.lng, PROJECT), bundle('A', 52));
+    s = switchSite(s, KEY_B).state;             // A is now archived
+    s = setActiveBundle(s, bundle('B', 4));
+    const r = resolveSiteKey(s, CLICK_2.lat, CLICK_2.lng, PROJECT);
+    expect(r.matchedExisting).toBe(true);
+    expect(r.key).toBe(siteKeyFromCoords(CLICK_1.lat, CLICK_1.lng, PROJECT));
+  });
+
+  it('🚨 a genuinely different property is NOT absorbed', () => {
+    const s = stateAt(siteKeyFromCoords(CLICK_1.lat, CLICK_1.lng, PROJECT), bundle('A'));
+    const r = resolveSiteKey(s, FAR.lat, FAR.lng, PROJECT);
+    expect(r.matchedExisting).toBe(false);
+    expect(r.key).toBe(siteKeyFromCoords(FAR.lat, FAR.lng, PROJECT));
+  });
+
+  it('🚨 the NEAREST known site wins — the neighbour still reaches the neighbour', () => {
+    // 3 and 5 Melvin Drive are ~17 m apart, inside the match radius of each
+    // other. Snapping to the FIRST match in range would make one unreachable;
+    // snapping to the NEAREST keeps both addressable.
+    const keyA = siteKeyFromCoords(MELVIN.lat, MELVIN.lng, PROJECT);
+    const keyB = siteKeyFromCoords(NEIGHBOUR.lat, NEIGHBOUR.lng, PROJECT);
+    let s = stateAt(keyA, bundle('A'));
+    s = switchSite(s, keyB).state;
+    s = setActiveBundle(s, bundle('B'));
+    // A click right on the neighbour resolves to the neighbour …
+    expect(resolveSiteKey(s, NEIGHBOUR.lat + 0.00001, NEIGHBOUR.lng, PROJECT).key).toBe(keyB);
+    // … and a click right on Melvin resolves to Melvin.
+    expect(resolveSiteKey(s, MELVIN.lat + 0.00001, MELVIN.lng, PROJECT).key).toBe(keyA);
+  });
+
+  it('with nothing known yet it mints a fresh key', () => {
+    const r = resolveSiteKey(emptyState(), MELVIN.lat, MELVIN.lng, PROJECT);
+    expect(r.matchedExisting).toBe(false);
+    expect(r.key).toBe(KEY_A);
+  });
+
+  it('unresolvable coordinates stay unresolved', () => {
+    const s = stateAt(KEY_A, bundle('A'));
+    expect(resolveSiteKey(s, null, null, PROJECT).key).toBe('');
+    expect(resolveSiteKey(s, NaN, 1, PROJECT).key).toBe('');
+  });
+
+  it('coordsOfSiteKey round-trips, and survives an @ in the project id', () => {
+    const c = coordsOfSiteKey(KEY_A)!;
+    expect(c.lat).toBeCloseTo(38.70615, 5);
+    expect(c.lng).toBeCloseTo(-90.04625, 5);
+    expect(coordsOfSiteKey('a@b@38.70615,-90.04625')!.lat).toBeCloseTo(38.70615, 5);
+    expect(coordsOfSiteKey('')).toBeNull();
+    expect(coordsOfSiteKey('nonsense')).toBeNull();
   });
 });
 

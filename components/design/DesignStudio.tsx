@@ -1503,10 +1503,25 @@ export default function DesignStudio({ project, onSave }: Props) {
   // house. A site change now happens only where the user SAYS so: Pick House,
   // the address search, and the address suggestion list.
   const changeSite = useCallback((lat: number, lng: number, address?: string | null) => {
-    const nextKey = siteKeyFromCoords(lat, lng, project.id);
+    // 🚨 SNAP TO A PROPERTY THIS PROJECT ALREADY KNOWS.
+    //
+    // The site key rounds to about 1.1 m, and a click on a roof scatters by
+    // metres — so picking the SAME house twice minted two properties, and the
+    // second pick opened an empty design next to the first. That is the
+    // original complaint wearing a different hat, and it happened to Ray on the
+    // live row: three identities for one building inside 43 seconds, ~17 m and
+    // ~19 m apart. resolveKeyFor reuses the nearest known site within
+    // SITE_MATCH_RADIUS_M, so returning to a house returns the design left
+    // there. Picking the actual neighbour still reaches the neighbour, because
+    // that click is nearer to the neighbour's own key.
+    const resolved = site.resolveKeyFor(lat, lng, project.id);
+    const nextKey = resolved.key;
     // An unresolved key means we cannot prove ownership — do nothing rather
     // than archive a design on the strength of a coordinate we do not trust.
     if (!nextKey) return false;
+    if (resolved.matchedExisting) {
+      console.log(`[DesignStudio] picked point is ${resolved.distanceM?.toFixed(1)}m from a property this project already has — reusing ${nextKey}`);
+    }
     const prevKey = activeSiteKeyRef.current;
     // 🚨 THE FENCE LINE IS lat/lng GEOMETRY, so it belongs to the property it
     // was drawn at — carrying it across draws a fence at the old address, which

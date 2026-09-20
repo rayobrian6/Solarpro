@@ -80,7 +80,7 @@ vi.mock('@/lib/engineering/syncPipeline', () => ({
 
 const { POST, GET } = await import('@/app/api/projects/[id]/layout/route');
 const { siteKeyFromCoords } = await import('@/lib/siteIdentity');
-const { getLayoutByProject, __resetSiteArchivesProbeForTests } = await import('@/lib/db/projects');
+const { getLayoutByProject, upsertLayout, __resetSiteArchivesProbeForTests } = await import('@/lib/db/projects');
 
 const sqlOf = (f: string) => readFileSync(join(process.cwd(), 'lib', 'migrations', f), 'utf8');
 const SQL_122 = sqlOf('122_layout_obstructions_measurements.sql');
@@ -415,6 +415,131 @@ describe('🚨 what the ENGINEERING consumers read back', () => {
       [PROJECT, USER_ID, JSON.stringify(planes), JSON.stringify(MELVIN)],
     );
     expect((await getLayoutByProject(PROJECT, USER_ID))?.roofPlanes).toHaveLength(4);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 restoring a version must not delete the roof', () => {
+  // Found by the post-merge adversarial sweep, not by any test here — and it
+  // was a regression THIS change introduced. The restore route forwarded 17
+  // fields and none of siteArchives/obstructions/measurements, and `undefined`
+  // means KEEP STORED. So a restore overwrote roof_planes from the snapshot
+  // while leaving site_archives (and its activeSiteKey) naming a DIFFERENT
+  // property — and activeSitePlanes() then filtered out every restored plane,
+  // handing lib/pvwatts.ts an empty array and logging the loss as a "repair".
+
+  it('a snapshot restored at a different property keeps its roof', async () => {
+    // The row is at property B; the snapshot is property A's.
+    const aPlanes = Array.from({ length: 6 }, (_, i) => plane(`a${i}`, KEY_A));
+    await post(autosaveBody({
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: [], roofPlanes: aPlanes, obstructions: [], measurements: [] } },
+    }));
+
+    // Restore A's snapshot — carrying A's archive header, as the fixed route does.
+    const restored = await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('a-p0')], roofPlanes: aPlanes, mapCenter: MELVIN,
+      siteArchives: { version: 1, activeSiteKey: KEY_A, sites: {} },
+    } as never);
+    expect(restored.roofPlanes).toHaveLength(6);
+
+    // 🚨 And a consumer reading it back sees SIX planes, not zero.
+    const back = await getLayoutByProject(PROJECT, USER_ID);
+    expect(back?.roofPlanes).toHaveLength(6);
+  });
+
+  it('🚨 the read path NEVER filters a roof down to nothing', async () => {
+    // The backstop for every caller not yet thought of, and for rows already
+    // left in this state: active key agrees with no stored plane.
+    await db.query(
+      `INSERT INTO layouts (project_id, user_id, panels, roof_planes, map_center, total_panels, site_archives)
+       VALUES ($1,$2,'[]'::jsonb,$3::jsonb,$4::jsonb,0,$5::jsonb)`,
+      [PROJECT, USER_ID,
+        JSON.stringify([...Array.from({ length: 4 }, (_, i) => plane(`a${i}`, KEY_A)),
+                        ...Array.from({ length: 2 }, (_, i) => plane(`b${i}`, KEY_B, NEIGHBOUR))]),
+        JSON.stringify(MELVIN),
+        JSON.stringify({ version: 1, activeSiteKey: siteKeyFromCoords(38.99, -90.99, PROJECT), sites: {} })],
+    );
+    const back = await getLayoutByProject(PROJECT, USER_ID);
+    // Six planes, none matching the active key — all six are returned, not none.
+    expect(back?.roofPlanes).toHaveLength(6);
+  });
+
+  it('a 0-panel version restores instead of 500-ing', async () => {
+    // A property change mints `panels: []` versions. Restoring one sends
+    // panels: [] — and without the archive the wipe guard correctly refuses it,
+    // so the restore button was broken for exactly the versions Phase 2 makes.
+    const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+    await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+
+    const restored = await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR,
+      siteArchives: { version: 1, activeSiteKey: KEY_B, sites: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } } },
+    } as never);
+    expect(restored.panels).toEqual([]);
+    expect(((await get())!.siteArchives as any).sites[KEY_A].panels).toHaveLength(52);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 the wipe guard relaxes only while the property is CHANGING', () => {
+  it('an ordinary wipe at the SAME property is still refused', async () => {
+    // The relaxation had no bound in time: once a project had archived a
+    // >=4-panel property, EVERY later `panels: []` save passed — for ever,
+    // including the July reload bug the guard was built for.
+    const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+    await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    // Switch away — allowed, this is a real property change.
+    expect((await post(autosaveBody({
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }))).status).toBe(200);
+    // Design at B …
+    const bPanels = Array.from({ length: 9 }, (_, i) => panel(`nb-${i}`, NEIGHBOUR));
+    expect((await post(autosaveBody({
+      panels: bPanels, roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }))).status).toBe(200);
+    // 🚨 … then a reload-bug wipe AT B, with the archive still present. The old
+    // relaxation passed this because the archive held 'roof' panels. It must not.
+    const res = await post(autosaveBody({
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }));
+    expect(res.status).toBe(503);
+    expect((await get())!.panels).toHaveLength(9);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 a caller that omits roofPlanes must not delete them', () => {
+  it('omitting roofPlanes and mapCenter KEEPS them (the bill-upload path)', async () => {
+    // /api/engineering/preliminary sends neither, and roof_planes used to be
+    // written unconditionally — so uploading a bill deleted the roof of a
+    // designed project, and after migration 123 left site_archives naming a
+    // roof that no longer existed.
+    const planes = Array.from({ length: 6 }, (_, i) => plane(`a${i}`, KEY_A));
+    await post(autosaveBody({ panels: [panel('p0')], roofPlanes: planes, mapCenter: MELVIN, activeSiteKey: KEY_A }));
+
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: Array.from({ length: 10 }, (_, i) => panel(`synthetic-${i}`)),
+      totalPanels: 10, systemSizeKw: 4,
+      // roofPlanes and mapCenter deliberately ABSENT, as that route sends them
+    } as never);
+
+    const after = await get();
+    expect(after?.roofPlanes, 'the roof must survive a bill upload').toHaveLength(6);
+    expect(after?.mapCenter?.lat).toBeCloseTo(MELVIN.lat, 4);
+  });
+
+  it('…but an explicit [] still clears the roof', async () => {
+    const planes = Array.from({ length: 6 }, (_, i) => plane(`a${i}`, KEY_A));
+    await post(autosaveBody({ panels: [panel('p0')], roofPlanes: planes, mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    await post(autosaveBody({ panels: [panel('p0')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    expect((await get())?.roofPlanes).toEqual([]);
   });
 });
 

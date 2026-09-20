@@ -192,6 +192,115 @@ export function emptyState(activeSiteKey = UNRESOLVED_SITE_KEY): SiteDesignState
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Which property did the user just click on?
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How close a picked point must be to a property this project already knows
+ * about for it to BE that property.
+ *
+ * 🚨 THIS EXISTS BECAUSE THE SITE KEY IS FAR TOO PRECISE FOR A MOUSE.
+ * `siteKeyFromCoords` rounds to 5 decimal places — about 1.1 m. Clicking the
+ * same roof twice in Pick House mode lands metres apart, so every click minted
+ * a NEW property. The live trace from 3 Melvin Drive, 2026-09-20, is three
+ * identities for one house inside 43 seconds:
+ *
+ *   v202 16:11:53  …@38.70615,-90.04625
+ *   v204 16:13:46  …@38.70630,-90.04620   (~17 m)
+ *   v205 16:13:57  …@38.70613,-90.04627   (~19 m)
+ *
+ * Nothing was lost — each identity's design was archived, correctly — but the
+ * user picked their own house again and got an empty roof, which is the
+ * complaint this whole model was built to answer, wearing a different hat.
+ *
+ * 🚨 8 m, AND THE NUMBER IS MEASURED, NOT GUESSED. The same live trace gives
+ * both bounds, and they are closer together than is comfortable:
+ *
+ *   accidental duplicate of one house   2.8 m   ← must be absorbed
+ *   3 Melvin Drive → 5 Melvin Drive    17.3 m   ← must NOT be absorbed
+ *
+ * The first radius tried here was 25 m, which swallowed the real neighbour and
+ * made it impossible to pick for the first time — caught by
+ * tests/designStudioSiteSwitch.component.test.tsx, whose fixture uses the
+ * genuine 17 m separation. 8 m clears the observed duplicate three times over
+ * and leaves better than a 2× margin to the neighbour.
+ *
+ * WHAT THIS DOES NOT FIX. If Pick House returns the clicked POINT rather than
+ * the building's centre, two clicks on opposite ends of a long roof can exceed
+ * 8 m and will still mint two properties. Nothing is lost when that happens —
+ * the design is archived and the banner says so — but the user has to pick
+ * closer to where they picked before. The real fix is to key the site on the
+ * building footprint instead of a coordinate; that is roof-UX work, and this
+ * radius is the honest interim.
+ *
+ * Matching the NEAREST known site rather than the first in range is what keeps
+ * both properties addressable once each has a key of its own.
+ */
+export const SITE_MATCH_RADIUS_M = 8;
+
+/** Metres between two lat/lng points. Equirectangular — exact enough at the
+ *  scale of one parcel, and it avoids a trig-heavy haversine on every pick. */
+function metresBetween(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const latMid = ((a.lat + b.lat) / 2) * Math.PI / 180;
+  const dLat = (a.lat - b.lat) * 111_320;
+  const dLng = (a.lng - b.lng) * 111_320 * Math.cos(latMid);
+  return Math.hypot(dLat, dLng);
+}
+
+/** The coordinate a site key names, or null if it cannot be parsed. */
+export function coordsOfSiteKey(siteKey: string | null | undefined): { lat: number; lng: number } | null {
+  if (!siteKey) return null;
+  const at = siteKey.lastIndexOf('@');
+  const coord = at >= 0 ? siteKey.slice(at + 1) : siteKey;
+  const [latS, lngS] = coord.split(',');
+  const lat = Number(latS), lng = Number(lngS);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+export interface ResolvedSite {
+  key: string;
+  /** True when this reused a property the project already knows about. */
+  matchedExisting: boolean;
+  /** Distance to the matched site, for logging. */
+  distanceM: number | null;
+}
+
+/**
+ * Name the property the user just picked.
+ *
+ * Returns an EXISTING key — the active site, or any archived one — when the
+ * picked point is within `SITE_MATCH_RADIUS_M` of it, choosing the nearest.
+ * Otherwise mints a fresh key from the coordinates.
+ *
+ * Snapping to the nearest known site is what makes "pick my house again" work:
+ * the user gets back the design they left there instead of an empty roof beside
+ * it. It cannot merge two genuinely different properties, because a click on
+ * the neighbour is nearer to the neighbour's own key than to this one.
+ */
+export function resolveSiteKey(
+  state: SiteDesignState,
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+  projectId?: string | null,
+): ResolvedSite {
+  const fresh = siteKeyFromCoords(lat, lng, projectId);
+  if (!fresh || lat == null || lng == null) return { key: fresh, matchedExisting: false, distanceM: null };
+  const here = { lat, lng };
+
+  let best: { key: string; d: number } | null = null;
+  const candidates = [state.activeSiteKey, ...Object.keys(state.archives ?? {})].filter(Boolean);
+  for (const key of candidates) {
+    const c = coordsOfSiteKey(key);
+    if (!c) continue;
+    const d = metresBetween(here, c);
+    if (d <= SITE_MATCH_RADIUS_M && (!best || d < best.d)) best = { key, d };
+  }
+  if (best) return { key: best.key, matchedExisting: true, distanceM: best.d };
+  return { key: fresh, matchedExisting: false, distanceM: null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The switch — the operation the whole module exists for
 // ─────────────────────────────────────────────────────────────────────────────
 
