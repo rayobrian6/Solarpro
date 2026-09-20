@@ -539,6 +539,31 @@ export interface Layout {
   // Design Studio, carried over to Engineering automatically. NULL for scratch
   // designs / older layouts. See DesignElectrical.
   designElectrical?: DesignElectrical;
+
+  /** Roof obstructions — vents, skylights, chimneys, HVAC, dormers.
+   *
+   *  🚨 NOT ANNOTATIONS. These are KEEP-OUT ZONES: removeObstructedPanels runs
+   *  against them, so an obstruction physically removes panels from the array.
+   *  Until migration 122 they lived only in component state, so reloading a
+   *  design silently re-filled panels over every one the user had placed — and
+   *  the panel count, the BOM, the production model and the permit drawing all
+   *  changed with it, with nothing to indicate anything had been lost. */
+  obstructions?: PlacedObstruction[];
+
+  /** Distances the user measured off the 3D model (horizontal and slope).
+   *  Field evidence, not decoration — discarded on unmount before migration 122. */
+  measurements?: LayoutMeasurement[];
+}
+
+/** One measured distance between two points on the model. Mirrors
+ *  lib/3d/measureMath.ts Measurement, declared here so the persisted shape is
+ *  owned by the type that is stored rather than by a 3D helper. */
+export interface LayoutMeasurement {
+  id: string;
+  a: { lat: number; lng: number; height?: number };
+  b: { lat: number; lng: number; height?: number };
+  horizDistM: number;
+  slopeDistM: number;
 }
 
 // ─── Design → Engineering electrical handoff ─────────────────────────────────

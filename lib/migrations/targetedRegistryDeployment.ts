@@ -200,6 +200,26 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
   // without the table (DB row -> env var -> off), so running this is an upgrade
   // from "env-var only" to "admin can flip at runtime", never a repair.
   '121': { expectedTables: ['app_feature_flags'] },
+  // 122 (2026-09-20) — obstructions + measurements on layouts. The last two
+  // DESIGN entities that never survived a reload.
+  //
+  // 🚨 An obstruction is a KEEP-OUT ZONE, not an annotation: removeObstructedPanels
+  // runs against it, so a vent or skylight physically removes panels. Because
+  // they lived only in component state, reloading silently re-filled panels over
+  // every obstruction the user placed — changing the panel count, the BOM, the
+  // production model and the permit drawing, with nothing to say anything was lost.
+  //
+  // Two bare ADD COLUMN IF NOT EXISTS, no default and no constraint. Its target
+  // table predates the registry (001_initial_schema), so — exactly as 107 does
+  // for audit_log — it declares altersPreexistingTables.
+  '122': {
+    expectedTables: [],
+    expectedColumns: [
+      { table: 'layouts', column: 'obstructions' },
+      { table: 'layouts', column: 'measurements' },
+    ],
+    altersPreexistingTables: ['layouts'],
+  },
 };
 
 /** The migration identifiers this module governs, in ceremony order.
@@ -207,7 +227,7 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
  *  other migration's governance event is recorded through, so running it first
  *  means the rest are actually auditable. 119 is last because its target table
  *  is 113's. */
-export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120', '121'] as const;
+export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;

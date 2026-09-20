@@ -310,6 +310,17 @@ export default function MigrationConsolePage() {
             tables="app_feature_flags"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-feature-flags-121" onResult={(v) => setRegistry((s) => ({ ...s, ['121']: v }))} result={registry['121']} />
+          {/* Layout design entities — migration 122. Obstructions are KEEP-OUT
+              ZONES: removeObstructedPanels runs against them, so a vent or a
+              skylight physically removes panels. Until this runs they live only
+              in component state, so reloading a design silently re-fills panels
+              over every obstruction the user placed — changing panel count, BOM,
+              production and the permit drawing with nothing to say so. Two bare
+              ADD COLUMN IF NOT EXISTS on layouts; no default, no constraint. */}
+          <RegistryButton id="122" label="Run migration 122… (roof obstructions + measurements persist)"
+            tables="layouts.obstructions, layouts.measurements"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-layout-design-entities-122" onResult={(v) => setRegistry((s) => ({ ...s, ['122']: v }))} result={registry['122']} />
           <RegistryButton id="113" label="Run migration 113…" tables="manufacturer_document_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-registry-113" onResult={(v) => setRegistry((s) => ({ ...s, ['113']: v }))} result={registry['113']} />

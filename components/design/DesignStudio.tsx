@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import type {
   Project, Layout, PlacedPanel, SolarPanel, Inverter, Battery,
   SystemType, DrawingMode, RoofPlane, BillAnalysis, BatteryRecommendation,
-  DesignElectrical
+  DesignElectrical, PlacedObstruction, LayoutMeasurement
 } from '@/types';
 import { generateFenceLayout, calculateSystemSize, polygonAreaM2 } from '@/lib/panelLayout';
 import { generateRoofLayoutOptimized, generateGroundLayoutOptimized, clearGridCache } from '@/lib/panelLayoutOptimized';
@@ -962,6 +962,20 @@ export default function DesignStudio({ project, onSave }: Props) {
    *  otherwise "my roof disappeared when I changed the address" is a support
    *  ticket, and the honest answer (it is saved, come back to it) is invisible. */
   const [archivedSitePlaneCount, setArchivedSitePlaneCount] = useState(0);
+  // Migration 122 — the last two DESIGN entities that never survived a reload.
+  // Obstructions are KEEP-OUT ZONES (removeObstructedPanels runs against them),
+  // so losing them silently re-filled panels over every vent the user placed.
+  // 🚨 NOT the same thing as `obstructions` above. That is NearmapObstruction[]
+  // — AI DETECTIONS read off aerial imagery. These are the keep-outs a person
+  // PLACED in the 3D engine, and they are what removeObstructedPanels runs
+  // against. Two different entities that both mean "obstruction"; keeping the
+  // names apart is the only thing stopping one from being saved as the other.
+  const [placedObstructions, setPlacedObstructions] = useState<PlacedObstruction[]>([]);
+  const [measurements, setMeasurements] = useState<LayoutMeasurement[]>([]);
+  const placedObstructionsRef = useRef<PlacedObstruction[]>([]);
+  const measurementsRef = useRef<LayoutMeasurement[]>([]);
+  useEffect(() => { placedObstructionsRef.current = placedObstructions; }, [placedObstructions]);
+  useEffect(() => { measurementsRef.current = measurements; }, [measurements]);
   /** The site key the ACTIVE roofPlanes currently belong to. Null until the
    *  DB restore resolves — ownership must not be decided from a half-loaded
    *  design, or the first render would archive a roof it had not yet read. */
@@ -1110,6 +1124,8 @@ export default function DesignStudio({ project, onSave }: Props) {
       rowSpacing: rowSpacingRef.current,
       groundHeight: groundHeightRef.current,
       bifacialOptimized: bifacialOptimizedRef.current,
+      obstructions: placedObstructionsRef.current,
+      measurements: measurementsRef.current,
     };
     const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams });
     if (sig === lastSavedPanelsRef.current) return; // nothing changed
@@ -1128,6 +1144,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       rowSpacing: designParams.rowSpacing,
       groundHeight: designParams.groundHeight,
       bifacialOptimized: designParams.bifacialOptimized,
+      // Always send the arrays, including []. The route merges with
+      // `?? existingLayout`, so undefined means KEEP STORED and deleting the
+      // last obstruction would be unsaveable.
+      obstructions: designParams.obstructions,
+      measurements: designParams.measurements,
       // v63: electrical design handoff for Engineering (string/topology/brand/equipment)
       designElectrical,
       // Include roofPlanes so permit generator can use exact roof geometry.
@@ -1263,6 +1284,8 @@ export default function DesignStudio({ project, onSave }: Props) {
         rowSpacing: rowSpacingRef.current,
         groundHeight: groundHeightRef.current,
         bifacialOptimized: bifacialOptimizedRef.current,
+        obstructions: placedObstructionsRef.current,
+        measurements: measurementsRef.current,
       };
       const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams });
       if (sig === lastSavedPanelsRef.current) return;
@@ -1340,7 +1363,11 @@ export default function DesignStudio({ project, onSave }: Props) {
           rowSpacing: data.data?.rowSpacing as number | undefined,
           groundHeight: data.data?.groundHeight as number | undefined,
           bifacialOptimized: data.data?.bifacialOptimized as boolean | undefined,
+          obstructions: (data.data?.obstructions as PlacedObstruction[] | undefined) ?? [],
+          measurements: (data.data?.measurements as LayoutMeasurement[] | undefined) ?? [],
         };
+        if (Array.isArray(restoredParams.obstructions)) setPlacedObstructions(restoredParams.obstructions);
+        if (Array.isArray(restoredParams.measurements)) setMeasurements(restoredParams.measurements);
         if (Array.isArray(restoredParams.fenceLine) && restoredParams.fenceLine.length > 1) {
           setFenceLine(restoredParams.fenceLine);
         }
@@ -4498,6 +4525,11 @@ export default function DesignStudio({ project, onSave }: Props) {
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               roofRestoreResolved={roofRestoreResolved}
+              // Migration 122. The engine REPORTS; DesignStudio stays the single
+              // writer to the layout row.
+              onObstructionsChange={setPlacedObstructions}
+              onMeasurementsChange={setMeasurements}
+              initialObstructions={placedObstructions}
               onTwinLoaded={(twin) => {
                 if (twin.solarData) setSolarApiData(twin.solarData);
                 // Honest no-coverage reporting. solarApiStatus was only ever set

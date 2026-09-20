@@ -156,6 +156,11 @@ export interface LayoutDesignParams {
   rowSpacing?: number | null;
   groundHeight?: number | null;
   bifacialOptimized?: boolean | null;
+  /** 🚨 Keep-out zones. They change the PANEL ARRAY, so an obstruction edit
+   *  must schedule a save or the design silently re-fills over it on reload. */
+  obstructions?: readonly unknown[] | null;
+  /** Distances measured off the model — field evidence. */
+  measurements?: readonly unknown[] | null;
 }
 
 /** 🚨 Every persisted design parameter must appear here, or edits to it will
@@ -165,6 +170,7 @@ export const SIGNED_DESIGN_PARAMS = [
   'fenceLine', 'fenceHeight', 'fenceAzimuth',
   'groundTilt', 'groundAzimuth', 'rowSpacing', 'groundHeight',
   'bifacialOptimized',
+  'obstructions', 'measurements',
 ] as const satisfies readonly (keyof LayoutDesignParams)[];
 
 function designParamsSignature(p: LayoutDesignParams | null | undefined): string {

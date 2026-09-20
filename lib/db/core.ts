@@ -353,6 +353,10 @@ export function rowToLayout(row: Record<string, unknown>): Layout {
     mapCenter: (row.map_center as Layout['mapCenter']) || { lat: 0, lng: 0 },
     mapZoom: (row.map_zoom as number) || 18,
     designElectrical: (row.design_electrical as Layout['designElectrical']) ?? undefined,
+    // Migration 122. Absent on a row written before it ran, which reads as
+    // undefined rather than throwing — the same tolerance design_electrical has.
+    obstructions: (row.obstructions as Layout['obstructions']) ?? undefined,
+    measurements: (row.measurements as Layout['measurements']) ?? undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };

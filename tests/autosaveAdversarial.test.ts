@@ -272,13 +272,24 @@ describe('entities that are NOT persisted — asserted so they stay known', () =
   // field, and for some of them a product decision about whether they are
   // design data or view state. Recorded here rather than left to be
   // rediscovered as a bug report.
-  const NOT_PERSISTED = ['obstructions', 'measurements', 'trees', 'blocks', 'vertexSpecs'];
+  // Obstructions and measurements MOVED OUT of this list in migration 122 —
+  // they now persist. What remains is the set with no defined shape and no
+  // reader: the engine types vertexSpecs as `any` and reads it back zero times,
+  // so persisting it would be cargo-cult schema. It needs a real type first.
+  const NOT_PERSISTED = ['trees', 'blocks', 'vertexSpecs'];
 
   it('the layout signature does not claim to cover them', () => {
     for (const e of NOT_PERSISTED) {
       expect(SIGNED_DESIGN_PARAMS as readonly string[]).not.toContain(e);
       expect(SIGNED_FIELDS as readonly string[]).not.toContain(e);
     }
+  });
+
+  it('obstructions and measurements DO persist now (migration 122)', () => {
+    // Obstructions are keep-out zones: removeObstructedPanels runs against
+    // them, so losing them silently re-filled panels over every vent placed.
+    expect(SIGNED_DESIGN_PARAMS as readonly string[]).toContain('obstructions');
+    expect(SIGNED_DESIGN_PARAMS as readonly string[]).toContain('measurements');
   });
 
   it('camera pose is deliberately absent — it is per-viewer, not design data', () => {

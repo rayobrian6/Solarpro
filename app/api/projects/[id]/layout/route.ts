@@ -38,6 +38,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
       roofPlanes, groundTilt, groundAzimuth, rowSpacing, groundHeight,
       fenceAzimuth, fenceHeight, fenceLine, bifacialOptimized,
       designElectrical,
+      // Migration 122. A field missing from THIS destructure is dropped with no
+      // error, which is how a persisted field can look wired and never arrive.
+      obstructions, measurements,
       changeSummary
     } = body;
 
@@ -89,6 +92,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       systemType: resolvedSysType,
       panels,
       roofPlanes:         roofPlanes         ?? existingLayout?.roofPlanes,
+      // Same `?? existing` rule: undefined KEEPS what is stored, so an empty
+      // array is how "the user deleted the last one" is expressed.
+      obstructions:       obstructions       ?? existingLayout?.obstructions,
+      measurements:       measurements       ?? existingLayout?.measurements,
       groundTilt:         groundTilt         ?? existingLayout?.groundTilt         ?? 20,
       groundAzimuth:      groundAzimuth      ?? existingLayout?.groundAzimuth      ?? 180,
       rowSpacing:         rowSpacing         ?? existingLayout?.rowSpacing         ?? 1.5,

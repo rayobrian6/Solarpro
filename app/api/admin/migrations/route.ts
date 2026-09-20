@@ -252,6 +252,7 @@ export async function POST(req: NextRequest) {
     'execute-audit-org-context-107', // mutation: TARGETED deployment of ONLY migration 107 (org-context columns on audit_log — ADR-013 T-08). Repairs the durable audit path itself.
     'execute-audit-chain-closure-120', // mutation: TARGETED deployment of ONLY migration 120 (unique successor index on audit_log). Makes a concurrent chain fork impossible. The first INDEX-ONLY target.
     'execute-feature-flags-121', // mutation: TARGETED deployment of ONLY migration 121 (app_feature_flags — the runtime feature-flag store). CREATE TABLE + index, IF NOT EXISTS, seeds no rows.
+    'execute-layout-design-entities-122', // mutation: TARGETED deployment of ONLY migration 122 (obstructions + measurements on layouts). Two bare ADD COLUMN IF NOT EXISTS.
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -349,9 +350,12 @@ export async function POST(req: NextRequest) {
   // Feature flags — migration 121 (app_feature_flags). CREATE TABLE + one index,
   // both IF NOT EXISTS, seeds no rows. Independent of every other target.
   const isFeatureFlags121 = action === 'execute-feature-flags-121';
+  // Layout design entities — migration 122 (obstructions + measurements on
+  // layouts). Two bare ADD COLUMN IF NOT EXISTS on a pre-registry table.
+  const isLayoutDesignEntities122 = action === 'execute-layout-design-entities-122';
   const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115
     || isEngineeringReview116 || isAhjRegistry117 || isFieldMeasurements118 || isDocumentJurisdiction119
-    || isAuditOrgContext107 || isAuditChainClosure120 || isFeatureFlags121;
+    || isAuditOrgContext107 || isAuditChainClosure120 || isFeatureFlags121 || isLayoutDesignEntities122;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
@@ -658,6 +662,7 @@ export async function POST(req: NextRequest) {
       const identifier = isAuditOrgContext107 ? '107'
         : isAuditChainClosure120 ? '120'
         : isFeatureFlags121 ? '121'
+        : isLayoutDesignEntities122 ? '122'
         : isRegistry113 ? '113'
         : isReconciliation114 ? '114'
         : isPersonnel115 ? '115'

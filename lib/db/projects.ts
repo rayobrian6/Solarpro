@@ -702,6 +702,8 @@ export interface UpsertLayoutData {
   mapCenter?: Layout['mapCenter'];
   mapZoom?: number;
   designElectrical?: Layout['designElectrical'];
+  obstructions?: Layout['obstructions'];
+  measurements?: Layout['measurements'];
 }
 
 // ── Coordinate-integrity guard (Ray, 2026-06-30) ────────────────────────────
@@ -930,6 +932,48 @@ async function applyDesignElectrical(
     saved.designElectrical = data.designElectrical;
   } catch (e) {
     console.warn('[upsertLayout] design_electrical not persisted (run migration 096):', (e as Error)?.message);
+  }
+  return applyDesignEntities(sql, data, saved);
+}
+
+/**
+ * Migration 122 — obstructions + measurements.
+ *
+ * Written the same way design_electrical is: a SEPARATE conditional write, so
+ * the main layout save never depends on these columns existing. Before
+ * migration 122 the UPDATE throws "column does not exist", we swallow it, and
+ * the layout still saves — the design entities simply are not stored yet.
+ *
+ * 🚨 Sends the arrays even when EMPTY. `?? existing` semantics elsewhere in
+ * this file mean an absent value is read as KEEP WHAT IS STORED, so deleting
+ * the last obstruction has to be expressible. An empty array is a statement;
+ * `undefined` is a question.
+ */
+async function applyDesignEntities(
+  sql: any,
+  data: UpsertLayoutData,
+  saved: Layout,
+): Promise<Layout> {
+  if (data.obstructions === undefined && data.measurements === undefined) return saved;
+  try {
+    if (data.obstructions !== undefined) {
+      await sql`
+        UPDATE layouts
+        SET obstructions = ${JSON.stringify(data.obstructions)}::jsonb
+        WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+      `;
+      saved.obstructions = data.obstructions;
+    }
+    if (data.measurements !== undefined) {
+      await sql`
+        UPDATE layouts
+        SET measurements = ${JSON.stringify(data.measurements)}::jsonb
+        WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+      `;
+      saved.measurements = data.measurements;
+    }
+  } catch (e) {
+    console.warn('[upsertLayout] obstructions/measurements not persisted (run migration 122):', (e as Error)?.message);
   }
   return saved;
 }

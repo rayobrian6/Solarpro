@@ -451,6 +451,17 @@ interface Props {
    *  Left FALSE on a failed read, deliberately — a restore that did not succeed
    *  must never license auto-detection. */
   roofRestoreResolved?: boolean;
+  /** 🚨 Obstructions are KEEP-OUT ZONES, not annotations: removeObstructedPanels
+   *  runs against them, so a vent or skylight physically removes panels. They
+   *  lived only in this component, so reloading a design silently re-filled
+   *  panels over every one the user placed. Lifted to DesignStudio, which is the
+   *  SINGLE WRITER to the layout row — the engine reports, it never saves. */
+  onObstructionsChange?: (obstructions: import('@/types').PlacedObstruction[]) => void;
+  /** Distances measured off the model. Field evidence; discarded on unmount
+   *  before this existed. Same single-writer rule. */
+  onMeasurementsChange?: (measurements: import('@/types').LayoutMeasurement[]) => void;
+  /** Obstructions restored from the database, re-applied on mount. */
+  initialObstructions?: import('@/types').PlacedObstruction[];
   /** v64: Stitch button — push the averaged/connected corners AND the recomputed
    *  plane frame back into roofPlanes state so panel placement (Auto Layout) +
    *  persistence use the stitched geometry, not the pre-stitch traced corners or a
@@ -960,6 +971,9 @@ function SolarEngine3D({
   onRoofPlaneCreated,
   onRoofPlanesDetected,
   roofRestoreResolved = false,
+  onObstructionsChange,
+  onMeasurementsChange,
+  initialObstructions,
   onRoofPlanesStitched,
   onE2EDiagnostics,
   selectedRoofPlaneId,
@@ -2036,6 +2050,29 @@ function SolarEngine3D({
   }, [panels]);
 
   useEffect(() => { roofPlanesRef.current = roofPlanes ?? []; }, [roofPlanes]);
+
+  // ── Obstructions: report every change to the parent ──────────────────────
+  // Emitted from an EFFECT on the state rather than from each mutation site.
+  // There are several (place, clear-all, and any future one), and a callback
+  // wired per-site is a callback someone eventually forgets — which is exactly
+  // how these never got persisted in the first place. One effect cannot be
+  // missed.
+  const skipFirstObstructionEmit = useRef(true);
+  useEffect(() => {
+    // Do not emit the initial empty array over a restored set on mount.
+    if (skipFirstObstructionEmit.current) { skipFirstObstructionEmit.current = false; return; }
+    onObstructionsChange?.(obstructions);
+  }, [obstructions, onObstructionsChange]);
+
+  // Re-apply obstructions restored from the database, once.
+  const appliedInitialObstructions = useRef(false);
+  useEffect(() => {
+    if (appliedInitialObstructions.current) return;
+    if (!initialObstructions || initialObstructions.length === 0) return;
+    appliedInitialObstructions.current = true;
+    obstructionsRef.current = initialObstructions;
+    setObstructions(initialObstructions);
+  }, [initialObstructions]);
 
   // ── Lane A state ─────────────────────────────────────────────────────────
   // Both are REFS on purpose. maybeRunLaneA fires from inside a resolved
@@ -8478,6 +8515,15 @@ function SolarEngine3D({
         const bundle = renderMeasurement(viewer, C, m);
         if (bundle) {
           measurementsRef.current.push(m);
+          // Lift it to the parent so it can be persisted. The engine keeps the
+          // render bundle; DesignStudio owns the durable record.
+          onMeasurementsChange?.(measurementsRef.current.map(x => ({
+            id: x.id,
+            a: { lat: x.a.lat, lng: x.a.lng, height: x.a.h },
+            b: { lat: x.b.lat, lng: x.b.lng, height: x.b.h },
+            horizDistM: x.horizDistM,
+            slopeDistM: x.slopeDistM,
+          })));
           setStatusMsg(`📏 Measurement ${measurementsRef.current.length}: ${m.slopeDistM.toFixed(1)} m / ${(m.slopeDistM * 3.28084).toFixed(1)} ft`);
         }
         measurePtsRef.current = [];
