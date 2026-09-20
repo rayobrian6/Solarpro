@@ -80,7 +80,7 @@ vi.mock('@/lib/engineering/syncPipeline', () => ({
 
 const { POST, GET } = await import('@/app/api/projects/[id]/layout/route');
 const { siteKeyFromCoords } = await import('@/lib/siteIdentity');
-const { getLayoutByProject } = await import('@/lib/db/projects');
+const { getLayoutByProject, __resetSiteArchivesProbeForTests } = await import('@/lib/db/projects');
 
 const sqlOf = (f: string) => readFileSync(join(process.cwd(), 'lib', 'migrations', f), 'utf8');
 const SQL_122 = sqlOf('122_layout_obstructions_measurements.sql');
@@ -419,25 +419,72 @@ describe('🚨 what the ENGINEERING consumers read back', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe('a deployment that has not run 123 yet', () => {
-  it('still saves the layout — the archive is simply not stored', async () => {
+describe('🚨 a deployment that has not run 123 yet', () => {
+  /** A database with 122 applied and 123 deliberately absent. */
+  async function pre123<T>(fn: (scratch: PGlite) => Promise<T>): Promise<T> {
     const scratch = await PGlite.create();
     const previous = db;
     try {
       await scratch.exec(BASELINE);
-      await scratch.exec(SQL_122); // 123 deliberately NOT applied
+      await scratch.exec(SQL_122);
       await scratch.query(
         `INSERT INTO projects (id, user_id, lat, lng, system_type) VALUES ($1,$2,$3,$4,'roof')`,
         [PROJECT, USER_ID, MELVIN.lat, MELVIN.lng],
       );
       db = scratch;
+      __resetSiteArchivesProbeForTests();
+      return await fn(scratch);
+    } finally {
+      db = previous;
+      __resetSiteArchivesProbeForTests();
+      await scratch.close();
+    }
+  }
+
+  it('still saves the layout — the archive is simply not stored', async () => {
+    await pre123(async scratch => {
       const res = await post(autosaveBody({ panels: [panel('p1')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
       expect(res.status).toBe(200);
       const rows = await scratch.query<{ n: number }>(`SELECT jsonb_array_length(panels) AS n FROM layouts`);
       expect(rows.rows[0].n).toBe(1);
-    } finally {
-      db = previous;
-      await scratch.close();
-    }
+    });
+  });
+
+  it('🚨 REFUSES the property-change save rather than deleting the layout', async () => {
+    // The regression this exists to prevent, and it is the worst kind — a
+    // guard disarming itself. The wipe guard treats archived panels as
+    // present, which is correct ONLY while the archive reaches the database.
+    // Without migration 123 the archive is silently dropped, so counting it
+    // would let `panels: []` through and DELETE the very layout the guard
+    // exists to protect. Absent the column, the guard stays at full strength.
+    await pre123(async scratch => {
+      const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+      expect((await post(autosaveBody({
+        panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A,
+      }))).status).toBe(200);
+
+      // The user picks the house next door.
+      const res = await post(autosaveBody({
+        panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+        archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+      }));
+      expect(res.status).toBe(503);
+      // 🚨 And the 52 panels are still there.
+      const rows = await scratch.query<{ n: number }>(`SELECT jsonb_array_length(panels) AS n FROM layouts`);
+      expect(rows.rows[0].n).toBe(52);
+    });
+  });
+
+  it('…and the SAME save is allowed once 123 has run', async () => {
+    // The two halves together are the contract: the guard relaxes exactly when,
+    // and only when, the archive can actually be stored.
+    const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+    await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    const res = await post(autosaveBody({
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }));
+    expect(res.status).toBe(200);
+    expect(((await get())!.siteArchives as any).sites[KEY_A].panels).toHaveLength(52);
   });
 });

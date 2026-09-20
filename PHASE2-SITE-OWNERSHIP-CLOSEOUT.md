@@ -208,6 +208,24 @@ path.
 
 ## 5. Open items
 
+### 5.0 The merge is safe in either order — but 123 should go first
+
+Relaxing the subsystem-wipe guard to count archived panels is safe **exactly as
+long as the archive reaches the database**. On a deployment where 123 has not
+run, `applyDesignEntities` catches the missing column, warns, and drops the
+archive — so a guard that had already counted those panels as present would have
+let `panels: []` through and **deleted the layout it exists to protect**. The
+guard would have disarmed itself.
+
+`upsertLayout` therefore probes for `layouts.site_archives` and, when it is
+absent, applies the original check unchanged: the property-change save is
+**refused**, the studio shows its save-failed badge, and nothing is lost. Both
+halves are pinned in `tests/siteDesignRoute.postgres.test.ts` — refused without
+123, allowed with it.
+
+So deploying before the migration cannot destroy data; it only means property
+switching does not persist yet. Running 123 first avoids the refusals entirely.
+
 ### 5.1 🚨 Migration 123 has NOT been run in production
 
 Verified against `schema_migrations`, not a UI message:

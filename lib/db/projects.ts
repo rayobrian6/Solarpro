@@ -802,6 +802,42 @@ async function resolveNameplateSizeKw(
   }
 }
 
+/**
+ * Does `layouts.site_archives` exist yet (migration 123)?
+ *
+ * Cached per process after the first TRUE answer — a column cannot disappear,
+ * and this is on the layout save path. A FALSE answer is deliberately NOT
+ * cached: a deployment that starts before the operator runs the migration must
+ * notice when it lands, rather than staying in the degraded mode until the next
+ * cold start. The probe is one `information_schema` lookup.
+ *
+ * Fails CLOSED. If the probe itself errors we report "absent", which keeps the
+ * subsystem-wipe guard at full strength — the safe direction, because the cost
+ * of a false "absent" is a refused save the user retries, and the cost of a
+ * false "present" is a deleted layout.
+ */
+let _siteArchivesColumnPresent = false;
+async function layoutsHasSiteArchives(sql: any): Promise<boolean> {
+  if (_siteArchivesColumnPresent) return true;
+  try {
+    const rows = await sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'layouts' AND column_name = 'site_archives'
+      LIMIT 1
+    `;
+    _siteArchivesColumnPresent = rows.length > 0;
+    return _siteArchivesColumnPresent;
+  } catch (e) {
+    console.warn('[upsertLayout] could not probe for layouts.site_archives — treating it as absent:', (e as Error)?.message);
+    return false;
+  }
+}
+
+/** Test seam: forget the cached probe result. */
+export function __resetSiteArchivesProbeForTests(): void {
+  _siteArchivesColumnPresent = false;
+}
+
 export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   assertUUID(data.projectId, 'projectId');
   assertUUID(data.userId, 'userId');
@@ -851,8 +887,26 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       // When no archive is present this is byte-for-byte the original check, so
       // the Stowell reload defect (81 panels → {} → 19 in three saves) is caught
       // exactly as before.
+      // 🚨 …BUT ONLY IF THE ARCHIVE CAN ACTUALLY BE STORED.
+      //
+      // This guard is the ONLY thing standing between a property change and a
+      // destroyed layout, and relaxing it on the strength of a payload field is
+      // safe exactly as long as that field reaches the database. On a
+      // deployment where migration 123 has not run, `site_archives` does not
+      // exist: `applyDesignEntities` catches the missing column, warns, and the
+      // archive is silently dropped — while this guard, having counted the
+      // archived panels as present, has already let `panels: []` through. The
+      // net effect would be the guard DISARMING ITSELF and deleting the very
+      // layout it exists to protect, which is strictly worse than the bug.
+      //
+      // So the column is probed. Absent, the check is byte-for-byte the
+      // original one: the destructive save is refused, the studio shows its
+      // save-failed badge, and nothing is lost. Present, archived panels count.
+      const archiveIsStorable = await layoutsHasSiteArchives(sql);
       const archivedPanels: Array<{ systemType?: string }> = [];
-      const arch = data.siteArchives as { sites?: Record<string, { panels?: unknown }> } | undefined;
+      const arch = archiveIsStorable
+        ? (data.siteArchives as { sites?: Record<string, { panels?: unknown }> } | undefined)
+        : undefined;
       if (arch && typeof arch === 'object' && arch.sites && typeof arch.sites === 'object') {
         for (const bundle of Object.values(arch.sites)) {
           if (Array.isArray(bundle?.panels)) archivedPanels.push(...(bundle.panels as Array<{ systemType?: string }>));
