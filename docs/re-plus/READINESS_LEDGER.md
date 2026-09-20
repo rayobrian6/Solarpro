@@ -285,8 +285,16 @@ Playwright specs are the only browser layer.
 One sentence: **there are two different, unshared definitions of "the roof surface" on either side
 of the render boundary.** Six independent confirmed defects.
 
-**Fixed in this session** on branch `fix/ws1-autolayout-panel-elevation` (stacked on PR #19):
-WS1-009, WS1-010, WS1-011. Still open: WS1-008, WS1-012, WS1-013.
+**Fixed in this session** on branch `fix/ws1-autolayout-panel-elevation` — **PR #20**, commits
+`b0e04146` and `6a681d12`: WS1-008, WS1-009, WS1-010, WS1-011 (+ WS1-014). Still open: WS1-012,
+WS1-013, which are coupled to each other.
+
+> 🚨 **A stacked PR gets NO CI.** `.github/workflows/ci.yml` triggers on
+> `pull_request: branches: [master]` only, so PR #20 based on `fix/phase2-post-merge-regressions`
+> ran **2 checks instead of 10**, both trivial, and looked fine. Retargeting to `master` is not
+> enough either — a base change fires `edited`, which is **not** in the default
+> `pull_request` types (`opened`, `synchronize`, `reopened`). Close-and-reopen fires `reopened`.
+> **A PR showing few checks is not a PR that passed.**
 
 ### The invariant that was missing
 
@@ -315,7 +323,7 @@ decimal places** while `height` keeps full precision
 default**. The precision floor is the stored representation, not the geometry. An earlier 1 mm
 tolerance was below that floor and failed for a reason that was not a defect.
 
-### WS1-008 — The restore path re-lifts the roof polygon, so panels render *below* the visible roof — `OPEN`
+### WS1-008 — The restore path re-lifts the roof polygon, so panels render *below* the visible roof — `FIXED_PENDING_VERIFICATION`
 
 `SURFACE_OFFSET_M = 0.12 m` is applied **unconditionally** by `computePlaneFromPoints3D`
 ([lib/roofPlane3D.ts:410-413](lib/roofPlane3D.ts:410)); callers must opt out. `polygon3D` is
@@ -326,13 +334,32 @@ Panels are placed at `origin3D + n·PANEL_OFFSET_ECEF` where `PANEL_OFFSET_ECEF 
 So the drawn roof sits at `P + 0.12` and the panels at `P + 0.05` — **panels render 0.07 m below
 the roof surface the user sees.** That is Ray's sentence, exactly.
 
-🚨 **This is the one I would fix next**, and it is deliberately NOT in this branch. It is the
-smallest offset of the six and the most likely to be what Ray actually looked at — a constant
-7 cm sink, panels half-buried rather than gone. Fixing it means deciding which surface is
-canonical (the lifted placement plane or the unlifted drawn one) and making both sides read it,
-which touches the restore effect, `squareUpTracedFaces` (WS1-012) and `renderRoofRails` (WS1-013)
-together. Doing it piecemeal would just move the mismatch. It needs one change with all three
-consumers in view, and a visual check in the browser — not a unit test alone.
+🚨 **This is the one that most likely matches what Ray actually saw.** The other elevation defects
+need Set Origin, Set Direction, or the per-plane relayout button to trigger. This one needs only a
+reload.
+
+🚨 **The codebase already knew the rule.** `ComputePlaneOptions.surfaceOffsetM`'s own docstring
+says, in capitals: *"PASS 0 WHEN RE-FITTING POINTS THAT WERE ALREADY LIFTED BY A PREVIOUS FIT…
+Stitch did exactly that… so each press floated the roof, and every panel on it, 12 cm higher."*
+**Stitch was fixed. The restore path does the same thing and never was.**
+
+**Fix (`6a681d12`).** The `polygon3D` branch of the restore effect now passes
+`{ surfaceOffsetM: 0 }`, because `polygon3D` *is* a fitted, already-lifted plane. The two legacy
+branches deliberately keep the default lift — `computeEcefFrameForLegacyPlane` fits points built
+from lat/lng and pitch, which have not been lifted, so for them the offset is the first one, not a
+second.
+
+**Tests** (3 added, pure math, no Cesium): the re-fit is idempotent with `surfaceOffsetM: 0`
+(every point within 1e-6 m); **without** it the polygon lifts by *exactly* `SURFACE_OFFSET_M`
+again — the defect asserted rather than described, so making the lift conditional later reports
+itself; and the user-visible invariant — against the fixed deck every clearance is positive,
+against the old one every panel is between **−0.05 and −0.09 m**.
+
+🚨 **NOT VISUALLY VERIFIED.** This moves a rendered surface and I have not put eyes on it in a
+browser. The math is pinned; the look is not.
+
+**Still coupled:** WS1-012 and WS1-013 share the lifted/unlifted split and remain open. They want
+one change with both consumers in view plus a visual check.
 
 ### WS1-009 — `relayoutPlane` runs the 2D engine in 3D mode and drops panels to the ellipsoid — `FIXED_PENDING_VERIFICATION`
 
