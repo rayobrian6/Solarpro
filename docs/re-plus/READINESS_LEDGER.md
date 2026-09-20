@@ -610,20 +610,20 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Gate | State |
 |---|---|
 | Source of truth identified | ✅ for panels, roof planes, site identity, panel elevation |
-| All writers audited | ✅ 6 panel-set writers, 11 panel counts, 5 layout-row writers enumerated |
+| All writers audited | ✅ 6 panel-set writers, 11 panel counts, 5 layout-row writers, 5 roof placement paths, 3 reshape emitters, 5 `buildRoofPlane3D` callers |
 | All readers audited | ✅ |
 | DB / migration verified | ❌ **migration 123 unapplied in production** |
 | Positive tests pass | ✅ 11/11 new clearance + 17/17 rewritten routing |
 | Negative tests pass | ✅ |
-| Mutation tests pass | ✅ proven to fail by **5.33 m / 4.11 m** with the lib fix reverted; **11/17** routing tests fail with the component fix reverted |
+| Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
 | E2E passes | ❌ **not run by me** — see below |
 | Full suite passes | ✅ **564 files, 12,140 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |
-| CI passes | ✅ 10/10 on `a754a4ec`; re-running on `f24a40c1` |
+| CI passes | ✅ **10/10 green on `de47e48a`** — Build Gate, CI Complete, Unit Tests, tsc, ESLint, secret guard, page-fit, env audit |
 | Staging deploy verified | ❌ |
-| Exact tested SHA verified | ✅ `a754a4ec`; `f24a40c1` pending |
+| Exact tested SHA verified | ✅ **`de47e48a`** (code frozen at `f24a40c1`; `de47e48a` is docs-only) |
 | **Visual check in a browser** | ❌ **BLOCKED — no database in this environment** (see below) |
 | Between-face geometry invariants | ❌ **GAP** — ridge continuity is asserted nowhere |
 | No known P0/P1 in workstream | ❌ WS1-002, WS1-003, WS1-012, WS1-013 open |
