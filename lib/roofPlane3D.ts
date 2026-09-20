@@ -632,14 +632,47 @@ export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = 
   const frame = computePlaneFromPoints3D(pts3D, options);
   const projPts = frame.projectedPts; // already offset above surface
 
-  // Vertices in lat/lng (projected, coplanar, offset above surface)
-  const vertices = projPts.map(p => {
+  // 🚨 THE PLAN-VIEW RECORD IS TAKEN BEFORE THE RENDER LIFT — IT SPLIT RIDGES.
+  //
+  // `projPts` are lifted SURFACE_OFFSET_M along the plane NORMAL, which is a
+  // rendering concern: it stops the deck z-fighting with the noisy tile mesh.
+  // A normal is not vertical, so that lift has a HORIZONTAL component of
+  // offset·sin(tilt) — and it points down-slope, i.e. along each face's own
+  // azimuth.
+  //
+  // `vertices` carry no height. They are the plan-view, engineering record: they
+  // are what lib/cad/buildCADFromSurvey.ts hands to geoPolygonToLocal and what
+  // lib/cad/roof/roofCAD.ts draws as plan polygons and setback bands. Deriving
+  // them from the LIFTED points therefore slid every face down-slope in plan by
+  // offset·sin(tilt) — and the two faces of a gable have OPPOSITE azimuths, so
+  // they slid apart and their shared ridge SPLIT by twice that:
+  //
+  //     4:12  (18.43°)   7.6 cm
+  //     6:12  (26.57°)  10.8 cm
+  //     10:12 (39.81°)  15.4 cm   (measured, and equal to 2·offset·sin(tilt))
+  //
+  // On the permit site plan. `joinSharedCorners` has a 1.5 m tolerance, so
+  // nothing downstream ever noticed.
+  //
+  // The lift stays where it belongs — `polygon3D`, `origin3D` and the frame keep
+  // it, so rendering and panel placement are untouched. Only the plan-view
+  // record is taken before it. Area, pitch and azimuth are unaffected either way:
+  // a translation along the normal is rigid, and `area` is measured in the
+  // plane's own UV basis relative to an origin that moved with it.
+  const liftM = options.surfaceOffsetM ?? SURFACE_OFFSET_M;
+  const n = frame.normal;
+  const planPts: Cart3[] = liftM === 0
+    ? projPts
+    : projPts.map(p => ({ x: p.x - n.x * liftM, y: p.y - n.y * liftM, z: p.z - n.z * liftM }));
+
+  // Vertices in lat/lng — plan view, unlifted (see above).
+  const vertices = planPts.map(p => {
     const { lat, lng } = ecefToLatLng(p);
     return { lat, lng };
   });
 
-  // Centroid from projected points
-  const centroidCart = centroid3(projPts);
+  // Centroid from the same unlifted points, so it agrees with the vertices.
+  const centroidCart = centroid3(planPts);
   const { lat: centroidLat, lng: centroidLng, height: centroidHeight } = ecefToLatLng(centroidCart);
 
   // Area (m²)

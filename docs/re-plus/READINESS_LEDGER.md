@@ -712,6 +712,57 @@ Mutation-checked: removing one emit fails with the offending block named.
 
 ---
 
+## WS1-018 — The render lift reached the permit site plan and split every gable ridge
+
+| | |
+|---|---|
+| **Severity** | **P1 — permit-visible** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+This is the defect behind the correction above, now measured and closed.
+
+`buildRoofPlane3D` derived `plane.vertices` from `frame.projectedPts` — the points **after** the
+`SURFACE_OFFSET_M` render lift. That lift is applied along the plane **normal**, and a normal is not
+vertical, so it carries a horizontal component of `offset·sin(tilt)` pointing **down-slope, along
+that face's own azimuth**.
+
+`vertices` carry no height. They are the plan-view engineering record — what
+`lib/cad/buildCADFromSurvey.ts` hands to `geoPolygonToLocal` and what `lib/cad/roof/roofCAD.ts`
+draws as plan polygons and setback bands. So every face slid down-slope in plan, and because the
+two halves of a gable have **opposite azimuths** they slid *apart*:
+
+| pitch | ridge split (measured) | = 2·offset·sin(tilt) |
+|---|---|---|
+| 4:12 (18.43°) | **7.63 cm** | 7.59 cm |
+| 6:12 (26.57°) | **10.79 cm** | 10.73 cm |
+| 10:12 (39.81°) | **15.43 cm** | 15.36 cm |
+
+Up to six inches of open ridge on the permit site plan. `joinSharedCorners` has a **1.5 m**
+tolerance, so nothing downstream ever noticed.
+
+**Fix.** The plan-view record is taken **before** the lift. `polygon3D`, `origin3D` and the frame
+keep it, so rendering and panel placement are untouched; only `vertices` and the centroid are
+derived from the unlifted points. Area, pitch and azimuth are unaffected either way — a translation
+along the normal is rigid, and area is measured in the plane's own UV basis relative to an origin
+that moved with it.
+
+**Tests** — `tests/ridgeContinuity.test.ts`, 15 tests. The fixture is asserted to be a real gable
+with opposed azimuths first. Then both ridge corners coincide to sub-millimetre at 4:12, 6:12 and
+10:12, for a flat roof, and with the lift opted out. An adversarial block reads the ridge out of
+`polygon3D` — which is *supposed* to stay lifted — and asserts the separation equals
+`2·offset·sin(tilt)`, so the assertions are proven load-bearing rather than vacuously true of any
+two rectangles. A final block pins that area, pitch, azimuth and the `origin3D` lift are unchanged.
+
+🚨 **Mutation-proven**: with the fix reverted the ridge tests fail by **7.63 / 10.79 / 15.43 cm**
+against a 1 mm tolerance — 76× to 154× — matching the independent measurement exactly.
+
+**Method repair.** The reason this survived is that *every* geometry invariant in the suite was
+asserted **within** a single face and none **between** faces. That is why a correct per-face
+invariance result was generalised into a wrong "not permit-grade" conclusion. This file is the first
+between-face invariant; ridge continuity is now a standing assertion.
+
+---
+
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
 `SolarEngine3D` applies restored obstructions to the wrong site · obstructions/measurements are
@@ -738,7 +789,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
 | E2E passes | ❌ **not run by me** — see below |
-| Full suite passes | ✅ **566 files, 12,173 tests, 0 failures**, 490 skipped |
+| Full suite passes | ✅ **567 files, 12,188 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |
@@ -746,7 +797,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Staging deploy verified | ❌ |
 | Exact tested SHA verified | ✅ **`de47e48a`** (code frozen at `f24a40c1`; `de47e48a` is docs-only) |
 | **Visual check in a browser** | ❌ **BLOCKED — no database in this environment** (see below) |
-| Between-face geometry invariants | ❌ **GAP** — ridge continuity is asserted nowhere |
+| Between-face geometry invariants | ✅ **CLOSED** — `tests/ridgeContinuity.test.ts` asserts shared-ridge continuity at 4:12/6:12/10:12, flat, and lift-opted-out |
 | No known P0/P1 in workstream | ✅ **all P0/P1 closed**; WS1-013 remains open at **P2**, and needs a visual judgement |
 
 ### Why the visual gate is blocked, and what would unblock it
