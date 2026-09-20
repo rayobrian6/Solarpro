@@ -3554,8 +3554,41 @@ export default function DesignStudio({ project, onSave }: Props) {
     toast.success('Roof plane added', `${newPanels.length} panels placed · ${pendingPlaneAzimuth}° azimuth · ${pendingPlanePitch}° pitch`);
   };
 
+  // ── THE ONE PLACE THAT DECIDES "this layout cannot run in the 2D engine" ──
+  //
+  // 🚨 THIS EXISTS BECAUSE THE RULE WAS HAND-COPIED AND ONE COPY WAS MISSED.
+  // The 2D layout engines (`generateRoofLayoutOptimized` et al) emit panels with no
+  // elevation. `addPanelEntity` reads `panel.height ?? 0` and `isValidCoord` accepts
+  // 0 as finite, so those panels are placed on the WGS-84 ellipsoid — metres beneath
+  // the building, which is what "panels disappear into the roof" looks like from the
+  // camera. The defence was an `if (show3D) { setPlacementMode3D('auto_roof'); return; }`
+  // block pasted at each call site: autoLayoutAll, fillRoof and optimizeLayout got it,
+  // `relayoutPlane` never did, and `relayoutWithOrientation` got a version that FAILS
+  // OPEN (it only routed when some panel already had height > 0 — so once the 2D
+  // engine had sunk them to 0, the guard that would have prevented it could never
+  // fire again; the condition was the symptom).
+  //
+  // A rule that must hold at N call sites belongs at one. Returns true when it has
+  // taken over, so callers read `if (routeLayoutTo3D()) return;`.
+  // `beforeRoute` runs only when we are actually routing, so callers that must prune
+  // neighbour roofs first keep that ordering without restating the mode test.
+  const routeLayoutTo3D = useCallback((beforeRoute?: () => void): boolean => {
+    if (!show3D) return false;
+    beforeRoute?.();
+    setPlacementMode3D('auto_roof');
+    return true;
+  }, [show3D]);
+
   // ── Re-layout panels for an existing plane (after azimuth/pitch change) ──
   const relayoutPlane = (plane: RoofPlane) => {
+    // 🚨 In 3D this re-lays the WHOLE roof, not just this face, because the 3D
+    // engine's fill is whole-roof — the same trade the three sibling paths already
+    // make. Re-laying every face is a visible surprise; burying the array below the
+    // ellipsoid is silent and wrong, so this is the better of the two.
+    if (routeLayoutTo3D()) {
+      toast.info('Re-laying the roof', 'In 3D the layout is rebuilt for every face so panels sit on the roof surface.');
+      return;
+    }
     // Inline point-in-polygon (ray casting) to filter panels inside this plane
     const pipTest = (lat: number, lng: number, verts: {lat:number;lng:number}[]): boolean => {
       let inside = false;
@@ -3645,15 +3678,19 @@ export default function DesignStudio({ project, onSave }: Props) {
     const hasAutoPanels = panels.some(p => p.layoutSource === 'AUTO');
     if (!hasAutoPanels) return; // no auto panels to refresh
 
-    // v48.37: In 3D mode with 3D-placed panels (height > 0), re-trigger the 3D
-    // engine's handleAutoRoof instead of the 2D layout engine.
-    // The 2D engine outputs panels with height=undefined → renders underground.
-    // The orientation prop flowing to SolarEngine3D ensures panelOrientationRef
-    // is updated BEFORE handleAutoRoof fires, so it uses the correct new orientation.
-    if (show3D && panels.some(p => (p.height ?? 0) > 0)) {
-      setPlacementMode3D('auto_roof');
-      return;
-    }
+    // v48.37: In 3D mode, re-trigger the 3D engine's handleAutoRoof instead of the
+    // 2D layout engine. The 2D engine outputs panels with height=undefined → they
+    // render underground. The orientation prop flowing to SolarEngine3D ensures
+    // panelOrientationRef is updated BEFORE handleAutoRoof fires, so it uses the
+    // correct new orientation.
+    //
+    // 🚨 THE `panels.some(p => (p.height ?? 0) > 0)` CLAUSE IS GONE, AND THAT IS THE
+    // FIX. It made the guard fail OPEN on exactly the state it was meant to repair:
+    // panels already at height 0 are the symptom, and requiring one above 0 before
+    // routing meant that once the 2D engine had sunk an array, every subsequent
+    // orientation change ran the 2D engine again and re-sank it. The mode alone
+    // decides which engine is correct.
+    if (routeLayoutTo3D()) return;
 
     clearGridCache();
     const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
@@ -3697,7 +3734,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       `${allNew.length} panels re-laid out`
     );
   }, [panels, roofPlanes, groundArea, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks, alignToEdge, show3D, setPlacementMode3D]);
+      tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks, alignToEdge, routeLayoutTo3D]);
 
   // ── "Only my building" guard (Ray, 2026-06-30) ──────────────────────────────
   // Restrict the design to the SUBJECT building — the roof-plane cluster under the
@@ -3759,10 +3796,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     // v48.35: In 3D mode, the 2D layout engines produce panels without terrain heights,
     // which render underground. Route through SolarEngine3D's auto_roof engine instead,
     // which samples terrain and places panels at the correct elevation.
-    if (show3D) {
-      setPlacementMode3D('auto_roof');
-      return;
-    }
+    if (routeLayoutTo3D()) return;
 
     setAutoLayoutRunning(true);
 
@@ -3819,7 +3853,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [panels, roofPlanes, groundArea, fenceLine, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D, keepOutZones, keepSubjectBuilding]);
+      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, routeLayoutTo3D, keepOutZones, keepSubjectBuilding]);
 
   // ── Fill Roof: maximize panels with minimal setback (0.3 m) ─────────────────
   const fillRoof = useCallback(() => {
@@ -3837,11 +3871,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     // Density is not lost by routing: the 3D fill already runs at the row and
     // panel spacing shown in the Configuration panel (0.02 m / mid-clamp gap),
     // which is what "Fill Roof" meant by maximum density.
-    if (show3D) {
-      keepSubjectBuilding();
-      setPlacementMode3D('auto_roof');
-      return;
-    }
+    if (routeLayoutTo3D(keepSubjectBuilding)) return;
 
     setAutoLayoutRunning(true);
     const subjectPlanes = keepSubjectBuilding();  // "only my building" — skip neighbour roofs
@@ -3892,7 +3922,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge, keepSubjectBuilding,
-      show3D, setPlacementMode3D]); // v66: without show3D the guard reads a stale value after a 2D/3D toggle
+      routeLayoutTo3D]); // v66: routeLayoutTo3D closes over show3D — without it the guard reads a stale value after a 2D/3D toggle
 
   // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
   const optimizeLayout = useCallback(() => {
@@ -3902,11 +3932,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
     // v66: same v48.35 guard as autoLayoutAll / fillRoof — the 2D engines emit
     // heightless panels that render underground in 3D mode. See fillRoof above.
-    if (show3D) {
-      keepSubjectBuilding();
-      setPlacementMode3D('auto_roof');
-      return;
-    }
+    if (routeLayoutTo3D(keepSubjectBuilding)) return;
 
     setAutoLayoutRunning(true);
     // v47.95: Roof panels are flush-mount -- use user rowSpacing directly
@@ -3958,7 +3984,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge, keepSubjectBuilding,
-      show3D, setPlacementMode3D]); // v66: see fillRoof — stale show3D would re-bury the panels
+      routeLayoutTo3D]); // v66: see fillRoof — a stale routeLayoutTo3D (stale show3D) would re-bury the panels
 
   // ── Calculate production ───────────────────────────────────
   const buildSystemDefinition = () => {

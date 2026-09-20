@@ -692,10 +692,34 @@ export function buildSurfaceGrid(opts: {
         z: eastECEF_.z*uNormEnu.x + northECEF_.z*uNormEnu.y,
       };
       const n_ = resolvedEcefFrame.n;
-      const vRaw_ = { x: n_.y*newU.z - n_.z*newU.y, y: n_.z*newU.x - n_.x*newU.z, z: n_.x*newU.y - n_.y*newU.x };
-      const vLen_ = Math.sqrt(vRaw_.x*vRaw_.x + vRaw_.y*vRaw_.y + vRaw_.z*vRaw_.z);
-      if (vLen_ > 1e-9) {
-        resolvedEcefFrame = { ...resolvedEcefFrame, u: newU, v: { x: vRaw_.x/vLen_, y: vRaw_.y/vLen_, z: vRaw_.z/vLen_ } };
+      // 🚨 PROJECT THE PICKED DIRECTION INTO THE PLANE BEFORE IT BECOMES THE GRID
+      // AXIS. `newU` is built from a HORIZONTAL ENU vector, and a horizontal vector
+      // does not lie in a tilted plane — it keeps a component along the normal of
+      // -sin(tilt)·sin(theta), where theta is the angle of the picked direction from
+      // the eave. Installing it verbatim as `u` (which is what this did) drove every
+      // panel off the plane by uCenter·sin(tilt)·sin(theta) ALONG THE ROW, so panels
+      // sank further into the roof the further they sat from the origin — a wedge,
+      // not a uniform offset.
+      //
+      // It could not be caught downstream either: `polyUV` is built from this same
+      // axis in buildSurfaceGridECEF, so the point-in-polygon containment test is a
+      // sheared projection of the same error and always agrees with it.
+      //
+      // Only `v` was re-derived before; `u` must be re-derived too, which is what
+      // makes the triad orthonormal rather than merely consistent.
+      const uDotN_ = newU.x*n_.x + newU.y*n_.y + newU.z*n_.z;
+      const uProj_ = { x: newU.x - n_.x*uDotN_, y: newU.y - n_.y*uDotN_, z: newU.z - n_.z*uDotN_ };
+      const uLenP_ = Math.sqrt(uProj_.x*uProj_.x + uProj_.y*uProj_.y + uProj_.z*uProj_.z);
+      // A direction parallel to the normal has no in-plane part, so there is no grid
+      // axis to derive from it — keep the frame the plane was built with rather than
+      // installing a degenerate one.
+      if (uLenP_ > 1e-9) {
+        const uHat_ = { x: uProj_.x/uLenP_, y: uProj_.y/uLenP_, z: uProj_.z/uLenP_ };
+        const vRaw_ = { x: n_.y*uHat_.z - n_.z*uHat_.y, y: n_.z*uHat_.x - n_.x*uHat_.z, z: n_.x*uHat_.y - n_.y*uHat_.x };
+        const vLen_ = Math.sqrt(vRaw_.x*vRaw_.x + vRaw_.y*vRaw_.y + vRaw_.z*vRaw_.z);
+        if (vLen_ > 1e-9) {
+          resolvedEcefFrame = { ...resolvedEcefFrame, u: uHat_, v: { x: vRaw_.x/vLen_, y: vRaw_.y/vLen_, z: vRaw_.z/vLen_ } };
+        }
       }
     }
     console.log('[SurfaceGrid] Applied custom ENU direction override');
@@ -704,9 +728,34 @@ export function buildSurfaceGrid(opts: {
   // Apply custom origin override (Set Origin tool — lat/lng)
   if (typeof customOriginLat === 'number' && typeof customOriginLng === 'number' &&
       isFinite(customOriginLat) && isFinite(customOriginLng)) {
-    const h_ = (plane.planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M) + (groundElevM ?? 0);  // v47.216: add ground elev
-    resolvedOrigin3D = latLngToECEF(customOriginLat, customOriginLng, h_);
-    console.log('[SurfaceGrid] Applied custom origin override');
+    // 🚨 THE CUSTOM ORIGIN MUST LAND ON THE PLANE, NOT AT GROUND LEVEL.
+    //
+    // `buildRoofPlane3D` stores `planeHeightAtCenterMeters: 0.0` on every 3D plane
+    // it mints, and its comment says that is safe "because buildSurfaceGrid uses the
+    // actual ECEF height (from projectedPts via origin3D)". This override was the one
+    // place that did NOT — and 0.0 is not nullish, so `?? LEGACY_PLANE_HEIGHT_M`
+    // could never fire and the whole expression collapsed to `groundElevM`. Setting
+    // an origin therefore re-based the grid to GROUND, dropping the array about a
+    // storey below the roof it belonged to. (Measured on a 25° plane 5 m above 120 m
+    // ground: 18 panels at 124.22–125.68 m became the same 18 at 119.26–120.72 m.)
+    //
+    // A lat/lng is two numbers and a point on a plane needs three, so rather than
+    // GUESS the third we take the height from the plane we already resolved and then
+    // project the point onto that plane along its normal. The result is on the plane
+    // by construction — for a tilted plane, a flat one, or a legacy 2D one — and no
+    // longer depends on a stored scalar that may be a sentinel.
+    const originLL_ = ecefToLatLng(resolvedOrigin3D);
+    const seed_     = latLngToECEF(customOriginLat, customOriginLng, originLL_.height);
+    const nO_       = resolvedEcefFrame.n;
+    const drop_     = (seed_.x - resolvedOrigin3D.x)*nO_.x
+                    + (seed_.y - resolvedOrigin3D.y)*nO_.y
+                    + (seed_.z - resolvedOrigin3D.z)*nO_.z;
+    resolvedOrigin3D = {
+      x: seed_.x - nO_.x*drop_,
+      y: seed_.y - nO_.y*drop_,
+      z: seed_.z - nO_.z*drop_,
+    };
+    console.log('[SurfaceGrid] Applied custom origin override (projected onto plane)');
   }
 
   // v48.12: MIXED LAYOUT — run portrait fill + landscape fill, merge without overlap
