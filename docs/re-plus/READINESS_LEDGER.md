@@ -274,7 +274,7 @@ still carries it.
 | | |
 |---|---|
 | **Severity** | **P1** |
-| **Status** | `OPEN` |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
 | **Explains** | Failure A's "52 and 0 at once" |
 
 The app can hold at least **11 independent answers to "how many panels"**, with **6 independent
@@ -298,6 +298,21 @@ driving a HUD kW figure computed by a **different formula** than the top bar's
 set `true` at [:1437](components/design/DesignStudio.tsx:1437) inside
 `if (restoredPanels.length > 0)` and **never set false anywhere**. That is the literal
 "Layout loaded from DB · 0 panels" string.
+
+**Fix.** The two parallel counters are **deleted**. The badge counts `panels.length` and
+`roofPlanes.length` — the canonical source the top bar and System Summary already used — so the
+three readouts cannot disagree. `layoutLoadedFromDB` now answers only the question it is named for,
+provenance, and is **updated on every property change** instead of latching once on mount.
+
+**Test** — `tests/designStudioSiteSwitch.component.test.tsx`: after moving to a property with
+nothing stored, the rendered DOM must not contain `"Layout loaded from DB · 0 panels"`, nor any
+`loaded from DB … · 0 panels` variant. 🚨 **Mutation-proven**: restore the latch and drop the badge
+guard, and the test fails with **Ray's exact string** in the assertion message.
+
+> Still outstanding as a *fourth* source, deliberately not changed here: `SolarEngine3D` keeps its
+> own `panelCount` state (19 writers) driving the 3D HUD, reconciled with the prop by a lagging
+> `useEffect`. It is inside the 3D viewport, it did not participate in the contradiction Ray saw
+> (top bar, summary and badge are all DesignStudio), and collapsing 19 call sites wants its own pass.
 
 ---
 
@@ -339,7 +354,7 @@ DesignStudio reconciles. Pinned by four tests including one asserting it agrees 
 | | |
 |---|---|
 | **Severity** | **P0** (test integrity) |
-| **Status** | `OPEN` |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
 
 `tests/designStudioSiteSwitch.component.test.tsx` mounts the real DesignStudio and drives the real
 `onLocationPick` — a good layer — but every call replays the **same two constants**
@@ -348,8 +363,18 @@ DesignStudio reconciles. Pinned by four tests including one asserting it agrees 
 coordinate tests exact-equality against a trivially equal key. The production failure is precisely
 that **a human cannot reproduce a coordinate**.
 
-Also confirmed: **no test anywhere asserts panel elevation above the roof surface**, and the two
-Playwright specs are the only browser layer.
+**Fix.** Added to the same file: **A1 → neighbour → A2, 2.8 m from A1** — the same distance as the
+accidental duplicate in the live trace — driven through the real `onLocationPick`. The fixture
+asserts up front that the two clicks genuinely mint different keys, then that the panel,
+roof-plane, obstruction and measurement **entity IDs** all return, and that the surviving key is the
+one the design was **filed under** rather than the new click's.
+
+🚨 **Mutation-proven**: disable the proximity snap in `changeSite` and this test fails while the
+other eight in the file still pass — which is precisely the blindness that let the defect ship.
+
+Also confirmed at the time: **no test anywhere asserted panel elevation above the roof surface** —
+now closed by `tests/panelSurfaceClearance.test.ts` — and the two Playwright specs remain the only
+browser layer.
 
 ---
 
@@ -529,7 +554,7 @@ part, so that case now leaves the plane's own frame alone rather than installing
 **Follow-up (not done):** `customLayoutDirRef` being one ref for every face is still live. One eave
 direction picked correctly for one face is the wrong direction on every other face.
 
-### WS1-012 — Square Up renders the face unlifted but places panels on the lifted plane — `OPEN`
+### WS1-012 — Square Up renders the face unlifted but places panels on the lifted plane — `FIXED_PENDING_VERIFICATION` (closed by the WS1-015 fix: both calls now pass the same offset)
 
 `squareUpTracedFaces` derives two geometries from the same points: `frame` with
 `{ surfaceOffsetM: 0 }` (correct) for the **rendered** surface, and `buildRoofPlane3D(pts3D)`
@@ -789,7 +814,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
 | E2E passes | ❌ **not run by me** — see below |
-| Full suite passes | ✅ **567 files, 12,188 tests, 0 failures**, 490 skipped |
+| Full suite passes | ✅ **567 files, 12,190 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |

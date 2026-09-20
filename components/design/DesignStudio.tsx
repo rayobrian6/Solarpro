@@ -940,8 +940,27 @@ export default function DesignStudio({ project, onSave }: Props) {
   // with 3-second debounce. Replaces the manual "Calculate Production" button.
   const autoCalcTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Restore indicators — show what was loaded from DB on mount
-  const [restoredPanelCount, setRestoredPanelCount] = useState<number>(0);
-  const [restoredRoofPlaneCount, setRestoredRoofPlaneCount] = useState<number>(0);
+  /**
+   * Did what is on screen come out of storage, rather than being drawn this
+   * session?
+   *
+   * 🚨 THIS USED TO BE A WRITE-ONCE LATCH, BESIDE TWO PARALLEL COUNTERS.
+   * `restoredPanelCount` / `restoredRoofPlaneCount` held their own idea of how
+   * many panels there were, set independently of `panels`, and
+   * `layoutLoadedFromDB` was set true in exactly one place and never set back.
+   * So after a property change the badge read:
+   *
+   *     "Layout loaded from DB · 0 panels"
+   *
+   * while the top bar and the System Summary — which read `panels.length`,
+   * the canonical source — both said 52. That is the contradiction Ray
+   * reported, verbatim, and it was three readouts disagreeing because two of
+   * them were not derived from the design.
+   *
+   * The counters are gone. The badge counts `panels` and `roofPlanes`, and this
+   * flag now answers only the question it is named for — provenance — and is
+   * updated on every property change, not once per mount.
+   */
   const [layoutLoadedFromDB, setLayoutLoadedFromDB] = useState<boolean>(false);
 
   // Auto-save refs — use refs for mapCenter/zoom so the debounce callback
@@ -1465,13 +1484,9 @@ export default function DesignStudio({ project, onSave }: Props) {
         }, siteKeyNow);
         const restoredPanels = hydrated.state.active.panels;
         const restoredPlanes = hydrated.state.active.roofPlanes;
-        if (restoredPanels.length > 0) {
-          setRestoredPanelCount(restoredPanels.length);
-          setLayoutLoadedFromDB(true);
-        }
-        if (restoredPlanes.length > 0) {
-          setRestoredRoofPlaneCount(restoredPlanes.length);
-        } else {
+        // Provenance only — the badge counts the design itself.
+        if (restoredPanels.length > 0 || restoredPlanes.length > 0) setLayoutLoadedFromDB(true);
+        if (restoredPlanes.length === 0) {
           // Solar API auto-detect DISABLED on project load.
           // Project coords may be a city centre or wrong building.
           // Roof planes only load when user explicitly picks a building via Pick House.
@@ -1571,8 +1586,12 @@ export default function DesignStudio({ project, onSave }: Props) {
       },
     });
     if (!res.changed) return false;
-    setRestoredRoofPlaneCount(res.arriving.roofPlanes.length);
-    setRestoredPanelCount(res.arriving.panels.length);
+    // 🚨 PROVENANCE MUST TRACK THE PROPERTY CHANGE, NOT LATCH ON MOUNT.
+    // This flag was set true exactly once, on restore, and never cleared — so
+    // after moving to a property with nothing stored the badge still claimed the
+    // layout had been loaded from the database. It now describes the bundle that
+    // just became active: restored from an archive, or a blank property.
+    setLayoutLoadedFromDB(res.arriving.panels.length > 0 || res.arriving.roofPlanes.length > 0);
     // Apply the arriving property's fence, or clear it for a property that has
     // none — leaving the previous one on screen is the defect, not the fix.
     const arrivingFence = res.arriving.scalars?.fenceLine;
@@ -4499,10 +4518,14 @@ export default function DesignStudio({ project, onSave }: Props) {
               <AlertCircle size={10} /> Unsaved Design
             </span>
           ) : null}
-          {/* Restore indicators — visible proof that layout was loaded from DB */}
-          {layoutLoadedFromDB ? (
+          {/* Restore indicator — visible proof that this design came out of storage.
+              🚨 COUNTS COME FROM THE DESIGN, not from a parallel counter. This read
+              `restoredPanelCount`, which was set independently of `panels`, so it
+              could say "0 panels" while the top bar and System Summary beside it
+              both said 52 off `panels.length`. Three readouts, two sources. */}
+          {layoutLoadedFromDB && (panels.length > 0 || roofPlanes.length > 0) ? (
             <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1">
-              <CheckCircle size={10} /> Layout loaded from DB · {restoredPanelCount} panels{restoredRoofPlaneCount > 0 ? ` · ${restoredRoofPlaneCount} roof planes` : ''}
+              <CheckCircle size={10} /> Layout loaded from DB · {panels.length} panels{roofPlanes.length > 0 ? ` · ${roofPlanes.length} roof planes` : ''}
             </span>
           ) : null}
           {/* Proceed to Engineering CTA — shown once panels are placed */}

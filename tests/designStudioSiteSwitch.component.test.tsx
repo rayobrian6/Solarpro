@@ -213,6 +213,77 @@ describe('🚨 DesignStudio: picking the house next door and coming back', () =>
     expect(body.siteArchives.sites[KEY_A]).toBeUndefined();
   });
 
+  it('🚨 the UI can never say "loaded from DB · 0 panels" — the contradiction Ray reported', async () => {
+    // HIS WORDS: 52 panels in the top bar, 52 in the System Summary,
+    // "Layout loaded from DB · 0 panels", and "Saved for another address" — all
+    // on screen at once, for one design.
+    //
+    // Three readouts, two sources. The top bar and the summary counted `panels`.
+    // The badge counted `restoredPanelCount`, a parallel number set independently
+    // of the design, beside `layoutLoadedFromDB`, a flag set true once on mount
+    // and never cleared. Move to a property with nothing stored and the flag was
+    // still true while the counter had been reset to zero.
+    const utils = await mountStudio();
+
+    // On Melvin the badge is truthful and agrees with the design.
+    const onMelvin = utils.container.textContent ?? '';
+    if (onMelvin.includes('Layout loaded from DB')) {
+      expect(onMelvin).toContain(`Layout loaded from DB · ${MELVIN_PANELS.length} panels`);
+    }
+
+    // Move to the house next door, which has nothing stored.
+    await act(async () => { engine.props.onLocationPick!(NEIGHBOUR.lat, NEIGHBOUR.lng, '5 Melvin Drive'); });
+    await flushAutosave();
+
+    const onNeighbour = utils.container.textContent ?? '';
+    // 🚨 The exact string, and any "· 0 panels" claim at all.
+    expect(onNeighbour).not.toContain('Layout loaded from DB · 0 panels');
+    expect(onNeighbour).not.toMatch(/Layout loaded from DB[^]{0,40}·\s*0\s*panels/);
+  });
+
+  it('🚨 A → B → A AT A DIFFERENT POINT ON THE SAME ROOF: the panels still come back', async () => {
+    // THE TEST THAT DID NOT EXIST, AND THE REASON THE BUG SHIPPED.
+    //
+    // Every case in this file replayed the SAME two constants, so the return
+    // pick was byte-identical to the original and the archive lookup was a
+    // trivially-equal string compare. A human cannot reproduce a coordinate.
+    // `pickPosition` returns the raw ray-cast hit under the cursor, and the
+    // site key quantises to ~1.1 m, so the second click on one roof is a
+    // DIFFERENT key — which is exactly what the live trace recorded at 3 Melvin
+    // Drive: three identities for one house in 43 seconds.
+    //
+    // ~2.8 m from the first click: the same distance as the accidental
+    // duplicate in that trace, and well inside SITE_MATCH_RADIUS_M.
+    const MELVIN_SECOND_CLICK = { lat: 38.70617757709013, lng: -90.04627419301613 };
+    const KEY_A2 = siteKeyFromCoords(MELVIN_SECOND_CLICK.lat, MELVIN_SECOND_CLICK.lng, PROJECT_ID);
+    // The fixture is only meaningful if the two clicks really do mint different keys.
+    expect(KEY_A2).not.toBe(KEY_A);
+
+    await mountStudio();
+    await act(async () => { engine.props.onLocationPick!(NEIGHBOUR.lat, NEIGHBOUR.lng, '5 Melvin Drive'); });
+    await flushAutosave();
+    posted = [];
+
+    await act(async () => {
+      engine.props.onLocationPick!(MELVIN_SECOND_CLICK.lat, MELVIN_SECOND_CLICK.lng, '3 Melvin Drive');
+    });
+    await flushAutosave();
+
+    const body = lastPost();
+    // Identities, never counts: 52 of the neighbour's panels would satisfy a count.
+    expect(body.panels.map((p: any) => p.id)).toEqual(MELVIN_PANELS.map(p => p.id));
+    expect(body.roofPlanes.map((p: any) => p.id)).toEqual(MELVIN_PLANES.map(p => p.id));
+    expect(body.obstructions.map((o: any) => o.id)).toEqual(MELVIN_OBS.map(o => o.id));
+    expect(body.measurements.map((m: any) => m.id)).toEqual(MELVIN_MEAS.map(m => m.id));
+
+    // 🚨 And the key that survives is the one the design was FILED under, not
+    // the new click's. Adopting the new coordinate's key would orphan the
+    // archives filed under KEY_A and the roof planes stamped with it.
+    expect(body.siteArchives.activeSiteKey).toBe(KEY_A);
+    expect(body.siteArchives.sites[KEY_A]).toBeUndefined();
+    expect(body.siteArchives.sites[KEY_A2]).toBeUndefined();
+  });
+
   it('A → B → A → B: the neighbour\'s own work is kept too', async () => {
     await mountStudio();
     await act(async () => { engine.props.onLocationPick!(NEIGHBOUR.lat, NEIGHBOUR.lng, '5 Melvin Drive'); });
