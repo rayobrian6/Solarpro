@@ -25,7 +25,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildRoofPlane3D, latLngToECEF } from '@/lib/roofPlane3D';
+import {
+  buildRoofPlane3D, latLngToECEF, computePlaneFromPoints3D, SURFACE_OFFSET_M,
+} from '@/lib/roofPlane3D';
 import { buildSurfaceGrid, PANEL_OFFSET_ECEF } from '@/lib/surfaceGeometry3D';
 import type { PlacedPanel, RoofPlane } from '@/types';
 
@@ -221,6 +223,76 @@ describe('panel surface clearance — panels sit ON the roof, never in it', () =
 
     expect(sunkClearance).toBeLessThan(0);
     expect(Math.abs(sunkClearance - PANEL_OFFSET_ECEF)).toBeGreaterThan(COPLANARITY_TOL_M);
+  });
+
+  // ── REGRESSION: the restore path re-lifted the roof it was about to draw ────
+  //
+  // `computePlaneFromPoints3D` applies SURFACE_OFFSET_M unconditionally, so
+  // re-fitting its own output lifts the result again. Its docstring says so, and
+  // Stitch was fixed for exactly this — each press floated the roof 12 cm. The
+  // v64 roof-plane RESTORE effect did the same thing and was never corrected: it
+  // fed `plane.polygon3D` (already a fitted, lifted plane) straight back in with
+  // no options.
+  //
+  // Panels are placed at origin3D + n·0.05 and origin3D lies on the UNRE-LIFTED
+  // plane, so drawing the deck at +0.12 put every panel 0.07 m BELOW the surface
+  // the user sees — panels half-buried in the roof.
+  describe('re-fitting a plane that is already a plane must not move it', () => {
+    const plane = buildRoofPlane3D(traceTiltedFace());
+    const poly = plane.polygon3D!.map(p => ({ x: p.x, y: p.y, z: p.z }));
+
+    /** Distance from a point to the plane through `origin3D` along the normal. */
+    function offsetOf(p: { x: number; y: number; z: number }) {
+      const n = plane.ecefFrame3D!.n;
+      const o = plane.origin3D!;
+      return (p.x - o.x) * n.x + (p.y - o.y) * n.y + (p.z - o.z) * n.z;
+    }
+
+    it('POSITIVE — with surfaceOffsetM: 0 the re-fit is idempotent', () => {
+      const refit = computePlaneFromPoints3D(poly, { surfaceOffsetM: 0 });
+      for (const p of refit.projectedPts) {
+        expect(Math.abs(offsetOf(p))).toBeLessThan(1e-6);
+      }
+    });
+
+    it('🚨 without the option it lifts the polygon by exactly SURFACE_OFFSET_M again', () => {
+      // This is the defect, quantified. It is asserted rather than merely
+      // described so that if the unconditional lift is ever made conditional,
+      // this test says so instead of silently passing.
+      const refit = computePlaneFromPoints3D(poly);
+      for (const p of refit.projectedPts) {
+        expect(Math.abs(offsetOf(p) - SURFACE_OFFSET_M)).toBeLessThan(1e-6);
+      }
+    });
+
+    it('🚨 THE USER-VISIBLE INVARIANT — panels must sit above the DRAWN deck', () => {
+      const panels = fill(plane);
+      expect(panels.length).toBeGreaterThan(0);
+      const n = plane.ecefFrame3D!.n;
+
+      // The deck as the restore path now draws it (offset 0) …
+      const drawnOk = computePlaneFromPoints3D(poly, { surfaceOffsetM: 0 });
+      // … and as it drew it before (re-lifted).
+      const drawnBad = computePlaneFromPoints3D(poly);
+
+      const clearanceAbove = (deck: { projectedPts: Array<{ x: number; y: number; z: number }> }) => {
+        const d0 = deck.projectedPts[0];
+        return panels.map(p => {
+          const q = latLngToECEF(p.lat, p.lng, p.height!);
+          return (q.x - d0.x) * n.x + (q.y - d0.y) * n.y + (q.z - d0.z) * n.z;
+        });
+      };
+
+      // Fixed: every panel is above the deck it is drawn on.
+      for (const c of clearanceAbove(drawnOk)) expect(c).toBeGreaterThan(0);
+
+      // Broken: every panel is BELOW it, by ~0.07 m. Ray's sentence, as a number.
+      const bad = clearanceAbove(drawnBad);
+      for (const c of bad) expect(c).toBeLessThan(0);
+      const worstBad = Math.min(...bad);
+      expect(worstBad).toBeLessThan(-0.05);
+      expect(worstBad).toBeGreaterThan(-0.09);
+    });
   });
 
   it('ADVERSARIAL — the invariant rejects an array placed at ground level', () => {

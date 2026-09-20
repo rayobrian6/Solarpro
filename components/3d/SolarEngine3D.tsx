@@ -2136,7 +2136,25 @@ function SolarEngine3D({
         if (plane.polygon3D && plane.polygon3D.length >= 3) {
           // polygon3D carries the exact stitched (or traced) ECEF corners.
           cartPts = plane.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
-          frame = computePlaneFromPoints3D(cartPts);
+          // 🚨 surfaceOffsetM: 0 — polygon3D IS ALREADY A FITTED, LIFTED PLANE.
+          //
+          // computePlaneFromPoints3D applies SURFACE_OFFSET_M unconditionally, so
+          // re-fitting its own output lifts the result another 12 cm. That is the
+          // exact trap its own docstring warns about, and the exact bug that was
+          // found and fixed in Stitch — and this restore path did the same thing
+          // and was never corrected.
+          //
+          // Panels are placed at `plane.origin3D + n·PANEL_OFFSET_ECEF` (0.05 m),
+          // and origin3D lies on the UNRE-LIFTED polygon3D plane. So drawing the
+          // deck at +0.12 while the panels sit at +0.05 rendered every panel
+          // 0.07 m BELOW the roof the user is looking at: panels half-buried in
+          // the surface, which is what "the panels disappear into the roof" is.
+          //
+          // The two legacy branches below deliberately keep the default lift:
+          // computeEcefFrameForLegacyPlane fits points built from lat/lng and
+          // pitch, which have NOT been lifted, so for them the offset is the
+          // first one, not a second.
+          frame = computePlaneFromPoints3D(cartPts, { surfaceOffsetM: 0 });
         } else if (plane.createdFrom3D && plane.origin3D && plane.ecefFrame3D) {
           // 3D plane with ECEF frame but no polygon3D (pre-stitch or older save).
           // Reconstruct polygon3D from the 2D vertices + stored ECEF frame.
