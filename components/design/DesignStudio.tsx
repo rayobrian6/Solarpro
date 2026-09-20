@@ -64,7 +64,7 @@ import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
 import { layoutSignature } from '@/lib/roofPlanesSignature';
-import { siteKeyFromCoords, isSameSite, coordKeyOf } from '@/lib/siteIdentity';
+import { siteKeyFromCoords, isSameSite, coordKeyOf, isPlaceholderCoords, PLACEHOLDER_LAT, PLACEHOLDER_LNG } from '@/lib/siteIdentity';
 import { archivesSignature, sitesAreSameProperty } from '@/lib/design/siteDesignModel';
 import { useSiteDesign } from './useSiteDesign';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
@@ -519,11 +519,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   // ── Resolve initial map center ──────────────────────────────────────────────
   // Priority: project.lat/lng (geocoded at creation) → client.lat/lng → geocode on load
   // Never default to Phoenix (33.4484, -112.0740) — that was a hardcoded placeholder
-  const PHOENIX_LAT = 33.4484;
-  const PHOENIX_LNG = -112.0740;
-  function isPhoenixDefault(lat?: number, lng?: number) {
-    return lat === PHOENIX_LAT && lng === PHOENIX_LNG;
-  }
+  // 🚨 Delegates to lib/siteIdentity.ts. This used to be a local literal pair,
+  // which is how the studio could reject the placeholder while
+  // `siteKeyFromCoords` — the only thing that decides ownership — accepted it
+  // and minted a Phoenix site key for the project.
+  const isPhoenixDefault = isPlaceholderCoords;
   function hasValidCoords(lat?: number, lng?: number): boolean {
     return typeof lat === 'number' && typeof lng === 'number' &&
       isFinite(lat) && isFinite(lng) &&
@@ -535,12 +535,12 @@ export default function DesignStudio({ project, onSave }: Props) {
     ? project.lat!
     : hasValidCoords(project.client?.lat, project.client?.lng)
       ? project.client!.lat!
-      : PHOENIX_LAT; // Will be replaced by geocoding in useEffect below
+      : PLACEHOLDER_LAT; // Will be replaced by geocoding in useEffect below
   const initialLng = hasValidCoords(project.lat, project.lng)
     ? project.lng!
     : hasValidCoords(project.client?.lat, project.client?.lng)
       ? project.client!.lng!
-      : PHOENIX_LNG;
+      : PLACEHOLDER_LNG;
 
   // Map state
   const [mapCenter, setMapCenter] = useState({
@@ -4073,15 +4073,25 @@ export default function DesignStudio({ project, onSave }: Props) {
       if (tilts.length > 0) effectiveTilt = tilts.reduce((a: number, b: number) => a + b, 0) / tilts.length;
       if (azimuths.length > 0) effectiveAzimuth = azimuths.reduce((a: number, b: number) => a + b, 0) / azimuths.length;
     }
-    const effectiveRoofPlanes = roofPlanes.length > 0 ? roofPlanes :
-      (panels.length > 0 && project.systemType === 'roof' ? [{
-        id: 'auto-plane-1',
-        vertices: [],
-        pitch: effectiveTilt,
-        azimuth: effectiveAzimuth,
-        area: panels.length * 1.134 * 1.722,
-        usableArea: panels.length * 1.134 * 1.722 * 0.85,
-      }] : undefined);
+    // 🚨 THE PHANTOM ROOF PLANE IS GONE, AND IT CHANGES NO PRODUCTION NUMBER.
+    //
+    // This synthesised a fake plane whenever there were panels but no traced
+    // roof, as a "convenience" for pvwatts. It was never even that: both pvwatts
+    // call sites read `roofPlanes[0].pitch` ONLY when `panels.length === 0`
+    // (lib/pvwatts.ts), and this was only built when `panels.length > 0`. The
+    // two conditions are mutually exclusive, so its pitch and azimuth were dead
+    // on arrival — and would have been redundant anyway, being the mean of the
+    // very panel tilts pvwatts already averages itself.
+    //
+    // Its only observable effect was PERSISTENCE. It reached `layouts.roof_planes`
+    // as a geometry record with `vertices: []` — an unrenderable plane with a
+    // fabricated `area` of `panels × 1.134 × 1.722`, i.e. the exact aggregate
+    // module area, which asserts 100% packing density with zero setbacks, row
+    // gaps or walkways. That number is not approximate, it is incoherent, and
+    // downstream consumers of `roof_planes` cannot tell it from a traced roof.
+    //
+    // No plane is the honest answer for a design that has no traced roof.
+    const effectiveRoofPlanes = roofPlanes.length > 0 ? roofPlanes : undefined;
     return {
       panels,
       systemType: project.systemType,

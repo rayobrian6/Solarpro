@@ -1030,13 +1030,28 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         system_type         = ${data.systemType || 'roof'},
         panels              = ${panelsJson}::jsonb,
         roof_planes         = COALESCE(${roofPlanesJson}::jsonb, roof_planes),
-        ground_tilt         = ${data.groundTilt ?? 20},
-        ground_azimuth      = ${data.groundAzimuth ?? 180},
-        row_spacing         = ${data.rowSpacing ?? 1.5},
-        ground_height       = ${data.groundHeight ?? 0.6},
-        fence_azimuth       = ${data.fenceAzimuth ?? null},
-        fence_height        = ${data.fenceHeight ?? null},
-        fence_line          = ${fenceLineJson}::jsonb,
+        -- ABSENCE KEEPS. These seven were the uneven half of a doctrine the two
+        -- lines around them already follow. See the note above upsertLayout.
+        --
+        -- fence_line was written unconditionally, and fenceLineJson is null
+        -- whenever data.fenceLine is absent -- so ANY save that did not carry a
+        -- fence SET THE STORED FENCE TO NULL. Unconditional, destructive, and
+        -- reachable from a read-only production CALCULATION
+        -- (app/api/production/route.ts), which sends no fence at all.
+        --
+        -- The four scalars were worse than silent: the 20 / 180 / 1.5 / 0.6
+        -- fallbacks replaced a value the user had set with a FABRICATED default
+        -- whenever a caller omitted it. Absence became a confident wrong answer.
+        --
+        -- An explicit empty array still clears a fence: [] is truthy, so it
+        -- serialises to '[]' and writes. Only genuine absence keeps.
+        ground_tilt         = COALESCE(${data.groundTilt ?? null}::double precision, ground_tilt),
+        ground_azimuth      = COALESCE(${data.groundAzimuth ?? null}::double precision, ground_azimuth),
+        row_spacing         = COALESCE(${data.rowSpacing ?? null}::double precision, row_spacing),
+        ground_height       = COALESCE(${data.groundHeight ?? null}::double precision, ground_height),
+        fence_azimuth       = COALESCE(${data.fenceAzimuth ?? null}::double precision, fence_azimuth),
+        fence_height        = COALESCE(${data.fenceHeight ?? null}::double precision, fence_height),
+        fence_line          = COALESCE(${fenceLineJson}::jsonb, fence_line),
         bifacial_optimized  = ${data.bifacialOptimized ?? false},
         total_panels        = ${data.totalPanels ?? 0},
         system_size_kw      = ${sizeKw},

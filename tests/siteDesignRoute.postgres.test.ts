@@ -547,6 +547,84 @@ describe('🚨 a caller that omits roofPlanes must not delete them', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 absence keeps — the WRITER must not erase what a caller omits', () => {
+  // 🚨 THESE CALL upsertLayout DIRECTLY, ON PURPOSE.
+  //
+  // The first version of this block went through POST /layout and was VACUOUS —
+  // the mutation test caught it. That route already merges every absent field
+  // against the stored row (`fenceLine ?? existingLayout?.fenceLine`), so it
+  // shields the writer and the defect can never be observed through it.
+  //
+  // But the route is not the only caller. app/api/production/route.ts routes a
+  // read-only CALCULATION into this same writer via buildLayoutFromDefinition,
+  // and it does NO such merge — so whatever that path omits was written as
+  // absent, and `fence_line` was the one field with no COALESCE. Testing the
+  // writer directly is the only way to assert its own semantics rather than one
+  // caller's politeness.
+  const FENCE = [{ lat: MELVIN.lat, lng: MELVIN.lng }, { lat: MELVIN.lat + 0.0002, lng: MELVIN.lng }];
+
+  async function seedDirect() {
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('p0')] as any, roofPlanes: [] as any,
+      mapCenter: MELVIN, mapZoom: 19,
+      fenceLine: FENCE as any, fenceHeight: 2.4, fenceAzimuth: 95,
+      groundTilt: 27, groundAzimuth: 170, rowSpacing: 2.2, groundHeight: 0.9,
+    } as any);
+  }
+
+  it('🚨 a write that omits the fence does NOT null the stored fence', async () => {
+    await seedDirect();
+    expect((await getLayoutByProject(PROJECT, USER_ID))!.fenceLine).toHaveLength(2);
+
+    // Exactly what the production CALCULATION path sends: panels, and silence.
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('p0'), panel('p1')] as any,
+    } as any);
+
+    const after = (await getLayoutByProject(PROJECT, USER_ID))!;
+    expect(after.panels).toHaveLength(2);
+    expect(after.fenceLine, 'the fence was erased by a write that never mentioned it').toHaveLength(2);
+  });
+
+  it('a write that omits the scalars keeps the ones the user set', async () => {
+    await seedDirect();
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof', panels: [panel('p0')] as any,
+    } as any);
+    const after = (await getLayoutByProject(PROJECT, USER_ID))!;
+    // These were replaced by 20 / 180 / 1.5 / 0.6 — fabricated defaults standing
+    // in for an answer the caller simply did not have.
+    expect(after.groundTilt).toBe(27);
+    expect(after.groundAzimuth).toBe(170);
+    expect(after.rowSpacing).toBe(2.2);
+    expect(after.groundHeight).toBe(0.9);
+    expect(after.fenceHeight).toBe(2.4);
+    expect(after.fenceAzimuth).toBe(95);
+  });
+
+  it('…but an EXPLICIT empty fence still clears it — absence is not intent', async () => {
+    await seedDirect();
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('p0')] as any, fenceLine: [] as any,
+    } as any);
+    expect((await getLayoutByProject(PROJECT, USER_ID))!.fenceLine).toEqual([]);
+  });
+
+  it('a write that omits mapCenter keeps the stored one', async () => {
+    await seedDirect();
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof', panels: [panel('p0')] as any,
+    } as any);
+    const mc = (await getLayoutByProject(PROJECT, USER_ID))!.mapCenter;
+    expect(mc.lat).toBeCloseTo(MELVIN.lat, 6);
+    expect(mc.lng).toBeCloseTo(MELVIN.lng, 6);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 describe('🚨 a deployment that has not run 123 yet', () => {
   /** A database with 122 applied and 123 deliberately absent. */
   async function pre123<T>(fn: (scratch: PGlite) => Promise<T>): Promise<T> {

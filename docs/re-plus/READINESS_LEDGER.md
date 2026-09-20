@@ -805,6 +805,85 @@ fix and it fails with `expected 'micro' to be 'string'`.
 
 ---
 
+## WS1-021 — A read-only calculation was writing invented facts into the layout
+
+| | |
+|---|---|
+| **Severity** | **P1** — includes unconditional data loss |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+`/api/production` routes a **read-only production calculation** into the layout **save** chokepoint:
+it picks `buildLayoutFromDefinition` whenever the body carries a `systemDefinition` and no `layout`,
+which is exactly what the studio's Calculate button sends. That function was written to satisfy
+`upsertLayout`'s *type*, not to describe a real layout, so it invented values and `upsertLayout`
+persisted them as fact:
+
+- **`mapCenter: { lat: 33.4484, lng: -112.074 }` — Phoenix, hardcoded.** `map_center` *is*
+  COALESCE'd, but COALESCE only protects against **absence**, and this supplied a confident wrong
+  answer instead. Every project that pressed Calculate had its map centre overwritten with Arizona.
+  **A fabricated value defeats a guard that a missing one would have satisfied.**
+- `rowSpacing: 1.5` and `groundHeight: 0.6` — literals with no source, overwriting user settings.
+
+And the writer's own column semantics were **unevenly applied**: `roof_planes` and `map_center`
+were COALESCE'd while the seven fields between them were not. `fence_line` was written
+unconditionally from a value that is null whenever the caller omits a fence — so **any** write
+without one **set the stored fence to NULL**.
+
+**Fix.** The invented values become `undefined`, which the writer now reads as "keep what is
+stored"; and `fence_line`, `fence_azimuth`, `fence_height`, `ground_tilt`, `ground_azimuth`,
+`row_spacing`, `ground_height` are all COALESCE'd. An explicit empty array still clears a fence —
+only genuine absence keeps.
+
+FIRST TEST WAS VACUOUS, AND THE MUTATION TEST CAUGHT IT AGAIN. It went through `POST /layout`,
+which already merges every absent field against the stored row. That route shields the writer, so
+the defect can never be observed through it. The tests now call `upsertLayout` **directly** — the
+only way to assert the writer's own semantics rather than one caller's politeness, and the
+production path does no such merge. Mutation-proven: revert and they fail with "the fence was
+erased by a write that never mentioned it" and "expected 20 to be 27".
+
+## WS1-022 — The Phoenix placeholder could mint a site key and own a design forever
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+Two definitions of "are these coordinates real". DesignStudio's `hasValidCoords` rejected the
+un-geocoded placeholder; `siteKeyFromCoords` — the **only** thing that decides ownership — had no
+placeholder concept and minted `"<projectId>@33.44840,-112.07400"`. The restore path resolves
+ownership from `mapCenterRef`, seeded with exactly the value the same file had just declared
+untrustworthy.
+
+The active key is decided once and never revised — only two writers, and a later geocode re-centres
+the map without re-keying. So a design adopted under Phoenix **stayed owned by Phoenix for the whole
+session**, and the real pick ~2,400 km away could never reclaim it, because `resolveSiteKey` only
+snaps within `SITE_MATCH_RADIUS_M`.
+
+**Fix.** `isPlaceholderCoords` and the constants move to `lib/siteIdentity.ts` as the single
+authority, and `siteKeyFromCoords` returns `UNRESOLVED_SITE_KEY` for the placeholder — the safe
+answer, because `hydrate` on an unresolved key keeps the stored design **active** and archives
+nothing. Exact equality is deliberate, and a test pins that one ten-thousandth of a degree away is
+still a real coordinate.
+
+## WS1-023 — Save & Calculate persisted a phantom roof plane
+
+| | |
+|---|---|
+| **Severity** | **P2** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+`buildSystemDefinition` synthesised a fake plane whenever there were panels but no traced roof, as a
+"convenience" for pvwatts. **It was never even that:** both pvwatts call sites read
+`roofPlanes[0].pitch` only when `panels.length === 0`, and this was only built when
+`panels.length > 0`. Mutually exclusive — dead on arrival, and redundant anyway.
+
+Its only observable effect was **persistence**: it reached `layouts.roof_planes` as a geometry
+record with `vertices: []` and a fabricated `area` of `panels x 1.134 x 1.722` — the exact aggregate
+module area, asserting 100% packing density with zero setbacks, row gaps or walkways. Not
+approximate; incoherent. Deleted, which changes no production number.
+
+---
+
 ## WS1-018 — The render lift reached the permit site plan and split every gable ridge
 
 | | |
@@ -882,7 +961,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
 | E2E passes | ❌ **not run by me** — see below |
-| Full suite passes | ✅ **567 files, 12,191 tests, 0 failures**, 490 skipped |
+| Full suite passes | ✅ **567 files, 12,198 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |

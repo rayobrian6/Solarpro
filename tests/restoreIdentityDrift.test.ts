@@ -38,6 +38,7 @@ import {
   siteKeyFromCoords, sitesAreSameProperty, SITE_MATCH_RADIUS_M, isEmptyBundle,
   type SiteDesignState, type SiteDesignBundle,
 } from '@/lib/design/siteDesignModel';
+import { isPlaceholderCoords, PLACEHOLDER_LAT, PLACEHOLDER_LNG } from '@/lib/siteIdentity';
 import type { PlacedPanel } from '@/types';
 
 const PROJECT = 'proj-1';
@@ -154,6 +155,40 @@ describe('🚨 ADVERSARIAL — the old exact-string behaviour, reproduced', () =
     expect(isEmptyBundle(far.state.active)).toBe(true);
     expect(far.needsAdoptionSave).toBe(true);           // the destructive flag
     expect(far.state.archives[KEY_CLICK].panels).toHaveLength(52); // still not dropped
+  });
+});
+
+describe('🚨 the un-geocoded placeholder can never own a design', () => {
+  // DesignStudio has always rejected this pair (`hasValidCoords`), but
+  // `siteKeyFromCoords` — the ONLY thing that decides ownership — had no
+  // placeholder concept and minted `<projectId>@33.44840,-112.07400`. The
+  // restore path resolves ownership from `mapCenterRef`, seeded with exactly the
+  // value the same file had just called untrustworthy. A design adopted under
+  // Phoenix STAYED owned by Phoenix for the session: the active key is written
+  // in only two places, and a later geocode re-centres the map without
+  // re-keying. The real pick, ~2,400 km away, could never reclaim it —
+  // resolveSiteKey only snaps within 8 m.
+  it('mints no key at all for the placeholder', () => {
+    expect(siteKeyFromCoords(PLACEHOLDER_LAT, PLACEHOLDER_LNG, PROJECT)).toBe('');
+    expect(siteKeyFromCoords(PLACEHOLDER_LAT, PLACEHOLDER_LNG)).toBe('');
+    expect(isPlaceholderCoords(PLACEHOLDER_LAT, PLACEHOLDER_LNG)).toBe(true);
+  });
+
+  it('an unresolved key HIDES NOTHING — the stored design stays active', () => {
+    // The safe failure mode: hydrate keeps the columns active and archives
+    // nothing, rather than deciding ownership on a coordinate nobody trusts.
+    const s = stateAt(KEY_CLICK, bundle('melvin', 52));
+    const r = hydrate(storedOf(s), siteKeyFromCoords(PLACEHOLDER_LAT, PLACEHOLDER_LNG, PROJECT));
+    expect(r.disposition).toBe('unresolved');
+    expect(r.state.active.panels).toHaveLength(52);
+    expect(r.needsAdoptionSave).toBe(false);
+  });
+
+  it('a real coordinate one ten-thousandth away is still a real coordinate', () => {
+    // Exact equality only — a genuine geocode of downtown Phoenix carries more
+    // precision than the literal and must not be swallowed.
+    expect(siteKeyFromCoords(PLACEHOLDER_LAT + 0.0001, PLACEHOLDER_LNG, PROJECT)).not.toBe('');
+    expect(isPlaceholderCoords(PLACEHOLDER_LAT + 0.0001, PLACEHOLDER_LNG)).toBe(false);
   });
 });
 
