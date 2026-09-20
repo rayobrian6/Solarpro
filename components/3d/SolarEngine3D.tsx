@@ -22,6 +22,11 @@ import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type 
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { getSunPosition, getPanelShadingFactor } from '@/lib/solarMath';
 import { siteKeyFromCoords } from '@/lib/siteIdentity';
+import {
+  segmentToRoofPlane, stampDetectedProvenance, detectionStatusFromSegmentCount,
+  shouldRunLaneA as shouldRunLaneAPure,
+  type LaneASegment, type LaneAGateInput as LaneAGateInputPure,
+} from '@/lib/3d/laneA';
 import type { PlacedPanel, RoofPlane } from '@/types';
 import {
   polygonCentroid,
@@ -888,26 +893,11 @@ export function removeBlockPreviewEntity(viewer: any, preview: any): void {
 
 /** Inputs to the Lane A gate. Every one is read from a REF at fire time, never
  *  captured in a closure — the whole point is to decide against the state that
- *  exists when the timer/promise resolves, not when it was scheduled. */
-export interface LaneAGateInput {
-  /** Engine load stage. Only 'done' means the scene is usable. */
-  stage: LoadStage;
-  /** Has ground elevation actually resolved? segmentToRoofPlane3D builds at
-   *  `groundElevM + heightAboveGround`, so firing before this puts every face
-   *  at elevation 0 — under the terrain. */
-  groundElevResolved: boolean;
-  /** Roof segments available from the digital twin (Google Solar). */
-  segmentCount: number;
-  /** Roof planes ALREADY in the design — traced, restored, or detected. */
-  existingPlaneCount: number;
-  /** Has the DB restore resolved? Firing before it means merging detected
-   *  geometry into an empty set and then persisting it over the stored roof. */
-  restoreResolved: boolean;
-  /** `lat,lng` rounded — identifies the building Lane A would run for. */
-  siteKey: string;
-  /** The last siteKey Lane A actually ran for, or null. */
-  lastRanSiteKey: string | null;
-}
+ *  exists when the timer/promise resolves, not when it was scheduled.
+ *
+ *  🚨 DEFINED IN lib/3d/laneA.ts. Re-exported here only so existing importers
+ *  keep working. Do not re-declare the shape — one fact, one definition. */
+export type LaneAGateInput = LaneAGateInputPure & { stage: LoadStage };
 
 /**
  * Should Lane A (zero-click roof detection from Google Solar) run right now?
@@ -928,16 +918,13 @@ export interface LaneAGateInput {
  *
  * Pure, so the whole refusal matrix is unit-testable without Cesium, a viewer,
  * a network or a Google key.
+ *
+ * 🚨 IMPLEMENTED IN lib/3d/laneA.ts. This delegates rather than repeating the
+ * conditions — a second copy of the refusal matrix that drifted from the first
+ * is exactly how this codebase has been burned before.
  */
 export function shouldRunLaneA(i: LaneAGateInput): boolean {
-  if (i.stage !== 'done') return false;
-  if (!i.groundElevResolved) return false;
-  if (!i.restoreResolved) return false;
-  if (i.segmentCount <= 0) return false;
-  if (i.existingPlaneCount !== 0) return false;
-  if (!i.siteKey) return false;
-  if (i.lastRanSiteKey === i.siteKey) return false;
-  return true;
+  return shouldRunLaneAPure(i);
 }
 
 /** The site identity Lane A dedupes on. Rounded to ~1 m so orbit jitter or a
@@ -10678,53 +10665,16 @@ function SolarEngine3D({
   // standard flush grid engine (placePanelsControlled) can fill it like a hand-drawn
   // plane. Builds the segment's convexHull as a 3D polygon at the correct heights for
   // its pitch+azimuth (downslope = lower), then buildRoofPlane3D computes the frame.
+  // 🚨 The conversion itself now lives in lib/3d/laneA.ts so the integration
+  // harness can run the REAL production code against archived Google Solar
+  // payloads. It used to be inlined here, inside a component that needs Cesium,
+  // WebGL, terrain and an API key to instantiate — so the geometry and the
+  // provenance, the parts that reach a permit drawing, could never be tested at
+  // all. This wrapper keeps the old name and adds only the logging.
   function segmentToRoofPlane3D(seg: any, groundElevM: number): RoofPlane | null {
-    try {
-      const hull = (seg?.convexHull && seg.convexHull.length >= 3) ? seg.convexHull : null;
-      if (!hull || !seg.center || !isValidCoord(seg.center.lat, seg.center.lng)) return null;
-      const DEG = Math.PI / 180;
-      const pitch = isFinite(seg.pitchDegrees) ? Math.max(0, Math.min(60, seg.pitchDegrees)) : 20;
-      const az    = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
-      const hAG   = isFinite(seg.heightAboveGround) ? seg.heightAboveGround : 3.0;
-      const baseH = groundElevM + hAG;
-      const tanP  = Math.tan(pitch * DEG);
-      const cosLat = Math.cos(seg.center.lat * DEG);
-      const mLat = 111320, mLng = 111320 * (cosLat > 0.01 ? cosLat : 1);
-      // Downslope (azimuth) + eave (perpendicular) horizontal unit vectors, in (E,N).
-      const dsE = Math.sin(az * DEG), dsN = Math.cos(az * DEG);  // downslope
-      const evE = Math.cos(az * DEG), evN = -Math.sin(az * DEG); // eave (cross-slope)
-      // Size guard from the face extent along eave + slope.
-      let minEv = Infinity, maxEv = -Infinity, minSl = Infinity, maxSl = -Infinity;
-      for (const v of hull) {
-        const dE = (v.lng - seg.center.lng) * mLng;
-        const dN = (v.lat - seg.center.lat) * mLat;
-        const ev = dE * evE + dN * evN;
-        const sl = dE * dsE + dN * dsN;
-        if (ev < minEv) minEv = ev; if (ev > maxEv) maxEv = ev;
-        if (sl < minSl) minSl = sl; if (sl > maxSl) maxSl = sl;
-      }
-      if (!(maxEv - minEv > 0.5) || !(maxSl - minSl > 0.5)) return null; // too small
-
-      // Build the plane from the REAL hull (tilted to pitch/azimuth) so the grid
-      // CLIPS to the actual roof face — no overshoot onto the ground. Then attach
-      // the EAVE direction as an ENU unit vector: handleAutoRoof passes it to the
-      // grid as customDir, forcing the columns along the eave regardless of the
-      // hull's most-horizontal edge. Real shape (clipping) + forced eave (no
-      // sideways) = correct on irregular CT hulls. (Proven in a harness.)
-      const hullPts3D = hull.map((v: any) => {
-        const dE = (v.lng - seg.center.lng) * mLng;
-        const dN = (v.lat - seg.center.lat) * mLat;
-        const along = dE * dsE + dN * dsN; // metres downslope (+ = lower)
-        return engLatLngToECEF(v.lat, v.lng, baseH - along * tanP);
-      });
-      if (hullPts3D.length < 3) return null;
-      const plane = buildRoofPlane3D(hullPts3D);
-      (plane as any).__eaveDirENU = { x: evE, y: evN };
-      return plane;
-    } catch (e) {
-      addLog('AUTO', `segmentToRoofPlane3D: ${(e as Error).message}`);
-      return null;
-    }
+    const plane = segmentToRoofPlane(seg as LaneASegment, groundElevM);
+    if (!plane) addLog('AUTO', `segmentToRoofPlane3D: segment produced no usable plane`);
+    return plane;
   }
 
   /**
@@ -10768,13 +10718,9 @@ function SolarEngine3D({
     // into the CURRENT one's roof. DesignStudio rejects any emit whose site
     // does not match the site on screen.
     const siteKey = forSiteKey ?? siteKeyFromCoords(lat, lng);
-    const detected = segPlanes.map((p, i) => {
-      p.source = 'solar_api';
-      p.confirmed = false;
-      if (p.solarSegmentIndex == null) p.solarSegmentIndex = i;
-      if (siteKey) p.siteKey = siteKey;
-      return p;
-    });
+    // Stamping lives in lib/3d/laneA.ts alongside the conversion, so the
+    // harness proves the provenance a reviewer relies on, not just the geometry.
+    const detected = stampDetectedProvenance(segPlanes, { siteKey });
     onRoofPlanesDetected?.(detected);
     addLog('AUTO', `${why}: emitted ${detected.length} detected planes to DesignStudio (unconfirmed, source=solar_api)`);
     return detected;
