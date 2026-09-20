@@ -412,6 +412,22 @@ export interface RoofPlane {
   confirmed?: boolean;
   sunshineHoursPerYear?: number;
 
+  /** WHICH PHYSICAL PROPERTY THIS PLANE BELONGS TO. See lib/siteIdentity.ts.
+   *
+   *  🚨 Roof geometry used to have no site identity, so after an address change
+   *  the previous property's planes stayed in state and were drawn over — and
+   *  engineered against — the new building. Panels, racking, structural, shade,
+   *  BOM and permit CAD all read that geometry, so the failure was not cosmetic:
+   *  it could combine one property's roof with another's jurisdiction.
+   *
+   *  Planes owned by another site are RETAINED and PERSISTED but never active —
+   *  they do not render, do not reach consumers and do not block Lane A.
+   *  Returning to that site reactivates them. Absent means "legacy, adopt me":
+   *  every plane stored before this field existed has none, and hiding those
+   *  would destroy real work. Never re-stamp a plane that already names a
+   *  different site. */
+  siteKey?: string;
+
   // v47.119 -- 3D Surface Frame (computed from azimuth + tilt)
   // Stored once at plane creation. Used by surface-based panel placement.
   //   n = surface normal (outward from roof)

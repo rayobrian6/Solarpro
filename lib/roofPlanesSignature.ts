@@ -53,6 +53,11 @@ export const SIGNED_FIELDS = [
   'edgeTypes',
   'source',
   'confirmed',
+  // Which physical property the plane belongs to (lib/siteIdentity.ts). Signed
+  // so that adopting a legacy plane onto the current site, or archiving one
+  // because the address moved, actually schedules a save — otherwise ownership
+  // would be recomputed from scratch on every reload and never persisted.
+  'siteKey',
 ] as const satisfies readonly (keyof RoofPlane)[];
 
 export type SignedField = (typeof SIGNED_FIELDS)[number];

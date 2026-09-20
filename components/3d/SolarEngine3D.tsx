@@ -21,6 +21,7 @@ import { MapSourcePicker, DEFAULT_PICKER_STATE, type MapPickerState } from '@/co
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { getSunPosition, getPanelShadingFactor } from '@/lib/solarMath';
+import { siteKeyFromCoords } from '@/lib/siteIdentity';
 import type { PlacedPanel, RoofPlane } from '@/types';
 import {
   polygonCentroid,
@@ -940,10 +941,13 @@ export function shouldRunLaneA(i: LaneAGateInput): boolean {
 }
 
 /** The site identity Lane A dedupes on. Rounded to ~1 m so orbit jitter or a
- *  re-geocode of the same address does not read as a different building. */
+ *  re-geocode of the same address does not read as a different building.
+ *
+ *  🚨 Delegates to lib/siteIdentity.ts — "is this a new site?" must have ONE
+ *  answer in this codebase. This is the coordinate-only form; DesignStudio
+ *  scopes the same key with the project id for storage. */
 export function laneASiteKey(lat: number, lng: number): string {
-  if (!isFinite(lat) || !isFinite(lng)) return '';
-  return `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  return siteKeyFromCoords(lat, lng);
 }
 
 function SolarEngine3D({
@@ -2545,7 +2549,23 @@ function SolarEngine3D({
     terrainReadyRef.current = false;
     setTerrainReady(false);
     // PERF v61: Reload twin data for new location — skip DSM for speed, enrich lazily.
+    // The site this particular request is asking about, captured BEFORE the
+    // await. Everything in the callback is validated against it.
+    const requestedSiteKey = siteKeyFromCoords(lat, lng);
     buildDigitalTwin(lat, lng, projectAddress ?? '', true /* skipDsm */).then(newTwin => {
+      // 🚨 STALE-RESPONSE GUARD. Twin loads are async and uncancelled, so two
+      // address changes in quick succession leave two requests in flight that
+      // can resolve OUT OF ORDER. prevLatRef/prevLngRef always hold the site
+      // the user is actually on (they are written synchronously at the top of
+      // this effect). If they no longer match the site this response answers
+      // for, the response is stale: it must not touch twinRef, must not move
+      // the camera, and must not seed ground elevation — all of which would
+      // apply one property's data to another.
+      const currentSiteKey = siteKeyFromCoords(prevLatRef.current, prevLngRef.current);
+      if (requestedSiteKey && currentSiteKey && requestedSiteKey !== currentSiteKey) {
+        addLog('FLY', `discarded stale twin for ${requestedSiteKey} — now at ${currentSiteKey}`);
+        return;
+      }
       twinRef.current = newTwin;
       onTwinLoaded?.(newTwin);
       addLog('FLY', `Twin reloaded: ${newTwin.roofSegments.length} segments`);
@@ -10734,17 +10754,25 @@ function SolarEngine3D({
    * faces; override both rather than let a detection assert itself as a
    * person's decision. tests/detectedPlaneProvenance.test.ts pins this.
    */
-  function detectPlanesFromTwin(why: string): RoofPlane[] {
+  function detectPlanesFromTwin(why: string, forSiteKey?: string): RoofPlane[] {
     const gElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     const segPlanes = (twinRef.current?.roofSegments ?? [])
       .map((s: any) => segmentToRoofPlane3D(s, gElev))
       .filter((p: RoofPlane | null): p is RoofPlane => !!p);
     if (segPlanes.length === 0) return [];
     addLog('AUTO', `${why}: built ${segPlanes.length} clean planes from Google roof segments`);
+    // 🚨 STAMP THE SITE THIS DETECTION ANSWERS FOR, captured at FIRE TIME.
+    // Twin loads are async and uncancelled: two address changes in quick
+    // succession produce two in-flight requests that can resolve out of order.
+    // Without this stamp, a response for the PREVIOUS property would be merged
+    // into the CURRENT one's roof. DesignStudio rejects any emit whose site
+    // does not match the site on screen.
+    const siteKey = forSiteKey ?? siteKeyFromCoords(lat, lng);
     const detected = segPlanes.map((p, i) => {
       p.source = 'solar_api';
       p.confirmed = false;
       if (p.solarSegmentIndex == null) p.solarSegmentIndex = i;
+      if (siteKey) p.siteKey = siteKey;
       return p;
     });
     onRoofPlanesDetected?.(detected);
@@ -10784,7 +10812,7 @@ function SolarEngine3D({
     // Mark BEFORE emitting: a re-entrant twin load for the same building must
     // not append a second set (buildRoofPlane3D mints a fresh uuid per call).
     laneARanForRef.current = siteKey;
-    const detected = detectPlanesFromTwin(`LaneA(${why})`);
+    const detected = detectPlanesFromTwin(`LaneA(${why})`, siteKey);
     if (detected.length === 0) {
       addLog('AUTO', `LaneA(${why}): twin had segments but none produced a usable plane`);
     }
