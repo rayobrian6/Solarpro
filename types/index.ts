@@ -412,6 +412,22 @@ export interface RoofPlane {
   confirmed?: boolean;
   sunshineHoursPerYear?: number;
 
+  /** WHICH PHYSICAL PROPERTY THIS PLANE BELONGS TO. See lib/siteIdentity.ts.
+   *
+   *  🚨 Roof geometry used to have no site identity, so after an address change
+   *  the previous property's planes stayed in state and were drawn over — and
+   *  engineered against — the new building. Panels, racking, structural, shade,
+   *  BOM and permit CAD all read that geometry, so the failure was not cosmetic:
+   *  it could combine one property's roof with another's jurisdiction.
+   *
+   *  Planes owned by another site are RETAINED and PERSISTED but never active —
+   *  they do not render, do not reach consumers and do not block Lane A.
+   *  Returning to that site reactivates them. Absent means "legacy, adopt me":
+   *  every plane stored before this field existed has none, and hiding those
+   *  would destroy real work. Never re-stamp a plane that already names a
+   *  different site. */
+  siteKey?: string;
+
   // v47.119 -- 3D Surface Frame (computed from azimuth + tilt)
   // Stored once at plane creation. Used by surface-based panel placement.
   //   n = surface normal (outward from roof)
@@ -523,6 +539,47 @@ export interface Layout {
   // Design Studio, carried over to Engineering automatically. NULL for scratch
   // designs / older layouts. See DesignElectrical.
   designElectrical?: DesignElectrical;
+
+  /** Roof obstructions — vents, skylights, chimneys, HVAC, dormers.
+   *
+   *  🚨 NOT ANNOTATIONS. These are KEEP-OUT ZONES: removeObstructedPanels runs
+   *  against them, so an obstruction physically removes panels from the array.
+   *  Until migration 122 they lived only in component state, so reloading a
+   *  design silently re-filled panels over every one the user had placed — and
+   *  the panel count, the BOM, the production model and the permit drawing all
+   *  changed with it, with nothing to indicate anything had been lost. */
+  obstructions?: PlacedObstruction[];
+
+  /** Distances the user measured off the 3D model (horizontal and slope).
+   *  Field evidence, not decoration — discarded on unmount before migration 122. */
+  measurements?: LayoutMeasurement[];
+
+  /** EVERY OTHER PROPERTY this project has designed at, whole (migration 123).
+   *
+   *  🚨 NOTHING DOWNSTREAM MAY READ THIS. The columns above describe ONE
+   *  physical property — the one the project is currently at — and every
+   *  consumer (lib/pvwatts.ts, lib/multiArrayEngine.ts, the production route,
+   *  the sync pipeline, the permit CAD path) is written on that assumption.
+   *  Archived sites are kept here, in a column nothing engineering-facing
+   *  touches, precisely so a second property's geometry cannot reach a permit.
+   *  It exists to be restored into the studio when the user returns to that
+   *  address, and for no other purpose.
+   *
+   *  Shape: lib/design/siteDesignModel.ts `StoredSiteArchives`. Typed as
+   *  `unknown` here so the persistence layer stays free of a React-side import
+   *  and so a row written by a newer build never fails to parse. */
+  siteArchives?: unknown;
+}
+
+/** One measured distance between two points on the model. Mirrors
+ *  lib/3d/measureMath.ts Measurement, declared here so the persisted shape is
+ *  owned by the type that is stored rather than by a 3D helper. */
+export interface LayoutMeasurement {
+  id: string;
+  a: { lat: number; lng: number; height?: number };
+  b: { lat: number; lng: number; height?: number };
+  horizDistM: number;
+  slopeDistM: number;
 }
 
 // ─── Design → Engineering electrical handoff ─────────────────────────────────

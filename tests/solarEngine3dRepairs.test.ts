@@ -197,11 +197,17 @@ describe('C — the block line-trace preview takes its vertex dots with it', () 
 // ─── A: the Cesium position property name actually exists ───────────────────
 
 describe('A — Lift/Flatten Roofs uses a real Cesium constructor', () => {
+  // 🚨 EXPLICIT 60s TIMEOUT. This is the only test in the suite that imports
+  // the whole of Cesium, which is tens of megabytes of ESM. Alone it takes ~2s;
+  // inside the full run, competing with two other workers, it has taken 23s and
+  // blown the 10s default — a red CI on a commit that changed nothing near it.
+  // A flaky gate is worse than a slow one: it trains people to re-run rather
+  // than read. The assertion is not slow; the import is.
   it('ConstantPosition is not a Cesium symbol; ConstantPositionProperty is', async () => {
     const Cesium: any = await import('cesium');
     expect(Cesium.ConstantPosition).toBeUndefined();
     expect(typeof Cesium.ConstantPositionProperty).toBe('function');
-  });
+  }, 60_000);
 
   it('SolarEngine3D never constructs C.ConstantPosition', () => {
     expect(SOURCE).not.toMatch(/new\s+C\.ConstantPosition\s*\(/);

@@ -184,6 +184,62 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
     expectedTables: [],
     expectedColumns: [{ table: 'manufacturer_document_registry', column: 'jurisdiction_authority_id' }],
   },
+  // 121 (2026-09-20) — app_feature_flags: the runtime feature-flag store.
+  //
+  // 🚨 REGISTERED BECAUSE IT WAS NOT. The .sql landed alone: commit e6be7205
+  // added the file and bumped the governance count tripwire, and touched none
+  // of the runner, this registry, the migrations route or the operator console
+  // — four of the five registration sites. The file was therefore discoverable
+  // by the manifest and executable by NO path an operator can currently reach,
+  // while app/admin/system-tools/page.tsx told them to "run it via the
+  // Migration Operator Console", a console with no control for it.
+  //
+  // Same migration shape as 113-118: pure additive CREATE TABLE / CREATE INDEX
+  // IF NOT EXISTS, no ALTER, no DO block, no seeded rows — so a flag nobody set
+  // cannot arrive switched on. lib/db/featureFlags.ts already degrades cleanly
+  // without the table (DB row -> env var -> off), so running this is an upgrade
+  // from "env-var only" to "admin can flip at runtime", never a repair.
+  '121': { expectedTables: ['app_feature_flags'] },
+  // 122 (2026-09-20) — obstructions + measurements on layouts. The last two
+  // DESIGN entities that never survived a reload.
+  //
+  // 🚨 An obstruction is a KEEP-OUT ZONE, not an annotation: removeObstructedPanels
+  // runs against it, so a vent or skylight physically removes panels. Because
+  // they lived only in component state, reloading silently re-filled panels over
+  // every obstruction the user placed — changing the panel count, the BOM, the
+  // production model and the permit drawing, with nothing to say anything was lost.
+  //
+  // Two bare ADD COLUMN IF NOT EXISTS, no default and no constraint. Its target
+  // table predates the registry (001_initial_schema), so — exactly as 107 does
+  // for audit_log — it declares altersPreexistingTables.
+  '122': {
+    expectedTables: [],
+    expectedColumns: [
+      { table: 'layouts', column: 'obstructions' },
+      { table: 'layouts', column: 'measurements' },
+    ],
+    altersPreexistingTables: ['layouts'],
+  },
+  // 123 (2026-09-20) — site_archives on layouts. Where a project's OTHER
+  // properties live.
+  //
+  // 🚨 The column exists so that no downstream consumer can reach a foreign
+  // property's geometry. `panels` / `roof_planes` / `obstructions` /
+  // `measurements` keep the meaning every consumer already assumes — THE
+  // PROPERTY THIS PROJECT IS AT — and everything else moves out of their reach.
+  // Before it, archived roof planes were merged INTO `roof_planes`, and one
+  // live row carried 13 planes from three properties into pvwatts, the
+  // production route and the permit CAD path.
+  //
+  // One bare ADD COLUMN IF NOT EXISTS, no default and no constraint, on a table
+  // that predates the registry — same shape and same declaration as 122.
+  '123': {
+    expectedTables: [],
+    expectedColumns: [
+      { table: 'layouts', column: 'site_archives' },
+    ],
+    altersPreexistingTables: ['layouts'],
+  },
 };
 
 /** The migration identifiers this module governs, in ceremony order.
@@ -191,7 +247,7 @@ export const REGISTRY_DEPLOYMENT: Record<string, RegistryDeploymentSpec> = {
  *  other migration's governance event is recorded through, so running it first
  *  means the rest are actually auditable. 119 is last because its target table
  *  is 113's. */
-export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120'] as const;
+export const REGISTRY_SEQUENCE = ['107', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;

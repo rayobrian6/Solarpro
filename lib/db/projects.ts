@@ -702,6 +702,11 @@ export interface UpsertLayoutData {
   mapCenter?: Layout['mapCenter'];
   mapZoom?: number;
   designElectrical?: Layout['designElectrical'];
+  obstructions?: Layout['obstructions'];
+  measurements?: Layout['measurements'];
+  /** Migration 123 — every OTHER property this project has designed at.
+   *  `undefined` means KEEP WHAT IS STORED, exactly like the two above. */
+  siteArchives?: Layout['siteArchives'];
 }
 
 // ── Coordinate-integrity guard (Ray, 2026-06-30) ────────────────────────────
@@ -797,6 +802,42 @@ async function resolveNameplateSizeKw(
   }
 }
 
+/**
+ * Does `layouts.site_archives` exist yet (migration 123)?
+ *
+ * Cached per process after the first TRUE answer — a column cannot disappear,
+ * and this is on the layout save path. A FALSE answer is deliberately NOT
+ * cached: a deployment that starts before the operator runs the migration must
+ * notice when it lands, rather than staying in the degraded mode until the next
+ * cold start. The probe is one `information_schema` lookup.
+ *
+ * Fails CLOSED. If the probe itself errors we report "absent", which keeps the
+ * subsystem-wipe guard at full strength — the safe direction, because the cost
+ * of a false "absent" is a refused save the user retries, and the cost of a
+ * false "present" is a deleted layout.
+ */
+let _siteArchivesColumnPresent = false;
+async function layoutsHasSiteArchives(sql: any): Promise<boolean> {
+  if (_siteArchivesColumnPresent) return true;
+  try {
+    const rows = await sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'layouts' AND column_name = 'site_archives'
+      LIMIT 1
+    `;
+    _siteArchivesColumnPresent = rows.length > 0;
+    return _siteArchivesColumnPresent;
+  } catch (e) {
+    console.warn('[upsertLayout] could not probe for layouts.site_archives — treating it as absent:', (e as Error)?.message);
+    return false;
+  }
+}
+
+/** Test seam: forget the cached probe result. */
+export function __resetSiteArchivesProbeForTests(): void {
+  _siteArchivesColumnPresent = false;
+}
+
 export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   assertUUID(data.projectId, 'projectId');
   assertUUID(data.userId, 'userId');
@@ -834,7 +875,45 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
         GROUP BY 1
       `;
-      const incoming = new Set((data.panels || []).map(p => ((p as { systemType?: string }).systemType ?? 'roof')));
+      // 🚨 ARCHIVED IS NOT WIPED (migration 123). Changing property moves the
+      // previous property's panels out of `panels` and into `site_archives` in
+      // ONE save, which looks exactly like a whole sub-system vanishing. It is
+      // not: the panels are in the same payload, in the column that holds other
+      // properties. Counting only `data.panels` here would make this guard
+      // REFUSE every legitimate address change — and refusing the save is worse
+      // than the bug it guards, because the archive would then never reach the
+      // database at all and the next save really would lose it.
+      //
+      // When no archive is present this is byte-for-byte the original check, so
+      // the Stowell reload defect (81 panels → {} → 19 in three saves) is caught
+      // exactly as before.
+      // 🚨 …BUT ONLY IF THE ARCHIVE CAN ACTUALLY BE STORED.
+      //
+      // This guard is the ONLY thing standing between a property change and a
+      // destroyed layout, and relaxing it on the strength of a payload field is
+      // safe exactly as long as that field reaches the database. On a
+      // deployment where migration 123 has not run, `site_archives` does not
+      // exist: `applyDesignEntities` catches the missing column, warns, and the
+      // archive is silently dropped — while this guard, having counted the
+      // archived panels as present, has already let `panels: []` through. The
+      // net effect would be the guard DISARMING ITSELF and deleting the very
+      // layout it exists to protect, which is strictly worse than the bug.
+      //
+      // So the column is probed. Absent, the check is byte-for-byte the
+      // original one: the destructive save is refused, the studio shows its
+      // save-failed badge, and nothing is lost. Present, archived panels count.
+      const archiveIsStorable = await layoutsHasSiteArchives(sql);
+      const archivedPanels: Array<{ systemType?: string }> = [];
+      const arch = archiveIsStorable
+        ? (data.siteArchives as { sites?: Record<string, { panels?: unknown }> } | undefined)
+        : undefined;
+      if (arch && typeof arch === 'object' && arch.sites && typeof arch.sites === 'object') {
+        for (const bundle of Object.values(arch.sites)) {
+          if (Array.isArray(bundle?.panels)) archivedPanels.push(...(bundle.panels as Array<{ systemType?: string }>));
+        }
+      }
+      const incoming = new Set([...(data.panels || []), ...archivedPanels]
+        .map(p => ((p as { systemType?: string }).systemType ?? 'roof')));
       const wiped = storedRows.filter((r: { st: string | null; n: number }) =>
         (r.n ?? 0) >= 4 && !incoming.has(r.st ?? 'roof'));
       if (wiped.length > 0) {
@@ -920,16 +999,97 @@ async function applyDesignElectrical(
   data: UpsertLayoutData,
   saved: Layout,
 ): Promise<Layout> {
-  if (!data.designElectrical) return saved;
+  // 🚨 THIS EARLY RETURN USED TO SKIP applyDesignEntities TOO.
+  //
+  // It read `if (!data.designElectrical) return saved;` and returned BEFORE the
+  // tail call below, so obstructions, measurements and site archives were
+  // persisted ONLY when the save also carried an electrical design. DesignStudio
+  // builds that as `panelList.length > 0 ? buildDesignElectrical() : undefined`,
+  // so the consequences were:
+  //
+  //   • a design with NO PANELS YET never stored its obstructions or
+  //     measurements — trace a roof, place a vent, reload, the vent is gone.
+  //     Migration 122 shipped, the column existed, the route accepted the
+  //     field, this function wrote it, and it still never ran.
+  //   • worse, the save that follows a PROPERTY CHANGE sends `panels: []` — so
+  //     `designElectrical` is undefined and the site archive was dropped on the
+  //     floor, silently, in exactly the case migration 123 exists for.
+  //
+  // Nothing announced either one: the request returned 200 and the row simply
+  // kept its old value. The two writes are independent and are now sequenced
+  // as such — a design with no electrical still has design entities.
+  if (data.designElectrical) {
+    try {
+      await sql`
+        UPDATE layouts
+        SET design_electrical = ${JSON.stringify(data.designElectrical)}::jsonb
+        WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+      `;
+      saved.designElectrical = data.designElectrical;
+    } catch (e) {
+      console.warn('[upsertLayout] design_electrical not persisted (run migration 096):', (e as Error)?.message);
+    }
+  }
+  return applyDesignEntities(sql, data, saved);
+}
+
+/**
+ * Migration 122 — obstructions + measurements.
+ *
+ * Written the same way design_electrical is: a SEPARATE conditional write, so
+ * the main layout save never depends on these columns existing. Before
+ * migration 122 the UPDATE throws "column does not exist", we swallow it, and
+ * the layout still saves — the design entities simply are not stored yet.
+ *
+ * 🚨 Sends the arrays even when EMPTY. `?? existing` semantics elsewhere in
+ * this file mean an absent value is read as KEEP WHAT IS STORED, so deleting
+ * the last obstruction has to be expressible. An empty array is a statement;
+ * `undefined` is a question.
+ */
+async function applyDesignEntities(
+  sql: any,
+  data: UpsertLayoutData,
+  saved: Layout,
+): Promise<Layout> {
+  if (data.obstructions === undefined && data.measurements === undefined && data.siteArchives === undefined) return saved;
   try {
-    await sql`
-      UPDATE layouts
-      SET design_electrical = ${JSON.stringify(data.designElectrical)}::jsonb
-      WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
-    `;
-    saved.designElectrical = data.designElectrical;
+    // Migration 123. Written here for the same reason as the two below: a
+    // deployment that has not run 123 yet must still save the layout, and the
+    // archives simply are not stored until it does.
+    //
+    // 🚨 An EMPTY archive is a statement — "this project is down to one
+    // property" — and has to be expressible, so `{sites:{}}` is written, not
+    // skipped. Only `undefined` means keep what is stored.
+    if (data.siteArchives !== undefined) {
+      try {
+        await sql`
+          UPDATE layouts
+          SET site_archives = ${JSON.stringify(data.siteArchives)}::jsonb
+          WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+        `;
+        saved.siteArchives = data.siteArchives;
+      } catch (e) {
+        console.warn('[upsertLayout] site_archives not persisted (run migration 123):', (e as Error)?.message);
+      }
+    }
+    if (data.obstructions !== undefined) {
+      await sql`
+        UPDATE layouts
+        SET obstructions = ${JSON.stringify(data.obstructions)}::jsonb
+        WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+      `;
+      saved.obstructions = data.obstructions;
+    }
+    if (data.measurements !== undefined) {
+      await sql`
+        UPDATE layouts
+        SET measurements = ${JSON.stringify(data.measurements)}::jsonb
+        WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+      `;
+      saved.measurements = data.measurements;
+    }
   } catch (e) {
-    console.warn('[upsertLayout] design_electrical not persisted (run migration 096):', (e as Error)?.message);
+    console.warn('[upsertLayout] obstructions/measurements not persisted (run migration 122):', (e as Error)?.message);
   }
   return saved;
 }

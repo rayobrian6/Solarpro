@@ -7,6 +7,10 @@ node_modules/
 .next/
 out/
 
+# Playwright run artifacts (traces, videos, failure screenshots)
+test-results/
+playwright-report/
+
 # Production build
 build/
 dist/

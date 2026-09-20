@@ -53,6 +53,11 @@ export const SIGNED_FIELDS = [
   'edgeTypes',
   'source',
   'confirmed',
+  // Which physical property the plane belongs to (lib/siteIdentity.ts). Signed
+  // so that adopting a legacy plane onto the current site, or archiving one
+  // because the address moved, actually schedules a save — otherwise ownership
+  // would be recomputed from scratch on every reload and never persisted.
+  'siteKey',
 ] as const satisfies readonly (keyof RoofPlane)[];
 
 export type SignedField = (typeof SIGNED_FIELDS)[number];
@@ -72,4 +77,103 @@ export function roofPlanesSignature(planes: readonly RoofPlane[] | undefined | n
   return JSON.stringify(
     planes.map(p => SIGNED_FIELDS.map(f => p[f] ?? null)),
   );
+}
+
+/**
+ * Fields on DesignElectrical that must NOT enter the dedup signature.
+ *
+ * 🚨 `generatedAt` is `new Date().toISOString()`, stamped fresh every time
+ * DesignStudio's `buildDesignElectrical()` runs. Including it made the whole
+ * dedup check DEAD: the signature differed on every rebuild even when nothing
+ * about the design had changed, so `if (sig === lastSavedPanelsRef.current)
+ * return;` could never be true while a design had panels. Every scheduled
+ * autosave POSTed, and the layout route runs `syncProjectPipeline()`
+ * SYNCHRONOUSLY whenever the layout has panels — rebuilding the engineering
+ * model and rewriting artifact files each time.
+ *
+ * A timestamp describes WHEN the object was built, never WHAT it contains.
+ * Anything with that property belongs in this list.
+ */
+export const UNSIGNED_ELECTRICAL_FIELDS = ['generatedAt'] as const;
+
+/** Drop the non-content fields before signing. Returns null for nullish input
+ *  so an absent electrical design and an empty one sign identically. */
+function signableElectrical(designElectrical: unknown): unknown {
+  if (designElectrical === null || designElectrical === undefined) return null;
+  if (typeof designElectrical !== 'object') return designElectrical;
+  const out: Record<string, unknown> = { ...(designElectrical as Record<string, unknown>) };
+  for (const f of UNSIGNED_ELECTRICAL_FIELDS) delete out[f];
+  return out;
+}
+
+/**
+ * THE layout dedup signature. Every call site that decides "has anything
+ * changed since the last save?" must use this and nothing else.
+ *
+ * WHY THIS EXISTS ON TOP OF roofPlanesSignature
+ * ---------------------------------------------
+ * Four call sites each built the string inline: the debounced autosave, the
+ * beforeunload beacon, and the two restore seeds. They drifted three ways at
+ * once — the two writers signed three parts while the two SEEDS signed only
+ * two (panels + electrical, no roof), so a restored layout could never compare
+ * equal to its own first save; and all four included `generatedAt`, which made
+ * the comparison meaningless anyway. The beacon even carried a comment saying
+ * "Shared helper, one definition" above a hand-rolled copy of the string.
+ *
+ * Stability contract:
+ *   • same content signed twice, any time apart → identical string
+ *   • a restore seed and the first save of that same content → identical
+ *   • any panel / signed-roof-field / electrical CONTENT change → different
+ */
+export function layoutSignature(input: {
+  panels?: unknown;
+  designElectrical?: unknown;
+  roofPlanes?: readonly RoofPlane[] | null;
+  /** The scalar design parameters and fence geometry the layout row carries.
+   *
+   *  🚨 WITHOUT THIS THEY CANNOT TRIGGER A SAVE. The autosave effect only fires
+   *  on a signature change, so a design whose ONLY edit was a fence line, a row
+   *  spacing or a ground tilt scheduled nothing — the same shape of defect as
+   *  roof geometry before v66, and invisible for the same reason: the payload
+   *  always carried the fields, so only the trigger was blind. */
+  designParams?: LayoutDesignParams | null;
+}): string {
+  return JSON.stringify(input.panels ?? [])
+    + '|' + JSON.stringify(signableElectrical(input.designElectrical))
+    + '|' + roofPlanesSignature(input.roofPlanes)
+    + '|' + designParamsSignature(input.designParams);
+}
+
+/** The persisted scalar/geometry fields of a layout, beyond panels, electrical
+ *  and roof planes. Named as data so the projection below and the restore path
+ *  cannot drift — the list IS the contract. */
+export interface LayoutDesignParams {
+  fenceLine?: ReadonlyArray<{ lat: number; lng: number }> | null;
+  fenceHeight?: number | null;
+  fenceAzimuth?: number | null;
+  groundTilt?: number | null;
+  groundAzimuth?: number | null;
+  rowSpacing?: number | null;
+  groundHeight?: number | null;
+  bifacialOptimized?: boolean | null;
+  /** 🚨 Keep-out zones. They change the PANEL ARRAY, so an obstruction edit
+   *  must schedule a save or the design silently re-fills over it on reload. */
+  obstructions?: readonly unknown[] | null;
+  /** Distances measured off the model — field evidence. */
+  measurements?: readonly unknown[] | null;
+}
+
+/** 🚨 Every persisted design parameter must appear here, or edits to it will
+ *  not schedule a save and will be lost on reload. Declared as data so a test
+ *  can assert it against the route's accepted body. */
+export const SIGNED_DESIGN_PARAMS = [
+  'fenceLine', 'fenceHeight', 'fenceAzimuth',
+  'groundTilt', 'groundAzimuth', 'rowSpacing', 'groundHeight',
+  'bifacialOptimized',
+  'obstructions', 'measurements',
+] as const satisfies readonly (keyof LayoutDesignParams)[];
+
+function designParamsSignature(p: LayoutDesignParams | null | undefined): string {
+  if (!p) return 'null';
+  return JSON.stringify(SIGNED_DESIGN_PARAMS.map(f => p[f] ?? null));
 }

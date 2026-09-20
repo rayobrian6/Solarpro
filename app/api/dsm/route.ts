@@ -305,6 +305,17 @@ export async function GET(req: NextRequest) {
       groundElevationM: Math.round(groundLevel * 100) / 100,
       roofPlanes: planesToReturn.slice(0, 20),
       utmZone: zone,
+      // 🚨 WHICH TIER ACTUALLY ANSWERED. The ladder walks HIGH -> MEDIUM ->
+      // BASE and stops at the first success, but the winning tier existed only
+      // in a server console.log and was dropped before the response — so a roof
+      // modelled from 0.25 m BASE coverage looked identical, to the caller and
+      // to the operator, to one modelled from 0.1 m HIGH. Surfaced so the
+      // difference is visible to whoever has to trust the geometry.
+      //
+      // `qualityAttempts` records what was tried and why each tier declined, so
+      // "no coverage" is a diagnosis rather than a shrug.
+      qualityUsed: usedQuality || null,
+      qualityAttempts: attempts,
     });
 
   } catch (err: unknown) {

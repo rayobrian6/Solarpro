@@ -1,0 +1,60 @@
+-- ============================================================================
+-- Migration 123: site_archives on layouts
+-- ============================================================================
+-- WHERE A PROJECT'S OTHER PROPERTIES LIVE.
+--
+-- THE DEFECT THIS CLOSES
+-- ----------------------
+-- A project's address can change: Pick House, an address search, a re-geocode.
+-- Every time it did, Design Studio ran `setPanels([])` and the property being
+-- left lost its panels, its placed obstructions and its measurements outright.
+-- Only the ROOF was kept — and it was kept the wrong way, merged into the same
+-- `roof_planes` column the active site uses.
+--
+-- That merge is the serious half. `rowToLayout()` hands `roof_planes` straight
+-- to lib/pvwatts.ts (where `roofPlanes[0].pitch` becomes the array tilt),
+-- lib/multiArrayEngine.ts, /api/production, lib/engineering/syncPipeline.ts and
+-- the permit CAD path. None of them filter by site, and none of them could —
+-- the column carried no statement about which property it described. One live
+-- row (3 Melvin Drive) held 13 planes belonging to THREE different properties.
+-- A permit artifact combining one property's roof with another's jurisdiction
+-- is a permit-grade defect, not a UI glitch.
+--
+-- WHY A SEPARATE COLUMN AND NOT A FLAG ON THE EXISTING ONES
+-- ---------------------------------------------------------
+-- Because the correctness of ~40 consumers must not depend on each of them
+-- remembering to filter. `panels`, `roof_planes`, `obstructions` and
+-- `measurements` keep exactly the meaning every consumer already assumes: THE
+-- PROPERTY THIS PROJECT IS AT. Anything belonging to another property is moved
+-- out of their reach entirely. Foreign-site data becomes unreachable by
+-- construction rather than by vigilance.
+--
+-- SHAPE
+-- -----
+--   { "version": 1,
+--     "activeSiteKey": "<projectId>@<lat5dp>,<lng5dp>",
+--     "sites": { "<siteKey>": { panels, roofPlanes, obstructions,
+--                               measurements, designElectrical, scalars } } }
+--
+-- `activeSiteKey` is the half that cannot be derived: without it, a reload
+-- cannot tell whether the active columns describe the property now on screen or
+-- the last one visited. See lib/design/siteDesignModel.ts.
+--
+-- 🚨 NO TIMESTAMP IS STORED IN THIS COLUMN. A field that changes when nothing
+-- changed makes the autosave dedup signature always-different and turns every
+-- 3-second tick into a database write — the `generatedAt` defect
+-- (lib/roofPlanesSignature.ts). The row's own `updated_at` records when.
+--
+-- NULLable — a project that never left its address writes NULL, and every
+-- existing layout simply has NULL. No backfill: the one contaminated row is
+-- repaired by the studio on first open (hydrate() splits a merged multi-site
+-- roof array), which is data the migration has no safe way to compute.
+--
+-- Idempotent: one ADD COLUMN IF NOT EXISTS. No ALTER of an existing column, no
+-- DO block, no data migration, no destructive operation, seeds no rows.
+-- Its target table predates the registry (001_initial_schema), so — exactly as
+-- 107 and 122 do — the deployment spec declares altersPreexistingTables.
+-- ============================================================================
+
+ALTER TABLE layouts
+  ADD COLUMN IF NOT EXISTS site_archives JSONB NULL;

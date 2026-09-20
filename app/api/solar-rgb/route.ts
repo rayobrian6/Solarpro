@@ -80,17 +80,24 @@ export async function GET(req: NextRequest) {
     // fell back to blurry base tiles for no reason.
     const IMAGERY_LADDER = ['HIGH', 'MEDIUM', 'BASE'] as const;
     let dlUrl = '';
+    // 🚨 Record WHICH tier answered and why each one declined. This existed
+    // only in a console.log and was dropped before the response, so an operator
+    // told "HD imagery on" while looking at BASE pixels had no way to know —
+    // and might tag vents off a blurry raster.
+    let usedQuality = '';
+    const qualityAttempts: string[] = [];
     for (const q of IMAGERY_LADDER) {
       const candidate = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=${RADIUS_M}&view=IMAGERY_LAYERS&requiredQuality=${q}&pixelSizeMeters=${PIXEL_SIZE}&key=${GOOGLE_SOLAR_API_KEY}`;
       try {
         const probe = await fetch(candidate);
-        if (!probe.ok) continue;
+        if (!probe.ok) { qualityAttempts.push(`${q}:${probe.status}`); continue; }
         const j = await probe.json();
-        if (j.error || !j.rgbUrl) continue;
+        if (j.error || !j.rgbUrl) { qualityAttempts.push(`${q}:${j.error?.status || 'no-rgbUrl'}`); continue; }
         dlUrl = candidate;
+        usedQuality = q;
         console.log(`[SOLAR-RGB] ${lat},${lng} — imagery at requiredQuality=${q}`);
         break;
-      } catch { /* try the next tier */ }
+      } catch (e) { qualityAttempts.push(`${q}:${(e as Error).message}`); }
     }
     if (!dlUrl) dlUrl = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=${RADIUS_M}&view=IMAGERY_LAYERS&requiredQuality=BASE&pixelSizeMeters=${PIXEL_SIZE}&key=${GOOGLE_SOLAR_API_KEY}`;
     const dlRes = await fetch(dlUrl);
@@ -144,6 +151,9 @@ export async function GET(req: NextRequest) {
       width,
       height,
       covered: true,
+      // Which tier this imagery actually came from, and what was tried.
+      qualityUsed: usedQuality || null,
+      qualityAttempts,
     }, { headers: { 'Cache-Control': 'private, max-age=86400' } });
 
   } catch (err: unknown) {

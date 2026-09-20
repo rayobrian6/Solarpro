@@ -80,7 +80,21 @@ export async function GET() {
   const body = {
     status,
     database:   dbStatus,
+    // 🚨 `version` DOES NOT IDENTIFY THE DEPLOYED CODE, and trusting it has
+    // already misled us. next.config.js injects NEXT_PUBLIC_BUILD_VERSION from
+    // lib/version.ts at build time, but a project-level environment variable of
+    // the same name overrides it at RUNTIME — and production has one pinned. On
+    // 2026-09-20 production reported `v60.3` while serving code from a commit
+    // that had set it to `v60.5` five months earlier. Anyone asking "did my
+    // deploy land?" got a confident wrong answer.
     version:    process.env.NEXT_PUBLIC_BUILD_VERSION ?? 'unknown',
+    // THIS is the answer to that question. Vercel sets it per deployment from
+    // the git ref actually built; nothing in the dashboard can pin it, and a
+    // short sha is not infrastructure information — it is a public commit id in
+    // a repository whose owner is asking whether it shipped. Absent outside
+    // Vercel (local, CI), which is honest rather than misleading.
+    commit:     process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ?? null,
+    ref:        process.env.VERCEL_GIT_COMMIT_REF ?? null,
     timestamp,
     elapsed_ms: elapsed,
     ...(dbError ? { db_error: dbError } : {}),

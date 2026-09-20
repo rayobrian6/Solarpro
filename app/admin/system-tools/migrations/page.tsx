@@ -299,6 +299,40 @@ export default function MigrationConsolePage() {
             tables="audit_log index uq_audit_log_chain_successor"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-audit-chain-closure-120" onResult={(v) => setRegistry((s) => ({ ...s, ['120']: v }))} result={registry['120']} />
+          {/* Feature flags — migration 121. The control that System Tools has
+              been telling operators to use since the .sql landed, and which did
+              not exist: the file was registered nowhere, so the instruction
+              pointed at a console with no button for it. Independent of every
+              other target. CREATE TABLE + one index, IF NOT EXISTS, seeds no
+              rows — so a flag nobody set cannot arrive switched on, and the app
+              keeps degrading DB row → env var → off until it is run. */}
+          <RegistryButton id="121" label="Run migration 121… (runtime feature-flag store)"
+            tables="app_feature_flags"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-feature-flags-121" onResult={(v) => setRegistry((s) => ({ ...s, ['121']: v }))} result={registry['121']} />
+          {/* Layout design entities — migration 122. Obstructions are KEEP-OUT
+              ZONES: removeObstructedPanels runs against them, so a vent or a
+              skylight physically removes panels. Until this runs they live only
+              in component state, so reloading a design silently re-fills panels
+              over every obstruction the user placed — changing panel count, BOM,
+              production and the permit drawing with nothing to say so. Two bare
+              ADD COLUMN IF NOT EXISTS on layouts; no default, no constraint. */}
+          <RegistryButton id="122" label="Run migration 122… (roof obstructions + measurements persist)"
+            tables="layouts.obstructions, layouts.measurements"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-layout-design-entities-122" onResult={(v) => setRegistry((s) => ({ ...s, ['122']: v }))} result={registry['122']} />
+          {/* Layout site archives — migration 123. Where a project's OTHER
+              properties live. Until this runs, changing the address archives
+              nothing: the previous property's panels, obstructions and
+              measurements are simply gone, and its roof planes are merged into
+              layouts.roof_planes — the column pvwatts, the production route and
+              the permit CAD path all read UNFILTERED, so a permit can combine
+              one property's roof with another's jurisdiction. One bare ADD
+              COLUMN IF NOT EXISTS on layouts; no default, no constraint. */}
+          <RegistryButton id="123" label="Run migration 123… (other properties are kept, not deleted)"
+            tables="layouts.site_archives"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-layout-site-archives-123" onResult={(v) => setRegistry((s) => ({ ...s, ['123']: v }))} result={registry['123']} />
           <RegistryButton id="113" label="Run migration 113…" tables="manufacturer_document_registry"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-registry-113" onResult={(v) => setRegistry((s) => ({ ...s, ['113']: v }))} result={registry['113']} />

@@ -465,6 +465,15 @@ export async function POST(req: NextRequest) {
       systemSizeKw:      rawLayout.systemSizeKw       ?? (rawLayout.panels?.length ?? 0) * 0.4,
       mapCenter:         rawLayout.mapCenter,
       mapZoom:           rawLayout.mapZoom,
+      // 🚨 THE THIRD WRITER TO THE LAYOUT ROW. Design Studio's Save button
+      // lands here, not on the layout route, so every site-bound entity has to
+      // be forwarded from here too or pressing Save undoes what the autosave
+      // stored. These were silently dropped: `undefined` reads as KEEP STORED
+      // in upsertLayout, so the row simply kept the older value while the user
+      // was told the design was saved.
+      obstructions:      rawLayout.obstructions,
+      measurements:      rawLayout.measurements,
+      siteArchives:      rawLayout.siteArchives,
     });
 
     const productionData = await calculateProduction(savedLayout, client);
