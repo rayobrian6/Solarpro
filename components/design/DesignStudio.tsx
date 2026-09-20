@@ -4784,6 +4784,16 @@ export default function DesignStudio({ project, onSave }: Props) {
                     // the permit disagreed and nothing reported it.
                     ...(typeof u.pitch === 'number' ? { pitch: u.pitch } : {}),
                     ...(typeof u.azimuth === 'number' ? { azimuth: u.azimuth } : {}),
+                    // 🚨 AND THE FRAME THE PANELS ARE PLACED ON. localFrame3D was
+                    // already carried here, which made a reshape look complete —
+                    // but buildSurfaceGrid places from `ecefFrame3D`, not
+                    // `localFrame3D`. Taking the new origin3D/normal3D while
+                    // keeping the OLD ecefFrame3D placed every panel with a new
+                    // origin on a stale triad: a wedge that goes below the deck
+                    // once the reshape rotates the plane by more than about half
+                    // a degree, and that foreshortens the usable extent by
+                    // cos²(Δ) — losing whole rows, so panel count, kW and BOM.
+                    ...(u.ecefFrame3D ? { ecefFrame3D: u.ecefFrame3D } : {}),
                   });
                 }));
                 console.log('[DesignStudio] Stitch synced', updates.length, 'plane(s) into roofPlanes');

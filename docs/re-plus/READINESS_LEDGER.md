@@ -473,6 +473,124 @@ rail run renders under the near-opaque deck fill.
 
 ---
 
+---
+
+## 🚨 CORRECTION — I said the roof datum was "not permit-grade". That was wrong.
+
+Earlier in this programme I measured the 0.12 m lift on a **single isolated face** and found `area`,
+`pitch` and `azimuth` invariant to 1e-14. That measurement was correct. The **inference from it was
+not**: I concluded the whole datum problem was confined to the 3D viewport.
+
+Two things falsify that, both found by the transitive re-audit:
+
+1. **The lift moves each face in its OWN azimuth direction.** Per face it is a rigid translation, so
+   per-face area and pitch are untouched — but two faces of a gable have *opposite* azimuths, so
+   their shared ridge **splits in plan view** by `2 × 0.12 × sin(pitch)`: **0.107 m (4.2 in) at 6:12,
+   0.154 m (6.0 in) at 10:12**. `plane.vertices` is what `lib/cad/buildCADFromSurvey.ts` hands to
+   `geoPolygonToLocal` and what `lib/cad/roof/roofCAD.ts` uses for plan polygons and setback bands,
+   so the split is **drawn on the permit site plan**. `joinSharedCorners` has a 1.5 m tolerance, so
+   nothing catches it.
+2. **Square Up destroys pitch outright** — see WS1-015 below. That is permit-grade by any measure.
+
+**Why the analysis failed, and what changed.** I tested one face in isolation and generalised to a
+system. An invariant that holds per-object says nothing about the *relationships between* objects.
+The repair is in the method, not just the code: geometry invariants must be asserted **between
+faces** (shared edges, ridge continuity), not only within one. That is now a named gap below, and it
+is the reason the Definition of Done carries a "visual check" row that is still red.
+
+---
+
+## WS1-015 — Square Up flattens every roof face it touches
+
+| | |
+|---|---|
+| **Severity** | **P0 — permit-grade** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+| **Reaches** | PVWatts, ASCE 7-22 wind + snow, sloped-area basis, fire setback, the planset |
+
+`squareUpTracedFaces` rebuilt every corner of a face at the **mean of its corner heights** — a
+horizontal ring — while the comment directly above the code said *"Rebuild each face from its
+squared ring at the heights it already had"*:
+
+```js
+const meanH = old.reduce((acc, g) => acc + g.height, 0) / old.length;
+const pts3D = ring.map(v => engLatLngToECEF(v.lat, v.lng, meanH));
+```
+
+Square Up is a **plan-view** tool — the eyeballed clicks are wrong in plan, not in slope — so it has
+no business touching pitch. It flattened it, and pushed the flattened `pitch`/`azimuth` into
+`updates`, which DesignStudio persists.
+
+🚨 **0.19° is more dangerous than 0°.** The rebuilt face does not measure as exactly flat: the engine
+measures tilt against the **geocentric** radial while the ring sits at constant **geodetic** height,
+and the angle between them is the deflection of the vertical — ~0.19° here, peaking near 45° lat. A
+clean zero would have been caught by the `t > 0` filter in `lib/pvwatts.ts` and the `pitch > 0` gate
+in `applyToSystemDefinition`. **0.19 slips past both**, so a flattened roof was silently treated as a
+real, almost-flat one. Below 0.5° the engine also **hard-codes azimuth to 180** — the real azimuth is
+destroyed, not approximated.
+
+Recomputed downstream consequences for a 25° face:
+
+| Consumer | Before | After | Effect |
+|---|---|---|---|
+| PVWatts annual kWh | 25° | 0.19° | **−8 to −12 %** — reaches the customer proposal |
+| ASCE 7-22 wind (7° threshold) | 25 > 7 ✓ | 0.19 > 7 ✗ | **binary flip** — applicability disclosure dropped from the permit |
+| ASCE 7-22 snow `Cs`, slippery roof | 0.692 | 1.000 | `ps` overstated **+44.5 %** |
+| `cos(pitch)` sloped-area basis | 0.9063 | 1.0000 | **−9.4 %** area, shifting `arrayCoverageFrac` and the resolved fire setback |
+
+**Fix.** A new pure helper, `projectOutlineOntoPlane` in `lib/roofPlane3D.ts`, solves for the one
+height that puts each squared corner on the plane the face already had (intersecting the geodetic
+vertical with that plane). The outline squares up; the plane does not move. It returns `null` for a
+vertical plane rather than inventing a height.
+
+**Second half of the same defect.** Square Up drew the deck from a frame built with
+`{ surfaceOffsetM: 0 }` but stored a plane built with the **default** lift, because
+`buildRoofPlane3D` took only points — it was *structurally impossible* to ask it for an unlifted
+plane. Deck and placement geometry therefore sat exactly `SURFACE_OFFSET_M` apart on every press,
+and the gap **compounded across save/reload cycles**. `buildRoofPlane3D` now takes the same
+`ComputePlaneOptions` as `computePlaneFromPoints3D`, and Square Up passes `0` to both.
+
+**Tests** — `tests/squareUpPreservesPitch.test.ts`, 12 tests, pure math, no Cesium. Pitch and azimuth
+preserved at 15/25/30/45°; the outline genuinely squares; projection is idempotent; degenerate input
+declined. And the defect is **asserted, not described**: the old mean-height rebuild is reproduced
+verbatim and shown to collapse 25° → <0.5° with azimuth exactly 180, with the residual pinned to
+0.1–0.3° so the "not zero, therefore invisible to the guards" property is itself a test.
+
+---
+
+## WS1-016 — Every reshape emitted a new origin on a stale frame
+
+| | |
+|---|---|
+| **Severity** | **P1 — reaches panel count, kW and BOM** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+The `onRoofPlanesStitched` contract carried `vertices`, `localFrame3D`, `polygon3D`, `origin3D`,
+`normal3D`, `pitch`, `azimuth` — but **not `ecefFrame3D`**. `buildSurfaceGrid` places panels from
+`ecefFrame3D`, *not* `localFrame3D`. So every reshape handed the placer a **new origin on the old
+triad**.
+
+With the plane rotated by Δ about the eave axis, clearance above the drawn deck is
+`d = PANEL_OFFSET_ECEF·cos(Δ) − v·sin(Δ)` — negative once `tan(Δ) > 0.05/v`, i.e. **~0.48° at 6 m up
+the slope**, deepening linearly along the row. Not merely cosmetic: `polyUV` projects the new polygon
+onto the stale `u`/`v`, foreshortening the usable extent by **cos²(Δ)** — an 18 % loss of measured
+roof on a 25° face, which removes whole rows and therefore changes **panel count, kW and BOM**.
+
+**Fix.** `ecefFrame3D` added to the contract, emitted at all three reshape sites, applied by the
+studio handler.
+
+🚨 **The shape was declared FOUR times** — once on the prop and once inside each of the three
+functions that fill it — so a field added in one place never reached the others. Collapsed to one
+exported `RoofPlaneReshapeUpdate`, and the test now asserts no inline re-declaration exists.
+
+**Test repair.** `tests/reshapeKeepsPitch.test.ts` matched `updates.push` blocks with a **420-character
+cap**. Adding one field pushed two of three blocks past it, so it matched one and failed
+"expected 1 to be 3" — *a test that breaks when the thing it guards is correctly extended*, and whose
+failure reads like a regression. Now matched by **brace balance**, and it asserts `ecefFrame3D` too.
+Mutation-checked: removing one emit fails with the offending block named.
+
+---
+
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
 `SolarEngine3D` applies restored obstructions to the wrong site · obstructions/measurements are

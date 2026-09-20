@@ -557,6 +557,50 @@ function polygonArea2D(pts: { u: number; v: number }[]): number {
   return Math.abs(area) / 2;
 }
 
+/**
+ * Lift a plan-view outline onto an existing plane.
+ *
+ * For each {lat, lng} it solves for the one height that puts the point exactly
+ * on the plane through `origin` with normal `normal`, by intersecting the
+ * vertical (geodetic up) line at that lat/lng with the plane.
+ *
+ * 🚨 THIS EXISTS SO THAT A PLAN-VIEW EDIT CANNOT CHANGE A PITCH.
+ * Square Up regularises a traced outline — a purely horizontal correction, since
+ * the eyeballed clicks are wrong in plan, not in slope. It used to rebuild every
+ * corner at the MEAN of the corner heights, which is a horizontal ring, so it
+ * FLATTENED every face it touched: a 25° roof came back as 0.19°, its azimuth
+ * hard-set to 180, and both were persisted. Downstream that moved PVWatts output,
+ * flipped the ASCE 7-22 wind applicability threshold (7°) and collapsed the
+ * cos(pitch) sloped-area basis to plan area.
+ *
+ * Returns null when the plane is vertical (or near enough that the intersection
+ * is numerically meaningless): a vertical line never meets a vertical plane, and
+ * inventing a height there would be worse than declining.
+ */
+export function projectOutlineOntoPlane(
+  outline: ReadonlyArray<{ lat: number; lng: number }>,
+  origin: Cart3,
+  normal: Cart3,
+): Cart3[] | null {
+  if (outline.length < 3) return null;
+  const dot = (a: Cart3, b: Cart3) => a.x * b.x + a.y * b.y + a.z * b.z;
+  const originDotN = dot(origin, normal);
+  const out: Cart3[] = [];
+  for (const v of outline) {
+    if (!Number.isFinite(v.lat) || !Number.isFinite(v.lng)) return null;
+    const base = latLngToECEF(v.lat, v.lng, 0);
+    const oneUp = latLngToECEF(v.lat, v.lng, 1);
+    // Geodetic up at this corner — unit length by construction.
+    const up = { x: oneUp.x - base.x, y: oneUp.y - base.y, z: oneUp.z - base.z };
+    const denom = dot(up, normal);
+    if (!Number.isFinite(denom) || Math.abs(denom) < 1e-6) return null;
+    const h = (originDotN - dot(base, normal)) / denom;
+    if (!Number.isFinite(h)) return null;
+    out.push(latLngToECEF(v.lat, v.lng, h));
+  }
+  return out;
+}
+
 // ─── Main Builder ─────────────────────────────────────────────────────────────
 
 /**
@@ -567,13 +611,25 @@ function polygonArea2D(pts: { u: number; v: number }[]): number {
  * This is what drives buildSurfaceGrid — the frame in localFrame3D IS
  * the grid coordinate system. Panels will be aligned with the roof edges
  * and sit above the surface (never clipped inside geometry).
+ *
+ * 🚨 `options` EXISTS BECAUSE ITS ABSENCE WAS A BUG, NOT A SIMPLIFICATION.
+ * This used to take only points, so it could ONLY ever produce a plane lifted by
+ * the default SURFACE_OFFSET_M. A caller re-fitting points that were ALREADY
+ * lifted had no way to say so — it could pass `{ surfaceOffsetM: 0 }` to
+ * computePlaneFromPoints3D for the surface it DRAWS and had no corresponding
+ * option for the plane it STORES. `squareUpTracedFaces` did exactly that, and
+ * the two answers differed by exactly 0.12 m on every press.
+ *
+ * The rule is the one computePlaneFromPoints3D already documents: a caller must
+ * pass the SAME offset to both calls, and pass 0 when the input points are
+ * themselves the output of an earlier fit.
  */
-export function buildRoofPlane3D(pts3D: Cart3[]): RoofPlane {
+export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = {}): RoofPlane {
   if (pts3D.length < 3) {
     throw new Error(`buildRoofPlane3D: need ≥3 points, got ${pts3D.length}`);
   }
 
-  const frame = computePlaneFromPoints3D(pts3D);
+  const frame = computePlaneFromPoints3D(pts3D, options);
   const projPts = frame.projectedPts; // already offset above surface
 
   // Vertices in lat/lng (projected, coplanar, offset above surface)

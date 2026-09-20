@@ -69,7 +69,7 @@ import {
   getPanelDims,
   PANEL_OFFSET_M as PLANE_ENGINE_PANEL_OFFSET_M,
 } from '@/lib/planeEngine';
-import { latLngToECEF as engLatLngToECEF } from '@/lib/roofPlane3D';
+import { latLngToECEF as engLatLngToECEF, projectOutlineOntoPlane } from '@/lib/roofPlane3D';
 
 // ─── v48.7: Control Layer ────────────────────────────────────────────────────
 // All panel placement is now routed through placePanelsControlled().
@@ -403,6 +403,65 @@ type FenceSectionState = {
   entityKey: string;
 };
 
+/**
+ * What a reshape emits back to DesignStudio.
+ *
+ * 🚨 ONE DECLARATION, ON PURPOSE. This shape was written out FOUR times — once
+ * on the prop and once inside each of the three functions that fill it — so a
+ * field added to the prop silently failed to compile at the producers, and a
+ * field added at one producer never reached the other two. `ecefFrame3D` was
+ * missing from all four.
+ */
+export interface RoofPlaneReshapeUpdate {
+    id: string;
+    vertices: Array<{ lat: number; lng: number }>;
+    localFrame3D: {
+      u: { x: number; y: number; z: number };
+      v: { x: number; y: number; z: number };
+      n: { x: number; y: number; z: number };
+    };
+    /** Stitched ECEF corners — the exact polygon3D that the stitch produced.
+     *  Persisted so the roof-plane restore-on-load effect can rebuild the
+     *  STITCHED 3D outline without re-sampling terrain. */
+    polygon3D?: Array<{ x: number; y: number; z: number }>;
+    /** Stitched plane origin in ECEF (min-UV corner of the stitched polygon). */
+    origin3D?: { x: number; y: number; z: number };
+    /** Stitched plane outward normal in ECEF. */
+    normal3D?: { x: number; y: number; z: number };
+    /** 🚨 THE RESHAPED PITCH AND AZIMUTH. Square Up, Stitch, the flat-trace
+     *  rebuild and the Building pitch/wall controls all reshape a face's
+     *  GEOMETRY and emit it here — but pitch/azimuth were not part of this
+     *  shape, so `plane.pitch` kept its original value while the 3D roof
+     *  changed underneath it. The planset, the structural engine and the
+     *  production model all read plane.pitch, so the roof the user shaped and
+     *  the pitch the permit quoted disagreed permanently, and nothing said so.
+     *  Carried here so the geometry and the number agree. */
+    pitch?: number;
+    azimuth?: number;
+    /** 🚨 THE RESHAPED ECEF FRAME — the axes panels are actually placed on.
+     *
+     *  This shape already carried `localFrame3D`, so a reshape looked complete.
+     *  It was not: `buildSurfaceGrid` places panels from `ecefFrame3D`, not
+     *  `localFrame3D` (lib/surfaceGeometry3D.ts — the createdFrom3D branch reads
+     *  origin3D + ecefFrame3D + polygon3D). Emitting a NEW origin3D and normal3D
+     *  while leaving ecefFrame3D at its pre-reshape value meant every reshape
+     *  placed panels with a new origin on an OLD triad.
+     *
+     *  The cost is a wedge, not an offset. With the plane rotated by Δ about the
+     *  eave axis, a panel's clearance above the drawn deck is
+     *      d = PANEL_OFFSET_ECEF·cos(Δ) − v·sin(Δ)
+     *  so it goes negative once tan(Δ) > PANEL_OFFSET_ECEF / v — about 0.48° at
+     *  6 m up the slope — and deepens linearly along the row. It is also not only
+     *  cosmetic: polyUV projects the new polygon onto the stale u/v, foreshortening
+     *  the usable extent by cos²(Δ), which removes whole rows. That reaches panel
+     *  count, kW and the BOM. */
+    ecefFrame3D?: {
+      u: { x: number; y: number; z: number };
+      v: { x: number; y: number; z: number };
+      n: { x: number; y: number; z: number };
+    };
+}
+
 interface Props {
   lat: number;
   lng: number;
@@ -466,33 +525,7 @@ interface Props {
    *  plane frame back into roofPlanes state so panel placement (Auto Layout) +
    *  persistence use the stitched geometry, not the pre-stitch traced corners or a
    *  stale frame. One call per Stitch, all updated planes at once. */
-  onRoofPlanesStitched?: (updates: Array<{
-    id: string;
-    vertices: Array<{ lat: number; lng: number }>;
-    localFrame3D: {
-      u: { x: number; y: number; z: number };
-      v: { x: number; y: number; z: number };
-      n: { x: number; y: number; z: number };
-    };
-    /** Stitched ECEF corners — the exact polygon3D that the stitch produced.
-     *  Persisted so the roof-plane restore-on-load effect can rebuild the
-     *  STITCHED 3D outline without re-sampling terrain. */
-    polygon3D?: Array<{ x: number; y: number; z: number }>;
-    /** Stitched plane origin in ECEF (min-UV corner of the stitched polygon). */
-    origin3D?: { x: number; y: number; z: number };
-    /** Stitched plane outward normal in ECEF. */
-    normal3D?: { x: number; y: number; z: number };
-    /** 🚨 THE RESHAPED PITCH AND AZIMUTH. Square Up, Stitch, the flat-trace
-     *  rebuild and the Building pitch/wall controls all reshape a face's
-     *  GEOMETRY and emit it here — but pitch/azimuth were not part of this
-     *  shape, so `plane.pitch` kept its original value while the 3D roof
-     *  changed underneath it. The planset, the structural engine and the
-     *  production model all read plane.pitch, so the roof the user shaped and
-     *  the pitch the permit quoted disagreed permanently, and nothing said so.
-     *  Carried here so the geometry and the number agree. */
-    pitch?: number;
-    azimuth?: number;
-  }>) => void;
+  onRoofPlanesStitched?: (updates: RoofPlaneReshapeUpdate[]) => void;
   /** E2E-only diagnostics bridge. Passed only when NEXT_PUBLIC_E2E=1. */
   onE2EDiagnostics?: (diagnostics: {
     fullRebuildCount: number;
@@ -1205,17 +1238,7 @@ function SolarEngine3D({
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C) return 0;
-    const updates: Array<{
-      id: string;
-      vertices: Array<{ lat: number; lng: number }>;
-      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
-      polygon3D?: Cart3[];
-      origin3D?: Cart3;
-      normal3D?: Cart3;
-      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
-      pitch?: number;
-      azimuth?: number;
-    }> = [];
+    const updates: RoofPlaneReshapeUpdate[] = [];
 
     for (const id of flatTracedPlaneIdsRef.current) {
       const params = flatTraceParamsRef.current.get(id);
@@ -1256,6 +1279,8 @@ function SolarEngine3D({
           // Emit the shape the face was actually BUILT to.
           pitch: built.plane.pitch,
           azimuth: built.plane.azimuth,
+          // The axes panels are placed on must travel with the geometry.
+          ecefFrame3D: built.plane.ecefFrame3D,
         });
       }
     }
@@ -4522,29 +4547,53 @@ function SolarEngine3D({
     const aligned = joinRes.joined;
 
     // 3. Rebuild each face from its squared ring at the heights it already had.
-    const updates: Array<{
-      id: string;
-      vertices: Array<{ lat: number; lng: number }>;
-      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
-      polygon3D?: Cart3[];
-      origin3D?: Cart3;
-      normal3D?: Cart3;
-      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
-      pitch?: number;
-      azimuth?: number;
-    }> = [];
+    const updates: RoofPlaneReshapeUpdate[] = [];
     for (const rp of renderables) {
       const ring = rings.get(rp.id);
       if (!ring || ring.length < 3) continue;
-      const old = rp.corners.map((c: any) => ecefToLatLng({ x: c.x, y: c.y, z: c.z }));
-      const meanH = old.reduce((acc: number, g: any) => acc + g.height, 0) / old.length;
-      const pts3D = ring.map(v => engLatLngToECEF(v.lat, v.lng, meanH));
+      // 🚨 PUT THE SQUARED CORNERS BACK ON THE FACE'S OWN PLANE.
+      //
+      // This block used to read:
+      //     const meanH = old.reduce((a, g) => a + g.height, 0) / old.length;
+      //     const pts3D = ring.map(v => engLatLngToECEF(v.lat, v.lng, meanH));
+      // — every corner rebuilt at the MEAN of the corner heights, which is a
+      // HORIZONTAL ring. Square Up therefore FLATTENED every face it touched,
+      // while the comment above it said "at the heights it already had".
+      //
+      // It is a plan-view tool. Squaring an outline is a horizontal correction;
+      // the pitch is not the trace's mistake and must survive untouched. A 25°
+      // face came out at 0.19° (not 0° — the residual is the deflection of the
+      // vertical, geocentric-up vs geodetic-up, ~0.19° at this latitude), and
+      // 0.19 > 0 is the dangerous value: it slips past the `t > 0` filter in
+      // lib/pvwatts.ts and the `pitch > 0` gate in applyToSystemDefinition that
+      // would both have rejected a clean zero. The flattened pitch and azimuth
+      // were then pushed into `updates` and persisted, so the damage outlived
+      // the session and reached PVWatts, the ASCE wind/snow gates and the
+      // cos(pitch) sloped-area basis.
+      //
+      // So: keep each corner's lat/lng from the squared ring, and solve for the
+      // height that puts it exactly on the plane the face already had. The
+      // outline squares up; the plane does not move.
+      // The maths lives in lib/roofPlane3D.ts so it can be tested without
+      // Cesium — this function cannot be, and an untestable fix to a
+      // permit-reaching defect is not a fix.
+      const pts3D = projectOutlineOntoPlane(
+        ring,
+        { x: rp.origin.x, y: rp.origin.y, z: rp.origin.z },
+        { x: rp.n.x, y: rp.n.y, z: rp.n.z },
+      );
+      if (!pts3D || pts3D.length < 3) continue;
+
       let frame, plane;
-      // surfaceOffsetM 0: these heights came from an earlier fit and are already
-      // lifted — see the note in computePlaneFromPoints3D about Stitch.
+      // 🚨 THE SAME OFFSET FOR BOTH. These points lie on a plane that was
+      // already lifted by an earlier fit, so both calls pass 0. Passing 0 to the
+      // rendered frame and the DEFAULT to the stored plane — which is what this
+      // did, because buildRoofPlane3D took no options — put the deck and the
+      // placement geometry exactly SURFACE_OFFSET_M apart on every press, and
+      // the gap compounded across save/reload cycles.
       try {
         frame = computePlaneFromPoints3D(pts3D, { surfaceOffsetM: 0 });
-        plane = buildRoofPlane3D(pts3D);
+        plane = buildRoofPlane3D(pts3D, { surfaceOffsetM: 0 });
       } catch { continue; }
 
       (plane3DEntityMap.current.get(rp.id) ?? []).forEach((eid: string) => {
@@ -4565,6 +4614,8 @@ function SolarEngine3D({
           id: rp.id, vertices: plane.vertices, localFrame3D: plane.localFrame3D,
           polygon3D: plane.polygon3D, origin3D: plane.origin3D, normal3D: plane.normal3D,
           pitch: plane.pitch, azimuth: plane.azimuth,
+          // The axes panels are placed on must travel with the geometry.
+          ecefFrame3D: plane.ecefFrame3D,
         });
       }
     }
@@ -4621,17 +4672,7 @@ function SolarEngine3D({
       return deriveAzimuthFromOutline(ring, ring.reduce((sum, v) => sum + v.lat, 0) / ring.length);
     });
 
-    const updates: Array<{
-      id: string;
-      vertices: Array<{ lat: number; lng: number }>;
-      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
-      polygon3D?: Cart3[];
-      origin3D?: Cart3;
-      normal3D?: Cart3;
-      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
-      pitch?: number;
-      azimuth?: number;
-    }> = [];
+    const updates: RoofPlaneReshapeUpdate[] = [];
 
     for (const rf of rawFaces) {
       if (scope && rf.id !== scope) continue;
@@ -4678,6 +4719,8 @@ function SolarEngine3D({
           // Emit the shape the face was actually BUILT to.
           pitch: built.plane.pitch,
           azimuth: built.plane.azimuth,
+          // The axes panels are placed on must travel with the geometry.
+          ecefFrame3D: built.plane.ecefFrame3D,
         });
       }
     }
