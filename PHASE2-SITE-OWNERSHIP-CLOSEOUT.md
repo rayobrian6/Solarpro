@@ -242,6 +242,56 @@ not survive a page reload**. A→B→A works within a session and is lost on
 refresh. Run it from **Admin → System Tools → Migrations → "Run migration 123…
 (other properties are kept, not deleted)"**.
 
+### 5.1b 🚨 Production does not appear to be running master
+
+Found while trying to answer "which commit is deployed?" — which, it turns out,
+nothing could answer.
+
+`/api/health` reported `version` from `NEXT_PUBLIC_BUILD_VERSION`, which
+next.config.js injects at build time and which a project-level environment
+variable of the same name overrides at **runtime**. Production has one pinned,
+so the version string is not evidence of anything. It now also returns `commit`
+(`VERCEL_GIT_COMMIT_SHA`) and `ref`, which the platform sets per deployment and
+the dashboard cannot pin. `solarpro-dev.vercel.app` already answers
+`{"commit":"ed31a0a8","ref":"dev"}`, so the mechanism is proven in a real
+deployment.
+
+The evidence about production is not the version number, it is the SHAPE of the
+response:
+
+```
+master today      status, database, version, timestamp, elapsed_ms
+solarpro-v31 now  status, database, env_valid, missing_env, warned_env,
+                  env_details{…}, version, node_env, vercel_env, timestamp, elapsed_ms
+```
+
+The wide form was deliberately narrowed on 2026-05-01 (`bdfba731`) precisely
+because `/api/health` is **public** — `middleware.ts:58` lists it as auth-exempt.
+`solarpro-v31.vercel.app` still serves the wide form, so it is running code from
+before that date, and it is currently publishing the NAMES of every configured
+secret to anyone who asks:
+
+```
+DATABASE_URL, JWT_SECRET, ANTHROPIC_API_KEY, OPENAI_API_KEY,
+GOOGLE_MAPS_API_KEY, RESEND_API_KEY, NEXT_PUBLIC_BASE_URL
+```
+
+plus `node_env` and `vercel_env`. No values — names and presence only — but that
+is exactly what the narrowing exists to prevent, and the fix has been sitting on
+master, undeployed, for over four months.
+
+Two readings, and only the Vercel dashboard can decide between them:
+
+1. **`solarpro-v31` IS production and is badly stale.** Then Phase 1 never
+   reached users, "master shipped, production confirmed live" was never actually
+   verified, and merging PR #17 will not deploy anything either.
+2. **`solarpro-v31` is an abandoned project** and the real production is a
+   custom domain. Then it should be taken down, because it is serving a
+   four-month-old build of this app, against the live database, and leaking.
+
+Either way this must be resolved BEFORE the merge is called landed. With
+`commit` in the payload, the check afterwards is one request.
+
 ### 5.2 The gable and hip tools emit no roof plane
 
 Both draw real roof faces with a pitch and an eave height, and both stop at
