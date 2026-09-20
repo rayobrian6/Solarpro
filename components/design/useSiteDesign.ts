@@ -85,7 +85,17 @@ export interface UseSiteDesign {
   archivedEntityCount: number;
 
   /** Move to another property. Returns whether anything changed. */
-  switchToSite: (toKey: string, opts?: { address?: string | null; mapCenter?: { lat: number; lng: number } | null }) => {
+  switchToSite: (
+    toKey: string,
+    opts?: {
+      address?: string | null;
+      mapCenter?: { lat: number; lng: number } | null;
+      /** The site-bound scalars as they stand RIGHT NOW. Passed in rather than
+       *  owned here because they live in DesignStudio's own state; the hook
+       *  archives and returns them so the caller can apply the arriving set. */
+      scalars?: SiteDesignScalars;
+    },
+  ) => {
     changed: boolean;
     arriving: SiteDesignBundle;
     archivedCount: number;
@@ -179,6 +189,11 @@ export function useSiteDesign(): UseSiteDesign {
         roofPlanes: roofPlanesRef.current,
         obstructions: placedObstructionsRef.current,
         measurements: measurementsRef.current,
+        // The fence line is lat/lng geometry, so it belongs to the property it
+        // was drawn at. Re-seated here, from the caller, for the same reason
+        // the entity arrays are: a bundle must never be archived one render
+        // stale.
+        scalars: opts?.scalars ?? stateRef.current.active.scalars,
       },
     };
     const res = switchSite(stateRef.current, toKey, opts);

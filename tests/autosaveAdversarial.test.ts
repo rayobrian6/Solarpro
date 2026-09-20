@@ -27,6 +27,7 @@ import { siteKeyFromCoords } from '@/lib/siteIdentity';
 // 🚨 The persistence round trip goes through the REAL model, not a two-line
 // simulation of it. See tests/helpers/siteRoundTrip.ts for why.
 import { persistAndReload } from './helpers/siteRoundTrip';
+import { SITE_BOUND_ENTITY_KEYS } from '@/lib/design/siteDesignModel';
 import type { RoofPlane } from '@/types';
 
 const SRC = readFileSync(join(process.cwd(), 'components/design/DesignStudio.tsx'), 'utf8');
@@ -297,20 +298,56 @@ describe('🚨 the traced-garage deletion class', () => {
 
 // ── KNOWN GAPS, RECORDED ────────────────────────────────────────────────────
 
-describe('entities that are NOT persisted — asserted so they stay known', () => {
-  // These have no outbound callback from SolarEngine3D at all: they die on
-  // unmount. Persisting them needs an engine->studio callback plus a Layout
-  // field, and for some of them a product decision about whether they are
-  // design data or view state. Recorded here rather than left to be
-  // rediscovered as a bug report.
-  // Obstructions and measurements MOVED OUT of this list in migration 122 —
-  // they now persist. What remains is the set with no defined shape and no
-  // reader: the engine types vertexSpecs as `any` and reads it back zero times,
-  // so persisting it would be cargo-cult schema. It needs a real type first.
-  const NOT_PERSISTED = ['trees', 'blocks', 'vertexSpecs'];
+describe('entities that are NOT persisted — classified, not merely listed', () => {
+  // 🚨 A LIST OF NAMES IS NOT A CLASSIFICATION. The previous version of this
+  // block asserted three strings were absent from the signature, which is true
+  // of every string. What matters about an unpersisted entity is whether
+  // ANYTHING READS IT: an entity nothing reads is a UX gap, and an entity
+  // something reads is a silent wrong answer in a permit.
+  //
+  // Each entry below is asserted against the engine source, so the day one of
+  // these grows a consumer or an outbound callback, this fails.
+  const ENGINE = readFileSync(join(process.cwd(), 'components/3d/SolarEngine3D.tsx'), 'utf8');
 
-  it('the layout signature does not claim to cover them', () => {
-    for (const e of NOT_PERSISTED) {
+  it('vertexSpecs / trees / blocks have NO outbound callback to the studio', () => {
+    // They live entirely inside SolarEngine3D and die on unmount. That is a
+    // real gap for the user, and it is NOT a correctness defect: with no
+    // callback there is no path by which they can reach a layout, a BOM, a
+    // production model or a permit. They cannot be silently wrong because they
+    // cannot be read at all.
+    expect(ENGINE).not.toMatch(/onVertexSpecsChange/);
+    expect(ENGINE).not.toMatch(/onTreesChange/);
+    expect(ENGINE).not.toMatch(/onBlocksChange/);
+  });
+
+  it('🚨 the GABLE and HIP tools are visual-only — they emit no roof plane', () => {
+    // Recorded deliberately, and it is the largest known gap. Both tools draw
+    // real roof FACES with a pitch and an eave height, and both stop at Cesium
+    // entities plus a vertexSpec. `onRoofPlaneCreated` is called from exactly
+    // ONE place — finalizePlane3D — so a gable a user places never reaches the
+    // Roof Planes sidebar, the panel layout, the BOM or the planset, and is
+    // gone on reload.
+    //
+    // It is NOT a Phase 2 correctness defect for the same reason as above:
+    // nothing downstream can read it, so no artifact can be wrong because of
+    // it. Closing it is roof-UX work (Phase 3), not persistence work.
+    const emits = ENGINE.match(/onRoofPlaneCreated\?\.\(/g) ?? [];
+    expect(emits).toHaveLength(1);
+    // If a gable/hip path ever starts emitting, this count moves and this test
+    // fails — at which point the emitted faces MUST be given a site key and a
+    // persistence path, like every other roof plane.
+  });
+
+  it('markOnly needs no persistence — it is DERIVED from the panels', () => {
+    // A face renders as outline-only when it carries no panels. Panels ARE
+    // persisted, so the mark-only state round-trips exactly, by construction.
+    // Storing it would create a second source of truth that could disagree
+    // with the first.
+    expect(ENGINE).toMatch(/const isMarkOnly = !planeHasPanels;/);
+  });
+
+  it('the layout signature does not claim to cover any of them', () => {
+    for (const e of ['trees', 'blocks', 'vertexSpecs', 'markOnly']) {
       expect(SIGNED_DESIGN_PARAMS as readonly string[]).not.toContain(e);
       expect(SIGNED_FIELDS as readonly string[]).not.toContain(e);
     }
@@ -321,6 +358,11 @@ describe('entities that are NOT persisted — asserted so they stay known', () =
     // them, so losing them silently re-filled panels over every vent placed.
     expect(SIGNED_DESIGN_PARAMS as readonly string[]).toContain('obstructions');
     expect(SIGNED_DESIGN_PARAMS as readonly string[]).toContain('measurements');
+  });
+
+  it('…and they are SITE-BOUND, so they move with the property (migration 123)', () => {
+    expect(SITE_BOUND_ENTITY_KEYS as readonly string[]).toContain('obstructions');
+    expect(SITE_BOUND_ENTITY_KEYS as readonly string[]).toContain('measurements');
   });
 
   it('camera pose is deliberately absent — it is per-viewer, not design data', () => {

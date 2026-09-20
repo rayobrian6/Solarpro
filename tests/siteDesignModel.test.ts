@@ -128,6 +128,7 @@ describe('A → B → A — the exact failure Ray reported', () => {
     let s = stateAt(KEY_A, A);
     s = switchSite(s, KEY_B).state;
     expect(Object.keys(s.archives)).toEqual([KEY_A]);
+    s = setActiveBundle(s, bundle('B', 4)); // design something at B so it is kept
     s = switchSite(s, KEY_A).state;
     expect(s.archives[KEY_A]).toBeUndefined();
     expect(Object.keys(s.archives)).toEqual([KEY_B]);
@@ -162,12 +163,17 @@ describe('A → B → C → A and rapid switching', () => {
 
   it('A → B → A → B → A, twenty times, loses nothing and grows nothing', () => {
     const A = bundle('A', 52);
+    const B = bundle('B', 4);
     let s = stateAt(KEY_A, A);
+    s = switchSite(s, KEY_B).state;
+    s = setActiveBundle(s, B);           // B has work of its own
+    s = switchSite(s, KEY_A).state;
     for (let i = 0; i < 20; i++) {
       s = switchSite(s, KEY_B).state;
       s = switchSite(s, KEY_A).state;
     }
     expect(ids(s.active)).toEqual(ids(A));
+    expect(ids(s.archives[KEY_B])).toEqual(ids(B));
     // One archive entry for B — not twenty.
     expect(Object.keys(s.archives)).toEqual([KEY_B]);
   });
@@ -208,6 +214,62 @@ describe('refusals — the model will not guess', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+describe('the archive is bounded by properties DESIGNED at, not properties VISITED', () => {
+  it('🚨 touring ten houses without designing does not grow the column', () => {
+    // `site_archives` rides on EVERY autosave. An entry per property visited
+    // would make a user who toured ten houses carry ten empty objects in every
+    // request, for ever, with no way to shed them.
+    let s = stateAt(KEY_A, emptyBundle());
+    for (let i = 0; i < 10; i++) {
+      s = switchSite(s, siteKeyFromCoords(38.7 + i * 0.001, -90.05, PROJECT)).state;
+    }
+    expect(Object.keys(s.archives)).toEqual([]);
+  });
+
+  it('…and a property that WAS designed at is still kept', () => {
+    let s = stateAt(KEY_A, bundle('A', 52));
+    s = switchSite(s, KEY_B).state;
+    s = switchSite(s, KEY_C).state; // B was empty — pruned; A was not
+    expect(Object.keys(s.archives)).toEqual([KEY_A]);
+    s = switchSite(s, KEY_A).state;
+    expect(s.active.panels).toHaveLength(52);
+  });
+
+  it('a bundle with no entities but a chosen electrical design is kept', () => {
+    // "Nothing placed yet" is not "nothing done".
+    let s = stateAt(KEY_A, { ...emptyBundle(), designElectrical: { topology: 'micro', modulesPerString: 1 } as never });
+    s = switchSite(s, KEY_B).state;
+    expect(Object.keys(s.archives)).toEqual([KEY_A]);
+  });
+
+  it('a bundle with only a fence line is kept — it is geometry', () => {
+    let s = stateAt(KEY_A, { ...emptyBundle(), scalars: { fenceLine: [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }] } });
+    s = switchSite(s, KEY_B).state;
+    expect(Object.keys(s.archives)).toEqual([KEY_A]);
+    s = switchSite(s, KEY_A).state;
+    expect(s.active.scalars?.fenceLine).toHaveLength(2);
+  });
+
+  it('address/mapCenter provenance alone does NOT count as content', () => {
+    // They are stamped on every switch, so counting them would make every
+    // bundle non-empty and defeat the pruning entirely.
+    let s = stateAt(KEY_A, { ...emptyBundle(), address: 'somewhere', mapCenter: { lat: 1, lng: 2 } });
+    s = switchSite(s, KEY_B).state;
+    expect(Object.keys(s.archives)).toEqual([]);
+  });
+
+  it('an emptied property is REMOVED from the archive, not left as junk', () => {
+    let s = stateAt(KEY_A, bundle('A'));
+    s = switchSite(s, KEY_B).state;          // A archived
+    s = switchSite(s, KEY_A).state;          // A active again
+    s = setActiveBundle(s, emptyBundle());   // the user clears A on purpose
+    s = switchSite(s, KEY_B).state;          // leave it
+    expect(Object.keys(s.archives)).toEqual([]);
+    s = switchSite(s, KEY_A).state;          // …and it comes back CLEARED
+    expect(isEmptyBundle(s.active)).toBe(true);
+  });
+});
+
 describe('deliberate deletion still works — hiding is not deleting', () => {
   it('a site cleared on purpose comes back CLEARED, not full', () => {
     const A = bundle('A');

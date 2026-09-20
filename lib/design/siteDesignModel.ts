@@ -78,16 +78,26 @@ export { siteKeyFromCoords, isSameSite, UNRESOLVED_SITE_KEY };
 // The bundle
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Scalar design parameters that describe THIS property's array, not the user's
- *  preferences. A ground-mount tilt or a fence line belongs to the site it was
- *  drawn at, exactly as the panels do. */
+/**
+ * The non-entity design values that belong to a PROPERTY rather than to the
+ * designer.
+ *
+ * 🚨 THE FENCE LINE IS GEOMETRY. It is a list of lat/lng points, so carrying it
+ * to another property draws a fence at the old address — the same contamination
+ * as a roof plane, with the same consequences for the BOM and the planset. It
+ * is site-bound for exactly that reason.
+ *
+ * 🚨 THE NUMBERS ARE DELIBERATELY NOT HERE. `groundTilt`, `groundAzimuth`,
+ * `rowSpacing`, `groundHeight` and `bifacialOptimized` are an installer's
+ * PREFERENCES about how they build arrays, not facts about a parcel. Moving to
+ * a different address is no reason to reset a 20° tilt to the component
+ * default, and resetting it silently would be its own quiet data loss. They
+ * stay on the layout row, project-wide, which is where they already were.
+ */
 export interface SiteDesignScalars {
-  groundTilt?: number;
-  groundAzimuth?: number;
-  rowSpacing?: number;
-  groundHeight?: number;
-  bifacialOptimized?: boolean;
+  /** Fence geometry — lat/lng, therefore site-bound. */
   fenceLine?: { lat: number; lng: number }[];
+  /** Carried with the line it belongs to. */
   fenceHeight?: number;
 }
 
@@ -132,6 +142,21 @@ export function emptyBundle(): SiteDesignBundle {
 export function isEmptyBundle(b: SiteDesignBundle | null | undefined): boolean {
   if (!b) return true;
   return SITE_BOUND_ENTITY_KEYS.every(k => (b[k]?.length ?? 0) === 0);
+}
+
+/** Is there anything here worth carrying to the database?
+ *
+ *  Broader than `isEmptyBundle`: a property with no entities but a chosen
+ *  topology or a ground tilt has still been worked on, and that work must
+ *  survive. `address`/`mapCenter` are provenance ONLY and deliberately do not
+ *  count — they are set on every switch, so counting them would make every
+ *  bundle non-empty and defeat the pruning entirely. */
+export function hasContent(b: SiteDesignBundle | null | undefined): boolean {
+  if (!b) return false;
+  if (!isEmptyBundle(b)) return true;
+  if (b.designElectrical) return true;
+  if (b.scalars && Object.values(b.scalars).some(v => v !== undefined && v !== null)) return true;
+  return false;
 }
 
 /** Total entity count across the bundle — what the UI reports as "kept". */
@@ -220,10 +245,20 @@ export function switchSite(
   const leaving: SiteDesignBundle = state.active;
   const archives: Record<string, SiteDesignBundle> = { ...state.archives };
 
-  // File the site we are leaving under its own key. Always — an empty bundle is
-  // archived too, so "I cleared this property on purpose" comes back cleared
-  // instead of coming back full.
-  archives[state.activeSiteKey] = leaving;
+  // File the site we are leaving under its own key.
+  //
+  // 🚨 EXCEPT WHEN THERE IS NOTHING TO FILE. `site_archives` is sent on EVERY
+  // autosave, so an entry per property visited would make a user who toured
+  // twenty houses carry twenty empty objects in every request, for ever, with
+  // no way to shed them. An entry with no entities, no electrical design and no
+  // scalars is indistinguishable on the way back from never having visited:
+  // both produce `emptyBundle()`. So dropping it changes no behaviour and
+  // bounds the column by the number of properties actually DESIGNED at.
+  //
+  // "I cleared this property on purpose" still round-trips cleared, for the
+  // same reason — an empty archive and an absent archive both come back empty.
+  if (hasContent(leaving)) archives[state.activeSiteKey] = leaving;
+  else delete archives[state.activeSiteKey];
 
   // Take back whatever was stored for the site we are entering.
   const arriving: SiteDesignBundle = archives[toKey] ?? emptyBundle();

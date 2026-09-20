@@ -99,6 +99,32 @@ type SolarE2EState = {
   /** Count of full rebuilds triggered during panel drag/move — should stay 0
    *  for smooth moves. 2176e4d3 regression guard. */
   panelMoveRebuildCount: number;
+  // ── SITE OWNERSHIP (the A → B → A regression Ray hit on 3 Melvin Drive) ────
+  /** Keep-out zones a person placed. Site-bound, like panels and roof planes. */
+  placedObstructions: PlacedObstruction[];
+  measurements: LayoutMeasurement[];
+  /** Which physical property the visible design belongs to. */
+  activeSiteKey: string;
+  /** How many OTHER properties this project is holding a design for, and how
+   *  many entities across all of them. Both must be visible: "the roof
+   *  disappeared" and "the roof was archived" look identical without them. */
+  archivedSiteCount: number;
+  archivedEntityCount: number;
+  /** Pick a house, as SolarEngine3D does in Pick House mode. Driving the real
+   *  click needs WebGL, Google tiles and a building under the cursor — none of
+   *  which is the behaviour under test. */
+  pickHouse: (lat: number, lng: number, address: string) => void;
+  /** Put a design on the ACTIVE property, through the same setters the studio
+   *  uses. SETUP ONLY — the behaviour under test is what happens to it when the
+   *  property changes. Without it the browser spec depends on Google Solar
+   *  answering, and a spec that SKIPS when the network is quiet proves nothing;
+   *  a vacuous skip is how the defect it guards ships. */
+  seedDesign: (d: {
+    panels?: PlacedPanel[];
+    roofPlanes?: RoofPlane[];
+    obstructions?: PlacedObstruction[];
+    measurements?: LayoutMeasurement[];
+  }) => void;
 };
 
 declare global {
@@ -610,19 +636,6 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [pendingPlanePitch, setPendingPlanePitch] = useState<number>(20);
   const [fenceLine, setFenceLine] = useState<{ lat: number; lng: number }[]>([]);
 
-  useEffect(() => {
-    if (!E2E_ENABLED || typeof window === 'undefined') return;
-    window.__solarE2E = {
-      roofPlanes,
-      panels,
-      stitchedCorners: e2eStitchedCorners,
-      setbackInsets: e2eDiagnostics.setbackInsets,
-      fullRebuildCount: e2eDiagnostics.fullRebuildCount,
-      roofPlaneEntityCount: e2eDiagnostics.roofPlaneEntityCount,
-      setbackBandCentroids: e2eDiagnostics.setbackBandCentroids,
-      panelMoveRebuildCount: e2eDiagnostics.panelMoveRebuildCount,
-    };
-  }, [roofPlanes, panels, e2eStitchedCorners, e2eDiagnostics]);
 
   // Mixed system support - active drawing zone type
   const [activeZoneType, setActiveZoneType] = useState<SystemType>(project.systemType);
@@ -1127,7 +1140,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     // Melvin's row held 13 planes from THREE properties. Archiving into its own
     // column means a foreign site is unreachable BY CONSTRUCTION instead of by
     // every consumer remembering to filter.
-    const sitePayload = site.persistencePayload({ designElectrical: designElectrical ?? null });
+    const sitePayload = site.persistencePayload({
+      designElectrical: designElectrical ?? null,
+      scalars: { fenceLine: designParams.fenceLine, fenceHeight: designParams.fenceHeight },
+    });
     const planesForPersistence = sitePayload.roofPlanes;
     const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams })
       + '|' + archivesSignature(sitePayload.siteArchives);
@@ -1236,7 +1252,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
     }
-  }, [project.id, project.systemType, buildDesignElectrical]);
+  }, [project.id, project.systemType, buildDesignElectrical, site.persistencePayload]);
 
   // Trigger auto-save 3 seconds after panels OR roof geometry change — but
   // NEVER before the DB restore resolves (see restoreStateRef above; the timer
@@ -1271,11 +1287,6 @@ export default function DesignStudio({ project, onSave }: Props) {
       // v66: must match saveLayoutToDB's signature exactly, or closing the tab
       // after tracing a roof beacons nothing (sig compares equal) or beacons
       // needlessly (sig never compares equal). Shared helper, one definition.
-      // Same split as saveLayoutToDB — the beacon must carry every OTHER
-      // property's design in `siteArchives` too, or closing the tab after an
-      // address change would beacon only the active site and drop the rest.
-      const sitePayload = site.persistencePayload({ designElectrical: designElectrical ?? null });
-      const planesForPersistence = sitePayload.roofPlanes;
       // Identical field set to saveLayoutToDB. The beacon previously omitted
       // fence geometry and every scalar design parameter, so closing the tab
       // within the 3s debounce lost them while closing it later did not — the
@@ -1291,6 +1302,14 @@ export default function DesignStudio({ project, onSave }: Props) {
         obstructions: placedObstructionsRef.current,
         measurements: measurementsRef.current,
       };
+      // Same split as saveLayoutToDB — the beacon must carry every OTHER
+      // property's design in `siteArchives` too, or closing the tab after an
+      // address change would beacon only the active site and drop the rest.
+      const sitePayload = site.persistencePayload({
+        designElectrical: designElectrical ?? null,
+        scalars: { fenceLine: designParams.fenceLine, fenceHeight: designParams.fenceHeight },
+      });
+      const planesForPersistence = sitePayload.roofPlanes;
       const sig = layoutSignature({ panels: panelList, designElectrical, roofPlanes: planesForPersistence, designParams })
         + '|' + archivesSignature(sitePayload.siteArchives);
       if (sig === lastSavedPanelsRef.current) return;
@@ -1312,7 +1331,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [project.id, project.systemType, site]);
+  // `site.persistencePayload` and not `site`: the hook returns a fresh object
+  // every render, so depending on it would re-subscribe the unload listener on
+  // every keystroke. The function itself is stable.
+  }, [project.id, project.systemType, site.persistencePayload]);
 
   // ── Restore panels from DB on mount ─────────────────────────────────────────
   useEffect(() => {
@@ -1486,10 +1508,32 @@ export default function DesignStudio({ project, onSave }: Props) {
     // than archive a design on the strength of a coordinate we do not trust.
     if (!nextKey) return false;
     const prevKey = activeSiteKeyRef.current;
-    const res = site.switchToSite(nextKey, { address: address ?? null, mapCenter: { lat, lng } });
+    // 🚨 THE FENCE LINE IS lat/lng GEOMETRY, so it belongs to the property it
+    // was drawn at — carrying it across draws a fence at the old address, which
+    // is the same contamination as a stale roof and reaches the same BOM and
+    // planset. The numeric ground parameters are deliberately NOT here: a tilt
+    // is an installer's preference, not a fact about a parcel, and resetting it
+    // on an address change would be its own quiet data loss.
+    const res = site.switchToSite(nextKey, {
+      address: address ?? null,
+      mapCenter: { lat, lng },
+      scalars: {
+        fenceLine: fenceLineRef.current.length > 1 ? fenceLineRef.current : undefined,
+        fenceHeight: fenceHeightRef.current,
+      },
+    });
     if (!res.changed) return false;
     setRestoredRoofPlaneCount(res.arriving.roofPlanes.length);
     setRestoredPanelCount(res.arriving.panels.length);
+    // Apply the arriving property's fence, or clear it for a property that has
+    // none — leaving the previous one on screen is the defect, not the fix.
+    const arrivingFence = res.arriving.scalars?.fenceLine;
+    fenceLineRef.current = Array.isArray(arrivingFence) ? arrivingFence : [];
+    setFenceLine(fenceLineRef.current);
+    if (typeof res.arriving.scalars?.fenceHeight === 'number') {
+      fenceHeightRef.current = res.arriving.scalars.fenceHeight;
+      setFenceHeight(res.arriving.scalars.fenceHeight);
+    }
     // The new site has no detection result yet — say so honestly rather than
     // leaving the previous site's status on screen.
     setSolarApiStatus('idle');
@@ -1510,14 +1554,17 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Load hardware
   useEffect(() => {
     fetch('/api/hardware').then(r => r.json()).then(d => {
-      if (d.success) {
-        setAvailablePanels(d.data.panels);
-        setAvailableInverters(d.data.inverters);
+      // `success: true` with a null/empty body is not a contradiction the
+      // studio should crash on — it threw an unhandled TypeError here, which
+      // in the browser leaves the page half-initialised with no message.
+      if (d?.success && d.data) {
+        setAvailablePanels(d.data.panels ?? []);
+        setAvailableInverters(d.data.inverters ?? []);
         setAvailableBatteries(d.data.batteries || []);
-        if (d.data.panels.length > 0 && !project.selectedPanel) {
+        if ((d.data.panels?.length ?? 0) > 0 && !project.selectedPanel) {
           setSelectedPanel(d.data.panels[0]);
         }
-        if (d.data.inverters.length > 0 && !project.selectedInverter) {
+        if ((d.data.inverters?.length ?? 0) > 0 && !project.selectedInverter) {
           // Default inverter by ID — NEVER a magic index. `inverters[3]` was
           // commented "SolarEdge default" but the unified list reordered and
           // index 3 became "SMA Sunny Boy 7.7-US", silently stamping a phantom
@@ -1529,7 +1576,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           setSelectedInverter(_defInv);
         }
       }
-    });
+    }).catch(e => console.warn('[DesignStudio] hardware load failed:', (e as Error)?.message));
   }, []);
 
   // ── Geocode address for initial fly-to (does NOT clear panels or fetch Solar data) ───────
@@ -1842,6 +1889,47 @@ export default function DesignStudio({ project, onSave }: Props) {
       }).catch(() => {});
     }
   }, [fetchSolarData, project.id, toast, changeSite]);
+
+  // ── E2E STATE MIRROR ──────────────────────────────────────────────────────
+  // Declared HERE, not beside the other layout state, because it reads
+  // handleLocationPick and the site-bound entities — all defined above this
+  // point. Installed only when NEXT_PUBLIC_E2E=1, so a production build never
+  // creates the hook.
+  useEffect(() => {
+    if (!E2E_ENABLED || typeof window === 'undefined') return;
+    window.__solarE2E = {
+      roofPlanes,
+      panels,
+      stitchedCorners: e2eStitchedCorners,
+      setbackInsets: e2eDiagnostics.setbackInsets,
+      fullRebuildCount: e2eDiagnostics.fullRebuildCount,
+      roofPlaneEntityCount: e2eDiagnostics.roofPlaneEntityCount,
+      setbackBandCentroids: e2eDiagnostics.setbackBandCentroids,
+      panelMoveRebuildCount: e2eDiagnostics.panelMoveRebuildCount,
+      // ── SITE OWNERSHIP ────────────────────────────────────────────────────
+      // Ray's first acceptance test was A → B → A, and the spec that should
+      // have caught it could not see any of this. Exposed under the same
+      // build-time flag as everything above (NEXT_PUBLIC_E2E), so a production
+      // build does not install the hook at all.
+      placedObstructions,
+      measurements,
+      activeSiteKey: site.activeSiteKey,
+      archivedSiteCount: site.archivedSiteCount,
+      archivedEntityCount: site.archivedEntityCount,
+      /** Pick a house, exactly as SolarEngine3D does in Pick House mode. The
+       *  browser path to that click needs WebGL, Google tiles and a building
+       *  under the cursor; the BEHAVIOUR being tested is what happens after. */
+      pickHouse: (lat: number, lng: number, address: string) => { void handleLocationPick(lat, lng, address); },
+      seedDesign: (d) => {
+        if (d.panels) setPanels(d.panels);
+        if (d.roofPlanes) setRoofPlanes(d.roofPlanes);
+        if (d.obstructions) setPlacedObstructions(d.obstructions);
+        if (d.measurements) setMeasurements(d.measurements);
+      },
+    };
+  }, [roofPlanes, panels, placedObstructions, measurements, e2eStitchedCorners, e2eDiagnostics,
+      site.activeSiteKey, site.archivedSiteCount, site.archivedEntityCount, handleLocationPick,
+      setPanels, setRoofPlanes, setPlacedObstructions, setMeasurements]);
 
   // ── Resolve location on load ─────────────────────────────────────────
   // v52.1: Street-level geocode always wins over stored coords.
@@ -4937,6 +5025,27 @@ export default function DesignStudio({ project, onSave }: Props) {
             {/* ── DESIGN TAB ── */}
             {activeTab === 'design' ? (
               <>
+                {/* 🚨 ANOTHER PROPERTY'S DESIGN IS SAVED — AT THE TOP, UNCOLLAPSED.
+                    This used to sit inside the "Roof Analysis" accordion, which
+                    is `defaultOpen={false}`. So the one message that answers the
+                    question a user actually asks — "where did my panels go?" —
+                    was behind a click they had no reason to make, and the
+                    correct behaviour still read as data loss. It belongs where
+                    the loss appears to happen: the top of the panel, the moment
+                    the property changes.
+                    It also no longer says "roof": panels, obstructions and
+                    measurements move with the property too. */}
+                {archivedSitePlaneCount > 0 ? (
+                  <div className="mx-3 mt-3 text-xs text-slate-300 bg-amber-500/10 rounded-lg p-2.5 border border-amber-500/30">
+                    <div className="font-semibold text-amber-300 mb-1">🏠 Saved for another address</div>
+                    <div className="leading-relaxed text-slate-400">
+                      The design you did at {site.archivedSiteCount === 1 ? 'another address' : `${site.archivedSiteCount} other addresses`} —
+                      {' '}{archivedSitePlaneCount} {archivedSitePlaneCount === 1 ? 'item' : 'items'} in all, panels and roof included —
+                      {' '}{archivedSitePlaneCount === 1 ? 'is' : 'are'} kept safely. Go back to that address to see
+                      {' '}{archivedSitePlaneCount === 1 ? 'it' : 'them'} again — nothing was deleted.
+                    </div>
+                  </div>
+                ) : null}
                 {/* System Summary — always visible so Calculate Production is always accessible */}
                 <Section title="System Summary" icon={<Zap size={12} />}>
                   {panels.length > 0 ? (
@@ -5791,26 +5900,6 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
                           <div className="font-semibold text-slate-300 mb-1">⚠ Auto-detect Unavailable</div>
                           <div>Use <span className="text-amber-400 font-medium">Draw Roof Zone</span> to trace planes manually.</div>
-                        </div>
-                      ) : null}
-
-                      {/* Another property's roof is saved.
-                          The one question the old UI could not answer: "will
-                          changing the address lose the work I already did?" It
-                          does not — geometry is archived per property and comes
-                          back — but nothing said so, which made a correct
-                          behaviour look like data loss. Plain language, no
-                          jargon, no new controls: the address bar is already
-                          how you go back. */}
-                      {archivedSitePlaneCount > 0 ? (
-                        <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
-                          <div className="font-semibold text-slate-300 mb-1">🏠 Saved for another address</div>
-                          <div className="leading-relaxed">
-                            The design you did at {site.archivedSiteCount === 1 ? 'another address' : `${site.archivedSiteCount} other addresses`} —
-                            {' '}{archivedSitePlaneCount} {archivedSitePlaneCount === 1 ? 'item' : 'items'} in all, panels and roof included —
-                            {' '}{archivedSitePlaneCount === 1 ? 'is' : 'are'} kept safely. Go back to that address to see
-                            {' '}{archivedSitePlaneCount === 1 ? 'it' : 'them'} again — nothing was deleted.
-                          </div>
                         </div>
                       ) : null}
 

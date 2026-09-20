@@ -127,6 +127,11 @@ describe('🚨 the exact sequence Ray ran on 3 Melvin Drive', () => {
     act(() => { r.result.current.hydrateFromStored(null, KEY_A); });
     seed(r.result, 'A', 52);
     const a = seen(r.result);
+    // Give B a design of its own, or it is pruned as an un-designed property
+    // and there is nothing to count.
+    act(() => { r.result.current.switchToSite(KEY_B); });
+    seed(r.result, 'B', 4);
+    act(() => { r.result.current.switchToSite(KEY_A); });
     act(() => {
       for (let i = 0; i < 20; i++) {
         r.result.current.switchToSite(KEY_B);
@@ -372,6 +377,49 @@ describe('reload', () => {
       }, KEY_A);
     });
     expect(next.result.current.panels).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 the fence line is site-bound — it is lat/lng geometry', () => {
+  const fenceA = [{ lat: 38.7061, lng: -90.0462 }, { lat: 38.7062, lng: -90.0461 }];
+  const fenceB = [{ lat: 38.7063, lng: -90.0460 }, { lat: 38.7064, lng: -90.0459 }];
+
+  it('a fence drawn at A does not follow the user to B', () => {
+    // Carrying it across draws a fence at the OLD address — the same
+    // contamination as a stale roof, reaching the same BOM and planset.
+    const r = renderHook(() => useSiteDesign());
+    act(() => { r.result.current.hydrateFromStored(null, KEY_A); });
+    act(() => { r.result.current.switchToSite(KEY_B, { scalars: { fenceLine: fenceA, fenceHeight: 2 } }); });
+    expect(r.result.current.stateRef.current.active.scalars?.fenceLine ?? []).toEqual([]);
+    expect(r.result.current.stateRef.current.archives[KEY_A].scalars?.fenceLine).toEqual(fenceA);
+  });
+
+  it('…and comes back, exactly, when the user returns', () => {
+    const r = renderHook(() => useSiteDesign());
+    act(() => { r.result.current.hydrateFromStored(null, KEY_A); });
+    act(() => { r.result.current.switchToSite(KEY_B, { scalars: { fenceLine: fenceA, fenceHeight: 2 } }); });
+    let back!: ReturnType<Hook['switchToSite']>;
+    act(() => { back = r.result.current.switchToSite(KEY_A, { scalars: { fenceLine: fenceB, fenceHeight: 3 } }); });
+    expect(back.arriving.scalars?.fenceLine).toEqual(fenceA);
+    expect(back.arriving.scalars?.fenceHeight).toBe(2);
+    // B's own fence is kept too.
+    expect(r.result.current.stateRef.current.archives[KEY_B].scalars?.fenceLine).toEqual(fenceB);
+  });
+
+  it('a property with only a fence is still archived — it is real work', () => {
+    const r = renderHook(() => useSiteDesign());
+    act(() => { r.result.current.hydrateFromStored(null, KEY_A); });
+    act(() => { r.result.current.switchToSite(KEY_B, { scalars: { fenceLine: fenceA } }); });
+    expect(r.result.current.archivedSiteCount).toBe(1);
+  });
+
+  it('the fence reaches the persisted archive', () => {
+    const r = renderHook(() => useSiteDesign());
+    act(() => { r.result.current.hydrateFromStored(null, KEY_A); });
+    act(() => { r.result.current.switchToSite(KEY_B, { scalars: { fenceLine: fenceA, fenceHeight: 2 } }); });
+    const stored = r.result.current.storedArchives();
+    expect(stored.sites[KEY_A].scalars?.fenceLine).toEqual(fenceA);
   });
 });
 
