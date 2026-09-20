@@ -1105,13 +1105,17 @@ export default function DesignStudio({ project, onSave }: Props) {
       fenceHeight: project.systemType === 'fence' ? fenceHeightRef.current : undefined,
     };
     // STEP 1 -- LAYOUT SAVE LOGGING
+    // Report what is actually WRITTEN, not just the active site — otherwise the
+    // count here disagrees with the payload the moment a second site is archived.
     console.log('[LAYOUT SAVE PAYLOAD]', {
       projectId: project.id,
       panelCount: panelList.length,
-      roofPlaneCount: roofPlanesRef.current.length,
-      hasRoofPlanes: roofPlanesRef.current.length > 0,
+      roofPlaneCount: planesForPersistence.length,
+      activeSitePlaneCount: roofPlanesRef.current.length,
+      archivedSitePlaneCount: foreignRoofPlanesRef.current.length,
+      activeSiteKey: activeSiteKeyRef.current,
+      hasRoofPlanes: planesForPersistence.length > 0,
       panels: panelList.slice(0, 3),
-      roofPlanes: roofPlanesRef.current,
     });
     // Always save to localStorage first (survives serverless cold starts)
     localSaveLayout(project.id, payload);
@@ -3828,11 +3832,25 @@ export default function DesignStudio({ project, onSave }: Props) {
   const buildLayout = (): Omit<Layout, 'id' | 'createdAt' | 'updatedAt'> => {
     // Reuse buildSystemDefinition for shared tilt/azimuth/roofPlane logic
     const sysDef = buildSystemDefinition();
+    // 🚨 THE SAVE BUTTON PERSISTS TOO. buildSystemDefinition returns the ACTIVE
+    // site's planes, which is right for ENGINEERING — tilt, azimuth and the
+    // production model must only ever see the property being designed. But this
+    // payload is also WRITTEN, so sending the active set alone would delete
+    // every archived site's roof from the row that the autosave path carefully
+    // preserves. Engineering keeps the active set; storage gets the merge.
+    //
+    // Only rewrites the field when there is something archived to lose, so the
+    // no-archive case behaves exactly as before (including `undefined`, which
+    // the route treats as "keep what is stored").
+    const archived = foreignRoofPlanesRef.current ?? [];
+    const roofPlanesForStorage = archived.length > 0
+      ? mergeForPersistence(sysDef.roofPlanes ?? [], archived, activeSiteKeyRef.current ?? '')
+      : sysDef.roofPlanes;
     return {
       projectId: project.id,
       systemType: project.systemType,
       panels,
-      roofPlanes: sysDef.roofPlanes,
+      roofPlanes: roofPlanesForStorage,
       groundTilt: sysDef.groundTilt,
       groundAzimuth: sysDef.groundAzimuth,
       rowSpacing, groundHeight,
