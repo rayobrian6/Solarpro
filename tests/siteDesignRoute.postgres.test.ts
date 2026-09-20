@@ -320,7 +320,9 @@ describe('🚨 A → B → A through the real route', () => {
     await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
     // The Stowell reload defect: an empty save with nothing archived anywhere.
     const res = await post(autosaveBody({ panels: [], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
-    expect(res.status).toBe(503);
+    // 409, not 503: a deliberate refusal is not a transient database error.
+    expect(res.status).toBe(409);
+    expect((res.json as { code?: string }).code).toBe('LAYOUT_SUBSYSTEM_WIPE');
     // …and the stored design is untouched.
     expect((await get())?.panels).toHaveLength(52);
   });
@@ -508,7 +510,8 @@ describe('🚨 the wipe guard relaxes only while the property is CHANGING', () =
       panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
       archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
     }));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(409);
+    expect((res.json as { code?: string }).code).toBe('LAYOUT_SUBSYSTEM_WIPE');
     expect((await get())!.panels).toHaveLength(9);
   });
 });
@@ -593,11 +596,106 @@ describe('🚨 a deployment that has not run 123 yet', () => {
         panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
         archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
       }));
-      expect(res.status).toBe(503);
+      // 🚨 409, NOT 503. This used to assert 503, because every throw in the
+      // route went through handleRouteDbError, which labels anything that is not
+      // a DbConfigError as DB_STARTING — a status its own comment calls
+      // transient and self-resolving. This refusal is neither: it is permanent
+      // and deliberate, and reporting it as a database hiccup meant the studio
+      // showed a five-second generic badge and the operator saw a transient
+      // warning for a condition that actually means "run migration 123".
+      expect(res.status).toBe(409);
+      // 🚨 AND THE DIAGNOSIS IS NOW THE ACCURATE ONE. Both guards refuse this
+      // save, but the archive check runs first and names the actual cause —
+      // there is nowhere to put the other property's design — instead of the
+      // wipe guard's symptom, 'an entire sub-system would vanish'. The operator
+      // is told to run migration 123 rather than left to infer it.
+      const body = res.json as { code?: string; refused?: boolean };
+      expect(body.code).toBe('LAYOUT_ARCHIVE_UNSTORABLE');
+      expect(body.refused).toBe(true);
       // 🚨 And the 52 panels are still there.
       const rows = await scratch.query<{ n: number }>(`SELECT jsonb_array_length(panels) AS n FROM layouts`);
       expect(rows.rows[0].n).toBe(52);
     });
+  });
+
+  it('🚨 ONE panel at the new property does NOT overwrite the previous 52', async () => {
+    // THE HOLE THE WIPE GUARD NEVER COVERED.
+    //
+    // That guard compares systemType BUCKET MEMBERSHIP, not identity and not
+    // count. It fires only when the incoming array has no panels of a stored
+    // type at all — which is why the `panels: []` case above is caught. Place
+    // ONE roof panel at the new property and 'roof' is in `incoming`, the guard
+    // passes, and `panels = ${panelsJson}::jsonb` (no COALESCE, unlike
+    // roof_planes and map_center beside it) replaces the 52 with the 1 — while
+    // the archive that was holding those 52 is dropped by the swallowed catch in
+    // applyDesignEntities. HTTP 200. Badge says "saved".
+    //
+    // This is the normal roof→roof case, i.e. what actually happens when a user
+    // picks the house next door and starts designing.
+    await pre123(async scratch => {
+      const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+      expect((await post(autosaveBody({
+        panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A,
+      }))).status).toBe(200);
+
+      const res = await post(autosaveBody({
+        panels: [panel('neighbour-0')], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+        archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+      }));
+
+      expect(res.status).toBe(409);
+      const body = res.json as { code?: string; error?: string };
+      expect(body.code).toBe('LAYOUT_ARCHIVE_UNSTORABLE');
+      expect(body.error).toMatch(/migration 123/);
+      expect(body.error).toMatch(/52 panels/);
+
+      // NOTHING was written — the refusal happens before any UPDATE.
+      const rows = await scratch.query<{ n: number }>(`SELECT jsonb_array_length(panels) AS n FROM layouts`);
+      expect(rows.rows[0].n).toBe(52);
+    });
+  });
+
+  it('an EMPTY archive is still allowed through — only real loss is refused', async () => {
+    // An archive with no entities round-trips identically whether it is stored
+    // or not, so refusing it would break ordinary single-property use on a
+    // pre-123 deployment for no benefit. Fail closed on loss, not on presence.
+    await pre123(async scratch => {
+      const res = await post(autosaveBody({
+        panels: [panel('p1')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A,
+        archives: { [KEY_B]: { panels: [], roofPlanes: [], obstructions: [], measurements: [] } },
+      }));
+      expect(res.status).toBe(200);
+      const rows = await scratch.query<{ n: number }>(`SELECT jsonb_array_length(panels) AS n FROM layouts`);
+      expect(rows.rows[0].n).toBe(1);
+    });
+  });
+
+  it('a non-panel archive counts as loss too — roof planes alone are enough', async () => {
+    // The archive carries four entity kinds. Refusing only when PANELS would be
+    // lost would silently discard a traced roof, which is just as much work.
+    await pre123(async () => {
+      const res = await post(autosaveBody({
+        panels: [panel('p1')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A,
+        archives: { [KEY_B]: { panels: [], roofPlanes: [plane('r0', KEY_B, NEIGHBOUR)], obstructions: [], measurements: [] } },
+      }));
+      expect(res.status).toBe(409);
+      expect((res.json as { code?: string }).code).toBe('LAYOUT_ARCHIVE_UNSTORABLE');
+    });
+  });
+
+  it('…and the one-panel property change SUCCEEDS once 123 has run', async () => {
+    // The other half of the contract: the refusal is about the column, not about
+    // the operation. With somewhere to put the archive, the same save is fine.
+    const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+    await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    const res = await post(autosaveBody({
+      panels: [panel('neighbour-0')], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }));
+    expect(res.status).toBe(200);
+    const after = (await get())!;
+    expect(after.panels).toHaveLength(1);
+    expect(((after.siteArchives as any).sites[KEY_A].panels)).toHaveLength(52);
   });
 
   it('…and the SAME save is allowed once 123 has run', async () => {

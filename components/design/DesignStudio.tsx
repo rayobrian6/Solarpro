@@ -949,6 +949,10 @@ export default function DesignStudio({ project, onSave }: Props) {
   const mapCenterRef = useRef(mapCenter);
   const zoomRef = useRef(zoom);
   const lastSavedPanelsRef = useRef<string>('[]');
+  /** The last 409 refusal reason we told the user about, so a permanent refusal
+   *  retried every few seconds does not repeat its toast forever. Cleared by the
+   *  first save that succeeds. */
+  const lastRefusalRef = useRef<string | null>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Data-loss guard (task #3 root cause, 2026-07-16): NO save path may run
   // before the DB restore has resolved. The autosave timer armed on MOUNT and
@@ -1232,6 +1236,9 @@ export default function DesignStudio({ project, onSave }: Props) {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
+        // A save got through, so any earlier refusal is over — let the next one
+        // speak again rather than being suppressed as a duplicate.
+        lastRefusalRef.current = null;
         setLastSavedAt(new Date());
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 3000);
@@ -1242,8 +1249,34 @@ export default function DesignStudio({ project, onSave }: Props) {
         // compares equal and returns early. A failed save became a permanent
         // one. Clearing it lets the next edit carry this content up with it.
         lastSavedPanelsRef.current = '';
-        console.error('[LAYOUT SAVE] rejected', res.status, await res.text().catch(() => ''));
+        const body = await res.text().catch(() => '');
+        console.error('[LAYOUT SAVE] rejected', res.status, body);
         setSaveStatus('error');
+        // 🚨 A REFUSAL IS PERMANENT — DO NOT LET IT BLINK AWAY.
+        //
+        // 409 is the server declining to destroy the user's work (a subsystem
+        // wipe, or an archived property it cannot store because migration 123
+        // has not been run). It will keep refusing until someone acts. Clearing
+        // the badge after five seconds, as a transient failure does, meant the
+        // one message that explains the situation vanished before it could be
+        // read — and the user carried on designing into a layout that was not
+        // being saved. So the badge STAYS, and the reason is put in front of
+        // them instead of only in the console.
+        if (res.status === 409) {
+          let reason = 'The server refused this save to avoid destroying existing work.';
+          try {
+            const parsed = JSON.parse(body) as { error?: string };
+            if (parsed?.error) reason = parsed.error;
+          } catch { /* keep the fallback */ }
+          // The autosave retries every few seconds and the refusal is permanent,
+          // so speak ONCE per distinct reason. Repeating the same toast forever
+          // is how a real warning becomes wallpaper.
+          if (lastRefusalRef.current !== reason) {
+            lastRefusalRef.current = reason;
+            toast.error('Save refused — your design is NOT saved', reason);
+          }
+          return;
+        }
         setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
       }
     } catch (e) {

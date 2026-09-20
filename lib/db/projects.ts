@@ -844,6 +844,53 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   const sql = await getDbReady();
   // Block cross-project coordinate contamination before any write (see helper above).
   await assertLayoutCoordsMatchProject(sql, data);
+  // 🚨 REFUSE A SAVE THAT WOULD SILENTLY DISCARD AN ARCHIVED PROPERTY.
+  //
+  // `applyDesignEntities` writes `site_archives` (migration 123) inside a
+  // try/catch whose only handler is a console.warn. On a deployment that has not
+  // run 123 the UPDATE throws "column does not exist", is swallowed, upsertLayout
+  // returns normally and the route answers **HTTP 200**. The studio branches on
+  // `res.ok` alone and shows "saved".
+  //
+  // The subsystem-wipe guard below does NOT cover this. It compares systemType
+  // BUCKET MEMBERSHIP, so it only fires when the incoming array has no panels of
+  // a stored type at all. Place ONE panel at the new property and 'roof' is in
+  // `incoming`, the guard passes, and `panels = ${panelsJson}::jsonb` — with no
+  // COALESCE, unlike roof_planes and map_center on the adjacent lines — replaces
+  // the previous property's 52 with the 1. The archive that was supposed to be
+  // holding those 52 was dropped a moment earlier, silently.
+  //
+  // So the check is here, BEFORE any write, and outside the guard's try/catch
+  // (which re-throws only LAYOUT_SUBSYSTEM_WIPE and swallows everything else —
+  // a refusal raised in there would be discarded).
+  //
+  // It refuses only when something would actually be LOST. An archive with no
+  // entities round-trips identically whether it is stored or not, so an empty one
+  // is allowed through and a single-property project keeps working normally on a
+  // pre-123 deployment. Only the case this exists for — real archived work that
+  // cannot be persisted — fails closed.
+  if (data.siteArchives !== undefined && !(await layoutsHasSiteArchives(sql))) {
+    const sites = (data.siteArchives as { sites?: Record<string, Record<string, unknown>> } | null)?.sites;
+    const lossy = sites && typeof sites === 'object'
+      ? Object.entries(sites).filter(([, bundle]) =>
+          !!bundle && ['panels', 'roofPlanes', 'obstructions', 'measurements']
+            .some(k => Array.isArray(bundle[k]) && (bundle[k] as unknown[]).length > 0))
+      : [];
+    if (lossy.length > 0) {
+      const detail = lossy.map(([k, b]) => {
+        const counts = ['panels', 'roofPlanes', 'obstructions', 'measurements']
+          .map(f => [f, Array.isArray(b[f]) ? (b[f] as unknown[]).length : 0] as const)
+          .filter(([, n]) => n > 0).map(([f, n]) => `${n} ${f}`).join(', ');
+        return `${k} (${counts})`;
+      }).join('; ');
+      console.error('[LAYOUT_ARCHIVE_UNSTORABLE]', { projectId: data.projectId, detail });
+      throw new Error(
+        `LAYOUT_ARCHIVE_UNSTORABLE: this save carries another property's design — ${detail} — ` +
+        `and the layouts.site_archives column does not exist, so it would be discarded without trace. ` +
+        `Run migration 123 (Admin → System Tools → Migrations). Nothing has been written.`,
+      );
+    }
+  }
   // Nameplate authority (P0-7): map-carrying projects get the equipment-db kW.
   const nameplateKw = await resolveNameplateSizeKw(sql, data);
   const sizeKw = nameplateKw ?? data.systemSizeKw ?? 0;

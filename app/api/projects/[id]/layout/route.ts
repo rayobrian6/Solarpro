@@ -318,6 +318,29 @@ export async function POST(req: NextRequest, context: RouteContext) {
       },
     });
   } catch (error: unknown) {
+    // 🚨 A DELIBERATE REFUSAL IS NOT A DATABASE HICCUP.
+    //
+    // `handleRouteDbError` classifies everything that is not a DbConfigError as
+    // **503 DB_STARTING**, a status its own comment describes as transient and
+    // self-resolving on retry. Both guards below are the opposite: they are
+    // permanent, deliberate refusals to destroy the user's work, and they stay
+    // refused until a human does something about it.
+    //
+    // Reporting them as 503 cost twice. The studio showed a generic save-failed
+    // badge that cleared itself after five seconds, so the user saw a blink and
+    // no reason; and the operator saw a transient-DB warning for a condition that
+    // is actually "run migration 123". 409 Conflict with a distinct code is the
+    // honest answer, and it carries the message the guard already wrote.
+    const msg = error instanceof Error ? error.message : String(error);
+    for (const code of ['LAYOUT_SUBSYSTEM_WIPE', 'LAYOUT_ARCHIVE_UNSTORABLE'] as const) {
+      if (msg.startsWith(code)) {
+        console.error(`[POST /api/projects/[id]/layout] ${code}:`, msg);
+        return NextResponse.json(
+          { success: false, error: msg, code, refused: true },
+          { status: 409 },
+        );
+      }
+    }
     return handleRouteDbError('[POST /api/pr', error);
   }
 }

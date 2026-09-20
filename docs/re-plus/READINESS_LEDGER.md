@@ -106,7 +106,7 @@ neighbour must not. An earlier 25 m radius swallowed the neighbour.
 | | |
 |---|---|
 | **Severity** | **P0** |
-| **Status** | `OPEN` — **not fixed on any branch, including `6aa5ea0a`** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
 | **Explains** | Failure A across reloads; silent design destruction |
 
 This is independent of WS1-001 and **survives the proximity fix**.
@@ -144,6 +144,26 @@ Identity should be re-derived from the coordinate that minted it.
 > Note: PR #19 changes `map_center` to `COALESCE` (absence keeps the stored value), which alters
 > this path — re-verify against #19, not master.
 
+**Fix.** `hydrate` now asks *"is this the same **property**"* (`sitesAreSameProperty` — the same
+predicate `resolveSiteKey` and the detection staleness guard use, so there is one definition in the
+codebase, not a third) instead of *"is this the same **string**"*. The key that survives is
+`parsed.activeSiteKey`, **not** the drifted `siteKeyNow`: archives are filed under the stored key
+and roof planes are stamped with it, so adopting the geocoder's key would orphan both.
+
+🚨 **The first fix was incomplete, and the test caught it.** Correcting the `matched` comparison
+left its sibling untouched: the reactivation branch still did `archives[siteKeyNow]`, an **exact**
+lookup, so a user returning to a property the archive genuinely held *missed it* and fell into the
+same empty + `needsAdoptionSave` branch. Archive lookup is a property question, not a string
+lookup. Added `nearestSamePropertyKey` — **nearest** match, not first, because two real houses can
+both sit inside the radius of a point between them and first-match would make one permanently
+unreachable (the same rule `resolveSiteKey` already follows).
+
+**Tests** — `tests/restoreIdentityDrift.test.ts`, 11 tests. The fixture is asserted honest first
+(the click and geocode keys genuinely differ, are genuinely the same property, and are 1.2–8 m
+apart). Then: the design stays active, `needsAdoptionSave` is false, panels return **by id**, the
+stored key survives, archives carry through, a genuinely different property is still archived, and
+a drifted return still reactivates its archive.
+
 ---
 
 ### WS1-003 — With migration 123 absent, placing ONE panel at a new property overwrites the previous property's 52
@@ -151,7 +171,7 @@ Identity should be re-derived from the coordinate that minted it.
 | | |
 |---|---|
 | **Severity** | **P0** |
-| **Status** | `OPEN` (production: migration 123 unapplied) |
+| **Status** | `FIXED_PENDING_VERIFICATION` (production: migration 123 still unapplied) |
 
 The wipe guard compares **`systemType` bucket membership, not site identity or count**
 ([lib/db/projects.ts:944-948](lib/db/projects.ts:944)). A stored `{roof: 52}` bucket is flagged
@@ -170,8 +190,54 @@ on `res.ok` alone and shows **"saved"**.
 
 > **Prior art (peer session).** This is already analysed in `PHASE2-SITE-OWNERSHIP-CLOSEOUT.md`
 > line 34 on master — "place one panel at the new property and the guard passes". It was
-> documented as the reason Melvin survived by luck and deliberately not fixed. So it is **open but
-> not unseen**; the derivation is already written down.
+> documented as the reason Melvin survived by luck and deliberately not fixed.
+
+**Fix — fail closed, before any write.** `upsertLayout` now refuses when `siteArchives` carries an
+archived property that **would actually be lost**: the column is absent and at least one archived
+bundle has entities. It runs before the first `UPDATE`, and deliberately **outside** the wipe
+guard's `try/catch` — that block re-throws only `LAYOUT_SUBSYSTEM_WIPE` and swallows everything
+else, so a refusal raised inside it would have been discarded.
+
+It refuses only on real loss: an archive with no entities round-trips identically whether stored or
+not, so a single-property project keeps working normally on a pre-123 deployment. All four entity
+kinds count — refusing only when *panels* would be lost would silently discard a traced roof, which
+is just as much work.
+
+**Tests** — in `tests/siteDesignRoute.postgres.test.ts`, against **real PostgreSQL** (PGlite,
+in-process, no credentials), with migration 123 deliberately absent: one panel at the new property
+is refused **409 `LAYOUT_ARCHIVE_UNSTORABLE`** and *nothing is written*; an empty archive is still
+allowed through; a roof-plane-only archive is refused too; and the same save **succeeds** once 123
+has run, with the 52 panels readable back out of `site_archives`.
+
+🚨 **Mutation-proven.** With the check reverted, that test returns **HTTP 200** — the save
+succeeds, the 52 panels become 1, and the archive is discarded. That is the defect, reproduced.
+
+---
+
+## WS1-017 — A deliberate refusal was reported as a transient database error
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+Every throw in the layout route went through `handleRouteDbError`, which classifies anything that
+is not a `DbConfigError` as **503 `DB_STARTING`** — a status its own comment describes as transient
+and self-resolving on retry ([lib/db/core.ts:137-141](lib/db/core.ts:137)).
+
+Both data-protection guards are the opposite of transient: they are permanent, deliberate refusals
+to destroy the user's work, and they stay refused until a human acts. Reporting them as 503 cost
+twice over — the studio showed a **generic save-failed badge that cleared itself after five
+seconds**, so the user saw a blink and no reason and carried on designing into a layout that was
+not being saved; and the operator saw a transient-DB warning for a condition that actually means
+*run migration 123*.
+
+**Fix.** The route maps `LAYOUT_SUBSYSTEM_WIPE` and `LAYOUT_ARCHIVE_UNSTORABLE` to **409 Conflict**
+with a distinct `code` and `refused: true`, carrying the message the guard already wrote. The
+studio surfaces that message in a toast and **leaves the error badge up** rather than clearing it,
+because the condition is permanent. It speaks **once per distinct reason** — the autosave retries
+every few seconds, and repeating the same toast forever is how a real warning becomes wallpaper —
+and resets on the first successful save.
 
 ---
 
@@ -285,9 +351,9 @@ Playwright specs are the only browser layer.
 One sentence: **there are two different, unshared definitions of "the roof surface" on either side
 of the render boundary.** Six independent confirmed defects.
 
-**Fixed in this session** on branch `fix/ws1-autolayout-panel-elevation` — **PR #20**, commits
-`b0e04146` and `6a681d12`: WS1-008, WS1-009, WS1-010, WS1-011 (+ WS1-014). Still open: WS1-012,
-WS1-013, which are coupled to each other.
+**Fixed in this session** on branch `fix/ws1-autolayout-panel-elevation` — **PR #20**:
+WS1-008, WS1-009, WS1-010, WS1-011, WS1-012, WS1-014, WS1-015, WS1-016. Still open: **WS1-013**
+only, at P2, and it needs a visual judgement rather than more analysis.
 
 > 🚨 **A stacked PR gets NO CI.** `.github/workflows/ci.yml` triggers on
 > `pull_request: branches: [master]` only, so PR #20 based on `fix/phase2-post-merge-regressions`
@@ -464,7 +530,55 @@ direction picked correctly for one face is the wrong direction on every other fa
 ([SolarEngine3D.tsx:4529-4549](components/3d/SolarEngine3D.tsx:4529)). The two go to different
 consumers with no guard anywhere on the path.
 
-### WS1-013 — `renderRoofRails` assumes an offset that does not exist — `OPEN`
+### WS1-013 — Two definitions of "how high a module sits above the deck" — `OPEN (needs a visual judgement)`
+
+| | |
+|---|---|
+| **Severity** | **P2 — viewport only** |
+| **Reaches engineering output** | **No** — `PlacedPanel.height` is read by the 3D renderer and the ground-mount engine, and by nothing on the roof engineering path |
+
+This is the last open datum item, and it is stated fully here because the fix needs an eye, not a
+calculation.
+
+There are **five** roof placement paths. **Four** put a module `getRoofPanelOffset(mountId)` above
+the plane — 0.14 m for the default IronRidge XR100 (102 mm standoff + 42 mm rail):
+
+| Path | Offset |
+|---|---|
+| Single panel on a marked plane (`SolarEngine3D.tsx:6335-6346`) | `getRoofPanelOffset` |
+| Single panel off-plane (`:6365`) | `getRoofPanelOffset` |
+| Google-segment fill (`:11213`) | `getRoofPanelOffset` |
+| Snap/row path (`:11357`) | `getRoofPanelOffset` |
+| **Auto Layout — `buildSurfaceGridECEF`** | **`PANEL_OFFSET_ECEF` = 0.05** |
+
+So a design with both hand-placed and auto-filled panels has them at **two different heights on the
+same roof**, 9 cm apart.
+
+`renderRoofRails` belongs to the majority convention: it computes
+`inwardM = getRoofPanelOffset(mountId) − railH/2` from the comment
+*"panel.height = roofDeckAlt + stackH"* — and **`roofDeckAlt` is not a variable anywhere in the
+file**, it appears only in that comment. Against an auto-filled panel the rail centre lands
+**0.069 m below the deck** and its top at −0.006 m, so the whole run renders under the deck fill.
+Against a hand-placed panel it sits correctly in the gap.
+
+**Why this is not fixed here.** Unifying them is right, but *which value* is a visual judgement I
+cannot make without the browser:
+
+- The rail is drawn at **`railH * 3`** (`:4076`, `:4138`) — a deliberate 3× exaggeration for
+  visibility, 0.126 m tall. It fits under a panel at 0.14 m and cannot fit under one at 0.05 m.
+- Physically, the fitted plane is *already* lifted `SURFACE_OFFSET_M` (0.12 m) as a z-fighting
+  fudge, so adding a full 0.14 m mount stack on top double-counts: 0.26 m above the raw mesh for a
+  stack that is really ~0.14 m. By that measure Auto Layout's 0.17 m total is the closer one.
+
+Consistency and physical truth therefore point at *different* values, and the tie-breaker is what
+the 3D view should look like. Guessing would move every auto-filled panel by 9 cm on a judgement I
+cannot check.
+
+**Recommended resolution** (one line of product judgement, then mechanical): pick the convention,
+put it in **one exported constant**, have all five placement paths and `renderRoofRails` read it,
+and pin it with a test asserting every path yields the same clearance. The mount-stack value is the
+better default — it is what four paths and the rail renderer already assume, so it is the smaller
+change and the one that makes rails correct for free.
 
 Its comment asserts `panel.height = roofDeckAlt + stackH`; **`roofDeckAlt` is not a variable
 anywhere in the file** — it appears only in that comment. For the default IronRidge XR100 mount the
@@ -617,7 +731,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
 | E2E passes | ❌ **not run by me** — see below |
-| Full suite passes | ✅ **564 files, 12,140 tests, 0 failures**, 490 skipped |
+| Full suite passes | ✅ **566 files, 12,170 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |
@@ -626,7 +740,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Exact tested SHA verified | ✅ **`de47e48a`** (code frozen at `f24a40c1`; `de47e48a` is docs-only) |
 | **Visual check in a browser** | ❌ **BLOCKED — no database in this environment** (see below) |
 | Between-face geometry invariants | ❌ **GAP** — ridge continuity is asserted nowhere |
-| No known P0/P1 in workstream | ❌ WS1-002, WS1-003, WS1-012, WS1-013 open |
+| No known P0/P1 in workstream | ✅ **all P0/P1 closed**; WS1-013 remains open at **P2**, and needs a visual judgement |
 
 ### Why the visual gate is blocked, and what would unblock it
 

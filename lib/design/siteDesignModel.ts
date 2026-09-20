@@ -285,6 +285,38 @@ export function sitesAreSameProperty(a: string | null | undefined, b: string | n
   return metresBetween(ca, cb) <= SITE_MATCH_RADIUS_M;
 }
 
+/**
+ * Which of `candidates` is the same property as `key` — the NEAREST one, or null.
+ *
+ * 🚨 AN ARCHIVE LOOKUP IS A PROPERTY QUESTION, NOT A STRING LOOKUP.
+ * `archives[someKey]` is exact, and on the restore path the key being looked up
+ * was re-derived from a coordinate that drifts (see the note in `hydrate`). So a
+ * user returning to a property the archive genuinely holds missed it, and got an
+ * empty design plus `needsAdoptionSave` — the destructive branch — for a design
+ * that was sitting right there under a neighbouring key.
+ *
+ * NEAREST, not first-match: two real houses can both be inside the radius of a
+ * point between them, and snapping to whichever happened to be enumerated first
+ * would make one of them permanently unreachable. Same rule as `resolveSiteKey`.
+ */
+export function nearestSamePropertyKey(
+  candidates: readonly string[],
+  key: string | null | undefined,
+): string | null {
+  if (!key) return null;
+  if (candidates.includes(key)) return key; // exact wins, and costs nothing
+  const target = coordsOfSiteKey(key);
+  if (!target) return null;
+  let best: { key: string; d: number } | null = null;
+  for (const c of candidates) {
+    const cc = coordsOfSiteKey(c);
+    if (!cc) continue;
+    const d = metresBetween(target, cc);
+    if (d <= SITE_MATCH_RADIUS_M && (!best || d < best.d)) best = { key: c, d };
+  }
+  return best ? best.key : null;
+}
+
 export interface ResolvedSite {
   key: string;
   /** True when this reused a property the project already knows about. */
@@ -397,8 +429,18 @@ export function switchSite(
   else delete archives[state.activeSiteKey];
 
   // Take back whatever was stored for the site we are entering.
-  const arriving: SiteDesignBundle = archives[toKey] ?? emptyBundle();
-  delete archives[toKey];
+  //
+  // 🚨 BY PROPERTY, NOT BY STRING — even though today's only caller already
+  // resolved the key. `changeSite` runs `resolveKeyFor` first, so `toKey` is
+  // normally an existing key and the exact branch inside
+  // `nearestSamePropertyKey` takes it at no cost. But that made correctness here
+  // depend on a caller remembering to resolve, and this function is exported.
+  // A raw key from any future caller would have silently missed a stored bundle
+  // and handed back an empty one — the same class of defect the restore path
+  // just had. The lookup now answers the property question itself.
+  const arrivingKey = nearestSamePropertyKey(Object.keys(archives), toKey);
+  const arriving: SiteDesignBundle = (arrivingKey ? archives[arrivingKey] : undefined) ?? emptyBundle();
+  if (arrivingKey) delete archives[arrivingKey];
 
   return {
     state: {
@@ -610,9 +652,34 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     };
   }
 
-  if (isSameSite(parsed.activeSiteKey, siteKeyNow)) {
+  // 🚨 SAME PROPERTY, NOT SAME STRING — AND KEEP THE KEY THE ROW ALREADY HAS.
+  //
+  // This was `isSameSite`, i.e. exact string equality, and that is the wrong
+  // question on the RESTORE path. The key the row stores was minted from the
+  // point the user CLICKED. `siteKeyNow` is re-derived on mount from
+  // `projects.lat/lng` — which the mount effect OVERWRITES with a fresh geocode
+  // ("street-level geocode always wins over stored coords", true of every picked
+  // address). A 3D roof-click point and a geocoder's rooftop point essentially
+  // never agree to the 1.1 m the key quantises to, so the two keys differed on
+  // reload for a design that had never left its property.
+  //
+  // The consequence was not a cosmetic mismatch. Falling through here reaches
+  // `stored-active-archived`, which activates an EMPTY bundle and sets
+  // `needsAdoptionSave`, forcing a save of `panels: []` — and the
+  // LAYOUT_SUBSYSTEM_WIPE guard relaxes precisely when the incoming key differs
+  // from the stored one, so that write is permitted. The design was destroyed by
+  // the mechanism built to protect it, on reload, with no user action at all.
+  //
+  // `sitesAreSameProperty` is the SAME predicate `resolveSiteKey` and the
+  // detection staleness guard use — one definition of "same property" in this
+  // codebase, not a third.
+  //
+  // And the key that survives is `parsed.activeSiteKey`, NOT `siteKeyNow`: the
+  // archives are filed under the stored key and roof planes are stamped with it,
+  // so adopting the drifted coordinate's key would orphan both.
+  if (sitesAreSameProperty(parsed.activeSiteKey, siteKeyNow)) {
     return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: parsed.sites },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites },
       disposition: 'matched',
       needsAdoptionSave: false,
     };
@@ -645,11 +712,20 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
   // under. It is never dropped.
   const archives = { ...parsed.sites };
   archives[parsed.activeSiteKey] = storedActive;
-  const mine = archives[siteKeyNow];
-  if (mine) {
-    delete archives[siteKeyNow];
+  // 🚨 PROPERTY LOOKUP, NOT STRING LOOKUP — the sibling of the comparison above.
+  // This was `archives[siteKeyNow]`, and it drifts for exactly the same reason:
+  // `siteKeyNow` comes from a re-geocoded coordinate, while the archive is filed
+  // under the key minted from the original click. Returning to a property the
+  // archive genuinely held therefore missed it and fell through to the empty,
+  // `needsAdoptionSave` branch — the destructive one.
+  const mineKey = nearestSamePropertyKey(Object.keys(archives), siteKeyNow);
+  const mine = mineKey ? archives[mineKey] : undefined;
+  if (mine && mineKey) {
+    delete archives[mineKey];
     return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: mine, archives },
+      // Keep the key the archive was filed under, for the same reason the
+      // matched branch does: plane stamps and archive keys must stay in step.
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: mineKey, active: mine, archives },
       disposition: 'reactivated-archive',
       needsAdoptionSave: true,
     };
