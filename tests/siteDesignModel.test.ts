@@ -22,10 +22,11 @@ import {
   switchSite, setActiveBundle, hydrate, parseStoredArchives,
   toPersistencePayload, archivesSignature,
   siteKeyFromCoords, SITE_BOUND_ENTITY_KEYS, SITE_ARCHIVE_VERSION,
-  resolveSiteKey, coordsOfSiteKey, SITE_MATCH_RADIUS_M,
+  resolveSiteKey, coordsOfSiteKey, sitesAreSameProperty, SITE_MATCH_RADIUS_M,
   type SiteDesignBundle, type SiteDesignState,
 } from '@/lib/design/siteDesignModel';
 import { UNSIGNED_ELECTRICAL_FIELDS } from '@/lib/roofPlanesSignature';
+import { coordKeyOf } from '@/lib/siteIdentity';
 import type { PlacedPanel, RoofPlane, PlacedObstruction, LayoutMeasurement } from '@/types';
 
 const PROJECT = '4030b664-bebe-433b-a11c-cda05ead2f7d';
@@ -584,6 +585,43 @@ describe('🚨 picking the same house twice must not mint a second property', ()
     const s = stateAt(KEY_A, bundle('A'));
     expect(resolveSiteKey(s, null, null, PROJECT).key).toBe('');
     expect(resolveSiteKey(s, NaN, 1, PROJECT).key).toBe('');
+  });
+
+  describe('🚨 sitesAreSameProperty — ONE definition, or the snap fix breaks detection', () => {
+    // Found by a second session reviewing the snap fix, not by this file.
+    // SolarEngine3D has no access to the resolver: it stamps the RAW
+    // coordinates it detected at. resolveSiteKey deliberately makes the active
+    // key differ from the current click's coordinate after a snap — so
+    // DesignStudio's stale-detection guard, which compared the two strings with
+    // `!==`, dropped EVERY roof detection on returning to a house.
+    const snappedActive = siteKeyFromCoords(CLICK_1.lat, CLICK_1.lng, PROJECT);
+    const engineStamped = siteKeyFromCoords(CLICK_2.lat, CLICK_2.lng); // coords-only, as the engine emits
+
+    it('a detection stamped 2.8 m from the snapped active key is NOT stale', () => {
+      expect(snappedActive).not.toBe(engineStamped);              // the strings differ …
+      expect(coordKeyOf(snappedActive)).not.toBe(engineStamped);  // … even scope-stripped
+      expect(sitesAreSameProperty(coordKeyOf(snappedActive), engineStamped)).toBe(true);
+    });
+
+    it('a detection for the actual neighbour IS still stale', () => {
+      const neighbourStamped = siteKeyFromCoords(NEIGHBOUR.lat, NEIGHBOUR.lng);
+      expect(sitesAreSameProperty(coordKeyOf(snappedActive), neighbourStamped)).toBe(false);
+    });
+
+    it('it agrees with resolveSiteKey, which is the point', () => {
+      // If these two ever disagree, the codebase holds two answers to "is this
+      // the same property" — which is the defect, not the fix.
+      const s = stateAt(snappedActive, bundle('A'));
+      const r = resolveSiteKey(s, CLICK_2.lat, CLICK_2.lng, PROJECT);
+      expect(r.matchedExisting).toBe(sitesAreSameProperty(coordKeyOf(snappedActive), engineStamped));
+    });
+
+    it('identical keys short-circuit, and nullish is never a match', () => {
+      expect(sitesAreSameProperty(KEY_A, KEY_A)).toBe(true);
+      expect(sitesAreSameProperty(null, KEY_A)).toBe(false);
+      expect(sitesAreSameProperty(KEY_A, '')).toBe(false);
+      expect(sitesAreSameProperty('nonsense', 'other')).toBe(false);
+    });
   });
 
   it('coordsOfSiteKey round-trips, and survives an @ in the project id', () => {

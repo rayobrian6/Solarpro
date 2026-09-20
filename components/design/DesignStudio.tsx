@@ -65,7 +65,7 @@ import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
 import { layoutSignature } from '@/lib/roofPlanesSignature';
 import { siteKeyFromCoords, isSameSite, coordKeyOf } from '@/lib/siteIdentity';
-import { archivesSignature } from '@/lib/design/siteDesignModel';
+import { archivesSignature, sitesAreSameProperty } from '@/lib/design/siteDesignModel';
 import { useSiteDesign } from './useSiteDesign';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
@@ -4690,10 +4690,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                 // a detection was in flight had the correct answer thrown away.
                 // The active site key only moves when the user changes
                 // property, which is exactly the condition this guard is for.
+                //
+                // 🚨 AND COMPARE BY PROPERTY, NOT BY STRING. SolarEngine3D has
+                // no access to the site resolver: it stamps the RAW coordinates
+                // it detected at. `resolveSiteKey` deliberately makes the active
+                // key differ from the current click's coordinate when the pick
+                // snapped to a property this project already knows — so `!==`
+                // on the two strings was ALWAYS true after a snapped re-pick,
+                // and every roof detection on returning to a house was dropped
+                // as stale. One definition of "same property", shared.
                 const coordsKeyNow = coordKeyOf(activeSiteKeyRef.current)
                   || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng);
                 const emittedFor = coordKeyOf(planes.find(p => p.siteKey)?.siteKey);
-                if (emittedFor && coordsKeyNow && emittedFor !== coordsKeyNow) {
+                if (emittedFor && coordsKeyNow && !sitesAreSameProperty(emittedFor, coordsKeyNow)) {
                   console.warn(
                     `[DesignStudio] dropped ${planes.length} detected plane(s) for ${emittedFor} — now at ${coordsKeyNow}`,
                   );

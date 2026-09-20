@@ -258,6 +258,33 @@ export function coordsOfSiteKey(siteKey: string | null | undefined): { lat: numb
   return { lat, lng };
 }
 
+/**
+ * Do two site keys name the SAME physical property?
+ *
+ * 🚨 THIS IS THE ONLY DEFINITION. `resolveSiteKey` decided that a pick within
+ * `SITE_MATCH_RADIUS_M` of a known property IS that property — so anything else
+ * asking "same site?" must agree, or the codebase holds two answers to one
+ * question and they drift.
+ *
+ * It drifted immediately. DesignStudio's stale-detection guard compared the
+ * active key to the key SolarEngine3D stamps on a detection using `!==` on the
+ * strings. The engine has no access to the resolver: it stamps the raw
+ * coordinates it detected at. So after a snapped re-pick the active key is the
+ * ORIGINAL click's coordinate and the detection carries the NEW one, they are
+ * never equal, and EVERY roof detection after returning to a house was
+ * discarded as stale. Found by a second session reviewing the snap fix.
+ *
+ * Exact-equal first, so an unsnapped comparison costs nothing; distance second,
+ * using the same radius and the same metric the resolver uses.
+ */
+export function sitesAreSameProperty(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const ca = coordsOfSiteKey(a), cb = coordsOfSiteKey(b);
+  if (!ca || !cb) return false;
+  return metresBetween(ca, cb) <= SITE_MATCH_RADIUS_M;
+}
+
 export interface ResolvedSite {
   key: string;
   /** True when this reused a property the project already knows about. */
