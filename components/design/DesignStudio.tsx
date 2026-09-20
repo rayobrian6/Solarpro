@@ -1601,6 +1601,30 @@ export default function DesignStudio({ project, onSave }: Props) {
       fenceHeightRef.current = res.arriving.scalars.fenceHeight;
       setFenceHeight(res.arriving.scalars.fenceHeight);
     }
+    // 🚨 THE ELECTRICAL DESIGN IS SITE-BOUND TOO, AND NOTHING READ IT.
+    //
+    // `siteDesignModel` stores `designElectrical` in the bundle precisely so
+    // that "returning to a property restores its topology/string paint, not the
+    // other property's" — and `res.arriving.designElectrical` had no reader
+    // anywhere in this component. So topology, racking, modules-per-string and
+    // the manual string paint carried straight across a property change, and
+    // `buildDesignElectrical()` then folded them into the layout persisted for
+    // the NEW property.
+    //
+    // The string paint is the worst of it: panel ids are index-based
+    // (`panel_${n}` in lib/autoDesign.ts), so site A's override KEYS collide
+    // with site B's panels and stringAssignment actively repaints them rather
+    // than skipping them. A's wiring decisions silently became B's.
+    //
+    // A property with no stored electrical design gets the defaults back, for
+    // the same reason the fence is cleared above: leaving the previous
+    // property's answer on screen is the defect, not the fix.
+    const arrivingElec = res.arriving.designElectrical;
+    setTopology(arrivingElec?.topology ?? 'string');
+    setModulesPerString(typeof arrivingElec?.modulesPerString === 'number' ? arrivingElec.modulesPerString : 10);
+    setRackingId(arrivingElec?.rackingId ?? 'ironridge-xr100');
+    setStringOverrides(arrivingElec?.overrides ?? {});
+
     // The new site has no detection result yet — say so honestly rather than
     // leaving the previous site's status on screen.
     setSolarApiStatus('idle');

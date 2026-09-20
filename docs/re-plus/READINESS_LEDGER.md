@@ -770,6 +770,41 @@ type. Mutation-proven: drop `pitch` from the stitch push and it fails naming the
 
 ---
 
+## WS1-020 — Two more site-bound facts that never moved with the property
+
+| | |
+|---|---|
+| **Severity** | **P1** (both) |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+**Obstructions were restored through a one-shot latch, and the engine never remounts.**
+`appliedInitialObstructions` was set `true` the first time a non-empty `initialObstructions`
+arrived and was **never reset**. `<SolarEngine3D>` carries no `key` and `changeSite` does not touch
+`show3D`, so the component survives every property change: after site A's obstructions were applied,
+switching to B changed the prop and the effect returned on its first line, leaving
+`obstructionsRef.current` holding **A's keep-outs while standing on B**. Two silent consequences —
+`removeObstructedPanels` culls B's panels using A's vent footprints in the plane3d and
+surface-select auto-fills, and placing one obstruction at B appends to A's list, so the outbound
+effect persists A's obstructions onto B. Replaced with a sync on the array's **identity**, so an
+empty array is a real answer ("this property has none") — which the old guard could not express at
+all, because it declined to apply empty.
+
+**`changeSite` never applied the arriving property's electrical design.** The bundle stores
+`designElectrical` precisely so "returning to a property restores its topology/string paint, not the
+other property's" — and `res.arriving.designElectrical` had **no reader** in DesignStudio. Topology,
+racking, modules-per-string and the manual string paint carried straight across, and
+`buildDesignElectrical()` folded them into the layout persisted for the **new** property. The string
+paint is the worst of it: panel ids are index-based (`panel_${n}`), so A's override **keys** collide
+with B's panels and `stringAssignment` repaints them rather than skipping them.
+
+🚨 **My first test for this was vacuous and the mutation test caught it.** The studio only builds
+`designElectrical` when panels exist, so an empty neighbour posts none at all and every assertion
+compared against `undefined` and passed for the wrong reason. The test now places a panel at the
+neighbour first — which is also exactly when a real user meets the bug. Mutation-proven: revert the
+fix and it fails with `expected 'micro' to be 'string'`.
+
+---
+
 ## WS1-018 — The render lift reached the permit site plan and split every gable ridge
 
 | | |
@@ -847,7 +882,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
 | E2E passes | ❌ **not run by me** — see below |
-| Full suite passes | ✅ **567 files, 12,190 tests, 0 failures**, 490 skipped |
+| Full suite passes | ✅ **567 files, 12,191 tests, 0 failures**, 490 skipped |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors (29 pre-existing warnings) |
 | Build passes | ✅ Build Gate green in CI |

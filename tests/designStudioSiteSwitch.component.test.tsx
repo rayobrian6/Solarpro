@@ -33,6 +33,7 @@ import type { Project } from '@/types';
 // ── The 3D engine: a prop-capturing stub ────────────────────────────────────
 type EngineProps = {
   onLocationPick?: (lat: number, lng: number, address: string) => void;
+  onPanelsChange?: (p: unknown[]) => void;
   onObstructionsChange?: (o: unknown[]) => void;
   onMeasurementsChange?: (m: unknown[]) => void;
   onRoofPlaneCreated?: (p: unknown) => void;
@@ -149,10 +150,21 @@ beforeEach(() => {
     obstructions: MELVIN_OBS,
     measurements: MELVIN_MEAS,
     mapCenter: MELVIN,
+    // Melvin's electrical design — distinctive on every field, so carry-over
+    // into the neighbour is unmistakable rather than a coincidence of defaults.
+    designElectrical: MELVIN_ELECTRICAL,
     siteArchives: { version: 1, activeSiteKey: KEY_A, sites: {} },
   };
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+/** Distinctive on every field — none of these is a default. */
+const MELVIN_ELECTRICAL = {
+  topology: 'micro' as const,
+  modulesPerString: 14,
+  rackingId: 'ironridge-xr1000',
+  overrides: { 'panel_0': 3, 'panel_1': 3 },
+};
 
 async function mountStudio() {
   let utils!: ReturnType<typeof render>;
@@ -211,6 +223,50 @@ describe('🚨 DesignStudio: picking the house next door and coming back', () =>
     expect(body.siteArchives.activeSiteKey).toBe(KEY_A);
     // Melvin is no longer in the archive — it is active.
     expect(body.siteArchives.sites[KEY_A]).toBeUndefined();
+  });
+
+  it("🚨 A → B: the neighbour does not inherit Melvin's electrical design", async () => {
+    // `siteDesignModel` stores designElectrical in the bundle precisely so that
+    // returning to a property restores ITS topology and string paint, not the
+    // other property's — and `res.arriving.designElectrical` had no reader in
+    // DesignStudio at all. Topology, racking, modules-per-string and the manual
+    // string paint carried straight across, and buildDesignElectrical() folded
+    // them into the layout persisted for the NEW property.
+    //
+    // The string paint is the worst of it: panel ids are index-based
+    // (`panel_${n}`), so site A's override KEYS collide with site B's panels and
+    // stringAssignment repaints them rather than skipping them.
+    await mountStudio();
+
+    // Melvin's design really is loaded — otherwise this proves nothing.
+    await flushAutosave();
+    const onMelvin = lastPost()?.designElectrical;
+    expect(onMelvin?.topology).toBe(MELVIN_ELECTRICAL.topology);
+    expect(onMelvin?.overrides).toEqual(MELVIN_ELECTRICAL.overrides);
+
+    posted = [];
+    await act(async () => { engine.props.onLocationPick!(NEIGHBOUR.lat, NEIGHBOUR.lng, '5 Melvin Drive'); });
+
+    // 🚨 PANELS FIRST, OR THIS PROVES NOTHING. The studio only builds
+    // `designElectrical` when there are panels, so an empty neighbour posts no
+    // electrical at all and every assertion below would compare against
+    // `undefined` and pass for the wrong reason. (It did, on the first attempt —
+    // the mutation test caught it.) So place a panel at the neighbour, which is
+    // also exactly when a real user would meet this bug.
+    await act(async () => { engine.props.onPanelsChange!([panel('neighbour-p0')]); });
+    await flushAutosave();
+
+    const onNeighbour = lastPost()?.designElectrical;
+    expect(onNeighbour, 'the neighbour must post an electrical design once it has a panel').toBeTruthy();
+
+    // The neighbour has nothing stored, so it gets the DEFAULTS — not Melvin's.
+    expect(onNeighbour.topology).toBe('string');
+    expect(onNeighbour.modulesPerString).toBe(10);
+    expect(onNeighbour.rackingId).toBe('ironridge-xr100');
+    // 🚨 And above all, none of Melvin's string paint. Panel ids are index-based
+    // upstream, so A's override KEYS collide with B's panels and get repainted
+    // rather than skipped.
+    expect(onNeighbour.overrides ?? {}).toEqual({});
   });
 
   it('🚨 the UI can never say "loaded from DB · 0 panels" — the contradiction Ray reported', async () => {

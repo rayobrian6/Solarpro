@@ -2090,13 +2090,38 @@ function SolarEngine3D({
   }, [obstructions, onObstructionsChange]);
 
   // Re-apply obstructions restored from the database, once.
-  const appliedInitialObstructions = useRef(false);
+  // 🚨 THIS WAS A ONE-SHOT LATCH, AND THE ENGINE NEVER REMOUNTS.
+  //
+  // `appliedInitialObstructions` was set true the first time a non-empty
+  // `initialObstructions` arrived and was never reset. `<SolarEngine3D>` carries
+  // no `key`, and `changeSite` does not touch `show3D`, so the component
+  // survives every property change. After site A's obstructions had been
+  // applied, switching to site B changed the prop and this effect returned at
+  // the first line — leaving `obstructionsRef.current` holding **A's keep-outs
+  // while standing on B**. Two live consequences, both silent:
+  //
+  //   1. WRONG CULLING. `removeObstructedPanels(newPanels, obstructionsRef.current)`
+  //      runs in the plane3d and surface-select auto-fills. A's vent footprints
+  //      are lat/lng, so at a neighbouring house they can land inside B's roof
+  //      and delete B's panels with nothing on screen to say why.
+  //   2. CROSS-SITE CONTAMINATION. Placing one obstruction at B appends to A's
+  //      list, and the outbound effect then persists A's obstructions onto B.
+  //
+  // The fix is to track WHAT was applied rather than WHETHER anything was. The
+  // identity of the incoming array is the signal: `applyBundle` hands a new
+  // array on every property change, and an empty one is a real answer — "this
+  // property has no obstructions" — which the old guard could not express at
+  // all, because it declined to apply empty.
+  const appliedObstructionsRef = useRef<PlacedObstruction[] | null>(null);
   useEffect(() => {
-    if (appliedInitialObstructions.current) return;
-    if (!initialObstructions || initialObstructions.length === 0) return;
-    appliedInitialObstructions.current = true;
-    obstructionsRef.current = initialObstructions;
-    setObstructions(initialObstructions);
+    const incoming = initialObstructions ?? [];
+    if (appliedObstructionsRef.current === initialObstructions) return;
+    // Only the mount-time case is skipped: before the restore resolves the prop
+    // is an empty array, and adopting it would clear nothing over nothing.
+    if (appliedObstructionsRef.current === null && incoming.length === 0) return;
+    appliedObstructionsRef.current = initialObstructions ?? [];
+    obstructionsRef.current = incoming;
+    setObstructions(incoming);
   }, [initialObstructions]);
 
   // ── Lane A state ─────────────────────────────────────────────────────────
