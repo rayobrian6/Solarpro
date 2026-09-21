@@ -823,3 +823,106 @@ describe('🚨 a deployment that has not run 123 yet', () => {
     expect(((await get())!.siteArchives as any).sites[KEY_A].panels).toHaveLength(52);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('🚨 unplaced panels must not replace a placed design', () => {
+  /**
+   * `/api/engineering/preliminary` writes `generateSyntheticPanels(...)` — every
+   * panel at `lat: 0, lng: 0` — through `upsertLayout`, and `panels` is the one
+   * column in the UPDATE with no COALESCE. The coordinate-integrity guard did
+   * not stop it: `_coordCentroid` drops any point with |lat| <= 0.001, so an
+   * array where EVERY panel is unplaced yields `null`, and "no centroid" was
+   * read as "nothing to validate against". The sub-system wipe guard does not
+   * stop it either — the synthetic panels are systemType 'roof', so 'roof' is
+   * present in `incoming` and nothing looks wiped.
+   *
+   * This runs the real `upsertLayout` against real PostgreSQL, so it also
+   * proves the new SQL is valid — it uses `jsonb_array_elements`, which ERRORS
+   * on a non-array, and a regex the template literal must not eat.
+   */
+  const unplaced = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `prelim-panel-${i}`, lat: 0, lng: 0, wattage: 400, systemType: 'roof',
+    }));
+
+  async function seedRealDesign() {
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('p1'), panel('p2'), panel('p3')] as never,
+      roofPlanes: [plane('rp1', KEY_A)] as never,
+      mapCenter: MELVIN, totalPanels: 3, systemSizeKw: 1.2,
+    } as never);
+  }
+
+  it('the fixture really is a placed design — the guard has something to protect', async () => {
+    await seedRealDesign();
+    const stored = await getLayoutByProject(PROJECT, USER_ID);
+    expect(stored?.panels?.length).toBe(3);
+    expect(Math.abs(Number(stored!.panels![0].lat))).toBeGreaterThan(1);
+  });
+
+  it('🚨 a save of nothing but unplaced panels is REFUSED', async () => {
+    await seedRealDesign();
+    await expect(upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: unplaced(12) as never, totalPanels: 12, systemSizeKw: 4.8,
+    } as never)).rejects.toThrow(/LAYOUT_COORDS_UNPLACED/);
+
+    // And nothing was written — the refusal is raised BEFORE any write.
+    const after = await getLayoutByProject(PROJECT, USER_ID);
+    expect(after?.panels?.length, 'the real design must survive the refused save').toBe(3);
+  });
+
+  it('🚨 it is still refused when the payload ALSO carries real roof planes', async () => {
+    // The hole in the first version of this guard: `_coordCentroid` falls back
+    // to roof-plane vertices, so a payload with real planes produced a centroid
+    // and the panel check was skipped — exactly when half the payload was
+    // unplaced.
+    await seedRealDesign();
+    await expect(upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: unplaced(12) as never,
+      roofPlanes: [plane('rp1', KEY_A)] as never,
+      mapCenter: MELVIN, totalPanels: 12, systemSizeKw: 4.8,
+    } as never)).rejects.toThrow(/LAYOUT_COORDS_UNPLACED/);
+  });
+
+  it('a NEW project takes the same payload — onboarding still works', async () => {
+    // The route this protects against exists to serve brand-new projects. If
+    // the guard fired there it would be a worse defect than the one it fixes.
+    const res = await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: unplaced(12) as never, totalPanels: 12, systemSizeKw: 4.8,
+    } as never);
+    expect(res?.panels?.length, 'an empty project must accept the preliminary scaffold').toBe(12);
+  });
+
+  it('a save that omits panels entirely is untouched — absence still keeps', async () => {
+    await seedRealDesign();
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof', systemSizeKw: 1.2,
+    } as never);
+    const after = await getLayoutByProject(PROJECT, USER_ID);
+    expect(after?.panels?.length, 'omitting panels must keep the stored ones').toBe(3);
+  });
+
+  it('a deliberate clear (panels: []) is still allowed through this guard', async () => {
+    // `[]` is a decision, not an absence, and it is the sub-system wipe guard's
+    // job to judge it — not this one's. Three panels is below that guard's
+    // four-panel threshold, so this save is expected to succeed.
+    await seedRealDesign();
+    const res = await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [] as never, totalPanels: 0, systemSizeKw: 0,
+    } as never);
+    expect(res?.panels?.length).toBe(0);
+  });
+
+  it('LAYOUT_COORDS_UNPLACED is in the refusal list, so routes answer 409 and not 503', async () => {
+    const { LAYOUT_REFUSAL_CODES, layoutRefusalCode } = await import('@/lib/db/core');
+    expect(LAYOUT_REFUSAL_CODES as readonly string[]).toContain('LAYOUT_COORDS_UNPLACED');
+    expect(layoutRefusalCode(new Error('LAYOUT_COORDS_UNPLACED: 12 panels with no map position')))
+      .toBe('LAYOUT_COORDS_UNPLACED');
+  });
+});

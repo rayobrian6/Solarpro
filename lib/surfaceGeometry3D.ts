@@ -366,6 +366,91 @@ export function polygonFromVerticesOnFrame(
   });
 }
 
+/**
+ * WHERE IS THIS FACE? — one answer, for placement and for rendering.
+ *
+ * 🚨 THE PLACEMENT ENGINE AND THE RENDERER USED TO DECIDE THIS SEPARATELY, AND
+ * THEY DISAGREED. Measured on the demo roof (ground 128 m, eave 160 m,
+ * `moduleStackHeightM('ironridge-xr100')` = 0.14 m), comparing each panel to the
+ * deck `SolarEngine3D`'s restore path drew under it:
+ *
+ *     full 3D face                         panel 0.141 m above its deck   ✅
+ *     3D face that lost polygon3D          panel 31.07 m above its deck   ✈
+ *     genuine 2D face (Google segment)     panel 0.017 m above its deck   ⛏
+ *
+ * The middle one floats the array thirty metres over a deck lying on the ground.
+ * The last one is worse because it looks fine: the panel box is 0.040 m thick
+ * and centred, so its underside sits 3 mm INSIDE the roof it is standing on —
+ * every panel on every 2D-detected face, half-buried, with a correct count and
+ * no error anywhere. That is Ray's report for those faces.
+ *
+ * Both came from the same cause: `buildSurfaceGrid` resolved the face one way
+ * and the restore path resolved it another, each reasonably, neither aware of
+ * the other. So the resolution lives here, is exported, and both call it.
+ *
+ * WHAT IT GUARANTEES: the returned `polygon3D` lies ON the plane whose
+ * `origin3D` the caller will add a mount stack to. A renderer draws the deck
+ * from it with **`surfaceOffsetM: 0`** — re-fitting it through
+ * `computePlaneFromPoints3D` with the default lift applies SURFACE_OFFSET_M a
+ * SECOND time, which is the other half of this defect family.
+ */
+export function resolvePlaneGeometry(
+  plane: RoofPlane,
+  groundElevM = 0,
+): {
+  origin3D: { x: number; y: number; z: number };
+  ecefFrame3D: { u: { x:number;y:number;z:number }; v: { x:number;y:number;z:number }; n: { x:number;y:number;z:number } };
+  polygon3D: Array<{ x: number; y: number; z: number }>;
+  /** Which branch answered — for logging, and so a test can prove it is not
+   *  silently taking the legacy path for a face that has its own frame. */
+  source: 'own-frame-and-polygon' | 'own-frame-synthesised-polygon' | 'legacy-2d';
+} {
+  // 🚨 ONE MISSING FIELD USED TO DISCARD THREE GOOD ONES.
+  //
+  // This was a single all-or-nothing test: without `polygon3D` the plane fell
+  // wholesale to `computeEcefFrameForLegacyPlane`, which rebuilds the frame from
+  // `planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M` — and `buildRoofPlane3D`
+  // writes **0.0** there deliberately, as a "don't use me, use origin3D"
+  // sentinel, which `??` KEEPS. So a 3D face carrying a perfectly good origin3D
+  // and ecefFrame3D got its whole array placed at GROUND ELEVATION.
+  //
+  // It also disagreed with `placeSinglePanel`, `extendRow` and `addRow`, which
+  // ask only for `ecefFrame3D && origin3D`. Two answers to "does this face have
+  // a usable 3D frame?" in one file.
+  //
+  // The frame and the outline are separate facts and are resolved separately:
+  // the plane's own frame is used whenever it has one, and only the polygon is
+  // synthesised when the polygon is what is missing.
+  const hasOwnFrame   = Boolean(plane.origin3D && plane.ecefFrame3D);
+  const hasOwnPolygon = Boolean(plane.polygon3D && plane.polygon3D.length >= 3);
+
+  if (hasOwnFrame && hasOwnPolygon) {
+    return {
+      origin3D: plane.origin3D!,
+      ecefFrame3D: plane.ecefFrame3D!,
+      polygon3D: plane.polygon3D!,
+      source: 'own-frame-and-polygon',
+    };
+  }
+  if (hasOwnFrame) {
+    // The frame survived and the outline did not. Keep the frame — it is what
+    // decides WHERE the panels are — and drop the plan-view vertices onto it.
+    return {
+      origin3D: plane.origin3D!,
+      ecefFrame3D: plane.ecefFrame3D!,
+      polygon3D: polygonFromVerticesOnFrame(plane, plane.origin3D!, plane.ecefFrame3D!),
+      source: 'own-frame-synthesised-polygon',
+    };
+  }
+  const legacy = computeEcefFrameForLegacyPlane(plane, groundElevM);
+  return {
+    origin3D: legacy.origin3D,
+    ecefFrame3D: legacy.ecefFrame3D,
+    polygon3D: legacy.polygon3D,
+    source: 'legacy-2d',
+  };
+}
+
 export function computeEcefFrameForLegacyPlane(plane: RoofPlane, groundElevM = 0): {
   origin3D:   { x: number; y: number; z: number };
   ecefFrame3D: { u: { x:number;y:number;z:number }; v: { x:number;y:number;z:number }; n: { x:number;y:number;z:number } };
@@ -443,9 +528,36 @@ export function computeEcefFrameForLegacyPlane(plane: RoofPlane, groundElevM = 0
     return latLngToECEF(vtx.lat, vtx.lng, vtxH);
   });
 
+  // 🚨 AND THE COLUMN HAD TO BE PUT ON THE PLANE IT CLAIMS TO BE ON.
+  //
+  // The heights above are computed with a FLAT-EARTH projection — metres per
+  // degree, times cos(lat) — and then handed to `latLngToECEF`, which places
+  // them on the curved ellipsoid. The result is a polygon that is NOT coplanar
+  // with the frame this same function returns. Measured, corner distance from
+  // the declared plane:
+  //
+  //     14 x  9 m at 25 deg     5.3 mm
+  //     28 x 18 m at 25 deg    10.6 mm
+  //     14 x  9 m at 40 deg     8.0 mm
+  //
+  // It grows with face size and with pitch. Panels are placed from `origin3D`
+  // and the deck is drawn by re-fitting `polygon3D`, so the residual became a
+  // direct disagreement between the modules and the roof under them — small,
+  // but on the same axis and in the same direction as every other defect in
+  // this family, and unbounded on a large commercial face.
+  //
+  // Dropping each corner onto the plane along the normal costs nothing: the
+  // corner's plan position is what the vertex record means, and its height is
+  // whatever the plane says it is at that position.
+  // `centECEF` is the plane's centre by construction, so it is the reference.
+  const polygonOnPlane = polygon3D.map(c => {
+    const d = (c.x - centECEF.x) * nECEF.x + (c.y - centECEF.y) * nECEF.y + (c.z - centECEF.z) * nECEF.z;
+    return { x: c.x - nECEF.x * d, y: c.y - nECEF.y * d, z: c.z - nECEF.z * d };
+  });
+
   // ── Step 6: Snap origin to min-UV corner of polygon ──
   // Compute UV coords of polygon relative to centroid
-  const polyUV = polygon3D.map(p => {
+  const polyUV = polygonOnPlane.map(p => {
     const d = { x: p.x - centECEF.x, y: p.y - centECEF.y, z: p.z - centECEF.z };
     return {
       u: d.x*uECEF.x + d.y*uECEF.y + d.z*uECEF.z,
@@ -468,7 +580,7 @@ export function computeEcefFrameForLegacyPlane(plane: RoofPlane, groundElevM = 0
   return {
     origin3D,
     ecefFrame3D: { u: uECEF, v: vECEF, n: nECEF },
-    polygon3D,
+    polygon3D: polygonOnPlane,
   };
 }
 
@@ -733,55 +845,13 @@ export function buildSurfaceGrid(opts: {
   // ONE FORMULA everywhere:
   //   worldPos = origin3D + u*uCenter + v*vCenter + n*moduleStackHeightM(mountId)
   // ecefToLatLng() called ONLY at final output per panel.
-
-  // Resolve plane geometry — always produces valid origin3D + ecefFrame3D + polygon3D
-  let resolvedOrigin3D: { x:number; y:number; z:number };
-  let resolvedEcefFrame: { u:{x:number;y:number;z:number}; v:{x:number;y:number;z:number}; n:{x:number;y:number;z:number} };
-  let resolvedPolygon3D: Array<{x:number;y:number;z:number}>;
-
-  // 🚨 ONE MISSING FIELD USED TO DISCARD THREE GOOD ONES.
-  //
-  // This was a single all-or-nothing test: without `polygon3D` the plane fell
-  // wholesale to `computeEcefFrameForLegacyPlane`, which rebuilds the frame from
-  // `planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M` — and `buildRoofPlane3D`
-  // writes **0.0** there deliberately, as a "don't use me, use origin3D"
-  // sentinel, which `??` KEEPS. So a 3D face carrying a perfectly good origin3D
-  // and ecefFrame3D got its whole array placed at GROUND ELEVATION. Measured on
-  // the demo roof: 55 panels, 34.22 m below where they belong, no error raised.
-  //
-  // It also disagreed with `placeSinglePanel`, `extendRow` and `addRow`, which
-  // ask only for `ecefFrame3D && origin3D` — so the same plane got panels on the
-  // roof from one tool and underground from another. Two answers to "does this
-  // face have a usable 3D frame?" in one file.
-  //
-  // The frame and the outline are separate facts and are resolved separately:
-  // the plane's own frame is used whenever it has one, and only the polygon is
-  // synthesised when the polygon is what is missing. Same principle as
-  // `collectRoofRenderables` preferring a plane's persisted frame over guessing
-  // it from a panel.
-  const hasOwnFrame   = Boolean(plane.origin3D && plane.ecefFrame3D);
-  const hasOwnPolygon = Boolean(plane.polygon3D && plane.polygon3D.length >= 3);
-
-  if (hasOwnFrame && hasOwnPolygon) {
-    // 3D plane-tool plane: exact geometry from picked points
-    resolvedOrigin3D   = plane.origin3D!;
-    resolvedEcefFrame  = plane.ecefFrame3D!;
-    resolvedPolygon3D  = plane.polygon3D!;
-  } else if (hasOwnFrame) {
-    // The frame survived and the outline did not. Keep the frame — it is the
-    // thing that decides WHERE the panels are — and project the plan-view
-    // vertices onto it for the clip outline.
-    resolvedOrigin3D   = plane.origin3D!;
-    resolvedEcefFrame  = plane.ecefFrame3D!;
-    resolvedPolygon3D  = polygonFromVerticesOnFrame(plane, plane.origin3D!, plane.ecefFrame3D!);
-  } else {
-    // Legacy 2D plane: compute ECEF frame from azimuth/tilt/centroid
-    const legacy = computeEcefFrameForLegacyPlane(plane, groundElevM);
-    resolvedOrigin3D   = legacy.origin3D;
-    resolvedEcefFrame  = legacy.ecefFrame3D;
-    resolvedPolygon3D  = legacy.polygon3D;
-  }
-
+  // 🚨 ONE ANSWER TO "WHERE IS THIS FACE", FOR PLACEMENT **AND** FOR RENDERING.
+  // See `resolvePlaneGeometry`, which is exported precisely so the 3D engine's
+  // restore path draws the deck on the plane the panels were placed from.
+  const resolved = resolvePlaneGeometry(plane, groundElevM);
+  let resolvedOrigin3D = resolved.origin3D;
+  let resolvedEcefFrame = resolved.ecefFrame3D;
+  const resolvedPolygon3D = resolved.polygon3D;
   // Apply custom direction override (Set Direction tool — ENU x/y vector)
   if (typeof customDirX === 'number' && typeof customDirY === 'number' &&
       isFinite(customDirX) && isFinite(customDirY)) {

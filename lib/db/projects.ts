@@ -750,14 +750,34 @@ async function assertLayoutCoordsMatchProject(sql: any, data: UpsertLayoutData):
   //
   // Unplaced geometry is refused only when it would destroy placed geometry, so
   // a brand-new project (the route's actual purpose) still works.
+  // 🚨 ASK ABOUT THE PANELS, NOT ABOUT THE COMBINED CENTROID.
+  // The first version of this guard tested `!ctr`, and `ctr` falls back to the
+  // ROOF-PLANE vertices when the panels yield nothing — so a payload carrying
+  // unplaced panels alongside real roof geometry produced a centroid, and the
+  // guard was skipped exactly when half the payload was unplaced.
   const suppliedPanels = Array.isArray(data.panels) ? data.panels.length : 0;
-  if (suppliedPanels > 0 && !ctr) {
+  const panelCentroid  = _coordCentroid(data.panels as Array<{ lat?: number; lng?: number }>);
+  if (suppliedPanels > 0 && !panelCentroid) {
+    // 🚨 jsonb_array_elements ERRORS on a non-array, and a lateral join is
+    // evaluated before WHERE, so the array-ness is decided inside the call.
+    // And `lat` is accepted as a number OR a numeric string, because
+    // `_coordCentroid` above accepts both (`Number(p.lat)`): a stricter test
+    // here would count a stored string coordinate as unplaced and quietly
+    // disarm the guard on exactly the rows it protects.
     const placed = await sql`
       SELECT COUNT(*)::int AS n
-      FROM layouts l, jsonb_array_elements(COALESCE(l.panels, '[]'::jsonb)) p
+      FROM layouts l,
+           jsonb_array_elements(
+             CASE WHEN jsonb_typeof(l.panels) = 'array' THEN l.panels ELSE '[]'::jsonb END
+           ) p
       WHERE l.project_id = ${data.projectId} AND l.user_id = ${data.userId}
-        AND (CASE WHEN jsonb_typeof(p->'lat') = 'number'
-                  THEN abs((p->>'lat')::double precision) ELSE 0 END) > 0.001
+        AND (CASE
+               WHEN jsonb_typeof(p->'lat') = 'number' THEN abs((p->>'lat')::double precision)
+               WHEN jsonb_typeof(p->'lat') = 'string'
+                    AND (p->>'lat') ~ '^[[:space:]]*-?[0-9]+([.][0-9]+)?[[:space:]]*$'
+                    THEN abs((p->>'lat')::double precision)
+               ELSE 0
+             END) > 0.001
     `;
     const n = Number(placed[0]?.n ?? 0);
     if (n > 0) {
@@ -929,7 +949,18 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   // Nameplate authority (P0-7): map-carrying projects get the equipment-db kW.
   const nameplateKw = await resolveNameplateSizeKw(sql, data);
   const sizeKw = nameplateKw ?? data.systemSizeKw ?? 0;
-  const panelsJson = JSON.stringify(data.panels || []);
+  // 🚨 ABSENCE KEEPS — INCLUDING FOR THE MOST VALUABLE COLUMN IN THE ROW.
+  // This was `JSON.stringify(data.panels || [])`, so a caller that did not send
+  // panels wrote `[]` and DELETED THE DESIGN, while every neighbouring column
+  // — roof_planes, map_center, fence_line, obstructions, measurements and the
+  // four scalars — had already been given the opposite rule. Proven against
+  // real PostgreSQL in tests/siteDesignRoute.postgres.test.ts: three placed
+  // panels, one save omitting `panels`, zero panels left.
+  //
+  // An explicit `[]` is a DECISION and still clears; only genuine absence keeps,
+  // exactly as for roofPlanes below. Judging a deliberate clear is the
+  // sub-system wipe guard's job, not this line's.
+  const panelsJson = data.panels == null ? null : JSON.stringify(data.panels);
   const roofPlanesJson = data.roofPlanes ? JSON.stringify(data.roofPlanes) : null;
   const fenceLineJson = data.fenceLine ? JSON.stringify(data.fenceLine) : null;
   const mapCenterJson = data.mapCenter ? JSON.stringify(data.mapCenter) : null;
@@ -1063,7 +1094,7 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
     const rows = await sql`
       UPDATE layouts SET
         system_type         = ${data.systemType || 'roof'},
-        panels              = ${panelsJson}::jsonb,
+        panels              = COALESCE(${panelsJson}::jsonb, panels),
         roof_planes         = COALESCE(${roofPlanesJson}::jsonb, roof_planes),
         -- ABSENCE KEEPS. These seven were the uneven half of a doctrine the two
         -- lines around them already follow. See the note above upsertLayout.
@@ -1087,11 +1118,19 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         fence_azimuth       = COALESCE(${data.fenceAzimuth ?? null}::double precision, fence_azimuth),
         fence_height        = COALESCE(${data.fenceHeight ?? null}::double precision, fence_height),
         fence_line          = COALESCE(${fenceLineJson}::jsonb, fence_line),
-        bifacial_optimized  = ${data.bifacialOptimized ?? false},
-        total_panels        = ${data.totalPanels ?? 0},
-        system_size_kw      = ${sizeKw},
+        -- The same rule, applied to the last four that did not follow it.
+        -- A '?? false' turned an omitted flag into a deliberate "no"; '?? 0'
+        -- turned an omitted count into "this design has no panels"; and
+        -- map_zoom was written unconditionally, so any save that did not carry
+        -- it NULLED the stored zoom. total_panels and system_size_kw are
+        -- DERIVED from panels, so if the panels are kept these must be too —
+        -- otherwise a save that omits everything leaves 3 panels beside a
+        -- stored count of 0.
+        bifacial_optimized  = COALESCE(${data.bifacialOptimized ?? null}::boolean, bifacial_optimized),
+        total_panels        = COALESCE(${data.totalPanels ?? null}::integer, total_panels),
+        system_size_kw      = COALESCE(${data.systemSizeKw === undefined && nameplateKw == null ? null : sizeKw}::double precision, system_size_kw),
         map_center          = COALESCE(${mapCenterJson}::jsonb, map_center),
-        map_zoom            = ${data.mapZoom ?? null},
+        map_zoom            = COALESCE(${data.mapZoom ?? null}::integer, map_zoom),
         updated_at          = NOW()
       WHERE project_id = ${data.projectId}
         AND user_id = ${data.userId}
@@ -1111,7 +1150,7 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         ${data.projectId},
         ${data.userId},
         ${data.systemType || 'roof'},
-        ${panelsJson}::jsonb,
+        ${panelsJson ?? '[]'}::jsonb,
         ${roofPlanesJson}::jsonb,
         ${data.groundTilt ?? 20},
         ${data.groundAzimuth ?? 180},

@@ -515,6 +515,48 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // 🚨 A REFUSED LAYOUT MUST NOT BE FOLLOWED BY THE REST OF THE WRITE.
+      //
+      // Reporting the refusal in the response body was half a fix. Everything
+      // below this point kept running: `upsertProduction`, the project's
+      // `system_type`, and the engineering seed row were all written for the
+      // SYNTHETIC system, over a project whose real design the database had
+      // just refused to replace — and the response still said `success: true`.
+      // That is the same destruction through different columns, plus a
+      // success message for it.
+      //
+      // `LAYOUT_COORDS_UNPLACED` and its siblings only fire when a project
+      // already holds real placed work, which is not the onboarding case this
+      // route exists for. So a refusal here means "this is not a new project",
+      // and the right answer is the same 409 every other route gives, with the
+      // numbers the caller asked for still attached.
+      if (layoutRefusal) {
+        return NextResponse.json({
+          success: false,
+          refused: true,
+          code:    layoutRefusal.code,
+          error:   layoutRefusal.error,
+          message: 'This project already holds a saved design, so the preliminary ' +
+                   'estimate was calculated but not written to it.',
+          data: {
+            systemKw,
+            panelCount,
+            panelWatts: DEFAULTS.panelWatts,
+            annualKwh:  annualUsage,
+            productionFactor,
+            monthlyProduction,
+            costEstimate: {
+              low: costLow, high: costHigh,
+              perWattLow: COST_LOW, perWattHigh: COST_HIGH,
+              label: `$${costLow.toLocaleString()} – $${costHigh.toLocaleString()}`,
+            },
+            savedFiles,
+            layoutRefusal,
+            generatedAt: new Date().toISOString(),
+          },
+        }, { status: 409 });
+      }
+
       try {
         // Save synthetic production record
         const co2Tons = Math.round(annualUsage * 0.000386 * 10) / 10;

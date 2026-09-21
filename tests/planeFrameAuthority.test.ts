@@ -184,3 +184,74 @@ describe('a plane keeps its own frame when only its outline is missing', () => {
     expect(h).toBeLessThan(GROUND_M + 7);
   });
 });
+
+describe('a legacy 2D face lies on the plane it declares', () => {
+  /**
+   * 🚨 IT DID NOT, AND THE ERROR GREW WITH THE ROOF.
+   *
+   * `computeEcefFrameForLegacyPlane` computes each corner's HEIGHT with a
+   * flat-earth projection (metres per degree, times cos(lat)) and then hands it
+   * to `latLngToECEF`, which places it on the curved ellipsoid. The corners
+   * therefore did not lie on the plane the same function returns:
+   *
+   *     14 x  9 m at 25 deg     5.3 mm
+   *     28 x 18 m at 25 deg    10.6 mm
+   *     14 x  9 m at 40 deg     8.0 mm
+   *
+   * Panels are placed from `origin3D` and the deck is drawn by re-fitting
+   * `polygon3D`, so that residual became a direct disagreement between the
+   * modules and the roof under them — small here, unbounded on a commercial
+   * face, and on the same axis as every other defect in this family.
+   */
+  const cases: Array<[number, number, number]> = [
+    [25, 14, 9], [25, 28, 18], [40, 14, 9], [10, 14, 9], [45, 40, 25],
+  ];
+
+  function twoDFace(tiltDeg: number, widthM: number, depthM: number): RoofPlane {
+    const mLng = M_LAT * Math.cos(LAT * DEG);
+    const dLng = widthM / 2 / mLng, dLat = depthM / 2 / M_LAT;
+    return {
+      id: `legacy-${tiltDeg}-${widthM}x${depthM}`,
+      pitch: tiltDeg, azimuth: 180,
+      vertices: [
+        { lat: LAT - dLat, lng: LNG - dLng }, { lat: LAT - dLat, lng: LNG + dLng },
+        { lat: LAT + dLat, lng: LNG + dLng }, { lat: LAT + dLat, lng: LNG - dLng },
+      ],
+      area: widthM * depthM, usableArea: widthM * depthM * 0.75,
+      centroidLat: LAT, centroidLng: LNG,
+      planeHeightAtCenterMeters: 5.2,
+    } as unknown as RoofPlane;
+  }
+
+  for (const [tilt, w, d] of cases) {
+    it(`🚨 ${w}x${d} m at ${tilt}° — every corner is ON the declared plane`, () => {
+      const legacy = computeEcefFrameForLegacyPlane(twoDFace(tilt, w, d), GROUND_M);
+      expect(legacy.polygon3D.length, 'the fixture produced no polygon').toBeGreaterThanOrEqual(3);
+      const o = legacy.origin3D, n = legacy.ecefFrame3D.n;
+      const worst = Math.max(...legacy.polygon3D.map(c =>
+        Math.abs((c.x - o.x) * n.x + (c.y - o.y) * n.y + (c.z - o.z) * n.z)));
+      // Float noise only. The pre-fix values are listed above; 1e-6 is three
+      // orders below the smallest of them, so this cannot pass on a regression.
+      expect(worst, `worst corner is ${(worst * 1000).toFixed(3)} mm off its own plane`)
+        .toBeLessThan(1e-6);
+    });
+  }
+
+  it('and the corners still describe the same FOOTPRINT — this is a projection, not a shrink', () => {
+    // Guard against the lazy fix: collapsing the polygon onto a point would
+    // satisfy every assertion above.
+    const legacy = computeEcefFrameForLegacyPlane(twoDFace(25, 14, 9), GROUND_M);
+    const o = legacy.origin3D, u = legacy.ecefFrame3D.u, v = legacy.ecefFrame3D.v;
+    const uv = legacy.polygon3D.map(c => {
+      const dx = c.x - o.x, dy = c.y - o.y, dz = c.z - o.z;
+      return { u: dx * u.x + dy * u.y + dz * u.z, v: dx * v.x + dy * v.y + dz * v.z };
+    });
+    const uSpan = Math.max(...uv.map(p => p.u)) - Math.min(...uv.map(p => p.u));
+    const vSpan = Math.max(...uv.map(p => p.v)) - Math.min(...uv.map(p => p.v));
+    // 14 m along the eave; 9 m of PLAN depth becomes 9/cos(25°) on the slope.
+    expect(uSpan, `u span ${uSpan.toFixed(3)} m`).toBeGreaterThan(13);
+    expect(uSpan).toBeLessThan(15);
+    expect(vSpan, `v span ${vSpan.toFixed(3)} m`).toBeGreaterThan(8);
+    expect(vSpan).toBeLessThan(11);
+  });
+});

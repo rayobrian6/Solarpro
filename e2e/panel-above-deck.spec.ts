@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { moduleStackHeightM } from '../lib/roofMountDatum';
 import {
-  DEFAULT_RACKING, buildGablePlanes, seedPlanes, seedRoofPlane, runAutoLayout, waitForCesiumCanvas,
+  DEFAULT_RACKING, buildGablePlanes, buildTaggedPlane, seedPlanes, seedRoofPlane, runAutoLayout,
+  waitForCesiumCanvas,
 } from './support/seedRoof';
 
 /**
@@ -82,10 +83,39 @@ const PANEL_HALF_THICKNESS_M = 0.020;
  *  below which "above the roof" stops being true on screen. */
 const VISIBLE_GAP_M = 0.05;
 
-/** The deck polygon is planar by construction (`computePlaneFromPoints3D`), and
- *  the panel position is a direct ECEF Cartesian3 with no lat/lng round trip,
- *  so this is float noise only — two orders tighter than the vitest layer's. */
-const PLANARITY_TOL_M = 2e-3;
+/**
+ * 🚨 THE TOLERANCE THIS FILE FIRST USED WAS JUSTIFIED BY A FALSE CLAIM.
+ *
+ * It read *"the panel position is a direct ECEF Cartesian3 with no lat/lng round
+ * trip, so this is float noise only"* and was set to 2 mm. `addPanelEntity`
+ * calls `safeCartesian3(C, panel.lng, panel.lat, h)` — it goes through the
+ * stored lat/lng, and those are rounded to SEVEN decimal places while the
+ * height keeps full precision. Reconstructing the point therefore moves it
+ * HORIZONTALLY, and a horizontal error tips into the plane normal as
+ * `error · sin(tilt)`.
+ *
+ * So the bound is derived from the quantum, not chosen: half a unit in the last
+ * place, in latitude and longitude together, times the sine of the face's own
+ * tilt — which is read from the deck Cesium drew, so there is no fixture
+ * constant to drift. Measured on the 25° fixtures: 2.2 mm, against a derived
+ * bound of 3.3 mm. The vitest layer reaches the same conclusion the same way
+ * (`tests/panelSurfaceClearance.test.ts`).
+ */
+const LATLNG_DECIMALS = 7;
+const M_PER_DEG = 111_320;
+/** Worst horizontal displacement from rounding lat AND lng, in metres. */
+const ROUNDING_HORIZONTAL_M = (Math.pow(10, -LATLNG_DECIMALS) / 2) * M_PER_DEG * Math.SQRT2;
+
+/** The clearance tolerance for a face at this tilt. */
+function clearanceTolM(tiltRad: number): number {
+  return ROUNDING_HORIZONTAL_M * Math.sin(tiltRad) + 1e-4;
+}
+
+/** A deck's tilt from vertical-up, read from the normal Cesium drew. */
+function deckTiltRad(plane: { origin: Vec; n: Vec }): number {
+  const up = norm(plane.origin);   // ECEF position doubles as local up
+  return Math.acos(Math.min(1, Math.max(-1, dot(plane.n, up))));
+}
 
 type Vec = { x: number; y: number; z: number };
 type Deck = { planeId: string; pts: Vec[] };
@@ -190,14 +220,18 @@ async function readScene(page: import('@playwright/test').Page): Promise<{ decks
 /** Signed height of every drawn panel above every drawn deck that covers it. */
 function clearances(decks: Deck[], panels: Panel[]) {
   const planes = decks.map(d => ({ deck: d, plane: deckPlane(d) }));
-  const rows: Array<{ panelId: string; planeId: string; clearanceM: number }> = [];
+  const rows: Array<{ panelId: string; planeId: string; clearanceM: number; tiltRad: number }> = [];
   const uncovered: string[] = [];
   for (const panel of panels) {
     let covered = false;
     for (const { deck, plane } of planes) {
       if (!deckCovers(deck, plane, panel.pos)) continue;
       covered = true;
-      rows.push({ panelId: panel.id, planeId: deck.planeId, clearanceM: dot(sub(panel.pos, plane.origin), plane.n) });
+      rows.push({
+        panelId: panel.id, planeId: deck.planeId,
+        clearanceM: dot(sub(panel.pos, plane.origin), plane.n),
+        tiltRad: deckTiltRad(plane),
+      });
     }
     if (!covered) uncovered.push(panel.id);
   }
@@ -291,7 +325,7 @@ test.describe('the drawn panel sits above the drawn roof', () => {
         Math.abs(r.clearanceM - EXPECTED_CLEARANCE_M),
         `panel ${r.panelId} renders ${r.clearanceM.toFixed(4)} m above the drawn deck, but ` +
         `moduleStackHeightM('${DEFAULT_RACKING}') is ${EXPECTED_CLEARANCE_M} m`,
-      ).toBeLessThan(PLANARITY_TOL_M);
+      ).toBeLessThan(clearanceTolM(r.tiltRad));
     }
   });
 
@@ -329,6 +363,60 @@ test.describe('the drawn panel sits above the drawn roof', () => {
         `face ${planeId.slice(0, 8)}: worst of ${cs.length} panels renders ${worst.toFixed(4)} m ` +
         'above its own drawn deck',
       ).toBeGreaterThanOrEqual(VISIBLE_GAP_M);
+    }
+  });
+
+
+  test('🚨 a 2D "Tag This Roof Plane" face — the shape every other fixture cannot be', async ({ page }) => {
+    // 🚨 THE FIXTURE, NOT THE ASSERTION, WAS THE GAP.
+    //
+    // Every other seeded plane in this harness comes from `buildRoofPlane3D`,
+    // so every one carries polygon3D / origin3D / ecefFrame3D — one shape out of
+    // three, and the shape that was already correct. A face from the 2D "Tag
+    // This Roof Plane" flow carries `vertices`, `pitch`, `azimuth` and
+    // `localFrame3D` and nothing else, and the renderer and the placement
+    // engine resolved THAT face differently:
+    //
+    //     panel centre   0.017 m above its own drawn deck
+    //     panel box      0.040 m thick, centred
+    //     underside      0.003 m INSIDE the roof it is standing on
+    //
+    // and with a low-profile racking (0.10 m stack) the whole box is under the
+    // deck. Correct count, no error, array half-buried — Ray's report, for
+    // every face tagged from the 2D map.
+    await boot(page);
+    await seedPlanes(page, [buildTaggedPlane()]);
+    await runAutoLayout(page);
+    await waitForDecks(page, 1);
+
+    const { decks, panels, outlineOnly: sceneOutlines } = await readScene(page);
+    expect(panels.length, 'Auto Layout must fill a tagged 2D face').toBeGreaterThan(0);
+
+    const undecked = sceneOutlines
+      .filter(o => o.pts.length >= 3)
+      .filter(o => { const pl = deckPlane(o); return panels.some(p => deckCovers(o, pl, p.pos)); })
+      .map(o => o.planeId);
+    expect(undecked, 'a tagged face with panels on it must be drawn as a deck').toEqual([]);
+    expect(decks.length, 'the tagged face must draw a deck').toBeGreaterThanOrEqual(1);
+
+    const { rows, uncovered } = clearances(decks, panels);
+    expect(uncovered, 'panels over no deck at all').toEqual([]);
+    expect(rows.length, 'nothing measured').toBeGreaterThan(0);
+
+    const buried = rows.filter(r => r.clearanceM - PANEL_HALF_THICKNESS_M < VISIBLE_GAP_M);
+    expect(
+      buried.map(r => `${r.panelId}: ${r.clearanceM.toFixed(4)} m`),
+      `${buried.length} of ${rows.length} panels on a TAGGED 2D face are not visibly above its deck`,
+    ).toEqual([]);
+
+    for (const r of rows) {
+      expect(
+        Math.abs(r.clearanceM - EXPECTED_CLEARANCE_M),
+        `a tagged 2D face renders its panel ${r.clearanceM.toFixed(4)} m above its deck; ` +
+        `moduleStackHeightM('${DEFAULT_RACKING}') is ${EXPECTED_CLEARANCE_M} m. ` +
+        'A value near 0.02 m is the deck drawn one SURFACE_OFFSET_M above the plane ' +
+        'the panels were placed from.',
+      ).toBeLessThan(clearanceTolM(r.tiltRad));
     }
   });
 
@@ -383,6 +471,6 @@ test.describe('the drawn panel sits above the drawn roof', () => {
       `the deck moved ${(worstAfter - worstBefore).toFixed(4)} m between a freshly ` +
       'seeded face and the same face drawn by the restore path — one of the two ' +
       'applied SURFACE_OFFSET_M a second time',
-    ).toBeLessThan(PLANARITY_TOL_M);
+    ).toBeLessThan(2 * clearanceTolM(afterRows[0].tiltRad));
   });
 });

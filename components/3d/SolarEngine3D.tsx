@@ -42,6 +42,7 @@ import {
   extendRow as extendRowOnSurface,
   addRow as addRowOnSurface,
   computeEcefFrameForLegacyPlane,
+  resolvePlaneGeometry,
 } from '@/lib/surfaceGeometry3D';
 import type { PlacedObstruction } from '@/types';
 import {
@@ -82,7 +83,8 @@ import {
   type ControlPlane,
   DEFAULT_SETBACKS,
 } from '@/lib/3d/controlLayer';
-import { moduleStackHeightM, railCrossSectionM, deckPointFromModule } from '@/lib/roofMountDatum';
+import { moduleStackHeightM, railCrossSectionM, deckPointFromModule, drawnRailHeightM, RAIL_DRAW_SCALE } from '@/lib/roofMountDatum';
+import { geoidUndulationM } from '@/lib/geodeticDatum';
 import { hasUsableElevation } from '@/lib/surfaceGeometry3D';
 
 // ─── v49.0: Isolated Ground Mount Reality Engine ──────────────────────────────
@@ -2265,54 +2267,48 @@ function SolarEngine3D({
         let cartPts: Cart3[];
         let frame: Plane3DFrame;
 
-        if (plane.polygon3D && plane.polygon3D.length >= 3) {
-          // polygon3D carries the exact stitched (or traced) ECEF corners.
-          cartPts = plane.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
-          // 🚨 surfaceOffsetM: 0 — polygon3D IS ALREADY A FITTED, LIFTED PLANE.
-          //
-          // computePlaneFromPoints3D applies SURFACE_OFFSET_M unconditionally, so
-          // re-fitting its own output lifts the result another 12 cm. That is the
-          // exact trap its own docstring warns about, and the exact bug that was
-          // found and fixed in Stitch — and this restore path did the same thing
-          // and was never corrected.
-          //
-          // Panels are placed at `plane.origin3D + n·moduleStackHeightM(mountId)`,
-          // and origin3D lies on the UNRE-LIFTED polygon3D plane. So drawing the
-          // deck at +0.12 while the panels sit at +0.05 rendered every panel
-          // 0.07 m BELOW the roof the user is looking at: panels half-buried in
-          // the surface, which is what "the panels disappear into the roof" is.
-          //
-          // The two legacy branches below deliberately keep the default lift:
-          // computeEcefFrameForLegacyPlane fits points built from lat/lng and
-          // pitch, which have NOT been lifted, so for them the offset is the
-          // first one, not a second.
-          frame = computePlaneFromPoints3D(cartPts, { surfaceOffsetM: 0 });
-        } else if (plane.createdFrom3D && plane.origin3D && plane.ecefFrame3D) {
-          // 3D plane with ECEF frame but no polygon3D (pre-stitch or older save).
-          // Reconstruct polygon3D from the 2D vertices + stored ECEF frame.
-          const legacy = computeEcefFrameForLegacyPlane(plane, groundElev);
-          if (!legacy.polygon3D || legacy.polygon3D.length < 3) {
-            addLog('RESTORE', `Skipped plane ${plane.id.slice(0,8)}: legacy projection yielded <3 corners`);
-            continue;
-          }
-          cartPts = legacy.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
-          frame = computePlaneFromPoints3D(cartPts);
-        } else {
-          // 2D-only legacy plane (no polygon3D, no ecefFrame3D). Project from
-          // vertices via azimuth/pitch → ECEF. This is a lossy approximation but
-          // at least shows the outline on reload.
-          try {
-            const legacy = computeEcefFrameForLegacyPlane(plane, groundElev);
-            if (!legacy.polygon3D || legacy.polygon3D.length < 3) {
-              addLog('RESTORE', `Skipped 2D plane ${plane.id.slice(0,8)}: <3 corners`);
-              continue;
-            }
-            cartPts = legacy.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
-            frame = computePlaneFromPoints3D(cartPts);
-          } catch (e) {
-            addLog('RESTORE', `Skipped 2D plane ${plane.id.slice(0,8)}: ${(e as Error).message}`);
-            continue;
-          }
+        // 🚨 THE DECK IS DRAWN FROM THE PLANE THE PANELS WERE PLACED ON.
+        //
+        // This used to resolve the face itself, three ways, and the placement
+        // engine resolved it three OTHER ways. Measured on the demo roof
+        // (ground 128 m, eave 160 m, stack 0.14 m), panel above its own deck:
+        //
+        //     full 3D face                    0.141 m   correct
+        //     3D face with no polygon3D      31.07  m   array floating over a
+        //                                              deck lying on the ground
+        //     genuine 2D face                 0.017 m   panel box is 0.040 m
+        //                                              thick and centred, so its
+        //                                              UNDERSIDE is 3 mm inside
+        //                                              the roof — half-buried,
+        //                                              correct count, no error
+        //
+        // The 2D case is reachable from the ordinary UI: "Tag This Roof Plane"
+        // (`confirmPendingPlane`) produces a face carrying only `vertices`,
+        // `pitch`, `azimuth` and `localFrame3D` — no polygon3D, no origin3D, no
+        // ecefFrame3D — and Auto Layout fills it. With a low-profile racking
+        // (0.10 m stack) the clearance is NEGATIVE and the whole array vanishes
+        // under the base coat.
+        //
+        // 🚨 AND IT IS A REGRESSION THIS WORKSTREAM CREATED. Before the
+        // mark-only latch was removed, a restored face was drawn as an outline
+        // for ever, so there was no deck to bury the array in. Drawing the deck
+        // is right; drawing it from a different resolution than the placement
+        // engine is what made it dangerous.
+        //
+        // `resolvePlaneGeometry` is that one resolution, and it guarantees the
+        // polygon lies ON the plane whose origin the placer adds the mount
+        // stack to — so the deck is drawn with `surfaceOffsetM: 0` in every
+        // branch. Re-fitting it with the default lift is the double-lift that
+        // WS1-038 records on `origin/master`.
+        const geom = resolvePlaneGeometry(plane as any, groundElev);
+        if (!geom.polygon3D || geom.polygon3D.length < 3) {
+          addLog('RESTORE', `Skipped plane ${plane.id.slice(0,8)}: resolved <3 corners (${geom.source})`);
+          continue;
+        }
+        cartPts = geom.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
+        frame = computePlaneFromPoints3D(cartPts, { surfaceOffsetM: 0 });
+        if (geom.source !== 'own-frame-and-polygon') {
+          addLog('RESTORE', `plane ${plane.id.slice(0,8)} resolved via ${geom.source}`);
         }
 
         // ── Step 2: Convert projected points to Cesium Cartesian3 ──────
@@ -2782,8 +2778,7 @@ function SolarEngine3D({
 
       // PERF v61: Use geoid approximation directly — skip sampleTerrainMostDetailed (saves 3-5s).
       const googleGroundElev = newTwin.elevation ?? 0;
-      const latRad = lat * Math.PI / 180;
-      const geoidApprox = -29 - 5 * Math.sin(latRad);
+      const geoidApprox = geoidUndulationM(lat);
       cesiumGroundElevRef.current = googleGroundElev + geoidApprox;
       cesiumGroundElevResolvedRef.current = true;
       addLog('FLY', `cesiumGroundElev updated: ${cesiumGroundElevRef.current.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
@@ -3424,8 +3419,7 @@ function SolarEngine3D({
       // The geoid approximation below is accurate to ~1-2m for CONUS, which is sufficient for panel placement.
       // Formula: ellipsoidal_height = orthometric_height (Google Elevation) + geoid_undulation
       // EGM96 CONUS approx: -29 - 5*sin(lat_rad) → ~-34m at Ohio, ~-32m at Alexandria VA, ~-29m at Texas
-      const latRadBoot = lat * Math.PI / 180;
-      const geoidApproxBoot = -29 - 5 * Math.sin(latRadBoot);
+      const geoidApproxBoot = geoidUndulationM(lat);
       const cesiumGroundElev = googleGroundElev + geoidApproxBoot;
       cesiumGroundElevRef.current = cesiumGroundElev;
       cesiumGroundElevResolvedRef.current = true;
@@ -3698,9 +3692,7 @@ function SolarEngine3D({
     // Use cesiumGroundElevRef if available (sampled at boot from terrain provider).
     // Fallback: Google elevation + lat-based EGM96 geoid approximation for CONUS.
     const googleElev = isFinite(twinData.elevation) ? twinData.elevation : 0;
-    const geoidUndulationOverlay = -29 - 5 * Math.sin(
-      (twinData.roofSegments[0]?.center?.lat ?? 38) * Math.PI / 180
-    );
+    const geoidUndulationOverlay = geoidUndulationM(twinData.roofSegments[0]?.center?.lat ?? NaN);
     const cesiumElev = cesiumGroundElevResolvedRef.current
       ? cesiumGroundElevRef.current
       : googleElev + geoidUndulationOverlay;
@@ -4046,11 +4038,9 @@ function SolarEngine3D({
     // right datum and left the exaggeration unbounded; the bound belongs with
     // it. IronRidge, Unirac, SnapNRack and the rest are unchanged — the clamp
     // only binds where the product would not have fitted.
-    const RAIL_DRAW_SCALE = 3;               // visibility exaggeration, see box dimensions
-    const RAIL_DECK_GAP_M = 0.005;           // leave the deck visible under the rail
-    const stackH = moduleStackHeightM(mountId);
-    const maxDrawnRailH = Math.max(railH, stackH - RAIL_DECK_GAP_M);
-    const drawnRailH = Math.min(railH * RAIL_DRAW_SCALE, maxDrawnRailH);
+    // The clamp is `drawnRailHeightM` in lib/roofMountDatum.ts — a function the
+    // renderer calls and the test calls, rather than arithmetic each restates.
+    const drawnRailH = drawnRailHeightM(mountId) ?? railH * RAIL_DRAW_SCALE;
     const inwardM    = drawnRailH / 2;
 
     // Max gap between adjacent panel edges that still belongs to the same rail run.
@@ -11395,8 +11385,7 @@ function SolarEngine3D({
     // ── Elevation: cesiumGroundElevRef + heightAboveGround ─────────────────────────
     const heightAboveGround = isFinite(seg.heightAboveGround) ? seg.heightAboveGround : 3.0;
     // v47.216: lat-based EGM96 geoid approximation for CONUS (fallback when terrain not sampled)
-    const segLatRad = seg.center.lat * Math.PI / 180;
-    const geoidApproxFill = -29 - 5 * Math.sin(segLatRad);
+    const geoidApproxFill = geoidUndulationM(seg.center.lat);
     const groundElev = cesiumGroundElevResolvedRef.current
       ? cesiumGroundElevRef.current
       : (isFinite(seg.elevation) ? seg.elevation : 0) + geoidApproxFill;

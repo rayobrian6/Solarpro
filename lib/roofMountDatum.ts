@@ -205,3 +205,52 @@ export function deckPointFromModule(
   const d = moduleStackHeightM(mountingSystemId);
   return { x: modulePos.x - normal.x * d, y: modulePos.y - normal.y * d, z: modulePos.z - normal.z * d };
 }
+
+/**
+ * How tall the RAIL IS DRAWN, in metres — exaggerated for visibility, but never
+ * through the deck it is bolted to.
+ *
+ * `renderRoofRails` draws the rail at three times its real cross-section so a
+ * 42 mm extrusion is visible at design zoom, and hangs it from the module
+ * underside. Nothing checked the product of those two decisions against the
+ * space between the module and the deck. Measured across all 45 catalogue
+ * systems, four drive the drawn rail straight through the roof:
+ *
+ *     s5-pvkit           stack 0.088   3x rail 0.1143   -26 mm
+ *     dpw-powerrail      stack 0.159   3x rail 0.1714   -12 mm
+ *     renusol-vs-plus    stack 0.170   3x rail 0.2042   -34 mm
+ *     mse-rapid-rail     stack 0.170   3x rail 0.2042   -34 mm
+ *
+ * and k2-crossrail and schletter-classic clear it by 0.4 mm, which renders as
+ * z-fighting rather than clearance.
+ *
+ * 🚨 THIS LIVES HERE, NOT IN THE RENDERER, BECAUSE A TEST THAT RE-DERIVES THE
+ * CLAMP PROVES NOTHING. The first guard for this recomputed
+ * `min(railH * 3, max(railH, stack - gap))` inside the test file and asserted
+ * on its own arithmetic — so deleting the clamp from `renderRoofRails` left it
+ * green. A rule the renderer must obey has to be a function the renderer calls
+ * and the test calls.
+ *
+ * Returns null when the system draws no rail at all.
+ */
+export const RAIL_DRAW_SCALE = 3;
+/** Deck left visible under the rail, so "just touching" cannot read as z-fighting. */
+export const RAIL_DECK_GAP_M = 0.005;
+
+export function drawnRailHeightM(mountingSystemId: string | null | undefined): number | null {
+  const rail = railCrossSectionM(mountingSystemId);
+  if (!rail) return null;
+  const stack = moduleStackHeightM(mountingSystemId);
+  // The floor keeps the rail at least its true size if a stack were ever
+  // smaller than the rail itself — a negative drawn height is not a smaller
+  // rail, it is an inside-out box.
+  const maxDrawn = Math.max(rail.heightM, stack - RAIL_DECK_GAP_M);
+  return Math.min(rail.heightM * RAIL_DRAW_SCALE, maxDrawn);
+}
+
+/** Where the drawn rail's underside sits above the deck, in metres. */
+export function drawnRailClearanceM(mountingSystemId: string | null | undefined): number | null {
+  const drawn = drawnRailHeightM(mountingSystemId);
+  if (drawn === null) return null;
+  return moduleStackHeightM(mountingSystemId) - drawn;
+}

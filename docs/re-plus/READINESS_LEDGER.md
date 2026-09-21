@@ -2169,6 +2169,241 @@ pass deliberately, and named here rather than attempted late in a session that h
 this function twice.
 
 ---
+---
+
+## 🚨 WS1-050 — THE RENDERER AND THE PLACEMENT ENGINE RESOLVED THE SAME FACE DIFFERENTLY
+
+| | |
+|---|---|
+| **Severity** | **P0** — and the worst half is a regression WS1-038 created |
+| **Status** | `FIXED_VERIFIED` (browser-measured, mutation-proven) |
+| **Found by** | an independent worker attacking WS1-038, then measured by me |
+
+WS1-038 made a paneled face draw its deck. Correct — and it exposed that the deck and the panels
+were being positioned by **two different resolutions of the same face**. Measured on the demo roof
+(ground 128 m, eave 160 m, `moduleStackHeightM('ironridge-xr100')` = 0.14 m), panel above its own
+drawn deck:
+
+```
+full 3D face                      0.141 m   correct
+3D face that lost polygon3D      31.07  m   the array floats thirty metres over a
+                                            deck lying on the ground
+genuine 2D face                   0.017 m   the panel box is 0.040 m thick and
+                                            CENTRED, so its underside sits 3 mm
+                                            INSIDE the roof it stands on
+```
+
+🚨 **The 2D case is the ordinary UI.** `confirmPendingPlane` — *"Tag This Roof Plane"* — produces a
+face carrying `vertices`, `pitch`, `azimuth` and `localFrame3D` and **nothing else**:
+`enrichRoofPlaneWith3DFrame` is three lines and adds only `localFrame3D`. Auto Layout fills it. With
+the studio's default racking the panel box's underside lands at **exactly 0.000 m** — coplanar with
+the opaque base coat, z-fighting. With a low-profile racking (`rooftech-mini-s`, `rooftech-hook`,
+`ironridge-flat-roof`, stack 0.10 m) the clearance is **−0.020 m** and the whole array disappears
+under the deck.
+
+🚨 **And WS1-038 is what started drawing that deck.** Before the mark-only latch was removed, a
+restored face stayed an outline for ever, so there was nothing to bury the array in. Drawing the
+deck is right. Drawing it from a different resolution than the placer is what made it dangerous —
+and my own new browser gate could not see it, because every fixture it seeded came from
+`buildRoofPlane3D` and therefore carried `polygon3D`. **One shape out of three, and it was the shape
+that was already correct.**
+
+**Fix.** `resolvePlaneGeometry` is exported from `lib/surfaceGeometry3D.ts` and answers *"where is
+this face"* once, for placement and for rendering. It guarantees the returned polygon lies ON the
+plane whose origin the placer adds a mount stack to — so the restore path draws every branch with
+`surfaceOffsetM: 0`, and the double-lift trap has one place to be wrong instead of three.
+
+**The fixture was the gap, not the assertion.** `e2e/support/seedRoof.ts` now builds a 2D tagged
+face through the studio's own `enrichRoofPlaneWith3DFrame`, and the browser gate fills it.
+Mutation-proven: restoring the default lift for the legacy branches fails with *"55 of 55 panels on
+a TAGGED 2D face are not visibly above its deck"*, while the other three cases stay green.
+
+---
+
+## 🚨 WS1-051 — A 2D FACE DID NOT LIE ON THE PLANE IT DECLARED
+
+| | |
+|---|---|
+| **Severity** | **P1** — millimetres on a house, unbounded on a commercial roof |
+| **Status** | `FIXED_VERIFIED` |
+
+`computeEcefFrameForLegacyPlane` computes each corner's height with a **flat-earth** projection
+(metres per degree, times cos(lat)) and then hands it to `latLngToECEF`, which places it on the
+curved ellipsoid. The corners therefore did not lie on the plane the same function returns:
+
+```
+14 x  9 m at 25°     5.3 mm
+28 x 18 m at 25°    10.6 mm
+14 x  9 m at 40°     8.0 mm
+```
+
+It grows with face size and with pitch. Panels are placed from `origin3D` and the deck is drawn by
+re-fitting `polygon3D`, so the residual was a direct disagreement between the modules and the roof
+under them — on the same axis, and in the same direction, as everything else in this family.
+
+Each corner is now dropped onto the plane along the normal; the corner's plan position is what the
+vertex record means, and its height is whatever the plane says at that position. Residual after:
+**0.00000 m** at every size and tilt tested. Mutation-proven, and guarded against the lazy fix — a
+second assertion requires the footprint to survive, so collapsing the polygon to a point would not
+satisfy it.
+
+---
+
+## 🚨 WS1-052 — MY RAIL TEST RECOMPUTED THE CLAMP INSTEAD OF EXERCISING IT
+
+| | |
+|---|---|
+| **Severity** | test honesty — the third time in this workstream |
+| **Status** | `FIXED_VERIFIED` |
+
+WS1-041 fixed the drawn rail and added a test that iterated the whole catalogue. It also
+**re-derived `min(railH * 3, max(railH, stack - gap))` inside the test file** and asserted on its own
+arithmetic — so deleting the clamp from `renderRoofRails` left it green. I "mutation-proved" it by
+mutating the **test**, which proves nothing about the code.
+
+The clamp is now `drawnRailHeightM` in `lib/roofMountDatum.ts`: one piece of arithmetic, called by
+the renderer and by the test. Mutation-proven **both ways** — removing the clamp from the authority
+surfaces all six offending systems, and stopping the renderer calling it fails the link assertion.
+
+---
+
+## 🚨 WS1-053 — A REFUSED LAYOUT WAS FOLLOWED BY THE REST OF THE WRITE
+
+| | |
+|---|---|
+| **Severity** | **P1** — WS1-034 was half a fix |
+| **Status** | `FIXED_VERIFIED` |
+
+WS1-034 stopped `/api/engineering/preliminary` swallowing a refusal, and had it report
+`layoutRefusal` in the response body. Everything below that point kept running: `upsertProduction`,
+the project's `system_type`, and the engineering seed row were all written for the **synthetic**
+system, over a project whose real design the database had just refused to replace — and the response
+still said `success: true`.
+
+The same destruction through different columns, plus a success message for it. A refusal now returns
+**409** with `refused`, `code` and the calculated numbers, and writes nothing further.
+
+---
+
+## 🚨 WS1-054 — THE VERSION SNAPSHOT'S TRIM MADE IT UNRESTORABLE, AND MY COMMENT SAID OTHERWISE
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_VERIFIED` |
+
+WS1-043 restored `height` to the snapshot and left a comment saying the remaining omissions "ARE
+re-computed at render time". **That was false and it was mine.** Nothing recomputes them:
+
+- `renderRoofRails` **filters** on `isFinite(ecefNx) && isFinite(ecefUx)` — a restored version draws
+  no rails at all;
+- `addPanelEntity` prefers `frameQuat` when present, so a panel the user rotated with the grab tool
+  comes back **unrotated** — their work, silently undone by a restore;
+- `collectRoofRenderables` reads `ecefUx`/`ecefNx` to recover a plane frame;
+- `addRow` / `extendRow` read `xMeters` / `yMeters` to rebuild the UV grid.
+
+The trim existed as a "PERF FIX" against row size. Measured: about a dozen numbers per panel, ~11 KB
+for a 55-panel design. A snapshot that cannot restore the design it snapshots is not worth that, and
+the honest place to bound version growth is a retention policy, not a lossy record that looks
+complete. The trim is gone.
+
+---
+
+## 🚨 WS1-055 — A SAVE THAT OMITTED `panels` DELETED THE DESIGN
+
+| | |
+|---|---|
+| **Severity** | **P0** |
+| **Status** | `FIXED_VERIFIED` (proven against real PostgreSQL) |
+| **Found by** | a test I wrote for something else |
+
+```ts
+const panelsJson = JSON.stringify(data.panels || []);
+...
+panels = ${panelsJson}::jsonb,
+```
+
+Every neighbouring column in that UPDATE — `roof_planes`, `map_center`, `fence_line`,
+`obstructions`, `measurements` and the four ground scalars — had already been given "absence keeps",
+each after its own incident. **`panels`, the most valuable column in the row, never was.** Three
+placed panels, one save that omits `panels`, zero panels left. Measured through the real
+`upsertLayout` against real PostgreSQL, and mutation-proven.
+
+`bifacial_optimized ?? false`, `total_panels ?? 0`, `system_size_kw` and an unconditional `map_zoom`
+had the same shape and are fixed with it — `total_panels` and `system_size_kw` are *derived* from
+panels, so keeping the panels while resetting the count leaves a row that contradicts itself.
+
+An explicit `[]` is a decision and still clears. Only absence keeps.
+
+---
+
+## WS1-056 — My unplaced-panel guard had a bypass, and SQL that could throw
+
+| | |
+|---|---|
+| **Severity** | P2 |
+| **Status** | `FIXED_VERIFIED` |
+
+Three defects in WS1-047, all mine, all found by workers attacking it:
+
+1. It tested `!ctr`, and `ctr` falls back to the **roof-plane vertices** — so a payload carrying
+   unplaced panels *alongside* real roof geometry produced a centroid and the check was skipped,
+   exactly when half the payload was unplaced. It asks about the panels now.
+2. `jsonb_array_elements` **errors** on a non-array, and a lateral join is evaluated before `WHERE`.
+   The array-ness is decided inside the call.
+3. The stored-side predicate counted a string `lat` as unplaced while `_coordCentroid` counts the
+   identical value as placed — an asymmetry that would have disarmed the guard on the rows it
+   protects. Both sides accept a numeric string now.
+
+And a fourth, caught by TypeScript: the SQL regex was written with `\s` inside a **template
+literal**, where an unrecognised escape is silently dropped — `\s` cooks to `s`. It uses POSIX
+character classes, which contain no backslashes at all.
+
+---
+
+## WS1-057 — Four copies of the geoid conversion
+
+| | |
+|---|---|
+| **Severity** | P2 — all four agreed, which is the only reason nothing had gone wrong |
+| **Status** | `FIXED_VERIFIED` |
+
+`-29 - 5 * Math.sin(lat)` appeared in **four** places in `SolarEngine3D`: boot, the twin reload,
+`drawOverlays`, and the segment fill. Four copies of a physical constant is four places for it to
+diverge, and this workstream exists because that already happened to the module mount height — six
+copies, four numbers, a 14 cm-per-reload ratchet. The rule is applied before the divergence this
+time: `lib/geodeticDatum.ts`, with a test that fails if the expression reappears anywhere.
+
+🚨 **What the file records rather than restates.** The fit is **latitude-only** — it has no longitude
+term, while the real EGM96 geoid varies strongly with longitude across the same parallel. The
+comment that travelled with the original expression claimed *"accurate to ~1-2m for CONUS, which is
+sufficient for panel placement"*, and **that claim has never been measured in this repository**. It
+enters as a uniform vertical offset between the fitted planes and Google's photogrammetry mesh,
+which is one of the two open questions in the roof datum. `sampleTerrainMostDetailed` would measure
+it and was removed for costing 3–5 s at boot; that trade is defensible and is now written down
+where the next person reading a half-metre discrepancy will find it.
+
+---
+
+## WS1-058 — My browser tolerance was justified by a claim about the code that was false
+
+| | |
+|---|---|
+| **Severity** | test honesty |
+| **Status** | `FIXED_VERIFIED` |
+
+`e2e/panel-above-deck.spec.ts` set a 2 mm tolerance and justified it: *"the panel position is a
+direct ECEF Cartesian3 with no lat/lng round trip, so this is float noise only"*. `addPanelEntity`
+calls `safeCartesian3(C, panel.lng, panel.lat, h)` — it goes through the stored lat/lng, which are
+rounded to **seven decimal places** while the height keeps full precision. The reconstruction moves
+horizontally, and a horizontal error tips into the plane normal as `error·sin(tilt)`.
+
+The bound is now derived from the quantum — half a unit in the last place, in latitude and longitude
+together, times the sine of the face's **own** tilt, read from the deck Cesium drew, so there is no
+fixture constant to drift. Derived 3.3 mm at 25°; measured 2.2 mm. The vitest layer already reached
+the same conclusion the same way, and the two now agree about why.
+
+---
 
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
@@ -2218,8 +2453,8 @@ before acceptance).** Outside Workstream 1's boundary, recorded so they are not 
 | Positive tests pass | ✅ |
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ see the table below |
-| **E2E passes** | ✅ **23 passed, 0 skipped, 0 failed** against a production build, in four passes (see `e2e/README.md`) — including four against **real PostgreSQL** and three that measure the **Cesium entities themselves** |
-| Full suite passes | ✅ **573 files, 12,248 tests, 0 failures** (490 skipped, pre-existing — almost all `*-postgres` and migration-governance files gated on a credential; see the note below) |
+| **E2E passes** | ✅ **24 passed, 0 skipped, 0 failed** against a production build, in two passes (see `e2e/README.md`) — including four against **real PostgreSQL** and four that measure the **Cesium entities themselves**, one of them on a face from the 2D *Tag This Roof Plane* path |
+| Full suite passes | ✅ **574 files, 12,269 tests, 0 failures** (490 skipped, pre-existing — almost all `*-postgres` and migration-governance files gated on a credential; see the note below) |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors; the changed files add no new warnings |
 | Build passes | ✅ `next build` exit 0, clean `.next` |
@@ -2249,6 +2484,12 @@ before acceptance).** Outside Workstream 1's boundary, recorded so they are not 
 | the validator back to `!isFinite(p.height ?? 0)` | *"the validator must drop exactly the tampered panel: expected 9 to be 8"* |
 | identity moved back in front of the spread | *"a spread at 38 comes after projectId(10)/userId(21) — the body can replace the authenticated identity"* |
 | the mark-only latch restored, in vitest | *"Mark Plane is the only thing that may latch this: expected [ …(2) ] to have a length of 1"* |
+| **the legacy restore branches back to the default lift, rebuilt** | *"55 of 55 panels on a TAGGED 2D face are not visibly above its deck"* — and the other three browser cases stay green, so the new fixture is what covers that shape |
+| legacy corners left off their own plane | *"worst corner is 5.278 mm off its own plane"*, 10.570 mm at 28×18 m, 8.026 mm at 40° |
+| the rail clamp removed from the AUTHORITY | six systems surface, incl. *"s5-pvkit … clearance -0.0262 m"* |
+| the renderer stops CALLING the clamp | *"renderRoofRails must call drawnRailHeightM"* |
+| `panels` back to `data.panels \|\| []` | *"omitting panels must keep the stored ones: expected +0 to be 3"*, against real PostgreSQL |
+| one geoid copy restored | *"these restate the geoid undulation instead of importing geoidUndulationM"* |
 
 ### What remains, and why
 

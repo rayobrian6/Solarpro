@@ -36,10 +36,16 @@ import { describe, it, expect } from 'vitest';
 import {
   moduleStackHeightM, railCrossSectionM, modulePointFromDeck, deckPointFromModule,
   DEFAULT_MODULE_STACK_M,
+  drawnRailHeightM,
+  drawnRailClearanceM,
+  RAIL_DRAW_SCALE,
+  RAIL_DECK_GAP_M,
 } from '@/lib/roofMountDatum';
 import { buildRoofPlane3D, latLngToECEF } from '@/lib/roofPlane3D';
 import { buildSurfaceGrid, placeSinglePanel, addRow, extendRow } from '@/lib/surfaceGeometry3D';
 import { getMountingSystemById, getAllMountingSystems } from '@/lib/mounting-hardware-db';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { PlacedPanel, RoofPlane } from '@/types';
 
 const DEG = Math.PI / 180;
@@ -256,39 +262,35 @@ describe('the roof mounting datum — one question, one answer', () => {
   });
 
   it('🚨 the DRAWN rail fits in the gap the datum creates — for every system in the catalogue', () => {
-    // 🚨 THIS TEST USED TO CHECK THREE HARDCODED IDS AND PASS.
-    // It asserted `railH * 3 < stack` for ironridge-xr100, ironridge-xr1000 and
-    // unirac-solarmount — the three that happen to fit — and called the class
-    // closed. Measured across all 45 catalogue systems, FOUR drive the drawn
-    // rail through the deck it is bolted to:
+    // 🚨 THIS TEST HAS BEEN WRONG TWICE, IN TWO DIFFERENT WAYS.
     //
-    //     s5-pvkit        stack 0.088  railH*3 0.1143   -26 mm
-    //     dpw-powerrail   stack 0.159  railH*3 0.1714   -12 mm
-    //     renusol-vs-plus stack 0.170  railH*3 0.2042   -34 mm
-    //     mse-rapid-rail  stack 0.170  railH*3 0.2042   -34 mm
+    // First it checked three hardcoded ids — ironridge-xr100, ironridge-xr1000,
+    // unirac-solarmount, the three that happen to fit — and called the class
+    // closed. Measured across all 45 catalogue systems, four drive the drawn
+    // rail through the deck and two more clear it by 0.4 mm.
     //
-    // and k2-crossrail and schletter-classic clear by 0.4 mm, which renders as
-    // z-fighting rather than clearance. A rule that must hold for every product
-    // has to be checked against every product; three chosen examples is the
-    // same vacuum as a fixture that cannot exhibit the condition.
+    // Then it iterated the catalogue but RE-DERIVED the clamp inside the test
+    // and asserted on its own arithmetic, so deleting the clamp from
+    // `renderRoofRails` left it green. A test that recomputes the thing it is
+    // testing is a test of itself.
     //
-    // `renderRoofRails` now clamps the exaggeration to the space available.
-    // This reproduces that arithmetic and requires the result to fit.
-    const RAIL_DRAW_SCALE  = 3;
-    const RAIL_DECK_GAP_M  = 0.005;
+    // The clamp is now `drawnRailHeightM` — a function the renderer calls and
+    // this calls — so there is one piece of arithmetic and this exercises it.
     const offenders: string[] = [];
     let checked = 0;
 
     for (const system of getAllMountingSystems()) {
-      const rail = railCrossSectionM(system.id);
-      if (!rail) continue;                 // rail-less: nothing is drawn
+      const drawn = drawnRailHeightM(system.id);
+      if (drawn === null) {
+        expect(railCrossSectionM(system.id), `${system.id} returns no drawn height, so it must have no rail`).toBeNull();
+        continue;
+      }
       checked++;
-      const stack = moduleStackHeightM(system.id);
-      const maxDrawn = Math.max(rail.heightM, stack - RAIL_DECK_GAP_M);
-      const drawn = Math.min(rail.heightM * RAIL_DRAW_SCALE, maxDrawn);
-      const bottom = stack - drawn;
-      if (bottom < RAIL_DECK_GAP_M - 1e-9) {
-        offenders.push(`${system.id}: stack ${stack.toFixed(3)} m, drawn rail ${drawn.toFixed(4)} m, bottom ${bottom.toFixed(4)} m`);
+      const clearance = drawnRailClearanceM(system.id)!;
+      expect(clearance, `${system.id}: the two helpers disagree`)
+        .toBeCloseTo(moduleStackHeightM(system.id) - drawn, 12);
+      if (clearance < RAIL_DECK_GAP_M - 1e-9) {
+        offenders.push(`${system.id}: stack ${moduleStackHeightM(system.id).toFixed(3)} m, drawn rail ${drawn.toFixed(4)} m, clearance ${clearance.toFixed(4)} m`);
       }
     }
 
@@ -301,14 +303,35 @@ describe('the roof mounting datum — one question, one answer', () => {
 
   it('the clamp only binds where it has to — common systems keep the full exaggeration', () => {
     // Guard against the lazy fix. Clamping everything to the stack would also
-    // make this test pass while quietly shrinking every rail on screen.
-    const RAIL_DRAW_SCALE = 3, RAIL_DECK_GAP_M = 0.005;
+    // satisfy the test above while quietly shrinking every rail on screen.
     for (const id of ['ironridge-xr100', 'ironridge-xr1000', 'unirac-solarmount', 'snapnrack-100']) {
       const rail = railCrossSectionM(id)!;
-      const stack = moduleStackHeightM(id);
-      const drawn = Math.min(rail.heightM * RAIL_DRAW_SCALE, Math.max(rail.heightM, stack - RAIL_DECK_GAP_M));
-      expect(drawn, `${id} should still be drawn at the full ${RAIL_DRAW_SCALE}x`)
-        .toBeCloseTo(rail.heightM * RAIL_DRAW_SCALE, 9);
+      expect(drawnRailHeightM(id), `${id} should still be drawn at the full ${RAIL_DRAW_SCALE}x`)
+        .toBeCloseTo(rail.heightM * RAIL_DRAW_SCALE, 12);
     }
+  });
+
+  it('🚨 and the four that do not fit are really clamped, not merely passing', () => {
+    // Name them. If a catalogue edit ever makes one of these fit unclamped,
+    // this fails and the list is re-derived deliberately rather than drifting.
+    for (const id of ['s5-pvkit', 'dpw-powerrail', 'renusol-vs-plus', 'mse-rapid-rail']) {
+      const rail = railCrossSectionM(id)!;
+      const drawn = drawnRailHeightM(id)!;
+      expect(drawn, `${id} must be clamped below the full ${RAIL_DRAW_SCALE}x`)
+        .toBeLessThan(rail.heightM * RAIL_DRAW_SCALE - 1e-9);
+      expect(drawnRailClearanceM(id)!, `${id} must end up clear of the deck`)
+        .toBeGreaterThanOrEqual(RAIL_DECK_GAP_M - 1e-9);
+    }
+  });
+
+  it('the RENDERER calls the clamp — it does not restate it', () => {
+    // The behavioural assertions above are of `drawnRailHeightM`. This is the
+    // link between that function and the code that draws, and it is stated as
+    // the weak source-level check it is: the behavioural proof of the rail's
+    // position in the running app is e2e/panel-above-deck.spec.ts.
+    const engine = readFileSync(join(process.cwd(), 'components', '3d', 'SolarEngine3D.tsx'), 'utf8');
+    expect(engine, 'renderRoofRails must call drawnRailHeightM').toMatch(/drawnRailHeightM\(mountId\)/);
+    expect(engine, 'and must not recompute the clamp beside it')
+      .not.toMatch(/Math\.min\(railH \* RAIL_DRAW_SCALE/);
   });
 });

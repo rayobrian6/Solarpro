@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { buildRoofPlane3D, latLngToECEF } from '../../lib/roofPlane3D';
+import { enrichRoofPlaneWith3DFrame } from '../../lib/surfaceGeometry3D';
 import type { RoofPlane } from '../../types';
 
 /**
@@ -160,4 +161,48 @@ export async function seedPlanes(
     { message: 'the 3D engine never received every seeded roof plane', timeout: 45_000 },
   ).toBe(planes.length);
   return planes;
+}
+
+/**
+ * A face produced by "Tag This Roof Plane" — the 2D path, NOT the 3D tracer.
+ *
+ * 🚨 EVERY OTHER FIXTURE IN THIS FILE COMES FROM `buildRoofPlane3D`, so every
+ * one of them carries `polygon3D`, `origin3D`, `ecefFrame3D` and
+ * `createdFrom3D`. That is one shape out of three, and it is the shape that was
+ * already correct. `confirmPendingPlane` in DesignStudio builds a face with
+ * `vertices`, `pitch`, `azimuth` and `localFrame3D` and nothing else — and both
+ * the placement engine and the renderer used to resolve THAT face differently,
+ * putting the drawn panel 17 mm above its drawn deck, which with a 40 mm panel
+ * box means the underside is 3 mm inside the roof. A fixture that cannot be a
+ * 2D face cannot show it.
+ *
+ * Built by the same `enrichRoofPlaneWith3DFrame` the studio calls, so this is
+ * the studio's own output shape rather than a hand-written approximation.
+ */
+export function buildTaggedPlane(): RoofPlane {
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos(DEMO_SITE.lat * DEG);
+  const dLng = WIDTH_M / 2 / mPerDegLng;
+  const dLat = DEPTH_M / 2 / M_PER_DEG_LAT;
+  const vertices = [
+    { lat: DEMO_SITE.lat - dLat, lng: DEMO_SITE.lng - dLng },
+    { lat: DEMO_SITE.lat - dLat, lng: DEMO_SITE.lng + dLng },
+    { lat: DEMO_SITE.lat + dLat, lng: DEMO_SITE.lng + dLng },
+    { lat: DEMO_SITE.lat + dLat, lng: DEMO_SITE.lng - dLng },
+  ];
+  const base: RoofPlane = {
+    id: 'tagged-2d-face',
+    vertices,
+    pitch: TILT_DEG,
+    azimuth: 180,
+    area: WIDTH_M * DEPTH_M,
+    usableArea: WIDTH_M * DEPTH_M * 0.75,
+    centroidLat: DEMO_SITE.lat,
+    centroidLng: DEMO_SITE.lng,
+    source: 'manual',
+    confirmed: true,
+    // A real 2D face knows how high it is above the ground, and NOTHING else
+    // about where it is in space.
+    planeHeightAtCenterMeters: 5.2,
+  } as unknown as RoofPlane;
+  return enrichRoofPlaneWith3DFrame(base);
 }
