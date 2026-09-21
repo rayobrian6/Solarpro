@@ -696,6 +696,40 @@ describe('🚨 a deployment that has not run 123 yet', () => {
     });
   });
 
+  it('🚨 A COORDINATE MISMATCH IS A REFUSAL TOO — 409, not 503', async () => {
+    // WS1-017 was closed by naming LAYOUT_SUBSYSTEM_WIPE and
+    // LAYOUT_ARCHIVE_UNSTORABLE in this route's catch block. That fixed the two
+    // instances I had found and left the CLASS open: `upsertLayout` throws a
+    // THIRD refusal, LAYOUT_COORDS_MISMATCH, which went straight on reporting
+    // itself as "Service temporarily unavailable. Please try again in a moment."
+    //
+    // It surfaced in a browser, not in a test: driving the real studio against a
+    // real database produced
+    //
+    //   [DB_TRANSIENT_ERROR] route=[POST /api/pr LAYOUT_COORDS_MISMATCH:
+    //   design geometry is 16.3 km from the project address
+    //
+    // — a permanent refusal logged as a transient error, on a save the user
+    // would retry forever. Three more routes call `upsertLayout` and handled
+    // none of the three codes, so the recognition now lives in
+    // `handleRouteDbError` itself and a new route cannot forget it.
+    // Connecticut, the guard's own example of the corruption it was written for
+    // ("an Illinois project carrying Connecticut panel coordinates"). NOT
+    // Phoenix: the guard deliberately exempts the placeholder coordinate, so a
+    // Phoenix centroid returns early and the refusal never fires — which is how
+    // the first version of this test passed a 200 and looked like a real result.
+    const FAR = { lat: 41.7658, lng: -72.6734 };
+    const res = await post(autosaveBody({
+      panels: [panel('far-1', FAR)], roofPlanes: [], mapCenter: FAR, activeSiteKey: KEY_A,
+    }));
+    expect(res.status, 'a coordinate refusal must not be reported as a transient DB error').toBe(409);
+    const body = res.json as { code?: string; refused?: boolean; error?: string };
+    expect(body.code).toBe('LAYOUT_COORDS_MISMATCH');
+    expect(body.refused).toBe(true);
+    // The guard's own sentence reaches the caller, not a generic one.
+    expect(body.error).toContain('from the project address');
+  });
+
   it('🚨 ONE panel at the new property does NOT overwrite the previous 52', async () => {
     // THE HOLE THE WIPE GUARD NEVER COVERED.
     //

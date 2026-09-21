@@ -4,21 +4,59 @@ This harness covers the `/design` Design Studio path with Playwright and a small
 
 ## Run
 
-```bash
-npm run test:e2e
-```
-
-The Playwright config starts the Next dev server with:
-
-```bash
-DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npm run dev -- -p 3000
-```
-
-You can point at an already-running server instead:
+🚨 **Run against a production BUILD, not `next dev`.** Fifteen cold route compiles
+make `page.goto` exceed 45 s and three tests fail on timeouts that look like
+product defects. Never `next build` while a dev server is writing the same
+`.next` — clear it first.
 
 ```bash
-E2E_BASE_URL=http://127.0.0.1:3000 NEXT_PUBLIC_E2E=1 npm run test:e2e
+rm -rf .next
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npx next build
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npx next start -p 3011
+E2E_BASE_URL=http://127.0.0.1:3011 NEXT_PUBLIC_E2E=1 npx playwright test
 ```
+
+### With a real database, and no credential
+
+`e2e/persistence-join.spec.ts` needs a database. It does **not** need the owner's
+Neon credential: `SOLARPRO_LOCAL_PG=1` boots PostgreSQL compiled to WebAssembly
+inside the Next server (`instrumentation.ts` → `lib/dev/pgliteNeonBridge.ts`) and
+answers the driver's requests there. Route handlers, `upsertLayout` and
+`rowToLayout` are untouched production code.
+
+```bash
+rm -rf .next
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 SOLARPRO_LOCAL_PG=1 npx next build
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 SOLARPRO_LOCAL_PG=1   DEV_AUTH_USER_ID=11111111-1111-4111-8111-111111111111   npx next start -p 3011
+```
+
+**You do not set `DATABASE_URL`.** The bridge points it at the in-process
+database itself, using a host in the reserved `.invalid` TLD and no password.
+
+That host can never resolve, which is the point: **if the bridge ever fails to
+intercept, the query fails loudly instead of quietly talking to something real.**
+Without `SOLARPRO_LOCAL_PG` those specs skip, loudly.
+
+### Run it in two passes
+
+```bash
+npx playwright test e2e/design-studio.spec.ts e2e/panel-elevation.spec.ts   # 9
+npx playwright test e2e/site-switch.spec.ts e2e/persistence-join.spec.ts    # 10
+```
+
+All nineteen pass, none skipped. Running all nineteen in ONE pass against one
+server intermittently fails two or three — the server reaches ~850 MB and
+degrades under nineteen consecutive Cesium sessions, and the failures move
+between runs (`read ECONNRESET`, "hook should be installed" timeouts). That is
+the machine, not the product; the split is the supported way to run it.
+
+### Authentication
+
+Every request needs `X-Dev-Auth: bypass` as well as `DEV_AUTH_BYPASS=true` —
+`getDevSessionUser` AND-gates them deliberately, so a signed-in user is never
+silently replaced by the dev user. `playwright.config.ts` sends the header for
+every spec. Without it `/api/projects` 401s and the page redirects to
+`/auth/login` mid-spec.
 
 ## Browser/runtime assumptions
 

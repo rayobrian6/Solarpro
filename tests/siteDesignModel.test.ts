@@ -370,12 +370,42 @@ describe('hydration', () => {
     expect(r.state.archives[KEY_B].panels).toHaveLength(9);
   });
 
-  it('reload at a site nothing is stored for — empty, and nothing is lost', () => {
+  it('🚨 reload at a key nothing is stored for KEEPS the design — a mismatch is not a claim', () => {
+    // CHANGED, and the reason matters more than the assertion.
+    //
+    // This used to expect `stored-active-archived`: the active design filed away
+    // and an EMPTY bundle activated, whenever the key derived on mount merely
+    // failed to match the stored one. That is the behaviour that emptied Ray's
+    // screen. `siteKeyNow` comes from the CAMERA, which the mount effect points
+    // using a fresh geocode; measured in a browser against a real database, a
+    // reload moved the key 2.8 km and archived 56 entities from a design that
+    // had never left its property.
+    //
+    // And hydrate cannot tell the two cases apart. A key 17 m away is either the
+    // neighbour's house or a geocode of your own — this codebase's own comment
+    // records that 3 Melvin Drive "geocodes ~17m onto the next house" — so no
+    // radius separates them. With the discrimination impossible, the safe answer
+    // is the non-destructive one: keep what the row says is active, and let an
+    // explicit Pick House (switchSite) move properties.
     const s = stateAt(KEY_A, bundle('A', 52));
     const r = hydrate(storedOf(s), KEY_C);
-    expect(r.disposition).toBe('stored-active-archived');
-    expect(isEmptyBundle(r.state.active)).toBe(true);
-    expect(r.state.archives[KEY_A].panels).toHaveLength(52);
+    expect(r.disposition).toBe('matched');
+    expect(r.state.active.panels).toHaveLength(52);
+    expect(r.state.activeSiteKey).toBe(KEY_A);
+    expect(r.needsAdoptionSave).toBe(false);   // nothing to force-save
+  });
+
+  it('...but a key the ARCHIVE holds still reactivates — a positive match is information', () => {
+    // The distinction that makes the change above safe. A mismatch says nothing;
+    // matching a property the row already holds a design for says the camera is
+    // demonstrably there, so bring it back and file the current one.
+    let s = stateAt(KEY_A, bundle('A', 52));
+    s = switchSite(s, KEY_B).state;
+    s = setActiveBundle(s, bundle('B', 9));
+    const r = hydrate(storedOf(s), KEY_A);
+    expect(r.disposition).toBe('reactivated-archive');
+    expect(r.state.active.panels).toHaveLength(52);
+    expect(r.state.archives[KEY_B].panels).toHaveLength(9);
   });
 
   it('unresolved coordinates hide nothing', () => {

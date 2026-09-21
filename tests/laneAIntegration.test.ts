@@ -407,11 +407,22 @@ describe('persistence round trip — payload to storage and back', () => {
     expect(active.map(p => p.id).sort()).toEqual(planes.map(p => p.id).sort());
   });
 
-  it('reload at a DIFFERENT site activates nothing but loses nothing', () => {
+  it('🚨 reload at a DIFFERENT key KEEPS the design — a reload is not a property change', () => {
+    // CHANGED with WS1-029. This expected the design to be archived and nothing
+    // activated whenever the key derived on mount merely differed from the
+    // stored one. That key comes from the CAMERA, which the mount effect points
+    // with a fresh geocode — and measured in a browser against real PostgreSQL,
+    // a reload moved it 2.8 km and archived 56 entities from a design that had
+    // never left its property. The screen went empty on F5.
+    //
+    // A restore cannot tell "the neighbour's house" from "a bad geocode of
+    // mine" — 3 Melvin Drive geocodes ~17 m onto the next house, against an 8 m
+    // match radius — so it no longer tries. Picking a house (`switchSite`) still
+    // archives, from a point the user actually clicked.
     const planes = acquire(NORMAL_SUBURBAN_PITCHED, POCAHONTAS, SITE_A);
     const { active, foreign } = persistAndReload({ planes, at: SITE_A, reloadAt: SITE_B });
-    expect(active).toHaveLength(0);
-    expect(foreign).toHaveLength(planes.length);
+    expect(active).toHaveLength(planes.length);
+    expect(foreign).toHaveLength(0);
   });
 
   it('a signature change is visible when a generated face is edited', () => {

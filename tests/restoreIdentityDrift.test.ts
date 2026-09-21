@@ -147,14 +147,23 @@ describe('🚨 ADVERSARIAL — the old exact-string behaviour, reproduced', () =
     // to `stored-active-archived`.
     expect(KEY_CLICK === KEY_GEOCODE).toBe(false);
 
-    // And prove the destructive branch is the one that used to be taken, by
-    // driving hydrate to a key that is genuinely far away.
+    // 🚨 AND THE DESTRUCTIVE BRANCH IS NOW GONE FROM HYDRATE ENTIRELY.
+    //
+    // This used to drive hydrate to a far-away key and assert
+    // `stored-active-archived` — an empty active bundle plus the
+    // `needsAdoptionSave` flag that forces a save of `panels: []`, which the
+    // LAYOUT_SUBSYSTEM_WIPE guard permits precisely because the keys differ.
+    //
+    // Widening the tolerance to `sitesAreSameProperty` (8 m) was not enough: a
+    // browser run against a real database moved the key 2.8 km on reload and
+    // archived 56 entities with no user action. A restore cannot distinguish
+    // "the neighbour's house" from "a bad geocode of mine", so it no longer
+    // tries. The design stays active; Pick House moves properties.
     const s = stateAt(KEY_CLICK, bundle('melvin', 52));
     const far = hydrate(storedOf(s), KEY_NEIGHBOUR);
-    expect(far.disposition).toBe('stored-active-archived');
-    expect(isEmptyBundle(far.state.active)).toBe(true);
-    expect(far.needsAdoptionSave).toBe(true);           // the destructive flag
-    expect(far.state.archives[KEY_CLICK].panels).toHaveLength(52); // still not dropped
+    expect(far.disposition).toBe('matched');
+    expect(far.state.active.panels).toHaveLength(52);
+    expect(far.needsAdoptionSave).toBe(false);
   });
 });
 
@@ -232,13 +241,54 @@ describe('switchSite answers the property question too, not just hydrate', () =>
   });
 });
 
+describe('🚨 THE MEASURED REPRODUCTION — a reload emptied the screen', () => {
+  // Not a constructed scenario. This is what a real browser did against a real
+  // PostgreSQL, driving the real Design Studio through `POST /api/projects`,
+  // Auto Layout, autosave and `location.reload()`:
+  //
+  //   before reload  activeSiteKey …@38.66570,-90.22660   panels 55  archived 0
+  //   after  reload  activeSiteKey …@38.64062,-90.22621   panels  0  archived 1 (56 entities)
+  //
+  // The second key is the GEOCODE of the project's address; the first is the
+  // coordinate the design was built at. Nobody touched the project, nobody
+  // picked a house. The screen went empty on F5 — which is what Ray reported as
+  // "the panels never came back".
+  const MINTED  = 'proj@38.66570,-90.22660';
+  const GEOCODE = 'proj@38.64062,-90.22621';
+
+  it('the two keys really are far apart — the tolerance could never have covered it', () => {
+    expect(sitesAreSameProperty(MINTED, GEOCODE)).toBe(false);
+  });
+
+  it('and the design stays active across that reload', () => {
+    const s = stateAt(MINTED, bundle('melvin', 55));
+    const r = hydrate(storedOf(s), GEOCODE);
+    expect(r.state.active.panels).toHaveLength(55);
+    expect(r.state.activeSiteKey).toBe(MINTED);
+    expect(Object.keys(r.state.archives)).toHaveLength(0);
+    // 🚨 And no forced save of an empty design. `needsAdoptionSave` is what
+    // turned an on-screen emptiness into a persisted one.
+    expect(r.needsAdoptionSave).toBe(false);
+  });
+});
+
 describe('a genuinely different property is still a different property', () => {
-  it('picking the neighbour archives this design rather than keeping it active', () => {
+  it('🚨 PICKING the neighbour archives this design — and PICKING is switchSite, not hydrate', () => {
+    // This test used to be named for picking and call `hydrate`. That conflation
+    // is the whole defect: a page load was being treated as a property change.
+    // Picking is `switchSite`, it is driven by a point the user actually
+    // clicked, and it still archives — as asserted here.
     const s = stateAt(KEY_CLICK, bundle('melvin', 52));
-    const r = hydrate(storedOf(s), KEY_NEIGHBOUR);
-    expect(r.disposition).toBe('stored-active-archived');
-    expect(isEmptyBundle(r.state.active)).toBe(true);
+    const r = switchSite(s, KEY_NEIGHBOUR);
+    expect(r.changed).toBe(true);
+    expect(isEmptyBundle(r.arriving)).toBe(true);
     expect(r.state.archives[KEY_CLICK].panels).toHaveLength(52);
+
+    // Reloading at that same neighbouring key does NOT, because a restore has no
+    // way to know whether the key is the neighbour or a drifted geocode.
+    const reloaded = hydrate(storedOf(s), KEY_NEIGHBOUR);
+    expect(reloaded.disposition).toBe('matched');
+    expect(reloaded.state.active.panels).toHaveLength(52);
   });
 
   it('returning to a property the archive holds still reactivates it', () => {

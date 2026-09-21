@@ -139,6 +139,13 @@ const nextConfig = {
     'exif-reader',           // native EXIF parsing
     'puppeteer-core',        // Puppeteer PDF generation
     '@sparticuz/chromium-min', // Sparticuz Chromium for Vercel serverless
+    // PostgreSQL compiled to WebAssembly. A devDependency, imported ONLY by
+    // lib/dev/pgliteNeonBridge.ts and only when SOLARPRO_LOCAL_PG=1, so it is
+    // never loaded on a deployment. Listed here because webpack bundling it
+    // breaks its WASM loader: the bundled `fs` shim rejects the URL it passes
+    // ("The 'path' argument must be of type string ... Received an instance of
+    // URL") and the instrumentation hook then fails the whole server boot.
+    '@electric-sql/pglite',
   ],
   experimental: {
     // Ship the manufacturer-asset PNGs into the permit serverless functions so

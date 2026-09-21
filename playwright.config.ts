@@ -12,6 +12,13 @@ export default defineConfig({
   reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : [['list']],
   use: {
     baseURL,
+    // 🚨 THE DEV BYPASS NEEDS A HEADER, NOT JUST AN ENV VAR.
+    // `getDevSessionUser` AND-gates `DEV_AUTH_BYPASS=true` with an explicit
+    // `X-Dev-Auth: bypass` header, deliberately, so a signed-in user is never
+    // silently replaced by the dev user. Without it every /api/projects call
+    // 401s and the page redirects to /auth/login mid-spec — which is what left
+    // a dead component's `window.__solarE2E` on the page for specs to read.
+    extraHTTPHeaders: { 'X-Dev-Auth': 'bypass' },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

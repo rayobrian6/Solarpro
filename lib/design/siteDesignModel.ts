@@ -575,7 +575,16 @@ export interface HydrateResult {
   state: SiteDesignState;
   /** How ownership of the stored active columns was decided. Logged, and
    *  asserted by the tests — a silent change of branch here is a silent change
-   *  of which property's design the user is looking at. */
+   *  of which property's design the user is looking at.
+   *
+   *  🚨 `stored-active-archived` is RETIRED and `hydrate` can no longer return
+   *  it. It meant "the key derived on mount disagrees with the stored one, so
+   *  file the whole design away and activate an empty bundle" — and the key
+   *  derived on mount comes from the CAMERA, which a fresh geocode moves. See
+   *  WS1-029: a reload archived 56 entities and emptied the screen with no user
+   *  action. The name is kept in the union so any stored log line or older
+   *  branch still type-checks against it, and so this note has somewhere to
+   *  live; nothing produces it. */
   disposition: 'matched' | 'adopted-legacy' | 'reactivated-archive' | 'stored-active-archived' | 'unresolved';
   /** True when hydration had to rewrite ownership, so exactly ONE save is
    *  expected immediately afterwards to record it. */
@@ -663,52 +672,13 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     };
   }
 
-  // 🚨 SAME PROPERTY, NOT SAME STRING — AND KEEP THE KEY THE ROW ALREADY HAS.
+  // ── A row with no claim about its own property ──────────────────────────
   //
-  // This was `isSameSite`, i.e. exact string equality, and that is the wrong
-  // question on the RESTORE path. The key the row stores was minted from the
-  // point the user CLICKED. `siteKeyNow` is re-derived on mount from
-  // `projects.lat/lng` — which the mount effect OVERWRITES with a fresh geocode
-  // ("street-level geocode always wins over stored coords", true of every picked
-  // address). A 3D roof-click point and a geocoder's rooftop point essentially
-  // never agree to the 1.1 m the key quantises to, so the two keys differed on
-  // reload for a design that had never left its property.
-  //
-  // The consequence was not a cosmetic mismatch. Falling through here reaches
-  // `stored-active-archived`, which activates an EMPTY bundle and sets
-  // `needsAdoptionSave`, forcing a save of `panels: []` — and the
-  // LAYOUT_SUBSYSTEM_WIPE guard relaxes precisely when the incoming key differs
-  // from the stored one, so that write is permitted. The design was destroyed by
-  // the mechanism built to protect it, on reload, with no user action at all.
-  //
-  // `sitesAreSameProperty` is the SAME predicate `resolveSiteKey` and the
-  // detection staleness guard use — one definition of "same property" in this
-  // codebase, not a third.
-  //
-  // And the key that survives is `parsed.activeSiteKey`, NOT `siteKeyNow`: the
-  // archives are filed under the stored key and roof planes are stamped with it,
-  // so adopting the drifted coordinate's key would orphan both.
-  if (sitesAreSameProperty(parsed.activeSiteKey, siteKeyNow)) {
-    return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites },
-      disposition: 'matched',
-      needsAdoptionSave: false,
-    };
-  }
-
   // 🚨 THE ROW NEVER DECIDED WHOSE THE ACTIVE COLUMNS ARE — ADOPT, NEVER DROP.
-  //
   // A project with no stored lat/lng resolves to UNRESOLVED_SITE_KEY at restore
-  // time, so the saves that follow write `activeSiteKey: ""`. On the NEXT load
-  // the coordinates ARE known, `isSameSite('', key)` is false (an unresolved key
-  // matches nothing, deliberately), and without this branch the design fell
-  // through to "the columns describe another property" — where the archival step
-  // is `if (parsed.activeSiteKey)`, which `''` fails. The design was neither
-  // active nor archived. It was simply gone, on the second open of every project
-  // created before its first geocode landed.
-  //
-  // An unresolved stored key is not a claim that the columns belong to somewhere
-  // else; it is the absence of a claim. Same doctrine as a legacy row: adopt.
+  // time, so the saves that follow write `activeSiteKey: ""`. An unresolved
+  // stored key is not a claim that the columns belong somewhere else; it is the
+  // absence of a claim. Same doctrine as a legacy row: adopt.
   if (!parsed.activeSiteKey) {
     return {
       state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: parsed.sites },
@@ -717,34 +687,70 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     };
   }
 
-  // The columns describe a different property than the one on screen.
-  // `parsed.activeSiteKey` is non-empty here — the branch above handles the
-  // unresolved case — so the stored active set always has a key to be filed
-  // under. It is never dropped.
-  const archives = { ...parsed.sites };
-  archives[parsed.activeSiteKey] = storedActive;
-  // 🚨 PROPERTY LOOKUP, NOT STRING LOOKUP — the sibling of the comparison above.
-  // This was `archives[siteKeyNow]`, and it drifts for exactly the same reason:
-  // `siteKeyNow` comes from a re-geocoded coordinate, while the archive is filed
-  // under the key minted from the original click. Returning to a property the
-  // archive genuinely held therefore missed it and fell through to the empty,
-  // `needsAdoptionSave` branch — the destructive one.
-  const mineKey = nearestSamePropertyKey(Object.keys(archives), siteKeyNow);
-  const mine = mineKey ? archives[mineKey] : undefined;
-  if (mine && mineKey) {
+  // ── Standing at a property the archive holds ─────────────────────────────
+  //
+  // A POSITIVE match. The camera is demonstrably at a property this row already
+  // has a design for, so bring that design back and file the current one. This
+  // is the case where re-deriving from the map is informative rather than
+  // destructive: it names a property the row itself knows about.
+  //
+  // 🚨 PROPERTY LOOKUP, NOT STRING LOOKUP. `siteKeyNow` comes from a re-geocoded
+  // coordinate while the archive is filed under the key minted from the original
+  // click, so exact-string lookup missed a property the archive genuinely held.
+  const mineKey = nearestSamePropertyKey(Object.keys(parsed.sites), siteKeyNow);
+  if (mineKey) {
+    const archives = { ...parsed.sites };
+    const mine = archives[mineKey];
     delete archives[mineKey];
+    archives[parsed.activeSiteKey] = storedActive;
     return {
-      // Keep the key the archive was filed under, for the same reason the
-      // matched branch does: plane stamps and archive keys must stay in step.
+      // Keep the key the archive was filed under: plane stamps and archive keys
+      // must stay in step.
       state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: mineKey, active: mine, archives },
       disposition: 'reactivated-archive',
       needsAdoptionSave: true,
     };
   }
+
+  // ── Everything else: keep what the row says is active ────────────────────
+  //
+  // 🚨 A PAGE LOAD IS NOT A PROPERTY CHANGE, AND A MISMATCH IS NOT A CLAIM.
+  //
+  // This used to archive the active design and activate an EMPTY bundle
+  // whenever `siteKeyNow` merely FAILED to match the stored key — and then set
+  // `needsAdoptionSave`, forcing a save of `panels: []` that the
+  // LAYOUT_SUBSYSTEM_WIPE guard permits precisely because the keys differ. The
+  // design was destroyed by the mechanism built to protect it, on reload, with
+  // no user action at all.
+  //
+  // `siteKeyNow` is derived in DesignStudio from `mapCenterRef` — THE CAMERA
+  // POSITION — which the mount effect sets from a fresh geocode of the address
+  // ("street-level geocode always wins over stored coords"). A camera position
+  // is not a property identity, and a geocoder's answer is not the point the
+  // user clicked.
+  //
+  // Widening the tolerance cannot fix it. The first repair made the comparison
+  // `sitesAreSameProperty`, which matches within SITE_MATCH_RADIUS_M = 8 m —
+  // and this codebase's own comment records that 3 Melvin Drive "geocodes ~17m
+  // onto the next house". Measured in a browser against a real database, a
+  // reload moved the key from
+  //
+  //     …@38.66570,-90.22660   (55 panels active, nothing archived)
+  // to  …@38.64062,-90.22621   (0 panels active, 56 entities archived)
+  //
+  // — 2.8 km, on a design that had never left its property. Any radius wide
+  // enough to cover a bad geocode also covers the neighbour's roof, which is
+  // exactly what the radius exists to keep out. The tolerance is not the lever.
+  //
+  // So a mismatch now decides nothing. The stored key is a claim the row makes
+  // about its own columns, written by the save that made them, and a restore is
+  // not the moment to overrule it. Property changes are `switchSite`, reached
+  // through Pick House, which still decides by proximity — from a point the user
+  // actually clicked.
   return {
-    state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: emptyBundle(), archives },
-    disposition: 'stored-active-archived',
-    needsAdoptionSave: true,
+    state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites },
+    disposition: 'matched',
+    needsAdoptionSave: false,
   };
 }
 

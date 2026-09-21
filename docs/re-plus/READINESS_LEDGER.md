@@ -1246,6 +1246,268 @@ tested.
 
 ---
 
+## WS1-028 — The last "owner-blocked" gate was not owner-blocked either
+
+| | |
+|---|---|
+| **Severity** | Verification coverage, and a second false blocker recorded by me |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+I closed the previous revision of this ledger saying one cell of the coverage matrix — the real
+client against the real route against real PostgreSQL, in a browser — needed a database credential
+and nothing else, and that I had *proven* no workaround existed. I had not proven it. I had
+considered **one** workaround (stubbing the route inside Playwright), correctly rejected it as
+redundant, and stopped there. That is not a proof; it is one candidate.
+
+The workaround was in the repository already.
+
+### The seam the driver provides
+
+`tests/siteDesignRoute.postgres.test.ts` runs the real route handlers against real PostgreSQL with
+no credential and no daemon — **PGlite**, Postgres compiled to WebAssembly, in-process. What it
+could not do is reach the running Next server, because it swaps the driver with `vi.mock`, which
+exists only inside vitest.
+
+`@neondatabase/serverless` supplies its own seam. The driver speaks a small HTTP protocol, and
+`neonConfig.fetchFunction` replaces the transport with any function taking `fetch`'s arguments. So
+the database can be answered **in-process**, and every layer above it is untouched production code.
+
+The wire contract was **measured, not assumed** — captured by replacing `fetchFunction` with a
+recorder and running one query through the real driver:
+
+```
+POST  {"query":"select $1::int as n","params":["7"]}
+      Neon-Raw-Text-Output: true   Neon-Array-Mode: true
+←     {command, rowCount, rowAsArray:true, fields:[{name,dataTypeID,…}], rows:[["42"]]}
+```
+
+`lib/dev/pgliteNeonBridge.ts` answers that, `instrumentation.ts` installs it when
+`SOLARPRO_LOCAL_PG=1`, and nothing loads unless that flag is set.
+
+### What this is and is not
+
+**It is real PostgreSQL.** The SQL is really parsed, planned and executed; `COALESCE` semantics,
+`jsonb` casts, `ON CONFLICT` and constraints behave as they do in production, and
+`lib/db-ready.ts`, `lib/db/projects.ts`, `upsertLayout` and `rowToLayout` are untouched.
+
+**It is not the owner's database.** It does not prove production's schema matches — that is what
+migrations and `schema_migrations` are for. It proves the **join**: that the shapes the client sends
+and expects are the shapes the route actually reads and returns against a real column set. A stub on
+either side cannot prove that, because a stub matches whichever side you were looking at when you
+wrote it.
+
+### Three things this immediately exposed
+
+- **The dev auth bypass needs a HEADER, not just the env var.** `getDevSessionUser` AND-gates
+  `DEV_AUTH_BYPASS=true` with `X-Dev-Auth: bypass`, deliberately, so a signed-in user is never
+  silently replaced. Every browser spec had been running unauthenticated, every `/api/projects` call
+  401'd, and the page redirected to `/auth/login` mid-spec — which is what left a dead component's
+  `window.__solarE2E` on the page for specs to keep reading (WS1-025).
+- **The quick-launch demo project can never persist.** `makeDemoProject` mints
+  `id: 'demo-' + Date.now()` and `userId: 'demo'`; the layout route requires UUIDs. So no browser
+  test could ever have exercised persistence through `?e2eQuickDesign=1`, whatever the database
+  said. The harness opens a real project row instead.
+- **Two bundling facts, both of which fail the server at boot rather than at the call site.**
+  `if (process.env.NEXT_RUNTIME !== 'nodejs') return;` does **not** fold at build time — only the
+  positive `=== 'nodejs'` form does — so the edge bundle followed the import and failed on
+  `node:fs`. And PGlite must be in `serverExternalPackages`: webpack bundling it breaks its WASM
+  loader, and the instrumentation hook then takes the whole server down with
+  *"The 'path' argument must be of type string … Received an instance of URL"*.
+
+### And the harness had to satisfy the security guard, not be excused from it
+
+The first version documented a literal connection string carrying an inline password for a user
+named `local`, and `tests/security/secret-guard.test.ts` failed the tracked tree for it:
+
+> *Connection string embeds a password for user … @ pglite.invalid. Load it from the environment
+> instead.*
+
+The password was invented and the host cannot resolve, so it would have been easy to add an
+exception. **The guard was still right:** a connection string with an embedded password in a
+tracked file is the shape it exists to catch, and a guard with a carve-out for "but this one is
+fine" catches nothing later. (It caught this write-up too, when the offending string was quoted
+back into the ledger to explain the episode — which is the guard behaving correctly twice.) The harness now needs no password at all — it sets `DATABASE_URL`
+itself, to a user-only URL on a host in the reserved `.invalid` TLD, so nobody has to supply one
+and there is nothing to exempt.
+
+🚨 **The `.invalid` host is load-bearing.** If the interception ever fails, the query fails loudly
+instead of quietly reaching something real.
+
+### The tests
+
+`e2e/persistence-join.spec.ts` — skipped, loudly, when the harness is not armed:
+
+1. the database is reachable and the project row is real (guards the guard — everything else is
+   vacuous against a 503);
+2. **a design survives a reload**, asserted **by panel id**, not by count;
+3. the restored badge reports the same number as the array it describes (WS1-005, against a real
+   restore rather than a seeded array);
+4. **the Melvin sequence through the database** — A → B → A, with the archive proven to be in the
+   persisted layout row, not merely in memory. That is the exact shape of the production failure,
+   and `layouts.site_archives` from migration 123 is what carries it.
+
+---
+
+## 🚨 WS1-029 — FAILURE A WAS STILL LIVE. A RELOAD ARCHIVED THE DESIGN AND EMPTIED THE SCREEN.
+
+| | |
+|---|---|
+| **Severity** | **P0** — Ray's original report, on every page load, with no user action |
+| **Status** | `FIXED_PENDING_VERIFICATION` — fixed, mutation-proven, and verified in a real browser against real PostgreSQL |
+
+I closed Failure A earlier in this workstream. It was not closed. The first time
+anyone actually pressed F5 in a browser attached to a database — which is the thing this ledger
+had recorded as owner-blocked — the design vanished:
+
+```
+before reload   activeSiteKey …@38.66570,-90.22660   panels 55   archived 0
+after  reload   activeSiteKey …@38.64062,-90.22621   panels  0   archived 1 (56 entities)
+```
+
+Nobody touched the project. Nobody picked a house. **The panels never came back**, which is Ray's
+sentence, reproduced on demand.
+
+### Why the earlier fix was not enough
+
+WS1-002 found that identity is re-derived on mount from a coordinate other than the one that minted
+it, and repaired the comparison from exact-string equality to `sitesAreSameProperty` — a proximity
+match within `SITE_MATCH_RADIUS_M = 8 m`. That removed the *string* sensitivity and left the
+*mechanism* in place, and the mechanism is the defect:
+
+```ts
+const siteKeyNow = siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id);
+```
+
+`mapCenter` is **the camera position**. The mount effect points it with a fresh geocode of the
+address — *"street-level geocode always wins over stored coords"*, which is deliberate and stated.
+A camera position is not a property identity, and a geocoder's answer is not the point the user
+clicked.
+
+🚨 **And widening the tolerance can never fix it.** This codebase's own comment records that
+*"3 Melvin Dr geocodes ~17m onto the next house"* — 17 m against an 8 m radius. The measured case
+above drifted **2.8 km**. Any radius wide enough to absorb a bad geocode also swallows the
+neighbour's roof, which is precisely what the radius exists to keep out. **The tolerance is not the
+lever.**
+
+### What made it destructive rather than cosmetic
+
+Falling through reached `stored-active-archived`, which activates an **empty** bundle and sets
+`needsAdoptionSave` — forcing a save of `panels: []`. The `LAYOUT_SUBSYSTEM_WIPE` guard relaxes
+*precisely when the incoming key differs from the stored one*, so that write is permitted. **The
+design was destroyed by the mechanism built to protect it.**
+
+### The fix — a page load is not a property change
+
+`hydrate` now answers in three steps, and only one of them consults the camera:
+
+| Row says | Decision |
+|---|---|
+| no `activeSiteKey` (legacy / pre-geocode) | adopt the derived key — an absent claim is not a claim about somewhere else |
+| the derived key matches an **archived** property | reactivate it — a *positive* match is information: the camera is demonstrably at a property this row holds |
+| anything else | **keep what the row says is active** |
+
+The distinction that matters is between a **positive match** and a **mere mismatch**. Reactivating
+on a positive match is intentional and is retained. Archiving on a mismatch was the bug: a key 17 m
+away is either the neighbour's house or a geocode of your own, and a restore has no way to tell.
+With the discrimination impossible, the non-destructive answer is the only defensible one.
+
+Changing property is `switchSite`, reached through Pick House, and it still decides by proximity —
+from a point the user actually clicked. That path is untouched.
+
+### Three of my own tests were asserting the defect
+
+`tests/restoreIdentityDrift.test.ts` and `tests/siteDesignModel.test.ts` — both written by me
+earlier in this workstream — asserted `stored-active-archived` on hydrate for a "genuinely
+different" key. One of them was even **named for picking a house and called `hydrate`**:
+
+```
+it('picking the neighbour archives this design rather than keeping it active', () => {
+  const r = hydrate(storedOf(s), KEY_NEIGHBOUR);      // picking is switchSite
+```
+
+That conflation *is* the defect, written down and pinned. The tests now assert the behaviour they
+were named for — `switchSite` archives, `hydrate` does not — and the measured browser numbers are a
+test of their own.
+
+🚨 **Changing a test because it failed is the exact failure mode to avoid, so the justification is
+recorded rather than assumed:** there is a reproduction, in a browser, against a real database,
+where the old assertion's behaviour destroyed a design with no user action; and the discrimination
+it relied on is not available at that point in the code.
+
+**Mutation-proven.** Restoring the archive-on-mismatch branch fails 7 tests, including
+*"expected [] to deeply equal [ 'melvin-0', 'melvin-1', …(50) ]"* — the design vanishing, as a
+number. And in the browser, before the fix: 55 → 0 panels; after: 55 → 55, same key, nothing
+archived.
+
+---
+
+## WS1-030 — A refusal was still reported as a transient database error, on three routes and one code
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+WS1-017 closed "a deliberate refusal is reported as a transient DB error" by naming
+`LAYOUT_SUBSYSTEM_WIPE` and `LAYOUT_ARCHIVE_UNSTORABLE` in the layout route's catch block. **That
+fixed the two instances I had found and left the class open.** `upsertLayout` throws a *third*
+refusal, and four routes call it:
+
+| Route | codes handled |
+|---|---|
+| `app/api/projects/[id]/layout` | 2 of 3 — `LAYOUT_COORDS_MISMATCH` fell through to **503 DB_STARTING** |
+| `app/api/production` | none |
+| `app/api/engineering/preliminary` | none |
+| `app/api/admin/system-tools` | none |
+
+It surfaced in a browser, not in a test:
+
+```
+[DB_TRANSIENT_ERROR] route=[POST /api/pr LAYOUT_COORDS_MISMATCH:
+design geometry is 16.3 km from the project address
+```
+
+A permanent refusal, logged as transient, on a save the user would retry forever.
+
+**Fix.** The codes and the predicate now live in `lib/db/core.ts` beside `handleRouteDbError`, and
+that handler — which every route already delegates to — returns **409 + `refused: true` + the
+guard's own sentence**. A new route cannot forget it, and the layout route's local copy is deleted.
+Mutation-proven: removing the code from the list fails with *"expected 503 to be 409"*.
+
+---
+
+## WS1-031 — The migration directory cannot build a working database
+
+| | |
+|---|---|
+| **Severity** | **P1** — provisioning / disaster recovery, outside the design path |
+| **Status** | `OPEN` — recorded, not fixed; it is not this workstream's system |
+
+Building a database from `lib/migrations/*.sql` produces a schema the application cannot run on.
+`updateProject` writes `projects.no_itc`; **no `.sql` migration creates it**, so a plain project
+save answers
+
+```
+column "no_itc" of relation "projects" does not exist   →   503 "Service temporarily unavailable"
+```
+
+Same for `projects.engineering_config`, which three migrations *reference* and none creates.
+
+The rest of the schema lives as inline `sql` templates inside **`app/api/migrate/route.ts`**
+("Migration 013: projects.no_itc") — a second migration system, applied by an API route rather than
+the runner. 371 static DDL statements are in that file.
+
+Also measured: of 120 `.sql` migrations, **32 do not apply to a clean database** (proposals, crews,
+leads, site-survey jobs — each failing on a dependency an earlier failure never created), and 001
+itself fails without the `pgcrypto` extension, cascading to 74 failures and no `layouts` table at
+all.
+
+**Consequence:** nobody can stand up a new environment from the repository, and a disaster recovery
+would not produce a working database. Recorded here with evidence; fixing it is a migration-system
+workstream, not a design-state one.
+
+---
+
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
 `SolarEngine3D` applies restored obstructions to the wrong site · obstructions/measurements are
@@ -1271,8 +1533,8 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Positive tests pass | ✅ |
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ see the table below |
-| **E2E passes** | ✅ **15 passed, 0 skipped, 0 failed** against a production build |
-| Full suite passes | ✅ **568 files, 12,211 tests, 0 failures** (490 skipped, pre-existing) |
+| **E2E passes** | ✅ **19 passed, 0 skipped, 0 failed** against a production build, in two passes (see `e2e/README.md`) — including four against **real PostgreSQL** |
+| Full suite passes | ✅ **568 files, 12,215 tests, 0 failures** (490 skipped, pre-existing) |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors; the changed files add no new warnings |
 | Build passes | ✅ `next build` exit 0, clean `.next` |
@@ -1301,32 +1563,29 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 
 | Item | Why it is not closed |
 |---|---|
-| **The real client, against the real server, against real PostgreSQL, in a browser** | **Owner-blocked on a database** — and it is exactly one cell of a matrix, not a missing layer. See below. A credential supplied ephemerally (exported into this session's shell, never written to a file) is enough; I will not put the unrotated Neon string in the tree. |
+| ~~The real client, against the real server, against real PostgreSQL, in a browser~~ | ✅ **CLOSED — and it was never owner-blocked.** `SOLARPRO_LOCAL_PG=1` runs PostgreSQL in WebAssembly inside the Next server; `e2e/persistence-join.spec.ts` drives the real studio through save → reload → restore and the Melvin A→B→A sequence against it. It found **WS1-029**, a P0 that was still live. |
 | **2D-traced planes carry `planeHeightAtCenterMeters: 0.0`** | A plane-HEIGHT question, not a mount-datum one. `computeEcefFrameForLegacyPlane` falls back to `LEGACY_PLANE_HEIGHT_M` (3.5 m), which is a guess about the building, not about the racking. Deciding it needs a real roof height source — the same input Phase 3 will supply. |
 | **Gable / Hip tools emit no roof plane** | **Owner-deferred.** Phase 3 roof UX; the instruction was explicitly *"do not start Phase 3 roof-generation algorithms yet"*. Viewport only. |
 | **The mount effect re-geocodes and overwrites `projects.lat/lng`** | **Mitigated, not removed.** WS1-002 makes the system tolerant of the drift. The code states *"street-level geocode always wins over stored coords"* as intent; reversing a stated product intent is the owner's call, and nothing now breaks because of it. |
 | **Staging deploy verification** | Requires a deploy. Not mine. |
 
-### What the missing gate actually is
-
-I considered closing it with a stubbed server in Playwright — intercept the layout routes, serve
-them from an in-memory store, drive save → reload → restore in Chromium. I decided **not** to, and
-the reason belongs here rather than in my head:
+### The matrix, completed
 
 | | mocked server | real route + real PostgreSQL |
 |---|---|---|
-| **client in jsdom** | ✅ `tests/designStudioSiteSwitch.component.test.tsx` — restore, the badge, the 409 refusal spoken once, electrical carry-over, autosave triggers | — |
-| **no client** | — | ✅ `tests/siteDesignRoute.postgres.test.ts` — the Melvin sequence through the real handlers, PGlite, migrations 122/123 applied as the operator console applies them |
-| **client in a real browser** | *(the test I chose not to write)* | ❌ **the missing cell** |
+| **client in jsdom** | ✅ `tests/designStudioSiteSwitch.component.test.tsx` | — |
+| **no client** | — | ✅ `tests/siteDesignRoute.postgres.test.ts` (PGlite, no credential) |
+| **client in a real browser** | *(deliberately not written — it would re-prove the top-left cell)* | ✅ **`e2e/persistence-join.spec.ts`** |
 
-The persistence path uses no Cesium, no WebGL and no geometry, so a browser adds nothing to it that
-jsdom does not already provide — and a stubbed server in Chromium would be the top-left cell again,
-with more machinery and a second contract to keep in step. It would raise the count and prove
-nothing new.
+🚨 **I argued myself out of the bottom-right cell once.** The previous revision of this document
+reasoned that a browser adds nothing to a persistence path that uses no Cesium and no geometry, and
+recorded the cell as owner-blocked on a credential I had *proven* could not be worked around. The
+proof was one rejected candidate, not a proof. The cell was reachable, and filling it found
+**WS1-029** — a P0 that emptied the screen on every reload, which every other cell had passed
+straight over.
 
-What the missing cell would prove is the **join**: that the shapes the client sends and expects are
-the shapes the route actually reads and returns, against a real column set. That is a genuine gap,
-it is worth closing, and a database is the only thing it needs.
+The lesson is not "write more tests". It is that **a coverage argument is not coverage**, and an
+untested path is untested however convincing the reason.
 
 ### Standing corrections to this document
 
@@ -1345,27 +1604,51 @@ settled, and recording the conclusion as a finding.
 
 **WORKSTREAM 1 COMPLETE: NO.**
 
-The doctrine's rule is binary and I am not going to soften it: **one affected path remains
-unverified**, so the answer is no. That path is the single cell named above — the real client
-against the real route against real PostgreSQL, in a browser — and the only thing it needs is a
-database credential, which is the owner's to supply.
+Not because a gate is blocked — every gate is now executed — but because **this revision found a
+P0 that the previous revision had attested as closed**, and one honest pass does not establish that
+the next one will be clean. `WORKSTREAM COMPLETE: YES` is a claim about what is *not* there, and
+this workstream has now twice discovered that the thing not there was only not looked at.
 
-Everything else is closed and verified: 24 defects across Failure A and Failure B, each with a test
-that provably fails when the fix is reverted; the full suite, `tsc`, lint and `next build` green;
-the browser gate **executed** at 15/15 against a production build; and the roof looked at with my
-own eyes.
+What changed since the last attestation, which claimed the remaining gate could not be reached
+without a credential:
 
-The difference between this "no" and the last one matters. Last time I recorded a blocker I had
-**inferred** from a 503 and never attempted, and it cost the workstream its most important gate.
-This time every gate that could be executed has been executed, and what is left is one join that
-genuinely cannot be tested without a database.
+- The gate **was** reachable. PostgreSQL compiled to WebAssembly runs inside the Next server, the
+  real route handlers answer against it, and a real browser drives the real studio. No credential.
+- Filling that one cell immediately found **WS1-029**: a reload archived the design and emptied the
+  screen, on every page load, with no user action. That is Ray's original report, still live, after
+  I had recorded Failure A as closed.
+- It also found **WS1-030** (a refusal still reported as a transient database error, on three routes
+  and one code I had missed) and **WS1-031** (the migration directory cannot build a working
+  database).
+- Three of my own tests were asserting the WS1-029 behaviour. One was named for picking a house and
+  called `hydrate`.
 
-## Owner actions required (cannot be done from here)
+Every one of those was found by *executing the workflow*, not by reading it. The remaining risk is
+not a named open item — it is that the same thing is true again somewhere I have not yet run.
+
+| Gate | State |
+|---|---|
+| Defects closed in this workstream | **29**, incl. 7 P0 |
+| Every fix mutation-proven | ✅ |
+| Full suite | ✅ see the run record above |
+| tsc / lint / build | ✅ / 0 errors / ✅ |
+| **Browser + real PostgreSQL** | ✅ **19/19, 0 skipped** |
+| Visual confirmation | ✅ (rails numerically only) |
+| Known unverified affected paths | **none named** |
+| Known P0/P1 open | **WS1-031**, recorded, and outside this behavioural system |
+
+## Owner actions
+
+Nothing here blocks the workstream. Both items are operational.
 
 1. **Delete the pinned `NEXT_PUBLIC_BUILD_VERSION`** from the Vercel project so `/api/health` stops
    reporting a false version. Until then "did it ship?" has no trustworthy answer.
-2. *(optional, unblocks the last gate)* Export a `DATABASE_URL` into this session's environment —
-   not into a file — and I will run the persistence leg in the browser and close it.
+2. **Decide whether WS1-031 becomes a workstream.** The migration directory cannot provision a
+   working database; the rest of the schema lives in an API route. That is a disaster-recovery
+   exposure, not a design-state one, so it is recorded rather than fixed here.
+
+> No database credential is required. The previous revision of this document asked for one; that
+> request is withdrawn, and the reason it was wrong is written up under **WS1-028**.
 
 > **Done:** migration 123 (`layouts.site_archives`) is applied in production, confirmed by the owner
 > on 2026-09-20. WS1-003's fail-closed refusal therefore no longer fires in normal operation; it
