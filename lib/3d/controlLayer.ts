@@ -616,10 +616,27 @@ export function validatePanels(
       if (!inside) {
         // Soft rejection for surface modes — engine already applies setbacks.
         // Log but don't hard-reject (engine UV test is more accurate than lat/lng PIP).
-        // Hard-reject only for extend_row where engine has no polygon check.
-        if (config.mode === 'extend_row') {
+        //
+        // 🚨 HARD-REJECT FOR THE MODES THAT SYNTHESISE PANELS DIRECTLY.
+        //
+        // The soft exemption above is correct for any mode whose panels came
+        // from `buildSurfaceGrid`, which clips in UV space against the real
+        // face and is genuinely more accurate than a lat/lng point-in-polygon.
+        //
+        // `extend_row` and `add_row` are NOT those modes. Both synthesise
+        // panels arithmetically in `lib/surfaceGeometry3D.ts` — `extendRow`
+        // walks columns outward, `addRow` emits a full row from `minCol` to
+        // `maxCol` at a chosen `rowIndex` — and NEITHER performs a containment
+        // test of its own. There is no engine clip behind them to be
+        // authoritative, so "the engine is authoritative" does not apply.
+        //
+        // Only `extend_row` was listed here. Its sibling was not, so pressing
+        // Add Row past the ridge placed a complete row in mid-air, and that row
+        // was carried into the layout, the production model and the permit.
+        // Same operation, same missing clip, one guarded and one not.
+        if (config.mode === 'extend_row' || config.mode === 'add_row') {
           warnings.push(
-            `[validate] extend_row panel at (${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}) ` +
+            `[validate] ${config.mode} panel at (${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}) ` +
             `is outside plane polygon — REJECTED`
           );
           return false;

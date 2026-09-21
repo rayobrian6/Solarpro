@@ -248,6 +248,56 @@ async function clickFace(page: Page, faceId: string): Promise<void> {
   await clickCanvasAt(page, pt!);
 }
 
+/** Is the 🏚 Building toggle on right now? Read from the button's own label. */
+async function buildingModeOn(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const b = Array.from(document.querySelectorAll('button'))
+      .find(e => (e.textContent || '').includes('Building'));
+    return (b?.textContent || '').includes('✓');
+  });
+}
+
+/** 🚨 A PREREQUISITE ASSERTION, NOT A CONVENIENCE.
+ *  Every interaction test in this file must state which click-router it is
+ *  exercising, because Building ON and Building OFF route the same click to
+ *  different code and a test that does not say which one it ran on proves
+ *  nothing about the other. */
+async function assertBuildingMode(page: Page, expected: boolean): Promise<void> {
+  const actual = await buildingModeOn(page);
+  expect(actual, `this test requires Building mode ${expected ? 'ON' : 'OFF'}`).toBe(expected);
+}
+
+/** Toggle Building via a real DOM click. `force: true` on the Playwright
+ *  locator does NOT fire React's handler here — measured — so the element's own
+ *  click() is used and the resulting state is asserted, never assumed. */
+async function setBuildingMode(page: Page, on: boolean): Promise<void> {
+  if (await buildingModeOn(page) === on) return;
+  await page.evaluate(() => {
+    const b = Array.from(document.querySelectorAll('button'))
+      .find(e => (e.textContent || '').includes('Building'));
+    (b as HTMLButtonElement | undefined)?.click();
+  });
+  await expect
+    .poll(() => buildingModeOn(page), { message: `Building mode did not turn ${on ? 'on' : 'off'}`, timeout: 10_000 })
+    .toBe(on);
+  await page.waitForTimeout(1500);   // let the extrusion rebuild
+}
+
+/** Count the Cesium entities in each family, so a test can prove the scene it
+ *  is clicking on actually contains what it thinks. */
+async function entityFamilies(page: Page): Promise<Record<string, number>> {
+  return page.evaluate(() => {
+    const viewer = (window as unknown as E2EWin).__solarViewerE2E;
+    const out: Record<string, number> = {};
+    for (const e of viewer.entities.values) {
+      const n: string = (e as any)?.name ?? '';
+      const fam = n.slice(0, n.indexOf(']') + 1);
+      if (fam) out[fam] = (out[fam] ?? 0) + 1;
+    }
+    return out;
+  });
+}
+
 async function openStudio(page: Page): Promise<void> {
   // `/design` on its own is the project picker. `e2eQuickDesign=1` is the same
   // quick-launch entry the other specs use, and lands in the studio itself.
@@ -339,10 +389,18 @@ test.describe('custom/fallback roof faces are individually selectable', () => {
     expect(await outlineWidth(page, north.id)).toBe(await outlineWidth(page, south.id));
   });
 
-  test('a PANEL still wins the click — face selection did not steal panel picking', async ({ page }) => {
-    // The protected behaviour. Panels are picked first; roof faces only answer
-    // where no panel does. If this fails, the array became unselectable.
+  test('WITH BUILDING OFF, a panel still wins the click', async ({ page }) => {
+    // 🚨 THE SCOPE IN THIS NAME IS LOad-BEARING. An earlier version of this test
+    // was called "a PANEL still wins the click" and was read as a statement
+    // about the product. It is not: `showBuilding3D` defaults to FALSE, so this
+    // only ever exercised the Building-OFF router. With Building ON the
+    // `[BUILD3D-ROOF]` branch runs FIRST and returns, so a panel click selects
+    // the roof face underneath it — see the Building-ON describe block below.
+    // A test that says "panel wins" when it means "panel wins with Building
+    // OFF" is a false proof, which is the same failure this whole spec exists
+    // to stop.
     await openStudio(page);
+    await assertBuildingMode(page, false);
     const [south, north] = buildGablePlanes();
     await seedPlanes(page, [south, north]);
     await frameRoof(page);
@@ -533,5 +591,153 @@ test.describe('a face removed from the design stops deciding things', () => {
 
     expect(msg, 'Stitch counted the deleted face and ran on it')
       .toMatch(/Stitch needs 2\+ marked planes/i);
+  });
+});
+
+/**
+ * BUILDING MODE IS A DIFFERENT CLICK ROUTER, AND UNTIL NOW NOTHING TESTED IT.
+ *
+ * `showBuilding3D` defaults to false. In `handleSelectClick` the Building branch
+ * runs FIRST and RETURNS on a hit:
+ *
+ *     if (showBuilding3DRef.current) {
+ *       const faceId = pickBuildingFaceAtScreen(viewer, C, screenPos);
+ *       if (faceId) { ...; return; }          // <- before the panel pick
+ *     }
+ *
+ * and `pickBuildingFaceAtScreen` drills 8 deep and returns the FIRST
+ * `[BUILD3D-ROOF]` match WITHOUT checking whether something nearer was hit. So a
+ * panel in front of a roof face does not shield it. The comment in the engine
+ * claiming a panel click "still falls through to the panel logic below" is
+ * wrong.
+ *
+ * These tests RECORD CURRENT BEHAVIOUR. They are not a statement that the
+ * behaviour is desirable — wall clicks in particular are known to be wrong. The
+ * selection hierarchy is a product decision that has not been made yet, and
+ * pinning today's answer is what makes a future change visible instead of
+ * silent.
+ */
+test.describe('Building mode routes clicks differently — recorded, not endorsed', () => {
+  test('the Building toggle really turns on, and really draws walls and roof faces', async ({ page }) => {
+    // The prerequisite. Every test below is meaningless without it, and a
+    // `force: true` click on this button does NOT fire React's handler.
+    await openStudio(page);
+    await assertBuildingMode(page, false);
+    const [south, north] = buildGablePlanes();
+    await seedPlanes(page, [south, north]);
+
+    await setBuildingMode(page, true);
+    await assertBuildingMode(page, true);
+
+    const fams = await entityFamilies(page);
+    expect(fams['[BUILD3D-ROOF]'], 'Building mode drew no roof faces').toBeGreaterThan(0);
+    expect(fams['[BUILD3D-WALL]'], 'Building mode drew no walls').toBeGreaterThan(0);
+  });
+
+  test('a ROOF FACE click selects that face', async ({ page }) => {
+    await openStudio(page);
+    const [south, north] = buildGablePlanes();
+    await seedPlanes(page, [south, north]);
+    await setBuildingMode(page, true);
+    await frameRoof(page);
+    await assertBuildingMode(page, true);
+
+    await clickFace(page, north.id);
+    await expect.poll(() => selectedFaceId(page), { timeout: SELECT_TIMEOUT }).toBe(north.id);
+
+    await clickFace(page, south.id);
+    await expect.poll(() => selectedFaceId(page), { timeout: SELECT_TIMEOUT }).toBe(south.id);
+  });
+
+  test('🚨 a PANEL click selects the ROOF FACE BEHIND IT — the opposite of Building OFF', async ({ page }) => {
+    // The engine comment says a panel click falls through to the panel logic.
+    // It does not: the Building branch returns first. Pinned so that fixing the
+    // selection hierarchy is a deliberate, visible change.
+    await openStudio(page);
+    const [south, north] = buildGablePlanes();
+    await seedPlanes(page, [south, north]);
+    await runAutoLayout(page);
+    await setBuildingMode(page, true);
+    await frameRoof(page);
+    await assertBuildingMode(page, true);
+
+    await expect
+      .poll(() => page.evaluate(() => {
+        const viewer = (window as unknown as E2EWin).__solarViewerE2E;
+        let n = 0;
+        for (const e of viewer.entities.values) if (((e as any)?.name ?? '').startsWith('[PANEL] ')) n++;
+        return n;
+      }), { message: 'no panels were drawn', timeout: 30_000 })
+      .toBeGreaterThan(0);
+
+    const panelPoint = await page.evaluate(() => {
+      const viewer = (window as unknown as E2EWin).__solarViewerE2E;
+      const C = (window as any).Cesium;
+      const now = C.JulianDate.now();
+      const f = C.SceneTransforms.worldToWindowCoordinates ?? C.SceneTransforms.wgs84ToWindowCoordinates;
+      const cv = viewer.scene.canvas;
+      for (const ent of viewer.entities.values) {
+        if (!((ent as any)?.name ?? '').startsWith('[PANEL] ')) continue;
+        const pos = (ent as any).position?.getValue?.(now);
+        if (!pos) continue;
+        const w = f(viewer.scene, pos);
+        if (w && isFinite(w.x) && isFinite(w.y) && w.x > 4 && w.y > 4
+            && w.x < cv.clientWidth - 4 && w.y < cv.clientHeight - 4) return { x: w.x, y: w.y };
+      }
+      return null;
+    });
+    expect(panelPoint, 'no panel was on screen').not.toBeNull();
+
+    await clickCanvasAt(page, panelPoint!);
+    await page.waitForTimeout(800);
+
+    // RECORDED BEHAVIOUR: a face gets selected, not the panel.
+    const sel = await selectedFaceId(page);
+    expect([south.id, north.id],
+      'expected the Building router to select a roof face on a panel click').toContain(sel);
+  });
+
+  test('a WALL click does not select the wall — it resolves to a roof face', async ({ page }) => {
+    // pickBuildingFaceAtScreen matches only [BUILD3D-ROOF], so a wall click
+    // misses, falls through, and the geometric roof-face test then answers with
+    // whatever face the ray reaches. Walls have no stored identity to select.
+    await openStudio(page);
+    const [south, north] = buildGablePlanes();
+    await seedPlanes(page, [south, north]);
+    await setBuildingMode(page, true);
+    await frameRoof(page);
+    await assertBuildingMode(page, true);
+
+    const wallPoint = await page.evaluate(() => {
+      const viewer = (window as unknown as E2EWin).__solarViewerE2E;
+      const C = (window as any).Cesium;
+      const now = C.JulianDate.now();
+      const f = C.SceneTransforms.worldToWindowCoordinates ?? C.SceneTransforms.wgs84ToWindowCoordinates;
+      const cv = viewer.scene.canvas;
+      for (const ent of viewer.entities.values) {
+        if (!((ent as any)?.name ?? '').startsWith('[BUILD3D-WALL]')) continue;
+        const poly = (ent as any).polygon?.hierarchy?.getValue?.(now);
+        if (!poly?.positions?.length) continue;
+        const pts = poly.positions;
+        const c = pts.reduce((a: any, p: any) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length, z: a.z + p.z / pts.length }), { x: 0, y: 0, z: 0 });
+        const w = f(viewer.scene, new C.Cartesian3(c.x, c.y, c.z));
+        if (w && isFinite(w.x) && isFinite(w.y) && w.x > 4 && w.y > 4
+            && w.x < cv.clientWidth - 4 && w.y < cv.clientHeight - 4) return { x: w.x, y: w.y };
+      }
+      return null;
+    });
+
+    if (!wallPoint) {
+      // Framed from overhead the walls can be edge-on. Say so rather than
+      // passing silently on a scene that could not exhibit the condition.
+      test.skip(true, 'no wall was projectable from this camera — cannot exercise a wall click');
+      return;
+    }
+
+    await clickCanvasAt(page, wallPoint!);
+    await page.waitForTimeout(800);
+    const sel = await selectedFaceId(page);
+    // RECORDED: a wall click never yields a wall. It yields a roof face or nothing.
+    expect(sel === null || sel === south.id || sel === north.id).toBe(true);
   });
 });
