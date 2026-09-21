@@ -93,6 +93,10 @@ type SolarE2EState = {
   fullRebuildCount: number;
   /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
   roofPlaneEntityCount: number;
+  /** How many roof planes the 3D ENGINE holds. Distinct from `roofPlanes`,
+   *  which is what the studio holds — a browser spec that presses a placement
+   *  button before the engine has the geometry silently places nothing. */
+  engineRoofPlaneCount: number;
   /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
    *  bands hug edges (not roof middle). cf0dd96b regression guard. */
   setbackBandCentroids: Array<{ lat: number; lng: number }>;
@@ -615,7 +619,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const site = useSiteDesign();
   const { panels, setPanels, roofPlanes, setRoofPlanes } = site;
   const [e2eStitchedCorners, setE2EStitchedCorners] = useState<Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>>([]);
-  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0, setbackBandCentroids: [] as Array<{ lat: number; lng: number }>, panelMoveRebuildCount: 0 });
+  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0, engineRoofPlaneCount: 0, setbackBandCentroids: [] as Array<{ lat: number; lng: number }>, panelMoveRebuildCount: 0 });
   const [expandedPlaneId, setExpandedPlaneId] = useState<string | null>(null);
   const [groundArea, setGroundArea] = useState<{ lat: number; lng: number }[]>([]);
   
@@ -2006,6 +2010,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       setbackInsets: e2eDiagnostics.setbackInsets,
       fullRebuildCount: e2eDiagnostics.fullRebuildCount,
       roofPlaneEntityCount: e2eDiagnostics.roofPlaneEntityCount,
+      engineRoofPlaneCount: e2eDiagnostics.engineRoofPlaneCount,
       setbackBandCentroids: e2eDiagnostics.setbackBandCentroids,
       panelMoveRebuildCount: e2eDiagnostics.panelMoveRebuildCount,
       // ── SITE OWNERSHIP ────────────────────────────────────────────────────
@@ -2029,6 +2034,14 @@ export default function DesignStudio({ project, onSave }: Props) {
         if (d.measurements) setMeasurements(d.measurements);
       },
     };
+    // 🚨 TEAR THE HOOK DOWN. Without this, an unmounted studio leaves its last
+    // state frozen on `window` — and this page DOES unmount: an unauthenticated
+    // /api/projects call redirects to /auth/login mid-spec. A browser test then
+    // goes on reading a dead component's snapshot, clicks land on nothing, and
+    // every assertion passes against numbers that can no longer change. A spec
+    // that cannot tell "nothing happened" from "the app is gone" proves nothing,
+    // which is the same failure as a guard wrapped in `if (panels.length > 0)`.
+    return () => { delete window.__solarE2E; };
   }, [roofPlanes, panels, placedObstructions, measurements, e2eStitchedCorners, e2eDiagnostics,
       site.activeSiteKey, site.archivedSiteCount, site.archivedEntityCount, handleLocationPick,
       setPanels, setRoofPlanes, setPlacedObstructions, setMeasurements]);

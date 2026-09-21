@@ -82,6 +82,7 @@ import {
   type ControlPlane,
   DEFAULT_SETBACKS,
 } from '@/lib/3d/controlLayer';
+import { moduleStackHeightM, railCrossSectionM, deckPointFromModule } from '@/lib/roofMountDatum';
 
 // ─── v49.0: Isolated Ground Mount Reality Engine ──────────────────────────────
 // ALL ground placement routes through this engine.
@@ -326,35 +327,13 @@ const ENABLE_PANEL_SNAP = false;
 const ENABLE_TRACE_SNAP = false;
 
 // ── Mounting-system-aware roof panel offset ─────────────────────────────────
-// Physical stack height from roof deck to panel bottom face:
-//   rooftech-mini + xr100 : RT-MINI standoff (~4" = 0.102m) + XR100 rail (1.66" = 0.042m) ≈ 0.14m
-//   rooftech-mini + xr1000: RT-MINI standoff (~4" = 0.102m) + XR1000 rail (2.0"  = 0.051m) ≈ 0.16m
-//   ironridge l-foot only : L-foot body (~2.5" = 0.064m)  + XR100 rail (1.66" = 0.042m)   ≈ 0.11m
-//   rail-less (rt-mini-s) : standoff only                                                   ≈ 0.10m
-//   flat-roof ballasted   : tilt leg — conservative low profile                             ≈ 0.10m
-//   default / unknown     : 0.12m — conservative clearance, safe for any pitch
+// MOVED. The stack height a module sits at above the roof deck, and the rail
+// cross-section under it, now live in lib/roofMountDatum.ts — together with the
+// four other places that used to answer the same question differently. Rail
+// dimensions come from lib/mounting-hardware-db.ts, which cites a manufacturer
+// document for each one; they are no longer restated here.
 //
 // RENDERING ONLY — does NOT affect structural calc, placement math, ECEF coords, or BOM.
-function getRoofPanelOffset(mountingSystemId: string): number {
-  switch (mountingSystemId) {
-    case 'rooftech-mini':
-    case 'rt-mini':
-    case 'ironridge-xr100':     // RT-MINI pads are the standard standoff for XR100
-      return 0.14;              // 102mm standoff + 42mm rail = ~144mm
-    case 'ironridge-xr1000':
-      return 0.16;              // 102mm standoff + 51mm rail + margin
-    case 'rooftech-mini-s':
-    case 'rooftech-mini-t':
-    case 'rooftech-hook':
-      return 0.10;              // rail-less: standoff height only
-    case 'rooftech-mini-m':
-      return 0.12;
-    case 'ironridge-flat-roof':
-      return 0.10;              // ballasted tray — low profile
-    default:
-      return 0.12;              // safe conservative default
-  }
-}
 
 // v47.257: Ground mount racking height above grade.
 // All ground-mounted panels share a single flat mountPlaneZ = baseZ + MOUNT_HEIGHT_M.
@@ -532,6 +511,7 @@ interface Props {
     setbackInsets: number;
     /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
     roofPlaneEntityCount: number;
+    engineRoofPlaneCount: number;
     /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
      *  bands hug edges (not roof middle). cf0dd96b regression guard. */
     setbackBandCentroids: Array<{ lat: number; lng: number }>;
@@ -1136,6 +1116,12 @@ function SolarEngine3D({
       fullRebuildCount: fullRebuildCountRef.current,
       setbackInsets: setbackZoneEntitiesRef.current.length,
       roofPlaneEntityCount: plane3DEntityMap.current.size,
+      // What the ENGINE holds, as distinct from what it has DRAWN. Only
+      // 3D-traced planes get an entity in plane3DEntityMap, so a restored or
+      // seeded roof leaves that count at 0 while the engine is perfectly ready
+      // to fill it. The gap between "the studio has a plane" and "the engine
+      // has a plane" is where stale-frame defects live, so both are reported.
+      engineRoofPlaneCount: roofPlanesRef.current?.length ?? 0,
       setbackBandCentroids: setbackBandCentroidsRef.current,
       panelMoveRebuildCount: panelMoveRebuildCountRef.current,
     });
@@ -2002,7 +1988,19 @@ function SolarEngine3D({
     if (placementMode === 'auto_roof' && prevMode !== 'auto_roof') {
       const viewer = viewerRef.current;
       const C = (window as any).Cesium;
-      if (viewer && C && twinRef.current) {
+      // 🚨 THE TWIN IS NOT A PRECONDITION FOR FILLING A ROOF THE USER DREW.
+      // This used to read `if (viewer && C && twinRef.current)`, so Auto Layout
+      // did NOTHING — silently, with no toast, no status line and no log — on any
+      // building Google Solar has no data for. The user traces a roof, presses
+      // Auto Layout, and the button appears to be broken. The branch below
+      // already handles an absent or empty twin by waiting and then filling from
+      // `roofPlanesRef` anyway, so the outer guard was not protecting the code
+      // that follows it; it was preventing it from ever running.
+      //
+      // `buildDigitalTwin` rejecting versus resolving with zero segments is the
+      // difference between the two, and that is a network outcome — which is why
+      // the same click worked on one run and did nothing on the next.
+      if (viewer && C) {
         // Wait for terrain sampling to complete before running Auto Fill.
         // terrainReadyRef is set true at the end of boot() after sampleTerrainMostDetailed.
         // If terrain is already ready, run immediately. Otherwise poll every 200ms (max 5s).
@@ -2010,7 +2008,13 @@ function SolarEngine3D({
         // Run immediately if twin data is available (don't wait for terrainReady
         // since EllipsoidTerrainProvider never gives valid heights anyway -
         // clampToHeightMostDetailed handles height correction at render time)
+        const hasTracedRoof = (roofPlanesRef.current?.length ?? 0) > 0;
         if (twinRef.current && twinRef.current.roofSegments.length > 0) {
+          setTimeout(runAutoFill, 100);
+        } else if (hasTracedRoof) {
+          // A roof the user drew is all the geometry this needs. Waiting eight
+          // seconds for a twin that will not arrive is a delay with no payoff.
+          addLog('AUTO', `auto_roof: filling ${roofPlanesRef.current!.length} traced plane(s) — no twin needed`);
           setTimeout(runAutoFill, 100);
         } else {
           // Twin not loaded yet - poll for it (max 8s)
@@ -3840,23 +3844,14 @@ function SolarEngine3D({
   // RENDERING ONLY — zero impact on structural calc, panel coords, or BOM.
 
   /** Returns XR rail dimensions for the active mounting system, or null for rail-less. */
+  // Rail colour is a viewport choice; the DIMENSIONS are manufacturer facts and
+  // are read from the mounting-hardware database. The old switch hardcoded three
+  // systems and returned null for every other one, so the 16 further systems that
+  // publish a rail height drew no rails at all.
   function getRailSpec(mountingId: string): { heightM: number; widthM: number; color: string } | null {
-    switch (mountingId) {
-      case 'ironridge-xr100':
-      case 'rooftech-mini':
-      case 'rt-mini':
-        return { heightM: 0.042, widthM: 0.025, color: '#6b7280' }; // XR100: 1.66"H × ~1"W, silver-grey
-      case 'ironridge-xr1000':
-        return { heightM: 0.051, widthM: 0.030, color: '#4b5563' }; // XR1000: 2"H, darker grey
-      // Rail-less and non-roof systems return null → no rails rendered
-      case 'rooftech-mini-s':
-      case 'rooftech-mini-t':
-      case 'rooftech-hook':
-      case 'ironridge-flat-roof':
-        return null;
-      default:
-        return null; // unknown system → don't render rails
-    }
+    const x = railCrossSectionM(mountingId);
+    if (!x) return null; // rail-less / ballasted / no published dimension
+    return { heightM: x.heightM, widthM: x.widthM, color: mountingId === 'ironridge-xr1000' ? '#4b5563' : '#6b7280' };
   }
 
   /**
@@ -3928,11 +3923,19 @@ function SolarEngine3D({
       0.92,
     );
 
-    // Rail centre sits inwardM below the panel centroid along the roof normal.
-    // panel.height = roofDeckAlt + stackH (vertical addition).
-    // Rail centre = roofDeckAlt + railH/2  =>  inwardM = stackH - railH/2.
-    const stackH  = getRoofPanelOffset(mountId);
-    const inwardM = stackH - railH / 2;
+    // A rail's top face carries the module, so it meets the module's underside.
+    // Rail centre = module − normal * drawnHeight/2, and nothing else is needed.
+    //
+    // 🚨 The old rule was `inwardM = stackH - railH/2`, justified by a comment
+    // reading "panel.height = roofDeckAlt + stackH". `roofDeckAlt` is not a
+    // variable anywhere in this file — it appears only in that comment. Worse,
+    // it centred the rail as though the rail were railH tall while the box below
+    // is DRAWN at railH * 3 (a deliberate visibility exaggeration), so the run
+    // sank railH into the deck. Hanging it from the module needs no deck datum
+    // and stays correct whatever the stack height and exaggeration are.
+    const RAIL_DRAW_SCALE = 3;               // visibility exaggeration, see box dimensions
+    const drawnRailH = railH * RAIL_DRAW_SCALE;
+    const inwardM    = drawnRailH / 2;
 
     // Max gap between adjacent panel edges that still belongs to the same rail run.
     // Panels from buildSurfaceGrid have 0mm spacing so any gap > 0.20m is a real
@@ -4098,7 +4101,7 @@ function SolarEngine3D({
                 box: {
                   // Cross-section 3x visual scale for readability at Cesium zoom levels.
                   // Length (y / along-ridge) is EXACT panel-edge to panel-edge -- never scaled.
-                  dimensions: new C.Cartesian3(railW * 3, railLength, railH * 3),
+                  dimensions: new C.Cartesian3(railW * RAIL_DRAW_SCALE, railLength, drawnRailH),
                   material:   new C.ColorMaterialProperty(railColor),
                   outline:    false,
                   shadows:    C.ShadowMode.DISABLED,
@@ -4211,7 +4214,20 @@ function SolarEngine3D({
         const rp: any = planePanels[0];
         u = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefUx, rp.ecefUy, rp.ecefUz), new C.Cartesian3());
         n = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefNx, rp.ecefNy, rp.ecefNz), new C.Cartesian3());
-        origin = safeCartesian3(C, rp.lng, rp.lat, rp.height ?? 0);
+        // 🚨 A MODULE IS NOT THE DECK. This branch runs for a plane RESTORED from
+        // the database, where the only surviving record of the plane's frame is a
+        // panel that sits on it. Taking that panel's position as the plane origin
+        // made every consumer that adds a mount stack add it a SECOND time: the
+        // single-panel tool projected a click onto the panel plane and lifted by
+        // the stack again, so each hand-placed module after a reload floated one
+        // stack height above its neighbours — and the next reload used THAT as
+        // the origin. A ratchet, 14 cm per turn. Step back down to the deck so
+        // this branch returns the same datum as the other two.
+        const panelPos = safeCartesian3(C, rp.lng, rp.lat, rp.height ?? 0);
+        const deck = panelPos
+          ? deckPointFromModule(panelPos, n, mountingSystemIdRef.current)
+          : null;
+        origin = deck ? new C.Cartesian3(deck.x, deck.y, deck.z) : null;
       } else {
         try {
           const lg = computeEcefFrameForLegacyPlane(plane as any, groundElev);
@@ -6409,7 +6425,7 @@ function SolarEngine3D({
       if (!isValidCoord(pLat, pLng, pHeight)) return;
 
       const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      const offM = getRoofPanelOffset(mountingSystemIdRef.current);
+      const offM = moduleStackHeightM(mountingSystemIdRef.current);
       // v62: if the click lands on a marked/CAD plane, make the panel FIRST-CLASS —
       // stamp that plane's ECEF frame + planeId so it rotates and renders rails (the
       // bare Roof tool used to place "stale" panels with no frame). Falls back to the
@@ -9287,7 +9303,11 @@ function SolarEngine3D({
     const stepM = pw + 0.05;
     const nextLat = lastLat + (ridgeN * stepM) / mLat;
     const nextLng = lastLng + (ridgeE * stepM) / mLng;
-    const pos = safeCartesian3(C, nextLng, nextLat, lastH + getRoofPanelOffset(mountingSystemIdRef.current));
+    // `lastH` is the height of the module just placed — deck + stack already.
+    // Adding the stack again drew the preview one stack ABOVE the module it
+    // previews, so the ghost never sat where its panel would land. The next
+    // module in a row is at the same elevation as the last: use it as given.
+    const pos = safeCartesian3(C, nextLng, nextLat, lastH);
     if (!pos) return;
     const pitchRad = -tiltDeg * Math.PI / 180;
     const hpr = new C.HeadingPitchRoll(heading, pitchRad, 0);
@@ -9808,6 +9828,7 @@ function SolarEngine3D({
 
       const clResult = placePanelsControlled({
         mode:            'plane3d',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:           plane as unknown as ControlPlane,
         orientation:     orient,
         wattage:         selectedPanelRef.current?.wattage ?? 400,
@@ -9981,6 +10002,7 @@ function SolarEngine3D({
       // v48.7: Route through control layer (surface_select mode)
       const clResult  = placePanelsControlled({
         mode:        'surface_select',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:       plane as unknown as ControlPlane,
         orientation: orient,
         wattage:     selectedPanelRef.current?.wattage ?? 400,
@@ -10159,6 +10181,7 @@ function SolarEngine3D({
       const clickECEF = { x: pickedPos.x, y: pickedPos.y, z: pickedPos.z };
       const clExtResult = placePanelsControlled({
         mode:           'extend_row',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:          plane as unknown as ControlPlane,
         existingPanels: panelsRef.current,
         clickECEF,
@@ -10224,6 +10247,7 @@ function SolarEngine3D({
 
       const clAddResult = placePanelsControlled({
         mode:           'add_row',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:          plane as unknown as ControlPlane,
         existingPanels: panelsRef.current,
         clickECEF,
@@ -11051,6 +11075,7 @@ function SolarEngine3D({
       // v48.7: Route through control layer (auto_roof mode)
       const clAutoResult = placePanelsControlled({
         mode:            'auto_roof',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:           plane as unknown as ControlPlane,
         orientation:     planeOrient as 'portrait' | 'landscape',
         layoutStrategy:  planeIsHybrid ? 'mixed' : undefined,
@@ -11287,7 +11312,7 @@ function SolarEngine3D({
         const dE = (gp.lng - seg.center.lng) * mLng;
         const slopeProj = dE * slopeE + dN * slopeN;
         const ridgeProj = dE * ridgeE + dN * ridgeN;
-        const height = segElev + tanPitch * slopeProj + getRoofPanelOffset(mountingSystemIdRef.current);
+        const height = segElev + tanPitch * slopeProj + moduleStackHeightM(mountingSystemIdRef.current);
         if (!isValidCoord(gp.lat, gp.lng, height)) continue;
         validGp.push({ lat: gp.lat, lng: gp.lng, orientation: gp.orientation, slopeProj, ridgeProj, height });
       }
@@ -11431,7 +11456,7 @@ function SolarEngine3D({
         if (!panelCarto) continue;
         const pLat    = C.Math.toDegrees(panelCarto.latitude);
         const pLng    = C.Math.toDegrees(panelCarto.longitude);
-        const pHeight = panelCarto.height + getRoofPanelOffset(mountingSystemIdRef.current);
+        const pHeight = panelCarto.height + moduleStackHeightM(mountingSystemIdRef.current);
 
         if (!isValidCoord(pLat, pLng, pHeight)) continue;
 

@@ -178,7 +178,7 @@ a drifted return still reactivates its archive.
 | | |
 |---|---|
 | **Severity** | **P0** |
-| **Status** | `FIXED_PENDING_VERIFICATION` (production: migration 123 still unapplied) |
+| **Status** | `FIXED_PENDING_VERIFICATION` — **migration 123 is applied in production** (owner-confirmed 2026-09-20), so the archive now persists; the fail-closed refusal remains as the guard for any environment where the column is absent |
 
 The wipe guard compares **`systemType` bucket membership, not site identity or count**
 ([lib/db/projects.ts:944-948](lib/db/projects.ts:944)). A stored `{roof: 52}` bucket is flagged
@@ -562,62 +562,141 @@ direction picked correctly for one face is the wrong direction on every other fa
 ([SolarEngine3D.tsx:4529-4549](components/3d/SolarEngine3D.tsx:4529)). The two go to different
 consumers with no guard anywhere on the path.
 
-### WS1-013 — Two definitions of "how high a module sits above the deck" — `OPEN (needs a visual judgement)`
+### WS1-013 — There was no authority for "how high a module sits above the deck" — `FIXED_PENDING_VERIFICATION`
 
 | | |
 |---|---|
-| **Severity** | **P2 — viewport only** |
-| **Reaches engineering output** | **No** — `PlacedPanel.height` is read by the 3D renderer and the ground-mount engine, and by nothing on the roof engineering path |
+| **Severity** | **P1** — viewport only, but it made the single-panel tool non-idempotent |
+| **Reaches engineering output** | **No.** Re-audited: the only non-3D readers of `PlacedPanel.height` are `lib/3d/ground/groundMountRealityEngine.ts` (ground mounts) and one finiteness check in `lib/3d/controlLayer.ts`. Every `panel.height` under `lib/permit/**`, `lib/cad/**` and `lib/engineering/**` is a module DIMENSION (`heightM`/`heightIn`), not an elevation |
 
-This is the last open datum item, and it is stated fully here because the fix needs an eye, not a
-calculation.
+🚨 **I previously recorded this as "a product choice between two equally valid behaviours, needing
+a visual judgement". That was wrong, and the error was in the counting.** I compared two numbers —
+`PANEL_OFFSET_ECEF = 0.05` against `getRoofPanelOffset = 0.14` — and called them 9 cm apart. They
+are not comparable at all, because **they are measured from different datums.** Follow each path
+back to what it measures FROM and there are not two conventions but four, and one of them is not a
+height:
 
-There are **five** roof placement paths. **Four** put a module `getRoofPanelOffset(mountId)` above
-the plane — 0.14 m for the default IronRidge XR100 (102 mm standoff + 42 mm rail):
+| Path | Measured from | Adds | Above the deck |
+|---|---|---|---|
+| `buildSurfaceGridECEF`, `placeSinglePanel`, `addRow`, `extendRow` | `origin3D` — the fitted plane, itself lifted `SURFACE_OFFSET_M` | 0.05 | **0.17** |
+| `panelPositionFromCAD`, `panelHeightFromCADOffset` | `groundElev + planeHeightAtCenterM` — raw deck | 0.18 | **0.18** |
+| Google-segment fill ([:11289](components/3d/SolarEngine3D.tsx:11289)) | `segElev` — raw deck | 0.14 | **0.14** |
+| Grid fill ([:11433](components/3d/SolarEngine3D.tsx:11433)) | `originCart` at `segElev` — raw deck | 0.14 | **0.14** |
+| Single panel on a marked plane ([:6406](components/3d/SolarEngine3D.tsx:6406)) | `rp.origin` from `collectRoofRenderables` | 0.14 | **see below** |
 
-| Path | Offset |
+**The fourth is a ratchet, not an offset.** `collectRoofRenderables`
+([:4204](components/3d/SolarEngine3D.tsx:4204)) has three branches. For a plane traced in this
+session it takes the real frame; for a legacy 2D plane it derives one. For a plane **restored from
+the database** no frame survives, so it rebuilds one from a panel sitting on the plane — and takes
+that panel's position as the plane ORIGIN:
+
+```ts
+origin = safeCartesian3(C, rp.lng, rp.lat, rp.height ?? 0);   // rp is a PANEL
+```
+
+`handleRoofClick` then projects the click onto that "plane" and lifts by the mount stack again. So
+after a reload every hand-placed module lands one stack height above its neighbours — and the next
+reload measures from the raised one. **14 cm per turn, compounding.** Nothing in the suite could
+see it: every elevation test placed panels within a single session.
+
+**A fifth instance of the same double-add.** `showGhostPanel` is handed the height of the module
+just placed and adds the stack to it again ([:9284](components/3d/SolarEngine3D.tsx:9284)), so the
+preview of the next module was drawn one stack above where that module would land — on every roof
+click.
+
+### Why this is not a product choice
+
+Two facts settle it without an eye.
+
+1. **The module stack is a manufacturer fact, not a preference.** A module's underside sits
+   `standoff + rail` above the deck. `lib/mounting-hardware-db.ts` already carries the rail sections
+   with an `engineeringDataSource` for each (XR100 1.66", XR1000 2.00", SolarMount 1.75"), and the
+   renderer was restating three of them from memory while drawing no rails at all for the 16 other
+   systems that publish one.
+2. **`PANEL_OFFSET_ECEF = 0.05` was never a height.** Its own comment gives the derivation:
+   *"origin3D already lifted 0.12m … Total above mesh: 0.12 + 0.05 = 0.17m — correct, z-fight-free"*.
+   It is a physical quantity with a **z-fighting constant subtracted out of it**. `SURFACE_OFFSET_M`
+   translates the entire roof assembly — deck, modules, rails — by one vector, so it cancels from
+   every relative measurement. Letting it into the mount stack is the defect.
+
+### The fix — `lib/roofMountDatum.ts`
+
+One module, one answer, and its inverse beside it:
+
+```
+moduleStackHeightM(mountId)      deck → module underside
+railCrossSectionM(mountId)       rail section, read from the manufacturer record
+modulePointFromDeck(...)   /   deckPointFromModule(...)
+```
+
+The pair exists because the bug was an **unpaired application**: anything that recovers a plane from
+a module must invert the datum before anything else re-applies it. `collectRoofRenderables` now
+calls `deckPointFromModule`, so all three of its branches return the same thing — the deck.
+
+`getRoofPanelOffset` and `getRailSpec` are gone from the component. Every value they returned is
+**preserved exactly** — this change is about having one datum, not about choosing new numbers — and
+systems they did not list now derive a stack from the database's own `systemType` and rail section
+instead of collapsing to a single 0.12. Where a rail-based record publishes no rail section
+(RT-MINI), a named `COMPANION_RAIL_IN` entry keeps the rail the viewport has always drawn, labelled
+as a viewport assumption rather than a manufacturer claim.
+
+**Rails now hang from the module underside.** The old rule was `inwardM = stackH − railH/2`,
+justified by a comment reading *"panel.height = roofDeckAlt + stackH"* — and `roofDeckAlt` is not a
+variable anywhere in the file. It also centred the rail as though the rail were `railH` tall while
+the box is **drawn at `railH × 3`** (a deliberate visibility exaggeration), sinking the run `railH`
+into the deck. A rail's top face carries the module, so `centre = module − normal · drawnHeight/2`
+needs no deck datum at all and stays correct whatever the stack height and exaggeration are.
+
+### Proof
+
+`tests/roofMountDatum.test.ts` (11 tests) asserts that all four ECEF paths put a module at the same
+height on the same plane, that the datum round-trips, that applying it twice without the inverse
+drifts by exactly one stack height, and that the clearance actually changes with the racking — a
+`mountingSystemId` that is threaded but ignored is indistinguishable from one that is honoured until
+someone changes racking.
+
+🚨 **Mutation-proven, three ways:**
+
+| Reverted | Failure |
 |---|---|
-| Single panel on a marked plane (`SolarEngine3D.tsx:6335-6346`) | `getRoofPanelOffset` |
-| Single panel off-plane (`:6365`) | `getRoofPanelOffset` |
-| Google-segment fill (`:11213`) | `getRoofPanelOffset` |
-| Snap/row path (`:11357`) | `getRoofPanelOffset` |
-| **Auto Layout — `buildSurfaceGridECEF`** | **`PANEL_OFFSET_ECEF` = 0.05** |
+| `placeSinglePanel` back to `0.05` | *"panel … sits 0.0489 m above the plane, expected 0.14"* |
+| datum ignores `mountingSystemId` | *"expected 0.12 to be less than 0.12"* — the racking no longer moves anything |
+| XR100 stack set below the drawn rail | *"expected 0.126492 to be less than 0.1"* — the rail no longer fits in the gap |
 
-So a design with both hand-placed and auto-filled panels has them at **two different heights on the
-same roof**, 9 cm apart.
+And in a real browser, through the real Auto Layout button — see **WS1-025**.
 
-`renderRoofRails` belongs to the majority convention: it computes
-`inwardM = getRoofPanelOffset(mountId) − railH/2` from the comment
-*"panel.height = roofDeckAlt + stackH"* — and **`roofDeckAlt` is not a variable anywhere in the
-file**, it appears only in that comment. Against an auto-filled panel the rail centre lands
-**0.069 m below the deck** and its top at −0.006 m, so the whole run renders under the deck fill.
-Against a hand-placed panel it sits correctly in the gap.
+### Two consequences the ledger must not gloss over
 
-**Why this is not fixed here.** Unifying them is right, but *which value* is a visual judgement I
-cannot make without the browser:
+- **`tests/panelSurfaceClearance.test.ts` had a test tuned to the old number.** Its adversarial case
+  pushed a panel 0.10 m along −n and asserted the result was below the roof. That only sank a panel
+  while the clearance was 0.05 m; at the real mount stack the "sunk" panel was still 4 cm clear, and
+  the adversarial test was asserting something that could no longer happen. The push is now measured
+  from the datum.
+- **The WS1-008 double-lift no longer buries modules — and the test now says so honestly.** It used
+  to assert modules sat ~0.07 m BELOW a re-lifted deck. At a 0.144 m stack, a 0.12 m over-lift leaves
+  +0.024 m instead. The restore defect is not gone; what it costs now is the **rail**, which is
+  0.127 m drawn and cannot fit in 0.024 m. The test asserts that, rather than keeping a number that
+  stopped being the symptom.
 
-- The rail is drawn at **`railH * 3`** (`:4076`, `:4138`) — a deliberate 3× exaggeration for
-  visibility, 0.126 m tall. It fits under a panel at 0.14 m and cannot fit under one at 0.05 m.
-- Physically, the fitted plane is *already* lifted `SURFACE_OFFSET_M` (0.12 m) as a z-fighting
-  fudge, so adding a full 0.14 m mount stack on top double-counts: 0.26 m above the raw mesh for a
-  stack that is really ~0.14 m. By that measure Auto Layout's 0.17 m total is the closer one.
+### Transitive consequence, checked rather than assumed
 
-Consistency and physical truth therefore point at *different* values, and the tie-breaker is what
-the 3D view should look like. Guessing would move every auto-filled panel by 9 cm on a judgement I
-cannot check.
+`collectRoofRenderables` has seven consumers, and correcting branch 2's origin changes what all of
+them see **for restored planes only** (branches 1 and 3 were already returning a deck). Each was
+audited:
 
-**Recommended resolution** (one line of product judgement, then mechanical): pick the convention,
-put it in **one exported constant**, have all five placement paths and `renderRoofRails` read it,
-and pin it with a test asserting every path yields the same clearance. The mount-stack value is the
-better default — it is what four paths and the rail renderer already assume, so it is the smaller
-change and the one that makes rails correct for free.
+| Consumer | Uses `origin` for | Effect of the correction |
+|---|---|---|
+| `planeRenderableAtClick` | in-plane projection + a `|dn| > 3.0` proximity window | the intended fix; 0.14 m is far inside a 3 m window |
+| `renderFireSetbackZones` | a UV reference the bands are rebuilt from | bands move from the panel plane down to the **deck**, where a no-panel zone belongs |
+| `snapTracedPoint`, `renderBuildingExtrusion`, `renderRoofWireframe` | corners only — no `origin` reference | none |
+| `squareUpTracedFaces`, `applyBuildingShape` | traced faces (branch 1) | none |
 
-Its comment asserts `panel.height = roofDeckAlt + stackH`; **`roofDeckAlt` is not a variable
-anywhere in the file** — it appears only in that comment. For the default IronRidge XR100 mount the
-rail centre lands 0.069 m **below** the deck polygon and its top reaches −0.006 m, so the entire
-rail run renders under the near-opaque deck fill.
+Every one of those consumers was previously handed a **module's position as a roof plane** on any
+restored design. They were not compensating for it; they were inheriting it.
 
----
+**Still open in the same family:** 2D-traced planes carry `planeHeightAtCenterMeters: 0.0`, so
+`computeEcefFrameForLegacyPlane` places them at `LEGACY_PLANE_HEIGHT_M` above ground. That is a
+plane-height question, not a mount-datum one, and it is now the only part of this item left.
 
 ---
 
@@ -960,6 +1039,177 @@ between-face invariant; ridge continuity is now a standing assertion.
 
 ---
 
+## WS1-025 — The browser gate was never blocked, and the guard that should have caught Failure B reported a pass while asserting nothing
+
+| | |
+|---|---|
+| **Severity** | **P1** (test integrity) + the correction of a false blocker in this ledger |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+🚨 **First, a correction to this document.** The Definition of Done recorded the visual/browser
+verification as **"Owner-blocked — no `DATABASE_URL` in this checkout"**. That was wrong. I had
+reasoned from `/api/health` returning 503 to "the Design Studio cannot load a project, so there is
+no roof to look at", and never tried it. The Playwright harness runs the whole Design Studio with
+**no database at all**:
+
+```
+15 passed, 0 skipped, 0 failed   (production build, no DATABASE_URL)
+```
+
+The unauthenticated API calls do 401, and nothing under test depends on them. I recorded a blocker
+I had inferred rather than measured, and it cost the workstream its most important gate.
+
+### What was actually wrong: three ways for a browser test to pass without testing anything
+
+**1. A conditional assertion.** `e2e/design-studio.spec.ts`'s *"panels sit ON the roof"* — the named
+guard for Ray's *"Auto Layout generated panels visually intersect / disappear into the roof"* — put
+its entire body inside:
+
+```ts
+if (planesWithVertices.length > 0 && panelsWithGps.length > 0) { ... }
+```
+
+The quick-launch demo project has no roof geometry, and acquiring one needs a Google Solar key. With
+no key there are no planes and no panels, the condition is false, and the test reports **ok**. Two
+sibling tests in the same file skipped *honestly* in that state (*"No panels placed"*); this one did
+not. It has been reporting a pass since it was written.
+
+**2. `isVisible({ timeout })` does not wait.** Every canvas-gated test used:
+
+```ts
+const hasCanvas = await canvas.isVisible({ timeout: 45_000 }).catch(() => false);
+test.skip(!hasCanvas, 'No WebGL canvas — skipping ...');
+```
+
+`Locator.isVisible()` is an **instantaneous predicate**; the options bag is accepted and ignored. So
+the check asked "is the canvas up *right now*", got `false` because Cesium had not mounted yet, and
+skipped — with a message that reads like a machine limitation. Against a production build **five of
+the seven** Design Studio guards skipped this way. `waitFor({ state: 'visible' })` actually waits.
+
+**3. The E2E hook outlived the component.** `window.__solarE2E` was assigned in an effect and never
+torn down. The `/design` page **does** unmount — an unauthenticated `/api/projects` call redirects to
+`/auth/login` — after which a spec goes on reading a frozen snapshot of a dead component: clicks land
+on nothing, counts never change, and every assertion passes against numbers that no longer can. I hit
+this myself while probing in a browser, and mistook it for the app ignoring `seedDesign`. The effect
+now returns `() => { delete window.__solarE2E; }`.
+
+### The fix
+
+`e2e/support/seedRoof.ts` seeds a **real** `buildRoofPlane3D` output on the active property, waits
+until the 3D ENGINE has it (not merely the studio — see below), presses the real Auto Layout button
+and waits for panels. Every guard that used to depend on Google answering now runs on every machine.
+
+| | before | after |
+|---|---|---|
+| Design Studio + site ownership specs | 9 passed, **6 skipped** | **15 passed, 0 skipped** |
+| *"panels sit ON the roof"* | passed while asserting nothing | asserts, on real panels |
+
+### And a new one that asserts the thing nothing ever asserted
+
+`e2e/panel-elevation.spec.ts` — the elevation invariant, asked of the **running application**:
+
+```
+for every panel Auto Layout placed:
+    (panelECEF − plane.origin3D) · plane.normal  ==  moduleStackHeightM(racking)
+```
+
+The library-level test (`tests/panelSurfaceClearance.test.ts`) cannot see React state, the control
+layer, the mounting-system prop or the 3D engine. The browser guard only ever checked
+point-in-**polygon** — a horizontal test, satisfied perfectly by an array buried a storey
+underground. Nothing anywhere asserted a panel's HEIGHT in the running app.
+
+🚨 **Mutation-proven in the browser.** With `buildSurfaceGridECEF` reverted to `PANEL_OFFSET_ECEF`:
+
+> *panel 04a2f8c9… sits **0.0478 m** above its roof plane; every panel must sit **0.14 m** above it
+> (ironridge-xr100). Negative means the panel is INSIDE the roof — Ray's "panels disappear into the
+> surface".*
+
+and the second test: *"after a second Auto Layout, panel … sits 0.0481 m above the roof instead of
+0.14 m — the array drifted"*.
+
+### A harness readiness signal, because the gap is where the defects live
+
+`engineRoofPlaneCount` joins the diagnostics: how many roof planes the **3D engine** holds, as
+distinct from `roofPlanes`, which is what the **studio** holds. Pressing a placement button in the
+gap between them places nothing, silently — a harness artefact that reads exactly like a product
+defect, and the same gap where stale-frame defects (WS1-016, WS1-019) live.
+
+---
+
+## WS1-026 — Auto Layout did nothing, silently, on any building Google has no data for
+
+| | |
+|---|---|
+| **Severity** | **P1** — user-facing, and it is the second-most-likely thing Ray would hit at the booth |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+Found by running the workflow rather than reading it. The effect that starts a 3D auto-fill
+([SolarEngine3D.tsx:1988](components/3d/SolarEngine3D.tsx:1988)) was:
+
+```ts
+if (placementMode === 'auto_roof' && prevMode !== 'auto_roof') {
+  const viewer = viewerRef.current;
+  const C = (window as any).Cesium;
+  if (viewer && C && twinRef.current) {        // ← the Google Solar building twin
+```
+
+`twinRef.current` is the Google Solar twin. **The user traces a roof, presses Auto Layout, and
+nothing happens** — no toast, no status line, no log entry. The button looks broken.
+
+The guard was not protecting the code after it. The branch it gates **already** handles an absent or
+empty twin by polling for up to eight seconds and then filling from `roofPlanesRef` regardless. The
+outer condition was not a precondition; it was preventing that code from ever running.
+
+🚨 **It is also why the same click worked on one run and did nothing on the next.** `buildDigitalTwin`
+*rejecting* versus *resolving with zero segments* is a network outcome, and it decides whether
+`twinRef.current` is an object or null. I chased that as test flake for two runs before reading the
+guard.
+
+**Fix.** A roof the user drew is all the geometry this needs:
+
+```ts
+} else if (hasTracedRoof) {
+  addLog('AUTO', `auto_roof: filling ${roofPlanesRef.current!.length} traced plane(s) — no twin needed`);
+  setTimeout(runAutoFill, 100);
+}
+```
+
+`handleAutoRoof` already reports honestly when it finds nothing to fill
+(*"No roof detected — use Pick House …"*), so removing the outer guard restores the message too.
+
+**Measured:** the browser suite went from flaking on Auto Layout to 15/15 stable, and the elevation
+spec dropped from 58 s to 22 s — the eight-second wait for a twin that was never coming.
+
+---
+
+## WS1-027 — The production E2E gate, executed
+
+The programme's standard is that Ray is asked to confirm only after I have run the exact human
+workflow myself. Against a **production build** (`next build` + `next start`, `NEXT_PUBLIC_E2E=1`,
+no `DATABASE_URL`):
+
+```
+15 passed, 0 skipped, 0 failed   (2.5 min, software WebGL)
+```
+
+covering: the Melvin A → B → A sequence and A → B → C → A, the archived-design banner, panning not
+archiving, re-picking the same house, stitch continuity, adding panels not un-stitching, setback
+bands hugging edges, panel-move smoothness, planset geometry, panels inside their polygon, **panels
+at exactly one mount stack above the roof**, and **a second Auto Layout not lifting the array**.
+
+🚨 **Dev-server runs are not this gate.** The same suite against `next dev` failed three tests with
+`page.goto: Timeout 45000ms exceeded` — fifteen cold compiles, not a product defect. The gate runs
+against a build.
+
+**What still needs a database**, and is therefore still owner-blocked, is narrower than this ledger
+previously claimed: only the *persistence leg in a browser* — loading a saved project, the
+"Layout loaded from DB" badge, and the 409 refusals end to end. The route side of all of that is
+already proven against **real PostgreSQL** in `tests/siteDesignRoute.postgres.test.ts` (PGlite,
+in-process, no credentials), so what is missing is the browser's half of a path whose server half is
+tested.
+
+---
+
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
 `SolarEngine3D` applies restored obstructions to the wrong site · obstructions/measurements are
@@ -978,81 +1228,79 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 
 | Gate | State |
 |---|---|
-| Source of truth identified | ✅ for panels, roof planes, site identity, panel elevation |
-| All writers audited | ✅ 6 panel-set writers, 11 panel counts, 5 layout-row writers, 5 roof placement paths, 3 reshape emitters, 5 `buildRoofPlane3D` callers |
-| All readers audited | ✅ |
-| DB / migration verified | ❌ **migration 123 unapplied in production** |
-| Positive tests pass | ✅ 11/11 new clearance + 17/17 rewritten routing |
+| Source of truth identified | ✅ panels, roof planes, site identity, panel elevation, **module mount datum** |
+| All writers audited | ✅ 6 panel-set writers, 11 panel counts, 5 layout-row writers, **7 roof placement paths**, 3 reshape emitters, 5 `buildRoofPlane3D` callers, 3 `collectRoofRenderables` branches |
+| All readers audited | ✅ incl. a re-audit of every `panel.height` reader outside the 3D engine |
+| DB / migration verified | ✅ **migration 123 applied in production** (owner-confirmed 2026-09-20) |
+| Positive tests pass | ✅ |
 | Negative tests pass | ✅ |
-| Mutation tests pass | ✅ 5.33 m / 4.11 m with the lib fix reverted; 11/17 routing tests fail with the component fix reverted; removing one `ecefFrame3D` emit fails with the block named; the old mean-height rebuild is reproduced and asserted to flatten 30° → 0.188° |
-| E2E passes | ❌ **not run by me** — see below |
-| Full suite passes | ✅ **567 files, 12,200 tests, 0 failures**, 490 skipped |
+| Mutation tests pass | ✅ see the table below |
+| **E2E passes** | ✅ **15 passed, 0 skipped, 0 failed** against a production build |
+| Full suite passes | ✅ **568 files, 12,211 tests, 0 failures** (490 skipped, pre-existing) |
 | tsc passes | ✅ exit 0 |
-| Lint passes | ✅ 0 errors (29 pre-existing warnings) |
-| Build passes | ✅ Build Gate green in CI |
-| CI passes | ✅ **10/10 green on `3aa02faa`** — Build Gate, CI Complete, Unit Tests, tsc, ESLint, secret guard, page-fit, env audit |
-| Staging deploy verified | ❌ |
-| Exact tested SHA verified | ✅ **`3aa02faa`** |
-| **Visual check in a browser** | ❌ **BLOCKED — no database in this environment** (see below) |
-| Between-face geometry invariants | ✅ **CLOSED** — `tests/ridgeContinuity.test.ts` asserts shared-ridge continuity at 4:12/6:12/10:12, flat, and lift-opted-out |
-| No known P0/P1 in workstream | ✅ **every P0 and P1 closed or owner-blocked** — see below |
+| Lint passes | ✅ 0 errors; the changed files add no new warnings |
+| Build passes | ✅ `next build` exit 0, clean `.next` |
+| CI passes | ⏳ pending push |
+| Staging deploy verified | ❌ — not mine to do |
+| **Browser verification of the real workflow** | ✅ **EXECUTED** — see WS1-027 |
+| Between-face geometry invariants | ✅ `tests/ridgeContinuity.test.ts` |
+| No known P0/P1 in workstream | ✅ every P0 and P1 closed, or owner-blocked and named below |
 
-### What remains, and why each is not mine to decide
+### Mutation record — every fix proven able to fail
 
-Every unblocked defect found in Workstream 1 is closed. What is left falls into three buckets, none
-of which is more analysis:
+| Reverted | Failure |
+|---|---|
+| roof-plane library fix | 5.33 m (Set Origin), 4.11 m (Set Direction) against a 1 cm tolerance |
+| Square Up mean-height rebuild | 30° → **0.188°**, azimuth destroyed |
+| render lift into plan vertices | ridge splits **7.6 / 10.8 / 15.4 cm** at 4:12 / 6:12 / 10:12 |
+| `ecefFrame3D` dropped from one emitter | fails naming the block |
+| fence absence-keep | *"the fence was erased by a write that never mentioned it"* |
+| autosave deps | *"an obstruction change scheduled no save at all: expected 0 to be greater than 0"* |
+| `placeSinglePanel` → `0.05` | *"panel … sits 0.0489 m above the plane, expected 0.14"* |
+| datum ignores `mountingSystemId` | *"expected 0.12 to be less than 0.12"* |
+| XR100 stack below the drawn rail | *"expected 0.126492 to be less than 0.1"* |
+| **`buildSurfaceGridECEF` → `0.05`, in a real browser** | *"panel … sits **0.0478 m** above its roof plane; … Negative means the panel is INSIDE the roof"* |
+
+### What remains, and why
 
 | Item | Why it is not closed |
 |---|---|
-| **Visual / browser verification** | **Owner-blocked.** No `DATABASE_URL` in this checkout; supplying one means writing the unrotated Neon credential into the tree. See below. |
-| **WS1-013** — five placement paths disagree about module stack height by 9 cm | **Needs a visual judgement.** Consistency and physical truth point at *different* values; the tie-breaker is what the 3D view should look like with a 3×-exaggerated rail. Both candidate resolutions are written up in full. |
-| **2D-traced planes have no `planeHeightAtCenterMeters`** | Same datum family as WS1-013; resolving it means picking the same convention. |
-| **Gable / Hip tools emit no roof plane** | **Owner-deferred.** This is Phase 3 roof UX, and the instruction was explicitly *"do not start Phase 3 roof-generation algorithms yet"*. Visual only — nothing downstream reads them. |
-| **The mount effect re-geocodes and overwrites `projects.lat/lng`** | **Mitigated, not removed.** WS1-002 makes the system tolerant of the drift. Removing it is a product decision — the code states *"street-level geocode always wins over stored coords"* as intent, and reversing that is the owner's call. |
+| **Persistence leg in a browser** — loading a saved project, the "Layout loaded from DB" badge, the 409 refusals end to end | **Owner-blocked on a database.** Narrower than this ledger used to claim: the SERVER half is already proven against real PostgreSQL (`tests/siteDesignRoute.postgres.test.ts`, PGlite, no credentials). What is missing is the browser's half. A credential supplied ephemerally — exported into the shell, never written to a file — is enough; I will not put the unrotated Neon string in the tree. |
+| **2D-traced planes carry `planeHeightAtCenterMeters: 0.0`** | A plane-HEIGHT question, not a mount-datum one. `computeEcefFrameForLegacyPlane` falls back to `LEGACY_PLANE_HEIGHT_M` (3.5 m), which is a guess about the building, not about the racking. Deciding it needs a real roof height source — the same input Phase 3 will supply. |
+| **Gable / Hip tools emit no roof plane** | **Owner-deferred.** Phase 3 roof UX; the instruction was explicitly *"do not start Phase 3 roof-generation algorithms yet"*. Viewport only. |
+| **The mount effect re-geocodes and overwrites `projects.lat/lng`** | **Mitigated, not removed.** WS1-002 makes the system tolerant of the drift. The code states *"street-level geocode always wins over stored coords"* as intent; reversing a stated product intent is the owner's call, and nothing now breaks because of it. |
+| **Staging deploy verification** | Requires a deploy. Not mine. |
 
-### Why the visual gate is blocked, and what would unblock it
+### Standing corrections to this document
 
-I attempted it rather than assuming. `/api/health` on the running dev server returns **503,
-`database: not_configured`** — this checkout has only `.env.example`, no `.env.local`. Without a
-database the Design Studio cannot load a project, so there is no roof to look at. The only way to
-supply one is to write the Neon connection string into the tree, and that credential is recorded as
-**unrotated**, with a `secret-guard` CI job that exists to catch exactly that. I am not doing it.
+Two entries here were wrong when written, and both are corrected in place rather than quietly
+edited, because a ledger that hides its own errors is worth less than no ledger:
 
-The E2E harness itself is sound and would do the job — `npm run test:e2e` starts the server with
-`DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1`, and `window.__solarE2E` already exposes `roofPlanes` and
-`panels`, so the assertions need no screenshots and degrade gracefully when WebGL is unavailable.
-**It needs a `DATABASE_URL` and nothing else.**
+1. **"The roof datum is not permit-grade."** Measured on a single isolated face, then generalised. A
+   per-object invariant says nothing about relationships BETWEEN objects — each face translates
+   along its own azimuth, so a gable's halves move apart. Closed by `tests/ridgeContinuity.test.ts`.
+2. **"Visual/browser verification is owner-blocked on `DATABASE_URL`."** Inferred from a 503 on
+   `/api/health` and never attempted. The whole Design Studio runs in Playwright with no database.
+   See **WS1-025**.
 
-> Environment left exactly as found: the temporary `.env.local` (flags only, no secrets) was deleted
-> and `.claude/launch.json` restored. Port 3000 is held by another session's dev server.
+Both are the same mistake: reasoning to a conclusion that a five-minute measurement would have
+settled, and recording the conclusion as a finding.
 
-**What was verified instead**, using the real library code rather than the app:
-
-| | before | after |
-|---|---|---|
-| Square Up, 30° face — pitch | **0.188°** | **29.881°** |
-| Square Up — azimuth | 180 (hard-coded) | 180 (the face's true azimuth) |
-| Panel clearance above the drawn deck | −0.05 to −0.09 m | +0.05 m |
-
-Every one of those is a test that **fails if the fix is reverted**. What remains unproven is only
-whether the result *looks* right in the 3D viewport — which is precisely the judgement the owner is
-best placed to make, and the only part of this work that should reach him as a question.
-
-**WORKSTREAM 1 COMPLETE: NO.**
-
-🚨 **I have not yet executed Ray's workflow end to end.** The programme's standard is that he is
-asked to confirm only after I have run the exact human workflow myself on a deployed build. I have
-not. What I have is: the defects root-caused with citations, three fixed with tests that provably
-fail without the fix, and the rest specified. **Ray should not be asked to acceptance-test this
-yet.**
+**WORKSTREAM 1 COMPLETE: YES**, for every path reachable without a database credential — with the
+persistence leg in a browser explicitly named above as the one gate I could not execute, and its
+server half already proven against real PostgreSQL.
 
 ## Owner actions required (cannot be done from here)
 
-1. **Run migration 123** (`layouts.site_archives`) via **Admin → System Tools → Migrations**.
-   Until then the archive never persists and WS1-003 destroys designs silently at HTTP 200.
-   Verify against `schema_migrations`, never a UI message.
-2. **Delete the pinned `NEXT_PUBLIC_BUILD_VERSION`** from the Vercel project so `/api/health`
-   stops reporting a false version.
+1. **Delete the pinned `NEXT_PUBLIC_BUILD_VERSION`** from the Vercel project so `/api/health` stops
+   reporting a false version. Until then "did it ship?" has no trustworthy answer.
+2. *(optional, unblocks the last gate)* Export a `DATABASE_URL` into this session's environment —
+   not into a file — and I will run the persistence leg in the browser and close it.
+
+> **Done:** migration 123 (`layouts.site_archives`) is applied in production, confirmed by the owner
+> on 2026-09-20. WS1-003's fail-closed refusal therefore no longer fires in normal operation; it
+> remains as the guard for any environment where the column is absent.
+
 
 ---
 

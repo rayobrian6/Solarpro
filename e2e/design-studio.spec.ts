@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { seedRoofPlane, runAutoLayout, waitForCesiumCanvas } from './support/seedRoof';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type SolarE2EState = {
@@ -121,7 +122,7 @@ test.describe('Design Studio → planset E2E harness', () => {
     expect(Array.isArray(state.panels)).toBe(true);
 
     const cesiumCanvas = page.locator('canvas').first();
-    const hasCanvas = await cesiumCanvas.isVisible({ timeout: 45_000 }).catch(() => false);
+    const hasCanvas = await waitForCesiumCanvas(page);
     test.skip(!hasCanvas, 'Cesium/WebGL canvas did not become visible — hook install verified, skipping canvas-dependent checks.');
 
     // Toggle zones to exercise setback rendering
@@ -152,7 +153,7 @@ test.describe('Design Studio → planset E2E harness', () => {
   test('stitch holds — shared corners stay within tolerance after panels added', async ({ page }) => {
     const state = await bootDesignStudio(page);
     const cesiumCanvas = page.locator('canvas').first();
-    const hasCanvas = await cesiumCanvas.isVisible({ timeout: 45_000 }).catch(() => false);
+    const hasCanvas = await waitForCesiumCanvas(page);
     test.skip(!hasCanvas, 'No WebGL canvas — skipping stitch tolerance check.');
 
     // Click Stitch button if available
@@ -202,11 +203,8 @@ test.describe('Design Studio → planset E2E harness', () => {
     }
 
     // Now add panels and verify stitch doesn't un-stitch (regression 0e318b58)
-    const autoLayout = page.getByRole('button', { name: /^auto layout$/i }).first();
-    if (await autoLayout.isVisible().catch(() => false)) {
-      await autoLayout.click();
-      await page.waitForTimeout(2_000);
-    }
+    await seedRoofPlane(page);
+    await runAutoLayout(page);
 
     const afterPanels = (await readSolarState(page))!;
     if (stitched.length >= 2 && afterPanels.stitchedCorners.length >= 2) {
@@ -231,7 +229,7 @@ test.describe('Design Studio → planset E2E harness', () => {
   test('adding panels does not un-stitch the roof', async ({ page }) => {
     const state = await bootDesignStudio(page);
     const cesiumCanvas = page.locator('canvas').first();
-    const hasCanvas = await cesiumCanvas.isVisible({ timeout: 45_000 }).catch(() => false);
+    const hasCanvas = await waitForCesiumCanvas(page);
     test.skip(!hasCanvas, 'No WebGL canvas — skipping un-stitch regression check.');
 
     // Stitch first
@@ -245,11 +243,8 @@ test.describe('Design Studio → planset E2E harness', () => {
     const stitchCountBefore = postStitch.stitchedCorners.length;
 
     // Add panels via Auto Layout
-    const autoLayout = page.getByRole('button', { name: /^auto layout$/i }).first();
-    if (await autoLayout.isVisible().catch(() => false)) {
-      await autoLayout.click();
-      await page.waitForTimeout(2_000);
-    }
+    await seedRoofPlane(page);
+    await runAutoLayout(page);
 
     const afterPanels = (await readSolarState(page))!;
     // Panels should exist now
@@ -269,27 +264,36 @@ test.describe('Design Studio → planset E2E harness', () => {
   test('panels sit ON the roof — point-in-polygon after auto layout', async ({ page }) => {
     const state = await bootDesignStudio(page);
     const cesiumCanvas = page.locator('canvas').first();
-    const hasCanvas = await cesiumCanvas.isVisible({ timeout: 45_000 }).catch(() => false);
+    const hasCanvas = await waitForCesiumCanvas(page);
     test.skip(!hasCanvas, 'No WebGL canvas — skipping on-roof panel check.');
 
-    // Stitch + Auto Layout
-    const stitchBtn = page.getByRole('button', { name: /stitch/i }).first();
-    if (await stitchBtn.isVisible().catch(() => false)) {
-      await stitchBtn.click();
-      await page.waitForTimeout(2_000);
-    }
-
-    const autoLayout = page.getByRole('button', { name: /^auto layout$/i }).first();
-    if (await autoLayout.isVisible().catch(() => false)) {
-      await autoLayout.click();
-      await page.waitForTimeout(2_000);
-    }
+    // Seed a real roof so this runs on every machine rather than only where
+    // Google Solar answers — see the note on the assertions below.
+    await seedRoofPlane(page);
+    await runAutoLayout(page);
 
     const afterLayout = (await readSolarState(page))!;
     const planesWithVertices = afterLayout.roofPlanes.filter(p => (p.vertices?.length ?? 0) >= 3);
     const panelsWithGps = afterLayout.panels.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
 
-    if (planesWithVertices.length > 0 && panelsWithGps.length > 0) {
+    // 🚨 THIS GUARD USED TO REPORT "ok" WHILE ASSERTING NOTHING.
+    // The whole body below was wrapped in `if (planes > 0 && panels > 0)`, and on
+    // a machine with no GOOGLE_MAPS_API_KEY the quick-launch project acquires no
+    // roof, so Auto Layout places nothing and the condition is false. Two of its
+    // sibling tests skip honestly in that state ("No panels placed"); this one —
+    // the named guard for Ray's second production failure, panels disappearing
+    // into the roof — passed silently. A conditional assertion is not a test.
+    //
+    // It now fails instead, and `e2e/panel-elevation.spec.ts` seeds a real plane
+    // so the check runs on every machine rather than only where Google answers.
+    expect(planesWithVertices.length,
+      'no roof plane with vertices — the on-roof guard cannot run, and must not report a pass',
+    ).toBeGreaterThan(0);
+    expect(panelsWithGps.length,
+      'Auto Layout placed no panels — the on-roof guard cannot run, and must not report a pass',
+    ).toBeGreaterThan(0);
+
+    {
       for (const panel of panelsWithGps) {
         const plane = panel.planeId
           ? planesWithVertices.find(p => p.id === panel.planeId)
@@ -314,7 +318,7 @@ test.describe('Design Studio → planset E2E harness', () => {
   test('setback bands hug edges — not roof interior (cf0dd96b)', async ({ page }) => {
     const state = await bootDesignStudio(page);
     const cesiumCanvas = page.locator('canvas').first();
-    const hasCanvas = await cesiumCanvas.isVisible({ timeout: 45_000 }).catch(() => false);
+    const hasCanvas = await waitForCesiumCanvas(page);
     test.skip(!hasCanvas, 'No WebGL canvas — skipping setback band placement check.');
 
     // Toggle zones ON to render setbacks
@@ -324,27 +328,22 @@ test.describe('Design Studio → planset E2E harness', () => {
       await page.waitForTimeout(1_500);
     }
 
-    // Also stitch and auto-layout to get full geometry
-    const stitchBtn = page.getByRole('button', { name: /stitch/i }).first();
-    if (await stitchBtn.isVisible().catch(() => false)) {
-      await stitchBtn.click();
-      await page.waitForTimeout(2_000);
-    }
-
-    const autoLayout = page.getByRole('button', { name: /^auto layout$/i }).first();
-    if (await autoLayout.isVisible().catch(() => false)) {
-      await autoLayout.click();
-      await page.waitForTimeout(2_000);
-    }
+    // Real geometry, on every machine — see e2e/support/seedRoof.ts.
+    await seedRoofPlane(page);
+    await runAutoLayout(page);
 
     const afterState = (await readSolarState(page))!;
     const planesWithVerts = afterState.roofPlanes.filter(p => (p.vertices?.length ?? 0) >= 3);
     const bandCentroids = afterState.setbackBandCentroids;
 
-    if (planesWithVerts.length === 0 || bandCentroids.length === 0) {
-      test.skip(true, 'No setback bands or roof planes rendered — skipping band placement check.');
-      return;
-    }
+    expect(planesWithVerts.length,
+      'no roof plane with vertices after seeding — the band placement check cannot run',
+    ).toBeGreaterThan(0);
+
+    // Bands only exist while the Zones overlay is on. If the toggle was not
+    // found, say so rather than reporting a pass over an empty list.
+    test.skip(bandCentroids.length === 0,
+      'Zones overlay produced no setback bands — nothing to place-check.');
 
     for (const bc of bandCentroids) {
       // Find the plane this band centroid is inside
@@ -370,21 +369,19 @@ test.describe('Design Studio → planset E2E harness', () => {
   test('panel move is smooth — no forceFullRebuild on drag (2176e4d3)', async ({ page }) => {
     const state = await bootDesignStudio(page);
     const cesiumCanvas = page.locator('canvas').first();
-    const hasCanvas = await cesiumCanvas.isVisible({ timeout: 45_000 }).catch(() => false);
+    const hasCanvas = await waitForCesiumCanvas(page);
     test.skip(!hasCanvas, 'No WebGL canvas — skipping panel move smoothness check.');
 
     // Auto Layout to get some panels on the roof
-    const autoLayout = page.getByRole('button', { name: /^auto layout$/i }).first();
-    if (await autoLayout.isVisible().catch(() => false)) {
-      await autoLayout.click();
-      await page.waitForTimeout(2_000);
-    }
+    await seedRoofPlane(page);
+    await runAutoLayout(page);
 
     const preMove = (await readSolarState(page))!;
-    if (preMove.panels.length === 0) {
-      test.skip(true, 'No panels to move — skipping smoothness check.');
-      return;
-    }
+    // `runAutoLayout` above already waits for panels, so an empty array here is
+    // a regression, not a quiet machine limitation.
+    expect(preMove.panels.length,
+      'no panels after a seeded Auto Layout — the smoothness check cannot run',
+    ).toBeGreaterThan(0);
 
     // Read panelMoveRebuildCount before any drag attempt
     const beforeDrag = preMove.panelMoveRebuildCount;
@@ -429,22 +426,18 @@ test.describe('Design Studio → planset E2E harness', () => {
   test('planset PV-1 panel count matches design — PV-1 ≠ PV-1B', async ({ page }) => {
     const state = await bootDesignStudio(page);
     const cesiumCanvas = page.locator('canvas').first();
-    const hasCanvas = await cesiumCanvas.isVisible({ timeout: 45_000 }).catch(() => false);
+    const hasCanvas = await waitForCesiumCanvas(page);
     test.skip(!hasCanvas, 'No WebGL canvas — skipping planset geometry check.');
 
     // Auto Layout to populate panels
-    const autoLayout = page.getByRole('button', { name: /^auto layout$/i }).first();
-    if (await autoLayout.isVisible().catch(() => false)) {
-      await autoLayout.click();
-      await page.waitForTimeout(2_000);
-    }
+    await seedRoofPlane(page);
+    await runAutoLayout(page);
 
     const afterLayout = (await readSolarState(page))!;
     const designPanelCount = afterLayout.panels.length;
-    if (designPanelCount === 0) {
-      test.skip(true, 'No panels placed — skipping planset geometry check.');
-      return;
-    }
+    expect(designPanelCount,
+      'no panels after a seeded Auto Layout — the planset geometry check cannot run',
+    ).toBeGreaterThan(0);
 
     // Navigate to the Engineering/Permit page to trigger planset generation
     // First, we need a project saved. The e2eQuickDesign demo project should

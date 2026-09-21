@@ -12,7 +12,7 @@
  *
  * So this file asserts one geometric invariant, and only that:
  *
- *   for every placed panel:  (panelECEF - plane.origin3D) · plane.normal  ==  PANEL_OFFSET_ECEF
+ *   for every placed panel:  (panelECEF - plane.origin3D) · plane.normal  ==  EXPECTED_CLEARANCE_M
  *
  * That is a SIGNED distance along the plane normal. It is negative when a panel is
  * inside or below the roof, which is exactly the defect, and it cannot be satisfied
@@ -28,7 +28,8 @@ import { describe, it, expect } from 'vitest';
 import {
   buildRoofPlane3D, latLngToECEF, computePlaneFromPoints3D, SURFACE_OFFSET_M,
 } from '@/lib/roofPlane3D';
-import { buildSurfaceGrid, PANEL_OFFSET_ECEF } from '@/lib/surfaceGeometry3D';
+import { buildSurfaceGrid } from '@/lib/surfaceGeometry3D';
+import { moduleStackHeightM } from '@/lib/roofMountDatum';
 import type { PlacedPanel, RoofPlane } from '@/types';
 
 const DEG = Math.PI / 180;
@@ -40,6 +41,13 @@ const M_PER_DEG_LAT = 111_320;
 const LAT = 38.70615;
 const LNG = -90.04625;
 const mPerDegLng = M_PER_DEG_LAT * Math.cos(LAT * DEG);
+
+// The racking decides the clearance, so the fixture names one instead of
+// leaning on a default. The expected value is READ FROM THE AUTHORITY rather
+// than written here: a test that restates the number it is checking cannot
+// notice the authority changing underneath it.
+const MOUNT_ID = 'ironridge-xr100';
+const EXPECTED_CLEARANCE_M = moduleStackHeightM(MOUNT_ID);
 
 const GROUND_M = 150;      // ellipsoidal ground height at the site
 const EAVE_H   = GROUND_M + 5;
@@ -75,7 +83,7 @@ function clearanceM(panel: PlacedPanel, plane: RoofPlane): number {
 }
 
 /**
- * How close to PANEL_OFFSET_ECEF the reconstructed clearance can possibly get.
+ * How close to EXPECTED_CLEARANCE_M the reconstructed clearance can possibly get.
  *
  * 🚨 THIS NUMBER IS MEASURED, NOT CHOSEN — do not tighten it, and do not loosen it.
  *
@@ -96,10 +104,10 @@ const COPLANARITY_TOL_M = 1e-2;
 
 /** The invariant, as one call. Returns the worst offender so failures name a number. */
 function worstClearance(panels: PlacedPanel[], plane: RoofPlane) {
-  let worst = { deviationM: 0, clearanceM: PANEL_OFFSET_ECEF, id: '' };
+  let worst = { deviationM: 0, clearanceM: EXPECTED_CLEARANCE_M, id: '' };
   for (const p of panels) {
     const c = clearanceM(p, plane);
-    const dev = Math.abs(c - PANEL_OFFSET_ECEF);
+    const dev = Math.abs(c - EXPECTED_CLEARANCE_M);
     if (dev > worst.deviationM) worst = { deviationM: dev, clearanceM: c, id: p.id };
   }
   return worst;
@@ -114,6 +122,7 @@ function fill(plane: RoofPlane, extra: Record<string, unknown> = {}): PlacedPane
     panelSpacingM: 0, rowSpacingM: 0,
     layoutId: 'test-layout',
     wattage: 400,
+    mountingSystemId: MOUNT_ID,
     ...extra,
   });
 }
@@ -132,7 +141,7 @@ describe('panel surface clearance — panels sit ON the roof, never in it', () =
     expect(fill(plane).length).toBeGreaterThanOrEqual(4);
   });
 
-  it('POSITIVE — a default fill puts every panel exactly PANEL_OFFSET_ECEF above the plane', () => {
+  it('POSITIVE — a default fill puts every panel exactly EXPECTED_CLEARANCE_M above the plane', () => {
     const panels = fill(plane);
     const worst = worstClearance(panels, plane);
     expect(worst.deviationM).toBeLessThan(COPLANARITY_TOL_M);
@@ -214,15 +223,22 @@ describe('panel surface clearance — panels sit ON the roof, never in it', () =
     const n = plane.ecefFrame3D!.n;
     const victim = panels[Math.floor(panels.length / 2)];
     const p = latLngToECEF(victim.lat, victim.lng, victim.height!);
-    // Push it 0.10 m along -n: still inside the roof polygon horizontally, still a
-    // perfectly valid lat/lng, still counted by every count-based test — and now
-    // 0.05 m INSIDE the roof. This is precisely what Ray saw.
-    const sunk = { x: p.x - n.x * 0.10, y: p.y - n.y * 0.10, z: p.z - n.z * 0.10 };
+    // Push it clean through the deck: still inside the roof polygon horizontally,
+    // still a perfectly valid lat/lng, still counted by every count-based test —
+    // and now 5 cm INSIDE the roof. This is precisely what Ray saw.
+    //
+    // The push is measured FROM THE DATUM rather than hardcoded. It used to be a
+    // flat 0.10 m, which only sank a panel because the clearance of the day
+    // happened to be 0.05 m; the day the datum became the real mount stack, the
+    // "sunk" panel was still 4 cm clear of the roof and the adversarial test was
+    // asserting something that could no longer happen.
+    const push = EXPECTED_CLEARANCE_M + 0.05;
+    const sunk = { x: p.x - n.x * push, y: p.y - n.y * push, z: p.z - n.z * push };
     const o = plane.origin3D!;
     const sunkClearance = (sunk.x - o.x) * n.x + (sunk.y - o.y) * n.y + (sunk.z - o.z) * n.z;
 
     expect(sunkClearance).toBeLessThan(0);
-    expect(Math.abs(sunkClearance - PANEL_OFFSET_ECEF)).toBeGreaterThan(COPLANARITY_TOL_M);
+    expect(Math.abs(sunkClearance - EXPECTED_CLEARANCE_M)).toBeGreaterThan(COPLANARITY_TOL_M);
   });
 
   // ── REGRESSION: the restore path re-lifted the roof it was about to draw ────
@@ -265,7 +281,7 @@ describe('panel surface clearance — panels sit ON the roof, never in it', () =
       }
     });
 
-    it('🚨 THE USER-VISIBLE INVARIANT — panels must sit above the DRAWN deck', () => {
+    it('🚨 THE USER-VISIBLE INVARIANT — re-lifting the deck eats the whole mount gap', () => {
       const panels = fill(plane);
       expect(panels.length).toBeGreaterThan(0);
       const n = plane.ecefFrame3D!.n;
@@ -283,15 +299,31 @@ describe('panel surface clearance — panels sit ON the roof, never in it', () =
         });
       };
 
-      // Fixed: every panel is above the deck it is drawn on.
-      for (const c of clearanceAbove(drawnOk)) expect(c).toBeGreaterThan(0);
+      // Fixed: every module clears the deck it is drawn on by its full mount
+      // stack — the gap a person sees daylight through.
+      for (const c of clearanceAbove(drawnOk)) {
+        expect(Math.abs(c - EXPECTED_CLEARANCE_M)).toBeLessThan(COPLANARITY_TOL_M);
+      }
 
-      // Broken: every panel is BELOW it, by ~0.07 m. Ray's sentence, as a number.
+      // Broken: the spurious second lift is subtracted from that gap, exactly.
+      //
+      // 🚨 HONEST NOTE ON WHAT THIS TEST USED TO SAY. It asserted the modules were
+      // BELOW the re-lifted deck, by about 0.07 m. That was true while modules sat
+      // 0.05 m above the plane. Now that they sit at the real mount stack (0.144 m
+      // for XR100), a 0.12 m over-lift no longer buries them — it leaves 0.024 m.
+      // The restore defect is NOT gone, and this test must not pretend the number
+      // it once printed is still the symptom. What it costs now is the rail:
       const bad = clearanceAbove(drawnBad);
-      for (const c of bad) expect(c).toBeLessThan(0);
-      const worstBad = Math.min(...bad);
-      expect(worstBad).toBeLessThan(-0.05);
-      expect(worstBad).toBeGreaterThan(-0.09);
+      for (const c of bad) {
+        expect(Math.abs(c - (EXPECTED_CLEARANCE_M - SURFACE_OFFSET_M))).toBeLessThan(COPLANARITY_TOL_M);
+      }
+
+      // A rail hangs the full drawn height below the module (visibility scale 3 on
+      // a 1.66" XR100 section = 0.127 m). With the deck re-lifted, the remaining
+      // gap cannot contain it, so the entire rail run renders inside the deck fill.
+      const DRAWN_RAIL_H = 0.042 * 3;
+      expect(EXPECTED_CLEARANCE_M).toBeGreaterThan(DRAWN_RAIL_H);                       // fits when drawn right
+      expect(EXPECTED_CLEARANCE_M - SURFACE_OFFSET_M).toBeLessThan(DRAWN_RAIL_H);       // cannot when re-lifted
     });
   });
 

@@ -30,6 +30,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { PlacedPanel, RoofPlane, SolarPanel, PlacedObstruction } from '@/types';
 import { ecefToLatLng, latLngToECEF } from '@/lib/roofPlane3D';
+import { moduleStackHeightM } from '@/lib/roofMountDatum';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,22 +41,28 @@ const FEET_PER_METER = 3.28084;
 // Panels are placed on a mathematically flat plane (pure ECEF formula).
 // Cesium 3D tiles mesh is VISUAL ONLY — never sampled per panel.
 //
-// v48.9: Two PANEL_OFFSET constants — one per code path:
+// ── WHERE THE PANEL OFFSET WENT ─────────────────────────────────────────────
+// There used to be two constants here, and three more elsewhere, each answering
+// "how far above the roof does a module sit" with a different number:
 //
-//   PANEL_OFFSET_ECEF (0.05m) — used by buildSurfaceGridECEF, placeSinglePanel,
-//     extendRow, addRow. These functions place panels relative to origin3D which
-//     is ALREADY lifted SURFACE_OFFSET_M=0.12m above the raw mesh by roofPlane3D.ts.
-//     Total above mesh: 0.12 + 0.05 = 0.17m — correct, z-fight-free.
+//   PANEL_OFFSET_ECEF   0.05  this file  (origin3D "already lifted 0.12m")
+//   PANEL_OFFSET_LEGACY 0.18  this file  (legacy 2D path, no pre-lift)
+//   getRoofPanelOffset  0.14  SolarEngine3D, for the same roof
 //
-//   PANEL_OFFSET_LEGACY (0.18m) — used by panelPositionFromCAD and
-//     panelHeightFromCADOffset. These legacy 2D paths compute height from
-//     groundElevM + planeHeightAtCenterM directly (no SURFACE_OFFSET_M pre-lift).
-//     0.18m is the only offset so it must remain large enough to clear z-fighting.
+// So a roof carrying both auto-filled and hand-placed modules drew them at
+// different heights, and the single-panel path measured from a MODULE and then
+// added the stack again, floating each new one above its neighbours.
 //
-export const PANEL_OFFSET_ECEF   = 0.05; // v48.9: ECEF path (origin3D already lifted 0.12m)
-export const PANEL_OFFSET_LEGACY = 0.18; // v48.9: legacy 2D path (no pre-lift)
-/** @deprecated Use PANEL_OFFSET_ECEF or PANEL_OFFSET_LEGACY explicitly */
-export const PANEL_OFFSET = PANEL_OFFSET_LEGACY; // kept for any external consumers
+// The 0.05 was the tell: it is 0.17 − 0.12, a physical stack height with a
+// Z-FIGHTING CONSTANT subtracted out of it. SURFACE_OFFSET_M translates the
+// whole roof assembly — deck, modules, rails — by one vector, so it cancels
+// from every relative measurement and never belonged in a mount height.
+//
+// There is now one answer, in lib/roofMountDatum.ts, and it is keyed by the
+// mounting system because that is what physically decides it.
+//
+//     modulePosition = planeOrigin3D + normal * moduleStackHeightM(mountId)
+//
 export const LEGACY_PLANE_HEIGHT_M = 3.5; // default height above ground for 2D planes
 
 export const PW_PORTRAIT  = 1.134;
@@ -421,6 +428,7 @@ export function panelWorldPosition(
   dims: PanelDims,
   panelSpacingM = 0.02,
   rowSpacingM   = 0.05,
+  mountingSystemId?: string,
 ): WorldPosition {
   const stepU = dims.widthM  + panelSpacingM;
   const stepV = dims.heightM + rowSpacingM;
@@ -436,7 +444,7 @@ export function panelWorldPosition(
   const cosLat = Math.cos(originLat * DEG);
   const lat    = originLat + dy / METERS_PER_DEG_LAT;
   const lng    = originLng + dx / (METERS_PER_DEG_LAT * cosLat);
-  const height = groundElevM + planeHeightAtCenterM + dz + PANEL_OFFSET;
+  const height = groundElevM + planeHeightAtCenterM + dz + moduleStackHeightM(mountingSystemId);
 
   return { lat, lng, height };
 }
@@ -448,10 +456,11 @@ export function panelHeightFromCADOffset(
   tiltDeg: number,
   xMeters: number,
   yMeters: number,
+  mountingSystemId?: string,
 ): number {
   const azRad = azimuthDeg * DEG;
   const slopeProj = xMeters * Math.sin(azRad) + yMeters * Math.cos(azRad);
-  return groundElevM + planeHeightAtCenterM + Math.tan(tiltDeg * DEG) * slopeProj + PANEL_OFFSET;
+  return groundElevM + planeHeightAtCenterM + Math.tan(tiltDeg * DEG) * slopeProj + moduleStackHeightM(mountingSystemId);
 }
 
 // ─── Plane Assignment ─────────────────────────────────────────────────────────
@@ -571,7 +580,7 @@ export function filterSetbackPanels(
  *     pos_ENU  = u * uOffset + v * vOffset
  *     lat      = originLat + pos_ENU.y / METERS_PER_DEG_LAT
  *     lng      = originLng + pos_ENU.x / (METERS_PER_DEG_LAT * cos(lat))
- *     height   = groundElev + planeHeight + pos_ENU.z + PANEL_OFFSET_LEGACY (0.18m — legacy 2D path, no pre-lift)
+ *     height   = groundElev + planeHeight + pos_ENU.z + moduleStackHeightM(mountId)
  *
  * SHARED ROTATION:
  *   All panels share the same heading/pitch/roll derived from the stable frame.
@@ -598,9 +607,14 @@ export function buildSurfaceGrid(opts: {
   customOriginLng?: number;
   // v48.12: Mixed portrait+landscape fill strategy
   layoutStrategy?: 'portrait-first' | 'landscape-first' | 'mixed';
+  /** Which racking system the modules sit on — decides how far above the deck
+   *  they are. Omitted means "unknown system", which resolves to the
+   *  conservative default in lib/roofMountDatum.ts. */
+  mountingSystemId?: string;
 }): PlacedPanel[] {
   const {
     plane, groundElevM,
+    mountingSystemId,
     orientation    = 'portrait',
     eaveSetbackM   = DEFAULT_EAVE_SETBACK_M,
     ridgeSetbackM  = DEFAULT_RIDGE_SETBACK_M,
@@ -652,7 +666,7 @@ export function buildSurfaceGrid(opts: {
   // or origin before calling buildSurfaceGridECEF.
   //
   // ONE FORMULA everywhere:
-  //   worldPos = origin3D + u*uCenter + v*vCenter + n*PANEL_OFFSET_ECEF (0.05m — ECEF path)
+  //   worldPos = origin3D + u*uCenter + v*vCenter + n*moduleStackHeightM(mountId) (0.05m — ECEF path)
   // ecefToLatLng() called ONLY at final output per panel.
 
   // Resolve plane geometry — always produces valid origin3D + ecefFrame3D + polygon3D
@@ -832,6 +846,7 @@ export function buildSurfaceGrid(opts: {
     wattage,
     dims,
     groundElevM,          // v47.216: forwarded for legacy plane elevation
+    mountingSystemId,     // decides the module stack height above the deck
     overrideOrigin3D:   resolvedOrigin3D,
     overrideEcefFrame:  resolvedEcefFrame,
     overridePolygon3D:  resolvedPolygon3D,
@@ -843,7 +858,7 @@ export function buildSurfaceGrid(opts: {
  * buildSurfaceGridECEF — Pure ECEF panel placement engine for 3D-tool planes.
  *
  * Uses the ONE FORMULA:
- *   worldPos = origin3D + u*(i*stepU + w/2) + v*(j*stepV + h/2) + n*PANEL_OFFSET_ECEF (0.05m)
+ *   worldPos = origin3D + u*(i*stepU + w/2) + v*(j*stepV + h/2) + n*moduleStackHeightM(mountId)
  *
  * No lat/lng approximations inside the loop. Zero metersPerDeg error.
  * ecefToLatLng() called ONLY at the final output step per panel.
@@ -863,14 +878,18 @@ function buildSurfaceGridECEF(opts: {
   wattage:            number;
   dims:               { widthM: number; heightM: number };
   groundElevM?:       number;  // v47.216: Cesium ellipsoidal ground elevation at site
+  mountingSystemId?:  string;  // decides module stack height — see lib/roofMountDatum.ts
   overrideOrigin3D?:  { x:number; y:number; z:number };
   overrideEcefFrame?: { u:{x:number;y:number;z:number}; v:{x:number;y:number;z:number}; n:{x:number;y:number;z:number} };
   overridePolygon3D?: Array<{x:number;y:number;z:number}>;
 }): PlacedPanel[] {
   const { plane, orientation, eaveSetbackM, ridgeSetbackM, sideSetbackM,
           panelSpacingM, rowSpacingM, layoutId, wattage, dims,
-          groundElevM: _groundElevM,
+          groundElevM: _groundElevM, mountingSystemId,
           overrideOrigin3D, overrideEcefFrame, overridePolygon3D } = opts;
+
+  // THE DATUM — one answer for every placement path in this file.
+  const mountOffsetM = moduleStackHeightM(mountingSystemId);
 
   const origin = overrideOrigin3D   ?? plane.origin3D!;
   const ef     = overrideEcefFrame  ?? plane.ecefFrame3D!;
@@ -1119,10 +1138,10 @@ function buildSurfaceGridECEF(opts: {
   const panels: PlacedPanel[] = [];
 
   for (const { uC, vC, col, row } of snappedFill) {
-    // finalPosition = origin3D + u*uC + v*vC + n*PANEL_OFFSET_ECEF (0.05m — ECEF path, origin already lifted 0.12m)
-    const wx = origin.x + ef.u.x * uC + ef.v.x * vC + ef.n.x * PANEL_OFFSET_ECEF;
-    const wy = origin.y + ef.u.y * uC + ef.v.y * vC + ef.n.y * PANEL_OFFSET_ECEF;
-    const wz = origin.z + ef.u.z * uC + ef.v.z * vC + ef.n.z * PANEL_OFFSET_ECEF;
+    // finalPosition = origin3D + u*uC + v*vC + n*moduleStackHeightM(mountId) (0.05m — ECEF path, origin already lifted 0.12m)
+    const wx = origin.x + ef.u.x * uC + ef.v.x * vC + ef.n.x * mountOffsetM;
+    const wy = origin.y + ef.u.y * uC + ef.v.y * vC + ef.n.y * mountOffsetM;
+    const wz = origin.z + ef.u.z * uC + ef.v.z * vC + ef.n.z * mountOffsetM;
 
     const { lat: panelLat, lng: panelLng, height: panelH } = ecefToLatLng({ x: wx, y: wy, z: wz });
 
@@ -1208,7 +1227,7 @@ export function enrichRoofPlaneWith3DFrame(plane: RoofPlane): RoofPlane {
  *   rowIndex = round(dot(clickECEF - origin, v) / stepV)
  *
  * Then places the panel at the exact grid-snapped position:
- *   worldPos = origin + u*(colIndex*stepU + w/2) + v*(rowIndex*stepV + h/2) + n*PANEL_OFFSET_ECEF
+ *   worldPos = origin + u*(colIndex*stepU + w/2) + v*(rowIndex*stepV + h/2) + n*moduleStackHeightM(mountId)
  */
 export function placeSinglePanel(
   clickLat:    number,
@@ -1218,7 +1237,9 @@ export function placeSinglePanel(
   orientation: 'portrait' | 'landscape',
   layoutId:    string,
   wattage:     number,
+  mountingSystemId?: string,
 ): PlacedPanel {
+  const mountOffsetM = moduleStackHeightM(mountingSystemId);
   const dims = getPanelDims(orientation);
   // v47.151: stepU/stepV must match buildSurfaceGridECEF (panelSpacingM=0, rowSpacingM=0).
   // Hardcoded 0.02/0.05 caused grid-snapping to use wrong cell sizes vs the initial grid.
@@ -1244,9 +1265,9 @@ export function placeSinglePanel(
   const uCenter = colIndex * stepU + dims.widthM  / 2;
   const vCenter = rowIndex * stepV + dims.heightM / 2;
 
-  const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * PANEL_OFFSET_ECEF;
-  const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * PANEL_OFFSET_ECEF;
-  const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * PANEL_OFFSET_ECEF;
+  const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * mountOffsetM;
+  const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * mountOffsetM;
+  const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * mountOffsetM;
   const { lat: panelLat, lng: panelLng, height: panelH } = ecefToLatLng({ x: wx, y: wy, z: wz });
 
   // v47.142: Per-plane heading/pitch from resolved ECEF frame — no cross-plane inheritance
@@ -1271,7 +1292,7 @@ export function placeSinglePanel(
     bifacialGain:   1.0,
     row:            rowIndex,
     col:            colIndex,
-    height:         isFinite(panelH) ? panelH : clickHeight + PANEL_OFFSET_ECEF,
+    height:         isFinite(panelH) ? panelH : clickHeight + mountOffsetM,
     heading:        sharedHeading,
     pitch:          sharedPitch,
     roll:           0,
@@ -1297,7 +1318,7 @@ export function placeSinglePanel(
  * No reconstruction from anchor lat/lng — position is derived solely from
  * stored gridRow/gridCol indices and the plane's ECEF origin+frame:
  *
- *   worldPos = origin + u*(nextCol*stepU + w/2) + v*(maxRow*stepV + h/2) + n*PANEL_OFFSET_ECEF
+ *   worldPos = origin + u*(nextCol*stepU + w/2) + v*(maxRow*stepV + h/2) + n*moduleStackHeightM(mountId)
  *
  * This eliminates any drift from relative-to-anchor reconstruction.
  */
@@ -1308,7 +1329,9 @@ export function extendRow(
   orientation:    'portrait' | 'landscape',
   layoutId:       string,
   wattage:        number,
+  mountingSystemId?: string,
 ): PlacedPanel | null {
+  const mountOffsetM = moduleStackHeightM(mountingSystemId);
   const planePanels = existingPanels.filter(p => p.planeId === plane.id);
   if (planePanels.length === 0) return null;
 
@@ -1381,9 +1404,9 @@ export function extendRow(
     }
   }
 
-  const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * PANEL_OFFSET_ECEF;
-  const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * PANEL_OFFSET_ECEF;
-  const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * PANEL_OFFSET_ECEF;
+  const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * mountOffsetM;
+  const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * mountOffsetM;
+  const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * mountOffsetM;
   const { lat: panelLat, lng: panelLng, height: panelH } = ecefToLatLng({ x: wx, y: wy, z: wz });
 
   return {
@@ -1421,7 +1444,7 @@ export function extendRow(
  *
  * Then a FULL ROW is generated at that rowIndex spanning the same columns
  * as the widest existing row on the plane. Position formula:
- *   worldPos = origin + u*(col*stepU + w/2) + v*(rowIndex*stepV + h/2) + n*PANEL_OFFSET_ECEF
+ *   worldPos = origin + u*(col*stepU + w/2) + v*(rowIndex*stepV + h/2) + n*moduleStackHeightM(mountId)
  *
  * @param clickECEF  Optional ECEF position from scene.pickPosition — used for
  *                   grid-snapping rowIndex. If omitted, falls back to maxRow+1.
@@ -1434,7 +1457,9 @@ export function addRow(
   layoutId:       string,
   wattage:        number,
   clickECEF?:     { x: number; y: number; z: number },
+  mountingSystemId?: string,
 ): PlacedPanel[] {
+  const mountOffsetM = moduleStackHeightM(mountingSystemId);
   const planePanels = existingPanels.filter(p => p.planeId === plane.id);
   if (planePanels.length === 0) return [];
 
@@ -1489,9 +1514,9 @@ export function addRow(
     const uCenter = refUC + (col - refCol) * stepU;
     const vCenter = refVC + (rowIndex - refRow) * stepV;
 
-    const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * PANEL_OFFSET_ECEF;
-    const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * PANEL_OFFSET_ECEF;
-    const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * PANEL_OFFSET_ECEF;
+    const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * mountOffsetM;
+    const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * mountOffsetM;
+    const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * mountOffsetM;
     const { lat: panelLat, lng: panelLng, height: panelH } = ecefToLatLng({ x: wx, y: wy, z: wz });
 
     newPanels.push({

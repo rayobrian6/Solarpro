@@ -165,6 +165,15 @@ export interface ControlConfig {
   /** Ground elevation in meters (Cesium terrain height at site). */
   groundElevM?: number;
 
+  /**
+   * Racking system the modules sit on. Decides how far above the roof deck a
+   * module's underside is — see lib/roofMountDatum.ts. The control layer never
+   * reads a ref for this, for the same reason it never reads one for
+   * orientation: a placement datum that varies by call site is how a roof ends
+   * up with modules at two different heights.
+   */
+  mountingSystemId?: string;
+
   // --- Fence / Ground specific ---
   /** ECEF start point for fence segment or ground row. */
   p1ECEF?: Vec3;
@@ -246,6 +255,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
 
   // ── 1. Resolve canonical inputs ────────────────────────────────────────────
   const orientation = config.orientation;                   // never fallback — always explicit
+  const mountingSystemId = config.mountingSystemId;         // ditto — the module stack datum
   const wattage     = config.wattage ?? 400;
   const setbacks    = config.setbacks ?? DEFAULT_SETBACKS;
   const groundElevM = config.groundElevM ?? 0;
@@ -295,6 +305,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
           customDirX:      config.customDirX,
           customDirY:      config.customDirY,
           layoutStrategy:  config.layoutStrategy,  // v48.12: mixed layout
+          mountingSystemId,
         });
         engineUsed = 'surfaceGeometry3D';
         break;
@@ -323,6 +334,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
           wattage,
           clickECEF:    config.clickECEF,
           existingPanels: existing,
+          mountingSystemId,
         } as any);
         engineUsed = 'surfaceGeometry3D';
         break;
@@ -381,6 +393,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
           orientation,
           rowLayoutId,
           wattage,
+          mountingSystemId,
         );
 
         if (newPanel) {
@@ -427,6 +440,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
           layoutId,
           wattage,
           config.clickECEF,
+          mountingSystemId,
         );
         if (newRowPanels) rawPanels = newRowPanels;
         engineUsed = 'surfaceGeometry3D';
