@@ -25,7 +25,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { pickFace, pickFaces, pointInPolygon3D, newellNormal, type SelectableFace, type Vec3 } from '@/lib/3d/faceHitTest';
+import { pickFace, pickFaces, pointInPolygon3D, newellNormal, selectableFacesFrom, type SelectableFace, type Vec3 } from '@/lib/3d/faceHitTest';
 import { resolvePlaneGeometry } from '@/lib/surfaceGeometry3D';
 import { latLngToECEF } from '@/lib/roofPlane3D';
 import { geoidUndulationM } from '@/lib/geodeticDatum';
@@ -407,5 +407,81 @@ describe('face hit test — the primitives it stands on', () => {
     const target = centroid(faces[0].polygon);
     const degenerate: SelectableFace = { faceId: 'bad', normal: null, polygon: [faces[0].polygon[0]] };
     expect(pickFace(rayFromAbove(target), [degenerate, ...faces])?.faceId).toBe('face-A');
+  });
+});
+
+describe('selectableFacesFrom — the design decides which faces exist, not the render cache', () => {
+  /**
+   * SolarEngine3D's three plane maps are never pruned — there is no `.delete()`
+   * on any of them anywhere in the file, and that is DELIBERATE: a
+   * reconcile-deletions block once removed entities for any id missing from the
+   * `roofPlanes` prop and destroyed a user's traced garage, because the prop has
+   * its own timing and "absent from a prop" is not "the user deleted it".
+   *
+   * A ghost outline was a cosmetic annoyance right up until those maps became
+   * the input to a PICK. Then it became a clickable face resolving to a
+   * canonical id the design no longer holds — and because the maps survive an
+   * address change, a face traced at one property stays selectable while a
+   * different property is on screen.
+   */
+  const geom = (poly: Vec3[]) => ({ polygon: poly, normal: null });
+
+  it('offers only faces the design still contains', () => {
+    const faces = gable();
+    const rendered = faces.map(f => [f.faceId, geom(f.polygon)] as const);
+
+    const both = selectableFacesFrom(rendered, new Set(['face-A', 'face-B']));
+    expect(both.map(f => f.faceId).sort()).toEqual(['face-A', 'face-B']);
+
+    const onlyA = selectableFacesFrom(rendered, new Set(['face-A']));
+    expect(onlyA.map(f => f.faceId)).toEqual(['face-A']);
+  });
+
+  it('A DELETED FACE IS NOT CLICKABLE, even though the render cache still holds it', () => {
+    const faces = gable();
+    const rendered = faces.map(f => [f.faceId, geom(f.polygon)] as const);
+    const target = centroid(faces[1].polygon);
+
+    // Before: B is in the design and is hit.
+    expect(pickFace(rayFromAbove(target), selectableFacesFrom(rendered, new Set(['face-A', 'face-B'])))?.faceId)
+      .toBe('face-B');
+
+    // After the user deletes B: the entities and the cache entry both remain —
+    // nothing is pruned — but the click must no longer resolve to it.
+    expect(pickFace(rayFromAbove(target), selectableFacesFrom(rendered, new Set(['face-A']))))
+      .toBeNull();
+  });
+
+  it("ANOTHER PROPERTY'S face cannot be selected while this one is on screen", () => {
+    // The address-change effect resets several per-location refs; the three
+    // plane maps are not among them. This is the cross-site case.
+    const here = gable();
+    // Placed a long way off, because a different PROPERTY is a different place.
+    const there = selectable(tracedFace('other-site-face', { e0: 600, e1: 606, n0: 600, n1: 606 }, 180));
+    const rendered = [...here, there].map(f => [f.faceId, geom(f.polygon)] as const);
+
+    const design = new Set(here.map(f => f.faceId));   // only THIS property's faces
+    const offered = selectableFacesFrom(rendered, design);
+    expect(offered.map(f => f.faceId)).not.toContain('other-site-face');
+
+    // And a click over the stale face finds nothing rather than the stranger.
+    expect(pickFace(rayFromAbove(centroid(there.polygon)), offered)).toBeNull();
+  });
+
+  it('an empty design offers nothing, rather than everything', () => {
+    const faces = gable();
+    const rendered = faces.map(f => [f.faceId, geom(f.polygon)] as const);
+    expect(selectableFacesFrom(rendered, new Set())).toEqual([]);
+  });
+
+  it('still drops degenerate geometry, and does not throw on a missing entry', () => {
+    const faces = gable();
+    const rendered = [
+      ['degenerate', geom([faces[0].polygon[0]])] as const,
+      [faces[0].faceId, geom(faces[0].polygon)] as const,
+    ];
+    const offered = selectableFacesFrom(rendered, new Set(['degenerate', 'face-A']));
+    expect(offered.map(f => f.faceId)).toEqual(['face-A']);
+    expect(selectableFacesFrom([], new Set(['face-A']))).toEqual([]);
   });
 });

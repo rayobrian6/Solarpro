@@ -86,7 +86,7 @@ import {
 } from '@/lib/3d/controlLayer';
 import { moduleStackHeightM, railCrossSectionM, deckPointFromModule, drawnRailHeightM, RAIL_DRAW_SCALE } from '@/lib/roofMountDatum';
 import { geoidUndulationM, resolveGroundDatum } from '@/lib/geodeticDatum';
-import { pickFace, type SelectableFace } from '@/lib/3d/faceHitTest';
+import { pickFace, selectableFacesFrom, type SelectableFace } from '@/lib/3d/faceHitTest';
 import { hasUsableElevation } from '@/lib/surfaceGeometry3D';
 
 // ─── v49.0: Isolated Ground Mount Reality Engine ──────────────────────────────
@@ -2517,6 +2517,21 @@ function SolarEngine3D({
   useEffect(() => { buildingPitchRef.current = buildingPitchDeg; }, [buildingPitchDeg]);
   useEffect(() => { buildingOverridesRef.current = buildingOverrides; }, [buildingOverrides]);
   useEffect(() => { selectedFaceIdRef.current = selectedFaceId; }, [selectedFaceId]);
+
+  /** 🚨 A SELECTION CANNOT OUTLIVE ITS FACE.
+   *
+   *  Deleting the selected face used to leave `selectedFaceId` pointing at an id
+   *  the design no longer contains, and the face-scoped Building controls
+   *  (`effectivePitchDeg`, `effectiveWallM`) go on reading a `buildingOverrides`
+   *  entry for it — so the steppers silently edit a dead face instead of falling
+   *  back to whole-building scope. Clearing a SELECTION destroys no work, which
+   *  is what separates this from the reconcile-deletions block that did. */
+  useEffect(() => {
+    if (!selectedFaceId) return;
+    if ((roofPlanes ?? []).some(p => p.id === selectedFaceId)) return;
+    selectRoofFace(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFaceId, roofPlanes]);
   const showBuilding3DRef = useRef(false);
   useEffect(() => { showBuilding3DRef.current = showBuilding3D; }, [showBuilding3D]);
   useEffect(() => { showShadeRef.current = showShade; setShowShadeLocal(showShade); }, [showShade]);
@@ -8111,17 +8126,24 @@ function SolarEngine3D({
    * `resolvePlaneGeometry` call, so neither has to impersonate the other here.
    */
   function selectableRoofFaces(): SelectableFace[] {
-    const faces: SelectableFace[] = [];
+    // 🚨 THE DESIGN SAYS WHICH FACES EXIST. THE RENDER CACHE DOES NOT.
+    // plane3DCesiumPtsMap is never pruned — there is no `.delete()` on it
+    // anywhere in this file, deliberately, because a reconcile-deletions block
+    // once destroyed a user's traced garage by inferring intent from a prop's
+    // timing. So the cache accumulates ghosts, and it survives an address
+    // change: without this gate a face traced at one property stays clickable
+    // while a DIFFERENT property is on screen. Nothing is deleted here; the
+    // ghost stays drawn exactly as before, it simply is not selectable.
+    const rendered: Array<readonly [string, { polygon: any[]; normal: any }]> = [];
     plane3DCesiumPtsMap.current.forEach((pts: any[], planeId: string) => {
       const frame = plane3DFrameMap.current.get(planeId);
       if (!pts || pts.length < 3) return;
-      faces.push({
-        faceId: planeId,
-        normal: frame ? { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z } : null,
+      rendered.push([planeId, {
         polygon: pts.map((q: any) => ({ x: q.x, y: q.y, z: q.z })),
-      });
+        normal: frame ? { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z } : null,
+      }] as const);
     });
-    return faces;
+    return selectableFacesFrom(rendered, new Set((roofPlanesRef.current ?? []).map(p => p.id)));
   }
 
   /**
@@ -11372,7 +11394,17 @@ function SolarEngine3D({
       // createdFrom3D). The geocode (lat,lng) can land on the NEIGHBOUR (3 Melvin
       // Dr geocodes ~17m onto the next house), seeding the filter on the wrong
       // building and skipping the roof the user drew. The marked plane is truth.
-      const marked = eligiblePlanes.filter(p => isHandModelledFace(p) && p.vertices && p.vertices.length >= 3);
+      // 🚨 THE SEED IS "ANY REAL GEOMETRY BEATS THE GEOCODE", NOT "ONLY HAND WORK".
+      // Narrowing this to hand-modelled faces was a regression on the PREFERRED
+      // provider: Lane A only runs on an empty design, so "Google faces and
+      // nothing else" is the normal post-detection state, and a Google-only
+      // design would seed from the geocode — the input the comment above names
+      // as landing ~17 m onto the neighbour. Hand-modelled faces still WIN when
+      // both exist, which is the preference that was actually wanted.
+      const handModelled = eligiblePlanes.filter(p => isHandModelledFace(p) && p.vertices && p.vertices.length >= 3);
+      const marked = handModelled.length > 0
+        ? handModelled
+        : eligiblePlanes.filter(p => p.vertices && p.vertices.length >= 3);
       const sv = marked.flatMap(p => p.vertices ?? []);
       const subjectPt = sv.length > 0
         ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }

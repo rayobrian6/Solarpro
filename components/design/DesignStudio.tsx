@@ -3886,7 +3886,12 @@ export default function DesignStudio({ project, onSave }: Props) {
     // createdFrom3D) over mapCenter — the geocode can land on the NEIGHBOUR (e.g.
     // 3 Melvin Dr sits ~17m onto the next house), which would seed the filter on the
     // wrong building and delete the roof the user actually drew. Marked plane = truth.
-    const marked = roofPlanes.filter(p => isHandModelledFace(p) && p.vertices && p.vertices.length >= 3);
+    // Same rule as the 3D side: any real geometry beats the geocode, and
+    // hand-modelled faces win only when both kinds are present.
+    const handModelled = roofPlanes.filter(p => isHandModelledFace(p) && p.vertices && p.vertices.length >= 3);
+    const marked = handModelled.length > 0
+      ? handModelled
+      : roofPlanes.filter(p => p.vertices && p.vertices.length >= 3);
     const sv = marked.flatMap(p => p.vertices ?? []);
     const subject = sv.length > 0
       ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }

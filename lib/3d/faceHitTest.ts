@@ -209,3 +209,57 @@ export function pickFace(ray: PickRay, faces: readonly SelectableFace[]): FaceHi
   const hits = pickFaces(ray, faces);
   return hits.length > 0 ? hits[0] : null;
 }
+
+/** The geometry a renderer is holding for one face: the polygon it drew, and the
+ *  frame normal if it has one. */
+export interface RenderedFaceGeometry {
+  polygon: Vec3[];
+  normal?: Vec3 | null;
+}
+
+/**
+ * Turn what the RENDERER is holding into what the interaction layer may select,
+ * using the DESIGN as the authority for which faces exist.
+ *
+ * 🚨 THE RENDER CACHE IS NOT THE LIST OF FACES, AND TREATING IT AS ONE IS A BUG
+ * I INTRODUCED AND AM REMOVING HERE.
+ *
+ * SolarEngine3D keeps three maps keyed by plane id — `plane3DEntityMap`,
+ * `plane3DFrameMap`, `plane3DCesiumPtsMap` — and there is not one `.delete()` or
+ * `.clear()` on any of them anywhere in the file. They only ever grow. That was
+ * a DELIBERATE choice and the reasoning is sound: a reconcile-deletions block
+ * used to remove entities for any id missing from the `roofPlanes` prop, and it
+ * destroyed a user's traced garage, because the prop has its own timing and
+ * "absent from a prop" is not "the user deleted it". The comment that replaced
+ * it says exactly that: *absence is not intent*, and a ghost outline is a
+ * cosmetic annoyance.
+ *
+ * It stopped being cosmetic the moment those maps became the input to a PICK.
+ * A ghost face is a real, clickable face that resolves to a canonical id the
+ * design no longer contains — and because the maps survive an address change,
+ * a face traced at one property stays selectable while a DIFFERENT property is
+ * on screen. That is one provider's stale geometry reaching into another's
+ * project, which is precisely what the provider boundary exists to prevent.
+ *
+ * The fix is not to delete anything. Nothing here removes an entity, so no
+ * traced work can be lost: the ghost stays drawn exactly as before. It simply
+ * is not SELECTABLE, because the authority for "which faces does this design
+ * have" is the design — `roofPlanes` — and never the render cache.
+ *
+ * `canonicalFaceIds` is REQUIRED rather than optional on purpose. An optional
+ * "filter if you feel like it" argument is how the unfiltered path survives.
+ */
+export function selectableFacesFrom(
+  rendered: Iterable<readonly [string, RenderedFaceGeometry]>,
+  canonicalFaceIds: ReadonlySet<string>,
+): SelectableFace[] {
+  const faces: SelectableFace[] = [];
+  for (const entry of rendered ?? []) {
+    if (!entry) continue;
+    const [faceId, geom] = entry;
+    if (!faceId || !canonicalFaceIds?.has(faceId)) continue;   // not in the design
+    if (!geom?.polygon || geom.polygon.length < 3) continue;
+    faces.push({ faceId, normal: geom.normal ?? null, polygon: geom.polygon });
+  }
+  return faces;
+}
