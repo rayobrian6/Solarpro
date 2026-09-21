@@ -1508,6 +1508,214 @@ workstream, not a design-state one.
 
 ---
 
+## 🚨 WS1-032 — I INTRODUCED A FLIP-FLOP WHILE FIXING WS1-029
+
+| | |
+|---|---|
+| **Severity** | **P0** — a live design replaced by a stale archive, forced to disk, on every reload |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+| **Found by** | an adversarial audit of my own commit, not by the suite |
+
+Fixing WS1-029 also **reordered** `hydrate`'s branches, putting the archive lookup ahead of the
+stored-active check. When the camera key is within `SITE_MATCH_RADIUS_M` of **both** the stored
+active key and an archived key — one building whose row holds two identities a few metres apart —
+the archive wins. Executed against the real module:
+
+```
+same property?  active/now true   arch/now true
+RELOAD 1 -> reactivated-archive | panels 3  (was 55) | needsAdoptionSave true
+RELOAD 2 -> reactivated-archive | panels 55          | needsAdoptionSave true
+```
+
+A 55-panel live design replaced on screen by a 3-panel archive with no user action, **forced to
+disk** (`needsAdoptionSave`), and swapped back on the next load: a permanent alternation, one write
+each time. The subsystem-wipe guard does not stop it — `switchingProperty` is true precisely because
+the key changed.
+
+🚨 **The precondition is not exotic.** `changeSite`'s own comment records Ray's live row having
+*"three identities for one building inside 43 seconds, ~17 m and ~19 m apart"*. And the
+`adopted-legacy` branch manufactures exactly this row shape — it adopts `siteKeyNow` as the active
+key while leaving `parsed.sites` untouched, with no check that an archive sits inside the radius —
+then force-saves it.
+
+**Fix.** The stored-active check goes back in front of the archive lookup. A camera that matches the
+row's *own* active key is not evidence of a property change, so there is nothing to reactivate and
+nothing to archive. The WS1-029 repair is untouched: what changed there was the **fall-through**,
+which no longer archives on a mere mismatch.
+
+**Why no test caught it.** Every fixture pair in the suite is kilometres apart, so
+`tests/autosaveAdversarial.test.ts`'s *"an archived site cannot reappear as the active one"* — the
+exact invariant this violates — passed **vacuously** for the ambiguous case. The new test asserts
+the fixture really is ambiguous before asserting anything else.
+
+Mutation-proven: restoring the bad order fails with *"expected 'reactivated-archive' to be
+'matched'"* and *"expected true to be false"* on the forced save.
+
+---
+
+## 🚨 WS1-033 — A PANEL WITH NO ELEVATION WAS DRAWN AT SEA LEVEL
+
+| | |
+|---|---|
+| **Severity** | **P1** — user-visible, and it is the shape of Ray's report |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+Ray: *"the panels are not all rendering above the roof when I do an auto layout to fill the roof."*
+
+**"Not ALL" is the whole clue.** A defect that affects every panel is a datum error; a defect that
+affects *some* is a per-panel property. This is one:
+
+```ts
+lib/3d/controlLayer.ts   if (!isFinite(p.height ?? 0)) reject      // undefined ?? 0 -> 0 -> finite -> KEPT
+SolarEngine3D            const h = panel.height ?? 0               // then drawn at h = 0
+```
+
+`undefined ?? 0` is `0`, and `isFinite(0)` is **true** — so the guard written to catch bad
+elevations waved through the worst case, and `isValidCoord` accepts 0. Ellipsoidal zero is roughly a
+hundred metres below any real roof. The panel count is right, nothing errors, and part of the array
+is underground.
+
+`PlacedPanel.height` is a required `number` in the type, which is why every guard around it was
+written as defensive noise — but runtime data can lack it whatever the type says: `layouts.panels`
+is JSONB, designs predate the column, and the 2D layout engine (`generateRoofLayoutOptimized`)
+never writes an elevation at all.
+
+**Fix.** One predicate, `hasUsableElevation`, used by the validator and the renderer. Absence and
+`NaN` are rejected; a real elevation of `0` is still real, because **absence is the thing being
+rejected, not the number**. The renderer now refuses to draw rather than drawing underground — a
+missing panel is noticed and reported; a buried one looks like a rendering bug and gets chased in
+the wrong place.
+
+Same distinction as `COALESCE` in the layout writer and `planeHeightAtCenterMeters ?? 3.5`. Three
+times in one workstream, `?? 0` has turned "we don't know" into "zero".
+
+The test pins the old expression's behaviour directly: `oldGuard(undefined) === true`,
+`oldGuard(null) === true`, `oldGuard(NaN) === false` — it caught only the case that never happens.
+
+### 🚨 What this does NOT establish
+
+**I have not proven this is what Ray is looking at.** Three things are true and should not be
+blurred:
+
+1. A defect of exactly that shape existed, and is fixed.
+2. **Every Failure B fix in this workstream is on a branch and unmerged.** `origin/master` contains
+   no `moduleStackHeightM`, no routing chokepoint, no Square Up repair. If Ray is using the deployed
+   app, he is looking at the original defects, none of which have shipped.
+3. The placement library itself is now correct on every fixture I can run — a hand-traced face, a
+   gable, and three archived **real Google Solar payloads** (`tests/detectedPlaneElevation.test.ts`,
+   13 tests). So whatever remains is not in the grid arithmetic.
+
+### One thing I could not test, stated plainly
+
+Panels sit a fixed height above a **fitted plane**. What Ray sees is the **photogrammetry mesh**,
+which is not planar — it carries ridge caps, vents and ±10–20 cm of noise. A panel correctly placed
+above the plane can still be swallowed where the mesh rises above it, and that is a per-location
+property, so it would look like "some panels".
+
+`SolarEngine3D.tsx:2010` claims *"clampToHeightMostDetailed handles height correction at render
+time"*. **`clampToHeightMostDetailed` appears nowhere in the file except that sentence.** Nothing
+samples the mesh under a panel. That is another comment describing a mechanism that does not exist,
+like `roofDeckAlt` before it — and closing it needs Google 3D tiles, which needs an API key this
+checkout does not have.
+
+---
+
+## WS1-034 — WS1-030 WAS A FALSE CLOSURE: THE SAVE BUTTON NEVER GOT THE FIX
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+WS1-030 moved refusal recognition into `handleRouteDbError` and claimed *"a new route cannot forget
+it"*. **Two of the five routes never reach that handler for a refusal**, and one of them is the one
+that matters most:
+
+- **`app/api/production`** — its catch delegates only for a `DbConfigError` or six network
+  substrings, then returns a bare **500** with no `code` and no `refused`.
+  🚨 **The Design Studio's Save button posts here**, not to the layout route — the route's own
+  comment says so. So the studio's refusal handling, which keys on `code`, never fired, and the user
+  was told *"Production calculation failed"* for a save deliberately blocked to protect another
+  property's design.
+- **`app/api/engineering/preliminary`** — an inner `try/catch` logged a warning and answered
+  **HTTP 200** with `'layout'` merely missing from `savedFiles`. The caller reads `success` only, so
+  the user was told the design saved when the database had refused to write it. **Silence is worse
+  than the 503 it replaced.**
+
+And the enumeration was wrong: **five** routes call `upsertLayout`, not four.
+
+**Fix.** Both routes consult `layoutRefusalCode` before their own classification. The preliminary
+route reports `layoutRefusal` in its response body rather than swallowing it — transient failures
+stay warnings, a refusal is stated.
+
+**Why the suite said nothing.** `handleRouteDbError` is `vi.mock`ed to a flat 500 in six test files.
+A mocked chokepoint cannot demonstrate that a route reaches it.
+
+### 🚨 And my first attempt at the guard was itself vacuous
+
+I wrote a structural test asserting every `upsertLayout` caller handles refusals, accepting "the
+catch delegates unconditionally to `handleRouteDbError`" as evidence. **`/api/production` has
+several catch blocks**, one of which matched that shape while the one wrapping `upsertLayout` did
+not — so deleting the fix left the test **green**. The mutation step caught it; nothing else would
+have.
+
+A regex over source cannot tell which catch will see a throw. The test now claims only what a scan
+can honestly check — that the code list is complete, that prefixes match only the real codes, and
+that the routes catching `upsertLayout` themselves consult the authority — and the behavioural proof
+stays where it belongs, in `tests/siteDesignRoute.postgres.test.ts` against real PostgreSQL.
+
+---
+
+## WS1-035 — A SIXTH ANSWER, WITH A PASSING TEST CALLING IT CANONICAL
+
+| | |
+|---|---|
+| **Severity** | P2 — read by nothing at runtime |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+`lib/3d/controlLayer.ts` exported `CANONICAL_PANEL_OFFSET_M = 0.05` — a sixth answer to the question
+`lib/roofMountDatum.ts` now owns, **exported from the very file that threads `mountingSystemId`
+through to the placement engines**, and pinned green by
+
+```ts
+it('CANONICAL_PANEL_OFFSET_M is 0.05m above the plane surface', () => {
+  expect(CANONICAL_PANEL_OFFSET_M).toBe(0.05);
+```
+
+Its comment claimed *"the control layer post-processes height when needed"*. It does no such
+post-processing. Nothing read the constant at runtime — only the test did — so it changed no number.
+It was a wrong answer sitting in the open, under the most inviting name in the file, with a test
+asserting it was canonical.
+
+WS1-013's re-audit searched for the *arithmetic* and found `CesiumViewer` and
+`placePanelsMultiPlane`; it walked straight past a constant whose name contains the word CANONICAL.
+Deleted, and the test now asserts the export is **gone**.
+
+---
+
+## WS1-036 — THE PLANE KNEW ITS OWN FRAME AND WE GUESSED ANYWAY
+
+| | |
+|---|---|
+| **Severity** | P1 — silently bakes a 9 cm error into a saved plane |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+`collectRoofRenderables` rebuilt a restored plane's frame from a panel sitting on it, justified by
+*"the only surviving record of the plane's frame is a panel"*. **That premise is false.** Round-
+tripping a plane through `upsertLayout` and `getLayoutByProject` against real PostgreSQL returns
+`origin3D`, `ecefFrame3D`, `polygon3D` and `createdFrom3D` **intact** — measured, not assumed.
+
+And the guess is not sound. Recovering a deck from a module means subtracting a mount stack;
+`PlacedPanel` records no mounting system, so it had to assume the **currently selected** racking.
+For a design saved before the mount datum existed — panels at the old `+0.05` — that recovers an
+origin **9 cm below** the true plane, and `squareUpTracedFaces` then **persists** it. Same error if
+the racking selector changed since placement.
+
+The plane's own frame is now preferred; the panel-derived path remains only for a plane that carries
+none.
+
+---
+
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
 `SolarEngine3D` applies restored obstructions to the wrong site · obstructions/measurements are
@@ -1534,7 +1742,7 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ see the table below |
 | **E2E passes** | ✅ **19 passed, 0 skipped, 0 failed** against a production build, in two passes (see `e2e/README.md`) — including four against **real PostgreSQL** |
-| Full suite passes | ✅ **568 files, 12,215 tests, 0 failures** (490 skipped, pre-existing) |
+| Full suite passes | ✅ **570 files, 12,235 tests, 0 failures** (490 skipped, pre-existing) |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors; the changed files add no new warnings |
 | Build passes | ✅ `next build` exit 0, clean `.next` |

@@ -113,3 +113,51 @@ export async function waitForCesiumCanvas(
     return false;
   }
 }
+
+/**
+ * A GABLE: two faces sharing a ridge, with opposite azimuths.
+ *
+ * 🚨 Every elevation test before this one used a SINGLE face, and Ray's report
+ * is "the panels are not ALL rendering above the roof when I auto layout to
+ * fill the roof". A single plane cannot show a per-plane defect, and "fill the
+ * roof" means more than one face on any real house.
+ */
+export function buildGablePlanes(): [RoofPlane, RoofPlane] {
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos(DEMO_SITE.lat * DEG);
+  const dLng   = WIDTH_M / 2 / mPerDegLng;   // half-width along the ridge (east-west)
+  const dLat   = DEPTH_M / 2 / M_PER_DEG_LAT; // half-depth up the slope (north-south)
+  const ridgeH = EAVE_H + (DEPTH_M / 2) * Math.tan(TILT_DEG * DEG);
+
+  // South face: eave to the south, ridge along the middle.
+  const south = buildRoofPlane3D([
+    latLngToECEF(DEMO_SITE.lat - dLat, DEMO_SITE.lng - dLng, EAVE_H),
+    latLngToECEF(DEMO_SITE.lat - dLat, DEMO_SITE.lng + dLng, EAVE_H),
+    latLngToECEF(DEMO_SITE.lat,        DEMO_SITE.lng + dLng, ridgeH),
+    latLngToECEF(DEMO_SITE.lat,        DEMO_SITE.lng - dLng, ridgeH),
+  ]);
+  // North face: shares the ridge, falls away to the north.
+  const north = buildRoofPlane3D([
+    latLngToECEF(DEMO_SITE.lat,        DEMO_SITE.lng - dLng, ridgeH),
+    latLngToECEF(DEMO_SITE.lat,        DEMO_SITE.lng + dLng, ridgeH),
+    latLngToECEF(DEMO_SITE.lat + dLat, DEMO_SITE.lng + dLng, EAVE_H),
+    latLngToECEF(DEMO_SITE.lat + dLat, DEMO_SITE.lng - dLng, EAVE_H),
+  ]);
+  return [south, north];
+}
+
+/** Seed several planes at once and wait for the ENGINE to hold them all. */
+export async function seedPlanes(
+  page: import('@playwright/test').Page,
+  planes: RoofPlane[],
+): Promise<RoofPlane[]> {
+  await page.evaluate(ps => (window as any).__solarE2E.seedDesign({ roofPlanes: ps }), planes as any);
+  await expect.poll(
+    () => page.evaluate(() => (window as any).__solarE2E?.roofPlanes.length ?? 0),
+    { message: 'seedDesign did not put every roof plane on the active property', timeout: 10_000 },
+  ).toBe(planes.length);
+  await expect.poll(
+    () => page.evaluate(() => (window as any).__solarE2E?.engineRoofPlaneCount ?? 0),
+    { message: 'the 3D engine never received every seeded roof plane', timeout: 45_000 },
+  ).toBe(planes.length);
+  return planes;
+}

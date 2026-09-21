@@ -83,6 +83,7 @@ import {
   DEFAULT_SETBACKS,
 } from '@/lib/3d/controlLayer';
 import { moduleStackHeightM, railCrossSectionM, deckPointFromModule } from '@/lib/roofMountDatum';
+import { hasUsableElevation } from '@/lib/surfaceGeometry3D';
 
 // ─── v49.0: Isolated Ground Mount Reality Engine ──────────────────────────────
 // ALL ground placement routes through this engine.
@@ -4210,14 +4211,35 @@ function SolarEngine3D({
       if (vs.length < 3) return;
       const planePanels = panelsRef.current.filter(p => p.planeId === plane.id && isFinite((p as any).ecefUx) && isFinite((p as any).ecefNx));
       let u: any, n: any, origin: any;
-      if (planePanels.length) {
+      const own = (plane as any).ecefFrame3D, ownOrigin = (plane as any).origin3D;
+      if (own?.u && own?.n && ownOrigin) {
+        // 🚨 THE PLANE KNOWS ITS OWN FRAME — ASK IT FIRST.
+        //
+        // The branch below rebuilds a frame from a panel because "the only
+        // surviving record of the plane's frame is a panel that sits on it".
+        // That premise is false, and I checked rather than believed it:
+        // round-tripping a plane through `upsertLayout` and `getLayoutByProject`
+        // against real PostgreSQL returns `origin3D`, `ecefFrame3D`, `polygon3D`
+        // and `createdFrom3D` intact. Deriving the deck from a module was
+        // guesswork standing next to the answer.
+        //
+        // And the guess is not sound. Recovering a deck from a module means
+        // subtracting a mount stack, `PlacedPanel` records no mounting system,
+        // so it had to assume the CURRENTLY SELECTED racking. For a design saved
+        // before the mount datum existed — panels at the old +0.05 — that
+        // recovers an origin 9 cm BELOW the true plane, and `squareUpTracedFaces`
+        // then PERSISTS it. Same error if the racking selector changed since
+        // placement.
+        u = C.Cartesian3.normalize(new C.Cartesian3(own.u.x, own.u.y, own.u.z), new C.Cartesian3());
+        n = C.Cartesian3.normalize(new C.Cartesian3(own.n.x, own.n.y, own.n.z), new C.Cartesian3());
+        origin = new C.Cartesian3(ownOrigin.x, ownOrigin.y, ownOrigin.z);
+      } else if (planePanels.length) {
         const rp: any = planePanels[0];
         u = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefUx, rp.ecefUy, rp.ecefUz), new C.Cartesian3());
         n = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefNx, rp.ecefNy, rp.ecefNz), new C.Cartesian3());
-        // 🚨 A MODULE IS NOT THE DECK. This branch runs for a plane RESTORED from
-        // the database, where the only surviving record of the plane's frame is a
-        // panel that sits on it. Taking that panel's position as the plane origin
-        // made every consumer that adds a mount stack add it a SECOND time: the
+        // 🚨 A MODULE IS NOT THE DECK. Reached only when the plane carries no
+        // frame of its own. Taking a panel's position as the plane origin made
+        // every consumer that adds a mount stack add it a SECOND time: the
         // single-panel tool projected a click onto the panel plane and lifted by
         // the stack again, so each hand-placed module after a reload floated one
         // stack height above its neighbours — and the next reload used THAT as
@@ -5407,7 +5429,25 @@ function SolarEngine3D({
       // v47.138: Height is set by pure plane math in buildSurfaceGridECEF /
       // addRow / extendRow / placeSinglePanel — origin + u*uC + v*vC + n*PANEL_OFFSET_ECEF (0.05m).
       // Cesium mesh (3D tiles) is VISUAL ONLY — never sample per-panel height from terrain.
-      const h       = panel.height ?? 0;
+      // 🚨 A PANEL WITH NO ELEVATION IS NOT A PANEL AT SEA LEVEL.
+      //
+      // This used to read `const h = panel.height ?? 0`, and `isValidCoord`
+      // accepts 0, so a panel that arrived without an elevation was DRAWN at
+      // ellipsoidal zero — roughly a hundred metres below any real roof — while
+      // its neighbours sat correctly. That is "the panels are not ALL rendering
+      // above the roof": the count is right, nothing errors, and part of the
+      // array is underground.
+      //
+      // Refusing to draw it is the honest failure. A missing panel is noticed
+      // and reported; a buried one looks like a rendering bug and gets chased
+      // in the wrong place.
+      if (!hasUsableElevation(panel)) {
+        addLog('ERROR',
+          `Panel ${panel.id} has NO elevation (height=${String(panel.height)}) — not drawn. ` +
+          `Re-run Auto Layout to place it on the roof.`);
+        return;
+      }
+      const h       = panel.height as number;
       const tiltDeg = panel.tilt    ?? 0;
       const azDeg   = panel.azimuth ?? 180;
 

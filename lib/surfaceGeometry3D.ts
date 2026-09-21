@@ -65,6 +65,35 @@ const FEET_PER_METER = 3.28084;
 //
 export const LEGACY_PLANE_HEIGHT_M = 3.5; // default height above ground for 2D planes
 
+/**
+ * Does this panel carry a REAL elevation, or none at all?
+ *
+ * 🚨 ABSENCE IS NOT ZERO, AND `?? 0` TURNS IT INTO ZERO.
+ *
+ * `PlacedPanel.height` is a required `number` in the type, so every guard around
+ * it was written as defensive noise — and each one spelled the defence
+ * `p.height ?? 0`, which converts a MISSING elevation into a valid one:
+ *
+ *   lib/3d/controlLayer.ts   if (!isFinite(p.height ?? 0)) reject   // undefined -> 0 -> finite -> KEPT
+ *   SolarEngine3D            const h = panel.height ?? 0            // then drawn at h = 0
+ *
+ * Ellipsoidal zero is roughly a hundred metres below any real roof, so a panel
+ * with no elevation is rendered far underground while its neighbours sit
+ * correctly — "the panels are not ALL rendering above the roof". The array looks
+ * partly broken and the count is right, because nothing rejected it.
+ *
+ * Runtime data can lack the field however strict the type is: `layouts.panels`
+ * is JSONB, designs predate the column, and the 2D layout engine
+ * (`generateRoofLayoutOptimized`) never writes an elevation at all.
+ *
+ * This is the same distinction as COALESCE in the layout writer and as
+ * `planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M`: a value that is absent
+ * must be treated as absent, not as the number zero.
+ */
+export function hasUsableElevation(panel: { height?: number | null }): boolean {
+  return typeof panel.height === 'number' && Number.isFinite(panel.height);
+}
+
 export const PW_PORTRAIT  = 1.134;
 export const PH_PORTRAIT  = 1.722;
 export const PW_LANDSCAPE = 1.722;

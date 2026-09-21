@@ -559,6 +559,25 @@ export async function POST(req: NextRequest) {
     const errStack = error instanceof Error ? error.stack   : undefined;
     console.error('[PRODUCTION_ERROR] POST /api/production failed:', errMsg, errStack);
 
+    // 🚨 A DELIBERATE REFUSAL MUST NOT BECOME A GENERIC 500 HERE.
+    //
+    // THE DESIGN STUDIO'S SAVE BUTTON POSTS TO THIS ROUTE, not to the layout
+    // route (see the note above `buildLayoutFromDefinition`). WS1-030 moved
+    // refusal handling into `handleRouteDbError` so no route could forget it —
+    // but this catch only DELEGATES for a `DbConfigError` or one of six network
+    // substrings, and a refusal matches none of them. So it fell through to a
+    // bare 500 with no `code` and no `refused`, the studio's refusal handling
+    // (which keys on `code`) never fired, and the user was told
+    // "Production calculation failed" for a save that was deliberately blocked
+    // to protect another property's design.
+    //
+    // Checking first is the whole fix: the refusal is not a database error and
+    // must not be classified by a database-error heuristic.
+    const { layoutRefusalCode } = await import('@/lib/db/core');
+    if (layoutRefusalCode(error)) {
+      return handleRouteDbError('[POST /api/production]', error);
+    }
+
     const { DbConfigError } = await import('@/lib/db-ready');
     if (
       error instanceof DbConfigError ||

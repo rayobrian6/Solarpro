@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { buildRoofPlane3D, latLngToECEF } from '../lib/roofPlane3D';
 import { moduleStackHeightM } from '../lib/roofMountDatum';
 import type { RoofPlane } from '../types';
-import { waitForCesiumCanvas } from './support/seedRoof';
+import { waitForCesiumCanvas, buildGablePlanes, seedPlanes, runAutoLayout } from './support/seedRoof';
 
 /**
  * e2e/panel-elevation.spec.ts
@@ -172,6 +172,58 @@ test.describe('panel elevation — the running application, not the library', ()
       `every panel must sit ${EXPECTED_CLEARANCE_M} m above it (${DEFAULT_RACKING}). ` +
       'Negative means the panel is INSIDE the roof — Ray\'s "panels disappear into the surface".',
     ).toBeLessThan(COPLANARITY_TOL_M);
+  });
+
+  test('🚨 A GABLE — every panel on BOTH faces sits one mount stack above ITS OWN plane', async ({ page }) => {
+    // Ray: "the panels are not ALL rendering above the roof when I do an auto
+    // layout to fill the roof". Every elevation assertion before this one used a
+    // SINGLE face, which cannot show a per-plane defect — and "fill the roof"
+    // means more than one face on any real house.
+    await page.goto('/design?e2eQuickDesign=1');
+    await expect.poll(
+      () => page.evaluate(() => Boolean((window as any).__solarE2E?.seedDesign)),
+      { message: 'NEXT_PUBLIC_E2E hook with seedDesign should be installed', timeout: 30_000 },
+    ).toBe(true);
+    const hasCanvas = await waitForCesiumCanvas(page);
+    test.skip(!hasCanvas, 'No WebGL canvas — the 3D placement path cannot run at all.');
+
+    const planes = await seedPlanes(page, buildGablePlanes());
+    await runAutoLayout(page);
+
+    const { panels, roofPlanes } = await readPanels(page);
+    expect(panels.length, 'Auto Layout should fill both faces').toBeGreaterThan(0);
+
+    const byId = new Map<string, E2EPlane>(
+      [...roofPlanes, ...(planes as unknown as E2EPlane[])].map(p => [p.id, p]),
+    );
+
+    // 🚨 EVERY PANEL MUST NAME THE FACE IT IS ON. Without a planeId there is no
+    // plane to measure against, and a panel that cannot be measured is exactly
+    // the one that would be drawn in the wrong place unnoticed.
+    const orphans = panels.filter(p => !p.planeId || !byId.get(p.planeId)?.origin3D);
+    expect(orphans.map(p => p.id),
+      'every placed panel should belong to a roof plane that carries a 3D frame',
+    ).toEqual([]);
+
+    // And both faces should actually have been filled — one face covered twice
+    // would satisfy a naive "all panels are on a plane" check.
+    const perPlane = new Map<string, number>();
+    for (const p of panels) perPlane.set(p.planeId!, (perPlane.get(p.planeId!) ?? 0) + 1);
+    expect([...perPlane.keys()].length, 'both faces of the gable should be filled').toBe(2);
+
+    const bad: string[] = [];
+    for (const panel of panels) {
+      const plane = byId.get(panel.planeId!)!;
+      const c = clearanceM(panel, plane);
+      if (Math.abs(c - EXPECTED_CLEARANCE_M) > COPLANARITY_TOL_M) {
+        bad.push(`${panel.id} on ${panel.planeId!.slice(0, 8)}: ${c.toFixed(4)} m`);
+      }
+    }
+    expect(bad,
+      `every panel must sit ${EXPECTED_CLEARANCE_M} m above its own face. ` +
+      `A negative clearance means the panel is INSIDE the roof. ` +
+      `${bad.length} of ${panels.length} are wrong: ${bad.slice(0, 8).join('; ')}`,
+    ).toEqual([]);
   });
 
   test('🚨 a second Auto Layout does not lift the array — placement is idempotent', async ({ page }) => {

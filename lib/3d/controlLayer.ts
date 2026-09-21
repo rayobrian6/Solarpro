@@ -37,6 +37,7 @@
 
 import {
   buildSurfaceGrid,
+  hasUsableElevation,
   extendRow as extendRowEngine,
   addRow as addRowEngine,
 } from '@/lib/surfaceGeometry3D';
@@ -56,11 +57,24 @@ import type { PlacedPanel } from '@/types';
 export const CANONICAL_PANEL_WIDTH_M  = 1.134;  // portrait width (= landscape height)
 export const CANONICAL_PANEL_HEIGHT_M = 1.722;  // portrait height (= landscape width)
 
-// ─── Canonical Panel Offset ───────────────────────────────────────────────────
-// 0.05m above the plane surface — prevents z-fighting with Cesium 3D tiles.
-// This is the CONTROL LAYER canonical value. Engines may use their own offsets
-// internally; the control layer post-processes height when needed.
-export const CANONICAL_PANEL_OFFSET_M = 0.05;
+// ─── Canonical Panel Offset — REMOVED ────────────────────────────────────────
+//
+// 🚨 A SIXTH ANSWER TO THE QUESTION lib/roofMountDatum.ts NOW OWNS, exported
+// from the very file that threads `mountingSystemId` through to the placement
+// engines — and pinned green by a test asserting the superseded value:
+//
+//     it('CANONICAL_PANEL_OFFSET_M is 0.05m above the plane surface', () => {
+//       expect(CANONICAL_PANEL_OFFSET_M).toBe(0.05);
+//
+// Its comment claimed "the control layer post-processes height when needed".
+// The control layer does no such post-processing; nothing read the constant at
+// runtime, only the test did. So it changed no number — it was a wrong answer
+// sitting in the open, with a passing test calling it canonical, waiting to be
+// used by whoever reached for the obvious name.
+//
+// The one answer is `moduleStackHeightM(mountingSystemId)`. The 0.05 was never
+// a mount height anyway: it is 0.17 − SURFACE_OFFSET_M, a physical quantity
+// with a z-fighting constant subtracted out of it.
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -573,8 +587,12 @@ function validatePanels(
       warnings.push(`[validate] Panel ${p.id} rejected: non-finite lat/lng (${p.lat}, ${p.lng})`);
       return false;
     }
-    if (!isFinite(p.height ?? 0)) {
-      warnings.push(`[validate] Panel ${p.id} rejected: non-finite height`);
+    // 🚨 `!isFinite(p.height ?? 0)` KEPT a panel with NO height: `undefined ?? 0`
+    // is 0 and `isFinite(0)` is true, so the guard written to catch bad
+    // elevations waved the worst case straight through — and the renderer then
+    // drew it at ellipsoidal zero, ~100 m under the roof.
+    if (!hasUsableElevation(p)) {
+      warnings.push(`[validate] Panel ${p.id} rejected: elevation is ${p.height === undefined ? 'MISSING' : String(p.height)} — a panel with no elevation cannot be placed on a roof`);
       return false;
     }
     return true;

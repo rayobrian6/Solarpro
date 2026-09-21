@@ -687,6 +687,33 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     };
   }
 
+  // ── The row's own property, reached again ────────────────────────────────
+  //
+  // 🚨 THIS CHECK MUST COME BEFORE THE ARCHIVE LOOKUP, and leaving it out was a
+  // regression I introduced while fixing WS1-029. Reordering put the archive
+  // first, so when the camera key was within SITE_MATCH_RADIUS_M of BOTH the
+  // stored active key and an archived key — one building whose row holds two
+  // identities a few metres apart, which is exactly the shape Ray's live row
+  // had — the ARCHIVE won:
+  //
+  //     RELOAD 1 -> reactivated-archive | panels 3  (was 55) | needsAdoptionSave true
+  //     RELOAD 2 -> reactivated-archive | panels 55          | needsAdoptionSave true
+  //
+  // A live 55-panel design replaced on screen by a 3-panel archive with no user
+  // action, forced to disk, and swapped back on the next load: a permanent
+  // alternation, one write each time. The same failure the WS1-029 fix exists
+  // to prevent, reached through the branch it kept.
+  //
+  // A camera that matches the row's OWN active key is not evidence of a
+  // property change. Nothing to reactivate, nothing to archive.
+  if (sitesAreSameProperty(parsed.activeSiteKey, siteKeyNow)) {
+    return {
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites },
+      disposition: 'matched',
+      needsAdoptionSave: false,
+    };
+  }
+
   // ── Standing at a property the archive holds ─────────────────────────────
   //
   // A POSITIVE match. The camera is demonstrably at a property this row already

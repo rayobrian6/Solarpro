@@ -272,6 +272,60 @@ describe('🚨 THE MEASURED REPRODUCTION — a reload emptied the screen', () =>
   });
 });
 
+describe('🚨 ONE BUILDING, TWO KEYS IN THE ROW — the archive must not steal the design', () => {
+  // A regression I introduced while fixing WS1-029 and did not catch myself.
+  //
+  // Fixing the destructive fall-through also REORDERED the branches, putting the
+  // archive lookup ahead of the stored-active check. When the camera key was
+  // within SITE_MATCH_RADIUS_M of BOTH the stored active key and an archived key
+  // — one building whose row holds two identities a few metres apart, which is
+  // the shape `changeSite` records Ray's live row having ("three identities for
+  // one building inside 43 seconds, ~17 m and ~19 m apart") — the ARCHIVE won:
+  //
+  //     RELOAD 1 -> reactivated-archive | panels 3  (was 55) | needsAdoptionSave true
+  //     RELOAD 2 -> reactivated-archive | panels 55          | needsAdoptionSave true
+  //
+  // A live design replaced on screen by a stale archive with no user action,
+  // forced to disk, and swapped back on the next load — a permanent alternation.
+  // A camera that matches the row's OWN active key is not evidence of a property
+  // change, so that check has to come first.
+  const P = 'proj-1';
+  const K_ACTIVE = `${P}@38.70615,-90.04625`;
+  const K_ARCH   = `${P}@38.70621,-90.04625`;   // ~6.7 m from active
+  const K_NOW    = `${P}@38.70618,-90.04625`;   // between them, inside 8 m of BOTH
+
+  it('the fixture really is ambiguous — the camera matches both keys', () => {
+    // Without this the test would pass for the wrong reason: two keys that are
+    // NOT both within the radius never reach the branch under test.
+    expect(sitesAreSameProperty(K_ACTIVE, K_NOW)).toBe(true);
+    expect(sitesAreSameProperty(K_ARCH, K_NOW)).toBe(true);
+  });
+
+  const storedRow = () => ({
+    ...bundle('live', 55),
+    siteArchives: { version: 1, activeSiteKey: K_ACTIVE, sites: { [K_ARCH]: bundle('old', 3) } },
+  });
+
+  it('the live design stays active, and nothing is forced to disk', () => {
+    const r = hydrate(storedRow() as never, K_NOW);
+    expect(r.disposition).toBe('matched');
+    expect(r.state.activeSiteKey).toBe(K_ACTIVE);
+    expect(r.state.active.panels).toHaveLength(55);
+    expect(r.needsAdoptionSave).toBe(false);
+  });
+
+  it('and it is stable — reloading again does not swap it back', () => {
+    const first = hydrate(storedRow() as never, K_NOW);
+    const second = hydrate({
+      ...first.state.active,
+      siteArchives: { version: 1, activeSiteKey: first.state.activeSiteKey, sites: first.state.archives },
+    } as never, K_NOW);
+    expect(second.state.active.panels).toHaveLength(55);
+    expect(second.state.activeSiteKey).toBe(K_ACTIVE);
+    expect(second.needsAdoptionSave).toBe(false);
+  });
+});
+
 describe('a genuinely different property is still a different property', () => {
   it('🚨 PICKING the neighbour archives this design — and PICKING is switchSite, not hydrate', () => {
     // This test used to be named for picking and call `hydrate`. That conflation
