@@ -35,7 +35,10 @@ export interface DigitalTwinData {
   lat: number;
   lng: number;
   address: string;
-  elevation: number;
+  /** Ground elevation in metres above sea level, or **null when the lookup did
+   *  not answer**. See `fetchElevation`. Consumers must decide what to do with
+   *  "unknown" rather than receive a 0 that reads as sea level. */
+  elevation: number | null;
   elevationGrid: TerrainPoint[];
   solarData: any;
   parcel: ParcelData | null;
@@ -109,18 +112,33 @@ export async function buildDigitalTwin(
 
   const [elevationData, solarData, dsmData] = await Promise.allSettled(apiCalls);
 
-  const elevation = elevationData.status === 'fulfilled' ? elevationData.value : 0;
+  // A rejected lookup is UNKNOWN, not zero. fetchElevation already returns null
+  // for "did not answer"; a rejected promise means the same thing.
+  const elevation: number | null =
+    elevationData.status === 'fulfilled' ? (elevationData.value as number | null) : null;
   const solar     = solarData.status === 'fulfilled' ? solarData.value : null;
   const grid: TerrainPoint[] = [];  // elevation grid skipped at boot for speed
   const dsm       = (dsmData.status === 'fulfilled' && dsmData.value) ? dsmData.value : null;
 
+  // 🚨 `?? 0` HERE IS SAFE, AND ONLY HERE, AND THE REASON IS MEASURED.
+  // `extractRoofSegments` emits `heightAboveGround = planeHeightAtCenterMeters -
+  // baseElevation`, so a wrong base is ADDED to every segment's relative height
+  // and SUBTRACTED from the site datum the renderer pairs it with. The two
+  // cancel EXACTLY: tests/groundElevationAuthority.test.ts drives the real
+  // extractRoofSegments -> segmentToRoofPlane pair with base 80 m and base 0 and
+  // gets byte-identical ECEF, delta 0.0000 m. That is why the Google/Solar-API
+  // path is immune to this failure and the hand-modelled 2D path is not.
+  // Do not "tidy" this into a null-propagating value without re-running that
+  // test — the cancellation is the protection.
+  const segBase = elevation ?? 0;
+
   // Extract roof segments from Solar API (for sunshine hours, panel positions, etc.)
-  const solarSegments = solar ? extractRoofSegments(solar, elevation) : [];
+  const solarSegments = solar ? extractRoofSegments(solar, segBase) : [];
 
   // Merge DSM roof planes with Solar API segments:
   // DSM gives us accurate polygon geometry; Solar API gives us sunshine hours & panel positions.
   const roofSegments = dsm?.roofPlanes?.length
-    ? mergeDsmWithSolar(dsm.roofPlanes, solarSegments, elevation)
+    ? mergeDsmWithSolar(dsm.roofPlanes, solarSegments, segBase)
     : solarSegments;
 
   const buildingFootprint = estimateBuildingFootprint(roofSegments, lat, lng);
@@ -152,8 +170,10 @@ export async function enrichDigitalTwinWithDsm(
       _twinCache.set(_ck, twin);  // no DSM data, cache as-is
       return twin;
     }
-    const solarSegments = twin.solarData ? extractRoofSegments(twin.solarData, twin.elevation) : twin.roofSegments;
-    const enrichedSegments = mergeDsmWithSolar(dsm.roofPlanes, solarSegments, twin.elevation);
+    // Same proven cancellation as in buildDigitalTwin — see the note there.
+    const segBase = twin.elevation ?? 0;
+    const solarSegments = twin.solarData ? extractRoofSegments(twin.solarData, segBase) : twin.roofSegments;
+    const enrichedSegments = mergeDsmWithSolar(dsm.roofPlanes, solarSegments, segBase);
     const enriched: DigitalTwinData = { ...twin, roofSegments: enrichedSegments };
     _twinCache.set(_ck, enriched);
     return enriched;
@@ -245,27 +265,49 @@ function mergeDsmWithSolar(
  * Fetch single point elevation via server-side API route
  * (avoids CORS issues when called from browser)
  */
-export async function fetchElevation(lat: number, lng: number): Promise<number> {
+/**
+ * Ground elevation at a point, in metres above SEA LEVEL (orthometric — this is
+ * what Google Elevation returns; the ellipsoidal height Cesium wants is this
+ * plus `geoidUndulationM(lat)`).
+ *
+ * 🚨 RETURNS null WHEN IT DOES NOT KNOW, AND THAT IS THE WHOLE POINT.
+ *
+ * This used to return `0` on every failure path, and 0 is a perfectly ordinary
+ * elevation — so "the lookup failed" and "the site is at sea level" were the
+ * same value. Every layer above inherited the confusion and none of them could
+ * have detected it.
+ *
+ * The `> 0` guard that used to sit on the proxy result was a second bug in the
+ * same line: it REJECTED every legitimate at-or-below-sea-level answer and fell
+ * through to the direct-Google branch, which cannot work in the browser
+ * (GOOGLE_API_KEY is server-only, by design), so it returned 0. Imperial Valley
+ * (~-20 m), New Orleans (~-2 m) and the Salton Sea (~-70 m) are real solar
+ * markets and all of them were silently flattened to 0. Any finite number is a
+ * valid elevation; only absence is absence.
+ */
+export async function fetchElevation(lat: number, lng: number): Promise<number | null> {
   try {
     // Use server-side API route to avoid CORS/network restrictions in browser
     const res = await fetch(`/api/elevation?lat=${lat}&lng=${lng}`);
     if (res.ok) {
       const data = await res.json();
-      if (typeof data.elevation === 'number' && isFinite(data.elevation) && data.elevation > 0) {
+      if (typeof data.elevation === 'number' && isFinite(data.elevation)) {
         return data.elevation;
       }
     }
   } catch {}
 
-  // Fallback: try direct Google API (works server-side)
+  // Fallback: try direct Google API (works server-side only — the browser has
+  // no key, so in the browser this branch always fails and we return null.)
   try {
     const url = `https://maps.googleapis.com/maps/api/elevation/json?locations=${lat},${lng}&key=${GOOGLE_API_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
-    if (data.results?.[0]) return data.results[0].elevation;
+    const v = data.results?.[0]?.elevation;
+    if (typeof v === 'number' && isFinite(v)) return v;
   } catch {}
 
-  return 0;
+  return null;
 }
 
 /**

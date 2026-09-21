@@ -84,7 +84,7 @@ import {
   DEFAULT_SETBACKS,
 } from '@/lib/3d/controlLayer';
 import { moduleStackHeightM, railCrossSectionM, deckPointFromModule, drawnRailHeightM, RAIL_DRAW_SCALE } from '@/lib/roofMountDatum';
-import { geoidUndulationM } from '@/lib/geodeticDatum';
+import { geoidUndulationM, resolveGroundDatum } from '@/lib/geodeticDatum';
 import { hasUsableElevation } from '@/lib/surfaceGeometry3D';
 
 // ─── v49.0: Isolated Ground Mount Reality Engine ──────────────────────────────
@@ -2777,11 +2777,17 @@ function SolarEngine3D({
       setStatusMsg(`✅ Solar data loaded: ${newTwin.roofSegments.length} roof segments`);
 
       // PERF v61: Use geoid approximation directly — skip sampleTerrainMostDetailed (saves 3-5s).
-      const googleGroundElev = newTwin.elevation ?? 0;
+      // Same rule as the boot path above: absence is not sea level.
       const geoidApprox = geoidUndulationM(lat);
-      cesiumGroundElevRef.current = googleGroundElev + geoidApprox;
-      cesiumGroundElevResolvedRef.current = true;
-      addLog('FLY', `cesiumGroundElev updated: ${cesiumGroundElevRef.current.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
+      const flyDatum = resolveGroundDatum(newTwin.elevation, lat);
+      if (flyDatum.resolved) {
+        cesiumGroundElevRef.current = flyDatum.ellipsoidalM;
+        cesiumGroundElevResolvedRef.current = true;
+        addLog('FLY', `cesiumGroundElev updated: ${flyDatum.ellipsoidalM.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
+      } else {
+        cesiumGroundElevResolvedRef.current = false;
+        addLog('WARN', `ground elevation UNRESOLVED for ${lat.toFixed(5)}, ${lng.toFixed(5)} (${flyDatum.reason}) — roof auto-detection held off`);
+      }
       // Defensive: keep the redundant ellipsoid globe hidden after navigation so
       // the flat base-imagery plane (rendered at height 0) can't bleed up through
       // the real terrain at low-lying/coastal sites. Only when 3D tiles exist, so
@@ -3401,7 +3407,7 @@ function SolarEngine3D({
         twinData = twinResult.value as DigitalTwinData;
         twinRef.current = twinData;
         onTwinLoaded?.(twinData);
-        addLog('SOLAR', `Digital twin: ${twinData.roofSegments.length} segments, elev=${twinData.elevation.toFixed(1)}m`);
+        addLog('SOLAR', `Digital twin: ${twinData.roofSegments.length} segments, elev=${twinData.elevation == null ? 'UNRESOLVED' : twinData.elevation.toFixed(1) + 'm'}`);
       } else {
         addLog('WARN', `Digital twin failed: ${(twinResult as PromiseRejectedResult).reason?.message}`);
       }
@@ -3413,19 +3419,32 @@ function SolarEngine3D({
       // Sample Cesium terrain to get true ellipsoidal height (fixes geoid undulation offset)
       // Google Elevation API returns orthometric heights; Cesium uses ellipsoidal heights
       // In Ohio the geoid undulation is approximately -33m (EGM96 geoid model)
-      const googleGroundElev = twinData?.elevation ?? 0;
+      const googleGroundElev = twinData?.elevation ?? null;
       // PERF v61: Use lat-based EGM96 geoid approximation directly — skip sampleTerrainMostDetailed.
       // sampleTerrainMostDetailed can take 3-5s with EllipsoidTerrainProvider (which returns 0 anyway).
       // The geoid approximation below is accurate to ~1-2m for CONUS, which is sufficient for panel placement.
       // Formula: ellipsoidal_height = orthometric_height (Google Elevation) + geoid_undulation
       // EGM96 CONUS approx: -29 - 5*sin(lat_rad) → ~-34m at Ohio, ~-32m at Alexandria VA, ~-29m at Texas
       const geoidApproxBoot = geoidUndulationM(lat);
-      const cesiumGroundElev = googleGroundElev + geoidApproxBoot;
-      cesiumGroundElevRef.current = cesiumGroundElev;
-      cesiumGroundElevResolvedRef.current = true;
+      // 🚨 `resolved` MEANS RESOLVED. It used to be stamped true unconditionally,
+      // directly beneath a `?? 0`, so a failed elevation lookup became a
+      // confident datum at the geoid (~-32 m in CONUS). shouldRunLaneA already
+      // refuses on `!groundElevResolved` and the camera already widens to 300 m
+      // — the correct behaviour was written and simply never reachable.
+      // The Google/Solar-API path is immune either way (the base-elevation error
+      // cancels, proven in tests/groundElevationAuthority.test.ts); the
+      // hand-modelled 2D path is NOT, and lands 80 m under the real roof.
+      const bootDatum = resolveGroundDatum(googleGroundElev, lat);
+      if (bootDatum.resolved) {
+        cesiumGroundElevRef.current = bootDatum.ellipsoidalM;
+        cesiumGroundElevResolvedRef.current = true;
+        addLog('BOOT', `cesiumGroundElev: ${bootDatum.ellipsoidalM.toFixed(1)}m (Google: ${bootDatum.orthometricM.toFixed(1)}m, geoidApprox: ${geoidApproxBoot.toFixed(1)}m) [skipped sampleTerrainMostDetailed for speed]`);
+      } else {
+        cesiumGroundElevResolvedRef.current = false;
+        addLog('WARN', `ground elevation UNRESOLVED (${bootDatum.reason}) — roof auto-detection is held off and 2D-traced faces cannot be placed against an absolute datum`);
+      }
       terrainReadyRef.current = true;
       setTerrainReady(true);
-      addLog('BOOT', `cesiumGroundElev: ${cesiumGroundElev.toFixed(1)}m (Google: ${googleGroundElev.toFixed(1)}m, geoidApprox: ${geoidApproxBoot.toFixed(1)}m) [skipped sampleTerrainMostDetailed for speed]`);
       // NOW set twin state - cesiumGroundElevRef is ready, so drawOverlays will use correct elevation
       if (twinData) setTwin(twinData);
 
@@ -3433,10 +3452,12 @@ function SolarEngine3D({
       const oo = orbitRef.current;
       oo.targetLat = lat;
       oo.targetLng = lng;
-      oo.targetAlt = cesiumGroundElev;
+      oo.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       oo.heading   = TILTED_AERIAL_VIEW.heading;  // π → fly-in looks NORTH (look dir = heading + π)
       oo.pitch     = TILTED_AERIAL_VIEW.pitch;    // -45° Aurora parity (lib/3d/cameraPresets.ts)
-      oo.radius    = TILTED_AERIAL_VIEW.range;
+      // Frame wider when the ground datum is unknown, matching the address-change
+      // path — a 150 m orbit around an unknown altitude can put the house off screen.
+      oo.radius    = cesiumGroundElevResolvedRef.current ? TILTED_AERIAL_VIEW.range : 300;
       applyOrbitRef.current?.();
 
       setProgress(90);
@@ -3691,7 +3712,10 @@ function SolarEngine3D({
     // Ground elevation for overlay positioning.
     // Use cesiumGroundElevRef if available (sampled at boot from terrain provider).
     // Fallback: Google elevation + lat-based EGM96 geoid approximation for CONUS.
-    const googleElev = isFinite(twinData.elevation) ? twinData.elevation : 0;
+    // `isFinite(null)` is TRUE in JS (null coerces to 0), so this test never
+    // caught an absent elevation and quietly relied on null arithmetic. State it.
+    const googleElev = (twinData.elevation != null && isFinite(twinData.elevation))
+      ? twinData.elevation : 0;
     const geoidUndulationOverlay = geoidUndulationM(twinData.roofSegments[0]?.center?.lat ?? NaN);
     const cesiumElev = cesiumGroundElevResolvedRef.current
       ? cesiumGroundElevRef.current

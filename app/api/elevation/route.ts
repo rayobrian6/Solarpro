@@ -48,13 +48,26 @@ export async function GET(req: NextRequest) {
       // Return full results array for grid
       return NextResponse.json({ results: data.results ?? [] });
     } else {
-      // Return single elevation
-      if (data.results?.[0]) {
-        return NextResponse.json({ elevation: data.results[0].elevation });
+      // Return single elevation.
+      //
+      // 🚨 ABSENCE IS NOT SEA LEVEL. This used to answer `{ elevation: 0 }` —
+      // with HTTP 200 — whenever Google returned no result, and `{ elevation: 0 }`
+      // again on an exception. Zero is a LEGITIMATE elevation (any coastline),
+      // so the caller had no way to tell "the site is at sea level" from "the
+      // lookup failed", and every layer above turned the failure into a
+      // confident datum. Measured consequence, tests/groundElevationAuthority
+      // .test.ts: a hand-modelled 2D roof plane renders 80 m below the real
+      // roof at the demo address. `null` is the only honest answer.
+      const v = data.results?.[0]?.elevation;
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        return NextResponse.json({ elevation: v });
       }
-      return NextResponse.json({ elevation: 0 });
+      return NextResponse.json({
+        elevation: null,
+        reason: data?.status ? `google:${data.status}` : 'no-result',
+      });
     }
   } catch (err: unknown) {
-    return NextResponse.json({ elevation: 0, error: (err as Error).message }, { status: 500 });
+    return NextResponse.json({ elevation: null, error: (err as Error).message }, { status: 500 });
   }
 }

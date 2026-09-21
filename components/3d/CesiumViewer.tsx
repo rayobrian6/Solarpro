@@ -933,7 +933,7 @@ export default function CesiumViewer({
               <div style={{ position:'absolute', bottom:36, right:10, zIndex:10, background:'rgba(0,0,0,0.78)', backdropFilter:'blur(8px)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10, padding:'8px 12px', pointerEvents:'none', minWidth:160 }}>
                 <div style={{ color:'#94a3b8', fontSize:10, marginBottom:4, fontWeight:600 }}>PROPERTY DATA</div>
                 <div style={{ color:'#f1f5f9', fontSize:11, lineHeight:1.7 }}>
-                  <div>📍 {twin.elevation.toFixed(1)}m elevation</div>
+                  <div>📍 {twin.elevation == null ? 'elevation unknown' : `${twin.elevation.toFixed(1)}m elevation`}</div>
                   <div>🏠 {twin.roofSegments.length} roof segments</div>
                   <div>☀️ {twin.solarData?.solarPotential?.maxSunshineHoursPerYear?.toFixed(0) ?? '—'}h/yr sunshine</div>
                   <div>⚡ {twin.solarData?.solarPotential?.maxArrayPanelsCount ?? '—'} max panels</div>

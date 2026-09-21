@@ -92,3 +92,37 @@ export function ellipsoidalFromOrthometricM(orthometricM: number, latDeg: number
 export function isWithinGeoidFitBand(latDeg: number): boolean {
   return Number.isFinite(latDeg) && latDeg >= FIT_LAT_MIN_DEG && latDeg <= FIT_LAT_MAX_DEG;
 }
+
+/** The site ground datum, or an explicit statement that we do not have one.
+ *
+ *  🚨 THIS EXISTS BECAUSE THE FLAG AND THE VALUE WERE SET SEPARATELY.
+ *  SolarEngine3D held the answer as two independent pieces — a number in
+ *  `cesiumGroundElevRef` and a boolean in `cesiumGroundElevResolvedRef` — set on
+ *  adjacent lines in two different places, and the boolean was written `true`
+ *  unconditionally in both. Nothing could have detected the disagreement,
+ *  because a boolean that is always true never contradicts anything.
+ *
+ *  A value that may be absent belongs in ONE object whose shape makes the
+ *  absence unrepresentable-as-a-number. */
+export type GroundDatum =
+  | { resolved: true;  reason: 'ok';                ellipsoidalM: number; orthometricM: number }
+  | { resolved: false; reason: 'elevation-unknown' };
+
+/**
+ * Turn Google's orthometric ground elevation — which may legitimately be absent —
+ * into the ellipsoidal datum Cesium places geometry against.
+ *
+ * `null`/`undefined`/non-finite in means `{ resolved: false }` out. It never
+ * substitutes a number, and in particular never substitutes the geoid
+ * undulation, which is what `0 + geoidUndulationM(lat)` silently produced and
+ * which looks exactly like a plausible answer (~-32 m in CONUS).
+ *
+ * 0 IS A VALID INPUT. A coastal site really is at sea level, and rejecting 0
+ * was the second half of this bug.
+ */
+export function resolveGroundDatum(orthometricM: number | null | undefined, latDeg: number): GroundDatum {
+  if (orthometricM == null) return { resolved: false, reason: 'elevation-unknown' };
+  const ellipsoidalM = ellipsoidalFromOrthometricM(orthometricM, latDeg);
+  if (ellipsoidalM === null) return { resolved: false, reason: 'elevation-unknown' };
+  return { resolved: true, reason: 'ok', ellipsoidalM, orthometricM };
+}
