@@ -716,7 +716,7 @@ export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = 
 
     // v47.128: ECEF frame axes — used by buildSurfaceGrid for pure ECEF grid arithmetic.
     // These are the ECEF-space unit vectors (not ENU tangent approximations).
-    // worldPos = origin3D + u*du + v*dv + n*PANEL_OFFSET_ECEF (0.05m)  (zero metersPerDeg error)
+    // worldPos = origin3D + u*du + v*dv + n*moduleStackHeightM(mountId)  (zero metersPerDeg error)
     ecefFrame3D: {
       u: frame.u,
       v: frame.v,
@@ -782,7 +782,9 @@ export function renderPlane3DEntity(
     //   Layer b) Color tint — subtle blue guide (active = brighter cyan).
     //
     // perPositionHeight:true + arcType:NONE = exact flat plane polygon.
-    // Section 2: Panels are placed via pure ECEF plane math (PANEL_OFFSET_ECEF=0.05m + SURFACE_OFFSET_M=0.12m = 0.17m total).
+    // Section 2: Panels are placed via pure ECEF plane math, one mount stack
+    // above this plane — see lib/roofMountDatum.ts. The SURFACE_OFFSET_M lift is
+    // a render fudge and is deliberately NOT part of that stack.
     // No sampleHeight(), no per-panel mesh query.
 
     // Layer a: opaque base coat (visually replaces wavy mesh surface)

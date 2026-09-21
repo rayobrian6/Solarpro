@@ -34,6 +34,12 @@ export {
   getDbReady,
   DbConfigError,
   handleRouteDbError,
+  // The deliberate-refusal authority. Re-exported here because this file is the
+  // sanctioned entry point ("Do not import lib/db/* directly"), and a route that
+  // catches `upsertLayout`'s error itself needs `layoutRefusalCode` to tell a
+  // refusal from a database fault.
+  LAYOUT_REFUSAL_CODES,
+  layoutRefusalCode,
   isValidUUID,
   assertUUID,
   rowToProject,

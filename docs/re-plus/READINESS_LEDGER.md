@@ -1716,6 +1716,35 @@ none.
 
 ---
 
+## WS1-037 — Documentation that describes code which no longer exists
+
+| | |
+|---|---|
+| **Severity** | P2 — but it is how the next person gets it wrong |
+| **Status** | `FIXED_PENDING_VERIFICATION` |
+
+Three comments in this workstream described mechanisms that were not there, and each one cost real
+time:
+
+| Comment | Reality |
+|---|---|
+| `panel.height = roofDeckAlt + stackH` | `roofDeckAlt` is a variable that exists **nowhere** — only in that sentence (WS1-013) |
+| *"the control layer post-processes height when needed"* | it does no such post-processing (WS1-035) |
+| *"clampToHeightMostDetailed handles height correction at render time"* | that identifier appears **nowhere in the file except that sentence** (WS1-033, still open) |
+
+So after changing the datum, the comments that named the deleted constants were swept too:
+`hydrate`'s own contract still listed the two cases WS1-029 removed and did not mention the case it
+added; six comments across `lib/roofPlane3D.ts` and `components/3d/SolarEngine3D.tsx` still gave
+`PANEL_OFFSET_ECEF (0.05m)` as the placement formula. Both corrected, and `LAYOUT_REFUSAL_CODES` is
+re-exported from `lib/db-neon.ts` — the entry point `lib/db/projects.ts` tells callers to use — so a
+route does not have to reach past the sanctioned import to find the refusal authority.
+
+🚨 **A stale comment is worse than no comment**, because it is evidence. Each of the three above was
+read as a statement of fact and believed; two of them were repeated into this ledger before being
+checked.
+
+---
+
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
 `SolarEngine3D` applies restored obstructions to the wrong site · obstructions/measurements are

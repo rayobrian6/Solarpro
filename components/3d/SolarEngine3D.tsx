@@ -429,8 +429,8 @@ export interface RoofPlaneReshapeUpdate {
      *
      *  The cost is a wedge, not an offset. With the plane rotated by Δ about the
      *  eave axis, a panel's clearance above the drawn deck is
-     *      d = PANEL_OFFSET_ECEF·cos(Δ) − v·sin(Δ)
-     *  so it goes negative once tan(Δ) > PANEL_OFFSET_ECEF / v — about 0.48° at
+     *      d = stack·cos(Δ) − v·sin(Δ)        (stack = moduleStackHeightM)
+     *  so it goes negative once tan(Δ) > stack / v — about 0.48° at
      *  6 m up the slope — and deepens linearly along the row. It is also not only
      *  cosmetic: polyUV projects the new polygon onto the stale u/v, foreshortening
      *  the usable extent by cos²(Δ), which removes whole rows. That reaches panel
@@ -2199,7 +2199,7 @@ function SolarEngine3D({
           // found and fixed in Stitch — and this restore path did the same thing
           // and was never corrected.
           //
-          // Panels are placed at `plane.origin3D + n·PANEL_OFFSET_ECEF` (0.05 m),
+          // Panels are placed at `plane.origin3D + n·moduleStackHeightM(mountId)`,
           // and origin3D lies on the UNRE-LIFTED polygon3D plane. So drawing the
           // deck at +0.12 while the panels sit at +0.05 rendered every panel
           // 0.07 m BELOW the roof the user is looking at: panels half-buried in
@@ -5427,7 +5427,7 @@ function SolarEngine3D({
   function addPanelEntity(viewer: any, C: any, panel: PlacedPanel, skipGridOverride?: boolean) {
     try {
       // v47.138: Height is set by pure plane math in buildSurfaceGridECEF /
-      // addRow / extendRow / placeSinglePanel — origin + u*uC + v*vC + n*PANEL_OFFSET_ECEF (0.05m).
+      // addRow / extendRow / placeSinglePanel — origin + u*uC + v*vC + n*moduleStackHeightM(mountId).
       // Cesium mesh (3D tiles) is VISUAL ONLY — never sample per-panel height from terrain.
       // 🚨 A PANEL WITH NO ELEVATION IS NOT A PANEL AT SEA LEVEL.
       //

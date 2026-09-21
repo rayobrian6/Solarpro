@@ -610,15 +610,30 @@ export interface HydrateResult {
  *    active, the rest become archive entries — so the contamination is repaired
  *    on first open instead of reaching the permit.
  *
- *  • Stored `activeSiteKey` equals `siteKeyNow` — the normal path.
+ *  • Stored `activeSiteKey` is the SAME PROPERTY as `siteKeyNow` — the normal
+ *    path. The key the ROW stores survives, not the re-derived one: archives are
+ *    filed under it and roof planes are stamped with it.
  *
- *  • Stored `activeSiteKey` names another property and we hold an archive for
- *    `siteKeyNow` — the user reloaded while standing at a different site than
- *    the columns describe. Archive the stored active set under ITS key and
- *    activate ours. Nothing is discarded.
+ *  • `siteKeyNow` matches an ARCHIVED property — a POSITIVE match, so the camera
+ *    is demonstrably somewhere this row holds a design for. Archive the stored
+ *    active set under ITS key and activate that one. Nothing is discarded.
  *
- *  • Stored `activeSiteKey` names another property and we hold nothing for
- *    `siteKeyNow` — same archival, then start empty.
+ *  • Anything else — KEEP WHAT THE ROW SAYS IS ACTIVE.
+ *
+ *    🚨 This case used to archive the active design and activate an EMPTY
+ *    bundle whenever `siteKeyNow` merely FAILED to match. `siteKeyNow` is
+ *    derived from the camera, which a fresh geocode moves, and a browser run
+ *    against real PostgreSQL measured a reload moving it 2.8 km and archiving
+ *    56 entities from a design that had never left its property (WS1-029). A
+ *    restore cannot distinguish "the neighbour's house" from "a bad geocode of
+ *    mine" — 3 Melvin Drive geocodes ~17 m onto the next house, against an 8 m
+ *    radius — so a mismatch now decides nothing. Property changes are
+ *    `switchSite`, from a point the user actually clicked.
+ *
+ *  🚨 THE ORDER OF THE LAST TWO MATTERS. Putting the archive lookup first lets
+ *  an archive steal the design whenever the camera is within the match radius of
+ *  BOTH keys, and `needsAdoptionSave` then forces that swap to disk — a
+ *  permanent alternation on every reload (WS1-032).
  */
 export function hydrate(stored: StoredLayoutForHydration | null | undefined, siteKeyNow: string): HydrateResult {
   const storedActive: SiteDesignBundle = {
