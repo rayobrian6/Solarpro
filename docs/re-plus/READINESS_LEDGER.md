@@ -2404,6 +2404,67 @@ fixture constant to drift. Derived 3.3 mm at 25°; measured 2.2 mm. The vitest l
 the same conclusion the same way, and the two now agree about why.
 
 ---
+---
+
+## 🚨 WS1-059 — THE ROW TOOLS RESOLVED THE FACE THEIR OWN WAY TOO
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_VERIFIED` |
+
+WS1-050 gave `buildSurfaceGrid` and the renderer one resolution. Three more places in the same file
+still had their own:
+
+- **`extendRow`** took the FRAME from the plane's own origin and the BOUNDARY from a ground-level
+  rebuild (`plane.polygon3D ?? legacy`). So on a face that had lost its polygon it placed the new
+  panel correctly on the roof and then **rejected it** for being *"outside roof polygon"* — an
+  outline tens of metres below. The symptom is not a misplaced panel; it is **no panel**.
+- **`addRow`** — the same two-field frame test.
+- **`placeSinglePanel`** — the same test, and its legacy fallback called
+  `computeEcefFrameForLegacyPlane(plane)` with **no ground elevation at all**, so a 2D face resolved
+  there landed `planeHeightAtCenterMeters` metres above the ELLIPSOID rather than above the site —
+  about 128 m low at the demo address.
+
+All three call `resolvePlaneGeometry` now.
+
+🚨 **And `placeSinglePanel` has no production callers.** `grep` over `app`, `components` and `lib`
+finds the definition, two comments, and nothing that calls it — `lib/3d/controlLayer.ts`
+reimplements the single-click path and says so. It is exercised only by tests. That does not make
+the inconsistency acceptable, but it does correct this ledger: WS1-013's *"five placement paths"* is
+true of the code and **one of the five is unreachable**, so the user impact of that finding was
+smaller than the count implied.
+
+### 🚨 AND MY FIRST TEST FOR IT WAS VACUOUS — THE FOURTH TIME
+
+The new agreement test wrapped its row-tool assertions in `if (extended) { … }`. Reverting
+`extendRow` to its own resolution left it **green**, because the defect makes `extendRow` return
+`null` and a conditional assertion cannot see an absence. It requires the row to extend now — and
+the fixture drops the last column first, because on a face packed to its setbacks *"no panel"* is
+the correct answer and demanding one would be a different kind of wrong. Mutation-proven: three
+cases fail with *"extendRow refused to extend a row on a face it had just placed panels on"*.
+
+---
+
+## WS1-060 — Two claims withdrawn
+
+| | |
+|---|---|
+| **Severity** | accuracy |
+| **Status** | `CORRECTED` |
+
+1. `tests/layoutEngineRoutingIsComplete.test.ts` called `confirmPendingPlane` and `autoPlacePanels`
+   *"two live entry points"*. `autoPlacePanels` is only ever invoked with `'ground'` and `'fence'`;
+   its roof branch has no caller today. The guard belongs there regardless — the rule is a property
+   of the call site, not of today's call graph — but the reachability claim was wrong.
+2. `e2e/panel-above-deck.spec.ts`'s reload case was written as *"in-session trace versus restore
+   path"*. It is not: `seedDesign` puts geometry on the studio's state, which is the restore path
+   **both times**. What it does prove is worth keeping — deck and panels survive a real reload and
+   refill on the same datum, with a fresh viewer, fresh entity ids and fresh React state — and it
+   now says that instead. The trace-versus-restore comparison needs a spec that drives the 3D
+   tracing tool, which needs a mesh to click on, which needs 3D tiles.
+
+---
 
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
@@ -2453,8 +2514,8 @@ before acceptance).** Outside Workstream 1's boundary, recorded so they are not 
 | Positive tests pass | ✅ |
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ see the table below |
-| **E2E passes** | ✅ **24 passed, 0 skipped, 0 failed** against a production build, in two passes (see `e2e/README.md`) — including four against **real PostgreSQL** and four that measure the **Cesium entities themselves**, one of them on a face from the 2D *Tag This Roof Plane* path |
-| Full suite passes | ✅ **574 files, 12,269 tests, 0 failures** (490 skipped, pre-existing — almost all `*-postgres` and migration-governance files gated on a credential; see the note below) |
+| **E2E passes** | ✅ **24 passed, 0 skipped, 0 failed** against a production build, in three passes with a server restart between each (see `e2e/README.md`) — including four against **real PostgreSQL** and four that measure the **Cesium entities themselves**, one of them on a face from the 2D *Tag This Roof Plane* path |
+| Full suite passes | ✅ **574 files, 12,278 tests, 0 failures** (490 skipped, pre-existing — almost all `*-postgres` and migration-governance files gated on a credential; see the note below) |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors; the changed files add no new warnings |
 | Build passes | ✅ `next build` exit 0, clean `.next` |

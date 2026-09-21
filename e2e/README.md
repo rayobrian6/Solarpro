@@ -60,13 +60,17 @@ Without `SOLARPRO_LOCAL_PG` those specs skip, loudly.
 ### Run it in two passes
 
 ```bash
-npx playwright test e2e/design-studio.spec.ts                               # 7
-npx playwright test e2e/panel-elevation.spec.ts e2e/panel-above-deck.spec.ts # 6
-npx playwright test e2e/site-switch.spec.ts                                 # 6
-SOLARPRO_LOCAL_PG=1 npx playwright test e2e/persistence-join.spec.ts        # 4
+npx playwright test e2e/design-studio.spec.ts e2e/panel-above-deck.spec.ts   # 11
+# restart the server here
+npx playwright test e2e/panel-elevation.spec.ts e2e/site-switch.spec.ts     #  9
+# restart the server here
+SOLARPRO_LOCAL_PG=1 npx playwright test e2e/persistence-join.spec.ts        #  4
 ```
 
-All twenty-three pass, none skipped. Running them all in ONE pass against one
+All twenty-four pass, none skipped. **Restart the server between passes** — that
+is not ceremony: running the last three specs together against one server
+failed two of them, and the same three split across a restart passed all of
+them, with individual tests dropping from 60 s to 6 s. Running them all in ONE pass against one
 server intermittently fails two or three — the server reaches ~850 MB and
 degrades under that many consecutive Cesium sessions, and the failures move
 between runs (`read ECONNRESET`, "hook should be installed" timeouts, and

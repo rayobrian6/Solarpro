@@ -420,13 +420,20 @@ test.describe('the drawn panel sits above the drawn roof', () => {
     }
   });
 
-  test('🚨 a reload draws the deck on the same datum it drew it on before', async ({ page }) => {
-    // THE MASTER DEFECT IS A RELOAD DEFECT. A face traced in-session is drawn
-    // from raw picks; the same face arriving from state on the next load goes
-    // through the restore path, which on master re-fits polygon3D and lifts it
-    // again. Measuring only a freshly seeded face would miss it entirely — so
-    // this seeds, fills, and then makes the engine rebuild the deck from the
-    // persisted geometry, and requires the answer not to move.
+  test('🚨 a rebuild after a reload draws the deck on the same datum', async ({ page }) => {
+    // 🚨 A CORRECTION TO WHAT THIS TEST FIRST CLAIMED. It was written as
+    // "in-session trace versus restore path" — and it is not that, because
+    // `seedDesign` puts geometry on the studio's state, which is the RESTORE
+    // path both times. Both halves take the same branch, so the comparison
+    // cannot show a trace-versus-restore divergence and it was wrong to say it
+    // could.
+    //
+    // What it does show is worth keeping: the deck and the panels survive a
+    // real page reload and a real refill on the SAME datum, with a fresh
+    // Cesium viewer, fresh entity ids and fresh React state — which is where
+    // the double-lift on `origin/master` becomes visible on a saved design.
+    // The trace-versus-restore comparison needs a spec that drives the 3D
+    // tracing tool, which needs a mesh to click on, which needs 3D tiles.
     await boot(page);
     await seedRoofPlane(page);
     await runAutoLayout(page);

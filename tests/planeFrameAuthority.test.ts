@@ -35,7 +35,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { buildRoofPlane3D, latLngToECEF } from '@/lib/roofPlane3D';
-import { buildSurfaceGrid, computeEcefFrameForLegacyPlane } from '@/lib/surfaceGeometry3D';
+import {
+  buildSurfaceGrid, computeEcefFrameForLegacyPlane, resolvePlaneGeometry, extendRow, addRow,
+} from '@/lib/surfaceGeometry3D';
 import { moduleStackHeightM } from '@/lib/roofMountDatum';
 import type { RoofPlane } from '@/types';
 
@@ -254,4 +256,96 @@ describe('a legacy 2D face lies on the plane it declares', () => {
     expect(vSpan, `v span ${vSpan.toFixed(3)} m`).toBeGreaterThan(8);
     expect(vSpan).toBeLessThan(11);
   });
+});
+
+describe('every placement path in the file resolves the face the same way', () => {
+  /**
+   * 🚨 THE FILE ANSWERED "WHERE IS THIS FACE" FOUR DIFFERENT WAYS.
+   *
+   *   buildSurfaceGrid   needed createdFrom3D + origin3D + ecefFrame3D + polygon3D
+   *   placeSinglePanel   needed ecefFrame3D + origin3D, and passed NO ground
+   *                      elevation to the legacy fallback — about 128 m low
+   *   extendRow          needed ecefFrame3D + origin3D for the FRAME and
+   *                      `plane.polygon3D ?? legacy` for the BOUNDARY, so a
+   *                      panel placed on the roof was tested against an outline
+   *                      at ground level
+   *   addRow             the same two-field test
+   *
+   * So the same face got panels on the roof from one tool and underground from
+   * another. They all call `resolvePlaneGeometry` now, and this asserts the
+   * consequence rather than the call: every path puts a panel one mount stack
+   * above the SAME plane, for every plane shape.
+   */
+  const MOUNTS = ['ironridge-xr100', 'ironridge-xr1000', 'rooftech-mini-s'];
+
+  function shapes(): Array<[string, RoofPlane]> {
+    const full = tracedFace();
+    const noPoly = { ...full, polygon3D: undefined } as unknown as RoofPlane;
+    const twoD = {
+      id: 'legacy-2d', vertices: full.vertices, pitch: full.pitch, azimuth: full.azimuth,
+      area: full.area, usableArea: full.usableArea,
+      centroidLat: full.centroidLat, centroidLng: full.centroidLng,
+      planeHeightAtCenterMeters: 5.2,
+    } as unknown as RoofPlane;
+    return [['full 3D', full], ['3D without polygon3D', noPoly], ['legacy 2D', twoD]];
+  }
+
+  for (const [name, plane] of shapes()) {
+    for (const mount of MOUNTS) {
+      it(`${name} · ${mount} — the grid and the row tools agree on the plane`, () => {
+        const stack = moduleStackHeightM(mount);
+        const geom = resolvePlaneGeometry(plane, GROUND_M);
+        const n = geom.ecefFrame3D.n, o = geom.origin3D;
+        const above = (pt: { lat: number; lng: number; height?: number }) => {
+          const e = latLngToECEF(pt.lat, pt.lng, pt.height!);
+          return (e.x - o.x) * n.x + (e.y - o.y) * n.y + (e.z - o.z) * n.z;
+        };
+
+        const grid = buildSurfaceGrid({
+          plane, groundElevM: GROUND_M, orientation: 'portrait',
+          eaveSetbackM: 0.3, ridgeSetbackM: 0.3, sideSetbackM: 0.3,
+          panelSpacingM: 0, rowSpacingM: 0, layoutId: 'agree', wattage: 400,
+          mountingSystemId: mount,
+        } as never);
+        expect(grid.length, 'the grid placed nothing — nothing is being compared').toBeGreaterThan(2);
+        for (const p of grid) {
+          expect(Math.abs(above(p) - stack), `grid panel ${p.id} at ${above(p).toFixed(3)} m`)
+            .toBeLessThan(0.02);
+        }
+
+        // 🚨 `if (extended)` WAS THE VACUUM, AND I WROTE IT.
+        // extendRow takes its FRAME from the plane's origin and used to take its
+        // BOUNDARY from a ground-level rebuild, so on a face that had lost its
+        // polygon it placed the panel correctly and then REJECTED it for being
+        // "outside roof polygon" — tens of metres below. The observable symptom
+        // is not a misplaced panel, it is NO PANEL, and a conditional
+        // assertion cannot see that. Requiring the row to extend is what
+        // detects it: the first mutation run of this test passed because of
+        // exactly that `if`.
+        // Leave room, or "no panel" is the CORRECT answer and the assertion
+        // below would be a different kind of wrong. The grid packs the face to
+        // its setbacks, so the last column is dropped to make a gap the row
+        // tool can legitimately fill.
+        const maxCol = Math.max(...grid.map((p: any) => p.col ?? 0));
+        const withGap = grid.filter((p: any) => (p.col ?? 0) < maxCol);
+        expect(withGap.length, 'dropping the last column left nothing').toBeGreaterThan(1);
+
+        const extended = extendRow(withGap as never, plane, GROUND_M, 'portrait', 'agree', 400, mount);
+        expect(extended,
+          'extendRow refused to extend a row on a face it had just placed panels on — ' +
+          'it is testing the new panel against an outline resolved differently from the frame',
+        ).toBeTruthy();
+        expect(Math.abs(above(extended!) - stack),
+          `extendRow put its panel ${above(extended!).toFixed(3)} m above the plane`,
+        ).toBeLessThan(0.02);
+
+        const added = addRow(withGap as never, plane, GROUND_M, 'portrait', 'agree', 400, undefined, mount);
+        expect(added && added.length, 'addRow placed no row at all').toBeTruthy();
+        for (const p of added!) {
+          expect(Math.abs(above(p) - stack), `addRow panel ${p.id} at ${above(p).toFixed(3)} m`)
+            .toBeLessThan(0.02);
+        }
+      });
+    }
+  }
 });

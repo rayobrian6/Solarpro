@@ -17,11 +17,18 @@
  *
  * 🚨 AND THE CLAIM WAS NOT CHECKED AGAINST THE CALLERS. It was checked against
  * the four sites that already had the rule pasted in, so `confirmPendingPlane`
- * and `autoPlacePanels` — two live entry points, "confirm a traced plane" and
- * "auto-place on a drawn zone" — went on calling the 2D engine directly. That
- * is the same shape as `handleRouteDbError` ("a new route cannot forget it",
- * while two of five routes never reached it): **a rule at one place still has
- * to be REACHED**, and the only way to know is to discover the callers.
+ * ("confirm a traced plane") and `autoPlacePanels` ("auto-place on a drawn
+ * zone") went on calling the 2D engine directly. That is the same shape as
+ * `handleRouteDbError` ("a new route cannot forget it", while two of five
+ * routes never reached it): **a rule at one place still has to be REACHED**,
+ * and the only way to know is to discover the callers.
+ *
+ * 🚨 ONE CORRECTION, MADE HERE RATHER THAN QUIETLY: the first version of this
+ * file called both of those "live entry points". `confirmPendingPlane` is —
+ * it is the 2D *Tag This Roof Plane* flow. `autoPlacePanels` is invoked only
+ * with 'ground' and 'fence', so its roof branch has no caller today. The guard
+ * belongs there regardless, because the rule is a property of the call site and
+ * not of today's call graph, but the reachability claim was wrong.
  *
  * So this test does not list them. It finds every `generateRoofLayoutOptimized`
  * call in the studio, works out which function encloses it, and requires the
@@ -84,8 +91,15 @@ describe('the 2D roof-layout engine is unreachable in 3D, at every entry point',
     const fns = calls.map(c => c.fn);
     // Two that the hand-written rule missed, named so a rename cannot quietly
     // shrink the scan back to the sites that were already correct.
-    expect(fns, 'confirmPendingPlane lays out a freshly traced plane').toContain('confirmPendingPlane');
-    expect(fns, 'autoPlacePanels lays out a drawn zone').toContain('autoPlacePanels');
+    //
+    // 🚨 AND A CORRECTION: the first version of this called BOTH "live entry
+    // points". `autoPlacePanels` is only ever invoked with 'ground' and
+    // 'fence' — `grep autoPlacePanels(` finds no 'roof' caller — so its roof
+    // branch is unreachable today. The guard there is still required, because
+    // the rule is about the CALL SITE and not about today's call graph, but
+    // the claim that a user can reach it was wrong and is withdrawn.
+    expect(fns, 'confirmPendingPlane lays out a freshly traced plane — reachable').toContain('confirmPendingPlane');
+    expect(fns, 'autoPlacePanels has a roof branch, currently with no caller').toContain('autoPlacePanels');
     for (const c of calls) {
       expect(c.fnLine, `the call at line ${c.line} has no enclosing function — the scan is wrong`)
         .toBeGreaterThan(0);

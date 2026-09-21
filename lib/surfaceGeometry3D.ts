@@ -1419,6 +1419,9 @@ export function placeSinglePanel(
   layoutId:    string,
   wattage:     number,
   mountingSystemId?: string,
+  /** Ellipsoidal ground elevation at the site. Only the legacy 2D branch needs
+   *  it, and omitting it is what put that branch at sea level. */
+  groundElevM: number = 0,
 ): PlacedPanel {
   const mountOffsetM = moduleStackHeightM(mountingSystemId);
   const dims = getPanelDims(orientation);
@@ -1428,9 +1431,19 @@ export function placeSinglePanel(
   const stepV = dims.heightM;  // 0 spacing — matches buildSurfaceGrid call sites
 
   // ── Resolve ECEF frame ─────────────────────────────────────────────────
-  const { origin3D: orig, ecefFrame3D: ef } = plane.ecefFrame3D && plane.origin3D
-    ? { origin3D: plane.origin3D, ecefFrame3D: plane.ecefFrame3D }
-    : (() => { const l = computeEcefFrameForLegacyPlane(plane); return { origin3D: l.origin3D, ecefFrame3D: l.ecefFrame3D }; })();
+  // 🚨 THE LEGACY FALLBACK HERE PASSED NO GROUND ELEVATION AT ALL.
+  // `computeEcefFrameForLegacyPlane(plane)` defaults `groundElevM` to 0, so a
+  // 2D face resolved here landed `planeHeightAtCenterMeters` metres above the
+  // ELLIPSOID rather than above the site — about 128 m too low at the demo
+  // address. Its two siblings pass the value; this one did not.
+  //
+  // 🚨 AND IT HAS NO PRODUCTION CALLERS. `grep placeSinglePanel` over app,
+  // components and lib finds this definition, two comments, and nothing that
+  // calls it — `lib/3d/controlLayer.ts` reimplements the single-click path and
+  // says so. It is exercised only by tests. Recorded rather than deleted
+  // because the mount-datum ledger cites it as one of the placement paths, and
+  // a reader deserves to know which of those a user can actually reach.
+  const { origin3D: orig, ecefFrame3D: ef } = resolvePlaneGeometry(plane, groundElevM);
 
   // ── Project click onto grid axes ───────────────────────────────────────
   const clickECEF = latLngToECEF(clickLat, clickLng, clickHeight);
@@ -1517,9 +1530,11 @@ export function extendRow(
   if (planePanels.length === 0) return null;
 
   // ── Resolve ECEF frame ─────────────────────────────────────────────────
-  const { origin3D: orig, ecefFrame3D: ef } = plane.ecefFrame3D && plane.origin3D
-    ? { origin3D: plane.origin3D, ecefFrame3D: plane.ecefFrame3D }
-    : (() => { const l = computeEcefFrameForLegacyPlane(plane, groundElevM); return { origin3D: l.origin3D, ecefFrame3D: l.ecefFrame3D }; })();
+  // One resolution for the whole file — see `resolvePlaneGeometry`. This asked
+  // only for `ecefFrame3D && origin3D` while `buildSurfaceGrid` asked for four
+  // fields, so the same face got panels on the roof from one tool and
+  // underground from another.
+  const { origin3D: orig, ecefFrame3D: ef } = resolvePlaneGeometry(plane, groundElevM);
 
   const dims   = getPanelDims(orientation);
   // v47.151: stepU/stepV must match buildSurfaceGridECEF (panelSpacingM=0, rowSpacingM=0).
@@ -1549,10 +1564,12 @@ export function extendRow(
   // ── v48.7: Boundary check ─────────────────────────────────────────────────
   // Project polygon3D into UV space and verify the new panel fits inside.
   // Uses the same ray-cast PIP as buildSurfaceGridECEF.
-  const resolvedPoly3D = plane.polygon3D ?? (() => {
-    const l = computeEcefFrameForLegacyPlane(plane, groundElevM);
-    return l.polygon3D;
-  })();
+  // 🚨 AND THE OUTLINE MUST COME FROM THE SAME RESOLUTION AS THE FRAME.
+  // `plane.polygon3D ?? legacy` took the frame from the plane's own origin and
+  // the boundary from a GROUND-LEVEL rebuild for any face that had lost its
+  // polygon — so the new panel was placed on the roof and then tested against
+  // an outline tens of metres below it.
+  const resolvedPoly3D = resolvePlaneGeometry(plane, groundElevM).polygon3D;
   if (resolvedPoly3D && resolvedPoly3D.length >= 3) {
     const polyUV = resolvedPoly3D.map(p => ({
       u: (p.x - orig.x) * ef.u.x + (p.y - orig.y) * ef.u.y + (p.z - orig.z) * ef.u.z,
@@ -1653,9 +1670,11 @@ export function addRow(
   if (planePanels.length === 0) return [];
 
   // ── Resolve ECEF frame ──────────────────────────────────────────────────
-  const { origin3D: orig, ecefFrame3D: ef } = plane.ecefFrame3D && plane.origin3D
-    ? { origin3D: plane.origin3D, ecefFrame3D: plane.ecefFrame3D }
-    : (() => { const l = computeEcefFrameForLegacyPlane(plane, groundElevM); return { origin3D: l.origin3D, ecefFrame3D: l.ecefFrame3D }; })();
+  // One resolution for the whole file — see `resolvePlaneGeometry`. This asked
+  // only for `ecefFrame3D && origin3D` while `buildSurfaceGrid` asked for four
+  // fields, so the same face got panels on the roof from one tool and
+  // underground from another.
+  const { origin3D: orig, ecefFrame3D: ef } = resolvePlaneGeometry(plane, groundElevM);
 
   const dims   = getPanelDims(orientation);
   // v47.151: stepU/stepV must match buildSurfaceGridECEF (panelSpacingM=0, rowSpacingM=0).
