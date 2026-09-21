@@ -19,6 +19,7 @@ import { buildDesignElectricalBlock, presentDesignSubSystemKeys } from '@/lib/sy
 import { toSubSystemKey } from '@/lib/system/subSystemEquipment';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
+import { isHandModelledFace } from '@/lib/3d/laneA';
 // v50.11: POA calculation + segment labels
 import { ghiToPoa, poaQualityLabel, segmentLabel } from '@/lib/poaCalc';
 import {
@@ -103,6 +104,14 @@ type SolarE2EState = {
   /** Count of full rebuilds triggered during panel drag/move — should stay 0
    *  for smooth moves. 2176e4d3 regression guard. */
   panelMoveRebuildCount: number;
+  /** The CANONICAL id of the roof face selected in 3D, or null.
+   *
+   *  🚨 This is the id `RoofPlane.id`, reported by the engine through
+   *  `onRoofPlaneSelect` — not an index, not a label, not a Cesium entity
+   *  handle. It exists here so a browser spec can assert WHICH logical face a
+   *  real canvas click selected, and that the SAME logical face is selected
+   *  again after a save and reload. */
+  selected3DFaceId: string | null;
   // ── SITE OWNERSHIP (the A → B → A regression Ray hit on 3 Melvin Drive) ────
   /** Keep-out zones a person placed. Site-bound, like panels and roof planes. */
   placedObstructions: PlacedObstruction[];
@@ -632,6 +641,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [solarDataError, setSolarDataError] = useState<string | null>(null);
   // Solar API roof plane auto-detection status
   const [solarApiStatus, setSolarApiStatus] = useState<'idle' | 'loading' | 'loaded' | 'unavailable'>('idle');
+  /** Which roof face the 3D engine reports as selected. The ENGINE owns the
+   *  selection; this is a faithful mirror for the sidebar and for browser
+   *  specs. It is deliberately NOT passed back down as `selectedRoofPlaneId`,
+   *  which would make this a second writer to the same fact. */
+  const [selected3DFaceId, setSelected3DFaceId] = useState<string | null>(null);
   // Nearmap aerial roof detection (licensed HD aerial → real planes, on demand)
   const [aerialDetecting, setAerialDetecting] = useState(false);
   // Pending plane: drawn vertices awaiting azimuth/pitch tagging before panels are placed
@@ -2013,6 +2027,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       engineRoofPlaneCount: e2eDiagnostics.engineRoofPlaneCount,
       setbackBandCentroids: e2eDiagnostics.setbackBandCentroids,
       panelMoveRebuildCount: e2eDiagnostics.panelMoveRebuildCount,
+      selected3DFaceId,
       // ── SITE OWNERSHIP ────────────────────────────────────────────────────
       // Ray's first acceptance test was A → B → A, and the spec that should
       // have caught it could not see any of this. Exposed under the same
@@ -2044,6 +2059,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     return () => { delete window.__solarE2E; };
   }, [roofPlanes, panels, placedObstructions, measurements, e2eStitchedCorners, e2eDiagnostics,
       site.activeSiteKey, site.archivedSiteCount, site.archivedEntityCount, handleLocationPick,
+      selected3DFaceId,
       setPanels, setRoofPlanes, setPlacedObstructions, setMeasurements]);
 
   // ── Resolve location on load ─────────────────────────────────────────
@@ -3870,7 +3886,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     // createdFrom3D) over mapCenter — the geocode can land on the NEIGHBOUR (e.g.
     // 3 Melvin Dr sits ~17m onto the next house), which would seed the filter on the
     // wrong building and delete the roof the user actually drew. Marked plane = truth.
-    const marked = roofPlanes.filter(p => ((p as any).source === 'manual' || (p as any).createdFrom3D) && p.vertices && p.vertices.length >= 3);
+    const marked = roofPlanes.filter(p => isHandModelledFace(p) && p.vertices && p.vertices.length >= 3);
     const sv = marked.flatMap(p => p.vertices ?? []);
     const subject = sv.length > 0
       ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
@@ -3886,7 +3902,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     const { kept, dropped } = dropDetectedPlanesOverlappingManual(
       subjectKept,
       (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
-      (p) => (p as any).source === 'manual' || (p as any).createdFrom3D === true,
+      (p) => isHandModelledFace(p),
     );
     const removed = roofPlanes.length - kept.length;
     if (removed === 0 || kept.length === 0) return roofPlanes;  // never wipe the design
@@ -4767,6 +4783,14 @@ export default function DesignStudio({ project, onSave }: Props) {
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               roofRestoreResolved={roofRestoreResolved}
+              // 🚨 THIS PROP WAS DECLARED AND NEVER PASSED. Every `[PLANE3D-*]`
+              // selection-styling site in the engine compared against
+              // `selectedRoofPlaneId`, which no parent has ever supplied, so all
+              // seven comparisons were `undefined === <id>` — permanently false.
+              // The engine now owns the selection and reports it here; the
+              // mirror is read-only and is deliberately NOT fed back down as
+              // `selectedRoofPlaneId`, which would give the fact two writers.
+              onRoofPlaneSelect={setSelected3DFaceId}
               // Migration 122. The engine REPORTS; DesignStudio stays the single
               // writer to the layout row.
               onObstructionsChange={setPlacedObstructions}

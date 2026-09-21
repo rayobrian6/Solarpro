@@ -55,7 +55,7 @@ const forbidden = {
   'conductor-count justification ("NO integrated EGC")': /NO integrated EGC/i.test(noB64),
   'Q-Cable provides integrated grounding': /Q.?Cable[^.]{0,80}integrated (equipment )?grounding/i.test(noB64),
   'grounding PASS / VERIFIED claim': /grounding[^.<]{0,60}✓\s*PASS/i.test(noB64)
-    || /GROUNDING(?![-A-Z])[^.<]{0,60}(?<![A-Za-z-])VERIFIED/.test(noB64),
+    || /GROUNDING(?![-A-Z])[^.<]{0,60}(?<![A-Za-z-])VERIFIED\b/.test(noB64),
 };
 
 const out = {

@@ -427,7 +427,7 @@ describe('7 — all SEVEN surfaces state the SAME outcome', () => {
     expect(noB64).not.toMatch(/NO integrated EGC/i);
     // and no PASS / VERIFIED grounding claim for this section
     expect(noB64).not.toMatch(/grounding[^.<]{0,60}✓\s*PASS/i);
-    expect(noB64).not.toMatch(/GROUNDING(?![-A-Z])[^.<]{0,60}(?<![A-Za-z-])VERIFIED/);
+    expect(noB64).not.toMatch(/GROUNDING(?![-A-Z])[^.<]{0,60}(?<![A-Za-z-])VERIFIED\b/);
 
     // the E-1 evidence stamp exports the SAME object the sheets rendered
     const m = noB64.match(/data-bar-wse="([^"]*)"/);

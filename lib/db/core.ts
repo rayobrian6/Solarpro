@@ -229,7 +229,7 @@ export function assertUUID(value: unknown, fieldName: string): string {
  * Parse a PostgreSQL numeric/decimal column that arrives as a string in JSON.
  * Postgres.js / Neon return NUMERIC/DECIMAL as strings to preserve precision.
  * TypeScript `as number` is compile-time only -- it does NOT coerce at runtime.
- * Without this helper, hasValidCoords() fails because typeof 8.707\ === \string\,
+ * Without this helper, hasValidCoords() fails because typeof '8.707' === 'string',
  * causing the map to fall back to Phoenix default coords and geocode needlessly.
  */
 export function parseDbFloat(val: unknown): number | undefined {

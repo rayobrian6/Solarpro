@@ -389,8 +389,13 @@ describe('entities that are NOT persisted — classified, not merely listed', ()
 
     // 4. And the redraw has to be able to notice a face gaining panels, or the
     //    derivation is correct and never re-evaluated.
+    // Pinned on the REQUIREMENT (panelPlaneKey is a trigger), not on the exact
+    // literal text of the array. The sibling dependency changed name when the
+    // two rival selection states were collapsed into one, and this assertion
+    // failed for a reason that had nothing to do with what it is protecting —
+    // which is what a source-text matcher costs if it over-specifies.
     expect(ENGINE, 'the plane redraw must key on which faces carry panels')
-      .toMatch(/\[selectedRoofPlaneId, panelPlaneKey\]/);
+      .toMatch(/\}, \[[^\]]*panelPlaneKey[^\]]*\]\);/);
   });
 
   it('the layout signature does not claim to cover any of them', () => {

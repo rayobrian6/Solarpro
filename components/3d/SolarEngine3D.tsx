@@ -24,6 +24,7 @@ import { getSunPosition, getPanelShadingFactor } from '@/lib/solarMath';
 import { siteKeyFromCoords } from '@/lib/siteIdentity';
 import {
   segmentToRoofPlane, stampDetectedProvenance, detectionStatusFromSegmentCount,
+  isHandModelledFace,
   shouldRunLaneA as shouldRunLaneAPure,
   type LaneASegment, type LaneAGateInput as LaneAGateInputPure,
 } from '@/lib/3d/laneA';
@@ -85,6 +86,7 @@ import {
 } from '@/lib/3d/controlLayer';
 import { moduleStackHeightM, railCrossSectionM, deckPointFromModule, drawnRailHeightM, RAIL_DRAW_SCALE } from '@/lib/roofMountDatum';
 import { geoidUndulationM, resolveGroundDatum } from '@/lib/geodeticDatum';
+import { pickFace, type SelectableFace } from '@/lib/3d/faceHitTest';
 import { hasUsableElevation } from '@/lib/surfaceGeometry3D';
 
 // ─── v49.0: Isolated Ground Mount Reality Engine ──────────────────────────────
@@ -524,8 +526,12 @@ interface Props {
   }) => void;
   /** v47.122: ID of the currently selected roof plane (highlights it, dims others) */
   selectedRoofPlaneId?: string;
-  /** v47.122: Called when user clicks a roof plane in the 3D view */
-  onRoofPlaneSelect?: (planeId: string) => void;
+  /** Called whenever the selected roof face CHANGES, with the canonical
+   *  `RoofPlane.id` — or **null on deselection**, which the old signature could
+   *  not express. The engine owns the selection; this is a notification, not a
+   *  request. A parent that mirrors it must not feed it back through
+   *  `selectedRoofPlaneId`, or the fact has two writers again. */
+  onRoofPlaneSelect?: (planeId: string | null) => void;
   /** v48.26: Orientation driven from DesignStudio (2D panel orientation buttons).
    *  Keeps the 3D panelOrientationRef in sync so handleAutoRoof uses the correct
    *  orientation when triggered by relayoutWithOrientation via placementMode='auto_roof'. */
@@ -1046,6 +1052,28 @@ function SolarEngine3D({
   // Which face is selected for editing, by plane id. null = the whole building.
   const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
   const selectedFaceIdRef = useRef<string | null>(null);
+
+  /** 🚨 THE SELECTED ROOF FACE. ONE ANSWER.
+   *
+   *  There were two, and only one of them was alive:
+   *
+   *    selectedFaceId        internal state. Real face-scoped behaviour hangs
+   *                          off it (per-face pitch and wall overrides), but it
+   *                          could only ever be set by a pick that matches
+   *                          `[BUILD3D-ROOF]` entities — which exist only while
+   *                          the Building extrusion is toggled on, and it is off
+   *                          by default.
+   *    selectedRoofPlaneId   a PROP, which every `[PLANE3D-*]` styling site
+   *                          compared against — and which no parent has ever
+   *                          passed. Seven `undefined === <id>` comparisons,
+   *                          permanently false, and `onRoofPlaneSelect` was
+   *                          declared, destructured and never called.
+   *
+   *  So the renderer honoured the dead one. `activeFaceId` collapses them: the
+   *  engine owns the selection, and the prop remains an OPTIONAL override so a
+   *  parent (e.g. the Roof Planes sidebar) can drive the highlight without
+   *  becoming a second writer. */
+  const activeFaceId: string | null = (selectedRoofPlaneId ?? selectedFaceId) || null;
   const measureOverlayRef = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
@@ -1076,6 +1104,7 @@ function SolarEngine3D({
   const panelMetaRef      = useRef<Props['panelMeta']>(panelMeta);
   const paintModeRef      = useRef<boolean>(paintMode);
   const onPanelPaintRef   = useRef<Props['onPanelPaint']>(onPanelPaint);
+  const onRoofPlaneSelectRef = useRef<Props['onRoofPlaneSelect']>(onRoofPlaneSelect);
   // equipmentMapRef: Cesium device-box entities (optimizer/micro) keyed by panel id.
   const equipmentMapRef   = useRef<Map<string, any>>(new Map());
   // roofRailMapRef: Cesium entities keyed by planeId for roof rail visualization (Phase 2).
@@ -1249,7 +1278,7 @@ function SolarEngine3D({
         if (ent) try { viewer.entities.remove(ent); } catch { /* ignore */ }
       });
       const cesiumPts = built.frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
-      const isSelected = selectedRoofPlaneId === id;
+      const isSelected = activeFaceId === id;
       const newIds = renderPlane3DEntity(
         viewer, C, cesiumPts, id, built.frame, isSelected, planeRendersOutlineOnly(id),
       );
@@ -2325,7 +2354,7 @@ function SolarEngine3D({
         const isMarkOnly = planeRendersOutlineOnly(plane.id);
 
         // ── Step 4: Render plane entity (mirrors finalizePlane3D) ──────
-        const isSelected = selectedRoofPlaneId === plane.id;
+        const isSelected = activeFaceId === plane.id;
         const entityIds = renderPlane3DEntity(
           viewer, C, projectedCesiumPts, plane.id, frame, isSelected, isMarkOnly,
         );
@@ -2399,6 +2428,7 @@ function SolarEngine3D({
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
   useEffect(() => { paintModeRef.current = paintMode; }, [paintMode]);
   useEffect(() => { onPanelPaintRef.current = onPanelPaint; }, [onPanelPaint]);
+  useEffect(() => { onRoofPlaneSelectRef.current = onRoofPlaneSelect; }, [onRoofPlaneSelect]);
 
   // v63: keep string-coloring / equipment refs current, then force a full panel
   // rebuild so colors, opacity and device boxes refresh. Only rebuild when the
@@ -2468,7 +2498,7 @@ function SolarEngine3D({
       });
 
       // Re-render with new selection state
-      const isSelected = selectedRoofPlaneId === planeId;
+      const isSelected = activeFaceId === planeId;
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, planeId, frame, isSelected, planeRendersOutlineOnly(planeId));
       plane3DEntityMap.current.set(planeId, newIds);
 
@@ -2478,7 +2508,7 @@ function SolarEngine3D({
 
     try { viewer.scene.requestRender(); } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRoofPlaneId, panelPlaneKey]);
+  }, [activeFaceId, panelPlaneKey]);
 
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
@@ -4842,7 +4872,7 @@ function SolarEngine3D({
       });
       const cesiumPts = frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, rp.id, frame,
-        selectedRoofPlaneId === rp.id, planeRendersOutlineOnly(rp.id));
+        activeFaceId === rp.id, planeRendersOutlineOnly(rp.id));
       plane3DEntityMap.current.set(rp.id, newIds);
       plane3DFrameMap.current.set(rp.id, frame);
       plane3DCesiumPtsMap.current.set(rp.id, cesiumPts);
@@ -4943,7 +4973,7 @@ function SolarEngine3D({
       });
       const cesiumPts = built.frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, rf.id, built.frame,
-        selectedRoofPlaneId === rf.id, planeRendersOutlineOnly(rf.id));
+        activeFaceId === rf.id, planeRendersOutlineOnly(rf.id));
       plane3DEntityMap.current.set(rf.id, newIds);
       plane3DFrameMap.current.set(rf.id, built.frame);
       plane3DCesiumPtsMap.current.set(rf.id, cesiumPts);
@@ -5338,7 +5368,7 @@ function SolarEngine3D({
       const projected = frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
       const oldIds = plane3DEntityMap.current.get(pid) || [];
       oldIds.forEach(id => { try { const e = viewer.entities.getById(id); if (e) viewer.entities.remove(e); } catch {} });
-      const isSel = selectedRoofPlaneId === pid;
+      const isSel = activeFaceId === pid;
       const newIds = renderPlane3DEntity(viewer, C, projected, pid, frame, isSel, planeRendersOutlineOnly(pid));
       plane3DEntityMap.current.set(pid, newIds);
       plane3DFrameMap.current.set(pid, frame);
@@ -8071,6 +8101,71 @@ function SolarEngine3D({
    * pick because the aerial texture and the outline sit on the same polygon and
    * a plain pick can return either.
    */
+  /**
+   * Every roof face currently OFFERED to the interaction layer.
+   *
+   * Built from the two maps the renderer itself writes — `plane3DCesiumPtsMap`
+   * (the projected polygon actually drawn) and `plane3DFrameMap` (its frame) —
+   * so what the user sees and what the pick resolves against cannot drift apart.
+   * Both geometry providers land in those maps through the same
+   * `resolvePlaneGeometry` call, so neither has to impersonate the other here.
+   */
+  function selectableRoofFaces(): SelectableFace[] {
+    const faces: SelectableFace[] = [];
+    plane3DCesiumPtsMap.current.forEach((pts: any[], planeId: string) => {
+      const frame = plane3DFrameMap.current.get(planeId);
+      if (!pts || pts.length < 3) return;
+      faces.push({
+        faceId: planeId,
+        normal: frame ? { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z } : null,
+        polygon: pts.map((q: any) => ({ x: q.x, y: q.y, z: q.z })),
+      });
+    });
+    return faces;
+  }
+
+  /**
+   * v71: WHICH ROOF FACE IS UNDER THE CURSOR — resolved geometrically.
+   *
+   * 🚨 DELIBERATELY NOT A SCENE PICK. A face that is marked but not yet panelled
+   * renders through the `outlineOnly` branch of `renderPlane3DEntity`, which
+   * adds ONE polyline and returns: there is no polygon under the cursor to hit,
+   * which is exactly why "I can see the planes but cannot select them". The
+   * obvious repair — add an invisible polygon so `scene.pick` finds something —
+   * would have put a new translucent surface over every roof, and
+   * `getWorldPosition` (the function the whole plane-TRACING workflow stands on)
+   * opens with `scene.pick` and then reads `scene.pickPosition`. Fixing
+   * selection by perturbing where a traced corner lands is not a fix.
+   *
+   * So the ray is intersected with the faces' own planes instead. Nothing is
+   * added to the scene, no existing pick changes, and the answer is the
+   * canonical `RoofPlane.id` — never an index, a label or a renderer handle.
+   */
+  function pickRoofFaceAtScreen(viewer: any, screenPos: any): string | null {
+    try {
+      const ray = viewer.camera.getPickRay(screenPos);
+      if (!ray?.origin || !ray?.direction) return null;
+      const hit = pickFace(
+        { origin: { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z },
+          direction: { x: ray.direction.x, y: ray.direction.y, z: ray.direction.z } },
+        selectableRoofFaces(),
+      );
+      return hit?.faceId ?? null;
+    } catch { return null; }
+  }
+
+  /** Set (or clear) the selected roof face. The ref is written SYNCHRONOUSLY
+   *  because the Cesium handlers read it within the same tick, long before
+   *  React has re-rendered. */
+  function selectRoofFace(faceId: string | null): void {
+    if (selectedFaceIdRef.current === faceId) return;
+    selectedFaceIdRef.current = faceId;
+    setSelectedFaceId(faceId);
+    // Report the deselection too. A parent told only about selections keeps the
+    // last id for ever, and its sidebar highlight outlives the 3D one.
+    onRoofPlaneSelectRef.current?.(faceId);
+  }
+
   function pickBuildingFaceAtScreen(viewer: any, C: any, screenPos: any): string | null {
     try {
       const hits = viewer.scene.drillPick(screenPos, 8) ?? [];
@@ -8108,7 +8203,10 @@ function SolarEngine3D({
       if (showBuilding3DRef.current) {
         const faceId = pickBuildingFaceAtScreen(viewer, C, screenPos);
         if (faceId) {
-          setSelectedFaceId(prev => (prev === faceId ? null : faceId));
+          // Through the same setter as the [PLANE3D-*] path, so the ref, the
+          // state and the outbound notification cannot drift between the two
+          // entity families that can both produce a face selection.
+          selectRoofFace(selectedFaceIdRef.current === faceId ? null : faceId);
           const ov = buildingOverridesRef.current.get(faceId);
           setStatusMsg(
             selectedFaceIdRef.current === faceId
@@ -8131,7 +8229,25 @@ function SolarEngine3D({
       const foundEntity = picked.foundEntity;
 
       if (!foundId || !foundEntity) {
+        // v71: no panel under the cursor — is a ROOF FACE? Checked here, AFTER
+        // the panel pick, so panels keep priority: clicking a module selects the
+        // module, clicking bare roof selects the face it is on. Clicking past
+        // every face still clears, including the face selection, so nothing
+        // stale is left highlighted.
+        const faceId = pickRoofFaceAtScreen(viewer, screenPos);
+        if (faceId) {
+          clearPanelSelection();
+          drilledGroupKeyRef.current = null;
+          const toggledOff = selectedFaceIdRef.current === faceId;
+          selectRoofFace(toggledOff ? null : faceId);
+          setStatusMsg(toggledOff
+            ? '⬡ Face deselected'
+            : `⬡ Roof face selected · face-scoped controls now act on THIS face · click it again to deselect`);
+          try { viewer.scene.requestRender(); } catch {}
+          return;
+        }
         clearPanelSelection();
+        selectRoofFace(null);
         drilledGroupKeyRef.current = null;
         setStatusMsg('Selection cleared');
         try { viewer.scene.requestRender(); } catch {}
@@ -10025,7 +10141,7 @@ function SolarEngine3D({
       // v62: mark-only faces render as a clean outline (no fill/grid/label/arrows).
 
       // Render plane visualization (full for panel planes; outline-only for marked).
-      const isSelected = selectedRoofPlaneId === plane.id;
+      const isSelected = activeFaceId === plane.id;
       // 🚨 THE MARK PLANE INTENT IS RECORDED ON THE PLANE, NOT IN A REF.
       //
       // It used to live in a component-lifetime `Set`, which meant it did not
@@ -11256,7 +11372,7 @@ function SolarEngine3D({
       // createdFrom3D). The geocode (lat,lng) can land on the NEIGHBOUR (3 Melvin
       // Dr geocodes ~17m onto the next house), seeding the filter on the wrong
       // building and skipping the roof the user drew. The marked plane is truth.
-      const marked = eligiblePlanes.filter(p => ((p as any).source === 'manual' || (p as any).createdFrom3D) && p.vertices && p.vertices.length >= 3);
+      const marked = eligiblePlanes.filter(p => isHandModelledFace(p) && p.vertices && p.vertices.length >= 3);
       const sv = marked.flatMap(p => p.vertices ?? []);
       const subjectPt = sv.length > 0
         ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
@@ -11280,7 +11396,7 @@ function SolarEngine3D({
       const { kept: deduped, dropped } = dropDetectedPlanesOverlappingManual(
         eligiblePlanes,
         (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
-        (p) => (p as any).source === 'manual' || (p as any).createdFrom3D === true,
+        (p) => isHandModelledFace(p),
       );
       if (dropped > 0 && deduped.length > 0) {
         eligiblePlanes = deduped;

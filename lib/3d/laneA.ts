@@ -155,6 +155,49 @@ export function stampDetectedProvenance(
 }
 
 /**
+ * DID A PERSON MODEL THIS FACE, OR DID A MACHINE DETECT IT?
+ *
+ * 🚨 THE ANSWER LIVED IN THE WRONG FIELD, AND IT ANSWERED "PERSON" FOR EVERY
+ * GOOGLE DETECTION.
+ *
+ * Four call sites asked it as `source === 'manual' || createdFrom3D === true`:
+ *
+ *     components/3d/SolarEngine3D.tsx   the Auto Layout subject-building seed
+ *     components/3d/SolarEngine3D.tsx   the "a manual trace wins" de-dup
+ *     components/design/DesignStudio.tsx  the same two, on the 2D side
+ *
+ * But `createdFrom3D` does not mean "a human made this". It means "this face
+ * carries exact 3D geometry", and `lib/surfaceGeometry3D.ts` gates the good
+ * ECEF placement branch on it. Lane A builds its planes with the same
+ * `buildRoofPlane3D` the tracing tool uses, and `stampDetectedProvenance`
+ * deliberately does NOT clear that flag — clearing it would push every Google
+ * face onto the legacy 2D branch, which is a real regression on the preferred
+ * provider.
+ *
+ * So every `source: 'solar_api'` plane also carries `createdFrom3D: true`, and
+ * `dropDetectedPlanesOverlappingManual` — whose entire job is "the same roof
+ * captured twice was double-filling, the manual trace wins" — returned `true`
+ * at its first line for the detection as well, and dropped nothing. It worked
+ * for `aerial_nearmap` (which is built elsewhere and has no such flag) and was
+ * inert for Google. That is precisely the case a person hits after tracing over
+ * a Google roof they judged wrong, which is the fallback workflow.
+ *
+ * Authorship is `source`. Geometry is `createdFrom3D`. They are different facts.
+ *
+ * The `createdFrom3D` fallback is KEPT for a face that records no `source` at
+ * all — a pre-provenance plane whose exact 3D geometry can only have come from
+ * someone tracing it. It is a legacy adoption rule, not the rule.
+ */
+export function isHandModelledFace(plane: unknown): boolean {
+  const p = plane as { source?: string; createdFrom3D?: boolean } | null | undefined;
+  if (!p) return false;
+  if (p.source === 'manual' || p.source === 'imported') return true;
+  // A DETECTION is a detection whatever its geometry is made of.
+  if (p.source === 'solar_api' || p.source === 'aerial_nearmap') return false;
+  return p.createdFrom3D === true;
+}
+
+/**
  * The whole conversion: segments in, stamped RoofPlanes out.
  *
  * Segments that cannot produce a plane are DROPPED, not faked — so an empty

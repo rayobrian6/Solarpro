@@ -158,3 +158,24 @@ Each test in `design-studio.spec.ts` guards a specific regression:
 The spec loads `/design?e2eQuickDesign=1`, waits for `window.__solarE2E`, verifies the Cesium canvas when available, then exercises each regression guard through the hook's state mirror. Tests that depend on WebGL skip gracefully with an explicit message when the canvas cannot initialize.
 
 The fast pure-Node planset guardrails live in `tests/planset/planset-structural.test.ts` and are part of `npm test` through the existing Vitest include glob.
+
+## 🚨 Run with `--workers=1` on this machine
+
+Measured 2026-09-21, same build, same server, minutes apart:
+
+```
+npx playwright test                 10 failed · 17 passed · 4 skipped
+npx playwright test --workers=1     0  failed · 27 passed · 4 skipped
+```
+
+`fullyParallel: false` only stops tests inside one file from running together —
+Playwright still runs FILES on several workers. Each worker is a separate Chromium
+with **software WebGL**, and several of them starving each other produces
+failures that are indistinguishable from product defects: a Cesium canvas that
+never becomes visible, an engine that never reaches stage `done`, a camera that
+has not settled when a click is dispatched.
+
+Three of the failures in that parallel run were in specs that had just passed
+7/7 on their own, and four were in specs that predate the change being tested.
+**A parallel red run is not evidence of a regression here.** Re-run serially
+before believing it, and report the serial result.

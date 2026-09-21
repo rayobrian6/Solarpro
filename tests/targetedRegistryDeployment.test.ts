@@ -18,6 +18,27 @@ import {
 import { TARGETED_RECOVERY_ALLOWLIST, isTargetedPermitValid } from '../lib/migrations/runner';
 import { discoverMigrationFiles } from '../lib/migrations/manifest';
 
+/**
+ * 🚨 MATCH THE SQL, NOT THE PROSE ABOUT THE SQL.
+ *
+ * The "this migration writes no rows" guards below used to read
+ * `/<0x08>UPDATE<0x08>/i` — ten stray BACKSPACE bytes where `\b` word
+ * boundaries were meant, so every one of them was a `.not.toMatch` against a
+ * pattern that can never match anything. They passed on every migration ever
+ * written, including one that backfilled.
+ *
+ * Repairing the boundaries exposed the opposite failure in the same family:
+ * migration 120 says "read-head-then-insert", "inserts zero rows" and "No row
+ * is written, read, altered or deleted" IN ITS HEADER COMMENT, so a raw text
+ * match on the file reports DML that is not there. A guard that can be
+ * satisfied — or defeated — by a comment is not reading the code.
+ */
+function sqlWithoutComments(sql: string): string {
+  return sql
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')   // block comments
+    .replace(/--[^\n]*/g, ' ');          // line comments
+}
+
 const SQL_113 = readFileSync(join(process.cwd(), 'lib', 'migrations', '113_manufacturer_document_registry.sql'), 'utf8');
 const SQL_114 = readFileSync(join(process.cwd(), 'lib', 'migrations', '114_equipment_reconciliation_audit.sql'), 'utf8');
 const SQL_115 = readFileSync(join(process.cwd(), 'lib', 'migrations', '115_project_personnel_roles.sql'), 'utf8');
@@ -158,8 +179,8 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(s.columnsMatchExpected).toBe(true);
     expect(s.nonDestructive).toBe(true);
     // and it must genuinely not backfill — the four live rows keep their value
-    expect(SQL_119).not.toMatch(/UPDATE/i);
-    expect(SQL_119).not.toMatch(/INSERT/i);
+    expect(sqlWithoutComments(SQL_119)).not.toMatch(/\bUPDATE\b/i);
+    expect(sqlWithoutComments(SQL_119)).not.toMatch(/\bINSERT\b/i);
   });
 
   it('accepts the real migration 120 (index-only, touches no row)', () => {
@@ -173,7 +194,7 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(s.createdIndexes).toEqual(['uq_audit_log_chain_successor']);
     // partial on prev_hash IS NOT NULL so the historical roots stay legal
     expect(SQL_120).toMatch(/WHERE prev_hash IS NOT NULL/);
-    expect(SQL_120).not.toMatch(/UPDATE|DELETE|INSERT/i);
+    expect(sqlWithoutComments(SQL_120)).not.toMatch(/\bUPDATE\b|\bDELETE\b|\bINSERT\b/i);
   });
 
   it('refuses an index-only migration that also alters or creates', () => {
