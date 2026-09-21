@@ -6,18 +6,16 @@ RE+ is **2026-11-16** (57 days from 2026-09-20).
 
 ## 🚨 REVISION BASIS — read before quoting any finding
 
-There are **three** different code states in play. Confusing them produces false refutations.
-
 | Name | SHA | What it is |
 |---|---|---|
-| `origin/master` | `5d89d4dc` | **What production runs.** Phase 2 site-ownership merged. |
-| `origin/dev` | `63f7954e` | Content-identical to master for this workstream. |
-| `fix/phase2-post-merge-regressions` | `6aa5ea0a` | **LOCAL ONLY — on no remote.** A peer session committed it at 11:43 today. |
+| `origin/master` | `5d89d4dc` | **What production runs.** Phase 2 site-ownership merged. Every Workstream 1 fix is still ABSENT here. |
+| `origin/fix/ws1-autolayout-panel-elevation` | `e635e105` | **All of Workstream 1.** Pushed. This is what the findings below describe. |
+| `origin/fix/phase2-post-merge-regressions` | `e3a60e9a` | PR #19. **A strict SUBSET** — both its commits are ancestors of the branch above. |
 
-> A second Claude session (**"SolarPro Phase 2 recovery and verification"**, started ~10:00) is
-> **actively working in this same working tree**. It checked out the fix branch and committed
-> `6aa5ea0a` *during* this session. I have sent it a coordination message and have **not modified
-> any tracked file**. See [Coordination](#coordination) at the end.
+> **PR sequencing is not a hazard here.** `git log HEAD..origin/fix/phase2-post-merge-regressions`
+> is **empty**: the Workstream 1 branch already contains every commit in PR #19. Merging the
+> Workstream 1 PR alone delivers both; merging #19 first also works. There is no order that loses
+> anything, and no dependency for the owner to manage.
 
 Measure commit counts against `origin/`, never local `master`.
 
@@ -678,6 +676,22 @@ And in a real browser, through the real Auto Layout button — see **WS1-025**.
   0.127 m drawn and cannot fit in 0.024 m. The test asserts that, rather than keeping a number that
   stopped being the symptom.
 
+### Two more leaks, found by re-auditing after the fix rather than before
+
+Doctrine: after implementing, audit again assuming you missed something. Searching for the
+*arithmetic* rather than the *names* turned up two more places that answer the same question:
+
+- **`components/3d/CesiumViewer.tsx:461`** — `panelElev = seg.elevation + 0.05`. A **sixth** datum,
+  and the same z-fighting constant. The file has **zero importers** (verified across every `.ts`,
+  `.tsx`, `.js` and `.json` in the repo), so it cannot drift anything at runtime — but reviving it
+  would reintroduce the split. It now reads the authority, with a comment saying so. The file is
+  left in place; deleting someone's component is not this workstream's call.
+- **`placePanelsMultiPlane`** — imported by `SolarEngine3D` and **never called**. It wraps
+  `placePanelsControlled` with `mode: 'auto_roof'` and passed no mounting system, so wiring it up
+  later would have silently placed modules at the conservative default. Threaded.
+
+Neither was reachable. Both were how the original four became four.
+
 ### Transitive consequence, checked rather than assumed
 
 `collectRoofRenderables` has seven consumers, and correcting branch 2's origin changes what all of
@@ -1201,6 +1215,28 @@ at exactly one mount stack above the roof**, and **a second Auto Layout not lift
 `page.goto: Timeout 45000ms exceeded` — fifteen cold compiles, not a product defect. The gate runs
 against a build.
 
+### And I looked at it
+
+Numbers are not the same as a look, and Ray judges this work by how it looks. So, on the production
+build, with the roof seeded at the ground elevation the app itself reports for the site:
+
+- The face renders with its edges correctly classified and coloured — **red ridge, cyan eave, two
+  yellow rakes** — matching the status line *"Roof model — 1 face · 1 ridge · 0 hip · 0 valley ·
+  1 eave · 2 rake"*.
+- **55 modules** tile the face in flush rows, aligned to the eave, entirely inside the setback
+  boundary. None outside the polygon, none sunk into the deck fill.
+- The top bar reads **55 panels · 24.2 kW**, the System Summary agrees, and the engine log reports
+  *"entities added: 55/55"* — the four-readout contradiction of WS1-005 does not reappear.
+
+The ground is bare terrain rather than a building because there is no `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
+in this checkout, so Photorealistic 3D Tiles do not load. That affects the backdrop, not the roof
+model or the array.
+
+**Not visually confirmed:** the rails. They are sub-centimetre at any framing that shows the whole
+array, and their geometry is asserted numerically instead (`tests/roofMountDatum.test.ts` — the drawn
+rail fits inside the mount gap for every railed system). A close-in rail check is worth doing the
+next time someone is in front of the app with a Google key.
+
 **What still needs a database**, and is therefore still owner-blocked, is narrower than this ledger
 previously claimed: only the *persistence leg in a browser* — loading a saved project, the
 "Layout loaded from DB" badge, and the 409 refusals end to end. The route side of all of that is
@@ -1265,11 +1301,32 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 
 | Item | Why it is not closed |
 |---|---|
-| **Persistence leg in a browser** — loading a saved project, the "Layout loaded from DB" badge, the 409 refusals end to end | **Owner-blocked on a database.** Narrower than this ledger used to claim: the SERVER half is already proven against real PostgreSQL (`tests/siteDesignRoute.postgres.test.ts`, PGlite, no credentials). What is missing is the browser's half. A credential supplied ephemerally — exported into the shell, never written to a file — is enough; I will not put the unrotated Neon string in the tree. |
+| **The real client, against the real server, against real PostgreSQL, in a browser** | **Owner-blocked on a database** — and it is exactly one cell of a matrix, not a missing layer. See below. A credential supplied ephemerally (exported into this session's shell, never written to a file) is enough; I will not put the unrotated Neon string in the tree. |
 | **2D-traced planes carry `planeHeightAtCenterMeters: 0.0`** | A plane-HEIGHT question, not a mount-datum one. `computeEcefFrameForLegacyPlane` falls back to `LEGACY_PLANE_HEIGHT_M` (3.5 m), which is a guess about the building, not about the racking. Deciding it needs a real roof height source — the same input Phase 3 will supply. |
 | **Gable / Hip tools emit no roof plane** | **Owner-deferred.** Phase 3 roof UX; the instruction was explicitly *"do not start Phase 3 roof-generation algorithms yet"*. Viewport only. |
 | **The mount effect re-geocodes and overwrites `projects.lat/lng`** | **Mitigated, not removed.** WS1-002 makes the system tolerant of the drift. The code states *"street-level geocode always wins over stored coords"* as intent; reversing a stated product intent is the owner's call, and nothing now breaks because of it. |
 | **Staging deploy verification** | Requires a deploy. Not mine. |
+
+### What the missing gate actually is
+
+I considered closing it with a stubbed server in Playwright — intercept the layout routes, serve
+them from an in-memory store, drive save → reload → restore in Chromium. I decided **not** to, and
+the reason belongs here rather than in my head:
+
+| | mocked server | real route + real PostgreSQL |
+|---|---|---|
+| **client in jsdom** | ✅ `tests/designStudioSiteSwitch.component.test.tsx` — restore, the badge, the 409 refusal spoken once, electrical carry-over, autosave triggers | — |
+| **no client** | — | ✅ `tests/siteDesignRoute.postgres.test.ts` — the Melvin sequence through the real handlers, PGlite, migrations 122/123 applied as the operator console applies them |
+| **client in a real browser** | *(the test I chose not to write)* | ❌ **the missing cell** |
+
+The persistence path uses no Cesium, no WebGL and no geometry, so a browser adds nothing to it that
+jsdom does not already provide — and a stubbed server in Chromium would be the top-left cell again,
+with more machinery and a second contract to keep in step. It would raise the count and prove
+nothing new.
+
+What the missing cell would prove is the **join**: that the shapes the client sends and expects are
+the shapes the route actually reads and returns, against a real column set. That is a genuine gap,
+it is worth closing, and a database is the only thing it needs.
 
 ### Standing corrections to this document
 
@@ -1286,9 +1343,22 @@ edited, because a ledger that hides its own errors is worth less than no ledger:
 Both are the same mistake: reasoning to a conclusion that a five-minute measurement would have
 settled, and recording the conclusion as a finding.
 
-**WORKSTREAM 1 COMPLETE: YES**, for every path reachable without a database credential — with the
-persistence leg in a browser explicitly named above as the one gate I could not execute, and its
-server half already proven against real PostgreSQL.
+**WORKSTREAM 1 COMPLETE: NO.**
+
+The doctrine's rule is binary and I am not going to soften it: **one affected path remains
+unverified**, so the answer is no. That path is the single cell named above — the real client
+against the real route against real PostgreSQL, in a browser — and the only thing it needs is a
+database credential, which is the owner's to supply.
+
+Everything else is closed and verified: 24 defects across Failure A and Failure B, each with a test
+that provably fails when the fix is reverted; the full suite, `tsc`, lint and `next build` green;
+the browser gate **executed** at 15/15 against a production build; and the roof looked at with my
+own eyes.
+
+The difference between this "no" and the last one matters. Last time I recorded a blocker I had
+**inferred** from a 503 and never attempted, and it cost the workstream its most important gate.
+This time every gate that could be executed has been executed, and what is left is one join that
+genuinely cannot be tested without a database.
 
 ## Owner actions required (cannot be done from here)
 
@@ -1306,13 +1376,13 @@ server half already proven against real PostgreSQL.
 
 ## Coordination
 
-A peer Claude session — **"SolarPro Phase 2 recovery and verification"** — is working in this same
-tree and committed `6aa5ea0a` at 11:43 today, mid-session. I have **not modified any tracked file**
-and sent it a coordination message covering scope, in-flight files, and the WS1-006 regression.
-No reply at time of writing.
+A peer Claude session (**"SolarPro Phase 2 recovery and verification"**) was working in this same
+tree earlier and committed `6aa5ea0a` mid-session. Ray's ruling was that this session takes over; it
+did, and the peer's two commits are carried forward intact as ancestors of the branch above.
 
-**Nothing in `6aa5ea0a` is on a remote.** Production remains on `5d89d4dc` with WS1-001, WS1-004
-and every Failure B defect live.
+One correction from that handover is worth keeping: the peer reported `resolveSiteKey` as "fixed and
+merged". It is **absent from `origin/master`** entirely — the symptom fix lives only on the branch.
+Verify a claim of "merged" against `origin/`, not against a local branch.
 
 ---
 

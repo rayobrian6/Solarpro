@@ -781,6 +781,7 @@ export function placePanelsMultiPlane(
   customOriginLng?: number,
   customDirX?:      number,
   customDirY?:      number,
+  mountingSystemId?: string,
 ): PlacedPanel[] {
   const allPanels: PlacedPanel[] = [];
 
@@ -789,6 +790,10 @@ export function placePanelsMultiPlane(
     const result = placePanelsControlled({
       mode:          'auto_roof',
       plane,
+      // Currently unwired — SolarEngine3D imports this helper and never calls it.
+      // Threaded anyway: a placement path that silently takes the default module
+      // stack is how WS1-013 got four datums in the first place.
+      mountingSystemId,
       orientation,
       wattage,
       setbacks,
