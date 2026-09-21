@@ -37,7 +37,7 @@ import { join } from 'node:path';
 import { resolveIntegratedEquipment, type SystemBosContext } from '@/lib/equipment/integratedBos';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { MICROINVERTERS } from '@/lib/equipment-db';
-import { stripCommentsAndStrings } from './planeLifecycleAuthority.test';
+import { stripCommentsAndStrings } from './support/stripSource';
 
 /** A real Enphase micro system, taken from the real catalogue. */
 const IQ8 = MICROINVERTERS.find(m => /enphase/i.test(m.manufacturer) && /IQ8/i.test(m.model))!;

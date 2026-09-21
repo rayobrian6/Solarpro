@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { runElectricalCalc, ElectricalCalcInput } from '@/lib/electrical-calc';
+import { resolveOverallStatus, notEvaluated } from '@/lib/engineering/engineeringStatus';
 import { runStructuralCalcV4, type StructuralInputV4 } from '@/lib/structural-engine-v4';
 import { buildStructuralInputV4, runSubSystemStructural } from './subSystemStructural';
 import { getJurisdictionInfo, getDesignTemperatures, getGroundSnowLoad, getDesignWindSpeed, parseStateFromAddress } from '@/lib/jurisdiction';
@@ -323,25 +324,43 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Deterministic overall status ──────────────────────────────────────
-    // Rule: if ALL engines return PASS (or no errors after auto-fixes), overall = PASS
-    // Only FAIL if there are unresolved errors after auto-fix
-    const electricalStatus = electricalResult?.status ?? 'PASS';
-    const structuralStatus = structuralResult?.status ?? 'PASS';
-
-    // Check for unresolved errors (not auto-fixed)
+    // 🚨 AN ENGINE THAT DID NOT RUN IS NOT A PASS.
+    //
+    // This used to read:
+    //     const electricalStatus = electricalResult?.status ?? 'PASS';
+    //     const structuralStatus = structuralResult?.status ?? 'PASS';
+    //     let overallStatus: 'PASS' | 'WARNING' | 'FAIL' = 'PASS';
+    // so a request that carried no `electrical` block — or no `structural` —
+    // was answered "PASS", and PASS was also the value the variable simply
+    // started at. The structural crash handler above already knew the rule
+    // ("FAIL CLOSED: a thrown engine must never read as a passing stamp");
+    // the aggregator did not apply it to absence.
+    //
+    // `null` means NOT EVALUATED. It is deliberate rather than a new enum
+    // member: lib/engineering-helpers.ts, lib/system-state.ts and
+    // app/engineering/page.tsx already declare `… | null`, and StatusBadge
+    // already renders it as "Not calculated". The honest value existed; nothing
+    // produced it.
     const electricalErrors = electricalResult?.errors?.filter((e: any) => !e.autoFixed) ?? [];
     const structuralErrors = (structuralResult as any)?.errors?.filter((e: any) => e.severity === 'error') ?? [];
 
-    let overallStatus: 'PASS' | 'WARNING' | 'FAIL' = 'PASS';
-    if (electricalErrors.length > 0 || structuralErrors.length > 0) {
-      overallStatus = 'FAIL';
-    } else if (electricalStatus === 'WARNING' || structuralStatus === 'WARNING') {
-      overallStatus = 'WARNING';
-    }
+    const _overall = resolveOverallStatus({
+      electrical: electricalResult
+        ? { evaluated: true, status: electricalResult.status, errorCount: electricalErrors.length }
+        : notEvaluated(electrical ? 'engine-error' : 'no-input'),
+      structural: structuralResult
+        ? { evaluated: true, status: (structuralResult as any).status, errorCount: structuralErrors.length }
+        : notEvaluated(structural ? 'engine-error' : 'no-input'),
+    });
+    const overallStatus = _overall.status;
 
     return NextResponse.json({
       success: true,
       overallStatus,
+      /** Present whenever `overallStatus` is null: which engines produced no
+       *  verdict and why. A consumer must not read a null status as a pass. */
+      statusNotEvaluated: _overall.notEvaluated,
+      statusBasis: _overall.basis,
       jurisdiction,
       electrical: electricalResult,
       // Hybrid: attach per-sub-system results WITHOUT touching the legacy

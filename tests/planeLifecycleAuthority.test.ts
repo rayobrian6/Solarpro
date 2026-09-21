@@ -30,52 +30,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripCommentsAndStrings, stripComments } from './support/stripSource';
 
 const ENGINE_PATH = join(__dirname, '..', 'components', '3d', 'SolarEngine3D.tsx');
 const ENGINE_RAW = readFileSync(ENGINE_PATH, 'utf8');
-
-/**
- * Strip comments and string/template literals from TypeScript source.
- *
- * 🚨 THIS IS THE POINT, NOT A UTILITY. A source-scan guard that does not strip
- * comments reads prose as code, and this repo has been bitten in BOTH
- * directions: a migration guard was defeated because the SQL said "insert" in
- * its header comment, and the comment that documents THIS fix names
- * `plane3DCesiumPtsMap` several times. An unstripped scan here would either
- * pass vacuously or fail on its own documentation.
- *
- * Replaces stripped spans with spaces so every byte offset is preserved.
- */
-export function stripCommentsAndStrings(src: string): string {
-  const out = src.split('');
-  let i = 0;
-  const blank = (from: number, to: number) => {
-    for (let k = from; k < to && k < out.length; k++) if (out[k] !== '\n') out[k] = ' ';
-  };
-  while (i < src.length) {
-    const c = src[i], d = src[i + 1];
-    if (c === '/' && d === '/') {
-      let j = i; while (j < src.length && src[j] !== '\n') j++;
-      blank(i, j); i = j; continue;
-    }
-    if (c === '/' && d === '*') {
-      let j = i + 2; while (j < src.length && !(src[j] === '*' && src[j + 1] === '/')) j++;
-      blank(i, Math.min(j + 2, src.length)); i = j + 2; continue;
-    }
-    if (c === '"' || c === "'" || c === '`') {
-      const quote = c;
-      let j = i + 1;
-      while (j < src.length) {
-        if (src[j] === '\\') { j += 2; continue; }
-        if (src[j] === quote) break;
-        j++;
-      }
-      blank(i + 1, j); i = j + 1; continue;
-    }
-    i++;
-  }
-  return out.join('');
-}
 
 const ENGINE = stripCommentsAndStrings(ENGINE_RAW);
 
