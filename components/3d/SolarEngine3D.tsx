@@ -53,6 +53,7 @@ import {
   renderPlane3DEntity,
   renderPoint3DMarker,
   renderPreviewPolyline,
+  unliftAlongNormal,
   type Cart3,
   type Plane3DFrame,
 } from '@/lib/roofPlane3D';
@@ -4986,9 +4987,45 @@ function SolarEngine3D({
     const renderables = collectRoofRenderables(C, groundSeed);
     if (renderables.length === 0) return 0;
 
+    // 🚨 TAKE THE RECORD BEFORE THE LIFT — THIS FUNCTION WAS THE UNFIXED CALLER.
+    //
+    // `collectRoofRenderables` hands back RENDER points. Both of its branches
+    // are lifted by SURFACE_OFFSET_M along the face normal: the live branch
+    // reads `plane3DCesiumPtsMap`, which is written from `built.frame.projectedPts`
+    // at the bottom of this very function, and the fallback branch reads the
+    // stored `polygon3D`, which lib/roofPlane3D.ts:743 sets to `projPts` and
+    // whose comment states "the lift stays where it belongs — polygon3D,
+    // origin3D and the frame keep it".
+    //
+    // A normal is not vertical, so that lift has a horizontal component of
+    // offset·sin(tilt) pointing down-slope. Projecting lifted points to lat/lng
+    // and feeding them to `roofPlaneFromFootprint` — which correctly lifts a
+    // genuinely raw outline — applied the offset a SECOND time, and then wrote
+    // the result straight back into `plane3DCesiumPtsMap`, so every press
+    // compounded on the last. Measured at 6:12 with the real library:
+    //
+    //     press 1:  plan drift  5.39 cm  ·  eave ratchet 10.73 cm
+    //     press 3:  plan drift 16.18 cm  ·  eave ratchet 32.18 cm
+    //     press 5:  plan drift 26.97 cm  ·  eave ratchet 53.63 cm
+    //
+    // `vertices` and `pitch` are both in SIGNED_FIELDS, so this did not merely
+    // look wrong — the autosave fired and persisted it, into the plan record
+    // the permit site plan and the CAD engine read. The two halves of a gable
+    // carry OPPOSITE azimuths, so they slide apart and the shared ridge splits
+    // by twice the drift. `joinSharedCorners`' 1.5 m tolerance is why nothing
+    // downstream ever objected.
+    //
+    // lib/roofPlane3D.ts:626-650 already documents this exact class and names
+    // the callers that were fixed — buildRoofPlane3D, Stitch and Square Up.
+    // This one re-fits points that are already lifted and was not on that list.
+    // Un-lifting is a pure translation along each face's own normal, so tilt and
+    // azimuth are untouched and a gable's halves move back TOWARDS each other.
     const rawFaces = renderables.map((rp: any) => ({
       id: rp.id as string,
-      polygon3D: rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[],
+      polygon3D: unliftAlongNormal(
+        rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })),
+        { x: rp.n.x, y: rp.n.y, z: rp.n.z },
+      ) as Cart3[],
     }));
     const azimuths = deriveAzimuthsFromSharedEdges(rawFaces, (id) => {
       const f = rawFaces.find(r => r.id === id);

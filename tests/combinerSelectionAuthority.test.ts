@@ -58,6 +58,14 @@ describe('the catalogue really does declare the pairing this turns on', () => {
   it('the IQ8 row names a combiner, and it is not the 6C', () => {
     // If this ever stops being true the rest of the file is testing a hazard
     // that no longer exists, and it should fail here saying so.
+    //
+    // 🚨 THIS PINS THE CATALOGUE, NOT THE MANUFACTURER. Enphase documents
+    // IDENTICAL IQ6/IQ7/IQ8 support on BOTH the 5/5C and the 6C, and both read
+    // "Yes" in the SOLAR ONLY column — so `compatibleWith` here is INCOMPLETE,
+    // not wrong, and microinverter family does NOT discriminate between them.
+    // Widening it is manufacturer data and changes which products are OFFERED;
+    // it must not be done to make a test pass. Nothing in this file may be read
+    // as "an IQ8 system takes a 5C" — that is an installer decision.
     expect(IQ8, 'no Enphase IQ8 microinverter in the catalogue').toBeTruthy();
     expect(Array.isArray((IQ8 as any).compatibleWith)).toBe(true);
     expect((IQ8 as any).compatibleWith).toContain('enphase-iq-combiner-5');
@@ -163,5 +171,73 @@ describe('every caller now resolves the SAME device', () => {
     }
     expect(inlineLookups, `these still re-derive the pairing inline: ${inlineLookups.join(', ')}`)
       .toEqual([]);
+  });
+});
+
+describe('the INPUT CONTRACT — identity is sent as an id, not as a drawing label', () => {
+  /**
+   * THE LIVE DEFECT RAY REPORTED: "The SLD is currently showing an IQ Combiner
+   * 6C. I am still installing IQ Combiner 5C."
+   *
+   * `app/engineering/page.tsx` built the SLD payload with
+   * `inverterModel: \`${invData.manufacturer} ${invData.model}\`` — a
+   * CONCATENATION made for a drawing label — and the route then used that same
+   * string to look the inverter up. The route only splits the manufacturer back
+   * off when `inverterManufacturer` is empty, and page.tsx sends it populated,
+   * so the model stayed "Enphase IQ8M", the exact-match lookup missed, the
+   * pairing came back `undefined`, and `?? getBosDevice('enphase-iq-combiner-6c')`
+   * chose a product nobody selected.
+   *
+   * The id was in scope the whole time — `invData` came from
+   * `getInvById(firstInv.inverterId, …)`.
+   */
+  it('🚨 the concatenated display form MISSES and the id HITS — the defect, reproduced', () => {
+    const display = `${IQ8.manufacturer} ${IQ8.model}`;            // "Enphase IQ8M"
+    // The route's own call shape: (manufacturer, model, id?).
+    const viaDisplayString = combinerCompatibilityFor(IQ8.manufacturer, display, undefined);
+    const viaId            = combinerCompatibilityFor(IQ8.manufacturer, display, (IQ8 as any).id);
+
+    expect(viaDisplayString, 'the display string must still miss — that is the hazard').toBeUndefined();
+    expect(viaId, 'the id must resolve the pairing the display string could not').toEqual((IQ8 as any).compatibleWith);
+    expect(viaId).not.toEqual(viaDisplayString);
+  });
+
+  it('and the two answers select DIFFERENT devices, which is why it reached the drawing', () => {
+    const display = `${IQ8.manufacturer} ${IQ8.model}`;
+    const fromString = resolveIntegratedEquipment(ctx({
+      compatibleCombinerIds: combinerCompatibilityFor(IQ8.manufacturer, display, undefined),
+    }));
+    const fromId = resolveIntegratedEquipment(ctx({
+      compatibleCombinerIds: combinerCompatibilityFor(IQ8.manufacturer, display, (IQ8 as any).id),
+    }));
+    expect(fromString.brains?.model).not.toBe(fromId.brains?.model);
+    // Deliberately NOT asserting WHICH model each is. Pinning "the id gives a
+    // 5C" would lock a golden to a product inferred from an incomplete
+    // catalogue, which is the very thing this work exists to stop. What is
+    // being proved is that a lookup miss silently changed the answer.
+  });
+
+  it('page.tsx sends the inverter id in the SLD payload', () => {
+    // Structural: the payload is built inside a ~16k-line component and cannot
+    // be driven from a unit test. Anchored on the SLD payload's own
+    // `combinerId:` line so it cannot be satisfied by an unrelated `inverterId`
+    // elsewhere in the file — there are many.
+    const src = stripCommentsAndStrings(
+      readFileSync(join(__dirname, '..', 'app', 'engineering', 'page.tsx'), 'utf8'),
+    );
+    const anchor = src.indexOf('combinerId:     config.combinerId || undefined');
+    expect(anchor, 'the SLD payload anchor was not found — re-anchor this guard').toBeGreaterThan(-1);
+    const window = src.slice(Math.max(0, anchor - 1_200), anchor);
+    expect(window, 'the SLD payload must carry inverterId, not just the display string')
+      .toMatch(/inverterId:\s*firstInv\?\.inverterId/);
+  });
+
+  it('the route prefers the id over the strings when one is supplied', () => {
+    const route = stripCommentsAndStrings(
+      readFileSync(join(__dirname, '..', 'app', 'api', 'engineering', 'sld', 'route.ts'), 'utf8'),
+    );
+    // The third argument must be wired through; without it the payload change
+    // above would be inert.
+    expect(route).toMatch(/combinerCompatibilityFor\([\s\S]{0,200}?body\.inverterId/);
   });
 });

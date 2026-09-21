@@ -6421,6 +6421,22 @@ function EngineeringPageInner() {
           dcOCPD:         cs.isString ? (cs.strings[0]?.ocpdAmps ?? sc?.ocpdPerString ?? 20) : 20,
           inverterModel:  invData ? `${invData.manufacturer} ${invData.model}` : 'String Inverter',
           inverterManufacturer: invData?.manufacturer || '',
+          // 🚨 THE IDENTITY, NOT A DISPLAY STRING. `inverterModel` above is a
+          // CONCATENATION — "Enphase IQ8M" — built for a drawing label. The
+          // route also uses it to look the inverter up, and its exact-match
+          // lookup misses on the concatenated form (the split at the route only
+          // runs when `inverterManufacturer` is empty, and it is not). That miss
+          // returned `undefined` compatibility, which fell into a hard-coded
+          // `?? getBosDevice('enphase-iq-combiner-6c')` — so the SLD printed an
+          // IQ Combiner 6C for a job fitted with a 5C, purely because an id was
+          // in scope and a string was sent instead.
+          //   model="IQ8M"          -> pairing FOUND     -> 5C
+          //   model="Enphase IQ8M"  -> pairing undefined -> 6C   (the live bug)
+          // `mountingSystemId` is already sent the same way further down; this
+          // is that pattern. It fixes the INPUT CONTRACT only — it does not
+          // decide which combiner the installer is fitting. Compatibility is
+          // not selection, and the selection authority is a separate build.
+          inverterId:     firstInv?.inverterId || undefined,
           // Operator combiner override -> resolveIntegratedEquipment's
           // overrideDeviceIds path. Empty string means auto-resolve.
           combinerId:     config.combinerId || undefined,

@@ -1,7 +1,58 @@
 # SolarPro 3D — the consolidated interaction model
 
-**Date:** 2026-09-21 · **Status:** PROPOSAL, pre-adversary. Three Step-0 defects
-are already fixed and shipped (§9); nothing else here is built.
+**Date:** 2026-09-21 · **Status:** PROPOSAL, **post-adversary**. Four Step-0
+defects are fixed and shipped (§9); nothing else here is built.
+
+> 🚨 **§0 — WHAT THE ADVERSARY OVERTURNED.** Five adversaries plus a synthesis
+> attacked this document. Their verdict: *not safe to start at §10 step 1 as
+> written.* Seven of my claims were factually wrong; the corrections are folded
+> into the sections below and listed here so nothing is quietly rewritten.
+>
+> 1. **The biggest finding in the whole exercise was not in this document.**
+>    `applyBuildingShape` was the unfixed caller of the SURFACE_OFFSET_M
+>    double-lift — a live, cumulative, *persisted* corruption of the plan record
+>    the permit site plan reads. I measured it: **5.39 cm of plan slide and
+>    10.73 cm of eave ratchet per press at 6:12, linear in the number of
+>    presses.** Fixed as Step 0b (§9(5)).
+> 2. **§11 was backwards.** I said a pure height edit is unsigned and silently
+>    dropped by the autosave. False: `applyBuildingShape` re-derives the
+>    outline, re-measures orientation and emits `vertices`, `pitch` and
+>    `azimuth` — all three signed — so the save *fires*. It was not losing the
+>    edit; it was persisting a corrupted one. Diagnosing a bug that was not
+>    there is exactly what hid the one that was.
+> 3. **§1's table was wrong about the same function.** "The outline is the
+>    input" — it is not; the input is the render-lifted cache. So the claim that
+>    all five writers preserve the footprint *by construction* was false: one of
+>    them moved it every press.
+> 4. **§3's "single drillPick" is not a thing.** There are two pick mechanisms,
+>    and `pickRoofFaceAtScreen` is deliberately *not* a scene pick — that is the
+>    fix for the defect Ray personally reported ("I can see the planes but
+>    cannot select them"), because a marked-but-unpanelled face renders as one
+>    polyline with no polygon to hit. Merging them naively re-ships it.
+> 5. **§10 step 1 is not implementable as written.** `lib/3d/faceHitTest.ts` has
+>    zero imports and cannot see a scene or depth buffer; the occlusion test
+>    belongs in `pickRoofFaceAtScreen`, which owns the viewer, and `pickFaces`
+>    already returns `distanceM` per hit as the seam.
+> 6. **§11's section seeding named the wrong tolerance and a graph that does not
+>    exist.** `buildWalls` computes a per-edge boolean and never records which
+>    face matched, so connected components is new code; and 0.35 m is documented
+>    in that very file as the *wrong* number for grouping — 1.6 m exists because
+>    at 0.35 m "both came out SOUTH" on every hand trace. On fallback roofs the
+>    0.35 m graph has no edges at all, so every face becomes its own section.
+> 7. **§11's "no migration needed" is false as written.** There is no free-form
+>    layout JSON: the layout route destructures the body explicitly and warns
+>    that a field missing from that destructure "is dropped with no error". A
+>    top-level `sections` array is silently discarded. A `sectionId` **on each
+>    RoofPlane** does survive, because `roofPlanes` is passed through whole.
+> 8. **§4 and §8 overstated `onRoofPlanesStitched`.** Its handler is a `map` over
+>    existing planes, so an update whose id is not already in `roofPlanes` is
+>    discarded *and still logged as success*. It cannot create. Gable/Hip/Block
+>    create, so §8's prescription would produce a handler that fires and changes
+>    nothing. Deletion has **no channel at all** — no `onRoofPlaneDeleted`
+>    exists — so §4's DELETE has no canonical path to assemble from.
+>
+> Surviving intact under attack: §2(a)'s algebra, §2(b), §2(d), §6 in full, §7's
+> "never mounted", §8's dead-code inventory, and §9(2)–(3).
 
 > Eight UX workers audited this. One adversary attacked their findings. This
 > document is **not** a concatenation of the nine — it is my synthesis, and where
@@ -422,6 +473,44 @@ does not — E2E records that with Building ON, a panel click selects the roof f
 behind it. The comment now records the truth and marks it as **recorded, not
 endorsed**: resolving the routing difference is §3's job.
 
+**(5) 🚨 STEP 0b — `applyBuildingShape` was corrupting the permit plan record,
+cumulatively, on every press. Found by the adversary, measured by me, fixed.**
+
+`collectRoofRenderables` returns RENDER points. Both its branches are lifted
+`SURFACE_OFFSET_M` along the face normal — the live branch reads
+`plane3DCesiumPtsMap`, written from `built.frame.projectedPts` at the bottom of
+`applyBuildingShape` itself; the fallback branch reads the stored `polygon3D`,
+which `lib/roofPlane3D.ts:743` sets to `projPts` under a comment stating *"the
+lift stays where it belongs — polygon3D, origin3D and the frame keep it"*.
+
+A normal is not vertical. Projecting those points to lat/lng and feeding them to
+`roofPlaneFromFootprint` — which correctly lifts a *genuinely raw* outline —
+applied the offset a second time, and the result was written straight back into
+the same cache, so presses compounded. Measured against the real library at 6:12:
+
+| presses | plan slide | eave ratchet |
+|---|---|---|
+| 1 | 5.39 cm | 10.73 cm |
+| 3 | 16.18 cm | 32.18 cm |
+| 5 | 26.97 cm | 53.63 cm |
+
+Exactly `0.12·sin(tilt)` and `0.12·cos(tilt)` per press, linear. `vertices` and
+`pitch` are both in `SIGNED_FIELDS`, so this was not a rendering artefact — the
+autosave fired and persisted it into the plan record the permit site plan and the
+CAD engine read. A gable's two halves carry opposite azimuths, so they slide
+apart and the shared ridge **splits by twice the drift**; `joinSharedCorners`'
+1.5 m tolerance is why nothing downstream ever objected.
+
+`lib/roofPlane3D.ts:626-650` already documents this exact class and names the
+callers that were fixed — `buildRoofPlane3D`, Stitch, Square Up. This one was not
+on that list. Fixed by un-lifting along each face's own normal before the plan
+record is taken. `tests/applyBuildingShapeDatum.test.ts` (6) reproduces the
+defect numerically, proves it is cumulative, and proves twenty presses now move
+the record by **less than a millimetre**.
+
+This affects **both providers identically** — `collectRoofRenderables` has no
+source filter — so it is a fix on the Google path too, not a change to it.
+
 ---
 
 ## 10. Build order
@@ -431,7 +520,8 @@ Each step is independently verifiable and leaves the product no worse.
 | # | step | why here |
 |---|---|---|
 | **0** | ~~duplicate handler registrations · inverted scope message · panel/face co-selection~~ | **DONE** (§9) |
-| 1 | Normalise the wheel handler; add the occlusion test to `pickFace` | Every recovery gesture below assumes zoom works and empty-click clears. Neither does. |
+| **0b** | ~~`applyBuildingShape` double-lift~~ | **DONE** (§9(5)). A live persisted corruption outranks every planned item. |
+| 1 | Normalise the wheel handler; add the occlusion test **in `pickRoofFaceAtScreen`**, not in `faceHitTest.ts` — that module has zero imports and cannot see a scene; `pickFaces` already returns `distanceM` as the seam | Every recovery gesture below assumes zoom works and empty-click clears. Neither does. |
 | 2 | One `resolveSelectTarget`; wall selection; panel priority in both modes; hover pre-highlight through the **same** function | Removes the last false system images. No geometry touched. |
 | 3 | Close the unscoped ALL-FACES rewrite; give `applyBuildingShape` an explicit azimuth policy | The real Google breach. Must precede any new writer. |
 | 4 | **The history authority over the canonical payload**, + fix `onSave` | Nothing reversible ships before this. §6. |
