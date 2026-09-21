@@ -385,6 +385,89 @@ export function polygonFromVerticesOnFrame(
 }
 
 /**
+ * The ellipsoidal height at which a given lat/lng sits ON a plane.
+ *
+ * 🚨 VERTICALLY, NOT ALONG THE NORMAL — the distinction that costs 0.8 m at 25°
+ * on a 4.5 m face. `latLngToECEF` is affine in height along the geodetic
+ * normal, so two samples give the exact crossing with no iteration.
+ *
+ * Returns null when the plane is vertical at that point (a wall, not a roof),
+ * rather than dividing by ~0 and returning a confident number.
+ */
+export function planeHeightAtLatLng(
+  origin: { x: number; y: number; z: number },
+  n: { x: number; y: number; z: number },
+  lat: number,
+  lng: number,
+): number | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const h0 = ecefToLatLng(origin).height;
+  const signed = (pt: { x: number; y: number; z: number }) =>
+    (pt.x - origin.x) * n.x + (pt.y - origin.y) * n.y + (pt.z - origin.z) * n.z;
+  const fa = signed(latLngToECEF(lat, lng, h0));
+  const fb = signed(latLngToECEF(lat, lng, h0 + 1));
+  const slope = fb - fa;
+  if (!Number.isFinite(slope) || Math.abs(slope) < 1e-9) return null;
+  const h = h0 - fa / slope;
+  return Number.isFinite(h) ? h : null;
+}
+
+/**
+ * Give a panel back the elevation a lossy record dropped.
+ *
+ * 🚨 WHY THIS EXISTS. `app/api/projects/[id]/layout/route.ts` trimmed `height`
+ * out of every version snapshot, on the premise that omitted fields are
+ * "re-computed at render time". Nothing re-computes it. That was fixed forward,
+ * but every snapshot taken BEFORE the fix still has height-less panels — and
+ * restoring one writes them over the live design. Before `hasUsableElevation`
+ * the restored array was drawn at sea level; after it, the array is not drawn
+ * at all and the route reports success. Both are silent.
+ *
+ * The repair is deterministic and uses the same authority as placement: a panel
+ * sits one mount stack above its own plane, so its height at its own lat/lng is
+ * the height of the module plane there. Nothing is guessed about WHERE the
+ * panel is — only its elevation is recovered, from the plane it already names.
+ *
+ * A panel that names no plane, or names one that is missing or has no 3D frame,
+ * is NOT repaired and NOT invented. It comes back in `unrepairable` so the
+ * caller can refuse rather than write a design that cannot be drawn.
+ */
+export function repairPanelElevations(
+  panels: readonly PlacedPanel[],
+  roofPlanes: readonly RoofPlane[] | undefined | null,
+  mountingSystemId: string | null | undefined,
+  groundElevM = 0,
+): { panels: PlacedPanel[]; repaired: string[]; unrepairable: string[] } {
+  const repaired: string[] = [];
+  const unrepairable: string[] = [];
+  const byId = new Map<string, RoofPlane>();
+  for (const p of roofPlanes ?? []) if (p?.id) byId.set(String(p.id), p);
+  const stack = moduleStackHeightM(mountingSystemId);
+
+  const out = (panels ?? []).map(panel => {
+    if (hasUsableElevation(panel)) return panel;
+    const plane = panel.planeId ? byId.get(String(panel.planeId)) : undefined;
+    if (!plane) { unrepairable.push(String(panel.id)); return panel; }
+    let geom;
+    try { geom = resolvePlaneGeometry(plane, groundElevM); }
+    catch { unrepairable.push(String(panel.id)); return panel; }
+    const n = geom.ecefFrame3D.n;
+    // The MODULE plane: the face, offset one mount stack along its normal.
+    const moduleOrigin = {
+      x: geom.origin3D.x + n.x * stack,
+      y: geom.origin3D.y + n.y * stack,
+      z: geom.origin3D.z + n.z * stack,
+    };
+    const h = planeHeightAtLatLng(moduleOrigin, n, panel.lat, panel.lng);
+    if (h === null) { unrepairable.push(String(panel.id)); return panel; }
+    repaired.push(String(panel.id));
+    return { ...panel, height: h };
+  });
+
+  return { panels: out, repaired, unrepairable };
+}
+
+/**
  * WHERE IS THIS FACE? — one answer, for placement and for rendering.
  *
  * 🚨 THE PLACEMENT ENGINE AND THE RENDERER USED TO DECIDE THIS SEPARATELY, AND

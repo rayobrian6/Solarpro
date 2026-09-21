@@ -37,6 +37,7 @@ import { describe, it, expect } from 'vitest';
 import { buildRoofPlane3D, latLngToECEF } from '@/lib/roofPlane3D';
 import {
   buildSurfaceGrid, computeEcefFrameForLegacyPlane, resolvePlaneGeometry, extendRow, addRow,
+  repairPanelElevations, hasUsableElevation,
 } from '@/lib/surfaceGeometry3D';
 import { moduleStackHeightM } from '@/lib/roofMountDatum';
 import type { RoofPlane } from '@/types';
@@ -359,4 +360,100 @@ describe('every placement path in the file resolves the face the same way', () =
       });
     }
   }
+});
+
+describe('a version snapshot that lost its panel elevations', () => {
+  /**
+   * 🚨 THE SNAPSHOT FIX WAS FORWARD-ONLY, AND I CALLED IT CLOSED.
+   *
+   * The layout route used to strip `height` out of every version snapshot. That
+   * is fixed, but every snapshot taken BEFORE the fix still carries height-less
+   * panels — and restoring one writes them over the live design. Drawn at sea
+   * level before `hasUsableElevation`; not drawn AT ALL after it; `success:
+   * true` either way.
+   *
+   * `repairPanelElevations` recovers the elevation from the plane the panel
+   * already names, using the same rule as placement: one mount stack above the
+   * face. It invents nothing about WHERE the panel is.
+   */
+  const MOUNT = 'ironridge-xr100';
+
+  function filled() {
+    const face = tracedFace();
+    const panels = buildSurfaceGrid({
+      plane: face, groundElevM: GROUND_M, orientation: 'portrait',
+      eaveSetbackM: 0.3, ridgeSetbackM: 0.3, sideSetbackM: 0.3,
+      panelSpacingM: 0, rowSpacingM: 0, layoutId: 'snap', wattage: 400,
+      mountingSystemId: MOUNT,
+    } as never);
+    return { face, panels };
+  }
+
+  it('the fixture is a real filled face — the repair has something to recover', () => {
+    const { panels } = filled();
+    expect(panels.length).toBeGreaterThan(10);
+    expect(panels.every(p => hasUsableElevation(p))).toBe(true);
+  });
+
+  it('🚨 a height-less panel set is restored to the SAME elevations it had', () => {
+    const { face, panels } = filled();
+    // Exactly what the old trim produced: every field but `height`.
+    const stripped = panels.map(p => { const { height, ...rest } = p as never as Record<string, unknown>; void height; return rest; });
+
+    const r = repairPanelElevations(stripped as never, [face], MOUNT, GROUND_M);
+    expect(r.unrepairable, 'every panel names this plane, so none is unrepairable').toEqual([]);
+    expect(r.repaired.length, 'every panel needed repair').toBe(panels.length);
+    expect(r.panels.every(p => hasUsableElevation(p)), 'and every one has an elevation now').toBe(true);
+
+    // 🚨 THE STRONG FORM: not "near the roof" but the SAME NUMBER, to the only
+    // precision the record can carry. The repair reads the same authority the
+    // placement engine wrote from, so the round trip is lossless EXCEPT for the
+    // one thing the snapshot genuinely quantises: `lat`/`lng` are stored at 7
+    // decimal places while `height` kept full precision. Recovering the height
+    // at the ROUNDED position moves it by the horizontal error times the slope:
+    //
+    //     (0.5e-7 deg) x 111320 m/deg x sqrt(2)  =  7.87 mm horizontally
+    //     7.87 mm x tan(25 deg)                  =  3.67 mm of height
+    //
+    // Measured: 2.1 mm. The bound is derived from the quantum, not chosen to
+    // make this pass — a real regression is orders larger (31 m, 34 m, 0.12 m
+    // are the failures this family has produced).
+    const ROUNDING_HORIZ_M = (Math.pow(10, -7) / 2) * M_LAT * Math.SQRT2;
+    const TOL_M = ROUNDING_HORIZ_M * Math.tan(25 * DEG) + 1e-5;
+    for (let i = 0; i < panels.length; i++) {
+      expect(Math.abs(r.panels[i].height! - panels[i].height!),
+        `panel ${panels[i].id} came back ${r.panels[i].height!.toFixed(4)} m, was ${panels[i].height!.toFixed(4)} m`,
+      ).toBeLessThan(TOL_M);
+    }
+  });
+
+  it('🚨 a panel that names NO plane is refused, not invented', () => {
+    const { face, panels } = filled();
+    const stripped = panels.map((p, i) => {
+      const { height, ...rest } = p as never as Record<string, unknown>;
+      void height;
+      return i === 2 ? { ...rest, planeId: undefined } : rest;
+    });
+    const r = repairPanelElevations(stripped as never, [face], MOUNT, GROUND_M);
+    expect(r.unrepairable.length, 'the orphan panel must be reported, not given a height').toBe(1);
+    expect(r.unrepairable[0]).toBe(String(panels[2].id));
+  });
+
+  it('🚨 a panel whose plane is MISSING from the snapshot is refused too', () => {
+    const { panels } = filled();
+    const stripped = panels.map(p => { const { height, ...rest } = p as never as Record<string, unknown>; void height; return rest; });
+    const r = repairPanelElevations(stripped as never, [], MOUNT, GROUND_M);
+    expect(r.unrepairable.length, 'no planes at all means nothing is repairable').toBe(panels.length);
+    expect(r.repaired).toEqual([]);
+  });
+
+  it('a panel that already HAS an elevation is left exactly alone', () => {
+    const { face, panels } = filled();
+    const r = repairPanelElevations(panels as never, [face], MOUNT, GROUND_M);
+    expect(r.repaired, 'nothing needed repair').toEqual([]);
+    expect(r.unrepairable, 'and nothing was unrepairable').toEqual([]);
+    for (let i = 0; i < panels.length; i++) {
+      expect(r.panels[i].height).toBe(panels[i].height);
+    }
+  });
 });

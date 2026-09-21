@@ -122,6 +122,7 @@ export const LAYOUT_REFUSAL_CODES = [
   'LAYOUT_ARCHIVE_UNSTORABLE',
   'LAYOUT_COORDS_MISMATCH',
   'LAYOUT_COORDS_UNPLACED',
+  'LAYOUT_RESTORE_UNPLACEABLE',
 ] as const;
 
 export type LayoutRefusalCode = (typeof LAYOUT_REFUSAL_CODES)[number];
