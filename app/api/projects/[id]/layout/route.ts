@@ -232,44 +232,38 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }
 
     // Save version snapshot (async, non-blocking for response).
-    // PERF FIX: Strip heavy per-panel computed fields (ECEF vectors, legacy pixel coords)
-    // before storing. These are re-computed at render time and bloat each snapshot row.
-    // We retain all fields needed for restore: lat/lng, tilt, azimuth, wattage, planeId,
-    // gridRow/gridCol, orientation, systemType, arrayId, and the metric coordinate fields.
-    const trimmedPanels = (savedLayout.panels ?? []).map((p) => ({
-      id: p.id,
-      layoutId: p.layoutId,
-      lat: p.lat,
-      lng: p.lng,
-      xFeet: p.xFeet,
-      yFeet: p.yFeet,
-      widthFeet: p.widthFeet,
-      heightFeet: p.heightFeet,
-      tilt: p.tilt,
-      azimuth: p.azimuth,
-      wattage: p.wattage,
-      bifacialGain: p.bifacialGain,
-      row: p.row,
-      col: p.col,
-      systemType: p.systemType,
-      arrayId: p.arrayId,
-      orientation: p.orientation,
-      planeId: p.planeId,
-      gridRow: p.gridRow,
-      gridCol: p.gridCol,
-      placementType: p.placementType,
-      layoutSource: p.layoutSource,
-      // Note: ecefNx/Ny/Nz, ecefUx/Uy/Uz, x, y, xMeters, yMeters intentionally omitted
-      // (re-computed at render time — not needed for version restore)
-    }));
-    const trimmedLayout = { ...savedLayout, panels: trimmedPanels };
+    //
+    // 🚨 THE TRIM WAS REMOVED. IT MADE THE SNAPSHOT UNRESTORABLE.
+    //
+    // It dropped the per-panel ECEF vectors, `frameQuat`, and the metric UV
+    // offsets, on the premise — stated in its own comment, and repeated in the
+    // first attempt at fixing it — that those are "re-computed at render time".
+    // **Nothing recomputes them.** They are computed once, at PLACEMENT time,
+    // and read straight back out:
+    //
+    //   renderRoofRails FILTERS on isFinite(ecefNx) && isFinite(ecefUx), so a
+    //     restored version draws NO RAILS at all;
+    //   addPanelEntity prefers `frameQuat` when present, so a panel the user
+    //     rotated with the grab tool comes back UNROTATED — their work, silently
+    //     undone by a restore;
+    //   collectRoofRenderables reads ecefUx/ecefNx to recover a plane frame;
+    //   addRow / extendRow read xMeters / yMeters to rebuild the UV grid.
+    //
+    // `height` was dropped too, which before `hasUsableElevation` restored the
+    // whole array to sea level and after it made the array invisible.
+    //
+    // The trim existed as a "PERF FIX" against row size. Measured: the dropped
+    // fields are about a dozen numbers per panel, ~11 KB for a 55-panel design.
+    // A snapshot that cannot restore the design it snapshots is not worth that,
+    // and the honest place to bound version growth is a retention policy, not a
+    // lossy record that looks complete.
     saveProjectVersion({
       projectId,
       userId: user.id,
       snapshot: {
         projectId,
         projectName: project.name,
-        layout:      trimmedLayout,
+        layout:      savedLayout,
         savedAt:     new Date().toISOString(),
       },
       panelsCount:   totalPanels,
@@ -318,6 +312,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
       },
     });
   } catch (error: unknown) {
+    // 🚨 A DELIBERATE REFUSAL IS NOT A DATABASE HICCUP — and the check for one
+    // now lives in `handleRouteDbError` itself (lib/db/core.ts), because a copy
+    // HERE is what let LAYOUT_COORDS_MISMATCH fall through to 503 while its two
+    // siblings were handled, and left the other three routes that call
+    // `upsertLayout` with no handling at all.
     return handleRouteDbError('[POST /api/pr', error);
   }
 }

@@ -98,6 +98,41 @@ export { DbConfigError } from '@/lib/db-ready';
 // ============================================================
 
 /**
+ * DELIBERATE REFUSALS — the codes `upsertLayout` throws when it will not write.
+ *
+ * 🚨 THESE ARE NOT DATABASE ERRORS AND MUST NEVER BE REPORTED AS ONE.
+ * Each is a permanent, considered refusal to destroy the user's work, and it
+ * stays refused until a human does something about it. `handleRouteDbError`
+ * classifies everything that is not a `DbConfigError` as **503 DB_STARTING** —
+ * a status its own comment calls transient and self-resolving on retry — so a
+ * refusal surfaced as "Service temporarily unavailable. Please try again in a
+ * moment." and the user retried forever.
+ *
+ * 🚨 AND THE LIST IS HERE BECAUSE ENUMERATING IT AT A CALL SITE DOES NOT WORK.
+ * The layout route used to carry its own copy naming two of these three, so
+ * LAYOUT_COORDS_MISMATCH — thrown by the SAME function — fell through to 503;
+ * and `/api/production`, `/api/engineering/preliminary` and the admin tools
+ * handled none of them at all. Four routes call `upsertLayout`; one of them
+ * handled two thirds of the cases. Recognising the refusal HERE, in the handler
+ * every route already delegates to, is the only version of this fix that a new
+ * route cannot forget.
+ */
+export const LAYOUT_REFUSAL_CODES = [
+  'LAYOUT_SUBSYSTEM_WIPE',
+  'LAYOUT_ARCHIVE_UNSTORABLE',
+  'LAYOUT_COORDS_MISMATCH',
+  'LAYOUT_COORDS_UNPLACED',
+] as const;
+
+export type LayoutRefusalCode = (typeof LAYOUT_REFUSAL_CODES)[number];
+
+/** The refusal code an error carries, or null when it is not a refusal. */
+export function layoutRefusalCode(error: unknown): LayoutRefusalCode | null {
+  const msg = error instanceof Error ? error.message : String(error);
+  return LAYOUT_REFUSAL_CODES.find(c => msg.startsWith(c)) ?? null;
+}
+
+/**
  * handleRouteDbError — standardized DB error handler for all API routes.
  *
  * Maps DbConfigError → 503 DB_CONFIG_ERROR (genuine misconfiguration)
@@ -116,6 +151,18 @@ export function handleRouteDbError(
   error: unknown
 ): import('next/server').NextResponse {
   const { NextResponse } = require('next/server');
+
+  // A deliberate refusal is a conflict, not a hiccup. 409 with the guard's own
+  // message, so the studio can show the reason and the operator can act on it.
+  const refusal = layoutRefusalCode(error);
+  if (refusal) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(`${routeLabel} ${refusal}:`, detail);
+    return NextResponse.json(
+      { success: false, error: detail, code: refusal, refused: true },
+      { status: 409 },
+    );
+  }
 
   if (error instanceof DbConfigError) {
     console.error(`${routeLabel} DB_CONFIG_ERROR:`, (error as Error).message);
@@ -385,6 +432,29 @@ function activeSitePlanes(row: Record<string, unknown>): Layout['roofPlanes'] {
     return planes;
   }
   const mine = planes.filter(p => { const k = (p as { siteKey?: string })?.siteKey; return !k || k === activeKey; });
+
+  // 🚨 FILTERING TO NOTHING IS NEVER THE RIGHT ANSWER.
+  //
+  // If NO plane matches the active key, the row is not "a multi-site row we can
+  // repair" — it is a row whose active key disagrees with every plane it holds,
+  // and the honest conclusion is that we do not know which is right. Returning
+  // [] hands lib/pvwatts.ts an empty array to read `roofPlanes[0].pitch` off,
+  // and logs the total loss of the roof as a "repair".
+  //
+  // The version-restore route produced exactly this: it overwrites roof_planes
+  // from a snapshot while leaving site_archives (and its activeSiteKey) naming
+  // a different property, so every restored plane was filtered out. That route
+  // is fixed to carry the archive with it — this is the backstop for every
+  // caller that has not been thought of, and for rows already in that state.
+  //
+  // Same doctrine as the unresolved-key branch above: a visible wrong answer
+  // beats an invisible missing one.
+  if (mine.length === 0) {
+    console.warn('[rowToLayout] active site key matches NO stored plane — keeping all of them rather than returning an empty roof. layout:', row.id,
+      { total: planes.length, activeKey, sites: [...keys] });
+    return planes;
+  }
+
   console.warn('[rowToLayout] multi-site roof_planes repaired on read — layout:', row.id,
     { total: planes.length, active: mine.length, sites: [...keys] });
   return mine as Layout['roofPlanes'];

@@ -469,6 +469,9 @@ export async function POST(req: NextRequest) {
     // ── Step 9: Save synthetic layout + production records ────────────────────
     // This makes the proposal page show real data immediately
     const savedFiles: string[] = [];
+    /** Set when `upsertLayout` deliberately refused the write — reported to the
+     *  caller rather than swallowed. See the catch below. */
+    let layoutRefusal: { code: string; error: string } | null = null;
 
     if (projectId && user.id) {
       try {
@@ -491,7 +494,67 @@ export async function POST(req: NextRequest) {
         });
         savedFiles.push('layout');
       } catch (e: unknown) {
-        console.warn('[preliminary] layout save failed:', (e as Error).message);
+        // 🚨 A REFUSAL IS NOT A BEST-EFFORT MISS. This catch exists so a
+        // transient save failure does not sink an onboarding calculation, and
+        // that is reasonable — but `upsertLayout` also throws DELIBERATE
+        // refusals, and swallowing one answered HTTP 200 with `savedFiles`
+        // merely missing 'layout'. The caller (BillUploadModal) reads
+        // `success` only, so the user was told the design saved when the
+        // database had refused to write it to protect another property.
+        //
+        // Silence is worse than the 503 this was meant to avoid. Transient
+        // failures stay warnings; a refusal is reported in the response so the
+        // caller can see it and a test can pin it.
+        const { layoutRefusalCode } = await import('@/lib/db/core');
+        const refusal = layoutRefusalCode(e);
+        if (refusal) {
+          console.error('[preliminary] layout save REFUSED:', (e as Error).message);
+          layoutRefusal = { code: refusal, error: (e as Error).message };
+        } else {
+          console.warn('[preliminary] layout save failed:', (e as Error).message);
+        }
+      }
+
+      // 🚨 A REFUSED LAYOUT MUST NOT BE FOLLOWED BY THE REST OF THE WRITE.
+      //
+      // Reporting the refusal in the response body was half a fix. Everything
+      // below this point kept running: `upsertProduction`, the project's
+      // `system_type`, and the engineering seed row were all written for the
+      // SYNTHETIC system, over a project whose real design the database had
+      // just refused to replace — and the response still said `success: true`.
+      // That is the same destruction through different columns, plus a
+      // success message for it.
+      //
+      // `LAYOUT_COORDS_UNPLACED` and its siblings only fire when a project
+      // already holds real placed work, which is not the onboarding case this
+      // route exists for. So a refusal here means "this is not a new project",
+      // and the right answer is the same 409 every other route gives, with the
+      // numbers the caller asked for still attached.
+      if (layoutRefusal) {
+        return NextResponse.json({
+          success: false,
+          refused: true,
+          code:    layoutRefusal.code,
+          error:   layoutRefusal.error,
+          message: 'This project already holds a saved design, so the preliminary ' +
+                   'estimate was calculated but not written to it.',
+          data: {
+            systemKw,
+            panelCount,
+            panelWatts: DEFAULTS.panelWatts,
+            annualKwh:  annualUsage,
+            productionFactor,
+            monthlyProduction,
+            costEstimate: {
+              low: costLow, high: costHigh,
+              perWattLow: COST_LOW, perWattHigh: COST_HIGH,
+              label: `$${costLow.toLocaleString()} – $${costHigh.toLocaleString()}`,
+            },
+            savedFiles,
+            layoutRefusal,
+            generatedAt: new Date().toISOString(),
+          },
+        }, { status: 409 });
       }
 
       try {
@@ -847,6 +910,11 @@ export async function POST(req: NextRequest) {
         reportText,
 
         savedFiles,   // list of what was actually saved
+        // 🚨 Present ONLY when the layout write was deliberately refused. Absent
+        // on the happy path, so a caller that ignores it is not silently told
+        // something is wrong — but a caller that checks can no longer be told
+        // the design saved when it did not.
+        ...(layoutRefusal ? { layoutRefusal } : {}),
         generatedAt:  new Date().toISOString(),
         disclaimer:   'PRELIMINARY ESTIMATE — Generated from utility bill data. Final design and pricing will be provided by a selected installation contractor.',
       },

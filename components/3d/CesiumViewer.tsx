@@ -23,9 +23,14 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { moduleStackHeightM } from '@/lib/roofMountDatum';
 import type { PlacedPanel, SolarPanel, SystemType } from '@/types';
 import { getSunPosition } from '@/lib/solarMath';
 import { buildDigitalTwin, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
+
+/** No mounting system reaches this unreferenced component; the datum's own
+ *  conservative default is the honest stand-in. */
+const DEFAULT_VIEWER_MOUNT_ID = '';
 
 interface Props {
   panels: PlacedPanel[];
@@ -458,7 +463,12 @@ export default function CesiumViewer({
           pLat >= s.boundingBox.sw.lat && pLat <= s.boundingBox.ne.lat &&
           pLng >= s.boundingBox.sw.lng && pLng <= s.boundingBox.ne.lng
         );
-        if (seg) panelElev = seg.elevation + 0.05;
+        // 🚨 THIS FILE IS UNREFERENCED — nothing imports CesiumViewer. It is left
+        // in place, but its module elevation must not be a SIXTH answer to a
+        // question lib/roofMountDatum.ts now owns: the bare `+ 0.05` here was the
+        // same z-fighting constant that WS1-013 removed from the live paths, and
+        // reviving this component with it would reintroduce the split.
+        if (seg) panelElev = seg.elevation + moduleStackHeightM(DEFAULT_VIEWER_MOUNT_ID);
       }
 
       const position = C.Cartesian3.fromDegrees(pLng, pLat, panelElev);

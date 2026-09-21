@@ -29,7 +29,8 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { PlacedPanel, RoofPlane, SolarPanel, PlacedObstruction } from '@/types';
-import { ecefToLatLng, latLngToECEF } from '@/lib/roofPlane3D';
+import { ecefToLatLng, latLngToECEF, SURFACE_OFFSET_M } from '@/lib/roofPlane3D';
+import { moduleStackHeightM } from '@/lib/roofMountDatum';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,23 +41,58 @@ const FEET_PER_METER = 3.28084;
 // Panels are placed on a mathematically flat plane (pure ECEF formula).
 // Cesium 3D tiles mesh is VISUAL ONLY — never sampled per panel.
 //
-// v48.9: Two PANEL_OFFSET constants — one per code path:
+// ── WHERE THE PANEL OFFSET WENT ─────────────────────────────────────────────
+// There used to be two constants here, and three more elsewhere, each answering
+// "how far above the roof does a module sit" with a different number:
 //
-//   PANEL_OFFSET_ECEF (0.05m) — used by buildSurfaceGridECEF, placeSinglePanel,
-//     extendRow, addRow. These functions place panels relative to origin3D which
-//     is ALREADY lifted SURFACE_OFFSET_M=0.12m above the raw mesh by roofPlane3D.ts.
-//     Total above mesh: 0.12 + 0.05 = 0.17m — correct, z-fight-free.
+//   PANEL_OFFSET_ECEF   0.05  this file  (origin3D "already lifted 0.12m")
+//   PANEL_OFFSET_LEGACY 0.18  this file  (legacy 2D path, no pre-lift)
+//   getRoofPanelOffset  0.14  SolarEngine3D, for the same roof
 //
-//   PANEL_OFFSET_LEGACY (0.18m) — used by panelPositionFromCAD and
-//     panelHeightFromCADOffset. These legacy 2D paths compute height from
-//     groundElevM + planeHeightAtCenterM directly (no SURFACE_OFFSET_M pre-lift).
-//     0.18m is the only offset so it must remain large enough to clear z-fighting.
+// So a roof carrying both auto-filled and hand-placed modules drew them at
+// different heights, and the single-panel path measured from a MODULE and then
+// added the stack again, floating each new one above its neighbours.
 //
-export const PANEL_OFFSET_ECEF   = 0.05; // v48.9: ECEF path (origin3D already lifted 0.12m)
-export const PANEL_OFFSET_LEGACY = 0.18; // v48.9: legacy 2D path (no pre-lift)
-/** @deprecated Use PANEL_OFFSET_ECEF or PANEL_OFFSET_LEGACY explicitly */
-export const PANEL_OFFSET = PANEL_OFFSET_LEGACY; // kept for any external consumers
+// The 0.05 was the tell: it is 0.17 − 0.12, a physical stack height with a
+// Z-FIGHTING CONSTANT subtracted out of it. SURFACE_OFFSET_M translates the
+// whole roof assembly — deck, modules, rails — by one vector, so it cancels
+// from every relative measurement and never belonged in a mount height.
+//
+// There is now one answer, in lib/roofMountDatum.ts, and it is keyed by the
+// mounting system because that is what physically decides it.
+//
+//     modulePosition = planeOrigin3D + normal * moduleStackHeightM(mountId)
+//
 export const LEGACY_PLANE_HEIGHT_M = 3.5; // default height above ground for 2D planes
+
+/**
+ * Does this panel carry a REAL elevation, or none at all?
+ *
+ * 🚨 ABSENCE IS NOT ZERO, AND `?? 0` TURNS IT INTO ZERO.
+ *
+ * `PlacedPanel.height` is a required `number` in the type, so every guard around
+ * it was written as defensive noise — and each one spelled the defence
+ * `p.height ?? 0`, which converts a MISSING elevation into a valid one:
+ *
+ *   lib/3d/controlLayer.ts   if (!isFinite(p.height ?? 0)) reject   // undefined -> 0 -> finite -> KEPT
+ *   SolarEngine3D            const h = panel.height ?? 0            // then drawn at h = 0
+ *
+ * Ellipsoidal zero is roughly a hundred metres below any real roof, so a panel
+ * with no elevation is rendered far underground while its neighbours sit
+ * correctly — "the panels are not ALL rendering above the roof". The array looks
+ * partly broken and the count is right, because nothing rejected it.
+ *
+ * Runtime data can lack the field however strict the type is: `layouts.panels`
+ * is JSONB, designs predate the column, and the 2D layout engine
+ * (`generateRoofLayoutOptimized`) never writes an elevation at all.
+ *
+ * This is the same distinction as COALESCE in the layout writer and as
+ * `planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M`: a value that is absent
+ * must be treated as absent, not as the number zero.
+ */
+export function hasUsableElevation(panel: { height?: number | null }): boolean {
+  return typeof panel.height === 'number' && Number.isFinite(panel.height);
+}
 
 export const PW_PORTRAIT  = 1.134;
 export const PH_PORTRAIT  = 1.722;
@@ -294,6 +330,145 @@ export function surfaceFrameToHPR(frame: SurfaceFrame3D, azimuthDeg: number, til
  * This gives exact ECEF unit vectors so buildSurfaceGridECEF can be used without
  * any metersPerDeg approximation.
  */
+/**
+ * The plane's outline, on the plane's OWN frame.
+ *
+ * Used when a 3D face has kept `origin3D` + `ecefFrame3D` but lost `polygon3D`.
+ * Each plan-view vertex (lat/lng, no height) is dropped onto the plane along the
+ * plane's normal, which is exact: a point's position in the plane is fixed by
+ * its horizontal position and the plane equation, so nothing is guessed here —
+ * unlike rebuilding the whole frame from `planeHeightAtCenterMeters`, which is
+ * 0.0 on every face `buildRoofPlane3D` produced.
+ */
+export function polygonFromVerticesOnFrame(
+  plane: RoofPlane,
+  origin: { x: number; y: number; z: number },
+  ef: { u: { x:number;y:number;z:number }; v: { x:number;y:number;z:number }; n: { x:number;y:number;z:number } },
+): Array<{ x: number; y: number; z: number }> {
+  // 🚨 PUT THE RENDER LIFT BACK, OR THE TWO BRANCHES DISAGREE BY 5 cm IN PLAN.
+  //
+  // `plane.vertices` is the PLAN record and is taken BEFORE `SURFACE_OFFSET_M`
+  // (see `buildRoofPlane3D` — deriving it from lifted points split gable
+  // ridges). `plane.polygon3D` is taken AFTER. So dropping a vertex straight
+  // onto the plane through `origin` reproduces the UNLIFTED plan position,
+  // while a face that still has its `polygon3D` gets the LIFTED one — the same
+  // face, resolved two ways, with outlines offset by `offset·sin(tilt)` = 5.1 cm
+  // and, once the grid snaps to them, panel heights differing by another
+  // `sin(tilt)`: 2.4 cm, measured.
+  //
+  // Small, but it is the same disease as everything else here: one fact, two
+  // answers, differing by a rendering constant. Dropping onto the UNLIFTED
+  // plane and then adding the lift back reconstructs exactly what `polygon3D`
+  // would have been, so the branches agree.
+  const lift = SURFACE_OFFSET_M;
+  const base = { x: origin.x - ef.n.x * lift, y: origin.y - ef.n.y * lift, z: origin.z - ef.n.z * lift };
+  const h0 = ecefToLatLng(base).height;
+  const signedDist = (pt: { x: number; y: number; z: number }) =>
+    (pt.x - base.x) * ef.n.x + (pt.y - base.y) * ef.n.y + (pt.z - base.z) * ef.n.z;
+
+  return plane.vertices.map(vtx => {
+    // 🚨 DROP EACH VERTEX VERTICALLY, NOT ALONG THE NORMAL.
+    // Projecting along n also moves the point HORIZONTALLY, by
+    // distance·sin²(tilt) — 0.8 m at 25° on a 4.5 m face — which shrinks the
+    // outline and silently loses a row of panels. `latLngToECEF` is affine in
+    // height along the geodetic normal, so two samples give the exact crossing.
+    const a = latLngToECEF(vtx.lat, vtx.lng, h0);
+    const b = latLngToECEF(vtx.lat, vtx.lng, h0 + 1);
+    const fa = signedDist(a), fb = signedDist(b);
+    const slope = fb - fa;
+    // A vertical line parallel to the plane means a wall, not a roof — keep the
+    // sample rather than dividing by ~0.
+    if (!Number.isFinite(slope) || Math.abs(slope) < 1e-9) return a;
+    const onBase = latLngToECEF(vtx.lat, vtx.lng, h0 - fa / slope);
+    return { x: onBase.x + ef.n.x * lift, y: onBase.y + ef.n.y * lift, z: onBase.z + ef.n.z * lift };
+  });
+}
+
+/**
+ * WHERE IS THIS FACE? — one answer, for placement and for rendering.
+ *
+ * 🚨 THE PLACEMENT ENGINE AND THE RENDERER USED TO DECIDE THIS SEPARATELY, AND
+ * THEY DISAGREED. Measured on the demo roof (ground 128 m, eave 160 m,
+ * `moduleStackHeightM('ironridge-xr100')` = 0.14 m), comparing each panel to the
+ * deck `SolarEngine3D`'s restore path drew under it:
+ *
+ *     full 3D face                         panel 0.141 m above its deck   ✅
+ *     3D face that lost polygon3D          panel 31.07 m above its deck   ✈
+ *     genuine 2D face (Google segment)     panel 0.017 m above its deck   ⛏
+ *
+ * The middle one floats the array thirty metres over a deck lying on the ground.
+ * The last one is worse because it looks fine: the panel box is 0.040 m thick
+ * and centred, so its underside sits 3 mm INSIDE the roof it is standing on —
+ * every panel on every 2D-detected face, half-buried, with a correct count and
+ * no error anywhere. That is Ray's report for those faces.
+ *
+ * Both came from the same cause: `buildSurfaceGrid` resolved the face one way
+ * and the restore path resolved it another, each reasonably, neither aware of
+ * the other. So the resolution lives here, is exported, and both call it.
+ *
+ * WHAT IT GUARANTEES: the returned `polygon3D` lies ON the plane whose
+ * `origin3D` the caller will add a mount stack to. A renderer draws the deck
+ * from it with **`surfaceOffsetM: 0`** — re-fitting it through
+ * `computePlaneFromPoints3D` with the default lift applies SURFACE_OFFSET_M a
+ * SECOND time, which is the other half of this defect family.
+ */
+export function resolvePlaneGeometry(
+  plane: RoofPlane,
+  groundElevM = 0,
+): {
+  origin3D: { x: number; y: number; z: number };
+  ecefFrame3D: { u: { x:number;y:number;z:number }; v: { x:number;y:number;z:number }; n: { x:number;y:number;z:number } };
+  polygon3D: Array<{ x: number; y: number; z: number }>;
+  /** Which branch answered — for logging, and so a test can prove it is not
+   *  silently taking the legacy path for a face that has its own frame. */
+  source: 'own-frame-and-polygon' | 'own-frame-synthesised-polygon' | 'legacy-2d';
+} {
+  // 🚨 ONE MISSING FIELD USED TO DISCARD THREE GOOD ONES.
+  //
+  // This was a single all-or-nothing test: without `polygon3D` the plane fell
+  // wholesale to `computeEcefFrameForLegacyPlane`, which rebuilds the frame from
+  // `planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M` — and `buildRoofPlane3D`
+  // writes **0.0** there deliberately, as a "don't use me, use origin3D"
+  // sentinel, which `??` KEEPS. So a 3D face carrying a perfectly good origin3D
+  // and ecefFrame3D got its whole array placed at GROUND ELEVATION.
+  //
+  // It also disagreed with `placeSinglePanel`, `extendRow` and `addRow`, which
+  // ask only for `ecefFrame3D && origin3D`. Two answers to "does this face have
+  // a usable 3D frame?" in one file.
+  //
+  // The frame and the outline are separate facts and are resolved separately:
+  // the plane's own frame is used whenever it has one, and only the polygon is
+  // synthesised when the polygon is what is missing.
+  const hasOwnFrame   = Boolean(plane.origin3D && plane.ecefFrame3D);
+  const hasOwnPolygon = Boolean(plane.polygon3D && plane.polygon3D.length >= 3);
+
+  if (hasOwnFrame && hasOwnPolygon) {
+    return {
+      origin3D: plane.origin3D!,
+      ecefFrame3D: plane.ecefFrame3D!,
+      polygon3D: plane.polygon3D!,
+      source: 'own-frame-and-polygon',
+    };
+  }
+  if (hasOwnFrame) {
+    // The frame survived and the outline did not. Keep the frame — it is what
+    // decides WHERE the panels are — and drop the plan-view vertices onto it.
+    return {
+      origin3D: plane.origin3D!,
+      ecefFrame3D: plane.ecefFrame3D!,
+      polygon3D: polygonFromVerticesOnFrame(plane, plane.origin3D!, plane.ecefFrame3D!),
+      source: 'own-frame-synthesised-polygon',
+    };
+  }
+  const legacy = computeEcefFrameForLegacyPlane(plane, groundElevM);
+  return {
+    origin3D: legacy.origin3D,
+    ecefFrame3D: legacy.ecefFrame3D,
+    polygon3D: legacy.polygon3D,
+    source: 'legacy-2d',
+  };
+}
+
 export function computeEcefFrameForLegacyPlane(plane: RoofPlane, groundElevM = 0): {
   origin3D:   { x: number; y: number; z: number };
   ecefFrame3D: { u: { x:number;y:number;z:number }; v: { x:number;y:number;z:number }; n: { x:number;y:number;z:number } };
@@ -371,9 +546,36 @@ export function computeEcefFrameForLegacyPlane(plane: RoofPlane, groundElevM = 0
     return latLngToECEF(vtx.lat, vtx.lng, vtxH);
   });
 
+  // 🚨 AND THE COLUMN HAD TO BE PUT ON THE PLANE IT CLAIMS TO BE ON.
+  //
+  // The heights above are computed with a FLAT-EARTH projection — metres per
+  // degree, times cos(lat) — and then handed to `latLngToECEF`, which places
+  // them on the curved ellipsoid. The result is a polygon that is NOT coplanar
+  // with the frame this same function returns. Measured, corner distance from
+  // the declared plane:
+  //
+  //     14 x  9 m at 25 deg     5.3 mm
+  //     28 x 18 m at 25 deg    10.6 mm
+  //     14 x  9 m at 40 deg     8.0 mm
+  //
+  // It grows with face size and with pitch. Panels are placed from `origin3D`
+  // and the deck is drawn by re-fitting `polygon3D`, so the residual became a
+  // direct disagreement between the modules and the roof under them — small,
+  // but on the same axis and in the same direction as every other defect in
+  // this family, and unbounded on a large commercial face.
+  //
+  // Dropping each corner onto the plane along the normal costs nothing: the
+  // corner's plan position is what the vertex record means, and its height is
+  // whatever the plane says it is at that position.
+  // `centECEF` is the plane's centre by construction, so it is the reference.
+  const polygonOnPlane = polygon3D.map(c => {
+    const d = (c.x - centECEF.x) * nECEF.x + (c.y - centECEF.y) * nECEF.y + (c.z - centECEF.z) * nECEF.z;
+    return { x: c.x - nECEF.x * d, y: c.y - nECEF.y * d, z: c.z - nECEF.z * d };
+  });
+
   // ── Step 6: Snap origin to min-UV corner of polygon ──
   // Compute UV coords of polygon relative to centroid
-  const polyUV = polygon3D.map(p => {
+  const polyUV = polygonOnPlane.map(p => {
     const d = { x: p.x - centECEF.x, y: p.y - centECEF.y, z: p.z - centECEF.z };
     return {
       u: d.x*uECEF.x + d.y*uECEF.y + d.z*uECEF.z,
@@ -396,7 +598,7 @@ export function computeEcefFrameForLegacyPlane(plane: RoofPlane, groundElevM = 0
   return {
     origin3D,
     ecefFrame3D: { u: uECEF, v: vECEF, n: nECEF },
-    polygon3D,
+    polygon3D: polygonOnPlane,
   };
 }
 
@@ -421,6 +623,7 @@ export function panelWorldPosition(
   dims: PanelDims,
   panelSpacingM = 0.02,
   rowSpacingM   = 0.05,
+  mountingSystemId?: string,
 ): WorldPosition {
   const stepU = dims.widthM  + panelSpacingM;
   const stepV = dims.heightM + rowSpacingM;
@@ -436,7 +639,7 @@ export function panelWorldPosition(
   const cosLat = Math.cos(originLat * DEG);
   const lat    = originLat + dy / METERS_PER_DEG_LAT;
   const lng    = originLng + dx / (METERS_PER_DEG_LAT * cosLat);
-  const height = groundElevM + planeHeightAtCenterM + dz + PANEL_OFFSET;
+  const height = groundElevM + planeHeightAtCenterM + dz + moduleStackHeightM(mountingSystemId);
 
   return { lat, lng, height };
 }
@@ -448,10 +651,11 @@ export function panelHeightFromCADOffset(
   tiltDeg: number,
   xMeters: number,
   yMeters: number,
+  mountingSystemId?: string,
 ): number {
   const azRad = azimuthDeg * DEG;
   const slopeProj = xMeters * Math.sin(azRad) + yMeters * Math.cos(azRad);
-  return groundElevM + planeHeightAtCenterM + Math.tan(tiltDeg * DEG) * slopeProj + PANEL_OFFSET;
+  return groundElevM + planeHeightAtCenterM + Math.tan(tiltDeg * DEG) * slopeProj + moduleStackHeightM(mountingSystemId);
 }
 
 // ─── Plane Assignment ─────────────────────────────────────────────────────────
@@ -571,7 +775,7 @@ export function filterSetbackPanels(
  *     pos_ENU  = u * uOffset + v * vOffset
  *     lat      = originLat + pos_ENU.y / METERS_PER_DEG_LAT
  *     lng      = originLng + pos_ENU.x / (METERS_PER_DEG_LAT * cos(lat))
- *     height   = groundElev + planeHeight + pos_ENU.z + PANEL_OFFSET_LEGACY (0.18m — legacy 2D path, no pre-lift)
+ *     height   = groundElev + planeHeight + pos_ENU.z + moduleStackHeightM(mountId)
  *
  * SHARED ROTATION:
  *   All panels share the same heading/pitch/roll derived from the stable frame.
@@ -598,9 +802,14 @@ export function buildSurfaceGrid(opts: {
   customOriginLng?: number;
   // v48.12: Mixed portrait+landscape fill strategy
   layoutStrategy?: 'portrait-first' | 'landscape-first' | 'mixed';
+  /** Which racking system the modules sit on — decides how far above the deck
+   *  they are. Omitted means "unknown system", which resolves to the
+   *  conservative default in lib/roofMountDatum.ts. */
+  mountingSystemId?: string;
 }): PlacedPanel[] {
   const {
     plane, groundElevM,
+    mountingSystemId,
     orientation    = 'portrait',
     eaveSetbackM   = DEFAULT_EAVE_SETBACK_M,
     ridgeSetbackM  = DEFAULT_RIDGE_SETBACK_M,
@@ -652,27 +861,15 @@ export function buildSurfaceGrid(opts: {
   // or origin before calling buildSurfaceGridECEF.
   //
   // ONE FORMULA everywhere:
-  //   worldPos = origin3D + u*uCenter + v*vCenter + n*PANEL_OFFSET_ECEF (0.05m — ECEF path)
+  //   worldPos = origin3D + u*uCenter + v*vCenter + n*moduleStackHeightM(mountId)
   // ecefToLatLng() called ONLY at final output per panel.
-
-  // Resolve plane geometry — always produces valid origin3D + ecefFrame3D + polygon3D
-  let resolvedOrigin3D: { x:number; y:number; z:number };
-  let resolvedEcefFrame: { u:{x:number;y:number;z:number}; v:{x:number;y:number;z:number}; n:{x:number;y:number;z:number} };
-  let resolvedPolygon3D: Array<{x:number;y:number;z:number}>;
-
-  if (plane.createdFrom3D && plane.origin3D && plane.ecefFrame3D && plane.polygon3D && plane.polygon3D.length >= 3) {
-    // 3D plane-tool plane: exact geometry from picked points
-    resolvedOrigin3D   = plane.origin3D;
-    resolvedEcefFrame  = plane.ecefFrame3D;
-    resolvedPolygon3D  = plane.polygon3D;
-  } else {
-    // Legacy 2D plane: compute ECEF frame from azimuth/tilt/centroid
-    const legacy = computeEcefFrameForLegacyPlane(plane, groundElevM);
-    resolvedOrigin3D   = legacy.origin3D;
-    resolvedEcefFrame  = legacy.ecefFrame3D;
-    resolvedPolygon3D  = legacy.polygon3D;
-  }
-
+  // 🚨 ONE ANSWER TO "WHERE IS THIS FACE", FOR PLACEMENT **AND** FOR RENDERING.
+  // See `resolvePlaneGeometry`, which is exported precisely so the 3D engine's
+  // restore path draws the deck on the plane the panels were placed from.
+  const resolved = resolvePlaneGeometry(plane, groundElevM);
+  let resolvedOrigin3D = resolved.origin3D;
+  let resolvedEcefFrame = resolved.ecefFrame3D;
+  const resolvedPolygon3D = resolved.polygon3D;
   // Apply custom direction override (Set Direction tool — ENU x/y vector)
   if (typeof customDirX === 'number' && typeof customDirY === 'number' &&
       isFinite(customDirX) && isFinite(customDirY)) {
@@ -692,10 +889,34 @@ export function buildSurfaceGrid(opts: {
         z: eastECEF_.z*uNormEnu.x + northECEF_.z*uNormEnu.y,
       };
       const n_ = resolvedEcefFrame.n;
-      const vRaw_ = { x: n_.y*newU.z - n_.z*newU.y, y: n_.z*newU.x - n_.x*newU.z, z: n_.x*newU.y - n_.y*newU.x };
-      const vLen_ = Math.sqrt(vRaw_.x*vRaw_.x + vRaw_.y*vRaw_.y + vRaw_.z*vRaw_.z);
-      if (vLen_ > 1e-9) {
-        resolvedEcefFrame = { ...resolvedEcefFrame, u: newU, v: { x: vRaw_.x/vLen_, y: vRaw_.y/vLen_, z: vRaw_.z/vLen_ } };
+      // 🚨 PROJECT THE PICKED DIRECTION INTO THE PLANE BEFORE IT BECOMES THE GRID
+      // AXIS. `newU` is built from a HORIZONTAL ENU vector, and a horizontal vector
+      // does not lie in a tilted plane — it keeps a component along the normal of
+      // -sin(tilt)·sin(theta), where theta is the angle of the picked direction from
+      // the eave. Installing it verbatim as `u` (which is what this did) drove every
+      // panel off the plane by uCenter·sin(tilt)·sin(theta) ALONG THE ROW, so panels
+      // sank further into the roof the further they sat from the origin — a wedge,
+      // not a uniform offset.
+      //
+      // It could not be caught downstream either: `polyUV` is built from this same
+      // axis in buildSurfaceGridECEF, so the point-in-polygon containment test is a
+      // sheared projection of the same error and always agrees with it.
+      //
+      // Only `v` was re-derived before; `u` must be re-derived too, which is what
+      // makes the triad orthonormal rather than merely consistent.
+      const uDotN_ = newU.x*n_.x + newU.y*n_.y + newU.z*n_.z;
+      const uProj_ = { x: newU.x - n_.x*uDotN_, y: newU.y - n_.y*uDotN_, z: newU.z - n_.z*uDotN_ };
+      const uLenP_ = Math.sqrt(uProj_.x*uProj_.x + uProj_.y*uProj_.y + uProj_.z*uProj_.z);
+      // A direction parallel to the normal has no in-plane part, so there is no grid
+      // axis to derive from it — keep the frame the plane was built with rather than
+      // installing a degenerate one.
+      if (uLenP_ > 1e-9) {
+        const uHat_ = { x: uProj_.x/uLenP_, y: uProj_.y/uLenP_, z: uProj_.z/uLenP_ };
+        const vRaw_ = { x: n_.y*uHat_.z - n_.z*uHat_.y, y: n_.z*uHat_.x - n_.x*uHat_.z, z: n_.x*uHat_.y - n_.y*uHat_.x };
+        const vLen_ = Math.sqrt(vRaw_.x*vRaw_.x + vRaw_.y*vRaw_.y + vRaw_.z*vRaw_.z);
+        if (vLen_ > 1e-9) {
+          resolvedEcefFrame = { ...resolvedEcefFrame, u: uHat_, v: { x: vRaw_.x/vLen_, y: vRaw_.y/vLen_, z: vRaw_.z/vLen_ } };
+        }
       }
     }
     console.log('[SurfaceGrid] Applied custom ENU direction override');
@@ -704,9 +925,34 @@ export function buildSurfaceGrid(opts: {
   // Apply custom origin override (Set Origin tool — lat/lng)
   if (typeof customOriginLat === 'number' && typeof customOriginLng === 'number' &&
       isFinite(customOriginLat) && isFinite(customOriginLng)) {
-    const h_ = (plane.planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M) + (groundElevM ?? 0);  // v47.216: add ground elev
-    resolvedOrigin3D = latLngToECEF(customOriginLat, customOriginLng, h_);
-    console.log('[SurfaceGrid] Applied custom origin override');
+    // 🚨 THE CUSTOM ORIGIN MUST LAND ON THE PLANE, NOT AT GROUND LEVEL.
+    //
+    // `buildRoofPlane3D` stores `planeHeightAtCenterMeters: 0.0` on every 3D plane
+    // it mints, and its comment says that is safe "because buildSurfaceGrid uses the
+    // actual ECEF height (from projectedPts via origin3D)". This override was the one
+    // place that did NOT — and 0.0 is not nullish, so `?? LEGACY_PLANE_HEIGHT_M`
+    // could never fire and the whole expression collapsed to `groundElevM`. Setting
+    // an origin therefore re-based the grid to GROUND, dropping the array about a
+    // storey below the roof it belonged to. (Measured on a 25° plane 5 m above 120 m
+    // ground: 18 panels at 124.22–125.68 m became the same 18 at 119.26–120.72 m.)
+    //
+    // A lat/lng is two numbers and a point on a plane needs three, so rather than
+    // GUESS the third we take the height from the plane we already resolved and then
+    // project the point onto that plane along its normal. The result is on the plane
+    // by construction — for a tilted plane, a flat one, or a legacy 2D one — and no
+    // longer depends on a stored scalar that may be a sentinel.
+    const originLL_ = ecefToLatLng(resolvedOrigin3D);
+    const seed_     = latLngToECEF(customOriginLat, customOriginLng, originLL_.height);
+    const nO_       = resolvedEcefFrame.n;
+    const drop_     = (seed_.x - resolvedOrigin3D.x)*nO_.x
+                    + (seed_.y - resolvedOrigin3D.y)*nO_.y
+                    + (seed_.z - resolvedOrigin3D.z)*nO_.z;
+    resolvedOrigin3D = {
+      x: seed_.x - nO_.x*drop_,
+      y: seed_.y - nO_.y*drop_,
+      z: seed_.z - nO_.z*drop_,
+    };
+    console.log('[SurfaceGrid] Applied custom origin override (projected onto plane)');
   }
 
   // v48.12: MIXED LAYOUT — run portrait fill + landscape fill, merge without overlap
@@ -715,9 +961,17 @@ export function buildSurfaceGrid(opts: {
     const primaryOri:   'portrait' | 'landscape' = layoutStrategy === 'landscape-first' ? 'landscape' : 'portrait';
     const secondaryOri: 'portrait' | 'landscape' = primaryOri === 'portrait' ? 'landscape' : 'portrait';
 
+    // 🚨 mountingSystemId BELONGS HERE, AND WAS MISSING.
+    // Both recursive fills went out without it, so `moduleStackHeightM(undefined)`
+    // returned DEFAULT_MODULE_STACK_M and a hybrid-orientation face got 0.12 m
+    // while its portrait neighbours got their racking's real stack — two module
+    // heights on one roof, which is the split lib/roofMountDatum.ts exists to
+    // end, reintroduced inside the file that threads the id through. Reachable
+    // from the PER-PLANE orientation override, which is not collapsed to
+    // 'portrait' the way the global one is.
     const commonOpts = {
       plane, groundElevM, eaveSetbackM, ridgeSetbackM, sideSetbackM,
-      panelSpacingM, rowSpacingM, layoutId, wattage,
+      panelSpacingM, rowSpacingM, layoutId, wattage, mountingSystemId,
       customOriginLat, customOriginLng, customDirX, customDirY,
     };
 
@@ -783,6 +1037,7 @@ export function buildSurfaceGrid(opts: {
     wattage,
     dims,
     groundElevM,          // v47.216: forwarded for legacy plane elevation
+    mountingSystemId,     // decides the module stack height above the deck
     overrideOrigin3D:   resolvedOrigin3D,
     overrideEcefFrame:  resolvedEcefFrame,
     overridePolygon3D:  resolvedPolygon3D,
@@ -794,7 +1049,7 @@ export function buildSurfaceGrid(opts: {
  * buildSurfaceGridECEF — Pure ECEF panel placement engine for 3D-tool planes.
  *
  * Uses the ONE FORMULA:
- *   worldPos = origin3D + u*(i*stepU + w/2) + v*(j*stepV + h/2) + n*PANEL_OFFSET_ECEF (0.05m)
+ *   worldPos = origin3D + u*(i*stepU + w/2) + v*(j*stepV + h/2) + n*moduleStackHeightM(mountId)
  *
  * No lat/lng approximations inside the loop. Zero metersPerDeg error.
  * ecefToLatLng() called ONLY at the final output step per panel.
@@ -814,14 +1069,18 @@ function buildSurfaceGridECEF(opts: {
   wattage:            number;
   dims:               { widthM: number; heightM: number };
   groundElevM?:       number;  // v47.216: Cesium ellipsoidal ground elevation at site
+  mountingSystemId?:  string;  // decides module stack height — see lib/roofMountDatum.ts
   overrideOrigin3D?:  { x:number; y:number; z:number };
   overrideEcefFrame?: { u:{x:number;y:number;z:number}; v:{x:number;y:number;z:number}; n:{x:number;y:number;z:number} };
   overridePolygon3D?: Array<{x:number;y:number;z:number}>;
 }): PlacedPanel[] {
   const { plane, orientation, eaveSetbackM, ridgeSetbackM, sideSetbackM,
           panelSpacingM, rowSpacingM, layoutId, wattage, dims,
-          groundElevM: _groundElevM,
+          groundElevM: _groundElevM, mountingSystemId,
           overrideOrigin3D, overrideEcefFrame, overridePolygon3D } = opts;
+
+  // THE DATUM — one answer for every placement path in this file.
+  const mountOffsetM = moduleStackHeightM(mountingSystemId);
 
   const origin = overrideOrigin3D   ?? plane.origin3D!;
   const ef     = overrideEcefFrame  ?? plane.ecefFrame3D!;
@@ -1070,12 +1329,20 @@ function buildSurfaceGridECEF(opts: {
   const panels: PlacedPanel[] = [];
 
   for (const { uC, vC, col, row } of snappedFill) {
-    // finalPosition = origin3D + u*uC + v*vC + n*PANEL_OFFSET_ECEF (0.05m — ECEF path, origin already lifted 0.12m)
-    const wx = origin.x + ef.u.x * uC + ef.v.x * vC + ef.n.x * PANEL_OFFSET_ECEF;
-    const wy = origin.y + ef.u.y * uC + ef.v.y * vC + ef.n.y * PANEL_OFFSET_ECEF;
-    const wz = origin.z + ef.u.z * uC + ef.v.z * vC + ef.n.z * PANEL_OFFSET_ECEF;
+    // finalPosition = origin3D + u*uC + v*vC + n*moduleStackHeightM(mountId)
+    const wx = origin.x + ef.u.x * uC + ef.v.x * vC + ef.n.x * mountOffsetM;
+    const wy = origin.y + ef.u.y * uC + ef.v.y * vC + ef.n.y * mountOffsetM;
+    const wz = origin.z + ef.u.z * uC + ef.v.z * vC + ef.n.z * mountOffsetM;
 
     const { lat: panelLat, lng: panelLng, height: panelH } = ecefToLatLng({ x: wx, y: wy, z: wz });
+
+    // 🚨 A PANEL WHOSE ELEVATION DID NOT COMPUTE IS NOT A PANEL AT SEA LEVEL.
+    // This used to be stamped `height: isFinite(panelH) ? panelH : 0`, which
+    // turns a degenerate frame (a NaN anywhere in u/v/n or the origin) into a
+    // panel sitting on the WGS-84 ellipsoid, ~100 m under the building — and it
+    // DEFEATS `hasUsableElevation`, which deliberately accepts a real 0 and so
+    // cannot tell a fabricated zero from a measured one. Refuse at the source.
+    if (!Number.isFinite(panelH) || !Number.isFinite(panelLat) || !Number.isFinite(panelLng)) continue;
 
     // v48.7: xMeters/yMeters = UV offsets from plane origin (not scalar ECEF components).
     // Previously used ef.u.x*uC (only x-component of u), which gave wrong values on
@@ -1102,7 +1369,7 @@ function buildSurfaceGridECEF(opts: {
       bifacialGain:   1.0,
       row,
       col,
-      height:         isFinite(panelH) ? panelH : 0,
+      height:         panelH,
       heading:        sharedHeading,
       pitch:          sharedPitch,
       roll:           sharedRoll,
@@ -1159,7 +1426,7 @@ export function enrichRoofPlaneWith3DFrame(plane: RoofPlane): RoofPlane {
  *   rowIndex = round(dot(clickECEF - origin, v) / stepV)
  *
  * Then places the panel at the exact grid-snapped position:
- *   worldPos = origin + u*(colIndex*stepU + w/2) + v*(rowIndex*stepV + h/2) + n*PANEL_OFFSET_ECEF
+ *   worldPos = origin + u*(colIndex*stepU + w/2) + v*(rowIndex*stepV + h/2) + n*moduleStackHeightM(mountId)
  */
 export function placeSinglePanel(
   clickLat:    number,
@@ -1169,7 +1436,12 @@ export function placeSinglePanel(
   orientation: 'portrait' | 'landscape',
   layoutId:    string,
   wattage:     number,
+  mountingSystemId?: string,
+  /** Ellipsoidal ground elevation at the site. Only the legacy 2D branch needs
+   *  it, and omitting it is what put that branch at sea level. */
+  groundElevM: number = 0,
 ): PlacedPanel {
+  const mountOffsetM = moduleStackHeightM(mountingSystemId);
   const dims = getPanelDims(orientation);
   // v47.151: stepU/stepV must match buildSurfaceGridECEF (panelSpacingM=0, rowSpacingM=0).
   // Hardcoded 0.02/0.05 caused grid-snapping to use wrong cell sizes vs the initial grid.
@@ -1177,9 +1449,19 @@ export function placeSinglePanel(
   const stepV = dims.heightM;  // 0 spacing — matches buildSurfaceGrid call sites
 
   // ── Resolve ECEF frame ─────────────────────────────────────────────────
-  const { origin3D: orig, ecefFrame3D: ef } = plane.ecefFrame3D && plane.origin3D
-    ? { origin3D: plane.origin3D, ecefFrame3D: plane.ecefFrame3D }
-    : (() => { const l = computeEcefFrameForLegacyPlane(plane); return { origin3D: l.origin3D, ecefFrame3D: l.ecefFrame3D }; })();
+  // 🚨 THE LEGACY FALLBACK HERE PASSED NO GROUND ELEVATION AT ALL.
+  // `computeEcefFrameForLegacyPlane(plane)` defaults `groundElevM` to 0, so a
+  // 2D face resolved here landed `planeHeightAtCenterMeters` metres above the
+  // ELLIPSOID rather than above the site — about 128 m too low at the demo
+  // address. Its two siblings pass the value; this one did not.
+  //
+  // 🚨 AND IT HAS NO PRODUCTION CALLERS. `grep placeSinglePanel` over app,
+  // components and lib finds this definition, two comments, and nothing that
+  // calls it — `lib/3d/controlLayer.ts` reimplements the single-click path and
+  // says so. It is exercised only by tests. Recorded rather than deleted
+  // because the mount-datum ledger cites it as one of the placement paths, and
+  // a reader deserves to know which of those a user can actually reach.
+  const { origin3D: orig, ecefFrame3D: ef } = resolvePlaneGeometry(plane, groundElevM);
 
   // ── Project click onto grid axes ───────────────────────────────────────
   const clickECEF = latLngToECEF(clickLat, clickLng, clickHeight);
@@ -1195,9 +1477,9 @@ export function placeSinglePanel(
   const uCenter = colIndex * stepU + dims.widthM  / 2;
   const vCenter = rowIndex * stepV + dims.heightM / 2;
 
-  const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * PANEL_OFFSET_ECEF;
-  const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * PANEL_OFFSET_ECEF;
-  const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * PANEL_OFFSET_ECEF;
+  const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * mountOffsetM;
+  const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * mountOffsetM;
+  const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * mountOffsetM;
   const { lat: panelLat, lng: panelLng, height: panelH } = ecefToLatLng({ x: wx, y: wy, z: wz });
 
   // v47.142: Per-plane heading/pitch from resolved ECEF frame — no cross-plane inheritance
@@ -1222,7 +1504,7 @@ export function placeSinglePanel(
     bifacialGain:   1.0,
     row:            rowIndex,
     col:            colIndex,
-    height:         isFinite(panelH) ? panelH : clickHeight + PANEL_OFFSET_ECEF,
+    height:         isFinite(panelH) ? panelH : clickHeight + mountOffsetM,
     heading:        sharedHeading,
     pitch:          sharedPitch,
     roll:           0,
@@ -1248,7 +1530,7 @@ export function placeSinglePanel(
  * No reconstruction from anchor lat/lng — position is derived solely from
  * stored gridRow/gridCol indices and the plane's ECEF origin+frame:
  *
- *   worldPos = origin + u*(nextCol*stepU + w/2) + v*(maxRow*stepV + h/2) + n*PANEL_OFFSET_ECEF
+ *   worldPos = origin + u*(nextCol*stepU + w/2) + v*(maxRow*stepV + h/2) + n*moduleStackHeightM(mountId)
  *
  * This eliminates any drift from relative-to-anchor reconstruction.
  */
@@ -1259,14 +1541,18 @@ export function extendRow(
   orientation:    'portrait' | 'landscape',
   layoutId:       string,
   wattage:        number,
+  mountingSystemId?: string,
 ): PlacedPanel | null {
+  const mountOffsetM = moduleStackHeightM(mountingSystemId);
   const planePanels = existingPanels.filter(p => p.planeId === plane.id);
   if (planePanels.length === 0) return null;
 
   // ── Resolve ECEF frame ─────────────────────────────────────────────────
-  const { origin3D: orig, ecefFrame3D: ef } = plane.ecefFrame3D && plane.origin3D
-    ? { origin3D: plane.origin3D, ecefFrame3D: plane.ecefFrame3D }
-    : (() => { const l = computeEcefFrameForLegacyPlane(plane, groundElevM); return { origin3D: l.origin3D, ecefFrame3D: l.ecefFrame3D }; })();
+  // One resolution for the whole file — see `resolvePlaneGeometry`. This asked
+  // only for `ecefFrame3D && origin3D` while `buildSurfaceGrid` asked for four
+  // fields, so the same face got panels on the roof from one tool and
+  // underground from another.
+  const { origin3D: orig, ecefFrame3D: ef } = resolvePlaneGeometry(plane, groundElevM);
 
   const dims   = getPanelDims(orientation);
   // v47.151: stepU/stepV must match buildSurfaceGridECEF (panelSpacingM=0, rowSpacingM=0).
@@ -1296,10 +1582,12 @@ export function extendRow(
   // ── v48.7: Boundary check ─────────────────────────────────────────────────
   // Project polygon3D into UV space and verify the new panel fits inside.
   // Uses the same ray-cast PIP as buildSurfaceGridECEF.
-  const resolvedPoly3D = plane.polygon3D ?? (() => {
-    const l = computeEcefFrameForLegacyPlane(plane, groundElevM);
-    return l.polygon3D;
-  })();
+  // 🚨 AND THE OUTLINE MUST COME FROM THE SAME RESOLUTION AS THE FRAME.
+  // `plane.polygon3D ?? legacy` took the frame from the plane's own origin and
+  // the boundary from a GROUND-LEVEL rebuild for any face that had lost its
+  // polygon — so the new panel was placed on the roof and then tested against
+  // an outline tens of metres below it.
+  const resolvedPoly3D = resolvePlaneGeometry(plane, groundElevM).polygon3D;
   if (resolvedPoly3D && resolvedPoly3D.length >= 3) {
     const polyUV = resolvedPoly3D.map(p => ({
       u: (p.x - orig.x) * ef.u.x + (p.y - orig.y) * ef.u.y + (p.z - orig.z) * ef.u.z,
@@ -1332,10 +1620,18 @@ export function extendRow(
     }
   }
 
-  const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * PANEL_OFFSET_ECEF;
-  const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * PANEL_OFFSET_ECEF;
-  const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * PANEL_OFFSET_ECEF;
+  const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * mountOffsetM;
+  const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * mountOffsetM;
+  const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * mountOffsetM;
   const { lat: panelLat, lng: panelLng, height: panelH } = ecefToLatLng({ x: wx, y: wy, z: wz });
+
+  // 🚨 A PANEL WHOSE ELEVATION DID NOT COMPUTE IS NOT A PANEL AT SEA LEVEL.
+  // This used to be stamped `height: isFinite(panelH) ? panelH : 0`, which
+  // turns a degenerate frame (a NaN anywhere in u/v/n or the origin) into a
+  // panel sitting on the WGS-84 ellipsoid, ~100 m under the building — and it
+  // DEFEATS `hasUsableElevation`, which deliberately accepts a real 0 and so
+  // cannot tell a fabricated zero from a measured one. Refuse at the source.
+  if (!Number.isFinite(panelH) || !Number.isFinite(panelLat) || !Number.isFinite(panelLng)) return null;
 
   return {
     id:         uuidv4(), layoutId,
@@ -1351,7 +1647,7 @@ export function extendRow(
     tilt:       plane.pitch, azimuth: plane.azimuth,
     wattage, bifacialGain: 1.0,
     row:        maxRow, col: nextCol,
-    height:     isFinite(panelH) ? panelH : 0,
+    height:     panelH,
     heading:    sharedHeading,
     pitch:      sharedPitch,
     roll:       0,
@@ -1372,7 +1668,7 @@ export function extendRow(
  *
  * Then a FULL ROW is generated at that rowIndex spanning the same columns
  * as the widest existing row on the plane. Position formula:
- *   worldPos = origin + u*(col*stepU + w/2) + v*(rowIndex*stepV + h/2) + n*PANEL_OFFSET_ECEF
+ *   worldPos = origin + u*(col*stepU + w/2) + v*(rowIndex*stepV + h/2) + n*moduleStackHeightM(mountId)
  *
  * @param clickECEF  Optional ECEF position from scene.pickPosition — used for
  *                   grid-snapping rowIndex. If omitted, falls back to maxRow+1.
@@ -1385,14 +1681,18 @@ export function addRow(
   layoutId:       string,
   wattage:        number,
   clickECEF?:     { x: number; y: number; z: number },
+  mountingSystemId?: string,
 ): PlacedPanel[] {
+  const mountOffsetM = moduleStackHeightM(mountingSystemId);
   const planePanels = existingPanels.filter(p => p.planeId === plane.id);
   if (planePanels.length === 0) return [];
 
   // ── Resolve ECEF frame ──────────────────────────────────────────────────
-  const { origin3D: orig, ecefFrame3D: ef } = plane.ecefFrame3D && plane.origin3D
-    ? { origin3D: plane.origin3D, ecefFrame3D: plane.ecefFrame3D }
-    : (() => { const l = computeEcefFrameForLegacyPlane(plane, groundElevM); return { origin3D: l.origin3D, ecefFrame3D: l.ecefFrame3D }; })();
+  // One resolution for the whole file — see `resolvePlaneGeometry`. This asked
+  // only for `ecefFrame3D && origin3D` while `buildSurfaceGrid` asked for four
+  // fields, so the same face got panels on the roof from one tool and
+  // underground from another.
+  const { origin3D: orig, ecefFrame3D: ef } = resolvePlaneGeometry(plane, groundElevM);
 
   const dims   = getPanelDims(orientation);
   // v47.151: stepU/stepV must match buildSurfaceGridECEF (panelSpacingM=0, rowSpacingM=0).
@@ -1440,10 +1740,18 @@ export function addRow(
     const uCenter = refUC + (col - refCol) * stepU;
     const vCenter = refVC + (rowIndex - refRow) * stepV;
 
-    const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * PANEL_OFFSET_ECEF;
-    const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * PANEL_OFFSET_ECEF;
-    const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * PANEL_OFFSET_ECEF;
+    const wx = orig.x + ef.u.x * uCenter + ef.v.x * vCenter + ef.n.x * mountOffsetM;
+    const wy = orig.y + ef.u.y * uCenter + ef.v.y * vCenter + ef.n.y * mountOffsetM;
+    const wz = orig.z + ef.u.z * uCenter + ef.v.z * vCenter + ef.n.z * mountOffsetM;
     const { lat: panelLat, lng: panelLng, height: panelH } = ecefToLatLng({ x: wx, y: wy, z: wz });
+
+    // 🚨 A PANEL WHOSE ELEVATION DID NOT COMPUTE IS NOT A PANEL AT SEA LEVEL.
+    // This used to be stamped `height: isFinite(panelH) ? panelH : 0`, which
+    // turns a degenerate frame (a NaN anywhere in u/v/n or the origin) into a
+    // panel sitting on the WGS-84 ellipsoid, ~100 m under the building — and it
+    // DEFEATS `hasUsableElevation`, which deliberately accepts a real 0 and so
+    // cannot tell a fabricated zero from a measured one. Refuse at the source.
+    if (!Number.isFinite(panelH) || !Number.isFinite(panelLat) || !Number.isFinite(panelLng)) continue;
 
     newPanels.push({
       id:         uuidv4(), layoutId,
@@ -1459,7 +1767,7 @@ export function addRow(
       tilt:       plane.pitch, azimuth: plane.azimuth,
       wattage, bifacialGain: 1.0,
       row:        rowIndex, col,
-      height:     isFinite(panelH) ? panelH : 0,
+      height:     panelH,
       heading:    sharedHeading,
       pitch:      sharedPitch,
       roll:       0,

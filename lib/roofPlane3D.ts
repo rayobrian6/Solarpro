@@ -557,6 +557,50 @@ function polygonArea2D(pts: { u: number; v: number }[]): number {
   return Math.abs(area) / 2;
 }
 
+/**
+ * Lift a plan-view outline onto an existing plane.
+ *
+ * For each {lat, lng} it solves for the one height that puts the point exactly
+ * on the plane through `origin` with normal `normal`, by intersecting the
+ * vertical (geodetic up) line at that lat/lng with the plane.
+ *
+ * 🚨 THIS EXISTS SO THAT A PLAN-VIEW EDIT CANNOT CHANGE A PITCH.
+ * Square Up regularises a traced outline — a purely horizontal correction, since
+ * the eyeballed clicks are wrong in plan, not in slope. It used to rebuild every
+ * corner at the MEAN of the corner heights, which is a horizontal ring, so it
+ * FLATTENED every face it touched: a 25° roof came back as 0.19°, its azimuth
+ * hard-set to 180, and both were persisted. Downstream that moved PVWatts output,
+ * flipped the ASCE 7-22 wind applicability threshold (7°) and collapsed the
+ * cos(pitch) sloped-area basis to plan area.
+ *
+ * Returns null when the plane is vertical (or near enough that the intersection
+ * is numerically meaningless): a vertical line never meets a vertical plane, and
+ * inventing a height there would be worse than declining.
+ */
+export function projectOutlineOntoPlane(
+  outline: ReadonlyArray<{ lat: number; lng: number }>,
+  origin: Cart3,
+  normal: Cart3,
+): Cart3[] | null {
+  if (outline.length < 3) return null;
+  const dot = (a: Cart3, b: Cart3) => a.x * b.x + a.y * b.y + a.z * b.z;
+  const originDotN = dot(origin, normal);
+  const out: Cart3[] = [];
+  for (const v of outline) {
+    if (!Number.isFinite(v.lat) || !Number.isFinite(v.lng)) return null;
+    const base = latLngToECEF(v.lat, v.lng, 0);
+    const oneUp = latLngToECEF(v.lat, v.lng, 1);
+    // Geodetic up at this corner — unit length by construction.
+    const up = { x: oneUp.x - base.x, y: oneUp.y - base.y, z: oneUp.z - base.z };
+    const denom = dot(up, normal);
+    if (!Number.isFinite(denom) || Math.abs(denom) < 1e-6) return null;
+    const h = (originDotN - dot(base, normal)) / denom;
+    if (!Number.isFinite(h)) return null;
+    out.push(latLngToECEF(v.lat, v.lng, h));
+  }
+  return out;
+}
+
 // ─── Main Builder ─────────────────────────────────────────────────────────────
 
 /**
@@ -567,23 +611,104 @@ function polygonArea2D(pts: { u: number; v: number }[]): number {
  * This is what drives buildSurfaceGrid — the frame in localFrame3D IS
  * the grid coordinate system. Panels will be aligned with the roof edges
  * and sit above the surface (never clipped inside geometry).
+ *
+ * 🚨 `options` EXISTS BECAUSE ITS ABSENCE WAS A BUG, NOT A SIMPLIFICATION.
+ * This used to take only points, so it could ONLY ever produce a plane lifted by
+ * the default SURFACE_OFFSET_M. A caller re-fitting points that were ALREADY
+ * lifted had no way to say so — it could pass `{ surfaceOffsetM: 0 }` to
+ * computePlaneFromPoints3D for the surface it DRAWS and had no corresponding
+ * option for the plane it STORES. `squareUpTracedFaces` did exactly that, and
+ * the two answers differed by exactly 0.12 m on every press.
+ *
+ * The rule is the one computePlaneFromPoints3D already documents: a caller must
+ * pass the SAME offset to both calls, and pass 0 when the input points are
+ * themselves the output of an earlier fit.
  */
-export function buildRoofPlane3D(pts3D: Cart3[]): RoofPlane {
+/**
+ * Take the PLAN-VIEW record from points that carry the render lift.
+ *
+ * 🚨 THE ENGINEERING RECORD IS TAKEN BEFORE THE LIFT, AND THERE ARE THREE
+ * PLACES THAT HAVE TO KNOW THAT. `SURFACE_OFFSET_M` lifts a fitted plane along
+ * its NORMAL so the deck does not z-fight with the photogrammetry mesh. A
+ * normal is not vertical, so that lift has a horizontal component of
+ * `offset·sin(tilt)` pointing down-slope — and `vertices` is the plan-view
+ * record the permit site plan and the CAD engine read. Deriving it from lifted
+ * points slides every face down its own azimuth, and the two halves of a gable
+ * have OPPOSITE azimuths, so they slide apart and the shared ridge SPLITS by
+ * twice that:
+ *
+ *     4:12  (18.43°)   7.6 cm
+ *     6:12  (26.57°)  10.8 cm
+ *     10:12 (39.81°)  15.4 cm
+ *
+ * `buildRoofPlane3D` was fixed for this. **Stitch and Square Up write the plan
+ * record back too, and were not** — they hand `frame.projectedPts` straight to
+ * `ecefToLatLng`, and those points came in already lifted (which is why they
+ * re-fit with `surfaceOffsetM: 0`). So a stitched gable re-split its own ridge
+ * on the permit plan, every press.
+ *
+ * `joinSharedCorners` has a 1.5 m tolerance, so nothing downstream ever noticed.
+ */
+export function unliftAlongNormal(
+  pts: readonly Cart3[],
+  normal: Cart3,
+  liftM: number = SURFACE_OFFSET_M,
+): Cart3[] {
+  if (!liftM) return pts.map(p => ({ x: p.x, y: p.y, z: p.z }));
+  return pts.map(p => ({
+    x: p.x - normal.x * liftM,
+    y: p.y - normal.y * liftM,
+    z: p.z - normal.z * liftM,
+  }));
+}
+
+export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = {}): RoofPlane {
   if (pts3D.length < 3) {
     throw new Error(`buildRoofPlane3D: need ≥3 points, got ${pts3D.length}`);
   }
 
-  const frame = computePlaneFromPoints3D(pts3D);
+  const frame = computePlaneFromPoints3D(pts3D, options);
   const projPts = frame.projectedPts; // already offset above surface
 
-  // Vertices in lat/lng (projected, coplanar, offset above surface)
-  const vertices = projPts.map(p => {
+  // 🚨 THE PLAN-VIEW RECORD IS TAKEN BEFORE THE RENDER LIFT — IT SPLIT RIDGES.
+  //
+  // `projPts` are lifted SURFACE_OFFSET_M along the plane NORMAL, which is a
+  // rendering concern: it stops the deck z-fighting with the noisy tile mesh.
+  // A normal is not vertical, so that lift has a HORIZONTAL component of
+  // offset·sin(tilt) — and it points down-slope, i.e. along each face's own
+  // azimuth.
+  //
+  // `vertices` carry no height. They are the plan-view, engineering record: they
+  // are what lib/cad/buildCADFromSurvey.ts hands to geoPolygonToLocal and what
+  // lib/cad/roof/roofCAD.ts draws as plan polygons and setback bands. Deriving
+  // them from the LIFTED points therefore slid every face down-slope in plan by
+  // offset·sin(tilt) — and the two faces of a gable have OPPOSITE azimuths, so
+  // they slid apart and their shared ridge SPLIT by twice that:
+  //
+  //     4:12  (18.43°)   7.6 cm
+  //     6:12  (26.57°)  10.8 cm
+  //     10:12 (39.81°)  15.4 cm   (measured, and equal to 2·offset·sin(tilt))
+  //
+  // On the permit site plan. `joinSharedCorners` has a 1.5 m tolerance, so
+  // nothing downstream ever noticed.
+  //
+  // The lift stays where it belongs — `polygon3D`, `origin3D` and the frame keep
+  // it, so rendering and panel placement are untouched. Only the plan-view
+  // record is taken before it. Area, pitch and azimuth are unaffected either way:
+  // a translation along the normal is rigid, and `area` is measured in the
+  // plane's own UV basis relative to an origin that moved with it.
+  const liftM = options.surfaceOffsetM ?? SURFACE_OFFSET_M;
+  const n = frame.normal;
+  const planPts: Cart3[] = unliftAlongNormal(projPts, n, liftM);
+
+  // Vertices in lat/lng — plan view, unlifted (see above).
+  const vertices = planPts.map(p => {
     const { lat, lng } = ecefToLatLng(p);
     return { lat, lng };
   });
 
-  // Centroid from projected points
-  const centroidCart = centroid3(projPts);
+  // Centroid from the same unlifted points, so it agrees with the vertices.
+  const centroidCart = centroid3(planPts);
   const { lat: centroidLat, lng: centroidLng, height: centroidHeight } = ecefToLatLng(centroidCart);
 
   // Area (m²)
@@ -627,7 +752,7 @@ export function buildRoofPlane3D(pts3D: Cart3[]): RoofPlane {
 
     // v47.128: ECEF frame axes — used by buildSurfaceGrid for pure ECEF grid arithmetic.
     // These are the ECEF-space unit vectors (not ENU tangent approximations).
-    // worldPos = origin3D + u*du + v*dv + n*PANEL_OFFSET_ECEF (0.05m)  (zero metersPerDeg error)
+    // worldPos = origin3D + u*du + v*dv + n*moduleStackHeightM(mountId)  (zero metersPerDeg error)
     ecefFrame3D: {
       u: frame.u,
       v: frame.v,
@@ -693,7 +818,9 @@ export function renderPlane3DEntity(
     //   Layer b) Color tint — subtle blue guide (active = brighter cyan).
     //
     // perPositionHeight:true + arcType:NONE = exact flat plane polygon.
-    // Section 2: Panels are placed via pure ECEF plane math (PANEL_OFFSET_ECEF=0.05m + SURFACE_OFFSET_M=0.12m = 0.17m total).
+    // Section 2: Panels are placed via pure ECEF plane math, one mount stack
+    // above this plane — see lib/roofMountDatum.ts. The SURFACE_OFFSET_M lift is
+    // a render fudge and is deliberately NOT part of that stack.
     // No sampleHeight(), no per-panel mesh query.
 
     // Layer a: opaque base coat (visually replaces wavy mesh surface)

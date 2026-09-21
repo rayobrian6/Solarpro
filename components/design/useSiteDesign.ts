@@ -47,6 +47,7 @@ import {
   switchSite,
   bundleEntityCount,
   toPersistencePayload,
+  resolveSiteKey,
   UNRESOLVED_SITE_KEY,
 } from '@/lib/design/siteDesignModel';
 
@@ -105,6 +106,12 @@ export interface UseSiteDesign {
   /** Rebuild from a stored layout row. Returns the disposition so the caller
    *  can log it and know whether one adoption save is expected. */
   hydrateFromStored: (stored: StoredLayoutForHydration | null, siteKeyNow: string) => ReturnType<typeof hydrate>;
+
+  /** Name the property at these coordinates, reusing a property this project
+   *  already knows about when the point is within SITE_MATCH_RADIUS_M of it.
+   *  This is what makes "pick my house again" return the design left there
+   *  rather than an empty roof beside it. */
+  resolveKeyFor: (lat: number, lng: number, projectId?: string | null) => ReturnType<typeof resolveSiteKey>;
 
   /** Everything the save paths need: the ACTIVE entities for their own columns
    *  plus the archives for `layouts.site_archives`. */
@@ -245,6 +252,11 @@ export function useSiteDesign(): UseSiteDesign {
     return toPersistencePayload(stateRef.current);
   }, [storedArchives]);
 
+  const resolveKeyFor = useCallback<UseSiteDesign['resolveKeyFor']>(
+    (lat, lng, projectId) => resolveSiteKey(stateRef.current, lat, lng, projectId),
+    [],
+  );
+
   const scope = useCallback<UseSiteDesign['scope']>(
     () => ({ siteKey: activeSiteKeyRef.current, epoch: epochRef.current }),
     [],
@@ -277,7 +289,7 @@ export function useSiteDesign(): UseSiteDesign {
     panelsRef, roofPlanesRef, placedObstructionsRef, measurementsRef,
     activeSiteKey, activeSiteKeyRef,
     archivedSiteCount, archivedEntityCount,
-    switchToSite, hydrateFromStored,
+    switchToSite, hydrateFromStored, resolveKeyFor,
     persistencePayload, storedArchives,
     scope, isCurrent,
     stateRef,

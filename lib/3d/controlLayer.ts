@@ -37,6 +37,7 @@
 
 import {
   buildSurfaceGrid,
+  hasUsableElevation,
   extendRow as extendRowEngine,
   addRow as addRowEngine,
 } from '@/lib/surfaceGeometry3D';
@@ -56,11 +57,24 @@ import type { PlacedPanel } from '@/types';
 export const CANONICAL_PANEL_WIDTH_M  = 1.134;  // portrait width (= landscape height)
 export const CANONICAL_PANEL_HEIGHT_M = 1.722;  // portrait height (= landscape width)
 
-// ─── Canonical Panel Offset ───────────────────────────────────────────────────
-// 0.05m above the plane surface — prevents z-fighting with Cesium 3D tiles.
-// This is the CONTROL LAYER canonical value. Engines may use their own offsets
-// internally; the control layer post-processes height when needed.
-export const CANONICAL_PANEL_OFFSET_M = 0.05;
+// ─── Canonical Panel Offset — REMOVED ────────────────────────────────────────
+//
+// 🚨 A SIXTH ANSWER TO THE QUESTION lib/roofMountDatum.ts NOW OWNS, exported
+// from the very file that threads `mountingSystemId` through to the placement
+// engines — and pinned green by a test asserting the superseded value:
+//
+//     it('CANONICAL_PANEL_OFFSET_M is 0.05m above the plane surface', () => {
+//       expect(CANONICAL_PANEL_OFFSET_M).toBe(0.05);
+//
+// Its comment claimed "the control layer post-processes height when needed".
+// The control layer does no such post-processing; nothing read the constant at
+// runtime, only the test did. So it changed no number — it was a wrong answer
+// sitting in the open, with a passing test calling it canonical, waiting to be
+// used by whoever reached for the obvious name.
+//
+// The one answer is `moduleStackHeightM(mountingSystemId)`. The 0.05 was never
+// a mount height anyway: it is 0.17 − SURFACE_OFFSET_M, a physical quantity
+// with a z-fighting constant subtracted out of it.
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -165,6 +179,15 @@ export interface ControlConfig {
   /** Ground elevation in meters (Cesium terrain height at site). */
   groundElevM?: number;
 
+  /**
+   * Racking system the modules sit on. Decides how far above the roof deck a
+   * module's underside is — see lib/roofMountDatum.ts. The control layer never
+   * reads a ref for this, for the same reason it never reads one for
+   * orientation: a placement datum that varies by call site is how a roof ends
+   * up with modules at two different heights.
+   */
+  mountingSystemId?: string;
+
   // --- Fence / Ground specific ---
   /** ECEF start point for fence segment or ground row. */
   p1ECEF?: Vec3;
@@ -246,6 +269,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
 
   // ── 1. Resolve canonical inputs ────────────────────────────────────────────
   const orientation = config.orientation;                   // never fallback — always explicit
+  const mountingSystemId = config.mountingSystemId;         // ditto — the module stack datum
   const wattage     = config.wattage ?? 400;
   const setbacks    = config.setbacks ?? DEFAULT_SETBACKS;
   const groundElevM = config.groundElevM ?? 0;
@@ -295,6 +319,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
           customDirX:      config.customDirX,
           customDirY:      config.customDirY,
           layoutStrategy:  config.layoutStrategy,  // v48.12: mixed layout
+          mountingSystemId,
         });
         engineUsed = 'surfaceGeometry3D';
         break;
@@ -323,6 +348,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
           wattage,
           clickECEF:    config.clickECEF,
           existingPanels: existing,
+          mountingSystemId,
         } as any);
         engineUsed = 'surfaceGeometry3D';
         break;
@@ -381,6 +407,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
           orientation,
           rowLayoutId,
           wattage,
+          mountingSystemId,
         );
 
         if (newPanel) {
@@ -427,6 +454,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
           layoutId,
           wattage,
           config.clickECEF,
+          mountingSystemId,
         );
         if (newRowPanels) rawPanels = newRowPanels;
         engineUsed = 'surfaceGeometry3D';
@@ -545,7 +573,15 @@ export function getCanonicalDims(orientation: PanelOrientation): PanelDims {
  *  2. Reject panels outside plane polygon (if plane provided)
  *  3. Enforce no duplicate (planeId + row + col) combinations
  */
-function validatePanels(
+/**
+ * 🚨 EXPORTED BECAUSE A VALIDATOR NOTHING CAN CALL CANNOT BE TESTED.
+ * The first attempt to prove "the control layer drops a panel with no
+ * elevation" went through `placePanelsControlled` in `surface_select` mode —
+ * which RE-PLACES from the plane, so the tampered panel never reached this
+ * function and the assertion ran over a list it had not touched. A test that
+ * cannot reach the code it names is worth nothing, so the code is reachable.
+ */
+export function validatePanels(
   panels: PlacedPanel[],
   config: ControlConfig,
   warnings: string[],
@@ -559,8 +595,12 @@ function validatePanels(
       warnings.push(`[validate] Panel ${p.id} rejected: non-finite lat/lng (${p.lat}, ${p.lng})`);
       return false;
     }
-    if (!isFinite(p.height ?? 0)) {
-      warnings.push(`[validate] Panel ${p.id} rejected: non-finite height`);
+    // 🚨 `!isFinite(p.height ?? 0)` KEPT a panel with NO height: `undefined ?? 0`
+    // is 0 and `isFinite(0)` is true, so the guard written to catch bad
+    // elevations waved the worst case straight through — and the renderer then
+    // drew it at ellipsoidal zero, ~100 m under the roof.
+    if (!hasUsableElevation(p)) {
+      warnings.push(`[validate] Panel ${p.id} rejected: elevation is ${p.height === undefined ? 'MISSING' : String(p.height)} — a panel with no elevation cannot be placed on a roof`);
       return false;
     }
     return true;
@@ -767,6 +807,7 @@ export function placePanelsMultiPlane(
   customOriginLng?: number,
   customDirX?:      number,
   customDirY?:      number,
+  mountingSystemId?: string,
 ): PlacedPanel[] {
   const allPanels: PlacedPanel[] = [];
 
@@ -775,6 +816,10 @@ export function placePanelsMultiPlane(
     const result = placePanelsControlled({
       mode:          'auto_roof',
       plane,
+      // Currently unwired — SolarEngine3D imports this helper and never calls it.
+      // Threaded anyway: a placement path that silently takes the default module
+      // stack is how WS1-013 got four datums in the first place.
+      mountingSystemId,
       orientation,
       wattage,
       setbacks,

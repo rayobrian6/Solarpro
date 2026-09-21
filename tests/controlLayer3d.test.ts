@@ -37,7 +37,6 @@ import {
   getCanonicalDims,
   CANONICAL_PANEL_WIDTH_M,
   CANONICAL_PANEL_HEIGHT_M,
-  CANONICAL_PANEL_OFFSET_M,
   DEFAULT_SETBACKS,
   type ControlPlane,
   type ControlConfig,
@@ -128,10 +127,19 @@ describe('controlLayer 3D — canonical panel dimensions', () => {
   it('CANONICAL_PANEL_HEIGHT_M is 1.722m (400W module spec)', () => {
     expect(CANONICAL_PANEL_HEIGHT_M).toBeCloseTo(1.722, 6);
   });
+  it('🚨 there is no CONTROL-LAYER panel offset any more — one datum owns it', async () => {
+    // This used to assert `CANONICAL_PANEL_OFFSET_M` is 0.05 and call it
+    // canonical. It was a sixth answer to the question lib/roofMountDatum.ts
+    // owns, exported from this very file, kept green by this very test — and
+    // read by nothing at runtime, so it changed no number while standing ready
+    // to be picked up by whoever reached for the obvious name.
+    const mod = await import('@/lib/3d/controlLayer') as Record<string, unknown>;
+    expect(mod.CANONICAL_PANEL_OFFSET_M,
+      'the control layer must not export its own panel offset').toBeUndefined();
 
-  it('CANONICAL_PANEL_OFFSET_M is 0.05m above the plane surface', () => {
-    // Prevents z-fighting with Cesium 3D tiles.
-    expect(CANONICAL_PANEL_OFFSET_M).toBe(0.05);
+    // The mount stack is a manufacturer-derived fact, keyed by racking.
+    const { moduleStackHeightM } = await import('@/lib/roofMountDatum');
+    expect(moduleStackHeightM('ironridge-xr100')).toBeGreaterThan(0.05);
   });
 
   it('getCanonicalDims("portrait") returns width=1.134, height=1.722', () => {

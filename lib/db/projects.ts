@@ -735,6 +735,61 @@ async function assertLayoutCoordsMatchProject(sql: any, data: UpsertLayoutData):
   if (!ctr && Array.isArray(data.roofPlanes)) {
     ctr = _coordCentroid((data.roofPlanes as Array<{ vertices?: Array<{ lat?: number; lng?: number }> }>).flatMap(rp => rp?.vertices || []));
   }
+  // 🚨 "NOTHING TO VALIDATE AGAINST" AND "NOTHING IS ANYWHERE" ARE NOT THE SAME.
+  //
+  // `_coordCentroid` drops any point with |lat| <= 0.001, so an array in which
+  // EVERY panel is at (0, 0) yields `null` and this guard — the one whose whole
+  // job is to stop one project's geometry landing on another — returned without
+  // looking at anything. `/api/engineering/preliminary` sends exactly that:
+  // `generateSyntheticPanels` emits `lat: 0, lng: 0` for every panel, and
+  // `panels` is the one column in the UPDATE with no COALESCE, so a preliminary
+  // calculation REPLACED a real design with unplaced scaffold panels. The
+  // sub-system guard does not catch it either — the synthetic panels are
+  // systemType 'roof', so 'roof' is present in `incoming` and nothing looks
+  // wiped.
+  //
+  // Unplaced geometry is refused only when it would destroy placed geometry, so
+  // a brand-new project (the route's actual purpose) still works.
+  // 🚨 ASK ABOUT THE PANELS, NOT ABOUT THE COMBINED CENTROID.
+  // The first version of this guard tested `!ctr`, and `ctr` falls back to the
+  // ROOF-PLANE vertices when the panels yield nothing — so a payload carrying
+  // unplaced panels alongside real roof geometry produced a centroid, and the
+  // guard was skipped exactly when half the payload was unplaced.
+  const suppliedPanels = Array.isArray(data.panels) ? data.panels.length : 0;
+  const panelCentroid  = _coordCentroid(data.panels as Array<{ lat?: number; lng?: number }>);
+  if (suppliedPanels > 0 && !panelCentroid) {
+    // 🚨 jsonb_array_elements ERRORS on a non-array, and a lateral join is
+    // evaluated before WHERE, so the array-ness is decided inside the call.
+    // And `lat` is accepted as a number OR a numeric string, because
+    // `_coordCentroid` above accepts both (`Number(p.lat)`): a stricter test
+    // here would count a stored string coordinate as unplaced and quietly
+    // disarm the guard on exactly the rows it protects.
+    const placed = await sql`
+      SELECT COUNT(*)::int AS n
+      FROM layouts l,
+           jsonb_array_elements(
+             CASE WHEN jsonb_typeof(l.panels) = 'array' THEN l.panels ELSE '[]'::jsonb END
+           ) p
+      WHERE l.project_id = ${data.projectId} AND l.user_id = ${data.userId}
+        AND (CASE
+               WHEN jsonb_typeof(p->'lat') = 'number' THEN abs((p->>'lat')::double precision)
+               WHEN jsonb_typeof(p->'lat') = 'string'
+                    AND (p->>'lat') ~ '^[[:space:]]*-?[0-9]+([.][0-9]+)?[[:space:]]*$'
+                    THEN abs((p->>'lat')::double precision)
+               ELSE 0
+             END) > 0.001
+    `;
+    const n = Number(placed[0]?.n ?? 0);
+    if (n > 0) {
+      console.error('[LAYOUT_COORDS_UNPLACED]', { projectId: data.projectId, incoming: suppliedPanels, storedPlaced: n });
+      throw new Error(
+        `LAYOUT_COORDS_UNPLACED: this save carries ${suppliedPanels} panel(s) with no map position, ` +
+        `and the project already holds ${n} placed panel(s). Writing it would replace a real design with ` +
+        `unplaced ones. Nothing has been written.`,
+      );
+    }
+  }
+
   if (!ctr || _isPhoenix(ctr.lat, ctr.lng)) return; // nothing to validate against
   const prows = await sql`SELECT lat, lng FROM projects WHERE id = ${data.projectId} LIMIT 1`;
   const plat = Number(prows[0]?.lat), plng = Number(prows[0]?.lng);
@@ -844,10 +899,68 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   const sql = await getDbReady();
   // Block cross-project coordinate contamination before any write (see helper above).
   await assertLayoutCoordsMatchProject(sql, data);
+  // 🚨 REFUSE A SAVE THAT WOULD SILENTLY DISCARD AN ARCHIVED PROPERTY.
+  //
+  // `applyDesignEntities` writes `site_archives` (migration 123) inside a
+  // try/catch whose only handler is a console.warn. On a deployment that has not
+  // run 123 the UPDATE throws "column does not exist", is swallowed, upsertLayout
+  // returns normally and the route answers **HTTP 200**. The studio branches on
+  // `res.ok` alone and shows "saved".
+  //
+  // The subsystem-wipe guard below does NOT cover this. It compares systemType
+  // BUCKET MEMBERSHIP, so it only fires when the incoming array has no panels of
+  // a stored type at all. Place ONE panel at the new property and 'roof' is in
+  // `incoming`, the guard passes, and `panels = ${panelsJson}::jsonb` — with no
+  // COALESCE, unlike roof_planes and map_center on the adjacent lines — replaces
+  // the previous property's 52 with the 1. The archive that was supposed to be
+  // holding those 52 was dropped a moment earlier, silently.
+  //
+  // So the check is here, BEFORE any write, and outside the guard's try/catch
+  // (which re-throws only LAYOUT_SUBSYSTEM_WIPE and swallows everything else —
+  // a refusal raised in there would be discarded).
+  //
+  // It refuses only when something would actually be LOST. An archive with no
+  // entities round-trips identically whether it is stored or not, so an empty one
+  // is allowed through and a single-property project keeps working normally on a
+  // pre-123 deployment. Only the case this exists for — real archived work that
+  // cannot be persisted — fails closed.
+  if (data.siteArchives !== undefined && !(await layoutsHasSiteArchives(sql))) {
+    const sites = (data.siteArchives as { sites?: Record<string, Record<string, unknown>> } | null)?.sites;
+    const lossy = sites && typeof sites === 'object'
+      ? Object.entries(sites).filter(([, bundle]) =>
+          !!bundle && ['panels', 'roofPlanes', 'obstructions', 'measurements']
+            .some(k => Array.isArray(bundle[k]) && (bundle[k] as unknown[]).length > 0))
+      : [];
+    if (lossy.length > 0) {
+      const detail = lossy.map(([k, b]) => {
+        const counts = ['panels', 'roofPlanes', 'obstructions', 'measurements']
+          .map(f => [f, Array.isArray(b[f]) ? (b[f] as unknown[]).length : 0] as const)
+          .filter(([, n]) => n > 0).map(([f, n]) => `${n} ${f}`).join(', ');
+        return `${k} (${counts})`;
+      }).join('; ');
+      console.error('[LAYOUT_ARCHIVE_UNSTORABLE]', { projectId: data.projectId, detail });
+      throw new Error(
+        `LAYOUT_ARCHIVE_UNSTORABLE: this save carries another property's design — ${detail} — ` +
+        `and the layouts.site_archives column does not exist, so it would be discarded without trace. ` +
+        `Run migration 123 (Admin → System Tools → Migrations). Nothing has been written.`,
+      );
+    }
+  }
   // Nameplate authority (P0-7): map-carrying projects get the equipment-db kW.
   const nameplateKw = await resolveNameplateSizeKw(sql, data);
   const sizeKw = nameplateKw ?? data.systemSizeKw ?? 0;
-  const panelsJson = JSON.stringify(data.panels || []);
+  // 🚨 ABSENCE KEEPS — INCLUDING FOR THE MOST VALUABLE COLUMN IN THE ROW.
+  // This was `JSON.stringify(data.panels || [])`, so a caller that did not send
+  // panels wrote `[]` and DELETED THE DESIGN, while every neighbouring column
+  // — roof_planes, map_center, fence_line, obstructions, measurements and the
+  // four scalars — had already been given the opposite rule. Proven against
+  // real PostgreSQL in tests/siteDesignRoute.postgres.test.ts: three placed
+  // panels, one save omitting `panels`, zero panels left.
+  //
+  // An explicit `[]` is a DECISION and still clears; only genuine absence keeps,
+  // exactly as for roofPlanes below. Judging a deliberate clear is the
+  // sub-system wipe guard's job, not this line's.
+  const panelsJson = data.panels == null ? null : JSON.stringify(data.panels);
   const roofPlanesJson = data.roofPlanes ? JSON.stringify(data.roofPlanes) : null;
   const fenceLineJson = data.fenceLine ? JSON.stringify(data.fenceLine) : null;
   const mapCenterJson = data.mapCenter ? JSON.stringify(data.mapCenter) : null;
@@ -905,16 +1018,57 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       const archiveIsStorable = await layoutsHasSiteArchives(sql);
       const archivedPanels: Array<{ systemType?: string }> = [];
       const arch = archiveIsStorable
-        ? (data.siteArchives as { sites?: Record<string, { panels?: unknown }> } | undefined)
+        ? (data.siteArchives as { activeSiteKey?: string; sites?: Record<string, { panels?: unknown }> } | undefined)
         : undefined;
-      if (arch && typeof arch === 'object' && arch.sites && typeof arch.sites === 'object') {
+      // 🚨 AND ONLY WHILE THE PROPERTY IS ACTUALLY CHANGING.
+      //
+      // The relaxation had no bound in TIME. An archive is never evicted, so
+      // once a project had archived a >=4-panel property, EVERY later save of
+      // that project with `panels: []` passed the guard — for ever, including
+      // the reload bug the guard was built for in July (Stowell: 81 panels ->
+      // {} -> 19 in three saves). The guard had disarmed itself permanently.
+      //
+      // A property change is identifiable: the save carries a DIFFERENT
+      // activeSiteKey than the row currently stores. Only then may archived
+      // panels count as present. A save at the same property that empties the
+      // array is an ordinary wipe and is refused exactly as before.
+      let switchingProperty = false;
+      if (arch && typeof arch.activeSiteKey === 'string') {
+        try {
+          const cur = await sql`
+            SELECT site_archives ->> 'activeSiteKey' AS k
+            FROM layouts WHERE project_id = ${data.projectId} AND user_id = ${data.userId} LIMIT 1
+          `;
+          const storedKey = cur[0]?.k ?? null;
+          // No stored key yet (first archive on this row) also counts: there is
+          // nothing to contradict, and refusing it would block the very first
+          // property change a project ever makes.
+          switchingProperty = storedKey === null || storedKey !== arch.activeSiteKey;
+        } catch {
+          // Cannot tell — assume NOT switching, which keeps the guard strict.
+          switchingProperty = false;
+        }
+      }
+      if (switchingProperty && arch?.sites && typeof arch.sites === 'object') {
         for (const bundle of Object.values(arch.sites)) {
           if (Array.isArray(bundle?.panels)) archivedPanels.push(...(bundle.panels as Array<{ systemType?: string }>));
         }
       }
-      const incoming = new Set([...(data.panels || []), ...archivedPanels]
+      // 🚨 ABSENCE IS NOT A WIPE, AND THIS GUARD SAID IT WAS.
+      //
+      // `data.panels || []` treats an OMITTED panel list exactly like an empty
+      // one, so any save that simply did not mention panels was read as
+      // removing every sub-system and refused with LAYOUT_SUBSYSTEM_WIPE. That
+      // made the write's own "absence keeps" rule — the COALESCE below —
+      // unreachable for every project with four or more panels, which is every
+      // real design: the guard threw before the write could keep anything.
+      //
+      // The two halves have to agree. A save that says nothing about panels
+      // removes nothing, so there is nothing for this guard to protect.
+      // A save that says `[]` is a decision and is judged exactly as before.
+      const incoming = new Set([...(data.panels ?? []), ...archivedPanels]
         .map(p => ((p as { systemType?: string }).systemType ?? 'roof')));
-      const wiped = storedRows.filter((r: { st: string | null; n: number }) =>
+      const wiped = data.panels == null ? [] : storedRows.filter((r: { st: string | null; n: number }) =>
         (r.n ?? 0) >= 4 && !incoming.has(r.st ?? 'roof'));
       if (wiped.length > 0) {
         const desc = wiped.map((r: { st: string | null; n: number }) => `${r.st ?? 'roof'} (${r.n} panels)`).join(', ');
@@ -932,23 +1086,63 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       console.warn('[LAYOUT_SUBSYSTEM_WIPE_GUARD] census failed, skipping guard:', (e as Error)?.message);
     }
     // UPDATE existing layout
+    // 🚨 roof_planes AND map_center USE COALESCE: `undefined` MEANS KEEP STORED,
+    // exactly as it does for obstructions, measurements and site_archives.
+    //
+    // They used to be written unconditionally, so `undefined` meant SET NULL —
+    // a roof-destroying default. Any caller that does not happen to send
+    // roofPlanes wiped the geometry, and `/api/engineering/preliminary`
+    // (reached from the bill-upload modal) sends neither it nor mapCenter. So
+    // uploading a bill deleted the roof of a designed project. After migration
+    // 123 it was worse: the active roof was destroyed while site_archives kept
+    // naming it, leaving that design neither active nor archived — the one
+    // thing the ownership model forbids.
+    //
+    // Nulling map_center also disables the legacy multi-site repair in
+    // rowToLayout, which falls back to it to decide which property a row is at.
+    //
+    // A DELIBERATE CLEAR STILL WORKS. The studio sends `[]`, which is not
+    // undefined, so COALESCE keeps the empty array. Only absence is ignored.
     const rows = await sql`
       UPDATE layouts SET
         system_type         = ${data.systemType || 'roof'},
-        panels              = ${panelsJson}::jsonb,
-        roof_planes         = ${roofPlanesJson}::jsonb,
-        ground_tilt         = ${data.groundTilt ?? 20},
-        ground_azimuth      = ${data.groundAzimuth ?? 180},
-        row_spacing         = ${data.rowSpacing ?? 1.5},
-        ground_height       = ${data.groundHeight ?? 0.6},
-        fence_azimuth       = ${data.fenceAzimuth ?? null},
-        fence_height        = ${data.fenceHeight ?? null},
-        fence_line          = ${fenceLineJson}::jsonb,
-        bifacial_optimized  = ${data.bifacialOptimized ?? false},
-        total_panels        = ${data.totalPanels ?? 0},
-        system_size_kw      = ${sizeKw},
-        map_center          = ${mapCenterJson}::jsonb,
-        map_zoom            = ${data.mapZoom ?? null},
+        panels              = COALESCE(${panelsJson}::jsonb, panels),
+        roof_planes         = COALESCE(${roofPlanesJson}::jsonb, roof_planes),
+        -- ABSENCE KEEPS. These seven were the uneven half of a doctrine the two
+        -- lines around them already follow. See the note above upsertLayout.
+        --
+        -- fence_line was written unconditionally, and fenceLineJson is null
+        -- whenever data.fenceLine is absent -- so ANY save that did not carry a
+        -- fence SET THE STORED FENCE TO NULL. Unconditional, destructive, and
+        -- reachable from a read-only production CALCULATION
+        -- (app/api/production/route.ts), which sends no fence at all.
+        --
+        -- The four scalars were worse than silent: the 20 / 180 / 1.5 / 0.6
+        -- fallbacks replaced a value the user had set with a FABRICATED default
+        -- whenever a caller omitted it. Absence became a confident wrong answer.
+        --
+        -- An explicit empty array still clears a fence: [] is truthy, so it
+        -- serialises to '[]' and writes. Only genuine absence keeps.
+        ground_tilt         = COALESCE(${data.groundTilt ?? null}::double precision, ground_tilt),
+        ground_azimuth      = COALESCE(${data.groundAzimuth ?? null}::double precision, ground_azimuth),
+        row_spacing         = COALESCE(${data.rowSpacing ?? null}::double precision, row_spacing),
+        ground_height       = COALESCE(${data.groundHeight ?? null}::double precision, ground_height),
+        fence_azimuth       = COALESCE(${data.fenceAzimuth ?? null}::double precision, fence_azimuth),
+        fence_height        = COALESCE(${data.fenceHeight ?? null}::double precision, fence_height),
+        fence_line          = COALESCE(${fenceLineJson}::jsonb, fence_line),
+        -- The same rule, applied to the last four that did not follow it.
+        -- A '?? false' turned an omitted flag into a deliberate "no"; '?? 0'
+        -- turned an omitted count into "this design has no panels"; and
+        -- map_zoom was written unconditionally, so any save that did not carry
+        -- it NULLED the stored zoom. total_panels and system_size_kw are
+        -- DERIVED from panels, so if the panels are kept these must be too —
+        -- otherwise a save that omits everything leaves 3 panels beside a
+        -- stored count of 0.
+        bifacial_optimized  = COALESCE(${data.bifacialOptimized ?? null}::boolean, bifacial_optimized),
+        total_panels        = COALESCE(${data.totalPanels ?? null}::integer, total_panels),
+        system_size_kw      = COALESCE(${data.systemSizeKw === undefined && nameplateKw == null ? null : sizeKw}::double precision, system_size_kw),
+        map_center          = COALESCE(${mapCenterJson}::jsonb, map_center),
+        map_zoom            = COALESCE(${data.mapZoom ?? null}::integer, map_zoom),
         updated_at          = NOW()
       WHERE project_id = ${data.projectId}
         AND user_id = ${data.userId}
@@ -968,7 +1162,7 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         ${data.projectId},
         ${data.userId},
         ${data.systemType || 'roof'},
-        ${panelsJson}::jsonb,
+        ${panelsJson ?? '[]'}::jsonb,
         ${roofPlanesJson}::jsonb,
         ${data.groundTilt ?? 20},
         ${data.groundAzimuth ?? 180},

@@ -174,17 +174,38 @@ function buildLayoutFromDefinition(
     systemType:        systemDef.systemType || project.systemType || 'roof',
     panels:            systemDef.panels ?? [],
     roofPlanes:        systemDef.roofPlanes,
-    groundTilt:        systemDef.groundTilt        ?? 20,
-    groundAzimuth:     systemDef.groundAzimuth     ?? 180,
-    rowSpacing:        1.5,
-    groundHeight:      0.6,
+    // 🚨 SAY NOTHING RATHER THAN SAY SOMETHING FALSE.
+    //
+    // This function was written to satisfy `upsertLayout`'s TYPE, not to
+    // describe a real layout — and a read-only production CALCULATION is routed
+    // through it (the branch below picks it whenever the body carries a
+    // systemDefinition and no layout, which is exactly what the studio's
+    // Calculate button sends). So every invented value here was persisted as
+    // fact about the user's design.
+    //
+    // The worst was `mapCenter: { lat: 33.4484, lng: -112.074 }` — PHOENIX,
+    // hardcoded. `map_center` IS COALESCE'd in upsertLayout, but COALESCE only
+    // protects against ABSENCE, and this supplied a confident wrong answer
+    // instead, so the column was overwritten with Arizona for every project that
+    // ever pressed Calculate. A fabricated value defeats a guard that a missing
+    // one would have satisfied.
+    //
+    // `rowSpacing: 1.5` and `groundHeight: 0.6` were literals with no source at
+    // all, overwriting whatever the user had set.
+    //
+    // These are now `undefined`, which upsertLayout's COALESCE reads as "keep
+    // what is stored" — the honest answer for a caller that does not know.
+    groundTilt:        systemDef.groundTilt,
+    groundAzimuth:     systemDef.groundAzimuth,
+    rowSpacing:        undefined,
+    groundHeight:      undefined,
     fenceAzimuth:      systemDef.fenceAzimuth,
     fenceHeight:       systemDef.fenceHeight,
     bifacialOptimized: systemDef.bifacialOptimized ?? false,
     totalPanels:       systemDef.panels?.length    ?? 0,
     systemSizeKw:      systemDef.systemSizeKw      ?? (systemDef.panels?.length ?? 0) * 0.4,
-    mapCenter:         { lat: 33.4484, lng: -112.074 },
-    mapZoom:           18,
+    mapCenter:         undefined,
+    mapZoom:           undefined,
   } as any;
 }
 
@@ -384,8 +405,15 @@ export async function POST(req: NextRequest) {
         utilityRate: (project as any).utilityRate ?? 0.13,
       };
 
+      // 🚨 THE AUTHENTICATED IDENTITY GOES LAST, NOT FIRST.
+      // `{ projectId, userId, ...rawLayout }` spread CLIENT JSON over both —
+      // `rawLayout` is `body.layout` verbatim on the legacy path — so a request
+      // carrying `layout.projectId` or `layout.userId` wrote the row those
+      // named, not the one `getProjectById(projectId, user.id)` authorised a
+      // moment earlier. The ownership check ran against a value the body then
+      // replaced.
       const savedLayout = await upsertLayout({
-        projectId, userId: user.id, ...rawLayout,
+        ...rawLayout, projectId, userId: user.id,
       } as any);
 
       const productionData = await calculateProductionFromDefinition(
@@ -453,10 +481,20 @@ export async function POST(req: NextRequest) {
       systemType:        rawLayout.systemType || project.systemType || 'roof',
       panels:            rawLayout.panels     || [],
       roofPlanes:        rawLayout.roofPlanes,
-      groundTilt:        rawLayout.groundTilt        ?? 20,
-      groundAzimuth:     rawLayout.groundAzimuth     ?? 180,
-      rowSpacing:        rawLayout.rowSpacing         ?? 1.5,
-      groundHeight:      rawLayout.groundHeight       ?? 0.6,
+      // 🚨 ABSENCE MUST REACH upsertLayout AS ABSENCE.
+      // These read `?? 20 / ?? 180 / ?? 1.5 / ?? 0.6`, which is the same
+      // absence-becomes-a-number default as everywhere else in this workstream
+      // — and here it actively DEFEATS the protection below it: upsertLayout
+      // writes these four with `COALESCE(${'${value ?? null}'}, column)`, so
+      // `undefined` deliberately KEEPS what is stored. Fabricating a value
+      // turned "this request says nothing about row spacing" into "set row
+      // spacing to 1.5", overwriting the user's ground array parameters on
+      // every save that did not happen to restate them. The INSERT path already
+      // supplies exactly these defaults for a genuinely new row.
+      groundTilt:        rawLayout.groundTilt,
+      groundAzimuth:     rawLayout.groundAzimuth,
+      rowSpacing:        rawLayout.rowSpacing,
+      groundHeight:      rawLayout.groundHeight,
       fenceAzimuth:      rawLayout.fenceAzimuth,
       fenceHeight:       rawLayout.fenceHeight,
       fenceLine:         rawLayout.fenceLine,
@@ -537,6 +575,25 @@ export async function POST(req: NextRequest) {
     const errMsg   = error instanceof Error ? error.message : String(error);
     const errStack = error instanceof Error ? error.stack   : undefined;
     console.error('[PRODUCTION_ERROR] POST /api/production failed:', errMsg, errStack);
+
+    // 🚨 A DELIBERATE REFUSAL MUST NOT BECOME A GENERIC 500 HERE.
+    //
+    // THE DESIGN STUDIO'S SAVE BUTTON POSTS TO THIS ROUTE, not to the layout
+    // route (see the note above `buildLayoutFromDefinition`). WS1-030 moved
+    // refusal handling into `handleRouteDbError` so no route could forget it —
+    // but this catch only DELEGATES for a `DbConfigError` or one of six network
+    // substrings, and a refusal matches none of them. So it fell through to a
+    // bare 500 with no `code` and no `refused`, the studio's refusal handling
+    // (which keys on `code`) never fired, and the user was told
+    // "Production calculation failed" for a save that was deliberately blocked
+    // to protect another property's design.
+    //
+    // Checking first is the whole fix: the refusal is not a database error and
+    // must not be classified by a database-error heuristic.
+    const { layoutRefusalCode } = await import('@/lib/db/core');
+    if (layoutRefusalCode(error)) {
+      return handleRouteDbError('[POST /api/production]', error);
+    }
 
     const { DbConfigError } = await import('@/lib/db-ready');
     if (

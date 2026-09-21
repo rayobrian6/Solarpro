@@ -42,6 +42,7 @@ import {
   extendRow as extendRowOnSurface,
   addRow as addRowOnSurface,
   computeEcefFrameForLegacyPlane,
+  resolvePlaneGeometry,
 } from '@/lib/surfaceGeometry3D';
 import type { PlacedObstruction } from '@/types';
 import {
@@ -69,7 +70,7 @@ import {
   getPanelDims,
   PANEL_OFFSET_M as PLANE_ENGINE_PANEL_OFFSET_M,
 } from '@/lib/planeEngine';
-import { latLngToECEF as engLatLngToECEF } from '@/lib/roofPlane3D';
+import { latLngToECEF as engLatLngToECEF, projectOutlineOntoPlane } from '@/lib/roofPlane3D';
 
 // ─── v48.7: Control Layer ────────────────────────────────────────────────────
 // All panel placement is now routed through placePanelsControlled().
@@ -82,6 +83,9 @@ import {
   type ControlPlane,
   DEFAULT_SETBACKS,
 } from '@/lib/3d/controlLayer';
+import { moduleStackHeightM, railCrossSectionM, deckPointFromModule, drawnRailHeightM, RAIL_DRAW_SCALE } from '@/lib/roofMountDatum';
+import { geoidUndulationM } from '@/lib/geodeticDatum';
+import { hasUsableElevation } from '@/lib/surfaceGeometry3D';
 
 // ─── v49.0: Isolated Ground Mount Reality Engine ──────────────────────────────
 // ALL ground placement routes through this engine.
@@ -326,35 +330,13 @@ const ENABLE_PANEL_SNAP = false;
 const ENABLE_TRACE_SNAP = false;
 
 // ── Mounting-system-aware roof panel offset ─────────────────────────────────
-// Physical stack height from roof deck to panel bottom face:
-//   rooftech-mini + xr100 : RT-MINI standoff (~4" = 0.102m) + XR100 rail (1.66" = 0.042m) ≈ 0.14m
-//   rooftech-mini + xr1000: RT-MINI standoff (~4" = 0.102m) + XR1000 rail (2.0"  = 0.051m) ≈ 0.16m
-//   ironridge l-foot only : L-foot body (~2.5" = 0.064m)  + XR100 rail (1.66" = 0.042m)   ≈ 0.11m
-//   rail-less (rt-mini-s) : standoff only                                                   ≈ 0.10m
-//   flat-roof ballasted   : tilt leg — conservative low profile                             ≈ 0.10m
-//   default / unknown     : 0.12m — conservative clearance, safe for any pitch
+// MOVED. The stack height a module sits at above the roof deck, and the rail
+// cross-section under it, now live in lib/roofMountDatum.ts — together with the
+// four other places that used to answer the same question differently. Rail
+// dimensions come from lib/mounting-hardware-db.ts, which cites a manufacturer
+// document for each one; they are no longer restated here.
 //
 // RENDERING ONLY — does NOT affect structural calc, placement math, ECEF coords, or BOM.
-function getRoofPanelOffset(mountingSystemId: string): number {
-  switch (mountingSystemId) {
-    case 'rooftech-mini':
-    case 'rt-mini':
-    case 'ironridge-xr100':     // RT-MINI pads are the standard standoff for XR100
-      return 0.14;              // 102mm standoff + 42mm rail = ~144mm
-    case 'ironridge-xr1000':
-      return 0.16;              // 102mm standoff + 51mm rail + margin
-    case 'rooftech-mini-s':
-    case 'rooftech-mini-t':
-    case 'rooftech-hook':
-      return 0.10;              // rail-less: standoff height only
-    case 'rooftech-mini-m':
-      return 0.12;
-    case 'ironridge-flat-roof':
-      return 0.10;              // ballasted tray — low profile
-    default:
-      return 0.12;              // safe conservative default
-  }
-}
 
 // v47.257: Ground mount racking height above grade.
 // All ground-mounted panels share a single flat mountPlaneZ = baseZ + MOUNT_HEIGHT_M.
@@ -402,6 +384,65 @@ type FenceSectionState = {
   panelIds: string[];
   entityKey: string;
 };
+
+/**
+ * What a reshape emits back to DesignStudio.
+ *
+ * 🚨 ONE DECLARATION, ON PURPOSE. This shape was written out FOUR times — once
+ * on the prop and once inside each of the three functions that fill it — so a
+ * field added to the prop silently failed to compile at the producers, and a
+ * field added at one producer never reached the other two. `ecefFrame3D` was
+ * missing from all four.
+ */
+export interface RoofPlaneReshapeUpdate {
+    id: string;
+    vertices: Array<{ lat: number; lng: number }>;
+    localFrame3D: {
+      u: { x: number; y: number; z: number };
+      v: { x: number; y: number; z: number };
+      n: { x: number; y: number; z: number };
+    };
+    /** Stitched ECEF corners — the exact polygon3D that the stitch produced.
+     *  Persisted so the roof-plane restore-on-load effect can rebuild the
+     *  STITCHED 3D outline without re-sampling terrain. */
+    polygon3D?: Array<{ x: number; y: number; z: number }>;
+    /** Stitched plane origin in ECEF (min-UV corner of the stitched polygon). */
+    origin3D?: { x: number; y: number; z: number };
+    /** Stitched plane outward normal in ECEF. */
+    normal3D?: { x: number; y: number; z: number };
+    /** 🚨 THE RESHAPED PITCH AND AZIMUTH. Square Up, Stitch, the flat-trace
+     *  rebuild and the Building pitch/wall controls all reshape a face's
+     *  GEOMETRY and emit it here — but pitch/azimuth were not part of this
+     *  shape, so `plane.pitch` kept its original value while the 3D roof
+     *  changed underneath it. The planset, the structural engine and the
+     *  production model all read plane.pitch, so the roof the user shaped and
+     *  the pitch the permit quoted disagreed permanently, and nothing said so.
+     *  Carried here so the geometry and the number agree. */
+    pitch?: number;
+    azimuth?: number;
+    /** 🚨 THE RESHAPED ECEF FRAME — the axes panels are actually placed on.
+     *
+     *  This shape already carried `localFrame3D`, so a reshape looked complete.
+     *  It was not: `buildSurfaceGrid` places panels from `ecefFrame3D`, not
+     *  `localFrame3D` (lib/surfaceGeometry3D.ts — the createdFrom3D branch reads
+     *  origin3D + ecefFrame3D + polygon3D). Emitting a NEW origin3D and normal3D
+     *  while leaving ecefFrame3D at its pre-reshape value meant every reshape
+     *  placed panels with a new origin on an OLD triad.
+     *
+     *  The cost is a wedge, not an offset. With the plane rotated by Δ about the
+     *  eave axis, a panel's clearance above the drawn deck is
+     *      d = stack·cos(Δ) − v·sin(Δ)        (stack = moduleStackHeightM)
+     *  so it goes negative once tan(Δ) > stack / v — about 0.48° at
+     *  6 m up the slope — and deepens linearly along the row. It is also not only
+     *  cosmetic: polyUV projects the new polygon onto the stale u/v, foreshortening
+     *  the usable extent by cos²(Δ), which removes whole rows. That reaches panel
+     *  count, kW and the BOM. */
+    ecefFrame3D?: {
+      u: { x: number; y: number; z: number };
+      v: { x: number; y: number; z: number };
+      n: { x: number; y: number; z: number };
+    };
+}
 
 interface Props {
   lat: number;
@@ -466,39 +507,14 @@ interface Props {
    *  plane frame back into roofPlanes state so panel placement (Auto Layout) +
    *  persistence use the stitched geometry, not the pre-stitch traced corners or a
    *  stale frame. One call per Stitch, all updated planes at once. */
-  onRoofPlanesStitched?: (updates: Array<{
-    id: string;
-    vertices: Array<{ lat: number; lng: number }>;
-    localFrame3D: {
-      u: { x: number; y: number; z: number };
-      v: { x: number; y: number; z: number };
-      n: { x: number; y: number; z: number };
-    };
-    /** Stitched ECEF corners — the exact polygon3D that the stitch produced.
-     *  Persisted so the roof-plane restore-on-load effect can rebuild the
-     *  STITCHED 3D outline without re-sampling terrain. */
-    polygon3D?: Array<{ x: number; y: number; z: number }>;
-    /** Stitched plane origin in ECEF (min-UV corner of the stitched polygon). */
-    origin3D?: { x: number; y: number; z: number };
-    /** Stitched plane outward normal in ECEF. */
-    normal3D?: { x: number; y: number; z: number };
-    /** 🚨 THE RESHAPED PITCH AND AZIMUTH. Square Up, Stitch, the flat-trace
-     *  rebuild and the Building pitch/wall controls all reshape a face's
-     *  GEOMETRY and emit it here — but pitch/azimuth were not part of this
-     *  shape, so `plane.pitch` kept its original value while the 3D roof
-     *  changed underneath it. The planset, the structural engine and the
-     *  production model all read plane.pitch, so the roof the user shaped and
-     *  the pitch the permit quoted disagreed permanently, and nothing said so.
-     *  Carried here so the geometry and the number agree. */
-    pitch?: number;
-    azimuth?: number;
-  }>) => void;
+  onRoofPlanesStitched?: (updates: RoofPlaneReshapeUpdate[]) => void;
   /** E2E-only diagnostics bridge. Passed only when NEXT_PUBLIC_E2E=1. */
   onE2EDiagnostics?: (diagnostics: {
     fullRebuildCount: number;
     setbackInsets: number;
     /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
     roofPlaneEntityCount: number;
+    engineRoofPlaneCount: number;
     /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
      *  bands hug edges (not roof middle). cf0dd96b regression guard. */
     setbackBandCentroids: Array<{ lat: number; lng: number }>;
@@ -1103,6 +1119,12 @@ function SolarEngine3D({
       fullRebuildCount: fullRebuildCountRef.current,
       setbackInsets: setbackZoneEntitiesRef.current.length,
       roofPlaneEntityCount: plane3DEntityMap.current.size,
+      // What the ENGINE holds, as distinct from what it has DRAWN. Only
+      // 3D-traced planes get an entity in plane3DEntityMap, so a restored or
+      // seeded roof leaves that count at 0 while the engine is perfectly ready
+      // to fill it. The gap between "the studio has a plane" and "the engine
+      // has a plane" is where stale-frame defects live, so both are reported.
+      engineRoofPlaneCount: roofPlanesRef.current?.length ?? 0,
       setbackBandCentroids: setbackBandCentroidsRef.current,
       panelMoveRebuildCount: panelMoveRebuildCountRef.current,
     });
@@ -1205,17 +1227,7 @@ function SolarEngine3D({
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C) return 0;
-    const updates: Array<{
-      id: string;
-      vertices: Array<{ lat: number; lng: number }>;
-      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
-      polygon3D?: Cart3[];
-      origin3D?: Cart3;
-      normal3D?: Cart3;
-      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
-      pitch?: number;
-      azimuth?: number;
-    }> = [];
+    const updates: RoofPlaneReshapeUpdate[] = [];
 
     for (const id of flatTracedPlaneIdsRef.current) {
       const params = flatTraceParamsRef.current.get(id);
@@ -1239,7 +1251,7 @@ function SolarEngine3D({
       const cesiumPts = built.frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
       const isSelected = selectedRoofPlaneId === id;
       const newIds = renderPlane3DEntity(
-        viewer, C, cesiumPts, id, built.frame, isSelected, markOnlyPlaneIdsRef.current.has(id),
+        viewer, C, cesiumPts, id, built.frame, isSelected, planeRendersOutlineOnly(id),
       );
       plane3DEntityMap.current.set(id, newIds);
       plane3DFrameMap.current.set(id, built.frame);
@@ -1256,6 +1268,8 @@ function SolarEngine3D({
           // Emit the shape the face was actually BUILT to.
           pitch: built.plane.pitch,
           azimuth: built.plane.azimuth,
+          // The axes panels are placed on must travel with the geometry.
+          ecefFrame3D: built.plane.ecefFrame3D,
         });
       }
     }
@@ -1326,8 +1340,23 @@ function SolarEngine3D({
   const plane3DFrameMap    = useRef<Map<string, Plane3DFrame>>(new Map());
   // plane3DCesiumPtsMap: planeId → Cesium Cartesian3[] (projected polygon corners)
   const plane3DCesiumPtsMap = useRef<Map<string, any[]>>(new Map());
-  // v62: planes traced with "Mark Plane" (outline only, no panels) — render clean.
-  const markOnlyPlaneIdsRef = useRef<Set<string>>(new Set());
+  // 🚨 `markOnlyPlaneIdsRef` WAS HERE AND IS DELIBERATELY GONE.
+  //
+  // It was a Set the Mark Plane tool added a plane id to and nothing ever
+  // removed from, read at every render site to decide outline-vs-deck. Keeping
+  // it as "the user's intent" alongside the derived "does this face carry
+  // panels" left a hole big enough to reproduce the whole defect:
+  // `handleAutoRoof` does NOT skip marked faces, so Auto Layout fills them —
+  // and a marked face with fifty-five panels on it would still have been drawn
+  // as a bare outline, with nothing under the array but the photogrammetry mesh.
+  //
+  // The two facts also never disagree except in that case. A marked face has no
+  // panels, so the derived rule already answers "outline"; the moment it DOES
+  // have panels it needs a deck, whatever was intended when it was traced.
+  // One question, one answer — see `planeRendersOutlineOnly`.
+  //
+  // Whether Auto Layout should respect a Mark Plane intent at all is a separate
+  // product question about PLACEMENT, and is not decided by the renderer.
   // Count of placed points (for status message)
   const [pts3DCount, setPts3DCount] = useState(0);
 
@@ -1367,6 +1396,38 @@ function SolarEngine3D({
   // can sample the correct 8-neighbor pixels for tilt/azimuth detection.
   const rowStartScreenPosRef = useRef<{ x: number; y: number } | null>(null);
   const panelsRef    = useRef<PlacedPanel[]>(panels);
+
+  /**
+   * Does this face render as a bare outline instead of a roof deck?
+   *
+   * 🚨 THE FACE UNDER AN AUTO LAYOUT HAD NO DECK DRAWN UNDER IT AT ALL.
+   *
+   * `renderPlane3DEntity`'s `outlineOnly` branch draws a polyline and returns.
+   * The branch it skips draws the thing the whole datum exists to put under a
+   * module: an opaque base coat whose own comment says it "suppresses wavy mesh
+   * waviness beneath panels". Without it the user is looking straight at
+   * Google's photogrammetry mesh, which is not planar — it carries ridge caps,
+   * vents and ±10–30 cm of noise, and a panel sitting a fixed height above a
+   * FITTED plane is swallowed wherever the mesh rises above it. Per location,
+   * so SOME panels look wrong and others do not.
+   *
+   * The restore path decided this ONCE, from `panelsRef.current` at the instant
+   * it ran — which is before Auto Layout has placed anything — and then LATCHED
+   * the answer into `markOnlyPlaneIdsRef`, which nothing ever removes from. So
+   * every face that arrives from state rather than from the trace tool — a
+   * reload, a restored design, and every Lane A face Google detects — was
+   * marked "no panels" forever, and filling it with fifty-five panels did not
+   * change that. A face traced in the same session took the other path and got
+   * its deck. That is "the panels are not ALL rendering above the roof",
+   * measured in the browser: 55 [PANEL] entities, one [PLANE3D-OUTLINE], zero
+   * [PLANE3D-BASE].
+   *
+   * Mark Plane is an INTENT and stays latched. Having no panels is a STATE and
+   * is read fresh, here, every time a face is drawn.
+   */
+  function planeRendersOutlineOnly(planeId: string): boolean {
+    return !panelsRef.current.some(p => p.planeId === planeId);
+  }
   const twinRef             = useRef<DigitalTwinData | null>(null);
   const simHourRef          = useRef<number>(12);
   const showShadeRef        = useRef<boolean>(showShade);
@@ -1977,7 +2038,19 @@ function SolarEngine3D({
     if (placementMode === 'auto_roof' && prevMode !== 'auto_roof') {
       const viewer = viewerRef.current;
       const C = (window as any).Cesium;
-      if (viewer && C && twinRef.current) {
+      // 🚨 THE TWIN IS NOT A PRECONDITION FOR FILLING A ROOF THE USER DREW.
+      // This used to read `if (viewer && C && twinRef.current)`, so Auto Layout
+      // did NOTHING — silently, with no toast, no status line and no log — on any
+      // building Google Solar has no data for. The user traces a roof, presses
+      // Auto Layout, and the button appears to be broken. The branch below
+      // already handles an absent or empty twin by waiting and then filling from
+      // `roofPlanesRef` anyway, so the outer guard was not protecting the code
+      // that follows it; it was preventing it from ever running.
+      //
+      // `buildDigitalTwin` rejecting versus resolving with zero segments is the
+      // difference between the two, and that is a network outcome — which is why
+      // the same click worked on one run and did nothing on the next.
+      if (viewer && C) {
         // Wait for terrain sampling to complete before running Auto Fill.
         // terrainReadyRef is set true at the end of boot() after sampleTerrainMostDetailed.
         // If terrain is already ready, run immediately. Otherwise poll every 200ms (max 5s).
@@ -1985,7 +2058,13 @@ function SolarEngine3D({
         // Run immediately if twin data is available (don't wait for terrainReady
         // since EllipsoidTerrainProvider never gives valid heights anyway -
         // clampToHeightMostDetailed handles height correction at render time)
+        const hasTracedRoof = (roofPlanesRef.current?.length ?? 0) > 0;
         if (twinRef.current && twinRef.current.roofSegments.length > 0) {
+          setTimeout(runAutoFill, 100);
+        } else if (hasTracedRoof) {
+          // A roof the user drew is all the geometry this needs. Waiting eight
+          // seconds for a twin that will not arrive is a delay with no payoff.
+          addLog('AUTO', `auto_roof: filling ${roofPlanesRef.current!.length} traced plane(s) — no twin needed`);
           setTimeout(runAutoFill, 100);
         } else {
           // Twin not loaded yet - poll for it (max 8s)
@@ -2065,13 +2144,38 @@ function SolarEngine3D({
   }, [obstructions, onObstructionsChange]);
 
   // Re-apply obstructions restored from the database, once.
-  const appliedInitialObstructions = useRef(false);
+  // 🚨 THIS WAS A ONE-SHOT LATCH, AND THE ENGINE NEVER REMOUNTS.
+  //
+  // `appliedInitialObstructions` was set true the first time a non-empty
+  // `initialObstructions` arrived and was never reset. `<SolarEngine3D>` carries
+  // no `key`, and `changeSite` does not touch `show3D`, so the component
+  // survives every property change. After site A's obstructions had been
+  // applied, switching to site B changed the prop and this effect returned at
+  // the first line — leaving `obstructionsRef.current` holding **A's keep-outs
+  // while standing on B**. Two live consequences, both silent:
+  //
+  //   1. WRONG CULLING. `removeObstructedPanels(newPanels, obstructionsRef.current)`
+  //      runs in the plane3d and surface-select auto-fills. A's vent footprints
+  //      are lat/lng, so at a neighbouring house they can land inside B's roof
+  //      and delete B's panels with nothing on screen to say why.
+  //   2. CROSS-SITE CONTAMINATION. Placing one obstruction at B appends to A's
+  //      list, and the outbound effect then persists A's obstructions onto B.
+  //
+  // The fix is to track WHAT was applied rather than WHETHER anything was. The
+  // identity of the incoming array is the signal: `applyBundle` hands a new
+  // array on every property change, and an empty one is a real answer — "this
+  // property has no obstructions" — which the old guard could not express at
+  // all, because it declined to apply empty.
+  const appliedObstructionsRef = useRef<PlacedObstruction[] | null>(null);
   useEffect(() => {
-    if (appliedInitialObstructions.current) return;
-    if (!initialObstructions || initialObstructions.length === 0) return;
-    appliedInitialObstructions.current = true;
-    obstructionsRef.current = initialObstructions;
-    setObstructions(initialObstructions);
+    const incoming = initialObstructions ?? [];
+    if (appliedObstructionsRef.current === initialObstructions) return;
+    // Only the mount-time case is skipped: before the restore resolves the prop
+    // is an empty array, and adopting it would clear nothing over nothing.
+    if (appliedObstructionsRef.current === null && incoming.length === 0) return;
+    appliedObstructionsRef.current = initialObstructions ?? [];
+    obstructionsRef.current = incoming;
+    setObstructions(incoming);
   }, [initialObstructions]);
 
   // ── Lane A state ─────────────────────────────────────────────────────────
@@ -2085,6 +2189,36 @@ function SolarEngine3D({
    *  load for the same building cannot append a duplicate set — buildRoofPlane3D
    *  mints a fresh uuid per call, so a re-run would ADD faces, not replace them. */
   const laneARanForRef = useRef<string | null>(null);
+
+  // ── E2E: THE SCENE ITSELF, NOT THIS COMPONENT'S OPINION OF IT ────────────
+  //
+  // 🚨 EVERY ELEVATION GUARD BEFORE THIS ONE MEASURED A NUMBER THIS FILE
+  // COMPUTED. `tests/panelSurfaceClearance.test.ts`, `tests/roofMountDatum.test.ts`
+  // and `e2e/panel-elevation.spec.ts` all compare a `PlacedPanel.height` against
+  // the `RoofPlane` it was placed from. That is the placement library checking
+  // its own arithmetic. It cannot see the two things a person actually looks at:
+  //
+  //   the BOX Cesium draws for a panel,  and
+  //   the POLYGON Cesium draws for the roof deck underneath it.
+  //
+  // Those are produced by different code — `addPanelEntity` and
+  // `renderPlane3DEntity` — from different inputs, and they disagreed on
+  // `origin/master`: the restore path re-fitted an already-lifted `polygon3D`
+  // and drew the deck a second SURFACE_OFFSET_M up, while panels sat at
+  // PANEL_OFFSET_ECEF. Every panel on a restored or auto-detected face rendered
+  // BELOW the deck, and no test anywhere could have noticed, because no test
+  // anywhere read an entity.
+  //
+  // So this exposes the live viewer — and nothing else — under the same
+  // build-time flag as the studio's hook, and the spec does all the measuring.
+  // Handing out a ready-made clearance number would put the measurement back
+  // inside the component under test.
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_E2E !== '1' || typeof window === 'undefined') return;
+    if (stage !== 'done' || !viewerRef.current) return;
+    (window as any).__solarViewerE2E = viewerRef.current;
+    return () => { try { delete (window as any).__solarViewerE2E; } catch {} };
+  }, [stage]);
 
   // ── v64: Restore 3D roof-plane outlines + wireframe on project load ──────
   // After reload the panels are still there (they have their own restore effect),
@@ -2133,36 +2267,48 @@ function SolarEngine3D({
         let cartPts: Cart3[];
         let frame: Plane3DFrame;
 
-        if (plane.polygon3D && plane.polygon3D.length >= 3) {
-          // polygon3D carries the exact stitched (or traced) ECEF corners.
-          cartPts = plane.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
-          frame = computePlaneFromPoints3D(cartPts);
-        } else if (plane.createdFrom3D && plane.origin3D && plane.ecefFrame3D) {
-          // 3D plane with ECEF frame but no polygon3D (pre-stitch or older save).
-          // Reconstruct polygon3D from the 2D vertices + stored ECEF frame.
-          const legacy = computeEcefFrameForLegacyPlane(plane, groundElev);
-          if (!legacy.polygon3D || legacy.polygon3D.length < 3) {
-            addLog('RESTORE', `Skipped plane ${plane.id.slice(0,8)}: legacy projection yielded <3 corners`);
-            continue;
-          }
-          cartPts = legacy.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
-          frame = computePlaneFromPoints3D(cartPts);
-        } else {
-          // 2D-only legacy plane (no polygon3D, no ecefFrame3D). Project from
-          // vertices via azimuth/pitch → ECEF. This is a lossy approximation but
-          // at least shows the outline on reload.
-          try {
-            const legacy = computeEcefFrameForLegacyPlane(plane, groundElev);
-            if (!legacy.polygon3D || legacy.polygon3D.length < 3) {
-              addLog('RESTORE', `Skipped 2D plane ${plane.id.slice(0,8)}: <3 corners`);
-              continue;
-            }
-            cartPts = legacy.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
-            frame = computePlaneFromPoints3D(cartPts);
-          } catch (e) {
-            addLog('RESTORE', `Skipped 2D plane ${plane.id.slice(0,8)}: ${(e as Error).message}`);
-            continue;
-          }
+        // 🚨 THE DECK IS DRAWN FROM THE PLANE THE PANELS WERE PLACED ON.
+        //
+        // This used to resolve the face itself, three ways, and the placement
+        // engine resolved it three OTHER ways. Measured on the demo roof
+        // (ground 128 m, eave 160 m, stack 0.14 m), panel above its own deck:
+        //
+        //     full 3D face                    0.141 m   correct
+        //     3D face with no polygon3D      31.07  m   array floating over a
+        //                                              deck lying on the ground
+        //     genuine 2D face                 0.017 m   panel box is 0.040 m
+        //                                              thick and centred, so its
+        //                                              UNDERSIDE is 3 mm inside
+        //                                              the roof — half-buried,
+        //                                              correct count, no error
+        //
+        // The 2D case is reachable from the ordinary UI: "Tag This Roof Plane"
+        // (`confirmPendingPlane`) produces a face carrying only `vertices`,
+        // `pitch`, `azimuth` and `localFrame3D` — no polygon3D, no origin3D, no
+        // ecefFrame3D — and Auto Layout fills it. With a low-profile racking
+        // (0.10 m stack) the clearance is NEGATIVE and the whole array vanishes
+        // under the base coat.
+        //
+        // 🚨 AND IT IS A REGRESSION THIS WORKSTREAM CREATED. Before the
+        // mark-only latch was removed, a restored face was drawn as an outline
+        // for ever, so there was no deck to bury the array in. Drawing the deck
+        // is right; drawing it from a different resolution than the placement
+        // engine is what made it dangerous.
+        //
+        // `resolvePlaneGeometry` is that one resolution, and it guarantees the
+        // polygon lies ON the plane whose origin the placer adds the mount
+        // stack to — so the deck is drawn with `surfaceOffsetM: 0` in every
+        // branch. Re-fitting it with the default lift is the double-lift that
+        // WS1-038 records on `origin/master`.
+        const geom = resolvePlaneGeometry(plane as any, groundElev);
+        if (!geom.polygon3D || geom.polygon3D.length < 3) {
+          addLog('RESTORE', `Skipped plane ${plane.id.slice(0,8)}: resolved <3 corners (${geom.source})`);
+          continue;
+        }
+        cartPts = geom.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
+        frame = computePlaneFromPoints3D(cartPts, { surfaceOffsetM: 0 });
+        if (geom.source !== 'own-frame-and-polygon') {
+          addLog('RESTORE', `plane ${plane.id.slice(0,8)} resolved via ${geom.source}`);
         }
 
         // ── Step 2: Convert projected points to Cesium Cartesian3 ──────
@@ -2170,10 +2316,13 @@ function SolarEngine3D({
           new C.Cartesian3(p.x, p.y, p.z)
         );
 
-        // ── Step 3: Determine mark-only (no panels assigned) ──────────
-        const planeHasPanels = panelsRef.current.some(p => p.planeId === plane.id);
-        const isMarkOnly = !planeHasPanels;
-        if (isMarkOnly) markOnlyPlaneIdsRef.current.add(plane.id);
+        // ── Step 3: Outline or deck? ──────────────────────────────────
+        // 🚨 THIS USED TO LATCH THE ANSWER INTO markOnlyPlaneIdsRef.
+        // It ran before Auto Layout had placed anything, so every restored and
+        // every auto-detected face was recorded as "no panels" permanently, and
+        // the deck that hides the photogrammetry mesh was never drawn under the
+        // array. See `planeRendersOutlineOnly`. Read, do not record.
+        const isMarkOnly = planeRendersOutlineOnly(plane.id);
 
         // ── Step 4: Render plane entity (mirrors finalizePlane3D) ──────
         const isSelected = selectedRoofPlaneId === plane.id;
@@ -2285,6 +2434,21 @@ function SolarEngine3D({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [colorByString, showEquipment, panelOpacity, panelMeta]);
 
+  /**
+   * Which faces currently carry panels.
+   *
+   * 🚨 THE OTHER HALF OF THE MISSING DECK. Reading `planeRendersOutlineOnly`
+   * fresh is not enough on its own: the plane entities are only rebuilt when
+   * this effect re-runs, and its only trigger was `selectedRoofPlaneId`. So a
+   * face drawn as an outline before Auto Layout stayed an outline afterwards
+   * until the user happened to click it. The answer changes when a face gains
+   * or loses panels, so that is what the redraw keys on.
+   */
+  const panelPlaneKey = useMemo(
+    () => Array.from(new Set(panels.map(p => p.planeId ?? ''))).sort().join('|'),
+    [panels],
+  );
+
   // v47.122: Re-render all tracked planes when selection changes
   // Selected plane → bright highlight; all others → dimmed
   useEffect(() => {
@@ -2305,7 +2469,7 @@ function SolarEngine3D({
 
       // Re-render with new selection state
       const isSelected = selectedRoofPlaneId === planeId;
-      const newIds = renderPlane3DEntity(viewer, C, cesiumPts, planeId, frame, isSelected, markOnlyPlaneIdsRef.current.has(planeId));
+      const newIds = renderPlane3DEntity(viewer, C, cesiumPts, planeId, frame, isSelected, planeRendersOutlineOnly(planeId));
       plane3DEntityMap.current.set(planeId, newIds);
 
       // Also update the flat list
@@ -2313,7 +2477,8 @@ function SolarEngine3D({
     });
 
     try { viewer.scene.requestRender(); } catch {}
-  }, [selectedRoofPlaneId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoofPlaneId, panelPlaneKey]);
 
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
@@ -2613,8 +2778,7 @@ function SolarEngine3D({
 
       // PERF v61: Use geoid approximation directly — skip sampleTerrainMostDetailed (saves 3-5s).
       const googleGroundElev = newTwin.elevation ?? 0;
-      const latRad = lat * Math.PI / 180;
-      const geoidApprox = -29 - 5 * Math.sin(latRad);
+      const geoidApprox = geoidUndulationM(lat);
       cesiumGroundElevRef.current = googleGroundElev + geoidApprox;
       cesiumGroundElevResolvedRef.current = true;
       addLog('FLY', `cesiumGroundElev updated: ${cesiumGroundElevRef.current.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
@@ -3255,8 +3419,7 @@ function SolarEngine3D({
       // The geoid approximation below is accurate to ~1-2m for CONUS, which is sufficient for panel placement.
       // Formula: ellipsoidal_height = orthometric_height (Google Elevation) + geoid_undulation
       // EGM96 CONUS approx: -29 - 5*sin(lat_rad) → ~-34m at Ohio, ~-32m at Alexandria VA, ~-29m at Texas
-      const latRadBoot = lat * Math.PI / 180;
-      const geoidApproxBoot = -29 - 5 * Math.sin(latRadBoot);
+      const geoidApproxBoot = geoidUndulationM(lat);
       const cesiumGroundElev = googleGroundElev + geoidApproxBoot;
       cesiumGroundElevRef.current = cesiumGroundElev;
       cesiumGroundElevResolvedRef.current = true;
@@ -3529,9 +3692,7 @@ function SolarEngine3D({
     // Use cesiumGroundElevRef if available (sampled at boot from terrain provider).
     // Fallback: Google elevation + lat-based EGM96 geoid approximation for CONUS.
     const googleElev = isFinite(twinData.elevation) ? twinData.elevation : 0;
-    const geoidUndulationOverlay = -29 - 5 * Math.sin(
-      (twinData.roofSegments[0]?.center?.lat ?? 38) * Math.PI / 180
-    );
+    const geoidUndulationOverlay = geoidUndulationM(twinData.roofSegments[0]?.center?.lat ?? NaN);
     const cesiumElev = cesiumGroundElevResolvedRef.current
       ? cesiumGroundElevRef.current
       : googleElev + geoidUndulationOverlay;
@@ -3772,23 +3933,14 @@ function SolarEngine3D({
   // RENDERING ONLY — zero impact on structural calc, panel coords, or BOM.
 
   /** Returns XR rail dimensions for the active mounting system, or null for rail-less. */
+  // Rail colour is a viewport choice; the DIMENSIONS are manufacturer facts and
+  // are read from the mounting-hardware database. The old switch hardcoded three
+  // systems and returned null for every other one, so the 16 further systems that
+  // publish a rail height drew no rails at all.
   function getRailSpec(mountingId: string): { heightM: number; widthM: number; color: string } | null {
-    switch (mountingId) {
-      case 'ironridge-xr100':
-      case 'rooftech-mini':
-      case 'rt-mini':
-        return { heightM: 0.042, widthM: 0.025, color: '#6b7280' }; // XR100: 1.66"H × ~1"W, silver-grey
-      case 'ironridge-xr1000':
-        return { heightM: 0.051, widthM: 0.030, color: '#4b5563' }; // XR1000: 2"H, darker grey
-      // Rail-less and non-roof systems return null → no rails rendered
-      case 'rooftech-mini-s':
-      case 'rooftech-mini-t':
-      case 'rooftech-hook':
-      case 'ironridge-flat-roof':
-        return null;
-      default:
-        return null; // unknown system → don't render rails
-    }
+    const x = railCrossSectionM(mountingId);
+    if (!x) return null; // rail-less / ballasted / no published dimension
+    return { heightM: x.heightM, widthM: x.widthM, color: mountingId === 'ironridge-xr1000' ? '#4b5563' : '#6b7280' };
   }
 
   /**
@@ -3860,11 +4012,36 @@ function SolarEngine3D({
       0.92,
     );
 
-    // Rail centre sits inwardM below the panel centroid along the roof normal.
-    // panel.height = roofDeckAlt + stackH (vertical addition).
-    // Rail centre = roofDeckAlt + railH/2  =>  inwardM = stackH - railH/2.
-    const stackH  = getRoofPanelOffset(mountId);
-    const inwardM = stackH - railH / 2;
+    // A rail's top face carries the module, so it meets the module's underside.
+    // Rail centre = module − normal * drawnHeight/2, and nothing else is needed.
+    //
+    // 🚨 The old rule was `inwardM = stackH - railH/2`, justified by a comment
+    // reading "panel.height = roofDeckAlt + stackH". `roofDeckAlt` is not a
+    // variable anywhere in this file — it appears only in that comment. Worse,
+    // it centred the rail as though the rail were railH tall while the box below
+    // is DRAWN at railH * 3 (a deliberate visibility exaggeration), so the run
+    // sank railH into the deck. Hanging it from the module needs no deck datum
+    // and stays correct whatever the stack height and exaggeration are.
+    // 🚨 AND THE EXAGGERATION HAS TO FIT IN THE STACK.
+    // `railH * 3` is a real manufacturer dimension multiplied by a rendering
+    // constant, and nothing checked the product against the space it hangs in.
+    // Measured across all 45 catalogue systems, four drive the drawn rail
+    // straight through the deck it is bolted to:
+    //
+    //     s5-pvkit        stack 0.088  drawn 0.1143   -26 mm
+    //     dpw-powerrail   stack 0.159  drawn 0.1714   -12 mm
+    //     renusol-vs-plus stack 0.170  drawn 0.2042   -34 mm
+    //     mse-rapid-rail  stack 0.170  drawn 0.2042   -34 mm
+    //
+    // and two more (k2-crossrail, schletter-classic) clear it by 0.4 mm, which
+    // is z-fighting, not clearance. The previous fix moved the rail onto the
+    // right datum and left the exaggeration unbounded; the bound belongs with
+    // it. IronRidge, Unirac, SnapNRack and the rest are unchanged — the clamp
+    // only binds where the product would not have fitted.
+    // The clamp is `drawnRailHeightM` in lib/roofMountDatum.ts — a function the
+    // renderer calls and the test calls, rather than arithmetic each restates.
+    const drawnRailH = drawnRailHeightM(mountId) ?? railH * RAIL_DRAW_SCALE;
+    const inwardM    = drawnRailH / 2;
 
     // Max gap between adjacent panel edges that still belongs to the same rail run.
     // Panels from buildSurfaceGrid have 0mm spacing so any gap > 0.20m is a real
@@ -3887,7 +4064,17 @@ function SolarEngine3D({
       const vz = nx * uy - ny * ux;
 
       // Reference ECEF point for plane-local coordinates (first panel in plane)
-      const refEcef = engLatLngToECEF(rep0.lat, rep0.lng, rep0.height ?? 0);
+      //
+      // 🚨 `?? 0` HERE PUT THE WHOLE PLANE'S ORIGIN AT SEA LEVEL.
+      // `addPanelEntity` was taught to refuse a panel with no elevation; the
+      // rail path kept substituting zero, so one elevation-less panel chosen as
+      // the reference threw every rail on that face a hundred metres off. Rails
+      // are drawn from modules, so they inherit the module's rule.
+      if (!hasUsableElevation(rep0)) {
+        addLog('ERROR', `Rails skipped for plane ${planeId.slice(0, 8)} — reference panel ${rep0.id} has no elevation`);
+        return;
+      }
+      const refEcef = engLatLngToECEF(rep0.lat, rep0.lng, rep0.height as number);
 
       // For each panel compute plane-local (u, v) coordinates and panel half-widths.
       // uC/vC are metres along the ridge/slope axes relative to refEcef.
@@ -3899,8 +4086,8 @@ function SolarEngine3D({
         uMin: number; uMax: number;
       };
 
-      const panelUVs: PanelUV[] = planePanels.map(p => {
-        const ecef = engLatLngToECEF(p.lat, p.lng, p.height ?? 0);
+      const panelUVs: PanelUV[] = planePanels.filter(hasUsableElevation).map(p => {
+        const ecef = engLatLngToECEF(p.lat, p.lng, p.height as number);
         const dx = ecef.x - refEcef.x;
         const dy = ecef.y - refEcef.y;
         const dz = ecef.z - refEcef.z;
@@ -4030,7 +4217,7 @@ function SolarEngine3D({
                 box: {
                   // Cross-section 3x visual scale for readability at Cesium zoom levels.
                   // Length (y / along-ridge) is EXACT panel-edge to panel-edge -- never scaled.
-                  dimensions: new C.Cartesian3(railW * 3, railLength, railH * 3),
+                  dimensions: new C.Cartesian3(railW * (drawnRailH / railH), railLength, drawnRailH),
                   material:   new C.ColorMaterialProperty(railColor),
                   outline:    false,
                   shadows:    C.ShadowMode.DISABLED,
@@ -4059,7 +4246,10 @@ function SolarEngine3D({
     rotByPlane.forEach((ps, pid) => {
       const ents: any[] = [];
       for (const p of ps) {
-        const pos = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
+        // Same rule as addPanelEntity: no elevation, no rail. A rail drawn at
+        // sea level is not a clue that something is wrong, it is a second bug.
+        if (!hasUsableElevation(p)) continue;
+        const pos = safeCartesian3(C, p.lng, p.lat, p.height as number);
         if (!pos) continue;
         // Panel's own box axes under its rotation: lX along ph, lY along pw, lZ = normal.
         const fq = (p as any).frameQuat;
@@ -4092,7 +4282,18 @@ function SolarEngine3D({
               name: `roof-rail-rot-${p.id.slice(0, 6)}-${sgn > 0 ? 'lo' : 'hi'}`,
               position: c,
               orientation: oq,
-              box: { dimensions: new C.Cartesian3(railW * 3, railLen, railH * 3), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
+              // 🚨 THE CLAMP REACHED THE OFFSET AND NOT THIS BOX.
+              // `inwardM` above is derived from the CLAMPED height, and the
+              // grid rail beside it is drawn at that height — but this branch
+              // kept `railH * 3`. So a rotated array positioned its rails by
+              // the clamped offset and drew them at the unclamped size: for
+              // S-5! PVKit the run hangs 10.6 mm BELOW the deck and rises
+              // 15.6 mm UP inside the 40 mm module box, and is 37.5% wider
+              // than the rails on an un-rotated face of the same roof.
+              // Reachable: pick that racking, Auto Layout, select the array,
+              // drag the rotate handle — every panel gets a frameQuat and
+              // comes through here.
+              box: { dimensions: new C.Cartesian3(railW * (drawnRailH / railH), railLen, drawnRailH), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
             }));
           } catch (e) { handleCesiumError('renderRoofRails rotated', e, true); }
         }
@@ -4139,11 +4340,52 @@ function SolarEngine3D({
       if (vs.length < 3) return;
       const planePanels = panelsRef.current.filter(p => p.planeId === plane.id && isFinite((p as any).ecefUx) && isFinite((p as any).ecefNx));
       let u: any, n: any, origin: any;
-      if (planePanels.length) {
+      const own = (plane as any).ecefFrame3D, ownOrigin = (plane as any).origin3D;
+      if (own?.u && own?.n && ownOrigin) {
+        // 🚨 THE PLANE KNOWS ITS OWN FRAME — ASK IT FIRST.
+        //
+        // The branch below rebuilds a frame from a panel because "the only
+        // surviving record of the plane's frame is a panel that sits on it".
+        // That premise is false, and I checked rather than believed it:
+        // round-tripping a plane through `upsertLayout` and `getLayoutByProject`
+        // against real PostgreSQL returns `origin3D`, `ecefFrame3D`, `polygon3D`
+        // and `createdFrom3D` intact. Deriving the deck from a module was
+        // guesswork standing next to the answer.
+        //
+        // And the guess is not sound. Recovering a deck from a module means
+        // subtracting a mount stack, `PlacedPanel` records no mounting system,
+        // so it had to assume the CURRENTLY SELECTED racking. For a design saved
+        // before the mount datum existed — panels at the old +0.05 — that
+        // recovers an origin 9 cm BELOW the true plane, and `squareUpTracedFaces`
+        // then PERSISTS it. Same error if the racking selector changed since
+        // placement.
+        u = C.Cartesian3.normalize(new C.Cartesian3(own.u.x, own.u.y, own.u.z), new C.Cartesian3());
+        n = C.Cartesian3.normalize(new C.Cartesian3(own.n.x, own.n.y, own.n.z), new C.Cartesian3());
+        origin = new C.Cartesian3(ownOrigin.x, ownOrigin.y, ownOrigin.z);
+      } else if (planePanels.length) {
         const rp: any = planePanels[0];
         u = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefUx, rp.ecefUy, rp.ecefUz), new C.Cartesian3());
         n = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefNx, rp.ecefNy, rp.ecefNz), new C.Cartesian3());
-        origin = safeCartesian3(C, rp.lng, rp.lat, rp.height ?? 0);
+        // 🚨 A MODULE IS NOT THE DECK. Reached only when the plane carries no
+        // frame of its own. Taking a panel's position as the plane origin made
+        // every consumer that adds a mount stack add it a SECOND time: the
+        // single-panel tool projected a click onto the panel plane and lifted by
+        // the stack again, so each hand-placed module after a reload floated one
+        // stack height above its neighbours — and the next reload used THAT as
+        // the origin. A ratchet, 14 cm per turn. Step back down to the deck so
+        // this branch returns the same datum as the other two.
+        // 🚨 AND `?? 0` WOULD HAVE PERSISTED SEA LEVEL AS THE ROOF.
+        // This origin is written back by Square Up. A representative panel with
+        // no elevation used to yield a deck on the WGS-84 ellipsoid, and the
+        // next save made that the plane's recorded origin — permanent, and
+        // indistinguishable afterwards from a roof that is genuinely there.
+        const panelPos = hasUsableElevation(rp)
+          ? safeCartesian3(C, rp.lng, rp.lat, rp.height as number)
+          : null;
+        const deck = panelPos
+          ? deckPointFromModule(panelPos, n, mountingSystemIdRef.current)
+          : null;
+        origin = deck ? new C.Cartesian3(deck.x, deck.y, deck.z) : null;
       } else {
         try {
           const lg = computeEcefFrameForLegacyPlane(plane as any, groundElev);
@@ -4155,12 +4397,29 @@ function SolarEngine3D({
       if (!origin) return;
       const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3());
       const baseH = C.Cartographic.fromCartesian(origin).height;
+      // 🚨 DROP EACH CORNER VERTICALLY, NOT ALONG THE NORMAL.
+      // This subtracted `n · dn`, which also moves the point HORIZONTALLY, by
+      // distance·sin²(tilt) — 0.8 m at 25° on a 4.5 m half-face. These corners
+      // decide which faces Stitch judges to share a hip, a ridge or a valley,
+      // and what position their shared corners average to. `joinSharedCorners`
+      // has a 1.5 m tolerance, which is why the adjacency usually still matched
+      // and the corner it produced was quietly wrong.
+      //
+      // The same trap `polygonFromVerticesOnFrame` names, in the file that
+      // names it. A vertical drop is exact: the corner's plan position is what
+      // the vertex record means, and its height is whatever the plane says at
+      // that position.
       const corners = vs.map((vert: any) => {
-        const Pv = safeCartesian3(C, vert.lng, vert.lat, baseH);
-        if (!Pv) return null;
-        const diff = C.Cartesian3.subtract(Pv, origin, new C.Cartesian3());
-        const dn = C.Cartesian3.dot(diff, n);
-        return C.Cartesian3.subtract(Pv, C.Cartesian3.multiplyByScalar(n, dn, new C.Cartesian3()), new C.Cartesian3());
+        const a = safeCartesian3(C, vert.lng, vert.lat, baseH);
+        const b = safeCartesian3(C, vert.lng, vert.lat, baseH + 1);
+        if (!a || !b) return null;
+        const fa = C.Cartesian3.dot(C.Cartesian3.subtract(a, origin, new C.Cartesian3()), n);
+        const fb = C.Cartesian3.dot(C.Cartesian3.subtract(b, origin, new C.Cartesian3()), n);
+        const slope = fb - fa;
+        // A vertical line parallel to the plane is a wall, not a roof — keep
+        // the sample rather than dividing by ~0.
+        if (!isFinite(slope) || Math.abs(slope) < 1e-9) return a;
+        return safeCartesian3(C, vert.lng, vert.lat, baseH - fa / slope);
       }).filter(Boolean);
       if (corners.length < 3) return;
       renderables.push({ id: plane.id, corners, u, v, n, origin });
@@ -4504,29 +4763,53 @@ function SolarEngine3D({
     const aligned = joinRes.joined;
 
     // 3. Rebuild each face from its squared ring at the heights it already had.
-    const updates: Array<{
-      id: string;
-      vertices: Array<{ lat: number; lng: number }>;
-      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
-      polygon3D?: Cart3[];
-      origin3D?: Cart3;
-      normal3D?: Cart3;
-      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
-      pitch?: number;
-      azimuth?: number;
-    }> = [];
+    const updates: RoofPlaneReshapeUpdate[] = [];
     for (const rp of renderables) {
       const ring = rings.get(rp.id);
       if (!ring || ring.length < 3) continue;
-      const old = rp.corners.map((c: any) => ecefToLatLng({ x: c.x, y: c.y, z: c.z }));
-      const meanH = old.reduce((acc: number, g: any) => acc + g.height, 0) / old.length;
-      const pts3D = ring.map(v => engLatLngToECEF(v.lat, v.lng, meanH));
+      // 🚨 PUT THE SQUARED CORNERS BACK ON THE FACE'S OWN PLANE.
+      //
+      // This block used to read:
+      //     const meanH = old.reduce((a, g) => a + g.height, 0) / old.length;
+      //     const pts3D = ring.map(v => engLatLngToECEF(v.lat, v.lng, meanH));
+      // — every corner rebuilt at the MEAN of the corner heights, which is a
+      // HORIZONTAL ring. Square Up therefore FLATTENED every face it touched,
+      // while the comment above it said "at the heights it already had".
+      //
+      // It is a plan-view tool. Squaring an outline is a horizontal correction;
+      // the pitch is not the trace's mistake and must survive untouched. A 25°
+      // face came out at 0.19° (not 0° — the residual is the deflection of the
+      // vertical, geocentric-up vs geodetic-up, ~0.19° at this latitude), and
+      // 0.19 > 0 is the dangerous value: it slips past the `t > 0` filter in
+      // lib/pvwatts.ts and the `pitch > 0` gate in applyToSystemDefinition that
+      // would both have rejected a clean zero. The flattened pitch and azimuth
+      // were then pushed into `updates` and persisted, so the damage outlived
+      // the session and reached PVWatts, the ASCE wind/snow gates and the
+      // cos(pitch) sloped-area basis.
+      //
+      // So: keep each corner's lat/lng from the squared ring, and solve for the
+      // height that puts it exactly on the plane the face already had. The
+      // outline squares up; the plane does not move.
+      // The maths lives in lib/roofPlane3D.ts so it can be tested without
+      // Cesium — this function cannot be, and an untestable fix to a
+      // permit-reaching defect is not a fix.
+      const pts3D = projectOutlineOntoPlane(
+        ring,
+        { x: rp.origin.x, y: rp.origin.y, z: rp.origin.z },
+        { x: rp.n.x, y: rp.n.y, z: rp.n.z },
+      );
+      if (!pts3D || pts3D.length < 3) continue;
+
       let frame, plane;
-      // surfaceOffsetM 0: these heights came from an earlier fit and are already
-      // lifted — see the note in computePlaneFromPoints3D about Stitch.
+      // 🚨 THE SAME OFFSET FOR BOTH. These points lie on a plane that was
+      // already lifted by an earlier fit, so both calls pass 0. Passing 0 to the
+      // rendered frame and the DEFAULT to the stored plane — which is what this
+      // did, because buildRoofPlane3D took no options — put the deck and the
+      // placement geometry exactly SURFACE_OFFSET_M apart on every press, and
+      // the gap compounded across save/reload cycles.
       try {
         frame = computePlaneFromPoints3D(pts3D, { surfaceOffsetM: 0 });
-        plane = buildRoofPlane3D(pts3D);
+        plane = buildRoofPlane3D(pts3D, { surfaceOffsetM: 0 });
       } catch { continue; }
 
       (plane3DEntityMap.current.get(rp.id) ?? []).forEach((eid: string) => {
@@ -4535,7 +4818,7 @@ function SolarEngine3D({
       });
       const cesiumPts = frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, rp.id, frame,
-        selectedRoofPlaneId === rp.id, markOnlyPlaneIdsRef.current.has(rp.id));
+        selectedRoofPlaneId === rp.id, planeRendersOutlineOnly(rp.id));
       plane3DEntityMap.current.set(rp.id, newIds);
       plane3DFrameMap.current.set(rp.id, frame);
       plane3DCesiumPtsMap.current.set(rp.id, cesiumPts);
@@ -4547,6 +4830,8 @@ function SolarEngine3D({
           id: rp.id, vertices: plane.vertices, localFrame3D: plane.localFrame3D,
           polygon3D: plane.polygon3D, origin3D: plane.origin3D, normal3D: plane.normal3D,
           pitch: plane.pitch, azimuth: plane.azimuth,
+          // The axes panels are placed on must travel with the geometry.
+          ecefFrame3D: plane.ecefFrame3D,
         });
       }
     }
@@ -4603,17 +4888,7 @@ function SolarEngine3D({
       return deriveAzimuthFromOutline(ring, ring.reduce((sum, v) => sum + v.lat, 0) / ring.length);
     });
 
-    const updates: Array<{
-      id: string;
-      vertices: Array<{ lat: number; lng: number }>;
-      localFrame3D: { u: Cart3; v: Cart3; n: Cart3 };
-      polygon3D?: Cart3[];
-      origin3D?: Cart3;
-      normal3D?: Cart3;
-      // Any reshape must carry the resulting pitch/azimuth — see the prop type.
-      pitch?: number;
-      azimuth?: number;
-    }> = [];
+    const updates: RoofPlaneReshapeUpdate[] = [];
 
     for (const rf of rawFaces) {
       if (scope && rf.id !== scope) continue;
@@ -4644,7 +4919,7 @@ function SolarEngine3D({
       });
       const cesiumPts = built.frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, rf.id, built.frame,
-        selectedRoofPlaneId === rf.id, markOnlyPlaneIdsRef.current.has(rf.id));
+        selectedRoofPlaneId === rf.id, planeRendersOutlineOnly(rf.id));
       plane3DEntityMap.current.set(rf.id, newIds);
       plane3DFrameMap.current.set(rf.id, built.frame);
       plane3DCesiumPtsMap.current.set(rf.id, cesiumPts);
@@ -4660,6 +4935,8 @@ function SolarEngine3D({
           // Emit the shape the face was actually BUILT to.
           pitch: built.plane.pitch,
           azimuth: built.plane.azimuth,
+          // The axes panels are placed on must travel with the geometry.
+          ecefFrame3D: built.plane.ecefFrame3D,
         });
       }
     }
@@ -5026,18 +5303,7 @@ function SolarEngine3D({
 
     // v64: collect the stitched corners (lat/lng) per plane so they can be written
     // back into roofPlanes state — the geometry every panel-placement engine reads.
-    const stitchUpdates: Array<{
-      id: string;
-      vertices: Array<{ lat: number; lng: number }>;
-      localFrame3D: {
-        u: { x: number; y: number; z: number };
-        v: { x: number; y: number; z: number };
-        n: { x: number; y: number; z: number };
-      };
-      polygon3D?: Array<{ x: number; y: number; z: number }>;
-      origin3D?:  { x: number; y: number; z: number };
-      normal3D?:  { x: number; y: number; z: number };
-    }> = [];
+    const stitchUpdates: RoofPlaneReshapeUpdate[] = [];
     for (const [pid, pts] of work) {
       const cartPts: Cart3[] = pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
       // 🚨 surfaceOffsetM: 0 — these points came OUT of a previous fit (the
@@ -5049,12 +5315,38 @@ function SolarEngine3D({
       const oldIds = plane3DEntityMap.current.get(pid) || [];
       oldIds.forEach(id => { try { const e = viewer.entities.getById(id); if (e) viewer.entities.remove(e); } catch {} });
       const isSel = selectedRoofPlaneId === pid;
-      const newIds = renderPlane3DEntity(viewer, C, projected, pid, frame, isSel, markOnlyPlaneIdsRef.current.has(pid));
+      const newIds = renderPlane3DEntity(viewer, C, projected, pid, frame, isSel, planeRendersOutlineOnly(pid));
       plane3DEntityMap.current.set(pid, newIds);
       plane3DFrameMap.current.set(pid, frame);
       plane3DCesiumPtsMap.current.set(pid, projected);
       // projected[i] is the same planarized corner buildRoofPlane3D used to make
       // plane.vertices[i] — convert back to lat/lng to update the source geometry.
+      // 🚨 THE PLAN RECORD HERE KEEPS THE RENDER LIFT, DELIBERATELY, AND I
+      // BROKE IT ONCE BY "FIXING" IT.
+      //
+      // `buildRoofPlane3D` takes `vertices` BEFORE the lift, because the lift
+      // has a horizontal component of offset·sin(tilt) down each face's own
+      // azimuth and deriving the plan record from lifted points slid the two
+      // halves of a gable apart. The obvious inference is that this write-back
+      // should do the same. It must not, and the reason is the clustering
+      // above:
+      //
+      //   `work` holds the LIFTED corners. A gable's two ridge corners are
+      //   therefore already 2·offset·sin(tilt) apart there — and the stitch's
+      //   whole purpose is to AVERAGE them into one point, which it does.
+      //   Subtracting each face's own normal afterwards pulls that single
+      //   shared point back into two, by exactly the amount the clustering had
+      //   just removed.
+      //
+      // Measured in the browser: before Stitch the gable's ridge vertices are
+      // 0.0 mm apart; with the unlift applied here they came out 100.9 mm
+      // apart — 2 · 0.12 · sin(25°). The guard in e2e/design-studio.spec.ts
+      // caught it before it shipped.
+      //
+      // What remains true is smaller and is recorded rather than guessed at: a
+      // stitched face's plan outline is translated ~5 cm down-slope as a whole.
+      // Removing that correctly means clustering in PLAN space, which is a
+      // change to the stitch algorithm, not to this loop.
       const verts: Array<{ lat: number; lng: number }> = [];
       for (const p of projected) {
         const carto = C.Cartographic.fromCartesian(p);
@@ -5095,6 +5387,26 @@ function SolarEngine3D({
           polygon3D: projected.map((p: any) => ({ x: p.x, y: p.y, z: p.z })),
           origin3D:  { x: frame.origin.x, y: frame.origin.y, z: frame.origin.z },
           normal3D:  { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z },
+          // 🚨 STITCH IS A RESHAPE, AND IT WAS THE ONE THAT SAID NOTHING.
+          //
+          // Ray uses Stitch deliberately to pull separate planes into a peak —
+          // a modelling move. Moving corners to a shared ridge CHANGES the
+          // plane, so pitch, azimuth and the ECEF frame all change with it. This
+          // push carried the geometry and none of the three, so `plane.pitch`
+          // kept its pre-stitch value (read by the planset, the structural
+          // engine and the production model) and `buildSurfaceGrid` kept
+          // placing panels on the pre-stitch triad while clipping them to the
+          // stitched outline.
+          //
+          // Derived exactly as buildRoofPlane3D derives them, so a stitched face
+          // and a traced one report the same numbers for the same geometry.
+          pitch:   Math.max(0, Math.min(60, frame.tiltDeg)),
+          azimuth: ((frame.azimuthDeg % 360) + 360) % 360,
+          ecefFrame3D: {
+            u: { x: frame.u.x, y: frame.u.y, z: frame.u.z },
+            v: { x: frame.v.x, y: frame.v.y, z: frame.v.z },
+            n: { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z },
+          },
         });
       }
     }
@@ -5294,9 +5606,27 @@ function SolarEngine3D({
   function addPanelEntity(viewer: any, C: any, panel: PlacedPanel, skipGridOverride?: boolean) {
     try {
       // v47.138: Height is set by pure plane math in buildSurfaceGridECEF /
-      // addRow / extendRow / placeSinglePanel — origin + u*uC + v*vC + n*PANEL_OFFSET_ECEF (0.05m).
+      // addRow / extendRow / placeSinglePanel — origin + u*uC + v*vC + n*moduleStackHeightM(mountId).
       // Cesium mesh (3D tiles) is VISUAL ONLY — never sample per-panel height from terrain.
-      const h       = panel.height ?? 0;
+      // 🚨 A PANEL WITH NO ELEVATION IS NOT A PANEL AT SEA LEVEL.
+      //
+      // This used to read `const h = panel.height ?? 0`, and `isValidCoord`
+      // accepts 0, so a panel that arrived without an elevation was DRAWN at
+      // ellipsoidal zero — roughly a hundred metres below any real roof — while
+      // its neighbours sat correctly. That is "the panels are not ALL rendering
+      // above the roof": the count is right, nothing errors, and part of the
+      // array is underground.
+      //
+      // Refusing to draw it is the honest failure. A missing panel is noticed
+      // and reported; a buried one looks like a rendering bug and gets chased
+      // in the wrong place.
+      if (!hasUsableElevation(panel)) {
+        addLog('ERROR',
+          `Panel ${panel.id} has NO elevation (height=${String(panel.height)}) — not drawn. ` +
+          `Re-run Auto Layout to place it on the roof.`);
+        return;
+      }
+      const h       = panel.height as number;
       const tiltDeg = panel.tilt    ?? 0;
       const azDeg   = panel.azimuth ?? 180;
 
@@ -6314,7 +6644,7 @@ function SolarEngine3D({
       if (!isValidCoord(pLat, pLng, pHeight)) return;
 
       const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      const offM = getRoofPanelOffset(mountingSystemIdRef.current);
+      const offM = moduleStackHeightM(mountingSystemIdRef.current);
       // v62: if the click lands on a marked/CAD plane, make the panel FIRST-CLASS —
       // stamp that plane's ECEF frame + planeId so it rotates and renders rails (the
       // bare Roof tool used to place "stale" panels with no frame). Falls back to the
@@ -9192,7 +9522,11 @@ function SolarEngine3D({
     const stepM = pw + 0.05;
     const nextLat = lastLat + (ridgeN * stepM) / mLat;
     const nextLng = lastLng + (ridgeE * stepM) / mLng;
-    const pos = safeCartesian3(C, nextLng, nextLat, lastH + getRoofPanelOffset(mountingSystemIdRef.current));
+    // `lastH` is the height of the module just placed — deck + stack already.
+    // Adding the stack again drew the preview one stack ABOVE the module it
+    // previews, so the ghost never sat where its panel would land. The next
+    // module in a row is at the same elevation as the last: use it as given.
+    const pos = safeCartesian3(C, nextLng, nextLat, lastH);
     if (!pos) return;
     const pitchRad = -tiltDeg * Math.PI / 180;
     const hpr = new C.HeadingPitchRoll(heading, pitchRad, 0);
@@ -9665,10 +9999,39 @@ function SolarEngine3D({
       );
 
       // v62: mark-only faces render as a clean outline (no fill/grid/label/arrows).
-      if (!fillPanels) markOnlyPlaneIdsRef.current.add(plane.id);
 
       // Render plane visualization (full for panel planes; outline-only for marked).
       const isSelected = selectedRoofPlaneId === plane.id;
+      // 🚨 THE MARK PLANE INTENT IS RECORDED ON THE PLANE, NOT IN A REF.
+      //
+      // It used to live in a component-lifetime `Set`, which meant it did not
+      // survive a reload at all — a face the user marked came back as an
+      // ordinary face — and, worse, the same Set was ALSO used to answer "does
+      // this face have panels", so it latched that answer for ever and no deck
+      // was ever drawn under an array. Deleting the Set removed the latch and
+      // the intent together. The intent is a real user decision and belongs on
+      // the object it is about, where persistence carries it.
+      //
+      // 🚨 THE RENDERER DELIBERATELY DOES NOT READ IT, and that is not an
+      // oversight. Work through the four cases and the intent never changes
+      // what is drawn: a marked face has no panels, so "no panels → outline"
+      // already answers it; and a marked face that something HAS panelled needs
+      // a deck under those modules whatever was intended when it was traced.
+      // Reading it in `planeRendersOutlineOnly` would be a branch that returns
+      // the same answer either way — a second source of truth that cannot
+      // disagree today and will the moment one of the two rules changes.
+      //
+      // It is recorded for the consumers that SHOULD care and currently have no
+      // way to: the Roof Planes sidebar, the planset, and `handleAutoRoof`,
+      // which fills marked faces because nothing tells it not to. Whether it
+      // ought to is a question about PLACEMENT, and is not the renderer's to
+      // answer.
+      if (!fillPanels) (plane as any).markOnly = true;
+
+      // `!fillPanels` rather than `planeRendersOutlineOnly` for this ONE call:
+      // the face is being created and has no panels yet, so the predicate would
+      // draw an outline for the frame before Auto Layout fills it. Every later
+      // draw of this face goes through the predicate and converges.
       const entityIds  = renderPlane3DEntity(viewer, C, projectedCesiumPts, plane.id, frame, isSelected, !fillPanels);
       plane3DEntitiesRef.current = [...plane3DEntitiesRef.current, ...entityIds];
 
@@ -9713,6 +10076,7 @@ function SolarEngine3D({
 
       const clResult = placePanelsControlled({
         mode:            'plane3d',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:           plane as unknown as ControlPlane,
         orientation:     orient,
         wattage:         selectedPanelRef.current?.wattage ?? 400,
@@ -9886,6 +10250,7 @@ function SolarEngine3D({
       // v48.7: Route through control layer (surface_select mode)
       const clResult  = placePanelsControlled({
         mode:        'surface_select',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:       plane as unknown as ControlPlane,
         orientation: orient,
         wattage:     selectedPanelRef.current?.wattage ?? 400,
@@ -10064,6 +10429,7 @@ function SolarEngine3D({
       const clickECEF = { x: pickedPos.x, y: pickedPos.y, z: pickedPos.z };
       const clExtResult = placePanelsControlled({
         mode:           'extend_row',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:          plane as unknown as ControlPlane,
         existingPanels: panelsRef.current,
         clickECEF,
@@ -10129,6 +10495,7 @@ function SolarEngine3D({
 
       const clAddResult = placePanelsControlled({
         mode:           'add_row',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:          plane as unknown as ControlPlane,
         existingPanels: panelsRef.current,
         clickECEF,
@@ -10956,6 +11323,7 @@ function SolarEngine3D({
       // v48.7: Route through control layer (auto_roof mode)
       const clAutoResult = placePanelsControlled({
         mode:            'auto_roof',
+        mountingSystemId: mountingSystemIdRef.current,
         plane:           plane as unknown as ControlPlane,
         orientation:     planeOrient as 'portrait' | 'landscape',
         layoutStrategy:  planeIsHybrid ? 'mixed' : undefined,
@@ -11097,8 +11465,7 @@ function SolarEngine3D({
     // ── Elevation: cesiumGroundElevRef + heightAboveGround ─────────────────────────
     const heightAboveGround = isFinite(seg.heightAboveGround) ? seg.heightAboveGround : 3.0;
     // v47.216: lat-based EGM96 geoid approximation for CONUS (fallback when terrain not sampled)
-    const segLatRad = seg.center.lat * Math.PI / 180;
-    const geoidApproxFill = -29 - 5 * Math.sin(segLatRad);
+    const geoidApproxFill = geoidUndulationM(seg.center.lat);
     const groundElev = cesiumGroundElevResolvedRef.current
       ? cesiumGroundElevRef.current
       : (isFinite(seg.elevation) ? seg.elevation : 0) + geoidApproxFill;
@@ -11192,7 +11559,7 @@ function SolarEngine3D({
         const dE = (gp.lng - seg.center.lng) * mLng;
         const slopeProj = dE * slopeE + dN * slopeN;
         const ridgeProj = dE * ridgeE + dN * ridgeN;
-        const height = segElev + tanPitch * slopeProj + getRoofPanelOffset(mountingSystemIdRef.current);
+        const height = segElev + tanPitch * slopeProj + moduleStackHeightM(mountingSystemIdRef.current);
         if (!isValidCoord(gp.lat, gp.lng, height)) continue;
         validGp.push({ lat: gp.lat, lng: gp.lng, orientation: gp.orientation, slopeProj, ridgeProj, height });
       }
@@ -11336,7 +11703,7 @@ function SolarEngine3D({
         if (!panelCarto) continue;
         const pLat    = C.Math.toDegrees(panelCarto.latitude);
         const pLng    = C.Math.toDegrees(panelCarto.longitude);
-        const pHeight = panelCarto.height + getRoofPanelOffset(mountingSystemIdRef.current);
+        const pHeight = panelCarto.height + moduleStackHeightM(mountingSystemIdRef.current);
 
         if (!isValidCoord(pLat, pLng, pHeight)) continue;
 

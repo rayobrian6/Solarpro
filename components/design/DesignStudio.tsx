@@ -64,8 +64,8 @@ import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
 import { layoutSignature } from '@/lib/roofPlanesSignature';
-import { siteKeyFromCoords, isSameSite, coordKeyOf } from '@/lib/siteIdentity';
-import { archivesSignature } from '@/lib/design/siteDesignModel';
+import { siteKeyFromCoords, isSameSite, coordKeyOf, isPlaceholderCoords, PLACEHOLDER_LAT, PLACEHOLDER_LNG } from '@/lib/siteIdentity';
+import { archivesSignature, sitesAreSameProperty } from '@/lib/design/siteDesignModel';
 import { useSiteDesign } from './useSiteDesign';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
@@ -93,6 +93,10 @@ type SolarE2EState = {
   fullRebuildCount: number;
   /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
   roofPlaneEntityCount: number;
+  /** How many roof planes the 3D ENGINE holds. Distinct from `roofPlanes`,
+   *  which is what the studio holds — a browser spec that presses a placement
+   *  button before the engine has the geometry silently places nothing. */
+  engineRoofPlaneCount: number;
   /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
    *  bands hug edges (not roof middle). cf0dd96b regression guard. */
   setbackBandCentroids: Array<{ lat: number; lng: number }>;
@@ -519,11 +523,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   // ── Resolve initial map center ──────────────────────────────────────────────
   // Priority: project.lat/lng (geocoded at creation) → client.lat/lng → geocode on load
   // Never default to Phoenix (33.4484, -112.0740) — that was a hardcoded placeholder
-  const PHOENIX_LAT = 33.4484;
-  const PHOENIX_LNG = -112.0740;
-  function isPhoenixDefault(lat?: number, lng?: number) {
-    return lat === PHOENIX_LAT && lng === PHOENIX_LNG;
-  }
+  // 🚨 Delegates to lib/siteIdentity.ts. This used to be a local literal pair,
+  // which is how the studio could reject the placeholder while
+  // `siteKeyFromCoords` — the only thing that decides ownership — accepted it
+  // and minted a Phoenix site key for the project.
+  const isPhoenixDefault = isPlaceholderCoords;
   function hasValidCoords(lat?: number, lng?: number): boolean {
     return typeof lat === 'number' && typeof lng === 'number' &&
       isFinite(lat) && isFinite(lng) &&
@@ -535,12 +539,12 @@ export default function DesignStudio({ project, onSave }: Props) {
     ? project.lat!
     : hasValidCoords(project.client?.lat, project.client?.lng)
       ? project.client!.lat!
-      : PHOENIX_LAT; // Will be replaced by geocoding in useEffect below
+      : PLACEHOLDER_LAT; // Will be replaced by geocoding in useEffect below
   const initialLng = hasValidCoords(project.lat, project.lng)
     ? project.lng!
     : hasValidCoords(project.client?.lat, project.client?.lng)
       ? project.client!.lng!
-      : PHOENIX_LNG;
+      : PLACEHOLDER_LNG;
 
   // Map state
   const [mapCenter, setMapCenter] = useState({
@@ -615,7 +619,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const site = useSiteDesign();
   const { panels, setPanels, roofPlanes, setRoofPlanes } = site;
   const [e2eStitchedCorners, setE2EStitchedCorners] = useState<Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>>([]);
-  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0, setbackBandCentroids: [] as Array<{ lat: number; lng: number }>, panelMoveRebuildCount: 0 });
+  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0, engineRoofPlaneCount: 0, setbackBandCentroids: [] as Array<{ lat: number; lng: number }>, panelMoveRebuildCount: 0 });
   const [expandedPlaneId, setExpandedPlaneId] = useState<string | null>(null);
   const [groundArea, setGroundArea] = useState<{ lat: number; lng: number }[]>([]);
   
@@ -940,8 +944,27 @@ export default function DesignStudio({ project, onSave }: Props) {
   // with 3-second debounce. Replaces the manual "Calculate Production" button.
   const autoCalcTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Restore indicators — show what was loaded from DB on mount
-  const [restoredPanelCount, setRestoredPanelCount] = useState<number>(0);
-  const [restoredRoofPlaneCount, setRestoredRoofPlaneCount] = useState<number>(0);
+  /**
+   * Did what is on screen come out of storage, rather than being drawn this
+   * session?
+   *
+   * 🚨 THIS USED TO BE A WRITE-ONCE LATCH, BESIDE TWO PARALLEL COUNTERS.
+   * `restoredPanelCount` / `restoredRoofPlaneCount` held their own idea of how
+   * many panels there were, set independently of `panels`, and
+   * `layoutLoadedFromDB` was set true in exactly one place and never set back.
+   * So after a property change the badge read:
+   *
+   *     "Layout loaded from DB · 0 panels"
+   *
+   * while the top bar and the System Summary — which read `panels.length`,
+   * the canonical source — both said 52. That is the contradiction Ray
+   * reported, verbatim, and it was three readouts disagreeing because two of
+   * them were not derived from the design.
+   *
+   * The counters are gone. The badge counts `panels` and `roofPlanes`, and this
+   * flag now answers only the question it is named for — provenance — and is
+   * updated on every property change, not once per mount.
+   */
   const [layoutLoadedFromDB, setLayoutLoadedFromDB] = useState<boolean>(false);
 
   // Auto-save refs — use refs for mapCenter/zoom so the debounce callback
@@ -949,6 +972,10 @@ export default function DesignStudio({ project, onSave }: Props) {
   const mapCenterRef = useRef(mapCenter);
   const zoomRef = useRef(zoom);
   const lastSavedPanelsRef = useRef<string>('[]');
+  /** The last 409 refusal reason we told the user about, so a permanent refusal
+   *  retried every few seconds does not repeat its toast forever. Cleared by the
+   *  first save that succeeds. */
+  const lastRefusalRef = useRef<string | null>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Data-loss guard (task #3 root cause, 2026-07-16): NO save path may run
   // before the DB restore has resolved. The autosave timer armed on MOUNT and
@@ -1232,6 +1259,9 @@ export default function DesignStudio({ project, onSave }: Props) {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
+        // A save got through, so any earlier refusal is over — let the next one
+        // speak again rather than being suppressed as a duplicate.
+        lastRefusalRef.current = null;
         setLastSavedAt(new Date());
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 3000);
@@ -1242,8 +1272,34 @@ export default function DesignStudio({ project, onSave }: Props) {
         // compares equal and returns early. A failed save became a permanent
         // one. Clearing it lets the next edit carry this content up with it.
         lastSavedPanelsRef.current = '';
-        console.error('[LAYOUT SAVE] rejected', res.status, await res.text().catch(() => ''));
+        const body = await res.text().catch(() => '');
+        console.error('[LAYOUT SAVE] rejected', res.status, body);
         setSaveStatus('error');
+        // 🚨 A REFUSAL IS PERMANENT — DO NOT LET IT BLINK AWAY.
+        //
+        // 409 is the server declining to destroy the user's work (a subsystem
+        // wipe, or an archived property it cannot store because migration 123
+        // has not been run). It will keep refusing until someone acts. Clearing
+        // the badge after five seconds, as a transient failure does, meant the
+        // one message that explains the situation vanished before it could be
+        // read — and the user carried on designing into a layout that was not
+        // being saved. So the badge STAYS, and the reason is put in front of
+        // them instead of only in the console.
+        if (res.status === 409) {
+          let reason = 'The server refused this save to avoid destroying existing work.';
+          try {
+            const parsed = JSON.parse(body) as { error?: string };
+            if (parsed?.error) reason = parsed.error;
+          } catch { /* keep the fallback */ }
+          // The autosave retries every few seconds and the refusal is permanent,
+          // so speak ONCE per distinct reason. Repeating the same toast forever
+          // is how a real warning becomes wallpaper.
+          if (lastRefusalRef.current !== reason) {
+            lastRefusalRef.current = reason;
+            toast.error('Save refused — your design is NOT saved', reason);
+          }
+          return;
+        }
         setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
       }
     } catch (e) {
@@ -1274,7 +1330,18 @@ export default function DesignStudio({ project, onSave }: Props) {
     // fence line, a row spacing or a ground tilt edit must schedule its own
     // save. They were persisted but could not TRIGGER, so on a ground-mount or
     // fence design — where panels may not move at all — the edit was lost.
-  }, [panels, roofPlanes, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, saveLayoutToDB]);
+  // 🚨 `placedObstructions` and `measurements` BELONG HERE, and their absence was
+  // a half-landed fix. Migration 122 added both to the persisted payload AND to
+  // the save signature (lib/roofPlanesSignature.ts SIGNED_DESIGN_PARAMS), which
+  // is why they looked done — but signing only SUPPRESSES the early return once
+  // something else has already scheduled a save. It cannot schedule one.
+  //
+  // So placing a vent or drawing a measurement changed nothing observable: no
+  // timer started, and the work persisted only if the user happened to touch a
+  // panel afterwards. The v66 comment directly above describes exactly this
+  // failure mode for roofPlanes ("They were persisted but could not TRIGGER")
+  // and the same trap was walked into again two migrations later.
+  }, [panels, roofPlanes, placedObstructions, measurements, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, saveLayoutToDB]);
 
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {
@@ -1432,13 +1499,9 @@ export default function DesignStudio({ project, onSave }: Props) {
         }, siteKeyNow);
         const restoredPanels = hydrated.state.active.panels;
         const restoredPlanes = hydrated.state.active.roofPlanes;
-        if (restoredPanels.length > 0) {
-          setRestoredPanelCount(restoredPanels.length);
-          setLayoutLoadedFromDB(true);
-        }
-        if (restoredPlanes.length > 0) {
-          setRestoredRoofPlaneCount(restoredPlanes.length);
-        } else {
+        // Provenance only — the badge counts the design itself.
+        if (restoredPanels.length > 0 || restoredPlanes.length > 0) setLayoutLoadedFromDB(true);
+        if (restoredPlanes.length === 0) {
           // Solar API auto-detect DISABLED on project load.
           // Project coords may be a city centre or wrong building.
           // Roof planes only load when user explicitly picks a building via Pick House.
@@ -1503,10 +1566,25 @@ export default function DesignStudio({ project, onSave }: Props) {
   // house. A site change now happens only where the user SAYS so: Pick House,
   // the address search, and the address suggestion list.
   const changeSite = useCallback((lat: number, lng: number, address?: string | null) => {
-    const nextKey = siteKeyFromCoords(lat, lng, project.id);
+    // 🚨 SNAP TO A PROPERTY THIS PROJECT ALREADY KNOWS.
+    //
+    // The site key rounds to about 1.1 m, and a click on a roof scatters by
+    // metres — so picking the SAME house twice minted two properties, and the
+    // second pick opened an empty design next to the first. That is the
+    // original complaint wearing a different hat, and it happened to Ray on the
+    // live row: three identities for one building inside 43 seconds, ~17 m and
+    // ~19 m apart. resolveKeyFor reuses the nearest known site within
+    // SITE_MATCH_RADIUS_M, so returning to a house returns the design left
+    // there. Picking the actual neighbour still reaches the neighbour, because
+    // that click is nearer to the neighbour's own key.
+    const resolved = site.resolveKeyFor(lat, lng, project.id);
+    const nextKey = resolved.key;
     // An unresolved key means we cannot prove ownership — do nothing rather
     // than archive a design on the strength of a coordinate we do not trust.
     if (!nextKey) return false;
+    if (resolved.matchedExisting) {
+      console.log(`[DesignStudio] picked point is ${resolved.distanceM?.toFixed(1)}m from a property this project already has — reusing ${nextKey}`);
+    }
     const prevKey = activeSiteKeyRef.current;
     // 🚨 THE FENCE LINE IS lat/lng GEOMETRY, so it belongs to the property it
     // was drawn at — carrying it across draws a fence at the old address, which
@@ -1523,8 +1601,12 @@ export default function DesignStudio({ project, onSave }: Props) {
       },
     });
     if (!res.changed) return false;
-    setRestoredRoofPlaneCount(res.arriving.roofPlanes.length);
-    setRestoredPanelCount(res.arriving.panels.length);
+    // 🚨 PROVENANCE MUST TRACK THE PROPERTY CHANGE, NOT LATCH ON MOUNT.
+    // This flag was set true exactly once, on restore, and never cleared — so
+    // after moving to a property with nothing stored the badge still claimed the
+    // layout had been loaded from the database. It now describes the bundle that
+    // just became active: restored from an archive, or a blank property.
+    setLayoutLoadedFromDB(res.arriving.panels.length > 0 || res.arriving.roofPlanes.length > 0);
     // Apply the arriving property's fence, or clear it for a property that has
     // none — leaving the previous one on screen is the defect, not the fix.
     const arrivingFence = res.arriving.scalars?.fenceLine;
@@ -1534,6 +1616,30 @@ export default function DesignStudio({ project, onSave }: Props) {
       fenceHeightRef.current = res.arriving.scalars.fenceHeight;
       setFenceHeight(res.arriving.scalars.fenceHeight);
     }
+    // 🚨 THE ELECTRICAL DESIGN IS SITE-BOUND TOO, AND NOTHING READ IT.
+    //
+    // `siteDesignModel` stores `designElectrical` in the bundle precisely so
+    // that "returning to a property restores its topology/string paint, not the
+    // other property's" — and `res.arriving.designElectrical` had no reader
+    // anywhere in this component. So topology, racking, modules-per-string and
+    // the manual string paint carried straight across a property change, and
+    // `buildDesignElectrical()` then folded them into the layout persisted for
+    // the NEW property.
+    //
+    // The string paint is the worst of it: panel ids are index-based
+    // (`panel_${n}` in lib/autoDesign.ts), so site A's override KEYS collide
+    // with site B's panels and stringAssignment actively repaints them rather
+    // than skipping them. A's wiring decisions silently became B's.
+    //
+    // A property with no stored electrical design gets the defaults back, for
+    // the same reason the fence is cleared above: leaving the previous
+    // property's answer on screen is the defect, not the fix.
+    const arrivingElec = res.arriving.designElectrical;
+    setTopology(arrivingElec?.topology ?? 'string');
+    setModulesPerString(typeof arrivingElec?.modulesPerString === 'number' ? arrivingElec.modulesPerString : 10);
+    setRackingId(arrivingElec?.rackingId ?? 'ironridge-xr100');
+    setStringOverrides(arrivingElec?.overrides ?? {});
+
     // The new site has no detection result yet — say so honestly rather than
     // leaving the previous site's status on screen.
     setSolarApiStatus('idle');
@@ -1904,6 +2010,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       setbackInsets: e2eDiagnostics.setbackInsets,
       fullRebuildCount: e2eDiagnostics.fullRebuildCount,
       roofPlaneEntityCount: e2eDiagnostics.roofPlaneEntityCount,
+      engineRoofPlaneCount: e2eDiagnostics.engineRoofPlaneCount,
       setbackBandCentroids: e2eDiagnostics.setbackBandCentroids,
       panelMoveRebuildCount: e2eDiagnostics.panelMoveRebuildCount,
       // ── SITE OWNERSHIP ────────────────────────────────────────────────────
@@ -1927,6 +2034,14 @@ export default function DesignStudio({ project, onSave }: Props) {
         if (d.measurements) setMeasurements(d.measurements);
       },
     };
+    // 🚨 TEAR THE HOOK DOWN. Without this, an unmounted studio leaves its last
+    // state frozen on `window` — and this page DOES unmount: an unauthenticated
+    // /api/projects call redirects to /auth/login mid-spec. A browser test then
+    // goes on reading a dead component's snapshot, clicks land on nothing, and
+    // every assertion passes against numbers that can no longer change. A spec
+    // that cannot tell "nothing happened" from "the app is gone" proves nothing,
+    // which is the same failure as a guard wrapped in `if (panels.length > 0)`.
+    return () => { delete window.__solarE2E; };
   }, [roofPlanes, panels, placedObstructions, measurements, e2eStitchedCorners, e2eDiagnostics,
       site.activeSiteKey, site.archivedSiteCount, site.archivedEntityCount, handleLocationPick,
       setPanels, setRoofPlanes, setPlacedObstructions, setMeasurements]);
@@ -3516,6 +3631,23 @@ export default function DesignStudio({ project, onSave }: Props) {
       verticesLocalCount: plane.verticesLocal?.length,
     });
 
+    // 🚨 THE CHOKEPOINT HAD TWO CALLERS THAT NEVER REACHED IT.
+    // `routeLayoutTo3D` was introduced as "the one place that decides this
+    // layout cannot run in the 2D engine", and the claim was not checked
+    // against the callers — it was checked against the four sites that already
+    // had the rule pasted in. This one and `autoPlacePanels` were not among
+    // them, so confirming a traced plane in 3D ran the 2D engine, which emits
+    // panels with NO elevation: they used to be drawn on the ellipsoid, ~100 m
+    // under the house, and now they are refused by the renderer and never drawn
+    // at all while still counting towards system size. Same defect shape as the
+    // refusal-routing chokepoint: a rule at one place still has to be REACHED.
+    // tests/layoutEngineRoutingIsComplete.test.ts discovers the callers now.
+    if (routeLayoutTo3D()) {
+      setPendingPlane(null);
+      toast.success('Roof plane added', 'Filling it in 3D so the panels sit on the roof surface.');
+      return;
+    }
+
     // Place panels using THIS plane's azimuth + pitch — temporarily override global tilt/azimuth
     // by using the plane object which autoLayoutAll already respects via plane.pitch/plane.azimuth
     const layoutId = uuidv4();
@@ -3539,8 +3671,41 @@ export default function DesignStudio({ project, onSave }: Props) {
     toast.success('Roof plane added', `${newPanels.length} panels placed · ${pendingPlaneAzimuth}° azimuth · ${pendingPlanePitch}° pitch`);
   };
 
+  // ── THE ONE PLACE THAT DECIDES "this layout cannot run in the 2D engine" ──
+  //
+  // 🚨 THIS EXISTS BECAUSE THE RULE WAS HAND-COPIED AND ONE COPY WAS MISSED.
+  // The 2D layout engines (`generateRoofLayoutOptimized` et al) emit panels with no
+  // elevation. `addPanelEntity` reads `panel.height ?? 0` and `isValidCoord` accepts
+  // 0 as finite, so those panels are placed on the WGS-84 ellipsoid — metres beneath
+  // the building, which is what "panels disappear into the roof" looks like from the
+  // camera. The defence was an `if (show3D) { setPlacementMode3D('auto_roof'); return; }`
+  // block pasted at each call site: autoLayoutAll, fillRoof and optimizeLayout got it,
+  // `relayoutPlane` never did, and `relayoutWithOrientation` got a version that FAILS
+  // OPEN (it only routed when some panel already had height > 0 — so once the 2D
+  // engine had sunk them to 0, the guard that would have prevented it could never
+  // fire again; the condition was the symptom).
+  //
+  // A rule that must hold at N call sites belongs at one. Returns true when it has
+  // taken over, so callers read `if (routeLayoutTo3D()) return;`.
+  // `beforeRoute` runs only when we are actually routing, so callers that must prune
+  // neighbour roofs first keep that ordering without restating the mode test.
+  const routeLayoutTo3D = useCallback((beforeRoute?: () => void): boolean => {
+    if (!show3D) return false;
+    beforeRoute?.();
+    setPlacementMode3D('auto_roof');
+    return true;
+  }, [show3D]);
+
   // ── Re-layout panels for an existing plane (after azimuth/pitch change) ──
   const relayoutPlane = (plane: RoofPlane) => {
+    // 🚨 In 3D this re-lays the WHOLE roof, not just this face, because the 3D
+    // engine's fill is whole-roof — the same trade the three sibling paths already
+    // make. Re-laying every face is a visible surprise; burying the array below the
+    // ellipsoid is silent and wrong, so this is the better of the two.
+    if (routeLayoutTo3D()) {
+      toast.info('Re-laying the roof', 'In 3D the layout is rebuilt for every face so panels sit on the roof surface.');
+      return;
+    }
     // Inline point-in-polygon (ray casting) to filter panels inside this plane
     const pipTest = (lat: number, lng: number, verts: {lat:number;lng:number}[]): boolean => {
       let inside = false;
@@ -3587,6 +3752,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     let newPanels: PlacedPanel[] = [];
 
     if (type === 'roof') {
+      // 🚨 The second caller that never reached the chokepoint. Ground and fence
+      // layouts are not roof layouts and keep the 2D engine — only a ROOF fill
+      // has a roof surface to sit on, and only a roof fill can bury an array.
+      if (routeLayoutTo3D()) return;
       const plane: RoofPlane = {
         id: uuidv4(), vertices: points, pitch: tilt, azimuth,
         area: polygonAreaM2(points), usableArea: polygonAreaM2(points) * 0.75,
@@ -3630,15 +3799,19 @@ export default function DesignStudio({ project, onSave }: Props) {
     const hasAutoPanels = panels.some(p => p.layoutSource === 'AUTO');
     if (!hasAutoPanels) return; // no auto panels to refresh
 
-    // v48.37: In 3D mode with 3D-placed panels (height > 0), re-trigger the 3D
-    // engine's handleAutoRoof instead of the 2D layout engine.
-    // The 2D engine outputs panels with height=undefined → renders underground.
-    // The orientation prop flowing to SolarEngine3D ensures panelOrientationRef
-    // is updated BEFORE handleAutoRoof fires, so it uses the correct new orientation.
-    if (show3D && panels.some(p => (p.height ?? 0) > 0)) {
-      setPlacementMode3D('auto_roof');
-      return;
-    }
+    // v48.37: In 3D mode, re-trigger the 3D engine's handleAutoRoof instead of the
+    // 2D layout engine. The 2D engine outputs panels with height=undefined → they
+    // render underground. The orientation prop flowing to SolarEngine3D ensures
+    // panelOrientationRef is updated BEFORE handleAutoRoof fires, so it uses the
+    // correct new orientation.
+    //
+    // 🚨 THE `panels.some(p => (p.height ?? 0) > 0)` CLAUSE IS GONE, AND THAT IS THE
+    // FIX. It made the guard fail OPEN on exactly the state it was meant to repair:
+    // panels already at height 0 are the symptom, and requiring one above 0 before
+    // routing meant that once the 2D engine had sunk an array, every subsequent
+    // orientation change ran the 2D engine again and re-sank it. The mode alone
+    // decides which engine is correct.
+    if (routeLayoutTo3D()) return;
 
     clearGridCache();
     const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
@@ -3682,7 +3855,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       `${allNew.length} panels re-laid out`
     );
   }, [panels, roofPlanes, groundArea, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks, alignToEdge, show3D, setPlacementMode3D]);
+      tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks, alignToEdge, routeLayoutTo3D]);
 
   // ── "Only my building" guard (Ray, 2026-06-30) ──────────────────────────────
   // Restrict the design to the SUBJECT building — the roof-plane cluster under the
@@ -3744,10 +3917,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     // v48.35: In 3D mode, the 2D layout engines produce panels without terrain heights,
     // which render underground. Route through SolarEngine3D's auto_roof engine instead,
     // which samples terrain and places panels at the correct elevation.
-    if (show3D) {
-      setPlacementMode3D('auto_roof');
-      return;
-    }
+    if (routeLayoutTo3D()) return;
 
     setAutoLayoutRunning(true);
 
@@ -3804,7 +3974,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [panels, roofPlanes, groundArea, fenceLine, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D, keepOutZones, keepSubjectBuilding]);
+      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, routeLayoutTo3D, keepOutZones, keepSubjectBuilding]);
 
   // ── Fill Roof: maximize panels with minimal setback (0.3 m) ─────────────────
   const fillRoof = useCallback(() => {
@@ -3822,11 +3992,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     // Density is not lost by routing: the 3D fill already runs at the row and
     // panel spacing shown in the Configuration panel (0.02 m / mid-clamp gap),
     // which is what "Fill Roof" meant by maximum density.
-    if (show3D) {
-      keepSubjectBuilding();
-      setPlacementMode3D('auto_roof');
-      return;
-    }
+    if (routeLayoutTo3D(keepSubjectBuilding)) return;
 
     setAutoLayoutRunning(true);
     const subjectPlanes = keepSubjectBuilding();  // "only my building" — skip neighbour roofs
@@ -3877,7 +4043,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge, keepSubjectBuilding,
-      show3D, setPlacementMode3D]); // v66: without show3D the guard reads a stale value after a 2D/3D toggle
+      routeLayoutTo3D]); // v66: routeLayoutTo3D closes over show3D — without it the guard reads a stale value after a 2D/3D toggle
 
   // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
   const optimizeLayout = useCallback(() => {
@@ -3887,11 +4053,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
     // v66: same v48.35 guard as autoLayoutAll / fillRoof — the 2D engines emit
     // heightless panels that render underground in 3D mode. See fillRoof above.
-    if (show3D) {
-      keepSubjectBuilding();
-      setPlacementMode3D('auto_roof');
-      return;
-    }
+    if (routeLayoutTo3D(keepSubjectBuilding)) return;
 
     setAutoLayoutRunning(true);
     // v47.95: Roof panels are flush-mount -- use user rowSpacing directly
@@ -3943,7 +4105,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge, keepSubjectBuilding,
-      show3D, setPlacementMode3D]); // v66: see fillRoof — stale show3D would re-bury the panels
+      routeLayoutTo3D]); // v66: see fillRoof — a stale routeLayoutTo3D (stale show3D) would re-bury the panels
 
   // ── Calculate production ───────────────────────────────────
   const buildSystemDefinition = () => {
@@ -3956,15 +4118,25 @@ export default function DesignStudio({ project, onSave }: Props) {
       if (tilts.length > 0) effectiveTilt = tilts.reduce((a: number, b: number) => a + b, 0) / tilts.length;
       if (azimuths.length > 0) effectiveAzimuth = azimuths.reduce((a: number, b: number) => a + b, 0) / azimuths.length;
     }
-    const effectiveRoofPlanes = roofPlanes.length > 0 ? roofPlanes :
-      (panels.length > 0 && project.systemType === 'roof' ? [{
-        id: 'auto-plane-1',
-        vertices: [],
-        pitch: effectiveTilt,
-        azimuth: effectiveAzimuth,
-        area: panels.length * 1.134 * 1.722,
-        usableArea: panels.length * 1.134 * 1.722 * 0.85,
-      }] : undefined);
+    // 🚨 THE PHANTOM ROOF PLANE IS GONE, AND IT CHANGES NO PRODUCTION NUMBER.
+    //
+    // This synthesised a fake plane whenever there were panels but no traced
+    // roof, as a "convenience" for pvwatts. It was never even that: both pvwatts
+    // call sites read `roofPlanes[0].pitch` ONLY when `panels.length === 0`
+    // (lib/pvwatts.ts), and this was only built when `panels.length > 0`. The
+    // two conditions are mutually exclusive, so its pitch and azimuth were dead
+    // on arrival — and would have been redundant anyway, being the mean of the
+    // very panel tilts pvwatts already averages itself.
+    //
+    // Its only observable effect was PERSISTENCE. It reached `layouts.roof_planes`
+    // as a geometry record with `vertices: []` — an unrenderable plane with a
+    // fabricated `area` of `panels × 1.134 × 1.722`, i.e. the exact aggregate
+    // module area, which asserts 100% packing density with zero setbacks, row
+    // gaps or walkways. That number is not approximate, it is incoherent, and
+    // downstream consumers of `roof_planes` cannot tell it from a traced roof.
+    //
+    // No plane is the honest answer for a design that has no traced roof.
+    const effectiveRoofPlanes = roofPlanes.length > 0 ? roofPlanes : undefined;
     return {
       panels,
       systemType: project.systemType,
@@ -4425,10 +4597,14 @@ export default function DesignStudio({ project, onSave }: Props) {
               <AlertCircle size={10} /> Unsaved Design
             </span>
           ) : null}
-          {/* Restore indicators — visible proof that layout was loaded from DB */}
-          {layoutLoadedFromDB ? (
+          {/* Restore indicator — visible proof that this design came out of storage.
+              🚨 COUNTS COME FROM THE DESIGN, not from a parallel counter. This read
+              `restoredPanelCount`, which was set independently of `panels`, so it
+              could say "0 panels" while the top bar and System Summary beside it
+              both said 52 off `panels.length`. Three readouts, two sources. */}
+          {layoutLoadedFromDB && (panels.length > 0 || roofPlanes.length > 0) ? (
             <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1">
-              <CheckCircle size={10} /> Layout loaded from DB · {restoredPanelCount} panels{restoredRoofPlaneCount > 0 ? ` · ${restoredRoofPlaneCount} roof planes` : ''}
+              <CheckCircle size={10} /> Layout loaded from DB · {panels.length} panels{roofPlanes.length > 0 ? ` · ${roofPlanes.length} roof planes` : ''}
             </span>
           ) : null}
           {/* Proceed to Engineering CTA — shown once panels are placed */}
@@ -4675,10 +4851,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                 // a detection was in flight had the correct answer thrown away.
                 // The active site key only moves when the user changes
                 // property, which is exactly the condition this guard is for.
+                //
+                // 🚨 AND COMPARE BY PROPERTY, NOT BY STRING. SolarEngine3D has
+                // no access to the site resolver: it stamps the RAW coordinates
+                // it detected at. `resolveSiteKey` deliberately makes the active
+                // key differ from the current click's coordinate when the pick
+                // snapped to a property this project already knows — so `!==`
+                // on the two strings was ALWAYS true after a snapped re-pick,
+                // and every roof detection on returning to a house was dropped
+                // as stale. One definition of "same property", shared.
                 const coordsKeyNow = coordKeyOf(activeSiteKeyRef.current)
                   || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng);
                 const emittedFor = coordKeyOf(planes.find(p => p.siteKey)?.siteKey);
-                if (emittedFor && coordsKeyNow && emittedFor !== coordsKeyNow) {
+                if (emittedFor && coordsKeyNow && !sitesAreSameProperty(emittedFor, coordsKeyNow)) {
                   console.warn(
                     `[DesignStudio] dropped ${planes.length} detected plane(s) for ${emittedFor} — now at ${coordsKeyNow}`,
                   );
@@ -4734,6 +4919,16 @@ export default function DesignStudio({ project, onSave }: Props) {
                     // the permit disagreed and nothing reported it.
                     ...(typeof u.pitch === 'number' ? { pitch: u.pitch } : {}),
                     ...(typeof u.azimuth === 'number' ? { azimuth: u.azimuth } : {}),
+                    // 🚨 AND THE FRAME THE PANELS ARE PLACED ON. localFrame3D was
+                    // already carried here, which made a reshape look complete —
+                    // but buildSurfaceGrid places from `ecefFrame3D`, not
+                    // `localFrame3D`. Taking the new origin3D/normal3D while
+                    // keeping the OLD ecefFrame3D placed every panel with a new
+                    // origin on a stale triad: a wedge that goes below the deck
+                    // once the reshape rotates the plane by more than about half
+                    // a degree, and that foreshortens the usable extent by
+                    // cos²(Δ) — losing whole rows, so panel count, kW and BOM.
+                    ...(u.ecefFrame3D ? { ecefFrame3D: u.ecefFrame3D } : {}),
                   });
                 }));
                 console.log('[DesignStudio] Stitch synced', updates.length, 'plane(s) into roofPlanes');

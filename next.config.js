@@ -90,6 +90,19 @@ const BUILD_VERSION = versionMatch ? versionMatch[1] : 'unknown';
 })();
 
 const nextConfig = {
+  // 🚨 A BUILD MUST NOT WRITE INTO A RUNNING DEV SERVER'S OUTPUT.
+  // `next build` and `next dev` share `.next`, so building while a dev server
+  // is serving this repo corrupts the running app and produces a build whose
+  // chunks are half from each. e2e/README.md says "never next build while a dev
+  // server is writing the same .next — clear it first", which is only possible
+  // when nobody else is using it. This makes the directory selectable instead:
+  //
+  //     NEXT_DIST_DIR=.next-e2e npx next build
+  //     NEXT_DIST_DIR=.next-e2e npx next start -p 3011
+  //
+  // Unset, it is `.next` exactly as before, so nothing about a normal build,
+  // `next dev`, or the Vercel deployment changes.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   reactStrictMode: true,
   // Without this, Next 14.2+ blocks cross-origin dev requests from 127.0.0.1 vs
   // localhost and every interactive click/input in the generator-estimator
@@ -139,6 +152,13 @@ const nextConfig = {
     'exif-reader',           // native EXIF parsing
     'puppeteer-core',        // Puppeteer PDF generation
     '@sparticuz/chromium-min', // Sparticuz Chromium for Vercel serverless
+    // PostgreSQL compiled to WebAssembly. A devDependency, imported ONLY by
+    // lib/dev/pgliteNeonBridge.ts and only when SOLARPRO_LOCAL_PG=1, so it is
+    // never loaded on a deployment. Listed here because webpack bundling it
+    // breaks its WASM loader: the bundled `fs` shim rejects the URL it passes
+    // ("The 'path' argument must be of type string ... Received an instance of
+    // URL") and the instrumentation hook then fails the whole server boot.
+    '@electric-sql/pglite',
   ],
   experimental: {
     // Ship the manufacturer-asset PNGs into the permit serverless functions so

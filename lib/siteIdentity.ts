@@ -54,11 +54,39 @@ export const SITE_KEY_PRECISION_DP = 5;
  *  anything, including itself, so nothing is ever mistakenly claimed by it. */
 export const UNRESOLVED_SITE_KEY = '';
 
+/** The hardcoded placeholder a project carries before it has been geocoded. */
+export const PLACEHOLDER_LAT = 33.4484;
+export const PLACEHOLDER_LNG = -112.0740;
+
+/**
+ * Is this the un-geocoded placeholder rather than a real location?
+ *
+ * 🚨 ONE DEFINITION OF "ARE THESE COORDINATES REAL".
+ * DesignStudio has always rejected this pair (`hasValidCoords`), but
+ * `siteKeyFromCoords` — the ONLY thing that decides ownership — had no
+ * placeholder concept and happily minted `"<projectId>@33.44840,-112.07400"`.
+ * The restore path resolves ownership from `mapCenterRef`, which is seeded with
+ * exactly the value the same file had just declared untrustworthy, so a design
+ * could be adopted under Phoenix and STAY owned by Phoenix for the whole
+ * session: the active key is written in only two places and a later geocode
+ * re-centres the map without ever re-keying. The real pick, ~2,400 km away,
+ * could never reclaim it — `resolveSiteKey` only snaps within 8 m.
+ *
+ * Exact equality is deliberate: a real geocode of downtown Phoenix carries more
+ * precision than the literal, and this is the same test the studio already made.
+ */
+export function isPlaceholderCoords(lat?: number | null, lng?: number | null): boolean {
+  return lat === PLACEHOLDER_LAT && lng === PLACEHOLDER_LNG;
+}
+
 /**
  * The canonical identity of a physical site.
  *
- * Returns UNRESOLVED_SITE_KEY for non-finite or absent coordinates — callers
- * must treat that as "cannot decide ownership", never as a match.
+ * Returns UNRESOLVED_SITE_KEY for non-finite, absent or PLACEHOLDER coordinates
+ * — callers must treat that as "cannot decide ownership", never as a match.
+ * An unresolved key is the safe answer: `hydrate` keeps the stored design active
+ * and archives nothing, so nothing is hidden or moved on the strength of a
+ * coordinate nobody trusts.
  */
 export function siteKeyFromCoords(
   lat: number | null | undefined,
@@ -67,6 +95,7 @@ export function siteKeyFromCoords(
 ): string {
   if (lat == null || lng == null) return UNRESOLVED_SITE_KEY;
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return UNRESOLVED_SITE_KEY;
+  if (isPlaceholderCoords(lat, lng)) return UNRESOLVED_SITE_KEY;
   const coord = `${lat.toFixed(SITE_KEY_PRECISION_DP)},${lng.toFixed(SITE_KEY_PRECISION_DP)}`;
   return projectId ? `${projectId}@${coord}` : coord;
 }

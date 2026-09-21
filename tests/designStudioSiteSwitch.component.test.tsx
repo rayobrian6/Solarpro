@@ -33,6 +33,7 @@ import type { Project } from '@/types';
 // ── The 3D engine: a prop-capturing stub ────────────────────────────────────
 type EngineProps = {
   onLocationPick?: (lat: number, lng: number, address: string) => void;
+  onPanelsChange?: (p: unknown[]) => void;
   onObstructionsChange?: (o: unknown[]) => void;
   onMeasurementsChange?: (m: unknown[]) => void;
   onRoofPlaneCreated?: (p: unknown) => void;
@@ -149,10 +150,21 @@ beforeEach(() => {
     obstructions: MELVIN_OBS,
     measurements: MELVIN_MEAS,
     mapCenter: MELVIN,
+    // Melvin's electrical design — distinctive on every field, so carry-over
+    // into the neighbour is unmistakable rather than a coincidence of defaults.
+    designElectrical: MELVIN_ELECTRICAL,
     siteArchives: { version: 1, activeSiteKey: KEY_A, sites: {} },
   };
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+/** Distinctive on every field — none of these is a default. */
+const MELVIN_ELECTRICAL = {
+  topology: 'micro' as const,
+  modulesPerString: 14,
+  rackingId: 'ironridge-xr1000',
+  overrides: { 'panel_0': 3, 'panel_1': 3 },
+};
 
 async function mountStudio() {
   let utils!: ReturnType<typeof render>;
@@ -211,6 +223,153 @@ describe('🚨 DesignStudio: picking the house next door and coming back', () =>
     expect(body.siteArchives.activeSiteKey).toBe(KEY_A);
     // Melvin is no longer in the archive — it is active.
     expect(body.siteArchives.sites[KEY_A]).toBeUndefined();
+  });
+
+  it("🚨 A → B: the neighbour does not inherit Melvin's electrical design", async () => {
+    // `siteDesignModel` stores designElectrical in the bundle precisely so that
+    // returning to a property restores ITS topology and string paint, not the
+    // other property's — and `res.arriving.designElectrical` had no reader in
+    // DesignStudio at all. Topology, racking, modules-per-string and the manual
+    // string paint carried straight across, and buildDesignElectrical() folded
+    // them into the layout persisted for the NEW property.
+    //
+    // The string paint is the worst of it: panel ids are index-based
+    // (`panel_${n}`), so site A's override KEYS collide with site B's panels and
+    // stringAssignment repaints them rather than skipping them.
+    await mountStudio();
+
+    // Melvin's design really is loaded — otherwise this proves nothing.
+    await flushAutosave();
+    const onMelvin = lastPost()?.designElectrical;
+    expect(onMelvin?.topology).toBe(MELVIN_ELECTRICAL.topology);
+    expect(onMelvin?.overrides).toEqual(MELVIN_ELECTRICAL.overrides);
+
+    posted = [];
+    await act(async () => { engine.props.onLocationPick!(NEIGHBOUR.lat, NEIGHBOUR.lng, '5 Melvin Drive'); });
+
+    // 🚨 PANELS FIRST, OR THIS PROVES NOTHING. The studio only builds
+    // `designElectrical` when there are panels, so an empty neighbour posts no
+    // electrical at all and every assertion below would compare against
+    // `undefined` and pass for the wrong reason. (It did, on the first attempt —
+    // the mutation test caught it.) So place a panel at the neighbour, which is
+    // also exactly when a real user would meet this bug.
+    await act(async () => { engine.props.onPanelsChange!([panel('neighbour-p0')]); });
+    await flushAutosave();
+
+    const onNeighbour = lastPost()?.designElectrical;
+    expect(onNeighbour, 'the neighbour must post an electrical design once it has a panel').toBeTruthy();
+
+    // The neighbour has nothing stored, so it gets the DEFAULTS — not Melvin's.
+    expect(onNeighbour.topology).toBe('string');
+    expect(onNeighbour.modulesPerString).toBe(10);
+    expect(onNeighbour.rackingId).toBe('ironridge-xr100');
+    // 🚨 And above all, none of Melvin's string paint. Panel ids are index-based
+    // upstream, so A's override KEYS collide with B's panels and get repainted
+    // rather than skipped.
+    expect(onNeighbour.overrides ?? {}).toEqual({});
+  });
+
+  it('🚨 placing an obstruction SCHEDULES a save on its own', async () => {
+    // Migration 122 added obstructions and measurements to the persisted payload
+    // AND to the save signature, which is why this looked finished. But signing
+    // only SUPPRESSES the early return once something else has already scheduled
+    // a save — it cannot schedule one. They were missing from the autosave
+    // effect's dependency array, so drawing a vent or a measurement started no
+    // timer and persisted only if the user happened to touch a panel afterwards.
+    await mountStudio();
+    await flushAutosave();
+    posted = [];
+
+    const vent = { id: 'vent-new', lat: MELVIN.lat, lng: MELVIN.lng, height: 2, radiusM: 0.5, type: 'vent' };
+    await act(async () => { engine.props.onObstructionsChange!([...MELVIN_OBS, vent]); });
+    await flushAutosave();
+
+    expect(posted.length, 'an obstruction change scheduled no save at all').toBeGreaterThan(0);
+    expect(lastPost().obstructions.map((o: any) => o.id)).toContain('vent-new');
+  });
+
+  it('🚨 adding a measurement SCHEDULES a save on its own', async () => {
+    await mountStudio();
+    await flushAutosave();
+    posted = [];
+
+    const meas = { id: 'meas-new', a: { lat: 1, lng: 1 }, b: { lat: 1, lng: 3 }, horizDistM: 9, slopeDistM: 9.1 };
+    await act(async () => { engine.props.onMeasurementsChange!([...MELVIN_MEAS, meas]); });
+    await flushAutosave();
+
+    expect(posted.length, 'a measurement change scheduled no save at all').toBeGreaterThan(0);
+    expect(lastPost().measurements.map((m: any) => m.id)).toContain('meas-new');
+  });
+
+  it('🚨 the UI can never say "loaded from DB · 0 panels" — the contradiction Ray reported', async () => {
+    // HIS WORDS: 52 panels in the top bar, 52 in the System Summary,
+    // "Layout loaded from DB · 0 panels", and "Saved for another address" — all
+    // on screen at once, for one design.
+    //
+    // Three readouts, two sources. The top bar and the summary counted `panels`.
+    // The badge counted `restoredPanelCount`, a parallel number set independently
+    // of the design, beside `layoutLoadedFromDB`, a flag set true once on mount
+    // and never cleared. Move to a property with nothing stored and the flag was
+    // still true while the counter had been reset to zero.
+    const utils = await mountStudio();
+
+    // On Melvin the badge is truthful and agrees with the design.
+    const onMelvin = utils.container.textContent ?? '';
+    if (onMelvin.includes('Layout loaded from DB')) {
+      expect(onMelvin).toContain(`Layout loaded from DB · ${MELVIN_PANELS.length} panels`);
+    }
+
+    // Move to the house next door, which has nothing stored.
+    await act(async () => { engine.props.onLocationPick!(NEIGHBOUR.lat, NEIGHBOUR.lng, '5 Melvin Drive'); });
+    await flushAutosave();
+
+    const onNeighbour = utils.container.textContent ?? '';
+    // 🚨 The exact string, and any "· 0 panels" claim at all.
+    expect(onNeighbour).not.toContain('Layout loaded from DB · 0 panels');
+    expect(onNeighbour).not.toMatch(/Layout loaded from DB[^]{0,40}·\s*0\s*panels/);
+  });
+
+  it('🚨 A → B → A AT A DIFFERENT POINT ON THE SAME ROOF: the panels still come back', async () => {
+    // THE TEST THAT DID NOT EXIST, AND THE REASON THE BUG SHIPPED.
+    //
+    // Every case in this file replayed the SAME two constants, so the return
+    // pick was byte-identical to the original and the archive lookup was a
+    // trivially-equal string compare. A human cannot reproduce a coordinate.
+    // `pickPosition` returns the raw ray-cast hit under the cursor, and the
+    // site key quantises to ~1.1 m, so the second click on one roof is a
+    // DIFFERENT key — which is exactly what the live trace recorded at 3 Melvin
+    // Drive: three identities for one house in 43 seconds.
+    //
+    // ~2.8 m from the first click: the same distance as the accidental
+    // duplicate in that trace, and well inside SITE_MATCH_RADIUS_M.
+    const MELVIN_SECOND_CLICK = { lat: 38.70617757709013, lng: -90.04627419301613 };
+    const KEY_A2 = siteKeyFromCoords(MELVIN_SECOND_CLICK.lat, MELVIN_SECOND_CLICK.lng, PROJECT_ID);
+    // The fixture is only meaningful if the two clicks really do mint different keys.
+    expect(KEY_A2).not.toBe(KEY_A);
+
+    await mountStudio();
+    await act(async () => { engine.props.onLocationPick!(NEIGHBOUR.lat, NEIGHBOUR.lng, '5 Melvin Drive'); });
+    await flushAutosave();
+    posted = [];
+
+    await act(async () => {
+      engine.props.onLocationPick!(MELVIN_SECOND_CLICK.lat, MELVIN_SECOND_CLICK.lng, '3 Melvin Drive');
+    });
+    await flushAutosave();
+
+    const body = lastPost();
+    // Identities, never counts: 52 of the neighbour's panels would satisfy a count.
+    expect(body.panels.map((p: any) => p.id)).toEqual(MELVIN_PANELS.map(p => p.id));
+    expect(body.roofPlanes.map((p: any) => p.id)).toEqual(MELVIN_PLANES.map(p => p.id));
+    expect(body.obstructions.map((o: any) => o.id)).toEqual(MELVIN_OBS.map(o => o.id));
+    expect(body.measurements.map((m: any) => m.id)).toEqual(MELVIN_MEAS.map(m => m.id));
+
+    // 🚨 And the key that survives is the one the design was FILED under, not
+    // the new click's. Adopting the new coordinate's key would orphan the
+    // archives filed under KEY_A and the roof planes stamped with it.
+    expect(body.siteArchives.activeSiteKey).toBe(KEY_A);
+    expect(body.siteArchives.sites[KEY_A]).toBeUndefined();
+    expect(body.siteArchives.sites[KEY_A2]).toBeUndefined();
   });
 
   it('A → B → A → B: the neighbour\'s own work is kept too', async () => {

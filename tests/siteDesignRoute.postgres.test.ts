@@ -80,7 +80,7 @@ vi.mock('@/lib/engineering/syncPipeline', () => ({
 
 const { POST, GET } = await import('@/app/api/projects/[id]/layout/route');
 const { siteKeyFromCoords } = await import('@/lib/siteIdentity');
-const { getLayoutByProject, __resetSiteArchivesProbeForTests } = await import('@/lib/db/projects');
+const { getLayoutByProject, upsertLayout, __resetSiteArchivesProbeForTests } = await import('@/lib/db/projects');
 
 const sqlOf = (f: string) => readFileSync(join(process.cwd(), 'lib', 'migrations', f), 'utf8');
 const SQL_122 = sqlOf('122_layout_obstructions_measurements.sql');
@@ -320,7 +320,9 @@ describe('🚨 A → B → A through the real route', () => {
     await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
     // The Stowell reload defect: an empty save with nothing archived anywhere.
     const res = await post(autosaveBody({ panels: [], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
-    expect(res.status).toBe(503);
+    // 409, not 503: a deliberate refusal is not a transient database error.
+    expect(res.status).toBe(409);
+    expect((res.json as { code?: string }).code).toBe('LAYOUT_SUBSYSTEM_WIPE');
     // …and the stored design is untouched.
     expect((await get())?.panels).toHaveLength(52);
   });
@@ -419,6 +421,210 @@ describe('🚨 what the ENGINEERING consumers read back', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 restoring a version must not delete the roof', () => {
+  // Found by the post-merge adversarial sweep, not by any test here — and it
+  // was a regression THIS change introduced. The restore route forwarded 17
+  // fields and none of siteArchives/obstructions/measurements, and `undefined`
+  // means KEEP STORED. So a restore overwrote roof_planes from the snapshot
+  // while leaving site_archives (and its activeSiteKey) naming a DIFFERENT
+  // property — and activeSitePlanes() then filtered out every restored plane,
+  // handing lib/pvwatts.ts an empty array and logging the loss as a "repair".
+
+  it('a snapshot restored at a different property keeps its roof', async () => {
+    // The row is at property B; the snapshot is property A's.
+    const aPlanes = Array.from({ length: 6 }, (_, i) => plane(`a${i}`, KEY_A));
+    await post(autosaveBody({
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: [], roofPlanes: aPlanes, obstructions: [], measurements: [] } },
+    }));
+
+    // Restore A's snapshot — carrying A's archive header, as the fixed route does.
+    const restored = await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('a-p0')], roofPlanes: aPlanes, mapCenter: MELVIN,
+      siteArchives: { version: 1, activeSiteKey: KEY_A, sites: {} },
+    } as never);
+    expect(restored.roofPlanes).toHaveLength(6);
+
+    // 🚨 And a consumer reading it back sees SIX planes, not zero.
+    const back = await getLayoutByProject(PROJECT, USER_ID);
+    expect(back?.roofPlanes).toHaveLength(6);
+  });
+
+  it('🚨 the read path NEVER filters a roof down to nothing', async () => {
+    // The backstop for every caller not yet thought of, and for rows already
+    // left in this state: active key agrees with no stored plane.
+    await db.query(
+      `INSERT INTO layouts (project_id, user_id, panels, roof_planes, map_center, total_panels, site_archives)
+       VALUES ($1,$2,'[]'::jsonb,$3::jsonb,$4::jsonb,0,$5::jsonb)`,
+      [PROJECT, USER_ID,
+        JSON.stringify([...Array.from({ length: 4 }, (_, i) => plane(`a${i}`, KEY_A)),
+                        ...Array.from({ length: 2 }, (_, i) => plane(`b${i}`, KEY_B, NEIGHBOUR))]),
+        JSON.stringify(MELVIN),
+        JSON.stringify({ version: 1, activeSiteKey: siteKeyFromCoords(38.99, -90.99, PROJECT), sites: {} })],
+    );
+    const back = await getLayoutByProject(PROJECT, USER_ID);
+    // Six planes, none matching the active key — all six are returned, not none.
+    expect(back?.roofPlanes).toHaveLength(6);
+  });
+
+  it('a 0-panel version restores instead of 500-ing', async () => {
+    // A property change mints `panels: []` versions. Restoring one sends
+    // panels: [] — and without the archive the wipe guard correctly refuses it,
+    // so the restore button was broken for exactly the versions Phase 2 makes.
+    const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+    await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+
+    const restored = await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR,
+      siteArchives: { version: 1, activeSiteKey: KEY_B, sites: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } } },
+    } as never);
+    expect(restored.panels).toEqual([]);
+    expect(((await get())!.siteArchives as any).sites[KEY_A].panels).toHaveLength(52);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 the wipe guard relaxes only while the property is CHANGING', () => {
+  it('an ordinary wipe at the SAME property is still refused', async () => {
+    // The relaxation had no bound in time: once a project had archived a
+    // >=4-panel property, EVERY later `panels: []` save passed — for ever,
+    // including the July reload bug the guard was built for.
+    const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+    await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    // Switch away — allowed, this is a real property change.
+    expect((await post(autosaveBody({
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }))).status).toBe(200);
+    // Design at B …
+    const bPanels = Array.from({ length: 9 }, (_, i) => panel(`nb-${i}`, NEIGHBOUR));
+    expect((await post(autosaveBody({
+      panels: bPanels, roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }))).status).toBe(200);
+    // 🚨 … then a reload-bug wipe AT B, with the archive still present. The old
+    // relaxation passed this because the archive held 'roof' panels. It must not.
+    const res = await post(autosaveBody({
+      panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }));
+    expect(res.status).toBe(409);
+    expect((res.json as { code?: string }).code).toBe('LAYOUT_SUBSYSTEM_WIPE');
+    expect((await get())!.panels).toHaveLength(9);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 a caller that omits roofPlanes must not delete them', () => {
+  it('omitting roofPlanes and mapCenter KEEPS them (the bill-upload path)', async () => {
+    // /api/engineering/preliminary sends neither, and roof_planes used to be
+    // written unconditionally — so uploading a bill deleted the roof of a
+    // designed project, and after migration 123 left site_archives naming a
+    // roof that no longer existed.
+    const planes = Array.from({ length: 6 }, (_, i) => plane(`a${i}`, KEY_A));
+    await post(autosaveBody({ panels: [panel('p0')], roofPlanes: planes, mapCenter: MELVIN, activeSiteKey: KEY_A }));
+
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: Array.from({ length: 10 }, (_, i) => panel(`synthetic-${i}`)),
+      totalPanels: 10, systemSizeKw: 4,
+      // roofPlanes and mapCenter deliberately ABSENT, as that route sends them
+    } as never);
+
+    const after = await get();
+    expect(after?.roofPlanes, 'the roof must survive a bill upload').toHaveLength(6);
+    expect(after?.mapCenter?.lat).toBeCloseTo(MELVIN.lat, 4);
+  });
+
+  it('…but an explicit [] still clears the roof', async () => {
+    const planes = Array.from({ length: 6 }, (_, i) => plane(`a${i}`, KEY_A));
+    await post(autosaveBody({ panels: [panel('p0')], roofPlanes: planes, mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    await post(autosaveBody({ panels: [panel('p0')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    expect((await get())?.roofPlanes).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 absence keeps — the WRITER must not erase what a caller omits', () => {
+  // 🚨 THESE CALL upsertLayout DIRECTLY, ON PURPOSE.
+  //
+  // The first version of this block went through POST /layout and was VACUOUS —
+  // the mutation test caught it. That route already merges every absent field
+  // against the stored row (`fenceLine ?? existingLayout?.fenceLine`), so it
+  // shields the writer and the defect can never be observed through it.
+  //
+  // But the route is not the only caller. app/api/production/route.ts routes a
+  // read-only CALCULATION into this same writer via buildLayoutFromDefinition,
+  // and it does NO such merge — so whatever that path omits was written as
+  // absent, and `fence_line` was the one field with no COALESCE. Testing the
+  // writer directly is the only way to assert its own semantics rather than one
+  // caller's politeness.
+  const FENCE = [{ lat: MELVIN.lat, lng: MELVIN.lng }, { lat: MELVIN.lat + 0.0002, lng: MELVIN.lng }];
+
+  async function seedDirect() {
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('p0')] as any, roofPlanes: [] as any,
+      mapCenter: MELVIN, mapZoom: 19,
+      fenceLine: FENCE as any, fenceHeight: 2.4, fenceAzimuth: 95,
+      groundTilt: 27, groundAzimuth: 170, rowSpacing: 2.2, groundHeight: 0.9,
+    } as any);
+  }
+
+  it('🚨 a write that omits the fence does NOT null the stored fence', async () => {
+    await seedDirect();
+    expect((await getLayoutByProject(PROJECT, USER_ID))!.fenceLine).toHaveLength(2);
+
+    // Exactly what the production CALCULATION path sends: panels, and silence.
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('p0'), panel('p1')] as any,
+    } as any);
+
+    const after = (await getLayoutByProject(PROJECT, USER_ID))!;
+    expect(after.panels).toHaveLength(2);
+    expect(after.fenceLine, 'the fence was erased by a write that never mentioned it').toHaveLength(2);
+  });
+
+  it('a write that omits the scalars keeps the ones the user set', async () => {
+    await seedDirect();
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof', panels: [panel('p0')] as any,
+    } as any);
+    const after = (await getLayoutByProject(PROJECT, USER_ID))!;
+    // These were replaced by 20 / 180 / 1.5 / 0.6 — fabricated defaults standing
+    // in for an answer the caller simply did not have.
+    expect(after.groundTilt).toBe(27);
+    expect(after.groundAzimuth).toBe(170);
+    expect(after.rowSpacing).toBe(2.2);
+    expect(after.groundHeight).toBe(0.9);
+    expect(after.fenceHeight).toBe(2.4);
+    expect(after.fenceAzimuth).toBe(95);
+  });
+
+  it('…but an EXPLICIT empty fence still clears it — absence is not intent', async () => {
+    await seedDirect();
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('p0')] as any, fenceLine: [] as any,
+    } as any);
+    expect((await getLayoutByProject(PROJECT, USER_ID))!.fenceLine).toEqual([]);
+  });
+
+  it('a write that omits mapCenter keeps the stored one', async () => {
+    await seedDirect();
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof', panels: [panel('p0')] as any,
+    } as any);
+    const mc = (await getLayoutByProject(PROJECT, USER_ID))!.mapCenter;
+    expect(mc.lat).toBeCloseTo(MELVIN.lat, 6);
+    expect(mc.lng).toBeCloseTo(MELVIN.lng, 6);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 describe('🚨 a deployment that has not run 123 yet', () => {
   /** A database with 122 applied and 123 deliberately absent. */
   async function pre123<T>(fn: (scratch: PGlite) => Promise<T>): Promise<T> {
@@ -468,11 +674,140 @@ describe('🚨 a deployment that has not run 123 yet', () => {
         panels: [], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
         archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
       }));
-      expect(res.status).toBe(503);
+      // 🚨 409, NOT 503. This used to assert 503, because every throw in the
+      // route went through handleRouteDbError, which labels anything that is not
+      // a DbConfigError as DB_STARTING — a status its own comment calls
+      // transient and self-resolving. This refusal is neither: it is permanent
+      // and deliberate, and reporting it as a database hiccup meant the studio
+      // showed a five-second generic badge and the operator saw a transient
+      // warning for a condition that actually means "run migration 123".
+      expect(res.status).toBe(409);
+      // 🚨 AND THE DIAGNOSIS IS NOW THE ACCURATE ONE. Both guards refuse this
+      // save, but the archive check runs first and names the actual cause —
+      // there is nowhere to put the other property's design — instead of the
+      // wipe guard's symptom, 'an entire sub-system would vanish'. The operator
+      // is told to run migration 123 rather than left to infer it.
+      const body = res.json as { code?: string; refused?: boolean };
+      expect(body.code).toBe('LAYOUT_ARCHIVE_UNSTORABLE');
+      expect(body.refused).toBe(true);
       // 🚨 And the 52 panels are still there.
       const rows = await scratch.query<{ n: number }>(`SELECT jsonb_array_length(panels) AS n FROM layouts`);
       expect(rows.rows[0].n).toBe(52);
     });
+  });
+
+  it('🚨 A COORDINATE MISMATCH IS A REFUSAL TOO — 409, not 503', async () => {
+    // WS1-017 was closed by naming LAYOUT_SUBSYSTEM_WIPE and
+    // LAYOUT_ARCHIVE_UNSTORABLE in this route's catch block. That fixed the two
+    // instances I had found and left the CLASS open: `upsertLayout` throws a
+    // THIRD refusal, LAYOUT_COORDS_MISMATCH, which went straight on reporting
+    // itself as "Service temporarily unavailable. Please try again in a moment."
+    //
+    // It surfaced in a browser, not in a test: driving the real studio against a
+    // real database produced
+    //
+    //   [DB_TRANSIENT_ERROR] route=[POST /api/pr LAYOUT_COORDS_MISMATCH:
+    //   design geometry is 16.3 km from the project address
+    //
+    // — a permanent refusal logged as a transient error, on a save the user
+    // would retry forever. Three more routes call `upsertLayout` and handled
+    // none of the three codes, so the recognition now lives in
+    // `handleRouteDbError` itself and a new route cannot forget it.
+    // Connecticut, the guard's own example of the corruption it was written for
+    // ("an Illinois project carrying Connecticut panel coordinates"). NOT
+    // Phoenix: the guard deliberately exempts the placeholder coordinate, so a
+    // Phoenix centroid returns early and the refusal never fires — which is how
+    // the first version of this test passed a 200 and looked like a real result.
+    const FAR = { lat: 41.7658, lng: -72.6734 };
+    const res = await post(autosaveBody({
+      panels: [panel('far-1', FAR)], roofPlanes: [], mapCenter: FAR, activeSiteKey: KEY_A,
+    }));
+    expect(res.status, 'a coordinate refusal must not be reported as a transient DB error').toBe(409);
+    const body = res.json as { code?: string; refused?: boolean; error?: string };
+    expect(body.code).toBe('LAYOUT_COORDS_MISMATCH');
+    expect(body.refused).toBe(true);
+    // The guard's own sentence reaches the caller, not a generic one.
+    expect(body.error).toContain('from the project address');
+  });
+
+  it('🚨 ONE panel at the new property does NOT overwrite the previous 52', async () => {
+    // THE HOLE THE WIPE GUARD NEVER COVERED.
+    //
+    // That guard compares systemType BUCKET MEMBERSHIP, not identity and not
+    // count. It fires only when the incoming array has no panels of a stored
+    // type at all — which is why the `panels: []` case above is caught. Place
+    // ONE roof panel at the new property and 'roof' is in `incoming`, the guard
+    // passes, and `panels = ${panelsJson}::jsonb` (no COALESCE, unlike
+    // roof_planes and map_center beside it) replaces the 52 with the 1 — while
+    // the archive that was holding those 52 is dropped by the swallowed catch in
+    // applyDesignEntities. HTTP 200. Badge says "saved".
+    //
+    // This is the normal roof→roof case, i.e. what actually happens when a user
+    // picks the house next door and starts designing.
+    await pre123(async scratch => {
+      const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+      expect((await post(autosaveBody({
+        panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A,
+      }))).status).toBe(200);
+
+      const res = await post(autosaveBody({
+        panels: [panel('neighbour-0')], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+        archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+      }));
+
+      expect(res.status).toBe(409);
+      const body = res.json as { code?: string; error?: string };
+      expect(body.code).toBe('LAYOUT_ARCHIVE_UNSTORABLE');
+      expect(body.error).toMatch(/migration 123/);
+      expect(body.error).toMatch(/52 panels/);
+
+      // NOTHING was written — the refusal happens before any UPDATE.
+      const rows = await scratch.query<{ n: number }>(`SELECT jsonb_array_length(panels) AS n FROM layouts`);
+      expect(rows.rows[0].n).toBe(52);
+    });
+  });
+
+  it('an EMPTY archive is still allowed through — only real loss is refused', async () => {
+    // An archive with no entities round-trips identically whether it is stored
+    // or not, so refusing it would break ordinary single-property use on a
+    // pre-123 deployment for no benefit. Fail closed on loss, not on presence.
+    await pre123(async scratch => {
+      const res = await post(autosaveBody({
+        panels: [panel('p1')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A,
+        archives: { [KEY_B]: { panels: [], roofPlanes: [], obstructions: [], measurements: [] } },
+      }));
+      expect(res.status).toBe(200);
+      const rows = await scratch.query<{ n: number }>(`SELECT jsonb_array_length(panels) AS n FROM layouts`);
+      expect(rows.rows[0].n).toBe(1);
+    });
+  });
+
+  it('a non-panel archive counts as loss too — roof planes alone are enough', async () => {
+    // The archive carries four entity kinds. Refusing only when PANELS would be
+    // lost would silently discard a traced roof, which is just as much work.
+    await pre123(async () => {
+      const res = await post(autosaveBody({
+        panels: [panel('p1')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A,
+        archives: { [KEY_B]: { panels: [], roofPlanes: [plane('r0', KEY_B, NEIGHBOUR)], obstructions: [], measurements: [] } },
+      }));
+      expect(res.status).toBe(409);
+      expect((res.json as { code?: string }).code).toBe('LAYOUT_ARCHIVE_UNSTORABLE');
+    });
+  });
+
+  it('…and the one-panel property change SUCCEEDS once 123 has run', async () => {
+    // The other half of the contract: the refusal is about the column, not about
+    // the operation. With somewhere to put the archive, the same save is fine.
+    const melvinPanels = Array.from({ length: 52 }, (_, i) => panel(`melvin-${i}`));
+    await post(autosaveBody({ panels: melvinPanels, roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }));
+    const res = await post(autosaveBody({
+      panels: [panel('neighbour-0')], roofPlanes: [], mapCenter: NEIGHBOUR, activeSiteKey: KEY_B,
+      archives: { [KEY_A]: { panels: melvinPanels, roofPlanes: [], obstructions: [], measurements: [] } },
+    }));
+    expect(res.status).toBe(200);
+    const after = (await get())!;
+    expect(after.panels).toHaveLength(1);
+    expect(((after.siteArchives as any).sites[KEY_A].panels)).toHaveLength(52);
   });
 
   it('…and the SAME save is allowed once 123 has run', async () => {
@@ -486,5 +821,150 @@ describe('🚨 a deployment that has not run 123 yet', () => {
     }));
     expect(res.status).toBe(200);
     expect(((await get())!.siteArchives as any).sites[KEY_A].panels).toHaveLength(52);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('🚨 unplaced panels must not replace a placed design', () => {
+  /**
+   * `/api/engineering/preliminary` writes `generateSyntheticPanels(...)` — every
+   * panel at `lat: 0, lng: 0` — through `upsertLayout`, and `panels` is the one
+   * column in the UPDATE with no COALESCE. The coordinate-integrity guard did
+   * not stop it: `_coordCentroid` drops any point with |lat| <= 0.001, so an
+   * array where EVERY panel is unplaced yields `null`, and "no centroid" was
+   * read as "nothing to validate against". The sub-system wipe guard does not
+   * stop it either — the synthetic panels are systemType 'roof', so 'roof' is
+   * present in `incoming` and nothing looks wiped.
+   *
+   * This runs the real `upsertLayout` against real PostgreSQL, so it also
+   * proves the new SQL is valid — it uses `jsonb_array_elements`, which ERRORS
+   * on a non-array, and a regex the template literal must not eat.
+   */
+  const unplaced = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `prelim-panel-${i}`, lat: 0, lng: 0, wattage: 400, systemType: 'roof',
+    }));
+
+  async function seedRealDesign() {
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [panel('p1'), panel('p2'), panel('p3')] as never,
+      roofPlanes: [plane('rp1', KEY_A)] as never,
+      mapCenter: MELVIN, totalPanels: 3, systemSizeKw: 1.2,
+    } as never);
+  }
+
+  it('the fixture really is a placed design — the guard has something to protect', async () => {
+    await seedRealDesign();
+    const stored = await getLayoutByProject(PROJECT, USER_ID);
+    expect(stored?.panels?.length).toBe(3);
+    expect(Math.abs(Number(stored!.panels![0].lat))).toBeGreaterThan(1);
+  });
+
+  it('🚨 a save of nothing but unplaced panels is REFUSED', async () => {
+    await seedRealDesign();
+    await expect(upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: unplaced(12) as never, totalPanels: 12, systemSizeKw: 4.8,
+    } as never)).rejects.toThrow(/LAYOUT_COORDS_UNPLACED/);
+
+    // And nothing was written — the refusal is raised BEFORE any write.
+    const after = await getLayoutByProject(PROJECT, USER_ID);
+    expect(after?.panels?.length, 'the real design must survive the refused save').toBe(3);
+  });
+
+  it('🚨 it is still refused when the payload ALSO carries real roof planes', async () => {
+    // The hole in the first version of this guard: `_coordCentroid` falls back
+    // to roof-plane vertices, so a payload with real planes produced a centroid
+    // and the panel check was skipped — exactly when half the payload was
+    // unplaced.
+    await seedRealDesign();
+    await expect(upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: unplaced(12) as never,
+      roofPlanes: [plane('rp1', KEY_A)] as never,
+      mapCenter: MELVIN, totalPanels: 12, systemSizeKw: 4.8,
+    } as never)).rejects.toThrow(/LAYOUT_COORDS_UNPLACED/);
+  });
+
+  it('a NEW project takes the same payload — onboarding still works', async () => {
+    // The route this protects against exists to serve brand-new projects. If
+    // the guard fired there it would be a worse defect than the one it fixes.
+    const res = await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: unplaced(12) as never, totalPanels: 12, systemSizeKw: 4.8,
+    } as never);
+    expect(res?.panels?.length, 'an empty project must accept the preliminary scaffold').toBe(12);
+  });
+
+  it('a save that omits panels entirely is untouched — absence still keeps', async () => {
+    await seedRealDesign();
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof', systemSizeKw: 1.2,
+    } as never);
+    const after = await getLayoutByProject(PROJECT, USER_ID);
+    expect(after?.panels?.length, 'omitting panels must keep the stored ones').toBe(3);
+  });
+
+  it('🚨 …and it still keeps them on a design big enough to trip the wipe guard', async () => {
+    // 🚨 THE FIXTURE ABOVE CANNOT SHOW THIS, AND I DID NOT NOTICE.
+    // `seedRealDesign` stores THREE panels, and the sub-system wipe guard only
+    // fires at FOUR. So "absence keeps" was proven on the one design size where
+    // the guard could not contradict it — and it did contradict it everywhere
+    // else: the guard read `data.panels || []`, treated an OMITTED list as an
+    // empty one, and threw LAYOUT_SUBSYSTEM_WIPE before the write could keep
+    // anything. The COALESCE was unreachable for every real design.
+    const many = Array.from({ length: 9 }, (_, i) => panel(`big${i}`));
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: many as never, roofPlanes: [plane('rp1', KEY_A)] as never,
+      mapCenter: MELVIN, totalPanels: 9, systemSizeKw: 3.6,
+    } as never);
+    expect((await getLayoutByProject(PROJECT, USER_ID))?.panels?.length,
+      'the fixture must be ABOVE the four-panel threshold or this proves nothing').toBe(9);
+
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof', systemSizeKw: 3.6,
+    } as never);
+    const after = await getLayoutByProject(PROJECT, USER_ID);
+    expect(after?.panels?.length,
+      'a save that says nothing about panels removes nothing — the guard must not ' +
+      'read absence as a wipe',
+    ).toBe(9);
+  });
+
+  it('🚨 but an explicit empty array on a big design is STILL refused', async () => {
+    // Guard against the lazy fix. Making the wipe guard ignore `[]` as well
+    // would satisfy the test above and disarm the protection Ray lost 81
+    // panels to.
+    const many = Array.from({ length: 9 }, (_, i) => panel(`big${i}`));
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: many as never, mapCenter: MELVIN, totalPanels: 9, systemSizeKw: 3.6,
+    } as never);
+    await expect(upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [] as never, totalPanels: 0, systemSizeKw: 0,
+    } as never)).rejects.toThrow(/LAYOUT_SUBSYSTEM_WIPE/);
+  });
+
+  it('a deliberate clear (panels: []) is still allowed through this guard', async () => {
+    // `[]` is a decision, not an absence, and it is the sub-system wipe guard's
+    // job to judge it — not this one's. Three panels is below that guard's
+    // four-panel threshold, so this save is expected to succeed.
+    await seedRealDesign();
+    const res = await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [] as never, totalPanels: 0, systemSizeKw: 0,
+    } as never);
+    expect(res?.panels?.length).toBe(0);
+  });
+
+  it('LAYOUT_COORDS_UNPLACED is in the refusal list, so routes answer 409 and not 503', async () => {
+    const { LAYOUT_REFUSAL_CODES, layoutRefusalCode } = await import('@/lib/db/core');
+    expect(LAYOUT_REFUSAL_CODES as readonly string[]).toContain('LAYOUT_COORDS_UNPLACED');
+    expect(layoutRefusalCode(new Error('LAYOUT_COORDS_UNPLACED: 12 panels with no map position')))
+      .toBe('LAYOUT_COORDS_UNPLACED');
   });
 });

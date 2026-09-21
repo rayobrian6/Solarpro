@@ -4,21 +4,110 @@ This harness covers the `/design` Design Studio path with Playwright and a small
 
 ## Run
 
-```bash
-npm run test:e2e
-```
-
-The Playwright config starts the Next dev server with:
-
-```bash
-DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npm run dev -- -p 3000
-```
-
-You can point at an already-running server instead:
+🚨 **Run against a production BUILD, not `next dev`.** Fifteen cold route compiles
+make `page.goto` exceed 45 s and three tests fail on timeouts that look like
+product defects. Never `next build` while a dev server is writing the same
+`.next` — clear it first.
 
 ```bash
-E2E_BASE_URL=http://127.0.0.1:3000 NEXT_PUBLIC_E2E=1 npm run test:e2e
+rm -rf .next
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npx next build
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npx next start -p 3011
+E2E_BASE_URL=http://127.0.0.1:3011 NEXT_PUBLIC_E2E=1 npx playwright test
 ```
+
+### If someone else is running a dev server on this repo
+
+`next build` and `next dev` share `.next`, so building while a dev server is
+serving the same checkout corrupts both. `next.config.js` reads `NEXT_DIST_DIR`,
+so the E2E build can have a directory of its own:
+
+```bash
+NEXT_DIST_DIR=.next-e2e DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npx next build
+NEXT_DIST_DIR=.next-e2e DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npx next start -p 3011
+```
+
+🚨 **A build with `NEXT_DIST_DIR` rewrites two tracked files** —
+`next-env.d.ts` and `tsconfig.json` are regenerated to point at that directory,
+because Next derives them from the active `distDir`. Put them back before
+committing:
+
+```bash
+git checkout -- next-env.d.ts tsconfig.json
+```
+
+### With a real database, and no credential
+
+`e2e/persistence-join.spec.ts` needs a database. It does **not** need the owner's
+Neon credential: `SOLARPRO_LOCAL_PG=1` boots PostgreSQL compiled to WebAssembly
+inside the Next server (`instrumentation.ts` → `lib/dev/pgliteNeonBridge.ts`) and
+answers the driver's requests there. Route handlers, `upsertLayout` and
+`rowToLayout` are untouched production code.
+
+```bash
+rm -rf .next
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 SOLARPRO_LOCAL_PG=1 npx next build
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 SOLARPRO_LOCAL_PG=1   DEV_AUTH_USER_ID=11111111-1111-4111-8111-111111111111   npx next start -p 3011
+```
+
+**You do not set `DATABASE_URL`.** The bridge points it at the in-process
+database itself, using a host in the reserved `.invalid` TLD and no password.
+
+That host can never resolve, which is the point: **if the bridge ever fails to
+intercept, the query fails loudly instead of quietly talking to something real.**
+Without `SOLARPRO_LOCAL_PG` those specs skip, loudly.
+
+### Run it in two passes
+
+```bash
+npx playwright test e2e/design-studio.spec.ts e2e/panel-above-deck.spec.ts   # 11
+# restart the server here
+npx playwright test e2e/panel-elevation.spec.ts e2e/site-switch.spec.ts     #  9
+# restart the server here
+SOLARPRO_LOCAL_PG=1 npx playwright test e2e/persistence-join.spec.ts        #  4
+```
+
+All twenty-four pass, none skipped. **Restart the server between passes** — that
+is not ceremony: running the last three specs together against one server
+failed two of them, and the same three split across a restart passed all of
+them, with individual tests dropping from 60 s to 6 s. Running them all in ONE pass against one
+server intermittently fails two or three — the server reaches ~850 MB and
+degrades under that many consecutive Cesium sessions, and the failures move
+between runs (`read ECONNRESET`, "hook should be installed" timeouts, and
+individual tests taking 60 s instead of 6 s). That is the machine, not the
+product; the split, with a server restart between passes, is the supported way
+to run it.
+
+🚨 **`SOLARPRO_LOCAL_PG=1` has to be set on the PLAYWRIGHT command too**, not
+just the server. `e2e/persistence-join.spec.ts` reads it from the test runner's
+environment to decide whether a database is attached; without it those four
+tests skip, and a skip is a pass over nothing.
+
+### What each spec actually measures
+
+| spec | measures | against |
+|---|---|---|
+| `design-studio` | studio state after real interactions | the app's own state hook |
+| `panel-elevation` | `PlacedPanel.height` after Auto Layout | the `RoofPlane` it was placed from |
+| `panel-above-deck` | the **Cesium entities Cesium drew** | each other |
+| `site-switch` | which property a design belongs to | the studio's site model |
+| `persistence-join` | a reload and A→B→A | real PostgreSQL, through the real route |
+
+🚨 **`panel-elevation` is circular on its own and `panel-above-deck` is not.**
+The first asks the placement library to check its own arithmetic — it cannot see
+`addPanelEntity` or `renderPlane3DEntity`, which are different functions fed
+different inputs. The second reads `[PANEL]` and `[PLANE3D-BASE]` out of the
+live entity collection and measures one against the other. That is what caught
+the defect where a face carrying fifty-five panels was drawn as a bare outline
+with no roof deck under the array at all.
+
+### Authentication
+
+Every request needs `X-Dev-Auth: bypass` as well as `DEV_AUTH_BYPASS=true` —
+`getDevSessionUser` AND-gates them deliberately, so a signed-in user is never
+silently replaced by the dev user. `playwright.config.ts` sends the header for
+every spec. Without it `/api/projects` 401s and the page redirects to
+`/auth/login` mid-spec.
 
 ## Browser/runtime assumptions
 
