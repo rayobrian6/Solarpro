@@ -6213,7 +6213,17 @@ function SolarEngine3D({
     // Runs BEFORE the existing panel-array LEFT_DOWN so handle picks short-circuit
     // panel array logic. We set suppressClickRef so the trailing LEFT_CLICK that
     // fires on mouse-up doesn't re-run selection.
-    handler.setInputAction((event: any) => {
+    //
+    // 🚨 THESE THREE ARE PLAIN FUNCTIONS, NOT REGISTRATIONS, AND THAT IS THE FIX.
+    // Cesium's ScreenSpaceEventHandler.setInputAction is a plain overwrite —
+    // `this._inputEvents[getInputEventKey(type, modifier)] = action` — not an
+    // append. Registering LEFT_DOWN / MOUSE_MOVE / LEFT_UP here AND again for the
+    // panel-array grab below, on this same `handler`, meant the second trio
+    // silently replaced this one: `blockResizeRef` was never set, so the block
+    // height drag, its camera freeze and its suppressClickRef were all dead code
+    // while the comment above claimed they ran first. They now really do run
+    // first, because the surviving handlers call them.
+    const blockResizeDown = (event: any): void => {
       try {
         if (blockResizeRef.current) return; // already resizing
         const screenPos = event.position;
@@ -6280,11 +6290,11 @@ function SolarEngine3D({
         setSelectedBlockId(blockId);
         setStatusMsg(`↕ Dragging block height — currently ${startHeightM.toFixed(1)}m`);
       } catch (err: unknown) { addLog('ERROR', `block resize LEFT_DOWN: ${(err as Error).message}`); }
-    }, C.ScreenSpaceEventType.LEFT_DOWN);
+    };
 
     // v64: Block resize — MOUSE_MOVE updates the block height in real-time.
     // Same pattern as panel array drag — fires only when blockResizeRef is set.
-    handler.setInputAction((event: any) => {
+    const blockResizeMove = (event: any): void => {
       const r = blockResizeRef.current;
       if (!r) return;
       try {
@@ -6323,10 +6333,10 @@ function SolarEngine3D({
         setStatusMsg(`↕ Block height: ${newHeightM.toFixed(1)}m`);
         try { viewer.scene.requestRender(); } catch {}
       } catch (err: unknown) { addLog('ERROR', `block resize MOUSE_MOVE: ${(err as Error).message}`); }
-    }, C.ScreenSpaceEventType.MOUSE_MOVE);
+    };
 
     // v64: Block resize — LEFT_UP finalizes and clears the resize state.
-    handler.setInputAction(() => {
+    const blockResizeUp = (): void => {
       const r = blockResizeRef.current;
       if (!r) return;
       try {
@@ -6348,7 +6358,7 @@ function SolarEngine3D({
         blockResizeRef.current = null;
         arrayManipRef.current = false; // hand the camera back
       }
-    }, C.ScreenSpaceEventType.LEFT_UP);
+    };
 
     handler.setInputAction((event: any) => {
       try {
@@ -6445,6 +6455,12 @@ function SolarEngine3D({
     // (a selected panel) → move it on its plane. Camera left-drag is disabled for
     // the duration so the globe doesn't orbit underneath.
     handler.setInputAction((event: any) => {
+      // Block height handles are checked first and in EVERY mode — the block is
+      // traced in `block` mode, so a mode guard here would make its own handle
+      // unreachable. If it took the event, blockResizeRef is set and the array
+      // grab must not also arm on the same press.
+      blockResizeDown(event);
+      if (blockResizeRef.current) return;
       if (modeRef.current !== 'select') return;
       const ids = selectedPanelIdsRef.current;
       if (ids.size === 0) return;
@@ -6481,6 +6497,7 @@ function SolarEngine3D({
     }, C.ScreenSpaceEventType.LEFT_DOWN);
 
     handler.setInputAction((event: any) => {
+      if (blockResizeRef.current) { blockResizeMove(event); return; }
       const drag = dragRef.current;
       if (!drag) return;
       const ray = viewer.camera.getPickRay(event.endPosition);
@@ -6522,6 +6539,7 @@ function SolarEngine3D({
     }, C.ScreenSpaceEventType.MOUSE_MOVE);
 
     handler.setInputAction(() => {
+      if (blockResizeRef.current) { blockResizeUp(); return; }
       const drag = dragRef.current;
       if (!drag) return;
       dragRef.current = null;
@@ -8264,23 +8282,48 @@ function SolarEngine3D({
       // on a roof face selects THAT face so the Walls / Pitch controls act on it
       // alone. Ray: "I have no way of selecting a plane" and "it adjusts both
       // planes". Checked before panel selection because with Building on the
-      // roof surfaces sit above the panels visually; a click that lands on a
-      // panel still falls through to the panel logic below.
+      // roof surfaces sit above the panels visually.
+      //
+      // 🚨 CORRECTION TO THIS COMMENT'S OWN EARLIER CLAIM. It used to end "a
+      // click that lands on a panel still falls through to the panel logic
+      // below." That is FALSE and an E2E test now records the truth: with
+      // Building ON, `drillPick(…, 8)` returns the [BUILD3D-ROOF] polygon from
+      // BEHIND the panel and this branch returns on it, so a click on a module
+      // selects the roof face under it — the opposite of Building OFF, where
+      // panels win. That routing difference is recorded, not endorsed; it is
+      // the UX proposal's problem to resolve, not something to paper over with
+      // a comment that says it does not happen.
       if (showBuilding3DRef.current) {
         const faceId = pickBuildingFaceAtScreen(viewer, C, screenPos);
         if (faceId) {
+          // 🚨 CAPTURE BEFORE THE WRITE. `selectRoofFace` sets
+          // `selectedFaceIdRef.current` SYNCHRONOUSLY, so reading the ref after
+          // calling it reports the state we just moved to, not the one we came
+          // from — which inverted this message: selecting a face announced
+          // "Face deselected" and deselecting announced "Face selected". This
+          // is the only scope feedback Building mode has, so the user was told
+          // the exact opposite of which faces the Walls/Pitch controls would
+          // act on. The sibling [PLANE3D-*] path below always did this right.
+          const toggledOff = selectedFaceIdRef.current === faceId;
+          // Matching the sibling path: one selection at a time. Without this a
+          // panel array stays selected alongside the face, and the arrow keys
+          // (gated on selectedPanelIdsRef alone) keep moving the array while
+          // the scope chip claims the click selected a face.
+          clearPanelSelection();
+          drilledGroupKeyRef.current = null;
           // Through the same setter as the [PLANE3D-*] path, so the ref, the
           // state and the outbound notification cannot drift between the two
           // entity families that can both produce a face selection.
-          selectRoofFace(selectedFaceIdRef.current === faceId ? null : faceId);
+          selectRoofFace(toggledOff ? null : faceId);
           const ov = buildingOverridesRef.current.get(faceId);
           setStatusMsg(
-            selectedFaceIdRef.current === faceId
+            toggledOff
               ? '⬡ Face deselected — Walls and Pitch now apply to the whole building'
               : `⬡ Face selected — Walls and Pitch now apply to THIS face only` +
                 (ov ? ` (pitch ${ov.pitchDeg ?? buildingPitchRef.current}°, walls ${ftStr(ov.wallHeightM ?? wallHeightRef.current)})` : '') +
                 ` · click it again to deselect`
           );
+          try { viewer.scene.requestRender(); } catch {}
           return;
         }
       }

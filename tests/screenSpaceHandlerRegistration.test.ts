@@ -1,0 +1,198 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * tests/screenSpaceHandlerRegistration.test.ts
+ *
+ * A SECOND setInputAction FOR THE SAME EVENT SILENTLY DELETES THE FIRST.
+ *
+ * `setupClickHandler` (components/3d/SolarEngine3D.tsx) creates ONE
+ * `C.ScreenSpaceEventHandler` and used to register two independent gesture
+ * trios on it:
+ *
+ *     LEFT_DOWN   block-handle height drag   …then…  panel-array grab
+ *     MOUSE_MOVE  block-handle height drag   …then…  panel-array grab
+ *     LEFT_UP     block-handle height drag   …then…  panel-array grab
+ *
+ * Cesium's `setInputAction` is a plain assignment into a keyed map, not an
+ * append (proved below against the installed Cesium, not from memory). So the
+ * panel-array trio REPLACED the block trio: `blockResizeRef` was never written,
+ * and with it the block height drag, its `arrayManipRef` camera freeze and its
+ * `suppressClickRef` were all unreachable — while the comment above them said
+ * "Runs BEFORE the existing panel-array LEFT_DOWN".
+ *
+ * That matters beyond the one dead feature: a UX proposal named that drag
+ * "INTERACTION PRECEDENT, COMPLETE AND WORKING — copy it verbatim", and any
+ * NEW gesture added as a third trio would have deleted the panel-array grab in
+ * exactly the same silent way. This file is the guard against the next one.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { stripComments } from './support/stripSource';
+
+const SRC_PATH = join(__dirname, '..', 'components', '3d', 'SolarEngine3D.tsx');
+
+describe('Cesium: the behaviour this whole guard exists for', () => {
+  it('setInputAction REPLACES a previous action for the same event type', async () => {
+    // Proved against the real installed Cesium rather than asserted, so that a
+    // future Cesium that changed to an append model would fail here loudly
+    // instead of leaving a guard nobody can justify.
+    const C: any = await import('cesium');
+    const canvas = document.createElement('canvas');
+    const h = new C.ScreenSpaceEventHandler(canvas);
+
+    const first = () => 'first';
+    const second = () => 'second';
+    h.setInputAction(first, C.ScreenSpaceEventType.LEFT_DOWN);
+    expect(h.getInputAction(C.ScreenSpaceEventType.LEFT_DOWN)).toBe(first);
+
+    h.setInputAction(second, C.ScreenSpaceEventType.LEFT_DOWN);
+    // 🚨 The first action is GONE — not queued behind the second.
+    expect(h.getInputAction(C.ScreenSpaceEventType.LEFT_DOWN)).toBe(second);
+    expect(h.getInputAction(C.ScreenSpaceEventType.LEFT_DOWN)).not.toBe(first);
+  });
+
+  it('a modifier makes it a DIFFERENT slot — so SHIFT+LEFT_CLICK is not a duplicate', () => {
+    // The guard below must not fire on the legitimate
+    // `LEFT_CLICK` + `LEFT_CLICK/SHIFT` pair that setupClickHandler really has.
+    // Nothing to assert against Cesium here beyond the key shape; the structural
+    // guard encodes it and this test names why the exception exists.
+    expect(true).toBe(true);
+  });
+});
+
+/** The body of one `function <name>(` declaration, to its matching close brace. */
+function functionBody(src: string, name: string): string {
+  const start = src.indexOf(`function ${name}(`);
+  expect(start, `function ${name} not found`).toBeGreaterThan(-1);
+  const open = src.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return src.slice(open, i + 1);
+    }
+  }
+  throw new Error(`unterminated body for ${name}`);
+}
+
+describe('setupClickHandler registers each event slot exactly once', () => {
+  // Comments stripped: this file's fix is explained in a long comment that names
+  // LEFT_DOWN, MOUSE_MOVE and LEFT_UP several times, and a scan that counts its
+  // own prose as registrations would fail against correct code.
+  const SRC = stripComments(readFileSync(SRC_PATH, 'utf8'));
+
+  it('the scan finds the function and some registrations', () => {
+    const body = functionBody(SRC, 'setupClickHandler');
+    expect(body.length).toBeGreaterThan(2_000);
+    expect(body).toContain('setInputAction');
+  });
+
+  it('🚨 no event type + modifier pair is registered twice on the same handler', () => {
+    const body = functionBody(SRC, 'setupClickHandler');
+
+    // The closing argument list of each registration:
+    //   }, C.ScreenSpaceEventType.LEFT_DOWN);
+    //   }, C.ScreenSpaceEventType.LEFT_CLICK, C.KeyboardEventModifier.SHIFT);
+    const re = /\}\s*,\s*C\.ScreenSpaceEventType\.([A-Z_]+)\s*(?:,\s*C\.KeyboardEventModifier\.([A-Z_]+)\s*)?\)/g;
+    const seen = new Map<string, number>();
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body)) !== null) {
+      const key = `${m[1]}${m[2] ? '/' + m[2] : ''}`;
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+
+    expect(seen.size, 'the scan matched no registrations at all — the regex has drifted from the source')
+      .toBeGreaterThanOrEqual(5);
+
+    const duplicated = [...seen.entries()].filter(([, n]) => n > 1);
+    expect(
+      duplicated,
+      `these event slots are registered more than once on ONE handler, so only the last survives:\n  ${
+        duplicated.map(([k, n]) => `${k} x${n}`).join('\n  ')
+      }`,
+    ).toEqual([]);
+  });
+
+  it('the block height drag is reachable — it is called, not registered', () => {
+    const body = functionBody(SRC, 'setupClickHandler');
+    // Declared as plain functions…
+    expect(body).toMatch(/const blockResizeDown\s*=/);
+    expect(body).toMatch(/const blockResizeMove\s*=/);
+    expect(body).toMatch(/const blockResizeUp\s*=/);
+    // …and actually invoked from the surviving handlers. Without these calls the
+    // refactor would be tidier dead code rather than a fix.
+    expect(body).toMatch(/blockResizeDown\(event\)/);
+    expect(body).toMatch(/blockResizeMove\(event\)/);
+    expect(body).toMatch(/blockResizeUp\(\)/);
+  });
+
+  it('the block handle is checked before the array grab short-circuits on mode', () => {
+    // The block is traced in `block` mode, so a `modeRef.current !== 'select'`
+    // guard ahead of the block check would make its own handle unreachable —
+    // a different way of killing the same feature.
+    const body = functionBody(SRC, 'setupClickHandler');
+    const downIdx = body.indexOf('blockResizeDown(event)');
+    const modeGuardIdx = body.indexOf("modeRef.current !== 'select'", downIdx);
+    expect(downIdx).toBeGreaterThan(-1);
+    expect(modeGuardIdx, 'the select-mode guard must come AFTER the block-handle check')
+      .toBeGreaterThan(downIdx);
+  });
+});
+
+describe('Building-mode face selection reports the scope it actually moved to', () => {
+  const SRC = stripComments(readFileSync(SRC_PATH, 'utf8'));
+
+  /**
+   * ONLY the Building branch of handleSelectClick.
+   *
+   * 🚨 The first draft of this block sliced from `showBuilding3DRef.current`,
+   * whose first occurrence is the ref-sync effect ~5,700 lines earlier. Every
+   * assertion below would then have been satisfied by the SIBLING [PLANE3D-*]
+   * path, which already did all of this correctly — a guard that passes on the
+   * broken code it was written for. Both anchors below are verified unique.
+   */
+  function buildingBranch(): string {
+    const start = SRC.indexOf('const faceId = pickBuildingFaceAtScreen(');
+    const end = SRC.indexOf('const picked = pickPanelAtScreen(viewer, screenPos)');
+    expect(start, 'Building-branch anchor not found').toBeGreaterThan(-1);
+    expect(end, 'panel-pick anchor not found').toBeGreaterThan(start);
+    const branch = SRC.slice(start, end);
+    // A slice that swallowed the sibling path would be long and would contain
+    // its distinctive call; both are checked so the anchors cannot silently rot.
+    // `pickRoofFaceAtScreen` is the sibling path's distinctive call and is the
+    // substantive anchor check; the length bound is a loose sanity rail (the
+    // branch is ~50 lines, and stripComments keeps their whitespace).
+    expect(branch).not.toContain('pickRoofFaceAtScreen');
+    expect(branch.length).toBeLessThan(4_000);
+    return branch;
+  }
+
+  it('🚨 the toggle state is captured BEFORE selectRoofFace writes the ref', () => {
+    // selectRoofFace sets selectedFaceIdRef.current synchronously. Reading the
+    // ref after calling it reports the state we moved TO, which inverted the
+    // only scope message Building mode has: selecting announced "deselected".
+    const branch = buildingBranch();
+    const capture = branch.indexOf('const toggledOff = selectedFaceIdRef.current === faceId');
+    const call = branch.indexOf('selectRoofFace(toggledOff');
+    expect(capture, 'the pre-write capture was not found').toBeGreaterThan(-1);
+    expect(call, 'selectRoofFace is not being driven from the captured value').toBeGreaterThan(capture);
+
+    // And the inverted form must not come back: the message must not be chosen
+    // by re-reading the ref that selectRoofFace has already moved.
+    expect(branch).not.toMatch(/setStatusMsg\(\s*selectedFaceIdRef\.current === faceId/);
+    expect(branch).toMatch(/setStatusMsg\(\s*toggledOff/);
+  });
+
+  it('selecting a face in Building mode clears the panel selection, as the roof path does', () => {
+    // Otherwise a panel array and a face are both selected, and the arrow keys —
+    // gated on selectedPanelIdsRef alone — move the array while the scope chip
+    // says the click selected a face.
+    const branch = buildingBranch();
+    const upTo = branch.slice(0, branch.indexOf('selectRoofFace(toggledOff'));
+    expect(upTo).toMatch(/clearPanelSelection\(\)/);
+    expect(upTo).toMatch(/drilledGroupKeyRef\.current = null/);
+  });
+});
