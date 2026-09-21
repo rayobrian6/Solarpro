@@ -259,8 +259,22 @@ export async function POST(req: NextRequest, context: RouteContext) {
       gridCol: p.gridCol,
       placementType: p.placementType,
       layoutSource: p.layoutSource,
-      // Note: ecefNx/Ny/Nz, ecefUx/Uy/Uz, x, y, xMeters, yMeters intentionally omitted
-      // (re-computed at render time — not needed for version restore)
+      // 🚨 height IS NOT RE-COMPUTED AT RENDER TIME. IT WAS DROPPED HERE.
+      // The trim below was written on the premise that everything omitted is
+      // rebuilt when the panel is drawn. That is true of the ECEF vectors and
+      // the pixel coordinates, and FALSE of the elevation: nothing downstream
+      // derives it, `addPanelEntity` now refuses to draw a panel without one,
+      // and the validator drops it — so restoring a version produced an EMPTY
+      // roof. Before the guard existed it produced a whole array at sea level.
+      // Either way the snapshot was not a restorable record of the design.
+      height: p.height,
+      // The frame the renderer prefers over azimuth/tilt, for the same reason:
+      // a restored panel that falls back to scalar HPR is re-oriented, not
+      // re-drawn as saved.
+      heading: p.heading,
+      pitch: p.pitch,
+      // Note: ecefNx/Ny/Nz, ecefUx/Uy/Uz, x, y, xMeters, yMeters intentionally
+      // omitted — those ARE re-computed at render time.
     }));
     const trimmedLayout = { ...savedLayout, panels: trimmedPanels };
     saveProjectVersion({

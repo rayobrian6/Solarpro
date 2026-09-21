@@ -573,7 +573,15 @@ export function getCanonicalDims(orientation: PanelOrientation): PanelDims {
  *  2. Reject panels outside plane polygon (if plane provided)
  *  3. Enforce no duplicate (planeId + row + col) combinations
  */
-function validatePanels(
+/**
+ * 🚨 EXPORTED BECAUSE A VALIDATOR NOTHING CAN CALL CANNOT BE TESTED.
+ * The first attempt to prove "the control layer drops a panel with no
+ * elevation" went through `placePanelsControlled` in `surface_select` mode —
+ * which RE-PLACES from the plane, so the tampered panel never reached this
+ * function and the assertion ran over a list it had not touched. A test that
+ * cannot reach the code it names is worth nothing, so the code is reachable.
+ */
+export function validatePanels(
   panels: PlacedPanel[],
   config: ControlConfig,
   warnings: string[],

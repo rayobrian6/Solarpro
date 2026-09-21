@@ -38,7 +38,7 @@ import { buildSurfaceGrid, hasUsableElevation } from '@/lib/surfaceGeometry3D';
 import { moduleStackHeightM } from '@/lib/roofMountDatum';
 import { latLngToECEF } from '@/lib/roofPlane3D';
 import { siteKeyFromCoords } from '@/lib/siteIdentity';
-import { placePanelsControlled } from '@/lib/3d/controlLayer';
+import { placePanelsControlled, validatePanels } from '@/lib/3d/controlLayer';
 import {
   NORMAL_SUBURBAN_PITCHED, MULTI_PLANE_COMPLEX, MEDIUM_QUALITY_RURAL, POCAHONTAS,
 } from './fixtures/googleSolarResponses';
@@ -207,28 +207,39 @@ describe('auto-detected roof faces — panels sit ON the roof, on every face', (
     });
 
     it('🚨 the control layer drops it rather than passing it to the renderer', () => {
+      // 🚨 THIS TEST WAS VACUOUS AND I WROTE IT.
+      // It drove `placePanelsControlled` in `surface_select` mode and then
+      // asserted `res.panels.every(hasUsableElevation)`. That mode RE-PLACES
+      // from the plane, so the tampered panel never reached the validator at
+      // all — the assertion ran over a freshly generated list, and `every` is
+      // true on an empty one either way. Deleting `hasUsableElevation` from the
+      // validator left it GREEN. It tested nothing.
+      //
+      // The validator is now exported, so this calls it with the exact input
+      // the defect requires and reads what it returns.
       const planes = acquire(MULTI_PLANE_COMPLEX);
       const plane = planes[0];
       const good = fill(plane);
-      expect(good.length).toBeGreaterThan(2);
+      expect(good.length, 'nothing to tamper with').toBeGreaterThan(2);
 
-      // Strip the elevation from one panel, exactly as an old saved design or
-      // the 2D layout engine would deliver it, and run the real validator.
-      const withOneBroken = good.map((p, i) => (i === 1 ? { ...p, height: undefined } : p));
-      const res = placePanelsControlled({
-        mode: 'surface_select',
-        plane: plane as never,
-        orientation: 'portrait',
-        wattage: 400,
-        mountingSystemId: MOUNT_ID,
-        groundElevM: POCAHONTAS.elevationM,
-        existingPanels: withOneBroken as never,
-      } as never);
-      // The engine re-places from the plane, so assert the VALIDATOR directly on
-      // the tampered set via its observable contract: nothing it returns may
-      // lack an elevation.
-      expect(res.panels.every(p => hasUsableElevation(p)),
-        'no panel without an elevation may survive validation').toBe(true);
+      // Exactly as an old saved design, a restored version snapshot, or the 2D
+      // layout engine delivers it: everything else intact, no elevation.
+      const tampered = good.map((p, i) => (i === 1 ? { ...p, height: undefined } : p));
+      const warnings: string[] = [];
+      const kept = validatePanels(tampered as never, { plane } as never, warnings);
+
+      expect(kept.length, 'the validator must drop exactly the tampered panel')
+        .toBe(good.length - 1);
+      expect(kept.map(p => p.id), 'and it must be the one with no elevation')
+        .not.toContain(good[1].id);
+      expect(warnings.join(' '), 'and it must SAY so — a silent drop is a vanished panel')
+        .toMatch(/elevation is MISSING/);
+
+      // Mutation anchor: with the old expression the panel survives. Shown, not
+      // asserted about the source, so a rename cannot make this pass silently.
+      const oldGuard = (h: number | null | undefined) => Number.isFinite(h ?? 0);
+      expect(tampered.filter(p => oldGuard(p.height)).length,
+        'the old guard would have kept all of them').toBe(good.length);
     });
   });
 });

@@ -1744,6 +1744,414 @@ read as a statement of fact and believed; two of them were repeated into this le
 checked.
 
 ---
+---
+
+## 🚨 WS1-038 — THERE WAS NO ROOF UNDER THE ARRAY
+
+| | |
+|---|---|
+| **Severity** | **P0** — user-visible, and it is the mechanism behind Ray's report |
+| **Status** | `FIXED_VERIFIED` (browser-measured, mutation-proven) |
+| **Found by** | reading the live Cesium entity collection, which no test had ever done |
+
+Ray: *"the panels are not all rendering above the roof when I do an auto layout to fill the roof."*
+
+WS1-033 found a defect of that shape and fixed it. It was not the whole answer. The first run of a
+new browser gate that reads the **scene** rather than the app's own state reported:
+
+```
+55  [PANEL]
+ 1  [PLANE3D-OUTLINE]
+ 0  [PLANE3D-BASE]
+```
+
+`renderPlane3DEntity` has two branches. The `outlineOnly` branch draws a polyline and returns. The
+branch it skips draws the thing the entire mount datum exists to put a module above — an opaque base
+coat whose own comment states its job:
+
+> *"Dark base coat — suppresses wavy mesh waviness beneath panels."*
+
+**A face carrying fifty-five panels was drawn as a bare outline.** With no deck, what is under the
+array is Google's photogrammetry mesh, which is not planar: ridge caps, vents, ±10–30 cm of noise. A
+panel placed a fixed height above a **fitted plane** is swallowed wherever the mesh rises above it —
+and that is a per-location property, so *some* panels look wrong and others do not.
+
+### Why every face Auto Layout fills was affected, and freshly traced ones were not
+
+The decision was made once and latched:
+
+```ts
+const planeHasPanels = panelsRef.current.some(p => p.planeId === plane.id);
+const isMarkOnly = !planeHasPanels;
+if (isMarkOnly) markOnlyPlaneIdsRef.current.add(plane.id);   // nothing ever removes
+```
+
+The plane-restore effect runs **before** Auto Layout has placed anything, so every face that arrives
+from state — a reload, a restored design, and **every face Lane A detects from Google Solar** — was
+recorded as "no panels" permanently. Filling it with fifty-five panels did not change the answer. A
+face traced in the same session takes the other code path and gets its deck.
+
+**Traced faces right, detected and reloaded faces wrong, on the same roof, in the same session.**
+That is "not ALL", mechanically.
+
+### The fix
+
+*Mark Plane* is an **intent** — the user traced a face and asked for no panels on it — and stays
+latched, with exactly one writer. *Having no panels* is a **state** and is now read fresh every time
+a face is drawn (`planeRendersOutlineOnly`). And the plane redraw keys on which faces carry panels,
+so a face gains its deck the moment Auto Layout fills it; reading fresh is useless if nothing
+re-renders.
+
+### The gate that found it, and why nothing before it could have
+
+`e2e/panel-above-deck.spec.ts`. Every elevation assertion written before it — three vitest files and
+one browser spec — computes `(panelECEF − plane.origin3D) · plane.normal` and compares it to
+`moduleStackHeightM`. **That is the placement library checking its own arithmetic.** None of them can
+see either of the two things a person actually looks at:
+
+```
+the BOX Cesium draws for a panel        addPanelEntity
+the POLYGON Cesium draws for the deck   renderPlane3DEntity
+```
+
+Different functions, different inputs, living in a 12,000-line React component that no unit test
+reaches. The new spec takes the drawn deck's own corners, fits a plane to them with Newell's method,
+and measures each drawn panel box against it — **0.14 m, every panel, on a single face, on a gable,
+and across a reload**, which is `moduleStackHeightM('ironridge-xr100')` exactly.
+
+`window.__solarViewerE2E` exposes the raw viewer and nothing else, under the same build-time flag as
+the studio's hook. Handing out a ready-made clearance number would have put the measurement back
+inside the component under test.
+
+**Mutation-proven.** Re-introducing the latch as a single line and rebuilding makes all three fail
+with *"the scene never drew a roof deck polygon"*.
+
+### And `origin/master` has a second, independent disagreement
+
+Verified against `origin/master`, not inferred. The restore path there re-fits an **already lifted**
+`polygon3D` through `computePlaneFromPoints3D`, which applies `SURFACE_OFFSET_M` again:
+
+```
+deck drawn at   fitted + 0.24 m     (0.12 lift, applied twice)
+panels sit at   fitted + 0.17 m     (origin3D + PANEL_OFFSET_ECEF 0.05)
+```
+
+Every panel on a restored or auto-detected face renders **7 cm below** the deck it sits on, while a
+face traced in the same session renders 5 cm above it. Fixed earlier on this branch; the new spec is
+what keeps it fixed.
+
+---
+
+## 🚨 WS1-039 — ONE MISSING FIELD DISCARDED THREE GOOD ONES, AND PUT THE ARRAY ON THE GROUND
+
+| | |
+|---|---|
+| **Severity** | **P1** — 34 m of error, silently; no producer of the input shape found in current code |
+| **Status** | `FIXED_VERIFIED` |
+
+`buildSurfaceGrid` resolved a plane's geometry with one all-or-nothing test: `createdFrom3D &&
+origin3D && ecefFrame3D && polygon3D.length >= 3`, else fall wholesale to
+`computeEcefFrameForLegacyPlane`. That fallback rebuilds the frame from
+`planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M` — and `buildRoofPlane3D` writes **0.0** there
+deliberately, as a *"don't read me, read origin3D"* sentinel, which `??` keeps.
+
+Measured on the demo roof, ground 128 m, eave 160 m:
+
+```
+WITH polygon3D      55 panels at 163.79 m
+WITHOUT polygon3D   55 panels at 129.58 m      <- 34.22 m below the roof
+```
+
+Correct panel count, no error, whole array underground. The fourth appearance of
+absence-becomes-a-number in this workstream.
+
+🚨 **And the file disagreed with itself.** `placeSinglePanel`, `extendRow` and `addRow` ask only for
+`ecefFrame3D && origin3D`. The same face therefore got panels on the roof from one tool and
+underground from another — two answers to *"does this face have a usable 3D frame?"* inside one file,
+which is the condition `lib/roofMountDatum.ts` exists to end for the mount stack.
+
+**Fix.** The frame and the outline are separate facts and are resolved separately: the plane's own
+frame is used whenever it has one, and only the polygon is synthesised, by dropping each plan-view
+vertex **vertically** onto the plane. (Projecting along the normal instead moves the point
+horizontally by `distance·sin²(tilt)` — 0.8 m at 25° — which shrinks the outline and silently costs
+a row of panels. Measured: 44 panels instead of 55, before that was corrected.)
+
+**Honestly stated:** I could not find a path in the current code that produces a 3D plane without a
+`polygon3D`. The restore path has an explicit branch for it commented *"pre-stitch or older save"*,
+and `buildSurfaceGrid` had the fallback, so the shape was believed to exist; the round trip through
+real PostgreSQL preserves all four fields. This is fixed as an inconsistent authority with a proven
+34 m failure mode, not as a defect I can currently trigger end to end.
+
+---
+
+## 🚨 WS1-040 — THE HYBRID FILL DROPPED THE MOUNTING SYSTEM
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_VERIFIED` |
+| **Found by** | an independent worker, verified by reading the code myself |
+
+`buildSurfaceGrid`'s mixed / portrait-first / landscape-first branch recurses through a
+`commonOpts` object that did not carry `mountingSystemId`:
+
+```ts
+const commonOpts = { plane, groundElevM, …, layoutId, wattage,
+                     customOriginLat, customOriginLng, customDirX, customDirY };
+const primaryPanels   = buildSurfaceGrid({ ...commonOpts, orientation: primaryOri });
+const secondaryPanels = buildSurfaceGrid({ ...commonOpts, orientation: secondaryOri });
+```
+
+So both fills resolved `moduleStackHeightM(undefined)` → `DEFAULT_MODULE_STACK_M` = 0.12 m. A face
+set to *hybrid* orientation got 0.12 m while its portrait neighbours got their racking's real stack
+— **two module heights on one roof, reintroduced inside the file that threads the id through** — and
+the per-plane orientation override is not collapsed to `portrait` the way the global one is, so the
+path is live. TypeScript could not catch it: the field is optional.
+
+No elevation test passes `layoutStrategy`, so the recursive branch was never entered by anything
+that asserts a clearance.
+
+---
+
+## 🚨 WS1-041 — THE DRAWN RAIL WENT THROUGH THE DECK FOR FOUR SYSTEMS, AND MY TEST CHECKED THREE IDS
+
+| | |
+|---|---|
+| **Severity** | **P2** — visual only; no exported number reads the draw scale |
+| **Status** | `FIXED_VERIFIED` |
+
+The earlier fix hung the rail from the module underside, which is the right datum, and left
+`RAIL_DRAW_SCALE = 3` — a rendering constant multiplying a real manufacturer dimension — with
+nothing checking the product against the space it hangs in. Measured across all 45 catalogue
+systems:
+
+```
+s5-pvkit           stack 0.088   drawn 0.1143   -26 mm
+dpw-powerrail      stack 0.159   drawn 0.1714   -12 mm
+renusol-vs-plus    stack 0.170   drawn 0.2042   -34 mm
+mse-rapid-rail     stack 0.170   drawn 0.2042   -34 mm
+k2-crossrail       stack 0.153   drawn 0.1524   +0.4 mm    (z-fighting, not clearance)
+schletter-classic  stack 0.153   drawn 0.1524   +0.4 mm
+```
+
+🚨 **And the test that claimed to exclude this checked three hardcoded ids** — `ironridge-xr100`,
+`ironridge-xr1000`, `unirac-solarmount`, the three that happen to fit — and called the class closed.
+A rule that must hold for every product has to be checked against every product; three chosen
+examples is the same vacuum as a fixture that cannot exhibit the condition.
+
+The exaggeration is now clamped to the space available, so IronRidge, Unirac and SnapNRack are
+unchanged and the six above are bounded. The test iterates the catalogue and is mutation-proven:
+removing the clamp from its model surfaces all six.
+
+---
+
+## 🚨 WS1-042 — THE CHOKEPOINT HAD TWO CALLERS THAT NEVER REACHED IT (AGAIN)
+
+| | |
+|---|---|
+| **Severity** | **P1** — and the second half is a regression my own guard introduced |
+| **Status** | `FIXED_VERIFIED` |
+
+`routeLayoutTo3D` was introduced as *"the one place that decides this layout cannot run in the 2D
+engine"*. The claim was checked against the four sites that already had the rule pasted in, not
+against the callers. **`confirmPendingPlane`** (confirm a traced plane) and **`autoPlacePanels`**
+(auto-place on a drawn zone) called `generateRoofLayoutOptimized` directly.
+
+The 2D engine emits panels with **no elevation**. Before `hasUsableElevation` they were drawn on the
+ellipsoid, ~100 m under the building. After it they are refused by the renderer and **not drawn at
+all, while still counting towards system size** — so my own fix converted a buried array into an
+invisible one at two entry points I had not found.
+
+This is the same shape as WS1-034 (`handleRouteDbError`, *"a new route cannot forget it"*, two of
+five routes never reached it). **Twice now I have built a chokepoint and not proven every caller
+reaches it.** `tests/layoutEngineRoutingIsComplete.test.ts` now discovers the callers from source,
+resolves the enclosing function of each call, and requires the guard ahead of it — mutation-proven by
+deleting one guard.
+
+---
+
+## 🚨 WS1-043 — THE VERSION SNAPSHOT DROPPED THE PANEL ELEVATION
+
+| | |
+|---|---|
+| **Severity** | **P1** — a regression my own gate turned from wrong into invisible |
+| **Status** | `FIXED_VERIFIED` |
+
+`app/api/projects/[id]/layout` trims per-panel fields before storing a version snapshot, on the
+stated premise that everything omitted is *"re-computed at render time"*. That is true of the ECEF
+vectors and the pixel coordinates. It is **false of `height`**: nothing downstream derives it.
+
+So restoring a version produced an array with no elevations — drawn at sea level before
+`hasUsableElevation`, and **not drawn at all** after it. Either way the snapshot was never a
+restorable record of the design. `height`, `heading` and `pitch` are kept now.
+
+---
+
+## 🚨 WS1-044 — THE ENGINE FABRICATED A ZERO ELEVATION, DEFEATING THE GUARD ADDED FOR IT
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_VERIFIED` |
+
+Three emit sites in `lib/surfaceGeometry3D.ts` stamped
+
+```ts
+height: isFinite(panelH) ? panelH : 0
+```
+
+`hasUsableElevation` deliberately **accepts a real 0** — absence is the thing being rejected, not the
+number — so it cannot tell a fabricated zero from a measured one. A degenerate frame (a NaN anywhere
+in u/v/n or the origin) therefore produced panels at ellipsoidal zero that passed every guard
+written for exactly that symptom.
+
+A panel whose elevation did not compute is not a panel at sea level. All three sites now refuse to
+emit it, and the caller sees a shortfall. The same substitution is removed from the rail paths and
+from `collectRoofRenderables`, where `rp.height ?? 0` would have put a **persisted** plane origin on
+the WGS-84 ellipsoid — Square Up writes that origin back.
+
+---
+
+## 🚨 WS1-045 — A REQUEST BODY COULD CHOOSE WHOSE LAYOUT ROW IT WROTE
+
+| | |
+|---|---|
+| **Severity** | **P0** — cross-project / cross-user write |
+| **Status** | `FIXED_VERIFIED` |
+
+```ts
+upsertLayout({ projectId, userId: user.id, ...rawLayout })
+```
+
+`rawLayout` is `body.layout` verbatim on the legacy path, and **the spread is last**. A request
+carrying `layout.projectId` or `layout.userId` replaced both, so the row written was not the row
+`getProjectById(projectId, user.id)` had authorised a moment earlier. The ownership check ran,
+passed, and was then overwritten by the thing it was checking. `upsertLayout` is not an
+authorisation boundary and does not claim to be — it writes `WHERE project_id = … AND user_id = …`
+with whatever it is handed.
+
+The authenticated identity now goes last. `tests/layoutWriteIdentity.test.ts` discovers every
+`upsertLayout({…})` argument literal under `app/api`, balances the braces so a nested object cannot
+hide a key, and requires `projectId`/`userId` to appear after any spread. Mutation-proven.
+
+---
+
+## 🚨 WS1-046 — A PRODUCTION CALCULATION OVERWROTE PARAMETERS IT WAS TOLD NOTHING ABOUT
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_VERIFIED` |
+
+```ts
+groundTilt:    rawLayout.groundTilt    ?? 20,
+groundAzimuth: rawLayout.groundAzimuth ?? 180,
+rowSpacing:    rawLayout.rowSpacing    ?? 1.5,
+groundHeight:  rawLayout.groundHeight  ?? 0.6,
+```
+
+`upsertLayout` writes these four with `COALESCE(value ?? null, column)` **specifically so that
+`undefined` keeps what is stored**. Fabricating a value at the call site turned *"this request says
+nothing about row spacing"* into *"set row spacing to 1.5"*, overwriting a user's ground-array
+parameters on every save that did not restate them. The INSERT path already supplies exactly these
+defaults for a genuinely new row, so the call-site defaults were redundant where they were harmless
+and destructive everywhere else.
+
+---
+
+## 🚨 WS1-047 — THE COORDINATE GUARD SKIPPED EXACTLY THE GEOMETRY THAT BELONGS NOWHERE
+
+| | |
+|---|---|
+| **Severity** | **P0** |
+| **Status** | `FIXED_VERIFIED` |
+
+`assertLayoutCoordsMatchProject` exists to stop one project's geometry landing on another. It
+computes a centroid with `_coordCentroid`, which drops any point with `|lat| <= 0.001`, and then:
+
+```ts
+if (!ctr || _isPhoenix(ctr.lat, ctr.lng)) return; // nothing to validate against
+```
+
+An array in which **every** panel is at (0, 0) yields `null`, and the guard returned without looking
+at anything. `/api/engineering/preliminary` sends exactly that: `generateSyntheticPanels` emits
+`lat: 0, lng: 0` for every panel, and `panels` is the one column in the UPDATE with **no COALESCE**.
+So a preliminary calculation — reached from the bill-upload modal — replaced a real design with
+unplaced scaffold panels. The sub-system wipe guard does not catch it either: the synthetic panels
+are `systemType: 'roof'`, so `'roof'` is present in `incoming` and nothing looks wiped.
+
+*"Nothing to validate against"* and *"nothing is anywhere"* are not the same sentence. Unplaced
+geometry is now refused — as `LAYOUT_COORDS_UNPLACED`, through the existing refusal authority — but
+**only when it would destroy placed geometry**, so a brand-new project, which is the route's actual
+purpose, still works.
+
+---
+
+## 🚨 WS1-048 — THREE MORE OF MY OWN TESTS WERE VACUOUS
+
+| | |
+|---|---|
+| **Severity** | test honesty |
+| **Status** | `FIXED_VERIFIED` |
+
+1. **`tests/detectedPlaneElevation.test.ts`** — *"the control layer drops it rather than passing it
+   to the renderer"* drove `placePanelsControlled` in `surface_select` mode, which **re-places from
+   the plane**, so the tampered panel never reached the validator; and `.every()` is true on an
+   empty array either way. Deleting `hasUsableElevation` from the validator left it green. The
+   validator is now exported — a validator nothing can call cannot be tested — and the test calls it
+   with the exact input the defect requires. Mutation-proven.
+
+2. **`e2e/panel-elevation.spec.ts`** — the measurement loop `continue`s over any plane with no 3D
+   frame, and `worst.dev` starts at 0, so skipping every panel passed on the initial value. It now
+   asserts that every panel was actually measured.
+
+3. **`tests/autosaveAdversarial.test.ts`** — *"markOnly needs no persistence — it is DERIVED from the
+   panels"*. The reasoning was exactly right. The assertion was
+   `expect(ENGINE).toMatch(/const isMarkOnly = !planeHasPanels;/)` — **and the defect satisfied it**,
+   because the latch sat two lines below the line it pinned. A test that asserts a token instead of
+   the property it means. It now requires the derivation to read the current panels, the latch to
+   have exactly one writer (the Mark Plane tool), and the redraw to key on which faces carry panels.
+   Mutation-proven.
+
+And two E2E `test.skip`s were removed: `isVisible()` — an instantaneous predicate whose options bag
+is accepted and ignored, the trap this harness already documents for the Cesium canvas — meant the
+Zones overlay was never toggled, so no setback bands rendered, so the test *skipped* rather than
+reporting the rendering failure it was written for.
+
+---
+
+## WS1-049 — Two archives for one property, and no way to tell which is newer
+
+| | |
+|---|---|
+| **Severity** | P2 — **no data is lost**; a stale design can surface instead of the current one |
+| **Status** | `RECORDED, DELIBERATELY NOT GUESSED` |
+
+`hydrate`'s adoption branches take `siteKeyNow` as the active key while leaving the archive map
+untouched. If an archive already holds a key for the **same physical property** — within
+`SITE_MATCH_RADIUS_M`, the shape Ray's live row has — the row ends up with two entries for one
+building. Reproduced against the real module:
+
+```
+adopt         -> active 55 panels; archive holds a same-property key with 3
+switch to B   -> archives: {kA2: 3 panels, kA: 55 panels}      two keys, one house
+return to A   -> reactivated-archive, 55 panels                (nearest wins, correctly here)
+```
+
+Nothing is lost, and the selection is deterministic: `nearestSamePropertyKey` picks the
+geometrically nearest. But a camera closer to the stale key surfaces the stale design, and the user
+has no UI for archives to get the other one back.
+
+🚨 **I did not guess a resolution, and this is why.** Reconciling two same-property bundles requires
+knowing which is newer, and **an archive bundle carries no timestamp**. Keeping both leaves a decoy;
+dropping either destroys work; merging duplicates entities. Every available rule is a heuristic
+replacing a heuristic — the condition this workstream exists to remove. The correct fix is to give
+each bundle a `savedAt` (the column is JSONB, so no migration) and make "newest wins" a fact rather
+than a guess. That is a contained change and it is **not owner-blocked** — it is scoped out of this
+pass deliberately, and named here rather than attempted late in a session that has already changed
+this function twice.
+
+---
 
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
@@ -1756,6 +2164,29 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 2D-traced planes never get `planeHeightAtCenterMeters` · `layouts` has no
 `UNIQUE(project_id, user_id)` · the operator has no way to see that a migration is unapplied ·
 `scope()`/`isCurrent()` — the documented stale-response defence — has **zero production callers**.
+
+**Added by the six-pipeline adversarial re-audit (24 independent workers, findings verified by me
+before acceptance).** Outside Workstream 1's boundary, recorded so they are not rediscovered:
+
+- 🚨 **P0 — `lib/pvwatts.ts` falls back to PHOENIX coordinates** when the client row has no geocode.
+  Silently wrong kWh, savings and payback, persisted as if measured.
+- 🚨 **P1 — a due-north array is excluded by an `a > 0` filter and re-reported as SOUTH-facing**,
+  overstating production by roughly half.
+- 🚨 **P0 — `lib/drafting/templates/roof.ts` decides railed vs rail-less by a name regex that matches
+  ZERO catalogue products**, so PV-1 and PV-3 draw rails for every rail-less system.
+- **P1 — a second racking BOM** with its own hardcoded rail span and attachment spacing is written
+  into `projects.canonical_snapshot`, ignoring the mounting-hardware database.
+- **P1 — `app/api/engineering/bom` turns an ABSENT attachment count and rail-section count into the
+  literals 12 and 4**; the CSV export hardcodes `IronRidge XR100` regardless of the racking chosen.
+- **P1 — the permit's fence embedment PASS/FAIL is computed from fabricated defaults** (absent
+  embedment becomes 3.5 ft, absent soil resistance a constant).
+- **P1 — a per-sub-system structural FAIL never reaches `overallStatus`**, so a hybrid design reports
+  PASS while its ground array failed.
+- **P2 — `upsertLayout` writes `map_zoom` with no COALESCE**, so a save that omits it nulls the
+  column; `rowToLayout` substitutes `{lat: 0, lng: 0}` for an absent `map_center`, and the layout
+  route writes that confident wrong answer back.
+- **P2 — no UI signal tells the user which property the on-screen design belongs to.** The accepted
+  trade of the WS1-029 fix, still accepted, still unaddressed.
 
 ---
 
@@ -1770,16 +2201,16 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | Positive tests pass | ✅ |
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ see the table below |
-| **E2E passes** | ✅ **19 passed, 0 skipped, 0 failed** against a production build, in two passes (see `e2e/README.md`) — including four against **real PostgreSQL** |
-| Full suite passes | ✅ **570 files, 12,235 tests, 0 failures** (490 skipped, pre-existing) |
+| **E2E passes** | ✅ **23 passed, 0 skipped, 0 failed** against a production build, in four passes (see `e2e/README.md`) — including four against **real PostgreSQL** and three that measure the **Cesium entities themselves** |
+| Full suite passes | ✅ **573 files, 12,248 tests, 0 failures** (490 skipped, pre-existing — almost all `*-postgres` and migration-governance files gated on a credential; see the note below) |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors; the changed files add no new warnings |
 | Build passes | ✅ `next build` exit 0, clean `.next` |
 | CI passes | ⏳ pending push |
 | Staging deploy verified | ❌ — not mine to do |
-| **Browser verification of the real workflow** | ✅ **EXECUTED** — see WS1-027 |
+| **Browser verification of the real workflow** | ✅ **EXECUTED**, and then deepened — see WS1-027, and **WS1-038**, which measures what Cesium DREW rather than what the library computed, and found a P0 that every prior gate passed over |
 | Between-face geometry invariants | ✅ `tests/ridgeContinuity.test.ts` |
-| No known P0/P1 in workstream | ✅ every P0 and P1 closed, or owner-blocked and named below |
+| No known P0/P1 in workstream | ✅ every P0 and P1 closed, or named below with the reason it is open. **WS1-049 is open by decision, not by blockage** — it needs a timestamp on archive bundles, and guessing a reconciliation rule would destroy user work. |
 
 ### Mutation record — every fix proven able to fail
 
@@ -1795,6 +2226,12 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | datum ignores `mountingSystemId` | *"expected 0.12 to be less than 0.12"* |
 | XR100 stack below the drawn rail | *"expected 0.126492 to be less than 0.1"* |
 | **`buildSurfaceGridECEF` → `0.05`, in a real browser** | *"panel … sits **0.0478 m** above its roof plane; … Negative means the panel is INSIDE the roof"* |
+| **the mark-only latch restored, one line, rebuilt** | all three deck gates fail: *"the scene never drew 1 roof deck polygon — with nothing under the panels this spec cannot measure anything"* |
+| `routeLayoutTo3D` deleted from one caller | *"autoPlacePanels (line 3764)"* — the discovery test names the caller, not a count |
+| the rail clamp removed from the test's model | six systems surface, incl. *"s5-pvkit: stack 0.088 m, drawn rail 0.1143 m, bottom -0.0262 m"* |
+| the validator back to `!isFinite(p.height ?? 0)` | *"the validator must drop exactly the tampered panel: expected 9 to be 8"* |
+| identity moved back in front of the spread | *"a spread at 38 comes after projectId(10)/userId(21) — the body can replace the authenticated identity"* |
+| the mark-only latch restored, in vitest | *"Mark Plane is the only thing that may latch this: expected [ …(2) ] to have a length of 1"* |
 
 ### What remains, and why
 
@@ -1804,6 +2241,9 @@ a real `mapCenter` in `buildLayoutFromDefinition` · Gable and Hip tools emit **
 | **2D-traced planes carry `planeHeightAtCenterMeters: 0.0`** | A plane-HEIGHT question, not a mount-datum one. `computeEcefFrameForLegacyPlane` falls back to `LEGACY_PLANE_HEIGHT_M` (3.5 m), which is a guess about the building, not about the racking. Deciding it needs a real roof height source — the same input Phase 3 will supply. |
 | **Gable / Hip tools emit no roof plane** | **Owner-deferred.** Phase 3 roof UX; the instruction was explicitly *"do not start Phase 3 roof-generation algorithms yet"*. Viewport only. |
 | **The mount effect re-geocodes and overwrites `projects.lat/lng`** | **Mitigated, not removed.** WS1-002 makes the system tolerant of the drift. The code states *"street-level geocode always wins over stored coords"* as intent; reversing a stated product intent is the owner's call, and nothing now breaks because of it. |
+| **The photogrammetry MESH itself** | Still not measured. What IS now proven is that a paneled face draws its opaque deck — the surface whose stated job is to hide the mesh — and that every drawn panel clears it by `moduleStackHeightM`. The residual is narrow and real: the deck sits `SURFACE_OFFSET_M` = 0.12 m above the fitted plane, so where the mesh rises more than that (ridge caps, vents, chimneys) it still wins the depth test and pokes through. Closing it needs Google 3D tiles, which needs a Maps API key this checkout does not have. **`clampToHeightMostDetailed` still appears nowhere in the repo except the comment claiming it handles this.** |
+| **WS1-049 — two archives for one property** | Open by decision. Needs a `savedAt` on each archive bundle so "newest wins" is a fact; every rule available without it is a guess that can destroy work. No data is lost today. |
+| **490 skipped unit tests** | Almost all `*-postgres.test.ts` and migration-governance files gated on a real `DATABASE_URL`. That gate is now questionable: `SOLARPRO_LOCAL_PG` proves PostgreSQL can run in-process with no credential, and `tests/siteDesignRoute.postgres.test.ts` already does exactly that. Re-arming them is migration/test-infra work (WS1-031's neighbourhood), not this workstream. |
 | **Staging deploy verification** | Requires a deploy. Not mine. |
 
 ### The matrix, completed
@@ -1826,7 +2266,7 @@ untested path is untested however convincing the reason.
 
 ### Standing corrections to this document
 
-Two entries here were wrong when written, and both are corrected in place rather than quietly
+Four entries here were wrong when written, and all are corrected in place rather than quietly
 edited, because a ledger that hides its own errors is worth less than no ledger:
 
 1. **"The roof datum is not permit-grade."** Measured on a single isolated face, then generalised. A
@@ -1835,6 +2275,17 @@ edited, because a ledger that hides its own errors is worth less than no ledger:
 2. **"Visual/browser verification is owner-blocked on `DATABASE_URL`."** Inferred from a 503 on
    `/api/health` and never attempted. The whole Design Studio runs in Playwright with no database.
    See **WS1-025**.
+3. **"The remaining candidate for Ray's report is the photogrammetry mesh, and closing it needs a
+   Google Maps key."** Half right, and the half that was wrong mattered more. A paneled face was
+   being drawn as a bare OUTLINE, so the opaque deck — the thing whose entire job is to stand
+   between a module and the wavy mesh — was never drawn at all. That needed no key to find: it
+   needed a test that read the entity collection instead of the app's own state. I had reasoned
+   about the mesh for two rounds while the surface in front of it was missing. See **WS1-038**.
+4. **"A rule that must hold at N call sites belongs at one"** — stated twice, and both times the
+   claim that every caller REACHED the one place was asserted rather than measured. `WS1-034`
+   (two of five routes) and `WS1-042` (two layout entry points). The rule is right; the missing
+   half is that a chokepoint has to be proven reachable from each caller, by discovery, not by
+   reading the sites that already looked correct.
 
 Both are the same mistake: reasoning to a conclusion that a five-minute measurement would have
 settled, and recording the conclusion as a finding.

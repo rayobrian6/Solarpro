@@ -159,13 +159,27 @@ test.describe('panel elevation — the running application, not the library', ()
     ).toBe(panels.length);
 
     let worst = { dev: 0, clearance: EXPECTED_CLEARANCE_M, id: '' };
+    let measured = 0;
     for (const panel of withFrames) {
       const plane = (panel.planeId && planeById.get(panel.planeId)) || (seedPlane as unknown as E2EPlane);
       if (!plane.origin3D || !plane.ecefFrame3D) continue;
+      measured++;
       const c = clearanceM(panel, plane);
       const dev = Math.abs(c - EXPECTED_CLEARANCE_M);
       if (dev > worst.dev) worst = { dev, clearance: c, id: panel.id };
     }
+
+    // 🚨 THE `continue` ABOVE COULD SKIP EVERY PANEL AND STILL PASS.
+    // `worst.dev` starts at 0, so if no resolved plane carried a frame — a
+    // round-trip that drops ecefFrame3D, a planeId pointing at a plane the
+    // studio no longer holds — the loop measured nothing and the assertion
+    // below succeeded on its initial value. The same shape as a guard wrapped
+    // in `if (panels.length > 0)`, which is what this whole file exists to
+    // replace.
+    expect(measured,
+      'no panel could be measured against a plane carrying a 3D frame — this test ' +
+      'measured nothing and must not report a pass',
+    ).toBe(withFrames.length);
 
     expect(worst.dev,
       `panel ${worst.id} sits ${worst.clearance.toFixed(4)} m above its roof plane; ` +

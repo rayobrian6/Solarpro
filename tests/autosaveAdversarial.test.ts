@@ -338,12 +338,59 @@ describe('entities that are NOT persisted — classified, not merely listed', ()
     // persistence path, like every other roof plane.
   });
 
-  it('markOnly needs no persistence — it is DERIVED from the panels', () => {
-    // A face renders as outline-only when it carries no panels. Panels ARE
-    // persisted, so the mark-only state round-trips exactly, by construction.
-    // Storing it would create a second source of truth that could disagree
-    // with the first.
-    expect(ENGINE).toMatch(/const isMarkOnly = !planeHasPanels;/);
+  it('🚨 markOnly is DERIVED from the panels — and it used to be LATCHED', () => {
+    // The reasoning here was always right: a face renders as outline-only when
+    // it carries no panels, panels are persisted, so the state round-trips by
+    // construction and storing it would create a second source of truth.
+    //
+    // 🚨 AND THE ASSERTION WAS `expect(ENGINE).toMatch(/const isMarkOnly = !planeHasPanels;/)`,
+    // WHICH THE DEFECT SATISFIED. Two lines below that expression sat
+    //
+    //     if (isMarkOnly) markOnlyPlaneIdsRef.current.add(plane.id);
+    //
+    // and nothing ever removed from that set. The restore path runs BEFORE Auto
+    // Layout places anything, so every face arriving from state — a reload, a
+    // restored design, every face Google detects — was recorded as "no panels"
+    // permanently. Filling it with fifty-five panels did not change the answer,
+    // and `renderPlane3DEntity`'s outline branch returns before drawing the
+    // opaque base coat that exists to "suppress wavy mesh waviness beneath
+    // panels". Measured in the browser: 55 [PANEL] entities, one
+    // [PLANE3D-OUTLINE], zero [PLANE3D-BASE] — no roof under the array, the
+    // photogrammetry mesh showing through, and a panel placed above a FITTED
+    // plane swallowed wherever the mesh rises above it.
+    //
+    // The test checked for the derivation and could not see the latch beside
+    // it. So it now asserts the property instead of the token.
+
+    // 1. There is a derivation, and it reads the CURRENT panel set.
+    const fn = ENGINE.match(/function planeRendersOutlineOnly[\s\S]{0,800}?panelsRef\.current\.some\(/);
+    expect(fn, 'the derived predicate must exist').toBeTruthy();
+    expect(fn![0], 'it must read the current panels, not a cached answer')
+      .toMatch(/panelsRef\.current\.some\(/);
+
+    // 2. Every face is drawn through it — no render site reads a latched set.
+    const renders = ENGINE.match(/renderPlane3DEntity\(/g) ?? [];
+    expect(renders.length, 'the scan found no render sites').toBeGreaterThanOrEqual(5);
+    const reads = ENGINE.match(/markOnlyPlaneIdsRef\.current\.has\(/g) ?? [];
+    expect(reads,
+      'the latched set may be read in exactly ONE place — inside ' +
+      'planeRendersOutlineOnly, where it answers "did the user mark this face". ' +
+      'A render site reading it directly is the defect: it asks a cached answer ' +
+      'whether a face has panels.',
+    ).toHaveLength(1);
+    expect(fn![0], 'and that one read belongs to the predicate')
+      .toMatch(/markOnlyPlaneIdsRef\.current\.has\(/);
+
+    // 3. The latch survives for exactly one thing: the Mark Plane TOOL, which
+    //    is a user intent and not a state. One writer, guarded by !fillPanels.
+    const adds = ENGINE.match(/markOnlyPlaneIdsRef\.current\.add\(/g) ?? [];
+    expect(adds, 'Mark Plane is the only thing that may latch this').toHaveLength(1);
+    expect(ENGINE).toMatch(/if \(!fillPanels\) markOnlyPlaneIdsRef\.current\.add\(/);
+
+    // 4. And the redraw has to be able to notice a face gaining panels, or the
+    //    derivation is correct and never re-evaluated.
+    expect(ENGINE, 'the plane redraw must key on which faces carry panels')
+      .toMatch(/\[selectedRoofPlaneId, panelPlaneKey\]/);
   });
 
   it('the layout signature does not claim to cover any of them', () => {

@@ -321,12 +321,18 @@ test.describe('Design Studio → planset E2E harness', () => {
     const hasCanvas = await waitForCesiumCanvas(page);
     test.skip(!hasCanvas, 'No WebGL canvas — skipping setback band placement check.');
 
-    // Toggle zones ON to render setbacks
+    // Toggle zones ON to render setbacks.
+    //
+    // 🚨 THIS USED `isVisible()`, WHICH DOES NOT WAIT. The options bag is
+    // accepted and ignored, so the check asked "is the Zones button up right
+    // now?", got false while the studio was still mounting, never clicked it,
+    // rendered no bands — and the `test.skip` below then reported a pass. The
+    // same instantaneous-predicate trap this harness already documents for the
+    // Cesium canvas, in the same file.
     const zonesButton = page.getByRole('button', { name: /zones (on|off)/i }).first();
-    if (await zonesButton.isVisible().catch(() => false)) {
-      await zonesButton.click();
-      await page.waitForTimeout(1_500);
-    }
+    await zonesButton.waitFor({ state: 'visible', timeout: 20_000 });
+    await zonesButton.click();
+    await page.waitForTimeout(1_500);
 
     // Real geometry, on every machine — see e2e/support/seedRoof.ts.
     await seedRoofPlane(page);
@@ -340,10 +346,15 @@ test.describe('Design Studio → planset E2E harness', () => {
       'no roof plane with vertices after seeding — the band placement check cannot run',
     ).toBeGreaterThan(0);
 
-    // Bands only exist while the Zones overlay is on. If the toggle was not
-    // found, say so rather than reporting a pass over an empty list.
-    test.skip(bandCentroids.length === 0,
-      'Zones overlay produced no setback bands — nothing to place-check.');
+    // 🚨 NO BANDS IS THE DEFECT, NOT A REASON TO SKIP.
+    // This was `test.skip(bandCentroids.length === 0)`. The Zones overlay is
+    // now definitely on and a roof with panels is definitely present, so zero
+    // bands means the overlay did not render — which is exactly what this test
+    // guards. Skipping on it is a pass over an empty list.
+    expect(bandCentroids.length,
+      'the Zones overlay is on and the roof is seeded, so setback bands must exist — ' +
+      'zero bands is the rendering failure this test was written for',
+    ).toBeGreaterThan(0);
 
     for (const bc of bandCentroids) {
       // Find the plane this band centroid is inside
@@ -392,21 +403,20 @@ test.describe('Design Studio → planset E2E harness', () => {
     // on the canvas.
     const canvas = page.locator('canvas').first();
     const box = await canvas.boundingBox();
-    if (!box) {
-      test.skip(true, 'Canvas bounding box not available — skipping drag test.');
-      return;
-    }
+    // The canvas was asserted visible a few lines up, so a missing bounding box
+    // is an anomaly, not an environment this test may excuse itself from.
+    expect(box, 'the Cesium canvas is visible but reports no bounding box').toBeTruthy();
 
     // Click in the center of the canvas (where panels likely are) to select
-    const centerX = box.x + box.width / 2;
-    const centerY = box.y + box.height / 2;
+    const centerX = box!.x + box!.width / 2;
+    const centerY = box!.y + box!.height / 2;
 
     // Select mode — click a panel
-    await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
+    await canvas.click({ position: { x: box!.width / 2, y: box!.height / 2 } });
     await page.waitForTimeout(500);
 
     // Drag the selected panel slightly
-    await canvas.click({ position: { x: box.width / 2 + 30, y: box.height / 2 + 10 } });
+    await canvas.click({ position: { x: box!.width / 2 + 30, y: box!.height / 2 + 10 } });
     await page.waitForTimeout(500);
 
     const afterMove = (await readSolarState(page))!;

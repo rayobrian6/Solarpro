@@ -405,8 +405,15 @@ export async function POST(req: NextRequest) {
         utilityRate: (project as any).utilityRate ?? 0.13,
       };
 
+      // 🚨 THE AUTHENTICATED IDENTITY GOES LAST, NOT FIRST.
+      // `{ projectId, userId, ...rawLayout }` spread CLIENT JSON over both —
+      // `rawLayout` is `body.layout` verbatim on the legacy path — so a request
+      // carrying `layout.projectId` or `layout.userId` wrote the row those
+      // named, not the one `getProjectById(projectId, user.id)` authorised a
+      // moment earlier. The ownership check ran against a value the body then
+      // replaced.
       const savedLayout = await upsertLayout({
-        projectId, userId: user.id, ...rawLayout,
+        ...rawLayout, projectId, userId: user.id,
       } as any);
 
       const productionData = await calculateProductionFromDefinition(
@@ -474,10 +481,20 @@ export async function POST(req: NextRequest) {
       systemType:        rawLayout.systemType || project.systemType || 'roof',
       panels:            rawLayout.panels     || [],
       roofPlanes:        rawLayout.roofPlanes,
-      groundTilt:        rawLayout.groundTilt        ?? 20,
-      groundAzimuth:     rawLayout.groundAzimuth     ?? 180,
-      rowSpacing:        rawLayout.rowSpacing         ?? 1.5,
-      groundHeight:      rawLayout.groundHeight       ?? 0.6,
+      // 🚨 ABSENCE MUST REACH upsertLayout AS ABSENCE.
+      // These read `?? 20 / ?? 180 / ?? 1.5 / ?? 0.6`, which is the same
+      // absence-becomes-a-number default as everywhere else in this workstream
+      // — and here it actively DEFEATS the protection below it: upsertLayout
+      // writes these four with `COALESCE(${'${value ?? null}'}, column)`, so
+      // `undefined` deliberately KEEPS what is stored. Fabricating a value
+      // turned "this request says nothing about row spacing" into "set row
+      // spacing to 1.5", overwriting the user's ground array parameters on
+      // every save that did not happen to restate them. The INSERT path already
+      // supplies exactly these defaults for a genuinely new row.
+      groundTilt:        rawLayout.groundTilt,
+      groundAzimuth:     rawLayout.groundAzimuth,
+      rowSpacing:        rawLayout.rowSpacing,
+      groundHeight:      rawLayout.groundHeight,
       fenceAzimuth:      rawLayout.fenceAzimuth,
       fenceHeight:       rawLayout.fenceHeight,
       fenceLine:         rawLayout.fenceLine,

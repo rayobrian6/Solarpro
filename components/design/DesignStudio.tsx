@@ -3631,6 +3631,23 @@ export default function DesignStudio({ project, onSave }: Props) {
       verticesLocalCount: plane.verticesLocal?.length,
     });
 
+    // 🚨 THE CHOKEPOINT HAD TWO CALLERS THAT NEVER REACHED IT.
+    // `routeLayoutTo3D` was introduced as "the one place that decides this
+    // layout cannot run in the 2D engine", and the claim was not checked
+    // against the callers — it was checked against the four sites that already
+    // had the rule pasted in. This one and `autoPlacePanels` were not among
+    // them, so confirming a traced plane in 3D ran the 2D engine, which emits
+    // panels with NO elevation: they used to be drawn on the ellipsoid, ~100 m
+    // under the house, and now they are refused by the renderer and never drawn
+    // at all while still counting towards system size. Same defect shape as the
+    // refusal-routing chokepoint: a rule at one place still has to be REACHED.
+    // tests/layoutEngineRoutingIsComplete.test.ts discovers the callers now.
+    if (routeLayoutTo3D()) {
+      setPendingPlane(null);
+      toast.success('Roof plane added', 'Filling it in 3D so the panels sit on the roof surface.');
+      return;
+    }
+
     // Place panels using THIS plane's azimuth + pitch — temporarily override global tilt/azimuth
     // by using the plane object which autoLayoutAll already respects via plane.pitch/plane.azimuth
     const layoutId = uuidv4();
@@ -3735,6 +3752,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     let newPanels: PlacedPanel[] = [];
 
     if (type === 'roof') {
+      // 🚨 The second caller that never reached the chokepoint. Ground and fence
+      // layouts are not roof layouts and keep the 2D engine — only a ROOF fill
+      // has a roof surface to sit on, and only a roof fill can bury an array.
+      if (routeLayoutTo3D()) return;
       const plane: RoofPlane = {
         id: uuidv4(), vertices: points, pitch: tilt, azimuth,
         area: polygonAreaM2(points), usableArea: polygonAreaM2(points) * 0.75,

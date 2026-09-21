@@ -255,15 +255,60 @@ describe('the roof mounting datum — one question, one answer', () => {
     }
   });
 
-  it('🚨 the rail fits in the gap the datum creates', () => {
-    // renderRoofRails hangs the rail from the module underside and draws it at
-    // three times its real cross-section for visibility. If the drawn rail were
-    // taller than the mount stack it would poke through the deck — which is what
-    // the old `inwardM = stackH - railH/2` rule did, sinking the run by railH.
-    const RAIL_DRAW_SCALE = 3;
-    for (const id of ['ironridge-xr100', 'ironridge-xr1000', 'unirac-solarmount']) {
+  it('🚨 the DRAWN rail fits in the gap the datum creates — for every system in the catalogue', () => {
+    // 🚨 THIS TEST USED TO CHECK THREE HARDCODED IDS AND PASS.
+    // It asserted `railH * 3 < stack` for ironridge-xr100, ironridge-xr1000 and
+    // unirac-solarmount — the three that happen to fit — and called the class
+    // closed. Measured across all 45 catalogue systems, FOUR drive the drawn
+    // rail through the deck it is bolted to:
+    //
+    //     s5-pvkit        stack 0.088  railH*3 0.1143   -26 mm
+    //     dpw-powerrail   stack 0.159  railH*3 0.1714   -12 mm
+    //     renusol-vs-plus stack 0.170  railH*3 0.2042   -34 mm
+    //     mse-rapid-rail  stack 0.170  railH*3 0.2042   -34 mm
+    //
+    // and k2-crossrail and schletter-classic clear by 0.4 mm, which renders as
+    // z-fighting rather than clearance. A rule that must hold for every product
+    // has to be checked against every product; three chosen examples is the
+    // same vacuum as a fixture that cannot exhibit the condition.
+    //
+    // `renderRoofRails` now clamps the exaggeration to the space available.
+    // This reproduces that arithmetic and requires the result to fit.
+    const RAIL_DRAW_SCALE  = 3;
+    const RAIL_DECK_GAP_M  = 0.005;
+    const offenders: string[] = [];
+    let checked = 0;
+
+    for (const system of getAllMountingSystems()) {
+      const rail = railCrossSectionM(system.id);
+      if (!rail) continue;                 // rail-less: nothing is drawn
+      checked++;
+      const stack = moduleStackHeightM(system.id);
+      const maxDrawn = Math.max(rail.heightM, stack - RAIL_DECK_GAP_M);
+      const drawn = Math.min(rail.heightM * RAIL_DRAW_SCALE, maxDrawn);
+      const bottom = stack - drawn;
+      if (bottom < RAIL_DECK_GAP_M - 1e-9) {
+        offenders.push(`${system.id}: stack ${stack.toFixed(3)} m, drawn rail ${drawn.toFixed(4)} m, bottom ${bottom.toFixed(4)} m`);
+      }
+    }
+
+    expect(checked, 'no railed system was examined — the scan found nothing to check')
+      .toBeGreaterThan(10);
+    expect(offenders,
+      'these systems draw the rail into or through the roof deck it is bolted to',
+    ).toEqual([]);
+  });
+
+  it('the clamp only binds where it has to — common systems keep the full exaggeration', () => {
+    // Guard against the lazy fix. Clamping everything to the stack would also
+    // make this test pass while quietly shrinking every rail on screen.
+    const RAIL_DRAW_SCALE = 3, RAIL_DECK_GAP_M = 0.005;
+    for (const id of ['ironridge-xr100', 'ironridge-xr1000', 'unirac-solarmount', 'snapnrack-100']) {
       const rail = railCrossSectionM(id)!;
-      expect(rail.heightM * RAIL_DRAW_SCALE).toBeLessThan(moduleStackHeightM(id));
+      const stack = moduleStackHeightM(id);
+      const drawn = Math.min(rail.heightM * RAIL_DRAW_SCALE, Math.max(rail.heightM, stack - RAIL_DECK_GAP_M));
+      expect(drawn, `${id} should still be drawn at the full ${RAIL_DRAW_SCALE}x`)
+        .toBeCloseTo(rail.heightM * RAIL_DRAW_SCALE, 9);
     }
   });
 });

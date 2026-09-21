@@ -735,6 +735,41 @@ async function assertLayoutCoordsMatchProject(sql: any, data: UpsertLayoutData):
   if (!ctr && Array.isArray(data.roofPlanes)) {
     ctr = _coordCentroid((data.roofPlanes as Array<{ vertices?: Array<{ lat?: number; lng?: number }> }>).flatMap(rp => rp?.vertices || []));
   }
+  // 🚨 "NOTHING TO VALIDATE AGAINST" AND "NOTHING IS ANYWHERE" ARE NOT THE SAME.
+  //
+  // `_coordCentroid` drops any point with |lat| <= 0.001, so an array in which
+  // EVERY panel is at (0, 0) yields `null` and this guard — the one whose whole
+  // job is to stop one project's geometry landing on another — returned without
+  // looking at anything. `/api/engineering/preliminary` sends exactly that:
+  // `generateSyntheticPanels` emits `lat: 0, lng: 0` for every panel, and
+  // `panels` is the one column in the UPDATE with no COALESCE, so a preliminary
+  // calculation REPLACED a real design with unplaced scaffold panels. The
+  // sub-system guard does not catch it either — the synthetic panels are
+  // systemType 'roof', so 'roof' is present in `incoming` and nothing looks
+  // wiped.
+  //
+  // Unplaced geometry is refused only when it would destroy placed geometry, so
+  // a brand-new project (the route's actual purpose) still works.
+  const suppliedPanels = Array.isArray(data.panels) ? data.panels.length : 0;
+  if (suppliedPanels > 0 && !ctr) {
+    const placed = await sql`
+      SELECT COUNT(*)::int AS n
+      FROM layouts l, jsonb_array_elements(COALESCE(l.panels, '[]'::jsonb)) p
+      WHERE l.project_id = ${data.projectId} AND l.user_id = ${data.userId}
+        AND (CASE WHEN jsonb_typeof(p->'lat') = 'number'
+                  THEN abs((p->>'lat')::double precision) ELSE 0 END) > 0.001
+    `;
+    const n = Number(placed[0]?.n ?? 0);
+    if (n > 0) {
+      console.error('[LAYOUT_COORDS_UNPLACED]', { projectId: data.projectId, incoming: suppliedPanels, storedPlaced: n });
+      throw new Error(
+        `LAYOUT_COORDS_UNPLACED: this save carries ${suppliedPanels} panel(s) with no map position, ` +
+        `and the project already holds ${n} placed panel(s). Writing it would replace a real design with ` +
+        `unplaced ones. Nothing has been written.`,
+      );
+    }
+  }
+
   if (!ctr || _isPhoenix(ctr.lat, ctr.lng)) return; // nothing to validate against
   const prows = await sql`SELECT lat, lng FROM projects WHERE id = ${data.projectId} LIMIT 1`;
   const plat = Number(prows[0]?.lat), plng = Number(prows[0]?.lng);
