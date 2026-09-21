@@ -624,6 +624,44 @@ export function projectOutlineOntoPlane(
  * pass the SAME offset to both calls, and pass 0 when the input points are
  * themselves the output of an earlier fit.
  */
+/**
+ * Take the PLAN-VIEW record from points that carry the render lift.
+ *
+ * 🚨 THE ENGINEERING RECORD IS TAKEN BEFORE THE LIFT, AND THERE ARE THREE
+ * PLACES THAT HAVE TO KNOW THAT. `SURFACE_OFFSET_M` lifts a fitted plane along
+ * its NORMAL so the deck does not z-fight with the photogrammetry mesh. A
+ * normal is not vertical, so that lift has a horizontal component of
+ * `offset·sin(tilt)` pointing down-slope — and `vertices` is the plan-view
+ * record the permit site plan and the CAD engine read. Deriving it from lifted
+ * points slides every face down its own azimuth, and the two halves of a gable
+ * have OPPOSITE azimuths, so they slide apart and the shared ridge SPLITS by
+ * twice that:
+ *
+ *     4:12  (18.43°)   7.6 cm
+ *     6:12  (26.57°)  10.8 cm
+ *     10:12 (39.81°)  15.4 cm
+ *
+ * `buildRoofPlane3D` was fixed for this. **Stitch and Square Up write the plan
+ * record back too, and were not** — they hand `frame.projectedPts` straight to
+ * `ecefToLatLng`, and those points came in already lifted (which is why they
+ * re-fit with `surfaceOffsetM: 0`). So a stitched gable re-split its own ridge
+ * on the permit plan, every press.
+ *
+ * `joinSharedCorners` has a 1.5 m tolerance, so nothing downstream ever noticed.
+ */
+export function unliftAlongNormal(
+  pts: readonly Cart3[],
+  normal: Cart3,
+  liftM: number = SURFACE_OFFSET_M,
+): Cart3[] {
+  if (!liftM) return pts.map(p => ({ x: p.x, y: p.y, z: p.z }));
+  return pts.map(p => ({
+    x: p.x - normal.x * liftM,
+    y: p.y - normal.y * liftM,
+    z: p.z - normal.z * liftM,
+  }));
+}
+
 export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = {}): RoofPlane {
   if (pts3D.length < 3) {
     throw new Error(`buildRoofPlane3D: need ≥3 points, got ${pts3D.length}`);
@@ -661,9 +699,7 @@ export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = 
   // plane's own UV basis relative to an origin that moved with it.
   const liftM = options.surfaceOffsetM ?? SURFACE_OFFSET_M;
   const n = frame.normal;
-  const planPts: Cart3[] = liftM === 0
-    ? projPts
-    : projPts.map(p => ({ x: p.x - n.x * liftM, y: p.y - n.y * liftM, z: p.z - n.z * liftM }));
+  const planPts: Cart3[] = unliftAlongNormal(projPts, n, liftM);
 
   // Vertices in lat/lng — plan view, unlifted (see above).
   const vertices = planPts.map(p => {

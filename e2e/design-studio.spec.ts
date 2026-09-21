@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { seedRoofPlane, runAutoLayout, waitForCesiumCanvas } from './support/seedRoof';
+import { seedRoofPlane, runAutoLayout, waitForCesiumCanvas, buildGablePlanes, seedPlanes} from './support/seedRoof';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type SolarE2EState = {
@@ -150,75 +150,79 @@ test.describe('Design Studio → planset E2E harness', () => {
   //  After stitching, shared corners of adjacent planes should be within
   //  ~1.6m of each other (the stitch tolerance). If stitch "came apart",
   //  paired corners will drift apart.
-  test('stitch holds — shared corners stay within tolerance after panels added', async ({ page }) => {
-    const state = await bootDesignStudio(page);
-    const cesiumCanvas = page.locator('canvas').first();
-    const hasCanvas = await waitForCesiumCanvas(page);
-    test.skip(!hasCanvas, 'No WebGL canvas — skipping stitch tolerance check.');
+  test('🚨 stitch holds — a gable shares its ridge after stitching, to the centimetre', async ({ page }) => {
+    // 🚨 THIS TEST WAS THREE VACUUMS AND A TOLERANCE SIXTEEN TIMES TOO LOOSE.
+    //
+    //   - it pressed Stitch only `if (await stitchBtn.isVisible())`, an
+    //     INSTANTANEOUS predicate, so on a slow mount it never stitched;
+    //   - every assertion sat inside `if (stitched.length >= 2)`, so an empty
+    //     list reported a pass;
+    //   - it never seeded a roof before stitching, so there was usually
+    //     nothing to stitch;
+    //   - and TOL_M was 1.6 m, doubled again at the assertion. `joinSharedCorners`
+    //     itself works to 1.5 m, so the test could not see anything the
+    //     implementation would not already have swallowed.
+    //
+    // What it needed to see: Stitch writes the plan record back, and it was
+    // taking it from points that carry the render lift. A normal is not
+    // vertical, so that lift slides each face `SURFACE_OFFSET_M·sin(tilt)`
+    // down its OWN azimuth — and a gable's halves have opposite azimuths, so
+    // the shared ridge separates by twice that, about 10 cm at 25°, on the
+    // permit site plan. `buildRoofPlane3D` was fixed for exactly this; the
+    // write-back was not.
+    await bootDesignStudio(page);
+    expect(await waitForCesiumCanvas(page), 'the Cesium canvas never appeared').toBe(true);
 
-    // Click Stitch button if available
+    // A gable: two faces that genuinely share a ridge. Seeded BEFORE stitching,
+    // because stitching nothing proves nothing.
+    const planes = await seedPlanes(page, buildGablePlanes());
+    expect(planes.length).toBe(2);
+
     const stitchBtn = page.getByRole('button', { name: /stitch/i }).first();
-    if (await stitchBtn.isVisible().catch(() => false)) {
-      await stitchBtn.click();
-      await page.waitForTimeout(2_000);
+    await stitchBtn.waitFor({ state: 'visible', timeout: 20_000 });
+    await stitchBtn.click();
+    await page.waitForTimeout(2_500);
+
+    const after = (await readSolarState(page))!;
+    const faces = after.roofPlanes.filter(p => (p.vertices?.length ?? 0) >= 3);
+    expect(faces.length, 'both gable faces must survive the stitch').toBe(2);
+
+    // The ridge is the pair of corners the two faces share. Find, for each
+    // vertex of face A, its nearest vertex on face B; the two smallest of those
+    // distances ARE the ridge, and after a stitch they must be the same points.
+    const [a, b] = faces;
+    const nearest = a.vertices!.map(va =>
+      Math.min(...b.vertices!.map(vb => haversineM(va, vb))));
+    nearest.sort((x, y) => x - y);
+    expect(nearest.length, 'face A has no vertices').toBeGreaterThanOrEqual(3);
+
+    // 🚨 A DERIVED BOUND, NOT A CHOSEN ONE. Vertices are stored at 7 decimal
+    // places, so a round trip moves a point by at most half a unit in the last
+    // place in each of lat and lng: 0.5e-7 · 111320 · sqrt(2) ≈ 7.9 mm. The
+    // defect this guards is 2 · 0.12 · sin(25°) ≈ 101 mm — an order larger.
+    const ROUNDING_M = (Math.pow(10, -7) / 2) * 111_320 * Math.SQRT2;
+    for (const d of nearest.slice(0, 2)) {
+      expect(d,
+        `a gable's two faces must still share their ridge corners after Stitch; ` +
+        `the nearest pair is ${(d * 1000).toFixed(1)} mm apart. About 100 mm means the ` +
+        `plan record was taken from points carrying SURFACE_OFFSET_M, which slides ` +
+        `each face down its own azimuth.`,
+      ).toBeLessThan(ROUNDING_M + 1e-4);
     }
 
-    const postStitch = (await readSolarState(page))!;
-    const stitched = postStitch.stitchedCorners;
-    const TOL_M = 1.6;
-
-    // If we got stitched corners, verify paired corners across adjacent planes
-    // are within tolerance. Two planes sharing an edge should have matching
-    // corner positions (within TOL).
-    if (stitched.length >= 2) {
-      for (let i = 0; i < stitched.length; i++) {
-        for (const vi of stitched[i].vertices) {
-          // Find the nearest vertex from any OTHER stitched plane
-          let nearestDist = Infinity;
-          for (let j = 0; j < stitched.length; j++) {
-            if (j === i) continue;
-            for (const vj of stitched[j].vertices) {
-              const d = haversineM(vi, vj);
-              if (d < nearestDist) nearestDist = d;
-            }
-          }
-          // At least one vertex from another plane should be close
-          // (a shared corner). This catches "stitch came apart" — if no
-          // other corner is within TOL, the stitch failed.
-          if (stitched.length >= 2) {
-            // Only enforce if there are truly shared edges; some vertices
-            // may be unique to one plane. Check that SOME vertex from this
-            // plane has a close neighbor.
-            const hasSharedEdge = stitched[i].vertices.some(v =>
-              stitched.some((s, si) => si !== i && s.vertices.some(sv => haversineM(v, sv) < TOL_M))
-            );
-            if (hasSharedEdge) {
-              // At least one vertex from this plane is shared — verify the
-              // shared ones are within tolerance
-              expect(nearestDist, `Stitched corner of plane ${stitched[i].id} should have a neighbor within ${TOL_M}m — got ${nearestDist.toFixed(2)}m`).toBeLessThan(TOL_M * 2); // 2× for lat/lng approx
-            }
-          }
-        }
-      }
-    }
-
-    // Now add panels and verify stitch doesn't un-stitch (regression 0e318b58)
-    await seedRoofPlane(page);
+    // And adding panels must not move them (regression 0e318b58).
     await runAutoLayout(page);
-
     const afterPanels = (await readSolarState(page))!;
-    if (stitched.length >= 2 && afterPanels.stitchedCorners.length >= 2) {
-      // Stitched corners should not have moved after adding panels
-      for (const sc of afterPanels.stitchedCorners) {
-        const pre = stitched.find(p => p.id === sc.id);
-        if (!pre) continue;
-        for (const v of sc.vertices) {
-          const match = pre.vertices.find(pv => haversineM(v, pv) < 0.5); // find the matching pre-vertex
-          if (match) {
-            const drift = haversineM(v, match);
-            expect(drift, `Stitched vertex drifted ${drift.toFixed(3)}m after panels added — 0e318b58 regression`).toBeLessThan(TOL_M);
-          }
-        }
+    const facesAfter = afterPanels.roofPlanes.filter(p => (p.vertices?.length ?? 0) >= 3);
+    expect(facesAfter.length, 'both faces must survive Auto Layout').toBe(2);
+    for (const face of facesAfter) {
+      const pre = faces.find(f => f.id === face.id);
+      expect(pre, `face ${face.id} vanished`).toBeTruthy();
+      for (let k = 0; k < face.vertices!.length; k++) {
+        const drift = haversineM(face.vertices![k], pre!.vertices![k]);
+        expect(drift,
+          `a stitched vertex drifted ${(drift * 1000).toFixed(1)} mm when panels were added`,
+        ).toBeLessThan(ROUNDING_M + 1e-4);
       }
     }
   });

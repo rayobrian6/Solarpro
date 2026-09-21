@@ -4386,12 +4386,29 @@ function SolarEngine3D({
       if (!origin) return;
       const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3());
       const baseH = C.Cartographic.fromCartesian(origin).height;
+      // 🚨 DROP EACH CORNER VERTICALLY, NOT ALONG THE NORMAL.
+      // This subtracted `n · dn`, which also moves the point HORIZONTALLY, by
+      // distance·sin²(tilt) — 0.8 m at 25° on a 4.5 m half-face. These corners
+      // decide which faces Stitch judges to share a hip, a ridge or a valley,
+      // and what position their shared corners average to. `joinSharedCorners`
+      // has a 1.5 m tolerance, which is why the adjacency usually still matched
+      // and the corner it produced was quietly wrong.
+      //
+      // The same trap `polygonFromVerticesOnFrame` names, in the file that
+      // names it. A vertical drop is exact: the corner's plan position is what
+      // the vertex record means, and its height is whatever the plane says at
+      // that position.
       const corners = vs.map((vert: any) => {
-        const Pv = safeCartesian3(C, vert.lng, vert.lat, baseH);
-        if (!Pv) return null;
-        const diff = C.Cartesian3.subtract(Pv, origin, new C.Cartesian3());
-        const dn = C.Cartesian3.dot(diff, n);
-        return C.Cartesian3.subtract(Pv, C.Cartesian3.multiplyByScalar(n, dn, new C.Cartesian3()), new C.Cartesian3());
+        const a = safeCartesian3(C, vert.lng, vert.lat, baseH);
+        const b = safeCartesian3(C, vert.lng, vert.lat, baseH + 1);
+        if (!a || !b) return null;
+        const fa = C.Cartesian3.dot(C.Cartesian3.subtract(a, origin, new C.Cartesian3()), n);
+        const fb = C.Cartesian3.dot(C.Cartesian3.subtract(b, origin, new C.Cartesian3()), n);
+        const slope = fb - fa;
+        // A vertical line parallel to the plane is a wall, not a roof — keep
+        // the sample rather than dividing by ~0.
+        if (!isFinite(slope) || Math.abs(slope) < 1e-9) return a;
+        return safeCartesian3(C, vert.lng, vert.lat, baseH - fa / slope);
       }).filter(Boolean);
       if (corners.length < 3) return;
       renderables.push({ id: plane.id, corners, u, v, n, origin });
@@ -5293,6 +5310,32 @@ function SolarEngine3D({
       plane3DCesiumPtsMap.current.set(pid, projected);
       // projected[i] is the same planarized corner buildRoofPlane3D used to make
       // plane.vertices[i] — convert back to lat/lng to update the source geometry.
+      // 🚨 THE PLAN RECORD HERE KEEPS THE RENDER LIFT, DELIBERATELY, AND I
+      // BROKE IT ONCE BY "FIXING" IT.
+      //
+      // `buildRoofPlane3D` takes `vertices` BEFORE the lift, because the lift
+      // has a horizontal component of offset·sin(tilt) down each face's own
+      // azimuth and deriving the plan record from lifted points slid the two
+      // halves of a gable apart. The obvious inference is that this write-back
+      // should do the same. It must not, and the reason is the clustering
+      // above:
+      //
+      //   `work` holds the LIFTED corners. A gable's two ridge corners are
+      //   therefore already 2·offset·sin(tilt) apart there — and the stitch's
+      //   whole purpose is to AVERAGE them into one point, which it does.
+      //   Subtracting each face's own normal afterwards pulls that single
+      //   shared point back into two, by exactly the amount the clustering had
+      //   just removed.
+      //
+      // Measured in the browser: before Stitch the gable's ridge vertices are
+      // 0.0 mm apart; with the unlift applied here they came out 100.9 mm
+      // apart — 2 · 0.12 · sin(25°). The guard in e2e/design-studio.spec.ts
+      // caught it before it shipped.
+      //
+      // What remains true is smaller and is recorded rather than guessed at: a
+      // stitched face's plan outline is translated ~5 cm down-slope as a whole.
+      // Removing that correctly means clustering in PLAN space, which is a
+      // change to the stitch algorithm, not to this loop.
       const verts: Array<{ lat: number; lng: number }> = [];
       for (const p of projected) {
         const carto = C.Cartographic.fromCartesian(p);

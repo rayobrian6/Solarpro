@@ -2465,6 +2465,68 @@ cases fail with *"extendRow refused to extend a row on a face it had just placed
    tracing tool, which needs a mesh to click on, which needs 3D tiles.
 
 ---
+---
+
+## 🚨 WS1-061 — I ACTED ON A WORKER'S CLAIM WITHOUT MEASURING IT, AND THE NEW GUARD CAUGHT ME
+
+| | |
+|---|---|
+| **Severity** | would have been **P1**; never shipped |
+| **Status** | `REVERTED, AND RECORDED` |
+
+A worker reported that Stitch writes the **lifted** points back as `plane.vertices`, re-splitting a
+gable's ridge on the permit plan by `2·SURFACE_OFFSET_M·sin(tilt)` — the exact defect
+`buildRoofPlane3D` was fixed for. The reasoning was sound, the code matched it, and I applied the
+obvious fix: unlift each face's points before taking the plan record.
+
+**It was wrong, and it made things worse.** The stitch's whole purpose is to AVERAGE the shared
+corners, and `work` holds the LIFTED ones — so the gable's two ridge corners are already
+`2·offset·sin(tilt)` apart there and the clustering merges them into a single point. Subtracting
+each face's own normal afterwards pulls that one point back into two, by exactly the amount the
+clustering had just removed. Measured in the browser:
+
+```
+before Stitch                 ridge vertices   0.0 mm apart
+after Stitch, with my "fix"   ridge vertices 100.9 mm apart     = 2 · 0.12 · sin(25°)
+after Stitch, reverted        ridge vertices   0.0 mm apart
+```
+
+Reverted, with the reason written where the next person will reach for the same fix.
+
+🚨 **What actually caught it was the test I wrote in the same pass.** The existing stitch guard
+could not have: it pressed the button only `if (await stitchBtn.isVisible())` — the instantaneous
+predicate this harness already documents — wrapped every assertion in `if (stitched.length >= 2)`,
+never seeded a roof before stitching so there was usually nothing to stitch, and used a **1.6 m**
+tolerance, doubled again at the assertion. `joinSharedCorners` itself works to 1.5 m, so the test
+could not see anything the implementation would not already have swallowed. It now seeds a real
+gable, waits for the button, and holds the ridge to a **derived** 7.9 mm — half a unit in the last
+place of a 7-decimal lat/lng, in both axes.
+
+**The residual, stated rather than guessed at:** a stitched face's plan outline is translated about
+5 cm down-slope as a whole. The ridge does not split, because clustering merges the corners first.
+Removing that 5 cm correctly means clustering in PLAN space, which is a change to the stitch
+algorithm and not to a write-back loop — named here, deliberately not attempted at the end of a
+session that has already changed this file eleven times.
+
+---
+
+## WS1-062 — collectRoofRenderables projected its corners the wrong way
+
+| | |
+|---|---|
+| **Severity** | P2 |
+| **Status** | `FIXED_VERIFIED` |
+
+It dropped each vertex onto the plane by subtracting `n · dn` — **projection along the normal**,
+which also moves the point horizontally by `distance·sin²(tilt)`: 0.8 m at 25° on a 4.5 m half-face.
+Those corners decide which faces Stitch judges to share a hip, a ridge or a valley, and what
+position their shared corners average to; `joinSharedCorners` has a 1.5 m tolerance, which is why
+the adjacency usually still matched and the corner it produced was quietly wrong.
+
+The same trap `polygonFromVerticesOnFrame` names, in the file that names it. Both drop vertically
+now, which is exact.
+
+---
 
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
