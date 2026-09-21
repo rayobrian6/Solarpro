@@ -1826,6 +1826,23 @@ inside the component under test.
 **Mutation-proven.** Re-introducing the latch as a single line and rebuilding makes all three fail
 with *"the scene never drew a roof deck polygon"*.
 
+### 🚨 AND MY OWN FIX LEFT THE HOLE OPEN — FOUND BY RE-AUDITING IT AN HOUR LATER
+
+The first version of this fix kept `markOnlyPlaneIdsRef` as *"the user's intent"* beside the derived
+*"does this face carry panels"*, on the reasoning that Mark Plane is a decision and should stay
+latched. That reasoning is fine and the code was still wrong, because **`handleAutoRoof` does not
+skip marked faces.** `eligiblePlanes` is built from confirmed planes and detected segments with no
+reference to the mark, so Auto Layout fills a marked face — and the latched intent would then have
+drawn it as a bare outline with fifty-five panels over it. The whole defect, reachable again,
+through the feature I had just protected.
+
+The two facts never disagree except in that case: a marked face has no panels, so the derived rule
+already answers "outline". The moment it *does* have panels it needs a deck under them, whatever was
+intended when it was traced. So the set is **deleted**, and one question has one answer.
+
+Whether Auto Layout ought to respect a Mark Plane intent is a separate product question about
+PLACEMENT. The renderer does not decide it, and I have not decided it either.
+
 ### And `origin/master` has a second, independent disagreement
 
 Verified against `origin/master`, not inferred. The restore path there re-fits an **already lifted**

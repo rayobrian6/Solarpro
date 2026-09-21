@@ -149,7 +149,7 @@ function deckCovers(deck: Deck, plane: ReturnType<typeof deckPlane>, p: Vec): bo
 }
 
 /** Everything the scene is drawing, read from the entity collection itself. */
-async function readScene(page: import('@playwright/test').Page): Promise<{ decks: Deck[]; panels: Panel[]; outlineOnly: string[] }> {
+async function readScene(page: import('@playwright/test').Page): Promise<{ decks: Deck[]; panels: Panel[]; outlineOnly: Deck[] }> {
   return page.evaluate(() => {
     const C = (window as any).Cesium;
     const viewer = (window as any).__solarViewerE2E;
@@ -157,11 +157,18 @@ async function readScene(page: import('@playwright/test').Page): Promise<{ decks
     const t = C.JulianDate.now();
     const decks: any[] = [];
     const panels: any[] = [];
-    const outlineOnly: string[] = [];
+    const outlineOnly: any[] = [];
     for (const e of viewer.entities.values) {
       const name: string = e.name ?? '';
       if (name.startsWith('[PLANE3D-OUTLINE] ')) {
-        outlineOnly.push(name.slice('[PLANE3D-OUTLINE] '.length));
+        // Keep the ring's own corners, not just the id: "a face was drawn as an
+        // outline" is only a defect when PANELS are sitting over that face, and
+        // deciding that needs its footprint.
+        const ring = e.polyline?.positions?.getValue(t);
+        outlineOnly.push({
+          planeId: name.slice('[PLANE3D-OUTLINE] '.length),
+          pts: (ring ?? []).map((p: any) => ({ x: p.x, y: p.y, z: p.z })),
+        });
       } else if (name.startsWith('[PLANE3D-BASE] ')) {
         const h = e.polygon?.hierarchy?.getValue(t);
         const pos = h?.positions ?? h;
@@ -241,14 +248,24 @@ test.describe('the drawn panel sits above the drawn roof', () => {
     expect(panels.length, 'no [PANEL] entity is in the scene').toBeGreaterThan(0);
 
     // 🚨 THE ASSERTION THAT FAILED FIRST, AND THE ONE THAT MATTERS MOST.
-    // A face carrying panels must be drawn as a DECK. Drawn as an outline it
+    // A face with panels over it must be drawn as a DECK. Drawn as an outline it
     // leaves the photogrammetry mesh as the surface under the array, and the
     // clearance measured below would then be measured against nothing.
-    const { decks: _d, outlineOnly } = { decks, outlineOnly: sceneOutlines };
-    void _d;
-    expect(outlineOnly,
-      'these faces carry panels and were still drawn outline-only, so there is ' +
-      'no roof deck under the array and the user sees the raw mesh',
+    //
+    // Stated as "no face that has panels over it is outline-only", NOT as "no
+    // outlines exist" — a face a person marked and never filled is SUPPOSED to
+    // be a clean outline, and a test that forbids all of them would fail on
+    // correct behaviour the first time someone adds an unfilled face.
+    const undecked = sceneOutlines
+      .filter(o => o.pts.length >= 3)
+      .filter(o => {
+        const pl = deckPlane(o);
+        return panels.some(p => deckCovers(o, pl, p.pos));
+      })
+      .map(o => o.planeId);
+    expect(undecked,
+      'these faces have drawn panels over them and were still drawn outline-only, ' +
+      'so there is no roof deck under the array and the user sees the raw mesh',
     ).toEqual([]);
     expect(decks.length, 'no [PLANE3D-BASE] deck polygon is in the scene').toBeGreaterThanOrEqual(1);
 

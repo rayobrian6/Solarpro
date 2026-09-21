@@ -1338,13 +1338,23 @@ function SolarEngine3D({
   const plane3DFrameMap    = useRef<Map<string, Plane3DFrame>>(new Map());
   // plane3DCesiumPtsMap: planeId → Cesium Cartesian3[] (projected polygon corners)
   const plane3DCesiumPtsMap = useRef<Map<string, any[]>>(new Map());
-  // v62: planes traced with "Mark Plane" (outline only, no panels) — render clean.
+  // 🚨 `markOnlyPlaneIdsRef` WAS HERE AND IS DELIBERATELY GONE.
   //
-  // 🚨 THIS SET HOLDS AN INTENT, NOT A STATE, AND IT USED TO HOLD BOTH.
-  // Only the Mark Plane tool writes to it: the user traced a face and asked for
-  // no panels on it. Nothing removes from it, which is correct for an intent and
-  // was catastrophic for a state — see `planeRendersOutlineOnly` below.
-  const markOnlyPlaneIdsRef = useRef<Set<string>>(new Set());
+  // It was a Set the Mark Plane tool added a plane id to and nothing ever
+  // removed from, read at every render site to decide outline-vs-deck. Keeping
+  // it as "the user's intent" alongside the derived "does this face carry
+  // panels" left a hole big enough to reproduce the whole defect:
+  // `handleAutoRoof` does NOT skip marked faces, so Auto Layout fills them —
+  // and a marked face with fifty-five panels on it would still have been drawn
+  // as a bare outline, with nothing under the array but the photogrammetry mesh.
+  //
+  // The two facts also never disagree except in that case. A marked face has no
+  // panels, so the derived rule already answers "outline"; the moment it DOES
+  // have panels it needs a deck, whatever was intended when it was traced.
+  // One question, one answer — see `planeRendersOutlineOnly`.
+  //
+  // Whether Auto Layout should respect a Mark Plane intent at all is a separate
+  // product question about PLACEMENT, and is not decided by the renderer.
   // Count of placed points (for status message)
   const [pts3DCount, setPts3DCount] = useState(0);
 
@@ -1414,7 +1424,6 @@ function SolarEngine3D({
    * is read fresh, here, every time a face is drawn.
    */
   function planeRendersOutlineOnly(planeId: string): boolean {
-    if (markOnlyPlaneIdsRef.current.has(planeId)) return true;
     return !panelsRef.current.some(p => p.planeId === planeId);
   }
   const twinRef             = useRef<DigitalTwinData | null>(null);
@@ -9946,10 +9955,13 @@ function SolarEngine3D({
       );
 
       // v62: mark-only faces render as a clean outline (no fill/grid/label/arrows).
-      if (!fillPanels) markOnlyPlaneIdsRef.current.add(plane.id);
 
       // Render plane visualization (full for panel planes; outline-only for marked).
       const isSelected = selectedRoofPlaneId === plane.id;
+      // `!fillPanels` rather than `planeRendersOutlineOnly` for this ONE call:
+      // the face is being created and has no panels yet, so the predicate would
+      // draw an outline for the frame before Auto Layout fills it. Every later
+      // draw of this face goes through the predicate and converges.
       const entityIds  = renderPlane3DEntity(viewer, C, projectedCesiumPts, plane.id, frame, isSelected, !fillPanels);
       plane3DEntitiesRef.current = [...plane3DEntitiesRef.current, ...entityIds];
 

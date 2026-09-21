@@ -371,21 +371,21 @@ describe('entities that are NOT persisted — classified, not merely listed', ()
     // 2. Every face is drawn through it — no render site reads a latched set.
     const renders = ENGINE.match(/renderPlane3DEntity\(/g) ?? [];
     expect(renders.length, 'the scan found no render sites').toBeGreaterThanOrEqual(5);
-    const reads = ENGINE.match(/markOnlyPlaneIdsRef\.current\.has\(/g) ?? [];
-    expect(reads,
-      'the latched set may be read in exactly ONE place — inside ' +
-      'planeRendersOutlineOnly, where it answers "did the user mark this face". ' +
-      'A render site reading it directly is the defect: it asks a cached answer ' +
-      'whether a face has panels.',
-    ).toHaveLength(1);
-    expect(fn![0], 'and that one read belongs to the predicate')
-      .toMatch(/markOnlyPlaneIdsRef\.current\.has\(/);
+    expect(ENGINE, 'no render site may ask a cached answer whether a face has panels')
+      .not.toMatch(/markOnlyPlaneIdsRef\.current\.has\(/);
 
-    // 3. The latch survives for exactly one thing: the Mark Plane TOOL, which
-    //    is a user intent and not a state. One writer, guarded by !fillPanels.
-    const adds = ENGINE.match(/markOnlyPlaneIdsRef\.current\.add\(/g) ?? [];
-    expect(adds, 'Mark Plane is the only thing that may latch this').toHaveLength(1);
-    expect(ENGINE).toMatch(/if \(!fillPanels\) markOnlyPlaneIdsRef\.current\.add\(/);
+
+    // 3. 🚨 AND THE LATCH IS GONE ENTIRELY, because keeping it left the hole open.
+    //    `handleAutoRoof` does NOT skip Mark Plane faces, so Auto Layout fills
+    //    them — and a marked face carrying fifty-five panels would still have
+    //    been drawn as a bare outline, which is the whole defect again. The two
+    //    facts never disagree except in that case, and there the panels win: a
+    //    face with modules on it needs a deck under them whatever was intended
+    //    when it was traced.
+    expect(ENGINE, 'no latched mark-only set may exist')
+      .not.toMatch(/markOnlyPlaneIdsRef\s*=\s*useRef/);
+    expect(ENGINE, 'and nothing may write to one')
+      .not.toMatch(/markOnlyPlaneIdsRef\.current\.add\(/);
 
     // 4. And the redraw has to be able to notice a face gaining panels, or the
     //    derivation is correct and never re-evaluated.
