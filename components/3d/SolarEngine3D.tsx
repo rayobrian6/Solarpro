@@ -4389,11 +4389,51 @@ function SolarEngine3D({
   // Collect renderable planes from BOTH sources with ECEF corners + frame + centroid:
   //   1. 3D Plane tool planes (plane3DCesiumPtsMap + plane3DFrameMap) — exact ECEF.
   //   2. roofPlanes prop (lat/lng vertices) — projected onto a panel/legacy frame.
+  /**
+   * 🚨 WHICH FACES BELONG TO THE DESIGN RIGHT NOW. ONE ANSWER, THREE CONSUMERS.
+   *
+   * The three plane maps — `plane3DEntityMap`, `plane3DFrameMap`,
+   * `plane3DCesiumPtsMap` — are a RENDER CACHE, and they are never pruned.
+   * There is no `.delete()` and no `.clear()` on any of them anywhere in this
+   * file, deliberately: a reconcile-deletions block once removed entities for
+   * every id missing from the `roofPlanes` prop and destroyed a user's traced
+   * garage, because that prop has its own timing and "absent from a prop" is
+   * not "the user deleted it". That reasoning still stands and nothing here
+   * deletes anything.
+   *
+   * What does NOT follow is that a ghost is harmless. Three places ENUMERATE
+   * those maps and treat whatever they find as the design:
+   *
+   *     collectRoofRenderables   building extrusion, setback zones, roof model
+   *     stitchRoofVertices       clusters corners and MUTATES the geometry
+   *     selectableRoofFaces      what a click can resolve to
+   *
+   * So a deleted plane still shaped the building, still pulled the faces the
+   * user kept toward its corners when they pressed Stitch, and was still
+   * clickable. And because these maps are NOT among the things the
+   * address-change effect resets, all three were also true of a face traced at
+   * a DIFFERENT PROPERTY while this one was on screen.
+   *
+   * Fixing that with a filter at each site would leave the next consumer to
+   * rediscover it. The authority for "is this face part of the design" is the
+   * design — `roofPlanes` — and it lives here, once.
+   *
+   * The cache may still hold and still DRAW a ghost; it may not decide anything.
+   */
+  function liveRenderedFaces(): Array<{ planeId: string; pts: any[]; frame: Plane3DFrame | undefined }> {
+    const inDesign = new Set((roofPlanesRef.current ?? []).map(p => p.id));
+    const out: Array<{ planeId: string; pts: any[]; frame: Plane3DFrame | undefined }> = [];
+    plane3DCesiumPtsMap.current.forEach((pts: any[], planeId: string) => {
+      if (!inDesign.has(planeId)) return;
+      out.push({ planeId, pts, frame: plane3DFrameMap.current.get(planeId) });
+    });
+    return out;
+  }
+
   function collectRoofRenderables(C: any, groundElev: number): any[] {
     const renderables: any[] = [];
     const seen = new Set<string>();
-    plane3DCesiumPtsMap.current.forEach((pts: any[], pid: string) => {
-      const fr = plane3DFrameMap.current.get(pid);
+    liveRenderedFaces().forEach(({ planeId: pid, pts, frame: fr }) => {
       if (!fr || !pts || pts.length < 3) return;
       const u = C.Cartesian3.normalize(new C.Cartesian3(fr.u.x, fr.u.y, fr.u.z), new C.Cartesian3());
       const n = C.Cartesian3.normalize(new C.Cartesian3(fr.normal.x, fr.normal.y, fr.normal.z), new C.Cartesian3());
@@ -5292,7 +5332,10 @@ function SolarEngine3D({
   // cluster to the cluster AVERAGE — so faces meet at one natural point. Then it
   // re-fits each plane's frame and re-renders. Free marking → Stitch → clean roof.
   function stitchRoofVertices(viewer: any, C: any) {
-    const entries = Array.from(plane3DCesiumPtsMap.current.entries()) as [string, any[]][];
+    // Only faces the design still holds. Stitch MOVES corners to a cluster
+    // average, so a ghost in the cache would drag the surviving faces toward a
+    // plane the user deleted — or toward another property's roof.
+    const entries = liveRenderedFaces().map(f => [f.planeId, f.pts] as [string, any[]]);
     if (entries.length < 2) { setStatusMsg('Stitch needs 2+ marked planes'); return; }
     const TOL = 1.6; // metres — corners within this are treated as the same point
     // Working copy of every plane's corners, mutated across passes.
@@ -8134,16 +8177,17 @@ function SolarEngine3D({
     // change: without this gate a face traced at one property stays clickable
     // while a DIFFERENT property is on screen. Nothing is deleted here; the
     // ghost stays drawn exactly as before, it simply is not selectable.
-    const rendered: Array<readonly [string, { polygon: any[]; normal: any }]> = [];
-    plane3DCesiumPtsMap.current.forEach((pts: any[], planeId: string) => {
-      const frame = plane3DFrameMap.current.get(planeId);
-      if (!pts || pts.length < 3) return;
-      rendered.push([planeId, {
-        polygon: pts.map((q: any) => ({ x: q.x, y: q.y, z: q.z })),
-        normal: frame ? { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z } : null,
+    const live = liveRenderedFaces();
+    const rendered = live
+      .filter(f => f.pts && f.pts.length >= 3)
+      .map(f => [f.planeId, {
+        polygon: f.pts.map((q: any) => ({ x: q.x, y: q.y, z: q.z })),
+        normal: f.frame ? { x: f.frame.normal.x, y: f.frame.normal.y, z: f.frame.normal.z } : null,
       }] as const);
-    });
-    return selectableFacesFrom(rendered, new Set((roofPlanesRef.current ?? []).map(p => p.id)));
+    // The membership gate is already applied by liveRenderedFaces; passing the
+    // same id set keeps selectableFacesFrom's contract honest rather than
+    // giving it a set that can never reject anything.
+    return selectableFacesFrom(rendered, new Set(live.map(f => f.planeId)));
   }
 
   /**

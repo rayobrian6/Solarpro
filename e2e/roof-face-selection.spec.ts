@@ -456,3 +456,82 @@ test.describe('the site is the custom/fallback provider, and says so', () => {
     expect(DEMO_SITE.lat).toBeGreaterThan(0);   // fixture sanity
   });
 });
+
+/**
+ * PLANE LIFECYCLE — the render cache may hold a ghost, it may not decide anything.
+ *
+ * The three plane maps in SolarEngine3D are never pruned (deliberately: a
+ * reconcile-deletions block once destroyed a user's traced garage by inferring
+ * intent from a prop's timing). So a deleted face is still DRAWN — and used to
+ * still be selectable, still shape the building, and still be clustered into
+ * the surviving faces' geometry by Stitch.
+ *
+ * These drive the real production path: the studio's own setter removes the
+ * plane from the design, exactly as the sidebar ✕ does, and nothing clears the
+ * cache.
+ */
+test.describe('a face removed from the design stops deciding things', () => {
+  test('it is no longer selectable, and its neighbour still is', async ({ page }) => {
+    await openStudio(page);
+    const [south, north] = buildGablePlanes();
+    await seedPlanes(page, [south, north]);
+    await frameRoof(page);
+
+    // It IS selectable while it is part of the design.
+    await clickFace(page, north.id);
+    await expect.poll(() => selectedFaceId(page), { timeout: SELECT_TIMEOUT }).toBe(north.id);
+
+    // Remove it from the design — the same state transition the sidebar delete
+    // performs. The entities and the cache entry both remain.
+    const wherePoint = await faceScreenPoint(page, north.id);
+    expect(wherePoint, 'the ghost should still be DRAWN — nothing is deleted from the scene')
+      .not.toBeNull();
+    await seedPlanes(page, [south]);
+
+    // The selection cannot outlive its face.
+    await expect
+      .poll(() => selectedFaceId(page), {
+        message: 'the selection survived the face it pointed at',
+        timeout: SELECT_TIMEOUT,
+      })
+      .toBeNull();
+
+    // And clicking the ghost resolves to nothing, not to a canonical id the
+    // design no longer contains.
+    await clickCanvasAt(page, wherePoint!);
+    await page.waitForTimeout(600);
+    expect(await selectedFaceId(page), 'a deleted face was still clickable').toBeNull();
+
+    // The surviving face is untouched.
+    await clickFace(page, south.id);
+    await expect.poll(() => selectedFaceId(page), { timeout: SELECT_TIMEOUT }).toBe(south.id);
+  });
+
+  test('STITCH does not fold a deleted face back into the roof', async ({ page }) => {
+    // The destructive case. stitchRoofVertices moves corners to a cluster
+    // AVERAGE, so a ghost in the cache drags the faces the user kept toward a
+    // plane they deleted. With one face left in the design, Stitch must see one
+    // face — not two — and decline.
+    await openStudio(page);
+    const [south, north] = buildGablePlanes();
+    await seedPlanes(page, [south, north]);
+    await frameRoof(page);
+
+    await seedPlanes(page, [south]);
+    await page.waitForTimeout(800);
+
+    const stitch = page.getByRole('button', { name: /stitch/i }).first();
+    await expect(stitch, 'the Stitch button should exist').toBeVisible();
+    await stitch.click({ force: true });
+    await page.waitForTimeout(1200);
+
+    const msg = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('*'))
+        .filter(e => e.children.length === 0)
+        .map(e => e.textContent || '')
+        .find(t => /Stitch needs|Stitched|Abutments/i.test(t)) ?? '');
+
+    expect(msg, 'Stitch counted the deleted face and ran on it')
+      .toMatch(/Stitch needs 2\+ marked planes/i);
+  });
+});
