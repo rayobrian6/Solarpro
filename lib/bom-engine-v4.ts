@@ -21,6 +21,7 @@ import {
   BOMStageDefinition,
 } from './topology-manager';
 import { resolveIntegratedEquipment } from './equipment/integratedBos';
+import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { getMountingSystemById } from './mounting-hardware-db';
 import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
 import { resolveAcDisconnect } from './electrical/acDisconnect';
@@ -1335,6 +1336,14 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     totalDevices: isMicro ? (input.deviceCount ?? input.moduleCount ?? 0) : 0,
     branchCount: 0,
     hasBattery: !!input.batteryId || (input.batteryCount ?? 0) > 0,
+    // 🚨 WITHOUT THIS THE BOM SHIPPED A DIFFERENT COMBINER FROM THE DRAWINGS.
+    // The resolver falls back to the current-generation 6C when no pairing is
+    // supplied; every IQ8 row declares the 5C. The comment above says this is
+    // "single-sourced ... so the BOM matches the SLD + permit sheets" — it did
+    // not, and the 6C/5C differ on `providesAcDisconnect`, which is the NEC
+    // 690.13 integral-disconnect statement.
+    compatibleCombinerIds: combinerCompatibilityFor(
+      inverterEntry?.manufacturer, inverterEntry?.model, (inverterEntry as any)?.id),
   });
   const _bosEmitted = new Set<string>();
   // An integrated combiner (e.g. IQ Combiner 6C) HOUSES the gateway — don't also
@@ -2717,6 +2726,8 @@ function generateBOMV4PerSubSystem(
       totalDevices,
       branchCount, // REAL summed branch count (legacy passed hardcoded 0)
       hasBattery: group.some(s => !!s.eq.batteryId || (s.eq.batteryCount ?? 0) > 0),
+      // Same pairing the drawings resolve — see the note on the other call site.
+      compatibleCombinerIds: combinerCompatibilityFor(group[0].brand, group[0].model),
     });
     if (plan.branchSlotWarning) warnings.push(plan.branchSlotWarning);
     const emitted = new Set<string>();

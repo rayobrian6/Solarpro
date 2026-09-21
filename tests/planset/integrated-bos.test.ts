@@ -1,11 +1,40 @@
 import { describe, it, expect } from 'vitest';
-import { resolveIntegratedEquipment, enphaseGeneration, getBosDevice } from '@/lib/equipment/integratedBos';
+import { resolveIntegratedEquipment, enphaseGeneration, getBosDevice, resolveCompatibleCombiner } from '@/lib/equipment/integratedBos';
+import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { buildIntegratedEquipment } from '@/lib/permit/utils/integratedEquipment';
 import { generatePermitHTML } from '@/lib/permit';
 import { roofProject } from '../../test-fixtures/roofProject';
 import type { CADModel } from '@/lib/cad/types';
 
-const ctx = (over: Partial<Parameters<typeof resolveIntegratedEquipment>[0]> = {}) => resolveIntegratedEquipment({
+/**
+ * 🚨 THIS FIXTURE USED TO OMIT `compatibleCombinerIds`, SO IT ONLY EVER TESTED
+ * THE FALLBACK BRANCH.
+ *
+ * `resolveIntegratedEquipment` picks the combiner from the pairing the selected
+ * inverter declares in equipment-db, and falls back to the current-generation 6C
+ * when no pairing is supplied. Every IQ8 row declares
+ * `compatibleWith: ['enphase-iq-combiner-5', ...]`, so production resolves the
+ * 5C — while these tests, which supplied nothing, asserted the 6C six times and
+ * passed. A fixture that cannot exhibit the production shape cannot prove
+ * anything about it.
+ *
+ * `ctx()` is now the PRODUCTION shape: it carries the pairing, resolved by the
+ * same `combinerCompatibilityFor` every call site uses. `ctxNoPairing()` keeps
+ * the fallback covered, explicitly and separately, because the fallback is real
+ * behaviour for an inverter the catalogue does not know.
+ */
+const ctx = (over: Partial<Parameters<typeof resolveIntegratedEquipment>[0]> = {}) => {
+  const inverterModel = (over.inverterModel as string) ?? 'IQ8M';
+  return resolveIntegratedEquipment({
+    inverterManufacturer: 'Enphase', inverterModel, isMicro: true,
+    totalDevices: 12, branchCount: 3, hasBattery: false,
+    compatibleCombinerIds: combinerCompatibilityFor('Enphase', inverterModel),
+    ...over,
+  });
+};
+
+/** The fallback branch: an inverter the catalogue declares no pairing for. */
+const ctxNoPairing = (over: Partial<Parameters<typeof resolveIntegratedEquipment>[0]> = {}) => resolveIntegratedEquipment({
   inverterManufacturer: 'Enphase', inverterModel: 'IQ8M', isMicro: true,
   totalDevices: 12, branchCount: 3, hasBattery: false, ...over,
 });
@@ -18,28 +47,53 @@ describe('integrated BOS device resolver', () => {
     expect(enphaseGeneration('SE7600H')).toBeNull();
   });
 
-  it('auto-configures the current-gen IQ Combiner 6C (one box: combiner + gateway + integral disconnect)', () => {
+  it('auto-configures the combiner the CATALOGUE pairs with the selected inverter', () => {
     const plan = ctx({ branchCount: 3 });
     expect(plan.source).toBe('auto');
-    expect(plan.brains?.model).toBe('IQ Combiner 6C');     // best / easiest install
-    expect(plan.brains?.partNumber).toBe('X-IQ-AM1-240-6C');
-    expect(plan.hasIntegratedGateway).toBe(true);          // no separate Envoy
-    expect(plan.providesAcDisconnect).toBe(true);          // its aggregate breaker is the PV disconnect
+    // Asserted against the catalogue rather than a hard-coded model, because
+    // WHICH device is correct is manufacturer data. If equipment-db's IQ8
+    // pairing is ever corrected to the 6C, this test follows it instead of
+    // having to be rewritten — and it still fails if the resolver ignores it.
+    const paired = combinerCompatibilityFor('Enphase', 'IQ8M');
+    expect(paired, 'the catalogue must declare a pairing for IQ8M').toBeTruthy();
+    expect(resolveCompatibleCombiner(paired)?.model).toBe(plan.brains?.model);
+    // Today that is the 5C, which is MAIN-LUG: no integral AC disconnecting
+    // means. That is a NEC 690.13 statement on the sheets, so it is pinned.
+    expect(plan.brains?.model).toBe('IQ Combiner 5C');
+    expect(plan.hasIntegratedGateway).toBe(true);          // no separate gateway on the wall
+    expect(plan.providesAcDisconnect).toBe(false);
     expect(plan.brains?.roleSummary).toContain('Combiner');
     expect(plan.brains?.roleSummary).toContain('Gateway');
-    expect(plan.brains?.roleSummary).toContain('Disconnect');
     expect(plan.branchSlotWarning).toBeUndefined();
   });
 
-  it('defaults to the 6C regardless of micro model (generation is an ecosystem line)', () => {
-    expect(ctx({ inverterModel: 'IQ7+' }).brains?.model).toBe('IQ Combiner 6C');
-    expect(ctx({ inverterModel: 'IQ8H' }).brains?.model).toBe('IQ Combiner 6C');
+  it('falls back to the current-gen 6C ONLY when the catalogue declares no pairing', () => {
+    const plan = ctxNoPairing();
+    expect(plan.brains?.model).toBe('IQ Combiner 6C');
+    expect(plan.brains?.partNumber).toBe('X-IQ-AM1-240-6C');
+    expect(plan.providesAcDisconnect).toBe(true);          // the 6C DOES have one
+    expect(plan.brains?.roleSummary).toContain('Disconnect');
   });
 
-  it('warns when AC branches exceed the 6C PV busbar (4, or 5 with a quadplex)', () => {
-    const plan = ctx({ branchCount: 8 });
-    expect(plan.brains?.model).toBe('IQ Combiner 6C');
-    expect(plan.branchSlotWarning).toMatch(/exceed the IQ Combiner 6C PV busbar/);
+  it('follows the catalogue across micro models rather than defaulting', () => {
+    for (const model of ['IQ7+', 'IQ8H']) {
+      const paired = combinerCompatibilityFor('Enphase', model);
+      const expected = paired ? resolveCompatibleCombiner(paired)?.model : 'IQ Combiner 6C';
+      expect(ctx({ inverterModel: model }).brains?.model).toBe(expected);
+    }
+  });
+
+  it('warns when AC branches exceed the resolved combiner PV busbar', () => {
+    // On the fallback device the warning names the 6C; on the paired device it
+    // names the 5C. The warning must describe the device that was RESOLVED, not
+    // a fixed one, or it tells the installer about hardware they do not have.
+    const fallback = ctxNoPairing({ branchCount: 8 });
+    expect(fallback.brains?.model).toBe('IQ Combiner 6C');
+    expect(fallback.branchSlotWarning).toMatch(/exceed the IQ Combiner 6C PV busbar/);
+
+    const paired = ctx({ branchCount: 8 });
+    expect(paired.brains?.model).toBe('IQ Combiner 5C');
+    expect(paired.branchSlotWarning).toMatch(/exceed the IQ Combiner 5C PV busbar/);
   });
 
   it('honors an explicit user override (e.g. the older main-lug 4C — no integral disconnect)', () => {

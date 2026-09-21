@@ -12,7 +12,7 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { getEquipmentContext } from '@/lib/system';
 import { hasRealBattery } from './helpers';
-import { MICROINVERTERS } from '@/lib/equipment-db';
+import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { buildConductorAuthority } from './conductorAuthority';
 import { resolveIntegratedEquipment, type IntegratedEquipmentPlan, type SystemBosContext } from '@/lib/equipment/integratedBos';
 
@@ -72,13 +72,9 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
   // matching on equipment models is a known defect class in this codebase and is
   // not being reintroduced here. No exact match ⇒ undefined ⇒ the previous
   // current-gen default, so this can only add correctness, never remove it.
-  const _norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
-  const _invRec = isMicro
-    ? MICROINVERTERS.find(m =>
-        _norm(m.manufacturer) === _norm(inverterManufacturer)
-        && _norm(m.model) === _norm(inverterModel))
-    : undefined;
-
+  // The pairing rule itself lives in lib/equipment/combinerCompatibility.ts.
+  // It used to be inlined here AND in the SLD route AND nowhere in the BOM,
+  // which is how the BOM came to ship a 6C while these sheets printed a 5C.
   const ctx: SystemBosContext = {
     inverterManufacturer,
     inverterModel,
@@ -87,7 +83,7 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
     branchCount,
     hasBattery: hasRealBattery(project),
     overrideDeviceIds,
-    compatibleCombinerIds: Array.isArray(_invRec?.compatibleWith) ? _invRec.compatibleWith : undefined,
+    compatibleCombinerIds: isMicro ? combinerCompatibilityFor(inverterManufacturer, inverterModel) : undefined,
   };
 
   return resolveIntegratedEquipment(ctx);

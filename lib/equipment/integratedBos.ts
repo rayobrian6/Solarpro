@@ -441,6 +441,12 @@ export interface HybridSourceInput {
   branchCount: number;              // AC branches (micro) or string count
   deviceCount: number;              // micro device count
   backfeedA: number;                // this source's OCPD / backfeed amps
+  /** The combiner ids this source's inverter declares in equipment-db. The
+   *  CALLER supplies it, because this module deliberately does not import
+   *  equipment-db (see SystemBosContext.compatibleCombinerIds). Omitting it
+   *  silently selected the current-generation default instead of the paired
+   *  device, so a hybrid lane could name a different combiner from the sheets. */
+  compatibleCombinerIds?: string[];
 }
 export interface HybridSourceCombining {
   key: string;
@@ -471,6 +477,7 @@ export function resolveHybridAcCollection(sources: HybridSourceInput[]): HybridA
       const plan = resolveIntegratedEquipment({
         inverterManufacturer: s.inverterManufacturer, inverterModel: s.inverterModel,
         isMicro: true, totalDevices: s.deviceCount, branchCount: s.branchCount, hasBattery: false,
+        compatibleCombinerIds: s.compatibleCombinerIds,
       });
       const combiner = plan.brains ?? plan.devices[0] ?? null;
       return {

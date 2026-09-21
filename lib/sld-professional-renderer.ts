@@ -18,6 +18,7 @@
 // ============================================================
 
 import type { RunSegment, MicroBranch } from './computed-system';
+import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker } from '@/lib/permit/utils/helpers';
 import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
@@ -3409,6 +3410,11 @@ export function acCollectionFromLanes(lanes: SLDSourceBranch[]): HybridAcCollect
     branchCount: b.microBranches?.length ?? b.totalStrings ?? 1,
     deviceCount: b.deviceCount ?? b.totalModules ?? 0,
     backfeedA: laneBackfeedA(b),
+    // This is the one lanes -> HybridSourceInput mapping site, as the note above
+    // says, so it is also the one place the combiner pairing can be attached for
+    // hybrid lanes. Without it a lane fell back to the current-generation
+    // default and could name a different combiner from the rest of the package.
+    compatibleCombinerIds: combinerCompatibilityFor(b.inverterManufacturer, b.inverterModel),
   })));
 }
 

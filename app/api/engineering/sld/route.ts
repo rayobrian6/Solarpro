@@ -12,6 +12,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
@@ -520,29 +521,13 @@ export async function POST(req: NextRequest) {
       // drawing agree with the equipment picker instead of contradicting it, and
       // it generalises: any inverter that declares a compatible combiner gets
       // that combiner drawn, whatever the brand or family.
-      compatibleCombinerIds: (() => {
-        // By id when the caller sends one. Not every caller does — the Diagram
-        // tab posts `inverterManufacturer` + `inverterModel` and no id — so fall
-        // back to an EXACT manufacturer+model match against the catalogue.
-        // Trimmed and case-insensitive, never a substring: substring matching on
-        // equipment models is a known defect class here.
-        const invId = body.inverterId ? String(body.inverterId) : undefined;
-        const byId = invId
-          ? (getInverterById(invId) as { compatibleWith?: string[] } | undefined)
-          : undefined;
-        if (Array.isArray(byId?.compatibleWith)) return byId.compatibleWith;
-
-        const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
-        // The Diagram tab sends model as "<Manufacturer> <Model>", so match on
-        // either the bare model or the combined form.
-        const wantMfr   = norm(inverterManufacturer);
-        const wantModel = norm(inverterModel);
-        const byModel = MICROINVERTERS.find(m =>
-          norm(m.manufacturer) === wantMfr
-          && (norm(m.model) === wantModel
-            || norm(`${m.manufacturer} ${m.model}`) === wantModel));
-        return Array.isArray(byModel?.compatibleWith) ? byModel.compatibleWith : undefined;
-      })(),
+      // The pairing equipment-db declares on the SELECTED microinverter — the
+      // one rule, shared with the BOM and the planset sheets. It used to be
+      // inlined here, and its by-id branch called getInverterById, which
+      // searches STRING inverters only, so for a micro id it always missed.
+      compatibleCombinerIds: combinerCompatibilityFor(
+        inverterManufacturer, inverterModel,
+        body.inverterId ? String(body.inverterId) : undefined),
     });
     const _bosBrains = _bosPlan.brains ?? _bosPlan.devices[0];
     const _bosLabel  = _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined;
