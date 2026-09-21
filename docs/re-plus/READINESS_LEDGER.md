@@ -2527,6 +2527,138 @@ The same trap `polygonFromVerticesOnFrame` names, in the file that names it. Bot
 now, which is exact.
 
 ---
+---
+
+## 🚨 WS1-063 — THE RAIL CLAMP REACHED THE OFFSET AND NOT THE ROTATED BOX
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_VERIFIED` |
+| **Found by** | round 3, verified by me |
+
+WS1-041 clamped the drawn rail so it could not punch through the deck. `inwardM` — the offset the
+rail hangs by — is derived from the clamped height, and the GRID rail box was updated to match. The
+**rotated-panel** branch was not: it kept `new Cartesian3(railW * 3, railLen, railH * 3)` while
+sharing the clamped offset. So a rotated array positions its rails by the clamped number and draws
+them at the unclamped size. For S-5! PVKit — which **is** selectable in the studio's racking list —
+the run hangs **10.6 mm below the deck** and rises **15.6 mm up inside the 40 mm module box**, and
+is 37.5 % wider than the rails on an un-rotated face of the same roof. Reachable in four actions:
+pick that racking, Auto Layout, select the array, drag the rotate handle.
+
+🚨 **And my own guard could not see it.** The source assertion greps for
+`Math.min(railH * RAIL_DRAW_SCALE` and for a call to `drawnRailHeightM(mountId)` — neither pattern
+reaches the rotated branch, so the class read as closed while one of the two rail-draw paths was
+unclamped. That is the third time in this workstream a *source* assertion has certified a class it
+could not actually see.
+
+---
+
+## 🚨 WS1-064 — "ABSENCE KEEPS PANELS" WAS CANCELLED BY THE GUARD ONE SCREEN ABOVE IT
+
+| | |
+|---|---|
+| **Severity** | **P1** |
+| **Status** | `FIXED_VERIFIED` (real PostgreSQL, mutation-proven) |
+
+WS1-055 gave `panels` the "absence keeps" rule every neighbouring column already had. The
+sub-system wipe guard, forty lines earlier, builds `incoming` from `data.panels || []` — so an
+**omitted** list reads as an empty one, every stored sub-system looks removed, and the save is
+refused with `LAYOUT_SUBSYSTEM_WIPE` **before the write can keep anything**. The COALESCE was
+unreachable for every project with four or more panels, which is every real design.
+
+🚨 **My test passed because its fixture had THREE panels and the guard fires at FOUR.** A fixture
+that cannot exhibit the condition — the vacuum this workstream has now found in its own work five
+times. There is a nine-panel fixture beside it now, and a companion test proving an explicit `[]`
+on the same design is **still refused**, so the lazy fix (ignoring `[]` too) would fail.
+
+---
+
+## WS1-065 — I DELETED A USER DECISION ALONG WITH THE LATCH
+
+| | |
+|---|---|
+| **Severity** | P2 — information loss, no wrong output |
+| **Status** | `FIXED_VERIFIED` |
+
+`markOnlyPlaneIdsRef` held two facts: *"the user marked this face — model it, do not panel it"* (an
+intent) and *"this face has no panels"* (a state). Deleting the Set removed the latch, which was
+right, and the intent with it, which was not. It was also never persisted, so a marked face came
+back as an ordinary face after a reload — the intent has always been half-lost.
+
+It is recorded on the **plane** now, where persistence carries it.
+
+🚨 **The renderer deliberately does not read it, and that is not an oversight.** Work the four cases:
+a marked face has no panels, so "no panels → outline" already answers it; and a marked face that
+something has panelled needs a deck under those modules whatever was intended when it was traced.
+Reading it in `planeRendersOutlineOnly` would be a branch returning the same answer either way — a
+second source of truth that cannot disagree today and will the moment one of the two rules changes.
+I wrote that branch first, then deleted it.
+
+It is recorded for the consumers that *should* care and currently cannot: the Roof Planes sidebar,
+the planset, and `handleAutoRoof`, which fills marked faces because nothing tells it not to.
+Whether it ought to is a question about PLACEMENT and is not the renderer's to answer.
+
+---
+
+## 🚨 WS1-066 — I WROTE A DISAGREEMENT DOWN AS A TOLERANCE
+
+| | |
+|---|---|
+| **Severity** | P2 |
+| **Status** | `FIXED_VERIFIED` |
+
+`resolvePlaneGeometry`'s two "own frame" branches produced outlines offset from each other by
+`SURFACE_OFFSET_M·sin(tilt)` = 5.1 cm in plan, because `plane.vertices` is the plan record taken
+BEFORE the render lift while `plane.polygon3D` is taken after. Once the grid snapped to them, panel
+heights differed by another `sin(tilt)`: **2.4 cm, measured**.
+
+🚨 **And I bounded it in a test tolerance instead of removing it** — wrote a careful derivation of
+why 2.4 cm was acceptable, in the same session whose whole subject is one fact having one answer.
+`polygonFromVerticesOnFrame` reconstructs the lift now, so the branches agree outright and the test
+asserts that rather than excusing it: the bound is the 7-decimal lat/lng quantum, 3.4 mm, and
+removing the reconstruction fails it at 23.8 mm.
+
+---
+
+## WS1-067 — Three more of my own tests, and a fourth that pinned a line
+
+| | |
+|---|---|
+| **Severity** | test honesty |
+| **Status** | `FIXED_VERIFIED` |
+
+1. **The stitch ridge guard I had just written passed with Stitch deleted.** `buildGablePlanes`
+   produces two faces that already share their ridge corners exactly — 0.0 mm apart *before* the
+   button is pressed — so the assertion could not distinguish a working stitch from no stitch at
+   all. It caught my bad unlift (WS1-061) because that made things *worse*; it could never have
+   caught a stitch that did nothing. There is a `buildGablePlanesWithRidgeGap(0.30)` fixture now:
+   the test asserts the ridge starts 30 cm open and ends inside 8 mm.
+2. **`planeFrameAuthority`'s cell-agreement test passed over two empty arrays** —
+   `Math.max(...[])` is `-Infinity`, which is less than any bound.
+3. **`layoutWriteIdentity`'s scan** sees only inline object literals, and its vacuity floor sat
+   below the number of real call sites. Recorded; the behavioural proof is elsewhere.
+4. 🚨 **`persistenceWriterParity` pinned `const incoming = new Set([...(data.panels || []), ...`
+   verbatim** — and broke when WS1-064 changed that `||` to `??`. A test that pins an expression
+   cannot tell a repair from a regression; it reports only that the text moved. It asserts the two
+   properties it means now.
+
+---
+
+## Round-3 findings recorded and NOT fixed
+
+Each is real, each was read by me, none is fixed in this pass, and the reason is stated:
+
+| Finding | Why not now |
+|---|---|
+| **Restoring a version created before this branch still yields height-less panels** — the snapshot fix repairs only NEW snapshots, so an old one restores to an array the renderer refuses to draw, with no explanation to the user. | A data-repair path (recompute from the plane, or refuse the restore with a message). Real P1, and the right fix touches the version-restore flow, which nothing in this workstream has audited. |
+| **Clear All Panels now strips every traced face back to a bare outline** — deck, grid, slope arrows and the Az/Tilt label all go with it, because they are bundled under one `outlineOnly` flag. Before the latch was removed, a face drawn filled stayed filled. | A stated consequence, not an accident: the deck's job is to sit under modules and there are none. Separating "draw the deck" from "draw the face's identity" is the real fix and it is a visual design decision about what an unpanelled traced face should look like. |
+| **The deck is redrawn from `plane3DFrameMap`, which nothing invalidates** — a face resolved once at the wrong ground elevation keeps it for the session. | Needs a cache-invalidation rule keyed on ground elevation resolving; a change to the engine's lifecycle, not to a draw call. |
+| **`adding panels does not un-stitch the roof` asserts nothing** — instantaneous `isVisible()`, an always-true expectation, and a conditional body. | Same family as the one repaired above. Named so the next pass fixes it rather than trusting it. |
+| **`panel-elevation`'s idempotence test measures the FIRST layout** — a fixed 3 s sleep and a `continue` with no measured counter. | As above. |
+| **`placeSinglePanel` still fabricates an elevation from the click.** | It has no production callers (WS1-059). Fixing it would be tidying dead code while live paths wait. |
+
+---
 
 ## Also confirmed (P1/P2) — carried forward, not yet detailed
 
@@ -2577,7 +2709,7 @@ before acceptance).** Outside Workstream 1's boundary, recorded so they are not 
 | Negative tests pass | ✅ |
 | Mutation tests pass | ✅ see the table below |
 | **E2E passes** | ✅ **24 passed, 0 skipped, 0 failed** against a production build, in three passes with a server restart between each (see `e2e/README.md`) — including four against **real PostgreSQL** and four that measure the **Cesium entities themselves**, one of them on a face from the 2D *Tag This Roof Plane* path |
-| Full suite passes | ✅ **574 files, 12,278 tests, 0 failures** (490 skipped, pre-existing — almost all `*-postgres` and migration-governance files gated on a credential; see the note below) |
+| Full suite passes | ✅ **574 files, 12,280 tests, 0 failures** (490 skipped, pre-existing — almost all `*-postgres` and migration-governance files gated on a credential; see the note below) |
 | tsc passes | ✅ exit 0 |
 | Lint passes | ✅ 0 errors; the changed files add no new warnings |
 | Build passes | ✅ `next build` exit 0, clean `.next` |
@@ -2585,7 +2717,7 @@ before acceptance).** Outside Workstream 1's boundary, recorded so they are not 
 | Staging deploy verified | ❌ — not mine to do |
 | **Browser verification of the real workflow** | ✅ **EXECUTED**, and then deepened — see WS1-027, and **WS1-038**, which measures what Cesium DREW rather than what the library computed, and found a P0 that every prior gate passed over |
 | Between-face geometry invariants | ✅ `tests/ridgeContinuity.test.ts` |
-| No known P0/P1 in workstream | ✅ every P0 and P1 closed, or named below with the reason it is open. **WS1-049 is open by decision, not by blockage** — it needs a timestamp on archive bundles, and guessing a reconciliation rule would destroy user work. |
+| No known P0/P1 in workstream | ⚠️ **NOT YET.** Three adversarial rounds have each produced new P0/P1 findings, including in the previous round's fixes. Everything confirmed is closed; the open ones are named in *Round-3 findings recorded and NOT fixed*, with a reason each. A fourth round has not been run. **WS1-049 is open by decision, not by blockage** — it needs a timestamp on archive bundles, and guessing a reconciliation rule would destroy user work. |
 
 ### Mutation record — every fix proven able to fail
 

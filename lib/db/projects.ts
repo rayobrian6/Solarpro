@@ -1054,9 +1054,21 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
           if (Array.isArray(bundle?.panels)) archivedPanels.push(...(bundle.panels as Array<{ systemType?: string }>));
         }
       }
-      const incoming = new Set([...(data.panels || []), ...archivedPanels]
+      // 🚨 ABSENCE IS NOT A WIPE, AND THIS GUARD SAID IT WAS.
+      //
+      // `data.panels || []` treats an OMITTED panel list exactly like an empty
+      // one, so any save that simply did not mention panels was read as
+      // removing every sub-system and refused with LAYOUT_SUBSYSTEM_WIPE. That
+      // made the write's own "absence keeps" rule — the COALESCE below —
+      // unreachable for every project with four or more panels, which is every
+      // real design: the guard threw before the write could keep anything.
+      //
+      // The two halves have to agree. A save that says nothing about panels
+      // removes nothing, so there is nothing for this guard to protect.
+      // A save that says `[]` is a decision and is judged exactly as before.
+      const incoming = new Set([...(data.panels ?? []), ...archivedPanels]
         .map(p => ((p as { systemType?: string }).systemType ?? 'roof')));
-      const wiped = storedRows.filter((r: { st: string | null; n: number }) =>
+      const wiped = data.panels == null ? [] : storedRows.filter((r: { st: string | null; n: number }) =>
         (r.n ?? 0) >= 4 && !incoming.has(r.st ?? 'roof'));
       if (wiped.length > 0) {
         const desc = wiped.map((r: { st: string | null; n: number }) => `${r.st ?? 'roof'} (${r.n} panels)`).join(', ');

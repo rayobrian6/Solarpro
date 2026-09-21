@@ -206,3 +206,39 @@ export function buildTaggedPlane(): RoofPlane {
   } as unknown as RoofPlane;
   return enrichRoofPlaneWith3DFrame(base);
 }
+
+/**
+ * A gable whose two faces do NOT already meet at the ridge.
+ *
+ * 🚨 `buildGablePlanes` produces faces that share their ridge corners EXACTLY,
+ * which makes it useless for testing Stitch: the guard passes whether Stitch
+ * runs or not. Measured — before pressing the button, the ridge vertices are
+ * 0.0 mm apart. A fixture that cannot exhibit the condition is the vacuum this
+ * harness keeps finding.
+ *
+ * This opens the ridge by `gapM` so there is something to join, and Stitch's
+ * clustering (which works to ~1.5 m) has to close it.
+ */
+export function buildGablePlanesWithRidgeGap(gapM: number): [RoofPlane, RoofPlane] {
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos(DEMO_SITE.lat * DEG);
+  const dLng   = WIDTH_M / 2 / mPerDegLng;
+  const dLat   = DEPTH_M / 2 / M_PER_DEG_LAT;
+  const gapLat = gapM / M_PER_DEG_LAT;
+  const ridgeH = EAVE_H + (DEPTH_M / 2) * Math.tan(TILT_DEG * DEG);
+
+  // South face: ridge pulled gapM SOUTH of the shared line.
+  const south = buildRoofPlane3D([
+    latLngToECEF(DEMO_SITE.lat - dLat,      DEMO_SITE.lng - dLng, EAVE_H),
+    latLngToECEF(DEMO_SITE.lat - dLat,      DEMO_SITE.lng + dLng, EAVE_H),
+    latLngToECEF(DEMO_SITE.lat - gapLat,    DEMO_SITE.lng + dLng, ridgeH),
+    latLngToECEF(DEMO_SITE.lat - gapLat,    DEMO_SITE.lng - dLng, ridgeH),
+  ]);
+  // North face: ridge pulled gapM NORTH of it.
+  const north = buildRoofPlane3D([
+    latLngToECEF(DEMO_SITE.lat + gapLat,    DEMO_SITE.lng - dLng, ridgeH),
+    latLngToECEF(DEMO_SITE.lat + gapLat,    DEMO_SITE.lng + dLng, ridgeH),
+    latLngToECEF(DEMO_SITE.lat + dLat,      DEMO_SITE.lng + dLng, EAVE_H),
+    latLngToECEF(DEMO_SITE.lat + dLat,      DEMO_SITE.lng - dLng, EAVE_H),
+  ]);
+  return [south, north];
+}

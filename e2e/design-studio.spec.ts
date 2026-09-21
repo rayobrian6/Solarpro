@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { seedRoofPlane, runAutoLayout, waitForCesiumCanvas, buildGablePlanes, seedPlanes} from './support/seedRoof';
+import {
+  seedRoofPlane, runAutoLayout, waitForCesiumCanvas, buildGablePlanes,
+  buildGablePlanesWithRidgeGap, seedPlanes,
+} from './support/seedRoof';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type SolarE2EState = {
@@ -173,10 +176,27 @@ test.describe('Design Studio → planset E2E harness', () => {
     await bootDesignStudio(page);
     expect(await waitForCesiumCanvas(page), 'the Cesium canvas never appeared').toBe(true);
 
-    // A gable: two faces that genuinely share a ridge. Seeded BEFORE stitching,
-    // because stitching nothing proves nothing.
-    const planes = await seedPlanes(page, buildGablePlanes());
+    // 🚨 THE FIXTURE HAD TO BE ABLE TO FAIL. The first version of this seeded
+    // `buildGablePlanes()`, whose two faces already share their ridge corners
+    // EXACTLY — measured, 0.0 mm apart before the button is pressed — so the
+    // assertion passed whether Stitch ran or not. A fixture that cannot exhibit
+    // the condition is the same vacuum as an empty array.
+    //
+    // This opens the ridge by 30 cm, well inside the ~1.5 m the clustering
+    // works to, so closing it is Stitch's job and the guard fails if Stitch
+    // does nothing.
+    const RIDGE_GAP_M = 0.30;
+    const planes = await seedPlanes(page, buildGablePlanesWithRidgeGap(RIDGE_GAP_M));
     expect(planes.length).toBe(2);
+
+    const before = (await readSolarState(page))!;
+    const facesBefore = before.roofPlanes.filter(p => (p.vertices?.length ?? 0) >= 3);
+    expect(facesBefore.length).toBe(2);
+    const gapBefore = Math.min(...facesBefore[0].vertices!.map(va =>
+      Math.min(...facesBefore[1].vertices!.map(vb => haversineM(va, vb)))));
+    expect(gapBefore,
+      `the fixture must start APART or this proves nothing — it starts ${(gapBefore * 1000).toFixed(0)} mm apart`,
+    ).toBeGreaterThan(RIDGE_GAP_M * 0.5);
 
     const stitchBtn = page.getByRole('button', { name: /stitch/i }).first();
     await stitchBtn.waitFor({ state: 'visible', timeout: 20_000 });

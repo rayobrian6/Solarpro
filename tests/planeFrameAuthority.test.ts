@@ -124,12 +124,18 @@ describe('a plane keeps its own frame when only its outline is missing', () => {
     //              deriving it from the lifted points slid every face down-slope
     //              by offset·sin(tilt) and SPLIT the ridge on the permit plan.
     //
-    // So a reconstruction from `vertices` sits offset·sin(tilt) = 5.1 cm up-slope
-    // of `polygon3D` in plan. The grid start can move by that much along v, which
-    // shows up in height as at most another sin(tilt). Measured: 2.4 cm. The
-    // bound below is the plan offset itself, derived — not a number chosen to
-    // make this pass.
-    const PLAN_OFFSET_M = 0.12 * Math.sin(25 * DEG);   // SURFACE_OFFSET_M · sin(tilt)
+    // A reconstruction from `vertices` would sit offset·sin(tilt) = 5.1 cm
+    // up-slope of `polygon3D` in plan, and the grid snap turned that into 2.4 cm
+    // of height — measured, and for a while merely BOUNDED here, which is how a
+    // 5 cm disagreement between two branches of one function got written down as
+    // a tolerance. `polygonFromVerticesOnFrame` reconstructs the lift instead,
+    // so the two branches now agree outright and this asserts that rather than
+    // excusing it.
+    //
+    // The floor is the 7-decimal lat/lng quantum the reconstruction round-trips
+    // through: half a unit in the last place, in both axes, tipped into the
+    // normal by sin(tilt).
+    const ROUNDING_M = (Math.pow(10, -7) / 2) * M_LAT * Math.SQRT2 * Math.sin(25 * DEG) + 1e-4;
 
     const whole = fill(face);
     const partial = fill({ ...face, polygon3D: undefined } as unknown as RoofPlane);
@@ -138,12 +144,17 @@ describe('a plane keeps its own frame when only its outline is missing', () => {
       'itself changed, not just the clip outline',
     ).toBe(whole.length);
 
+    // 🚨 GUARD THE COMPARISON. `Math.max(...[])` is -Infinity, which is less
+    // than any bound, so two empty arrays would have satisfied everything below
+    // — and `expect(0).toBe(0)` above would have agreed with them.
+    expect(whole.length, 'the intact face placed nothing').toBeGreaterThan(2);
+    expect(partial.length, 'the stripped face placed nothing').toBeGreaterThan(2);
+
     const h1 = whole.map(p => p.height!).sort((a, b) => a - b);
     const h2 = partial.map(p => p.height!).sort((a, b) => a - b);
     const worst = Math.max(...h1.map((h, i) => Math.abs(h - h2[i])));
-    expect(worst, `worst height difference ${worst.toFixed(4)} m`).toBeLessThan(PLAN_OFFSET_M);
-    // And nowhere near the 32 m the old fallback produced.
-    expect(worst).toBeLessThan(0.1);
+    expect(Number.isFinite(worst), 'nothing was compared').toBe(true);
+    expect(worst, `worst height difference ${worst.toFixed(5)} m`).toBeLessThan(ROUNDING_M);
   });
 
   it('the legacy rebuild really does land at ground level — the fallback is the hazard', () => {

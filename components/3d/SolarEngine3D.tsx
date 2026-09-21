@@ -4282,7 +4282,18 @@ function SolarEngine3D({
               name: `roof-rail-rot-${p.id.slice(0, 6)}-${sgn > 0 ? 'lo' : 'hi'}`,
               position: c,
               orientation: oq,
-              box: { dimensions: new C.Cartesian3(railW * 3, railLen, railH * 3), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
+              // 🚨 THE CLAMP REACHED THE OFFSET AND NOT THIS BOX.
+              // `inwardM` above is derived from the CLAMPED height, and the
+              // grid rail beside it is drawn at that height — but this branch
+              // kept `railH * 3`. So a rotated array positioned its rails by
+              // the clamped offset and drew them at the unclamped size: for
+              // S-5! PVKit the run hangs 10.6 mm BELOW the deck and rises
+              // 15.6 mm UP inside the 40 mm module box, and is 37.5% wider
+              // than the rails on an un-rotated face of the same roof.
+              // Reachable: pick that racking, Auto Layout, select the array,
+              // drag the rotate handle — every panel gets a frameQuat and
+              // comes through here.
+              box: { dimensions: new C.Cartesian3(railW * (drawnRailH / railH), railLen, drawnRailH), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
             }));
           } catch (e) { handleCesiumError('renderRoofRails rotated', e, true); }
         }
@@ -9991,6 +10002,32 @@ function SolarEngine3D({
 
       // Render plane visualization (full for panel planes; outline-only for marked).
       const isSelected = selectedRoofPlaneId === plane.id;
+      // 🚨 THE MARK PLANE INTENT IS RECORDED ON THE PLANE, NOT IN A REF.
+      //
+      // It used to live in a component-lifetime `Set`, which meant it did not
+      // survive a reload at all — a face the user marked came back as an
+      // ordinary face — and, worse, the same Set was ALSO used to answer "does
+      // this face have panels", so it latched that answer for ever and no deck
+      // was ever drawn under an array. Deleting the Set removed the latch and
+      // the intent together. The intent is a real user decision and belongs on
+      // the object it is about, where persistence carries it.
+      //
+      // 🚨 THE RENDERER DELIBERATELY DOES NOT READ IT, and that is not an
+      // oversight. Work through the four cases and the intent never changes
+      // what is drawn: a marked face has no panels, so "no panels → outline"
+      // already answers it; and a marked face that something HAS panelled needs
+      // a deck under those modules whatever was intended when it was traced.
+      // Reading it in `planeRendersOutlineOnly` would be a branch that returns
+      // the same answer either way — a second source of truth that cannot
+      // disagree today and will the moment one of the two rules changes.
+      //
+      // It is recorded for the consumers that SHOULD care and currently have no
+      // way to: the Roof Planes sidebar, the planset, and `handleAutoRoof`,
+      // which fills marked faces because nothing tells it not to. Whether it
+      // ought to is a question about PLACEMENT, and is not the renderer's to
+      // answer.
+      if (!fillPanels) (plane as any).markOnly = true;
+
       // `!fillPanels` rather than `planeRendersOutlineOnly` for this ONE call:
       // the face is being created and has no panels yet, so the predicate would
       // draw an outline for the frame before Auto Layout fills it. Every later

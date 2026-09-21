@@ -134,7 +134,16 @@ describe('the routes and the DB layer carry the field through', () => {
     const guard = DB.slice(DB.indexOf('Subsystem-wipe guard'), DB.indexOf('// UPDATE existing layout'));
     expect(guard).toMatch(/archivedPanels/);
     expect(guard).toMatch(/data\.siteArchives/);
-    expect(guard).toMatch(/const incoming = new Set\(\[\.\.\.\(data\.panels \|\| \[\]\), \.\.\.archivedPanels\]/);
+    // 🚨 THIS PINNED THE LINE VERBATIM, DOWN TO `data.panels || []`.
+    // Changing that `||` to `??` — which is the fix for "an omitted panel list
+    // is not a wipe" — broke a test whose own stated subject is archived
+    // panels. A test that pins an expression cannot tell a repair from a
+    // regression; it only reports that the text moved. It asserts the two
+    // properties it actually means now.
+    expect(guard, 'the incoming set must include the archived panels')
+      .toMatch(/new Set\(\[[\s\S]{0,80}?data\.panels[\s\S]{0,80}?archivedPanels\]/);
+    expect(guard, 'an OMITTED panel list is not a wipe — absence must reach the writer')
+      .toMatch(/data\.panels == null \? \[\] :/);
   });
 });
 

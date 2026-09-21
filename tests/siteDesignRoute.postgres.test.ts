@@ -907,6 +907,48 @@ describe('🚨 unplaced panels must not replace a placed design', () => {
     expect(after?.panels?.length, 'omitting panels must keep the stored ones').toBe(3);
   });
 
+  it('🚨 …and it still keeps them on a design big enough to trip the wipe guard', async () => {
+    // 🚨 THE FIXTURE ABOVE CANNOT SHOW THIS, AND I DID NOT NOTICE.
+    // `seedRealDesign` stores THREE panels, and the sub-system wipe guard only
+    // fires at FOUR. So "absence keeps" was proven on the one design size where
+    // the guard could not contradict it — and it did contradict it everywhere
+    // else: the guard read `data.panels || []`, treated an OMITTED list as an
+    // empty one, and threw LAYOUT_SUBSYSTEM_WIPE before the write could keep
+    // anything. The COALESCE was unreachable for every real design.
+    const many = Array.from({ length: 9 }, (_, i) => panel(`big${i}`));
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: many as never, roofPlanes: [plane('rp1', KEY_A)] as never,
+      mapCenter: MELVIN, totalPanels: 9, systemSizeKw: 3.6,
+    } as never);
+    expect((await getLayoutByProject(PROJECT, USER_ID))?.panels?.length,
+      'the fixture must be ABOVE the four-panel threshold or this proves nothing').toBe(9);
+
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof', systemSizeKw: 3.6,
+    } as never);
+    const after = await getLayoutByProject(PROJECT, USER_ID);
+    expect(after?.panels?.length,
+      'a save that says nothing about panels removes nothing — the guard must not ' +
+      'read absence as a wipe',
+    ).toBe(9);
+  });
+
+  it('🚨 but an explicit empty array on a big design is STILL refused', async () => {
+    // Guard against the lazy fix. Making the wipe guard ignore `[]` as well
+    // would satisfy the test above and disarm the protection Ray lost 81
+    // panels to.
+    const many = Array.from({ length: 9 }, (_, i) => panel(`big${i}`));
+    await upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: many as never, mapCenter: MELVIN, totalPanels: 9, systemSizeKw: 3.6,
+    } as never);
+    await expect(upsertLayout({
+      projectId: PROJECT, userId: USER_ID, systemType: 'roof',
+      panels: [] as never, totalPanels: 0, systemSizeKw: 0,
+    } as never)).rejects.toThrow(/LAYOUT_SUBSYSTEM_WIPE/);
+  });
+
   it('a deliberate clear (panels: []) is still allowed through this guard', async () => {
     // `[]` is a decision, not an absence, and it is the sub-system wipe guard's
     // job to judge it — not this one's. Three panels is below that guard's

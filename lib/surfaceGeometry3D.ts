@@ -29,7 +29,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { PlacedPanel, RoofPlane, SolarPanel, PlacedObstruction } from '@/types';
-import { ecefToLatLng, latLngToECEF } from '@/lib/roofPlane3D';
+import { ecefToLatLng, latLngToECEF, SURFACE_OFFSET_M } from '@/lib/roofPlane3D';
 import { moduleStackHeightM } from '@/lib/roofMountDatum';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -345,9 +345,26 @@ export function polygonFromVerticesOnFrame(
   origin: { x: number; y: number; z: number },
   ef: { u: { x:number;y:number;z:number }; v: { x:number;y:number;z:number }; n: { x:number;y:number;z:number } },
 ): Array<{ x: number; y: number; z: number }> {
-  const h0 = ecefToLatLng(origin).height;
+  // 🚨 PUT THE RENDER LIFT BACK, OR THE TWO BRANCHES DISAGREE BY 5 cm IN PLAN.
+  //
+  // `plane.vertices` is the PLAN record and is taken BEFORE `SURFACE_OFFSET_M`
+  // (see `buildRoofPlane3D` — deriving it from lifted points split gable
+  // ridges). `plane.polygon3D` is taken AFTER. So dropping a vertex straight
+  // onto the plane through `origin` reproduces the UNLIFTED plan position,
+  // while a face that still has its `polygon3D` gets the LIFTED one — the same
+  // face, resolved two ways, with outlines offset by `offset·sin(tilt)` = 5.1 cm
+  // and, once the grid snaps to them, panel heights differing by another
+  // `sin(tilt)`: 2.4 cm, measured.
+  //
+  // Small, but it is the same disease as everything else here: one fact, two
+  // answers, differing by a rendering constant. Dropping onto the UNLIFTED
+  // plane and then adding the lift back reconstructs exactly what `polygon3D`
+  // would have been, so the branches agree.
+  const lift = SURFACE_OFFSET_M;
+  const base = { x: origin.x - ef.n.x * lift, y: origin.y - ef.n.y * lift, z: origin.z - ef.n.z * lift };
+  const h0 = ecefToLatLng(base).height;
   const signedDist = (pt: { x: number; y: number; z: number }) =>
-    (pt.x - origin.x) * ef.n.x + (pt.y - origin.y) * ef.n.y + (pt.z - origin.z) * ef.n.z;
+    (pt.x - base.x) * ef.n.x + (pt.y - base.y) * ef.n.y + (pt.z - base.z) * ef.n.z;
 
   return plane.vertices.map(vtx => {
     // 🚨 DROP EACH VERTEX VERTICALLY, NOT ALONG THE NORMAL.
@@ -362,7 +379,8 @@ export function polygonFromVerticesOnFrame(
     // A vertical line parallel to the plane means a wall, not a roof — keep the
     // sample rather than dividing by ~0.
     if (!Number.isFinite(slope) || Math.abs(slope) < 1e-9) return a;
-    return latLngToECEF(vtx.lat, vtx.lng, h0 - fa / slope);
+    const onBase = latLngToECEF(vtx.lat, vtx.lng, h0 - fa / slope);
+    return { x: onBase.x + ef.n.x * lift, y: onBase.y + ef.n.y * lift, z: onBase.z + ef.n.z * lift };
   });
 }
 
