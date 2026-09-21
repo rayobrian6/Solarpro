@@ -9,7 +9,7 @@ RE+ is **2026-11-16** (57 days from 2026-09-20).
 | Name | SHA | What it is |
 |---|---|---|
 | `origin/master` | `5d89d4dc` | **What production runs.** Phase 2 site-ownership merged. Every Workstream 1 fix is still ABSENT here. |
-| `origin/fix/ws1-autolayout-panel-elevation` | `e635e105` | **All of Workstream 1.** Pushed. This is what the findings below describe. |
+| `origin/fix/ws1-autolayout-panel-elevation` | branch head | **All of Workstream 1.** Pushed. This is what the findings below describe. A SHA is deliberately not pinned here: this file is part of the commit, so any SHA written in it is always one commit stale. Test-run SHAs are recorded where a result is quoted. |
 | `origin/fix/phase2-post-merge-regressions` | `e3a60e9a` | PR #19. **A strict SUBSET** — both its commits are ancestors of the branch above. |
 
 > **PR sequencing is not a hazard here.** `git log HEAD..origin/fix/phase2-post-merge-regressions`
