@@ -4811,6 +4811,8 @@ export default function DesignStudio({ project, onSave }: Props) {
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               roofRestoreResolved={roofRestoreResolved}
+
+              nativeDisposition={site.nativeDisposition}
               // 🚨 THIS PROP WAS DECLARED AND NEVER PASSED. Every `[PLANE3D-*]`
               // selection-styling site in the engine compared against
               // `selectedRoofPlaneId`, which no parent has ever supplied, so all
@@ -4879,6 +4881,14 @@ export default function DesignStudio({ project, onSave }: Props) {
                 // and every face of one section is stamped here, by this one
                 // line, so the copies stay in agreement.
                 if (enrichedPlane.section) enrichedPlane.section.siteKey = enrichedPlane.siteKey;
+                // 🚨 BUILDING A SECTION IS A DECISION ABOUT THE PROPERTY.
+                // Somebody modelled this house by hand, so a hand-built model
+                // governs it and automatic native acquisition must stop — on
+                // BOTH doors, including the ungated one Auto Fill used to take.
+                // Recorded from the act itself rather than inferred later from
+                // "there are some manual planes", which is the kind of guess
+                // this whole module exists to replace.
+                if (enrichedPlane.section) site.setNativeDisposition('custom');
                 setRoofPlanes(prev => [...prev, enrichedPlane]);
                 console.log('[DesignStudio] 3D plane added:', enrichedPlane.id,
                   `az=${enrichedPlane.azimuth.toFixed(1)}° tilt=${enrichedPlane.pitch.toFixed(1)}°`);
@@ -6182,10 +6192,28 @@ export default function DesignStudio({ project, onSave }: Props) {
                           </button>
                           <button
                             onClick={() => {
+                              // 🚨 THE REJECTION IS RECORDED, not merely acted on.
+                              //
+                              // This used to clear the planes and nothing else. The empty
+                              // bundle was then PRUNED rather than archived (`hasContent` is
+                              // false for it), so the rejection erased itself — and the next
+                              // 2D map pan of ~12 m produced a new site key, satisfied every
+                              // condition in shouldRunLaneA, and re-injected the exact planes
+                              // that had just been rejected. Pressing Auto Fill did the same
+                              // through a second, entirely ungated door.
+                              //
+                              // "I looked at this and it is not good enough to design on" is
+                              // a decision about a PROPERTY. It outlives the geometry it was
+                              // a decision about, so it is stored by siteKey, not inferred
+                              // from an empty array.
+                              site.setNativeDisposition('rejected');
                               setRoofPlanes([]);
                               setSolarApiStatus('idle');
                               setDrawingMode('draw_roof');
-                              toast.info('✏️ Draw mode activated', 'Use R key or toolbar to draw each roof plane');
+                              toast.info(
+                                '✏️ Draw mode activated',
+                                'Google 3D is now marked as not governing this property, so it will not be re-detected. Use R or the toolbar to draw each roof plane.',
+                              );
                             }}
                             className="w-full mt-1.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 font-medium rounded-lg text-xs transition-colors"
                           >

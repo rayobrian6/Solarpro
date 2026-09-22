@@ -119,6 +119,7 @@ export type SectionRefusalCode =
   | 'FOOTPRINT_TOO_FEW_POINTS'
   | 'FOOTPRINT_DEGENERATE'
   | 'RIDGED_ROOF_NEEDS_FOUR_CORNERS'
+  | 'FOOTPRINT_SELF_INTERSECTING'
   | 'PITCH_OUT_OF_RANGE'
   | 'EAVE_HEIGHT_INVALID'
   | 'GROUND_ELEV_INVALID'
@@ -213,6 +214,67 @@ function distLocal(a: LocalPt, b: LocalPt): number {
   return Math.hypot(a.e - b.e, a.n - b.n);
 }
 
+/** Do the open segments a-b and c-d cross? Endpoint contact does not count —
+ *  adjacent edges of a ring always share one. */
+function segmentsCross(a: LocalPt, b: LocalPt, c: LocalPt, d: LocalPt): boolean {
+  const cross = (p: LocalPt, q: LocalPt, r: LocalPt) =>
+    (q.e - p.e) * (r.n - p.n) - (q.n - p.n) * (r.e - p.e);
+  const d1 = cross(c, d, a), d2 = cross(c, d, b);
+  const d3 = cross(a, b, c), d4 = cross(a, b, d);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0))
+      && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+/**
+ * Pitch and azimuth of a face, measured in the LOCAL GEODETIC tangent frame.
+ *
+ * 🚨 WHY NOT USE THE FITTED NORMAL. `buildRoofPlane3D` derives pitch from the
+ * angle between the face normal and the ECEF position vector — the GEOCENTRIC
+ * vertical. On an oblate Earth that differs from the true local vertical by up
+ * to 0.1924°, varying as sin(2·latitude). The consequence is measurable and
+ * wrong in a way that looks like a bug in the tool: a PERFECTLY SYMMETRIC gable
+ * at 38.67°N asking for 30° reports its two halves as 30.256° and 29.880° —
+ * a 0.376° disagreement, which is exactly 2 × 0.1924° × sin(2φ).
+ *
+ * That matters. `roofPlanes[0].pitch` is the array tilt PVWatts uses, so which
+ * half of a symmetric roof happens to sort first changed the production
+ * estimate; and a permit drawing that gives two different pitches for one gable
+ * is a drawing an engineer has to question.
+ *
+ * Measured here instead, from the corner heights this module computed itself,
+ * in the same local ENU frame it laid the face out in. Exact for a planar face,
+ * which every section face is by construction. The 3D geometry is untouched —
+ * only the REPORTED orientation, which is what the structural, production and
+ * permit consumers read.
+ */
+function faceOrientationLocal(
+  outline: readonly LatLng[],
+  heightsM: readonly number[],
+  f: LocalFrame,
+): { pitchDeg: number; azimuthDeg: number } | null {
+  if (outline.length < 3) return null;
+  const pts = outline.map((v, i) => ({ ...toLocal(v, f), h: heightsM[i] }));
+  // Least-squares fit of h = A·e + B·n + C. Exact for coplanar input.
+  let See = 0, Snn = 0, Sen = 0, Seh = 0, Snh = 0;
+  const mE = pts.reduce((s, p) => s + p.e, 0) / pts.length;
+  const mN = pts.reduce((s, p) => s + p.n, 0) / pts.length;
+  const mH = pts.reduce((s, p) => s + p.h, 0) / pts.length;
+  for (const p of pts) {
+    const de = p.e - mE, dn = p.n - mN, dh = p.h - mH;
+    See += de * de; Snn += dn * dn; Sen += de * dn; Seh += de * dh; Snh += dn * dh;
+  }
+  const det = See * Snn - Sen * Sen;
+  if (!(Math.abs(det) > 1e-9)) return null;
+  const A = (Seh * Snn - Snh * Sen) / det;   // dh/de
+  const B = (Snh * See - Seh * Sen) / det;   // dh/dn
+  const slope = Math.hypot(A, B);
+  // Downslope is the direction of steepest DESCENT: -(A, B) in (east, north).
+  const azimuthDeg = slope > 1e-12
+    ? ((Math.atan2(-A, -B) * 180 / Math.PI) % 360 + 360) % 360
+    : 180;
+  return { pitchDeg: Math.atan(slope) * 180 / Math.PI, azimuthDeg };
+}
+
 /** Perpendicular distance from point `p` to the infinite line through a and b. */
 function perpDistance(p: LocalPt, a: LocalPt, b: LocalPt): number {
   const de = b.e - a.e, dn = b.n - a.n;
@@ -288,6 +350,30 @@ export function validateSection(section: BuildingSection): SectionRefusal[] {
   }
   if (!(longest > MIN_SECTION_EDGE_M)) {
     add('FOOTPRINT_DEGENERATE', 'That footprint is smaller than half a metre across.');
+  }
+
+  // 🚨 A QUADRILATERAL IS NOT NECESSARILY A SIMPLE ONE, and the difference is
+  // silent and severe. Clicking the corners in reading order — NW, NE, SW, SE —
+  // is the natural mis-click, and the ring it produces is a bow-tie. Measured on
+  // a 12 x 8 m rectangle at 38.67°N asking for 30°: the correct trace gives
+  // 110.77 m² at 30.3°/29.9°; the bow-tie gives 69.19 m² at 60°/60° — 38% less
+  // roof, more than double the pitch, azimuths 53° out — and came back
+  // `ok: true` with no refusal at all. That flows into the panel grid, the array
+  // tilt PVWatts reads, the BOM and the permit drawing.
+  for (let i = 0; i < loc.length; i++) {
+    for (let j = i + 2; j < loc.length; j++) {
+      if (i === 0 && j === loc.length - 1) continue;   // adjacent through the wrap
+      if (segmentsCross(loc[i], loc[(i + 1) % loc.length], loc[j], loc[(j + 1) % loc.length])) {
+        add(
+          'FOOTPRINT_SELF_INTERSECTING',
+          'Those corners cross over each other, so they do not enclose a building. ' +
+          'Click them IN ORDER around the outside of the footprint rather than ' +
+          'left-to-right, top-to-bottom.',
+        );
+        i = loc.length; // one refusal is enough; the advice is the same for all
+        break;
+      }
+    }
   }
 
   if (section.kind !== 'flat') {
@@ -497,6 +583,21 @@ export function buildSectionRoofPlanes(section: BuildingSection): SectionPlanOut
     }
 
     const plane = built.plane;
+
+    // 🚨 ORIENTATION IS MEASURED AGAINST THE LOCAL GEODETIC VERTICAL, not the
+    // geocentric one the ECEF fit uses. See `faceOrientationLocal`: without
+    // this, a perfectly symmetric gable reports its two halves 0.376° apart at
+    // this latitude and neither equals what the installer typed. Decks are left
+    // alone — `roofPlaneFromFootprint` already pins them to the requested
+    // values, because a flat roof has no geometric azimuth to measure.
+    if (face.key !== 'deck') {
+      const o = faceOrientationLocal(face.outline, face.heightsM, localFrame(section.footprint));
+      if (o) {
+        plane.pitch = clampPitch(o.pitchDeg);
+        plane.azimuth = normalizeAzimuth(o.azimuthDeg);
+      }
+    }
+
     // 🚨 THE FACE ID IS THE SECTION'S, NOT THE FITTER'S. buildRoofPlane3D mints
     // a fresh id every call; keeping it would orphan every panel on this face
     // the moment the installer nudged the eave height.

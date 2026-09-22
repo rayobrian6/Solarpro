@@ -76,10 +76,65 @@ describe('create → save → reload → the same design', () => {
     expect(reloaded.standaloneFaceIds).toEqual([]);
     expect(reloaded.sections.map(s => s.id).sort()).toEqual(['sec-garage', 'sec-house']);
 
-    // Not merely present — IDENTICAL, field for field, including the label the
-    // installer typed and the footprint they traced.
+    // 🚨 ASSERTED AGAINST A LITERAL, NOT AGAINST `sectionRecord(house())`.
+    //
+    // The first version of this test compared the reloaded section to
+    // `sectionRecord(house())` — the function under test used as its own
+    // oracle. Any field `sectionRecord` forgot to copy was dropped from BOTH
+    // sides, so the comparison passed while the field was silently lost. An
+    // adversarial pass deleted `ridgeAxis` from the copier and this test did
+    // not notice; on reload a cross-gable's ridge rotated 90 degrees.
+    //
+    // Every field is named here, by hand, on purpose. When the record grows a
+    // field this test must be edited — that is the point.
     const back = reloaded.sections.find(s => s.id === 'sec-house')!;
-    expect(back).toEqual(sectionRecord(house()));
+    expect(back).toEqual({
+      id: 'sec-house',
+      kind: 'gable',
+      footprint: rect(14, 9, 30),
+      eaveHeightM: 3,
+      pitchDeg: 30,
+      groundElevM: 140,
+      shedAzimuthDeg: null,
+      ridgeAxis: 'auto',
+      siteKey: 'site-1',
+      label: 'House',
+      createdAtIso: '2026-09-21T00:00:00.000Z',
+      source: 'user-traced',
+    });
+  });
+
+  it('🚨 EVERY field of the record survives — one assertion per field', () => {
+    // The literal above proves the default case. This proves that each field
+    // individually round-trips a NON-default value, so a copier that drops one
+    // cannot hide behind the others agreeing.
+    const cases: Array<[string, Partial<BuildingSection>, (s: BuildingSection) => unknown, unknown]> = [
+      ['kind',           { kind: 'hip' },                    s => s.kind, 'hip'],
+      ['eaveHeightM',    { eaveHeightM: 4.25 },              s => s.eaveHeightM, 4.25],
+      ['pitchDeg',       { pitchDeg: 38 },                   s => s.pitchDeg, 38],
+      ['groundElevM',    { groundElevM: 212.5 },             s => s.groundElevM, 212.5],
+      ['ridgeAxis',      { ridgeAxis: 'short' },             s => s.ridgeAxis, 'short'],
+      ['label',          { label: 'Rear addition' },         s => s.label, 'Rear addition'],
+      ['siteKey',        { siteKey: 'site-zzz' },            s => s.siteKey, 'site-zzz'],
+      ['createdAtIso',   { createdAtIso: '2020-01-02T03:04:05.000Z' }, s => s.createdAtIso, '2020-01-02T03:04:05.000Z'],
+      ['shedAzimuthDeg', { kind: 'shed', shedAzimuthDeg: 95 }, s => s.shedAzimuthDeg, 95],
+    ];
+    for (const [name, over, read, want] of cases) {
+      const planes = throughDb(buildSectionRoofPlanes(house(over)).planes);
+      const back = sectionsFromPlanes(planes).sections[0];
+      expect(back, `${name}: no section came back`).toBeTruthy();
+      expect(read(back), `${name} did not survive the round trip`).toEqual(want);
+    }
+  });
+
+  it('the footprint survives corner for corner, not just in shape', () => {
+    const fp = rect(14, 9, 30);
+    const back = sectionsFromPlanes(throughDb(buildSectionRoofPlanes(house({ footprint: fp })).planes)).sections[0];
+    expect(back.footprint).toHaveLength(4);
+    for (let i = 0; i < 4; i++) {
+      expect(back.footprint[i].lat).toBeCloseTo(fp[i].lat, 12);
+      expect(back.footprint[i].lng).toBeCloseTo(fp[i].lng, 12);
+    }
   });
 
   it('rebuilding from the reloaded record reproduces the same faces', () => {

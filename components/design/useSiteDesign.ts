@@ -34,6 +34,11 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  dispositionFor,
+  withDisposition,
+  type NativeGeometryDisposition,
+} from '@/lib/design/nativeGeometryDisposition';
 import type { PlacedPanel, RoofPlane, PlacedObstruction, LayoutMeasurement, DesignElectrical } from '@/types';
 import {
   type SiteDesignBundle,
@@ -123,6 +128,16 @@ export interface UseSiteDesign {
   scope: () => SiteScope;
   isCurrent: (s: SiteScope | null | undefined) => boolean;
 
+  /** What the installer has decided about THIS property's native (Google)
+   *  geometry. See lib/design/nativeGeometryDisposition.ts. Read as a ref so
+   *  the Lane A gate, which fires from inside a resolved promise, sees the
+   *  decision that exists NOW rather than the one captured when it was
+   *  scheduled. */
+  nativeDisposition: NativeGeometryDisposition;
+  nativeDispositionRef: React.MutableRefObject<NativeGeometryDisposition>;
+  /** Record a decision about the ACTIVE property. */
+  setNativeDisposition: (d: NativeGeometryDisposition) => void;
+
   /** Test/diagnostic view of the whole state. Not for production branching. */
   stateRef: React.MutableRefObject<SiteDesignState>;
 }
@@ -141,6 +156,7 @@ export function useSiteDesign(): UseSiteDesign {
   const measurementsRef = useRef<LayoutMeasurement[]>([]);
   const activeSiteKeyRef = useRef<string>(UNRESOLVED_SITE_KEY);
   const stateRef = useRef<SiteDesignState>(emptyState());
+  const nativeDispositionRef = useRef<NativeGeometryDisposition>('undecided');
   const epochRef = useRef(0);
 
   /** One setter factory. The ref is written first and synchronously, so any
@@ -281,6 +297,29 @@ export function useSiteDesign(): UseSiteDesign {
     };
   }, [archiveTick]);
 
+  // Derived from the state, per ACTIVE property. Recomputed when the archive
+  // moves (which is when the active property changes) so switching house and
+  // back shows that property's decision, not the other one's.
+  const nativeDisposition = useMemo(() => {
+    void archiveTick;
+    const d = dispositionFor(stateRef.current.nativeGeometry, activeSiteKey);
+    nativeDispositionRef.current = d;
+    return d;
+  }, [archiveTick, activeSiteKey]);
+
+  const setNativeDisposition = useCallback((d: NativeGeometryDisposition) => {
+    // 🚨 KEYED BY SITE, like ownership. A judgement is about a PROPERTY, so
+    // going to the neighbour's house and back must not lose it.
+    stateRef.current = {
+      ...stateRef.current,
+      nativeGeometry: withDisposition(stateRef.current.nativeGeometry, activeSiteKeyRef.current, d),
+    };
+    nativeDispositionRef.current = d;
+    // Moves `archivesSignature`, so the autosave actually writes it. Without
+    // the tick the decision would live in a ref nothing re-reads.
+    setArchiveTick(t => t + 1);
+  }, []);
+
   return {
     panels, setPanels,
     roofPlanes, setRoofPlanes,
@@ -292,6 +331,7 @@ export function useSiteDesign(): UseSiteDesign {
     switchToSite, hydrateFromStored, resolveKeyFor,
     persistencePayload, storedArchives,
     scope, isCurrent,
+    nativeDisposition, nativeDispositionRef, setNativeDisposition,
     stateRef,
   };
 }

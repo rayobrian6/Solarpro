@@ -7,6 +7,8 @@
 // the decision, so the proof is a difference in behaviour rather than a claim.
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   NATIVE_GEOMETRY_DISPOSITIONS,
@@ -22,6 +24,7 @@ import {
 } from '@/lib/design/nativeGeometryDisposition';
 import { shouldRunLaneA, type LaneAGateInput } from '@/lib/3d/laneA';
 import {
+  archivesSignature,
   emptyState,
   parseStoredArchives,
   toPersistencePayload,
@@ -214,6 +217,103 @@ describe('🚨 the decision survives the database, including for the ACTIVE prop
     // map has to be written as {} rather than omitted.
     const payload = toPersistencePayload(emptyState('site-active'));
     expect(payload.siteArchives.nativeGeometry).toEqual({});
+  });
+});
+
+describe('🚨 THE DECISION IS REACHABLE IN PRODUCTION — it is not decoration', () => {
+  // An adversarial pass found the first version of this feature was inert in
+  // FOUR independent ways at once: nothing wrote a decision, the gate literal
+  // did not pass one so `shouldRunLaneA` always saw 'undecided', every
+  // hydrate/switchSite path dropped the map so the next save wrote {} over a
+  // stored rejection, and `archivesSignature` did not sign it so a write could
+  // never have scheduled that save anyway. Each leg alone makes the other three
+  // pointless, so each is asserted separately.
+  const STUDIO = readFileSync(join(process.cwd(), 'components/design/DesignStudio.tsx'), 'utf8');
+  const HOOK = readFileSync(join(process.cwd(), 'components/design/useSiteDesign.ts'), 'utf8');
+  const ENGINE = readFileSync(join(process.cwd(), 'components/3d/SolarEngine3D.tsx'), 'utf8');
+  const MODEL = readFileSync(join(process.cwd(), 'lib/design/siteDesignModel.ts'), 'utf8');
+
+  it('LEG 1 — something WRITES it: rejecting the Google roof records the rejection', () => {
+    expect(HOOK).toMatch(/const setNativeDisposition = useCallback/);
+    expect(HOOK).toMatch(/withDisposition\(stateRef\.current\.nativeGeometry, activeSiteKeyRef\.current, d\)/);
+    // "Draw Manually Instead" — the gesture that used to erase itself.
+    //
+    // 🚨 SLICED FORWARD FROM THE CALL, not backward from the label. The first
+    // version searched backward from `indexOf('Draw Manually Instead')`, and
+    // that phrase also appears in a COMMENT 5,000 lines earlier — so the slice
+    // came out empty and the assertions below would have passed vacuously had
+    // the positive control not caught it.
+    const at = STUDIO.indexOf("site.setNativeDisposition('rejected')");
+    expect(at, 'positive control: the write was not found at all').toBeGreaterThan(-1);
+    const btn = STUDIO.slice(at, at + 1200);
+    expect(btn, 'the rejection must clear the planes too').toMatch(/setRoofPlanes\(\[\]\)/);
+    expect(btn, 'positive control: this really is that button')
+      .toMatch(/Draw Manually Instead/);
+  });
+
+  it('LEG 1b — building a section records that a hand-built model governs', () => {
+    expect(STUDIO).toMatch(/if \(enrichedPlane\.section\) site\.setNativeDisposition\('custom'\)/);
+  });
+
+  it('LEG 2 — the GATE reads it, on the path that runs Lane A', () => {
+    const gate = ENGINE.slice(
+      ENGINE.indexOf('const gate: LaneAGateInput = {'),
+      ENGINE.indexOf('if (!shouldRunLaneA(gate))'),
+    );
+    expect(gate.length, 'positive control: the gate literal was found').toBeGreaterThan(200);
+    expect(gate).toMatch(/nativeDisposition:/);
+  });
+
+  it('🚨 LEG 2b — AND on the SECOND acquisition path, which had no gate at all', () => {
+    // `handleAutoRoof` called `detectPlanesFromTwin` directly — no stage check,
+    // no restore check, no plane count, no run-once guard — and fired precisely
+    // when `eligiblePlanes.length === 0`, which is the state a rejection leaves
+    // behind. Pressing Auto Fill re-injected the rejected roof.
+    const auto = ENGINE.slice(
+      ENGINE.indexOf('if (eligiblePlanes.length === 0) {'),
+      ENGINE.indexOf("addLog('AUTO', 'handleAutoRoof: no drawn planes AND no Solar segments')"),
+    );
+    expect(auto.length, 'positive control: the branch was found').toBeGreaterThan(200);
+    expect(auto).toMatch(/nativeAcquisitionPermitted\(/);
+    // The refusal must come BEFORE the detection, not after it.
+    expect(auto.indexOf('nativeAcquisitionPermitted('))
+      .toBeLessThan(auto.indexOf("detectPlanesFromTwin('handleAutoRoof')"));
+  });
+
+  it('LEG 3 — every state literal carries it, so reload and A→B→A keep it', () => {
+    // A literal that builds a SiteDesignState without it silently resets the
+    // decision, and `toPersistencePayload`'s `?? {}` then writes the reset back.
+    const literals = MODEL.match(/version: SITE_ARCHIVE_VERSION,/g) ?? [];
+    expect(literals.length, 'positive control: state literals exist').toBeGreaterThan(5);
+    let missing = 0;
+    let idx = MODEL.indexOf('version: SITE_ARCHIVE_VERSION,');
+    while (idx >= 0) {
+      if (!MODEL.slice(idx, idx + 700).includes('nativeGeometry')) missing++;
+      idx = MODEL.indexOf('version: SITE_ARCHIVE_VERSION,', idx + 1);
+    }
+    expect(missing, 'a state literal drops the provider decision').toBe(0);
+  });
+
+  it('LEG 4 — it is SIGNED, so recording it actually schedules a save', () => {
+    const sig = MODEL.slice(
+      MODEL.indexOf('export function archivesSignature('),
+      MODEL.indexOf('function signableElectrical('),
+    );
+    expect(sig.length, 'positive control: archivesSignature was found').toBeGreaterThan(200);
+    expect(sig).toMatch(/nativeGeometry/);
+  });
+
+  it('…and the signature genuinely moves when a decision is recorded', () => {
+    // The behavioural form of LEG 4. A structural match on the word proves the
+    // field is mentioned; this proves the string changes.
+    const base = { version: 1 as const, activeSiteKey: 'a', sites: {} };
+    const a = archivesSignature({ ...base, nativeGeometry: {} });
+    const b = archivesSignature({ ...base, nativeGeometry: { a: 'rejected' } });
+    const c = archivesSignature({ ...base, nativeGeometry: { a: 'custom' } });
+    expect(a).not.toBe(b);
+    expect(b).not.toBe(c);
+    // …and does NOT move when nothing changed.
+    expect(archivesSignature({ ...base, nativeGeometry: { a: 'rejected' } })).toBe(b);
   });
 });
 

@@ -187,24 +187,51 @@ describe('DEFECT 4 — faces built independently do not share a ridge', () => {
   });
 
   it('THE NEW PATH: the ridge is one line at one height, whatever the trace', () => {
-    // Deliberately asymmetric: a trapezoid, not a rectangle.
+    // 🚨 THIS TEST USED TO PROVE THE RIGHT THING FOR THE WRONG REASON.
+    //
+    // It traced a near-symmetric trapezoid and asserted the two slopes differed
+    // by more than 0.5°, calling that "a saltbox, correctly reported". The
+    // difference it was measuring was 0.376° of GEOCENTRIC-vertical error —
+    // the datum artifact, present on every gable including a perfect
+    // rectangle — not asymmetry. Fixing the datum dropped that shape to 0.014°
+    // and this assertion failed, which is how the confusion surfaced.
+    //
+    // Measured at 38.7°N asking 30°, after the datum fix:
+    //   parallelogram, any rotation   → 30.000 / 30.000   (exactly as asked)
+    //   the old "trapezoid"           → 28.751 / 28.765   (0.014° — symmetric)
+    //   a genuinely skewed quad       → 23.084 / 24.942   (1.86° apart)
     const skewed: LatLng[] = [
       { lat: C_LAT, lng: C_LNG },
-      { lat: C_LAT, lng: C_LNG + 14 / M_PER_DEG_LNG },
-      { lat: C_LAT + 11 / M_PER_DEG_LAT, lng: C_LNG + 12 / M_PER_DEG_LNG },
-      { lat: C_LAT + 7 / M_PER_DEG_LAT, lng: C_LNG },
+      { lat: C_LAT, lng: C_LNG + 16 / M_PER_DEG_LNG },
+      { lat: C_LAT + 4 / M_PER_DEG_LAT, lng: C_LNG + 16 / M_PER_DEG_LNG },
+      { lat: C_LAT + 14 / M_PER_DEG_LAT, lng: C_LNG },
     ];
     const out = buildSectionRoofPlanes(section({ footprint: skewed }));
     expect(out.refusals).toEqual([]);
     expect(out.ridgeHeightM).not.toBeNull();
-    // One ridge height for the section, and both faces were lifted to it.
+
+    // THE INVARIANT: one ridge height for the section, and both faces lifted to it.
     const tops = out.faces.map(f => Math.max(...f.heightsM));
     for (const t of tops) expect(t).toBeCloseTo(out.ridgeHeightM!, 9);
-    // …and the honest consequence: the two slopes have DIFFERENT fitted
-    // pitches, because the trace is asymmetric. That is a saltbox, correctly
-    // reported, rather than a roof forced to close by moving traced corners.
+
+    // THE HONEST CONSEQUENCE: a genuinely asymmetric trace gives genuinely
+    // different pitches, because the roof closes on one ridge rather than being
+    // forced shut by moving the corners somebody traced.
     const pitches = out.planes.map(p => p.pitch);
-    expect(Math.abs(pitches[0] - pitches[1])).toBeGreaterThan(0.5);
+    expect(Math.abs(pitches[0] - pitches[1])).toBeGreaterThan(1.0);
+  });
+
+  it('…while a SYMMETRIC trace gives exactly the pitch that was asked for', () => {
+    // The control for the test above. If this ever drifts off 30, the number
+    // above stops meaning "asymmetry" and starts meaning "error" again.
+    const para: LatLng[] = [
+      { lat: C_LAT, lng: C_LNG },
+      { lat: C_LAT, lng: C_LNG + 14 / M_PER_DEG_LNG },
+      { lat: C_LAT + 9 / M_PER_DEG_LAT, lng: C_LNG + 17 / M_PER_DEG_LNG },
+      { lat: C_LAT + 9 / M_PER_DEG_LAT, lng: C_LNG + 3 / M_PER_DEG_LNG },
+    ];
+    const out = buildSectionRoofPlanes(section({ footprint: para, pitchDeg: 30 }));
+    for (const p of out.planes) expect(p.pitch).toBeCloseTo(30, 3);
   });
 });
 

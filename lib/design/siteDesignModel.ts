@@ -464,6 +464,10 @@ export function switchSite(
       activeSiteKey: toKey,
       active: { ...arriving, address: opts?.address ?? arriving.address ?? null, mapCenter: opts?.mapCenter ?? arriving.mapCenter ?? null },
       archives,
+      // Carried whole. Switching property moves BUNDLES; it does not revisit a
+      // judgement about either property, and losing the judgement on the way
+      // out and back is exactly the A -> B -> A failure this is keyed to avoid.
+      nativeGeometry: state.nativeGeometry ?? {},
     },
     arriving: { ...arriving, address: opts?.address ?? arriving.address ?? null, mapCenter: opts?.mapCenter ?? arriving.mapCenter ?? null },
     archived: leaving,
@@ -680,7 +684,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
 
   if (!siteKeyNow) {
     return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: UNRESOLVED_SITE_KEY, active: storedActive, archives: parseStoredArchives(stored?.siteArchives)?.sites ?? {} },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: UNRESOLVED_SITE_KEY, active: storedActive, archives: parseStoredArchives(stored?.siteArchives)?.sites ?? {}, nativeGeometry: parseStoredArchives(stored?.siteArchives)?.nativeGeometry ?? {} },
       disposition: 'unresolved',
       needsAdoptionSave: false,
     };
@@ -699,7 +703,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     const { active: mine, foreign } = partitionBySite(planes as Array<RoofPlane & SiteOwned>, siteKeyNow);
     if (foreign.length === 0) {
       return {
-        state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: {} },
+        state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: {}, nativeGeometry: parseStoredArchives(stored?.siteArchives)?.nativeGeometry ?? {} },
         disposition: 'adopted-legacy',
         needsAdoptionSave: true,
       };
@@ -715,6 +719,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
         activeSiteKey: siteKeyNow,
         active: { ...storedActive, roofPlanes: mine },
         archives,
+        nativeGeometry: parsed?.nativeGeometry ?? {},
       },
       disposition: 'adopted-legacy',
       needsAdoptionSave: true,
@@ -730,7 +735,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
   // absence of a claim. Same doctrine as a legacy row: adopt.
   if (!parsed.activeSiteKey) {
     return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: parsed.sites },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {} },
       disposition: 'adopted-legacy',
       needsAdoptionSave: true,
     };
@@ -757,7 +762,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
   // property change. Nothing to reactivate, nothing to archive.
   if (sitesAreSameProperty(parsed.activeSiteKey, siteKeyNow)) {
     return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {} },
       disposition: 'matched',
       needsAdoptionSave: false,
     };
@@ -782,7 +787,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     return {
       // Keep the key the archive was filed under: plane stamps and archive keys
       // must stay in step.
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: mineKey, active: mine, archives },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: mineKey, active: mine, archives, nativeGeometry: parsed?.nativeGeometry ?? {} },
       disposition: 'reactivated-archive',
       needsAdoptionSave: true,
     };
@@ -824,7 +829,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
   // through Pick House, which still decides by proximity — from a point the user
   // actually clicked.
   return {
-    state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites },
+    state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {} },
     disposition: 'matched',
     needsAdoptionSave: false,
   };
@@ -847,8 +852,17 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
 export function archivesSignature(a: StoredSiteArchives | null | undefined): string {
   if (!a) return 'null';
   const keys = Object.keys(a.sites ?? {}).sort();
+  // 🚨 THE PROVIDER DECISION IS SIGNED. Rejecting a bad Google roof changes no
+  // ENTITY — it is a judgement about a property, and the bundle it was a
+  // judgement about is typically empty by then. An unsigned field never
+  // schedules a save, so without this the rejection would be recorded in memory
+  // and never reach the database, which is indistinguishable from not recording
+  // it at all.
+  const decisions = Object.keys(a.nativeGeometry ?? {}).sort()
+    .map(k => [k, a.nativeGeometry![k]]);
   return JSON.stringify([
     a.activeSiteKey ?? '',
+    decisions,
     keys.map(k => [
       k,
       SITE_BOUND_ENTITY_KEYS.map(e => a.sites[k]?.[e] ?? []),

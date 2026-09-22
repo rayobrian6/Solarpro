@@ -59,6 +59,10 @@ import {
   type Plane3DFrame,
 } from '@/lib/roofPlane3D';
 import { buildSectionRoofPlanes } from '@/lib/3d/buildingSection';
+import {
+  nativeAcquisitionPermitted,
+  type NativeGeometryDisposition,
+} from '@/lib/design/nativeGeometryDisposition';
 // v66: Aurora-style 2D → 3D. Builds a pitched roof face from a flat traced
 // outline plus pitch + azimuth, for addresses with no Photorealistic 3D Tiles.
 import { roofPlaneFromFootprint, roofPlaneFromFootprintAndRidge } from '@/lib/3d/footprintToRoofPlane';
@@ -488,6 +492,15 @@ interface Props {
    *  Planes arrive source:'solar_api', confirmed:false — they are a detection,
    *  not a person's decision, so they route through operator review. */
   onRoofPlanesDetected?: (planes: import('@/types').RoofPlane[]) => void;
+  /**
+   * 🚨 WHICH GEOMETRY GOVERNS THIS PROPERTY. See lib/design/nativeGeometryDisposition.ts.
+   *
+   * Both native-acquisition paths refuse when this says a human has decided
+   * against it (rejected / custom). Optional and defaulting to 'undecided',
+   * so a caller that does not pass it behaves exactly as before — which is
+   * also the correct reading for a project nobody has judged.
+   */
+  nativeDisposition?: NativeGeometryDisposition;
   /** 🚨 LANE A GATE. True once DesignStudio's DB restore has RESOLVED — i.e. the
    *  stored layout is in state, or the read genuinely returned nothing. Lane A
    *  refuses to run while this is false, because detection lands in React state
@@ -995,6 +1008,7 @@ function SolarEngine3D({
   onTwinLoaded, onError, onLocationPick,
   onRoofPlaneCreated,
   onRoofPlanesDetected,
+  nativeDisposition = 'undecided',
   roofRestoreResolved = false,
   onObstructionsChange,
   onMeasurementsChange,
@@ -11486,6 +11500,10 @@ function SolarEngine3D({
       restoreResolved: roofRestoreResolvedRef.current,
       siteKey,
       lastRanSiteKey: laneARanForRef.current,
+      // 🚨 THE DECISION, READ FROM A PROP AT FIRE TIME. Without this the gate
+      // always saw 'undecided' and the refusal in shouldRunLaneA could never
+      // fire in production — the rule existed and was unreachable.
+      nativeDisposition: nativeDisposition ?? 'undecided',
     };
     if (!shouldRunLaneA(gate)) {
       addLog('AUTO', `LaneA(${why}): refused — ${JSON.stringify(gate)}`);
@@ -11578,8 +11596,21 @@ function SolarEngine3D({
     // covered address, no tracing. (Previous attempt used the gappy/staggered
     // fillRoofSegmentWithPanels engine — wrong engine.)
     if (eligiblePlanes.length === 0) {
-      const detected = detectPlanesFromTwin('handleAutoRoof');
-      if (detected.length > 0) eligiblePlanes = detected;
+      // 🚨 THE SECOND ACQUISITION DOOR. This calls detectPlanesFromTwin
+      // DIRECTLY, bypassing shouldRunLaneA entirely — no stage check, no
+      // restore check, no plane count, no run-once guard. And it fires in
+      // precisely the state a rejection leaves behind (`eligiblePlanes` empty),
+      // so pressing Auto Fill after 'Draw Manually Instead' re-injected the
+      // exact Google roof that had just been rejected, and the autosave
+      // persisted it. One gate on native acquisition, not one gated path and
+      // one ungated one.
+      if (!nativeAcquisitionPermitted(nativeDisposition ?? 'undecided')) {
+        setStatusMsg('Auto Fill did not re-detect the roof — Google 3D is marked as not governing this property. Model the roof, or change that decision first.');
+        addLog('AUTO', `handleAutoRoof: native acquisition refused (${nativeDisposition})`);
+      } else {
+        const detected = detectPlanesFromTwin('handleAutoRoof');
+        if (detected.length > 0) eligiblePlanes = detected;
+      }
     }
 
     if (eligiblePlanes.length === 0) {

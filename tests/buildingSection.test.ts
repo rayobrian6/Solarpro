@@ -203,6 +203,35 @@ describe('🚨 one ridge at one height', () => {
     for (const p of pitches) expect(p).toBeCloseTo(30, 0);
   });
 
+  it('🚨 a SYMMETRIC gable reports the SAME pitch on both halves, and it is the one asked for', () => {
+    // 🚨 THE GEODETIC-vs-GEOCENTRIC DEFECT. `buildRoofPlane3D` measures pitch
+    // against the ECEF position vector — the GEOCENTRIC vertical — which on an
+    // oblate Earth differs from true local up by up to 0.1924°, as sin(2φ).
+    // Measured at 38.6657°N asking 30°, before this was fixed: 30.256° and
+    // 29.880°. Neither is 30, they disagree by 0.376°, and 0.376 is exactly
+    // 2 × 0.1924 × sin(2 × 38.6657°). `roofPlanes[0].pitch` is the array tilt
+    // PVWatts reads, so which half sorted first changed the production estimate.
+    for (const bearing of [0, 30, 45, 90, 137]) {
+      const out = buildSectionRoofPlanes(section({ footprint: rotatedRect(14, 9, bearing), pitchDeg: 30 }));
+      const [a, b] = out.planes.map(p => p.pitch);
+      expect(Math.abs(a - b), `bearing ${bearing}: the halves disagree`).toBeLessThan(0.01);
+      expect(a, `bearing ${bearing}: not the pitch asked for`).toBeCloseTo(30, 3);
+    }
+  });
+
+  it('🚨 all FOUR faces of a hip report the same pitch, 90° apart', () => {
+    const out = buildSectionRoofPlanes(section({ kind: 'hip', footprint: rotatedRect(14, 9, 0) }));
+    for (const p of out.planes) expect(p.pitch).toBeCloseTo(30, 3);
+    expect(out.planes.map(p => Math.round(p.azimuth)).sort((x, y) => x - y)).toEqual([0, 90, 180, 270]);
+  });
+
+  it('the reported pitch tracks what was asked across the range', () => {
+    for (const want of [0, 5, 18.43, 22, 26.57, 33.69, 45, 60]) {
+      const out = buildSectionRoofPlanes(section({ pitchDeg: want }));
+      for (const p of out.planes) expect(p.pitch, `asked ${want}`).toBeCloseTo(want, 3);
+    }
+  });
+
   it('ridge height follows the pitch and the span, not a constant', () => {
     // 8 m wide ⇒ half-span 4 m ⇒ rise = 4·tan(pitch).
     expect(sectionRidgeHeightM(section({ pitchDeg: 0 }))!).toBeCloseTo(3, 6);
@@ -302,6 +331,57 @@ describe('🚨 it refuses rather than approximating', () => {
     expect(codes).toContain('RIDGED_ROOF_NEEDS_FOUR_CORNERS');
     expect(codes).toContain('PITCH_OUT_OF_RANGE');
     expect(codes).toContain('EAVE_HEIGHT_INVALID');
+  });
+
+  it('🚨 a BOW-TIE footprint is refused — four corners is not enough', () => {
+    // Clicking the corners in READING order (NW, NE, SW, SE) is the natural
+    // mis-click, and it produces a quadrilateral that is not a simple polygon.
+    // Measured before this refusal existed, on a 12x8 m rectangle asking 30°:
+    //   correct trace : ok, 110.77 m², pitches 30.3 / 29.9, azimuths 0 / 180
+    //   bow-tie       : ok, 69.19 m², pitches 60 / 60,   azimuths 127 / 233
+    // 38% less roof, double the pitch (60 is the clamp ceiling, so the true fit
+    // is worse still), azimuths 53° out — and NO refusal. That fed the panel
+    // grid, the array tilt PVWatts reads, the BOM and the permit drawing.
+    const NW = { lat: C_LAT + 4 / M_PER_DEG_LAT, lng: C_LNG - 6 / M_PER_DEG_LNG };
+    const NE = { lat: C_LAT + 4 / M_PER_DEG_LAT, lng: C_LNG + 6 / M_PER_DEG_LNG };
+    const SW = { lat: C_LAT - 4 / M_PER_DEG_LAT, lng: C_LNG - 6 / M_PER_DEG_LNG };
+    const SE = { lat: C_LAT - 4 / M_PER_DEG_LAT, lng: C_LNG + 6 / M_PER_DEG_LNG };
+
+    // POSITIVE CONTROL: the same four corners, traced properly, are accepted.
+    const good = buildSectionRoofPlanes(section({ footprint: [NW, NE, SE, SW] }));
+    expect(good.ok, 'the control trace must be accepted').toBe(true);
+    expect(good.planes.reduce((s, p) => s + p.area, 0)).toBeCloseTo(110.77, 1);
+
+    for (const [name, fp] of [
+      ['reading order NW,NE,SW,SE', [NW, NE, SW, SE]],
+      ['reading order SW,SE,NW,NE', [SW, SE, NW, NE]],
+      ['diagonal pair first',       [NW, SE, NE, SW]],
+    ] as Array<[string, LatLng[]]>) {
+      const out = buildSectionRoofPlanes(section({ footprint: fp }));
+      expect(out.ok, name).toBe(false);
+      expect(out.planes, name).toEqual([]);
+      expect(out.refusals.map(r => r.code), name).toContain('FOOTPRINT_SELF_INTERSECTING');
+      // The refusal must teach the gesture, not just name the fault.
+      expect(out.refusals.find(r => r.code === 'FOOTPRINT_SELF_INTERSECTING')!.message)
+        .toMatch(/IN ORDER around the outside/i);
+    }
+  });
+
+  it('a valid NON-rectangular quad is still accepted — the guard is not over-eager', () => {
+    // A trapezoid and a rotated parallelogram are simple polygons and real roofs.
+    const trap: LatLng[] = [
+      { lat: C_LAT, lng: C_LNG },
+      { lat: C_LAT, lng: C_LNG + 14 / M_PER_DEG_LNG },
+      { lat: C_LAT + 9 / M_PER_DEG_LAT, lng: C_LNG + 11 / M_PER_DEG_LNG },
+      { lat: C_LAT + 9 / M_PER_DEG_LAT, lng: C_LNG + 2 / M_PER_DEG_LNG },
+    ];
+    expect(buildSectionRoofPlanes(section({ footprint: trap })).ok).toBe(true);
+    for (const b of [0, 17, 30, 45, 63, 88, 115, 152, 200, 300]) {
+      expect(buildSectionRoofPlanes(section({ footprint: rotatedRect(14, 9, b) })).ok, `bearing ${b}`).toBe(true);
+    }
+    // …including a footprint traced the other way round the ring.
+    const cw = rotatedRect(14, 9, 30).slice().reverse();
+    expect(buildSectionRoofPlanes(section({ footprint: cw })).ok, 'clockwise').toBe(true);
   });
 
   it('a footprint under half a metre is a mis-click, not a roof', () => {
