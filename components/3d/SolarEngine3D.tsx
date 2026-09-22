@@ -7018,15 +7018,47 @@ function SolarEngine3D({
       } catch (e) { handleCesiumError('Terrain pick', e, true); }
     }
 
-    // Fallback: ellipsoid pick
+    // ── Fallback: ellipsoid pick ─────────────────────────────────────────────
+    //
+    // 🚨 THIS WAS DEAD CODE, AND IT WAS DEAD IN THE ONE CASE IT EXISTS FOR.
+    //
+    // It called `viewer.scene.globe.ellipsoid.intersectWithRay(ray)`.
+    // `Ellipsoid.prototype.intersectWithRay` DOES NOT EXIST in CesiumJS —
+    // verified against both the pinned browser build (1.114, app/layout.tsx:69)
+    // and the local package (1.139.1): the property is `undefined`, so the call
+    // threw a TypeError that `handleCesiumError` swallowed on every pick.
+    //
+    // Nobody noticed because it is the LAST resort and the first two almost
+    // always answer. They do not answer in exactly one situation: an address
+    // with no Google photorealistic mesh. The engine hides the globe as soon as
+    // a tileset object exists (line ~3537, the coastal bleed-through fix), and
+    // Google's ROOT tileset resolves for any valid key whether or not that
+    // address has coverage — so `scene.pick` finds nothing, the terrain branch
+    // is skipped because the globe is hidden, and this threw.
+    //
+    // Result: four clicks of the Gable tool did nothing at all, with no
+    // message, at precisely the properties the custom fallback pipeline was
+    // built for. `camera.pickEllipsoid` is the supported API and is present in
+    // both versions.
+    //
+    // 🚨 AND IT PICKS AT THE GROUND, NOT AT h=0. A bare WGS84 pick lands on the
+    // ellipsoid surface while `finalizeRoofSection` builds the section at
+    // `groundElevM` — measured 420 px apart on a 1000 px canvas at 3 Melvin Dr,
+    // and 966 px at Denver elevation, so the finished roof appears nowhere near
+    // where it was traced. Expanding the ellipsoid by the resolved ground
+    // elevation puts the corner where the user pointed.
     if (!cartesian) {
       try {
-        const ray = viewer.camera.getPickRay(screenPos);
-        if (ray) {
-          const ep = viewer.scene.globe.ellipsoid.intersectWithRay(ray);
-          if (ep && isFinite(ep.x) && C.Cartesian3.magnitude(ep) > 1000) {
-            cartesian = ep; pickMethod = 'ellipsoid';
-          }
+        const base = viewer.scene.globe?.ellipsoid ?? C.Ellipsoid.WGS84;
+        const h = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+        const atGround = isFinite(h) && Math.abs(h) > 0.01;
+        const ell = atGround
+          ? new C.Ellipsoid(base.radii.x + h, base.radii.y + h, base.radii.z + h)
+          : base;
+        const ep = viewer.camera.pickEllipsoid(screenPos, ell);
+        if (ep && isFinite(ep.x) && C.Cartesian3.magnitude(ep) > 1000) {
+          cartesian = ep;
+          pickMethod = atGround ? 'ellipsoid@ground' : 'ellipsoid';
         }
       } catch (e) { handleCesiumError('Ellipsoid pick', e, true); }
     }
@@ -10066,16 +10098,31 @@ function SolarEngine3D({
   }
 
   function handleGableClick(viewer: any, C: any, screenPos: any) {
+    const LABEL = '🏠 Gable';
     try {
+      // 🚨 A MISSED PICK SAYS SO. These three exits were bare `return`s, so a
+      // click that resolved to nothing left the counter unchanged and the
+      // status line untouched — the only way to notice was that the badge still
+      // read (1/4) after two clicks. That silence is how a dead ellipsoid
+      // fallback went unnoticed for so long: at an address with no Google mesh
+      // EVERY corner click did nothing, and the tool said nothing about it.
+      const missed = (why: string) => {
+        setStatusMsg(`${LABEL} — that click did not land on the building. ${why}`);
+        addLog('SECTION', `corner pick missed: ${why}`);
+      };
+
       const hit = getWorldPosition(viewer, C, screenPos);
-      if (!hit) return;
+      if (!hit) { missed('Aim at the roof or the ground beside it, then click again.'); return; }
       const carto = C.Cartographic.fromCartesian(hit.cartesian);
-      if (!carto) return;
+      if (!carto) { missed('That point could not be turned into a coordinate.'); return; }
       const pt = {
         lat: C.Math.toDegrees(carto.latitude),
         lng: C.Math.toDegrees(carto.longitude),
       };
-      if (!isValidCoord(pt.lat, pt.lng)) return;
+      if (!isValidCoord(pt.lat, pt.lng)) {
+        missed(`It resolved to ${pt.lat.toFixed(4)}, ${pt.lng.toFixed(4)}, which is not on this property.`);
+        return;
+      }
       gablePtsRef.current.push(pt);
       setGablePtCount(gablePtsRef.current.length);
 
@@ -10102,16 +10149,31 @@ function SolarEngine3D({
   // The ridge is set back from BOTH short eave edges (typical hip setback = 1/3 of short edge).
   // 4 faces: 2 trapezoid slopes (long sides) + 2 triangular hip ends (short sides).
   function handleHipClick(viewer: any, C: any, screenPos: any) {
+    const LABEL = '🏗 Hip';
     try {
+      // 🚨 A MISSED PICK SAYS SO. These three exits were bare `return`s, so a
+      // click that resolved to nothing left the counter unchanged and the
+      // status line untouched — the only way to notice was that the badge still
+      // read (1/4) after two clicks. That silence is how a dead ellipsoid
+      // fallback went unnoticed for so long: at an address with no Google mesh
+      // EVERY corner click did nothing, and the tool said nothing about it.
+      const missed = (why: string) => {
+        setStatusMsg(`${LABEL} — that click did not land on the building. ${why}`);
+        addLog('SECTION', `corner pick missed: ${why}`);
+      };
+
       const hit = getWorldPosition(viewer, C, screenPos);
-      if (!hit) return;
+      if (!hit) { missed('Aim at the roof or the ground beside it, then click again.'); return; }
       const carto = C.Cartographic.fromCartesian(hit.cartesian);
-      if (!carto) return;
+      if (!carto) { missed('That point could not be turned into a coordinate.'); return; }
       const pt = {
         lat: C.Math.toDegrees(carto.latitude),
         lng: C.Math.toDegrees(carto.longitude),
       };
-      if (!isValidCoord(pt.lat, pt.lng)) return;
+      if (!isValidCoord(pt.lat, pt.lng)) {
+        missed(`It resolved to ${pt.lat.toFixed(4)}, ${pt.lng.toFixed(4)}, which is not on this property.`);
+        return;
+      }
       hipPtsRef.current.push(pt);
       setHipPtCount(hipPtsRef.current.length);
 
