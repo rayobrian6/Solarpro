@@ -4873,6 +4873,12 @@ export default function DesignStudio({ project, onSave }: Props) {
                 // stamped with '' and own nothing.
                 enrichedPlane.siteKey = activeSiteKeyRef.current
                   || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id);
+                // A face that belongs to a building section carries the section's
+                // own record. Stamp ownership there too, or the reconstituted
+                // section would not know which property it is a building on —
+                // and every face of one section is stamped here, by this one
+                // line, so the copies stay in agreement.
+                if (enrichedPlane.section) enrichedPlane.section.siteKey = enrichedPlane.siteKey;
                 setRoofPlanes(prev => [...prev, enrichedPlane]);
                 console.log('[DesignStudio] 3D plane added:', enrichedPlane.id,
                   `az=${enrichedPlane.azimuth.toFixed(1)}° tilt=${enrichedPlane.pitch.toFixed(1)}°`);

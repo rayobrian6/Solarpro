@@ -76,6 +76,7 @@ import {
   roofPlaneFromFootprint,
   roofPlaneFromLiftedOutline,
 } from '@/lib/3d/footprintToRoofPlane';
+import type { Cart3, Plane3DFrame } from '@/lib/roofPlane3D';
 
 const DEG = Math.PI / 180;
 const M_PER_DEG_LAT = 111_320;
@@ -150,6 +151,24 @@ export interface SectionPlanOutcome {
   ok: boolean;
   faces: SectionFace[];
   planes: RoofPlane[];
+  /**
+   * Everything the RENDERER needs, per face, alongside the plane itself.
+   *
+   * The engine draws a face from its fitted frame and its projected ECEF
+   * corners, and registers both so selection, setbacks and the panel grid can
+   * find them later. Returning them here means a section face is rendered by
+   * exactly the same call as a hand-traced one, rather than the engine
+   * re-deriving a frame from the plane and getting a subtly different answer.
+   */
+  faceBuilds: Array<{
+    faceId: string;
+    key: SectionFaceKey;
+    plane: RoofPlane;
+    frame: Plane3DFrame;
+    /** The fitted, guaranteed-coplanar corners, in traced order. */
+    projectedPts: Cart3[];
+    eaveDirENU: { x: number; y: number };
+  }>;
   /** Height of the ridge above local ground. Null for a deck, and on refusal. */
   ridgeHeightM: number | null;
   /** The pitch each face actually came out at, keyed by face id. Reported, not
@@ -443,12 +462,13 @@ export function buildSectionRoofPlanes(section: BuildingSection): SectionPlanOut
   const laid = layoutSectionFaces(section);
   if (laid.refusals.length > 0) {
     return {
-      ok: false, faces: [], planes: [], ridgeHeightM: null,
+      ok: false, faces: [], planes: [], faceBuilds: [], ridgeHeightM: null,
       fittedPitchByFaceId: {}, refusals: laid.refusals,
     };
   }
 
   const planes: RoofPlane[] = [];
+  const faceBuilds: SectionPlanOutcome['faceBuilds'] = [];
   const fittedPitchByFaceId: Record<string, number> = {};
   const refusals: SectionRefusal[] = [];
 
@@ -501,11 +521,19 @@ export function buildSectionRoofPlanes(section: BuildingSection): SectionPlanOut
 
     fittedPitchByFaceId[face.id] = plane.pitch;
     planes.push(plane);
+    faceBuilds.push({
+      faceId: face.id,
+      key: face.key,
+      plane,
+      frame: built.frame,
+      projectedPts: built.frame.projectedPts,
+      eaveDirENU: built.eaveDirENU,
+    });
   }
 
   if (planes.length === 0) {
     return {
-      ok: false, faces: laid.faces, planes: [], ridgeHeightM: laid.ridgeHeightM,
+      ok: false, faces: laid.faces, planes: [], faceBuilds: [], ridgeHeightM: laid.ridgeHeightM,
       fittedPitchByFaceId, refusals,
     };
   }
@@ -513,6 +541,7 @@ export function buildSectionRoofPlanes(section: BuildingSection): SectionPlanOut
     ok: refusals.length === 0,
     faces: laid.faces,
     planes,
+    faceBuilds,
     ridgeHeightM: laid.ridgeHeightM,
     fittedPitchByFaceId,
     refusals,

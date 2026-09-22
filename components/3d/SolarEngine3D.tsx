@@ -58,6 +58,7 @@ import {
   type Cart3,
   type Plane3DFrame,
 } from '@/lib/roofPlane3D';
+import { buildSectionRoofPlanes } from '@/lib/3d/buildingSection';
 // v66: Aurora-style 2D → 3D. Builds a pitched roof face from a flat traced
 // outline plus pitch + azimuth, for addresses with no Photorealistic 3D Tiles.
 import { roofPlaneFromFootprint, roofPlaneFromFootprintAndRidge } from '@/lib/3d/footprintToRoofPlane';
@@ -6671,6 +6672,10 @@ function SolarEngine3D({
         setMeasurePtCount(0);
         clearMeasureOverlay();
         setStatusMsg('Measure cleared');
+      } else if (modeRef.current === 'roof_gable') {
+        cancelSectionTrace('gable');
+      } else if (modeRef.current === 'roof_hip') {
+        cancelSectionTrace('hip');
       } else if (modeRef.current === 'block') {
         // v65: right-click finalizes the line-trace block (or cancels if < 3 points)
         if (blockPtsRef.current.length >= 3) {
@@ -9067,6 +9072,17 @@ function SolarEngine3D({
         rowPtsRef.current = []; setRowPtCount(0); rowStartScreenPosRef.current = null;
         planePtsRef.current = []; setPlanePtCount(0);
         // v65: also cancel an in-progress block line-trace
+        // A half-traced section footprint must be abandonable. The gable and
+        // hip tools had no cancel at all while they were a two-click gesture —
+        // tolerable at two clicks, stranding at four.
+        if (modeRef.current === 'roof_gable' && gablePtsRef.current.length > 0) {
+          cancelSectionTrace('gable');
+          return;
+        }
+        if (modeRef.current === 'roof_hip' && hipPtsRef.current.length > 0) {
+          cancelSectionTrace('hip');
+          return;
+        }
         if (modeRef.current === 'block' && blockPtsRef.current.length > 0) {
           if (blockPreviewRef.current) {
             try {
@@ -9566,6 +9582,99 @@ function SolarEngine3D({
   // The eave is a rectangle in lat/lng. The ridge runs along the long edge
   // (the longer of the two eave dimensions) at the rectangle centroid. Two
   // sloped polygons (south face + north face) meet at the ridge.
+  /**
+   * FINALIZE A BUILDING SECTION — the massing tools stop being a drawing program.
+   *
+   * 🚨 WHAT THIS REPLACES. The Gable and Hip tools used to add Cesium entities
+   * and push a `vertexSpec` into component state, and nothing else. No RoofPlane
+   * was ever produced, so a gable somebody placed never reached the Roof Planes
+   * sidebar, the panel layout, the BOM or the planset — and was gone on reload.
+   * Both also took TWO clicks and normalised them to an axis-aligned bounding
+   * box, so a house rotated off north could not be modelled at all.
+   *
+   * The footprint is now traced as FOUR CORNERS, used exactly as clicked, and
+   * the faces come from `lib/3d/buildingSection`, which builds every one of them
+   * through `lib/3d/footprintToRoofPlane` — the same module the hand-trace path
+   * uses. So a gable face and a Mark Plane face are the same kind of object,
+   * registered here through the same calls, and everything downstream that
+   * already works for one works for the other.
+   *
+   * 🚨 IT REFUSES RATHER THAN GUESSING. An unresolved ground elevation is passed
+   * through as NaN so the domain refuses it: defaulting to 0 would model the
+   * house 136 m underground at a site like Pocahontas IL, and it would look
+   * plausible the whole way to a permit.
+   */
+  function finalizeRoofSection(viewer: any, C: any, kind: 'gable' | 'hip', footprint: Array<{ lat: number; lng: number }>) {
+    try {
+      const sectionId = `sec-${Date.now().toString(36)}`;
+      // NaN when unresolved — see above. The domain turns that into a refusal.
+      const groundElevM = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : NaN;
+
+      const outcome = buildSectionRoofPlanes({
+        id: sectionId,
+        kind,
+        footprint: footprint.map(p => ({ lat: p.lat, lng: p.lng })),
+        eaveHeightM: newRoofEaveHeightM,
+        pitchDeg: roofPitchDeg,
+        groundElevM,
+        ridgeAxis: 'auto',
+        label: kind === 'gable' ? 'Gable section' : 'Hip section',
+        createdAtIso: new Date().toISOString(),
+        source: 'user-traced',
+      });
+
+      if (!outcome.ok || outcome.faceBuilds.length === 0) {
+        // Every refusal, not the first — an installer who fixes one thing and is
+        // refused again for another has been told half the truth twice.
+        const why = outcome.refusals.map(r => r.message).join(' ');
+        setStatusMsg(`⚠️ ${kind === 'gable' ? 'Gable' : 'Hip'} not built — ${why || 'the traced corners do not describe a roof.'}`);
+        addLog('SECTION', `refused: ${outcome.refusals.map(r => r.code).join(',') || 'NO_FACES'}`);
+        return false;
+      }
+
+      for (const b of outcome.faceBuilds) {
+        const cesiumPts = b.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
+        // Same render + registration as finalizePlane3D. A section face has to be
+        // findable by selection, setbacks and the panel grid, and those all read
+        // these three maps.
+        const entityIds = renderPlane3DEntity(viewer, C, cesiumPts, b.plane.id, b.frame, false, false);
+        plane3DEntitiesRef.current = [...plane3DEntitiesRef.current, ...entityIds];
+        plane3DEntityMap.current.set(b.plane.id, entityIds);
+        plane3DFrameMap.current.set(b.plane.id, b.frame);
+        plane3DCesiumPtsMap.current.set(b.plane.id, cesiumPts);
+        (b.plane as any).__eaveDirENU = b.eaveDirENU;
+        // 🚨 THE EMIT. This is what makes it a design object rather than a
+        // picture: DesignStudio stamps ownership, adds it to roofPlanes, and the
+        // autosave persists it.
+        onRoofPlaneCreated?.(b.plane);
+      }
+
+      const ridge = outcome.ridgeHeightM;
+      addLog('SECTION', `${kind} ${sectionId}: ${outcome.planes.length} faces, ridge ${ridge?.toFixed(2)}m, pitch ${roofPitchDeg}°`);
+      setStatusMsg(
+        `🏠 ${kind === 'gable' ? 'Gable' : 'Hip'} section placed — ${outcome.planes.length} roof faces, ` +
+        `eave ${newRoofEaveHeightM.toFixed(1)}m, ridge ${ridge != null ? ridge.toFixed(1) : '?'}m. ` +
+        'They are real roof faces: place panels on them, and they save with the design.',
+      );
+      if (showRoofModel)    { try { renderRoofWireframe(viewer, C); } catch {} }
+      if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
+      try { viewer.scene.requestRender(); } catch {}
+      return true;
+    } catch (err: unknown) {
+      addLog('ERROR', `finalizeRoofSection: ${(err as Error).message}`);
+      setStatusMsg(`⚠️ Section failed: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  /** Abandon a half-traced section footprint. Shared by Escape and right-click,
+   *  so a mis-click can never strand the user mid-trace with no way out. */
+  function cancelSectionTrace(which: 'gable' | 'hip') {
+    if (which === 'gable') { gablePtsRef.current = []; setGablePtCount(0); }
+    else                   { hipPtsRef.current = [];   setHipPtCount(0); }
+    setStatusMsg(`${which === 'gable' ? '🏠 Gable' : '🏗 Hip'} cancelled — click the first footprint corner to start again.`);
+  }
+
   function handleGableClick(viewer: any, C: any, screenPos: any) {
     try {
       const hit = getWorldPosition(viewer, C, screenPos);
@@ -9580,109 +9689,20 @@ function SolarEngine3D({
       gablePtsRef.current.push(pt);
       setGablePtCount(gablePtsRef.current.length);
 
-      if (gablePtsRef.current.length >= 2) {
-        const [c1, c2] = gablePtsRef.current;
-        // Use extracted math for the gable geometry (tested in lib/3d/blockMath)
-        const eaveHeightM = newRoofEaveHeightM;
-        const g = computeGableGeometry(c1, c2, eaveHeightM, roofPitchDeg);
-        const { sw, ne, ridgeA, ridgeB, ridgeRiseM, longIsLng, eaveSW, eaveSE, eaveNW, eaveNE } = g;
-        const { widthM, depthM } = computeBlockDimensions(sw, ne, eaveHeightM);
-        if (widthM < 0.5 || depthM < 0.5) {
-          setStatusMsg('Gable: eave too small (<0.5m) — try again with a bigger rectangle');
-          gablePtsRef.current = [];
-          setGablePtCount(0);
-          return;
-        }
-        // Build 4 eave corners and 2 ridge endpoints in 3D Cartesian
-        const swC = safeCartesian3(C, eaveSW.lng, eaveSW.lat, eaveSW.h);
-        const seC = safeCartesian3(C, eaveSE.lng, eaveSE.lat, eaveSE.h);
-        const nwC = safeCartesian3(C, eaveNW.lng, eaveNW.lat, eaveNW.h);
-        const neC = safeCartesian3(C, eaveNE.lng, eaveNE.lat, eaveNE.h);
-        const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeA.h);
-        const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeB.h);
-        if (!swC || !seC || !nwC || !neC || !rAC || !rBC) {
-          setStatusMsg('Gable: failed to compute 3D positions — try again');
-          gablePtsRef.current = [];
-          setGablePtCount(0);
-          return;
-        }
-        // Build 2 slope polygons. Each is a 3D quadrilateral.
-        // Face 1: from eave on one side to ridge
-        // Face 2: from eave on the other side to ridge
-        const faceAPositions = longIsLng
-          ? [swC, seC, rBC, rAC]   // south face (low latitude) — eave SW→SE, ridge A→B
-          : [swC, nwC, rAC, rBC];  // west face
-        const faceBPositions = longIsLng
-          ? [nwC, neC, rBC, rAC]   // north face (high latitude)
-          : [seC, neC, rAC, rBC];  // east face
-        const faceA = viewer.entities.add({
-          id: `gable-face-a-${Date.now()}`,
-          name: 'Gable slope A',
-          polygon: {
-            hierarchy: new C.PolygonHierarchy(faceAPositions),
-            // perPositionHeight:true keeps the face at the 3D positions of its corners
-            // instead of clamping to the ellipsoid surface. Without this, the sloped
-            // face would render as a flat ground-clamped polygon.
-            perPositionHeight: true,
-            material: C.Color.fromCssColorString('#caa472').withAlpha(0.92), // wood/roof color
-            outline: true,
-            outlineColor: C.Color.fromCssColorString('#5a3a1a'),
-          },
-        });
-        const faceB = viewer.entities.add({
-          id: `gable-face-b-${Date.now()}`,
-          name: 'Gable slope B',
-          polygon: {
-            hierarchy: new C.PolygonHierarchy(faceBPositions),
-            perPositionHeight: true,
-            material: C.Color.fromCssColorString('#caa472').withAlpha(0.92),
-            outline: true,
-            outlineColor: C.Color.fromCssColorString('#5a3a1a'),
-          },
-        });
-        // End gables (triangular walls closing the roof on the short edges)
-        const endGableA = viewer.entities.add({
-          id: `gable-end-a-${Date.now()}`,
-          name: 'Gable end A',
-          polygon: {
-            hierarchy: new C.PolygonHierarchy(longIsLng ? [swC, seC, rAC, rBC] : [swC, nwC, rAC, rBC]),
-            perPositionHeight: true,
-            material: C.Color.fromCssColorString('#f5f0e8').withAlpha(0.6), // gable wall color
-            outline: true,
-            outlineColor: C.Color.fromCssColorString('#8a6a3a'),
-          },
-        });
-        const endGableB = viewer.entities.add({
-          id: `gable-end-b-${Date.now()}`,
-          name: 'Gable end B',
-          polygon: {
-            hierarchy: new C.PolygonHierarchy(longIsLng ? [nwC, neC, rAC, rBC] : [seC, neC, rAC, rBC]),
-            perPositionHeight: true,
-            material: C.Color.fromCssColorString('#f5f0e8').withAlpha(0.6),
-            outline: true,
-            outlineColor: C.Color.fromCssColorString('#8a6a3a'),
-          },
-        });
-        gableEntitiesRef.current.push(faceA, faceB, endGableA, endGableB);
-        setPlacedGableCount(gableEntitiesRef.current.length / 4);
-        const gableGroupId = `gable-grp-${Date.now()}`;
-        try { (faceA as any).__groupId = gableGroupId; } catch { /* ignore */ }
-        try { (faceB as any).__groupId = gableGroupId; } catch { /* ignore */ }
-        try { (endGableA as any).__groupId = gableGroupId; } catch { /* ignore */ }
-        try { (endGableB as any).__groupId = gableGroupId; } catch { /* ignore */ }
-        setVertexSpecs(prev => [...prev, {
-          id: gableGroupId,
-          type: 'gable',
-          vertices: [eaveSW, eaveSE, eaveNW, eaveNE].map(v => ({ lat: v.lat, lng: v.lng, h: v.h })),
-          eaveHeightM,
-          pitchDeg: roofPitchDeg,
-        }]);
-        addLog('GABLE', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m at pitch ${roofPitchDeg}°`);
-        setStatusMsg(`🏠 Gable placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge ${ridgeRiseM.toFixed(1)}m up — click again to place another`);
+      // 🚨 FOUR CORNERS, USED AS TRACED. The old gesture took TWO clicks and
+      // normalised them to an axis-aligned bounding box, so it could only model
+      // a house square to north — and the bbox of a rotated rectangle is bigger
+      // than the rectangle, so it over-reported the roof too.
+      if (gablePtsRef.current.length >= 4) {
+        finalizeRoofSection(viewer, C, 'gable', gablePtsRef.current.slice(0, 4));
         gablePtsRef.current = [];
         setGablePtCount(0);
       } else {
-        setStatusMsg(`🏠 Eave corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click corner 2 (NE)`);
+        setStatusMsg(
+          `🏠 Gable — corner ${gablePtsRef.current.length} of 4. Click the footprint corners IN ORDER `
+          + `around the building, not diagonally. Pitch ${roofPitchDeg}°, eave `
+          + `${newRoofEaveHeightM.toFixed(1)}m. Esc to cancel.`,
+        );
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleGableClick: ${(err as Error).message}`); }
@@ -9705,101 +9725,18 @@ function SolarEngine3D({
       hipPtsRef.current.push(pt);
       setHipPtCount(hipPtsRef.current.length);
 
-      if (hipPtsRef.current.length >= 2) {
-        const [c1, c2] = hipPtsRef.current;
-        // Use extracted math for the hip geometry (tested in lib/3d/blockMath)
-        const eaveHeightM = newRoofEaveHeightM;
-        const h = computeHipGeometry(c1, c2, eaveHeightM, roofPitchDeg);
-        const { sw, ne, ridgeA, ridgeB, ridgeRiseM, hipSetbackM, longIsLng, eaveSW, eaveSE, eaveNW, eaveNE } = h;
-        const { widthM, depthM } = computeBlockDimensions(sw, ne, eaveHeightM);
-        if (widthM < 0.5 || depthM < 0.5) {
-          setStatusMsg('Hip: eave too small (<0.5m) — try again with a bigger rectangle');
-          hipPtsRef.current = [];
-          setHipPtCount(0);
-          return;
-        }
-        // Eave corners
-        const swC = safeCartesian3(C, eaveSW.lng, eaveSW.lat, eaveSW.h);
-        const seC = safeCartesian3(C, eaveSE.lng, eaveSE.lat, eaveSE.h);
-        const nwC = safeCartesian3(C, eaveNW.lng, eaveNW.lat, eaveNW.h);
-        const neC = safeCartesian3(C, eaveNE.lng, eaveNE.lat, eaveNE.h);
-        // Ridge endpoints — at the centroid, set back from the short edges by hipSetback
-        const rAC = safeCartesian3(C, ridgeA.lng, ridgeA.lat, ridgeA.h);
-        const rBC = safeCartesian3(C, ridgeB.lng, ridgeB.lat, ridgeB.h);
-        if (!swC || !seC || !nwC || !neC || !rAC || !rBC) {
-          setStatusMsg('Hip: failed to compute 3D positions — try again');
-          hipPtsRef.current = [];
-          setHipPtCount(0);
-          return;
-        }
-        // 4 faces:
-        //   - 2 trapezoid slopes (south slope: SW→SE→rB→rA, north slope: NW→NE→rB→rA)
-        //   - 2 triangular hip ends (south end: SW→SE→rA is wrong, actually SW→hipCorner→SE where
-        //     hipCorner is the ridge endpoint A on the south side)
-        // For the hip ends, the triangle is (eave SW corner, eave SE corner, ridge A). But that's
-        // only correct for the LONG-axis sides. For a true hip:
-        //   - South face (long axis, south side of ridge): eave SW, eave SE, ridge B, ridge A — but
-        //     we want the OUTSIDE of the slope. The slope is a trapezoid.
-        //   - South end (short axis, south end of ridge): eave SW, eave SE, ridge A — triangle.
-        // We have 4 slopes total: 2 long-axis trapezoids (south slope + north slope) + 2 short-axis
-        // triangle hip ends (south hip + north hip). But for a true hip, the 2 long-axis faces are
-        // already trapezoids (ridge is shorter than eave), and the 2 short-axis faces are triangles.
-        // The "end gables" from the gable tool become triangular hip faces here.
-        const faceSouthSlope = longIsLng
-          ? [swC, seC, rBC, rAC]  // south long-axis trapezoid
-          : [swC, seC, rAC, rBC];
-        const faceNorthSlope = longIsLng
-          ? [nwC, neC, rBC, rAC]  // north long-axis trapezoid
-          : [nwC, neC, rAC, rBC];
-        const faceSouthHip = longIsLng
-          ? [swC, seC, rAC]       // south short-axis triangle
-          : [swC, seC, rBC];
-        const faceNorthHip = longIsLng
-          ? [nwC, neC, rBC]       // north short-axis triangle
-          : [nwC, neC, rAC];
-        const slopeMat = C.Color.fromCssColorString('#caa472').withAlpha(0.92);
-        const hipEndMat = C.Color.fromCssColorString('#caa472').withAlpha(0.92);
-        const outlineColor = C.Color.fromCssColorString('#5a3a1a');
-        const f1 = viewer.entities.add({
-          id: `hip-slope-a-${Date.now()}`,
-          name: 'Hip slope A',
-          polygon: { hierarchy: new C.PolygonHierarchy(faceSouthSlope), perPositionHeight: true, material: slopeMat, outline: true, outlineColor },
-        });
-        const f2 = viewer.entities.add({
-          id: `hip-slope-b-${Date.now()}`,
-          name: 'Hip slope B',
-          polygon: { hierarchy: new C.PolygonHierarchy(faceNorthSlope), perPositionHeight: true, material: slopeMat, outline: true, outlineColor },
-        });
-        const f3 = viewer.entities.add({
-          id: `hip-end-a-${Date.now()}`,
-          name: 'Hip end A',
-          polygon: { hierarchy: new C.PolygonHierarchy(faceSouthHip), perPositionHeight: true, material: hipEndMat, outline: true, outlineColor },
-        });
-        const f4 = viewer.entities.add({
-          id: `hip-end-b-${Date.now()}`,
-          name: 'Hip end B',
-          polygon: { hierarchy: new C.PolygonHierarchy(faceNorthHip), perPositionHeight: true, material: hipEndMat, outline: true, outlineColor },
-        });
-        hipEntitiesRef.current.push(f1, f2, f3, f4);
-        setPlacedHipCount(hipEntitiesRef.current.length / 4);
-        const hipGroupId = `hip-grp-${Date.now()}`;
-        try { (f1 as any).__groupId = hipGroupId; } catch { /* ignore */ }
-        try { (f2 as any).__groupId = hipGroupId; } catch { /* ignore */ }
-        try { (f3 as any).__groupId = hipGroupId; } catch { /* ignore */ }
-        try { (f4 as any).__groupId = hipGroupId; } catch { /* ignore */ }
-        setVertexSpecs(prev => [...prev, {
-          id: hipGroupId,
-          type: 'hip',
-          vertices: [eaveSW, eaveSE, eaveNW, eaveNE].map(v => ({ lat: v.lat, lng: v.lng, h: v.h })),
-          eaveHeightM,
-          pitchDeg: roofPitchDeg,
-        }]);
-        addLog('HIP', `Placed ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m eave, ridge rise ${ridgeRiseM.toFixed(2)}m, setback ${hipSetbackM.toFixed(2)}m`);
-        setStatusMsg(`🏠 Hip placed: ${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ridge ${ridgeRiseM.toFixed(1)}m up, setback ${hipSetbackM.toFixed(1)}m — click again to place another`);
+      // 🚨 FOUR CORNERS, USED AS TRACED — see handleGableClick. A hip on a
+      // bounding box is a hip on a building nobody traced.
+      if (hipPtsRef.current.length >= 4) {
+        finalizeRoofSection(viewer, C, 'hip', hipPtsRef.current.slice(0, 4));
         hipPtsRef.current = [];
         setHipPtCount(0);
       } else {
-        setStatusMsg(`🏠 Eave corner 1 set at (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}) — click corner 2 (NE)`);
+        setStatusMsg(
+          `🏗 Hip — corner ${hipPtsRef.current.length} of 4. Click the footprint corners IN ORDER `
+          + `around the building, not diagonally. Pitch ${roofPitchDeg}°, eave `
+          + `${newRoofEaveHeightM.toFixed(1)}m. Esc to cancel.`,
+        );
       }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleHipClick: ${(err as Error).message}`); }
@@ -12666,8 +12603,8 @@ function SolarEngine3D({
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
               { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block by line-tracing its footprint: click N points to define any shape (rectangle, L, T, etc.), right-click to finish. Use when Google 3D Tiles has no coverage for this address.' },
-              { mode: 'roof_gable'   as PlacementMode, icon: '\u{1F3E0}\u2009\u{1F3D7}', label: 'Gable', tip: 'Drop a 3D gable roof: click 2 eave corners, the system draws 2 sloped faces meeting at a ridge along the long edge.' },
-              { mode: 'roof_hip'     as PlacementMode, icon: '\u{1F3D7}\u2009\u{1F3E0}', label: 'Hip', tip: 'Drop a 3D hip roof: click 2 eave corners, 4 sloped faces meet at a ridge that is shorter than the eave (set back on both short sides).' },
+              { mode: 'roof_gable'   as PlacementMode, icon: '\u{1F3E0}\u2009\u{1F3D7}', label: 'Gable', tip: 'Build a gable SECTION: click the 4 footprint corners in order around the building. Two real roof faces meeting at one ridge, at any rotation. They take panels and they save with the design. Works with no 3D coverage.' },
+              { mode: 'roof_hip'     as PlacementMode, icon: '\u{1F3D7}\u2009\u{1F3E0}', label: 'Hip', tip: 'Build a hip SECTION: click the 4 footprint corners in order around the building. Four real roof faces \u2014 two slopes plus two hipped ends \u2014 all closing on one ridge. On a square footprint it becomes a pyramid. Works with no 3D coverage.' },
               { mode: 'tree'         as PlacementMode, icon: '\u{1F333}', label: 'Tree', tip: 'Drop a decorative tree: a green sphere on a thin trunk. Click anywhere on the terrain to place. No effect on solar production.' },
             ],
           },
@@ -12908,8 +12845,8 @@ function SolarEngine3D({
                  placementMode === 'set_direction' ? '\u{1F9ED} Set Direction' :
                  placementMode === 'set_origin' ? '\u{1F4CD} Set Origin' :
                  placementMode === 'block' ? `\u{1F9F1} Block${blockPtCount > 0 ? ` (${blockPtCount}/2)` : ''}` :
-                 placementMode === 'roof_gable' ? `\u{1F3E0}\u2009\u{1F3D7} Gable${gablePtCount > 0 ? ` (${gablePtCount}/2)` : ''}` :
-                 placementMode === 'roof_hip'   ? `\u{1F3D7}\u2009\u{1F3E0} Hip${hipPtCount > 0 ? ` (${hipPtCount}/2)` : ''}` :
+                 placementMode === 'roof_gable' ? `\u{1F3E0}\u2009\u{1F3D7} Gable${gablePtCount > 0 ? ` (${gablePtCount}/4)` : ''}` :
+                 placementMode === 'roof_hip'   ? `\u{1F3D7}\u2009\u{1F3E0} Hip${hipPtCount > 0 ? ` (${hipPtCount}/4)` : ''}` :
                  placementMode === 'tree'       ? `\u{1F333} Tree (${placedTreeCount} placed)` :
                  placementMode}
               </div>
@@ -13638,34 +13575,14 @@ function SolarEngine3D({
                   borderRadius: 10, padding: '6px 10px',
                 }}>
                   <span style={{ color: '#ffd28a', fontSize: 12 }}>
+                    {/* The tool traces FOUR corners now. The old copy said two,
+                        and said 'ridge along long edge' as if the ridge could only
+                        run north-south or east-west, which is what the bounding-box
+                        math actually did. */}
                     {gablePtCount === 0
-                      ? '\u{1F3D7} Click eave corner 1 (SW)'
-                      : gablePtCount === 1
-                        ? '\u{1F3D7} Click eave corner 2 (NE) — gable placed with ridge along long edge'
-                        : `${placedGableCount} gable${placedGableCount === 1 ? '' : 's'} placed`}
+                      ? '\u{1F3D7} Gable section \u2014 click footprint corner 1 of 4'
+                      : `\u{1F3D7} Corner ${gablePtCount} of 4 \u2014 keep going around the building`}
                   </span>
-                  {gablePtCount > 0 || placedGableCount > 0 ? (
-                    <button
-                      onClick={() => {
-                        gablePtsRef.current = []; setGablePtCount(0);
-                        const viewer = viewerRef.current;
-                        if (viewer) {
-                          for (const e of gableEntitiesRef.current) {
-                            try { viewer.entities.remove(e); } catch { /* ignore */ }
-                          }
-                        }
-                        gableEntitiesRef.current = [];
-                        setPlacedGableCount(0);
-                        setVertexSpecs(prev => prev.filter(s => s.type !== 'gable'));
-                        setStatusMsg('Gable tool cleared');
-                      }}
-                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                        background: 'rgba(255,180,80,0.15)', color: '#ffd28a',
-                        border: '1px solid rgba(255,180,80,0.3)', cursor: 'pointer' }}
-                    >
-                      Clear
-                    </button>
-                  ) : null}
                 </div>
               ) : null}
 
@@ -13678,32 +13595,9 @@ function SolarEngine3D({
                 }}>
                   <span style={{ color: '#d4b07a', fontSize: 12 }}>
                     {hipPtCount === 0
-                      ? '\u{1F3D7} Click eave corner 1 (SW)'
-                      : hipPtCount === 1
-                        ? '\u{1F3D7} Click eave corner 2 (NE) — hip placed with ridge shorter than eave'
-                        : `${placedHipCount} hip${placedHipCount === 1 ? '' : 's'} placed`}
+                      ? '\u{1F3D7} Hip section \u2014 click footprint corner 1 of 4'
+                      : `\u{1F3D7} Corner ${hipPtCount} of 4 \u2014 keep going around the building`}
                   </span>
-                  {hipPtCount > 0 || placedHipCount > 0 ? (
-                    <button
-                      onClick={() => {
-                        hipPtsRef.current = []; setHipPtCount(0);
-                        const viewer = viewerRef.current;
-                        if (viewer) {
-                          for (const e of hipEntitiesRef.current) {
-                            try { viewer.entities.remove(e); } catch { /* ignore */ }
-                          }
-                        }
-                        hipEntitiesRef.current = [];
-                        setPlacedHipCount(0);
-                        setStatusMsg('Hip tool cleared');
-                      }}
-                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                        background: 'rgba(180,140,80,0.15)', color: '#d4b07a',
-                        border: '1px solid rgba(180,140,80,0.3)', cursor: 'pointer' }}
-                    >
-                      Clear
-                    </button>
-                  ) : null}
                 </div>
               ) : null}
 

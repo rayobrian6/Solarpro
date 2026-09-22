@@ -320,22 +320,51 @@ describe('entities that are NOT persisted — classified, not merely listed', ()
     expect(ENGINE).not.toMatch(/onBlocksChange/);
   });
 
-  it('🚨 the GABLE and HIP tools are visual-only — they emit no roof plane', () => {
-    // Recorded deliberately, and it is the largest known gap. Both tools draw
-    // real roof FACES with a pitch and an eave height, and both stop at Cesium
-    // entities plus a vertexSpec. `onRoofPlaneCreated` is called from exactly
-    // ONE place — finalizePlane3D — so a gable a user places never reaches the
-    // Roof Planes sidebar, the panel layout, the BOM or the planset, and is
-    // gone on reload.
+  it('🚨 the GABLE and HIP tools now EMIT — and this test is what gated that', () => {
+    // WHAT THIS USED TO SAY, and why it mattered: both tools drew real roof
+    // FACES with a pitch and an eave height, and both stopped at Cesium entities
+    // plus a vertexSpec. `onRoofPlaneCreated` was called from exactly ONE place —
+    // finalizePlane3D — so a gable somebody placed never reached the Roof Planes
+    // sidebar, the panel layout, the BOM or the planset, and was gone on reload.
     //
-    // It is NOT a Phase 2 correctness defect for the same reason as above:
-    // nothing downstream can read it, so no artifact can be wrong because of
-    // it. Closing it is roof-UX work (Phase 3), not persistence work.
+    // The old assertion was `expect(emits).toHaveLength(1)` with this note:
+    //
+    //   "If a gable/hip path ever starts emitting, this count moves and this
+    //    test fails — at which point the emitted faces MUST be given a site key
+    //    and a persistence path, like every other roof plane."
+    //
+    // That has now happened, so this test asserts the CONDITIONS it named rather
+    // than the count it was holding the line with. Emitting is no longer the
+    // thing to prevent; emitting WITHOUT ownership and persistence is.
     const emits = ENGINE.match(/onRoofPlaneCreated\?\.\(/g) ?? [];
-    expect(emits).toHaveLength(1);
-    // If a gable/hip path ever starts emitting, this count moves and this test
-    // fails — at which point the emitted faces MUST be given a site key and a
-    // persistence path, like every other roof plane.
+    expect(emits, 'finalizePlane3D and finalizeRoofSection').toHaveLength(2);
+
+    // 1. The section emitter exists and goes through the shared domain, not
+    //    through geometry of its own.
+    expect(ENGINE).toMatch(/function finalizeRoofSection\(/);
+    expect(ENGINE).toMatch(/buildSectionRoofPlanes\(\{/);
+
+    // 2. A SITE KEY. The engine deliberately does NOT stamp one — DesignStudio's
+    //    onRoofPlaneCreated handler stamps every plane it receives, from one
+    //    line, so a section face is owned by exactly the same rule as a traced
+    //    face. Asserted where it actually happens.
+    const STUDIO = readFileSync(join(process.cwd(), 'components/design/DesignStudio.tsx'), 'utf8');
+    const handler = STUDIO.slice(
+      STUDIO.indexOf('onRoofPlaneCreated={(plane) => {'),
+      STUDIO.indexOf('onRoofPlanesDetected={(planes) => {'),
+    );
+    expect(handler.length, 'the scan did not find the handler').toBeGreaterThan(300);
+    expect(handler).toMatch(/enrichedPlane\.siteKey = activeSiteKeyRef\.current/);
+    // …and the section's own record is stamped with it too, or a reconstituted
+    // section would not know which property it stands on.
+    expect(handler).toMatch(/enrichedPlane\.section\.siteKey = enrichedPlane\.siteKey/);
+    expect(handler).toMatch(/setRoofPlanes\(prev => \[\.\.\.prev, enrichedPlane\]\)/);
+
+    // 3. A PERSISTENCE PATH. Section faces are ordinary roof planes, so they
+    //    ride `layouts.roof_planes` — and the two fields that carry the section
+    //    are signed, so a section edit that moves no geometry still saves.
+    expect(SIGNED_FIELDS as readonly string[]).toContain('sectionId');
+    expect(SIGNED_FIELDS as readonly string[]).toContain('section');
   });
 
   it('🚨 markOnly is DERIVED from the panels — and it used to be LATCHED', () => {
