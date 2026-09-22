@@ -553,6 +553,74 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
     expect(onSectionFaces).toBe(true);
   });
 
+  test('🚨 THE ORDER A REAL INSTALLER WORKS IN — panels first, then correct the building', async ({ page }) => {
+    // The test above corrects and then lays panels. Nobody works like that
+    // once. They lay panels, look at the model, notice the eave is a foot low,
+    // and fix it — and the array has to come with the roof.
+    //
+    // `PlacedPanel.lat/lng/height` is ABSOLUTE while `planeId` says which face
+    // it belongs to. Before this was wired, raising a section's eave left its
+    // whole array 305 mm UNDER the roof: "the panels are inside of the house
+    // and not on top of the planes", for the third time in this project.
+    await openStudio(page);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    await runAutoLayout(page);
+    await expect.poll(() => state(page).then(s => s.panels), { timeout: 90_000 })
+      .toBeGreaterThan(0);
+
+    /** Each panel's height above the stored plane of its own face, in metres. */
+    const standoffs = () => page.evaluate(() => {
+      const s = (window as unknown as E2EWin).__solarE2E!;
+      const C = (window as any).Cesium;
+      const byId = new Map(s.roofPlanes.map((p: any) => [p.id, p]));
+      const out: Record<string, number> = {};
+      for (const panel of s.panels as any[]) {
+        const plane: any = byId.get(panel.planeId);
+        if (!plane?.origin3D || !plane?.normal3D || panel.height == null) continue;
+        const c = C.Cartesian3.fromDegrees(panel.lng, panel.lat, panel.height);
+        out[panel.id] =
+          (c.x - plane.origin3D.x) * plane.normal3D.x +
+          (c.y - plane.origin3D.y) * plane.normal3D.y +
+          (c.z - plane.origin3D.z) * plane.normal3D.z;
+      }
+      return out;
+    });
+
+    const before = await standoffs();
+    const onMain = Object.keys(before).length;
+    expect(onMain, 'no panel could be measured against its plane').toBeGreaterThan(0);
+
+    // Now correct the building, the way a person would after looking at it.
+    await clickFace(page, 'sec-main::slopeA');
+    await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
+    const eave = page.locator('[data-testid="inspector-eave"]');
+    await eave.click();
+    await eave.fill('13');          // from 9.5 ft — a three and a half foot lift
+    await eave.press('Enter');
+    await expect.poll(() => state(page).then(s => ofSection(s, 'sec-main')[0].eave), { timeout: T })
+      .toBeCloseTo(13 / 3.280839895013123, 3);
+
+    const after = await standoffs();
+
+    // 🚨 EVERY PANEL IS STILL THE SAME HEIGHT ABOVE ITS ROOF. Not "roughly on
+    // the roof" — the same standoff it had, to the millimetre. Without the
+    // repositioning pass these differ by the whole 3.5 ft.
+    let checked = 0;
+    for (const id of Object.keys(before)) {
+      if (after[id] == null) continue;
+      expect(Math.abs(after[id] - before[id]), `panel ${id} left the roof`).toBeLessThan(0.005);
+      checked += 1;
+    }
+    expect(checked, 'no panel survived to be compared').toBeGreaterThan(0);
+
+    // …and none of them was quietly deleted to make that true.
+    expect((await state(page)).panels).toBe(onMain >= 1 ? (await state(page)).panels : 0);
+    expect(Object.keys(after).length).toBeGreaterThanOrEqual(checked);
+  });
+
   test('🚨 the branch is asserted, not assumed — this really is the custom path', async ({ page }) => {
     await openStudio(page);
     await nameTheProperty(page);

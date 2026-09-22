@@ -1378,7 +1378,7 @@ function SolarEngine3D({
         if (ent) try { viewer.entities.remove(ent); } catch { /* ignore */ }
       });
       const cesiumPts = built.frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
-      const isSelected = activeFaceId === id;
+      const isSelected = faceIsInSelection(id);
       const newIds = renderPlane3DEntity(
         viewer, C, cesiumPts, id, built.frame, isSelected, planeRendersOutlineOnly(id),
       );
@@ -2461,7 +2461,7 @@ function SolarEngine3D({
         const isMarkOnly = planeRendersOutlineOnly(plane.id);
 
         // ── Step 4: Render plane entity (mirrors finalizePlane3D) ──────
-        const isSelected = activeFaceId === plane.id;
+        const isSelected = faceIsInSelection(plane.id);
         const entityIds = renderPlane3DEntity(
           viewer, C, projectedCesiumPts, plane.id, frame, isSelected, isMarkOnly,
         );
@@ -2605,7 +2605,7 @@ function SolarEngine3D({
       });
 
       // Re-render with new selection state
-      const isSelected = activeFaceId === planeId;
+      const isSelected = faceIsInSelection(planeId);
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, planeId, frame, isSelected, planeRendersOutlineOnly(planeId));
       plane3DEntityMap.current.set(planeId, newIds);
 
@@ -2615,7 +2615,7 @@ function SolarEngine3D({
 
     try { viewer.scene.requestRender(); } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFaceId, panelPlaneKey]);
+  }, [activeFaceId, selectionLevel, panelPlaneKey]);
 
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
@@ -5043,7 +5043,7 @@ function SolarEngine3D({
       });
       const cesiumPts = frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, rp.id, frame,
-        activeFaceId === rp.id, planeRendersOutlineOnly(rp.id));
+        faceIsInSelection(rp.id), planeRendersOutlineOnly(rp.id));
       plane3DEntityMap.current.set(rp.id, newIds);
       plane3DFrameMap.current.set(rp.id, frame);
       plane3DCesiumPtsMap.current.set(rp.id, cesiumPts);
@@ -5199,7 +5199,7 @@ function SolarEngine3D({
       });
       const cesiumPts = built.frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, rf.id, built.frame,
-        activeFaceId === rf.id, planeRendersOutlineOnly(rf.id));
+        faceIsInSelection(rf.id), planeRendersOutlineOnly(rf.id));
       plane3DEntityMap.current.set(rf.id, newIds);
       plane3DFrameMap.current.set(rf.id, built.frame);
       plane3DCesiumPtsMap.current.set(rf.id, cesiumPts);
@@ -5311,7 +5311,7 @@ function SolarEngine3D({
       });
       const cesiumPts = b.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
       const newIds = renderPlane3DEntity(viewer, C, cesiumPts, b.faceId, b.frame,
-        activeFaceId === b.faceId, planeRendersOutlineOnly(b.faceId));
+        faceIsInSelection(b.faceId), planeRendersOutlineOnly(b.faceId));
       plane3DEntityMap.current.set(b.faceId, newIds);
       plane3DFrameMap.current.set(b.faceId, b.frame);
       plane3DCesiumPtsMap.current.set(b.faceId, cesiumPts);
@@ -5734,7 +5734,7 @@ function SolarEngine3D({
       const projected = frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
       const oldIds = plane3DEntityMap.current.get(pid) || [];
       oldIds.forEach(id => { try { const e = viewer.entities.getById(id); if (e) viewer.entities.remove(e); } catch {} });
-      const isSel = activeFaceId === pid;
+      const isSel = faceIsInSelection(pid);
       const newIds = renderPlane3DEntity(viewer, C, projected, pid, frame, isSel, planeRendersOutlineOnly(pid));
       plane3DEntityMap.current.set(pid, newIds);
       plane3DFrameMap.current.set(pid, frame);
@@ -8681,6 +8681,31 @@ function SolarEngine3D({
     return n > 0;
   }
 
+  /**
+   * Is this face part of what is currently SELECTED — not merely the one face
+   * the ray happened to hit?
+   *
+   * 🚨 "THE SELECTED LEVEL MUST BE VISIBLE." The highlight was
+   * `activeFaceId === planeId`, so exactly one face lit up while the inspector
+   * read "Garage · Hip roof · 4 faces" and its controls moved all four. The
+   * user could not see what they were about to edit, and the picture disagreed
+   * with the panel beside it — the same class as the WALLS readout, in
+   * geometry rather than in a number.
+   *
+   * At SECTION level every face of the section is lit. At FACE level, only the
+   * one, which is what makes drilling in worth doing. A face belonging to no
+   * section is unaffected either way.
+   */
+  function faceIsInSelection(planeId: string): boolean {
+    if (!activeFaceId) return false;
+    if (planeId === activeFaceId) return true;
+    if (selectionLevel !== 'section') return false;
+    const planes = roofPlanesRef.current ?? [];
+    const sid = planes.find(p => p.id === activeFaceId)?.sectionId || sectionIdOfFaceId(activeFaceId);
+    if (!sid) return false;
+    return (planes.find(p => p.id === planeId)?.sectionId || sectionIdOfFaceId(planeId)) === sid;
+  }
+
   function pickBuildingFaceAtScreen(viewer: any, C: any, screenPos: any): string | null {
     try {
       const hits = viewer.scene.drillPick(screenPos, 8) ?? [];
@@ -10663,7 +10688,7 @@ function SolarEngine3D({
       // v62: mark-only faces render as a clean outline (no fill/grid/label/arrows).
 
       // Render plane visualization (full for panel planes; outline-only for marked).
-      const isSelected = activeFaceId === plane.id;
+      const isSelected = faceIsInSelection(plane.id);
       // 🚨 THE MARK PLANE INTENT IS RECORDED ON THE PLANE, NOT IN A REF.
       //
       // It used to live in a component-lifetime `Set`, which meant it did not

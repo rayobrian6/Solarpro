@@ -43,6 +43,7 @@ import {
   emptyHistory, pushSnapshot, undo, redo, canUndo, canRedo, undoLabel, redoLabel,
   type GeometryHistory,
 } from '@/lib/3d/geometryHistory';
+import { repositionPanelsForPlanes } from '@/lib/3d/sectionEditing';
 import type { PlacedPanel, RoofPlane, PlacedObstruction, LayoutMeasurement, DesignElectrical } from '@/types';
 import {
   type SiteDesignBundle,
@@ -229,12 +230,40 @@ export function useSiteDesign(): UseSiteDesign {
     writeHistory(pushSnapshot(geometryHistoryRef.current, label, roofPlanesRef.current, coalesceKey));
   }, []);
 
+  /**
+   * Adopt a restored roof AND bring its panels back with it.
+   *
+   * 🚨 UNDO HAS THE SAME OBLIGATION AS THE EDIT. `editSection` repositions the
+   * array when the roof moves, because `PlacedPanel.lat/lng/height` is absolute
+   * while `planeId` says which face it belongs to. An undo that restored only
+   * the roof would be that defect exactly, in reverse: the geometry returns to
+   * where it was and the modules stay where the edit had put them — a foot
+   * above the roof instead of a foot below it.
+   *
+   * The history unit stays `RoofPlane[]`. Panels are DERIVED from the roof they
+   * stand on, so they are recomputed from it rather than snapshotted beside it;
+   * storing both would create two records of one fact and a way for them to
+   * disagree.
+   */
+  const applyRestoredGeometry = useCallback((restored: RoofPlane[]) => {
+    const held = panelsRef.current ?? [];
+    const from = roofPlanesRef.current ?? [];
+    setRoofPlanes(restored);
+    if (held.length === 0) return;
+    const moved = repositionPanelsForPlanes(held, from, restored);
+    if (moved.moved > 0) setPanels(moved.panels);
+    // An orphan here means the undone edit had changed the roof KIND. The
+    // panels are left exactly as they are rather than guessed onto a
+    // neighbouring face; the caller surfaces it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const undoGeometry = useCallback((): string | null => {
     const step = undo(geometryHistoryRef.current, roofPlanesRef.current);
     if (!step.ok) return null;
     writeHistory(step.history);
     // Adopt the canonical array; every derived thing rebuilds from it.
-    setRoofPlanes(step.planes);
+    applyRestoredGeometry(step.planes);
     return step.label;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -243,7 +272,7 @@ export function useSiteDesign(): UseSiteDesign {
     const step = redo(geometryHistoryRef.current, roofPlanesRef.current);
     if (!step.ok) return null;
     writeHistory(step.history);
-    setRoofPlanes(step.planes);
+    applyRestoredGeometry(step.planes);
     return step.label;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

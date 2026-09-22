@@ -239,8 +239,16 @@ describe('🚨 undo restores canonical geometry, and the inert second history is
     expect(SITE).toMatch(/const recordGeometry = useCallback/);
     expect(SITE).toMatch(/pushSnapshot\(geometryHistoryRef\.current, label, roofPlanesRef\.current, coalesceKey\)/);
     // Undo adopts CANONICAL planes. No Cesium, no entity, no frame.
+    //
+    // 🚨 RE-ANCHORED ON THE INDIRECTION, NOT DELETED. This asserted
+    // `setRoofPlanes(step.planes)` inside undoGeometry. The adoption now goes
+    // through `applyRestoredGeometry`, which also brings the panels back — so
+    // the old literal is gone and the INVARIANT is not. What matters is that
+    // the restored planes are adopted, canonically, which is asserted here and
+    // in the undo-panel guard below.
     expect(SITE).toMatch(/const undoGeometry = useCallback/);
-    expect(SITE).toMatch(/setRoofPlanes\(step\.planes\)/);
+    expect(SITE).toMatch(/applyRestoredGeometry\(step\.planes\)/);
+    expect(SITE).toMatch(/setRoofPlanes\(restored\)/);
     expect(SITE).not.toMatch(/Cesium/);
   });
 
@@ -377,5 +385,60 @@ describe('🚨 the panels come with the roof', () => {
     const panels = fn.indexOf('repositionPanelsForPlanes(');
     expect(roof).toBeGreaterThan(-1);
     expect(panels).toBeGreaterThan(roof);
+  });
+});
+
+describe('🚨 the selected LEVEL is visible in the scene, not just in the panel', () => {
+  it('every roof-face highlight goes through faceIsInSelection', () => {
+    // The highlight was `activeFaceId === planeId` at seven separate call
+    // sites, so exactly ONE face lit up while the inspector read
+    // "Garage · Hip roof · 4 faces" and its controls moved all four. The user
+    // could not see what they were about to edit, and the picture disagreed
+    // with the panel beside it — the same class as the WALLS readout, in
+    // geometry instead of in a number.
+    expect(ENGINE).toMatch(/function faceIsInSelection\(/);
+
+    // Prove the forbidden pattern is a real one before forbidding it: a
+    // `.not.toMatch` whose regex cannot fire passes against any source.
+    const SINGLE = /activeFaceId === (planeId|plane\.id|id|pid|rp\.id|rf\.id|b\.faceId)/;
+    expect('const isSelected = activeFaceId === planeId;').toMatch(SINGLE);
+    expect(ENGINE, 'a highlight is still comparing against one face id').not.toMatch(SINGLE);
+
+    // It must consult the LEVEL, or it would light the whole section even when
+    // the user has deliberately drilled into one face.
+    const fn = bodyOf(ENGINE, 'function faceIsInSelection(');
+    expect(fn).toMatch(/selectionLevel !== 'section'/);
+    expect(fn).toMatch(/sectionIdOfFaceId\(/);
+
+    // …and the re-render must actually run when the level changes.
+    expect(ENGINE).toMatch(/\[activeFaceId, selectionLevel, panelPlaneKey\]/);
+  });
+});
+
+describe('🚨 undo brings the panels back too', () => {
+  it('a restored roof repositions the array, symmetrically with the edit', () => {
+    // `editSection` moves the array when the roof moves. An undo that restored
+    // only the roof would be that defect in reverse: the geometry returns to
+    // where it was and the modules stay where the edit had put them — a foot
+    // ABOVE the roof instead of a foot below it.
+    expect(SITE).toMatch(/from '@\/lib\/3d\/sectionEditing'/);
+    expect(SITE).toMatch(/const applyRestoredGeometry = useCallback/);
+
+    const fn = SITE.slice(
+      SITE.indexOf('const applyRestoredGeometry = useCallback'),
+      SITE.indexOf('const undoGeometry = useCallback'),
+    );
+    expect(fn).toMatch(/repositionPanelsForPlanes\(held, from, restored\)/);
+    // The roof must be adopted before the panels are mapped onto it, and the
+    // OLD planes must be the source frame — passing `restored` twice would map
+    // every panel through an identity and move nothing while reporting success.
+    expect(fn).toMatch(/const from = roofPlanesRef\.current \?\? \[\]/);
+
+    // Both directions go through it. Redo has exactly the same obligation.
+    for (const which of ['undoGeometry', 'redoGeometry']) {
+      const body = SITE.slice(SITE.indexOf(`const ${which} = useCallback`), SITE.indexOf(`const ${which} = useCallback`) + 500);
+      expect(body, `${which} must not adopt planes without its panels`).toMatch(/applyRestoredGeometry\(step\.planes\)/);
+      expect(body).not.toMatch(/setRoofPlanes\(step\.planes\)/);
+    }
   });
 });
