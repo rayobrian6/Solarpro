@@ -331,13 +331,16 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
     // The house's eave is 2.9 m = 9.5 ft. The OLD readout seeded at 3.0 m and
     // showed 9.8 ft about whatever the wall happened to be.
     expect(await fieldValue(page, 'inspector-eave')).toBe('9.5');
-    expect(await fieldValue(page, 'inspector-pitch')).toBe('30');
+    // One decimal: `decimals={0}` printed a 22.5 deg roof as "23", a half-degree
+    // lie in the number that drives the ridge height, the array tilt PVWatts
+    // reads and the pitch on the permit drawing.
+    expect(await fieldValue(page, 'inspector-pitch')).toBe('30.0');
 
     // Select the GARAGE, whose eave is 2.4 m = 7.9 ft on a different pad. One
     // global counter could not tell these apart; this must.
     await clickFace(page, 'sec-garage::slopeA');
     await expect.poll(() => fieldValue(page, 'inspector-eave'), { timeout: T }).toBe('7.9');
-    await expect.poll(() => fieldValue(page, 'inspector-pitch'), { timeout: T }).toBe('25');
+    await expect.poll(() => fieldValue(page, 'inspector-pitch'), { timeout: T }).toBe('25.0');
   });
 
   test('🚨 EVERY PRESS LANDS, AND THE FIELD SHOWS THE BUILDING — not the press before', async ({ page }) => {
@@ -570,7 +573,7 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
     await frameRoof(page);
     await clickFace(page, 'sec-garage::slopeA');
     await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
-    await expect.poll(() => fieldValue(page, 'inspector-pitch'), { timeout: T }).toBe('35');
+    await expect.poll(() => fieldValue(page, 'inspector-pitch'), { timeout: T }).toBe('35.0');
   });
 
   test('🚨 STEP 13-14 — panels go on the corrected roof, through the normal Auto Layout', async ({ page }) => {

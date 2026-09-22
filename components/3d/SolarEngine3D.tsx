@@ -8529,7 +8529,24 @@ function SolarEngine3D({
     // isPanelId: true only for bare UUID keys (no __ separator)
     const isPanelId = (id: string) => !id.includes('__');
     try {
-      const drilled = viewer.scene.drillPick(screenPos, 10);
+      // 🚨 DRILL DEEP ENOUGH TO REACH A PANEL IN BUILDING MODE.
+      //
+      // This was 10. With the Building view on, one screen point can sit over a
+      // roof polygon, its aerial texture, its outline, its glow, a wall, and a
+      // panel's box AND its glass — so the panel can fall past the tenth hit
+      // and the pick reports "no panel here".
+      //
+      // That is not cosmetic any more. The select handler now asks this
+      // question FIRST and lets the Building roof answer only when it says no,
+      // which is how a module stopped being unselectable — so a false "no" puts
+      // the defect straight back. An E2E measured exactly that: "a panel click
+      // still selected the roof face behind the module", passing in isolation
+      // and failing in a fuller scene, which is the signature of a depth limit
+      // rather than a timing race.
+      //
+      // The cost is a longer walk on a miss, on a click. The cost of being
+      // wrong is a panel nobody can select, delete or move.
+      const drilled = viewer.scene.drillPick(screenPos, 32);
       for (const pickedObj of drilled) {
         if (!pickedObj || !pickedObj.id) continue;
         const entity = pickedObj.id;
