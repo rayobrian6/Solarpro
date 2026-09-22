@@ -5500,7 +5500,10 @@ function SolarEngine3D({
     const groundSeed = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     const renderables = collectRoofRenderables(C, groundSeed);
     if (renderables.length === 0) {
-      setStatusMsg('No roof faces yet — trace a roof face first, then turn on 🏚 Building');
+      // The old text said "trace a roof face first", which sends the reader
+      // straight to Mark Plane - the tool that CANNOT produce a building.
+      // Name the group that can.
+      setStatusMsg('Nothing to extrude yet \u2014 model the house first with \u{1F3DA} Building \u2192 Gable, Hip or Flat/Block. (\u{1F3DA} Building only draws walls on what already exists.)');
       return;
     }
 
@@ -13335,6 +13338,17 @@ function SolarEngine3D({
   const selectedFaceSectionId = activeFaceId
     ? (inspectorPlanes.find(p => p.id === activeFaceId)?.sectionId || selectedSectionId)
     : null;
+  /**
+   * DOES THE SELECTED FACE BELONG TO A BUILDING SECTION?
+   *
+   * 🚨 THE ONLY HONEST BASIS FOR SAYING "SECTION" ON SCREEN. A face has a
+   * section when it carries the RECORD, not merely when its id happens to
+   * parse as one: a face whose record is missing can be measured but not
+   * edited as a volume, and telling the user otherwise is the contradiction
+   * this flag exists to remove.
+   */
+  const selectedFaceHasSection = !!(activeFaceId && selectedFaceSectionId
+    && inspectorPlanes.find(p => p.id === activeFaceId)?.section);
 
   const inspectorState: InspectorState = (() => {
     const planes = inspectorPlanes;
@@ -13731,9 +13745,37 @@ function SolarEngine3D({
               { mode: 'roof'    as PlacementMode, icon: '\u{1F3E0}', label: 'Roof',     tip: 'Place panels on a roof surface' },
               { mode: 'ground'  as PlacementMode, icon: '\u{1F331}', label: 'Ground',   tip: 'Ground mount: click start \u2192 end to place a row' },
               { mode: 'fence'   as PlacementMode, icon: '\u26A1',    label: 'Fence',    tip: 'SOL Fence: click points, right-click to finish' },
-              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: 'Custom Array', tip: 'Outline the panel area: click 3+ roof corners, right-click to place an array. Works without 3D coverage — falls back to a flat trace using the Tilt slider pitch.' },
-              { mode: 'mark_plane' as PlacementMode, icon: '⬡', label: 'Mark Plane', tip: 'Outline a roof face for the model/permit WITHOUT panels (3+ corners, right-click to finish). Works without 3D coverage — falls back to a flat trace, with direction read from the shape you draw. Use 🔗 Roof Model to see all edges.' },
+              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: 'Custom Array', tip: 'ONE roof face, with panels on it. Click 3+ roof corners, right-click to place. It is a single face, not a building: no wall height, no pad, no ridge. To model a house with walls and a ridge, use the \u{1F3DA} Building group.' },
+              { mode: 'mark_plane' as PlacementMode, icon: '⬡', label: 'Mark Plane', tip: 'ONE roof face, no panels \u2014 for the model and the permit. Click 3+ corners, right-click to finish. It is a single face, not a building: no wall height, no pad, no ridge. To model a house with walls and a ridge, use the \u{1F3DA} Building group.' },
               { mode: 'row'     as PlacementMode, icon: '\u27A1',    label: 'Row',      tip: 'Row Tool: click two points to place a panel row' },
+            ],
+          },
+          // THE TOOLS THAT BUILD A BUILDING LIVE UNDER "BUILDING".
+          //
+          // Gable, Hip and Block are the only three that produce a
+          // BuildingSection - a volume with a footprint, a wall height, a pad
+          // and a ridge, whose faces move together. They used to sit in
+          // "Tools", between Obstruction and a decorative Tree, while the
+          // group a person opens first - "Place" - offered Mark Plane and
+          // Custom Array, which produce a SINGLE STANDALONE FACE.
+          //
+          // A UX audit traced the consequence, and it is the owner's own
+          // report: "I was already in Building mode when I traced this
+          // geometry" - and got faces with no section. The Building toggle is
+          // a RENDER control (it extrudes walls for the view); it changes no
+          // tool and never did. So the product required the user to know the
+          // difference between a standalone RoofPlane and a section-owned
+          // face in order to pick a tool, and offered the wrong one first.
+          //
+          // The rule this encodes: the object a tool creates is named where
+          // the tool is chosen, not discovered three operations later when
+          // the controls for it turn out not to exist.
+          {
+            id: 'building', icon: '\u{1F3DA}', label: 'Building',
+            tools: [
+              { mode: 'block'      as PlacementMode, icon: '\u{1F9F1}', label: 'Flat / Block', tip: 'A FLAT-ROOFED VOLUME (garage, addition, commercial deck). Line-trace the footprint: click N points for any shape \u2014 rectangle, L, T \u2014 right-click to finish. It becomes a building SECTION with a wall height and a pad you can edit, and its deck takes panels. Works with no 3D coverage.' },
+              { mode: 'roof_gable'   as PlacementMode, icon: '\u{1F3E0}\u2009\u{1F3D7}', label: 'Gable', tip: 'Build a gable SECTION: click the 4 footprint corners in order around the building. Two real roof faces meeting at one ridge, at any rotation. They take panels and they save with the design. Works with no 3D coverage.' },
+              { mode: 'roof_hip'     as PlacementMode, icon: '\u{1F3D7}\u2009\u{1F3E0}', label: 'Hip', tip: 'Build a hip SECTION: click the 4 footprint corners in order around the building. Four real roof faces \u2014 two slopes plus two hipped ends \u2014 all closing on one ridge. On a square footprint it becomes a pyramid. Works with no 3D coverage.' },
             ],
           },
           {
@@ -13754,9 +13796,6 @@ function SolarEngine3D({
               { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruction', tip: 'Add Obstruction (Aurora parity): click the roof to drop a chimney-class prism. Default 0.6m × 0.6m × 1.0m, configurable via the right panel. Removes panels inside the footprint.' },
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
-              { mode: 'block'         as PlacementMode, icon: '\u{1F9F1}', label: 'Block',     tip: 'Drop a 3D building block by line-tracing its footprint: click N points to define any shape (rectangle, L, T, etc.), right-click to finish. Use when Google 3D Tiles has no coverage for this address.' },
-              { mode: 'roof_gable'   as PlacementMode, icon: '\u{1F3E0}\u2009\u{1F3D7}', label: 'Gable', tip: 'Build a gable SECTION: click the 4 footprint corners in order around the building. Two real roof faces meeting at one ridge, at any rotation. They take panels and they save with the design. Works with no 3D coverage.' },
-              { mode: 'roof_hip'     as PlacementMode, icon: '\u{1F3D7}\u2009\u{1F3E0}', label: 'Hip', tip: 'Build a hip SECTION: click the 4 footprint corners in order around the building. Four real roof faces \u2014 two slopes plus two hipped ends \u2014 all closing on one ridge. On a square footprint it becomes a pyramid. Works with no 3D coverage.' },
               { mode: 'tree'         as PlacementMode, icon: '\u{1F333}', label: 'Tree', tip: 'Drop a decorative tree: a green sphere on a thin trunk. Click anywhere on the terrain to place. No effect on solar production.' },
             ],
           },
@@ -15282,7 +15321,16 @@ function SolarEngine3D({
                   background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.10)',
                 }}
               >
-                {activeFaceId ? '⬡ Inspector → this section' : 'Click a roof to edit its section'}
+                {/* It said "Inspector -> this section" for ANY selected face,
+                    while the inspector simultaneously read "not part of a
+                    building section" for a hand-traced one: two on-screen
+                    statements contradicting each other, about a capability
+                    that face does not have. It now reports what IS selected. */}
+                {!activeFaceId
+                  ? 'Click a roof to edit it'
+                  : (selectedFaceHasSection
+                      ? '\u2B21 Inspector \u2192 this section'
+                      : '\u2B21 Single roof face \u2014 no walls, pad or ridge')}
               </span>
             ) : null}
             {/* v66: square up the trace itself. Sits next to Stitch because they

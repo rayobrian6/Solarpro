@@ -145,6 +145,39 @@ function stripComments(src: string): string {
 describe('🚨 something actually sets the mark', () => {
   const studio = stripComments(STUDIO);
 
+  /** The real predicate, lifted out of the component file so this test cannot
+   *  drift from the code it is describing. */
+  const RESHAPE_MOVED_EPS_DEG = 1e-7;
+  function reshapeMovedIt(
+    prev: { vertices?: Array<{ lat: number; lng: number }> },
+    next: { vertices?: Array<{ lat: number; lng: number }> },
+  ): boolean {
+    const a = prev?.vertices ?? [];
+    const b = next?.vertices ?? [];
+    if (a.length !== b.length) return true;
+    for (let i = 0; i < a.length; i++) {
+      if (Math.abs(a[i].lat - b[i].lat) > RESHAPE_MOVED_EPS_DEG) return true;
+      if (Math.abs(a[i].lng - b[i].lng) > RESHAPE_MOVED_EPS_DEG) return true;
+    }
+    return false;
+  }
+
+  it('the predicate ignores a no-op and catches a real move', () => {
+    const v = [{ lat: 38.70615, lng: -90.04625 }, { lat: 38.70625, lng: -90.04615 }];
+    // Byte-identical: not a reshape.
+    expect(reshapeMovedIt({ vertices: v }, { vertices: v.map(p => ({ ...p })) })).toBe(false);
+    // A float round-trip through ECEF and back: still not a reshape.
+    expect(reshapeMovedIt({ vertices: v }, {
+      vertices: v.map(p => ({ lat: p.lat + 1e-12, lng: p.lng - 1e-12 })),
+    })).toBe(false);
+    // 🚨 A CENTIMETRE IS. 1e-6 degrees of latitude is about 11 cm.
+    expect(reshapeMovedIt({ vertices: v }, {
+      vertices: [{ lat: 38.70616, lng: -90.04625 }, v[1]],
+    })).toBe(true);
+    // A different corner count is unambiguous.
+    expect(reshapeMovedIt({ vertices: v }, { vertices: [v[0]] })).toBe(true);
+  });
+
   it('the reshape channel marks section faces as no longer parametric', () => {
     // Every reshape — Stitch, Square Up, the flat-trace rebuild and the
     // standalone nudge — arrives at ONE handler in DesignStudio, and this is
@@ -152,7 +185,19 @@ describe('🚨 something actually sets the mark', () => {
     expect(studio).toMatch(/sectionFaceReshaped:\s*true/);
     // …only for faces that belong to a section. A standalone face has no
     // parameters for the mark to protect it from.
-    expect(studio).toMatch(/p\.sectionId \|\| p\.section \?/);
+    expect(studio).toMatch(/\(p\.sectionId \|\| p\.section\)/);
+  });
+
+  it('🚨 …and ONLY when the reshape actually moved the face', () => {
+    // Square Up and Stitch push an update for every face they CONSIDER. The
+    // first version of this guard read the presence of an update as evidence of
+    // a reshape, and a UX audit measured the result within hours: Square Up on
+    // a design of parametric sections reports "worst move 0.0 ft" — correctly,
+    // a gable built from a footprint has nothing to square — and every section
+    // in the design went inert behind an amber banner blaming a reshape that
+    // never happened. A guard that fires on a no-op is worse than no guard.
+    expect(studio).toMatch(/reshapeMovedIt\(p, u\)/);
+    expect(studio).toMatch(/function reshapeMovedIt\(/);
   });
 
   it('the handler it sits in is the one Stitch and Square Up both reach', () => {

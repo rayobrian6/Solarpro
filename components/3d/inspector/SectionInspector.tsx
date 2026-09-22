@@ -501,7 +501,12 @@ export function SectionInspector({
              Wall, and the controls must change to that object's scope. ── */}
       <div style={SECTION_TITLE}>Selected</div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-        {levelChip('section', 'Section', state.level === 'section', !!s || !!f || !!w)}
+        {/* 🚨 ENABLED ONLY WHEN THERE IS A SECTION TO GO TO. It used to be lit
+            for a standalone face too, so clicking it accepted the press, changed
+            nothing and said nothing — a control that looks available and is not
+            is the same defect as a control that accepts a number and ignores it. */}
+        {levelChip('section', 'Section', state.level === 'section',
+          !!s || !!(f && f.sectionId) || !!(w && w.sectionId))}
         {levelChip('face', 'Roof face', state.level === 'face', !!f || !!s || !!w)}
         {/* 🚨 THE WALL CHIP IS ONLY LIT WHEN A WALL IS SELECTED. There is no
                "the wall of this face" — a face has several — so this level is
@@ -838,10 +843,19 @@ export function SectionInspector({
                      honest to display: this face has no pad, so "wall height"
                      has no value, and a counter of how often the button was
                      pressed is what read 17 ft on a ten-foot wall. */}
+              {/* 🚨 THE ADVICE MUST NAME SOMETHING THE USER CAN DO, AND SAY WHAT IT
+                  COSTS. "Trace it as a building section" meant delete and re-trace
+                  with a different tool — there is no promote/group operation
+                  anywhere in the product — and re-tracing mints new face ids, so
+                  every panel standing on this face orphans. Saying only the first
+                  half of that sends a person to redo work and lose an array they
+                  did not know was at risk. */}
               <div style={{ marginTop: 6, fontSize: 9.5, color: '#7c8aa5', lineHeight: 1.45 }}>
-                This face was traced on its own, so it has no wall or pad to set —
-                only a relative move. Trace it as a building section to get real
-                heights.
+                This is a single traced face, so it has no wall, pad or ridge to set —
+                only a relative move. To get those, model the mass with
+                <b> Building → Gable, Hip or Flat/Block</b>, which builds a section.
+                That means re-tracing this face: it is a different object, and any
+                panels on this one would have to be laid again.
               </div>
             </>
           )}

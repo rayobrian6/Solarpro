@@ -537,6 +537,38 @@ function BillCalculator({ onAnalysis, project }: {
 }
 
 // ─── Main Design Studio ───────────────────────────────────────
+
+/**
+ * Did this reshape actually MOVE the face?
+ *
+ * 🚨 SQUARE UP AND STITCH PUSH AN UPDATE FOR EVERY FACE THEY CONSIDER, moved or
+ * not — Square Up reports "worst move 0.0 ft" on a design of parametric sections
+ * and still emits one update per face. Treating the presence of an update as
+ * evidence of a reshape marked every section in the design as hand-modelled and
+ * greyed out every one of its controls, for an operation that changed nothing.
+ *
+ * A centimetre is the threshold: below it the corners are the same corners to
+ * any building, and a float round-trip through ECEF and back is well inside it.
+ * Above it the face is genuinely somewhere else and the section's footprint no
+ * longer describes it.
+ */
+const RESHAPE_MOVED_EPS_DEG = 1e-7;   // ~1.1 cm of latitude
+
+function reshapeMovedIt(
+  prev: { vertices?: Array<{ lat: number; lng: number }> },
+  next: { vertices?: Array<{ lat: number; lng: number }> },
+): boolean {
+  const a = prev?.vertices ?? [];
+  const b = next?.vertices ?? [];
+  // A different corner COUNT is unambiguously a reshape.
+  if (a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    if (Math.abs(a[i].lat - b[i].lat) > RESHAPE_MOVED_EPS_DEG) return true;
+    if (Math.abs(a[i].lng - b[i].lng) > RESHAPE_MOVED_EPS_DEG) return true;
+  }
+  return false;
+}
+
 export default function DesignStudio({ project, onSave }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -5093,7 +5125,20 @@ export default function DesignStudio({ project, onSave }: Props) {
                     // a degree, and that foreshortens the usable extent by
                     // cos²(Δ) — losing whole rows, so panel count, kW and BOM.
                     ...(u.ecefFrame3D ? { ecefFrame3D: u.ecefFrame3D } : {}),
-                    // 🚨 AND THE FACE SAYS IT IS NO LONGER PARAMETRIC.
+                    // 🚨 AND THE FACE SAYS IT IS NO LONGER PARAMETRIC — BUT ONLY
+                    // IF IT ACTUALLY MOVED.
+                    //
+                    // The first version marked every face in `updates`, and both
+                    // Square Up and Stitch push an update for EVERY face they
+                    // considered, moved or not. A UX audit measured the
+                    // consequence within hours: press 📐 Square Up on a design of
+                    // parametric sections, it reports "worst move 0.0 ft" —
+                    // correctly, a gable built from a footprint has nothing to
+                    // square — and every section in the design nevertheless went
+                    // inert, with an amber banner blaming a reshape that had not
+                    // happened. A guard that fires on an operation that changed
+                    // nothing is worse than no guard: it takes the controls away
+                    // and gives a false reason.
                     //
                     // A section face is derived from footprint + eave + pitch and
                     // is rebuilt from those on every section edit. The corners a
@@ -5107,7 +5152,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                     // says so, instead of quietly choosing one of the two
                     // geometries. Standalone faces are unaffected — they have no
                     // parameters to disagree with.
-                    ...(p.sectionId || p.section ? { sectionFaceReshaped: true } : {}),
+                    ...((p.sectionId || p.section) && reshapeMovedIt(p, u) ? { sectionFaceReshaped: true } : {}),
                   });
                 }));
                 console.log('[DesignStudio] Stitch synced', updates.length, 'plane(s) into roofPlanes');
