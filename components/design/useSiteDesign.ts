@@ -493,8 +493,20 @@ export function useSiteDesign(): UseSiteDesign {
   }, []);
 
   const redoGeometry = useCallback((): string | null => {
-    // Captured before `restoreLedger` overwrites it -- the delta is the point.
+    // 🚨 CAPTURED BEFORE THE RESTORE, BOTH OF THEM.
+    //
+    // The ledger was, and the PANELS WERE NOT -- and an adversary caught it:
+    // `restorePanelsVerbatim` calls setPanels, whose setter writes
+    // `panelsRef.current` SYNCHRONOUSLY, so by the time the authorization was
+    // minted the array had already become the post-deletion one. The modules the
+    // redo removed were no longer in it, the authorization named no
+    // panelSystemTypes, and the save guard still saw an unexplained loss of
+    // every module on that face. The 409 deadlock this was written to close was
+    // still open.
+    //
+    // Half a fix reads to the user exactly like no fix.
     const beforeLedger = deletionLedgerRef.current;
+    const panelsBefore = panelsRef.current;
     const step = redo(
       geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
       deletionLedgerRef.current, panelsRef.current,
@@ -521,7 +533,7 @@ export function useSiteDesign(): UseSiteDesign {
     // Computed from the LEDGER DELTA rather than from the step's label, so it
     // covers exactly what this step removed and nothing else.
     const redoAuth = authorizationForLedgerDelta(
-      beforeLedger, step.deletions as DeletionLedger, ledgerKeyOf(), panelsRef.current, Date.now(),
+      beforeLedger, step.deletions as DeletionLedger, ledgerKeyOf(), panelsBefore, Date.now(),
     );
     restoreLedger(step.deletions);
     if (redoAuth) {

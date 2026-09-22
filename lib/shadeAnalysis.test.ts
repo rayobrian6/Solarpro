@@ -42,7 +42,24 @@ describe('computeShadeAnalysis', () => {
     expect(result.panelShadeFactors['p1']).toBeLessThanOrEqual(1.0);
   });
 
-  it('south-facing panel has higher shade factor than north-facing at same lat', () => {
+  it('🚨 an unshaded north roof is not SHADED -- it is badly oriented', () => {
+    // -----------------------------------------------------------------------
+    // 🚨 THIS TEST ASSERTED THE DEFECT, AND IS CORRECTED RATHER THAN DELETED.
+    //
+    // It required south > north from a number called `annualShadeFactor`. That
+    // could only hold if the factor encoded ORIENTATION -- and it did: it was
+    // the irradiance-weighted mean of cos(angle of incidence), normalised by the
+    // weights alone. Which is exactly why a clear south roof reported "26.6%
+    // annual shade loss" with nothing in the sky, and why `lib/pvwatts.ts` then
+    // applied that on top of PVWatts' OWN tilt/azimuth factors.
+    //
+    // Orientation has one owner and it is PVWatts. This function owns
+    // obstruction. A north-facing roof with a clear sky is not shaded; it
+    // produces less, and the production model is what says so.
+    //
+    // The property that had to be asserted instead is below: with nothing in the
+    // way, both are 1.0 -- and with something in the way, the factor moves.
+    // -----------------------------------------------------------------------
     const southPanel: PanelShadeInput[] = [
       { id: 'south', tilt: 20, azimuth: 180, row: 0, col: 0 },
     ];
@@ -53,10 +70,14 @@ describe('computeShadeAnalysis', () => {
     const southResult = computeShadeAnalysis(southPanel, 33.44, -112.07);
     const northResult = computeShadeAnalysis(northPanel, 33.44, -112.07);
 
-    // South-facing should have significantly better solar access than north-facing
-    expect(southResult.panelShadeFactors['south']).toBeGreaterThan(
-      northResult.panelShadeFactors['north']
-    );
+    expect(southResult.panelShadeFactors['south']).toBeCloseTo(1.0, 6);
+    expect(northResult.panelShadeFactors['north']).toBeCloseTo(1.0, 6);
+
+    // ...and the number still responds to a real obstruction, on both.
+    const blocked = computeShadeAnalysis(southPanel, 33.44, -112.07, {
+      nearbyObstruction: [{ heightM: 12, distanceM: 4, azimuthDeg: 180, arcDeg: 60 }],
+    });
+    expect(blocked.panelShadeFactors['south']).toBeLessThan(0.9);
   });
 
   it('nearby tall obstruction reduces shade factor', () => {
@@ -97,15 +118,43 @@ describe('computeShadeAnalysis', () => {
   });
 
   it('returns correct worst/best panel IDs', () => {
-    // Panel 1: optimal south-facing; Panel 2: north-facing (worse)
+    // 🚨 WORST MEANS MOST SHADED, WHICH TAKES AN OBSTRUCTION.
+    //
+    // This used to distinguish the two panels by ORIENTATION alone -- 'bad' was
+    // simply north-facing -- which only produced an answer because the factor
+    // was secretly orientation. With a clear sky both are 1.0 and neither is
+    // worse than the other, so the panels are now told apart by what actually
+    // stands in front of one of them.
     const panels: PanelShadeInput[] = [
       { id: 'good', tilt: 20, azimuth: 180, row: 0, col: 0 },
-      { id: 'bad',  tilt: 20, azimuth: 0,   row: 0, col: 1 },
+      { id: 'bad',  tilt: 20, azimuth: 180, row: 0, col: 1 },
     ];
-    const result = computeShadeAnalysis(panels, 33.44, -112.07);
+    const result = computeShadeAnalysis(panels, 33.44, -112.07,
+      (id) => (id === 'bad'
+        ? { nearbyObstruction: [{ heightM: 14, distanceM: 3, azimuthDeg: 180, arcDeg: 70 }] }
+        : { nearbyObstruction: [] }));
 
     expect(result.worstPanelId).toBe('bad');
     expect(result.bestPanelId).toBe('good');
+    expect(result.panelShadeFactors['bad']).toBeLessThan(result.panelShadeFactors['good']);
+  });
+
+  it('🚨 a clear array still names a worst and a best panel', () => {
+    // The latent bug this exposed: the scan seeded `worstShadeFactor = 1.0` and
+    // compared strictly, so an array where every factor is exactly 1.0 never
+    // satisfied `factor < worst` and `worstPanelId` came back NULL. A UI asking
+    // "which module is worst affected" got no answer for the commonest case
+    // there is -- a clear roof. It was hidden because the old factor was never
+    // exactly 1.0 and differed per panel, so some panel always won.
+    const panels: PanelShadeInput[] = [
+      { id: 'a', tilt: 20, azimuth: 180, row: 0, col: 0 },
+      { id: 'b', tilt: 20, azimuth: 180, row: 0, col: 1 },
+    ];
+    const result = computeShadeAnalysis(panels, 33.44, -112.07);
+    expect(result.worstPanelId).not.toBeNull();
+    expect(result.bestPanelId).not.toBeNull();
+    expect(result.panelShadeFactors['a']).toBeCloseTo(1.0, 6);
+    expect(result.panelShadeFactors['b']).toBeCloseTo(1.0, 6);
   });
 
   it('systemShadeDeratePct is 0..100 range', () => {
@@ -135,7 +184,14 @@ describe('computeShadeAnalysis', () => {
     expect(result.panelShadeFactors['flat']).toBeGreaterThan(0.3);
   });
 
-  it('vertical fence panel (tilt=90) has lower factor than tilted', () => {
+  it('🚨 a vertical SolFence in clear air is unshaded too', () => {
+    // Same correction as the north-roof case above. A 90° fence produces less
+    // than a 20° roof and PVWatts says so; it is not SHADED by being vertical.
+    //
+    // This one mattered commercially: the old factor gave a south-facing
+    // SolFence about 0.58, so every fence quote carried a fabricated 42% shade
+    // loss on top of its real orientation penalty, which PVWatts had already
+    // applied.
     const tiltedPanel: PanelShadeInput[] = [
       { id: 'tilted', tilt: 20, azimuth: 180, row: 0, col: 0 },
     ];
@@ -143,13 +199,11 @@ describe('computeShadeAnalysis', () => {
       { id: 'vertical', tilt: 90, azimuth: 180, row: 0, col: 0 },
     ];
 
-    const tiltedResult  = computeShadeAnalysis(tiltedPanel,  33.44, -112.07);
+    const tiltedResult   = computeShadeAnalysis(tiltedPanel,   33.44, -112.07);
     const verticalResult = computeShadeAnalysis(verticalPanel, 33.44, -112.07);
 
-    // 20° tilt should outperform 90° vertical for south-facing in Phoenix
-    expect(tiltedResult.panelShadeFactors['tilted']).toBeGreaterThan(
-      verticalResult.panelShadeFactors['vertical']
-    );
+    expect(tiltedResult.panelShadeFactors['tilted']).toBeCloseTo(1.0, 6);
+    expect(verticalResult.panelShadeFactors['vertical']).toBeCloseTo(1.0, 6);
   });
 
   it('handles horizon elevations profile', () => {

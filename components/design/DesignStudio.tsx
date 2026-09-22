@@ -44,7 +44,7 @@ import { type NearmapObstruction, OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/n
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { autoLayoutScope } from '@/lib/3d/autoLayoutScope';
 import { filterPanelsByKeepOut } from '@/lib/3d/panelKeepOut';
-import { buildShadeScene, profileForPanel } from '@/lib/shade/canonicalShadeScene';
+import { buildShadeScene, profileForPanel, faceTopM } from '@/lib/shade/canonicalShadeScene';
 import { computeShadeAnalysis } from '@/lib/shadeAnalysis';
 import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
 
@@ -4589,10 +4589,27 @@ export default function DesignStudio({ project, onSave }: Props) {
   } | null>(null);
   const deletionTokenRef = useRef(0);
 
+  /**
+   * 🚨 WHAT ELSE THIS DELETION MEANT, RUN ONLY IF IT ACTUALLY HAPPENS.
+   *
+   * "Draw Manually Instead" does two things: it throws the detected roof away
+   * AND it records that Google does not govern this property. The second is
+   * irreversible, and it was being done FIRST and unconditionally -- together
+   * with the mode switch and a toast announcing it -- while the deletion itself
+   * opens a confirm modal the user can cancel. Pressing Cancel therefore left
+   * the property permanently marked and the studio in draw mode, having
+   * performed the half of an operation that cannot be undone, for an operation
+   * that had just been declined.
+   *
+   * A follow-up registered here runs once, and only on a successful commit.
+   */
+  const afterDeletionRef = useRef<(() => void) | null>(null);
+
   const commitDeletion = useCallback((plan: DeletionPlan) => {
     setPendingDeletion(null);
     const res = site.applyDelete(plan);
     if (!res.ok) {
+      afterDeletionRef.current = null;
       toast.error('Nothing was deleted', res.message);
       return;
     }
@@ -4627,6 +4644,10 @@ export default function DesignStudio({ project, onSave }: Props) {
       setKeepOutZones([]);
     }
     toast.success(plan.title, res.message + ' Undo restores it.');
+    // Committed. Anything that depended on it may now run, exactly once.
+    const after = afterDeletionRef.current;
+    afterDeletionRef.current = null;
+    after?.();
   }, [site.applyDelete]);
 
   const requestDeletion = useCallback((scope: string, targetId?: string) => {
@@ -4636,6 +4657,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       // "This face is one of 2 on a gable section…" plus "Delete the whole
       // section instead" is the difference between a product that said no and
       // a product that appears broken.
+      afterDeletionRef.current = null;
       toast.error(plan.title + ' is not possible here', plan.refusal + ' ' + plan.refusalRemedy);
       return;
     }
@@ -4673,9 +4695,25 @@ export default function DesignStudio({ project, onSave }: Props) {
     const obs = placedObstructionsRef.current ?? [];
     const live = panelsRef2.current ?? [];
     if (live.length === 0) return;
-    const groundElevM = planes.find(p => Number.isFinite(p.planeHeightAtCenterMeters))
-      ?.planeHeightAtCenterMeters ?? 0;
-    const scene = buildShadeScene({ roofPlanes: planes, obstructions: obs, groundElevM });
+    // 🚨 NOT `find(p => isFinite(planeHeightAtCenterMeters))`. That took the
+    // first face with a finite value -- and 0.0 is finite, and 0.0 is the
+    // SENTINEL meaning "my elevation is in origin3D". So on any hand-built
+    // design this resolved the site's ground to ellipsoid zero, roughly 140 m
+    // below the actual ground here, and every occluder was measured against it.
+    //
+    // The lowest resolved face is the honest answer: the ground is at or below
+    // the lowest thing standing on it.
+    const faceTops = planes
+      .map(pl => faceTopM(pl as never, NaN))
+      .filter(h => Number.isFinite(h)) as number[];
+    const groundElevM = faceTops.length ? Math.min(...faceTops) : 0;
+    const scene = buildShadeScene({
+      // 🚨 origin3D IS PASSED, because it is the only datum a hand-traced face
+      // has. Without it `faceTopM` has nothing to fall back to.
+      roofPlanes: planes as never,
+      obstructions: obs,
+      groundElevM,
+    });
     const byId = new Map(live.map(p => [p.id, p]));
     const result = computeShadeAnalysis(
       live.map(p => ({
@@ -4791,7 +4829,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       <DeleteConfirm
         plan={pendingDeletion}
         onConfirm={() => { if (pendingDeletion) commitDeletion(pendingDeletion); }}
-        onCancel={() => setPendingDeletion(null)}
+        onCancel={() => { afterDeletionRef.current = null; setPendingDeletion(null); }}
       />
 
       {/* ── Studio Header ── */}
@@ -6785,8 +6823,22 @@ export default function DesignStudio({ project, onSave }: Props) {
                               // to resolve. Marking a neighbour's house as
                               // not-governed-by-Google is worse than losing the decision, so
                               // the coordinates on screen name it.
-                              site.setNativeDisposition('rejected', activeSiteKeyRef.current
-                                || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
+                              // 🚨 THE REJECTION WAITS FOR THE CONFIRM. It is
+                              // irreversible and the deletion beside it is
+                              // cancellable; doing it first meant Cancel still
+                              // marked the property for ever. See
+                              // `afterDeletionRef`.
+                              const rejectKey = activeSiteKeyRef.current
+                                || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id);
+                              afterDeletionRef.current = () => {
+                                site.setNativeDisposition('rejected', rejectKey);
+                                setSolarApiStatus('idle');
+                                setDrawingMode('draw_roof');
+                                toast.info(
+                                  '✏️ Draw mode activated',
+                                  'Google 3D is now marked as not governing this property, so it will not be re-detected. Use R or the toolbar to draw each roof plane.',
+                                );
+                              };
                               // 🚨 A RAW setRoofPlanes([]) IS NOT A DELETION.
                               //
                               // It emptied the array and nothing else: no
@@ -6808,12 +6860,6 @@ export default function DesignStudio({ project, onSave }: Props) {
                               // Routed through the authority now, which also means
                               // the confirm step lists exactly what is about to go.
                               requestDeletion('design');
-                              setSolarApiStatus('idle');
-                              setDrawingMode('draw_roof');
-                              toast.info(
-                                '✏️ Draw mode activated',
-                                'Google 3D is now marked as not governing this property, so it will not be re-detected. Use R or the toolbar to draw each roof plane.',
-                              );
                             }}
                             className="w-full mt-1.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 font-medium rounded-lg text-xs transition-colors"
                           >

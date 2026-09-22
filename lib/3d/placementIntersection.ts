@@ -240,13 +240,36 @@ export function nearestFaceAlongRay(
   faces: PlanarFace[],
   opts: RayFaceOptions = {},
 ): FaceHit | null {
-  let best: FaceHit | null = null;
+  // 🚨 A TRUE HIT BEATS A PADDED ONE, WHATEVER THE DISTANCES.
+  //
+  // With one padded pass, a face could win a click on its NEIGHBOUR. The pad is
+  // measured in the face's own plane, so on a gable at the engine's default -45°
+  // camera a ray crossing the ridge is already ~0.25 m past it while still 0.6 m
+  // down the far slope: the near face's PADDED hit came out closer than the far
+  // face's TRUE hit, so the near face won a click the user could plainly see
+  // belonged to the other one, and the object was built in mid-air above the
+  // ridge.
+  //
+  // The pad exists for an eave with nothing beyond it. It must never outrank a
+  // face the ray genuinely entered, so the two are tracked separately and the
+  // padded answer is used only when there is no true one.
+  const pad = opts.padM ?? 0;
+  let bestTrue: FaceHit | null = null;
+  let bestPadded: FaceHit | null = null;
+
   for (const face of faces ?? []) {
-    const hit = intersectRayWithFace(rayOrigin, rayDirection, face, opts);
-    if (!hit) continue;
-    if (!best || hit.distanceAlongRay < best.distanceAlongRay) best = hit;
+    const exact = intersectRayWithFace(rayOrigin, rayDirection, face, { ...opts, padM: 0 });
+    if (exact) {
+      if (!bestTrue || exact.distanceAlongRay < bestTrue.distanceAlongRay) bestTrue = exact;
+      continue;
+    }
+    if (pad <= 0) continue;
+    const padded = intersectRayWithFace(rayOrigin, rayDirection, face, opts);
+    if (!padded) continue;
+    if (!bestPadded || padded.distanceAlongRay < bestPadded.distanceAlongRay) bestPadded = padded;
   }
-  return best;
+
+  return bestTrue ?? bestPadded;
 }
 
 /**
@@ -296,33 +319,31 @@ export function intersectRayWithGeocentricSphere(
   const dir = normalize(rayDirection);
   if (!dir) return null;
 
-  // 🚨 A CAMERA INSIDE THE SPHERE HAS NO PLACEMENT POINT, AND SAYING SO IS THE
-  // WHOLE VALUE OF THIS GUARD.
+  // 🚨 ONLY THE NEAR ROOT. A CAMERA INSIDE THE SPHERE HAS NO PLACEMENT POINT.
   //
   // A ray meets a sphere twice. When the origin is outside, the near root is the
   // visible surface. When it is INSIDE, the near root is behind the camera and
   // the far root is the shell's inside face — on the other side of the planet.
-  // Without this, a camera 500 m up against a ground sphere 1600 m up returned a
-  // point 12,744 km away, and a tree would have been planted there. The caller
-  // must fall through to an honest failure instead, so this returns null.
+  // A first version returned a point 12,744 km away and a tree would have been
+  // planted there.
   //
-  // The tolerance absorbs a ground elevation that is stale by a few metres; it
-  // does not absorb a camera that is genuinely underground.
-  const originR = Math.sqrt(dot(rayOrigin, rayOrigin));
-  if (originR < radius - 1.0) return null;
-
-  // |o + t·d|² = r²  →  t² + 2(o·d)t + (|o|² − r²) = 0
+  // 🚨 AND THE FIRST GUARD AGAINST IT WAS STILL WRONG. It allowed the far root
+  // whenever the camera was within 1 m inside the sphere, meaning to be generous
+  // about a stale ground elevation — but the far root for a camera 0.5 m under
+  // the surface is the ANTIPODE, which is the exact failure the guard was written
+  // to prevent, merely harder to reach. An adversary found it; my own test had
+  // asserted only that the result lay ON the sphere, which the antipode does.
+  //
+  // There is no tolerance that makes the far root correct, because the far root
+  // is never what the user pointed at. So the near root is the only answer, and
+  // a camera at or below the ground datum gets null and an honest failure
+  // message. That case means the datum is wrong, and guessing cannot fix it.
   const b = 2 * dot(rayOrigin, dir);
   const c = dot(rayOrigin, rayOrigin) - radius * radius;
   const disc = b * b - 4 * c;
   if (disc < 0) return null;
 
-  const sq = Math.sqrt(disc);
-  const t0 = (-b - sq) / 2;
-  const t1 = (-b + sq) / 2;
-  // The near hit in front of the camera. t1 is reached only within the tolerance
-  // above, where the camera is effectively sitting on the surface.
-  const t = t0 > DEFAULT_MIN_DISTANCE_M ? t0 : t1;
+  const t = (-b - Math.sqrt(disc)) / 2;
   if (!isFinite(t) || t < DEFAULT_MIN_DISTANCE_M) return null;
 
   return add(rayOrigin, scale(dir, t));

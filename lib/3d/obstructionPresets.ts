@@ -110,7 +110,9 @@ export const OBSTRUCTION_PRESETS: readonly ObstructionPreset[] = [
     id: 'skylight', label: 'Skylight', icon: '▭',
     widthM: 1.2, depthM: 0.8, heightM: 0.12, round: false, space: 'roof',
     hint: 'Click the roof. A flush unit — it takes area, it barely shades.',
-    minFootprintM: 0.3, maxFootprintM: 3.0, minHeightM: 0.02, maxHeightM: 0.8,
+    // A 10 in tubular daylight device is 0.254 m across; a 0.3 m floor
+    // silently inflated one by 18%.
+    minFootprintM: 0.25, maxFootprintM: 3.0, minHeightM: 0.02, maxHeightM: 0.8,
   },
   {
     id: 'chimney', label: 'Chimney', icon: '🏠',
@@ -122,7 +124,10 @@ export const OBSTRUCTION_PRESETS: readonly ObstructionPreset[] = [
     id: 'roof_hatch', label: 'Roof hatch', icon: '⬓',
     widthM: 0.9, depthM: 0.9, heightM: 0.3, round: false, space: 'roof',
     hint: 'Click the roof. Kept clear so it can open.',
-    minFootprintM: 0.4, maxFootprintM: 2.0, minHeightM: 0.05, maxHeightM: 1.2,
+    // A ladder-access or equipment hatch runs to 4 ft x 8 ft (1.22 x 2.44 m).
+    // A 2.0 m cap shortened the long side of a real one by 44 cm -- on the
+    // object that exists here precisely to be kept clear so it can open.
+    minFootprintM: 0.4, maxFootprintM: 2.5, minHeightM: 0.05, maxHeightM: 1.2,
   },
   {
     id: 'hvac', label: 'Rooftop unit', icon: '▦',

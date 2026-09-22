@@ -77,6 +77,12 @@ export interface OccluderSourceFace {
   area?: number;
   planeHeightAtCenterMeters?: number;
   polygon3D?: Array<{ x: number; y: number; z: number }>;
+  /**
+   * 🚨 THE FACE'S CANONICAL DATUM, and the only thing that can answer how high
+   * a hand-traced roof is. See `faceTopM` for why the declared height cannot.
+   * It is the deck origin in ECEF, without the render lift.
+   */
+  origin3D?: { x: number; y: number; z: number };
 }
 
 export interface OccluderSourceObstruction {
@@ -126,6 +132,59 @@ function horizontalMetres(
   return { dM, azimuthDeg };
 }
 
+/**
+ * Geodetic height above the WGS84 ellipsoid, from an ECEF point. Bowring's
+ * method -- one iteration is already sub-millimetre at terrestrial heights.
+ *
+ * Local, because this module is pure: it may not import Cesium, and a shade
+ * scene must compute the same answer in a test, on a server and in a browser.
+ */
+export function geodeticHeightOfEcef(pt: { x: number; y: number; z: number } | null | undefined): number {
+  if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y) || !Number.isFinite(pt.z)) return NaN;
+  const a = 6378137.0;
+  const f = 1 / 298.257223563;
+  const b = a * (1 - f);
+  const e2 = f * (2 - f);
+  const ep2 = (a * a - b * b) / (b * b);
+  const pxy = Math.hypot(pt.x, pt.y);
+  // At the poles the parametric latitude is undefined; the height is direct.
+  if (pxy < 1e-6) return Math.abs(pt.z) - b;
+  const theta = Math.atan2(pt.z * a, pxy * b);
+  const st = Math.sin(theta), ct = Math.cos(theta);
+  const lat = Math.atan2(pt.z + ep2 * b * st * st * st, pxy - e2 * a * ct * ct * ct);
+  const sl = Math.sin(lat);
+  const N = a / Math.sqrt(1 - e2 * sl * sl);
+  return pxy / Math.cos(lat) - N;
+}
+
+/**
+ * How high the top of this face is, in metres above the ellipsoid.
+ *
+ * 🚨 0.0 IS A SENTINEL, NOT AN ELEVATION.
+ *
+ * `buildRoofPlane3D` writes `planeHeightAtCenterMeters: 0.0` deliberately, to
+ * mean "do not use me, my elevation is in origin3D" -- `lib/roofPlane3D.ts` and
+ * `lib/3d/sectionEditing.ts` both say so in terms. Reading it as a literal
+ * height put every hand-traced, gable-tool and section-edited face at ELLIPSOID
+ * ZERO, which at this site is about 140 m BELOW the ground.
+ *
+ * So a 10 m detached garage standing 10 m due south of the array could not
+ * shade anything: it was underground. Only `solar_api` faces, which carry a
+ * real declared height, were ever able to occlude -- in a feature whose entire
+ * purpose is to make the design's OWN geometry cast shade.
+ *
+ * `??` keeps a 0, which is why the same sentinel has caught this codebase
+ * before (see `resolvePlaneGeometry`, where it placed a whole array at ground
+ * elevation). The test is explicit here for that reason.
+ */
+export function faceTopM(f: OccluderSourceFace, groundElevM: number): number {
+  const declared = f?.planeHeightAtCenterMeters;
+  if (Number.isFinite(declared) && declared !== 0) return declared as number;
+  const fromOrigin = geodeticHeightOfEcef(f?.origin3D);
+  if (Number.isFinite(fromOrigin)) return fromOrigin;
+  return groundElevM;
+}
+
 function centroidOf(f: OccluderSourceFace): { lat: number; lng: number } | null {
   if (Number.isFinite(f?.centroidLat) && Number.isFinite(f?.centroidLng)) {
     return { lat: f.centroidLat, lng: f.centroidLng };
@@ -172,9 +231,7 @@ export function buildShadeScene(input: {
     // The face's own height. `planeHeightAtCenterMeters` is the declared datum;
     // `polygon3D` is not used here because it is ECEF and carries the render
     // lift, which must never flow into a physical calculation.
-    const topM = Number.isFinite(f?.planeHeightAtCenterMeters)
-      ? f.planeHeightAtCenterMeters
-      : ground;
+    const topM = faceTopM(f, ground);
     out.push({
       id: f.id ?? 'face',
       lat: c.lat, lng: c.lng,

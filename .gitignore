@@ -125,3 +125,18 @@ scripts/.mfr-cache/
 
 # Deterministic pagination diagnostics (measured HTML + failing-sheet screenshots)
 test-output/
+
+# Audit/probe scratch. Workers and harnesses write these into the repo root and
+# into tests/, and a `git add -A` once swept two of them into a commit. They are
+# never project files.
+_tmp_*
+_probe_*
+_s[0-9]*.py
+tests/_tmp_*
+tests/__scratch*
+tests/_zz_*
+tests/_lane*
+tests/_probe*
+.e2e-*.log
+.build-*.log
+.suite-*.log

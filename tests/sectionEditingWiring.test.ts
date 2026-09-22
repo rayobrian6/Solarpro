@@ -373,9 +373,27 @@ describe('🚨 a decision names the property it is about', () => {
     // Every one of the other four names the property explicitly — a decision
     // filed against an empty key is dropped, and a decision filed against the
     // NEXT property to resolve marks the neighbour's house.
+    // 🚨 NAMING THE PROPERTY IS THE POINT; THE SPELLING IS NOT.
+    //
+    // This required the second argument to be literally
+    // `activeSiteKeyRef.current`, so it failed the moment a call site computed
+    // the key into a local first -- which "Draw Manually Instead" now must,
+    // because its rejection is deferred into a closure that runs only if the
+    // deletion actually commits. The key is still the same expression; it just
+    // has a name. What must never happen is a call with NO second argument,
+    // which is what filed a decision against the neighbour's house.
     const named = studioCode.match(
-      /setNativeDisposition\('(custom|rejected|accepted|undecided)', activeSiteKeyRef\.current/g) ?? [];
-    expect(named.length, 'every remaining call site must name the property').toBe(5);
+      /setNativeDisposition\('(custom|rejected|accepted|undecided)',\s*[A-Za-z_$]/g) ?? [];
+    // Six, not five: the widened pattern accepts any named expression, so it
+    // now also matches the `enrichedPlane.siteKey` call that the narrow version
+    // could not see and that the `toContain` above checks by name. Every call
+    // site names its property, which is the property under test.
+    expect(named.length, 'every call site must name the property').toBe(calls.length);
+    expect(named.length).toBe(6);
+    expect(studioCode, 'a disposition is filed with no property at all')
+      .not.toMatch(/setNativeDisposition\('(custom|rejected|accepted|undecided)'\s*\)/);
+    // The deferred one derives its key the same way as every other.
+    expect(studioCode).toMatch(/const rejectKey = activeSiteKeyRef\.current/);
     // And all five states that a human can decide have a writer.
     for (const d of ['custom', 'rejected', 'accepted', 'undecided']) {
       expect(studioCode, `no writer for '${d}'`).toContain(`setNativeDisposition('${d}'`);

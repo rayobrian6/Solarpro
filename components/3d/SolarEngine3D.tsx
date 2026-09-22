@@ -27,6 +27,20 @@ import {
   clampToPreset,
 } from '@/lib/3d/obstructionPresets';
 import { DEFAULT_CLEARANCE_M } from '@/lib/3d/panelKeepOut';
+/**
+ * How far from the site a placement click may land, metres.
+ *
+ * A click on the sky just above the roofline misses every face and every
+ * surface, and `camera.pickEllipsoid` then answers with the GRAZING
+ * intersection several kilometres away. Nothing objected: `isValidCoord` only
+ * range-checks degrees. The object was created, in a field, off screen, and the
+ * only symptom was that nothing appeared where the user clicked.
+ *
+ * Generous on purpose -- a detached shop or a tree at the back of a large lot
+ * must still be placeable -- but far inside "somewhere else entirely".
+ */
+const PLACEMENT_RADIUS_M = 250;
+
 import {
   nearestFaceAlongRay,
   intersectRayWithGeocentricSphere,
@@ -2491,44 +2505,45 @@ function SolarEngine3D({
     obstructionsRef.current = incoming;
     setObstructions(incoming);
 
-    // 🚨 AND DRAW THEM. THE RECORD WAS RESTORED AND THE PICTURE WAS NOT.
-    //
-    // This effect adopted the array and drew nothing, and `drawObstructionEntity`
-    // had exactly two callers -- placement and the inspector -- so an obstruction
-    // was drawn only in the session that created it. Reload the project and
-    // every marked vent, chimney and tree became an INVISIBLE KEEP-OUT: still
-    // fed to placePanelsControlled, so it still removed panels, while being
-    // impossible to see, select, resize or delete. The user sees a hole in the
-    // array with nothing in it.
-    //
-    // It is the same effect for an undo: `restoreSiteEntities` puts the record
-    // back into `placedObstructions`, which arrives here as `initialObstructions`,
-    // so "Undo restores it" was visually false too.
-    //
-    // Redrawn from scratch rather than diffed: the incoming array is the whole
-    // truth for this property, and an entity left over from another one must not
-    // survive a property switch.
+  }, [initialObstructions]);
+
+  // 🚨 DRAWING IS ITS OWN EFFECT, BECAUSE THE VIEWER IS NOT READY WHEN THE
+  // RECORD ARRIVES.
+  //
+  // The first version drew inside the adopt effect, guarded by
+  // `if (viewerRef.current)`. On a cold load the DB restore resolves long before
+  // Cesium finishes initialising, so that ref was null, the guard fell through,
+  // and nothing ever retried -- the restored obstructions were adopted and never
+  // drawn, which is the exact defect it was written to close. It only worked
+  // when the viewer happened to already exist.
+  //
+  // So the draw depends on a STATE (`stage`), which re-renders when it changes,
+  // rather than a ref, which does not. The redraw is idempotent -- remove then
+  // add, per id -- so running it again on the next stage change is harmless.
+  useEffect(() => {
     const v = viewerRef.current;
     const C = (window as any).Cesium;
-    if (v && C) {
-      try {
-        const live = (appliedObstructionsRef.current ?? []).map(o => o?.id).filter(Boolean) as string[];
-        const stale = (v.entities.values ?? [])
-          .filter((e: any) => typeof e?.name === 'string' && e.name.startsWith('[OBS] '))
-          .map((e: any) => e.id)
-          .filter((id: string) => !live.includes(id));
-        if (stale.length) removeObstructionEntities(v, stale);
-        for (const o of incoming) {
-          if (!o?.id) continue;
-          try { removeObstructionEntities(v, [o.id]); } catch { /* not drawn yet */ }
-          drawObstructionEntity(v, C, o);
-        }
-        v.scene.requestRender();
-      } catch (e: unknown) {
-        addLog('WARN', 'obstruction restore draw: ' + (e as Error).message);
+    if (!v || !C || stage !== 'done') return;
+    const live = obstructionsRef.current ?? [];
+    try {
+      // Anything drawn that is no longer in the design -- including objects left
+      // over from a different property -- goes first.
+      const liveIds = live.map(o => o?.id).filter(Boolean) as string[];
+      const stale = (v.entities.values ?? [])
+        .filter((e: any) => typeof e?.name === 'string' && e.name.startsWith('[OBS] '))
+        .map((e: any) => e.id)
+        .filter((id: string) => !liveIds.includes(id));
+      if (stale.length) removeObstructionEntities(v, stale);
+      for (const o of live) {
+        if (!o?.id) continue;
+        try { removeObstructionEntities(v, [o.id]); } catch { /* not drawn yet */ }
+        drawObstructionEntity(v, C, o);
       }
+      v.scene.requestRender();
+    } catch (e: unknown) {
+      addLog('WARN', 'obstruction redraw: ' + (e as Error).message);
     }
-  }, [initialObstructions]);
+  }, [obstructions, stage]);
 
   // ── Lane A state ─────────────────────────────────────────────────────────
   // Both are REFS on purpose. maybeRunLaneA fires from inside a resolved
@@ -7512,7 +7527,29 @@ function SolarEngine3D({
     screenPos: any,
     space: 'roof' | 'site',
   ): { lat: number; lng: number; height: number; cartesian: any; planeId: string | null; method: string } | null {
-    const groundElevM = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    // 🚨 AN UNRESOLVED GROUND DATUM IS NOT ZERO.
+    //
+    // This read `resolved ? elev : 0`, and 0 is the ellipsoid -- about 140 m
+    // below the ground here, and ~1600 m below it in Denver. So when the
+    // elevation lookup failed or was quota-limited, a tree was planted a hundred
+    // metres underground and the status bar said it had been placed. Every other
+    // consumer honours the flag: Lane A refuses, the camera widens to a 300 m
+    // orbit. This one guessed.
+    //
+    // A site object has no meaning without the ground, so it refuses and the
+    // existing `!spot` message tells the user. A roof object may still proceed:
+    // its answer comes from the canonical faces, which carry their own datum.
+    const groundResolved = cesiumGroundElevResolvedRef.current;
+    const groundElevM = groundResolved ? cesiumGroundElevRef.current : 0;
+    if (space === 'site' && !groundResolved) {
+      addLog('WARN', 'placement: refusing a site object while the ground elevation is unresolved');
+      return null;
+    }
+
+    // The engine's own site-centre props, bound here so `finish` can compare
+    // against them without shadowing its local hit coordinates.
+    const siteLat = lat;
+    const siteLng = lng;
 
     const finish = (cart: any, planeId: string | null, method: string) => {
       const carto = C.Cartographic.fromCartesian(cart);
@@ -7520,6 +7557,23 @@ function SolarEngine3D({
       const lat = C.Math.toDegrees(carto.latitude);
       const lng = C.Math.toDegrees(carto.longitude);
       if (!isValidCoord(lat, lng)) return null;
+      // 🚨 AND IT HAS TO BE ON THIS PROPERTY.
+      //
+      // `isValidCoord` only range-checks degrees. A click on the sky just above
+      // the roofline misses every face, misses the hidden globe, and
+      // `pickEllipsoid` answers with the GRAZING intersection several kilometres
+      // away -- which the site branch then snapped to ground elevation and
+      // reported as a successful placement. The object existed, in a field, off
+      // screen, and the only clue was that nothing appeared.
+      if (Number.isFinite(siteLat) && Number.isFinite(siteLng)) {
+        const dLat = (lat - siteLat) * 111_320;
+        const dLng = (lng - siteLng) * 111_320 * Math.cos((siteLat * Math.PI) / 180);
+        const awayM = Math.hypot(dLat, dLng);
+        if (awayM > PLACEMENT_RADIUS_M) {
+          addLog('WARN', `placement: ${Math.round(awayM)} m from the site — refused`);
+          return null;
+        }
+      }
       const height = isFinite(carto.height) ? carto.height : groundElevM;
       return { lat, lng, height, cartesian: cart, planeId, method };
     };
@@ -7539,7 +7593,10 @@ function SolarEngine3D({
         const faces: IntersectFace[] = collectRoofRenderables(C, groundElevM)
           .filter((rp: any) => rp && rp.corners && rp.corners.length >= 3)
           .map((rp: any) => ({ id: rp.id, origin: rp.origin, u: rp.u, v: rp.v, n: rp.n, corners: rp.corners }));
-        // A 0.25 m pad so a click right on an eave is a click on the roof.
+        // A 0.25 m pad so a click right on an eave is still a click on the
+        // roof. `nearestFaceAlongRay` ranks TRUE hits above padded ones, so the
+        // pad can never let one face steal a click from its neighbour across a
+        // ridge -- see the note there.
         const rhit = nearestFaceAlongRay(ray.origin, ray.direction, faces, { padM: 0.25 });
         if (rhit) {
           const cart = new C.Cartesian3(rhit.point.x, rhit.point.y, rhit.point.z);
@@ -15517,19 +15574,19 @@ function SolarEngine3D({
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>Width</span>
                     <input
-                      type="range" min={MIN_OBSTRUCTION_FOOTPRINT_M} max={MAX_OBSTRUCTION_FOOTPRINT_M} step={0.1}
+                      type="range" min={presetFor(obstructionPresetId).minFootprintM} max={presetFor(obstructionPresetId).maxFootprintM} step={0.1}
                       value={newObstructionWidthM}
                       onChange={e => setNewObstructionWidthM(parseFloat(e.target.value))}
                       style={{ flex: 1, accentColor: '#ffaa00' }}
                     />
                     <input
-                      type="number" min={MIN_OBSTRUCTION_FOOTPRINT_M} max={MAX_OBSTRUCTION_FOOTPRINT_M} step={0.1}
+                      type="number" min={presetFor(obstructionPresetId).minFootprintM} max={presetFor(obstructionPresetId).maxFootprintM} step={0.1}
                       value={newObstructionWidthM}
                       onChange={e => {
                         const v = parseFloat(e.target.value);
                         if (isFinite(v)) {
                           setNewObstructionWidthM(
-                            Math.max(MIN_OBSTRUCTION_FOOTPRINT_M, Math.min(MAX_OBSTRUCTION_FOOTPRINT_M, v)),
+                            Math.max(presetFor(obstructionPresetId).minFootprintM, Math.min(presetFor(obstructionPresetId).maxFootprintM, v)),
                           );
                         }
                       }}
@@ -15541,19 +15598,19 @@ function SolarEngine3D({
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>Depth</span>
                     <input
-                      type="range" min={MIN_OBSTRUCTION_FOOTPRINT_M} max={MAX_OBSTRUCTION_FOOTPRINT_M} step={0.1}
+                      type="range" min={presetFor(obstructionPresetId).minFootprintM} max={presetFor(obstructionPresetId).maxFootprintM} step={0.1}
                       value={newObstructionDepthM}
                       onChange={e => setNewObstructionDepthM(parseFloat(e.target.value))}
                       style={{ flex: 1, accentColor: '#ffaa00' }}
                     />
                     <input
-                      type="number" min={MIN_OBSTRUCTION_FOOTPRINT_M} max={MAX_OBSTRUCTION_FOOTPRINT_M} step={0.1}
+                      type="number" min={presetFor(obstructionPresetId).minFootprintM} max={presetFor(obstructionPresetId).maxFootprintM} step={0.1}
                       value={newObstructionDepthM}
                       onChange={e => {
                         const v = parseFloat(e.target.value);
                         if (isFinite(v)) {
                           setNewObstructionDepthM(
-                            Math.max(MIN_OBSTRUCTION_FOOTPRINT_M, Math.min(MAX_OBSTRUCTION_FOOTPRINT_M, v)),
+                            Math.max(presetFor(obstructionPresetId).minFootprintM, Math.min(presetFor(obstructionPresetId).maxFootprintM, v)),
                           );
                         }
                       }}
@@ -15565,19 +15622,19 @@ function SolarEngine3D({
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>Height</span>
                     <input
-                      type="range" min={MIN_OBSTRUCTION_HEIGHT_M} max={MAX_OBSTRUCTION_HEIGHT_M} step={0.1}
+                      type="range" min={presetFor(obstructionPresetId).minHeightM} max={presetFor(obstructionPresetId).maxHeightM} step={0.1}
                       value={newObstructionHeightM}
                       onChange={e => setNewObstructionHeightM(parseFloat(e.target.value))}
                       style={{ flex: 1, accentColor: '#ffaa00' }}
                     />
                     <input
-                      type="number" min={MIN_OBSTRUCTION_HEIGHT_M} max={MAX_OBSTRUCTION_HEIGHT_M} step={0.1}
+                      type="number" min={presetFor(obstructionPresetId).minHeightM} max={presetFor(obstructionPresetId).maxHeightM} step={0.1}
                       value={newObstructionHeightM}
                       onChange={e => {
                         const v = parseFloat(e.target.value);
                         if (isFinite(v)) {
                           setNewObstructionHeightM(
-                            Math.max(MIN_OBSTRUCTION_HEIGHT_M, Math.min(MAX_OBSTRUCTION_HEIGHT_M, v)),
+                            Math.max(presetFor(obstructionPresetId).minHeightM, Math.min(presetFor(obstructionPresetId).maxHeightM, v)),
                           );
                         }
                       }}
@@ -15703,33 +15760,16 @@ function SolarEngine3D({
                 </div>
               ) : null}
 
-              {/* ── Tree context (v64: decorative tree placement) ── */}
-              {placementMode === 'tree' ? (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(74,138,58,0.25)',
-                  borderRadius: 10, padding: '6px 10px',
-                }}>
-                  <span style={{ color: '#7ab86a', fontSize: 12 }}>
-                    {placedTreeCount === 0
-                      ? '\u{1F333} Click anywhere to drop a tree (sphere + trunk)'
-                      : `\u{1F333} ${placedTreeCount} tree${placedTreeCount === 1 ? '' : 's'} placed — click to add more`}
-                  </span>
-                  {placedTreeCount > 0 ? (
-                    <button
-                      onClick={() => {
-                        clearPlacedTrees(viewerRef.current);
-                        setStatusMsg('Tree tool cleared');
-                      }}
-                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                        background: 'rgba(74,138,58,0.15)', color: '#7ab86a',
-                        border: '1px solid rgba(74,138,58,0.3)', cursor: 'pointer' }}
-                    >
-                      Clear
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
+              {/* 🚨 THE DECORATIVE TREE BAR IS GONE.
+                  It said "Click anywhere to drop a tree (sphere + trunk)" and
+                  counted `placedTreeCount` -- both describing `handleTreeClick`,
+                  the implementation that added two Cesium entities and recorded
+                  nothing. Nothing routes there any more, so the counter was
+                  PERMANENTLY ZERO: place five trees and the tally still reads 0
+                  while the bar keeps saying "click anywhere". A successful click
+                  that looks exactly like a failed one, which is the thing this
+                  whole round is about. The obstruction placement panel serves
+                  the Tree tool now, and it counts the canonical objects. */}
 
               {/* ── Set Origin context ── */}
               {placementMode === 'set_origin' ? (
@@ -15809,15 +15849,18 @@ function SolarEngine3D({
                   placementMode === 'block'        ? blockPtCount  :
                   placementMode === 'roof_gable'   ? gablePtCount  :
                   placementMode === 'roof_hip'     ? hipPtCount    :
-                  placementMode === 'tree'         ? placedTreeCount :
+                  placementMode === 'tree'         ? obstructions.length :
                   placementMode === 'mark_plane'   ? markPlanePtCount :
                   placementMode === 'plane3d'      ? plane3DPtCount :
                   placementMode === 'fence'        ? fencePtCount  :
                   placementMode === 'measure'      ? measurePtCount :
                   placementMode === 'ground'       ? groundPtCount :
                   undefined,
+                // 🚨 THE OBJECTS THAT EXIST, not the dead counter. A tally
+                // that never moves is the clearest possible signal that a click
+                // did nothing -- and here it was lying, because the click worked.
                 liveCount: placementMode === 'tree'
-                  ? { label: 'trees', value: placedTreeCount }
+                  ? { label: 'trees', value: obstructions.filter(o => o?.type === 'tree').length }
                   : undefined,
               }}
             />

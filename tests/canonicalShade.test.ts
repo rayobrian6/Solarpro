@@ -429,7 +429,13 @@ describe('🚨 the analysis reaches the panels, the picture and production', () 
     const at = STUDIO.indexOf('const runShadeAnalysis = useCallback');
     expect(at, 'there is no shade analysis').toBeGreaterThan(-1);
     const body = STUDIO.slice(at, at + 2600);
-    expect(body).toMatch(/buildShadeScene\(\{ roofPlanes: planes, obstructions: obs/);
+    // 🚨 THE ARGUMENTS, NOT THE LINE BREAKS. This pinned a single-line call
+    // and broke when the call grew a third argument and wrapped -- a failure
+    // that says nothing about whether the scene is still built from canonical
+    // geometry, which is what this test is for.
+    expect(body).toMatch(/buildShadeScene\(\{/);
+    expect(body).toMatch(/roofPlanes: planes/);
+    expect(body).toMatch(/obstructions: obs/);
     // 🚨 A RESOLVER, NOT A SINGLE PROFILE. One profile for the whole array
     // answers the question a shade study exists to avoid.
     expect(body).toMatch(/\(panelId\) => \{/);

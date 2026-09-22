@@ -293,8 +293,37 @@ export function computeShadeAnalysis(
       horizonMask = prof ? buildHorizonMask(prof) : FLAT_HORIZON;
     }
 
-    let totalWeight = 0;
-    let weightedShadeFactor = 0;
+    // 🚨 A SHADE FACTOR IS A RATIO OF IRRADIANCE, AND THIS WAS A MEAN COSINE.
+    //
+    // `shadeFactor()` returns max(0, dot(panelNormal, sunVector)) -- the cosine
+    // of the angle of incidence, with nothing to do with obstructions. The
+    // annual number was the irradiance-weighted mean of that cosine, normalised
+    // by the weights alone:
+    //
+    //     annualFactor = SUM(cos_i * w_i) / SUM(w_i)
+    //
+    // For a clear south-facing roof at 38.7 N that is about 0.73, so the product
+    // reported "26.6% annual shade loss" ON AN EMPTY SKY -- nothing in the scene
+    // at all. A flat deck reported 35%. And lib/pvwatts.ts then stacked it on
+    // the 14% baseline AND on PVWatts' own tilt/azimuth factors, which already
+    // account for orientation: effective losses 36.9% against a 14% baseline,
+    // production multiplied by 0.734 for a roof with nothing shading it.
+    //
+    // Orientation has exactly one owner and it is not this function. What this
+    // function owns is OBSTRUCTION. So the denominator must be the irradiance
+    // the same panel would receive with an unobstructed sky:
+    //
+    //     annualFactor = SUM(cos_i * w_i * visible_i) / SUM(cos_i * w_i)
+    //
+    // which is 1.0 for a clear sky by construction, and otherwise the fraction
+    // of plane-of-array irradiance that actually arrives. The cosine appears in
+    // both sums and therefore cancels where nothing blocks -- it weights the
+    // hours by how much they were worth to THIS panel, which is exactly what it
+    // should do, rather than masquerading as a loss.
+    /** SUM(cos_i * w_i) over every daylight sample: the unobstructed sky. */
+    let clearSkyWeight = 0;
+    /** The same sum, counting only the samples that actually reach the panel. */
+    let receivedWeight = 0;
 
     for (const sample of SAMPLE_MONTHS) {
       const date = new Date(refYear, sample.month, sample.day);
@@ -326,10 +355,17 @@ export function computeShadeAnalysis(
 
         // Check horizon/obstruction block
         if (isSunBlocked(sunPos.elevation, sunPos.azimuth, horizonMask)) {
-          // Sun below horizon mask — this panel is shaded in this time slot
+          // Sun below the horizon mask: this slot is genuinely lost to something
+          // in the scene. It counts in the denominator -- it is irradiance the
+          // panel WOULD have had -- and contributes nothing to the numerator.
+          //
+          // 🚨 AND THE COSINE IS NEEDED HERE TOO. The old code skipped straight
+          // past it, which mattered once the denominator became cosine-weighted:
+          // without it, an obstruction blocking a low-angle winter morning would
+          // be charged at the same rate as one blocking noon in June.
           const irradianceProxy = Math.sin(toRad(sunPos.elevation));
-          totalWeight += sample.weight * irradianceProxy;
-          // weightedShadeFactor += 0 (shaded)
+          const cosI = shadeFactor(panel.tilt, panel.azimuth, sunPos.elevation, sunPos.azimuth);
+          clearSkyWeight += cosI * sample.weight * irradianceProxy;
           continue;
         }
 
@@ -352,18 +388,25 @@ export function computeShadeAnalysis(
           }
         }
 
-        // Compute shade factor for this time slot
-        const sf = interRowBlocked ? 0 : shadeFactor(panel.tilt, panel.azimuth, sunPos.elevation, sunPos.azimuth);
+        // The cosine of incidence for this slot: how much this sun position was
+        // worth to THIS panel. It is the weight, not the answer.
+        const cosI = shadeFactor(panel.tilt, panel.azimuth, sunPos.elevation, sunPos.azimuth);
 
         // Weight by irradiance proxy (sin of sun elevation) and seasonal weight
         const irradianceProxy = Math.sin(toRad(sunPos.elevation));
-        const w = sample.weight * irradianceProxy;
-        totalWeight += w;
-        weightedShadeFactor += sf * w;
+        const w = cosI * sample.weight * irradianceProxy;
+        clearSkyWeight += w;
+        // Inter-row self-shading is a real obstruction -- by the array itself.
+        if (!interRowBlocked) receivedWeight += w;
       }
     }
 
-    const annualFactor = totalWeight > 0 ? Math.max(0, Math.min(1, weightedShadeFactor / totalWeight)) : 1.0;
+    // 🚨 1.0 MEANS NOTHING IS IN THE WAY. With an empty scene every sample
+    // lands in both sums and the ratio is exactly 1 -- which is the property the
+    // old formula could not have, at any orientation.
+    const annualFactor = clearSkyWeight > 0
+      ? Math.max(0, Math.min(1, receivedWeight / clearSkyWeight))
+      : 1.0;
     panelShadeFactors[panel.id] = annualFactor;
   }
 
@@ -387,12 +430,26 @@ export function computeShadeAnalysis(
   }));
 
   // Best/worst panels
-  let worstPanelId: string | null = null;
-  let bestPanelId:  string | null = null;
-  let worstShadeFactor = 1.0;
-  let bestShadeFactor  = 0.0;
+  //
+  // 🚨 SEEDED FROM THE FIRST PANEL, NOT FROM 1.0 AND 0.0.
+  //
+  // The comparison is strict, so seeding `worstShadeFactor = 1.0` meant that an
+  // array where nothing is shaded — every factor exactly 1.0 — never satisfied
+  // `factor < worstShadeFactor` and reported `worstPanelId: null`. A UI asking
+  // "which module is worst affected" got no answer at all for the commonest
+  // case there is: a clear roof.
+  //
+  // It was invisible while the factor was the mean cosine of incidence, because
+  // that number is never exactly 1.0 and differs per panel, so some panel always
+  // won. Correcting the factor to a true shade ratio exposed it. That is worth
+  // recording: this was always broken, and only a second bug hid it.
+  const entries = Object.entries(panelShadeFactors);
+  let worstPanelId: string | null = entries.length ? entries[0][0] : null;
+  let bestPanelId:  string | null = entries.length ? entries[0][0] : null;
+  let worstShadeFactor = entries.length ? entries[0][1] : 0;
+  let bestShadeFactor  = entries.length ? entries[0][1] : 1;
 
-  for (const [id, factor] of Object.entries(panelShadeFactors)) {
+  for (const [id, factor] of entries) {
     if (factor < worstShadeFactor) { worstShadeFactor = factor; worstPanelId = id; }
     if (factor > bestShadeFactor)  { bestShadeFactor  = factor; bestPanelId  = id; }
   }

@@ -231,6 +231,49 @@ describe('the eave pad', () => {
     expect(intersectRayWithFace(v(4.1, 0, 40), v(0, 0, -1), face)).toBeNull();
   });
 
+  it('🚨 a TRUE hit on the far slope beats a PADDED hit on the near one', () => {
+    // 🚨 THE PAD SUITE WAS VACUOUS WITH RESPECT TO THE LIVE PATH, AND AN
+    // ADVERSARY SAID SO.
+    //
+    // Every other case here uses a vertical ray — the one direction in which the
+    // pad's reach in plan equals padM. The engine's own default camera is -45°,
+    // where the reach is ~2.6× larger, and ~10× at 31°. So the suite certified
+    // the pad in a configuration the product never uses.
+    //
+    // A gable at the app's real camera: the ray crosses the ridge and lands
+    // genuinely inside the FAR slope, while still within the pad of the NEAR
+    // slope's infinite plane. Ranking by distance alone gave the click to the
+    // near face and built the object in mid-air above the ridge.
+    // A real gable: ridge at y=0 z=9, eaves at y=±5 z=6.5 (a 6/12 pitch). The
+    // two faces SHARE the ridge line, which is the whole point — a pad on a
+    // shared edge reaches onto the neighbour.
+    const ridge = v(0, 0, 9);
+    const slope = Math.hypot(5, 2.5);                 // 5.590 m along the rafter
+    const vFar = unit(v(0, 5, -2.5));                 // ridge -> north eave
+    const vNear = unit(v(0, -5, -2.5));               // ridge -> south eave
+    const far = rect('far', add(ridge, mul(vFar, slope / 2)), v(1, 0, 0), vFar, 12, slope);
+    const near = rect('near', add(ridge, mul(vNear, slope / 2)), v(1, 0, 0), vNear, 12, slope);
+
+    // Aim 0.6 m down the FAR slope from the ridge — plainly on the far roof.
+    const target = add(ridge, mul(vFar, 0.6));
+    // The engine's own default camera: to the south, 45° above the horizon.
+    const camera = add(target, v(0, -40, 40));
+    const hit = nearestFaceAlongRay(camera, sub(target, camera), [near, far], { padM: 0.25 });
+
+    expect(hit, 'nothing was hit at all').not.toBeNull();
+    expect(hit!.faceId, 'the near slope stole a click on the far slope').toBe('far');
+    // …and the point is ON the far slope, not floating above the ridge.
+    expect(Math.abs(signedDistanceToFace(hit!.point, far))).toBeLessThan(1e-6);
+  });
+
+  it('the pad still rescues an eave click when no face truly contains it', () => {
+    // The case the pad exists for: nothing beyond the edge to steal from.
+    const deck = rect('deck', v(0, 0, 6), v(1, 0, 0), v(0, 1, 0), 10, 8);
+    const hit = nearestFaceAlongRay(v(5.1, 0, 40), v(0, 0, -1), [deck], { padM: 0.25 });
+    expect(hit).not.toBeNull();
+    expect(hit!.faceId).toBe('deck');
+  });
+
   it('🚨 the pad does not fold a non-convex ring shut', () => {
     // An L-shaped face. The notch is OUTSIDE the roof, and a pad implemented by
     // offsetting the ring would fold at the reflex corner and swallow it.
@@ -372,11 +415,30 @@ describe('🚨 the ground is a surface even when nothing is drawn', () => {
     expect(intersectRayWithGeocentricSphere(v(0, 0, R - 50), v(0, 0, -1), R)).toBeNull();
   });
 
-  it('…but a camera sitting essentially on the surface still places', () => {
-    // A ground elevation stale by a metre must not disarm the tool.
-    const p = intersectRayWithGeocentricSphere(v(0, 0, R - 0.5), v(1, 0, -0.02), R);
-    expect(p).not.toBeNull();
-    expect(Math.hypot(p!.x, p!.y, p!.z)).toBeCloseTo(R, 3);
+  it('🚨 a camera even slightly inside gets null — there is no safe tolerance', () => {
+    // 🚨 THIS TEST USED TO ASSERT THE OPPOSITE, AND WAS TOO WEAK TO NOTICE.
+    //
+    // It allowed a camera up to 1 m inside the sphere "so a ground elevation
+    // stale by a metre does not disarm the tool", and then asserted only that
+    // the result lay ON the sphere — which the ANTIPODE does. An adversary found
+    // that the far root for a camera 0.5 m under the surface is a point on the
+    // other side of the planet: the exact failure the guard was written to
+    // prevent, merely harder to reach.
+    //
+    // There is no tolerance that makes the far root correct, because the far
+    // root is never what the user pointed at. A camera at or below the datum
+    // means the datum is wrong, and guessing cannot fix it.
+    expect(intersectRayWithGeocentricSphere(v(0, 0, R - 0.5), v(1, 0, -0.02), R)).toBeNull();
+    expect(intersectRayWithGeocentricSphere(v(0, 0, R - 0.001), v(0, 0, -1), R)).toBeNull();
+  });
+
+  it('🚨 …and the assertion that would have caught it: the hit is NEAR the camera', () => {
+    // The property the old test lacked. Being on the sphere is not enough.
+    const camera = v(0, 0, R + 800);
+    const p = intersectRayWithGeocentricSphere(camera, v(0, 0, -1), R)!;
+    expect(dist(p, camera)).toBeLessThan(2_000);
+    // The antipode would be ~2R away.
+    expect(dist(p, camera)).toBeLessThan(R);
   });
 
   it('bad input is null, not a throw', () => {

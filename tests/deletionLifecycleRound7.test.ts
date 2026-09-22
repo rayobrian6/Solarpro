@@ -195,14 +195,33 @@ describe('🚨 a restored obstruction is DRAWN, not merely remembered', () => {
     // Reload, and every vent, chimney and tree became an invisible keep-out:
     // still fed to placePanelsControlled, so still removing panels, while being
     // impossible to see, select, resize or delete.
-    const at = ENGINE.indexOf('const incoming = initialObstructions ?? [];');
-    expect(at, 'the obstruction restore effect is gone').toBeGreaterThan(-1);
-    const body = ENGINE.slice(at, ENGINE.indexOf('}, [initialObstructions]);', at));
-    expect(body.length, 'the effect window collapsed').toBeGreaterThan(400);
+    // 🚨 THE DRAW IS ITS OWN EFFECT, AND THAT IS THE FIX, NOT A REFACTOR.
+    //
+    // A first version drew inside the ADOPT effect behind `if
+    // (viewerRef.current)`. On a cold load the DB restore resolves long before
+    // Cesium finishes initialising, so that ref was null, the guard fell
+    // through, and nothing ever retried — the restored obstructions were
+    // adopted and never drawn, which is precisely the defect it was written to
+    // close. It only worked when the viewer happened to already exist.
+    //
+    // So this asserts the two halves separately: the adopt effect still exists,
+    // and a SEPARATE draw effect depends on `stage`, which is state and
+    // therefore re-renders when Cesium becomes ready.
+    const adoptAt = ENGINE.indexOf('const incoming = initialObstructions ?? [];');
+    expect(adoptAt, 'the obstruction restore effect is gone').toBeGreaterThan(-1);
+
+    const drawAt = ENGINE.indexOf("if (!v || !C || stage !== 'done') return;");
+    expect(drawAt, 'the obstruction DRAW effect is gone').toBeGreaterThan(-1);
+    const body = ENGINE.slice(drawAt, ENGINE.indexOf('}, [obstructions, stage]);', drawAt));
+    expect(body.length, 'the draw effect window collapsed').toBeGreaterThan(400);
     expect(body, 'the restore adopts the record and draws nothing')
       .toMatch(/drawObstructionEntity\(v, C, o\)/);
     // …and clears what belonged to another property.
     expect(body).toMatch(/removeObstructionEntities\(v, stale\)/);
+    // 🚨 GATED ON STATE, NEVER ON THE REF. A ref does not re-render, so a guard
+    // on `viewerRef.current` can only ever be evaluated once — at the moment it
+    // is guaranteed to be wrong.
+    expect(ENGINE).toMatch(/\}, \[obstructions, stage\]\);/);
   });
 
   it('which also makes Undo visually true for an obstruction', () => {
