@@ -47,7 +47,7 @@ import fs from 'fs';
 import path from 'path';
 import { buildWalls, type ExtrusionFace } from '@/lib/3d/buildingExtrusion';
 import { buildSectionRoofPlanes, type BuildingSection } from '@/lib/3d/buildingSection';
-import { applySectionEdit } from '@/lib/3d/sectionEditing';
+import { applySectionEdit, repositionPanelsForPlanes } from '@/lib/3d/sectionEditing';
 import { ecefToLatLng } from '@/lib/roofPlane3D';
 
 const read = (rel: string) => fs.readFileSync(path.join(process.cwd(), rel), 'utf8');
@@ -305,5 +305,253 @@ describe('🚨 a vertical wall is drawn as a WALL', () => {
       expect(w.plan[0].lat).toBeCloseTo(g0.lat, 9);
       expect(w.topHeightsM[0]).toBeCloseTo(g0.height, 6);
     }
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WHAT A FRESH ADVERSARY BROKE, AND WHAT NOW HOLDS
+//
+// It was given "a single-plane roof can take any valid pitch and any slope
+// direction without being redrawn, and a wall that dies against a taller
+// neighbour never produces a degenerate or wrong-looking wall" and told to
+// break it. It broke both halves, seven ways. Each of these is its own
+// reproduction.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 1. giving a flat porch a pitch does not spin its array 180°', () => {
+  // `buildRoofPlane3D` derives the u-axis as `cross(normal, radialUp)`, whose
+  // magnitude is sin(tilt), and falls back to the most horizontal polygon EDGE
+  // below 0.05 — asin(0.05) = 3.0452°. Every FLAT deck is under that and every
+  // real porch pitch is over it (1/12 = 4.76°), so the conversion crosses the
+  // threshold and the fitted u-axis bearing flips 90° → 270°.
+  //
+  // `repositionPanelsForPlanes` maps (u,v) in the old frame to (u,v) in the
+  // new one, so a reversed frame is a 180° ROTATION about the face centre. The
+  // adversary measured nine modules travelling 5.04 m on an 8 × 3 m deck,
+  // reported as `moved: 9, orphaned: 0` — the containment guard cannot catch it
+  // because on a symmetric footprint the rotated array is still inside.
+  const deckSection = (over: Partial<BuildingSection> = {}): BuildingSection =>
+    porch({ id: 'sec-deck', kind: 'flat', pitchDeg: 0, shedAzimuthDeg: 180, ...over });
+
+  /** A row of module centres across the deck, at its own surface. */
+  function panelsOnDeck(planes: ReturnType<typeof buildSectionRoofPlanes>['planes']) {
+    const poly = planes[0].polygon3D!;
+    const g = poly.map(q => ecefToLatLng(q as never));
+    const out: Array<{ id: string; lat: number; lng: number; height: number; planeId: string }> = [];
+    for (let i = 0; i < 4; i++) {
+      const t = 0.2 + i * 0.2;
+      out.push({
+        id: `p${i}`,
+        lat: g[0].lat + (g[2].lat - g[0].lat) * t,
+        lng: g[0].lng + (g[2].lng - g[0].lng) * t,
+        height: g[0].height,
+        planeId: planes[0].id,
+      });
+    }
+    return out;
+  }
+
+  it('the modules travel centimetres, not metres', () => {
+    const before = buildSectionRoofPlanes(deckSection()).planes;
+    const panels = panelsOnDeck(before);
+    const after = applySectionEdit(before, 'sec-deck', { pitchDeg: twelve(1) });
+    expect(after.ok).toBe(true);
+
+    const moved = repositionPanelsForPlanes(panels as never, before, after.planes);
+    expect(moved.orphaned).toEqual([]);
+    for (const p of moved.panels) {
+      const was = panels.find(q => q.id === p.id)!;
+      const dLatM = (p.lat - was.lat) * M_PER_DEG_LAT;
+      const dLngM = (p.lng - was.lng) * M_PER_DEG_LAT * Math.cos(LAT * Math.PI / 180);
+      const planM = Math.hypot(dLatM, dLngM);
+      // 🚨 THE DEFECT WAS 5.04 m. A 1/12 pitch moves a module vertically and
+      // barely at all in plan.
+      expect(planM, `${p.id} slid ${planM.toFixed(2)} m across the deck`).toBeLessThan(0.15);
+    }
+  });
+
+  it('…at every pitch that crosses the 3.045° frame threshold, and back again', () => {
+    for (const rise of [1, 2, 3, 6]) {
+      const before = buildSectionRoofPlanes(deckSection()).planes;
+      const panels = panelsOnDeck(before);
+      const up = applySectionEdit(before, 'sec-deck', { pitchDeg: twelve(rise) });
+      const m1 = repositionPanelsForPlanes(panels as never, before, up.planes);
+      expect(m1.orphaned, `${rise}/12 orphaned`).toEqual([]);
+      const maxUp = Math.max(...m1.panels.map(p => {
+        const was = panels.find(q => q.id === p.id)!;
+        return Math.hypot((p.lat - was.lat) * M_PER_DEG_LAT,
+          (p.lng - was.lng) * M_PER_DEG_LAT * Math.cos(LAT * Math.PI / 180));
+      }));
+      expect(maxUp, `${rise}/12 slid ${maxUp.toFixed(2)} m`).toBeLessThan(0.2);
+
+      // …and the reverse edit, shed -> flat, which crosses the same threshold.
+      const down = applySectionEdit(up.planes, 'sec-deck', { pitchDeg: 0 });
+      const m2 = repositionPanelsForPlanes(m1.panels, up.planes, down.planes);
+      expect(m2.orphaned, `${rise}/12 back to flat orphaned`).toEqual([]);
+    }
+  });
+});
+
+describe('🚨 2. the abutment rule works whichever side the porch is on', () => {
+  // `isAbutment` required BOTH endpoints inside the SAME `polygon3D`. A gable's
+  // two slopes each cover half the house in plan, so an abutting edge crossing
+  // the ridge matched neither and the wall came back. The adversary measured
+  // four walls instead of three on the EAST and WEST sides, on a
+  // `ridgeAxis:'short'` house, on a porch spanning house and garage, and two
+  // walls running half their length through the house interior on a corner
+  // porch. It was never about compass direction — flipping the ridge axis moved
+  // the failure to the other side.
+
+  /** A porch attached along one side of the 12 x 9 m house, head on the wall. */
+  const sidePorch = (id: string, fp: ReturnType<typeof rect>): BuildingSection =>
+    ({ ...porch({ id }), footprint: fp, kind: 'shed', pitchDeg: twelve(2) } as BuildingSection);
+
+  it('SOUTH, NORTH, EAST and WEST all give three walls, not four', () => {
+    const cases: Array<[string, ReturnType<typeof rect>]> = [
+      ['south', rect(2, -3, 8, 3)],
+      ['north', rect(2, 9, 8, 3)],
+      // 🚨 THE ONES THAT FAILED: their head edge runs across the ridge line.
+      ['east', rect(12, 1.5, 3, 6)],
+      ['west', rect(-3, 1.5, 3, 6)],
+    ];
+    for (const [name, fp] of cases) {
+      const ws = wallsOf([mainHouse(), sidePorch('sec-p-' + name, fp)])
+        .filter(w => w.faceId.startsWith('sec-p-' + name));
+      expect(ws.length, `${name} porch produced ${ws.length} walls`).toBe(3);
+    }
+  });
+
+  it('…and on a house whose ridge runs the OTHER way', () => {
+    const shortRidge = { ...mainHouse(), ridgeAxis: 'short' } as BuildingSection;
+    const ws = wallsOf([shortRidge, sidePorch('sec-p-s', rect(2, -3, 8, 3))])
+      .filter(w => w.faceId.startsWith('sec-p-s'));
+    expect(ws.length).toBe(3);
+  });
+
+  it('a porch spanning TWO buildings is buried against both', () => {
+    // The union is what matters: no single neighbour contains the whole edge.
+    const garage: BuildingSection = {
+      ...mainHouse(), id: 'sec-garage', footprint: rect(14, 0, 7, 9),
+    } as BuildingSection;
+    const spanning = sidePorch('sec-span', rect(6, -3, 12, 3));
+    const ws = wallsOf([mainHouse(), garage, spanning]).filter(w => w.faceId.startsWith('sec-span'));
+    expect(ws.length).toBe(3);
+  });
+
+  it('🚨 MUTATION PROOF: requiring ONE face to contain both ends fails the east porch', () => {
+    // Reproduce the old rule directly against the real geometry: ask whether
+    // any SINGLE main-house face contains both ends of the porch head edge.
+    const east = sidePorch('sec-p-e', rect(12, 1.5, 3, 6));
+    const houseFaces = facesOf([mainHouse()]);
+    const porchFaces = facesOf([east]);
+    const poly = porchFaces[0].polygon3D;
+    // The head edge is the one whose plan positions are nearest the house.
+    const g = poly.map(q => ecefToLatLng(q as never));
+    let head = 0, bestLng = Infinity;
+    for (let i = 0; i < g.length; i++) {
+      const mid = (g[i].lng + g[(i + 1) % g.length].lng) / 2;
+      if (mid < bestLng) { bestLng = mid; head = i; }
+    }
+    const a = g[head], b = g[(head + 1) % g.length];
+    const inRing = (lat: number, lng: number, ring: Array<{ lat: number; lng: number }>) => {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const p1 = ring[i], p2 = ring[j];
+        if (((p1.lat > lat) !== (p2.lat > lat))
+          && (lng < (p2.lng - p1.lng) * (lat - p1.lat) / (p2.lat - p1.lat) + p1.lng)) inside = !inside;
+      }
+      return inside;
+    };
+    const anySingleFaceHoldsBoth = houseFaces.some(f => {
+      const ring = f.polygon3D.map(q => { const q2 = ecefToLatLng(q as never); return { lat: q2.lat, lng: q2.lng }; });
+      return inRing(a.lat, a.lng, ring) && inRing(b.lat, b.lng, ring);
+    });
+    // 🚨 THE DEFECT, RECORDED: no single slope holds both ends.
+    expect(anySingleFaceHoldsBoth).toBe(false);
+    // …and the union rule still buries it.
+    const ws = wallsOf([mainHouse(), east]).filter(w => w.faceId.startsWith('sec-p-e'));
+    expect(ws.length).toBe(3);
+  });
+});
+
+describe('🚨 3. a wall that is genuinely above the neighbour is still drawn', () => {
+  // The cover test compared against the neighbour's GLOBAL maximum height, not
+  // its height AT the edge. Main roof under the porch head is 3.127 m and the
+  // ridge is 5.695 m, so raising the porch eave by 0.4 ft opened up to 2.9 m of
+  // wall to the sky with no wall drawn at all.
+  const at = (eaveM: number) =>
+    wallsOf([mainHouse(), porch({ kind: 'shed', pitchDeg: twelve(2), eaveHeightM: eaveM })])
+      .filter(w => w.faceId.startsWith('sec-porch'));
+
+  it('buried while the porch head is under the main roof surface', () => {
+    expect(at(2.2).length).toBe(3);
+  });
+
+  it('🚨 …and a wall APPEARS once the head rises above it', () => {
+    for (const eave of [3.6, 4.6, 5.4]) {
+      const ws = at(eave);
+      expect(ws.length, `a porch with a ${eave} m eave left the building open`).toBe(4);
+    }
+  });
+
+  it('the appearing wall is a real quad, not a degenerate one', () => {
+    for (const w of at(4.6)) expect(isDegenerate(w as never)).toBe(false);
+  });
+});
+
+describe('🚨 4. a lowered pad cannot produce a three-corner wall', () => {
+  // `Math.min(ground, roofHeight)` set the base EQUAL to the top whenever a
+  // roof corner was at or below grade — the two points coincide, Cesium
+  // de-duplicates them, and the wall is a triangle. It traded a bowtie for a
+  // duplicate corner.
+  it('across the whole window the adversary found', () => {
+    for (const eave of [0, 0.02, 0.05, 0.2]) {
+      for (const padOffset of [-0.3, -1.0, 0]) {
+        const ws = wallsOf([
+          mainHouse(),
+          porch({ kind: 'shed', pitchDeg: twelve(3), eaveHeightM: eave, groundElevM: GROUND + padOffset }),
+        ]);
+        for (const w of ws) {
+          expect(isDegenerate(w as never),
+            `eave=${eave} padOffset=${padOffset} -> degenerate ${w.faceId}#${w.edgeIndex}`).toBe(false);
+        }
+      }
+    }
+  });
+});
+
+describe('🚨 5. a hidden, sticky anchor cannot block the conversion', () => {
+  // `pitchAnchor` is engine state that is never reset on selection change,
+  // while the inspector correctly HIDES the toggle for a single plane and still
+  // sent the stale value. Set Ridge on the house, select the porch, type 2:12 —
+  // the conversion never ran, refused by a message about a control the user
+  // could not see. That is the owner's original complaint through another door.
+  it('"hold the ridge" on a roof with no ridge is ignored, not refused', () => {
+    const planes = buildSectionRoofPlanes(porch()).planes;
+    const out = applySectionEdit(planes, 'sec-porch', { pitchDeg: twelve(2), pitchAnchor: 'ridge' });
+    expect(out.refusals).toEqual([]);
+    expect(out.ok).toBe(true);
+    expect(out.section!.kind).toBe('shed');
+    expect(out.planes[0].pitch).toBeCloseTo(twelve(2), 2);
+  });
+
+  it('…and a roof that HAS a ridge still honours it', () => {
+    // The anchor is not disabled everywhere; it still does its job where the
+    // noun exists.
+    const house = buildSectionRoofPlanes(mainHouse()).planes;
+    const out = applySectionEdit(house, 'sec-main', { pitchDeg: 40, pitchAnchor: 'ridge' });
+    expect(out.ok).toBe(true);
+    // Holding the ridge means the EAVE moved.
+    expect(out.section!.eaveHeightM).not.toBeCloseTo(MAIN_EAVE, 3);
+  });
+});
+
+describe('🚨 7. the slope direction is stored normalised', () => {
+  it('-90 and 450 come back as 270 and 90', () => {
+    const planes = buildSectionRoofPlanes(porch()).planes;
+    expect(applySectionEdit(planes, 'sec-porch', { shedAzimuthDeg: -90 }).section!.shedAzimuthDeg).toBe(270);
+    expect(applySectionEdit(planes, 'sec-porch', { shedAzimuthDeg: 450 }).section!.shedAzimuthDeg).toBe(90);
+    expect(applySectionEdit(planes, 'sec-porch', { shedAzimuthDeg: null }).section!.shedAzimuthDeg).toBeNull();
   });
 });

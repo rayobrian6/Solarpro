@@ -214,33 +214,87 @@ function inPlanRing(
  * boundary), and that face must be HIGHER there — otherwise the wall really is
  * exposed above a lower neighbour and must still be drawn.
  */
+/** Height of the plane through `poly` at (lat,lng), or null if it is not a
+ *  plane. Local metres, so the arithmetic is flat-earth and exact at this
+ *  scale. */
+function planeHeightAt(
+  poly: readonly Cart3[], lat: number, lng: number,
+): number | null {
+  if (!poly || poly.length < 3) return null;
+  const g0 = ecefToLatLng(poly[0]);
+  const mPerDegLat = 111320;
+  const mPerDegLng = mPerDegLat * Math.cos(g0.lat * Math.PI / 180);
+  const local = (p: Cart3) => {
+    const g = ecefToLatLng(p);
+    return { x: (g.lng - g0.lng) * mPerDegLng, y: (g.lat - g0.lat) * mPerDegLat, z: g.height };
+  };
+  const p0 = local(poly[0]);
+  // Pick the two further corners that give the largest cross product, so a
+  // near-collinear triple cannot define the plane.
+  let best: { nx: number; ny: number; nz: number; mag: number } | null = null;
+  for (let i = 1; i < poly.length; i++) {
+    for (let j = i + 1; j < poly.length; j++) {
+      const pi = local(poly[i]), pj = local(poly[j]);
+      const ux = pi.x - p0.x, uy = pi.y - p0.y, uz = pi.z - p0.z;
+      const vx = pj.x - p0.x, vy = pj.y - p0.y, vz = pj.z - p0.z;
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const mag = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (!best || mag > best.mag) best = { nx, ny, nz, mag };
+    }
+  }
+  if (!best || !(best.mag > 1e-9) || Math.abs(best.nz) < 1e-9) return null;
+  const qx = (lng - g0.lng) * mPerDegLng, qy = (lat - g0.lat) * mPerDegLat;
+  return p0.z - (best.nx * (qx - p0.x) + best.ny * (qy - p0.y)) / best.nz;
+}
+
+/**
+ * Does this edge die against other building geometry rather than face outdoors?
+ *
+ * 🚨 EACH ENDPOINT IS TESTED AGAINST THE UNION OF THE NEIGHBOURS, NOT AGAINST
+ * ONE FACE. The first version required BOTH endpoints inside the SAME
+ * `polygon3D`, and a gable's two slopes each cover only half the house in plan
+ * — so any abutting edge that crosses the ridge line matched neither, and the
+ * wall came back. An adversary measured it: a porch on the gable END (the
+ * commonest position) always failed, a porch spanning the house and the garage
+ * failed, and a porch wrapped round a corner produced two walls running half
+ * their length through the house interior, full height to grade. Flipping the
+ * house's ridge axis simply moved the failure to the other side, so it was
+ * never about compass direction.
+ *
+ * 🚨 AND THE COVER IS MEASURED AT THE EDGE, NOT AT THE NEIGHBOUR'S RIDGE. It
+ * compared against the neighbour's GLOBAL maximum height, so a porch head above
+ * the main roof's SURFACE there but below its ridge was still called buried:
+ * raising a porch eave by 0.4 ft opened up to 2.9 m of wall to the sky.
+ */
 function isAbutment(
   a: Cart3, b: Cart3, faceId: string,
   faces: readonly ExtrusionFace[], tolM: number,
 ): boolean {
   const ga = ecefToLatLng(a);
   const gb = ecefToLatLng(b);
-  const edgeTop = Math.max(ga.height, gb.height);
-  for (const other of faces) {
-    if (!other || other.id === faceId) continue;
-    const poly = other.polygon3D;
-    if (!poly || poly.length < 3) continue;
-    const ring = poly.map(pt => {
-      const g = ecefToLatLng(pt);
-      return { lat: g.lat, lng: g.lng };
-    });
-    if (!inPlanRing(ga.lat, ga.lng, ring, tolM)) continue;
-    if (!inPlanRing(gb.lat, gb.lng, ring, tolM)) continue;
-    // The neighbour must actually be over this edge. A LOWER roof next door
-    // leaves the wall above it genuinely outdoors, and it must still be drawn.
-    let otherMax = -Infinity;
-    for (const pt of poly) {
-      const h = ecefToLatLng(pt).height;
-      if (isFinite(h) && h > otherMax) otherMax = h;
+  const covered = (lat: number, lng: number, topM: number): boolean => {
+    for (const other of faces) {
+      if (!other || other.id === faceId) continue;
+      const poly = other.polygon3D;
+      if (!poly || poly.length < 3) continue;
+      const ring = poly.map(pt => {
+        const g = ecefToLatLng(pt);
+        return { lat: g.lat, lng: g.lng };
+      });
+      if (!inPlanRing(lat, lng, ring, tolM)) continue;
+      const hereM = planeHeightAt(poly, lat, lng);
+      if (hereM === null) continue;
+      if (hereM >= topM - tolM) return true;
     }
-    if (otherMax >= edgeTop - tolM) return true;
-  }
-  return false;
+    return false;
+  };
+  // Both ends, and the midpoint: an edge that is covered at both ends but bows
+  // out in between is not fully buried, and calling it so would hide a real
+  // wall. The midpoint is the cheapest test that notices.
+  const mid = { lat: (ga.lat + gb.lat) / 2, lng: (ga.lng + gb.lng) / 2, h: (ga.height + gb.height) / 2 };
+  return covered(ga.lat, ga.lng, ga.height)
+      && covered(gb.lat, gb.lng, gb.height)
+      && covered(mid.lat, mid.lng, mid.h);
 }
 
 export function buildWalls(
@@ -314,8 +368,21 @@ export function buildWalls(
     // corner BELOW ground put its base above its top, producing a self-crossing
     // bowtie. Both read on screen as a triangle, and both are reachable simply
     // by lowering a porch pad past the one global ground the extruder resolves.
-    const baseA = Math.min(groundElevM, gA.height);
-    const baseB = Math.min(groundElevM, gB.height);
+    // 🚨 AND THE CLAMP MUST NOT PRODUCE base == top. The previous version traded
+    // a bowtie for a THREE-CORNER polygon: `Math.min(ground, roofHeight)` sets
+    // the base equal to the top whenever a roof corner is at or below grade,
+    // the two points coincide, Cesium de-duplicates them and draws a triangle.
+    // An adversary reproduced it at porch eave 0.00-0.05 m with the pad 0.3 m
+    // below the extruder's ground. The skip above is an AND by design — one
+    // corner above grade is still a wall — so this end of it has to be sound on
+    // its own: a corner with no wall to draw is pushed to a hair below its top,
+    // which keeps four distinct corners and renders as nothing visible.
+    const floor = (topM: number) => {
+      const b = Math.min(groundElevM, topM);
+      return b < topM - 1e-4 ? b : topM - 1e-4;
+    };
+    const baseA = floor(gA.height);
+    const baseB = floor(gB.height);
     const bottomA = latLngToECEF(gA.lat, gA.lng, baseA);
     const bottomB = latLngToECEF(gB.lat, gB.lng, baseB);
 

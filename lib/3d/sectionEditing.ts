@@ -507,7 +507,14 @@ export function applySectionEdit(
       next.facePitchDeg = Object.keys(kept).length > 0 ? kept : undefined;
     }
   }
-  if (edit.shedAzimuthDeg !== undefined) next.shedAzimuthDeg = edit.shedAzimuthDeg;
+  if (edit.shedAzimuthDeg !== undefined) {
+    // 🚨 NORMALISED ON THE WAY IN. It used to be stored raw, so -90 and 450
+    // round-tripped verbatim through `sectionRecord` and any display of the
+    // number was wrong while the geometry was right — two answers to one fact.
+    const a = edit.shedAzimuthDeg;
+    next.shedAzimuthDeg = (a === null || a === undefined || !isFinite(a))
+      ? null : ((a % 360) + 360) % 360;
+  }
   if (edit.label !== undefined) next.label = edit.label;
 
   if (edit.footprint !== undefined) {
@@ -576,7 +583,21 @@ export function applySectionEdit(
   // so laying the section out once at eave 0 reads the new rise directly. No
   // iteration, no second stored number, and the answer is exact.
   const changesPitch = edit.pitchDeg !== undefined || edit.facePitchDeg !== undefined;
-  if (edit.pitchAnchor === 'ridge' && changesPitch) {
+  // 🚨 A ROOF WITH NO RIDGE IGNORES A RIDGE ANCHOR; IT DOES NOT REFUSE.
+  //
+  // `pitchAnchor` is component state in the engine and is never reset when the
+  // selection changes, while the inspector correctly HIDES the toggle for a
+  // single-plane section — and still sent the stale value with every pitch
+  // commit. So: set the anchor to Ridge on the house, select the porch, type
+  // 2:12, and the conversion never ran, refused by a message about a control
+  // the user could not see. That is the owner's original complaint reachable
+  // through a different door.
+  //
+  // "Hold the ridge" is meaningless for one plane rather than wrong, so the
+  // honest response is to hold the eave, which is what a single-plane roof
+  // always does.
+  const hasRidge = next.kind !== 'flat' && next.kind !== 'shed';
+  if (edit.pitchAnchor === 'ridge' && changesPitch && hasRidge) {
     if (edit.eaveHeightM !== undefined) {
       return fail([{
         code: 'EDIT_VALUE_NOT_FINITE',
@@ -1507,6 +1528,27 @@ function pointOnFace(
   return false;
 }
 
+/**
+ * The ECEF centroid of a face's own corners.
+ *
+ * 🚨 THE ONE ANCHOR TWO FITS OF THE SAME FACE AGREE ABOUT. `origin3D` is
+ * whichever corner the builder started from, so it MOVES when the fit changes
+ * — and it does change, at the 3.045 deg tilt threshold where
+ * `buildRoofPlane3D` switches from `cross(normal, radialUp)` to the most
+ * horizontal polygon edge. Anchoring a rigid map on it translated a whole array
+ * by the face diagonal the moment a flat porch was given a slope.
+ */
+function ringCentroid(plane: RoofPlane | null | undefined): { x: number; y: number; z: number } | null {
+  const poly = (plane?.polygon3D ?? []) as Array<{ x: number; y: number; z: number }>;
+  const good = poly.filter(p => p && isFinite(p.x) && isFinite(p.y) && isFinite(p.z));
+  if (good.length < 3) return null;
+  return {
+    x: good.reduce((s, p) => s + p.x, 0) / good.length,
+    y: good.reduce((s, p) => s + p.y, 0) / good.length,
+    z: good.reduce((s, p) => s + p.z, 0) / good.length,
+  };
+}
+
 export interface PanelRepositionOutcome {
   /** 🚨 Uniform shape — see SectionLookup. */
   panels: PlacedPanel[];
@@ -1551,11 +1593,51 @@ export function repositionPanelsForPlanes(
 
     if (!isFinite(panel.lat) || !isFinite(panel.lng) || !isFinite(panel.height as number)) return panel;
     const world = latLngToECEF(panel.lat, panel.lng, panel.height as number);
-    const d = { x: world.x - oA.x, y: world.y - oA.y, z: world.z - oA.z };
+
+    // 🚨 ANCHORED ON THE FACE CENTROID, NOT ON `origin3D`.
+    //
+    // `origin3D` is the first CLICKED corner, and the builder chooses it — so
+    // it is a property of how the face was fitted, not of where the face is.
+    // Crossing the frame threshold below moves it to the opposite corner, and a
+    // map anchored there translates the whole array by the diagonal. The
+    // centroid of the same footprint is the same physical point however the
+    // face is fitted, so it is the one anchor both frames agree about.
+    const oC = ringCentroid(oldPlane) ?? oA;
+    const nC = ringCentroid(newPlane) ?? nA;
+    const d = { x: world.x - oC.x, y: world.y - oC.y, z: world.z - oC.z };
 
     // The panel's position in the OLD face's own axes.
-    const u = d.x * oF.u.x + d.y * oF.u.y + d.z * oF.u.z;
-    const v = d.x * oF.v.x + d.y * oF.v.y + d.z * oF.v.z;
+    let u = d.x * oF.u.x + d.y * oF.u.y + d.z * oF.u.z;
+    let v = d.x * oF.v.x + d.y * oF.v.y + d.z * oF.v.z;
+
+    // 🚨 THE TWO FRAMES MUST POINT THE SAME WAY, AND ACROSS ONE PARTICULAR
+    // EDIT THEY DO NOT.
+    //
+    // `buildRoofPlane3D` derives the u-axis as `cross(normal, radialUp)`, whose
+    // magnitude is sin(tilt), and falls back to the most horizontal polygon
+    // EDGE whenever that is under 0.05 — i.e. below asin(0.05) = 3.0452 deg.
+    // Every FLAT deck is under that threshold and every real porch pitch is
+    // over it (1/12 = 4.76 deg), so giving a flat porch a slope crosses it, and
+    // the fitted u-axis bearing flips from 90 deg to 270 deg with `origin3D`
+    // jumping to the opposite corner.
+    //
+    // This map carries a panel by its (u, v) in the old frame into (u, v) in the
+    // new one. With the frame reversed that is a 180 deg ROTATION about the face
+    // centre: an adversary measured nine modules travelling 5.04 m on an 8 x 3 m
+    // deck, reported as `moved: 9, orphaned: 0`, because on a symmetric
+    // footprint the rotated array is still inside the outline — the
+    // reports-success-while-wrong class the containment guard below exists to
+    // catch and structurally cannot. On an L-shaped deck it silently orphaned
+    // nine of twenty-one.
+    //
+    // A frame is a CHOICE of axes for the same surface, so the fix is to
+    // express the panel in whichever handedness the new frame uses rather than
+    // to assume the two agree. A reversal shows up as a negative dot product,
+    // and the correction is exact, not a tolerance.
+    const uDot = oF.u.x * nF.u.x + oF.u.y * nF.u.y + oF.u.z * nF.u.z;
+    const vDot = oF.v.x * nF.v.x + oF.v.y * nF.v.y + oF.v.z * nF.v.z;
+    if (uDot < 0) u = -u;
+    if (vDot < 0) v = -v;
 
     // 🚨 THE NORMAL COMPONENT IS CARRIED, NOT RECOMPUTED.
     //
@@ -1575,9 +1657,9 @@ export function repositionPanelsForPlanes(
     void mountingSystemId; void moduleStackHeightM;
 
     const p = {
-      x: nA.x + nF.u.x * u + nF.v.x * v + nF.n.x * stack,
-      y: nA.y + nF.u.y * u + nF.v.y * v + nF.n.y * stack,
-      z: nA.z + nF.u.z * u + nF.v.z * v + nF.n.z * stack,
+      x: nC.x + nF.u.x * u + nF.v.x * v + nF.n.x * stack,
+      y: nC.y + nF.u.y * u + nF.v.y * v + nF.n.y * stack,
+      z: nC.z + nF.u.z * u + nF.v.z * v + nF.n.z * stack,
     };
     const g = ecefToLatLng(p);
     if (!isFinite(g.lat) || !isFinite(g.lng) || !isFinite(g.height)) return panel;
@@ -1595,7 +1677,14 @@ export function repositionPanelsForPlanes(
     // So containment is checked, in the new face's own (u, v). A panel whose
     // centre is not on the new surface is returned UNTOUCHED and named, exactly
     // like one whose face was deleted.
-    if (!pointOnFace(u, v, newPlane, nA, nF)) { out.orphaned.push(panel.id); return panel; }
+    // `pointOnFace` builds the ring in the new face's axes ABOUT ITS ORIGIN, so
+    // the centroid-relative coordinates are shifted onto that basis first.
+    const cOff = { x: nC.x - nA.x, y: nC.y - nA.y, z: nC.z - nA.z };
+    const uFromOrigin = u + (cOff.x * nF.u.x + cOff.y * nF.u.y + cOff.z * nF.u.z);
+    const vFromOrigin = v + (cOff.x * nF.v.x + cOff.y * nF.v.y + cOff.z * nF.v.z);
+    if (!pointOnFace(uFromOrigin, vFromOrigin, newPlane, nA, nF)) {
+      out.orphaned.push(panel.id); return panel;
+    }
 
     out.moved += 1;
     return {
