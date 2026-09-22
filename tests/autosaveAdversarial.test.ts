@@ -350,13 +350,26 @@ describe('entities that are NOT persisted — classified, not merely listed', ()
     // That has now happened, so this test asserts the CONDITIONS it named rather
     // than the count it was holding the line with. Emitting is no longer the
     // thing to prevent; emitting WITHOUT ownership and persistence is.
+    // 🚨 AND NOW THE BLOCK TOOL EMITS TOO, for the same reason and under the
+    // same conditions. Its own tooltip reads "Use when Google 3D Tiles has no
+    // coverage for this address" — the fallback case — and it produced only
+    // Cesium entities: never in the sidebar, no panels, nothing in the BOM or
+    // the planset, gone on reload. A flat roof IS a building section, so it
+    // goes through `buildSectionRoofPlanes({ kind: 'flat' })` like the others.
+    //
+    // This count moving is the POINT of this test. Each time it does, the new
+    // emitter has to satisfy the two conditions below, and they are asserted
+    // once for all of them because DesignStudio stamps every plane it receives
+    // from a single line.
     const emits = ENGINE.match(/onRoofPlaneCreated\?\.\(/g) ?? [];
-    expect(emits, 'finalizePlane3D and finalizeRoofSection').toHaveLength(2);
+    expect(emits, 'finalizePlane3D, finalizeRoofSection and finalizeBlock').toHaveLength(3);
 
-    // 1. The section emitter exists and goes through the shared domain, not
-    //    through geometry of its own.
+    // 1. Every emitter goes through the shared domain, not through geometry of
+    //    its own.
     expect(ENGINE).toMatch(/function finalizeRoofSection\(/);
-    expect(ENGINE).toMatch(/buildSectionRoofPlanes\(\{/);
+    expect(ENGINE).toMatch(/function finalizeBlock\(/);
+    expect((ENGINE.match(/buildSectionRoofPlanes\(\{/g) ?? []).length,
+      'each section-producing tool must build through the one domain').toBe(2);
 
     // 2. A SITE KEY. The engine deliberately does NOT stamp one — DesignStudio's
     //    onRoofPlaneCreated handler stamps every plane it receives, from one

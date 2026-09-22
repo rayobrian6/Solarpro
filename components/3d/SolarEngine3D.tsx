@@ -10050,7 +10050,71 @@ function SolarEngine3D({
       blockExtrudeHeightM: eaveHeightM,
     }]);
     addLog('BLOCK', `Finalized: ${pts.length} points, ≈${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m, ground ${groundLevelM.toFixed(1)}m, eave ${eaveHeightM}m`);
-    setStatusMsg(`🧱 Block placed — ${pts.length} footprint points, eave ${eaveHeightM}m. Click more points to add another, or Esc.`);
+
+    // ── THE BLOCK IS NOW A BUILDING SECTION, NOT JUST A PICTURE ─────────────
+    //
+    // 🚨 IT USED TO PRODUCE ONLY CESIUM ENTITIES. Its own tooltip says "Use
+    // when Google 3D Tiles has no coverage for this address" — the fallback
+    // case this whole pipeline exists for — and what it produced never reached
+    // the Roof Planes sidebar, took no panels, contributed nothing to the BOM
+    // or the planset, and was gone on reload. An installer modelled a flat-roof
+    // garage or a commercial box and got a white prism.
+    //
+    // A flat roof IS a building section: `buildSectionRoofPlanes` has taken
+    // `kind: 'flat'` since it was written, over a footprint of ANY number of
+    // corners, and emits a real deck face through the same
+    // `lib/3d/footprintToRoofPlane` the hand trace uses. So a Block's roof and
+    // a Mark Plane face are the same object from the same code, and everything
+    // that already works for one works for it.
+    //
+    // 🚨 THE PRISM STAYS. It is what makes the massing readable, and deleting
+    // it would be a second change wearing this one's clothes. The section face
+    // is drawn on top of it by the same renderer as every other face.
+    try {
+      const sectionId = `sec-${blockId}`;
+      const outcome = buildSectionRoofPlanes({
+        id: sectionId,
+        kind: 'flat',
+        footprint: pts.map(pt => ({ lat: pt.lat, lng: pt.lng })),
+        eaveHeightM,
+        pitchDeg: 0,
+        // The same refusal-rather-than-guess rule as finalizeRoofSection: NaN
+        // when unresolved, so the domain declines instead of modelling the
+        // building at sea level.
+        groundElevM: cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : NaN,
+        label: 'Flat section',
+        createdAtIso: new Date().toISOString(),
+        source: 'user-traced',
+      });
+
+      if (outcome.ok && outcome.faceBuilds.length > 0) {
+        for (const b of outcome.faceBuilds) {
+          const cesiumPts = b.projectedPts.map((q: Cart3) => new C.Cartesian3(q.x, q.y, q.z));
+          const entityIds = renderPlane3DEntity(viewer, C, cesiumPts, b.plane.id, b.frame, false, false);
+          plane3DEntitiesRef.current = [...plane3DEntitiesRef.current, ...entityIds];
+          plane3DEntityMap.current.set(b.plane.id, entityIds);
+          plane3DFrameMap.current.set(b.plane.id, b.frame);
+          plane3DCesiumPtsMap.current.set(b.plane.id, cesiumPts);
+          (b.plane as any).__eaveDirENU = b.eaveDirENU;
+          onRoofPlaneCreated?.(b.plane);
+        }
+        addLog('SECTION', `flat ${sectionId}: ${outcome.planes.length} face from block`);
+        setStatusMsg(
+          `🧱 Block placed — ${pts.length} corners, eave ${eaveHeightM}m, and its flat roof is a ` +
+          'real roof face: place panels on it, edit it in the inspector, and it saves with the design.',
+        );
+      } else {
+        const why = outcome.refusals.map(r => r.message).join(' ');
+        setStatusMsg(
+          `🧱 Block drawn, but its roof face was not built — ${why || 'those corners do not describe a roof.'} ` +
+          'The massing is on screen; nothing has been added to the design.',
+        );
+        addLog('SECTION', `flat refused: ${outcome.refusals.map(r => r.code).join(',') || 'NO_FACES'}`);
+      }
+    } catch (err: unknown) {
+      addLog('ERROR', `block section: ${(err as Error).message}`);
+      setStatusMsg(`🧱 Block placed — ${pts.length} footprint points, eave ${eaveHeightM}m. Its roof face could not be built.`);
+    }
     // v68: drop the in-progress segment arrows now that the prism
     // takes over. We do NOT clear the flip set — if the user starts
     // a new block immediately, their previous flips don't carry

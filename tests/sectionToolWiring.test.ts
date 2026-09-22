@@ -28,7 +28,15 @@ function fnBody(name: string): string {
   expect(i, `${name} not found in the engine`).toBeGreaterThan(-1);
   // Handlers here are terminated by a catch line that names the function.
   const end = ENGINE.indexOf(`${name}: \${(err as Error).message}`, i);
-  return end > i ? ENGINE.slice(i, end) : ENGINE.slice(i, i + 4000);
+  if (end > i) return ENGINE.slice(i, end);
+  // 🚨 FALL BACK TO THE NEXT FUNCTION, NOT TO A CHARACTER COUNT. This used to
+  // return `slice(i, i + 4000)` for a function with no such catch line —
+  // `finalizeBlock` is one — so a guard on anything past the four-thousandth
+  // character silently searched a truncated body and failed for a reason that
+  // had nothing to do with the code. A fixed window is a guess about a
+  // function's length.
+  const next = ENGINE.indexOf('\n  function ', i + name.length + 10);
+  return next > i ? ENGINE.slice(i, next) : ENGINE.slice(i);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,5 +176,50 @@ describe('🚨 the UI does not describe a gesture that no longer exists', () => 
     // answer than no button.
     expect(ENGINE).not.toMatch(/setPlacedGableCount\(0\);\s*setVertexSpecs/);
     expect(ENGINE).not.toMatch(/setPlacedHipCount\(0\);\s*setVertexSpecs/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE BLOCK TOOL PRODUCES A DESIGN OBJECT, NOT A PICTURE
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 Block emits a real roof face', () => {
+  it('finalizeBlock builds a flat section and emits it, like the other two tools', () => {
+    // Its own tooltip reads "Use when Google 3D Tiles has no coverage for this
+    // address" — the fallback case this whole pipeline exists for — and it
+    // produced only Cesium entities. What it drew never reached the Roof Planes
+    // sidebar, took no panels, contributed nothing to the BOM or the planset,
+    // and was gone on reload.
+    const fn = fnBody('finalizeBlock');
+
+    expect(fn).toMatch(/buildSectionRoofPlanes\(\{/);
+    expect(fn).toMatch(/kind: 'flat'/);
+    // A flat deck is pitch 0 by definition; anything else would be a shed.
+    expect(fn).toMatch(/pitchDeg: 0/);
+
+    // 🚨 THE SAME REFUSAL RULE AS THE OTHER TOOLS. NaN when the pad is
+    // unresolved, so the domain declines rather than modelling the building at
+    // sea level — which would look plausible all the way to a permit.
+    expect(fn).toMatch(/cesiumGroundElevResolvedRef\.current \? cesiumGroundElevRef\.current : NaN/);
+
+    // THE EMIT is what makes it a design object.
+    expect(fn).toMatch(/onRoofPlaneCreated\?\.\(b\.plane\)/);
+    // …registered in the same three maps as every other face, or selection,
+    // setbacks and the panel grid cannot find it.
+    expect(fn).toMatch(/plane3DEntityMap\.current\.set\(b\.plane\.id, entityIds\)/);
+    expect(fn).toMatch(/plane3DFrameMap\.current\.set\(b\.plane\.id, b\.frame\)/);
+    expect(fn).toMatch(/plane3DCesiumPtsMap\.current\.set\(b\.plane\.id, cesiumPts\)/);
+
+    // A refusal must be reported, not swallowed into a success message.
+    expect(fn).toMatch(/outcome\.refusals/);
+    expect(fn).toMatch(/nothing has been added to the design/i);
+  });
+
+  it('the massing prism is still drawn — the section face is added, not swapped in', () => {
+    const fn = fnBody('finalizeBlock');
+    // The prism is what makes the massing readable; removing it would be a
+    // second change wearing this one's clothes.
+    expect(fn).toMatch(/blockEntitiesRef\.current\.push\(prismEntity\)/);
+    expect(fn).toMatch(/blockHandlesRef\.current\.push\(handleEntity\)/);
   });
 });
