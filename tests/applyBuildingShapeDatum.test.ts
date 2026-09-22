@@ -9,9 +9,17 @@
  *
  *   • the live branch reads `plane3DCesiumPtsMap`, written from
  *     `built.frame.projectedPts` at the bottom of applyBuildingShape itself;
- *   • the fallback branch reads the stored `polygon3D`, which
- *     lib/roofPlane3D.ts:743 sets to `projPts` — "the lift stays where it
- *     belongs — polygon3D, origin3D and the frame keep it".
+ *   • the fallback branch does NOT. 🚨 AN EARLIER VERSION OF THIS HEADER SAID
+ *     IT READ THE STORED `polygon3D`. That was wrong, an independent touch
+ *     audit caught it, and the error was not cosmetic: it is the premise the
+ *     first fix was built on, and acting on it corrupted the very faces that
+ *     were exact. That branch builds each corner from `plane.vertices` — the
+ *     canonical, ALREADY-UNLIFTED plan record — and drops it VERTICALLY onto
+ *     the plane, so its plan position is the truth and only its height comes
+ *     from the lifted plane. Un-lifting those slides them `lift·sin(tilt)`
+ *     UP-slope: the same corruption, in the other direction, on the other
+ *     provider. Which branch answered is now carried on the renderable as
+ *     `cornersPlanLiftM` rather than assumed.
  *
  * A normal is not vertical. Projecting lifted points back to lat/lng and handing
  * them to `roofPlaneFromFootprint` — which correctly lifts a genuinely raw
@@ -33,7 +41,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { roofPlaneFromFootprint } from '@/lib/3d/footprintToRoofPlane';
-import { ecefToLatLng, unliftAlongNormal, SURFACE_OFFSET_M, type Cart3 } from '@/lib/roofPlane3D';
+import {
+  ecefToLatLng, unliftAlongNormal, unliftFacesPreservingSharedCorners,
+  SURFACE_OFFSET_M, type Cart3,
+} from '@/lib/roofPlane3D';
 import { stripComments } from './support/stripSource';
 
 const LAT = 38.6657, LNG = -90.2266;
@@ -186,12 +197,214 @@ describe('applyBuildingShape takes the record before the lift', () => {
     // and cannot be driven from a unit test. Anchored on `rawFaces`, which is
     // unique to this function, rather than on a bare `unliftAlongNormal` that
     // another call site could satisfy.
-    const idx = SRC.indexOf('const rawFaces = renderables.map(');
-    expect(idx, 'the rawFaces anchor was not found — re-anchor this guard').toBeGreaterThan(-1);
-    const block = SRC.slice(idx, idx + 500);
-    expect(block, 'the render lift must be removed before the plan record is taken')
-      .toMatch(/unliftAlongNormal\(/);
-    // The normal must come from the face's OWN frame, not a shared or vertical one.
-    expect(block).toMatch(/rp\.n\.x/);
+    const idx = SRC.indexOf('const unlifted = unliftFacesPreservingSharedCorners(');
+    expect(idx, 'the un-lift anchor was not found — re-anchor this guard').toBeGreaterThan(-1);
+    const block = SRC.slice(idx, idx + 1_600);
+    // The normal must come from each face's OWN frame, not a shared or vertical one.
+    expect(block).toMatch(/normal:\s*\{\s*x:\s*rp\.n\.x/);
+    expect(block).toMatch(/const rawFaces = renderables\.map\(/);
+    expect(block).toMatch(/polygon3D:\s*unlifted\[i\]/);
+
+    // 🚨 AND IT MUST BE THE ROOF-WIDE FORM. The per-face `unliftAlongNormal`
+    // is correct arithmetic and the WRONG operation here: it splits every seam
+    // Stitch closed, by 2*lift*sin(tilt), which the tests above measure at
+    // 107.9 mm. This guard is what stops that being reintroduced as a
+    // simplification.
+    const fnStart = SRC.indexOf('function applyBuildingShape(');
+    expect(fnStart, 'applyBuildingShape not found').toBeGreaterThan(-1);
+    const fnBody = SRC.slice(fnStart, SRC.indexOf('function ', fnStart + 40));
+    // 🚨 NO `\b` IN THIS PATTERN, DELIBERATELY. Written through a shell heredoc
+    // it becomes a literal 0x08 BACKSPACE byte, the regex can then never match,
+    // and a `.not.toMatch` guard built on it passes against any source at all.
+    // tests/sourceControlBytes.test.ts caught exactly that, here, in this file.
+    const PER_FACE = /[^a-zA-Z]unliftAlongNormal\s*\(/;
+    // Prove the pattern can fail before trusting it to. A `.not.toMatch` whose
+    // regex cannot match anything is the vacuous-guard defect in miniature.
+    expect(' unliftAlongNormal(').toMatch(PER_FACE);
+    expect(fnBody, 'applyBuildingShape must not un-lift face by face').not.toMatch(PER_FACE);
+  });
+});
+
+
+describe('🚨 un-lifting FACE BY FACE tears a stitched roof open', () => {
+  /**
+   * The regression my first version of this fix shipped, and the reason
+   * `unliftFacesPreservingSharedCorners` exists.
+   *
+   * Stitch and the abutment pass average a shared ridge corner into ONE point,
+   * in LIFTED space. A gable's halves have opposite normals, so un-lifting each
+   * face along its own normal moves that single point in two directions at
+   * once. `stitchRoofVertices` documents the same measurement from a browser
+   * run (100.9 mm at 25 degrees) and deliberately does not un-lift because of it.
+   */
+  function gableHalves() {
+    const hw = 3 / M_LNG, hd = 2.5 / M_LAT;
+    const mk = (latOffM: number, az: number) => {
+      const c = LAT + latOffM / M_LAT;
+      const b = roofPlaneFromFootprint(
+        [{ lat: c - hd, lng: LNG - hw }, { lat: c - hd, lng: LNG + hw },
+         { lat: c + hd, lng: LNG + hw }, { lat: c + hd, lng: LNG - hw }],
+        { pitchDeg: PITCH_DEG, azimuthDeg: az, eaveHeightM: WALL_M, groundElevM: GROUND_M },
+      );
+      expect(b).toBeTruthy();
+      return b!;
+    };
+    const south = mk(-2.5, 180), north = mk(2.5, 0);
+    const sPts: Cart3[] = south.frame.projectedPts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
+    const nPts: Cart3[] = north.frame.projectedPts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
+    // Force the ridge corners coincident, which is exactly what Stitch leaves.
+    const hS = sPts.map(p => ecefToLatLng(p).height), hN = nPts.map(p => ecefToLatLng(p).height);
+    const iS = hS.indexOf(Math.max(...hS)), iN = hN.indexOf(Math.max(...hN));
+    const mid = { x: (sPts[iS].x + nPts[iN].x) / 2, y: (sPts[iS].y + nPts[iN].y) / 2, z: (sPts[iS].z + nPts[iN].z) / 2 };
+    sPts[iS] = { ...mid }; nPts[iN] = { ...mid };
+    const nrm = (b: any): Cart3 => ({ x: b.frame.normal.x, y: b.frame.normal.y, z: b.frame.normal.z });
+    return { sPts, nPts, iS, iN, sN: nrm(south), nN: nrm(north) };
+  }
+
+  const gapM = (a: Cart3, b: Cart3) => {
+    const ga = ecefToLatLng(a), gb = ecefToLatLng(b);
+    return Math.hypot((gb.lat - ga.lat) * M_LAT, (gb.lng - ga.lng) * M_LNG);
+  };
+
+  it('the fixture really does arrive with the ridge joined', () => {
+    // A fixture whose ridge was never shut could not exhibit the split.
+    const { sPts, nPts, iS, iN } = gableHalves();
+    expect(gapM(sPts[iS], nPts[iN])).toBeLessThan(0.001);
+  });
+
+  it('🚨 unliftAlongNormal per face splits it by 2*lift*sin(tilt)', () => {
+    const { sPts, nPts, iS, iN, sN, nN } = gableHalves();
+    const s = unliftAlongNormal(sPts, sN), n = unliftAlongNormal(nPts, nN);
+    const split = gapM(s[iS], n[iN]);
+    const predicted = 2 * SURFACE_OFFSET_M * Math.sin((PITCH_DEG * Math.PI) / 180);
+    expect(split).toBeGreaterThan(0.10);
+    expect(split).toBeCloseTo(predicted, 2);
+  });
+
+  it('unliftFacesPreservingSharedCorners keeps it shut', () => {
+    const { sPts, nPts, iS, iN, sN, nN } = gableHalves();
+    const [s, n] = unliftFacesPreservingSharedCorners([
+      { pts: sPts, normal: sN }, { pts: nPts, normal: nN },
+    ]);
+    expect(gapM(s[iS], n[iN]), 'the ridge must stay one point').toBeLessThan(0.001);
+  });
+
+  it('…and still un-lifts every corner that nobody shares', () => {
+    // Otherwise "keep it shut" could be satisfied by not un-lifting at all,
+    // which is the defect this whole file exists for.
+    const { sPts, nPts, iS, sN, nN } = gableHalves();
+    const [s] = unliftFacesPreservingSharedCorners([
+      { pts: sPts, normal: sN }, { pts: nPts, normal: nN },
+    ]);
+    const solo = unliftAlongNormal(sPts, sN);
+    let moved = 0;
+    for (let i = 0; i < sPts.length; i++) {
+      if (i === iS) continue;                      // the shared one
+      expect(gapM(s[i], solo[i])).toBeLessThan(1e-6);
+      if (gapM(s[i], sPts[i]) > 0.04) moved++;     // ~5.4 cm each at 6:12
+    }
+    expect(moved, 'the unshared corners were not un-lifted').toBeGreaterThanOrEqual(2);
+  });
+
+  it('a lone face is unchanged by the group version', () => {
+    const { sPts, sN } = gableHalves();
+    const [only] = unliftFacesPreservingSharedCorners([{ pts: sPts, normal: sN }]);
+    const solo = unliftAlongNormal(sPts, sN);
+    only.forEach((p, i) => expect(gapM(p, solo[i])).toBeLessThan(1e-9));
+  });
+
+  it('two corners 0.5 m apart are NOT merged', () => {
+    // The smallest edge the editor permits is MIN_EDGE_LENGTH_M = 0.5 m, so the
+    // 1 cm tolerance must never treat distinct corners as one.
+    const { sPts, nPts, iS, iN, sN, nN } = gableHalves();
+    nPts[iN] = { x: nPts[iN].x + 0.5, y: nPts[iN].y, z: nPts[iN].z };
+    const [s, n] = unliftFacesPreservingSharedCorners([
+      { pts: sPts, normal: sN }, { pts: nPts, normal: nN },
+    ]);
+    expect(gapM(s[iS], n[iN])).toBeGreaterThan(0.3);
+  });
+});
+
+
+describe('🚨 provenance — a roof is a MIXTURE, and only one branch carries the lift', () => {
+  /**
+   * `collectRoofRenderables` answers from two branches:
+   *   live     — `plane3DCesiumPtsMap`, points that came out of a fit, LIFTED;
+   *   fallback — `plane.vertices` dropped vertically, plan-EXACT, not lifted.
+   * A single roof can contain both (a face with no render entities takes the
+   * fallback). Un-lifting the whole roof with one number corrupts whichever
+   * branch it guessed wrong about.
+   */
+  function facePair() {
+    const b = build(footprint(3, 2.5), GROUND_M);
+    const normal: Cart3 = { x: b.frame.normal.x, y: b.frame.normal.y, z: b.frame.normal.z };
+    const lifted: Cart3[] = b.frame.projectedPts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
+    // The fallback branch's corners: same plane, but plan positions untouched.
+    const exact: Cart3[] = unliftAlongNormal(lifted, normal);
+    return { normal, lifted, exact };
+  }
+
+  const planGap = (a: Cart3, b: Cart3) => {
+    const ga = ecefToLatLng(a), gb = ecefToLatLng(b);
+    return Math.hypot((gb.lat - ga.lat) * M_LAT, (gb.lng - ga.lng) * M_LNG);
+  };
+
+  it('liftM: 0 leaves a plan-exact face exactly where it is', () => {
+    const { normal, exact } = facePair();
+    const [out] = unliftFacesPreservingSharedCorners([{ pts: exact, normal, liftM: 0 }]);
+    out.forEach((p, i) => expect(planGap(p, exact[i])).toBeLessThan(1e-9));
+  });
+
+  it('🚨 and un-lifting it anyway moves it 5.4 cm the WRONG WAY', () => {
+    // The defect the provenance flag prevents, measured rather than asserted.
+    const { normal, exact } = facePair();
+    const [wrong] = unliftFacesPreservingSharedCorners([{ pts: exact, normal }]); // default lift
+    const drift = Math.max(...wrong.map((p, i) => planGap(p, exact[i])));
+    expect(drift).toBeGreaterThan(0.05);
+    expect(drift).toBeCloseTo(SURFACE_OFFSET_M * Math.sin((PITCH_DEG * Math.PI) / 180), 3);
+  });
+
+  it('a mixed roof: the lifted face moves, the exact one does not, in ONE call', () => {
+    const { normal, lifted, exact } = facePair();
+    const [a, bOut] = unliftFacesPreservingSharedCorners([
+      { pts: lifted, normal, liftM: SURFACE_OFFSET_M },
+      { pts: exact,  normal, liftM: 0 },
+    ]);
+    // Both end up at the same plan positions — which is the point: they were
+    // always meant to describe the same footprint.
+    a.forEach((p, i) => expect(planGap(p, exact[i])).toBeLessThan(1e-6));
+    bOut.forEach((p, i) => expect(planGap(p, exact[i])).toBeLessThan(1e-9));
+  });
+
+  it('an all-exact roof is a complete no-op', () => {
+    const { normal, exact } = facePair();
+    const out = unliftFacesPreservingSharedCorners([
+      { pts: exact, normal, liftM: 0 }, { pts: exact, normal, liftM: 0 },
+    ]);
+    out.forEach(face => face.forEach((p, i) => expect(planGap(p, exact[i])).toBeLessThan(1e-9)));
+  });
+});
+
+describe('applyBuildingShape asks the renderable which branch answered', () => {
+  const SRC2 = stripComments(
+    readFileSync(join(__dirname, '..', 'components', '3d', 'SolarEngine3D.tsx'), 'utf8'),
+  );
+
+  it('both branches of collectRoofRenderables tag their corners', () => {
+    const fnStart = SRC2.indexOf('function collectRoofRenderables(');
+    expect(fnStart).toBeGreaterThan(-1);
+    const body = SRC2.slice(fnStart, SRC2.indexOf('function ', fnStart + 40));
+    const pushes = body.match(/renderables\.push\(/g) ?? [];
+    expect(pushes.length, 'expected exactly two branches to push renderables').toBe(2);
+    const tags = body.match(/cornersPlanLiftM:/g) ?? [];
+    expect(tags.length, 'every branch must state its plan-lift provenance').toBe(2);
+    expect(body).toMatch(/cornersPlanLiftM:\s*SURFACE_OFFSET_M/);   // live branch
+    expect(body).toMatch(/cornersPlanLiftM:\s*0/);                  // fallback branch
+  });
+
+  it('and applyBuildingShape passes it through rather than assuming', () => {
+    const idx = SRC2.indexOf('const unlifted = unliftFacesPreservingSharedCorners(');
+    expect(idx).toBeGreaterThan(-1);
+    expect(SRC2.slice(idx, idx + 1_600)).toMatch(/liftM:\s*rp\.cornersPlanLiftM/);
   });
 });

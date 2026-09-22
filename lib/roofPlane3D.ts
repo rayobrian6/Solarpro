@@ -662,6 +662,101 @@ export function unliftAlongNormal(
   }));
 }
 
+/**
+ * Un-lift SEVERAL faces at once, and keep the corners they share as one corner.
+ *
+ * 🚨 `unliftAlongNormal` ALONE TEARS A STITCHED ROOF OPEN, AND IT IS MEASURED.
+ *
+ * Each face is un-lifted along ITS OWN normal, and a gable's two halves have
+ * opposite normals. So a ridge corner that Stitch (or the abutment pass) had
+ * averaged into a single point in lifted space becomes TWO points, separated by
+ * `2·lift·sin(tilt)`:
+ *
+ *     joined in lifted space :   0.0 mm
+ *     un-lifted per face     : 107.9 mm   (6:12, lift 0.12 m)
+ *
+ * which is the same 100.9 mm the stitch write-back records from a browser run.
+ * That is why `stitchRoofVertices` deliberately does NOT un-lift its own plan
+ * write-back, and its comment says so at length. Any caller that un-lifts a
+ * whole roof face-by-face re-opens exactly that seam.
+ *
+ * So: group the corners that arrive COINCIDENT, un-lift every point along its
+ * own face normal, then put each group back on the mean of its un-lifted
+ * positions. A lone corner is un-lifted exactly; a shared corner stays shared.
+ * For a symmetric gable the mean is the true ridge; for an asymmetric one it is
+ * the best available estimate and is wrong by far less than the 10.8 cm split
+ * it replaces.
+ *
+ * This RESTORES AN INVARIANT THE INPUT ALREADY HAD. It is not a new authority
+ * and it must not become one: it decides nothing about where corners belong,
+ * only that points which were one point stay one point.
+ *
+ * @param tolM how close two input points must be to count as the same corner.
+ *             1 cm by default — stitching averages to exact equality, and the
+ *             smallest edge the editor permits is 0.5 m, so this cannot merge
+ *             two corners that are genuinely distinct.
+ */
+export function unliftFacesPreservingSharedCorners(
+  faces: ReadonlyArray<{
+    pts: readonly Cart3[];
+    normal: Cart3;
+    /**
+     * 🚨 PER FACE, BECAUSE A ROOF IS A MIXTURE.
+     *
+     * `collectRoofRenderables` answers from two branches. The live branch hands
+     * back points that came out of a fit and therefore carry the render lift.
+     * The fallback branch drops the canonical `vertices` VERTICALLY onto the
+     * plane, so its plan positions are already exact and un-lifting them slides
+     * them `lift·sin(tilt)` the WRONG WAY. A single roof can contain both.
+     *
+     * A first version of this took one lift for the whole call and corrupted
+     * every fallback-branch face. Omitting it defaults to SURFACE_OFFSET_M,
+     * which is the live-branch answer and the common case — pass 0 explicitly
+     * for anything whose plan record is already the truth.
+     */
+    liftM?: number;
+  }>,
+  defaultLiftM: number = SURFACE_OFFSET_M,
+  tolM = 0.01,
+): Cart3[][] {
+  const liftOf = (i: number) => faces[i].liftM ?? defaultLiftM;
+  const out = faces.map((f, i) => unliftAlongNormal(f.pts, f.normal, liftOf(i)));
+  if (faces.every((_, i) => !liftOf(i))) return out;
+
+  // Group by proximity in the ORIGINAL (lifted) space — that is where the
+  // sharing was established, and it is the only place it is still visible.
+  const tol2 = tolM * tolM;
+  const groups: Array<Array<[number, number]>> = [];
+  const owner = new Map<string, number>();
+
+  for (let fi = 0; fi < faces.length; fi++) {
+    const pts = faces[fi].pts;
+    for (let pi = 0; pi < pts.length; pi++) {
+      const p = pts[pi];
+      let gi = -1;
+      for (let g = 0; g < groups.length; g++) {
+        const [afi, api] = groups[g][0];
+        const q = faces[afi].pts[api];
+        const dx = p.x - q.x, dy = p.y - q.y, dz = p.z - q.z;
+        if (dx * dx + dy * dy + dz * dz <= tol2) { gi = g; break; }
+      }
+      if (gi < 0) { groups.push([[fi, pi]]); gi = groups.length - 1; }
+      else groups[gi].push([fi, pi]);
+      owner.set(`${fi}:${pi}`, gi);
+    }
+  }
+
+  for (const g of groups) {
+    if (g.length < 2) continue;              // a corner nobody shares
+    let x = 0, y = 0, z = 0;
+    for (const [fi, pi] of g) { const q = out[fi][pi]; x += q.x; y += q.y; z += q.z; }
+    const mean = { x: x / g.length, y: y / g.length, z: z / g.length };
+    for (const [fi, pi] of g) out[fi][pi] = { ...mean };
+  }
+
+  return out;
+}
+
 export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = {}): RoofPlane {
   if (pts3D.length < 3) {
     throw new Error(`buildRoofPlane3D: need ≥3 points, got ${pts3D.length}`);

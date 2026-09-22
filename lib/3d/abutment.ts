@@ -30,6 +30,24 @@
  * action and never runs on its own. Horizontal position is NEVER touched — the
  * plan-view footprint the user traced is theirs, and only the height it sits at
  * is inferred.
+ *
+ * 🚨 SCOPE OF THAT RULE, RULED ON 2026-09-21 — READ BEFORE CITING IT ELSEWHERE.
+ *
+ * This sentence has been read as a blanket ban on horizontal movement, and a
+ * proposal for a Move tool turned on it. It is not. The ruling:
+ *
+ *   INFERENCE AND AUTOMATIC RECONCILIATION must never silently move the user's
+ *   traced plan geometry. An EXPLICIT USER GESTURE may — deliberately selecting
+ *   a building section and moving it is the user exercising ownership of their
+ *   own footprint, not the software overriding it.
+ *
+ *   AUTOMATIC / INFERRED MUTATION  ≠  EXPLICIT USER-AUTHORED MUTATION.
+ *
+ * This module is squarely on the `inferred` side: it runs as part of Stitch,
+ * decides for itself which vertices to move, and therefore stays vertical-only.
+ * The rule above is unchanged FOR THIS FILE. What changed is that it is no
+ * longer the whole policy, and the policy now lives in one place rather than in
+ * this comment: lib/3d/geometryMutationPolicy.ts.
  */
 
 import { ecefToLatLng, latLngToECEF, type Cart3 } from '@/lib/roofPlane3D';

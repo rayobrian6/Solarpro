@@ -53,7 +53,8 @@ import {
   renderPlane3DEntity,
   renderPoint3DMarker,
   renderPreviewPolyline,
-  unliftAlongNormal,
+  SURFACE_OFFSET_M,
+  unliftFacesPreservingSharedCorners,
   type Cart3,
   type Plane3DFrame,
 } from '@/lib/roofPlane3D';
@@ -4441,7 +4442,14 @@ function SolarEngine3D({
       const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3());
       const origin = new C.Cartesian3(fr.origin.x, fr.origin.y, fr.origin.z);
       const corners = pts.map((p: any) => new C.Cartesian3(p.x, p.y, p.z));
-      renderables.push({ id: pid, corners, u, v, n, origin });
+      // 🚨 PROVENANCE, NOT DECORATION. `plane3DCesiumPtsMap` holds points that
+      // came out of a fit, so they carry the SURFACE_OFFSET_M render lift and
+      // their plan projection is slid `lift·sin(tilt)` down-slope. The fallback
+      // branch below does NOT — it drops the canonical `vertices` vertically, so
+      // its plan positions are exact. The two are indistinguishable once they
+      // are both a list of Cartesian3, and a caller that takes the plan record
+      // from either must know which it has. `cornersPlanLiftM` says.
+      renderables.push({ id: pid, corners, u, v, n, origin, cornersPlanLiftM: SURFACE_OFFSET_M });
       seen.add(pid);
     });
     (roofPlanesRef.current ?? []).forEach(plane => {
@@ -4532,7 +4540,12 @@ function SolarEngine3D({
         return safeCartesian3(C, vert.lng, vert.lat, baseH - fa / slope);
       }).filter(Boolean);
       if (corners.length < 3) return;
-      renderables.push({ id: plane.id, corners, u, v, n, origin });
+      // 🚨 NO RENDER LIFT IN THE PLAN POSITIONS. Each corner keeps the exact
+      // lat/lng of `plane.vertices` — the canonical, already-unlifted plan
+      // record — and only its HEIGHT comes from the (lifted) plane. So a caller
+      // must NOT un-lift these: subtracting 0.12·n would slide them 5.4 cm
+      // UP-slope at 6:12, i.e. corrupt the one branch that was exact.
+      renderables.push({ id: plane.id, corners, u, v, n, origin, cornersPlanLiftM: 0 });
     });
     renderables.forEach((rp: any) => {
       const c = new C.Cartesian3(0, 0, 0);
@@ -5018,14 +5031,33 @@ function SolarEngine3D({
     // lib/roofPlane3D.ts:626-650 already documents this exact class and names
     // the callers that were fixed — buildRoofPlane3D, Stitch and Square Up.
     // This one re-fits points that are already lifted and was not on that list.
-    // Un-lifting is a pure translation along each face's own normal, so tilt and
-    // azimuth are untouched and a gable's halves move back TOWARDS each other.
-    const rawFaces = renderables.map((rp: any) => ({
+    //
+    // 🚨 AND IT MUST BE UN-LIFTED FOR THE WHOLE ROOF AT ONCE, NOT FACE BY FACE.
+    // Un-lifting each face along its OWN normal tears open every seam Stitch
+    // and the abutment pass had closed: a gable's halves have opposite normals,
+    // so a ridge corner they had averaged into ONE point becomes two, separated
+    // by 2·lift·sin(tilt) — measured at 107.9 mm at 6:12, the same split the
+    // stitch write-back records from a browser run and deliberately avoids.
+    // A first version of this fix did exactly that and shipped it.
+    // `unliftFacesPreservingSharedCorners` un-lifts every point along its own
+    // face normal and then puts corners that ARRIVED coincident back on one
+    // point, so the plan record is the true footprint AND the roof stays shut.
+    const unlifted = unliftFacesPreservingSharedCorners(
+      renderables.map((rp: any) => ({
+        pts: rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[],
+        normal: { x: rp.n.x, y: rp.n.y, z: rp.n.z } as Cart3,
+        // 🚨 ASK THE RENDERABLE, DO NOT ASSUME. Only the live branch of
+        // `collectRoofRenderables` carries the render lift; the fallback branch
+        // drops the canonical `vertices` vertically and is already exact. A
+        // first version of this fix un-lifted BOTH and slid every
+        // fallback-branch face 5.4 cm up-slope — the same corruption it was
+        // written to remove, in the other direction, on the other provider.
+        liftM: rp.cornersPlanLiftM,
+      })),
+    );
+    const rawFaces = renderables.map((rp: any, i: number) => ({
       id: rp.id as string,
-      polygon3D: unliftAlongNormal(
-        rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })),
-        { x: rp.n.x, y: rp.n.y, z: rp.n.z },
-      ) as Cart3[],
+      polygon3D: unlifted[i],
     }));
     const azimuths = deriveAzimuthsFromSharedEdges(rawFaces, (id) => {
       const f = rawFaces.find(r => r.id === id);
