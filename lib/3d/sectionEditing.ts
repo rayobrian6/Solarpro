@@ -78,8 +78,9 @@
  * kind of number that starts the next compensating edit.
  */
 
-import type { RoofPlane } from '@/types';
-import { SURFACE_OFFSET_M, ecefToLatLng, type Cart3 } from '@/lib/roofPlane3D';
+import type { PlacedPanel, RoofPlane } from '@/types';
+import { SURFACE_OFFSET_M, ecefToLatLng, latLngToECEF, type Cart3 } from '@/lib/roofPlane3D';
+import { moduleStackHeightM } from '@/lib/roofMountDatum';
 import { evaluateGeometryMutation } from './geometryMutationPolicy';
 import {
   type BuildingSection,
@@ -570,6 +571,137 @@ export function measureFaceVertical(
     out.groundResolved = true;
     out.wallHeightM = out.eaveElevM - ground;
   }
+  return out;
+}
+
+// ── Panels follow the roof they stand on ────────────────────────────────────
+
+/**
+ * Move already-placed panels onto the rebuilt version of the face they belong to.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * 🚨 WHY THIS IS NOT OPTIONAL
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * `PlacedPanel` carries BOTH descriptions of where a panel is:
+ *
+ *    planeId + gridRow/gridCol     where it BELONGS — a slot on a roof face
+ *    lat / lng / height / frame    where it is DRAWN — absolute, in ECEF
+ *
+ * A section edit moves the first and not the second. Nothing in the app
+ * re-places panels when `roofPlanes` changes, so raising a section's eave by a
+ * foot leaves its whole array a foot under the roof — inside the house. That is
+ * the same defect this project has already shipped twice, as "the panels are
+ * inside of the house and not on top of the planes" and as "NO DECK under the
+ * array", and a person who lays panels and THEN corrects the building hits it
+ * immediately.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * HOW IT MOVES THEM
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Rigidly, in the face's own frame. A panel's offset from the old face's origin
+ * is expressed in that face's (u, v, n) axes, and re-applied in the new face's
+ * — so the array keeps its layout, its spacing and its position on the roof,
+ * and simply travels with the surface. The normal component is REPLACED rather
+ * than carried, with the racking stack from `lib/roofMountDatum` — the one
+ * datum authority — so a panel that was correctly mounted stays correctly
+ * mounted and one that had drifted is put right.
+ *
+ * 🚨 A PANEL WHOSE FACE IS GONE IS REPORTED, NEVER REHOMED. Changing a hip to a
+ * gable destroys two faces. Guessing those panels onto a neighbour would move
+ * modules the user never asked to move, onto a roof plane that may not fit
+ * them. They are returned untouched and named in `orphaned` so the caller can
+ * say so.
+ */
+export interface PanelRepositionOutcome {
+  /** 🚨 Uniform shape — see SectionLookup. */
+  panels: PlacedPanel[];
+  /** How many actually moved. */
+  moved: number;
+  /** Panels whose face no longer exists. Returned unchanged, and named. */
+  orphaned: string[];
+}
+
+export function repositionPanelsForPlanes(
+  panels: ReadonlyArray<PlacedPanel> | null | undefined,
+  before: ReadonlyArray<RoofPlane> | null | undefined,
+  after: ReadonlyArray<RoofPlane> | null | undefined,
+  mountingSystemId?: string | null,
+): PanelRepositionOutcome {
+  const out: PanelRepositionOutcome = { panels: (panels ?? []).slice(), moved: 0, orphaned: [] };
+  if (!panels || panels.length === 0) return out;
+
+  const oldById = new Map((before ?? []).map(p => [p.id, p]));
+  const newById = new Map((after ?? []).map(p => [p.id, p]));
+
+  out.panels = panels.map(panel => {
+    const planeId = panel.planeId;
+    if (!planeId) return panel;                       // a ground or fence array
+    const oldPlane = oldById.get(planeId);
+    const newPlane = newById.get(planeId);
+
+    if (oldPlane && !newPlane) { out.orphaned.push(panel.id); return panel; }
+    if (!oldPlane || !newPlane) return panel;
+
+    const oA = oldPlane.origin3D, nA = newPlane.origin3D;
+    const oF = oldPlane.ecefFrame3D, nF = newPlane.ecefFrame3D;
+    if (!oA || !nA || !oF || !nF) return panel;       // nothing to map through
+
+    // Unchanged geometry: leave the panel byte-identical rather than pushing it
+    // through a round-trip that would perturb it in the last decimals.
+    if (oA.x === nA.x && oA.y === nA.y && oA.z === nA.z
+      && oF.n.x === nF.n.x && oF.n.y === nF.n.y && oF.n.z === nF.n.z
+      && oF.u.x === nF.u.x && oF.u.y === nF.u.y && oF.u.z === nF.u.z) {
+      return panel;
+    }
+
+    if (!isFinite(panel.lat) || !isFinite(panel.lng) || !isFinite(panel.height as number)) return panel;
+    const world = latLngToECEF(panel.lat, panel.lng, panel.height as number);
+    const d = { x: world.x - oA.x, y: world.y - oA.y, z: world.z - oA.z };
+
+    // The panel's position in the OLD face's own axes.
+    const u = d.x * oF.u.x + d.y * oF.u.y + d.z * oF.u.z;
+    const v = d.x * oF.v.x + d.y * oF.v.y + d.z * oF.v.z;
+
+    // 🚨 THE NORMAL COMPONENT IS CARRIED, NOT RECOMPUTED.
+    //
+    // A first version imposed `moduleStackHeightM(racking)` here, reasoning
+    // that lib/roofMountDatum is the one answer to "how far above the deck does
+    // a module sit". Measured, that was wrong twice over: the panels
+    // `buildSurfaceGrid` actually produces sit at a different offset from the
+    // lifted `origin3D` than that constant (the origin already carries
+    // SURFACE_OFFSET_M, and the grid's own datum handling is not a bare
+    // addition of the stack), and the mounting system is not reliably on the
+    // panel, so the fallback silently changed every panel's standoff by 2 cm.
+    //
+    // This operation is "the roof moved, bring the array with it". A rigid
+    // motion is exactly that, and it cannot introduce a datum disagreement it
+    // was not asked to fix. Whatever standoff a panel had, it keeps.
+    const stack = d.x * oF.n.x + d.y * oF.n.y + d.z * oF.n.z;
+    void mountingSystemId; void moduleStackHeightM;
+
+    const p = {
+      x: nA.x + nF.u.x * u + nF.v.x * v + nF.n.x * stack,
+      y: nA.y + nF.u.y * u + nF.v.y * v + nF.n.y * stack,
+      z: nA.z + nF.u.z * u + nF.v.z * v + nF.n.z * stack,
+    };
+    const g = ecefToLatLng(p);
+    if (!isFinite(g.lat) || !isFinite(g.lng) || !isFinite(g.height)) return panel;
+
+    out.moved += 1;
+    return {
+      ...panel,
+      lat: g.lat, lng: g.lng, height: g.height,
+      // The module lies ON the roof, so its orientation is the roof's. Leaving
+      // these behind is how a roof and its array come to quote two pitches.
+      tilt: isFinite(newPlane.pitch) ? newPlane.pitch : panel.tilt,
+      azimuth: isFinite(newPlane.azimuth) ? newPlane.azimuth : panel.azimuth,
+      pitch: isFinite(newPlane.pitch) ? newPlane.pitch : panel.pitch,
+      ecefFrame3D: { u: { ...nF.u }, v: { ...nF.v }, n: { ...nF.n } },
+    } as PlacedPanel;
+  });
+
   return out;
 }
 

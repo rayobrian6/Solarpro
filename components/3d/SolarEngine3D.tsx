@@ -61,6 +61,7 @@ import {
 import { buildSectionRoofPlanes, sectionIdOfFaceId } from '@/lib/3d/buildingSection';
 import {
   applySectionEdit, measureSection, measureFaceVertical, sectionFromPlanes, listSections,
+  repositionPanelsForPlanes,
   type SectionEdit,
 } from '@/lib/3d/sectionEditing';
 import { SectionInspector, type InspectorState } from '@/components/3d/inspector/SectionInspector';
@@ -5321,6 +5322,39 @@ function SolarEngine3D({
     // 🚨 THE WHOLE ARRAY, CANONICAL. Not a per-face patch — see the prop's own
     // comment. The parent snapshots what it holds for undo, then adopts this.
     onRoofGeometryReplaced?.(outcome.planes, { label, coalesceKey });
+
+    // 🚨 AND THE PANELS COME WITH THE ROOF.
+    //
+    // `PlacedPanel.lat/lng/height` and its ECEF frame are ABSOLUTE, while
+    // `planeId` says which face it belongs to. Nothing in the app re-places
+    // panels when `roofPlanes` changes, so raising a section's eave by a foot
+    // used to leave its whole array a foot UNDER the roof — inside the house.
+    // That is the defect this project has already shipped twice, as "the panels
+    // are inside of the house and not on top of the planes" and as "NO DECK
+    // under the array", and a person who lays panels and THEN corrects the
+    // building hits it on the first edit.
+    const held = panelsRef.current ?? [];
+    if (held.length > 0) {
+      const moved = repositionPanelsForPlanes(
+        held, roofPlanesRef.current ?? [], outcome.planes, mountingSystemIdRef.current,
+      );
+      if (moved.moved > 0 || moved.orphaned.length > 0) {
+        onPanelsChange(moved.panels);
+        const v2 = viewerRef.current;
+        if (v2) { try { renderAllPanelsRef.current?.(v2, C, moved.panels, true); } catch { /* ignore */ } }
+        addLog('SECTION', `panels: ${moved.moved} moved, ${moved.orphaned.length} orphaned`);
+        // An orphan is a panel whose roof face no longer exists — only possible
+        // when the roof KIND changed. It is never silently rehomed onto a
+        // neighbour, so the user has to be told it is now standing on nothing.
+        if (moved.orphaned.length > 0) {
+          setSectionRefusal(
+            `${moved.orphaned.length} panel${moved.orphaned.length === 1 ? '' : 's'} ` +
+            'sat on a roof face that this change removed. They have not been moved — ' +
+            'delete them or re-run Fill Roof.',
+          );
+        }
+      }
+    }
 
     if (showRoofModel)             { try { renderRoofWireframe(viewer, C); } catch { /* ignore */ } }
     if (showBuilding3DRef.current) { try { renderBuildingExtrusion(viewer, C); } catch { /* ignore */ } }

@@ -345,3 +345,37 @@ describe('🚨 a decision made before the property was named is held, not droppe
     expect(block).not.toMatch(/top: 12, left: 12/);
   });
 });
+
+describe('🚨 the panels come with the roof', () => {
+  it('editSection repositions them, and does not leave the library uncalled', () => {
+    // lib/3d/geometryHistory.ts spent a whole audit cycle "fully built, fully
+    // tested and imported by nothing". A repositioning pass that nothing calls
+    // would be the same defect: the unit tests would be green and the array
+    // would still end up inside the house.
+    const fn = bodyOf(ENGINE, 'function editSection(');
+    expect(fn).toMatch(/repositionPanelsForPlanes\(/);
+    expect(fn).toMatch(/panelsRef\.current/);
+    expect(fn).toMatch(/onPanelsChange\(moved\.panels\)/);
+
+    // It must pass the OLD planes as the source frame. Passing the new ones for
+    // both would map every panel through an identity and move nothing, while
+    // reporting success.
+    expect(fn).toMatch(/repositionPanelsForPlanes\(\s*held,\s*roofPlanesRef\.current \?\? \[\],\s*outcome\.planes/);
+
+    // An orphan must reach the user. A panel standing on a face that no longer
+    // exists, reported to nobody, is the "reports success" class again.
+    expect(fn).toMatch(/moved\.orphaned\.length > 0/);
+    expect(fn).toMatch(/setSectionRefusal\(/);
+  });
+
+  it('…and the repositioning happens AFTER the roof is emitted', () => {
+    // The parent snapshots for undo when the roof arrives; panels must follow
+    // that, not precede it, or an undo restores a roof whose panels were
+    // already moved for the next state.
+    const fn = bodyOf(ENGINE, 'function editSection(');
+    const roof = fn.indexOf('onRoofGeometryReplaced?.(outcome.planes');
+    const panels = fn.indexOf('repositionPanelsForPlanes(');
+    expect(roof).toBeGreaterThan(-1);
+    expect(panels).toBeGreaterThan(roof);
+  });
+});
