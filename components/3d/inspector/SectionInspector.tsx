@@ -659,24 +659,38 @@ export function SectionInspector({
                  stepper then sent `hidden 22.5 + 1` = 23.5, which printed as
                  "24", so the user could not even predict what a press would
                  do. A field that rounds is a field that lies. */}
-          {/* 🚨 A FLAT SECTION GETS NO PITCH BOX. It is horizontal by
-                 definition and the builder hardcodes its deck to 0°, so an
-                 editable field here accepted a number, reported success and
-                 changed nothing — then displayed the number it had not used.
-                 An audit found that reachable from the Block tool in three
-                 clicks. The authority refuses it too (validateSection); this
-                 is the half that stops it being offered at all. */}
+          {/* 🚨 THE FLAT LOCK IS GONE FROM HERE TOO, AND THAT IS THE HALF
+                 THAT WAS STILL BROKEN.
+
+                 The refusal that stood here was written for a real defect: a
+                 flat deck accepted a pitch, reported success, built itself
+                 horizontal anyway and then displayed the number it had not
+                 used. Refusing beat lying. It was still the wrong cure, and
+                 the owner said so holding a 2-in-12 porch: "I should NOT have
+                 to delete it and redraw it using a completely different
+                 internal object."
+
+                 🚨 AND THE FIRST FIX ONLY REACHED THE FACE LEVEL. `flat` was
+                 unlocked in `measureFaceVertical` and left locked HERE, so
+                 selecting the porch — which lands on the SECTION level —
+                 still showed "Pitch 0.0°" with no way to change it. Half a
+                 fix reads to the user exactly like no fix, because the door
+                 they actually walk through is still shut.
+                 `applySectionEdit` converts the section in place, keeping the
+                 footprint, pad, eave and id. */}
           <PitchEditor
             idPrefix="inspector"
             pitchDeg={s.pitchDeg}
             disabled={sectionDisabled}
-            notEditableWhy={s.kind === 'flat'
-              ? 'A flat section is horizontal by definition. Change its roof kind to Shed to give it a slope and a direction.'
-              : null}
+            notEditableWhy={null}
             onCommit={v => onEdit({ pitchDeg: v, pitchAnchor: state.pitchAnchor }, 'Set roof pitch', `pitch:${s.sectionId}`)}
             onStep={v => onEdit({ pitchDeg: v, pitchAnchor: state.pitchAnchor }, 'Set roof pitch', `pitch:${s.sectionId}`)}
           />
-          {s.kind !== 'flat' ? (
+          {/* 🚨 A SINGLE PLANE HAS NO RIDGE TO HOLD, so the eave/ridge anchor
+                 is meaningless for it — there is one edge that rises and one
+                 that does not. Offering the toggle would be a control that
+                 decides nothing. */}
+          {!s.singlePlane ? (
             <AnchorToggle
               anchor={state.pitchAnchor}
               disabled={sectionDisabled}

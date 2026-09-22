@@ -490,6 +490,35 @@ describe('🚨 a single-plane roof says which way it falls', () => {
     expect(screen.queryByTestId('inspector-slope-direction')).toBeNull();
   });
 
+  it('🚨 THE SECTION-LEVEL PITCH BOX IS LIVE FOR A FLAT DECK', () => {
+    // 🚨 THE FIRST FIX ONLY REACHED THE FACE LEVEL. `flat` was unlocked in
+    // `measureFaceVertical` and left locked in the SECTION panel — and
+    // selecting a porch lands on the section level, so the owner still saw
+    // "Pitch 0.0°" with no way to change it and reported the feature as half
+    // implemented. He was right. Half a fix reads exactly like no fix.
+    const sec = measureSection({ ...mainSection(), kind: 'flat', pitchDeg: 0, shedAzimuthDeg: 180 }, 1);
+    const { onEdit } = mount({ ...baseState(), level: 'section', section: sec });
+    expect(screen.queryByTestId('inspector-pitch-locked')).toBeNull();
+    const box = screen.getByTestId('inspector-pitch');
+    expect((box as HTMLInputElement).disabled).toBe(false);
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: '9.5' } });
+    fireEvent.blur(box);
+    expect(onEdit).toHaveBeenCalled();
+    expect(onEdit.mock.calls[0][0]).toMatchObject({ pitchDeg: 9.5 });
+  });
+
+  it('…and a single plane is offered NO eave/ridge anchor, which it has no use for', () => {
+    // One edge rises and one does not; there is no ridge to hold.
+    const sec = measureSection({ ...mainSection(), kind: 'shed', pitchDeg: 12, shedAzimuthDeg: 180 }, 1);
+    mount({ ...baseState(), level: 'section', section: sec });
+    expect(screen.queryByTestId('inspector-anchor-eave')).toBeNull();
+    cleanup();
+    // …while a gable still gets it.
+    mount({ ...baseState(), level: 'section', section: measureSection(mainSection(), 2) });
+    expect(screen.getByTestId('inspector-anchor-eave')).toBeTruthy();
+  });
+
   it('an undecided direction says so rather than showing a default', () => {
     const sec = measureSection({ ...mainSection(), kind: 'flat', pitchDeg: 0, shedAzimuthDeg: null }, 1);
     mount({ ...baseState(), level: 'section', section: sec });

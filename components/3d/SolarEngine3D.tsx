@@ -7001,6 +7001,10 @@ function SolarEngine3D({
         else if (mode === 'block')          handleBlockClick(viewer, C, screenPos);
         else if (mode === 'roof_gable')     handleGableClick(viewer, C, screenPos);
         else if (mode === 'roof_hip')       handleHipClick(viewer, C, screenPos);
+        // 🚨 NOT REACHABLE, AND KEPT ONLY SO THE DEAD PATH IS VISIBLE HERE.
+        // `activateTool` redirects the Tree tool to the canonical obstruction
+        // object. `handleTreeClick` is the decorative one — two Cesium entities
+        // and no record — and nothing may route to it again.
         else if (mode === 'tree')           handleTreeClick(viewer, C, screenPos);
         // auto_roof: fires once via placementMode useEffect — NOT on canvas click
 
@@ -14246,6 +14250,32 @@ function SolarEngine3D({
           if (mode !== 'row')     { rowPtsRef.current = []; setRowPtCount(0); rowStartScreenPosRef.current = null; }
           if (mode !== 'measure') { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }
           if (mode !== 'select')  { clearPanelSelection(); }
+          // 🚨 THE TREE TOOL PLACES A REAL TREE NOW.
+          //
+          // "I tried the Tree button. It does not visibly give me a useful
+          // tree." It never did: `handleTreeClick` added two Cesium entities
+          // with hardcoded dimensions, wrote nothing to any canonical array,
+          // was in no `Layout`, survived no reload, could not be resized or
+          // deleted individually, and the tooltip said "No effect on solar
+          // production". Meanwhile the obstruction model already had a `tree`
+          // preset that IS canonical — persisted, deletable, undoable, and read
+          // by the shade scene.
+          //
+          // Two controls called Tree, both with the same emoji, one of them a
+          // placebo, is worse than either alone. So this one arms the real
+          // object rather than a second implementation of it.
+          if (mode === 'tree') {
+            const treePreset = presetFor('tree');
+            obstructionPresetRef.current = 'tree';
+            setObstructionPresetId('tree');
+            setNewObstructionWidthM(treePreset.widthM);
+            setNewObstructionDepthM(treePreset.depthM);
+            setNewObstructionHeightM(treePreset.heightM);
+            setStatusMsg('\u{1F333} Tree \u2014 click the ground at the trunk. Height and canopy are adjustable before and after.');
+            onPlacementModeChange('obstruction');
+            setOpenGroup(null);
+            return;
+          }
           setOpenGroup(null); // close flyout after selection
 
           // Camera angle is NOT forced when entering ground mode.
@@ -14313,7 +14343,7 @@ function SolarEngine3D({
               { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruction', tip: 'Add Obstruction (Aurora parity): click the roof to drop a chimney-class prism. Default 0.6m × 0.6m × 1.0m, configurable via the right panel. Removes panels inside the footprint.' },
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
-              { mode: 'tree'         as PlacementMode, icon: '\u{1F333}', label: 'Tree', tip: 'Drop a decorative tree: a green sphere on a thin trunk. Click anywhere on the terrain to place. No effect on solar production.' },
+              { mode: 'tree'         as PlacementMode, icon: '\u{1F333}', label: 'Tree', tip: 'Place a tree that SHADES. Click the ground at the trunk, then set its height and canopy width. It is saved with the design, it is deleted like anything else, and Shade uses it.' },
             ],
           },
         ];
