@@ -475,3 +475,40 @@ describe('🚨 a control that cannot move the geometry is not offered', () => {
     expect(STUDIO).toContain("p.id === plane.id ? { ...p, pitch: Number(e.target.value) } : p");
   });
 });
+
+describe('🚨 "Selected height" edits the block that is selected', () => {
+  it('selection wins, with the last-placed block as the fallback', () => {
+    // `setSelectedBlockId` fired when a person grabbed a block's handle and
+    // `selectedBlockId` was read NOWHERE. The control labelled "Selected
+    // height" read and wrote `lastPlacedBlockId` instead: draw the house, draw
+    // the garage, grab the HOUSE's handle, drag the slider — the GARAGE changed
+    // height and the house did not move.
+    expect(ENGINE).toContain('const blockId = selectedBlockId || lastPlacedBlockId!;');
+    expect(ENGINE).toContain("{placementMode === 'block' && (selectedBlockId || lastPlacedBlockId) ?");
+    // The label tells the truth about which one it is acting on.
+    expect(ENGINE).toContain("{selectedBlockId ? 'Selected height' : 'Last block height'}");
+  });
+
+  it('🚨 and the handle moves to a COORDINATE, not to a bare height', () => {
+    // Both call sites built `new Cartesian3(cur.x, cur.y, v + 0.3)` — keeping
+    // the block's ECEF x and y, which are millions of metres, and replacing z
+    // with a metres-above-ground number. That writes the handle ~3,969 km
+    // toward the equatorial plane, so it vanishes and the block can no longer
+    // be grabbed. The same defect was measured in the drag handler.
+    const fn = bodyOf(ENGINE, 'function setBlockHeight(');
+    expect(fn).toMatch(/Cartographic\.fromCartesian\(cur\)/);
+    expect(fn).toMatch(/Cartesian3\.fromRadians\(carto\.longitude, carto\.latitude/);
+
+    // 🚨 THE GUARD EXCLUDES `cur.z + …`, DELIBERATELY. A first version banned
+    // `new C.Cartesian3(cur.x, cur.y,` outright and caught a DIFFERENT line
+    // that adds a delta to the existing z — a relative shift, not a height
+    // substitution. Forbidding the shape instead of the mistake catches the
+    // innocent. (That line was separately wrong for shifting along ECEF z
+    // rather than the local vertical, and is fixed; the fallback it keeps for a
+    // null normal is what this lookahead permits.)
+    const BARE = /new C\.Cartesian3\(cur\.x, cur\.y, (?!cur\.z)/;
+    expect('new C.Cartesian3(cur.x, cur.y, v + 0.3)').toMatch(BARE);
+    expect('new C.Cartesian3(cur.x, cur.y, cur.z + delta)').not.toMatch(BARE);
+    expect(ENGINE, 'a bare-height handle position is back').not.toMatch(BARE);
+  });
+});

@@ -1846,7 +1846,17 @@ function SolarEngine3D({
               // geometry half-shifted. The real type for an Entity.position that
               // never changes over time is ConstantPositionProperty (the position
               // analogue of the ConstantProperty used for the hierarchy above).
-              handle.position = new C.ConstantPositionProperty(new C.Cartesian3(cur.x, cur.y, cur.z + delta));
+              // 🚨 AND THE SHIFT IS ALONG THE LOCAL VERTICAL, NOT ALONG ECEF Z.
+              // `cur.z + delta` moves the point delta metres toward the NORTH
+              // POLE, whose vertical component is only delta·sin(latitude) —
+              // 63% of the intended move at 38.7°N, and zero on the equator.
+              // The handle drifted north as well as up, by delta·cos(latitude).
+              const up = C.Ellipsoid.WGS84.geodeticSurfaceNormal(cur, new C.Cartesian3());
+              handle.position = new C.ConstantPositionProperty(
+                up
+                  ? C.Cartesian3.add(cur, C.Cartesian3.multiplyByScalar(up, delta, new C.Cartesian3()), new C.Cartesian3())
+                  : new C.Cartesian3(cur.x, cur.y, cur.z + delta),
+              );
             }
           }
         }
@@ -8818,6 +8828,40 @@ function SolarEngine3D({
     return isFinite(u) ? u : null;
   }
 
+
+  /**
+   * Set one block's extruded height, and move its drag handle with it.
+   *
+   * 🚨 THE HANDLE POSITION IS A COORDINATE, NOT A HEIGHT. Both callers used to
+   * build `new Cartesian3(cur.x, cur.y, v + 0.3)` — keeping the block's ECEF x
+   * and y, which are millions of metres, and replacing z with a
+   * metres-above-ground number. At this latitude that writes the handle roughly
+   * 3,969 km toward the equatorial plane, so it vanishes and the block can no
+   * longer be grabbed. The same defect was measured in the drag handler.
+   */
+  function setBlockHeight(blockId: string | null, heightM: number): void {
+    if (!blockId || !isFinite(heightM)) return;
+    const C = (window as any).Cesium;
+    const block = blockEntitiesRef.current.find((b: any) => b.id === blockId);
+    if (!C || !block?.polygon?.extrudedHeight) return;
+    const clamped = Math.max(1, Math.min(30, heightM));
+    block.polygon.extrudedHeight = new C.ConstantProperty(clamped);
+    blockHeightOverridesRef.current.set(blockId, clamped);
+    const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === blockId);
+    if (handle && block.position) {
+      const cur = block.position.getValue(C.JulianDate.now());
+      if (cur) {
+        const carto = C.Cartographic.fromCartesian(cur);
+        const prior = blockHeightOverridesRef.current.get(blockId) ?? clamped;
+        const groundM = carto.height - prior;
+        handle.position = new C.ConstantProperty(
+          C.Cartesian3.fromRadians(carto.longitude, carto.latitude, groundM + clamped + 0.3),
+        );
+      }
+    }
+    try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
+  }
+
   function pickBuildingFaceAtScreen(viewer: any, C: any, screenPos: any): string | null {
     try {
       const hits = viewer.scene.drillPick(screenPos, 8) ?? [];
@@ -13976,54 +14020,44 @@ function SolarEngine3D({
                       <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
                     </div>
                   ) : null}
-                  {/* Selected block height — update last placed block */}
-                  {placementMode === 'block' && lastPlacedBlockId ? (
+                  {/* ── Selected block height ────────────────────────────
+                      🚨 IT EDITS THE BLOCK THE USER SELECTED, which it did not.
+
+                      `setSelectedBlockId` fired when a person grabbed a block's
+                      handle and `selectedBlockId` was read NOWHERE. This control
+                      — labelled "Selected height" — read and wrote
+                      `lastPlacedBlockId` instead. Draw the house, draw the
+                      garage, grab the HOUSE's handle, drag this slider: the
+                      GARAGE changed height and the house did not move.
+
+                      Selection wins; the most recently placed block is the
+                      fallback for the case where nothing has been grabbed yet,
+                      which is what the control was really doing all along. */}
+                  {placementMode === 'block' && (selectedBlockId || lastPlacedBlockId) ? (
+                    (() => {
+                      const blockId = selectedBlockId || lastPlacedBlockId!;
+                      const shown = blockHeightOverridesRef.current.get(blockId) ?? newBlockEaveHeightM;
+                      return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ color: '#ffd28a', fontSize: 11, minWidth: 100 }}>Selected height</span>
+                      <span style={{ color: '#ffd28a', fontSize: 11, minWidth: 100 }}>
+                        {selectedBlockId ? 'Selected height' : 'Last block height'}
+                      </span>
                       <input
                         type="range" min={1} max={30} step={0.5}
-                        value={blockHeightOverridesRef.current.get(lastPlacedBlockId) ?? newBlockEaveHeightM}
-                        onChange={e => {
-                          const v = parseFloat(e.target.value);
-                          if (!isFinite(v)) return;
-                          const block = blockEntitiesRef.current.find((b: any) => b.id === lastPlacedBlockId);
-                          if (block?.polygon?.extrudedHeight) {
-                            block.polygon.extrudedHeight = new (window as any).Cesium.ConstantProperty(v);
-                            blockHeightOverridesRef.current.set(lastPlacedBlockId, v);
-                            // Also move the handle to the new top
-                            const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === lastPlacedBlockId);
-                            if (handle && block.position) {
-                              const cur = block.position.getValue((window as any).Cesium.JulianDate.now());
-                              if (cur) handle.position = new (window as any).Cesium.ConstantProperty(new (window as any).Cesium.Cartesian3(cur.x, cur.y, v + 0.3));
-                            }
-                            try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
-                          }
-                        }}
+                        value={shown}
+                        onChange={e => setBlockHeight(blockId, parseFloat(e.target.value))}
                         style={{ flex: 1, accentColor: '#ffaa00' }}
                       />
                       <input
                         type="number" min={1} max={30} step={0.5}
-                        value={blockHeightOverridesRef.current.get(lastPlacedBlockId) ?? newBlockEaveHeightM}
-                        onChange={e => {
-                          const v = parseFloat(e.target.value);
-                          if (!isFinite(v)) return;
-                          const clamped = Math.max(1, Math.min(30, v));
-                          const block = blockEntitiesRef.current.find((b: any) => b.id === lastPlacedBlockId);
-                          if (block?.polygon?.extrudedHeight) {
-                            block.polygon.extrudedHeight = new (window as any).Cesium.ConstantProperty(clamped);
-                            blockHeightOverridesRef.current.set(lastPlacedBlockId, clamped);
-                            const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === lastPlacedBlockId);
-                            if (handle && block.position) {
-                              const cur = block.position.getValue((window as any).Cesium.JulianDate.now());
-                              if (cur) handle.position = new (window as any).Cesium.ConstantProperty(new (window as any).Cesium.Cartesian3(cur.x, cur.y, clamped + 0.3));
-                            }
-                            try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
-                          }
-                        }}
+                        value={shown}
+                        onChange={e => setBlockHeight(blockId, parseFloat(e.target.value))}
                         style={{ width: 56, fontSize: 11, padding: '2px 4px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
                       />
                       <span style={{ color: '#aaa', fontSize: 10 }}>m</span>
                     </div>
+                      );
+                    })()
                   ) : null}
                   {/* Eave height — for new roofs (gable / hip) */}
                   {(placementMode === 'roof_gable' || placementMode === 'roof_hip') ? (
