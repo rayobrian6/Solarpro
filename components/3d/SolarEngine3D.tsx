@@ -24,8 +24,14 @@ import { autoLayoutScope, panelsAutoRoofOwns, mergeAutoRoofPanels } from '@/lib/
 import {
   OBSTRUCTION_PRESETS, DEFAULT_OBSTRUCTION_PRESET, presetFor, legacyRadiusFor,
   type ObstructionPresetId,
+  clampToPreset,
 } from '@/lib/3d/obstructionPresets';
 import { DEFAULT_CLEARANCE_M } from '@/lib/3d/panelKeepOut';
+import {
+  nearestFaceAlongRay,
+  intersectRayWithGeocentricSphere,
+  type PlanarFace as IntersectFace,
+} from '@/lib/3d/placementIntersection';
 import { getSunPosition, getPanelShadingFactor } from '@/lib/solarMath';
 import { siteKeyFromCoords } from '@/lib/siteIdentity';
 import {
@@ -7433,6 +7439,138 @@ function SolarEngine3D({
     return { lat: pLat, lng: pLng, height: groundElevM, pickMethod: hit.pickMethod };
   }
 
+  // ────── resolvePlacementPoint: ONE answer to "where did the user point?" -------
+  /**
+   * 🚨 THE SHARED PLACEMENT-INTERSECTION AUTHORITY.
+   *
+   * "Tree -> click ground -> NO TREE APPEARS." "Chimney may also not be wired
+   * end-to-end." Both were the same defect, and it was never in Tree or in
+   * Chimney: five handlers resolved their click with a bare
+   * `viewer.scene.pickPosition(screenPos)`, which reads the DEPTH BUFFER. That
+   * answers only where something is already drawn, and only where the depth
+   * texture exists. The engine hides the globe once a tileset object exists, and
+   * Google's root tileset resolves for any valid key whether or not the address
+   * has coverage -- so at exactly the properties the custom pipeline was built
+   * for, the buffer is empty, the call returns undefined, and the handler
+   * returns having built nothing. A click that succeeded and a click that failed
+   * looked identical.
+   *
+   * 🚨 A PHYSICAL PLACEMENT POINT MUST NOT REQUIRE A RENDERED, SELECTABLE
+   * ENTITY. The design already knows where its surfaces are. So a roof object is
+   * placed by intersecting the camera ray with the design's OWN canonical faces,
+   * and a site object by intersecting it with the ground elevation -- neither of
+   * which needs anything drawn, picked, or GPU-readable.
+   *
+   * The depth-buffer chain is kept, demoted to a fallback: when Google's mesh IS
+   * present it is the most accurate answer available, and it is the only one
+   * that knows about geometry the design does not own.
+   *
+   * @param space 'roof' -- must land on a canonical roof face; carries its id.
+   *              'site' -- must land on the ground; height is the ground datum.
+   */
+  function resolvePlacementPoint(
+    viewer: any,
+    C: any,
+    screenPos: any,
+    space: 'roof' | 'site',
+  ): { lat: number; lng: number; height: number; cartesian: any; planeId: string | null; method: string } | null {
+    const groundElevM = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+
+    const finish = (cart: any, planeId: string | null, method: string) => {
+      const carto = C.Cartographic.fromCartesian(cart);
+      if (!carto) return null;
+      const lat = C.Math.toDegrees(carto.latitude);
+      const lng = C.Math.toDegrees(carto.longitude);
+      if (!isValidCoord(lat, lng)) return null;
+      const height = isFinite(carto.height) ? carto.height : groundElevM;
+      return { lat, lng, height, cartesian: cart, planeId, method };
+    };
+
+    let ray: any = null;
+    try { ray = viewer.camera.getPickRay(screenPos); } catch { ray = null; }
+
+    // -- ROOF: the design's own faces answer first ---------------------------
+    //
+    // 🚨 AND THIS IS ALSO WHERE THE OBJECT LEARNS WHICH FACE IT IS ON. The
+    // old code stamped `selectedFaceIdRef.current` -- the SELECTED face, not the
+    // clicked one -- so marking a chimney on the garage while the main roof
+    // happened to be selected bound it to the main roof, and it then moved with
+    // the wrong section for ever. The ray knows which face the user pointed at.
+    if (space === 'roof' && ray) {
+      try {
+        const faces: IntersectFace[] = collectRoofRenderables(C, groundElevM)
+          .filter((rp: any) => rp && rp.corners && rp.corners.length >= 3)
+          .map((rp: any) => ({ id: rp.id, origin: rp.origin, u: rp.u, v: rp.v, n: rp.n, corners: rp.corners }));
+        // A 0.25 m pad so a click right on an eave is a click on the roof.
+        const rhit = nearestFaceAlongRay(ray.origin, ray.direction, faces, { padM: 0.25 });
+        if (rhit) {
+          const cart = new C.Cartesian3(rhit.point.x, rhit.point.y, rhit.point.z);
+          const out = finish(cart, rhit.faceId, 'canonical-face');
+          if (out) return out;
+        }
+      } catch (e: unknown) { addLog('WARN', 'placement: canonical face pick - ' + (e as Error).message); }
+    }
+
+    // -- The depth-buffer chain, as a fallback -------------------------------
+    // getWorldPosition is 3dtiles -> terrain -> ellipsoid@ground, and unlike the
+    // bare pickPosition it always answers when the camera is over the earth.
+    const whit = getWorldPosition(viewer, C, screenPos);
+    if (whit && whit.cartesian) {
+      if (space === 'site') {
+        // 🚨 A TREE STANDS ON THE GROUND. A 3D-tiles pick that landed on a
+        // roof gives the right lat/lng and the wrong height; planting the trunk
+        // up there puts the canopy a storey too high in every shade result.
+        const carto = C.Cartographic.fromCartesian(whit.cartesian);
+        if (carto) {
+          const lat = C.Math.toDegrees(carto.latitude);
+          const lng = C.Math.toDegrees(carto.longitude);
+          if (isValidCoord(lat, lng)) {
+            const onGround = safeCartesian3(C, lng, lat, groundElevM);
+            if (onGround) return finish(onGround, null, whit.pickMethod + '@ground');
+          }
+        }
+      }
+      // For a roof object with no canonical face under the ray, the depth pick
+      // is still a real surface -- keep it, and recover a face id if it is near
+      // one, so the object is not orphaned.
+      let planeId: string | null = null;
+      if (space === 'roof') {
+        try { planeId = planeRenderableAtClick(C, whit.cartesian, groundElevM)?.id ?? null; } catch { planeId = null; }
+      }
+      const out = finish(whit.cartesian, planeId, whit.pickMethod);
+      if (out) return out;
+    }
+
+    // -- Last resort: the ground is a known elevation, and a known elevation is
+    // a surface a ray can be intersected with. Reached when the camera is over
+    // the earth but nothing at all is drawn or pickable.
+    if (ray) {
+      try {
+        // 🚨 THE GEOCENTRIC RADIUS UNDER THE CAMERA, NOT A MEAN EARTH RADIUS.
+        // The ellipsoid's equatorial and polar radii differ by 21 km, so at this
+        // site's latitude a mean-radius sphere sits about 1.4 km ABOVE the real
+        // ground — the camera would be inside it on every call, and the only
+        // intersection in front would be the far side of the planet. Taking the
+        // ground point directly beneath the camera is exact to well under a
+        // millimetre across a parcel.
+        const camCarto = C.Cartographic.fromCartesian(viewer.camera.positionWC ?? viewer.camera.position);
+        const groundUnderCam = camCarto
+          ? C.Cartesian3.fromRadians(camCarto.longitude, camCarto.latitude, groundElevM)
+          : null;
+        const radius = groundUnderCam ? C.Cartesian3.magnitude(groundUnderCam) : NaN;
+        const gp = isFinite(radius)
+          ? intersectRayWithGeocentricSphere(ray.origin, ray.direction, radius)
+          : null;
+        if (gp) {
+          const out = finish(new C.Cartesian3(gp.x, gp.y, gp.z), null, 'ray@ground');
+          if (out) return out;
+        }
+      } catch (e: unknown) { addLog('WARN', 'placement: ground ray - ' + (e as Error).message); }
+    }
+
+    return null;
+  }
+
   // ── Roof placement ─────────────────────────────────────────────────────────
   function handleRoofClick(viewer: any, C: any, screenPos: any) {
     try {
@@ -10130,8 +10268,34 @@ function SolarEngine3D({
   }
 
 
+  /**
+   * 🚨 A KEYSTROKE AIMED AT A TEXT BOX IS NOT A SHORTCUT.
+   *
+   * This handler is on `window`, so it saw every keystroke in the application
+   * -- including the ones typed into its own inspector. Backspace is how a
+   * person clears a number field, and Backspace here DELETED THE SELECTED
+   * OBJECT. So the documented way to resize a tree...
+   *
+   *     select the tree -> click "Canopy width" -> Backspace to clear it
+   *
+   * ...deleted the tree. Same for a roof section's pitch, a wall height, and
+   * every other number in the inspector. DesignStudio's own handler has guarded
+   * this since v31.1 (components/design/DesignStudio.tsx); the engine's never
+   * did, and the engine is the one that owns the inspector.
+   *
+   * `isContentEditable` is included, which DesignStudio's version misses.
+   */
+  function keyEventIsTyping(e: KeyboardEvent): boolean {
+    const el = e.target as HTMLElement | null;
+    if (!el) return false;
+    const tag = el.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    return el.isContentEditable === true;
+  }
+
   function setupKeyboardHandler() {
     const onKey = (e: KeyboardEvent) => {
+      if (keyEventIsTyping(e)) return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && modeRef.current === 'select'
           && (selectedPanelIdRef.current || selectedPanelIdsRef.current.size > 0)) {
         e.preventDefault();
@@ -11949,12 +12113,18 @@ function SolarEngine3D({
    */
   function handleSurfaceSelectClick(viewer: any, C: any, screenPos: any) {
     try {
-      const pickedPos = viewer.scene.pickPosition(screenPos);
-      if (!pickedPos || !isFinite(pickedPos.x)) {
-        addLog('SURFACE', 'pickPosition returned invalid position');
-        setStatusMsg('Surface click — no 3D position found. Ensure tiles are loaded.');
+      // 🚨 THE SAME BARE `scene.pickPosition` THAT KILLED TREE AND CHIMNEY.
+      // It reads the depth buffer, so on a property with no Google mesh -- the
+      // exact case the custom pipeline exists for -- it returned undefined and
+      // this tool did nothing at all. One authority now answers
+      // "where did the user point?", from the design's own geometry.
+      const spot = resolvePlacementPoint(viewer, C, screenPos, 'roof');
+      if (!spot) {
+        addLog('SURFACE', 'no placement intersection for surface select');
+        setStatusMsg('Surface click — could not find a surface there. Aim at the roof.');
         return;
       }
+      const pickedPos = spot.cartesian;
 
       const carto = C.Cartographic.fromCartesian(pickedPos);
       const clickLat = C.Math.toDegrees(carto.latitude);
@@ -12110,8 +12280,14 @@ function SolarEngine3D({
   // landscape row below a portrait array. Click again next to the new panel to keep going.
   function handleSnapPanelClick(viewer: any, C: any, screenPos: any) {
     try {
-      const pickedPos = viewer.scene.pickPosition(screenPos);
-      if (!pickedPos || !isFinite(pickedPos.x)) { setStatusMsg('Snap Panel — click on the roof near the array'); return; }
+      // 🚨 THE SAME BARE `scene.pickPosition` THAT KILLED TREE AND CHIMNEY.
+      // It reads the depth buffer, so on a property with no Google mesh -- the
+      // exact case the custom pipeline exists for -- it returned undefined and
+      // this tool did nothing at all. One authority now answers
+      // "where did the user point?", from the design's own geometry.
+      const spot = resolvePlacementPoint(viewer, C, screenPos, 'roof');
+      if (!spot) { setStatusMsg('Snap Panel — click on the roof near the array'); return; }
+      const pickedPos = spot.cartesian;
 
       // Nearest existing roof panel that carries an ECEF frame.
       let ref: PlacedPanel | null = null; let bestD = Infinity;
@@ -12198,8 +12374,14 @@ function SolarEngine3D({
 
   function handleExtendRowClick(viewer: any, C: any, screenPos: any) {
     try {
-      const pickedPos = viewer.scene.pickPosition(screenPos);
-      if (!pickedPos || !isFinite(pickedPos.x)) return;
+      // 🚨 THE SAME BARE `scene.pickPosition` THAT KILLED TREE AND CHIMNEY.
+      // It reads the depth buffer, so on a property with no Google mesh -- the
+      // exact case the custom pipeline exists for -- it returned undefined and
+      // this tool did nothing at all, and said nothing. One authority now answers
+      // "where did the user point?", from the design's own geometry.
+      const spot = resolvePlacementPoint(viewer, C, screenPos, 'roof');
+      if (!spot) { setStatusMsg('Extend Row — could not find the roof there. Aim at a roof face.'); return; }
+      const pickedPos = spot.cartesian;
       const carto = C.Cartographic.fromCartesian(pickedPos);
       const clickLat = C.Math.toDegrees(carto.latitude);
       const clickLng = C.Math.toDegrees(carto.longitude);
@@ -12271,8 +12453,14 @@ function SolarEngine3D({
    */
   function handleAddRowClick(viewer: any, C: any, screenPos: any) {
     try {
-      const pickedPos = viewer.scene.pickPosition(screenPos);
-      if (!pickedPos || !isFinite(pickedPos.x)) return;
+      // 🚨 THE SAME BARE `scene.pickPosition` THAT KILLED TREE AND CHIMNEY.
+      // It reads the depth buffer, so on a property with no Google mesh -- the
+      // exact case the custom pipeline exists for -- it returned undefined and
+      // this tool did nothing at all, and said nothing. One authority now answers
+      // "where did the user point?", from the design's own geometry.
+      const spot = resolvePlacementPoint(viewer, C, screenPos, 'roof');
+      if (!spot) { setStatusMsg('Add Row — could not find the roof there. Aim at a roof face.'); return; }
+      const pickedPos = spot.cartesian;
       const carto = C.Cartographic.fromCartesian(pickedPos);
       const clickLat = C.Math.toDegrees(carto.latitude);
       const clickLng = C.Math.toDegrees(carto.longitude);
@@ -12361,28 +12549,55 @@ function SolarEngine3D({
    */
   function handleObstructionClick(viewer: any, C: any, screenPos: any) {
     try {
-      const pickedPos = viewer.scene.pickPosition(screenPos);
-      if (!pickedPos || !isFinite(pickedPos.x)) {
-        setStatusMsg('Obstruction: could not pick position — ensure tiles are loaded');
+      // 🚨 THE ARMED TYPE IS READ FIRST, BECAUSE IT DECIDES WHERE THE CLICK
+      // LANDS. A tree is placed on the ground and a chimney on a roof face;
+      // asking "where did the user point?" without knowing which of those is
+      // being placed cannot give one right answer.
+      const preset = presetFor(obstructionPresetRef.current);
+
+      const spot = resolvePlacementPoint(viewer, C, screenPos, preset.space === 'site' ? 'site' : 'roof');
+      if (!spot) {
+        // 🚨 A FAILED CLICK MUST NOT LOOK LIKE A SUCCESSFUL ONE. The old
+        // message blamed tiles that this property does not have and never will.
+        setStatusMsg(`Could not place ${preset.label.toLowerCase()} here — aim at ${preset.space === 'site' ? 'the ground near the house' : 'a roof face'} and try again`);
+        addLog('WARN', `obstruction placement: no intersection for ${preset.id} (${preset.space})`);
+        return;
+      }
+      const obsLat = spot.lat;
+      const obsLng = spot.lng;
+      const obsH   = spot.height;
+
+      // 🚨 A ROOF OBJECT MUST LAND ON A ROOF. Placing a chimney over open
+      // ground built a prism standing in the garden that Auto Layout then had to
+      // route panels around. Refusing is the honest answer, and it names the
+      // reason rather than failing silently.
+      if (preset.space === 'roof' && !spot.planeId) {
+        setStatusMsg(`${preset.label} needs a roof — click on a roof face`);
+        addLog('WARN', `obstruction placement: ${preset.id} clicked off every roof face`);
         return;
       }
 
-      const carto = C.Cartographic.fromCartesian(pickedPos);
-      const obsLat = C.Math.toDegrees(carto.latitude);
-      const obsLng = C.Math.toDegrees(carto.longitude);
-      const obsH   = carto.height;
-
-      if (!isValidCoord(obsLat, obsLng)) return;
-
-      // v66: use the right-panel slider values, clamped to the safe range.
-      const { widthM, depthM } = clampObstructionFootprint(
-        newObstructionWidthM,
-        newObstructionDepthM,
-      );
-      const prismHeightM = Math.max(
-        MIN_OBSTRUCTION_HEIGHT_M,
-        Math.min(MAX_OBSTRUCTION_HEIGHT_M, newObstructionHeightM),
-      );
+      // 🚨 CLAMPED AGAINST THE OBJECT, NOT AGAINST ONE GLOBAL BAND.
+      //
+      // `clampObstructionFootprint` bounds the footprint to [0.2, 3.0] m and the
+      // height to [0.3, 5.0] -- a range chosen for the single generic
+      // 0.6 x 0.6 x 1.0 block this feature started as. Once there were nine real
+      // objects it silently rewrote four of them at the moment of placement:
+      //
+      //   tree            6.0 x 6.0 x 8.0  ->  3.0 x 3.0 x 5.0
+      //   vent pipe       0.10 wide        ->  0.20
+      //   plumbing stack  0.15 wide        ->  0.20   (now identical to a vent pipe)
+      //   skylight        0.12 tall        ->  0.30
+      //
+      // The tree is the one that was reported: a 3 m stump instead of a 6 m
+      // canopy. And because `canopyRadiusM` is derived from the footprint below,
+      // every shade result was computed on half a tree -- so this was never
+      // cosmetic. The right-hand panel already offered a canopy up to 30 m, so
+      // the placement clamp and the editor had been contradicting each other.
+      const sized = clampToPreset(preset, newObstructionWidthM, newObstructionDepthM, newObstructionHeightM);
+      const widthM = sized.widthM;
+      const depthM = sized.depthM;
+      const prismHeightM = sized.heightM;
 
       // Build the 4 corner points of the centered rectangle.
       const footprint = buildObstructionFootprint(obsLat, obsLng, widthM, depthM);
@@ -12402,8 +12617,8 @@ function SolarEngine3D({
       // the keep-out clearance (lib/3d/panelKeepOut.ts) and whether the object
       // occupies roof area at all or only shades it, so stamping one type on
       // every object gave a vent pipe a chimney's 450 mm clearance and gave a
-      // tree one it should never have had.
-      const preset = presetFor(obstructionPresetRef.current);
+      // tree one it should never have had. `preset` is resolved at the top of
+      // this function, before the click is even located.
       const newObs: PlacedObstruction = {
         id:      `obs-${Date.now()}`,
         lat:     obsLat,
@@ -12419,43 +12634,20 @@ function SolarEngine3D({
         canopyRadiusM: preset.space === 'site' ? Math.max(widthM, depthM) / 2 : undefined,
         // Which face it was marked on, so it belongs to a surface rather than
         // floating at a world coordinate when that surface moves.
-        planeId: preset.space === 'roof' ? (selectedFaceIdRef.current ?? undefined) : undefined,
+        //
+        // 🚨 THE FACE THE RAY HIT, NOT THE FACE THAT HAPPENED TO BE SELECTED.
+        // `selectedFaceIdRef.current` bound a chimney marked on the garage to
+        // the main roof whenever the main roof was the current selection, and it
+        // bound it to NOTHING when no face was selected at all.
+        planeId: preset.space === 'roof' ? (spot.planeId ?? undefined) : undefined,
       };
 
-      // Visual: a small white extruded polygon (per-position height so the
-      // prism's bottom sits flush with the click elevation, same trick the
-      // v64 Block primitive uses to avoid z-fighting with the drape).
-      const obsId = newObs.id;
-      try {
-        viewer.entities.add({
-          id:    obsId,
-          name:  `[OBS] ${obsId}`,
-          polygon: {
-            hierarchy: new C.PolygonHierarchy(polyPositions),
-            perPositionHeight: true,
-            // When perPositionHeight is true, height/extrudedHeight are
-            // RELATIVE to each position's elevation. So height=0 means
-            // the bottom is at each position's actual height, and
-            // extrudedHeight=prismHeightM means the top is prismHeightM
-            // above each position.
-            height: 0,
-            extrudedHeight: prismHeightM,
-            material: C.Color.fromCssColorString('#f5f5f5').withAlpha(0.92),
-            outline: true,
-            outlineColor: C.Color.fromCssColorString('#2a2a2a'),
-            outlineWidth: 2,
-            closeTop: true,
-            closeBottom: false,
-          },
-          description: `<table class="cesium-infoBox-defaultTable">
-            <tr><th>Obstruction</th><td>${widthM.toFixed(1)}m × ${depthM.toFixed(1)}m × ${prismHeightM.toFixed(1)}m</td></tr>
-            <tr><th>Footprint area</th><td>${obstructionFootprintAreaM2(widthM, depthM).toFixed(2)} m²</td></tr>
-            <tr><th>Center</th><td>${obsLat.toFixed(6)}, ${obsLng.toFixed(6)}</td></tr>
-          </table>`,
-        });
-      } catch (e: unknown) {
-        addLog('WARN', `Obstruction entity: ${(e as Error).message}`);
-      }
+      // 🚨 ONE DRAW PATH. This used to hand-roll its own white polygon while
+      // `drawObstructionEntity` — the one a reload and an undo use — drew a tree
+      // green. So a tree looked like a vent until the page was reloaded, and the
+      // owner's "it does not visibly give me a useful tree" was partly this:
+      // the object WAS there, wearing the wrong thing.
+      drawObstructionEntity(viewer, C, newObs);
 
       // Update obstruction list
       const updatedObs = [...obstructionsRef.current, newObs];
@@ -12479,9 +12671,12 @@ function SolarEngine3D({
         panelsRef.current = filtered;
         onPanelsChange(filtered);
         setPanelCount(filtered.length);
-        setStatusMsg(`${preset.label} placed — ${removed} panel(s) removed from under it. Undo brings them back.`);
+        setStatusMsg(`${preset.icon} ${preset.label} placed — ${removed} panel(s) removed from under it. Undo brings them back.`);
       } else {
-        setStatusMsg(`Obstruction placed at ${widthM.toFixed(1)}×${depthM.toFixed(1)}×${prismHeightM.toFixed(1)}m (no panels removed)`);
+        // 🚨 SAY WHAT WAS BUILT AND WHERE. "Obstruction placed at 0.6x0.6x1.0m"
+        // does not tell a person whether the thing they asked for exists.
+        const where = newObs.planeId ? 'on the roof face you clicked' : 'on the site';
+        setStatusMsg(`${preset.icon} ${preset.label} placed ${where} — ${widthM.toFixed(1)}×${depthM.toFixed(1)}m, ${prismHeightM.toFixed(1)}m tall. Select it to adjust.`);
       }
 
       addLog('OBS', `Placed obstruction at ${obsLat.toFixed(5)}, ${obsLng.toFixed(5)} — ${widthM.toFixed(2)}×${depthM.toFixed(2)}×${prismHeightM.toFixed(2)}m, ${removed} panels removed`);

@@ -255,7 +255,19 @@ describe('🚨 an obstruction can be selected, and therefore deleted', () => {
     // `[OBS] <id>` where <id> IS the PlacedObstruction id — one fact, read one
     // way, so a tombstone and an entity cannot disagree about which object it is.
     expect(ENGINE).toMatch(/nm\.startsWith\('\[OBS\] '\)/);
-    expect(ENGINE).toMatch(/name:\s+`\[OBS\] \$\{obsId\}`/);
+    // 🚨 THIS USED TO READ `${obsId}`, THE HAND-ROLLED ENTITY IN THE CLICK
+    // HANDLER. It is now `${obs.id}` inside `drawObstructionEntity`, because
+    // placement no longer builds its own entity.
+    //
+    // The old arrangement had TWO writers of this name: the click handler and
+    // the redraw path. They also disagreed about colour — placement always drew
+    // white, while `drawObstructionEntity` draws a site object green — so a
+    // freshly placed tree looked like a vent until the page was reloaded, which
+    // is part of "it does not visibly give me a useful tree". One writer now,
+    // which is what makes this assertion worth having.
+    expect(ENGINE).toMatch(/name:\s+`\[OBS\] \$\{obs\.id\}`/);
+    expect(ENGINE, 'placement builds its own entity again')
+      .not.toMatch(/name:\s+`\[OBS\] \$\{obsId\}`/);
   });
 });
 
@@ -281,7 +293,7 @@ describe('🚨 a site object shades but does not occupy', () => {
 // MARKING A VENT SHOULD NOT BE A CAD SESSION
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { OBSTRUCTION_PRESETS, presetFor, legacyRadiusFor, DEFAULT_OBSTRUCTION_PRESET } from '@/lib/3d/obstructionPresets';
+import { clampToPreset, presetIsSelfConsistent, OBSTRUCTION_PRESETS, presetFor, legacyRadiusFor, DEFAULT_OBSTRUCTION_PRESET } from '@/lib/3d/obstructionPresets';
 
 describe('🚨 the type a user picks is the type that gets stored', () => {
   it('EVERY obstruction used to be stamped "chimney", whatever it was', () => {
@@ -337,7 +349,23 @@ describe('🚨 the type a user picks is the type that gets stored', () => {
   it('a roof object records the face it was marked on; a site object does not', () => {
     // Surface-local ownership: the object belongs to a face, not to a world
     // coordinate, so the face can move and take it along.
-    expect(ENGINE).toMatch(/planeId: preset\.space === 'roof' \? \(selectedFaceIdRef\.current \?\? undefined\) : undefined/);
+    //
+    // 🚨 THIS TEST ASSERTED THE WRONG FACE AND IS CORRECTED, NOT DELETED.
+    //
+    // It used to require `selectedFaceIdRef.current` — the face that happened to
+    // be SELECTED, which is not the face the user clicked. Marking a chimney on
+    // the garage while the main roof was selected bound it to the main roof, so
+    // it moved with the wrong section for ever; and with nothing selected it
+    // bound to nothing at all and the object was orphaned the moment its roof
+    // moved. The test named the right property ("the face it was marked on") and
+    // then pinned the wrong implementation of it.
+    //
+    // The ray now answers: `resolvePlacementPoint` intersects the camera ray
+    // with the design's own canonical faces and returns the id of the nearest
+    // one actually hit. See tests/placementIntersection.test.ts.
+    expect(ENGINE).toMatch(/planeId: preset\.space === 'roof' \? \(spot\.planeId \?\? undefined\) : undefined/);
+    expect(ENGINE, 'the object is bound to the selected face again')
+      .not.toMatch(/planeId: preset\.space === 'roof' \? \(selectedFaceIdRef\.current/);
     expect(ENGINE).toMatch(/canopyRadiusM: preset\.space === 'site'/);
   });
 });
@@ -399,5 +427,145 @@ describe('🚨 the Tree tool places the object Shade can actually use', () => {
     // tests/toolStateAuthority.test.ts owns that invariant now.
     expect(ENGINE).toMatch(/else if \(mode === 'tree'\)\s+handleObstructionClick/);
     expect(ENGINE).not.toMatch(/No effect on solar production/);
+  });
+});
+
+
+// ===========================================================================
+describe('🚨 an object is placed at the size it says it is', () => {
+  // -------------------------------------------------------------------------
+  // THE LIVE FAILURE
+  //
+  //   "I tried the Tree button. It does not visibly give me a useful tree."
+  //
+  // The Tree tool armed a 6 m x 6 m x 8 m canopy, and placement then clamped it
+  // to 3 x 3 x 5 -- because `clampObstructionFootprint` holds ONE range,
+  // [0.2, 3.0] m footprint and [0.3, 5.0] m height, chosen for the single
+  // generic 0.6 x 0.6 x 1.0 block the feature began as. Nine real objects now
+  // share that clamp and four of them do not fit inside it.
+  //
+  // 🚨 THIS IS NOT COSMETIC. `canopyRadiusM` is derived from the placed
+  // footprint, so the shade calculation ran on a tree of half the radius.
+  // -------------------------------------------------------------------------
+
+  it('🚨 every preset survives its own clamp unchanged', () => {
+    // If a nominal value falls outside the range declared beside it, the
+    // catalogue is lying about what it places. This is the assertion that found
+    // all four rewrites.
+    for (const preset of OBSTRUCTION_PRESETS) {
+      const c = clampToPreset(preset, preset.widthM, preset.depthM, preset.heightM);
+      expect(c.widthM,  `${preset.id} width is rewritten at placement`).toBe(preset.widthM);
+      expect(c.depthM,  `${preset.id} depth is rewritten at placement`).toBe(preset.depthM);
+      expect(c.heightM, `${preset.id} height is rewritten at placement`).toBe(preset.heightM);
+      expect(presetIsSelfConsistent(preset), `${preset.id} is not self-consistent`).toBe(true);
+    }
+  });
+
+  it('🚨 a tree keeps its 6 m canopy and its 8 m height', () => {
+    // The exact numbers from the report. Under the old global clamp this was
+    // 3 x 3 x 5.
+    const tree = presetFor('tree');
+    const c = clampToPreset(tree, tree.widthM, tree.depthM, tree.heightM);
+    expect(c.widthM).toBe(6.0);
+    expect(c.depthM).toBe(6.0);
+    expect(c.heightM).toBe(8.0);
+    // ...and the canopy RADIUS that shade reads is 3 m, not 1.5 m.
+    expect(Math.max(c.widthM, c.depthM) / 2).toBe(3.0);
+  });
+
+  it('a vent pipe and a plumbing stack stay different objects', () => {
+    // Both were forced to 0.20 m, which made them the same thing on the roof
+    // and gave them the same keep-out.
+    const pipe = presetFor('vent_pipe');
+    const stack = presetFor('plumbing_stack');
+    const cp = clampToPreset(pipe, pipe.widthM, pipe.depthM, pipe.heightM);
+    const cs = clampToPreset(stack, stack.widthM, stack.depthM, stack.heightM);
+    expect(cp.widthM).toBe(0.1);
+    expect(cs.widthM).toBe(0.15);
+    expect(cp.widthM).not.toBe(cs.widthM);
+  });
+
+  it('a flush skylight stays flush', () => {
+    // 0.12 m -> 0.30 m turned a flush unit into a curb, and the preset's own
+    // comment says "a flush skylight is genuinely 0.1 and not 1.0".
+    const sky = presetFor('skylight');
+    expect(clampToPreset(sky, sky.widthM, sky.depthM, sky.heightM).heightM).toBe(0.12);
+  });
+
+  it('the bounds still bound: nonsense is still refused', () => {
+    // A range per object is not the absence of a range.
+    const chimney = presetFor('chimney');
+    expect(clampToPreset(chimney, 500, 500, 500).widthM).toBe(chimney.maxFootprintM);
+    expect(clampToPreset(chimney, 0.0001, 0.0001, 0.0001).widthM).toBe(chimney.minFootprintM);
+    expect(clampToPreset(chimney, -4, -4, -4).widthM).toBe(chimney.widthM);
+    // ...and a tree may not be a vent pipe's size either.
+    const tree = presetFor('tree');
+    expect(clampToPreset(tree, 0.05, 0.05, 0.05).widthM).toBe(tree.minFootprintM);
+  });
+
+  it('a blank field places the object, not the smallest legal one', () => {
+    // An empty input box reads as NaN. Falling back to the minimum would place
+    // a 1 m tree; falling back to the nominal places a tree.
+    const tree = presetFor('tree');
+    const c = clampToPreset(tree, NaN, undefined as any, null as any);
+    expect(c.widthM).toBe(tree.widthM);
+    expect(c.depthM).toBe(tree.depthM);
+    expect(c.heightM).toBe(tree.heightM);
+  });
+
+  it('🚨 placement asks the object, not the global band', () => {
+    expect(ENGINE, 'placement is back on the one-size-fits-all clamp')
+      .not.toMatch(/const \{ widthM, depthM \} = clampObstructionFootprint\(\s*newObstructionWidthM/);
+    expect(ENGINE).toMatch(/clampToPreset\(preset, newObstructionWidthM, newObstructionDepthM, newObstructionHeightM\)/);
+  });
+});
+
+// ===========================================================================
+describe('🚨 typing in the inspector does not delete what you are editing', () => {
+  // -------------------------------------------------------------------------
+  // The engine's keyboard handler is bound to `window`, so it saw every
+  // keystroke in the application -- including the ones typed into its own
+  // inspector. Backspace is how a person clears a number field, and Backspace
+  // here DELETED THE SELECTED OBJECT. So the documented way to resize a tree
+  //
+  //     select the tree -> click "Canopy width" -> Backspace to clear it
+  //
+  // deleted the tree. It is the owner's own acceptance path: "click site ->
+  // actual tree appears -> change height -> change canopy width".
+  //
+  // The same keystroke deletes a selected roof SECTION and a selected panel.
+  // DesignStudio's handler has guarded this since v31.1; the engine's -- which
+  // is the one that owns the inspector -- never did.
+  // -------------------------------------------------------------------------
+
+  it('🚨 the handler ignores keystrokes aimed at a text field', () => {
+    expect(ENGINE).toMatch(/function keyEventIsTyping\(e: KeyboardEvent\): boolean/);
+    expect(ENGINE).toMatch(/tag === 'input' \|\| tag === 'textarea' \|\| tag === 'select'/);
+    expect(ENGINE).toMatch(/isContentEditable === true/);
+  });
+
+  it('🚨 ...and it is the FIRST thing the handler does', () => {
+    // A guard placed after the delete branch is not a guard.
+    const at = ENGINE.indexOf('function setupKeyboardHandler()');
+    expect(at, 'the keyboard handler is gone').toBeGreaterThan(-1);
+    const body = ENGINE.slice(at, at + 1200);
+    expect(body.length).toBeGreaterThan(600);
+    const guardAt = body.indexOf('if (keyEventIsTyping(e)) return;');
+    const deleteAt = body.indexOf("e.key === 'Backspace'");
+    expect(guardAt, 'the typing guard is missing from the handler').toBeGreaterThan(-1);
+    expect(deleteAt, 'the delete branch is gone').toBeGreaterThan(-1);
+    expect(guardAt, 'the delete branch runs before the typing guard').toBeLessThan(deleteAt);
+  });
+
+  it('the inspector really does contain the number fields this protects', () => {
+    // If the inspector stopped having inputs the guard would be guarding
+    // nothing, and this test would be the one that still passed.
+    //
+    // The ids are passed to the shared `num()` helper rather than written into
+    // the JSX, so this asserts both halves: the call sites and the attribute.
+    expect(ENGINE).toMatch(/'obstruction-canopy'/);
+    expect(ENGINE).toMatch(/'obstruction-height'/);
+    expect(ENGINE).toMatch(/data-testid=\{testId\}/);
+    expect(ENGINE).toMatch(/type="number" data-no-drag/);
   });
 });
