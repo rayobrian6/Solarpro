@@ -165,9 +165,20 @@ describe('Building-mode face selection reports the scope it actually moved to', 
    */
   function buildingBranch(): string {
     const start = SRC.indexOf('const faceId = pickBuildingFaceAtScreen(');
-    const end = SRC.indexOf('const picked = pickPanelAtScreen(viewer, screenPos)');
+    // 🚨 RE-ANCHORED. The closing anchor was `const picked = pickPanelAtScreen(
+    // viewer, screenPos)`, which sat immediately AFTER this branch — until the
+    // panel pick was deliberately moved BEFORE it, so that a module in front of
+    // the roof wins the click in Building mode as it always did with Building
+    // off. That reordering is the fix, not a regression, and it left this
+    // anchor pointing backwards.
+    //
+    // The new anchor is the sibling path's own entry, which is where this
+    // branch has always ended. The `pickRoofFaceAtScreen` exclusion below is
+    // what actually proves the slice did not swallow the sibling, and it is
+    // unchanged.
+    const end = SRC.indexOf('const faceId = pickRoofFaceAtScreen(viewer, screenPos)');
     expect(start, 'Building-branch anchor not found').toBeGreaterThan(-1);
-    expect(end, 'panel-pick anchor not found').toBeGreaterThan(start);
+    expect(end, 'sibling-path anchor not found').toBeGreaterThan(start);
     const branch = SRC.slice(start, end);
     // A slice that swallowed the sibling path would be long and would contain
     // its distinctive call; both are checked so the anchors cannot silently rot.

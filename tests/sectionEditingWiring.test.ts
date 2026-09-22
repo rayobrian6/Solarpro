@@ -302,3 +302,46 @@ describe('positive controls', () => {
     expect(ENGINE).toMatch(/function applyBuildingShape\(/);
   });
 });
+
+describe('🚨 a decision made before the property was named is held, not dropped', () => {
+  it('setNativeDisposition parks it and setActiveKey flushes it', () => {
+    // Measured in a real browser: opening the studio through the quick-design
+    // entry leaves `activeSiteKey` as the empty string, so building a section
+    // right away called `withDisposition(map, '', 'custom')`, which returns the
+    // map unchanged — "an unresolved site owns no decision". The write vanished
+    // and nothing said so, and the app went on believing native acquisition was
+    // still permitted for that property.
+    expect(SITE).toMatch(/pendingDispositionRef/);
+
+    const setter = SITE.slice(
+      SITE.indexOf('const setNativeDisposition = useCallback'),
+      SITE.indexOf('return {', SITE.indexOf('const setNativeDisposition = useCallback')),
+    );
+    expect(setter).toMatch(/if \(!\(activeSiteKeyRef\.current \|\| stateRef\.current\.activeSiteKey\)\)/);
+    expect(setter).toMatch(/pendingDispositionRef\.current = d/);
+
+    const flush = SITE.slice(
+      SITE.indexOf('const setActiveKey = useCallback'),
+      SITE.indexOf('const setNativeDisposition = useCallback'),
+    );
+    expect(flush, 'setActiveKey must flush the parked decision').toMatch(/pendingDispositionRef\.current/);
+    expect(flush).toMatch(/withDisposition\(stateRef\.current\.nativeGeometry, k, d\)/);
+    // It must clear the park, or every later key change would refile it.
+    expect(flush).toMatch(/pendingDispositionRef\.current = null/);
+  });
+
+  it('🚨 the Undo chip is not buried under the other panels', () => {
+    // `elementsFromPoint` over the live page found, in front of it: the LiDAR
+    // Properties panel (z=60) and the top-left dock (z=51). The chip inherited
+    // top:12/left:12/z=50 from the inert toolbar it replaced, so Undo could not
+    // be clicked — by a test or by a person. Nobody noticed because the buttons
+    // it replaced did nothing at all.
+    const i = ENGINE.indexOf('<DraggablePanel id="undo-redo-toolbar"');
+    expect(i, 'the undo toolbar is not mounted').toBeGreaterThan(-1);
+    const block = ENGINE.slice(i, i + 900);
+    expect(block).toMatch(/zIndex=\{62\}/);
+    expect(block).toMatch(/zIndex: 62/);
+    // And it is no longer in the corner the two docks occupy.
+    expect(block).not.toMatch(/top: 12, left: 12/);
+  });
+});

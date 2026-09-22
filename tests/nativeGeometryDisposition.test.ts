@@ -339,3 +339,46 @@ describe('what the UI is allowed to say', () => {
     expect(NATIVE_GEOMETRY_DISPOSITIONS.filter(customModelGoverns)).toEqual(['custom']);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A DECISION MADE BEFORE THE PROPERTY WAS NAMED
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 an unresolved site key must not swallow a decision in silence', () => {
+  it('withDisposition still refuses to FILE against an empty key', () => {
+    // This part is right and stays right: a decision has to be about a
+    // property, and '' is not one.
+    expect(withDisposition({}, '', 'custom')).toEqual({});
+    expect(withDisposition({}, null, 'rejected')).toEqual({});
+    expect(withDisposition({ a: 'custom' }, undefined, 'rejected')).toEqual({ a: 'custom' });
+  });
+
+  it('🚨 …which is why the CALLER has to hold it — measured live, it was lost', () => {
+    // components/design/useSiteDesign.ts: `setNativeDisposition` filed against
+    // `activeSiteKeyRef.current || stateRef.current.activeSiteKey`. Measured in
+    // a real browser through the quick-design entry, BOTH are the empty string
+    // at the moment a section is built, so `withDisposition` returned the map
+    // unchanged, the write vanished, and the app went on believing native
+    // geometry acquisition was still permitted for that property.
+    //
+    // The hook now parks the decision and `setActiveKey` files it the moment
+    // the property is named. This asserts the SHAPE that fix relies on: the
+    // same decision, applied later against a real key, lands.
+    const parked: NativeGeometryDisposition = 'custom';
+    let map = withDisposition({}, '', parked);
+    expect(dispositionFor(map, 'site-1')).toBe('undecided');   // the loss
+
+    map = withDisposition(map, 'site-1', parked);              // the flush
+    expect(dispositionFor(map, 'site-1')).toBe('custom');
+    expect(nativeAcquisitionPermitted(dispositionFor(map, 'site-1'))).toBe(false);
+  });
+
+  it('the parked decision belongs to the site that RESOLVES, not to every site', () => {
+    const map = withDisposition(withDisposition({}, '', 'custom'), 'site-1', 'custom');
+    expect(dispositionFor(map, 'site-1')).toBe('custom');
+    // A neighbour must not inherit it. "Custom data must not silently
+    // contaminate a normal good Google project."
+    expect(dispositionFor(map, 'site-2')).toBe('undecided');
+    expect(nativeAcquisitionPermitted(dispositionFor(map, 'site-2'))).toBe(true);
+  });
+});

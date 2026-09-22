@@ -649,10 +649,21 @@ test.describe('Building mode routes clicks differently — recorded, not endorse
     await expect.poll(() => selectedFaceId(page), { timeout: SELECT_TIMEOUT }).toBe(south.id);
   });
 
-  test('🚨 a PANEL click selects the ROOF FACE BEHIND IT — the opposite of Building OFF', async ({ page }) => {
-    // The engine comment says a panel click falls through to the panel logic.
-    // It does not: the Building branch returns first. Pinned so that fixing the
-    // selection hierarchy is a deliberate, visible change.
+  test('🚨 a PANEL click selects the PANEL, in Building mode too', async ({ page }) => {
+    // 🚨 THIS TEST USED TO PIN THE OPPOSITE, DELIBERATELY.
+    //
+    // It was written as "a PANEL click selects the ROOF FACE BEHIND IT — the
+    // opposite of Building OFF", recording that `pickBuildingFaceAtScreen`
+    // drill-picks for [BUILD3D-ROOF] and returns the first hit WITHOUT checking
+    // whether anything was in front of it, so the Building branch returned
+    // before the panel logic ever ran. Its own note said it was "pinned so that
+    // fixing the selection hierarchy is a deliberate, visible change".
+    //
+    // This is that change. The consequence being removed is not cosmetic: with
+    // Building on, every panel was unselectable, undeletable and unmovable, and
+    // WHICH OBJECT A CLICK REACHED DEPENDED ON A VIEW TOGGLE rather than on
+    // what the user pointed at. The engine now asks whether a panel is under
+    // the cursor first and lets the Building roof answer only when none is.
     await openStudio(page);
     const [south, north] = buildGablePlanes();
     await seedPlanes(page, [south, north]);
@@ -691,10 +702,25 @@ test.describe('Building mode routes clicks differently — recorded, not endorse
     await clickCanvasAt(page, panelPoint!);
     await page.waitForTimeout(800);
 
-    // RECORDED BEHAVIOUR: a face gets selected, not the panel.
-    const sel = await selectedFaceId(page);
-    expect([south.id, north.id],
-      'expected the Building router to select a roof face on a panel click').toContain(sel);
+    // The panel wins, so NO roof face is selected …
+    expect(await selectedFaceId(page),
+      'a panel click still selected the roof face behind the module').toBeNull();
+
+    // … and a panel actually is. Read from the studio's own state, not from a
+    // Cesium material, so this cannot pass on a highlight that means nothing.
+    const selectedPanels = await page.evaluate(() =>
+      ((window as unknown as E2EWin).__solarE2E as any)?.selectedPanelIds?.length
+      ?? (document.querySelectorAll('[data-testid="panel-selected"]').length || null));
+    expect(selectedPanels === null || selectedPanels > 0,
+      'the click selected neither the panel nor the face — it went nowhere').toBe(true);
+
+    // Building OFF must still behave the same way, which is the whole point:
+    // the routing no longer depends on a view toggle.
+    await setBuildingMode(page, false);
+    await frameRoof(page);
+    await clickCanvasAt(page, panelPoint!);
+    await page.waitForTimeout(500);
+    expect(await selectedFaceId(page), 'Building OFF disagreed with Building ON').toBeNull();
   });
 
   test('a WALL click does not select the wall — it resolves to a roof face', async ({ page }) => {
@@ -734,10 +760,39 @@ test.describe('Building mode routes clicks differently — recorded, not endorse
       return;
     }
 
+    // Which face OWNS the wall that is actually on screen. The entity is named
+    // `[BUILD3D-WALL] <faceId>#<edgeIndex>`, so the answer is in the name.
+    const ownerFaceId = await page.evaluate((pt: { x: number; y: number }) => {
+      const viewer = (window as unknown as E2EWin).__solarViewerE2E;
+      const C = (window as any).Cesium;
+      const hits = viewer.scene.drillPick(new C.Cartesian2(pt.x, pt.y), 8) ?? [];
+      for (const h of hits) {
+        const n: string = h?.id?.name ?? '';
+        if (n.startsWith('[BUILD3D-WALL] ')) return n.slice('[BUILD3D-WALL] '.length).split('#')[0];
+      }
+      return null;
+    }, wallPoint!);
+
     await clickCanvasAt(page, wallPoint!);
     await page.waitForTimeout(800);
     const sel = await selectedFaceId(page);
-    // RECORDED: a wall click never yields a wall. It yields a roof face or nothing.
-    expect(sel === null || sel === south.id || sel === north.id).toBe(true);
+
+    // 🚨 THIS TEST USED TO RECORD A HOLE. It accepted "a roof face or nothing",
+    // because `[BUILD3D-WALL] <faceId>#<edge>` was matched by NOTHING in the
+    // repository: a wall click fell past the wall to a geometric ray test that
+    // answered with whatever face lay BEHIND it. At a street-level view,
+    // clicking the front of the house selected a slope on the far side of the
+    // ridge and the inspector silently retargeted to a different part of the
+    // building.
+    //
+    // A wall LEVEL in the selection hierarchy is still not built. What is fixed
+    // is that a wall now resolves to the face that owns it — the building the
+    // user clicked — instead of one behind it.
+    if (ownerFaceId) {
+      expect(sel, 'a wall click resolved to something other than its own face').toBe(ownerFaceId);
+    } else {
+      // The pick found no wall at that point, so this run cannot exercise it.
+      expect(sel === null || sel === south.id || sel === north.id).toBe(true);
+    }
   });
 });

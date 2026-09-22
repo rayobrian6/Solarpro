@@ -176,6 +176,8 @@ export function useSiteDesign(): UseSiteDesign {
   const activeSiteKeyRef = useRef<string>(UNRESOLVED_SITE_KEY);
   const stateRef = useRef<SiteDesignState>(emptyState());
   const nativeDispositionRef = useRef<NativeGeometryDisposition>('undecided');
+  /** A decision recorded before the property had a name. See setActiveKey. */
+  const pendingDispositionRef = useRef<NativeGeometryDisposition | null>(null);
   const epochRef = useRef(0);
 
   /** One setter factory. The ref is written first and synchronously, so any
@@ -266,6 +268,29 @@ export function useSiteDesign(): UseSiteDesign {
   const setActiveKey = useCallback((k: string) => {
     activeSiteKeyRef.current = k;
     setActiveSiteKeyState(k);
+    // 🚨 A DECISION MADE BEFORE THE PROPERTY WAS NAMED IS NOT DISCARDED.
+    //
+    // `withDisposition` returns the map unchanged for an empty site key — "an
+    // unresolved site owns no decision" — which is right about STORAGE and
+    // wrong as the whole behaviour: the write was silently dropped and nobody
+    // was told. Measured live: opening the studio through the quick-design
+    // entry leaves `activeSiteKey` as the empty string, so building a section
+    // right away recorded 'custom' into nothing and the app went on believing
+    // native geometry was still permitted for that property.
+    //
+    // The decision is now held until the property has a name, then filed
+    // against it. Held in a ref, not state, because the very next thing that
+    // reads it is the Lane A gate firing from inside a resolved promise.
+    if (k && pendingDispositionRef.current) {
+      const d = pendingDispositionRef.current;
+      pendingDispositionRef.current = null;
+      stateRef.current = {
+        ...stateRef.current,
+        nativeGeometry: withDisposition(stateRef.current.nativeGeometry, k, d),
+      };
+      nativeDispositionRef.current = d;
+      setArchiveTick(t => t + 1);
+    }
   }, []);
 
   const switchToSite = useCallback<UseSiteDesign['switchToSite']>((toKey, opts) => {
@@ -391,6 +416,14 @@ export function useSiteDesign(): UseSiteDesign {
         d,
       ),
     };
+    // 🚨 AND IF THERE WAS NO PROPERTY TO FILE IT AGAINST, HOLD IT.
+    // Both keys are the empty string until hydration resolves ownership, and
+    // `withDisposition` drops a write against an empty key. `setActiveKey`
+    // flushes this the moment the property is named. Without it the decision
+    // vanished in silence — see the note there.
+    if (!(activeSiteKeyRef.current || stateRef.current.activeSiteKey)) {
+      pendingDispositionRef.current = d;
+    }
     nativeDispositionRef.current = d;
     // Moves `archivesSignature`, so the autosave actually writes it. Without
     // the tick the decision would live in a ref nothing re-reads.

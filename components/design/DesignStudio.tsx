@@ -2099,7 +2099,19 @@ export default function DesignStudio({ project, onSave }: Props) {
       undoGeometryLabel: site.undoGeometryLabel,
       seedDesign: (d) => {
         if (d.panels) setPanels(d.panels);
-        if (d.roofPlanes) setRoofPlanes(d.roofPlanes);
+        if (d.roofPlanes) {
+          // 🚨 THE SEED APPLIES THE SAME RULE AS THE REAL CREATION PATH.
+          // `onRoofPlaneCreated` records 'custom' the moment a SECTION face is
+          // built — "somebody modelled this house by hand, so a hand-built
+          // model governs it". Seeding used to skip that, which left an
+          // acceptance spec with a choice between asserting a disposition the
+          // harness had quietly set for it (proving nothing) and not asserting
+          // the branch at all (proving less). Mirroring the production rule
+          // here keeps "this is genuinely the custom fallback path" a real
+          // assertion about the application.
+          if (d.roofPlanes.some(p => !!p.section)) site.setNativeDisposition('custom');
+          setRoofPlanes(d.roofPlanes);
+        }
         if (d.obstructions) setPlacedObstructions(d.obstructions);
         if (d.measurements) setMeasurements(d.measurements);
       },

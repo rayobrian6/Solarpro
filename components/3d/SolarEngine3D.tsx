@@ -8652,8 +8652,29 @@ function SolarEngine3D({
       const hits = viewer.scene.drillPick(screenPos, 8) ?? [];
       for (const h of hits) {
         const name: string = h?.id?.name ?? '';
-        if (typeof name === 'string' && name.startsWith('[BUILD3D-ROOF] ')) {
+        if (typeof name !== 'string') continue;
+        if (name.startsWith('[BUILD3D-ROOF] ')) {
           return name.slice('[BUILD3D-ROOF] '.length);
+        }
+        // 🚨 A WALL IS PART OF THE BUILDING AND MUST NOT BE A HOLE.
+        //
+        // Walls are drawn as `[BUILD3D-WALL] <faceId>#<edgeIndex>` and, until
+        // now, that string was matched by NOTHING in the repository. A click on
+        // a wall therefore fell past it to a geometric ray test that answered
+        // with whatever roof face lay BEHIND the wall — so at a street-level
+        // view, clicking the front of the house selected a slope on the far
+        // side of the ridge and the inspector silently retargeted.
+        //
+        // A wall level in the hierarchy is not built yet, so this does the
+        // honest intermediate thing: a wall resolves to the face that OWNS it,
+        // which resolves in turn to that face's section. Clicking the front
+        // wall of the garage selects the garage. That is the object whose
+        // height the user was reaching for, and it is never a different
+        // building from the one they clicked.
+        if (name.startsWith('[BUILD3D-WALL] ')) {
+          const tag = name.slice('[BUILD3D-WALL] '.length);
+          const faceId = tag.split('#')[0];
+          if (faceId) return faceId;
         }
       }
     } catch { /* pick can throw mid-frame; treat as no hit */ }
@@ -8690,7 +8711,25 @@ function SolarEngine3D({
       // panels win. That routing difference is recorded, not endorsed; it is
       // the UX proposal's problem to resolve, not something to paper over with
       // a comment that says it does not happen.
-      if (showBuilding3DRef.current) {
+      // 🚨 A PANEL IN FRONT OF THE ROOF WINS, IN BOTH MODES.
+      //
+      // This branch used to run unconditionally whenever Building was on, and
+      // `pickBuildingFaceAtScreen` drill-picks for `[BUILD3D-ROOF]` and returns
+      // the first one it finds WITHOUT checking whether anything was in front
+      // of it. So with Building on, clicking a module selected the roof deck
+      // underneath it: every panel became unselectable, undeletable and
+      // unmovable, and which object a click reached depended on a VIEW TOGGLE
+      // rather than on what the user pointed at. The comment that stood here
+      // recorded that as "not endorsed; the UX proposal's problem to resolve".
+      //
+      // This is that resolution, and it is the smallest one: ask whether a
+      // panel is under the cursor first, and let the Building roof answer only
+      // when none is. Clicking bare roof still selects the face in both modes,
+      // so nothing that worked stops working.
+      // One drill-pick, read twice — `pickPanelAtScreen` walks up to ten hits
+      // and calling it again below would double that on every click.
+      const picked = pickPanelAtScreen(viewer, screenPos);
+      if (showBuilding3DRef.current && !picked.foundId) {
         const faceId = pickBuildingFaceAtScreen(viewer, C, screenPos);
         if (faceId) {
           // 🚨 CAPTURE BEFORE THE WRITE. `selectRoofFace` sets
@@ -8723,7 +8762,6 @@ function SolarEngine3D({
       //   • plain click            → select the WHOLE array (move/rotate the array)
       //   • double-click (drill)   → then a click selects a single panel (micro-edit)
       //   • click empty space      → clear selection AND exit any drilled-in array
-      const picked = pickPanelAtScreen(viewer, screenPos);
       const foundId = picked.foundId;
       const foundEntity = picked.foundEntity;
 
@@ -12700,12 +12738,21 @@ function SolarEngine3D({
              These buttons now drive the canonical `RoofPlane[]` history owned
              by the parent (components/design/useSiteDesign.ts). See
              lib/3d/geometryHistory.ts. */}
+      {/* 🚨 BOTTOM-LEFT AT z=62, NOT TOP-LEFT AT z=50.
+
+          The chip inherited top:12/left:12/z=50 from the inert toolbar it
+          replaced, and `elementsFromPoint` over the live page returns, in
+          front of it: the LiDAR Properties panel (z=60) and the top-left
+          dock's "🔗 Roof Model" button (z=51). So Undo was covered by two
+          other panels and could not be clicked — by a test or by a person.
+          Nobody had noticed because the buttons it replaced did nothing at
+          all, so being unreachable changed no outcome. */}
       {onUndoGeometry || onRedoGeometry ? (
-        <DraggablePanel id="undo-redo-toolbar" zIndex={50}>
+        <DraggablePanel id="undo-redo-toolbar" zIndex={62}>
         <div
           data-drag-handle
           style={{
-            position: 'absolute', top: 12, left: 12, zIndex: 50,
+            position: 'absolute', bottom: 12, left: 12, zIndex: 62,
             display: 'flex', alignItems: 'center', gap: 4,
             background: 'rgba(10,14,24,0.85)', border: '1px solid rgba(148,163,184,0.25)',
             borderRadius: 8, padding: '4px 6px', backdropFilter: 'blur(6px)',
