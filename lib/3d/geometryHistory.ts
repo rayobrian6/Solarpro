@@ -103,6 +103,21 @@ export interface GeometrySnapshot {
    * existing caller records and what every existing step does.
    */
   panels: unknown[] | null;
+  /**
+   * THE OBSTRUCTIONS AND MEASUREMENTS AS THEY STOOD BEFORE, carried by a step
+   * that removes them.
+   *
+   * 🚨 THE PRODUCT WAS SAYING "UNDO RESTORES IT" AND IT WAS NOT TRUE. Deleting
+   * an obstruction filtered it out of state and pushed a snapshot that carried
+   * only planes, disposition, ledger and panels. Pressing Undo consumed a
+   * history step, removed the tombstone, announced "Undone — Delete
+   * obstruction" — and the vent was still gone, permanently, with nothing left
+   * to bring it back. A second press then silently destroyed an EARLIER
+   * geometry edit. A false reassurance is worse than no undo at all, because it
+   * is the reason somebody stops looking for the thing they lost.
+   */
+  obstructions: unknown[] | null;
+  measurements: unknown[] | null;
 }
 
 export interface GeometryHistory {
@@ -130,6 +145,9 @@ export interface HistoryStep {
   /** The panels to restore VERBATIM, or null to recompute them from `planes`
    *  exactly as before. See `GeometrySnapshot.panels`. */
   panels: unknown[] | null;
+  /** The obstructions and measurements to restore verbatim, or null. */
+  obstructions: unknown[] | null;
+  measurements: unknown[] | null;
 }
 
 export function emptyHistory(): GeometryHistory {
@@ -179,6 +197,10 @@ export function pushSnapshot(
    *  panels; omitted means the caller recomputes them, which is the rule for
    *  every other edit. See `GeometrySnapshot.panels`. */
   panelsBefore?: ReadonlyArray<unknown> | null,
+  /** The obstructions and measurements as they stand NOW. Supplied only by a
+   *  step that removes them. See `GeometrySnapshot.obstructions`. */
+  obstructionsBefore?: ReadonlyArray<unknown> | null,
+  measurementsBefore?: ReadonlyArray<unknown> | null,
 ): GeometryHistory {
   const copy = deepCopyPlanes(planesBefore);
   if (copy === null) return history; // see deepCopyPlanes
@@ -205,6 +227,8 @@ export function pushSnapshot(
     disposition: dispositionBefore ?? null,
     deletions: deletionsBefore ?? null,
     panels: panelCopy,
+    obstructions: copyOpaque(obstructionsBefore),
+    measurements: copyOpaque(measurementsBefore),
   }];
   while (past.length > MAX_HISTORY_DEPTH) past.shift();
   // 🚨 A NEW EDIT DESTROYS THE REDO BRANCH. Keeping it would let Redo apply a
@@ -253,16 +277,18 @@ export function undo(
    *  step being undone carried panels — a redo of a deletion must remove them
    *  again, and it can only do that if it knows what "after" looked like. */
   panelsNow?: ReadonlyArray<unknown> | null,
+  obstructionsNow?: ReadonlyArray<unknown> | null,
+  measurementsNow?: ReadonlyArray<unknown> | null,
 ): HistoryStep {
   const current = (planesNow ?? []).slice();
   if (!canUndo(history)) {
-    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null };
+    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null, obstructions: null, measurements: null };
   }
   const past = history.past.slice();
   const entry = past.pop()!;
   const forward = deepCopyPlanes(planesNow);
   if (forward === null) {
-    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null };
+    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null, obstructions: null, measurements: null };
   }
   return {
     ok: true,
@@ -275,6 +301,8 @@ export function undo(
         disposition: dispositionNow ?? null,
         deletions: deletionsNow ?? null,
         panels: entry.panels ? copyOpaque(panelsNow) : null,
+        obstructions: entry.obstructions ? copyOpaque(obstructionsNow) : null,
+        measurements: entry.measurements ? copyOpaque(measurementsNow) : null,
       }],
     },
     // Hand out a fresh copy: the caller will mutate what it adopts, and the
@@ -284,6 +312,8 @@ export function undo(
     disposition: entry.disposition ?? null,
     deletions: entry.deletions ?? null,
     panels: copyOpaque(entry.panels),
+    obstructions: copyOpaque(entry.obstructions),
+    measurements: copyOpaque(entry.measurements),
   };
 }
 
@@ -294,16 +324,18 @@ export function redo(
   dispositionNow?: string | null,
   deletionsNow?: unknown | null,
   panelsNow?: ReadonlyArray<unknown> | null,
+  obstructionsNow?: ReadonlyArray<unknown> | null,
+  measurementsNow?: ReadonlyArray<unknown> | null,
 ): HistoryStep {
   const current = (planesNow ?? []).slice();
   if (!canRedo(history)) {
-    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null };
+    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null, obstructions: null, measurements: null };
   }
   const future = history.future.slice();
   const entry = future.pop()!;
   const back = deepCopyPlanes(planesNow);
   if (back === null) {
-    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null };
+    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null, obstructions: null, measurements: null };
   }
   return {
     ok: true,
@@ -313,6 +345,8 @@ export function redo(
         disposition: dispositionNow ?? null,
         deletions: deletionsNow ?? null,
         panels: entry.panels ? copyOpaque(panelsNow) : null,
+        obstructions: entry.obstructions ? copyOpaque(obstructionsNow) : null,
+        measurements: entry.measurements ? copyOpaque(measurementsNow) : null,
       }],
       future,
     },
@@ -321,6 +355,8 @@ export function redo(
     disposition: entry.disposition ?? null,
     deletions: entry.deletions ?? null,
     panels: copyOpaque(entry.panels),
+    obstructions: copyOpaque(entry.obstructions),
+    measurements: copyOpaque(entry.measurements),
   };
 }
 

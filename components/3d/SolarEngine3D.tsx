@@ -15237,21 +15237,22 @@ function SolarEngine3D({
                       Reset to 0.6×0.6×1.0m
                     </button>
                     <button
-                      onClick={() => {
-                        const v = viewerRef.current;
-                        if (!v) return;
-                        for (const e of obstructionsRef.current) {
-                          try { v.entities.removeById(e.id); } catch { /* ignore */ }
-                        }
-                        obstructionsRef.current = [];
-                        setObstructions([]);
-                        setStatusMsg('Obstructions cleared');
-                      }}
-                      title="Remove every placed obstruction"
+                      // 🚨 IT USED TO BE A RAW SETTER, AND IT SITS NEXT TO
+                      // "Reset to 0.6x0.6x1.0m". No plan, no list of what would
+                      // go, no undo step, no tombstone, no save authorization,
+                      // no toast — and it propagated straight into canonical
+                      // state, where the autosave persisted the loss. A person
+                      // who opened this panel to fix ONE vent was one mis-click
+                      // from wiping every vent, stack, skylight and chimney on
+                      // the roof. It is now the same canonical delete as every
+                      // other control, and it asks first.
+                      onClick={() => onRequestDelete?.('obstructions')}
+                      data-testid="obstruction-clear-all"
+                      title="Remove every marked obstruction"
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
                         background: 'rgba(239,68,68,0.1)', color: '#f87171',
                         border: '1px solid rgba(239,68,68,0.3)' }}>
-                      Clear
+                      Clear all
                     </button>
                   </div>
                 </div>

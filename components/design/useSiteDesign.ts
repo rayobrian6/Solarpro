@@ -53,6 +53,7 @@ import {
   planDeletion,
   tombstonesFor,
   authorizationFor,
+  makeAuthorization,
   withTombstones,
   withoutTombstones,
   lifecycleFor,
@@ -207,6 +208,21 @@ export interface UseSiteDesign {
    */
   applyDelete: (plan: DeletionPlan) => { ok: boolean; removed: number; message: string };
 
+  /**
+   * A DELIBERATE PANEL REMOVAL THAT DID NOT COME THROUGH `planDelete`.
+   *
+   * 🚨 "DELETE SELECTED" IS A DELETION TOO. Box-selecting forty modules and
+   * pressing Delete is as deliberate as any control in the studio, and it
+   * minted no authorization — so the save that followed was met with
+   * LAYOUT_SUBSYSTEM_WIPE and a permanent "Save refused" badge telling the user
+   * to use a delete control they had just used. The removal never persisted.
+   *
+   * MERGED, NEVER OVERWRITTEN. Two deletions inside one three-second autosave
+   * window used to leave only the second authorization on the payload, and the
+   * server refuses when ANY wiped sub-system is unauthorised — so the save
+   * deadlocked and BOTH deletions were lost on reload.
+   */
+  notePanelRemoval: (removed: Array<{ id?: string; systemType?: string }>) => void;
   /** The authorization for the NEXT save, or null. Read by the save paths. */
   pendingDestructive: () => DestructiveAuthorization | null;
   /** Consume it — called once the save that carried it has SUCCEEDED. A failed
@@ -328,10 +344,11 @@ export function useSiteDesign(): UseSiteDesign {
       // thing that makes "delete a face, make two more edits, undo three times"
       // end with the face actually back rather than back-until-reload.
       deletionLedgerRef.current,
-      // Panels are NOT carried here. Every edit this function records MOVES a
-      // face, so its panels are recomputed from where the face went; only
-      // `applyDelete` snapshots them, because only a delete destroys them.
-      null,
+      // Panels, obstructions and measurements are NOT carried here. Every edit
+      // this function records MOVES a face: its panels are recomputed from
+      // where the face went, and nothing else is touched. Only `applyDelete`
+      // snapshots them, because only a delete destroys them.
+      null, null, null,
     ));
   }, []);
 
@@ -421,10 +438,19 @@ export function useSiteDesign(): UseSiteDesign {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Put the site entities back exactly, when the step carried them. Only a
+   *  deletion does; every other edit leaves them alone entirely. */
+  const restoreSiteEntities = useCallback((obs: unknown[] | null, meas: unknown[] | null) => {
+    if (Array.isArray(obs)) setPlacedObstructions(obs as PlacedObstruction[]);
+    if (Array.isArray(meas)) setMeasurements(meas as LayoutMeasurement[]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const undoGeometry = useCallback((): string | null => {
     const step = undo(
       geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
       deletionLedgerRef.current, panelsRef.current,
+      placedObstructionsRef.current, measurementsRef.current,
     );
     if (!step.ok) return null;
     writeHistory(step.history);
@@ -435,6 +461,7 @@ export function useSiteDesign(): UseSiteDesign {
     const verbatim = restorePanelsVerbatim(step.panels);
     // Adopt the canonical array; every derived thing rebuilds from it.
     applyRestoredGeometry(step.planes, verbatim);
+    restoreSiteEntities(step.obstructions, step.measurements);
     restoreDisposition(step.disposition);
     restoreLedger(step.deletions);
     return step.label;
@@ -445,11 +472,13 @@ export function useSiteDesign(): UseSiteDesign {
     const step = redo(
       geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
       deletionLedgerRef.current, panelsRef.current,
+      placedObstructionsRef.current, measurementsRef.current,
     );
     if (!step.ok) return null;
     writeHistory(step.history);
     const verbatim = restorePanelsVerbatim(step.panels);
     applyRestoredGeometry(step.planes, verbatim);
+    restoreSiteEntities(step.obstructions, step.measurements);
     restoreDisposition(step.disposition);
     restoreLedger(step.deletions);
     return step.label;
@@ -518,6 +547,11 @@ export function useSiteDesign(): UseSiteDesign {
     // because the acquisition gate and the restore filters read the REF, and a
     // property change is exactly when they fire.
     deletionLedgerRef.current = res.state.deletions ?? emptyLedger();
+    // 🚨 AND THE AUTHORIZATION DOES NOT TRAVEL. It names the property it was
+    // minted at, so carrying it to the next house guarantees a refusal there —
+    // the save 409s until the user happens to place a panel of the wiped
+    // sub-system at a property they never deleted anything from.
+    if (res.changed) pendingDestructiveRef.current = null;
     if (res.changed || res.reason === 'unresolved-source') {
       setActiveKey(res.state.activeSiteKey);
       epochRef.current += 1;
@@ -538,6 +572,7 @@ export function useSiteDesign(): UseSiteDesign {
     const res = hydrate(stored, siteKeyNow);
     stateRef.current = res.state;
     deletionLedgerRef.current = res.state.deletions ?? emptyLedger();
+    pendingDestructiveRef.current = null;
     // 🚨 A RELOAD IS NOT A SAVE. Anything the previous session had authorised
     // was either persisted or refused; carrying it across a hydration would let
     // a stale authorization license a wipe nobody asked for in this one.
@@ -782,6 +817,12 @@ export function useSiteDesign(): UseSiteDesign {
       nativeDispositionRef.current,
       deletionLedgerRef.current,
       panelsRef.current,
+      // 🚨 AND THE OBSTRUCTIONS AND MEASUREMENTS, so "Undo restores it" is
+      // TRUE. Deleting a vent used to say exactly that and leave it gone for
+      // good — a false reassurance is the reason somebody stops looking for
+      // what they lost.
+      placedObstructionsRef.current,
+      measurementsRef.current,
     ));
 
     const goneFace: Record<string, boolean> = {};
@@ -807,12 +848,60 @@ export function useSiteDesign(): UseSiteDesign {
     // 🚨 THE AUTHORIZATION IS MINTED HERE AND NOWHERE ELSE. This is the single
     // function that can say "a person chose this", so it is the single function
     // that may hand the server permission to accept an emptied sub-system.
-    pendingDestructiveRef.current = authorizationFor(plan, key, now);
+    //
+    // MERGED, NEVER OVERWRITTEN — see `mergeAuthorization`.
+    pendingDestructiveRef.current = mergeAuthorization(
+      pendingDestructiveRef.current, authorizationFor(plan, key, now),
+    );
 
     const removed = plan.faceIds.length + plan.panelIds.length + plan.obstructionIds.length;
     return { ok: true, removed, message: `${plan.title}: ${plan.lines.join(', ')}.` };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ledgerKeyOf, writeLedger]);
+
+  /**
+   * Fold a new authorization into whatever is already waiting for the next save.
+   *
+   * 🚨 PLAIN ASSIGNMENT WAS A DEADLOCK. The autosave is debounced three
+   * seconds and its timer restarts on every state change, so two deletions
+   * inside that window produced ONE save carrying only the SECOND
+   * authorization. The server refuses when ANY wiped sub-system is
+   * unauthorised, so the save 409-ed, nothing was written — tombstones
+   * included — and the autosave retried for ever with the same insufficient
+   * token. Both deletions came back on reload.
+   *
+   * Two authorizations at different properties do not merge; the newer one
+   * wins, because the older one can no longer be satisfied by a save that
+   * names the new property.
+   */
+  const mergeAuthorization = useCallback((
+    prev: DestructiveAuthorization | null, next: DestructiveAuthorization,
+  ): DestructiveAuthorization => {
+    if (!prev || prev.siteKey !== next.siteKey) return next;
+    const join = (a: string[], b: string[]) => Array.from(new Set([...(a ?? []), ...(b ?? [])])).sort();
+    return {
+      ...next,
+      faceIds: join(prev.faceIds, next.faceIds),
+      sectionIds: join(prev.sectionIds, next.sectionIds),
+      obstructionIds: join(prev.obstructionIds, next.obstructionIds),
+      panelIds: join(prev.panelIds, next.panelIds),
+      panelSystemTypes: join(prev.panelSystemTypes, next.panelSystemTypes),
+    };
+  }, []);
+
+  const notePanelRemoval = useCallback<UseSiteDesign['notePanelRemoval']>((removed) => {
+    const list = (Array.isArray(removed) ? removed : []).filter(Boolean);
+    if (list.length === 0) return;
+    const key = ledgerKeyOf();
+    if (!key) return;
+    pendingDestructiveRef.current = mergeAuthorization(
+      pendingDestructiveRef.current,
+      makeAuthorization('panels', key, {
+        panelIds: list.map(p => p?.id).filter(Boolean) as string[],
+        panelSystemTypes: list.map(p => p?.systemType || 'roof'),
+      }, Date.now()),
+    );
+  }, [ledgerKeyOf, mergeAuthorization]);
 
   const pendingDestructive = useCallback(() => pendingDestructiveRef.current, []);
   const clearPendingDestructive = useCallback(() => { pendingDestructiveRef.current = null; }, []);
@@ -863,7 +952,7 @@ export function useSiteDesign(): UseSiteDesign {
     redoGeometryLabel: redoLabel(geometryHistory),
     deletionLedger, deletionLedgerRef,
     planDelete, applyDelete,
-    pendingDestructive, clearPendingDestructive,
+    notePanelRemoval, pendingDestructive, clearPendingDestructive,
     forgetDeletions,
     geometryLifecycle, geometryLifecycleRef,
     admitGeometry, admitPlacedObstructions,

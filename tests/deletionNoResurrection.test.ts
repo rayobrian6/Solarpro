@@ -42,8 +42,11 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { hydrate, switchSite, emptyState, emptyBundle, archivesSignature, toPersistencePayload } from '@/lib/design/siteDesignModel';
-import { withTombstones, emptyLedger } from '@/lib/design/deletionAuthority';
+import { hydrate, switchSite, emptyState, emptyBundle, archivesSignature, toPersistencePayload, sitesAreSameProperty } from '@/lib/design/siteDesignModel';
+import {
+  withTombstones, emptyLedger, ledgerSite, resolveLedgerKey, lifecycleFor,
+  makeAuthorization, authorizesSubsystemRemoval,
+} from '@/lib/design/deletionAuthority';
 import { shouldRunLaneA, type LaneAGateInput } from '@/lib/3d/laneA';
 
 const read = (rel: string) => fs.readFileSync(path.join(process.cwd(), rel), 'utf8');
@@ -336,5 +339,167 @@ describe('🚨 every delete gesture goes through the one canonical path', () => 
     expect(ENGINE).toMatch(/Clear Custom Building/);
     expect(ENGINE).toMatch(/Start Over: empty this property/);
     expect(ENGINE).not.toMatch(/tip: 'Clear All: remove all panels'/);
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WHAT AN ADVERSARIAL PASS BROKE, AND WHAT NOW HOLDS
+//
+// The claim under attack was: "a deliberate deletion stays deleted through
+// save, reload, reopen, provider retry and archive round-trip; an unexplained
+// wipe is still refused." Six ways through it were found. These pin the fixes.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 the ledger matches by PROPERTY, not by the spelling of a key', () => {
+  it('a tombstone filed under one key is visible from its drifted twin', () => {
+    // `siteKeyFromCoords` rounds to ~1.1 m, and this repo measured ONE house
+    // minting keys 2.8 m, 17 m and 19 m apart inside 43 seconds. The disposition
+    // map hit exactly this and was given `dispositionForProperty`; the ledger
+    // was written without the same wrapper, so a tombstone under KA was
+    // invisible under KA' — the lifecycle read `untouched`, the acquisition gate
+    // said yes, and the archive handed the deleted face straight back.
+    const KA = 'p1@38.70615,-90.04625';
+    const KB = 'p1@38.70613,-90.04627';       // the same house, 2.8 m away
+    expect(sitesAreSameProperty(KA, KB)).toBe(true);
+    const led = withTombstones(emptyLedger(), KA, { faceIds: ['F1'], clearedAt: 1 });
+
+    // The raw, exact lookup still cannot see it — that is the defect, recorded.
+    expect(ledgerSite(led, KB).faceIds).toEqual([]);
+    // Resolved by property, it can.
+    expect(resolveLedgerKey(led, KB, sitesAreSameProperty)).toBe(KA);
+    expect(ledgerSite(led, resolveLedgerKey(led, KB, sitesAreSameProperty)).faceIds).toEqual(['F1']);
+    expect(lifecycleFor(led, resolveLedgerKey(led, KB, sitesAreSameProperty), 0)).toBe('cleared');
+  });
+
+  it('…and a genuinely different property is NOT absorbed', () => {
+    const KA = 'p1@38.70615,-90.04625';
+    const NEIGHBOUR = 'p1@38.70630,-90.04620';    // 17 m — the real next house
+    expect(sitesAreSameProperty(KA, NEIGHBOUR)).toBe(false);
+    const led = withTombstones(emptyLedger(), KA, { faceIds: ['F1'] });
+    expect(resolveLedgerKey(led, NEIGHBOUR, sitesAreSameProperty)).toBe(NEIGHBOUR);
+    expect(ledgerSite(led, resolveLedgerKey(led, NEIGHBOUR, sitesAreSameProperty)).faceIds).toEqual([]);
+  });
+
+  it('a restore at the drifted key refuses the deleted face', () => {
+    const KA = 'p1@38.70615,-90.04625';
+    const KB = 'p1@38.70613,-90.04627';
+    const stored = {
+      panels: [], measurements: [], obstructions: [],
+      roofPlanes: [face('deleted-face'), face('kept-face')],
+      siteArchives: {
+        version: 1, activeSiteKey: KB, sites: {},
+        deletions: withTombstones(emptyLedger(), KA, { faceIds: ['deleted-face'] }),
+      },
+    } as never;
+    const res = hydrate(stored, KB);
+    expect(res.state.active.roofPlanes.map((p: { id: string }) => p.id)).toEqual(['kept-face']);
+  });
+});
+
+describe('🚨 two deletions in one autosave window do not deadlock the save', () => {
+  it('a second authorization MERGES with the first instead of replacing it', () => {
+    // The autosave is debounced 3 s and its timer restarts on every state
+    // change, so two deletions inside that window produce ONE save. The server
+    // refuses when ANY wiped sub-system is unauthorised, so an overwritten
+    // authorization 409-ed for ever — nothing was written, tombstones included,
+    // and BOTH deletions came back on reload.
+    const KEY = 'p1@1,1';
+    const first = makeAuthorization('section', KEY, { panelSystemTypes: ['ground'], panelIds: ['g1'] }, 1);
+    const second = makeAuthorization('panels', KEY, { panelSystemTypes: ['roof'], panelIds: ['r1'] }, 2);
+    const merged = {
+      ...second,
+      panelSystemTypes: Array.from(new Set([...first.panelSystemTypes, ...second.panelSystemTypes])).sort(),
+      panelIds: Array.from(new Set([...first.panelIds, ...second.panelIds])).sort(),
+    };
+    expect(authorizesSubsystemRemoval(merged, KEY, 'ground')).toBe(true);
+    expect(authorizesSubsystemRemoval(merged, KEY, 'roof')).toBe(true);
+    // 🚨 THE DEFECT, RECORDED: the unmerged second token authorises only roof.
+    expect(authorizesSubsystemRemoval(second, KEY, 'ground')).toBe(false);
+  });
+
+  it('the hook merges, and does not merge across properties', () => {
+    const hook = strip(read('components/design/useSiteDesign.ts'));
+    expect(hook).toMatch(/const mergeAuthorization = useCallback/);
+    expect(hook).toMatch(/if \(!prev \|\| prev\.siteKey !== next\.siteKey\) return next;/);
+    expect(hook).toMatch(/pendingDestructiveRef\.current = mergeAuthorization\(/);
+  });
+
+  it('an authorization does not travel to another property', () => {
+    // It names the property it was minted at, so carrying it to the next house
+    // guarantees a refusal there — the save 409s until the user happens to
+    // place a panel of the wiped sub-system somewhere they deleted nothing.
+    const hook = strip(read('components/design/useSiteDesign.ts'));
+    const at = hook.indexOf('const switchToSite = useCallback');
+    expect(at).toBeGreaterThan(-1);
+    expect(hook.slice(at, at + 2400)).toMatch(/pendingDestructiveRef\.current = null/);
+  });
+});
+
+describe('🚨 every deliberate panel removal says so', () => {
+  const STUDIO2 = strip(read('components/design/DesignStudio.tsx'));
+
+  it('"Delete selected" mints an authorization — both the key and the button', () => {
+    // Box-select forty modules, press Delete, and the save was met with
+    // LAYOUT_SUBSYSTEM_WIPE and a permanent "Save refused" badge telling the
+    // user to use a delete control they had just used.
+    expect((STUDIO2.match(/site\.notePanelRemoval\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the beforeunload beacon carries it too', () => {
+    // Start Over, then close the tab inside the 3 s debounce: the beacon sent
+    // `panels: []` with no authorization, the server refused it, nothing was
+    // written — and the user never saw the refusal, because the page was gone.
+    const at = STUDIO2.indexOf('navigator.sendBeacon');
+    expect(at).toBeGreaterThan(-1);
+    expect(STUDIO2.slice(Math.max(0, at - 1200), at)).toMatch(/destructive: site\.pendingDestructive\(\)/);
+  });
+
+  it('the obstruction panel\u2019s Clear goes through the authority', () => {
+    const ENGINE2 = strip(read('components/3d/SolarEngine3D.tsx'));
+    expect(ENGINE2).toMatch(/onRequestDelete\?\.\('obstructions'\)/);
+    // 🚨 THE RAW SETTER, ASSERTED AGAINST.
+    expect(ENGINE2).not.toMatch(/obstructionsRef\.current = \[\];[\s\S]{0,40}setObstructions\(\[\]\);/);
+  });
+});
+
+describe('🚨 "Undo restores it" is true for an obstruction', () => {
+  it('the snapshot carries obstructions and measurements', () => {
+    const hist = strip(read('lib/3d/geometryHistory.ts'));
+    expect(hist).toMatch(/obstructions: unknown\[\] \| null;/);
+    expect(hist).toMatch(/measurements: unknown\[\] \| null;/);
+    const hook = strip(read('components/design/useSiteDesign.ts'));
+    expect(hook).toMatch(/placedObstructionsRef\.current,[\s\S]{0,80}measurementsRef\.current,/);
+    expect(hook).toMatch(/restoreSiteEntities\(step\.obstructions, step\.measurements\)/);
+  });
+
+  it('a step that removes nothing carries nothing — the rule is unchanged for edits', () => {
+    const hook = strip(read('components/design/useSiteDesign.ts'));
+    const at = hook.indexOf('const recordGeometry = useCallback');
+    expect(at).toBeGreaterThan(-1);
+    expect(hook.slice(at, at + 700)).toMatch(/null, null, null,/);
+  });
+});
+
+describe('🚨 a deleted face is not redrawn as a ghost', () => {
+  it('the selection-highlight effect filters by design membership', () => {
+    // It walked `plane3DEntityMap` with no filter and re-rendered every entry.
+    // The map is deliberately never pruned, and the doctrine that justifies
+    // keeping the entries says they "decide nothing" — this was a consumer that
+    // decided quite a lot: delete a face, click any other face, and the deleted
+    // one was DRAWN AGAIN, unselectable and impossible to remove without a
+    // reload.
+    const at = ENGINE.indexOf('plane3DEntityMap.current.forEach((entityIds, planeId)');
+    expect(at).toBeGreaterThan(-1);
+    const body = ENGINE.slice(at - 300, at + 300);
+    expect(body).toMatch(/const inDesign = new Set\(\(roofPlanesRef\.current \?\? \[\]\)\.map\(p => p\.id\)\)/);
+    expect(body).toMatch(/if \(!inDesign\.has\(planeId\)\) return;/);
+  });
+
+  it('…and the restore effect asks whether entities EXIST, not whether a map key does', () => {
+    // A delete removes the entities and leaves the map entry, so after an Undo
+    // the face was in `roofPlanes`, in the sidebar, and invisible in 3D.
+    expect(ENGINE).toMatch(/const stillDrawn = \(planeId: string\) =>/);
+    expect(ENGINE).toMatch(/const planesToRestore = planes\.filter\(p => !stillDrawn\(p\.id\)\)/);
   });
 });

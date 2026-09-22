@@ -1470,6 +1470,12 @@ export default function DesignStudio({ project, onSave }: Props) {
         // See saveLayoutToDB — always send the array, including [].
         roofPlanes: planesForPersistence,
         siteArchives: sitePayload.siteArchives,
+        // 🚨 THE BEACON CARRIES IT TOO. Without this, Start Over followed by
+        // closing the tab inside the three-second debounce sent `panels: []`
+        // with no authorization, the server refused it, nothing was written —
+        // tombstones included — and the whole design was back on reopen. The
+        // user never saw the refusal, because the page was gone.
+        destructive: site.pendingDestructive() ?? undefined,
         ...designParams,
       });
       navigator.sendBeacon(
@@ -3537,6 +3543,11 @@ export default function DesignStudio({ project, onSave }: Props) {
         case 'Delete': case 'Backspace':
           if (selectedPanelIds.size > 0) {
             e.preventDefault();
+            // 🚨 THIS IS A DELIBERATE DELETION AND IT HAS TO SAY SO. Without
+            // an authorization the save that follows is met with
+            // LAYOUT_SUBSYSTEM_WIPE and a permanent "Save refused" badge
+            // telling the user to use a delete control they just used.
+            site.notePanelRemoval((panelsRef2.current ?? []).filter(p => selectedPanelIds.has(p.id)));
             setPanels(prev => prev.filter(p => !selectedPanelIds.has(p.id)));
             setSelectedPanelIds(new Set());
           }
@@ -5083,7 +5094,11 @@ export default function DesignStudio({ project, onSave }: Props) {
 
           {selectedPanelIds.size > 0 ? (
             <button
-              onClick={() => { setPanels(prev => prev.filter(p => !selectedPanelIds.has(p.id))); setSelectedPanelIds(new Set()); }}
+              onClick={() => {
+                site.notePanelRemoval((panelsRef2.current ?? []).filter(p => selectedPanelIds.has(p.id)));
+                setPanels(prev => prev.filter(p => !selectedPanelIds.has(p.id)));
+                setSelectedPanelIds(new Set());
+              }}
               title="Delete Selected"
               className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition-all group relative"
             >

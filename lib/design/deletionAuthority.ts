@@ -57,6 +57,8 @@ export type DeletionScope =
   | 'section'
   /** one obstruction and its keep-out */
   | 'obstruction'
+  /** every marked obstruction at this property, and their keep-outs */
+  | 'obstructions'
   /** the panel layout only — geometry untouched */
   | 'panels'
   /** every hand-built roof face and section at this property */
@@ -65,7 +67,7 @@ export type DeletionScope =
   | 'design';
 
 export const DELETION_SCOPES: readonly DeletionScope[] = [
-  'face', 'section', 'obstruction', 'panels', 'customBuilding', 'design',
+  'face', 'section', 'obstruction', 'obstructions', 'panels', 'customBuilding', 'design',
 ] as const;
 
 export function isDeletionScope(v: unknown): v is DeletionScope {
@@ -85,6 +87,7 @@ export type DeletionCeremony = 'undoable' | 'confirm';
 
 export function ceremonyFor(scope: DeletionScope): DeletionCeremony {
   return scope === 'customBuilding' || scope === 'design' || scope === 'panels'
+      || scope === 'obstructions'
     ? 'confirm'
     : 'undoable';
 }
@@ -594,6 +597,7 @@ export function titleFor(scope: DeletionScope): string {
     case 'face':           return 'Delete roof face';
     case 'section':        return 'Delete building section';
     case 'obstruction':    return 'Delete obstruction';
+    case 'obstructions':   return 'Clear all obstructions';
     case 'panels':         return 'Clear panels';
     case 'customBuilding': return 'Clear custom building';
     default:               return 'Start over';
@@ -668,6 +672,17 @@ export function planDeletion(i: DeletionPlanInput): DeletionPlan {
         'Select an obstruction on the model and try again.');
     }
     obstructionIds = [o.id];
+  } else if (i.scope === 'obstructions') {
+    // 🚨 "CLEAR" IN THE OBSTRUCTION PANEL USED TO BE A RAW SETTER. No plan, no
+    // object list, no undo step, no tombstone, no save authorization, no toast —
+    // and it sat next to "Reset to 0.6x0.6x1.0m", so a person who opened the
+    // panel to fix ONE vent was a mis-click from wiping every vent, stack,
+    // skylight and chimney on the roof, with the autosave persisting the loss.
+    if (!obstructions.length) {
+      return refuse('obstructions', 'There are no obstructions to clear.',
+        'Mark one with the Obstruction tool first.');
+    }
+    obstructionIds = obstructions.map(o => o.id).filter(isId);
   } else if (i.scope === 'panels') {
     if (!panels.length) {
       return refuse('panels', 'There are no panels to clear.',
