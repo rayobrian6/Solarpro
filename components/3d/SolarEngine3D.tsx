@@ -1633,11 +1633,29 @@ function SolarEngine3D({
     });
   }, [lat, lng, lidar]);
 
-  // Lift Roofs / Flatten Roofs — sample LiDAR Z under each roof plane and
-  // update the plane's height. For v1 we log the action and surface a
-  // status message; the actual roofPlane mutation goes through a follow-up
-  // callback prop once the parent (DesignStudio) is wired to the LiDAR
-  // state (out of v1 scope).
+  // ── Lift Roofs / Flatten Roofs ──────────────────────────────────────────
+  //
+  // 🚨 THESE DO NOT WRITE ANYTHING, AND THEY NOW SAY SO.
+  //
+  // The comment that stood here said "the actual roofPlane mutation goes
+  // through a follow-up callback prop ... (out of v1 scope)", and that was
+  // honest about the code. The STATUS MESSAGE was not: it read "⤴ Lifted 4 of 4
+  // roof plane(s) to LiDAR-derived heights" while `updated` was a local that
+  // was counted and dropped. Nothing moved, nothing was written, and the next
+  // reload showed the same heights. An installer who trusted it would have
+  // designed on a roof they believed had been corrected.
+  //
+  // 🚨 WHY IT IS NOT SIMPLY WIRED UP NOW THAT A CHANNEL EXISTS.
+  // `onRoofGeometryReplaced` would carry it, but the value these compute is
+  // `planeHeightAtCenterMeters` — a field a touch audit found carrying FOUR
+  // mutually incompatible datums (a 0.0 sentinel, metres-above-ground,
+  // absolute orthometric metres, and a dataset-local LiDAR Z), whose only real
+  // consumer unconditionally treats it as relative-above-ground. The Z these
+  // produce is the dataset-local one, after `applyOffset`. Connecting them
+  // would ship a datum error into the permit rather than a feature.
+  //
+  // So they report what they measured and state plainly that nothing was
+  // changed. Saying "not yet" is a feature; saying "done" was a defect.
   const handleLiftRoofs = useCallback(() => {
     if (!lidar.state.dataset || !roofPlanes || roofPlanes.length === 0) {
       setStatusMsg('⤴ Lift Roofs: load LiDAR and have at least one roof plane first');
@@ -1648,8 +1666,13 @@ function SolarEngine3D({
     const changed = updated.filter(
       (p) => p.planeHeightAtCenterMeters !== beforeById.get(p.id),
     ).length;
-    addLog('LIDAR', `Lift Roofs: ${changed}/${updated.length} planes changed`);
-    setStatusMsg(`⤴ Lifted ${changed} of ${updated.length} roof plane(s) to LiDAR-derived heights`);
+    addLog('LIDAR', `Lift Roofs: measured ${changed}/${updated.length} planes — NOT APPLIED (see the note above this function)`);
+    setStatusMsg(
+      `⤴ Lift Roofs: LiDAR differs from ${changed} of ${updated.length} roof plane(s). ` +
+      'NOTHING HAS BEEN CHANGED — this measurement is not yet applied to the design, ' +
+      'because the height it produces is in the LiDAR frame, not the roof frame. ' +
+      'Set heights on the building section instead.',
+    );
   }, [lidar.state.dataset, lidar.state.offset, roofPlanes]);
 
   const handleFlattenRoofs = useCallback(() => {
@@ -1662,8 +1685,13 @@ function SolarEngine3D({
     const changed = updated.filter(
       (p) => p.planeHeightAtCenterMeters !== beforeById.get(p.id),
     ).length;
-    addLog('LIDAR', `Flatten Roofs: ${changed}/${updated.length} planes changed`);
-    setStatusMsg(`⤓ Flattened ${changed} of ${updated.length} roof plane(s) to median LiDAR height`);
+    addLog('LIDAR', `Flatten Roofs: measured ${changed}/${updated.length} planes — NOT APPLIED (see the note above this function)`);
+    setStatusMsg(
+      `⤓ Flatten Roofs: LiDAR differs from ${changed} of ${updated.length} roof plane(s). ` +
+      'NOTHING HAS BEEN CHANGED — this measurement is not yet applied to the design, ' +
+      'because the height it produces is in the LiDAR frame, not the roof frame. ' +
+      'Set heights on the building section instead.',
+    );
   }, [lidar.state.dataset, lidar.state.offset, roofPlanes]);
 
   // ── v66: Lift Roofs / Flatten Roofs for the 3D Primitives ────────────────
@@ -2061,6 +2089,14 @@ function SolarEngine3D({
       // handleBlockClick — abandoning a half-traced block by switching tools
       // used to leave its marker dots behind in the viewer.
       blockPtsRef.current = []; setBlockPtCount(0);
+      // 🚨 THE SECTION TOOLS WERE MISSING FROM THIS LIST. Every other
+      // in-progress buffer is cleared on a tool change; gable and hip were not,
+      // so clicking two corners, switching to Hip and switching back finalised
+      // a section whose first two corners came from the ABANDONED trace — a
+      // footprint nobody drew, silently accepted whenever it happened not to
+      // self-intersect.
+      gablePtsRef.current = []; setGablePtCount(0);
+      hipPtsRef.current = []; setHipPtCount(0);
       if (blockPreviewRef.current) {
         removeBlockPreviewEntity(viewerRef.current, blockPreviewRef.current);
         blockPreviewRef.current = null;
@@ -6572,22 +6608,11 @@ function SolarEngine3D({
         const ray = viewer.camera.getPickRay(screenPos);
         let startYWorld = startHeightM;
         if (ray) {
-          // Vertical line through centroidCart — find the highest Y the ray reaches
-          // Use the direction dot product of the ray direction with world up
-          const dir = ray.direction;
-          const upDot = dir.x * 0 + dir.y * 0 + dir.z * 1; // simple z-dot, fine for local heights
-          if (Math.abs(upDot) > 0.001) {
-            // t at which the ray's z equals the centroid's z
-            const t = (centroidCart.z - ray.origin.z) / upDot;
-            if (t > 0) {
-              const hitCart = new C.Cartesian3(
-                ray.origin.x + dir.x * t,
-                ray.origin.y + dir.y * t,
-                ray.origin.z + dir.z * t,
-              );
-              startYWorld = hitCart.z;
-            }
-          }
+          // Where the cursor sits along the block's OWN vertical, in metres from
+          // its centroid. See rayHeightAlongVertical for why the previous
+          // arithmetic could only ever return the centroid's own z.
+          const u0 = rayHeightAlongVertical(C, ray, centroidCart);
+          if (u0 != null) startYWorld = u0;
         }
         blockResizeRef.current = {
           blockEntity, handleEntity,
@@ -6608,15 +6633,9 @@ function SolarEngine3D({
       try {
         const ray = viewer.camera.getPickRay(event.endPosition);
         if (!ray) return;
-        const dir = ray.direction;
-        const upDot = dir.z;
-        if (Math.abs(upDot) < 0.001) return;
-        const t = (r.centroidCart.z - ray.origin.z) / upDot;
-        if (t <= 0) return;
-        const cursorYWorld = ray.origin.z + dir.z * t;
-        // New height = start height + (cursor delta in world Y)
-        const dyWorld = cursorYWorld - r.startYWorld;
-        const newHeightM = clampBlockHeight(r.startHeightM + dyWorld);
+        const u = rayHeightAlongVertical(C, ray, r.centroidCart);
+        if (u == null) return;
+        const newHeightM = clampBlockHeight(r.startHeightM + (u - r.startYWorld));
         // v65: the new line-trace block is a PolygonGraphics with extrudedHeight.
         // Update the prism's extrudedHeight so the walls stretch to the new height.
         if (r.blockEntity.polygon?.extrudedHeight) {
@@ -6632,9 +6651,16 @@ function SolarEngine3D({
         }
         // Update the handle's position to sit on top of the new prism
         // (handle is at eaveHeight + 0.3 to keep it visible above the top face)
+        // 🚨 A HEIGHT IS NOT AN ECEF Z. This kept the centroid's ECEF x and y
+        // — millions of metres — and replaced its z with a metres-above-ground
+        // number, so at 38.73 N the handle was written 3,969 km toward the
+        // equatorial plane and vanished on the first mouse-move. The drag then
+        // had nothing to hold. Rebuild it from the anchor's own lat/lng.
         if (r.handleEntity.position) {
+          const carto = C.Cartographic.fromCartesian(r.centroidCart);
+          const groundM = carto.height - r.startHeightM;
           r.handleEntity.position = new C.ConstantProperty(
-            new C.Cartesian3(r.centroidCart.x, r.centroidCart.y, newHeightM + 0.3),
+            C.Cartesian3.fromRadians(carto.longitude, carto.latitude, groundM + newHeightM + 0.3),
           );
         }
         blockHeightOverridesRef.current.set(r.blockEntity.id, newHeightM);
@@ -8738,6 +8764,43 @@ function SolarEngine3D({
     return (planes.find(p => p.id === planeId)?.sectionId || sectionIdOfFaceId(planeId)) === sid;
   }
 
+
+  /**
+   * How far along a point's LOCAL VERTICAL the cursor ray reaches, in metres.
+   *
+   * 🚨 THE OLD ARITHMETIC WAS AN EXACT NO-OP, AND IT IS WORTH SEEING WHY.
+   *
+   *     const t            = (centroid.z - ray.origin.z) / dir.z;
+   *     const cursorYWorld =  ray.origin.z + dir.z * t;
+   *
+   * Substituting `t` into the second line gives `ray.origin.z + (centroid.z -
+   * ray.origin.z)` — i.e. `centroid.z`, for EVERY cursor position. The
+   * block-height drag therefore computed the same number all the way through,
+   * `dyWorld` was 0, and the prism never moved while the status bar reported a
+   * height. An audit measured a residual of exactly 0.000e+0 m across 143
+   * simulated cursor positions.
+   *
+   * It was also measuring against ECEF z — the direction to the pole — rather
+   * than the local vertical, which is only "up" on the equator.
+   *
+   * This is the standard closest-approach between the cursor ray and the
+   * vertical line through the anchor, which is what dragging a vertical handle
+   * actually means.
+   */
+  function rayHeightAlongVertical(C: any, ray: any, anchor: any): number | null {
+    const up = C.Ellipsoid.WGS84.geodeticSurfaceNormal(anchor, new C.Cartesian3());
+    if (!up) return null;
+    const d = ray.direction;
+    const w0 = C.Cartesian3.subtract(ray.origin, anchor, new C.Cartesian3());
+    const b = C.Cartesian3.dot(d, up);
+    const denom = 1 - b * b;                 // |d| and |up| are both unit
+    if (Math.abs(denom) < 1e-6) return null; // looking straight along the handle
+    const dd = C.Cartesian3.dot(d, w0);
+    const ee = C.Cartesian3.dot(up, w0);
+    const u = (ee - b * dd) / denom;
+    return isFinite(u) ? u : null;
+  }
+
   function pickBuildingFaceAtScreen(viewer: any, C: any, screenPos: any): string | null {
     try {
       const hits = viewer.scene.drillPick(screenPos, 8) ?? [];
@@ -10049,8 +10112,33 @@ function SolarEngine3D({
         // Every refusal, not the first — an installer who fixes one thing and is
         // refused again for another has been told half the truth twice.
         const why = outcome.refusals.map(r => r.message).join(' ');
+        const codes = outcome.refusals.map(r => r.code);
+
+        // 🚨 AN UNRESOLVED GROUND ELEVATION IS NOT THE INSTALLER'S MISTAKE, AND
+        // IT MUST NOT COST THEM THE TRACE.
+        //
+        // `groundElevM` is NaN when the elevation service has not answered —
+        // deliberately, so the domain refuses rather than modelling the house
+        // at sea level. But the caller then threw the four traced corners away
+        // and said "Ground elevation has not resolved yet", which names a
+        // condition the user cannot influence and does not say what to do. They
+        // click four more corners and get the same sentence.
+        //
+        // The corners are kept (the caller does not clear them on `false`), and
+        // the message says what will make it work.
+        if (codes.includes('GROUND_ELEV_INVALID')) {
+          setStatusMsg(
+            '⏳ Your four corners are saved. The ground elevation for this property has not ' +
+            'come back yet, and a roof built without it would sit at sea level. ' +
+            'Wait a moment and click the last corner again, or move the map slightly ' +
+            'to re-request it.',
+          );
+          addLog('SECTION', 'refused: GROUND_ELEV_INVALID (trace kept)');
+          return false;
+        }
+
         setStatusMsg(`⚠️ ${kind === 'gable' ? 'Gable' : 'Hip'} not built — ${why || 'the traced corners do not describe a roof.'}`);
-        addLog('SECTION', `refused: ${outcome.refusals.map(r => r.code).join(',') || 'NO_FACES'}`);
+        addLog('SECTION', `refused: ${codes.join(',') || 'NO_FACES'}`);
         return false;
       }
 
