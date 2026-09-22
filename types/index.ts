@@ -375,6 +375,50 @@ export interface SolarApiSegment {
 }
 
 // ─── Roof Plane ─────────────────────────────────────────────────────────────
+/**
+ * THE PERSISTED RECORD OF A BUILDING SECTION.
+ *
+ * A section is the editing unit between a project and a roof face: one simple
+ * mass (a house, a garage, a rear addition) that owns SEVERAL faces which move
+ * together. See lib/3d/buildingSection.ts for the domain and the construction.
+ *
+ * 🚨 IT LIVES ON THE FACES, AND THAT IS NOT A SECOND SOURCE OF TRUTH.
+ * Every face of a section carries an identical copy of this record, written
+ * atomically by one function. There is no other store for it to disagree with;
+ * this is a storage encoding, not a rival authority. It rides inside the
+ * existing layouts.roof_planes JSONB — no migration, and no new column that
+ * would survive an address change while the geometry around it moved.
+ * sectionsFromPlanes() REFUSES a section whose copies disagree rather than
+ * picking one, so the encoding cannot quietly become two answers.
+ */
+export interface RoofSectionRecord {
+  /** Stable identity. Face ids are derived from it, and panels hang off those. */
+  id: string;
+  kind: RoofSectionKind;
+  /** The PLAN footprint, traced order, open ring. Canonical, never render-offset. */
+  footprint: { lat: number; lng: number }[];
+  /** Eave height above local ground, metres. */
+  eaveHeightM: number;
+  /** The pitch the installer ASKED for. Each face reports what it actually is. */
+  pitchDeg: number;
+  /** Local ground elevation, metres. Never defaulted to 0 — see the domain. */
+  groundElevM: number;
+  /** 'shed' only: the downslope bearing. */
+  shedAzimuthDeg?: number | null;
+  /** 'gable' / 'hip' only. 'auto' means the longer edge pair. */
+  ridgeAxis?: RoofSectionRidgeAxis;
+  /** Which physical property this belongs to. See lib/siteIdentity.ts. */
+  siteKey?: string;
+  /** What the installer calls it: "House", "Garage", "Rear addition". */
+  label?: string;
+  createdAtIso?: string;
+  source?: 'user-traced';
+}
+
+export type RoofSectionKind = 'gable' | 'hip' | 'shed' | 'flat';
+export type RoofSectionRidgeAxis = 'auto' | 'long' | 'short';
+export type RoofSectionFaceKey = 'slopeA' | 'slopeB' | 'hipEndA' | 'hipEndB' | 'deck';
+
 export interface RoofPlane {
   id: string;
   vertices: { lat: number; lng: number }[];
@@ -454,6 +498,21 @@ export interface RoofPlane {
   normal3D?: { x: number; y: number; z: number };     // ECEF unit normal (outward)
   polygon3D?: Array<{ x: number; y: number; z: number }>; // ECEF corners in order
   createdFrom3D?: boolean;   // true when plane was created by 3D point picking (not 2D draw)
+
+  /** WHICH BUILDING SECTION THIS FACE BELONGS TO, if any.
+   *
+   *  Absent means the face was traced by hand and belongs to no section, which
+   *  stays entirely legal — Mark Plane has always produced standalone faces.
+   *  Present means the face is DERIVED from `section` and is rebuilt from it:
+   *  editing the pitch of a section-owned face edits the SECTION, and all of
+   *  its faces move together. That is the whole point of the noun. */
+  sectionId?: string;
+  /** Which face of that section this is. Faces are identified as
+   *  sectionId + '::' + sectionFaceKey, deterministically, so a rebuild keeps
+   *  the id and the panels standing on it are not orphaned. */
+  sectionFaceKey?: RoofSectionFaceKey;
+  /** The section's own record, copied onto every face it owns. See RoofSectionRecord. */
+  section?: RoofSectionRecord;
 
   // v47.128 -- ECEF frame axes (unit vectors in ECEF space, not ENU tangent space)
   // Stored alongside localFrame3D so buildSurfaceGrid can use pure ECEF arithmetic.

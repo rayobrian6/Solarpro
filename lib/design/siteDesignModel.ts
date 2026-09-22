@@ -71,6 +71,7 @@
 
 import type { PlacedPanel, RoofPlane, PlacedObstruction, LayoutMeasurement, DesignElectrical } from '@/types';
 import { siteKeyFromCoords, isSameSite, partitionBySite, UNRESOLVED_SITE_KEY, type SiteOwned } from '@/lib/siteIdentity';
+import { parseNativeGeometryMap, type NativeGeometryMap } from '@/lib/design/nativeGeometryDisposition';
 
 export { siteKeyFromCoords, isSameSite, UNRESOLVED_SITE_KEY };
 
@@ -185,10 +186,14 @@ export interface SiteDesignState {
   activeSiteKey: string;
   active: SiteDesignBundle;
   archives: Record<string, SiteDesignBundle>;
+  /** Which geometry governs each property, keyed by siteKey. Absent key means
+   *  'undecided'. Kept beside the archives rather than inside a bundle so the
+   *  ACTIVE property's decision persists too — see StoredSiteArchives. */
+  nativeGeometry?: NativeGeometryMap;
 }
 
 export function emptyState(activeSiteKey = UNRESOLVED_SITE_KEY): SiteDesignState {
-  return { version: SITE_ARCHIVE_VERSION, activeSiteKey, active: emptyBundle(), archives: {} };
+  return { version: SITE_ARCHIVE_VERSION, activeSiteKey, active: emptyBundle(), archives: {}, nativeGeometry: {} };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -491,6 +496,22 @@ export interface StoredSiteArchives {
    *  whether the active columns are this property's or the last one's. */
   activeSiteKey: string;
   sites: Record<string, SiteDesignBundle>;
+  /**
+   * WHICH GEOMETRY GOVERNS EACH PROPERTY. See lib/design/nativeGeometryDisposition.ts.
+   *
+   * 🚨 IT LIVES AT THE TOP LEVEL, NOT IN A BUNDLE, and that is load-bearing.
+   * `toPersistencePayload` writes `sites: state.archives` — the ARCHIVED
+   * bundles only — so a field added to `SiteDesignBundle` persists for every
+   * property except the one currently on screen. A decision about the ACTIVE
+   * property is precisely the one that must survive, so it cannot go there.
+   * (That hole is why `designElectrical` needed its own column.)
+   *
+   * 🚨 A REJECTION IS NOT AN ENTITY, so ARCHIVE-NEVER-CLEAR does not cover it:
+   * clearing the bad planes made the bundle empty, `hasContent` returned false,
+   * and the archive was PRUNED — taking the rejection with it. Keyed by siteKey
+   * up here, the judgement outlives the entities it was a judgement about.
+   */
+  nativeGeometry?: NativeGeometryMap;
 }
 
 /** What the client sends, and what the layout route persists. The active
@@ -514,6 +535,11 @@ export function toPersistencePayload(state: SiteDesignState): SitePersistencePay
       version: SITE_ARCHIVE_VERSION,
       activeSiteKey: state.activeSiteKey,
       sites: state.archives,
+      // The provider judgement for EVERY property this project has touched,
+      // including the active one — which is the whole reason it is not a
+      // bundle field. Always emitted, so clearing the last decision is
+      // expressible as {} rather than indistinguishable from 'not written'.
+      nativeGeometry: state.nativeGeometry ?? {},
     },
   };
 }
@@ -555,7 +581,15 @@ export function parseStoredArchives(raw: unknown): StoredSiteArchives | null {
       sites[k] = coerceBundle(v);
     }
   }
-  return { version: SITE_ARCHIVE_VERSION, activeSiteKey: o.activeSiteKey, sites };
+  // 🚨 THIS FUNCTION REBUILDS THE OBJECT, so anything not named here is
+  // DISCARDED on read. A new top-level field that is written but not parsed
+  // round-trips as absent and looks exactly like a feature that never ran.
+  return {
+    version: SITE_ARCHIVE_VERSION,
+    activeSiteKey: o.activeSiteKey,
+    sites,
+    nativeGeometry: parseNativeGeometryMap(o.nativeGeometry),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

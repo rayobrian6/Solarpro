@@ -328,3 +328,81 @@ export function roofPlaneFromFootprint(
     slopeAreaM2: plane.area,
   };
 }
+
+/**
+ * Build a RoofPlane from an outline whose vertices already carry EXPLICIT
+ * heights above local ground.
+ *
+ * WHY THIS EXISTS, ALONGSIDE THE TWO ABOVE
+ * ----------------------------------------
+ * `roofPlaneFromFootprint` derives heights from a pitch. `...AndRidge` derives
+ * them from one ridge line. Neither can express a HIP END: a triangle whose
+ * apex is a single point on the ridge, not a segment of it. Passing a
+ * zero-length ridge to `...AndRidge` is rejected (correctly) as a mis-click.
+ *
+ * A building SECTION needs all of its faces to close on one ridge at one
+ * height, so the section computes the height of every corner ONCE and every
+ * one of its faces — gable slopes, hip trapezoids, hip-end triangles — is
+ * built here from those numbers. One construction rule per section is what
+ * makes the ridge shut; deriving each face independently is what tore it open.
+ *
+ * The plane's pitch and azimuth are NOT pinned to a requested value here. They
+ * come back from `buildRoofPlane3D`'s fit, i.e. from the geometry as built. A
+ * section records what the installer ASKED for; each face reports what it
+ * actually IS. On a true rectangle those agree; on a trapezoid they do not,
+ * and the honest answer is the fitted one.
+ *
+ * @param outline  Corners in order, open ring. lat/lng only.
+ * @param heightsM Height of each corner ABOVE LOCAL GROUND, same order/length.
+ * @param groundElevM Local ground elevation, metres.
+ */
+export function roofPlaneFromLiftedOutline(
+  outline: readonly { lat: number; lng: number }[],
+  heightsM: readonly number[],
+  groundElevM: number,
+): FootprintPlaneResult | null {
+  if (!outline || outline.length < 3) return null;
+  if (!heightsM || heightsM.length !== outline.length) return null;
+  if (!isFinite(groundElevM)) return null;
+  for (const h of heightsM) if (!isFinite(h)) return null;
+  for (const v of outline) if (!isFinite(v.lat) || !isFinite(v.lng)) return null;
+
+  // Reject a degenerate ring before the fit: a face under half a metre across
+  // is a mis-click, not a roof. Same threshold as the two functions above, and
+  // measured the same way — in the local tangent plane, in metres.
+  let sumLat = 0, sumLng = 0;
+  for (const v of outline) { sumLat += v.lat; sumLng += v.lng; }
+  const cLat = sumLat / outline.length;
+  const cLng = sumLng / outline.length;
+  const cosLat = Math.cos(cLat * DEG);
+  const mLng = M_PER_DEG_LAT * (cosLat > 0.01 ? cosLat : 1);
+  let minE = Infinity, maxE = -Infinity, minN = Infinity, maxN = -Infinity;
+  for (const v of outline) {
+    const e = (v.lng - cLng) * mLng;
+    const n = (v.lat - cLat) * M_PER_DEG_LAT;
+    if (e < minE) minE = e; if (e > maxE) maxE = e;
+    if (n < minN) minN = n; if (n > maxN) maxN = n;
+  }
+  if (!(Math.max(maxE - minE, maxN - minN) > 0.5)) return null;
+
+  const pts3D = outline.map((v, i) => latLngToECEF(v.lat, v.lng, groundElevM + heightsM[i]));
+
+  let plane: RoofPlane;
+  let frame: Plane3DFrame;
+  try {
+    // Same two calls, same order, as every other path in this module.
+    frame = computePlaneFromPoints3D(pts3D);
+    plane = buildRoofPlane3D(pts3D);
+  } catch {
+    return null;
+  }
+
+  const azR = normalizeAzimuth(plane.azimuth) * DEG;
+  return {
+    plane,
+    frame,
+    liftedPts: pts3D,
+    eaveDirENU: { x: Math.cos(azR), y: -Math.sin(azR) },
+    slopeAreaM2: plane.area,
+  };
+}

@@ -58,6 +58,17 @@ export const SIGNED_FIELDS = [
   // because the address moved, actually schedules a save — otherwise ownership
   // would be recomputed from scratch on every reload and never persisted.
   'siteKey',
+  // 🚨 THE BUILDING SECTION THIS FACE BELONGS TO, and the section's own record.
+  //
+  // Both are signed because a section is edited by rebuilding its faces, and
+  // some of those edits move NO signed geometry. Renaming "Garage" to "Shop",
+  // or flipping ridgeAxis on a section whose footprint is square, changes
+  // `section` and nothing else — and an unsigned field never schedules a save,
+  // so the rename would be gone on reload with no error anywhere. `sectionId`
+  // is signed separately so that RE-PARENTING a face is saved even when the
+  // section record it moves to is byte-identical to the one it left.
+  'sectionId',
+  'section',
 ] as const satisfies readonly (keyof RoofPlane)[];
 
 export type SignedField = (typeof SIGNED_FIELDS)[number];

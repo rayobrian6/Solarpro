@@ -28,6 +28,10 @@
  */
 
 import { buildRoofPlane3D, latLngToECEF } from '@/lib/roofPlane3D';
+import {
+  nativeAcquisitionPermitted,
+  type NativeGeometryDisposition,
+} from '@/lib/design/nativeGeometryDisposition';
 import type { RoofPlane } from '@/types';
 
 /** The shape Lane A consumes. This is `RoofSegment` as lib/digitalTwin.ts emits
@@ -226,6 +230,13 @@ export interface LaneAGateInput {
   restoreResolved: boolean;
   siteKey: string;
   lastRanSiteKey: string | null;
+  /**
+   * What the installer has decided about this property's native geometry.
+   * Optional so every existing caller and test keeps compiling; absent is read
+   * as `undecided`, which is exactly the behaviour before this existed.
+   * See lib/design/nativeGeometryDisposition.ts.
+   */
+  nativeDisposition?: NativeGeometryDisposition;
 }
 
 /**
@@ -248,6 +259,16 @@ export function shouldRunLaneA(i: LaneAGateInput): boolean {
   if (!i.groundElevResolved) return false;
   if (!i.restoreResolved) return false;
   if (i.segmentCount <= 0) return false;
+  // 🚨 A JUDGEMENT OUTRANKS A PLANE COUNT, and must be checked even when the
+  // count is zero — because clearing the bad planes IS how the installer says
+  // no. Before this, "Draw Manually Instead" emptied the array, the empty
+  // bundle was pruned rather than archived, and the next 2D map pan of more
+  // than ~12 m produced a new site key, satisfied every remaining condition,
+  // and re-injected the exact planes that had just been rejected. No address
+  // change required. `existingPlaneCount` cannot express a decision; it can
+  // only observe a consequence, and the consequence is what the rejection
+  // removes.
+  if (!nativeAcquisitionPermitted(i.nativeDisposition ?? 'undecided')) return false;
   if (i.existingPlaneCount !== 0) return false;
   if (!i.siteKey) return false;
   if (i.lastRanSiteKey === i.siteKey) return false;

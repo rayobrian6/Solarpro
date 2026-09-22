@@ -67,6 +67,7 @@ import { localSaveLayout } from '@/lib/clientStorage';
 import { layoutSignature } from '@/lib/roofPlanesSignature';
 import { siteKeyFromCoords, isSameSite, coordKeyOf, isPlaceholderCoords, PLACEHOLDER_LAT, PLACEHOLDER_LNG } from '@/lib/siteIdentity';
 import { archivesSignature, sitesAreSameProperty } from '@/lib/design/siteDesignModel';
+import { planAerialAdoption } from '@/lib/design/aerialAdoption';
 import { useSiteDesign } from './useSiteDesign';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
@@ -1935,8 +1936,30 @@ export default function DesignStudio({ project, onSave }: Props) {
         toast.info('No aerial coverage here', data.message || 'Use Solar API or draw the roof manually.');
         return;
       }
-      const planes = data.planes as RoofPlane[];
-      setRoofPlanes(planes);
+      // 🚨 THIS USED TO BE `setRoofPlanes(planes)`, UNCONDITIONALLY.
+      //
+      // One click, no merge, no guard, no confirmation, no undo — and the
+      // autosave persisted it three seconds later. An installer who spent an
+      // hour tracing a roof and then pressed this button to COMPARE lost all of
+      // it from inside the studio. The Google path beside it already merged by
+      // id; this one did not. The rule now lives in one tested place
+      // (lib/design/aerialAdoption.ts) instead of at the call site.
+      const adoption = planAerialAdoption({
+        existing: roofPlanesRef.current,
+        incoming: data.planes as RoofPlane[],
+        siteKey: activeSiteKeyRef.current || undefined,
+        panelledPlaneIds: Array.from(new Set(
+          (panelsRef2.current ?? []).map(p => p.planeId).filter(Boolean) as string[],
+        )),
+      });
+      if (!adoption.ok) {
+        // A refusal is a NO-OP. Nothing is written, and the operator is told
+        // exactly what stopped it and what they can do about it.
+        setSolarApiStatus('idle');
+        toast.error('Aerial detect did not replace your roof', adoption.refusals[0].message);
+        return;
+      }
+      setRoofPlanes(adoption.planes);
       setSolarApiStatus('loaded');
       if (data.resolved?.address) setSolarDataAddress(data.resolved.address);
 
@@ -1954,9 +1977,9 @@ export default function DesignStudio({ project, onSave }: Props) {
         const typeCounts: Record<string, number> = {};
         for (const o of fetchedObs) typeCounts[o.type] = (typeCounts[o.type] || 0) + 1;
         const summary = Object.entries(typeCounts).map(([t, c]) => `${c} ${t}${c !== 1 ? 's' : ''}`).join(', ');
-        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''}, ${fetchedObs.length} obstruction${fetchedObs.length !== 1 ? 's' : ''} (${summary})${cropNote} · review & confirm`);
+        toast.success('🛰️ Roof detected from aerial', `${adoption.planes.length} plane${adoption.planes.length !== 1 ? 's' : ''}, ${fetchedObs.length} obstruction${fetchedObs.length !== 1 ? 's' : ''} (${summary})${cropNote} · review & confirm`);
       } else {
-        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap${cropNote} · review pitch & azimuth, then confirm`);
+        toast.success('🛰️ Roof detected from aerial', `${adoption.planes.length} plane${adoption.planes.length !== 1 ? 's' : ''} from Nearmap${cropNote} · review pitch & azimuth, then confirm`);
       }
     } catch (e) {
       setSolarApiStatus('unavailable');
