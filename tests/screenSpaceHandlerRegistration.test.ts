@@ -196,3 +196,139 @@ describe('Building-mode face selection reports the scope it actually moved to', 
     expect(upTo).toMatch(/drilledGroupKeyRef\.current = null/);
   });
 });
+
+describe('a drag must not strand the click suppression flag', () => {
+  /**
+   * 🚨 Cesium synthesises LEFT_CLICK only when the pointer moved no more than
+   * `_clickPixelTolerance` (5) px between down and up. A gesture that sets
+   * `suppressClickRef` at the END of a real drag therefore sets a flag that
+   * nothing will ever consume, and the guard at the top of the LEFT_CLICK
+   * handler silently eats the user's NEXT click — in whatever mode they are in.
+   *
+   * The panel-array grab has always had this shape. Making the block-height
+   * drag reachable added a second instance. Both are fixed by clearing the flag
+   * on a fresh LEFT_DOWN: by then, any suppression from an earlier gesture is
+   * stale by definition.
+   */
+  const SRC = stripComments(readFileSync(SRC_PATH, 'utf8'));
+
+  it('Cesium really does gate LEFT_CLICK on a pixel tolerance', async () => {
+    // Proved against the installed build rather than asserted, because the whole
+    // fix rests on it. If a future Cesium always synthesised LEFT_CLICK, the
+    // stranding could not happen and this guard would deserve re-examining.
+    const C: any = await import('cesium');
+    const canvas = document.createElement('canvas');
+    const h: any = new C.ScreenSpaceEventHandler(canvas);
+    expect(typeof h.constructor.mouseEmulationIgnoreMilliseconds === 'number'
+        || typeof (C.ScreenSpaceEventHandler as any).mouseEmulationIgnoreMilliseconds === 'number'
+        || '_clickPixelTolerance' in h,
+      'ScreenSpaceEventHandler no longer exposes a click tolerance — re-verify the premise',
+    ).toBe(true);
+    if ('_clickPixelTolerance' in h) {
+      expect(h._clickPixelTolerance).toBeGreaterThan(0);
+    }
+  });
+
+  it('🚨 a fresh LEFT_DOWN clears suppressClickRef before anything else', () => {
+    // 🚨 SCOPED TO THE LEFT_DOWN HANDLER, AND THAT SCOPE IS THE WHOLE GUARD.
+    // A first version searched the whole of setupClickHandler for a
+    // `suppressClickRef.current = false` occurring before `blockResizeDown` —
+    // and the LEFT_CLICK handler's own CONSUME line (`if (suppressClickRef...)
+    // { suppressClickRef.current = false; return; }`) sits earlier in the
+    // function and satisfied it. Mutation-checked against the pre-fix blob: the
+    // guard PASSED on the broken code. It now looks only inside the handler
+    // that must do the clearing.
+    const body = functionBody(SRC, 'setupClickHandler');
+    const blockDown = body.indexOf('blockResizeDown(event)');
+    expect(blockDown, 'the LEFT_DOWN handler was not found').toBeGreaterThan(-1);
+    const handlerStart = body.lastIndexOf('handler.setInputAction(', blockDown);
+    expect(handlerStart, 'could not find the registration that owns blockResizeDown').toBeGreaterThan(-1);
+    const downHandler = body.slice(handlerStart, blockDown);
+    // Nothing from the LEFT_CLICK handler can be in this slice: it ends AT the
+    // block-handle call and starts at that registration's own opening.
+    expect(downHandler).not.toContain('ScreenSpaceEventType.LEFT_CLICK');
+    expect(downHandler, 'a fresh press must void any stale click suppression')
+      .toMatch(/suppressClickRef\.current = false/);
+  });
+
+  it('an abandoned block drag cannot survive a tool change', () => {
+    // arrayManipRef is reset on tool change with a comment naming the bug
+    // ("never leave the camera frozen"). blockResizeRef was omitted while the
+    // drag was dead code; it is reachable now, and its only other clear is
+    // inside blockResizeUp's own finally — which an abandoned drag never reaches.
+    // 🚨 ANCHORED ON CODE, NOT ON THE COMMENT NEXT TO IT. The first version of
+    // this guard sliced from the string 'never leave the camera frozen on tool
+    // change' — which is COMMENT PROSE, and `stripComments` blanks it, so the
+    // anchor did not exist in the text being searched. Anchoring a guard on
+    // documentation is a defect class this repo has been bitten by repeatedly.
+    const anchor = SRC.indexOf('if (dragRef.current) dragRef.current = null;');
+    expect(anchor, 'the tool-change reset was not found').toBeGreaterThan(-1);
+    const reset = SRC.slice(anchor, anchor + 900);  // stripComments keeps blanked lines as whitespace
+    expect(reset, 'an abandoned block drag must be cleared on tool change')
+      .toMatch(/blockResizeRef\.current = null/);
+    expect(reset, 'the existing resets must still be there')
+      .toMatch(/arrayManipRef\.current = false/);
+    expect(reset).toMatch(/suppressClickRef\.current = false/);
+  });
+});
+
+describe('exactly one selection is live at a time, in BOTH directions', () => {
+  /**
+   * The face branches already cleared the panel selection. Neither panel branch
+   * cleared the FACE, and neither did Escape — and a selected face is not inert:
+   * the Walls/Pitch chip keeps reading "THIS face" and `applyBuildingShape` is
+   * still scoped to it, so the next press edits a face the user stopped pointing
+   * at several clicks ago.
+   */
+  const SRC = stripComments(readFileSync(SRC_PATH, 'utf8'));
+
+  /**
+   * ONLY the branches that run when a panel WAS hit.
+   *
+   * 🚨 A first version sliced from `const picked = pickPanelAtScreen(...)`,
+   * which also swallowed the NO-HIT block above it — and that block has always
+   * contained `selectRoofFace(null)` for the click-empty-space case. Mutation-
+   * checked against the pre-fix blob: the guard PASSED on the broken code. The
+   * slice now starts after the no-hit block returns.
+   */
+  function panelBranches(): string {
+    const start = SRC.indexOf('const panel    = panelsRef.current.find(p => p.id === foundId)');
+    const end = SRC.indexOf('function arrayCentroidECEF(', start);
+    expect(start, 'panel-hit anchor not found').toBeGreaterThan(-1);
+    expect(end, 'end anchor not found').toBeGreaterThan(start);
+    const slice = SRC.slice(start, end);
+    // The no-hit block must be outside this slice, or the guard is vacuous.
+    expect(slice).not.toContain('pickRoofFaceAtScreen');
+    expect(slice).not.toContain("setStatusMsg('Selection cleared')");
+    return slice;
+  }
+
+  it('a panel hit clears the face selection', () => {
+    const branches = panelBranches();
+    // Before the drilled-in branch, so BOTH the single-panel and whole-array
+    // paths are covered by one statement rather than two that can drift.
+    const clear = branches.indexOf('selectRoofFace(null)');
+    const drilled = branches.indexOf('drilledGroupKeyRef.current === groupKey');
+    expect(clear, 'a panel hit must clear the roof-face selection').toBeGreaterThan(-1);
+    expect(drilled).toBeGreaterThan(-1);
+    expect(clear, 'it must run before the branch split, so it covers both paths')
+      .toBeLessThan(drilled);
+  });
+
+  it('Escape clears the face selection too', () => {
+    // Anchored on the cancel-everything block's own code, not on its comments.
+    const esc = SRC.indexOf("e.key === 'Escape'");
+    expect(esc, 'the Escape handler was not found').toBeGreaterThan(-1);
+    const body = SRC.slice(esc, esc + 1_400);
+    expect(body).toMatch(/clearPanelSelection\(\)/);
+    expect(body, 'Escape must also drop the roof-face selection').toMatch(/selectRoofFace\(null\)/);
+  });
+
+  it('clearPanelSelection stays panel-only — the fix is at the call sites', () => {
+    // Widening clearPanelSelection to also drop the face would silently change
+    // eight call sites, including ones that deliberately keep a face selected
+    // while re-selecting panels. The name would then lie about its scope.
+    const fn = functionBody(SRC, 'clearPanelSelection');
+    expect(fn).not.toMatch(/selectRoofFace/);
+  });
+});

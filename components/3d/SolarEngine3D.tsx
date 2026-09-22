@@ -1976,6 +1976,13 @@ function SolarEngine3D({
       // half-open (which would keep camera left-drag disabled).
       hideRotateHandle();
       if (dragRef.current) dragRef.current = null;
+      // 🚨 blockResizeRef BELONGS IN THIS LIST. It was omitted while the block
+      // height drag was dead code and could never be set; it is reachable now.
+      // An abandoned drag would otherwise survive a tool change, keep
+      // swallowing MOUSE_MOVE and LEFT_UP in the new tool, and — because the
+      // only place it is cleared is blockResizeUp's own `finally` — never
+      // release. `arrayManipRef` is already reset here for exactly this reason.
+      if (blockResizeRef.current) blockResizeRef.current = null;
       suppressClickRef.current = false;
       arrayManipRef.current = false; // never leave the camera frozen on tool change
       // v47.131 Issue 2: Reset plane frame state on every tool change.
@@ -6524,6 +6531,22 @@ function SolarEngine3D({
     // (a selected panel) → move it on its plane. Camera left-drag is disabled for
     // the duration so the globe doesn't orbit underneath.
     handler.setInputAction((event: any) => {
+      // 🚨 A NEW PRESS VOIDS ANY STALE CLICK SUPPRESSION.
+      //
+      // `suppressClickRef` is set at the END of a drag to swallow the trailing
+      // LEFT_CLICK — but Cesium only SYNTHESISES that LEFT_CLICK when the
+      // pointer moved no more than `_clickPixelTolerance = 5` px between down
+      // and up (verified in the installed Cesium). A real drag moves far more,
+      // so no LEFT_CLICK is ever delivered, nothing consumes the flag, and the
+      // user's NEXT click — in whatever mode they are in — is silently thrown
+      // away by the guard at the top of the LEFT_CLICK handler.
+      //
+      // The panel-array grab has always had this shape; making the block-height
+      // drag reachable added a second instance of it. Clearing here fixes both:
+      // by the time a fresh press arrives, any suppression left over from an
+      // earlier gesture is stale by definition. The flag set later in THIS
+      // gesture is still consumed normally by the LEFT_CLICK that may follow it.
+      suppressClickRef.current = false;
       // Block height handles are checked first and in EVERY mode — the block is
       // traced in `block` mode, so a mode guard here would make its own handle
       // unreachable. If it took the event, blockResizeRef is set and the array
@@ -8436,6 +8459,18 @@ function SolarEngine3D({
       const groupKey = groupKeyOf(panel);
       const RED = new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92));
 
+      // 🚨 ONE SELECTION AT A TIME, IN BOTH DIRECTIONS.
+      //
+      // Both face branches above clear the panel selection. Neither panel branch
+      // below cleared the FACE, so selecting a face and then clicking a panel
+      // left both live — and the face is not inert while selected: the scope
+      // chip keeps reading "THIS face", and `applyBuildingShape` is still scoped
+      // to it, so the next Walls/Pitch press edits a face the user stopped
+      // pointing at several clicks ago. Nothing else clears it either: Escape
+      // calls `clearPanelSelection`, which is panel-only by name and by body,
+      // and the tool-change reset does not touch it.
+      selectRoofFace(null);
+
       // Drilled INTO this array → a click selects just the one clicked panel.
       if (drilledGroupKeyRef.current && drilledGroupKeyRef.current === groupKey) {
         clearPanelSelection();
@@ -9021,6 +9056,13 @@ function SolarEngine3D({
           cancelGroundArray();
         }
         clearPanelSelection();
+        // 🚨 AND THE FACE. Escape is the product's cancel-everything key — it
+        // drops ground arrays, panel selection, the measure/row/plane point
+        // buffers, an in-progress Block trace and the ghost panel. It did not
+        // clear the roof-face selection, which is not inert: the Walls/Pitch
+        // chip keeps reading "THIS face" and `applyBuildingShape` stays scoped
+        // to it, so "I pressed Escape" left a live edit target behind.
+        selectRoofFace(null);
         measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay();
         rowPtsRef.current = []; setRowPtCount(0); rowStartScreenPosRef.current = null;
         planePtsRef.current = []; setPlanePtCount(0);
