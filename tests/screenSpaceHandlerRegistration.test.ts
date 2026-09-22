@@ -34,6 +34,15 @@ import { stripComments } from './support/stripSource';
 const SRC_PATH = join(__dirname, '..', 'components', '3d', 'SolarEngine3D.tsx');
 
 describe('Cesium: the behaviour this whole guard exists for', () => {
+  // 🚨 60s, AND THE REASON MATTERS. This is the only test in the file that
+  // imports the REAL Cesium, which is a very large module. Alone it finishes in
+  // under three seconds; inside a loaded full-suite run (`--maxWorkers 3`) the
+  // import has been measured at 22s and blew the 10s default — a failure that
+  // says nothing about Cesium and everything about how busy the machine was.
+  //
+  // A load-sensitive timeout is worse than a slow test: it fails in the full
+  // run and passes on the immediate re-run, which teaches everyone to re-run
+  // rather than read. Raised deliberately rather than left to be re-rolled.
   it('setInputAction REPLACES a previous action for the same event type', async () => {
     // Proved against the real installed Cesium rather than asserted, so that a
     // future Cesium that changed to an append model would fail here loudly
@@ -51,7 +60,7 @@ describe('Cesium: the behaviour this whole guard exists for', () => {
     // 🚨 The first action is GONE — not queued behind the second.
     expect(h.getInputAction(C.ScreenSpaceEventType.LEFT_DOWN)).toBe(second);
     expect(h.getInputAction(C.ScreenSpaceEventType.LEFT_DOWN)).not.toBe(first);
-  });
+  }, 60_000);
 
   it('a modifier makes it a DIFFERENT slot — so SHIFT+LEFT_CLICK is not a duplicate', () => {
     // The guard below must not fire on the legitimate
