@@ -223,6 +223,17 @@ export interface UseSiteDesign {
    * deadlocked and BOTH deletions were lost on reload.
    */
   notePanelRemoval: (removed: Array<{ id?: string; systemType?: string }>) => void;
+  /**
+   * Record the design BEFORE something removes panels that no delete control
+   * asked for.
+   *
+   * 🚨 PLACING AN OBSTRUCTION EATS PANELS, AND IT WAS NOT UNDOABLE. Marking a
+   * vent culls every module inside its footprint — correct, it is physically
+   * there — and there was no history step, so a mis-placed vent cost the array
+   * permanently: deleting the vent did not bring the modules back, and the only
+   * recovery was a full re-layout, which destroys every manual adjustment.
+   */
+  recordPanelCull: (label: string) => void;
   /** The authorization for the NEXT save, or null. Read by the save paths. */
   pendingDestructive: () => DestructiveAuthorization | null;
   /** Consume it — called once the save that carried it has SUCCEEDED. A failed
@@ -889,6 +900,20 @@ export function useSiteDesign(): UseSiteDesign {
     };
   }, []);
 
+  const recordPanelCull = useCallback<UseSiteDesign['recordPanelCull']>((label) => {
+    writeHistory(pushSnapshot(
+      geometryHistoryRef.current, label, roofPlanesRef.current, null,
+      nativeDispositionRef.current,
+      deletionLedgerRef.current,
+      // The panels are the point: they are what is about to go, and nothing can
+      // recompute them from a roof that did not change.
+      panelsRef.current,
+      placedObstructionsRef.current,
+      measurementsRef.current,
+    ));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const notePanelRemoval = useCallback<UseSiteDesign['notePanelRemoval']>((removed) => {
     const list = (Array.isArray(removed) ? removed : []).filter(Boolean);
     if (list.length === 0) return;
@@ -952,7 +977,7 @@ export function useSiteDesign(): UseSiteDesign {
     redoGeometryLabel: redoLabel(geometryHistory),
     deletionLedger, deletionLedgerRef,
     planDelete, applyDelete,
-    notePanelRemoval, pendingDestructive, clearPendingDestructive,
+    notePanelRemoval, recordPanelCull, pendingDestructive, clearPendingDestructive,
     forgetDeletions,
     geometryLifecycle, geometryLifecycleRef,
     admitGeometry, admitPlacedObstructions,

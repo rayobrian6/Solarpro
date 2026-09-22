@@ -620,6 +620,17 @@ interface Props {
    */
   onRunShadeAnalysis?: () => void;
   /**
+   * SOMETHING IS ABOUT TO REMOVE PANELS THAT NO DELETE CONTROL ASKED FOR.
+   *
+   * 🚨 MARKING A VENT COST THE ARRAY PERMANENTLY. Placing an obstruction culls
+   * every module inside its footprint — right, it is physically there — with no
+   * history step, so a mis-placed vent was unrecoverable: deleting the vent did
+   * not bring the modules back and the only route was a full re-layout, which
+   * destroys every manual adjustment. The owner asked to be able to experiment
+   * aggressively; this is one of the places that punished it.
+   */
+  onPanelsAboutToBeCulled?: (label: string) => void;
+  /**
    * WHAT THE OWNER JUST DELETED, and the token that says it is new.
    *
    * The counter is the trigger: an effect keyed on it removes exactly these
@@ -1131,7 +1142,7 @@ function SolarEngine3D({
   initialObstructions,
   onRoofPlanesStitched,
   onRoofGeometryReplaced,
-  onRequestDelete, deletion, onRunShadeAnalysis,
+  onRequestDelete, deletion, onRunShadeAnalysis, onPanelsAboutToBeCulled,
   onUndoGeometry, onRedoGeometry,
   canUndoGeometry = false, canRedoGeometry = false,
   undoGeometryLabel = null, redoGeometryLabel = null,
@@ -7001,11 +7012,12 @@ function SolarEngine3D({
         else if (mode === 'block')          handleBlockClick(viewer, C, screenPos);
         else if (mode === 'roof_gable')     handleGableClick(viewer, C, screenPos);
         else if (mode === 'roof_hip')       handleHipClick(viewer, C, screenPos);
-        // 🚨 NOT REACHABLE, AND KEPT ONLY SO THE DEAD PATH IS VISIBLE HERE.
-        // `activateTool` redirects the Tree tool to the canonical obstruction
-        // object. `handleTreeClick` is the decorative one — two Cesium entities
-        // and no record — and nothing may route to it again.
-        else if (mode === 'tree')           handleTreeClick(viewer, C, screenPos);
+        // 🚨 A TREE IS PLACED BY THE OBSTRUCTION PATH, WHICH IS THE ONE THAT
+        // WRITES A CANONICAL RECORD. The tool state stays `tree` so the palette
+        // and the user agree about what is armed; only the machinery is shared.
+        // `handleTreeClick` — the decorative one, two Cesium entities and no
+        // record — is dead and nothing may route to it again.
+        else if (mode === 'tree')           handleObstructionClick(viewer, C, screenPos);
         // auto_roof: fires once via placementMode useEffect — NOT on canvas click
 
         // pick_house: user clicked a house — get lat/lng and reverse-geocode
@@ -12456,6 +12468,9 @@ function SolarEngine3D({
       const removed  = panelsRef.current.length - filtered.length;
 
       if (removed > 0) {
+        // 🚨 SNAPSHOT FIRST. See `onPanelsAboutToBeCulled`: without this a
+        // mis-placed vent cost the array for good.
+        onPanelsAboutToBeCulled?.(`Mark ${preset.label.toLowerCase()}`);
         // Remove Cesium entities for culled panels
         panelsRef.current.filter(p => !filtered.find(f => f.id === p.id)).forEach(p => {
           removePanelEntities(viewer, p.id); // v47.159
@@ -12464,7 +12479,7 @@ function SolarEngine3D({
         panelsRef.current = filtered;
         onPanelsChange(filtered);
         setPanelCount(filtered.length);
-        setStatusMsg(`Obstruction placed — ${removed} panel(s) removed within ${widthM.toFixed(1)}×${depthM.toFixed(1)}m footprint`);
+        setStatusMsg(`${preset.label} placed — ${removed} panel(s) removed from under it. Undo brings them back.`);
       } else {
         setStatusMsg(`Obstruction placed at ${widthM.toFixed(1)}×${depthM.toFixed(1)}×${prismHeightM.toFixed(1)}m (no panels removed)`);
       }
@@ -14296,20 +14311,21 @@ function SolarEngine3D({
           if (mode !== 'row')     { rowPtsRef.current = []; setRowPtCount(0); rowStartScreenPosRef.current = null; }
           if (mode !== 'measure') { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }
           if (mode !== 'select')  { clearPanelSelection(); }
-          // 🚨 THE TREE TOOL PLACES A REAL TREE NOW.
+          // 🚨 THE TREE TOOL ARMS A TREE AND STAYS ON THE TREE TOOL.
           //
+          // First it placed a decorative sphere that no array recorded, so:
           // "I tried the Tree button. It does not visibly give me a useful
-          // tree." It never did: `handleTreeClick` added two Cesium entities
-          // with hardcoded dimensions, wrote nothing to any canonical array,
-          // was in no `Layout`, survived no reload, could not be resized or
-          // deleted individually, and the tooltip said "No effect on solar
-          // production". Meanwhile the obstruction model already had a `tree`
-          // preset that IS canonical — persisted, deletable, undoable, and read
-          // by the shade scene.
+          // tree." Then it armed the canonical object by switching the mode to
+          // `obstruction` — and the palette highlight follows the MODE, so:
+          // "When I click Tree, the UI immediately reverts to Obstruction. I
+          // never actually enter a persistent Tree-placement state."
           //
-          // Two controls called Tree, both with the same emoji, one of them a
-          // placebo, is worse than either alone. So this one arms the real
-          // object rather than a second implementation of it.
+          // Both reports are the same mistake in different places: the tool
+          // state carried the placement CATEGORY and lost the OBJECT TYPE. They
+          // are two facts. `tree` is a placement mode of its own now, dispatched
+          // to the same canonical placement as every other roof object — shared
+          // machinery, distinct tool state — so the button a person pressed is
+          // the button that stays lit until they place, cancel, or pick another.
           if (mode === 'tree') {
             const treePreset = presetFor('tree');
             obstructionPresetRef.current = 'tree';
@@ -14318,9 +14334,16 @@ function SolarEngine3D({
             setNewObstructionDepthM(treePreset.depthM);
             setNewObstructionHeightM(treePreset.heightM);
             setStatusMsg('\u{1F333} Tree \u2014 click the ground at the trunk. Height and canopy are adjustable before and after.');
-            onPlacementModeChange('obstruction');
-            setOpenGroup(null);
-            return;
+          }
+          if (mode === 'obstruction' && obstructionPresetRef.current === 'tree') {
+            // Coming back to the generic Obstruction tool from Tree: the type
+            // must not stay `tree`, or a vent is placed as a tree.
+            const fallback = presetFor(DEFAULT_OBSTRUCTION_PRESET);
+            obstructionPresetRef.current = DEFAULT_OBSTRUCTION_PRESET;
+            setObstructionPresetId(DEFAULT_OBSTRUCTION_PRESET);
+            setNewObstructionWidthM(fallback.widthM);
+            setNewObstructionDepthM(fallback.depthM);
+            setNewObstructionHeightM(fallback.heightM);
           }
           setOpenGroup(null); // close flyout after selection
 
@@ -14642,14 +14665,17 @@ function SolarEngine3D({
                  placementMode === 'surface_select' ? '\u{1F3AF} Surface' :
                  placementMode === 'extend_row' ? '\u2192+ Ext Row' :
                  placementMode === 'add_row' ? '\u2191+ Add Row' :
-                 placementMode === 'obstruction' ? `\u26A0 Obstruction (${obstructions.length} placed)` :
+                 placementMode === 'obstruction' || placementMode === 'tree'
+                   ? `${presetFor(obstructionPresetId).icon} ${presetFor(obstructionPresetId).label} \u2014 click to place (${obstructions.length} on site)` :
                  placementMode === 'measure' ? '\u{1F4CF} Measure' :
                  placementMode === 'set_direction' ? '\u{1F9ED} Set Direction' :
                  placementMode === 'set_origin' ? '\u{1F4CD} Set Origin' :
                  placementMode === 'block' ? `\u{1F9F1} Block${blockPtCount > 0 ? ` (${blockPtCount}/2)` : ''}` :
                  placementMode === 'roof_gable' ? `\u{1F3E0}\u2009\u{1F3D7} Gable${gablePtCount > 0 ? ` (${gablePtCount}/4)` : ''}` :
                  placementMode === 'roof_hip'   ? `\u{1F3D7}\u2009\u{1F3E0} Hip${hipPtCount > 0 ? ` (${hipPtCount}/4)` : ''}` :
-                 placementMode === 'tree'       ? `\u{1F333} Tree (${placedTreeCount} placed)` :
+                 // 'tree' is reported by the obstruction branch above, which
+                 // names the ARMED OBJECT rather than the category. A second
+                 // branch here would be a second answer to "what is armed".
                  placementMode}
               </div>
 
@@ -15178,7 +15204,7 @@ function SolarEngine3D({
                   parity bar: "a small block (e.g. 0.6m × 0.6m × 1.0m,
                   configurable)". Same visual language as the 3D Primitives panel
                   so the two read as siblings. */}
-              {placementMode === 'obstruction' ? (
+              {placementMode === 'obstruction' || placementMode === 'tree' ? (
                 <div style={{
                   display: 'flex', flexDirection: 'column', gap: 6,
                   background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(10px)',
@@ -15189,7 +15215,7 @@ function SolarEngine3D({
                     fontSize: 9, color: '#ffaa00', textAlign: 'left',
                     fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase',
                   }}>
-                    Add Obstruction
+                    {presetFor(obstructionPresetId).icon} Place {presetFor(obstructionPresetId).label}
                   </div>
                   {/* ── PICK THE NOUN, THEN CLICK ─────────────────────────
                        The preset carries the dimensions a person would
@@ -15208,6 +15234,11 @@ function SolarEngine3D({
                           setNewObstructionWidthM(pr.widthM);
                           setNewObstructionDepthM(pr.depthM);
                           setNewObstructionHeightM(pr.heightM);
+                          // 🚨 THE TOOL FOLLOWS THE TYPE. Two places that each
+                          // hold half of "what is armed" is how the palette
+                          // came to show Obstruction while a tree was queued.
+                          const wantMode: PlacementMode = pr.id === 'tree' ? 'tree' : 'obstruction';
+                          if (placementMode !== wantMode) onPlacementModeChange(wantMode);
                         }}
                         style={{
                           padding: '3px 7px', borderRadius: 6, fontSize: 10, fontWeight: 700,

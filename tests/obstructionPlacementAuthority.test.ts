@@ -391,7 +391,13 @@ describe('🚨 the Tree tool places the object Shade can actually use', () => {
     // either alone.
     expect(ENGINE).toMatch(/if \(mode === 'tree'\) \{/);
     expect(ENGINE).toMatch(/obstructionPresetRef\.current = 'tree'/);
-    expect(ENGINE).toMatch(/onPlacementModeChange\('obstruction'\)/);
+    // 🚨 AND IT STAYS ON THE TREE TOOL. This line used to require the opposite
+    // — `onPlacementModeChange('obstruction')` — which is exactly the defect
+    // the owner reported next: "When I click Tree, the UI immediately reverts
+    // to Obstruction." Arming the right OBJECT while throwing away the tool
+    // STATE is half a fix, and it reads to a user like none.
+    // tests/toolStateAuthority.test.ts owns that invariant now.
+    expect(ENGINE).toMatch(/else if \(mode === 'tree'\)\s+handleObstructionClick/);
     expect(ENGINE).not.toMatch(/No effect on solar production/);
   });
 });

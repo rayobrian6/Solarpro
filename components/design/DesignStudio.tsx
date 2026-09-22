@@ -136,6 +136,9 @@ type SolarE2EState = {
    *  which is the behaviour under test. */
   pickHouse: (lat: number, lng: number, address: string) => void;
   requestDelete: (scope: string, targetId?: string) => void;
+  /** THE ARMED TOOL. One authority, so a spec can assert that the button a
+   *  person pressed is the tool that is still armed a moment later. */
+  placementMode: string;
   deletionLedger: unknown;
   geometryLifecycle: string;
   // ── THE CUSTOM/FALLBACK MODELLING PATH ────────────────────────────────────
@@ -2161,6 +2164,7 @@ export default function DesignStudio({ project, onSave }: Props) {
        *  the BEHAVIOUR under test is what happens after the request, including
        *  the confirmation dialog, which this deliberately does not skip. */
       requestDelete: (scope: string, targetId?: string) => { requestDeletion(scope, targetId); },
+      placementMode: placementMode3D,
       deletionLedger: site.deletionLedger,
       geometryLifecycle: site.geometryLifecycle,
       nativeDisposition: site.nativeDisposition,
@@ -5352,6 +5356,7 @@ export default function DesignStudio({ project, onSave }: Props) {
               geometryLifecycleRef={site.geometryLifecycleRef}
               onRequestDelete={requestDeletion}
               onRunShadeAnalysis={runShadeAnalysis}
+              onPanelsAboutToBeCulled={site.recordPanelCull}
               deletion={engineDeletion ?? undefined}
               onUndoGeometry={site.undoGeometry}
               onRedoGeometry={site.redoGeometry}

@@ -1171,3 +1171,91 @@ test.describe('delete, undo, save, reload — it stays gone', () => {
       .toBe('cleared');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE BUTTON A PERSON PRESSES IS THE TOOL THAT STAYS ARMED
+//
+//   "I tested the Tree tool. When I click Tree, the UI immediately reverts to
+//    Obstruction. I never actually enter a persistent Tree-placement state, so
+//    I cannot place a tree at all."
+//
+// 🚨 THROUGH THE REAL PALETTE. The owner's instruction was explicit: "Do not
+// test by directly calling the tree creation function. Test the actual
+// toolbar/menu/tool-state path." So these open the flyout and click the button,
+// and read the ARMED TOOL from the studio that owns it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test.describe('the armed tool survives being armed', () => {
+  const armed = (page: Page) =>
+    page.evaluate(() => (window as any).__solarE2E?.placementMode ?? '');
+
+  /** Open the tool group whose label matches, then press the tool by its label. */
+  async function pickTool(page: Page, group: string, tool: string) {
+    // The spine buttons carry their icon as their own text and publish their
+    // label through a hover tooltip, so the group is opened by its aria/title
+    // and the tool row is found by the visible label inside the flyout.
+    await page.locator(`button:has-text("${group}")`).first().click();
+    await page.locator(`button:has-text("${tool}")`).last().click();
+  }
+
+  test('🚨 clicking Tree leaves Tree armed — it does not revert to Obstruction', async ({ page }) => {
+    await openStudio(page);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    await pickTool(page, 'Tools', 'Tree');
+
+    // 🚨 THE ASSERTION THE OWNER ASKED FOR. Not "a tree was created" — the tool
+    // state itself, before any map click.
+    await expect
+      .poll(() => armed(page), { message: 'the Tree tool did not stay armed', timeout: T })
+      .toBe('tree');
+
+    // …and it is STILL tree a moment later, with no click in between. The
+    // defect was a same-tick revert, so a single read could miss a slower one.
+    await page.waitForTimeout(1_200);
+    expect(await armed(page), 'the Tree tool reverted on its own').toBe('tree');
+
+    // The panel names the armed object rather than the category.
+    await expect(page.locator('[data-testid="obstruction-preset-tree"]')).toBeVisible({ timeout: T });
+  });
+
+  test('🚨 and this is not a Tree-only patch — every roof object stays armed too', async ({ page }) => {
+    await openStudio(page);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    await pickTool(page, 'Tools', 'Obstruction');
+    await expect.poll(() => armed(page), { timeout: T }).toBe('obstruction');
+
+    // Each type is chosen in the placement panel, and the armed TOOL follows
+    // the type — the two halves of "what is armed" move together.
+    for (const id of ['vent', 'chimney', 'skylight']) {
+      await page.locator(`[data-testid="obstruction-preset-${id}"]`).click();
+      await page.waitForTimeout(400);
+      expect(await armed(page), `${id} did not stay on the obstruction tool`).toBe('obstruction');
+    }
+
+    // Switching to the tree type moves the tool with it…
+    await page.locator('[data-testid="obstruction-preset-tree"]').click();
+    await expect.poll(() => armed(page), { timeout: T }).toBe('tree');
+    // …and back again.
+    await page.locator('[data-testid="obstruction-preset-chimney"]').click();
+    await expect.poll(() => armed(page), { timeout: T }).toBe('obstruction');
+  });
+
+  test('another tool takes the arm away, which is the only thing that should', async ({ page }) => {
+    await openStudio(page);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    await pickTool(page, 'Tools', 'Tree');
+    await expect.poll(() => armed(page), { timeout: T }).toBe('tree');
+
+    await pickTool(page, 'Tools', 'Measure');
+    await expect.poll(() => armed(page), { timeout: T }).toBe('measure');
+  });
+});
