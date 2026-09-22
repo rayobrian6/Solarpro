@@ -48,6 +48,18 @@ export interface ObstructionProfile {
     distanceM: number;    // horizontal distance from panel (m)
     azimuthDeg: number;   // compass direction to obstruction (degrees)
     arcDeg?: number;      // angular width of obstruction (default: 30°)
+    /**
+     * WHICH OBJECT THIS IS, when the profile was derived from real geometry.
+     *
+     * 🚨 WITHOUT IT NOBODY CAN ANSWER "WHY IS THIS PANEL SHADED". Four
+     * anonymous entries at similar bearings are indistinguishable — a test
+     * hunting for "the tree" matched a garage, and a user asking the same
+     * question of the UI would get no answer at all. Optional, because a
+     * hand-entered profile has no object behind it.
+     */
+    sourceId?: string;
+    /** 'tree' | 'roofObject' | 'building' — what kind of thing it is. */
+    kind?: string;
   }[];
 }
 
@@ -224,7 +236,19 @@ export function computeShadeAnalysis(
   panels: PanelShadeInput[],
   lat: number,
   lng: number,
-  obstruction?: ObstructionProfile,
+  /**
+   * WHAT STANDS BETWEEN THESE MODULES AND THE SUN.
+   *
+   * 🚨 A FUNCTION MEANS "PER PANEL", AND THAT IS THE WHOLE POINT OF A SHADE
+   * STUDY. One profile for the entire array answers the question the study was
+   * asked to avoid: a tree at the south-west corner shades the modules beside
+   * it and not the ones forty feet away. `lib/shade/canonicalShadeScene.ts`
+   * builds these from the design's own geometry.
+   *
+   * A single profile still behaves exactly as it always did, so every existing
+   * caller is unchanged.
+   */
+  obstruction?: ObstructionProfile | ((panelId: string) => ObstructionProfile | null),
   rowSpacingM = 1.5,
   panelHeightM = 1.134,
   year?: number,
@@ -245,7 +269,11 @@ export function computeShadeAnalysis(
   const refYear = year ?? new Date().getFullYear();
 
   // Build horizon mask (0s if no obstruction provided)
-  const horizonMask = obstruction ? buildHorizonMask(obstruction) : new Array<number>(360).fill(0);
+  const perPanelProfile = typeof obstruction === 'function' ? obstruction : null;
+  const FLAT_HORIZON = new Array<number>(360).fill(0);
+  const sharedMask = perPanelProfile
+    ? null
+    : (obstruction ? buildHorizonMask(obstruction as ObstructionProfile) : FLAT_HORIZON);
 
   // Compute inter-row shade elevation threshold per panel
   // Panels in later rows (higher row index) are shaded by earlier rows
@@ -257,6 +285,13 @@ export function computeShadeAnalysis(
   for (const panel of panels) {
     const pLat = panel.lat ?? lat;
     const pLng = panel.lng ?? lng;
+    // Built once per panel, not once per sample: the geometry does not move
+    // between January and June, only the sun does.
+    let horizonMask = sharedMask;
+    if (perPanelProfile) {
+      const prof = perPanelProfile(panel.id);
+      horizonMask = prof ? buildHorizonMask(prof) : FLAT_HORIZON;
+    }
 
     let totalWeight = 0;
     let weightedShadeFactor = 0;

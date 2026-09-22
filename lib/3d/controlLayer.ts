@@ -47,6 +47,7 @@ import {
   getPanelDims,
 } from '@/lib/planeEngine';
 import type { PlacedPanel } from '@/types';
+import { filterPanelsByKeepOut, type KeepOutObject } from '@/lib/3d/panelKeepOut';
 
 // ─── Canonical Panel Dimensions ──────────────────────────────────────────────
 // Single source of truth used by control layer output normalization.
@@ -155,6 +156,28 @@ export interface ControlConfig {
   /** All currently placed panels (used for extend/add context). */
   existingPanels?: PlacedPanel[];
 
+  /**
+   * WHAT IS PHYSICALLY ON THE ROOF — vents, stacks, chimneys, skylights,
+   * hatches, rooftop equipment — with their clearances.
+   *
+   * 🚨 IT BELONGS HERE BECAUSE THIS IS THE ONE CHOKEPOINT. Every 3D placement
+   * path in the studio arrives through `placePanelsControlled`: auto_roof,
+   * plane3d, surface_select, add_row, extend_row, single, ground and fence. An
+   * audit found this layer had NO obstruction awareness whatsoever — a grep for
+   * obstruction or keep-out across lib/3d/ returned zero matches — while the
+   * only filter that existed lived in three 2D call sites that are all
+   * unreachable in 3D mode. So a hand-marked chimney was honoured by nothing,
+   * and Auto Layout put modules straight through it.
+   *
+   * Filtering here, after the engine and before the caller sees a panel, is
+   * what makes "manual placement and Auto Layout share one physical validity
+   * authority" true by construction rather than by every call site remembering.
+   *
+   * Optional only so the ~30 existing unit fixtures keep compiling; a source
+   * guard asserts that every call site in the studio passes it.
+   */
+  obstructions?: KeepOutObject[];
+
   /** ECEF position of the user's click. Used for single/extend_row/add_row. */
   clickECEF?: Vec3;
 
@@ -241,6 +264,11 @@ export interface ControlResult {
 
   /** Panel count after validation (may be less than engine output). */
   panelCount: number;
+
+  /** How many panels this call removed because they stood on a marked
+   *  obstruction or inside its clearance. Reported rather than silent: a layout
+   *  that is quietly smaller than the roof is indistinguishable from a bug. */
+  obstructedCount: number;
 
   /** Any validation warnings (non-fatal). */
   warnings: string[];
@@ -523,7 +551,18 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
   const validated = validatePanels(rawPanels, config, warnings);
 
   // ── 4. Normalize output ────────────────────────────────────────────────────
-  const normalized = normalizePanels(validated, orientation, dims);
+  const normalizedAll = normalizePanels(validated, orientation, dims);
+
+  // ── 4b. REMOVE ANYTHING STANDING ON A PHYSICAL OBJECT ──────────────────────
+  //
+  // 🚨 AFTER normalisation, so the modules carry their real CAD dimensions and
+  // the test is footprint-against-footprint rather than the centre-point test
+  // that let a default vent remove a module only about one time in five.
+  const keptAfterKeepOut = filterPanelsByKeepOut(normalizedAll, config.obstructions);
+  if (keptAfterKeepOut.removed.length > 0) {
+    warnings.push(`[${config.mode}] ${keptAfterKeepOut.removed.length} panel(s) removed: they stood on a marked obstruction or inside its clearance`);
+  }
+  const normalized = keptAfterKeepOut.panels;
 
   // ── 5. Log result ──────────────────────────────────────────────────────────
   const elapsed = Date.now() - t0;
@@ -532,6 +571,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
     orientation,
     rawCount:       rawPanels.length,
     validatedCount: validated.length,
+    keptOutCount:   keptAfterKeepOut.removed.length,
     finalCount:     normalized.length,
     warnings:       warnings.length,
     ms:             elapsed,
@@ -547,6 +587,7 @@ export function placePanelsControlled(config: ControlConfig): ControlResult {
     mode:           config.mode,
     orientation,
     panelCount:     normalized.length,
+    obstructedCount: keptAfterKeepOut.removed.length,
     warnings,
     rejectionReason,
   };

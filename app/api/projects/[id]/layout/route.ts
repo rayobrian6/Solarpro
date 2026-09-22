@@ -43,6 +43,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       obstructions, measurements,
       // Migration 123 — every OTHER property this project has designed at.
       siteArchives,
+      // 🚨 THE ONE-SHOT DELETE AUTHORIZATION. Not persisted, not defaulted —
+      // it exists for the length of this request and is consumed by the
+      // sub-system-wipe guard in upsertLayout. A field missing from THIS
+      // destructure is dropped with no error, and a dropped authorization
+      // reads as "no authorization", which refuses a deletion the user
+      // explicitly confirmed. See lib/design/deletionAuthority.ts.
+      destructive,
       changeSummary
     } = body;
 
@@ -105,6 +112,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
       // "this project is down to one property" — so it must win the merge;
       // only `undefined` keeps what is stored.
       siteArchives:       siteArchives       ?? existingLayout?.siteArchives,
+      // NOT `?? existing` — an authorization is never inherited from the
+      // stored row. It authorises THIS save and no other.
+      destructive,
       groundTilt:         groundTilt         ?? existingLayout?.groundTilt         ?? 20,
       groundAzimuth:      groundAzimuth      ?? existingLayout?.groundAzimuth      ?? 180,
       rowSpacing:         rowSpacing         ?? existingLayout?.rowSpacing         ?? 1.5,

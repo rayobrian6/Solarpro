@@ -190,7 +190,11 @@ describe('🚨 the call site cannot go back to the unconditional form', () => {
     // ever stopped covering the function, the assertion below would pass
     // vacuously — so assert that the slice DOES contain the new write, proving
     // it is looking at the right code, and that it does NOT contain the old one.
-    expect(fn).toMatch(/setRoofPlanes\(adoption\.planes\)/);
+    // The planner's answer still reaches state — now via the deletion ledger,
+    // which refuses a face the user deliberately removed. This is the THIRD
+    // machine-write door, and re-admitting a tombstoned face is the same defect
+    // whichever machine supplied it.
+    expect(fn).toMatch(/setRoofPlanes\(site\.admitGeometry\(adoption\.planes\)\)/);
     expect(fn).not.toMatch(/setRoofPlanes\(planes\)/);
   });
 

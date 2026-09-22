@@ -78,6 +78,13 @@ import {
   type NativeGeometryDisposition,
   type NativeGeometryMap,
 } from '@/lib/design/nativeGeometryDisposition';
+import {
+  type DeletionLedger,
+  emptyLedger,
+  parseDeletionLedger,
+  admitFaces,
+  admitObstructions,
+} from '@/lib/design/deletionAuthority';
 
 export { siteKeyFromCoords, isSameSite, UNRESOLVED_SITE_KEY };
 
@@ -196,10 +203,15 @@ export interface SiteDesignState {
    *  'undecided'. Kept beside the archives rather than inside a bundle so the
    *  ACTIVE property's decision persists too — see StoredSiteArchives. */
   nativeGeometry?: NativeGeometryMap;
+  /** What a person deliberately DELETED at each property, keyed by siteKey.
+   *  Beside `nativeGeometry` and for the same reason: a deletion is not an
+   *  entity, so a bundle cannot carry it and ARCHIVE-NEVER-CLEAR does not cover
+   *  it. See lib/design/deletionAuthority.ts. */
+  deletions?: DeletionLedger;
 }
 
 export function emptyState(activeSiteKey = UNRESOLVED_SITE_KEY): SiteDesignState {
-  return { version: SITE_ARCHIVE_VERSION, activeSiteKey, active: emptyBundle(), archives: {}, nativeGeometry: {} };
+  return { version: SITE_ARCHIVE_VERSION, activeSiteKey, active: emptyBundle(), archives: {}, nativeGeometry: {}, deletions: emptyLedger() };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -518,8 +530,34 @@ export function switchSite(
   // and handed back an empty one — the same class of defect the restore path
   // just had. The lookup now answers the property question itself.
   const arrivingKey = nearestSamePropertyKey(Object.keys(archives), toKey);
-  const arriving: SiteDesignBundle = (arrivingKey ? archives[arrivingKey] : undefined) ?? emptyBundle();
+  let arriving: SiteDesignBundle = (arrivingKey ? archives[arrivingKey] : undefined) ?? emptyBundle();
   if (arrivingKey) delete archives[arrivingKey];
+
+  // 🚨 THE ARRIVING BUNDLE IS FILTERED, and the leaving one is not.
+  //
+  // The archive prune is an EXACT-key delete while the archive lookup is an 8 m
+  // fuzzy property match, and one house routinely mints two keys a few metres
+  // apart (the trace in this file's own header records 2.8 m). So emptying the
+  // design under key KA deletes archives[KA] and leaves archives[KA'] — the
+  // drifted twin, still holding the roof — and picking the same house again
+  // hands it straight back. The tombstones are filed against the PROPERTY, so
+  // they catch it however the key is spelled.
+  const arrivingFaces = admitFaces(state.deletions, toKey, arriving.roofPlanes ?? []);
+  const arrivingObs = admitObstructions(state.deletions, toKey, arriving.obstructions ?? []);
+  if (arrivingFaces.refused.length || arrivingObs.refused.length) {
+    console.warn('[siteDesignModel] archive refused deliberately-deleted objects at ' + toKey, {
+      faces: arrivingFaces.refused.map(f => f?.id),
+      obstructions: arrivingObs.refused.map(o => o?.id),
+    });
+  }
+  const goneArrivingFace: Record<string, boolean> = {};
+  for (const f of arrivingFaces.refused) if (f?.id) goneArrivingFace[f.id] = true;
+  arriving = {
+    ...arriving,
+    roofPlanes: arrivingFaces.admitted,
+    obstructions: arrivingObs.admitted,
+    panels: (arriving.panels ?? []).filter(p => !(p?.planeId && goneArrivingFace[p.planeId])),
+  };
 
   return {
     state: {
@@ -531,6 +569,10 @@ export function switchSite(
       // judgement about either property, and losing the judgement on the way
       // out and back is exactly the A -> B -> A failure this is keyed to avoid.
       nativeGeometry: state.nativeGeometry ?? {},
+      // And so is the deletion ledger. A -> B -> A must not resurrect the face
+      // that was deleted at A; the tombstone is keyed by siteKey precisely so
+      // that going away and coming back is not a way to forget it.
+      deletions: state.deletions ?? emptyLedger(),
     },
     arriving: { ...arriving, address: opts?.address ?? arriving.address ?? null, mapCenter: opts?.mapCenter ?? arriving.mapCenter ?? null },
     archived: leaving,
@@ -579,6 +621,17 @@ export interface StoredSiteArchives {
    * up here, the judgement outlives the entities it was a judgement about.
    */
   nativeGeometry?: NativeGeometryMap;
+  /**
+   * WHAT A PERSON DELIBERATELY DELETED AT EACH PROPERTY.
+   *
+   * 🚨 TOP LEVEL FOR THE SAME REASON AS `nativeGeometry`, and it matters more
+   * here: the property whose geometry was just deleted is by definition the
+   * ACTIVE one, and `sites` holds only the ARCHIVED bundles. A tombstone filed
+   * in a bundle would persist for every property except the one it was about,
+   * and the deleted face would come back on the next reload — which is the
+   * whole failure this exists to close.
+   */
+  deletions?: DeletionLedger;
 }
 
 /** What the client sends, and what the layout route persists. The active
@@ -607,6 +660,10 @@ export function toPersistencePayload(state: SiteDesignState): SitePersistencePay
       // bundle field. Always emitted, so clearing the last decision is
       // expressible as {} rather than indistinguishable from 'not written'.
       nativeGeometry: state.nativeGeometry ?? {},
+      // Always emitted, for the same reason: clearing the last tombstone must
+      // be expressible as `{sites:{}}` rather than being indistinguishable from
+      // a build that never wrote the field.
+      deletions: state.deletions ?? emptyLedger(),
     },
   };
 }
@@ -656,6 +713,7 @@ export function parseStoredArchives(raw: unknown): StoredSiteArchives | null {
     activeSiteKey: o.activeSiteKey,
     sites,
     nativeGeometry: parseNativeGeometryMap(o.nativeGeometry),
+    deletions: parseDeletionLedger(o.deletions),
   };
 }
 
@@ -737,6 +795,66 @@ export interface HydrateResult {
  *  permanent alternation on every reload (WS1-032).
  */
 export function hydrate(stored: StoredLayoutForHydration | null | undefined, siteKeyNow: string): HydrateResult {
+  return admitAfterHydrate(hydrateRaw(stored, siteKeyNow));
+}
+
+/**
+ * NOTHING A PERSON DELETED COMES BACK THROUGH A RESTORE.
+ *
+ * 🚨 THIS WRAPS **EVERY** BRANCH, AND THAT IS THE POINT. `hydrateRaw` has six
+ * of them — unresolved key, legacy repair, adopted active key, matched
+ * property, reactivated archive, and the fallback — and each one assembles the
+ * active bundle from a different source. Filtering at one call site, or in one
+ * branch, is how five of the six keep working and the sixth resurrects a face.
+ *
+ * The ledger it filters against is the one that just came out of the same
+ * stored column, so a row written before the ledger existed filters against an
+ * empty ledger and behaves exactly as it did before.
+ *
+ * ARCHIVED bundles are deliberately NOT filtered. A tombstone is filed against
+ * the property it was made at; an archive belongs to a DIFFERENT property, and
+ * reaching into it would let a deletion at 3 Melvin remove a face at number 5.
+ * The filter runs again when that archive is reactivated, against its own key.
+ */
+function admitAfterHydrate(res: HydrateResult): HydrateResult {
+  const led = res?.state?.deletions;
+  const key = res?.state?.activeSiteKey;
+  if (!led || !key || key === UNRESOLVED_SITE_KEY) return res;
+  const faces = admitFaces(led, key, res.state.active.roofPlanes ?? []);
+  const obs = admitObstructions(led, key, res.state.active.obstructions ?? []);
+  if (!faces.refused.length && !obs.refused.length) return res;
+  // Never silent: a face that vanishes with no explanation is the failure this
+  // model exists to replace, and it has to be as visible as the resurrection was.
+  console.warn('[siteDesignModel] restore refused deliberately-deleted objects at ' + key, {
+    faces: faces.refused.map(f => f?.id),
+    obstructions: obs.refused.map(o => o?.id),
+  });
+  // 🚨 AND THE PANELS THAT STOOD ON THEM GO TOO. A panel whose face is
+  // tombstoned has nothing to stand on; leaving it would put an array in the
+  // air over a roof the user removed, and the layout engine cannot notice
+  // because `planeId` simply resolves to nothing.
+  const goneFace: Record<string, boolean> = {};
+  for (const f of faces.refused) if (f?.id) goneFace[f.id] = true;
+  const panels = (res.state.active.panels ?? []).filter(p => !(p?.planeId && goneFace[p.planeId]));
+  return {
+    ...res,
+    state: {
+      ...res.state,
+      active: {
+        ...res.state.active,
+        roofPlanes: faces.admitted,
+        obstructions: obs.admitted,
+        panels,
+      },
+    },
+    // The stored row still holds what was just refused, so it has to be
+    // rewritten — otherwise every reload repeats this filter and the row never
+    // agrees with the design.
+    needsAdoptionSave: true,
+  };
+}
+
+function hydrateRaw(stored: StoredLayoutForHydration | null | undefined, siteKeyNow: string): HydrateResult {
   const storedActive: SiteDesignBundle = {
     panels: stored?.panels ?? [],
     roofPlanes: stored?.roofPlanes ?? [],
@@ -747,7 +865,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
 
   if (!siteKeyNow) {
     return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: UNRESOLVED_SITE_KEY, active: storedActive, archives: parseStoredArchives(stored?.siteArchives)?.sites ?? {}, nativeGeometry: parseStoredArchives(stored?.siteArchives)?.nativeGeometry ?? {} },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: UNRESOLVED_SITE_KEY, active: storedActive, archives: parseStoredArchives(stored?.siteArchives)?.sites ?? {}, nativeGeometry: parseStoredArchives(stored?.siteArchives)?.nativeGeometry ?? {}, deletions: parseStoredArchives(stored?.siteArchives)?.deletions ?? emptyLedger() },
       disposition: 'unresolved',
       needsAdoptionSave: false,
     };
@@ -766,7 +884,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     const { active: mine, foreign } = partitionBySite(planes as Array<RoofPlane & SiteOwned>, siteKeyNow);
     if (foreign.length === 0) {
       return {
-        state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: {}, nativeGeometry: parseStoredArchives(stored?.siteArchives)?.nativeGeometry ?? {} },
+        state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: {}, nativeGeometry: parseStoredArchives(stored?.siteArchives)?.nativeGeometry ?? {}, deletions: parseStoredArchives(stored?.siteArchives)?.deletions ?? emptyLedger() },
         disposition: 'adopted-legacy',
         needsAdoptionSave: true,
       };
@@ -783,6 +901,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
         active: { ...storedActive, roofPlanes: mine },
         archives,
         nativeGeometry: parsed?.nativeGeometry ?? {},
+        deletions: parsed?.deletions ?? emptyLedger(),
       },
       disposition: 'adopted-legacy',
       needsAdoptionSave: true,
@@ -798,7 +917,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
   // absence of a claim. Same doctrine as a legacy row: adopt.
   if (!parsed.activeSiteKey) {
     return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {} },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: siteKeyNow, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {}, deletions: parsed.deletions ?? emptyLedger() },
       disposition: 'adopted-legacy',
       needsAdoptionSave: true,
     };
@@ -825,7 +944,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
   // property change. Nothing to reactivate, nothing to archive.
   if (sitesAreSameProperty(parsed.activeSiteKey, siteKeyNow)) {
     return {
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {} },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {}, deletions: parsed.deletions ?? emptyLedger() },
       disposition: 'matched',
       needsAdoptionSave: false,
     };
@@ -850,7 +969,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
     return {
       // Keep the key the archive was filed under: plane stamps and archive keys
       // must stay in step.
-      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: mineKey, active: mine, archives, nativeGeometry: parsed?.nativeGeometry ?? {} },
+      state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: mineKey, active: mine, archives, nativeGeometry: parsed?.nativeGeometry ?? {}, deletions: parsed?.deletions ?? emptyLedger() },
       disposition: 'reactivated-archive',
       needsAdoptionSave: true,
     };
@@ -892,7 +1011,7 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
   // through Pick House, which still decides by proximity — from a point the user
   // actually clicked.
   return {
-    state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {} },
+    state: { version: SITE_ARCHIVE_VERSION, activeSiteKey: parsed.activeSiteKey, active: storedActive, archives: parsed.sites, nativeGeometry: parsed.nativeGeometry ?? {}, deletions: parsed.deletions ?? emptyLedger() },
     disposition: 'matched',
     needsAdoptionSave: false,
   };
@@ -923,9 +1042,18 @@ export function archivesSignature(a: StoredSiteArchives | null | undefined): str
   // it at all.
   const decisions = Object.keys(a.nativeGeometry ?? {}).sort()
     .map(k => [k, a.nativeGeometry![k]]);
+  // 🚨 AND SO IS THE DELETION LEDGER, for exactly the same reason one step
+  // further on. Deleting the last face changes an entity array AND a tombstone
+  // list; deleting a face at a property whose bundle is already archived, or
+  // undoing a deletion, can change ONLY the tombstone list. An unsigned ledger
+  // would be held in memory and never scheduled, so the face would return on
+  // the next reload and the delete would look like it had silently failed.
+  const tombstones = Object.keys(a.deletions?.sites ?? {}).sort()
+    .map(k => [k, a.deletions!.sites[k]]);
   return JSON.stringify([
     a.activeSiteKey ?? '',
     decisions,
+    tombstones,
     keys.map(k => [
       k,
       SITE_BOUND_ENTITY_KEYS.map(e => a.sites[k]?.[e] ?? []),

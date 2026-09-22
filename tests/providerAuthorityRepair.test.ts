@@ -240,11 +240,23 @@ describe('🚨 the read and the write use ONE key expression', () => {
     // coordinates never resolve, the write filed the decision and the very next
     // render read '' and overwrote the ref with 'undecided'.
     expect(hook).toMatch(/const dispositionKeyOf = useCallback/);
-    // Exactly two callers: the memo that READS, and the setter that WRITES.
-    // A third would mean a third key expression, which is how they diverged.
-    expect((hook.match(/dispositionKeyOf\(/g) ?? []).length).toBe(2);
+    // 🚨 ONE KEY EXPRESSION, HOWEVER MANY CALLERS. The count used to be the
+    // proxy for that — two callers, the memo that READS and the setter that
+    // WRITES — and it became wrong the moment the deletion ledger arrived,
+    // because tombstones are filed against the same property by the same rule
+    // and must use the same expression. What matters is that NOBODY builds the
+    // key any other way, so that is what is asserted: every site-key decision
+    // in this hook goes through `dispositionKeyOf`.
+    expect((hook.match(/dispositionKeyOf\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(hook).toMatch(/const key = dispositionKeyOf\(\);/);        // the read
     expect(hook).toMatch(/const key = dispositionKeyOf\(siteKey\);/); // the write
+    // No second spelling of "which property is this": the fallback chain lives
+    // in `dispositionKeyOf` and nowhere else.
+    // Everything AFTER the definition itself — the definition is allowed to
+    // spell the fallback chain; nobody else is.
+    const defAt = hook.indexOf('const dispositionKeyOf');
+    const others = hook.slice(hook.indexOf('[]);', defAt) + 4);
+    expect(others).not.toMatch(/activeSiteKeyRef\.current \|\| stateRef\.current\.activeSiteKey/);
   });
 
   it('the memo never overwrites a known decision with "nobody looked"', () => {
@@ -261,7 +273,11 @@ describe('🚨 the read and the write use ONE key expression', () => {
   });
 
   it('undo carries the decision through the history, not around it', () => {
-    expect(hook).toMatch(/nativeDispositionRef\.current,\s*\n\s*\)\);/);   // pushSnapshot
+    // pushSnapshot carries the decision. It now carries the deletion ledger
+    // beside it, for the same reason and with the same consequence if it did
+    // not: an undo that restores half the change.
+    expect(hook).toMatch(/nativeDispositionRef\.current,\s*\n[\s\S]{0,600}?\)\);/);
+    expect(hook).toMatch(/deletionLedgerRef\.current,/);
     expect(hook).toMatch(/restoreDisposition\(step\.disposition\)/);
   });
 });

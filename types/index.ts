@@ -591,8 +591,51 @@ export interface PlacedObstruction {
   depthM?: number;        // footprint depth in meters (Aurora parity)
   /** Prism height above the click point (meters). Optional — defaults to 1.0. */
   heightM?: number;       // extrusion height in meters (Aurora parity)
-  type: 'vent' | 'skylight' | 'chimney' | 'hvac' | 'dormer' | 'other';
+  /**
+   * WHAT THE THING IS.
+   *
+   * 🚨 THE LIST GREW BECAUSE THE FIELD WORKFLOW NEEDS IT. A designer marking a
+   * roof does not think "hvac, other, other, other" — they think vent pipe,
+   * plumbing stack, roof hatch. The type is not decoration: it chooses the
+   * default clearance (lib/3d/panelKeepOut.ts) and the default dimensions, and
+   * collapsing four objects into `other` meant one clearance for all of them.
+   */
+  type: 'vent' | 'vent_pipe' | 'plumbing_stack' | 'skylight' | 'chimney'
+      | 'hvac' | 'roof_hatch' | 'dormer' | 'tree' | 'other';
   label?: string;
+  /**
+   * HOW FAR PANELS MUST STAY FROM IT, metres. Absent means the type's default.
+   *
+   * 🚨 IT USED NOT TO EXIST, AND THE ANSWER WAS ZERO FOR EVERYTHING. A chimney
+   * needs room for flashing; a plumbing stack needs room for a boot and a hand;
+   * a hatch needs to open. Editable per object, because an installer's judgement
+   * beats a table.
+   */
+  clearanceM?: number;
+
+  /**
+   * WHICH SPACE THIS OBJECT LIVES IN.
+   *
+   * 🚨 A TREE AND A VENT ARE BOTH "OBSTRUCTIONS" AND THEY ARE NOT THE SAME KIND
+   * OF THING, and the difference is not cosmetic:
+   *
+   *   'roof' — it is ON a roof face. It OCCUPIES roof area, so panels may not
+   *            be placed on it, and it belongs to the face it was marked on:
+   *            re-pitching or raising that section must carry it along.
+   *   'site' — it stands on the ground beside the building. It occupies no roof
+   *            area and must NOT remove panels; what it does is cast SHADE.
+   *
+   * Absent reads as 'roof', which is what every obstruction stored before this
+   * field existed was.
+   */
+  space?: 'roof' | 'site';
+  /** For a 'roof' object: the face it was marked on. Kept so the object can
+   *  follow the surface it belongs to rather than floating at a world
+   *  coordinate when that surface moves. */
+  planeId?: string;
+  /** Canopy radius, metres — a tree. Distinct from `radiusM`, which is a
+   *  panel keep-out and is deliberately not what a canopy is. */
+  canopyRadiusM?: number;
 }
 
 // ─── Layout ───────────────────────────────────────────────────

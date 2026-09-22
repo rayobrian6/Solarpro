@@ -136,6 +136,20 @@ export interface SectionInspectorProps {
    * reshape. Only ever called from the explicit button below — never inferred.
    */
   onRebuildFromParameters: () => void;
+  /**
+   * DELETE WHAT IS SELECTED.
+   *
+   * 🚨 IT IS HERE BECAUSE THE SELECTION IS HERE. The owner's instruction was
+   * "do not bury deletion inside internal tooling" — the control belongs on the
+   * object, beside the controls that edit it, so that "which one will go" is
+   * answered by the same highlight that answers "which one am I editing".
+   *
+   * The component does not delete anything. It names a scope; the owner plans
+   * it, shows exactly what would be removed, asks for confirmation when the
+   * scope deserves it, and applies it through the one canonical path that
+   * records the undo step and the tombstone.
+   */
+  onDelete: (scope: 'face' | 'section') => void;
   /** Rendered as a disabled hint when the section has no editable record. */
   disabled?: boolean;
 }
@@ -429,12 +443,20 @@ const KIND_LABEL: Record<string, string> = {
   gable: 'Gable', hip: 'Hip', shed: 'Shed', flat: 'Flat',
 };
 
+/** One look for every delete control, so "this removes something" is learned
+ *  once and recognised everywhere. */
+const DELETE_BTN: React.CSSProperties = {
+  marginTop: 8, width: '100%', padding: '5px 0', borderRadius: 6,
+  background: 'rgba(255,90,90,0.12)', border: '1px solid rgba(255,90,90,0.40)',
+  color: '#ffb3b3', fontSize: 10.5, fontWeight: 800, cursor: 'pointer',
+};
+
 // ── The component ───────────────────────────────────────────────────────────
 
 export function SectionInspector({
   state, onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal,
   onSetFacePitch, onSetPitchAnchor, previewPitch, onSelectFace, onRebuildFromParameters,
-  disabled,
+  onDelete, disabled,
 }: SectionInspectorProps) {
   const s = state.section;
   const f = state.face;
@@ -961,6 +983,44 @@ export function SectionInspector({
               cursor: 'pointer', fontWeight: 800, fontSize: 11, padding: 0,
             }}
           >×</button>
+        </div>
+      ) : null}
+
+      {/* ── DELETE WHAT IS SELECTED ──────────────────────────────────────
+             One control, named for the object the highlight is on. A face and
+             a section are both single-click deletions with a real undo — the
+             ceremony belongs on the two that cannot be a slip (Clear Custom
+             Building, Start Over), and those live at the workspace level, not
+             here. Making every removal cost a modal is how people stop trying
+             things, and a modelling tool that punishes experiment is the
+             usability failure this whole pass exists to remove. */}
+      {state.level === 'face' && f ? (
+        <button
+          type="button" data-no-drag data-testid="inspector-delete-face"
+          onClick={() => onDelete('face')}
+          style={DELETE_BTN}
+        >🗑 Delete this roof face</button>
+      ) : null}
+      {state.level === 'section' && s ? (
+        <button
+          type="button" data-no-drag data-testid="inspector-delete-section"
+          onClick={() => onDelete('section')}
+          style={DELETE_BTN}
+        >🗑 Delete this building section</button>
+      ) : null}
+      {state.level === 'wall' && w ? (
+        /* 🚨 NO DELETE BUTTON FOR A WALL, AND THE REASON IS SAID OUT LOUD.
+           A wall is GENERATED from its section's footprint and eave height; it
+           has no independent existence to remove, and a control that appeared
+           to delete one would either do nothing or silently delete something
+           else. Naming the object that can actually go is the honest answer. */
+        <div data-testid="inspector-wall-delete-note" style={{
+          marginTop: 8, padding: '6px 8px', borderRadius: 6,
+          background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.10)',
+          color: '#9aa8bd', fontSize: 10, lineHeight: 1.45,
+        }}>
+          A wall is built from its section&rsquo;s footprint, so it cannot be deleted on its
+          own. {w.sectionId ? 'Delete the section to remove it.' : 'It belongs to no section.'}
         </div>
       ) : null}
 

@@ -248,7 +248,11 @@ describe('🚨 undo restores canonical geometry, and the inert second history is
     // 🚨 THE SNAPSHOT CARRIES THE PROVIDER DECISION TOO. Every section face
     // files `custom` for the property, so an undo that restored only the roof
     // left the property permanently custom with nothing able to clear it.
-    expect(SITE).toMatch(/pushSnapshot\(\s*\n\s*geometryHistoryRef\.current, label, roofPlanesRef\.current, coalesceKey,\s*\n\s*nativeDispositionRef\.current,\s*\n\s*\)\)/);
+    // 🚨 AND THE DELETION LEDGER, for the same reason one step further on: a
+    // tombstone that outlives its undo puts the face back on screen and filters
+    // it out again on the next reload — which looks like it worked.
+    expect(SITE).toMatch(/pushSnapshot\(\s*\n\s*geometryHistoryRef\.current, label, roofPlanesRef\.current, coalesceKey,\s*\n\s*nativeDispositionRef\.current,[\s\S]{0,900}?\)\)/);
+    expect(SITE).toMatch(/deletionLedgerRef\.current,/);
     // Undo adopts CANONICAL planes. No Cesium, no entity, no frame.
     //
     // 🚨 RE-ANCHORED ON THE INDIRECTION, NOT DELETED. This asserted
@@ -258,7 +262,7 @@ describe('🚨 undo restores canonical geometry, and the inert second history is
     // the restored planes are adopted, canonically, which is asserted here and
     // in the undo-panel guard below.
     expect(SITE).toMatch(/const undoGeometry = useCallback/);
-    expect(SITE).toMatch(/applyRestoredGeometry\(step\.planes\)/);
+    expect(SITE).toMatch(/applyRestoredGeometry\(step\.planes,/);
     expect(SITE).toMatch(/setRoofPlanes\(restored\)/);
     expect(SITE).not.toMatch(/Cesium/);
   });
@@ -485,8 +489,18 @@ describe('🚨 undo brings the panels back too', () => {
 
     // Both directions go through it. Redo has exactly the same obligation.
     for (const which of ['undoGeometry', 'redoGeometry']) {
-      const body = SITE.slice(SITE.indexOf(`const ${which} = useCallback`), SITE.indexOf(`const ${which} = useCallback`) + 500);
-      expect(body, `${which} must not adopt planes without its panels`).toMatch(/applyRestoredGeometry\(step\.planes\)/);
+      // 900, not 500: the body grew when undo took on the ledger and the
+      // panels a deletion removed. A window that no longer covers the function
+      // is a test that passes because it cannot see the code.
+      const body = SITE.slice(SITE.indexOf(`const ${which} = useCallback`), SITE.indexOf(`const ${which} = useCallback`) + 900);
+      expect(body, `the ${which} window does not cover the function`).toMatch(/return step\.label;/);
+      // 🚨 THE SECOND ARGUMENT IS NOT COSMETIC. A DELETE step has already put
+      // the exact panels back — repositioning them would map modules onto a
+      // face that did not move, and `repositionPanelsForPlanes` matching a
+      // restored face against a live roof that no longer contains it would
+      // orphan the array. Every other step still repositions, as before.
+      expect(body, `${which} must not adopt planes without its panels`).toMatch(/applyRestoredGeometry\(step\.planes, verbatim\)/);
+      expect(body, `${which} must restore the panels a deletion took`).toMatch(/restorePanelsVerbatim\(step\.panels\)/);
       expect(body).not.toMatch(/setRoofPlanes\(step\.planes\)/);
     }
   });

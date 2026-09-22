@@ -54,6 +54,7 @@ function mount(state: InspectorState, overrides: Partial<Parameters<typeof Secti
   const onSetPitchAnchor = vi.fn();
   const onSelectFace = vi.fn();
   const onRebuildFromParameters = vi.fn();
+  const onDelete = vi.fn();
   // Default: no preview. Tests that care pass their own, backed by the real
   // `previewFacePitch` so the sentence on screen is the authority's answer.
   const previewPitch = vi.fn(() => null);
@@ -68,6 +69,7 @@ function mount(state: InspectorState, overrides: Partial<Parameters<typeof Secti
       onSetFacePitch={onSetFacePitch}
       onSetPitchAnchor={onSetPitchAnchor}
       onSelectFace={onSelectFace}
+      onDelete={onDelete}
       onRebuildFromParameters={onRebuildFromParameters}
       previewPitch={previewPitch}
       {...overrides}
@@ -75,7 +77,7 @@ function mount(state: InspectorState, overrides: Partial<Parameters<typeof Secti
   );
   return {
     onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal,
-    onSetFacePitch, onSetPitchAnchor, onSelectFace, previewPitch, onRebuildFromParameters,
+    onSetFacePitch, onSetPitchAnchor, onSelectFace, previewPitch, onRebuildFromParameters, onDelete,
   };
 }
 

@@ -43,6 +43,22 @@ import {
   type GeometryHistory,
 } from '@/lib/3d/geometryHistory';
 import { repositionPanelsForPlanes } from '@/lib/3d/sectionEditing';
+import {
+  type DeletionLedger,
+  type DeletionPlan,
+  type DeletionScope,
+  type DestructiveAuthorization,
+  type DesignGeometryLifecycle,
+  emptyLedger,
+  planDeletion,
+  tombstonesFor,
+  authorizationFor,
+  withTombstones,
+  withoutTombstones,
+  lifecycleFor,
+  admitFaces,
+  admitObstructions,
+} from '@/lib/design/deletionAuthority';
 import type { PlacedPanel, RoofPlane, PlacedObstruction, LayoutMeasurement, DesignElectrical } from '@/types';
 import {
   type SiteDesignBundle,
@@ -166,6 +182,58 @@ export interface UseSiteDesign {
   undoGeometryLabel: string | null;
   redoGeometryLabel: string | null;
 
+  // ── Deletion ──────────────────────────────────────────────────────────────
+  /**
+   * WHAT A PERSON DELIBERATELY REMOVED AT EACH PROPERTY, and the one canonical
+   * answer to "does this object still belong to the active design?".
+   * See lib/design/deletionAuthority.ts.
+   */
+  deletionLedger: DeletionLedger;
+  deletionLedgerRef: React.MutableRefObject<DeletionLedger>;
+
+  /** What would this deletion remove? Pure — shows the user before it happens,
+   *  and refuses with a sentence when the deletion is not expressible. */
+  planDelete: (scope: DeletionScope, targetId?: string) => DeletionPlan;
+
+  /**
+   * Perform a planned deletion.
+   *
+   * 🚨 THIS IS THE ONLY WAY GEOMETRY LEAVES THE ACTIVE DESIGN. It is what
+   * writes the tombstones, what mints the save authorization, and what records
+   * the undo step — so a caller that splices `roofPlanes` itself gets none of
+   * the three, and the object comes back on the next reload.
+   */
+  applyDelete: (plan: DeletionPlan) => { ok: boolean; removed: number; message: string };
+
+  /** The authorization for the NEXT save, or null. Read by the save paths. */
+  pendingDestructive: () => DestructiveAuthorization | null;
+  /** Consume it — called once the save that carried it has SUCCEEDED. A failed
+   *  save must keep it, or the retry is refused for the deletion the user
+   *  already confirmed. */
+  clearPendingDestructive: () => void;
+
+  /**
+   * Forget every deletion at a property. The explicit "use Google 3D geometry
+   * here after all" command, and nothing else — a ledger that quietly forgets
+   * is the resurrection bug wearing a different hat.
+   */
+  forgetDeletions: (siteKey?: string) => void;
+
+  /** `untouched` | `populated` | `cleared` — what `existingPlaneCount` was
+   *  being asked and could not answer. Read by the acquisition gate. */
+  geometryLifecycle: DesignGeometryLifecycle;
+  geometryLifecycleRef: React.MutableRefObject<DesignGeometryLifecycle>;
+
+  /**
+   * Filter anything a reconstruction path is about to admit.
+   *
+   * Stored row, archived bundle, provider acquisition, aerial adoption, legacy
+   * migration — every one of them can hand the studio a face a person already
+   * removed. They all run through this.
+   */
+  admitGeometry: <T extends { id?: string; sectionId?: string }>(faces: T[]) => T[];
+  admitPlacedObstructions: <T extends { id?: string }>(obstructions: T[]) => T[];
+
   /** Test/diagnostic view of the whole state. Not for production branching. */
   stateRef: React.MutableRefObject<SiteDesignState>;
 }
@@ -185,6 +253,13 @@ export function useSiteDesign(): UseSiteDesign {
   const activeSiteKeyRef = useRef<string>(UNRESOLVED_SITE_KEY);
   const stateRef = useRef<SiteDesignState>(emptyState());
   const nativeDispositionRef = useRef<NativeGeometryDisposition>('undecided');
+  // 🚨 DECLARED HERE, WITH THE OTHER OWNERSHIP REFS, because `undoGeometry`
+  // below has to restore the ledger and is written before the deletion block.
+  // A `const` referenced from a callback body is fine at call time; one
+  // referenced from a `useCallback` DEPENDENCY ARRAY is evaluated during this
+  // render and would hit the temporal dead zone.
+  const deletionLedgerRef = useRef<DeletionLedger>(emptyLedger());
+  const pendingDestructiveRef = useRef<DestructiveAuthorization | null>(null);
   const epochRef = useRef(0);
 
   /** One setter factory. The ref is written first and synchronously, so any
@@ -246,6 +321,15 @@ export function useSiteDesign(): UseSiteDesign {
     writeHistory(pushSnapshot(
       geometryHistoryRef.current, label, roofPlanesRef.current, coalesceKey,
       nativeDispositionRef.current,
+      // 🚨 AND THE DELETION LEDGER, on EVERY step, not just on a delete.
+      // Carrying it costs nothing when nothing was deleted, and it is the only
+      // thing that makes "delete a face, make two more edits, undo three times"
+      // end with the face actually back rather than back-until-reload.
+      deletionLedgerRef.current,
+      // Panels are NOT carried here. Every edit this function records MOVES a
+      // face, so its panels are recomputed from where the face went; only
+      // `applyDelete` snapshots them, because only a delete destroys them.
+      null,
     ));
   }, []);
 
@@ -264,10 +348,16 @@ export function useSiteDesign(): UseSiteDesign {
    * storing both would create two records of one fact and a way for them to
    * disagree.
    */
-  const applyRestoredGeometry = useCallback((restored: RoofPlane[]) => {
+  const applyRestoredGeometry = useCallback((restored: RoofPlane[], panelsAlreadyExact = false) => {
     const held = panelsRef.current ?? [];
     const from = roofPlanesRef.current ?? [];
     setRoofPlanes(restored);
+    // 🚨 A DELETE STEP HAS ALREADY PUT THE EXACT PANELS BACK. Repositioning
+    // them would move modules that were never moved: the face they stand on
+    // did not change shape, it came back. There is nothing to compensate for,
+    // and `repositionPanelsForPlanes` matching a restored face against a live
+    // roof that no longer contains it would orphan the array.
+    if (panelsAlreadyExact) return;
     if (held.length === 0) return;
     const moved = repositionPanelsForPlanes(held, from, restored);
     if (moved.moved > 0) setPanels(moved.panels);
@@ -296,15 +386,55 @@ export function useSiteDesign(): UseSiteDesign {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Put the deletion ledger back to what it was before the undone step.
+   *
+   * 🚨 A TOMBSTONE MUST NOT OUTLIVE ITS UNDO. Without this, undoing a deletion
+   * puts the face back on screen and in `roofPlanes` — and the tombstone is
+   * still filed, so the very next hydration refuses it again. The face would
+   * disappear on reload with nothing to explain it, which is strictly worse
+   * than the delete not working at all, because it looks like it worked.
+   *
+   * `null` means the step carried none (recorded before this existed), and then
+   * whatever is current is left alone — the same rule as the disposition.
+   */
+  const restoreLedger = useCallback((led: unknown) => {
+    if (!led || typeof led !== 'object') return;
+    stateRef.current = { ...stateRef.current, deletions: led as DeletionLedger };
+    deletionLedgerRef.current = led as DeletionLedger;
+    setArchiveTick(t => t + 1);
+  }, []);
+
+  /**
+   * Put the panels back exactly, when the step carried them.
+   *
+   * Only a deletion does. Everything else keeps the existing rule — panels are
+   * derived from the roof they stand on and are repositioned, never restored —
+   * because two records of one fact is a way for them to disagree.
+   */
+  const restorePanelsVerbatim = useCallback((panelsBefore: unknown[] | null): boolean => {
+    if (!panelsBefore || !Array.isArray(panelsBefore)) return false;
+    setPanels(panelsBefore as PlacedPanel[]);
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const undoGeometry = useCallback((): string | null => {
     const step = undo(
       geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
+      deletionLedgerRef.current, panelsRef.current,
     );
     if (!step.ok) return null;
     writeHistory(step.history);
+    // 🚨 PANELS FIRST WHEN THE STEP CARRIES THEM. `applyRestoredGeometry`
+    // repositions whatever panels are live onto the restored roof; if the
+    // deleted ones are not back yet it repositions the survivors and the
+    // deleted array never returns.
+    const verbatim = restorePanelsVerbatim(step.panels);
     // Adopt the canonical array; every derived thing rebuilds from it.
-    applyRestoredGeometry(step.planes);
+    applyRestoredGeometry(step.planes, verbatim);
     restoreDisposition(step.disposition);
+    restoreLedger(step.deletions);
     return step.label;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -312,11 +442,14 @@ export function useSiteDesign(): UseSiteDesign {
   const redoGeometry = useCallback((): string | null => {
     const step = redo(
       geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
+      deletionLedgerRef.current, panelsRef.current,
     );
     if (!step.ok) return null;
     writeHistory(step.history);
-    applyRestoredGeometry(step.planes);
+    const verbatim = restorePanelsVerbatim(step.panels);
+    applyRestoredGeometry(step.planes, verbatim);
     restoreDisposition(step.disposition);
+    restoreLedger(step.deletions);
     return step.label;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -379,6 +512,10 @@ export function useSiteDesign(): UseSiteDesign {
     };
     const res = switchSite(stateRef.current, toKey, opts);
     stateRef.current = res.state;
+    // The ledger travels with the state. Re-seat the synchronous mirror here,
+    // because the acquisition gate and the restore filters read the REF, and a
+    // property change is exactly when they fire.
+    deletionLedgerRef.current = res.state.deletions ?? emptyLedger();
     if (res.changed || res.reason === 'unresolved-source') {
       setActiveKey(res.state.activeSiteKey);
       epochRef.current += 1;
@@ -398,6 +535,11 @@ export function useSiteDesign(): UseSiteDesign {
   const hydrateFromStored = useCallback<UseSiteDesign['hydrateFromStored']>((stored, siteKeyNow) => {
     const res = hydrate(stored, siteKeyNow);
     stateRef.current = res.state;
+    deletionLedgerRef.current = res.state.deletions ?? emptyLedger();
+    // 🚨 A RELOAD IS NOT A SAVE. Anything the previous session had authorised
+    // was either persisted or refused; carrying it across a hydration would let
+    // a stale authorization license a wipe nobody asked for in this one.
+    pendingDestructiveRef.current = null;
     setActiveKey(res.state.activeSiteKey);
     epochRef.current += 1;
     applyBundle(res.state.active);
@@ -544,6 +686,145 @@ export function useSiteDesign(): UseSiteDesign {
     setArchiveTick(t => t + 1);
   }, []);
 
+  // ── DELETION ───────────────────────────────────────────────────────────────
+  //
+  // 🚨 THE LEDGER LIVES ON `stateRef.current.deletions`, beside the provider
+  // judgement and for the same reason: it is a fact about a PROPERTY, not an
+  // entity, so a bundle cannot carry it and archiving cannot protect it. The
+  // ref below is a synchronous mirror, exactly like `nativeDispositionRef` —
+  // the Lane A gate and the restore filters both fire from inside resolved
+  // promises and must see the ledger that exists NOW, not the one captured when
+  // they were scheduled.
+  // `deletionLedgerRef` and `pendingDestructiveRef` are declared with the other
+  // ownership refs at the top of this hook — see the note there.
+  const geometryLifecycleRef = useRef<DesignGeometryLifecycle>('untouched');
+
+  const deletionLedger = useMemo(() => {
+    void archiveTick;
+    void activeSiteKey;
+    const led = stateRef.current.deletions ?? emptyLedger();
+    deletionLedgerRef.current = led;
+    return led;
+  }, [archiveTick, activeSiteKey]);
+
+  const geometryLifecycle = useMemo(() => {
+    void archiveTick;
+    const l = lifecycleFor(
+      stateRef.current.deletions, dispositionKeyOf(), (roofPlanesRef.current ?? []).length,
+    );
+    geometryLifecycleRef.current = l;
+    return l;
+  }, [archiveTick, roofPlanes, dispositionKeyOf]);
+
+  /** Write the ledger to state AND the mirror, and move the archive signature
+   *  so the autosave actually persists it. A tombstone held only in memory is
+   *  a face that returns on the next reload. */
+  const writeLedger = useCallback((next: DeletionLedger) => {
+    stateRef.current = { ...stateRef.current, deletions: next };
+    deletionLedgerRef.current = next;
+    setArchiveTick(t => t + 1);
+  }, []);
+
+  const planDelete = useCallback<UseSiteDesign['planDelete']>((scope, targetId) => planDeletion({
+    scope,
+    siteKey: dispositionKeyOf(),
+    targetId: targetId ?? '',
+    faces: (roofPlanesRef.current ?? []) as never,
+    panels: (panelsRef.current ?? []) as never,
+    obstructions: (placedObstructionsRef.current ?? []) as never,
+    measurementCount: (measurementsRef.current ?? []).length,
+    now: Date.now(),
+  }), [dispositionKeyOf]);
+
+  const applyDelete = useCallback<UseSiteDesign['applyDelete']>((plan) => {
+    if (!plan || !plan.ok) {
+      return { ok: false, removed: 0, message: plan?.refusal || 'Nothing to delete.' };
+    }
+    const key = dispositionKeyOf();
+    if (!key) {
+      // 🚨 REFUSED OUT LOUD, exactly as an unnamed-property disposition write
+      // is. A tombstone filed against an empty key is dropped by
+      // `withTombstones`, and the deletion would then work on screen and be
+      // undone by the next hydration with nothing saying why.
+      return {
+        ok: false, removed: 0,
+        message: 'This property is not identified yet, so a deletion cannot be recorded against it. '
+          + 'Pick the house on the map first.',
+      };
+    }
+    const now = Date.now();
+
+    // 🚨 HISTORY FIRST, AND IT CARRIES THE PANELS. Every other edit moves a
+    // face, so its panels are recomputed from where the face went. A delete
+    // removes the face, and no arithmetic brings a panel back from a roof that
+    // is not there — so this is the one step that snapshots them.
+    writeHistory(pushSnapshot(
+      geometryHistoryRef.current, plan.title, roofPlanesRef.current, null,
+      nativeDispositionRef.current,
+      deletionLedgerRef.current,
+      panelsRef.current,
+    ));
+
+    const goneFace: Record<string, boolean> = {};
+    for (const id of plan.faceIds) goneFace[id] = true;
+    const gonePanel: Record<string, boolean> = {};
+    for (const id of plan.panelIds) gonePanel[id] = true;
+    const goneObs: Record<string, boolean> = {};
+    for (const id of plan.obstructionIds) goneObs[id] = true;
+
+    if (plan.faceIds.length) {
+      setRoofPlanes((roofPlanesRef.current ?? []).filter(p => !goneFace[p?.id]));
+    }
+    if (plan.panelIds.length) {
+      setPanels((panelsRef.current ?? []).filter(p => !gonePanel[p?.id]));
+    }
+    if (plan.obstructionIds.length) {
+      setPlacedObstructions((placedObstructionsRef.current ?? []).filter(o => !goneObs[o?.id]));
+    }
+    if (plan.clearsMeasurements) setMeasurements([]);
+
+    writeLedger(withTombstones(deletionLedgerRef.current, key, tombstonesFor(plan, now)));
+
+    // 🚨 THE AUTHORIZATION IS MINTED HERE AND NOWHERE ELSE. This is the single
+    // function that can say "a person chose this", so it is the single function
+    // that may hand the server permission to accept an emptied sub-system.
+    pendingDestructiveRef.current = authorizationFor(plan, key, now);
+
+    const removed = plan.faceIds.length + plan.panelIds.length + plan.obstructionIds.length;
+    return { ok: true, removed, message: `${plan.title}: ${plan.lines.join(', ')}.` };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispositionKeyOf, writeLedger]);
+
+  const pendingDestructive = useCallback(() => pendingDestructiveRef.current, []);
+  const clearPendingDestructive = useCallback(() => { pendingDestructiveRef.current = null; }, []);
+
+  const forgetDeletions = useCallback<UseSiteDesign['forgetDeletions']>((siteKey) => {
+    const key = dispositionKeyOf(siteKey);
+    if (!key) return;
+    writeLedger(withoutTombstones(deletionLedgerRef.current, key));
+  }, [dispositionKeyOf, writeLedger]);
+
+  const admitGeometry = useCallback(<T extends { id?: string; sectionId?: string }>(faces: T[]): T[] => {
+    const res = admitFaces(deletionLedgerRef.current, dispositionKeyOf(), faces);
+    if (res.refused.length) {
+      // Never silent. A face that vanishes with no explanation is the failure
+      // mode this whole model exists to replace.
+      console.warn('[useSiteDesign] refused ' + res.refused.length
+        + ' face(s) that were deliberately deleted at this property:',
+        res.refused.map(f => f?.id));
+    }
+    return res.admitted;
+  }, [dispositionKeyOf]);
+
+  const admitPlacedObstructions = useCallback(<T extends { id?: string }>(obs: T[]): T[] => {
+    const res = admitObstructions(deletionLedgerRef.current, dispositionKeyOf(), obs);
+    if (res.refused.length) {
+      console.warn('[useSiteDesign] refused ' + res.refused.length
+        + ' obstruction(s) that were deliberately deleted at this property.');
+    }
+    return res.admitted;
+  }, [dispositionKeyOf]);
+
   return {
     panels, setPanels,
     roofPlanes, setRoofPlanes,
@@ -561,6 +842,12 @@ export function useSiteDesign(): UseSiteDesign {
     canRedoGeometry: canRedo(geometryHistory),
     undoGeometryLabel: undoLabel(geometryHistory),
     redoGeometryLabel: redoLabel(geometryHistory),
+    deletionLedger, deletionLedgerRef,
+    planDelete, applyDelete,
+    pendingDestructive, clearPendingDestructive,
+    forgetDeletions,
+    geometryLifecycle, geometryLifecycleRef,
+    admitGeometry, admitPlacedObstructions,
     stateRef,
   };
 }

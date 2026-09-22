@@ -512,6 +512,14 @@ export async function POST(req: NextRequest) {
       obstructions:      rawLayout.obstructions,
       measurements:      rawLayout.measurements,
       siteArchives:      rawLayout.siteArchives,
+      // 🚨 AND THE ONE-SHOT DELETE AUTHORIZATION, for the same reason as the
+      // three above. The Save button lands HERE, so a person who pressed
+      // "Clear Panels" and then Save would have their confirmed deletion met
+      // with the sub-system-wipe refusal — the guard doing exactly its job
+      // against exactly the case it is not meant to catch. It travels on the
+      // request body, never on the Layout record: it authorises one save and
+      // is not persisted. See lib/design/deletionAuthority.ts.
+      destructive:       body.destructive,
     });
 
     const productionData = await calculateProduction(savedLayout, client);

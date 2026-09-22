@@ -21,6 +21,7 @@ import type { SubSystemEquipmentMap, SubSystemKey } from '@/lib/system/subSystem
 import { isSubSystemKey } from '@/lib/system/subSystemEquipment';
 import { computeNameplateKw } from '@/lib/system/nameplate';
 import { getPanelById } from '@/lib/equipment-db';
+import { parseAuthorization, authorizesSubsystemRemoval } from '@/lib/design/deletionAuthority';
 
 // ============================================================
 // PROJECTS
@@ -707,6 +708,20 @@ export interface UpsertLayoutData {
   /** Migration 123 — every OTHER property this project has designed at.
    *  `undefined` means KEEP WHAT IS STORED, exactly like the two above. */
   siteArchives?: Layout['siteArchives'];
+  /**
+   * THE USER DELIBERATELY DELETED SOMETHING, AND THIS SAYS WHAT.
+   *
+   * 🚨 IT IS NOT PERSISTED. It is a one-shot authorization that travels with
+   * the save it authorises and is consumed by the sub-system-wipe guard below.
+   * Minted by the canonical destructive operation in the studio
+   * (lib/design/deletionAuthority.ts), never by a generic save path — which is
+   * the whole point: a payload that merely contains zero panels is the
+   * signature of the July reload data-loss bug, and a payload that contains
+   * zero panels AND names the property and the sub-systems a person chose to
+   * remove is a decision. The guard has to be able to tell them apart, and
+   * before this it could not.
+   */
+  destructive?: unknown;
 }
 
 // ── Coordinate-integrity guard (Ray, 2026-06-30) ────────────────────────────
@@ -1068,16 +1083,46 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       // A save that says `[]` is a decision and is judged exactly as before.
       const incoming = new Set([...(data.panels ?? []), ...archivedPanels]
         .map(p => ((p as { systemType?: string }).systemType ?? 'roof')));
-      const wiped = data.panels == null ? [] : storedRows.filter((r: { st: string | null; n: number }) =>
+      const allWiped = data.panels == null ? [] : storedRows.filter((r: { st: string | null; n: number }) =>
         (r.n ?? 0) >= 4 && !incoming.has(r.st ?? 'roof'));
+      // 🚨 AN AUTHORISED DELETION IS NOT A WIPE, AND THIS IS THE ONLY THING
+      // THAT DISTINGUISHES THEM.
+      //
+      // The guard's whole value is that it cannot be talked out of refusing —
+      // so it is not asked to trust a boolean. It is handed the authorization
+      // the destructive operation minted, and that authorization has to NAME
+      // the property and NAME each sub-system it removed. A save that empties
+      // the roof array while holding an authorization for the roof at this
+      // property goes through; the same save holding an authorization minted at
+      // the house next door, or one that mentions only the ground mount, is
+      // refused exactly as before — and so is every save that carries none,
+      // which is every save the reload bug has ever produced.
+      //
+      // Nothing about this is persisted. The authorization exists for the
+      // length of one request.
+      const auth = parseAuthorization(data.destructive);
+      const authSiteKey = (data.siteArchives as { activeSiteKey?: string } | null | undefined)?.activeSiteKey ?? '';
+      const authorised = allWiped.filter((r: { st: string | null }) =>
+        authorizesSubsystemRemoval(auth, authSiteKey, r.st ?? 'roof'));
+      const wiped = allWiped.filter((r: { st: string | null }) =>
+        !authorizesSubsystemRemoval(auth, authSiteKey, r.st ?? 'roof'));
+      if (authorised.length > 0) {
+        console.warn('[LAYOUT_SUBSYSTEM_WIPE_AUTHORISED]', {
+          projectId: data.projectId,
+          op: auth?.op,
+          siteKey: authSiteKey,
+          removed: authorised.map((r: { st: string | null; n: number }) => `${r.st ?? 'roof'} (${r.n})`).join(', '),
+        });
+      }
       if (wiped.length > 0) {
         const desc = wiped.map((r: { st: string | null; n: number }) => `${r.st ?? 'roof'} (${r.n} panels)`).join(', ');
-        console.error('[LAYOUT_SUBSYSTEM_WIPE_BLOCKED]', { projectId: data.projectId, wiped: desc, incomingCount: (data.panels || []).length });
+        console.error('[LAYOUT_SUBSYSTEM_WIPE_BLOCKED]', { projectId: data.projectId, wiped: desc, incomingCount: (data.panels || []).length, hadAuthorization: !!auth, authOp: auth?.op ?? null });
         throw new Error(
           `LAYOUT_SUBSYSTEM_WIPE: this save would remove the entire ${desc} sub-system in one step — ` +
           `this is the signature of the reload data-loss bug, not a normal edit. ` +
-          `Refusing to save. If you really are removing the whole array, delete its panels in the studio first ` +
-          `(reduce it below 4 panels), then save.`,
+          `Refusing to save. If you really are removing the whole array, do it with a delete control in the ` +
+          `studio — Clear Panels, Clear Custom Building or Start Over — which records the decision and lets ` +
+          `this save through.`,
         );
       }
     } catch (e) {

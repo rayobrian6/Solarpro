@@ -77,6 +77,32 @@ export interface GeometrySnapshot {
    * whatever is current alone.
    */
   disposition: string | null;
+  /**
+   * THE DELETION LEDGER AS IT STOOD BEFORE THE EDIT.
+   *
+   * 🚨 A TOMBSTONE THAT OUTLIVES ITS UNDO IS A FACE THAT COMES BACK AND THEN
+   * DISAPPEARS AGAIN ON RELOAD. Deleting a face writes an entry to the ledger
+   * so no restore path can re-admit it; undoing that deletion is a person
+   * saying they did not mean it, so the entry has to go with it. Without this
+   * the undone face would be on screen, in `roofPlanes`, and filtered out of
+   * the very next hydration — the worst possible answer, because it looks like
+   * it worked.
+   *
+   * Opaque, for the same reason `disposition` is: this module records what it
+   * was told and hands it back, and stays free of the deletion vocabulary.
+   */
+  deletions: unknown | null;
+  /**
+   * THE PANELS AS THEY STOOD BEFORE, carried ONLY by a step that removes them.
+   *
+   * 🚨 THE "PANELS ARE DERIVED" RULE HAS EXACTLY ONE EXCEPTION, AND THIS IS IT.
+   * Every other edit MOVES a face, so its panels are recomputed from the face
+   * they stand on — storing them would be a second record of one fact. A
+   * DELETE removes the face, and a panel cannot be recomputed from a roof that
+   * is not there. `null` means "recompute as usual", which is what every
+   * existing caller records and what every existing step does.
+   */
+  panels: unknown[] | null;
 }
 
 export interface GeometryHistory {
@@ -99,10 +125,24 @@ export interface HistoryStep {
   /** The decision to restore alongside `planes`, or null when the step carried
    *  none. See `GeometrySnapshot.disposition`. */
   disposition: string | null;
+  /** The deletion ledger to restore alongside `planes`, or null. */
+  deletions: unknown | null;
+  /** The panels to restore VERBATIM, or null to recompute them from `planes`
+   *  exactly as before. See `GeometrySnapshot.panels`. */
+  panels: unknown[] | null;
 }
 
 export function emptyHistory(): GeometryHistory {
   return { past: [], future: [] };
+}
+
+/** Deep copy for the opaque carried values. Returns null rather than throwing:
+ *  a value that cannot be copied is recorded as "the step carried none", which
+ *  degrades to the pre-existing behaviour instead of handing a shared mutable
+ *  reference to two history entries. */
+function copyOpaque(v: ReadonlyArray<unknown> | null | undefined): unknown[] | null {
+  if (!v) return null;
+  try { return JSON.parse(JSON.stringify(v)) as unknown[]; } catch { return null; }
 }
 
 /** See the header: shallow is not a snapshot. */
@@ -132,6 +172,13 @@ export function pushSnapshot(
   /** The provider decision as it stands NOW, before the edit. See
    *  `GeometrySnapshot.disposition`. Omitted means "do not restore one". */
   dispositionBefore?: string | null,
+  /** The deletion ledger as it stands NOW, before the edit. Omitted means
+   *  "do not restore one". See `GeometrySnapshot.deletions`. */
+  deletionsBefore?: unknown | null,
+  /** The panels as they stand NOW. Supplied ONLY by a step that removes
+   *  panels; omitted means the caller recomputes them, which is the rule for
+   *  every other edit. See `GeometrySnapshot.panels`. */
+  panelsBefore?: ReadonlyArray<unknown> | null,
 ): GeometryHistory {
   const copy = deepCopyPlanes(planesBefore);
   if (copy === null) return history; // see deepCopyPlanes
@@ -145,7 +192,20 @@ export function pushSnapshot(
     return { past: history.past, future: [] };
   }
 
-  const past = [...history.past, { label, planes: copy, coalesceKey: key, disposition: dispositionBefore ?? null }];
+  let panelCopy: unknown[] | null = null;
+  if (panelsBefore) {
+    try { panelCopy = JSON.parse(JSON.stringify(panelsBefore)) as unknown[]; }
+    // A non-serialisable panel list must not silently become "recompute them",
+    // which on a delete step means the panels never come back. Refuse the push
+    // instead; undo then reaches one edit further, which is recoverable.
+    catch { return history; }
+  }
+  const past = [...history.past, {
+    label, planes: copy, coalesceKey: key,
+    disposition: dispositionBefore ?? null,
+    deletions: deletionsBefore ?? null,
+    panels: panelCopy,
+  }];
   while (past.length > MAX_HISTORY_DEPTH) past.shift();
   // 🚨 A NEW EDIT DESTROYS THE REDO BRANCH. Keeping it would let Redo apply a
   // geometry that was derived from a state that no longer exists.
@@ -186,16 +246,23 @@ export function undo(
    *  leave the decision behind, which is the same half-undo in the other
    *  direction. */
   dispositionNow?: string | null,
+  /** The ledger as it stands NOW. Becomes the redo target, exactly as
+   *  `planesNow` does. */
+  deletionsNow?: unknown | null,
+  /** The panels as they stand NOW. Carried onto the redo entry only when the
+   *  step being undone carried panels — a redo of a deletion must remove them
+   *  again, and it can only do that if it knows what "after" looked like. */
+  panelsNow?: ReadonlyArray<unknown> | null,
 ): HistoryStep {
   const current = (planesNow ?? []).slice();
   if (!canUndo(history)) {
-    return { ok: false, history, planes: current, label: null, disposition: null };
+    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null };
   }
   const past = history.past.slice();
   const entry = past.pop()!;
   const forward = deepCopyPlanes(planesNow);
   if (forward === null) {
-    return { ok: false, history, planes: current, label: null, disposition: null };
+    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null };
   }
   return {
     ok: true,
@@ -206,6 +273,8 @@ export function undo(
       future: [...history.future, {
         label: entry.label, planes: forward, coalesceKey: null,
         disposition: dispositionNow ?? null,
+        deletions: deletionsNow ?? null,
+        panels: entry.panels ? copyOpaque(panelsNow) : null,
       }],
     },
     // Hand out a fresh copy: the caller will mutate what it adopts, and the
@@ -213,6 +282,8 @@ export function undo(
     planes: deepCopyPlanes(entry.planes) ?? [],
     label: entry.label,
     disposition: entry.disposition ?? null,
+    deletions: entry.deletions ?? null,
+    panels: copyOpaque(entry.panels),
   };
 }
 
@@ -221,16 +292,18 @@ export function redo(
   history: GeometryHistory,
   planesNow: ReadonlyArray<RoofPlane> | null | undefined,
   dispositionNow?: string | null,
+  deletionsNow?: unknown | null,
+  panelsNow?: ReadonlyArray<unknown> | null,
 ): HistoryStep {
   const current = (planesNow ?? []).slice();
   if (!canRedo(history)) {
-    return { ok: false, history, planes: current, label: null, disposition: null };
+    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null };
   }
   const future = history.future.slice();
   const entry = future.pop()!;
   const back = deepCopyPlanes(planesNow);
   if (back === null) {
-    return { ok: false, history, planes: current, label: null, disposition: null };
+    return { ok: false, history, planes: current, label: null, disposition: null, deletions: null, panels: null };
   }
   return {
     ok: true,
@@ -238,12 +311,16 @@ export function redo(
       past: [...history.past, {
         label: entry.label, planes: back, coalesceKey: null,
         disposition: dispositionNow ?? null,
+        deletions: deletionsNow ?? null,
+        panels: entry.panels ? copyOpaque(panelsNow) : null,
       }],
       future,
     },
     planes: deepCopyPlanes(entry.planes) ?? [],
     label: entry.label,
     disposition: entry.disposition ?? null,
+    deletions: entry.deletions ?? null,
+    panels: copyOpaque(entry.panels),
   };
 }
 

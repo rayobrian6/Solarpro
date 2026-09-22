@@ -42,6 +42,10 @@ import {
 } from '@/lib/placementEngine';
 import { type NearmapObstruction, OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
+import { autoLayoutScope } from '@/lib/3d/autoLayoutScope';
+import { filterPanelsByKeepOut } from '@/lib/3d/panelKeepOut';
+import { buildShadeScene, profileForPanel } from '@/lib/shade/canonicalShadeScene';
+import { computeShadeAnalysis } from '@/lib/shadeAnalysis';
 import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar approx — fine at parcel
@@ -70,6 +74,8 @@ import { archivesSignature, sitesAreSameProperty } from '@/lib/design/siteDesign
 import { planAerialAdoption } from '@/lib/design/aerialAdoption';
 import { nativeAcquisitionPermitted, dispositionLabel, customModelGoverns } from '@/lib/design/nativeGeometryDisposition';
 import { useSiteDesign } from './useSiteDesign';
+import type { DeletionPlan, DeletionScope } from '@/lib/design/deletionAuthority';
+import DeleteConfirm from './DeleteConfirm';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
   Layers, Zap, Sun, RotateCcw, Save, Play, ChevronDown, ChevronUp,
@@ -1276,6 +1282,13 @@ export default function DesignStudio({ project, onSave }: Props) {
       // to recognize it by). Mirrors the roofPlanes treatment.
       fenceLine:  fenceLineRef.current.length > 1 ? fenceLineRef.current : undefined,
       fenceHeight: project.systemType === 'fence' ? fenceHeightRef.current : undefined,
+      // 🚨 THE ONE-SHOT DELETE AUTHORIZATION, when the user has just deleted
+      // something. Without it the sub-system-wipe guard cannot tell a confirmed
+      // "Clear Custom Building" from the reload data-loss bug, and has to refuse
+      // both — which is what trapped a user inside a design they wanted to
+      // empty. Minted only by `applyDelete`; cleared only after the save it
+      // authorised has actually succeeded. See lib/design/deletionAuthority.ts.
+      destructive: site.pendingDestructive() ?? undefined,
     };
     // STEP 1 -- LAYOUT SAVE LOGGING
     // Report what is actually WRITTEN for the ACTIVE property, and separately
@@ -1319,6 +1332,11 @@ export default function DesignStudio({ project, onSave }: Props) {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
+        // 🚨 CONSUMED ON SUCCESS, NOT ON SEND. An authorization cleared when the
+        // request left would be gone by the time a failed save is retried, and
+        // the retry would then be refused for the very deletion the user
+        // confirmed — the trap this exists to remove, one step further along.
+        site.clearPendingDestructive();
         // A save got through, so any earlier refusal is over — let the next one
         // speak again rather than being suppressed as a duplicate.
         lastRefusalRef.current = null;
@@ -1368,7 +1386,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
     }
-  }, [project.id, project.systemType, buildDesignElectrical, site.persistencePayload]);
+  }, [project.id, project.systemType, buildDesignElectrical, site.persistencePayload, site.pendingDestructive, site.clearPendingDestructive]);
 
   // Trigger auto-save 3 seconds after panels OR roof geometry change — but
   // NEVER before the DB restore resolves (see restoreStateRef above; the timer
@@ -2019,7 +2037,10 @@ export default function DesignStudio({ project, onSave }: Props) {
         toast.error('Aerial detect did not replace your roof', adoption.refusals[0].message);
         return;
       }
-      setRoofPlanes(adoption.planes);
+      // Same filter, same reason: this is the THIRD machine-write door, and an
+      // adoption that re-admits a deleted face is the same defect whichever
+      // machine supplied it.
+      setRoofPlanes(site.admitGeometry(adoption.planes));
       setSolarApiStatus('loaded');
       if (data.resolved?.address) setSolarDataAddress(data.resolved.address);
 
@@ -3984,6 +4005,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   // planes AND their panels from state and returns the kept planes (for the 2D
   // path to iterate; the 3D auto_roof engine reads the now-cleaned roofPlanes).
   const keepSubjectBuilding = useCallback((): RoofPlane[] => {
+    // NAME KEPT, MEANING NARROWED: it now RETURNS the faces that will receive
+    // panels and writes nothing. See the note at the bottom of the body.
+
     if (roofPlanes.length <= 1) return roofPlanes;
     // Subject reference: prefer the user's MARKED planes (source 'manual' /
     // createdFrom3D) over mapCenter — the geocode can land on the NEIGHBOUR (e.g.
@@ -3999,12 +4023,28 @@ export default function DesignStudio({ project, onSave }: Props) {
     const subject = sv.length > 0
       ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
       : { lat: mapCenter.lat, lng: mapCenter.lng };
-    const { kept: subjectKept, cropped } = filterToSubjectBuilding(
-      roofPlanes,
-      (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
-      subject,
-      { maxDistM: 60 },  // hard cap: no plane >60m from the subject building
-    );
+    // 🚨 THE CROP SEES ONLY DETECTED FACES. It was written for a real defect —
+    // a block-wide Google detect papering 997 panels across ten houses — and
+    // that defect is entirely about faces a MACHINE supplied. A face a person
+    // drew is never the neighbour's roof: they drew it, deliberately, on this
+    // property. The clustering's only evidence is distance, and a detached
+    // garage IS far from the house, so distance cannot tell them apart.
+    // Authorship can, and it is already recorded.
+    const scoped = autoLayoutScope({
+      planes: roofPlanes,
+      vertsOf: (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+      isAuthored: (p) => isHandModelledFace(p),
+      crop: (planes) => {
+        const r = filterToSubjectBuilding(
+          planes,
+          (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+          subject,
+          { maxDistM: 60 },  // hard cap: no plane >60m from the subject building
+        );
+        return { kept: r.kept, cropped: r.cropped };
+      },
+    });
+    const subjectKept = scoped.scope;
     // De-dup: drop a detected (aerial_*) plane that overlaps a hand-traced plane —
     // the same roof captured twice was double-filling panels (Melvin 134 = 54+80).
     const { kept, dropped } = dropDetectedPlanesOverlappingManual(
@@ -4013,15 +4053,30 @@ export default function DesignStudio({ project, onSave }: Props) {
       (p) => isHandModelledFace(p),
     );
     const removed = roofPlanes.length - kept.length;
-    if (removed === 0 || kept.length === 0) return roofPlanes;  // never wipe the design
-    setRoofPlanes(kept);
-    setPanels(prev => prev.filter(pan => kept.some(pl => pointInLatLngRing(pan.lat, pan.lng, pl.vertices ?? []))));
+    if (removed === 0 || kept.length === 0) return roofPlanes;
+    // 🚨 NOTHING IS WRITTEN HERE ANY MORE, AND THAT IS THE FIX.
+    //
+    // This used to be `setRoofPlanes(kept)` followed by a panel filter that
+    // kept only panels standing inside a kept ROOF polygon. Two deletions on
+    // one click, and the owner hit both: a DETACHED garage is its own
+    // adjacency cluster (they union only within 1.2 m), so it was not the
+    // seed's cluster and was deleted from the design; and a SolFence panel
+    // stands on a fence line in the yard, inside no roof polygon, so every
+    // fence and ground panel was deleted too — that filter never looked at
+    // `systemType` at all. The autosave then persisted both.
+    //
+    // Auto Layout chooses SURFACES. It does not own the building. A face that
+    // gets no panels is still part of the property, and that sentence had no
+    // way to be expressed before: the only way to say "not for panels" was
+    // "not in the design".
     const neighborN = roofPlanes.length - subjectKept.length;
     const msg = [
-      neighborN > 0 ? `${neighborN} neighbor roof${neighborN !== 1 ? 's' : ''}` : '',
+      neighborN > 0 ? `${neighborN} detected neighbour roof${neighborN !== 1 ? 's' : ''}` : '',
       dropped > 0 ? `${dropped} duplicate detection${dropped !== 1 ? 's' : ''}` : '',
     ].filter(Boolean).join(' + ');
-    toast.info('Kept your building', `Ignored ${msg} — panels go on your traced roof only`);
+    toast.info('Panels go on your building only',
+      `Skipped ${msg} for this layout. Nothing was deleted — they are still on the property, `
+      + 'and you can remove them yourself if you want them gone.');
     return kept;
   }, [roofPlanes, mapCenter, toast]);
 
@@ -4088,7 +4143,15 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     // Combine: manual panels first (preserved), then new auto panels
     // Filter out auto panels that overlap obstruction keep-out zones
-    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    // 🚨 TWO SOURCES, ONE RULE. `keepOutZones` holds only what the Nearmap AI
+    // detected — the sole `setKeepOutZones` caller in the file. The obstructions
+    // a PERSON marked live in `placedObstructions` and reached no placement path
+    // at all, so a hand-marked chimney was honoured by nothing. Both now run
+    // through the same authority the 3D chokepoint uses.
+    const filteredNew = filterPanelsByKeepOut(
+      keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew,
+      placedObstructionsRef.current ?? [],
+    ).panels;
     setPanels([...manualPanels, ...filteredNew]);
     setAutoLayoutRunning(false);
     const removedCount = allNew.length - filteredNew.length;
@@ -4157,7 +4220,15 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
 
     const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
-    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    // 🚨 TWO SOURCES, ONE RULE. `keepOutZones` holds only what the Nearmap AI
+    // detected — the sole `setKeepOutZones` caller in the file. The obstructions
+    // a PERSON marked live in `placedObstructions` and reached no placement path
+    // at all, so a hand-marked chimney was honoured by nothing. Both now run
+    // through the same authority the 3D chokepoint uses.
+    const filteredNew = filterPanelsByKeepOut(
+      keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew,
+      placedObstructionsRef.current ?? [],
+    ).panels;
     setPanels([...manualPanels, ...filteredNew]);
     setAutoLayoutRunning(false);
     const removedCount = allNew.length - filteredNew.length;
@@ -4219,7 +4290,15 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
 
     const manualPanels2 = panels.filter(p => p.layoutSource === 'MANUAL');
-    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    // 🚨 TWO SOURCES, ONE RULE. `keepOutZones` holds only what the Nearmap AI
+    // detected — the sole `setKeepOutZones` caller in the file. The obstructions
+    // a PERSON marked live in `placedObstructions` and reached no placement path
+    // at all, so a hand-marked chimney was honoured by nothing. Both now run
+    // through the same authority the 3D chokepoint uses.
+    const filteredNew = filterPanelsByKeepOut(
+      keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew,
+      placedObstructionsRef.current ?? [],
+    ).panels;
     setPanels([...manualPanels2, ...filteredNew]);
     setAutoLayoutRunning(false);
     const removedCount = allNew.length - filteredNew.length;
@@ -4355,7 +4434,17 @@ export default function DesignStudio({ project, onSave }: Props) {
       projectId: project.id,
       systemType: project.systemType,
       panels,
-      roofPlanes: sysDef.roofPlanes,
+      // 🚨 THE ARRAY ITSELF, NEVER `sysDef.roofPlanes`.
+      //
+      // `buildSystemDefinition` deliberately reports `undefined` for an empty
+      // roof: no plane is the honest input for a production calculation with
+      // nothing traced. But this is the PERSISTENCE path, and in upsertLayout
+      // `undefined` means COALESCE — KEEP WHAT IS STORED. So deleting every
+      // face and pressing Save wrote nothing, kept the old geometry in
+      // `layouts.roof_planes`, and told the user "Design saved & calculated!".
+      // The roof came back on the next reload and looked like the delete had
+      // been ignored. `[]` is not nullish; it wins the merge and is written.
+      roofPlanes,
       siteArchives: archives,
       obstructions: placedObstructionsRef.current,
       measurements: measurementsRef.current,
@@ -4391,10 +4480,14 @@ export default function DesignStudio({ project, onSave }: Props) {
           layout,
           selectedInverter: selectedInverter ?? undefined,
           selectedPanel: selectedPanel ?? undefined,
+          // The Save button lands on this route, so a confirmed deletion has to
+          // be able to authorise itself here too. See the autosave path.
+          destructive: site.pendingDestructive() ?? undefined,
         }),
       });
       const data = await res.json();
       if (data.success) {
+        site.clearPendingDestructive();
         setProduction(data.data.production);
         setCostEstimate(data.data.costEstimate);
         setSaveStatus('saved');
@@ -4426,12 +4519,145 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   };
 
-  const clearAll = () => {
-    setPanels([]); setRoofPlanes([]); setGroundArea([]); setFenceLine([]);
-    setDrawnPoints([]); setProduction(null); setCostEstimate(null);
-    setSelectedPanelIds(new Set()); setMeasurePoints([]); setMeasureDistance(null);
-    setObstructions([]); setKeepOutZones([]);
-  };
+  // ═══════════════════════════════════════════════════════════════════════
+  // DELETION — planned, shown, confirmed when it deserves it, then applied
+  //
+  // 🚨 ONE PATH. Every delete control in the studio and in the 3D engine lands
+  // here, so there is exactly one place that records the undo step, writes the
+  // tombstone that stops a restore path re-admitting the object, mints the
+  // save authorization, and tells the renderer which entities to take down.
+  // A control that spliced an array itself would get none of the four, and the
+  // object would come back on the next reload.
+  // ═══════════════════════════════════════════════════════════════════════
+  const [pendingDeletion, setPendingDeletion] = useState<DeletionPlan | null>(null);
+  const [engineDeletion, setEngineDeletion] = useState<{
+    token: number; scope: string;
+    faceIds: string[]; obstructionIds: string[]; panelIds: string[];
+    resetEditor: boolean;
+  } | null>(null);
+  const deletionTokenRef = useRef(0);
+
+  const commitDeletion = useCallback((plan: DeletionPlan) => {
+    setPendingDeletion(null);
+    const res = site.applyDelete(plan);
+    if (!res.ok) {
+      toast.error('Nothing was deleted', res.message);
+      return;
+    }
+    // 🚨 THE RENDERER IS TOLD WHAT WENT, BY ID. It must never work it out by
+    // comparing against a prop — that inference is what deleted a hand-traced
+    // garage once already. See the v66 note in SolarEngine3D's restore effect.
+    deletionTokenRef.current += 1;
+    setEngineDeletion({
+      token: deletionTokenRef.current,
+      scope: plan.scope,
+      faceIds: plan.faceIds,
+      obstructionIds: plan.obstructionIds,
+      panelIds: plan.panelIds,
+      // A clear also cancels whatever the user was half-way through drawing.
+      // The owner's own screenshot had "Hip section — click footprint corner 1
+      // of 4" over a scene they were trying to empty: two corners were already
+      // recorded, invisible, and the next click would have finished a section
+      // from points picked before the reset.
+      resetEditor: plan.clearsProperty || plan.scope === 'customBuilding',
+    });
+    if (plan.clearsProperty) {
+      // Derived, project-level state that is not site-bound geometry. It
+      // describes a design that no longer exists.
+      setProduction(null);
+      setCostEstimate(null);
+      setGroundArea([]);
+      setFenceLine([]);
+      setDrawnPoints([]);
+      setSelectedPanelIds(new Set());
+      setMeasurePoints([]);
+      setMeasureDistance(null);
+      setKeepOutZones([]);
+    }
+    toast.success(plan.title, res.message + ' Undo restores it.');
+  }, [site.applyDelete]);
+
+  const requestDeletion = useCallback((scope: string, targetId?: string) => {
+    const plan = site.planDelete(scope as DeletionScope, targetId);
+    if (!plan.ok) {
+      // 🚨 A REFUSAL IS A SENTENCE AND A WAY FORWARD, never a silent no-op.
+      // "This face is one of 2 on a gable section…" plus "Delete the whole
+      // section instead" is the difference between a product that said no and
+      // a product that appears broken.
+      toast.error(plan.title + ' is not possible here', plan.refusal + ' ' + plan.refusalRemedy);
+      return;
+    }
+    if (plan.ceremony === 'confirm') { setPendingDeletion(plan); return; }
+    commitDeletion(plan);
+  }, [site.planDelete, commitDeletion]);
+
+  /**
+   * 🚨 `clearAll` IS NOW A DELETION, NOT A SET OF SETTERS.
+   *
+   * It used to call nine setters directly. That meant: no undo entry at all
+   * (pressing Undo afterwards replayed some OLDER roof under a label naming a
+   * different action), no tombstone (so the cleared faces came back from the
+   * archive or from Lane A), no authorization (so the save that followed was
+   * refused by the sub-system-wipe guard with a data-loss error about a wipe
+   * the user had just asked for), and every face left drawn in the viewer
+   * because nothing told the renderer.
+   */
+  const clearAll = useCallback(() => { requestDeletion('design'); }, [requestDeletion]);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SHADE, FROM THE GEOMETRY THIS PRODUCT OWNS
+  //
+  // 🚨 BEFORE THIS, NOTHING OCCLUDED ANYTHING. The per-panel shade number was
+  // the cosine of incidence between the module normal and the sun — it read
+  // `tilt` and `azimuth` and was blind to every object in the scene, Google's
+  // mesh included. Cesium's shadow map was switched on in shade mode and never
+  // sampled. And `annualShadeFactor`, which `lib/pvwatts.ts` turns into a
+  // production derate, had exactly one writer: a component imported by nothing.
+  //
+  // So this is not "custom shade support". It is shade.
+  // ═══════════════════════════════════════════════════════════════════════
+  const runShadeAnalysis = useCallback(() => {
+    const planes = roofPlanesRef.current ?? [];
+    const obs = placedObstructionsRef.current ?? [];
+    const live = panelsRef2.current ?? [];
+    if (live.length === 0) return;
+    const groundElevM = planes.find(p => Number.isFinite(p.planeHeightAtCenterMeters))
+      ?.planeHeightAtCenterMeters ?? 0;
+    const scene = buildShadeScene({ roofPlanes: planes, obstructions: obs, groundElevM });
+    const byId = new Map(live.map(p => [p.id, p]));
+    const result = computeShadeAnalysis(
+      live.map(p => ({
+        id: p.id, tilt: p.tilt ?? 0, azimuth: p.azimuth ?? 180,
+        row: p.row ?? 0, col: p.col ?? 0, lat: p.lat, lng: p.lng,
+      })),
+      mapCenterRef.current?.lat ?? 0,
+      mapCenterRef.current?.lng ?? 0,
+      // 🚨 PER PANEL. A tree at the south-west corner shades the modules beside
+      // it and not the ones forty feet away, and that difference is the entire
+      // reason anyone runs a shade study.
+      (panelId) => {
+        const p = byId.get(panelId);
+        if (!p) return null;
+        return profileForPanel(
+          { id: p.id, lat: p.lat, lng: p.lng, height: p.height, planeId: p.planeId },
+          scene, groundElevM,
+        );
+      },
+      rowSpacing,
+    );
+    setPanels(prev => prev.map(p => {
+      const f = result.panelShadeFactors[p.id];
+      return typeof f === 'number' ? { ...p, annualShadeFactor: f } : p;
+    }));
+    const shadedCount = Object.values(result.panelShadeFactors).filter(f => f < 0.97).length;
+    toast.info(
+      `Shade: ${result.systemShadeDeratePct.toFixed(1)}% annual loss`,
+      shadedCount > 0
+        ? `${shadedCount} of ${live.length} modules see shade from the model — trees, chimneys and nearby structures included. It is in the production estimate.`
+        : `No module in this layout is shaded by anything in the model.`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowSpacing, toast]);
 
   const systemTypeLabel = { roof: 'Roof Mount', ground: 'Ground Mount', fence: 'Sol Fence' }[project.systemType];
   const systemTypeColor = { roof: 'text-amber-400', ground: 'text-teal-400', fence: 'text-purple-400' }[project.systemType];
@@ -4507,6 +4733,14 @@ export default function DesignStudio({ project, onSave }: Props) {
         <Bug size={14} /> Report a Bug
       </button>
       <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+      {/* 🚨 IT LISTS THE OBJECTS BEFORE IT ASKS. Only the scopes that cannot be
+          a slip reach it — `ceremonyFor` decides, not this call site — so a
+          single traced face is still one click and an Undo away. */}
+      <DeleteConfirm
+        plan={pendingDeletion}
+        onConfirm={() => { if (pendingDeletion) commitDeletion(pendingDeletion); }}
+        onCancel={() => setPendingDeletion(null)}
+      />
 
       {/* ── Studio Header ── */}
       <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-900 border-b border-slate-700/50 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
@@ -5045,9 +5279,24 @@ export default function DesignStudio({ project, onSave }: Props) {
                   e.siteKey = detectedForSite;
                   return e;
                 });
+                // 🚨 A DETECTION MAY NOT RE-ADMIT A FACE THE USER DELETED.
+                //
+                // Detected planes merge BY ID, and Google's ids are stable for a
+                // property — so deleting a bad detected face and pressing Auto
+                // Fill again put the identical face straight back, silently, as
+                // an "update" of an id that is no longer part of the design. The
+                // ledger is the one canonical answer to whether it still belongs.
+                const admitted = site.admitGeometry(enriched);
+                if (admitted.length < enriched.length) {
+                  toast.info(
+                    'Some detected faces were not re-added',
+                    `${enriched.length - admitted.length} of them were deleted here on purpose. `
+                    + 'Use Start Over if you want this property re-detected from scratch.',
+                  );
+                }
                 setRoofPlanes(prev => {
                   const byId = new Map(prev.map(p => [p.id, p]));
-                  for (const p of enriched) byId.set(p.id, p);
+                  for (const p of admitted) byId.set(p.id, p);
                   return Array.from(byId.values());
                 });
                 setSolarApiStatus('loaded');
@@ -5074,6 +5323,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                   return e;
                 }));
               }}
+              geometryLifecycleRef={site.geometryLifecycleRef}
+              onRequestDelete={requestDeletion}
+              onRunShadeAnalysis={runShadeAnalysis}
+              deletion={engineDeletion ?? undefined}
               onUndoGeometry={site.undoGeometry}
               onRedoGeometry={site.redoGeometry}
               canUndoGeometry={site.canUndoGeometry}
@@ -6355,7 +6608,14 @@ export default function DesignStudio({ project, onSave }: Props) {
 
                           This row does not unmount, it names the governing
                           answer, and it is the escape from all three. ── */}
-                      {roofPlanes.length > 0 || site.nativeDisposition !== 'undecided' ? (
+                      {/* 🚨 AND IT APPEARS AFTER A CLEARING TOO. A property that
+                          was deliberately emptied has `undecided` as its
+                          disposition and zero planes, so both of the old
+                          conditions were false and the row unmounted — leaving
+                          no control anywhere that could permit detection again.
+                          Deleting the roof would have been a one-way door. */}
+                      {roofPlanes.length > 0 || site.nativeDisposition !== 'undecided'
+                        || site.geometryLifecycle === 'cleared' ? (
                         <div
                           data-testid="geometry-source-row"
                           className="flex items-center gap-2 text-[10px] rounded px-2 py-1.5 border bg-slate-900/60 border-slate-700/40"
@@ -6366,7 +6626,14 @@ export default function DesignStudio({ project, onSave }: Props) {
                           <span className="flex-1 truncate text-slate-300" title={dispositionLabel(site.nativeDisposition)}>
                             {dispositionLabel(site.nativeDisposition)}
                           </span>
-                          {nativeAcquisitionPermitted(site.nativeDisposition) ? (
+                          {/* 🚨 BLOCKED BY EITHER FACT. A judgement about Google's
+                              geometry and a deliberate clearing of this property
+                              both refuse acquisition, and the button that lifts
+                              the block has to be offered for both — otherwise
+                              "Google 3D rejected" shows an escape and "I deleted
+                              everything" shows none. */}
+                          {nativeAcquisitionPermitted(site.nativeDisposition)
+                            && site.geometryLifecycle !== 'cleared' ? (
                             <button
                               data-testid="geometry-source-reject"
                               onClick={() => {
@@ -6387,10 +6654,20 @@ export default function DesignStudio({ project, onSave }: Props) {
                                 // whether Google's roof is any good is still unjudged.
                                 site.setNativeDisposition('undecided', activeSiteKeyRef.current
                                   || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
-                                toast.success('Geometry source re-opened', 'Auto-detect may run again on this property.');
+                                // 🚨 AND THE TOMBSTONES GO WITH IT — this is the
+                                // ONE explicit command that may clear them. The
+                                // ledger deliberately has no other way to forget:
+                                // a model that quietly discards a deletion is the
+                                // resurrection bug wearing a different hat. Here
+                                // a person is saying, in as many words, "bring
+                                // the detected roof back", so it may.
+                                site.forgetDeletions(activeSiteKeyRef.current
+                                  || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
+                                toast.success('Geometry source re-opened',
+                                  'Auto-detect may run again on this property, including faces you deleted here.');
                               }}
                               className="px-1.5 py-0.5 rounded border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 transition-colors flex-shrink-0"
-                            >Allow auto-detect</button>
+                            >{site.geometryLifecycle === 'cleared' ? 'Use Google 3D here' : 'Allow auto-detect'}</button>
                           )}
                         </div>
                       ) : null}
@@ -6510,7 +6787,18 @@ export default function DesignStudio({ project, onSave }: Props) {
                                   <div className="text-right text-[11px] text-blue-400 font-semibold">{azDir}</div>
                                   <div className="flex items-center justify-end gap-0.5">
                                     <button
-                                      onClick={e => { e.stopPropagation(); setRoofPlanes(prev => prev.filter(p => p.id !== plane.id)); }}
+                                      /* 🚨 THIS BUTTON USED TO SPLICE THE ARRAY.
+                                         No undo entry, no tombstone, no save
+                                         authorization, no word to the renderer.
+                                         Deleting every face one at a time left
+                                         the provider decision at 'accepted', the
+                                         plane count at zero — which WAS Lane A's
+                                         permission to re-acquire — and the faces
+                                         came back on the next map pan. It is the
+                                         single highest-value resurrection path an
+                                         audit found, and it is now the same
+                                         canonical delete as every other. */
+                                      onClick={e => { e.stopPropagation(); requestDeletion('face', plane.id); }}
                                       className="w-4 h-4 flex items-center justify-center text-slate-600 hover:text-red-400 transition-colors text-[10px]"
                                       title="Delete"
                                     >✕</button>

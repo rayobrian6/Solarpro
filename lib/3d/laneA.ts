@@ -32,6 +32,10 @@ import {
   nativeAcquisitionPermitted,
   type NativeGeometryDisposition,
 } from '@/lib/design/nativeGeometryDisposition';
+import {
+  acquisitionPermittedByLifecycle,
+  type DesignGeometryLifecycle,
+} from '@/lib/design/deletionAuthority';
 import type { RoofPlane } from '@/types';
 
 /** The shape Lane A consumes. This is `RoofSegment` as lib/digitalTwin.ts emits
@@ -226,7 +230,28 @@ export interface LaneAGateInput {
   stage: string;
   groundElevResolved: boolean;
   segmentCount: number;
+  /**
+   * 🚨 NO LONGER THE AUTHORITY, AND KEPT ONLY AS A CONSISTENCY CHECK.
+   *
+   * This integer was asked a question it cannot answer. Zero planes is the same
+   * number whether nobody has modelled this house yet or somebody modelled it
+   * and threw it away — and those two facts must produce OPPOSITE answers here.
+   * Emptying the roof is how a person says a Google model is not good enough,
+   * so reading zero as "go ahead and acquire" re-injected exactly what had just
+   * been removed. It is still read, because a design that HAS geometry must
+   * never have a machine's guess appended to it, but "may we acquire at an
+   * empty property" is now `lifecycle`'s question.
+   */
   existingPlaneCount: number;
+  /**
+   * WHAT HAPPENED TO THIS PROPERTY'S GEOMETRY, as a fact rather than an
+   * inference. See lib/design/deletionAuthority.ts.
+   *
+   * Optional so every existing caller and test keeps compiling; absent is read
+   * as derived-from-the-count, which is exactly the behaviour before this
+   * existed.
+   */
+  lifecycle?: DesignGeometryLifecycle;
   restoreResolved: boolean;
   siteKey: string;
   lastRanSiteKey: string | null;
@@ -270,6 +295,19 @@ export function shouldRunLaneA(i: LaneAGateInput): boolean {
   // removes.
   if (!nativeAcquisitionPermitted(i.nativeDisposition ?? 'undecided')) return false;
   if (i.existingPlaneCount !== 0) return false;
+  // 🚨 AND A DELIBERATE CLEARING REFUSES TOO, which the count above cannot say.
+  //
+  // The disposition covers "I looked at Google's roof and rejected it" and "a
+  // hand-built model governs here". It does NOT cover the commonest gesture of
+  // all: selecting the bad faces and deleting them, or pressing Start Over.
+  // Those leave the disposition at `accepted` or `undecided` — both of which
+  // permit acquisition — and leave the plane count at zero, which used to BE
+  // the permission. So the two guards together said yes to the one case the
+  // whole feature exists to refuse. `lifecycle` is the fact that was missing.
+  //
+  // Absent means "derive it from the count", which is the behaviour that
+  // existed before the ledger and keeps every older caller honest.
+  if (!acquisitionPermittedByLifecycle(i.lifecycle ?? 'untouched')) return false;
   if (!i.siteKey) return false;
   if (i.lastRanSiteKey === i.siteKey) return false;
   return true;

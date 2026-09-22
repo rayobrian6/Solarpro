@@ -20,6 +20,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { MapSourcePicker, DEFAULT_PICKER_STATE, type MapPickerState } from '@/components/3d/mapSource';
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
+import { autoLayoutScope, panelsAutoRoofOwns, mergeAutoRoofPanels } from '@/lib/3d/autoLayoutScope';
 import { getSunPosition, getPanelShadingFactor } from '@/lib/solarMath';
 import { siteKeyFromCoords } from '@/lib/siteIdentity';
 import {
@@ -527,6 +528,14 @@ interface Props {
    * neither behaves as before.
    */
   nativeDispositionRef?: React.MutableRefObject<NativeGeometryDisposition>;
+  /**
+   * WHAT HAPPENED TO THIS PROPERTY'S GEOMETRY — 'untouched' | 'populated' |
+   * 'cleared'. A REF for exactly the reason the line above is one: the gate
+   * fires from inside a resolved promise, seconds after the render it closed
+   * over, and a clear performed during that fetch must be visible to it.
+   * See lib/design/deletionAuthority.ts.
+   */
+  geometryLifecycleRef?: React.MutableRefObject<'untouched' | 'populated' | 'cleared'>;
   /** 🚨 LANE A GATE. True once DesignStudio's DB restore has RESOLVED — i.e. the
    *  stored layout is in state, or the read genuinely returned nothing. Lane A
    *  refuses to run while this is false, because detection lands in React state
@@ -581,6 +590,49 @@ interface Props {
    * buttons did nothing, and what it modelled was render state, which is the
    * one thing a geometry history must not restore.
    */
+  /**
+   * ASK THE OWNER TO DELETE SOMETHING.
+   *
+   * 🚨 THE ENGINE NEVER DELETES CANONICAL GEOMETRY ITSELF, for the same reason
+   * it never patches a single plane: the parent owns `roofPlanes`, the undo
+   * stack, the deletion ledger and the save authorization, and a deletion that
+   * skipped any of those would work on screen and come back on reload. The
+   * engine's job is to know WHAT is selected and to say so.
+   *
+   * `scope` names the user's words ('face', 'section', 'obstruction', 'panels',
+   * 'customBuilding', 'design'); `targetId` is the selected object for the
+   * first three. The parent plans it, shows what will go, confirms if the
+   * scope deserves it, and applies.
+   */
+  onRequestDelete?: (scope: string, targetId?: string) => void;
+  /**
+   * RUN A REAL SHADE ANALYSIS over the canonical design.
+   *
+   * 🚨 THE ENGINE CANNOT DO THIS ITSELF, and not for a layering reason: the
+   * result is a number ON EACH PANEL (`annualShadeFactor`), which the owner
+   * holds, the autosave persists and `lib/pvwatts.ts` turns into a production
+   * derate. A shade study that lived in the viewer would be a picture.
+   */
+  onRunShadeAnalysis?: () => void;
+  /**
+   * WHAT THE OWNER JUST DELETED, and the token that says it is new.
+   *
+   * The counter is the trigger: an effect keyed on it removes exactly these
+   * entities. Removal is driven by an EXPLICIT LIST OF IDS and never by
+   * inferring absence from a prop — the reconcile-deletions block that inferred
+   * it destroyed a hand-traced garage (see the v66 note in the restore effect).
+   */
+  deletion?: {
+    token: number;
+    scope: string;
+    faceIds: string[];
+    obstructionIds: string[];
+    panelIds: string[];
+    /** True for Clear Custom Building / Start Over: the editor returns to idle
+     *  and every render-only primitive (blocks, trees, walls, wireframe,
+     *  setbacks, in-progress traces) goes with it. */
+    resetEditor: boolean;
+  };
   onUndoGeometry?: () => string | null;
   onRedoGeometry?: () => string | null;
   canUndoGeometry?: boolean;
@@ -1067,13 +1119,14 @@ function SolarEngine3D({
   onRoofPlaneCreated,
   onRoofPlanesDetected,
   nativeDisposition = 'undecided',
-  nativeDispositionRef,
+  nativeDispositionRef, geometryLifecycleRef,
   roofRestoreResolved = false,
   onObstructionsChange,
   onMeasurementsChange,
   initialObstructions,
   onRoofPlanesStitched,
   onRoofGeometryReplaced,
+  onRequestDelete, deletion, onRunShadeAnalysis,
   onUndoGeometry, onRedoGeometry,
   canUndoGeometry = false, canRedoGeometry = false,
   undoGeometryLabel = null, redoGeometryLabel = null,
@@ -1172,6 +1225,11 @@ function SolarEngine3D({
   const hitWallIdRef = useRef<string | null>(null);
   /** The wall currently selected, when the selection level is 'wall'. */
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
+  /** The marked obstruction under the cursor, if any. Selectable so it can be
+   *  deleted — the owner's list names "delete obstruction" and "delete tree",
+   *  and neither was reachable by any gesture. */
+  const [selectedObstructionId, setSelectedObstructionId] = useState<string | null>(null);
+  const selectedObstructionIdRef = useRef<string | null>(null);
   /** The last refusal from the section authority, phrased for a person. */
   const [sectionRefusal, setSectionRefusal] = useState<string | null>(null);
   /**
@@ -2457,6 +2515,50 @@ function SolarEngine3D({
   // polygon3D / origin3D / normal3D / localFrame3D from the stitch write-back).
   //
   // Idempotent: skips planes already in plane3DEntityMap (traced/stitched this
+  // ═════════════════════════════════════════════════════════════════════════
+  // A DELETION HAS BEEN PERFORMED BY THE OWNER — take the picture down.
+  //
+  // 🚨 THIS IS THE DELETION PATH THE v66 NOTE BELOW SAYS IS THE ONLY LEGAL ONE:
+  // "it must be driven by an explicit user delete action carrying the id to
+  // remove — never by inferring absence from a prop that has its own timing."
+  // The ids come from the owner's canonical delete, which has already recorded
+  // the undo step and the tombstone. Nothing here looks at what is missing.
+  //
+  // Keyed on the TOKEN, not on the id list: two identical deletions (delete,
+  // undo, delete again) must both fire, and a list compared by identity would
+  // re-fire on every unrelated re-render.
+  // ═════════════════════════════════════════════════════════════════════════
+  const lastDeletionTokenRef = useRef<number>(0);
+  useEffect(() => {
+    if (!deletion || !deletion.token) return;
+    if (deletion.token === lastDeletionTokenRef.current) return;
+    lastDeletionTokenRef.current = deletion.token;
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    let removed = 0;
+    removed += removeFaceEntities(viewer, deletion.faceIds ?? []);
+    removed += removeObstructionEntities(viewer, deletion.obstructionIds ?? []);
+    for (const pid of (deletion.panelIds ?? [])) {
+      try { removePanelEntities(viewer, pid); removed++; } catch { /* ignore */ }
+    }
+    if (deletion.resetEditor) {
+      // 🚨 THE ORDER MATTERS. Idle FIRST, so that nothing below can be
+      // re-created by a half-finished interaction reacting to the removals.
+      resetEditorToIdle(viewer);
+      try { clearBuildingExtrusion(viewer); } catch { /* ignore */ }
+      try { clearRoofWireframe(viewer); } catch { /* ignore */ }
+      try { clearFireSetbackZones(viewer); } catch { /* ignore */ }
+      try { clearEquipment(viewer); } catch { /* ignore */ }
+      try { clearRoofRails(viewer); } catch { /* ignore */ }
+      clearPlacedBlocks(viewer);
+      clearPlacedTrees(viewer);
+    }
+    addLog('DELETE', `${deletion.scope}: removed ${removed} entit${removed === 1 ? 'y' : 'ies'}`
+      + (deletion.resetEditor ? ', editor reset to idle' : ''));
+    try { viewer.scene?.requestRender?.(); } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deletion?.token]);
+
   // session). Does NOT touch panels or fences — those have their own restore paths.
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -2714,6 +2816,13 @@ function SolarEngine3D({
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
   useEffect(() => { showRoofTextureRef.current = showRoofTexture; }, [showRoofTexture]);
   useEffect(() => { selectedFaceIdRef.current = selectedFaceId; }, [selectedFaceId]);
+  // 🚨 REFS, because the keyboard handler is installed once and closes over the
+  // first render's values. Reading state there would delete whatever was
+  // selected when the listener was attached, which is usually nothing and
+  // occasionally the wrong object.
+  const selectionLevelRef = useRef<'section' | 'face' | 'wall'>('section');
+  const selectedFaceSectionIdRef = useRef<string | null>(null);
+  useEffect(() => { selectionLevelRef.current = selectionLevel; }, [selectionLevel]);
 
   /** 🚨 A SELECTION CANNOT OUTLIVE ITS FACE.
    *
@@ -6309,7 +6418,18 @@ function SolarEngine3D({
         const _utcH = ((_localH - lng / 15) % 24 + 24) % 24;
         d.setUTCHours(Math.floor(_utcH), Math.round((_utcH % 1) * 60), 0, 0);
         const sunPos = getSunPosition(lat, lng, d);
-        const shade  = computeShade(panel, sunPos);
+        // 🚨 THE ANNUAL FACTOR WINS WHEN THERE IS ONE.
+        //
+        // `computeShade` is the cosine of incidence and nothing else: it reads
+        // the module's tilt and azimuth and is blind to every object in the
+        // scene. Painting the roof with it while the analysis says something
+        // different is two answers to one question, and the one on screen is
+        // the one people believe. `annualShadeFactor` is produced from the
+        // canonical geometry — trees, chimneys, the garage across the drive —
+        // by lib/shade/canonicalShadeScene.ts. See `onRunShadeAnalysis`.
+        const shade = typeof (panel as { annualShadeFactor?: number }).annualShadeFactor === 'number'
+          ? (panel as { annualShadeFactor: number }).annualShadeFactor
+          : computeShade(panel, sunPos);
         cellMaterial    = new C.ColorMaterialProperty(shadeToColor(C, shade));
         glassColor      = shadeToColor(C, shade).withAlpha(0.18);
         frameOutlineCol = C.Color.fromCssColorString('#aaaaaa').withAlpha(0.70);
@@ -7617,6 +7737,12 @@ function SolarEngine3D({
     const p2ECEF = engLatLngToECEF(p2.lat, p2.lng, p2.height);
 
     const clGroundResult = placePanelsControlled({
+        // 🚨 EVERY placement path passes this. One physical validity
+        // authority: auto, manual, row, snap and fill all ask the same
+        // question of the same objects. tests/obstructionPlacementAuthority
+        // asserts that this line is present at every call site, so a new
+        // path cannot quietly reintroduce a placement rule of its own.
+        obstructions: obstructionsRef.current ?? [],
       mode:        'ground',
       p1ECEF,
       p2ECEF,
@@ -8012,6 +8138,12 @@ function SolarEngine3D({
 
       // Place panels — routed through control layer
       const clFenceResult = placePanelsControlled({
+        // 🚨 EVERY placement path passes this. One physical validity
+        // authority: auto, manual, row, snap and fill all ask the same
+        // question of the same objects. tests/obstructionPlacementAuthority
+        // asserts that this line is present at every call site, so a new
+        // path cannot quietly reintroduce a placement rule of its own.
+        obstructions: obstructionsRef.current ?? [],
         mode:         'fence',
         p1ECEF,
         p2ECEF,
@@ -8550,6 +8682,12 @@ function SolarEngine3D({
     const azForRow   = isFinite(azimuthDeg) ? azimuthDeg : azimuthRef.current;
 
     const clRowResult = placePanelsControlled({
+        // 🚨 EVERY placement path passes this. One physical validity
+        // authority: auto, manual, row, snap and fill all ask the same
+        // question of the same objects. tests/obstructionPlacementAuthority
+        // asserts that this line is present at every call site, so a new
+        // path cannot quietly reintroduce a placement rule of its own.
+        obstructions: obstructionsRef.current ?? [],
       mode:        'ground',
       p1ECEF,
       p2ECEF,
@@ -9254,6 +9392,30 @@ function SolarEngine3D({
       // so nothing that worked stops working.
       // One drill-pick, read twice — `pickPanelAtScreen` walks up to ten hits
       // and calling it again below would double that on every click.
+      // ── A MARKED OBSTRUCTION IS SELECTABLE ───────────────────────────────
+      //
+      // 🚨 IT WAS NOT, AT ALL. A vent, a chimney or a tree could be placed and
+      // never touched again: no click selected one, so "delete this one" was
+      // unreachable and the only way to remove a mis-placed vent was to remove
+      // every obstruction on the roof. Checked BEFORE panels because an
+      // obstruction is small, sits on the roof surface and is usually
+      // surrounded by modules — a panel-first order makes it unclickable
+      // exactly where it matters.
+      const obsHit = pickObstructionAtScreen(viewer, screenPos);
+      if (obsHit) {
+        selectedObstructionIdRef.current = obsHit;
+        setSelectedObstructionId(obsHit);
+        clearPanelSelection();
+        selectRoofFace(null);
+        setStatusMsg('\u{1F6A7} Obstruction selected \u2014 press Delete to remove it');
+        try { viewer.scene.requestRender(); } catch { /* ignore */ }
+        return;
+      }
+      if (selectedObstructionIdRef.current) {
+        selectedObstructionIdRef.current = null;
+        setSelectedObstructionId(null);
+      }
+
       const picked = pickPanelAtScreen(viewer, screenPos);
       if (showBuilding3DRef.current && !picked.foundId) {
         const faceId = pickBuildingFaceAtScreen(viewer, C, screenPos);
@@ -9899,6 +10061,26 @@ function SolarEngine3D({
           && (selectedPanelIdRef.current || selectedPanelIdsRef.current.size > 0)) {
         e.preventDefault();
         deleteSelectedPanels(); // v48.12: deletes all in Set
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && modeRef.current === 'select'
+          && selectedObstructionIdRef.current) {
+        e.preventDefault();
+        onRequestDelete?.('obstruction', selectedObstructionIdRef.current);
+        selectedObstructionIdRef.current = null;
+        setSelectedObstructionId(null);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && modeRef.current === 'select'
+          && selectedFaceIdRef.current) {
+        // 🚨 THE DELETE KEY WAS SILENTLY INERT FOR GEOMETRY. It deleted panels
+        // and nothing else, so selecting a roof face and pressing Delete — the
+        // single most obvious gesture in any modelling tool — did nothing at
+        // all, with no message. It now asks the owner for the same deletion the
+        // inspector's button asks for, so the keyboard and the button cannot
+        // diverge.
+        e.preventDefault();
+        const asSection = selectionLevelRef.current === 'section' && selectedFaceSectionIdRef.current;
+        onRequestDelete?.(
+          asSection ? 'section' : 'face',
+          asSection ? selectedFaceSectionIdRef.current : selectedFaceIdRef.current,
+        );
       }
       // v62: with an array selected, arrow keys MOVE it (screen-relative) and
       // , / . ROTATE it about its plane normal.
@@ -11025,6 +11207,188 @@ function SolarEngine3D({
     previewRowEntitiesRef.current = [];
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // DELETION — the renderer's half
+  //
+  // 🚨 THE PARENT DECIDES, THIS REMOVES. Nothing here reads `roofPlanes` to
+  // work out what went; it is handed an explicit list of ids by the owner that
+  // performed the deletion. Inferring removal from a prop is what the
+  // reconcile-deletions block did, and it destroyed a hand-traced garage —
+  // ABSENCE IS NOT INTENT, and the ids make intent explicit.
+  // ═════════════════════════════════════════════════════════════════════════
+
+  /** Drop every Cesium entity belonging to these faces.
+   *
+   *  🚨 THE MAP ENTRIES ARE LEFT, exactly as the section-edit path leaves them,
+   *  and the blanket ban on pruning `plane3DEntityMap` stands. Membership in the
+   *  design is taken from `roofPlanesRef.current` by `liveRenderedFaces()`, so a
+   *  leftover cache entry decides nothing — and a deleted id is tombstoned, so
+   *  it can never return to be confused with a new face. */
+  function removeFaceEntities(viewer: any, faceIds: string[]) {
+    if (!viewer || !faceIds?.length) return 0;
+    let removed = 0;
+    for (const id of faceIds) {
+      for (const eid of (plane3DEntityMap.current.get(id) ?? [])) {
+        const e = viewer.entities.getById(eid);
+        if (e) { try { viewer.entities.remove(e); removed++; } catch { /* ignore */ } }
+      }
+      // The rails and the setback bands are DERIVED from the face. They are
+      // keyed by plane id and would otherwise hang in the air over nothing.
+      try { clearRoofRails(viewer, id); } catch { /* ignore */ }
+    }
+    // A named sweep as well, because `[PLANE3D-*]` entities carry the face id
+    // in their name and a map entry that was never written (a face restored by
+    // a path that did not register) would otherwise leave a ghost.
+    try {
+      const all = viewer.entities.values.slice();
+      for (const e of all) {
+        const nm: string = e?.name ?? '';
+        if (!nm.startsWith('[PLANE3D-')) continue;
+        if (!faceIds.some(id => nm.includes(id))) continue;
+        try { viewer.entities.remove(e); removed++; } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+    plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
+    return removed;
+  }
+
+  /** Drop the prism and label for these obstructions. The entity id IS the
+   *  obstruction id (see the placement path), and the name carries it too. */
+  /** Which marked obstruction is under the cursor? Reads the `[OBS] <id>` name
+   *  the placement path writes, so the entity id and the canonical id are the
+   *  same fact read one way. */
+  function pickObstructionAtScreen(viewer: any, screenPos: any): string | null {
+    try {
+      const hits = viewer.scene.drillPick(screenPos, 12) ?? [];
+      for (const h of hits) {
+        const nm: string = h?.id?.name ?? '';
+        if (typeof nm === 'string' && nm.startsWith('[OBS] ')) return nm.slice(6).trim();
+        const eid: string = h?.id?.id ?? '';
+        if (typeof eid === 'string' && (obstructionsRef.current ?? []).some(o => o?.id === eid)) return eid;
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  function removeObstructionEntities(viewer: any, ids: string[]) {
+    if (!viewer || !ids?.length) return 0;
+    let removed = 0;
+    for (const id of ids) {
+      const e = viewer.entities.getById(id);
+      if (e) { try { viewer.entities.remove(e); removed++; } catch { /* ignore */ } }
+    }
+    try {
+      const all = viewer.entities.values.slice();
+      for (const e of all) {
+        const nm: string = e?.name ?? '';
+        if (!nm.startsWith('[OBS]')) continue;
+        if (!ids.some(id => nm.includes(id))) continue;
+        try { viewer.entities.remove(e); removed++; } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+    return removed;
+  }
+
+  /** The render-only primitives that are not canonical geometry: traced blocks
+   *  and decorative trees. They are not in `roofPlanes`, so a design-level
+   *  clear would leave them standing over an empty lot. */
+  function clearPlacedBlocks(viewer: any) {
+    if (viewer) {
+      for (const e of blockEntitiesRef.current) { try { viewer.entities.remove(e); } catch { /* ignore */ } }
+      for (const e of blockHandlesRef.current) { try { viewer.entities.remove(e); } catch { /* ignore */ } }
+    }
+    blockEntitiesRef.current = [];
+    blockHandlesRef.current = [];
+    blockHeightOverridesRef.current.clear();
+    setPlacedBlockCount(0);
+    setVertexSpecs(prev => prev.filter(s => s.type !== 'block'));
+  }
+
+  function clearPlacedTrees(viewer: any) {
+    if (viewer) {
+      for (const e of treeEntitiesRef.current) { try { viewer.entities.remove(e); } catch { /* ignore */ } }
+    }
+    treeEntitiesRef.current = [];
+    setPlacedTreeCount(0);
+  }
+
+  /**
+   * RETURN THE EDITOR TO IDLE.
+   *
+   * 🚨 A CLEAR THAT LEAVES A TRACE HALF-DRAWN IS WORSE THAN NO CLEAR. The
+   * owner's screenshot showed "Hip section — click footprint corner 1 of 4"
+   * over a contaminated scene: two corners were already down, in a ref, invisible
+   * in the emptied model, and the NEXT click would have completed a section from
+   * points picked before the reset.
+   *
+   * Three separate paths reset transient state today — the tool-change effect,
+   * the Escape handler and `activateTool` — and an audit found each of them
+   * missing something the others cleared: Escape leaves an in-progress fence and
+   * the plane3d markers; the tool-change effect leaves the ruler drag and the
+   * measure overlay; `activateTool` leaves the block, gable and hip buffers.
+   * This is the union, in one place, and it is what a clear calls.
+   */
+  function resetEditorToIdle(viewer: any) {
+    fencePtsRef.current = [];        setFencePtCount(0);
+    planePtsRef.current = [];        setPlanePtCount(0);
+    rowPtsRef.current = [];          setRowPtCount(0);
+    rowStartScreenPosRef.current = null;
+    rowLastClickRef.current = null;
+    measurePtsRef.current = [];      setMeasurePtCount(0);
+    blockPtsRef.current = [];        setBlockPtCount(0);
+    gablePtsRef.current = [];        setGablePtCount(0);
+    hipPtsRef.current = [];          setHipPtCount(0);
+    dirClickPtsRef.current = [];
+    offMeshFirstClicksRef.current = 0;
+    pts3DCesiumRef.current = [];
+    pts3DCartRef.current = [];
+    setPts3DCount(0);
+    setMarkPlanePtCount(0);
+    setPlane3DPtCount(0);
+    setGroundPtCount(0);
+    setClickCountForTool(0);
+    // Drag / manipulation state. A live drag that survives a reset re-applies
+    // itself to whatever the next pointer-up happens to find.
+    dragRef.current = null;
+    blockResizeRef.current = null;
+    arrayManipRef.current = false;
+    suppressClickRef.current = false;
+    rulerAnchorRef.current = null;
+    rulerCursorRef.current = null;
+    rulerDraggingRef.current = false;
+    // Previews and overlays.
+    try { clearMeasureOverlay(); } catch { /* ignore */ }
+    try { clearGhostPanel(); } catch { /* ignore */ }
+    try { hideRotateHandle(); } catch { /* ignore */ }
+    if (viewer) {
+      try { clearPlane3DPreview(viewer); } catch { /* ignore */ }
+      try { clearLayoutOverlays(viewer); } catch { /* ignore */ }
+    }
+    if (blockPreviewRef.current) {
+      try {
+        const dots = (blockPreviewRef.current as any).__dots ?? [];
+        for (const d of dots) { try { viewer?.entities?.remove(d); } catch { /* ignore */ } }
+        viewer?.entities?.remove(blockPreviewRef.current);
+      } catch { /* ignore */ }
+      blockPreviewRef.current = null;
+    }
+    try { segmentArrowOverlayRef.current?.clear(); } catch { /* ignore */ }
+    flippedArrowsRef.current.clear();
+    try { cancelGroundArray(); } catch { /* ignore */ }
+    // Selection. Nothing may stay selected that the clear removed, or the
+    // inspector keeps offering controls for an object that is gone.
+    try { clearPanelSelection(); } catch { /* ignore */ }
+    try { selectRoofFace(null); } catch { /* ignore */ }
+    setSelectedWallId(null);
+    setSelectionLevel('section');
+    setSectionRefusal(null);
+    setSelectedBlockId(null);
+    // And the tool itself. 'select' is this editor's idle mode — there is no
+    // 'none' — so nothing is armed and no next click completes an operation
+    // that began before the reset.
+    onPlacementModeChange?.('select');
+  }
+
   /**
    * handlePlane3DClick — left-click in 'plane3d' mode.
    * Picks 3D position using full getWorldPosition() chain (3D tiles → terrain → ellipsoid).
@@ -11367,6 +11731,12 @@ function SolarEngine3D({
       const layoutId      = `plane3d-${plane.id}`;
 
       const clResult = placePanelsControlled({
+        // 🚨 EVERY placement path passes this. One physical validity
+        // authority: auto, manual, row, snap and fill all ask the same
+        // question of the same objects. tests/obstructionPlacementAuthority
+        // asserts that this line is present at every call site, so a new
+        // path cannot quietly reintroduce a placement rule of its own.
+        obstructions: obstructionsRef.current ?? [],
         mode:            'plane3d',
         mountingSystemId: mountingSystemIdRef.current,
         plane:           plane as unknown as ControlPlane,
@@ -11541,6 +11911,12 @@ function SolarEngine3D({
 
       // v48.7: Route through control layer (surface_select mode)
       const clResult  = placePanelsControlled({
+        // 🚨 EVERY placement path passes this. One physical validity
+        // authority: auto, manual, row, snap and fill all ask the same
+        // question of the same objects. tests/obstructionPlacementAuthority
+        // asserts that this line is present at every call site, so a new
+        // path cannot quietly reintroduce a placement rule of its own.
+        obstructions: obstructionsRef.current ?? [],
         mode:        'surface_select',
         mountingSystemId: mountingSystemIdRef.current,
         plane:       plane as unknown as ControlPlane,
@@ -11720,6 +12096,12 @@ function SolarEngine3D({
       // Control layer resolves targetRow from clickECEF — fixes the global-maxCol bug.
       const clickECEF = { x: pickedPos.x, y: pickedPos.y, z: pickedPos.z };
       const clExtResult = placePanelsControlled({
+        // 🚨 EVERY placement path passes this. One physical validity
+        // authority: auto, manual, row, snap and fill all ask the same
+        // question of the same objects. tests/obstructionPlacementAuthority
+        // asserts that this line is present at every call site, so a new
+        // path cannot quietly reintroduce a placement rule of its own.
+        obstructions: obstructionsRef.current ?? [],
         mode:           'extend_row',
         mountingSystemId: mountingSystemIdRef.current,
         plane:          plane as unknown as ControlPlane,
@@ -11786,6 +12168,12 @@ function SolarEngine3D({
       const clickECEF = { x: pickedPos.x, y: pickedPos.y, z: pickedPos.z };
 
       const clAddResult = placePanelsControlled({
+        // 🚨 EVERY placement path passes this. One physical validity
+        // authority: auto, manual, row, snap and fill all ask the same
+        // question of the same objects. tests/obstructionPlacementAuthority
+        // asserts that this line is present at every call site, so a new
+        // path cannot quietly reintroduce a placement rule of its own.
+        obstructions: obstructionsRef.current ?? [],
         mode:           'add_row',
         mountingSystemId: mountingSystemIdRef.current,
         plane:          plane as unknown as ControlPlane,
@@ -12478,6 +12866,11 @@ function SolarEngine3D({
       groundElevResolved: cesiumGroundElevResolvedRef.current,
       segmentCount: twinRef.current?.roofSegments?.length ?? 0,
       existingPlaneCount: (roofPlanesRef.current ?? []).length,
+      // 🚨 AND THE FACT THE COUNT ABOVE CANNOT EXPRESS. Zero planes reads the
+      // same whether nobody has modelled this house yet or somebody modelled it
+      // and deleted it, and the gate must answer those two opposite ways. Read
+      // from a ref at fire time, like every other field here.
+      lifecycle: geometryLifecycleRef?.current ?? 'untouched',
       restoreResolved: roofRestoreResolvedRef.current,
       siteKey,
       lastRanSiteKey: laneARanForRef.current,
@@ -12551,12 +12944,25 @@ function SolarEngine3D({
       const subjectPt = sv.length > 0
         ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
         : { lat, lng };
-      const { kept } = filterToSubjectBuilding(
-        eligiblePlanes,
-        (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
-        subjectPt,
-        { maxDistM: 60 },
-      );
+      // 🚨 AUTHORED FACES ARE NEVER CROPPED OUT OF THE FILL SET. Even with the
+      // destructive writes gone from the 2D side, a detached garage would still
+      // have received ZERO panels — it is its own adjacency cluster and the
+      // clustering keeps only the seed's. Distance cannot tell a garage from a
+      // neighbour's roof; authorship can, and it is already recorded.
+      const { scope: kept } = autoLayoutScope({
+        planes: eligiblePlanes,
+        vertsOf: (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+        isAuthored: (p) => isHandModelledFace(p),
+        crop: (planes) => {
+          const r = filterToSubjectBuilding(
+            planes,
+            (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+            subjectPt,
+            { maxDistM: 60 },
+          );
+          return { kept: r.kept, cropped: r.cropped };
+        },
+      });
       if (kept.length > 0 && kept.length < before) {
         eligiblePlanes = kept;
         addLog('AUTO', `handleAutoRoof: subject filter kept ${kept.length}/${before} planes (seed=${marked.length > 0 ? 'marked-plane' : 'geocode'})`);
@@ -12596,9 +13002,20 @@ function SolarEngine3D({
       // The ref, for the same reason the Lane A gate uses it: this runs from a
       // click handler whose closure may predate a decision made moments ago.
       const decided = nativeDispositionRef?.current ?? nativeDisposition ?? 'undecided';
+      // 🚨 AND THE LIFECYCLE, for the same reason the Lane A gate now reads it.
+      // The disposition covers "I looked at Google's roof and said no". It does
+      // NOT cover the commonest gesture: selecting the faces and deleting them,
+      // or pressing Start Over — both of which leave the decision at 'accepted'
+      // or 'undecided' and the plane list empty, which is exactly the state this
+      // door fires in. Without this, Auto Fill is a one-click undo of a
+      // deliberate clearing.
+      const lifecycleNow = geometryLifecycleRef?.current ?? 'untouched';
       if (!nativeAcquisitionPermitted(decided)) {
         setStatusMsg('Auto Fill did not re-detect the roof — Google 3D is marked as not governing this property. Model the roof, or change that decision in the Roof Planes panel first.');
         addLog('AUTO', `handleAutoRoof: native acquisition refused (${decided})`);
+      } else if (lifecycleNow === 'cleared') {
+        setStatusMsg('Auto Fill did not re-detect the roof \u2014 this property was cleared on purpose. Build a roof with the \u{1F3DA} Building tools, or use "Use Google 3D here" to bring the detected roof back.');
+        addLog('AUTO', 'handleAutoRoof: native acquisition refused (property deliberately cleared)');
       } else {
         const detected = detectPlanesFromTwin('handleAutoRoof');
         if (detected.length > 0) eligiblePlanes = detected;
@@ -12615,9 +13032,18 @@ function SolarEngine3D({
 
     addLog('AUTO', `handleAutoRoof: ${eligiblePlanes.length} planes, groundElev=${cesiumGroundElevRef.current.toFixed(1)}m`);
 
-    // ── Clear existing panels ────────────────────────────────────────────────
-    panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
-    panelMapRef.current.clear();
+    // ── Clear the panels THIS FILL OWNS ──────────────────────────────────────
+    //
+    // 🚨 IT USED TO CLEAR EVERY PANEL ENTITY IN THE SCENE. The SolFence
+    // disappeared visually right here, before any state was written, and then
+    // for real at `onPanelsChange(newPanels)` below. An auto ROOF fill owns the
+    // auto-generated ROOF panels and nothing else — see
+    // lib/3d/autoLayoutScope.ts for the rule and why each exception exists.
+    const ownership = panelsAutoRoofOwns(panelsRef.current ?? []);
+    const preservedPanels = ownership.preserved;
+    for (const p of ownership.replaced) {
+      try { removePanelEntities(viewer, p.id); } catch { /* ignore */ }
+    }
     lastRenderedPanelsRef.current = [];
     // Phase 2: clear roof rails on auto-fill rebuild
     try { clearRoofRails(viewer); } catch {}
@@ -12652,6 +13078,12 @@ function SolarEngine3D({
 
       // v48.7: Route through control layer (auto_roof mode)
       const clAutoResult = placePanelsControlled({
+        // 🚨 EVERY placement path passes this. One physical validity
+        // authority: auto, manual, row, snap and fill all ask the same
+        // question of the same objects. tests/obstructionPlacementAuthority
+        // asserts that this line is present at every call site, so a new
+        // path cannot quietly reintroduce a placement rule of its own.
+        obstructions: obstructionsRef.current ?? [],
         mode:            'auto_roof',
         mountingSystemId: mountingSystemIdRef.current,
         plane:           plane as unknown as ControlPlane,
@@ -12706,13 +13138,26 @@ function SolarEngine3D({
       autoFillRunningRef.current = false;
       return;
     }
-    lastRenderedPanelsRef.current = newPanels;
-    panelsRef.current = newPanels;
-    onPanelsChange(newPanels);
-    setPanelCount(newPanels.length);
+    // 🚨 A MERGE, NOT A REPLACEMENT. `newPanels` is accumulated purely from roof
+    // planes, so handing it to `onPanelsChange` wholesale deleted every fence,
+    // ground and hand-placed panel in the project. This path was the outlier —
+    // its sibling 3D paths already merge, and the 2D path already preserved
+    // MANUAL panels — and the owner lost a SolFence to it.
+    const merged = mergeAutoRoofPanels(preservedPanels, newPanels);
+    if (merged.suppressed > 0) {
+      addLog('AUTO', `handleAutoRoof: ${merged.suppressed} generated panel(s) suppressed under hand-placed modules`);
+    }
+    if (preservedPanels.length > 0) {
+      addLog('AUTO', `handleAutoRoof: preserved ${preservedPanels.length} panel(s) this fill does not own (fence/ground/hand-placed)`);
+    }
+    lastRenderedPanelsRef.current = merged.panels;
+    panelsRef.current = merged.panels;
+    onPanelsChange(merged.panels);
+    setPanelCount(merged.panels.length);
     // Phase 2: render roof rails after auto-fill completes
-    try { renderRoofRails(viewer, C, newPanels); } catch (e) { handleCesiumError('renderRoofRails auto', e, true); }
-    setStatusMsg(`Auto-roof: ${newPanels.length} panels on ${eligiblePlanes.length} roof planes (frame-locked)`);
+    try { renderRoofRails(viewer, C, merged.panels); } catch (e) { handleCesiumError('renderRoofRails auto', e, true); }
+    setStatusMsg(`Auto-roof: ${newPanels.length} panels on ${eligiblePlanes.length} roof planes (frame-locked)`
+      + (preservedPanels.length > 0 ? ` \u00b7 kept ${preservedPanels.length} existing` : ''));
 
     // v47.126: bounding box for auto-filled panels — debug only
     if (DEBUG_PLANE_OVERLAYS) {
@@ -13338,6 +13783,7 @@ function SolarEngine3D({
   const selectedFaceSectionId = activeFaceId
     ? (inspectorPlanes.find(p => p.id === activeFaceId)?.sectionId || selectedSectionId)
     : null;
+  selectedFaceSectionIdRef.current = selectedFaceSectionId;
   /**
    * DOES THE SELECTED FACE BELONG TO A BUILDING SECTION?
    *
@@ -13886,7 +14332,25 @@ function SolarEngine3D({
                   { icon: '\u{1F9ED}',     tip: 'Orient North: reset heading',       action: () => { const o=orbitRef.current; o.heading=Math.PI; o.pitch=-0.785; applyOrbitRef.current?.(); setStatusMsg('\u{1F9ED} North up'); } },
                   { icon: '\u{1F4D0}',     tip: 'Tilt: 3D angled perspective view', action: () => { const o=orbitRef.current; o.heading=5.76; o.pitch=-0.524; o.radius=280; applyOrbitRef.current?.(); setStatusMsg('\u{1F4D0} Perspective'); } },
                   { icon: '\u{1F52D}',     tip: "Top-Down: bird's eye view",        action: () => { const o=orbitRef.current; o.heading=Math.PI; o.pitch=-1.553; o.radius=150; applyOrbitRef.current?.(); setStatusMsg('\u{1F52D} Top-down'); } },
-                  { icon: '\u{1F5D1}',     tip: 'Clear All: remove all panels',     action: clearPanels, danger: true },
+                  // 🚨 THREE NAMED SCOPES, NOT ONE UNLABELLED BIN.
+                  //
+                  // This was a single trash icon in the always-visible spine
+                  // whose tip read "Clear All" and whose action deleted every
+                  // panel with no confirmation and no undo of any kind. "Clear
+                  // All" beside a roof model reads as "clear all of it"; what it
+                  // cleared was the layout, and the difference was discoverable
+                  // only by pressing it.
+                  //
+                  // Each of these now goes through the owner's canonical delete,
+                  // which shows what will be removed, asks, records the undo
+                  // step, tombstones what it removed and authorises the save
+                  // that follows. See lib/design/deletionAuthority.ts.
+                  { icon: '\u{1F5D1}', tip: 'Clear Panels: remove the panel layout, keep the roof',
+                    action: () => onRequestDelete?.('panels'), danger: true },
+                  { icon: '\u{1F3DA}', tip: 'Clear Custom Building: remove hand-built roof faces and sections',
+                    action: () => onRequestDelete?.('customBuilding'), danger: true },
+                  { icon: '\u21BA', tip: 'Start Over: empty this property and begin again',
+                    action: () => onRequestDelete?.('design'), danger: true },
                 ] as { icon: string; tip: string; action: () => void; danger?: boolean }[]).map(({ icon, tip, action, danger }) => (
                   <button key={tip}
                     onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:tip,x:r.left+r.width/2,y:r.top-8}); }}
@@ -14721,21 +15185,12 @@ function SolarEngine3D({
                   ) : null}
                   {placedBlockCount > 0 ? (
                     <button
+                      // One implementation. This used to be a second copy of
+                      // the same nine lines, so a design-level clear and this
+                      // button could drift apart — and did: the design-level
+                      // path did not know blocks existed at all.
                       onClick={() => {
-                        const viewer = viewerRef.current;
-                        if (viewer) {
-                          for (const e of blockEntitiesRef.current) {
-                            try { viewer.entities.remove(e); } catch { /* ignore */ }
-                          }
-                          for (const e of blockHandlesRef.current) {
-                            try { viewer.entities.remove(e); } catch { /* ignore */ }
-                          }
-                        }
-                        blockEntitiesRef.current = [];
-                        blockHandlesRef.current = [];
-                        blockHeightOverridesRef.current.clear();
-                        setPlacedBlockCount(0);
-                        setVertexSpecs(prev => prev.filter(s => s.type !== 'block'));
+                        clearPlacedBlocks(viewerRef.current);
                         setStatusMsg('All blocks cleared');
                       }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
@@ -14797,14 +15252,7 @@ function SolarEngine3D({
                   {placedTreeCount > 0 ? (
                     <button
                       onClick={() => {
-                        const viewer = viewerRef.current;
-                        if (viewer) {
-                          for (const e of treeEntitiesRef.current) {
-                            try { viewer.entities.remove(e); } catch { /* ignore */ }
-                          }
-                        }
-                        treeEntitiesRef.current = [];
-                        setPlacedTreeCount(0);
+                        clearPlacedTrees(viewerRef.current);
                         setStatusMsg('Tree tool cleared');
                       }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
@@ -14949,6 +15397,10 @@ function SolarEngine3D({
               const next = !showShadeRef.current;
               showShadeRef.current = next;
               setShowShadeLocal(next);
+              // Turning Shade ON asks the owner for a real analysis over the
+              // canonical geometry. Cheap when nothing has changed; the owner
+              // decides whether to recompute.
+              if (next) onRunShadeAnalysis?.();
               updateShadeColors();
             } },
           ] as LayerToggle[])}
@@ -15415,6 +15867,21 @@ function SolarEngine3D({
                 if (editSection(sid, { rebuildFromParameters: true }, 'Rebuild section from trace', `rebuild:${sid}`)) {
                   setStatusMsg('🏠 Section rebuilt from its traced footprint — the hand reshape was discarded (Undo restores it)');
                 }
+              }}
+              /* 🚨 THE ENGINE NAMES THE OBJECT; THE OWNER DELETES IT. Everything
+                 that makes a deletion stick — the undo step, the tombstone that
+                 stops a restore path re-admitting the face, and the one-shot
+                 authorization that lets the save through — lives with
+                 `roofPlanes`, which this component does not own. */
+              onDelete={(scope) => {
+                const target = scope === 'section' ? selectedFaceSectionId : activeFaceId;
+                if (!target) {
+                  setSectionRefusal(scope === 'section'
+                    ? 'Select a building section first.'
+                    : 'Select a roof face first.');
+                  return;
+                }
+                onRequestDelete?.(scope, target);
               }}
             />
           </div>
