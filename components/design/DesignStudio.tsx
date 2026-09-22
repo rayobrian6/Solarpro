@@ -68,6 +68,7 @@ import { layoutSignature } from '@/lib/roofPlanesSignature';
 import { siteKeyFromCoords, isSameSite, coordKeyOf, isPlaceholderCoords, PLACEHOLDER_LAT, PLACEHOLDER_LNG } from '@/lib/siteIdentity';
 import { archivesSignature, sitesAreSameProperty } from '@/lib/design/siteDesignModel';
 import { planAerialAdoption } from '@/lib/design/aerialAdoption';
+import { nativeAcquisitionPermitted } from '@/lib/design/nativeGeometryDisposition';
 import { useSiteDesign } from './useSiteDesign';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
@@ -1944,6 +1945,21 @@ export default function DesignStudio({ project, onSave }: Props) {
       // it from inside the studio. The Google path beside it already merged by
       // id; this one did not. The rule now lives in one tested place
       // (lib/design/aerialAdoption.ts) instead of at the call site.
+      // 🚨 THE THIRD MACHINE-WRITE DOOR. Lane A and Auto Fill are both gated on
+      // the provider decision; this one was not, and it is reachable from the
+      // button directly beside "Draw Manually Instead". After a rejection the
+      // plane list is EMPTY, so `planAerialAdoption` — which infers protection
+      // from the existing planes — finds nothing to protect and accepts. The
+      // decision is about whether a MACHINE may supply this property's geometry;
+      // which machine is not the point.
+      if (!nativeAcquisitionPermitted(site.nativeDisposition)) {
+        setSolarApiStatus('idle');
+        toast.info(
+          'Aerial detect did not run',
+          'This property is marked as hand-modelled or as having rejected automatic geometry, so detections are not applied. Clear that decision first if you want to re-detect.',
+        );
+        return;
+      }
       const adoption = planAerialAdoption({
         existing: roofPlanesRef.current,
         incoming: data.planes as RoofPlane[],

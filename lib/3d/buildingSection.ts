@@ -79,7 +79,31 @@ import {
 import type { Cart3, Plane3DFrame } from '@/lib/roofPlane3D';
 
 const DEG = Math.PI / 180;
-const M_PER_DEG_LAT = 111_320;
+
+// 🚨 WGS84 RADII, NOT A ROUND NUMBER. The usual `111320 m per degree of
+// latitude, times cos(lat) for longitude` is a 0.3% approximation, and 0.3% of
+// the span across a ridge is a real error in the RIDGE HEIGHT, which is how the
+// pitch is realised. Measured at 38.6657°N asking for 30°, the round-number
+// frame built a roof at 30.0689°, and a hip came out with its two slope pairs
+// 0.10° apart because the meridian and prime-vertical radii differ and the
+// approximation does not distinguish them. The installer types 30; the roof
+// should be 30.
+const WGS84_A = 6378137.0;
+const WGS84_E2 = 6.69437999014e-3;
+
+/** Metres per degree of latitude at this latitude (meridian radius of curvature). */
+function mPerDegLat(latDeg: number): number {
+  const s = Math.sin(latDeg * DEG);
+  const w = 1 - WGS84_E2 * s * s;
+  return (WGS84_A * (1 - WGS84_E2) / Math.pow(w, 1.5)) * DEG;
+}
+
+/** Metres per degree of longitude at this latitude (prime-vertical radius). */
+function mPerDegLng(latDeg: number): number {
+  const s = Math.sin(latDeg * DEG);
+  const w = 1 - WGS84_E2 * s * s;
+  return (WGS84_A / Math.sqrt(w)) * Math.cos(latDeg * DEG) * DEG;
+}
 
 /** Below this, a footprint edge is a mis-click rather than a wall. */
 export const MIN_SECTION_EDGE_M = 0.5;
@@ -187,6 +211,7 @@ interface LocalFrame {
   cLat: number;
   cLng: number;
   mLng: number;
+  mLat: number;
 }
 
 function localFrame(footprint: readonly LatLng[]): LocalFrame {
@@ -195,15 +220,18 @@ function localFrame(footprint: readonly LatLng[]): LocalFrame {
   const cLat = sumLat / footprint.length;
   const cLng = sumLng / footprint.length;
   const cosLat = Math.cos(cLat * DEG);
-  return { cLat, cLng, mLng: M_PER_DEG_LAT * (cosLat > 0.01 ? cosLat : 1) };
+  // Near the poles cos(lat) collapses and the frame degenerates; fall back to
+  // the meridian scale rather than dividing by ~0 and producing infinities.
+  const mLng = cosLat > 0.01 ? mPerDegLng(cLat) : mPerDegLat(cLat);
+  return { cLat, cLng, mLng, mLat: mPerDegLat(cLat) };
 }
 
 function toLocal(v: LatLng, f: LocalFrame): LocalPt {
-  return { e: (v.lng - f.cLng) * f.mLng, n: (v.lat - f.cLat) * M_PER_DEG_LAT };
+  return { e: (v.lng - f.cLng) * f.mLng, n: (v.lat - f.cLat) * f.mLat };
 }
 
 function fromLocal(p: LocalPt, f: LocalFrame): LatLng {
-  return { lat: f.cLat + p.n / M_PER_DEG_LAT, lng: f.cLng + p.e / f.mLng };
+  return { lat: f.cLat + p.n / f.mLat, lng: f.cLng + p.e / f.mLng };
 }
 
 function midLocal(a: LocalPt, b: LocalPt): LocalPt {
@@ -221,59 +249,29 @@ function segmentsCross(a: LocalPt, b: LocalPt, c: LocalPt, d: LocalPt): boolean 
     (q.e - p.e) * (r.n - p.n) - (q.n - p.n) * (r.e - p.e);
   const d1 = cross(c, d, a), d2 = cross(c, d, b);
   const d3 = cross(a, b, c), d4 = cross(a, b, d);
-  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0))
-      && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0))
+   && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+
+  // 🚨 A STRICT CROSSING IS NOT THE ONLY WAY TO FOLD A RING. The first version
+  // of this guard tested only the strict case, and four self-intersecting
+  // footprints still built roofs — including one with ZERO plan area, which
+  // came out at 17.8° for a requested 30°. A corner that lands exactly ON the
+  // opposite edge, or a ring that doubles back along itself, is degenerate in
+  // the same way and for the same reason: the corners do not enclose a
+  // building. Touching counts.
+  const onSegment = (p: LocalPt, q: LocalPt, r: LocalPt) =>
+    Math.abs(cross(p, q, r)) <= TOUCH_EPS_M2
+    && Math.min(p.e, q.e) - TOUCH_EPS_M <= r.e && r.e <= Math.max(p.e, q.e) + TOUCH_EPS_M
+    && Math.min(p.n, q.n) - TOUCH_EPS_M <= r.n && r.n <= Math.max(p.n, q.n) + TOUCH_EPS_M;
+  return onSegment(c, d, a) || onSegment(c, d, b)
+      || onSegment(a, b, c) || onSegment(a, b, d);
 }
 
-/**
- * Pitch and azimuth of a face, measured in the LOCAL GEODETIC tangent frame.
- *
- * 🚨 WHY NOT USE THE FITTED NORMAL. `buildRoofPlane3D` derives pitch from the
- * angle between the face normal and the ECEF position vector — the GEOCENTRIC
- * vertical. On an oblate Earth that differs from the true local vertical by up
- * to 0.1924°, varying as sin(2·latitude). The consequence is measurable and
- * wrong in a way that looks like a bug in the tool: a PERFECTLY SYMMETRIC gable
- * at 38.67°N asking for 30° reports its two halves as 30.256° and 29.880° —
- * a 0.376° disagreement, which is exactly 2 × 0.1924° × sin(2φ).
- *
- * That matters. `roofPlanes[0].pitch` is the array tilt PVWatts uses, so which
- * half of a symmetric roof happens to sort first changed the production
- * estimate; and a permit drawing that gives two different pitches for one gable
- * is a drawing an engineer has to question.
- *
- * Measured here instead, from the corner heights this module computed itself,
- * in the same local ENU frame it laid the face out in. Exact for a planar face,
- * which every section face is by construction. The 3D geometry is untouched —
- * only the REPORTED orientation, which is what the structural, production and
- * permit consumers read.
- */
-function faceOrientationLocal(
-  outline: readonly LatLng[],
-  heightsM: readonly number[],
-  f: LocalFrame,
-): { pitchDeg: number; azimuthDeg: number } | null {
-  if (outline.length < 3) return null;
-  const pts = outline.map((v, i) => ({ ...toLocal(v, f), h: heightsM[i] }));
-  // Least-squares fit of h = A·e + B·n + C. Exact for coplanar input.
-  let See = 0, Snn = 0, Sen = 0, Seh = 0, Snh = 0;
-  const mE = pts.reduce((s, p) => s + p.e, 0) / pts.length;
-  const mN = pts.reduce((s, p) => s + p.n, 0) / pts.length;
-  const mH = pts.reduce((s, p) => s + p.h, 0) / pts.length;
-  for (const p of pts) {
-    const de = p.e - mE, dn = p.n - mN, dh = p.h - mH;
-    See += de * de; Snn += dn * dn; Sen += de * dn; Seh += de * dh; Snh += dn * dh;
-  }
-  const det = See * Snn - Sen * Sen;
-  if (!(Math.abs(det) > 1e-9)) return null;
-  const A = (Seh * Snn - Snh * Sen) / det;   // dh/de
-  const B = (Snh * See - Seh * Sen) / det;   // dh/dn
-  const slope = Math.hypot(A, B);
-  // Downslope is the direction of steepest DESCENT: -(A, B) in (east, north).
-  const azimuthDeg = slope > 1e-12
-    ? ((Math.atan2(-A, -B) * 180 / Math.PI) % 360 + 360) % 360
-    : 180;
-  return { pitchDeg: Math.atan(slope) * 180 / Math.PI, azimuthDeg };
-}
+/** A centimetre, in the units this module measures in. Below it, two corners
+ *  are the same click as far as a building is concerned. */
+const TOUCH_EPS_M = 0.01;
+/** The cross-product form of the same tolerance, for the collinearity test. */
+const TOUCH_EPS_M2 = 0.01;
 
 /** Perpendicular distance from point `p` to the infinite line through a and b. */
 function perpDistance(p: LocalPt, a: LocalPt, b: LocalPt): number {
@@ -584,20 +582,21 @@ export function buildSectionRoofPlanes(section: BuildingSection): SectionPlanOut
 
     const plane = built.plane;
 
-    // 🚨 ORIENTATION IS MEASURED AGAINST THE LOCAL GEODETIC VERTICAL, not the
-    // geocentric one the ECEF fit uses. See `faceOrientationLocal`: without
-    // this, a perfectly symmetric gable reports its two halves 0.376° apart at
-    // this latitude and neither equals what the installer typed. Decks are left
-    // alone — `roofPlaneFromFootprint` already pins them to the requested
-    // values, because a flat roof has no geometric azimuth to measure.
-    if (face.key !== 'deck') {
-      const o = faceOrientationLocal(face.outline, face.heightsM, localFrame(section.footprint));
-      if (o) {
-        plane.pitch = clampPitch(o.pitchDeg);
-        plane.azimuth = normalizeAzimuth(o.azimuthDeg);
-      }
-    }
-
+    // 🚨 THE ORIENTATION IS NOT OVERWRITTEN HERE, AND THAT IS THE POINT.
+    //
+    // A previous version of this file wrote the REQUESTED pitch and azimuth over
+    // whatever the fit returned, because the fit was giving a symmetric gable
+    // two different pitches. That relabelled the symptom and created a second
+    // answer: `plane.pitch` said 30.000 while the plane's own `polygon3D`,
+    // `normal3D` and `ecefFrame3D` still described 30.2565 and 29.8813 — and
+    // Stitch, which re-derives pitch from that stored frame, put the wrong pair
+    // straight back. Two answers in one object is not a fix; it is a fix that
+    // survives until something re-reads the geometry.
+    //
+    // The cause was in `computePlaneFromPoints3D`, which measured tilt against
+    // the GEOCENTRIC radial rather than the geodetic surface normal. That is now
+    // fixed at the source, so the fit reports the truth, every consumer that
+    // re-derives gets the same number, and this module has nothing to correct.
     // 🚨 THE FACE ID IS THE SECTION'S, NOT THE FITTER'S. buildRoofPlane3D mints
     // a fresh id every call; keeping it would orphan every panel on this face
     // the moment the installer nudged the eave height.

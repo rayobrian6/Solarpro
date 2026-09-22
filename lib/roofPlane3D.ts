@@ -459,7 +459,36 @@ export function computePlaneFromPoints3D(pts: Cart3[], options: ComputePlaneOpti
   const gridOrigin = computePolygonCornerOrigin(projectedPts, centroid, u, v);
 
   // ── Step 8: ENU conversion at centroid ──────────────────────────────────
-  const upECEF    = normalize3(centroid);
+  //
+  // 🚨 "UP" IS THE GEODETIC SURFACE NORMAL, NOT THE DIRECTION TO THE CENTRE OF
+  // THE EARTH. This line used to be `normalize3(centroid)` — the GEOCENTRIC
+  // radial. On an oblate ellipsoid those differ by up to 0.1924°, as sin(2·lat),
+  // and every pitch and azimuth in the application is measured against this
+  // vector.
+  //
+  // The error was not a uniform bias, which is why it was survivable for years
+  // and then obvious: each FACE has its own centroid, so a north-facing slope
+  // and a south-facing slope on one roof are tilted in OPPOSITE senses relative
+  // to the deflection. Measured on a perfectly symmetric 12×8 m gable at
+  // 38.6657°N built to exactly 30°:
+  //
+  //     slope A  30.2565°      slope B  29.8813°      true geodetic  30.0689°
+  //
+  // One gable, two pitches, 0.376° apart — which is exactly 2 × 0.1924 × sin(2φ).
+  // `roofPlanes[0].pitch` is the array tilt lib/pvwatts.ts reads, so which half
+  // sorted first moved the production estimate, and the permit drawing quoted
+  // two pitches for one roof. A hip produced four.
+  //
+  // The gradient of the ellipsoid equation IS the geodetic normal direction —
+  // no trig and no lat/lng round-trip — and it is what Cesium's
+  // `Ellipsoid.geodeticSurfaceNormal` computes. Altitude does not change the
+  // direction, so this is correct for a roof as well as for a point on the
+  // surface.
+  const upECEF    = normalize3({
+    x: centroid.x / (WGS84_A * WGS84_A),
+    y: centroid.y / (WGS84_A * WGS84_A),
+    z: centroid.z / (WGS84_B * WGS84_B),
+  });
   const eastRaw   = { x: -centroid.y, y: centroid.x, z: 0 };
   const eastECEF  = normalize3(eastRaw);
   const northECEF = normalize3(cross3(upECEF, eastECEF));

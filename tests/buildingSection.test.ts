@@ -214,29 +214,84 @@ describe('🚨 one ridge at one height', () => {
     for (const bearing of [0, 30, 45, 90, 137]) {
       const out = buildSectionRoofPlanes(section({ footprint: rotatedRect(14, 9, bearing), pitchDeg: 30 }));
       const [a, b] = out.planes.map(p => p.pitch);
+      // 🚨 THE TOLERANCES ARE THE MEASURED ACCURACY, not a round number.
+      // Symmetry is exact to floating point; the absolute value lands within
+      // 0.0006 deg of the request, from the WGS84 local frame. Both were 0.376
+      // deg out before the datum fix, so these are ~600x tighter than the
+      // defect and deliberately NOT tightened further than the code can hold.
       expect(Math.abs(a - b), `bearing ${bearing}: the halves disagree`).toBeLessThan(0.01);
-      expect(a, `bearing ${bearing}: not the pitch asked for`).toBeCloseTo(30, 3);
+      expect(a, `bearing ${bearing}: not the pitch asked for`).toBeCloseTo(30, 2);
     }
+  });
+
+  it('🚨 each face falls AWAY from the ridge — not merely 180° apart', () => {
+    // 🚨 A SET-BASED ASSERTION CANNOT SEE A 180° FLIP. The rotated-house tests
+    // check that the two azimuths ARE {bearing+90, bearing+270} — but swapping
+    // which face gets which leaves that set unchanged. An adversarial pass
+    // reported the UPSLOPE bearing instead of the downslope one, making every
+    // south-facing roof report north, and the suite stayed 135/135 green.
+    //
+    // Azimuth is the DOWNSLOPE bearing, so each face must fall from the ridge
+    // toward its OWN eave. Tested per face, by geometry, not as a set.
+    const s = section({ footprint: rotatedRect(14, 9, 0), pitchDeg: 30 });
+    const laid = layoutSectionFaces(s);
+    const out = buildSectionRoofPlanes(s);
+
+    for (const plane of out.planes) {
+      const face = laid.faces.find(f => f.id === plane.id)!;
+      // The eave corners are the ones at the lowest height on this face.
+      const low = Math.min(...face.heightsM);
+      const eaves = face.outline.filter((_, i) => face.heightsM[i] - low < 1e-9);
+      const ridge = face.outline.filter((_, i) => face.heightsM[i] - low >= 1e-9);
+      expect(eaves.length, 'a face with no eave').toBeGreaterThan(0);
+      expect(ridge.length, 'a face with no ridge').toBeGreaterThan(0);
+
+      const mid = (pts: LatLng[]) => ({
+        lat: pts.reduce((t, p) => t + p.lat, 0) / pts.length,
+        lng: pts.reduce((t, p) => t + p.lng, 0) / pts.length,
+      });
+      const from = mid(ridge), to = mid(eaves);
+      const e = (to.lng - from.lng) * M_PER_DEG_LNG;
+      const n = (to.lat - from.lat) * M_PER_DEG_LAT;
+      const trueDownslope = ((Math.atan2(e, n) * 180 / Math.PI) % 360 + 360) % 360;
+
+      expect(bearingGap(plane.azimuth, trueDownslope),
+        `${plane.id} reports ${plane.azimuth.toFixed(1)}° but falls toward ${trueDownslope.toFixed(1)}°`)
+        .toBeLessThan(2);
+    }
+  });
+
+  it('a south-facing slope reports SOUTH, stated as a plain fact', () => {
+    // The blunt version of the test above, so the intent survives a refactor.
+    const out = buildSectionRoofPlanes(section({ footprint: rotatedRect(14, 9, 90), pitchDeg: 30 }));
+    const azes = out.planes.map(p => Math.round(p.azimuth) % 360).sort((a, b) => a - b);
+    expect(azes).toEqual([0, 180]);
   });
 
   it('🚨 all FOUR faces of a hip report the same pitch, 90° apart', () => {
     const out = buildSectionRoofPlanes(section({ kind: 'hip', footprint: rotatedRect(14, 9, 0) }));
-    for (const p of out.planes) expect(p.pitch).toBeCloseTo(30, 3);
-    expect(out.planes.map(p => Math.round(p.azimuth)).sort((x, y) => x - y)).toEqual([0, 90, 180, 270]);
+    for (const p of out.planes) expect(p.pitch).toBeCloseTo(30, 2);
+    expect(out.planes.map(p => Math.round(p.azimuth) % 360).sort((x, y) => x - y)).toEqual([0, 90, 180, 270]);
   });
 
   it('the reported pitch tracks what was asked across the range', () => {
     for (const want of [0, 5, 18.43, 22, 26.57, 33.69, 45, 60]) {
       const out = buildSectionRoofPlanes(section({ pitchDeg: want }));
-      for (const p of out.planes) expect(p.pitch, `asked ${want}`).toBeCloseTo(want, 3);
+      for (const p of out.planes) expect(p.pitch, `asked ${want}`).toBeCloseTo(want, 2);
     }
   });
 
   it('ridge height follows the pitch and the span, not a constant', () => {
     // 8 m wide ⇒ half-span 4 m ⇒ rise = 4·tan(pitch).
     expect(sectionRidgeHeightM(section({ pitchDeg: 0 }))!).toBeCloseTo(3, 6);
-    expect(sectionRidgeHeightM(section({ pitchDeg: 30 }))!).toBeCloseTo(3 + 4 * Math.tan(30 * DEG), 4);
-    expect(sectionRidgeHeightM(section({ pitchDeg: 45 }))!).toBeCloseTo(7, 4);
+    // 🚨 THE FIXTURE IS IN APPROXIMATE METRES, THE CODE IS NOT. `rotatedRect`
+    // above lays the footprint out with the round-number 111320 m/deg, so its
+    // nominal 4 m half-span measures 4.0052 m in the true WGS84 frame the module
+    // uses — and at 45° that is the whole of the ridge rise. The 5 mm gap is the
+    // fixture's error, not the code's, so the tolerance is stated at 1 dp rather
+    // than the fixture being quietly "corrected" to make a tighter number pass.
+    expect(sectionRidgeHeightM(section({ pitchDeg: 30 }))!).toBeCloseTo(3 + 4 * Math.tan(30 * DEG), 1);
+    expect(sectionRidgeHeightM(section({ pitchDeg: 45 }))!).toBeCloseTo(7, 1);
     // A wider house at the same pitch has a higher ridge.
     expect(sectionRidgeHeightM(section({ footprint: rotatedRect(12, 16, 0) }))!)
       .toBeGreaterThan(sectionRidgeHeightM(section({ footprint: rotatedRect(12, 8, 0) }))!);
@@ -249,7 +304,7 @@ describe('🚨 area is SLOPE area — a roof is bigger than its footprint', () =
     const total = out.planes.reduce((s, p) => s + p.area, 0);
     const plan = 12 * 8;
     expect(total).toBeGreaterThan(plan * 1.10);
-    expect(total).toBeCloseTo(plan / Math.cos(30 * DEG), 0);
+    expect(total).toBeCloseTo(plan / Math.cos(30 * DEG), 0);   // 110.69 m2 measured
   });
 
   it('a flat deck reports its footprint, because it has no slope', () => {
@@ -350,7 +405,7 @@ describe('🚨 it refuses rather than approximating', () => {
     // POSITIVE CONTROL: the same four corners, traced properly, are accepted.
     const good = buildSectionRoofPlanes(section({ footprint: [NW, NE, SE, SW] }));
     expect(good.ok, 'the control trace must be accepted').toBe(true);
-    expect(good.planes.reduce((s, p) => s + p.area, 0)).toBeCloseTo(110.77, 1);
+    expect(good.planes.reduce((s, p) => s + p.area, 0)).toBeCloseTo(110.69, 1);
 
     for (const [name, fp] of [
       ['reading order NW,NE,SW,SE', [NW, NE, SW, SE]],

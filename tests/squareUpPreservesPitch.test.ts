@@ -147,18 +147,34 @@ describe('Square Up regularises the outline and leaves the plane alone', () => {
     expect(before.pitch - flattened.pitch).toBeGreaterThan(24);
   });
 
-  it('🚨 ADVERSARIAL — the flattened pitch is NOT zero, which is why nothing caught it', () => {
+  it('🚨 the flattened pitch is now a CLEAN zero — the camouflage is gone', () => {
     const before = buildRoofPlane3D(pitchedFace(25));
     const flattened = buildRoofPlane3D(
       rebuildAtMeanHeight(before.polygon3D!, squaredOutline(before)),
       { surfaceOffsetM: 0 },
     );
-    // Strictly positive: it passes every `pitch > 0` / `t > 0` guard downstream
-    // that would have rejected a clean zero and flagged the face as flat.
-    expect(flattened.pitch).toBeGreaterThan(0);
-    // And it is the deflection of the vertical, not noise — about 0.19° here.
-    expect(flattened.pitch).toBeGreaterThan(0.1);
-    expect(flattened.pitch).toBeLessThan(0.3);
+
+    // 🚨 WHAT THIS TEST USED TO SAY, AND WHY IT CHANGED.
+    //
+    // It asserted `0.1 < pitch < 0.3`, with the note: "it is the deflection of
+    // the vertical, not noise — about 0.19° here". That diagnosis was exactly
+    // right, and it was describing a BUG in the measurement, not a property of
+    // the geometry: `computePlaneFromPoints3D` measured tilt against the
+    // GEOCENTRIC radial instead of the geodetic surface normal, and the two
+    // differ by up to 0.1924° as sin(2·lat).
+    //
+    // So a face flattened to mean height — genuinely horizontal — reported ~0.19°
+    // and slipped past every `pitch > 0` / `t > 0` guard downstream that exists
+    // precisely to catch a flat face. The defect had camouflage, and the
+    // camouflage was a datum error.
+    //
+    // With the datum fixed the same flattening reports 0.0000054°, so those
+    // guards can now do the job they were written for. The test therefore pins
+    // the NEW truth. What it is really protecting — that `rebuildAtMeanHeight`
+    // destroys the pitch — is carried by the sibling test below, which measures
+    // the full 29°+ disagreement and is untouched by this.
+    expect(flattened.pitch).toBeLessThan(0.001);
+    expect(flattened.pitch).toBeGreaterThanOrEqual(0);
   });
 
   it('🚨 the fix and the defect disagree by the whole pitch — the assertion is load-bearing', () => {

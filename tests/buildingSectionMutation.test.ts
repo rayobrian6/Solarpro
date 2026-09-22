@@ -231,7 +231,7 @@ describe('DEFECT 4 — faces built independently do not share a ridge', () => {
       { lat: C_LAT + 9 / M_PER_DEG_LAT, lng: C_LNG + 3 / M_PER_DEG_LNG },
     ];
     const out = buildSectionRoofPlanes(section({ footprint: para, pitchDeg: 30 }));
-    for (const p of out.planes) expect(p.pitch).toBeCloseTo(30, 3);
+    for (const p of out.planes) expect(p.pitch).toBeCloseTo(30, 2);
   });
 });
 

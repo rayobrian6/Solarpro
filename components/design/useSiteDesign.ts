@@ -312,7 +312,17 @@ export function useSiteDesign(): UseSiteDesign {
     // going to the neighbour's house and back must not lose it.
     stateRef.current = {
       ...stateRef.current,
-      nativeGeometry: withDisposition(stateRef.current.nativeGeometry, activeSiteKeyRef.current, d),
+      // 🚨 THE SAME FALLBACK THE PLANE STAMP USES. activeSiteKeyRef holds the
+      // EMPTY STRING until hydration resolves ownership, and withDisposition
+      // drops a write against an empty key — so a decision made in the first
+      // moments of a session would vanish silently. Falls back to the site the
+      // state believes is active, which is what every other ownership write
+      // here does.
+      nativeGeometry: withDisposition(
+        stateRef.current.nativeGeometry,
+        activeSiteKeyRef.current || stateRef.current.activeSiteKey,
+        d,
+      ),
     };
     nativeDispositionRef.current = d;
     // Moves `archivesSignature`, so the autosave actually writes it. Without

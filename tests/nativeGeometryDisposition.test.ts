@@ -235,7 +235,16 @@ describe('🚨 THE DECISION IS REACHABLE IN PRODUCTION — it is not decoration'
 
   it('LEG 1 — something WRITES it: rejecting the Google roof records the rejection', () => {
     expect(HOOK).toMatch(/const setNativeDisposition = useCallback/);
-    expect(HOOK).toMatch(/withDisposition\(stateRef\.current\.nativeGeometry, activeSiteKeyRef\.current, d\)/);
+    // Matched as three facts rather than one formatting. The call became
+    // multi-line when the site key gained a fallback, and a regex pinned to the
+    // argument list broke for a reason that had nothing to do with what it
+    // protects — which is what an over-specified source matcher always costs.
+    expect(HOOK).toMatch(/withDisposition\(/);
+    expect(HOOK).toMatch(/stateRef\.current\.nativeGeometry/);
+    // 🚨 THE FALLBACK. `activeSiteKeyRef` is the EMPTY STRING until hydration
+    // resolves ownership, and a write against an empty key is dropped — so a
+    // decision made early in a session would vanish with no error.
+    expect(HOOK).toMatch(/activeSiteKeyRef\.current \|\| stateRef\.current\.activeSiteKey/);
     // "Draw Manually Instead" — the gesture that used to erase itself.
     //
     // 🚨 SLICED FORWARD FROM THE CALL, not backward from the label. The first
