@@ -211,6 +211,19 @@ export async function POST(req: NextRequest) {
       const input: BOMGenerationInputV4 = {
         inverterId:         resolvedInverterId,
         optimizerId:        resolvedOptimizerId,
+        // 🚨 THE PROJECT'S RECORDED COMBINER SELECTION
+        // (projects.selected_equipment.combinerSelection, sent by the client).
+        //
+        // bom-engine-v4 has read `selectedCombinerId` at both of its integrated-
+        // BOS call sites since the field was added, and NO PRODUCTION CALLER
+        // EVER SET IT — this route builds the engine input and never looked for
+        // it on the body. The engine therefore fell through to the catalogue
+        // pairing on every real request, so the BOM the estimator priced and the
+        // drawing the installer approved could name different hardware. A field
+        // that only a test sets is not plumbing.
+        selectedCombinerId: typeof body.selectedCombinerId === 'string' && body.selectedCombinerId.trim()
+                              ? body.selectedCombinerId.trim()
+                              : null,
       // HYBRID: V4's racking stage is roof-only by design — when the client sends
       // a roof subset (roofData.mountingSystemId), that id is the roof racking
       // authority even if the project-level rackingId is a fence/ground system.

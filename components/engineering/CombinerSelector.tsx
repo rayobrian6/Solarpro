@@ -85,6 +85,21 @@ export default function CombinerSelector({ projectId, visible, onSelectionChange
     finally { setLoading(false); }
   }, [projectId]);
 
+  // 🚨 A SELECTION IS NOT PORTABLE BETWEEN PROJECTS. Drop it BEFORE the fetch.
+  //
+  // `load` reports the new project's answer only once the request lands. Until
+  // then this component went on DISPLAYING the previous project's device and
+  // the page went on SENDING it — and a reported `selectedCombinerId` outranks
+  // every other authority downstream, so a drawing or BOM generated in that
+  // window would have asserted another project's equipment decision rather than
+  // merely defaulted. Reset first, then load: a moment of "nothing selected" is
+  // true, where a moment of the wrong device is not.
+  useEffect(() => {
+    setSelected(null); setCandidates([]); setDeclared(null); setRefusals([]);
+    setDraftId(''); setBasis(''); setOverrideReason(''); setOverrideAuthority('');
+    onSelectionChangedRef.current?.(null);
+  }, [projectId]);
+
   useEffect(() => { if (visible) void load(); }, [visible, load]);
 
   if (!visible) return null;

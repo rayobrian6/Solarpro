@@ -36,7 +36,8 @@ import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { necNextStandardOcpd } from './utils/helpers';
 import { classifyPanel, isSubSystemKey } from './utils/subSystems';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
-import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+import { getPanelById, getInverterById, getMicroinverterById,
+         resolveBatteryBranch, findBatteryByExactModel } from '@/lib/equipment-db';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import { buildStructuralInputForPermit, buildSubSystemStructuralInputs } from './utils/structuralInput';
 import type { ElectricalCompliance } from './types';
@@ -353,22 +354,46 @@ export function generatePermitHTML(
     // (see the electrical-calc block below); a 690.8 estimate fills the void
     // ONLY when the engine produced no busbar result.
 
-    // Battery fields: propagate batteryKwh and batteryBackfeedA if battery info exists
-    // in project (set by the route from frontend data). Do NOT fabricate battery data.
-    // The electrical pages compute batteryKwh = batteryCount * batteryKwh per unit,
-    // so both fields must be populated together if battery is present.
-    if (project.batteryCount && project.batteryCount > 0 && project.batteryKwh && project.batteryKwh > 0) {
-      // Already populated — nothing to do
-    } else if (project.batteryCount && project.batteryCount > 0 && !project.batteryKwh) {
-      // batteryCount is set but batteryKwh per unit is missing — default per unit
-      // Most common residential battery (e.g. Enphase IQ Battery 5P) is ~5 kWh
-      project.batteryKwh = 5.0;
-    }
-    // batteryBackfeedA: if battery exists but backfeed not set, compute from battery spec
-    // Typical Enphase IQ Battery 5P backfeed: 20A per unit
-    if (project.batteryCount && project.batteryCount > 0 && !project.batteryBackfeedA) {
-      const backfeedPerUnit = 20; // A — typical for residential AC-coupled battery
-      project.batteryBackfeedA = backfeedPerUnit * project.batteryCount;
+    // ── Battery electrical characteristics — from the authority, never invented ──
+    //
+    // 🚨 WHAT WAS HERE: `project.batteryKwh = 5.0` and
+    // `project.batteryBackfeedA = 20 * batteryCount`, both hard-coded, both
+    // described in the comments as "typical". They were neither derived from
+    // the selected product nor marked as guesses, so a 29.5 A IQ Battery 10C
+    // got a 20 A breaker and a 10.0 kWh unit got 5.0 kWh — on a permit.
+    //
+    // Both now come from `resolveBatteryBranch`. When it refuses, the field is
+    // LEFT UNSET and an audit warning is raised. An unset field is visibly
+    // missing downstream; a fabricated one is not.
+    if (project.batteryCount && project.batteryCount > 0) {
+      const _batResolved = resolveBatteryBranch(
+        project.batteryId ?? findBatteryByExactModel(project.batteryBrand, project.batteryModel)?.id,
+        project.batteryCount,
+      );
+
+      if (!project.batteryKwh || project.batteryKwh <= 0) {
+        if (_batResolved.resolved && _batResolved.aggregateUsableKwh != null) {
+          // The authority returns the FLEET total; this field is per unit, and
+          // the electrical pages multiply it by batteryCount themselves.
+          project.batteryKwh = _batResolved.aggregateUsableKwh / project.batteryCount;
+        } else {
+          console.warn('[PLANSET] Battery usable capacity UNRESOLVED for',
+            project.batteryCount, 'unit(s):',
+            _batResolved.refusal?.message ?? 'no battery identified',
+            '— batteryKwh left unset, NOT defaulted to a typical value.');
+        }
+      }
+
+      if (!project.batteryBackfeedA) {
+        if (_batResolved.resolved && _batResolved.busbarContributionA != null) {
+          project.batteryBackfeedA = _batResolved.busbarContributionA;
+        } else {
+          console.warn('[PLANSET] Battery backfeed UNRESOLVED:',
+            _batResolved.refusal?.message ?? 'no battery identified',
+            '— NEC 705.12(B) cannot be concluded from a fabricated breaker;',
+            'batteryBackfeedA left unset.');
+        }
+      }
     }
   }
 

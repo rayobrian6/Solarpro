@@ -706,6 +706,19 @@ export function generateBOMForPermit(
     try {
       const v4Input: BOMGenerationInputV4 = {
         inverterId: _v4InverterId,
+        // 🚨 THE INSTALLER'S RECORDED COMBINER, INTO THE ENGINE ITSELF.
+        //
+        // bom-engine-v4 has read `selectedCombinerId` at both of its BOS call
+        // sites for as long as the field has existed; NO PRODUCTION CALLER SET
+        // IT, so it was dead on arrival. Step 5b below rewrites the combiner
+        // line from buildIntegratedEquipment afterwards, which MASKED the gap on
+        // single-system jobs — but 5b deliberately skips that rewrite on the
+        // per-sub hybrid path (`!_isPerSubHybrid`), because the per-brand-group
+        // emission inside the engine is the authoritative one there. So on a
+        // hybrid the engine's own input was the only place the selection could
+        // land, and it never arrived: the package could still order a device
+        // nobody chose.
+        selectedCombinerId: project.selectedCombinerId ?? null,
         panelId,
         // Same id the STRUCTURAL path resolves (mountingSystemId) when the BOM-
         // specific rackingId is unset — otherwise Stage 5 lost its registry entry

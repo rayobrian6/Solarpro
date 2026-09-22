@@ -2,7 +2,7 @@
  * Engineering page helper functions, types, and constants.
  * Extracted from app/engineering/page.tsx for monolith relief.
  */
-import { getBatteryById } from '@/lib/equipment-db';
+import { resolveBatteryBranch } from '@/lib/equipment-db';
 import type { SubSystemKey, SubSystemEquipmentMap } from '@/lib/system/subSystemEquipment';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -234,14 +234,22 @@ export const NEC_EXPLANATIONS: Record<string, { title: string; plain: string; fi
 
 /**
  * Calculate total battery backfeed breaker amps for NEC 705.12(B) bus loading.
+ *
+ * 🚨 THIS WAS ONE OF FIVE DISAGREEING MODELS and is now a thin shim over the
+ * single authority, `resolveBatteryBranch` in lib/equipment-db.ts. It kept its
+ * own copy of `requiresGateway ? flat : × count`, which returned 0 for any
+ * product whose branch OCPD is a step function rather than a scalar — the
+ * permissive direction on the 120% rule.
+ *
+ * Prefer `resolveBatteryBranch(id, count)` directly: it reports WHY a number is
+ * what it is and refuses instead of returning 0. This signature cannot express
+ * "unresolved", so it still returns 0 there; a caller that needs the difference
+ * must call the authority.
  */
 export function calcBatteryBackfeedAmps(batteryId: string | undefined, batteryCount: number): number {
-  if (!batteryId) return 0;
-  const b = getBatteryById(batteryId);
-  if (!b || !b.backfeedBreakerA) return 0;
-  if (b.requiresGateway) return b.backfeedBreakerA;
   const qty = batteryCount && batteryCount > 0 ? batteryCount : 1;
-  return b.backfeedBreakerA * qty;
+  const r = resolveBatteryBranch(batteryId, qty);
+  return r.resolved ? (r.busbarContributionA ?? 0) : 0;
 }
 
 export function parseStateFromAddress(address: string): string | null {

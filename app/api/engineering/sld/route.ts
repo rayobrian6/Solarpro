@@ -113,6 +113,18 @@ export async function POST(req: NextRequest) {
           drawingNumber:           String(body.drawingNumber ?? 'SLD-001'),
           revision:                String(body.revision ?? 'A'),
           topologyType:            String(body.topologyType ?? 'HYBRID_MULTI_SOURCE'),
+          // 🚨 THE SELECTION HAS TO BE ON THIS OBJECT OR IT IS LOST ENTIRELY.
+          //
+          // This branch RETURNS (below) before the single-lane `_bosPlan`
+          // resolution further down ever runs, so everything that block does for
+          // the combiner — pairing, override, and the project's recorded
+          // selection — simply did not happen for a hybrid design. The
+          // multi-lane renderer re-resolves a combiner per lane through
+          // acCollectionFromLanes, and this is the only field that reaches it.
+          // A hybrid job could therefore have its combiner corrected in System
+          // Config and still be drawn, exported and permitted with a device
+          // nobody chose.
+          selectedCombinerId:      body.selectedCombinerId ? String(body.selectedCombinerId) : null,
           totalModules:            Number(body.totalModules) || _sources.reduce((s, b) => s + (b.totalModules ?? 0), 0),
           totalStrings:            Number(body.totalStrings) || 0,
           panelModel:              String(body.panelModel ?? _sources[0].panelModel ?? 'PV Module'),

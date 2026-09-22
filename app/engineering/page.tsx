@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById } from '@/lib/equipment-db';
+import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById, resolveBatteryBranch } from '@/lib/equipment-db';
 import { listCombiners } from '@/lib/equipment/integratedBos';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
 // ── Wave 5A — multi-lane SLD: page-path source-branch builder + the W4B.D
@@ -159,25 +159,28 @@ import { downloadFilenameFor } from '@/lib/http/contentDisposition';
 /**
  * Calculate total battery backfeed breaker amps for NEC 705.12(B) bus loading.
  *
- * KEY RULE: Gateway-based systems (Enphase IQ, Tesla Powerwall) use ONE shared
- * backfeed breaker for ALL units — the gateway/controller is the single point of
- * interconnection. Non-gateway systems (Franklin WH, SolarEdge Home Battery)
- * each require their own dedicated breaker, so multiply by count.
+ * 🚨 THIS PAGE NO LONGER DECIDES. It calls the single battery electrical
+ * authority, `resolveBatteryBranch` in lib/equipment-db.ts.
  *
- * References:
- *   - Enphase IQ Battery install guide: single 20A/40A breaker per system (not per unit)
- *   - Tesla Powerwall install guide: single 50A breaker per Backup Gateway
- *   - NEC 705.12(B)(2): each separately-fused backfeed source counts
+ * What was here: `requiresGateway ? backfeedBreakerA : backfeedBreakerA × qty`,
+ * one of five copies of this decision in the repo, each giving a different
+ * answer for the same fleet. Two specific failures it had:
+ *
+ *   • `if (!b.backfeedBreakerA) return 0` — any product whose branch OCPD is a
+ *     STEP FUNCTION rather than a scalar (the IQ Battery 10C: 40 A for one
+ *     unit, 80 A for two or more) carries no scalar, so it silently
+ *     contributed 0 A to the 120% rule. Zero is the permissive direction.
+ *   • The shared-gateway credit was applied to the MAIN-PANEL contribution on
+ *     the strength of an install-guide reading, and cited "20A/40A" for a
+ *     family whose members range from 15 A to 80 A.
+ *
+ * The authority takes the conservative aggregation for scalar products and the
+ * manufacturer's published step function where one has been transcribed.
  */
 function calcBatteryBackfeedAmps(batteryId: string | undefined, batteryCount: number): number {
-  if (!batteryId) return 0;
-  const b = getBatteryById(batteryId);
-  if (!b || !b.backfeedBreakerA) return 0;
-  // Gateway-based: single shared breaker regardless of unit count
-  if (b.requiresGateway) return b.backfeedBreakerA;
-  // Non-gateway: each unit has its own breaker
   const qty = batteryCount && batteryCount > 0 ? batteryCount : 1;
-  return b.backfeedBreakerA * qty;
+  const r = resolveBatteryBranch(batteryId, qty);
+  return r.resolved ? (r.busbarContributionA ?? 0) : 0;
 }
 
 function parseStateFromAddress(address: string): string | null {
@@ -1073,6 +1076,21 @@ function EngineeringPageInner() {
   // from projects.selected_equipment. It is sent with every drawing/BOM payload
   // so downstream CONSUMES it instead of re-deriving a device from compatibility.
   const [projectCombinerId, setProjectCombinerId] = useState<string | null>(null);
+  // 🚨 A SELECTION BELONGS TO ONE PROJECT. DROP IT THE INSTANT THE PROJECT CHANGES.
+  //
+  // This state is only ever WRITTEN by CombinerSelector, which reports on load
+  // and on change — and which is mounted only for micro designs
+  // (`visible={!!computedSystem?.isMicro}`). So switching from a micro project
+  // that HAD a selection to one that does not — or to a string design, which
+  // unmounts the selector entirely — left the previous project's device sitting
+  // in this state and travelling on the next project's SLD, BOM and permit
+  // payloads. `selectedCombinerId` outranks everything in the resolver, so that
+  // stale id would not merely be a default: it would WIN, and one project's
+  // equipment decision would be asserted on another project's permit package.
+  //
+  // Clearing to null is the honest reset: "nobody has chosen on this project
+  // yet" — which is exactly what is true until the selector reports otherwise.
+  useEffect(() => { setProjectCombinerId(null); }, [currentProjectId]);
   const [currentClientId,  setCurrentClientId]  = useState<string | null>(null);
 
   // Project selector — shown when no projectId in URL
@@ -6805,6 +6823,16 @@ function EngineeringPageInner() {
         })();
 
       const _bomPayload = {
+          // 🚨 THE INSTALLER'S RECORDED COMBINER, ON THE BOM PAYLOAD.
+          //
+          // The SLD payload and both export payloads have carried this; the BOM
+          // payload did not, and /api/engineering/bom therefore had nothing to
+          // forward into the engine even after the engine learned to read it.
+          // That is the "worked on the SLD but not everything else" report seen
+          // from the client end: same page, same state, three payloads carried
+          // the decision and the fourth dropped it, so the priced BOM could name
+          // different hardware from the drawing beside it.
+          selectedCombinerId: projectCombinerId || undefined,
           // REGRESSION FIX: for micro topology, ensure we send a valid micro inverterId
           // firstInv.inverterId may be stale (e.g. 'se-7600h') if topology switch didn't update it
           inverterId: firstInv?.type === 'micro'
@@ -13312,27 +13340,50 @@ function EngineeringPageInner() {
                     <p className="text-xs text-slate-500 mt-0.5">Vector PDF · 24×18 inch sheet · Engineering title block · Conductor callouts</p>
                   </div>
                   <div className="flex gap-2 items-center">
-                    {/* AC COMBINER OVERRIDE — the drawing must be able to name the
-                        device actually being installed. "Auto" resolves from the
-                        inverter's equipment-db `compatibleWith` pairing (IQ8+ →
-                        IQ Combiner 5); an explicit pick wins over that everywhere
-                        the combiner is named. Only meaningful on micro topologies,
-                        so it hides otherwise. */}
+                    {/* 🚨 THE SLD DOES NOT OWN A COMBINER OVERRIDE ANY MORE.
+                        There used to be a bare <select> here writing
+                        `config.combinerId` into engineering_config — this page's
+                        private workspace. That is a SECOND override of the same
+                        fact, and it is the shape of the reported defect: the
+                        drawing could be corrected here while the schedule, the
+                        BOM and the permit package went on naming the device a
+                        resolver had guessed, because nothing downstream reads
+                        engineering_config.
+
+                        The combiner belongs to System Configuration / Equipment.
+                        The SLD tab now shows what is selected and links to the
+                        one control that can change it, so this surface can
+                        DISPLAY the decision but can never disagree with it.
+                        (The read side of `config.combinerId` is untouched: a
+                        legacy project that still carries one keeps rendering it
+                        as a session override, ranked BELOW the project's
+                        recorded selection by resolveIntegratedEquipment.) */}
                     {computedSystem.isMicro ? (
-                      <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                      <span
+                        className="flex items-center gap-1.5 text-xs text-slate-400"
+                        title="The combiner is a project equipment decision, recorded in System Configuration. It is shown here; it is changed there."
+                      >
                         <span className="whitespace-nowrap">AC Combiner</span>
-                        <select
-                          value={config.combinerId ?? ''}
-                          onChange={e => { updateConfig({ combinerId: e.target.value }); setSldSvg(''); }}
-                          className="eng-select"
-                          title="Overrides the combiner the SLD, schedule and BOM name. Auto uses the inverter's declared compatible device."
+                        <span className={projectCombinerId ? 'font-semibold text-emerald-300' : 'font-semibold text-amber-300'}>
+                          {(() => {
+                            if (!projectCombinerId) return 'not selected';
+                            const d = listCombiners().find(c => c.id === projectCombinerId);
+                            // A selected id the catalogue does not know is shown
+                            // AS THE ID rather than silently blanked — the same
+                            // rule the resolver follows, which returns an empty
+                            // plan for an unknown selection instead of quietly
+                            // substituting something it does recognise.
+                            return d ? `${d.brand} ${d.model}` : projectCombinerId;
+                          })()}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-ghost btn-sm !py-0.5"
+                          onClick={() => setActiveTab('config')}
                         >
-                          <option value="">Auto (from equipment DB)</option>
-                          {listCombiners().map(d => (
-                            <option key={d.id} value={d.id}>{d.brand} {d.model}</option>
-                          ))}
-                        </select>
-                      </label>
+                          Change in System Config
+                        </button>
+                      </span>
                     ) : null}
                     <button
                       onClick={fetchSLD}

@@ -2551,6 +2551,71 @@ export function getConduitByTypeAndSize(type: string, size: string): Conduit | u
 // Battery Storage Systems
 // ============================================================
 
+// ─── Battery branch architecture — the documented step function ──────────────
+//
+// 🚨 WHY A RULE SET AND NOT A SCALAR.
+//
+// `backfeedBreakerA` is ONE number. A manufacturer's branch rule is a STEP
+// FUNCTION over the number of units sharing a branch, because units are
+// daisy-chained onto a shared circuit rather than given one breaker each. For
+// the Enphase IQ Battery 10C, Enphase publishes, verbatim:
+//
+//   "40 A OCPD requires a minimum of 8 AWG for one IQ Battery 10C
+//    or
+//    80 A OCPD requires a minimum of 4 AWG for two or more IQ Battery 10C"
+//
+//   footnote 8: "More than two IQ Battery 10C on a 4 AWG circuit protected by
+//   80 A OCPD requires setting Power Control System: IQ Battery
+//   Oversubscription."
+//
+// No scalar can express that, which is why the 10C's figures were being
+// invented by four different downstream call sites instead of read from here.
+//
+// 🚨 THESE RULES ARE TRANSCRIBED, NEVER EXTRAPOLATED. A unit count the
+// manufacturer does not document resolves to a REFUSAL, not to arithmetic on
+// the nearest rule. See `resolveBatteryBranch`.
+
+export interface BatteryBranchOcpdRule {
+  /** Inclusive lower bound of units sharing ONE branch circuit. */
+  minUnits: number;
+  /** Inclusive upper bound of units sharing ONE branch circuit. */
+  maxUnits: number;
+  /** The branch OCPD the manufacturer publishes for that unit count. */
+  branchOcpdA: number;
+  /** Minimum conductor the manufacturer publishes alongside that OCPD. */
+  minConductorAwg: string;
+  /** true ⇔ the manufacturer requires a Power Control System setting here. */
+  pcsRequired: boolean;
+  /** The PCS mode by its documented name, or null when none is required. */
+  pcsMode: string | null;
+  /** The document that states this row. Never a summary. */
+  source: string;
+}
+
+export interface BatteryBranchArchitecture {
+  /**
+   * true  ⇔ units daisy-chain onto a SHARED branch (contribution is per
+   *          branch, never perUnit × quantity).
+   * false ⇔ each unit takes its own branch circuit.
+   */
+  unitsSharePerBranch: boolean;
+  /**
+   * The largest unit count the manufacturer documents. Above this the answer is
+   * UNRESOLVED — the tool refuses rather than extending the last rule.
+   */
+  maxUnitsDocumented: number;
+  /** The published rows, in ascending unit order. */
+  rules: BatteryBranchOcpdRule[];
+  /**
+   * A device this product is documented to REQUIRE. Selecting the battery
+   * constrains this device. null ⇔ no such documented constraint.
+   */
+  requiresDeviceId: string | null;
+  /** A label a planset may print when PCS is engaged. */
+  pcsLabelRequirement: string | null;
+  source: string;
+}
+
 export interface BatterySystem {
   id: string;
   manufacturer: string;
@@ -2568,6 +2633,29 @@ export interface BatterySystem {
   maxContinuousOutputA?: number;
   backfeedBreakerA?: number;       // ← NEC 705.12(B): adds to bus loading
   minDedicatedBreakerA?: number;
+  /**
+   * The manufacturer's published branch rule set.
+   *
+   * Present ⇔ the step function has been transcribed from the datasheet and
+   * `resolveBatteryBranch` can answer authoritatively. ABSENT is the common
+   * case and is NOT a defect — it means this product still answers from the
+   * single `backfeedBreakerA` scalar, which is reported with a
+   * `catalogue-scalar` basis so a consumer can see it is not architecture
+   * verified. It must never be silently upgraded to "documented".
+   */
+  branchArchitecture?: BatteryBranchArchitecture;
+  /**
+   * The number the manufacturer says to use for interconnection and permitting.
+   * Enphase is explicit that the MODEL NUMBER is used for permitting, not the
+   * ordering SKU. Absent rather than guessed.
+   */
+  permitModelNumber?: string;
+  /** Published peak output CURRENT rows, where peak POWER is not published. */
+  peakOutputCurrentA?: { amps: number; durationSec: number }[];
+  /** Rated output current at the nominal AC voltage, where published. */
+  ratedOutputCurrentA?: number;
+  /** Rated neutral current at 120 V L-N, where published. */
+  ratedNeutralCurrentA?: number;
   // Physical
   weightLbs: number;
   outdoorRated: boolean;
@@ -2644,6 +2732,143 @@ export const BATTERIES: BatterySystem[] = [
     compatibleWith: ['enphase-iq-system-controller-3', 'enphase-iq-sc3-ats', 'enphase-iq-gateway'],
     active: true,
     datasheetUrl: 'https://assets.ctfassets.net/k6ot5nj1c6f9/2nqAdKtPMi5IirhnfQMeH3/58f82b1f4342baee1df92a71a6fe0b5b/IQ_Battery-5P-DSH-00010-2.0-EN-US-2023-07-26__1_.pdf',
+  },
+  {
+    // ══════════════════════════════════════════════════════════════════════
+    // IQ BATTERY 10C — the row whose ABSENCE was the whole defect.
+    //
+    // Sources: DSH-00565-9.0-EN-2026-02-26 (10C datasheet), TEB-00282-4.0-EN
+    // (EES planning, Feb 2026), QIG 140-00379-02 v2.0, DSH-00585-3.0 (IQ
+    // Combiner 6C). Where the QIG and the datasheet differ, the datasheet is
+    // newer and wins.
+    //
+    // 🚨 THREE TRAPS, each of which a previous number in this file fell into:
+    //
+    //  1. kVA and kW are SEPARATE published rows that happen to share 7.08.
+    //     Neither is derived from the other and no power factor sits between
+    //     them.
+    //  2. Total capacity == usable capacity == 10.0 kWh, DELIBERATELY. The 2%
+    //     safety and 3% sustenance reserves are already inside that number.
+    //     Do NOT apply a depth-of-discharge derate on top.
+    //  3. 29.5 A is conditional — it is the balanced 240 V L-L figure.
+    //     Unbalanced support is 24 A at 120 V L-N.
+    //
+    // 🚨 peakPowerKw IS PINNED TO THE CONTINUOUS RATING ON PURPOSE.
+    // Enphase does NOT publish a peak output POWER for this product; it
+    // publishes peak output CURRENTS (56 A for 3 s, 44.8 A for 10 s), carried
+    // below in `peakOutputCurrentA`. The "14.16 kVA peak" figure circulating
+    // on reseller pages is not a manufacturer statement and must never reach a
+    // planset. `peakPowerKw` is a required field on this interface, so it
+    // carries the rated continuous value — the only direction that cannot
+    // advertise a surge capability Enphase never claimed.
+    // ══════════════════════════════════════════════════════════════════════
+    id: 'enphase-iq-battery-10c',
+    manufacturer: 'Enphase', model: 'IQ Battery 10C',
+    // 🚨 THE MODEL NUMBER, NOT AN ORDERING SKU. Datasheet footnote 2: "The
+    // model number is used on the product nameplate, Certificate of
+    // Compliance, and in official regulatory listings (e.g., California Energy
+    // Commission). For all interconnection applications and permitting
+    // processes, ensure that the model number is used, not the ordering SKU."
+    //
+    // The datasheet's Product details table reads:
+    //   Model number   IQBATTERY-10C-1P-NA
+    //   Ordering SKU   5 kWh battery unit       B05-C01-US00-1-3 (-DOM)
+    //                  IQ Battery 10C cover kit B10CNC0708O      (-DOM)
+    //
+    // B10CNC0708O is the COVER KIT's ordering SKU — one of the two orderable
+    // parts that make up the product (the 10C ships as two 5 kWh units plus a
+    // cover kit). Printing it on a permit is the exact error footnote 2 exists
+    // to prevent.
+    permitModelNumber: 'IQBATTERY-10C-1P-NA',
+    category: 'battery', subcategory: 'ac_coupled',
+    // total == usable == 10.0 kWh (reserves already inside the number)
+    usableCapacityKwh: 10.0,
+    peakPowerKw: 7.08,          // see the note above — NOT a published peak
+    continuousPowerKw: 7.08,    // max continuous discharge rate, kW
+    // AC round-trip efficiency (the system-level figure for an AC-coupled
+    // battery). The datasheet also publishes a 96% DC round-trip efficiency;
+    // they are different measurements and this field is the AC one.
+    roundTripEfficiencyPct: 90.0,
+    chemistry: 'LFP',
+    voltageNominalV: 76.8,      // nominal DC voltage (max 86.4 V)
+    acOutputVoltageV: 240,
+    maxContinuousOutputA: 29.5,
+    ratedOutputCurrentA: 29.5,  // at 240 V L-L, balanced loads
+    ratedNeutralCurrentA: 24,   // at 120 V L-N
+    peakOutputCurrentA: [{ amps: 56, durationSec: 3 }, { amps: 44.8, durationSec: 10 }],
+    // 🚨 NO SCALAR IS CORRECT HERE. The branch OCPD is a step function over the
+    // unit count (40 A for one, 80 A for two or more) and lives in
+    // `branchArchitecture`. Leaving `backfeedBreakerA` undefined is deliberate:
+    // any consumer that reads the scalar for this product gets `undefined` and
+    // must go through `resolveBatteryBranch`, rather than silently picking one
+    // step of a two-step function.
+    backfeedBreakerA: undefined,
+    minDedicatedBreakerA: undefined,
+    branchArchitecture: {
+      unitsSharePerBranch: true,   // daisy-chained (QIG §8.1, §10.4)
+      maxUnitsDocumented: 8,       // system maximum: 8 units, 30.72 kW, 80 kWh
+      // 🚨 NULL, NOT THE 6C. An earlier audit note recorded that the 10C
+      // "works ONLY with the IQ Combiner 6C" and "does not work with IQ
+      // Gateway". The datasheet's own Compatibility row contradicts that:
+      // "Compatible with IQ and M Series Microinverters, IQ Meter Collar, IQ
+      // Combiner 6C, and IQ Gateway for grid-tied and backup operations."
+      // Compatibility is not a requirement, and the datasheet is the newer,
+      // primary document — so no exclusive requirement is asserted here.
+      requiresDeviceId: null,
+      pcsLabelRequirement: 'Add a PCS disclaimer label at all PCS-enabled IQ Battery 10C units.',
+      source: 'Enphase DSH-00565-9.0-EN-2026-02-26 §OCPD; footnote 8; TEB-00282-4.0-EN',
+      rules: [
+        {
+          minUnits: 1, maxUnits: 1,
+          branchOcpdA: 40, minConductorAwg: '#8 AWG',
+          pcsRequired: false, pcsMode: null,
+          source: 'DSH-00565-9.0: "40 A OCPD requires a minimum of 8 AWG for one IQ Battery 10C"',
+        },
+        {
+          minUnits: 2, maxUnits: 2,
+          branchOcpdA: 80, minConductorAwg: '#4 AWG',
+          pcsRequired: false, pcsMode: null,
+          source: 'DSH-00565-9.0: "80 A OCPD requires a minimum of 4 AWG for two or more IQ Battery 10C"',
+        },
+        {
+          // 🚨 The OCPD does NOT grow past 80 A. Oversubscription increases the
+          // storage that may sit behind a GIVEN breaker by reducing each unit's
+          // maximum continuous current — the breaker stays 80 A and the array's
+          // rated kVA is what changes.
+          minUnits: 3, maxUnits: 8,
+          branchOcpdA: 80, minConductorAwg: '#4 AWG',
+          pcsRequired: true, pcsMode: 'IQ Battery Oversubscription',
+          source: 'DSH-00565-9.0 footnote 8 (NEC 705.13); TEB-00282-4.0-EN §PCS',
+        },
+      ],
+    },
+    weightLbs: 317,              // total installed weight (max lifting weight 125 lb)
+    outdoorRated: true, ipRating: 'NEMA 3R',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: false,
+    // Warranty: "60% capacity, up to 15 years, or 6,000 cycles, whichever
+    // occurs first." The retention figure is 60%, not the 70% the other
+    // Enphase rows carry.
+    warrantyYears: 15, cycleGuarantee: '6000 cycles', capacityRetentionPct: 60,
+    // ⚠️ ESTIMATE, not a manufacturer figure — Enphase publishes no MSRP. This
+    // field is a commercial placeholder and must not be quoted as a price.
+    msrpUsd: 8000,
+    necRefs: [
+      'NEC 705.12(B) — 120% rule: backfeed breakers add to bus loading',
+      'NEC 705.13 — Power Control Systems (IQ Battery Oversubscription above two units per 80 A branch)',
+      'NEC 706 — Energy Storage Systems',
+    ],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+    ecosystemBrand: 'enphase',
+    ecosystemFamily: 'iq-battery',
+    // Datasheet Compatibility row, verbatim: "Compatible with IQ and M Series
+    // Microinverters, IQ Meter Collar, IQ Combiner 6C, and IQ Gateway for
+    // grid-tied and backup operations." Only the devices this catalogue
+    // actually carries ids for are listed.
+    compatibleWith: ['enphase-iq-combiner-6c', 'enphase-iq-gateway'],
+    active: true,
+    isNew: true,
+    datasheetUrl: 'https://enphase.com/download/iq-battery-10c-data-sheet',
   },
   {
     id: 'enphase-iq-battery-10t',
@@ -4042,16 +4267,286 @@ export function getAllNewEquipment(): {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// THE BATTERY ELECTRICAL AUTHORITY
+//
+// ONE function decides every battery electrical quantity: `resolveBatteryBranch`.
+// It lives here, in the canonical equipment catalogue, rather than in a module
+// of its own, for one reason — `computeBatteryBusImpact` below is the answer
+// this repository already had, and an authority in a separate file could not
+// have absorbed it without an import cycle. A second module would have been a
+// SECOND ANSWER. Instead the old entry point stayed put and now delegates.
+//
+// 🚨 WHAT THIS REPLACED: five call sites each decided the same question
+// differently and disagreed for the same fleet —
+//
+//   app/engineering/page.tsx        requiresGateway ? flat : × count
+//   lib/engineering-helpers.ts      an unused duplicate of the above
+//   lib/computed-system.ts          Σ per id, no gateway awareness
+//   lib/permit/generatePermit.ts    20 × count, hard-coded, MUTATED the project
+//   lib/permit/utils/sldAdapter.ts  20 × count, hard-coded
+//   lib/sld-professional-renderer   a flat `?? 20` in the drawing
+//
+// and `computed-system` reconciled two of them with `Math.max`, which is not an
+// authority — it is "take whichever number isn't zero".
+//
+// 🚨 UNKNOWN NEVER BECOMES A NUMBER. Every refusal path returns
+// `resolved: false` with a code. It is the consumer's job to propagate that,
+// not to substitute 0 (permissive — makes NEC 705.12(B) easier to pass) or 20
+// (a guess that happened to describe a different product).
+// ═══════════════════════════════════════════════════════════════════════════
+
 /**
- * computeBatteryBusImpact — NEC 705.12(B) 120% rule
- * Returns the additional bus loading from an AC-coupled battery's backfeed breaker.
- * DC-coupled batteries don't add a separate breaker — the inverter backfeed covers both.
+ * How the returned numbers were arrived at. The point of this type is that the
+ * weak bases are VISIBLE — a consumer that prints a breaker on a permit can say
+ * where the figure came from instead of asserting it.
+ */
+export type BatteryBranchBasis =
+  /** Transcribed manufacturer step function. Authoritative. */
+  | 'documented-architecture'
+  /**
+   * The single `backfeedBreakerA` scalar, summed over every unit.
+   *
+   * 🚨 NOT architecture verified. This is deliberately the CONSERVATIVE
+   * aggregation and deliberately identical to what the calculation engine
+   * already did (`Σ computeBatteryBusImpact` per unit), so adopting the
+   * authority does not move any existing design's 705.12(B) result. No
+   * shared-breaker credit is taken for gateway products, because that credit
+   * has not been verified against a manufacturer document for the main-panel
+   * layer — and taking it would move the busbar check in the PERMISSIVE
+   * direction.
+   */
+  | 'catalogue-scalar'
+  /** Nothing is known. Must not become a number. */
+  | 'unresolved';
+
+export interface BatteryBranchRefusal {
+  code:
+    | 'UNKNOWN_BATTERY'            // not in the catalogue
+    | 'UNIT_COUNT_INVALID'         // zero, negative or non-integer
+    | 'EXCEEDS_DOCUMENTED_MAXIMUM' // beyond the manufacturer's published range
+    | 'NO_BRANCH_RULE'             // architecture exists but no rule covers this count
+    | 'NO_ELECTRICAL_DATA';        // neither architecture nor a usable scalar
+  message: string;
+}
+
+export interface BatteryBranchResolution {
+  resolved: boolean;
+  batteryId: string;
+  unitCount: number;
+  basis: BatteryBranchBasis;
+  /** The branch OCPD. null ⇔ refused. */
+  branchOcpdA: number | null;
+  /** Minimum conductor the manufacturer publishes with that OCPD. */
+  minConductorAwg: string | null;
+  /** Manufacturer requires a Power Control System setting at this unit count. */
+  pcsRequired: boolean;
+  pcsMode: string | null;
+  /** A label the planset owes when PCS is engaged. */
+  pcsLabelRequirement: string | null;
+  /**
+   * What this battery adds to the NEC 705.12(B) busbar total.
+   *
+   * 🚨 READ `busbarBasis` BEFORE PRINTING THIS. For a product whose breakers
+   * live inside a required combiner, this is the BRANCH OCPD used as a
+   * conservative stand-in: the manufacturer publishes no battery-count →
+   * main-panel-backfeed table, only a ceiling on the combiner feeder. It is
+   * larger than every value it replaced, so it is safe for the 120% check, but
+   * it is NOT the verified feeder figure and must not be labelled as one.
+   */
+  busbarContributionA: number | null;
+  busbarBasis:
+    | 'battery-branch-ocpd'              // the branch lands on the main panel
+    | 'branch-ocpd-pending-feeder-data'  // stand-in; feeder layer unverified
+    | 'catalogue-scalar-sum'
+    | 'dc-coupled-none'                  // inverter backfeed already counts it
+    | 'unresolved';
+  /** Rated continuous output current for ONE unit, where published. */
+  ratedOutputCurrentA: number | null;
+  /** Aggregate usable energy for the fleet. null ⇔ unknown per unit. */
+  aggregateUsableKwh: number | null;
+  /** The permitting model number, where the manufacturer names one. */
+  permitModelNumber: string | null;
+  /** A device this product is documented to require. */
+  requiresDeviceId: string | null;
+  /** The document(s) behind the numbers above. */
+  source: string | null;
+  refusal: BatteryBranchRefusal | null;
+}
+
+/**
+ * A uniform empty shell. Every refusal returns one of these, so no consumer can
+ * reach a number that was never resolved. (Uniform shape rather than a
+ * discriminated union because this repository compiles with `strict: false`,
+ * where narrowing on an `ok` discriminant does not hold — the same reasoning
+ * `lib/combinerSelection/types.ts` records.)
+ */
+function refuseBatteryBranch(
+  batteryId: string,
+  unitCount: number,
+  refusal: BatteryBranchRefusal,
+): BatteryBranchResolution {
+  return {
+    resolved: false, batteryId, unitCount, basis: 'unresolved',
+    branchOcpdA: null, minConductorAwg: null,
+    pcsRequired: false, pcsMode: null, pcsLabelRequirement: null,
+    busbarContributionA: null, busbarBasis: 'unresolved',
+    ratedOutputCurrentA: null, aggregateUsableKwh: null,
+    permitModelNumber: null, requiresDeviceId: null,
+    source: null, refusal,
+  };
+}
+
+/**
+ * resolveBatteryBranch — THE single answer for battery electrical quantities.
+ *
+ * @param batteryId  catalogue id. Identity is the id, never a model substring.
+ * @param unitCount  how many units are installed.
+ */
+export function resolveBatteryBranch(
+  batteryId: string | undefined | null,
+  unitCount: number,
+): BatteryBranchResolution {
+  const id = batteryId ?? '';
+  const battery = id ? getBatteryById(id) : undefined;
+
+  if (!battery) {
+    return refuseBatteryBranch(id, unitCount, {
+      code: 'UNKNOWN_BATTERY',
+      message: id
+        ? `No catalogue row for battery id '${id}'. Its electrical characteristics are UNRESOLVED — do not substitute a typical value.`
+        : 'No battery id supplied. Electrical characteristics are UNRESOLVED.',
+    });
+  }
+
+  if (!Number.isInteger(unitCount) || unitCount < 1) {
+    return refuseBatteryBranch(id, unitCount, {
+      code: 'UNIT_COUNT_INVALID',
+      message: `Unit count must be a positive integer; received ${unitCount}. A branch OCPD is a step function over the unit count and cannot be resolved without it.`,
+    });
+  }
+
+  const aggregateUsableKwh =
+    typeof battery.usableCapacityKwh === 'number' ? battery.usableCapacityKwh * unitCount : null;
+  const ratedOutputCurrentA =
+    battery.ratedOutputCurrentA ?? battery.maxContinuousOutputA ?? null;
+
+  // DC-coupled: no separate backfeed breaker — the inverter backfeed already
+  // counts it. This rule is correct today and is preserved exactly.
+  if (battery.subcategory === 'dc_coupled') {
+    return {
+      resolved: true, batteryId: id, unitCount, basis: 'catalogue-scalar',
+      branchOcpdA: null, minConductorAwg: null,
+      pcsRequired: false, pcsMode: null, pcsLabelRequirement: null,
+      busbarContributionA: 0, busbarBasis: 'dc-coupled-none',
+      ratedOutputCurrentA, aggregateUsableKwh,
+      permitModelNumber: battery.permitModelNumber ?? null,
+      requiresDeviceId: null,
+      source: 'DC-coupled: inverter backfeed already carries this battery (NEC 705.12(B)).',
+      refusal: null,
+    };
+  }
+
+  const arch = battery.branchArchitecture;
+
+  // ── Documented architecture: the step function ─────────────────────────
+  if (arch) {
+    if (unitCount > arch.maxUnitsDocumented) {
+      return refuseBatteryBranch(id, unitCount, {
+        code: 'EXCEEDS_DOCUMENTED_MAXIMUM',
+        message: `${battery.manufacturer} ${battery.model}: ${unitCount} units exceeds the documented maximum of ${arch.maxUnitsDocumented}. There is no published rule at that count — this is UNRESOLVED, not an extension of the last rule.`,
+      });
+    }
+    const rule = arch.rules.find(r => unitCount >= r.minUnits && unitCount <= r.maxUnits);
+    if (!rule) {
+      return refuseBatteryBranch(id, unitCount, {
+        code: 'NO_BRANCH_RULE',
+        message: `${battery.manufacturer} ${battery.model}: no published branch rule covers ${unitCount} unit(s).`,
+      });
+    }
+    return {
+      resolved: true, batteryId: id, unitCount, basis: 'documented-architecture',
+      branchOcpdA: rule.branchOcpdA,
+      minConductorAwg: rule.minConductorAwg,
+      pcsRequired: rule.pcsRequired,
+      pcsMode: rule.pcsMode,
+      pcsLabelRequirement: rule.pcsRequired ? arch.pcsLabelRequirement : null,
+      // 🚨 See the field doc. The branch OCPD is a BRANCH quantity. Whether
+      // that branch lands directly on the dwelling's busbar or on a combiner's
+      // DER busbar that then backfeeds through its own feeder OCPD is a
+      // property of the DESIGN, which this catalogue does not know — and the
+      // manufacturer publishes no battery-count → main-panel-backfeed table
+      // either way. So the branch OCPD stands in, and the basis says so
+      // rather than claiming to be the feeder figure.
+      busbarContributionA: rule.branchOcpdA,
+      busbarBasis: 'branch-ocpd-pending-feeder-data',
+      ratedOutputCurrentA, aggregateUsableKwh,
+      permitModelNumber: battery.permitModelNumber ?? null,
+      requiresDeviceId: arch.requiresDeviceId,
+      source: rule.source,
+      refusal: null,
+    };
+  }
+
+  // ── No architecture: the legacy scalar, aggregated conservatively ──────
+  const scalar = battery.backfeedBreakerA;
+  if (typeof scalar !== 'number' || scalar <= 0) {
+    return refuseBatteryBranch(id, unitCount, {
+      code: 'NO_ELECTRICAL_DATA',
+      message: `${battery.manufacturer} ${battery.model}: catalogue row carries no branch architecture and no usable backfeedBreakerA. The NEC 705.12(B) conclusion, conductor sizing and OCPD selection are BLOCKED — not 0, not a typical value.`,
+    });
+  }
+  return {
+    resolved: true, batteryId: id, unitCount, basis: 'catalogue-scalar',
+    branchOcpdA: scalar,
+    minConductorAwg: null,
+    pcsRequired: false, pcsMode: null, pcsLabelRequirement: null,
+    busbarContributionA: scalar * unitCount,
+    busbarBasis: 'catalogue-scalar-sum',
+    ratedOutputCurrentA, aggregateUsableKwh,
+    permitModelNumber: battery.permitModelNumber ?? null,
+    requiresDeviceId: null,
+    source: `SolarPro catalogue scalar backfeedBreakerA=${scalar} A, summed over ${unitCount} unit(s). NOT manufacturer-architecture verified.`,
+    refusal: null,
+  };
+}
+
+/**
+ * Exact, normalised catalogue lookup for consumers that carry only text.
+ *
+ * 🚨 DELIBERATELY NOT A SUBSTRING MATCHER. Substring matching on a model name
+ * is how "IQ Battery 10" selects the 10C (or the 10T), and how a 20 A breaker
+ * gets picked for a 29.5 A device. Case, spacing and punctuation are
+ * normalised; nothing else is. No match, or more than one, is UNRESOLVED.
+ */
+export function findBatteryByExactModel(
+  manufacturer: string | undefined | null,
+  model: string | undefined | null,
+): BatterySystem | undefined {
+  if (!manufacturer || !model) return undefined;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const m = norm(manufacturer);
+  const md = norm(model);
+  if (!m || !md) return undefined;
+  const hits = BATTERIES.filter(b => norm(b.manufacturer) === m && norm(b.model) === md);
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
+/**
+ * computeBatteryBusImpact — NEC 705.12(B) 120% rule, PER SINGLE UNIT.
+ *
+ * Retained because callers sum it per unit. It now DELEGATES to
+ * `resolveBatteryBranch` so it cannot be a second answer.
+ *
+ * 🚨 IT CANNOT EXPRESS A STEP FUNCTION, and callers must stop summing it for
+ * products that have one. For those it returns the ONE-UNIT branch OCPD, which
+ * a caller summing over N units would overstate by roughly N×. Use
+ * `resolveBatteryBranch(id, count)` directly and read `busbarContributionA`.
  */
 export function computeBatteryBusImpact(batteryId: string): number {
-  const battery = getBatteryById(batteryId);
-  if (!battery) return 0;
-  if (battery.subcategory === 'dc_coupled') return 0; // inverter backfeed already counted
-  return battery.backfeedBreakerA ?? 0;
+  const r = resolveBatteryBranch(batteryId, 1);
+  if (!r.resolved) return 0; // legacy shape: callers cannot express unresolved
+  return r.busbarContributionA ?? 0;
 }
 
 /**

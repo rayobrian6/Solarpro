@@ -58,8 +58,32 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
 
   // User override (typed on PermitInput.project) — the design-studio picker
   // writes bosDeviceIds; falls back to a single combinerId.
+  //
+  // 🚨 THIS IS THE SESSION OVERRIDE, NOT THE DECISION. `bosDeviceIds` /
+  // `combinerId` come from the engineering page's private engineering_config.
+  // The project's RECORDED selection is a separate, higher authority and is
+  // passed below; resolveIntegratedEquipment enforces the ordering.
   const overrideDeviceIds = project.bosDeviceIds
     ?? (project.combinerId ? [project.combinerId] : undefined);
+
+  // 🚨 THE INSTALLER'S OWN ANSWER — projects.selected_equipment.combinerSelection,
+  // carried onto PermitInput.project by the client.
+  //
+  // THIS LINE IS THE PROPAGATION. Eight consumers resolve the combiner through
+  // this ONE adapter — E-1 (electricalPages), SCHED/PV-6 (structuralPages), the
+  // disconnecting-means directory (compliancePages), PV-0 (coverSheet), the
+  // canonical snapshot, the permit BOM reconcile and the SLD adapter. Every one
+  // of them used to re-derive the device from a catalogue RECOMMENDATION, which
+  // is how a package could be corrected on the diagram and still ship a
+  // schedule, a BOM and a code statement naming a device nobody chose. The 5C
+  // and the 6C differ on `providesAcDisconnect` — NEC 690.13 — so that
+  // disagreement was never cosmetic.
+  //
+  // It is passed UNCONDITIONALLY, not gated on `isMicro`, for the same reason
+  // `overrideDeviceIds` is not: a stated decision is not something this function
+  // gets to decline to hear. `compatibleCombinerIds` below stays micro-gated
+  // because a recommendation for a string system is meaningless.
+  const selectedCombinerId = project.selectedCombinerId ?? null;
 
   // The combiner pairing equipment-db declares on the micro sub's OWN inverter.
   // The permit sheet must resolve the SAME device the Diagram tab does, or E-1
@@ -84,6 +108,7 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
     hasBattery: hasRealBattery(project),
     overrideDeviceIds,
     compatibleCombinerIds: isMicro ? combinerCompatibilityFor(inverterManufacturer, inverterModel) : undefined,
+    selectedCombinerId,
   };
 
   return resolveIntegratedEquipment(ctx);

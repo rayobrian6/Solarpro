@@ -196,6 +196,7 @@
       "rapidShutdownIntegrated",
       "revision",
       "scale",
+      "selectedCombinerId",
       "systemType",
       "topologyType",
       "totalModules",

@@ -523,6 +523,18 @@ export interface HybridSourceInput {
    *  silently selected the current-generation default instead of the paired
    *  device, so a hybrid lane could name a different combiner from the sheets. */
   compatibleCombinerIds?: string[];
+  /**
+   * 🚨 THE PROJECT'S RECORDED SELECTION, FOR THIS LANE. Same authority and same
+   * ordering as `SystemBosContext.selectedCombinerId`, which is what this ends
+   * up being — it outranks `compatibleCombinerIds` above.
+   *
+   * Without it a hybrid job had a hole exactly where the single-system path had
+   * been repaired: E-1's multi-lane drawing and the permit BOM's shared-panel
+   * block both read this resolver, and it had no way of being told what the
+   * installer selected, so every micro lane named a RECOMMENDATION however
+   * explicit the project's answer was.
+   */
+  selectedCombinerId?: string | null;
 }
 export interface HybridSourceCombining {
   key: string;
@@ -554,6 +566,10 @@ export function resolveHybridAcCollection(sources: HybridSourceInput[]): HybridA
         inverterManufacturer: s.inverterManufacturer, inverterModel: s.inverterModel,
         isMicro: true, totalDevices: s.deviceCount, branchCount: s.branchCount, hasBattery: false,
         compatibleCombinerIds: s.compatibleCombinerIds,
+        // The selection outranks the pairing — the ordering is resolved inside
+        // resolveIntegratedEquipment, so a hybrid lane and a single-system job
+        // answer "which combiner" through the same rule rather than two.
+        selectedCombinerId: s.selectedCombinerId ?? null,
       });
       const combiner = plan.brains ?? plan.devices[0] ?? null;
       return {

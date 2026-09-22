@@ -195,6 +195,25 @@ export interface PermitInput {
     // (the design-studio picker will write this). Read by buildIntegratedEquipment.
     bosDeviceIds?: string[];
     combinerId?: string;
+    /**
+     * 🚨 THE PROJECT'S RECORDED COMBINER SELECTION — what the installer told us
+     * they are actually installing, carried from
+     * `projects.selected_equipment.combinerSelection` (see
+     * lib/combinerSelection/service). THE HIGHEST AUTHORITY on this object.
+     *
+     * `bosDeviceIds` / `combinerId` above are a SESSION override typed on the
+     * engineering page's private workspace. This is a decision with an actor, a
+     * basis and a supersession history, so it outranks both — the ordering is
+     * enforced inside resolveIntegratedEquipment, not here.
+     *
+     * It existed on the wire (the client has been sending it) and on the
+     * resolver (which has honoured it since it was built) but NOT on this type,
+     * so buildIntegratedEquipment could not read it and every planset sheet,
+     * the SCHED/E-1 pages and the permit BOM went on naming whatever the
+     * catalogue pairing recommended. That is the "worked on the SLD surface but
+     * did not propagate" report.
+     */
+    selectedCombinerId?: string | null;
     /** §1.1 per-subsystem equipment authority map (config.subSystems carriage).
      *  Read by resolveEquipmentBySubSystem as the id-based fallback source when
      *  a sub's tagged fleet carries no enriched names (legacy/thin payloads). */

@@ -393,6 +393,18 @@ export interface SLDProfessionalInput {
   combinerModel?:          string;
   combinerHasIntegratedGateway?: boolean;  // gateway lives inside the combiner (no separate Envoy)
   combinerProvidesAcDisconnect?: boolean;  // combiner has an integral load-break disconnect
+  /**
+   * 🚨 THE PROJECT'S RECORDED COMBINER SELECTION
+   * (projects.selected_equipment.combinerSelection).
+   *
+   * The four fields above are the RESOLVED combiner for the single-lane
+   * drawing — an answer the caller already computed. This is the QUESTION's
+   * authority, and the multi-lane path needs it because that path does not
+   * consume the resolved fields at all: it re-resolves a combiner PER LANE
+   * through acCollectionFromLanes. So a hybrid drawing ignored a selection the
+   * single-lane drawing honoured, on the same project.
+   */
+  selectedCombinerId?:     string | null;
   ocpdPerString?:          number;
   dcAcRatio?:              number;
   stringConfigWarnings?:   string[];
@@ -2476,11 +2488,21 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // The lug itself is drawn inside renderBUI; we just need to terminate at it.
 
     // Backfeed breaker at MSP for battery (NEC 705.12(B))
-    const bfA = input.batteryBackfeedA ?? 20;
+    //
+    // 🚨 WAS: `input.batteryBackfeedA ?? 20`. A renderer cannot know a breaker
+    // rating, and this one asserted 20 A on the drawing whenever the value did
+    // not reach it — a number an AHJ reads as an engineering conclusion. The
+    // renderer PRINTS the authority's answer and nothing else. When the value
+    // is absent the symbol still draws (the breaker physically exists) but it
+    // is labelled UNRESOLVED, so the omission is visible on the sheet instead
+    // of being silently filled with a plausible ampacity.
+    const bfA = input.batteryBackfeedA;
+    const bfLabel = (bfA != null && bfA > 0) ? `${bfA}A BATT` : 'BATT — SIZE UNRESOLVED';
     const bfX = xMSP + 30;
-    parts.push(breakerSymbol(bfX, BUS_Y + 30, 20, 12, bfA));
+    parts.push(breakerSymbol(bfX, BUS_Y + 30, 20, 12, bfA != null && bfA > 0 ? bfA : undefined));
     parts.push(ln(bfX, BUS_Y, bfX, BUS_Y + 24, {sw: SW_THIN, stroke: '#1565C0'}));
-    parts.push(txt(bfX, BUS_Y + 48, `${bfA}A BATT`, {sz: 5, anc: 'middle', bold: true, fill: '#1565C0'}));
+    parts.push(txt(bfX, BUS_Y + 48, bfLabel, {sz: 5, anc: 'middle', bold: true,
+      fill: (bfA != null && bfA > 0) ? '#1565C0' : '#C62828'}));
     parts.push(txt(bfX, BUS_Y + 56, 'NEC 705.12(B)', {sz: 4.5, anc: 'middle', italic: true, fill: '#1565C0'}));
 
     // Battery symbol — above BUI, connected to BUI battery port
@@ -3401,7 +3423,13 @@ function laneBackfeedA(b: SLDSourceBranch): number {
  * disagree with the diagram about the shared panel, its busbar rating, or the
  * single disconnect. Map lanes → HybridSourceInput here and nowhere else.
  */
-export function acCollectionFromLanes(lanes: SLDSourceBranch[]): HybridAcCollectionPlan {
+export function acCollectionFromLanes(
+  lanes: SLDSourceBranch[],
+  /** The project's recorded combiner selection, when the caller has one. It
+   *  applies to the MICRO lanes (only they take a brand combiner) and outranks
+   *  the per-lane pairing below — one project, one installed device. */
+  selectedCombinerId?: string | null,
+): HybridAcCollectionPlan {
   return resolveHybridAcCollection(lanes.map(b => ({
     key: b.key,
     inverterManufacturer: b.inverterManufacturer ?? '',
@@ -3415,6 +3443,10 @@ export function acCollectionFromLanes(lanes: SLDSourceBranch[]): HybridAcCollect
     // hybrid lanes. Without it a lane fell back to the current-generation
     // default and could name a different combiner from the rest of the package.
     compatibleCombinerIds: combinerCompatibilityFor(b.inverterManufacturer, b.inverterModel),
+    // ...and the same place the installer's ANSWER attaches. Compatibility says
+    // what CAN be used; this says what IS being installed, and the resolver
+    // ranks it above the line before it.
+    selectedCombinerId: selectedCombinerId ?? null,
   })));
 }
 
@@ -3583,7 +3615,11 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   //    combiner panel → ONE system disconnect (replaces a disconnect per lane).
   //    Single-sourced via acCollectionFromLanes so BOM/SCHED read the identical
   //    shared panel + disconnect (lib/permit/utils/sldAdapter.buildHybridAcCollection). ──
-  const acCollection = acCollectionFromLanes(lanes);
+  //    The project's recorded selection rides along: this path re-resolves a
+  //    combiner PER LANE and never looks at input.combinerModel, so without it
+  //    a hybrid E-1 named a recommendation while the single-lane E-1 for the
+  //    same project named the installer's choice.
+  const acCollection = acCollectionFromLanes(lanes, input.selectedCombinerId ?? null);
   const totalModules = input.totalModules || lanes.reduce((s, b) => s + (b.totalModules ?? 0), 0);
   // MULTI-LANE total AC = Σ of the lanes THIS sheet draws. input.acOutputKw is
   // the legacy single-system figure and on Stowell it lagged the design

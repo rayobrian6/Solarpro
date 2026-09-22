@@ -852,7 +852,17 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
 
   // Battery NEC 705.12(B) bus impact — AC-coupled battery backfeed breakers add to bus loading
   // NEC 705.12(B): ALL backfeed breakers (solar + battery) count toward 120% rule
+  //
+  // 🚨 THE `?? 0` THAT WAS HERE HAD TWO MEANINGS AND ONLY ONE WAS CORRECT.
+  // With no battery on the job, 0 is right and is kept. With a battery
+  // PRESENT but its backfeed unresolved, 0 silently made the 120% rule EASIER
+  // to pass — the permissive direction, on the one calculation that clears a
+  // design for interconnection. An unknown backfeed now blocks the conclusion
+  // instead of flattering it. (docs/BATTERY-ELECTRICAL-AUTHORITY.md §6.)
+  const _batteryPresent = (input.batteryCount ?? 0) > 0;
+  const _batteryBackfeedKnown = typeof input.batteryBackfeedA === 'number' && input.batteryBackfeedA > 0;
   const batteryBackfeedA = input.batteryBackfeedA ?? 0;
+  const batteryBackfeedUnresolved = _batteryPresent && !_batteryBackfeedKnown;
   const totalBackfeedWithBattery = solarBreakerRequired + batteryBackfeedA;
 
   // Resolve interconnection config — default to LOAD_SIDE with mainPanelAmps as bus
@@ -978,6 +988,27 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       });
       allErrors.push(interconnectionIssues[0]);
     }
+  }
+
+  // ── Unknown battery backfeed BLOCKS the 705.12(B) conclusion ──────────────
+  //
+  // A battery is on the job but nothing authoritative sized its backfeed, so
+  // the busbar total above is missing a term. Passing here would be a verdict
+  // computed from an incomplete sum — the permissive direction. NEC 705.11
+  // supply-side taps are exempt because the 120% rule does not apply to them,
+  // so a missing backfeed term changes nothing there.
+  if (batteryBackfeedUnresolved && icMethod !== 'SUPPLY_SIDE_TAP') {
+    const _batBlock: CalcIssue = {
+      code: 'E-BATTERY-BACKFEED-UNRESOLVED',
+      severity: 'error',
+      message: `NEC 705.12(B) cannot be concluded: ${input.batteryCount} battery unit(s) are on this design but no authoritative backfeed breaker was resolved for them. The busbar total (${icSolarBreaker}A) omits the battery contribution. Resolve the battery against the equipment catalogue (lib/equipment-db.ts → resolveBatteryBranch) — do not substitute a typical value.`,
+      value: icSolarBreaker,
+      necReference: 'NEC 705.12(B)',
+      suggestion: 'Select the battery model in the design so its documented branch OCPD can be resolved, or record the manufacturer-stated backfeed breaker.',
+    };
+    interconnectionIssues.push(_batBlock);
+    allErrors.push(_batBlock);
+    interconnectionPasses = false;
   }
 
   // Build alternatives list (shown when LOAD_SIDE fails)

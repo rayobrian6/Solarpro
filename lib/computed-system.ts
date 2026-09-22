@@ -28,7 +28,7 @@ import {
 
 import { buildSegments } from './segment-builder';
 import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
-import { computeBatteryBusImpact, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
+import { getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, resolveBatteryBranch } from './equipment-db';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { nextStandardOcpd } from './electrical/stdSizes';
 import { NEC_705_11_C_TAP_LIMIT_FT, TAP_SPAN_PHYSICAL_SEGMENT_ID } from './electrical/tapSpan';
@@ -1398,16 +1398,61 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const _interconMethodRaw = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
   const _isSupplySideTap = _interconMethodRaw.includes('SUPPLY') || _interconMethodRaw.includes('LINE_SIDE');
 
-  // Sum battery backfeed breaker contributions (AC-coupled only; DC-coupled returns 0)
-  // BUILD v24: Also accept direct batteryBackfeedA input (avoids DB lookup when ID not provided)
-  const batteryBusImpactFromIds = (input.batteryIds ?? []).reduce(
-    (sum, id) => sum + computeBatteryBusImpact(id), 0
-  );
-  // Use direct batteryBackfeedA if provided and greater than DB-derived value
-  const batteryBusImpactA = Math.max(
-    batteryBusImpactFromIds,
-    input.batteryBackfeedA ?? 0
-  );
+  // ── Battery contribution — ONE authority, not a Math.max of two models ────
+  //
+  // 🚨 WHAT WAS HERE:
+  //     const fromIds = batteryIds.reduce((s, id) => s + computeBatteryBusImpact(id), 0);
+  //     const impact  = Math.max(fromIds, input.batteryBackfeedA ?? 0);
+  //
+  // Two different models of "how much does the battery add", reconciled by
+  // taking the larger. `Math.max` of two disagreeing models is not an
+  // authority — it is "take whichever number isn't zero", and it landed on the
+  // conservative side only by accident of which model happened to be bigger.
+  //
+  // Summing a PER-UNIT breaker over the fleet is also wrong for any product
+  // whose units daisy-chain onto a SHARED branch: three IQ Battery 10C sit on
+  // one 80 A branch, so the old reduce would have said 3 × 40 = 120 A for a
+  // circuit the manufacturer protects at 80 A.
+  //
+  // Batteries are grouped by product id because distinct products land on
+  // distinct branch circuits; within a group the authority applies the
+  // manufacturer's step function over that group's unit count.
+  const _batteryCountsById = new Map<string, number>();
+  for (const id of (input.batteryIds ?? [])) {
+    _batteryCountsById.set(id, (_batteryCountsById.get(id) ?? 0) + 1);
+  }
+  let batteryBusImpactFromIds = 0;
+  let _batteryUnresolved = false;
+  for (const [id, count] of _batteryCountsById) {
+    const r = resolveBatteryBranch(id, count);
+    if (r.resolved && r.busbarContributionA != null) batteryBusImpactFromIds += r.busbarContributionA;
+    else _batteryUnresolved = true;
+  }
+
+  // The authority's answer WINS whenever battery ids were supplied. The direct
+  // `batteryBackfeedA` input remains the source only when no ids reached here
+  // (BUILD v24: avoids a DB lookup when the caller has no id). A disagreement
+  // between the two is a CALLER BUG and is surfaced rather than silently maxed
+  // away — every first-party caller now routes through the same authority, so
+  // the two agree by construction.
+  const _directBatteryBackfeedA = input.batteryBackfeedA ?? 0;
+  let batteryBusImpactA: number;
+  if (_batteryCountsById.size > 0) {
+    batteryBusImpactA = batteryBusImpactFromIds;
+    if (_directBatteryBackfeedA > 0 && Math.abs(_directBatteryBackfeedA - batteryBusImpactFromIds) > 0.01) {
+      console.warn('[COMPUTED-SYSTEM] battery backfeed disagreement: authority says',
+        batteryBusImpactFromIds, 'A from', [..._batteryCountsById].map(([i, c]) => `${c}×${i}`).join(', '),
+        'but caller passed batteryBackfeedA =', _directBatteryBackfeedA,
+        'A — using the authority. Route the caller through resolveBatteryBranch().');
+    }
+    if (_batteryUnresolved) {
+      console.warn('[COMPUTED-SYSTEM] at least one battery could not be resolved;',
+        'its NEC 705.12(B) contribution is MISSING from the busbar total, which is',
+        'therefore incomplete — do not read interconnectionPass as a clearance.');
+    }
+  } else {
+    batteryBusImpactA = _directBatteryBackfeedA;
+  }
   const totalBackfeedA = backfeedBreakerAmps + batteryBusImpactA;
 
   const interconnectionPass = _isSupplySideTap

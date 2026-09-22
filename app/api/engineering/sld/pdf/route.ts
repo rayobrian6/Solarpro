@@ -204,6 +204,13 @@ export async function POST(req: NextRequest) {
       combinerModel:                _combiner.combinerModel,
       combinerHasIntegratedGateway: _combiner.combinerHasIntegratedGateway,
       combinerProvidesAcDisconnect: _combiner.combinerProvidesAcDisconnect,
+      // The four fields above are the RESOLVED single-lane combiner. This is
+      // the selection itself, and it is needed because a hybrid export attaches
+      // `input.sources` below and switches to the multi-lane renderer, which
+      // ignores those four and re-resolves per lane. Without it the EXPORTED
+      // hybrid sheet — the one that reaches the permit package — silently
+      // dropped the selection the on-screen single-lane sheet honoured.
+      selectedCombinerId:      buildInput.selectedCombinerId ? String(buildInput.selectedCombinerId) : null,
       totalModules:            Number(buildInput.totalModules)           || 20,
       totalStrings:            Number(buildInput.totalStrings)           || 2,
       panelModel:              String(buildInput.panelModel ?? (firstPanelSpec ? `${firstPanelSpec.manufacturer} ${firstPanelSpec.model}` : 'Q.PEAK DUO BLK ML-G10+ 400W')),

@@ -13,7 +13,8 @@ import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { buildConductorAuthority, type ConductorAuthority, type SubSystemConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
-import { getInverterById, getMicroinverterById, SOLAR_PANELS } from '@/lib/equipment-db';
+import { getInverterById, getMicroinverterById, SOLAR_PANELS,
+         resolveBatteryBranch, findBatteryByExactModel } from '@/lib/equipment-db';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
@@ -186,7 +187,29 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // appears in the PV-1 equipment legend; the SLD label includes the breakdown
   // for clarity: e.g. "15 kWh (3 × 5.0)" instead of just "15 kWh".
   const batteryUnits    = project.batteryCount || 1;
-  const batteryKwhPer   = project.batteryKwh ?? 5.0;
+
+  // ── The battery electrical authority, resolved ONCE for this drawing ──────
+  //
+  // 🚨 This adapter used to invent two different battery facts: a flat 5.0 kWh
+  // per unit and a flat 20 A per unit. Both are now the authority's answer or
+  // nothing at all. `resolveBatteryBranch` is the single decider; an
+  // unresolved answer stays unresolved rather than becoming a typical value.
+  const _batAuth = hasBattery
+    ? resolveBatteryBranch(
+        project.batteryId ?? findBatteryByExactModel(project.batteryBrand, project.batteryModel)?.id,
+        batteryUnits,
+      )
+    : null;
+  const _batteryAuthorityBackfeedA = _batAuth?.resolved
+    ? (_batAuth.busbarContributionA ?? undefined)
+    : undefined;
+  // Per-unit usable kWh: the project's own figure wins (it came from the
+  // design), then the authority. No `?? 5.0` — that number described one
+  // product and was printed for every product.
+  const _batKwhPerAuthority = _batAuth?.resolved && _batAuth.aggregateUsableKwh != null
+    ? _batAuth.aggregateUsableKwh / batteryUnits
+    : undefined;
+  const batteryKwhPer   = project.batteryKwh ?? _batKwhPerAuthority ?? 0;
   const batteryKwhTotal = hasBattery ? batteryUnits * batteryKwhPer : 0;
   const batteryKwhLabel = hasBattery && batteryUnits > 1
     ? `${batteryKwhTotal} kWh (${batteryUnits} × ${batteryKwhPer})`
@@ -309,8 +332,13 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     batteryModel:            project.batteryModel ?? '',
     batteryKwh:              batteryKwhTotal,
     batteryKwhLabel,
-    // Error 5ba fix: compute battery backfeed fallback (20A per unit typical residential)
-    batteryBackfeedA:        project.batteryBackfeedA ?? (hasBattery ? (project.batteryCount ?? 1) * 20 : undefined),
+    // 🚨 WAS: `(project.batteryCount ?? 1) * 20` — a hard-coded 20 A per unit,
+    // unconditional, for whatever battery the job actually has. It drew a
+    // breaker on the SLD that no product, calculation or manufacturer document
+    // had chosen. The drawing PRINTS the authority's answer; it does not
+    // invent one, and when the authority refuses, the field stays undefined so
+    // the renderer can say "unresolved" instead of asserting an ampacity.
+    batteryBackfeedA:        project.batteryBackfeedA ?? _batteryAuthorityBackfeedA,
     generatorBrand:          project.generatorBrand ?? undefined,
     generatorKw:             project.generatorKw ?? undefined,
     atsBrand:                project.atsBrand ?? undefined,
@@ -347,6 +375,11 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     combinerModel:           _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined,
     combinerHasIntegratedGateway: _bos.hasIntegratedGateway,
     combinerProvidesAcDisconnect: _bos.providesAcDisconnect,
+    // The four fields above are the RESOLVED single-lane answer. This is the
+    // selection itself, which the MULTI-LANE renderer needs because that path
+    // re-resolves per lane and never reads them — without it a hybrid planset
+    // E-1 would drop the selection the rest of this adapter just honoured.
+    selectedCombinerId:      project.selectedCombinerId ?? null,
     ocpdPerString:           isMicro ? 0 : dcOCPD,
     // P1-10 (data-authority register): system.dcAcRatio is the ONE owner —
     // read it, never a third re-derivation. Fallback recompute only when the
@@ -528,7 +561,11 @@ export function buildHybridAcCollection(
   const auth = buildConductorAuthority(input, cad ?? undefined);
   const lanes = buildSourceBranchesFromAuthority(auth, input);
   if (!lanes || lanes.length < 2) return null;
-  return acCollectionFromLanes(lanes);
+  // The project's recorded selection, so the permit BOM's shared-panel block and
+  // E-1's multi-lane drawing resolve the SAME lane combiner. They read this one
+  // function precisely so they cannot disagree; passing the selection on only
+  // one side would have reintroduced the disagreement it exists to prevent.
+  return acCollectionFromLanes(lanes, input.project.selectedCombinerId ?? null);
 }
 
 // ─── PAGE PATH — computedMulti.subSystems → SLDSourceBranch[] ────────────────
