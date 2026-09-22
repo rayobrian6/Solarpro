@@ -58,6 +58,7 @@ import {
   lifecycleFor,
   admitFaces,
   admitObstructions,
+  resolveLedgerKey,
 } from '@/lib/design/deletionAuthority';
 import type { PlacedPanel, RoofPlane, PlacedObstruction, LayoutMeasurement, DesignElectrical } from '@/types';
 import {
@@ -75,6 +76,7 @@ import {
   resolveSiteKey,
   dispositionForProperty,
   withDispositionForProperty,
+  sitesAreSameProperty,
   UNRESOLVED_SITE_KEY,
 } from '@/lib/design/siteDesignModel';
 
@@ -699,6 +701,23 @@ export function useSiteDesign(): UseSiteDesign {
   // ownership refs at the top of this hook — see the note there.
   const geometryLifecycleRef = useRef<DesignGeometryLifecycle>('untouched');
 
+  /**
+   * THE KEY THE TOMBSTONES ARE FILED UNDER — one expression, used by every
+   * read and every write, exactly as `dispositionKeyOf` is for the judgement.
+   *
+   * 🚨 IT MATCHES BY PROPERTY. `siteKeyFromCoords` rounds to about 1.1 m and a
+   * single house routinely mints two or three keys metres apart, so an exact
+   * lookup made a tombstone filed under one spelling invisible under another:
+   * the lifecycle read `untouched`, the acquisition gate said yes, and the
+   * archive handed the deleted face back. The disposition map had this defect
+   * and was fixed with `dispositionForProperty`; this is the same fix for the
+   * ledger, and it also means one house accumulates ONE entry rather than a
+   * tombstone under each spelling of itself.
+   */
+  const ledgerKeyOf = useCallback((explicit?: string) =>
+    resolveLedgerKey(deletionLedgerRef.current, dispositionKeyOf(explicit), sitesAreSameProperty),
+  [dispositionKeyOf]);
+
   const deletionLedger = useMemo(() => {
     void archiveTick;
     void activeSiteKey;
@@ -710,11 +729,11 @@ export function useSiteDesign(): UseSiteDesign {
   const geometryLifecycle = useMemo(() => {
     void archiveTick;
     const l = lifecycleFor(
-      stateRef.current.deletions, dispositionKeyOf(), (roofPlanesRef.current ?? []).length,
+      stateRef.current.deletions, ledgerKeyOf(), (roofPlanesRef.current ?? []).length,
     );
     geometryLifecycleRef.current = l;
     return l;
-  }, [archiveTick, roofPlanes, dispositionKeyOf]);
+  }, [archiveTick, roofPlanes, ledgerKeyOf]);
 
   /** Write the ledger to state AND the mirror, and move the archive signature
    *  so the autosave actually persists it. A tombstone held only in memory is
@@ -727,20 +746,20 @@ export function useSiteDesign(): UseSiteDesign {
 
   const planDelete = useCallback<UseSiteDesign['planDelete']>((scope, targetId) => planDeletion({
     scope,
-    siteKey: dispositionKeyOf(),
+    siteKey: ledgerKeyOf(),
     targetId: targetId ?? '',
     faces: (roofPlanesRef.current ?? []) as never,
     panels: (panelsRef.current ?? []) as never,
     obstructions: (placedObstructionsRef.current ?? []) as never,
     measurementCount: (measurementsRef.current ?? []).length,
     now: Date.now(),
-  }), [dispositionKeyOf]);
+  }), [ledgerKeyOf]);
 
   const applyDelete = useCallback<UseSiteDesign['applyDelete']>((plan) => {
     if (!plan || !plan.ok) {
       return { ok: false, removed: 0, message: plan?.refusal || 'Nothing to delete.' };
     }
-    const key = dispositionKeyOf();
+    const key = ledgerKeyOf();
     if (!key) {
       // 🚨 REFUSED OUT LOUD, exactly as an unnamed-property disposition write
       // is. A tombstone filed against an empty key is dropped by
@@ -793,19 +812,19 @@ export function useSiteDesign(): UseSiteDesign {
     const removed = plan.faceIds.length + plan.panelIds.length + plan.obstructionIds.length;
     return { ok: true, removed, message: `${plan.title}: ${plan.lines.join(', ')}.` };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispositionKeyOf, writeLedger]);
+  }, [ledgerKeyOf, writeLedger]);
 
   const pendingDestructive = useCallback(() => pendingDestructiveRef.current, []);
   const clearPendingDestructive = useCallback(() => { pendingDestructiveRef.current = null; }, []);
 
   const forgetDeletions = useCallback<UseSiteDesign['forgetDeletions']>((siteKey) => {
-    const key = dispositionKeyOf(siteKey);
+    const key = ledgerKeyOf(siteKey);
     if (!key) return;
     writeLedger(withoutTombstones(deletionLedgerRef.current, key));
-  }, [dispositionKeyOf, writeLedger]);
+  }, [ledgerKeyOf, writeLedger]);
 
   const admitGeometry = useCallback(<T extends { id?: string; sectionId?: string }>(faces: T[]): T[] => {
-    const res = admitFaces(deletionLedgerRef.current, dispositionKeyOf(), faces);
+    const res = admitFaces(deletionLedgerRef.current, ledgerKeyOf(), faces);
     if (res.refused.length) {
       // Never silent. A face that vanishes with no explanation is the failure
       // mode this whole model exists to replace.
@@ -814,16 +833,16 @@ export function useSiteDesign(): UseSiteDesign {
         res.refused.map(f => f?.id));
     }
     return res.admitted;
-  }, [dispositionKeyOf]);
+  }, [ledgerKeyOf]);
 
   const admitPlacedObstructions = useCallback(<T extends { id?: string }>(obs: T[]): T[] => {
-    const res = admitObstructions(deletionLedgerRef.current, dispositionKeyOf(), obs);
+    const res = admitObstructions(deletionLedgerRef.current, ledgerKeyOf(), obs);
     if (res.refused.length) {
       console.warn('[useSiteDesign] refused ' + res.refused.length
         + ' obstruction(s) that were deliberately deleted at this property.');
     }
     return res.admitted;
-  }, [dispositionKeyOf]);
+  }, [ledgerKeyOf]);
 
   return {
     panels, setPanels,

@@ -872,6 +872,15 @@ export function pointInPolygonLatLng(
  * file has no dependency on a UI-side helper.
  */
 function isPanelInsideObstruction(panel: PlacedPanel, obs: PlacedObstruction): boolean {
+  // 🚨 A SITE OBJECT SHADES; IT DOES NOT OCCUPY.
+  //
+  // There are two keep-out implementations — this one and
+  // lib/3d/panelKeepOut.ts — and only the other honoured `space`. This is the
+  // one the PLACEMENT path calls, so dropping a 6 m tree near the house
+  // instantly deleted every module within 3 m of it, unrecoverably, while the
+  // tool's own hint on screen promised "it shades; it does not remove panels".
+  // Shaded production is a derate, not a no-build.
+  if ((obs as { space?: string }).space === 'site') return false;
   const cosLat = Math.cos(panel.lat * DEG);
   const dyM = (panel.lat - obs.lat) * METERS_PER_DEG_LAT;
   const dxM = (panel.lng - obs.lng) * METERS_PER_DEG_LAT * cosLat;

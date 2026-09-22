@@ -432,12 +432,41 @@ export function applySectionEdit(
     // saying so gets the installer the roof they actually asked for.
     const kindAfter = edit.kind !== undefined ? edit.kind : next.kind;
     if (kindAfter === 'flat' && edit.pitchDeg !== 0) {
-      return fail([{
-        code: 'PITCH_OUT_OF_RANGE',
-        message:
-          `A flat section is horizontal by definition, so it cannot be ${edit.pitchDeg}°. ` +
-          `Change its roof kind to Shed to give it a slope and a direction.`,
-      }]);
+      // 🚨 IT CONVERTS. IT DOES NOT REFUSE, AND IT DOES NOT MAKE THEM REDRAW.
+      //
+      // This used to answer "a flat section is horizontal by definition —
+      // change its roof kind to Shed", which is true about the CODE and useless
+      // to the person holding a porch that slopes 2 in 12. The owner's report
+      // is exact: "I should NOT have to delete it and redraw it using a
+      // completely different internal object simply because the porch has a
+      // 1/12, 2/12, 3/12 slope."
+      //
+      // `flat` and `shed` are ALREADY the same topology here — one planar face,
+      // built by the same `roofPlaneFromFootprint` call, differing only in
+      // whether the pitch is pinned to zero. So "one planar roof surface" and
+      // "physical pitch is zero forever" were two facts wearing one word, and
+      // this separates them: the topology is unchanged, and the physical
+      // dimension stops being locked by it.
+      //
+      // Everything authored survives — footprint, id, pad elevation, eave
+      // height, label — because nothing is recreated. A shed at 0° is a true
+      // flat roof, so this is not a one-way door either: setting the pitch back
+      // to zero leaves a horizontal deck that REMEMBERS its slope direction for
+      // the next time it is raised.
+      next.kind = 'shed';
+      // A slope needs a direction as well as a magnitude, and inventing one
+      // from polygon winding order is how a roof ends up falling toward the
+      // house. If the caller did not supply one and the section has never had
+      // one, the edit is refused and says what is missing.
+      const dirAfter = edit.shedAzimuthDeg !== undefined ? edit.shedAzimuthDeg : next.shedAzimuthDeg;
+      if (dirAfter === null || dirAfter === undefined || !isFinite(dirAfter)) {
+        return fail([{
+          code: 'SHED_DIRECTION_REQUIRED',
+          message:
+            'This roof can take a slope, but it needs to know which way it falls. '
+            + 'Choose the downhill direction (or the high edge) and set the pitch again.',
+        }]);
+      }
     }
     next.pitchDeg = edit.pitchDeg;
     // See SectionEdit.pitchDeg: setting the roof's pitch means the roof.
@@ -740,15 +769,12 @@ export function previewFacePitch(
   if (!look.found) return noPreview(faceId, look.refusals);
   const sec = look.section!;
 
-  if (sec.kind === 'flat') {
-    return noPreview(faceId, [{
-      code: 'PITCH_OUT_OF_RANGE',
-      message: 'A flat section has no pitch to set. Change its roof kind to Shed first, ' +
-        'then give it a slope and a direction.',
-    }]);
-  }
-
-  const isShedDeck = sec.kind === 'shed';
+  // 🚨 A FLAT DECK GOES DOWN THE SHED PATH. It used to be refused here with
+  // "change its roof kind to Shed first", which is an instruction to learn an
+  // internal noun before you may describe a porch. The two kinds are one
+  // topology — a single planar face built by one call — and `applySectionEdit`
+  // converts in place, keeping the footprint, pad, eave and id.
+  const isShedDeck = sec.kind === 'shed' || sec.kind === 'flat';
   const edit: SectionEdit = isShedDeck
     ? { pitchDeg, pitchAnchor: anchor }
     : { facePitchDeg: { [key ?? 'slopeA']: pitchDeg } as Partial<Record<SectionFaceKey, number>>, pitchAnchor: anchor };
@@ -1006,6 +1032,26 @@ export interface SectionMeasurement {
   /** Plan dimensions of the footprint's two edge pairs, metres. */
   planAM: number;
   planBM: number;
+  /**
+   * IS THIS ONE PLANAR ROOF SURFACE? True for a flat deck and for a mono-slope,
+   * which are the same topology.
+   *
+   * 🚨 IT IS A TOPOLOGY QUESTION, NOT A PITCH ONE. The two were one word for a
+   * long time — `flat` meant both "one plane" and "zero degrees for ever" — and
+   * that is what forced a person with a 2-in-12 porch to delete it and redraw
+   * it as a different internal object.
+   */
+  singlePlane: boolean;
+  /**
+   * WHICH WAY IT FALLS, compass degrees (0 = north, 180 = south). Null when it
+   * has never been decided.
+   *
+   * 🚨 A SLOPE NEEDS A DIRECTION AS WELL AS A MAGNITUDE, and the direction must
+   * not be invented from polygon winding order — that is how a porch roof ends
+   * up falling toward the house. Null is shown as "not set yet" and the pitch
+   * edit asks for it rather than guessing.
+   */
+  slopeAzimuthDeg: number | null;
 }
 
 /** Mean length of the two opposite edge pairs of a four-corner footprint, or
@@ -1056,6 +1102,10 @@ export function measureSection(
     ridgeAxis: section.ridgeAxis ?? 'auto',
     planAM: pairs.a,
     planBM: pairs.b,
+    singlePlane: section.kind === 'flat' || section.kind === 'shed',
+    slopeAzimuthDeg:
+      typeof section.shedAzimuthDeg === 'number' && isFinite(section.shedAzimuthDeg)
+        ? section.shedAzimuthDeg : null,
   };
 }
 
@@ -1147,11 +1197,15 @@ export function measureFaceVertical(
     out.pitchNotEditableWhy =
       'This face names a building section but carries no definition of it, so a pitch ' +
       'set here would have nowhere to live. Retrace the section to edit it.';
-  } else if (rec.kind === 'flat') {
-    out.pitchScope = 'not-editable';
-    out.pitchNotEditableWhy =
-      'A flat section has no pitch. Change its roof kind to Shed to give it a slope.';
-  } else if (rec.kind === 'shed') {
+  } else if (rec.kind === 'flat' || rec.kind === 'shed') {
+    // 🚨 A FLAT DECK IS A SINGLE-PLANE ROOF AT ZERO DEGREES, NOT A ROOF THAT
+    // CANNOT HAVE A PITCH. This used to read "not-editable — change its roof
+    // kind to Shed", which told a person holding a 2-in-12 porch to go and
+    // learn an internal noun. `flat` and `shed` are the same topology (one
+    // planar face, one builder); the only difference was that one pinned the
+    // physical dimension to zero. Typing a pitch now converts the section in
+    // place, keeping the footprint, the pad, the eave and the id — see
+    // `applySectionEdit`.
     out.pitchScope = 'shed-deck';
     out.sectionPitchDeg = rec.pitchDeg;
   } else if (!out.faceKey) {

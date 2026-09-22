@@ -171,6 +171,10 @@ export type SectionRefusalCode =
   /** Stitch or Square Up moved this section's faces by hand; a parametric
    *  rebuild would discard that. See `RoofPlane.sectionFaceReshaped`. */
   | 'SECTION_FACES_RESHAPED'
+  /** A single-plane roof was given a pitch but has no downhill direction yet.
+   *  Magnitude without direction is half a slope, and deriving the direction
+   *  from polygon winding order is how a roof ends up falling into the house. */
+  | 'SHED_DIRECTION_REQUIRED'
   | 'EDIT_VALUE_NOT_FINITE';
 
 export interface SectionRefusal {

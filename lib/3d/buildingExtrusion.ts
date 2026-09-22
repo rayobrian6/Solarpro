@@ -53,7 +53,35 @@ export interface WallQuad {
   corners: Cart3[];
   /** Height of the taller top corner above ground, metres. For colouring/labels. */
   maxHeightM: number;
+  /**
+   * THE WALL AS A WALL: its two plan positions and the height band at each.
+   *
+   * 🚨 A VERTICAL QUAD MUST NOT BE DRAWN AS A POLYGON, and this field exists so
+   * it is not. Cesium triangulates a `PolygonGraphics` from a projection onto a
+   * HORIZONTAL tangent plane (`EllipsoidTangentPlane.fromPoints` takes the
+   * geodetic normal at the bounding-box centre), so a vertical quad collapses
+   * to a sliver of near-zero area. When earcut then fails on that sliver,
+   * `PolygonGeometryLibrary` substitutes `indices = [0, 1, 2]` — literally the
+   * first three of the four corners — and the wall renders as A TRIANGLE. It is
+   * numerics-dependent, which is exactly why it appeared and disappeared as the
+   * porch was moved and lowered. A `WallGraphics` never goes near that
+   * projection: it is given plan positions and a height band directly.
+   */
+  plan: Array<{ lat: number; lng: number }>;
+  /** Absolute ellipsoid height of the wall TOP at each plan position. */
+  topHeightsM: number[];
+  /** Absolute ellipsoid height of the wall BASE at each plan position. */
+  baseHeightsM: number[];
+  /**
+   * Why this edge got a wall. Only `exposed` is ever emitted; the value is
+   * carried so a caller can say what it is looking at and a test can assert
+   * that an abutment produced none.
+   */
+  role: 'exposed';
 }
+
+/** How an edge was classified. Only `exposed` produces a wall. */
+export type WallEdgeRole = 'exposed' | 'shared' | 'abutment' | 'buried';
 
 export interface BuildWallsOptions {
   /**
@@ -146,6 +174,75 @@ function dropToGround(p: Cart3, groundElevM: number): Cart3 {
  * Returns an empty array rather than throwing for degenerate input — a caller
  * rendering a scene should not blow up because one face was malformed.
  */
+/** Is this point inside the plan ring, or within `tolM` of its boundary? */
+function inPlanRing(
+  lat: number, lng: number, ring: Array<{ lat: number; lng: number }>, tolM: number,
+): boolean {
+  if (!ring || ring.length < 3) return false;
+  // Ray cast in lat/lng. The rings are house-scale, so the distortion is far
+  // below the tolerance this is compared against.
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if (((a.lat > lat) !== (b.lat > lat))
+      && (lng < (b.lng - a.lng) * (lat - a.lat) / (b.lat - a.lat) + a.lng)) {
+      inside = !inside;
+    }
+  }
+  if (inside) return true;
+  // On the boundary counts: a porch head edge lands ON the house wall, and a
+  // strict inside test would call it exposed by a few centimetres.
+  const mPerDegLat = 111320;
+  const mPerDegLng = mPerDegLat * Math.cos(lat * Math.PI / 180);
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    const ax = (a.lng - lng) * mPerDegLng, ay = (a.lat - lat) * mPerDegLat;
+    const bx = (b.lng - lng) * mPerDegLng, by = (b.lat - lat) * mPerDegLat;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+    const px = ax + t * dx, py = ay + t * dy;
+    if (Math.sqrt(px * px + py * py) <= tolM) return true;
+  }
+  return false;
+}
+
+/**
+ * Does this edge die against another section rather than face outdoors?
+ *
+ * Both endpoints must lie within another face plan outline (or on its
+ * boundary), and that face must be HIGHER there — otherwise the wall really is
+ * exposed above a lower neighbour and must still be drawn.
+ */
+function isAbutment(
+  a: Cart3, b: Cart3, faceId: string,
+  faces: readonly ExtrusionFace[], tolM: number,
+): boolean {
+  const ga = ecefToLatLng(a);
+  const gb = ecefToLatLng(b);
+  const edgeTop = Math.max(ga.height, gb.height);
+  for (const other of faces) {
+    if (!other || other.id === faceId) continue;
+    const poly = other.polygon3D;
+    if (!poly || poly.length < 3) continue;
+    const ring = poly.map(pt => {
+      const g = ecefToLatLng(pt);
+      return { lat: g.lat, lng: g.lng };
+    });
+    if (!inPlanRing(ga.lat, ga.lng, ring, tolM)) continue;
+    if (!inPlanRing(gb.lat, gb.lng, ring, tolM)) continue;
+    // The neighbour must actually be over this edge. A LOWER roof next door
+    // leaves the wall above it genuinely outdoors, and it must still be drawn.
+    let otherMax = -Infinity;
+    for (const pt of poly) {
+      const h = ecefToLatLng(pt).height;
+      if (isFinite(h) && h > otherMax) otherMax = h;
+    }
+    if (otherMax >= edgeTop - tolM) return true;
+  }
+  return false;
+}
+
 export function buildWalls(
   faces: readonly ExtrusionFace[],
   groundElevM: number,
@@ -186,13 +283,41 @@ export function buildWalls(
     }
     if (interior) continue;
 
-    const bottomA = dropToGround(e.a, groundElevM);
-    const bottomB = dropToGround(e.b, groundElevM);
+    // 🚨 AN EDGE THAT DIES AGAINST A TALLER BUILDING IS NOT AN EXTERIOR WALL.
+    //
+    // The only interior test above is exact 3D endpoint coincidence within
+    // 0.35 m, which a porch head landing part-way up a taller slope never
+    // satisfies. So that high edge was classified exposed and a full-height
+    // wall was dropped from it to the ground THROUGH the main house — and it
+    // appeared and vanished as the porch was moved, because moving it pushed
+    // the endpoints in and out of that 0.35 m window.
+    //
+    // A footprint edge does not imply a wall. An edge whose whole length lies
+    // inside another section plan outline, under a roof that is higher there,
+    // is an ABUTMENT: what is on the other side of it is the neighbour, not
+    // outdoors.
+    if (isAbutment(e.a, e.b, e.faceId, faces, tolM)) continue;
 
-    const hA = ecefToLatLng(e.a).height - groundElevM;
-    const hB = ecefToLatLng(e.b).height - groundElevM;
+    const gA = ecefToLatLng(e.a);
+    const gB = ecefToLatLng(e.b);
+    const hA = gA.height - groundElevM;
+    const hB = gB.height - groundElevM;
     // A roof edge already at or below ground has no wall to draw.
     if (hA <= minLenM && hB <= minLenM) continue;
+
+    // 🚨 THE BASE IS CLAMPED PER CORNER, NOT DROPPED BLINDLY.
+    //
+    // This used to drop BOTH corners to one global `groundElevM` and skip the
+    // wall only when BOTH were at or below it — an AND. So a wall with one
+    // corner exactly at ground produced a ring with a duplicate point, which
+    // Cesium de-duplicates into a THREE-POINT polygon; and a wall with one
+    // corner BELOW ground put its base above its top, producing a self-crossing
+    // bowtie. Both read on screen as a triangle, and both are reachable simply
+    // by lowering a porch pad past the one global ground the extruder resolves.
+    const baseA = Math.min(groundElevM, gA.height);
+    const baseB = Math.min(groundElevM, gB.height);
+    const bottomA = latLngToECEF(gA.lat, gA.lng, baseA);
+    const bottomB = latLngToECEF(gB.lat, gB.lng, baseB);
 
     walls.push({
       faceId: e.faceId,
@@ -200,6 +325,10 @@ export function buildWalls(
       // 🚨 Perimeter order. See the winding note in the file header.
       corners: [e.a, e.b, bottomB, bottomA],
       maxHeightM: Math.max(hA, hB),
+      plan: [{ lat: gA.lat, lng: gA.lng }, { lat: gB.lat, lng: gB.lng }],
+      topHeightsM: [gA.height, gB.height],
+      baseHeightsM: [baseA, baseB],
+      role: 'exposed',
     });
   }
 

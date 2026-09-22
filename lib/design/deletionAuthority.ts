@@ -125,6 +125,39 @@ export function emptyLedgerSite(): DeletionLedgerSite {
   return { faceIds: [], sectionIds: [], obstructionIds: [], clearedAt: 0 };
 }
 
+/**
+ * WHICH KEY DOES THIS PROPERTY'S LEDGER LIVE UNDER?
+ *
+ * 🚨 AN EXACT STRING LOOKUP IS NOT A PROPERTY MATCH, and everything else that
+ * answers "which house is this" in this codebase knows it. `siteKeyFromCoords`
+ * rounds to about 1.1 m, so ONE house routinely mints two or three keys metres
+ * apart — the live trace in lib/design/siteDesignModel.ts records 2.8 m, 17 m
+ * and 19 m for a single address inside 43 seconds. The DISPOSITION map hit
+ * exactly this and was given `dispositionForProperty`; the ledger was written
+ * without the same wrapper, so a tombstone filed under KA was invisible under
+ * KA' — `lifecycleFor` read `untouched`, the acquisition gate said yes, and
+ * `switchSite` handed the deleted face and its panel straight back. That is the
+ * A -> B -> A failure this whole model exists to close, reintroduced one level
+ * down.
+ *
+ * The matcher is injected so this module stays dependency-free and testable;
+ * the callers pass `sitesAreSameProperty`.
+ */
+export function resolveLedgerKey(
+  ledger: DeletionLedger | null | undefined,
+  siteKey: string | null | undefined,
+  sameProperty?: (a: string, b: string) => boolean,
+): string {
+  if (!siteKey) return '';
+  const sites = ledger?.sites ?? {};
+  if (sites[siteKey]) return siteKey;
+  if (!sameProperty) return siteKey;
+  for (const k of Object.keys(sites)) {
+    if (k && k !== siteKey && sameProperty(k, siteKey)) return k;
+  }
+  return siteKey;
+}
+
 /** The tombstones at one property. Always an object, never null. */
 export function ledgerSite(
   ledger: DeletionLedger | null | undefined,

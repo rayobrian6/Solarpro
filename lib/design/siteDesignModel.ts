@@ -84,6 +84,7 @@ import {
   parseDeletionLedger,
   admitFaces,
   admitObstructions,
+  resolveLedgerKey,
 } from '@/lib/design/deletionAuthority';
 
 export { siteKeyFromCoords, isSameSite, UNRESOLVED_SITE_KEY };
@@ -542,8 +543,9 @@ export function switchSite(
   // drifted twin, still holding the roof — and picking the same house again
   // hands it straight back. The tombstones are filed against the PROPERTY, so
   // they catch it however the key is spelled.
-  const arrivingFaces = admitFaces(state.deletions, toKey, arriving.roofPlanes ?? []);
-  const arrivingObs = admitObstructions(state.deletions, toKey, arriving.obstructions ?? []);
+  const ledgerKeyForArrival = resolveLedgerKey(state.deletions, toKey, sitesAreSameProperty);
+  const arrivingFaces = admitFaces(state.deletions, ledgerKeyForArrival, arriving.roofPlanes ?? []);
+  const arrivingObs = admitObstructions(state.deletions, ledgerKeyForArrival, arriving.obstructions ?? []);
   if (arrivingFaces.refused.length || arrivingObs.refused.length) {
     console.warn('[siteDesignModel] archive refused deliberately-deleted objects at ' + toKey, {
       faces: arrivingFaces.refused.map(f => f?.id),
@@ -818,8 +820,12 @@ export function hydrate(stored: StoredLayoutForHydration | null | undefined, sit
  */
 function admitAfterHydrate(res: HydrateResult): HydrateResult {
   const led = res?.state?.deletions;
-  const key = res?.state?.activeSiteKey;
-  if (!led || !key || key === UNRESOLVED_SITE_KEY) return res;
+  const rawKey = res?.state?.activeSiteKey;
+  if (!led || !rawKey || rawKey === UNRESOLVED_SITE_KEY) return res;
+  // 🚨 BY PROPERTY, NOT BY SPELLING. See `resolveLedgerKey`: one house mints
+  // several keys metres apart, and an exact lookup makes a tombstone invisible
+  // from the twin — which is the resurrection this filter exists to stop.
+  const key = resolveLedgerKey(led, rawKey, sitesAreSameProperty);
   const faces = admitFaces(led, key, res.state.active.roofPlanes ?? []);
   const obs = admitObstructions(led, key, res.state.active.obstructions ?? []);
   if (!faces.refused.length && !obs.refused.length) return res;

@@ -459,20 +459,92 @@ describe('what is refused, and why', () => {
       .toEqual(['sec-garage::hipEndA', 'sec-garage::hipEndB']);
   });
 
-  it('🚨 typing a pitch into a FLAT section is refused, not stored and ignored', () => {
-    // The audit reached this from the Block tool in three clicks. `pitchDeg: 25`
-    // validated, the edit returned ok, the status bar said "every face of the
-    // section moved together", the builder built the deck at 0° anyway, and the
-    // panel then displayed "Roof pitch 25.0°" about a roof with no 25° in it.
+  it('🚨 THE PORCH: typing a pitch into a FLAT section CONVERTS it, it does not refuse', () => {
+    // ─────────────────────────────────────────────────────────────────────
+    // THIS TEST ASSERTED THE OPPOSITE UNTIL THE OWNER USED IT.
+    //
+    // It used to require `PITCH_OUT_OF_RANGE` and a message saying "change its
+    // roof kind to Shed". That refusal was written for a real defect — a flat
+    // section silently STORED a pitch it did not have, and the panel then
+    // reported "Roof pitch 25.0°" about a horizontal deck — and refusing was
+    // better than lying. It was still the wrong answer:
+    //
+    //   "I created my porch using the Flat building tool. SolarPro then treats
+    //    Flat = permanently 0°. That is too restrictive. I should NOT have to
+    //    delete it and redraw it using a completely different internal object
+    //    simply because the porch has a 1/12, 2/12, 3/12 slope."
+    //
+    // `flat` and `shed` are the SAME TOPOLOGY in this codebase: one planar
+    // face, one call to `roofPlaneFromFootprint`, differing only in whether the
+    // pitch is pinned to zero. So one word was carrying two facts — "this roof
+    // is one plane" and "this roof is horizontal forever" — and the second does
+    // not follow from the first. Typing a pitch now separates them in place.
+    // ─────────────────────────────────────────────────────────────────────
     const flat: BuildingSection = {
-      ...mainSection(), id: 'sec-flat', kind: 'flat', pitchDeg: 0,
+      ...mainSection(), id: 'sec-flat', kind: 'flat', pitchDeg: 0, shedAzimuthDeg: 180,
+    };
+    const planes = housePlanes([flat]);
+    const out = applySectionEdit(planes, 'sec-flat', { pitchDeg: 25 });
+    expect(out.refusals).toEqual([]);
+    expect(out.ok).toBe(true);
+    // 🚨 THE TOPOLOGY CHANGED; NOTHING AUTHORED DID.
+    expect(out.section!.kind).toBe('shed');
+    expect(out.section!.pitchDeg).toBe(25);
+    expect(out.section!.id).toBe('sec-flat');
+    expect(out.section!.footprint).toEqual(flat.footprint);
+    expect(out.section!.eaveHeightM).toBe(flat.eaveHeightM);
+    expect(out.section!.groundElevM).toBe(flat.groundElevM);
+    // …and the GEOMETRY really took the pitch, which is what the old refusal
+    // existed to prevent being lied about.
+    expect(byId(out.planes, 'sec-flat::deck').pitch).toBeCloseTo(25, 2);
+    // Still one face. A porch does not sprout a ridge.
+    expect(out.planes.filter(p => p.sectionId === 'sec-flat')).toHaveLength(1);
+  });
+
+  it('🚨 …and a slope with no DIRECTION is refused, because half a slope is not one', () => {
+    // Deriving the downhill direction from polygon winding order is how a porch
+    // roof ends up falling toward the house.
+    const flat: BuildingSection = {
+      ...mainSection(), id: 'sec-flat', kind: 'flat', pitchDeg: 0, shedAzimuthDeg: null,
     };
     const planes = housePlanes([flat]);
     const out = applySectionEdit(planes, 'sec-flat', { pitchDeg: 25 });
     expect(out.ok).toBe(false);
-    expect(out.refusals[0].code).toBe('PITCH_OUT_OF_RANGE');
-    expect(out.refusals[0].message).toMatch(/Shed/);
+    expect(out.refusals[0].code).toBe('SHED_DIRECTION_REQUIRED');
+    expect(out.refusals[0].message).toMatch(/which way it falls/i);
     expect(out.planes).toEqual(planes);
+    // Supplying it in the same edit is accepted.
+    const withDir = applySectionEdit(planes, 'sec-flat', { pitchDeg: 25, shedAzimuthDeg: 90 });
+    expect(withDir.ok).toBe(true);
+    expect(withDir.section!.shedAzimuthDeg).toBe(90);
+    expect(byId(withDir.planes, 'sec-flat::deck').azimuth).toBeCloseTo(90, 0);
+  });
+
+  it('🚨 0° -> 2/12 -> 1/12 -> 0°, with no redraw and no lost direction', () => {
+    // The owner's exact sequence. Going back to zero leaves a TRUE FLAT ROOF
+    // that remembers which way it fell, so raising it again does not ask twice.
+    const flat: BuildingSection = {
+      ...mainSection(), id: 'sec-porch', kind: 'flat', pitchDeg: 0, shedAzimuthDeg: 200,
+    };
+    let planes = housePlanes([flat]);
+    const fp = flat.footprint;
+
+    const twelve = (rise: number) => Math.atan2(rise, 12) * 180 / Math.PI;
+
+    const a = applySectionEdit(planes, 'sec-porch', { pitchDeg: twelve(2) });
+    expect(a.ok).toBe(true);
+    expect(byId(a.planes, 'sec-porch::deck').pitch).toBeCloseTo(twelve(2), 2);
+
+    const b = applySectionEdit(a.planes, 'sec-porch', { pitchDeg: twelve(1) });
+    expect(b.ok).toBe(true);
+    expect(byId(b.planes, 'sec-porch::deck').pitch).toBeCloseTo(twelve(1), 2);
+
+    const c = applySectionEdit(b.planes, 'sec-porch', { pitchDeg: 0 });
+    expect(c.ok).toBe(true);
+    expect(byId(c.planes, 'sec-porch::deck').pitch).toBeCloseTo(0, 2);
+    expect(c.section!.shedAzimuthDeg).toBe(200);   // the direction is remembered
+    // The footprint never moved through any of it.
+    expect(c.section!.footprint).toEqual(fp);
   });
 
   it('🚨 a flat section STORES 0°, whatever a caller hands in', () => {
@@ -489,18 +561,21 @@ describe('what is refused, and why', () => {
     expect(measureSection(flattened.section!, 1).pitchDeg).toBe(0);
   });
 
-  it('a flat section has no pitch to set, and says so', () => {
+  it('🚨 the inspector OFFERS the pitch control on a flat deck', () => {
+    // It used to report `not-editable` with "change its roof kind to Shed",
+    // which sends a person to learn an internal noun in order to describe a
+    // porch. A single-plane roof takes a pitch; zero is one of its values.
     const flat: BuildingSection = {
-      ...mainSection(), id: 'sec-flat', kind: 'flat', pitchDeg: 0,
+      ...mainSection(), id: 'sec-flat', kind: 'flat', pitchDeg: 0, shedAzimuthDeg: 180,
     };
     const planes = housePlanes([flat]);
-    const out = applyFacePitchEdit(planes, 'sec-flat::deck', 20);
-    expect(out.ok).toBe(false);
-    expect(out.refusals[0].message).toMatch(/Shed/);
-    // ...and the measurement tells the UI not to offer the control at all.
     const m = measureFaceVertical(byId(planes, 'sec-flat::deck'));
-    expect(m.pitchScope).toBe('not-editable');
-    expect(m.pitchNotEditableWhy).toMatch(/flat section has no pitch/i);
+    expect(m.pitchScope).toBe('shed-deck');
+    expect(m.pitchNotEditableWhy).toBeNull();
+    // …and the face-level edit works through the same door.
+    const out = applyFacePitchEdit(planes, 'sec-flat::deck', 20);
+    expect(out.ok).toBe(true);
+    expect(byId(out.planes, 'sec-flat::deck').pitch).toBeCloseTo(20, 2);
   });
 
   it('setting the SECTION pitch clears every per-face override', () => {

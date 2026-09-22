@@ -2592,8 +2592,17 @@ function SolarEngine3D({
 
     if (planes.length === 0) return;
 
-    // Find planes that are NOT already rendered (not in the entity map)
-    const planesToRestore = planes.filter(p => !plane3DEntityMap.current.has(p.id));
+    // Find planes that are NOT already rendered.
+    //
+    // 🚨 "IN THE MAP" IS NOT "ON SCREEN". A delete removes the ENTITIES and
+    // deliberately leaves the map entry (the prune ban). So after an Undo the
+    // face was back in `roofPlanes` and back in the sidebar and invisible in
+    // 3D — it reappeared only as a side effect of the next selection change,
+    // which reads exactly like the undo half-worked. Membership in the map is
+    // now checked against whether its entities actually exist.
+    const stillDrawn = (planeId: string) =>
+      (plane3DEntityMap.current.get(planeId) ?? []).some((eid: string) => !!viewer.entities.getById(eid));
+    const planesToRestore = planes.filter(p => !stillDrawn(p.id));
     if (planesToRestore.length === 0) return;
 
     const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
@@ -2798,7 +2807,23 @@ function SolarEngine3D({
     const C = (window as any).Cesium;
     if (!viewer || !C) return;
 
+    // 🚨 MEMBERSHIP, NOT MAP CONTENTS.
+    //
+    // This walked `plane3DEntityMap` with no filter and RE-RENDERED every entry
+    // it found. The map is deliberately never pruned — that ban exists because
+    // a "reconcile deletions" effect once destroyed a hand-traced garage — and
+    // the doctrine that justifies keeping the entries says they are "a cache
+    // entry that decides nothing". This effect was a consumer that decided
+    // quite a lot: delete a face, click any other face, and the deleted one was
+    // DRAWN AGAIN. It could not be selected (`selectableRoofFaces` gates on
+    // `roofPlanesRef`), could not be deleted again, and did not go away without
+    // a reload — a face on screen that is in no design and in no permit.
+    //
+    // So the map still keeps every entry, and this reads membership from the
+    // same place every other authority does.
+    const inDesign = new Set((roofPlanesRef.current ?? []).map(p => p.id));
     plane3DEntityMap.current.forEach((entityIds, planeId) => {
+      if (!inDesign.has(planeId)) return;
       const frame     = plane3DFrameMap.current.get(planeId);
       const cesiumPts = plane3DCesiumPtsMap.current.get(planeId);
       if (!frame || !cesiumPts) return;
@@ -5731,17 +5756,33 @@ function SolarEngine3D({
     // quad an exact planar surface instead of draping it over the ellipsoid.
     const wallEdge = C.Color.fromCssColorString('#9aa3b8').withAlpha(0.85);
     for (const w of walls) {
-      const pts = w.corners.map(p => new C.Cartesian3(p.x, p.y, p.z));
+      // 🚨 A WALL, NOT A VERTICAL POLYGON. THIS IS THE TRIANGLE.
+      //
+      // Each wall used to be a `PolygonGraphics` over four ECEF corners with
+      // `perPositionHeight`. Cesium triangulates a polygon from a projection
+      // onto a HORIZONTAL tangent plane — `EllipsoidTangentPlane.fromPoints`
+      // takes the geodetic normal at the bounding-box centre — so a VERTICAL
+      // quad collapses to a 2D sliver of near-zero area, its top and bottom
+      // corners separated only by the few centimetres that the deflection of
+      // the vertical contributes. When earcut fails on that sliver,
+      // `PolygonGeometryLibrary` falls back to `indices = [0, 1, 2]`: literally
+      // the first three of the four corners. The wall renders as a TRIANGLE.
+      //
+      // That is numerics-dependent, which is exactly why the owner saw it come
+      // and go as the porch was moved and lowered, and why it looked like a
+      // geometry defect rather than a rendering one. `WallGraphics` is the
+      // primitive for this: it takes plan positions and a height band and never
+      // projects anything.
       const ent = viewer.entities.add({
         name: `[BUILD3D-WALL] ${w.faceId}#${w.edgeIndex}`,
-        polygon: {
-          hierarchy:         new C.PolygonHierarchy(pts),
-          material:          shade('#e8eaf0', litness(w.corners), 0.95),
-          outline:           true,
-          outlineColor:      wallEdge,
-          perPositionHeight: true,
-          arcType:           C.ArcType.NONE,
-          shadows:           C.ShadowMode.ENABLED,
+        wall: {
+          positions:      w.plan.map(q => C.Cartesian3.fromDegrees(q.lng, q.lat)),
+          maximumHeights: w.topHeightsM.slice(),
+          minimumHeights: w.baseHeightsM.slice(),
+          material:       shade('#e8eaf0', litness(w.corners), 0.95),
+          outline:        true,
+          outlineColor:   wallEdge,
+          shadows:        C.ShadowMode.ENABLED,
         },
       });
       buildingEntitiesRef.current.push(ent);
@@ -6757,7 +6798,15 @@ function SolarEngine3D({
       try {
         let color: any;
         if (showShadeRef.current) {
-          const shade = computeShade(panel, sunPos);
+          // 🚨 THE ANALYSIS WINS HERE TOO. `addPanelEntity` already prefers
+          // `annualShadeFactor`, but this runs on every sun-slider change and
+          // repainted every module with `computeShade` — the cosine of
+          // incidence, blind to every object in the scene. Nudging the slider
+          // silently reverted the shade study to the model it replaced, and the
+          // picture is the thing people believe.
+          const shade = typeof panel.annualShadeFactor === 'number'
+            ? panel.annualShadeFactor
+            : computeShade(panel, sunPos);
           color = new C.ColorMaterialProperty(shadeToColor(C, shade));
         } else {
           color = new C.ColorMaterialProperty(systemTypeColor(C, (panel.systemType ?? 'roof') as SystemType));
@@ -15925,6 +15974,13 @@ function SolarEngine3D({
                  stops a restore path re-admitting the face, and the one-shot
                  authorization that lets the save through — lives with
                  `roofPlanes`, which this component does not own. */
+              onSetSlopeAzimuth={(deg) => {
+                const sid = selectedFaceSectionId;
+                if (!sid) { setSectionRefusal('Select a building section first.'); return; }
+                if (editSection(sid, { shedAzimuthDeg: deg }, 'Set slope direction', `slope:${sid}`)) {
+                  setStatusMsg('\u2198 This roof now falls toward ' + deg + '\u00b0 \u2014 the opposite edge is the high one');
+                }
+              }}
               onDelete={(scope) => {
                 const target = scope === 'section' ? selectedFaceSectionId : activeFaceId;
                 if (!target) {

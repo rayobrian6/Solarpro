@@ -55,6 +55,7 @@ function mount(state: InspectorState, overrides: Partial<Parameters<typeof Secti
   const onSelectFace = vi.fn();
   const onRebuildFromParameters = vi.fn();
   const onDelete = vi.fn();
+  const onSetSlopeAzimuth = vi.fn();
   // Default: no preview. Tests that care pass their own, backed by the real
   // `previewFacePitch` so the sentence on screen is the authority's answer.
   const previewPitch = vi.fn(() => null);
@@ -70,6 +71,7 @@ function mount(state: InspectorState, overrides: Partial<Parameters<typeof Secti
       onSetPitchAnchor={onSetPitchAnchor}
       onSelectFace={onSelectFace}
       onDelete={onDelete}
+      onSetSlopeAzimuth={onSetSlopeAzimuth}
       onRebuildFromParameters={onRebuildFromParameters}
       previewPitch={previewPitch}
       {...overrides}
@@ -77,7 +79,7 @@ function mount(state: InspectorState, overrides: Partial<Parameters<typeof Secti
   );
   return {
     onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal,
-    onSetFacePitch, onSetPitchAnchor, onSelectFace, previewPitch, onRebuildFromParameters, onDelete,
+    onSetFacePitch, onSetPitchAnchor, onSelectFace, previewPitch, onRebuildFromParameters, onDelete, onSetSlopeAzimuth,
   };
 }
 
@@ -432,16 +434,74 @@ describe('🚨 a selected roof face can have its pitch EDITED', () => {
       .toMatch(/never reaches the ridge/);
   });
 
-  it('🚨 a face whose pitch cannot be set gets NO editor and a reason', () => {
+  it('🚨 A FLAT DECK DOES GET THE EDITOR — one plane is not zero degrees for ever', () => {
+    // ─────────────────────────────────────────────────────────────────────
+    // THIS TEST ASSERTED THE OPPOSITE UNTIL THE OWNER USED IT.
+    //
+    // It required NO editor and the message "a flat section has no pitch —
+    // change its roof kind to Shed". That was written for a real defect (a flat
+    // section silently STORED a pitch it did not have) and it was still the
+    // wrong cure: it told a person holding a 2-in-12 porch to go and learn an
+    // internal noun, or to delete the porch and redraw it.
+    //
+    // `flat` and `shed` are one topology here — a single planar face built by
+    // one call — so the pitch control belongs on both. Typing a number converts
+    // the section in place, keeping the footprint, the pad, the eave and the id.
+    // ─────────────────────────────────────────────────────────────────────
     const flat = buildSectionRoofPlanes({
       ...mainSection(), id: 'sec-flat', kind: 'flat', pitchDeg: 0,
     }).planes[0];
     mount({ ...baseState(), level: 'face', face: measureFaceVertical(flat) });
-    // No box to type a number into that nothing would use.
+    expect(screen.getByTestId('inspector-face-pitch')).toBeTruthy();
+    expect(screen.queryByTestId('inspector-face-pitch-locked')).toBeNull();
+  });
+
+  it('🚨 …but a face that genuinely cannot take one still gets NO editor and a reason', () => {
+    // The invariant the test above used to carry, kept and pointed at a case
+    // that is actually true: a face naming a section whose definition is not
+    // there has nowhere for a pitch to live.
+    const orphan = buildSectionRoofPlanes({
+      ...mainSection(), id: 'sec-gone',
+    }).planes[0];
+    const stripped = { ...orphan, section: undefined } as typeof orphan;
+    mount({ ...baseState(), level: 'face', face: measureFaceVertical(stripped) });
     expect(screen.queryByTestId('inspector-face-pitch')).toBeNull();
     expect(screen.queryByTestId('inspector-face-pitch-rise')).toBeNull();
     expect(screen.getByTestId('inspector-face-pitch-locked').textContent)
-      .toMatch(/flat section has no pitch/i);
+      .toMatch(/carries no definition/i);
+  });
+});
+
+describe('🚨 a single-plane roof says which way it falls', () => {
+  it('the direction control is offered for a flat deck and for a shed', () => {
+    for (const kind of ['flat', 'shed'] as const) {
+      const sec = measureSection({ ...mainSection(), kind, pitchDeg: kind === 'flat' ? 0 : 12, shedAzimuthDeg: 180 }, 1);
+      mount({ ...baseState(), level: 'section', section: sec });
+      expect(screen.getByTestId('inspector-slope-direction'), kind).toBeTruthy();
+      expect(screen.getByTestId('inspector-slope-S'), kind).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it('🚨 it is NOT offered for a gable — there is no single downhill direction', () => {
+    // A control that appears for an object it cannot describe is the same
+    // defect as one that accepts a number and ignores it.
+    mount({ ...baseState(), level: 'section', section: measureSection(mainSection(), 2) });
+    expect(screen.queryByTestId('inspector-slope-direction')).toBeNull();
+  });
+
+  it('an undecided direction says so rather than showing a default', () => {
+    const sec = measureSection({ ...mainSection(), kind: 'flat', pitchDeg: 0, shedAzimuthDeg: null }, 1);
+    mount({ ...baseState(), level: 'section', section: sec });
+    expect(screen.getByTestId('inspector-slope-direction').textContent)
+      .toMatch(/Not set yet/i);
+  });
+
+  it('pressing a direction reports it in compass degrees', () => {
+    const sec = measureSection({ ...mainSection(), kind: 'shed', pitchDeg: 12, shedAzimuthDeg: 180 }, 1);
+    const { onSetSlopeAzimuth } = mount({ ...baseState(), level: 'section', section: sec });
+    fireEvent.click(screen.getByTestId('inspector-slope-W'));
+    expect(onSetSlopeAzimuth).toHaveBeenCalledWith(270);
   });
 });
 

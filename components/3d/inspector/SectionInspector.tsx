@@ -150,6 +150,16 @@ export interface SectionInspectorProps {
    * records the undo step and the tombstone.
    */
   onDelete: (scope: 'face' | 'section') => void;
+  /**
+   * WHICH WAY A SINGLE-PLANE ROOF FALLS, compass degrees.
+   *
+   * 🚨 IT IS ASKED FOR, NOT DERIVED. A mono-slope needs a magnitude AND a
+   * direction, and deriving the direction from the order the corners were
+   * clicked is how a porch ends up draining toward the house. The control is
+   * offered wherever the pitch control is, for the same object, so "which way"
+   * and "how steep" are answered in one place.
+   */
+  onSetSlopeAzimuth: (azimuthDeg: number) => void;
   /** Rendered as a disabled hint when the section has no editable record. */
   disabled?: boolean;
 }
@@ -158,6 +168,22 @@ export interface SectionInspectorProps {
 
 const PANEL: React.CSSProperties = {
   width: 268,
+  // 🚨 IT IS ANCHORED TO THE BOTTOM, SO IT GROWS UPWARD INTO THE CHROME.
+  //
+  // The dock places this panel at `bottom: 96`, so every row added to it pushes
+  // the TOP further up — and the level chips (Section / Roof face / Wall) are
+  // the topmost thing in it. Adding the delete control was enough to slide them
+  // under the studio header, where the header's own flex row swallows the
+  // pointer events: the chips were visible, enabled, and unclickable. Three
+  // browser specs caught it by timing out on a click that Playwright reported
+  // as "intercepts pointer events", which is exactly what a person would
+  // experience and would have no way to describe.
+  //
+  // Capping the height and scrolling inside is the fix that survives the NEXT
+  // row somebody adds, rather than one that works until the panel grows again.
+  maxHeight: 'calc(100vh - 220px)',
+  overflowY: 'auto',
+  overscrollBehavior: 'contain',
   background: 'rgba(10,14,24,0.92)',
   border: '1px solid rgba(148,163,184,0.28)',
   borderRadius: 10,
@@ -443,6 +469,23 @@ const KIND_LABEL: Record<string, string> = {
   gable: 'Gable', hip: 'Hip', shed: 'Shed', flat: 'Flat',
 };
 
+/**
+ * The eight directions a roof can fall, as a designer says them.
+ *
+ * 🚨 EIGHT, NOT A FREE NUMBER FIELD. A porch drains toward the yard, not toward
+ * 197 degrees. An installer who needs the exact figure can still read it from
+ * the face, and nobody has to type one to describe a lean-to.
+ */
+const SLOPE_DIRECTIONS: ReadonlyArray<{ label: string; deg: number }> = [
+  { label: 'N', deg: 0 }, { label: 'NE', deg: 45 }, { label: 'E', deg: 90 }, { label: 'SE', deg: 135 },
+  { label: 'S', deg: 180 }, { label: 'SW', deg: 225 }, { label: 'W', deg: 270 }, { label: 'NW', deg: 315 },
+];
+
+function compassName(deg: number): string {
+  const names = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+  return names[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
 /** One look for every delete control, so "this removes something" is learned
  *  once and recognised everywhere. */
 const DELETE_BTN: React.CSSProperties = {
@@ -456,7 +499,7 @@ const DELETE_BTN: React.CSSProperties = {
 export function SectionInspector({
   state, onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal,
   onSetFacePitch, onSetPitchAnchor, previewPitch, onSelectFace, onRebuildFromParameters,
-  onDelete, disabled,
+  onDelete, onSetSlopeAzimuth, disabled,
 }: SectionInspectorProps) {
   const s = state.section;
   const f = state.face;
@@ -983,6 +1026,42 @@ export function SectionInspector({
               cursor: 'pointer', fontWeight: 800, fontSize: 11, padding: 0,
             }}
           >×</button>
+        </div>
+      ) : null}
+
+      {/* ── WHICH WAY A SINGLE-PLANE ROOF FALLS ───────────────────────────
+             Offered only where it means something: one planar surface. A gable
+             has no single downhill direction, and a control that appears for it
+             would be a control that decides nothing. */}
+      {s && s.singlePlane ? (
+        <div data-testid="inspector-slope-direction" style={{ marginTop: 9 }}>
+          <div style={SECTION_TITLE}>Slopes down toward</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+            {SLOPE_DIRECTIONS.map(d => {
+              const on = s.slopeAzimuthDeg !== null
+                && Math.abs(((s.slopeAzimuthDeg - d.deg + 540) % 360) - 180) < 22.5;
+              return (
+                <button
+                  key={d.label}
+                  type="button" data-no-drag
+                  data-testid={`inspector-slope-${d.label}`}
+                  onClick={() => onSetSlopeAzimuth(d.deg)}
+                  style={{
+                    padding: '3px 7px', borderRadius: 5, fontSize: 10, fontWeight: 800,
+                    cursor: 'pointer',
+                    background: on ? 'rgba(0,229,255,0.20)' : 'rgba(255,255,255,0.05)',
+                    border: '1px solid ' + (on ? 'rgba(0,229,255,0.55)' : 'rgba(255,255,255,0.14)'),
+                    color: on ? '#7fe9ff' : '#cfd8e6',
+                  }}
+                >{d.label}</button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 4, fontSize: 9.5, color: '#9aa8bd', lineHeight: 1.4 }}>
+            {s.slopeAzimuthDeg === null
+              ? 'Not set yet. Choose the direction water runs before giving this roof a pitch.'
+              : `Water runs ${compassName(s.slopeAzimuthDeg)}. The opposite edge is the high one.`}
+          </div>
         </div>
       ) : null}
 
