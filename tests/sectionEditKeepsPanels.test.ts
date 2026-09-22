@@ -234,3 +234,103 @@ describe('positive controls', () => {
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WHAT AN ADVERSARIAL AUDIT MEASURED, AND WHAT IT COST
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 a rigid map is only valid when the panel lands on the new face', () => {
+  it('flipping the ridge axis ORPHANS the panels it cannot carry — it does not report success', () => {
+    // Measured by an adversary: switching a 14.0 × 5.2 m gable slope to the
+    // short ridge axis replaces it with a 9.1 × 8.1 m face at right angles,
+    // under the SAME id. A rigid (u, v) map put 8 of 22 panels clean off that
+    // roof and reported "22 moved, 0 orphaned" — the reports-success-while-
+    // wrong class this whole pass exists to remove.
+    const planes = houseAsPlanes();
+    const faceId = sectionFaceId('sec-main', 'slopeA');
+    const panels = panelsOn(planes.find(p => p.id === faceId)!);
+    expect(panels.length).toBeGreaterThan(8);
+
+    const edited = applySectionEdit(planes, 'sec-main', { ridgeAxis: 'short' });
+    expect(edited.ok).toBe(true);
+    const after = edited.planes.find(p => p.id === faceId)!;
+
+    // The face really did become a different surface under the same id.
+    expect(Math.abs(after.azimuth - 180)).toBeGreaterThan(45);
+
+    const moved = repositionPanelsForPlanes(panels, planes, edited.planes);
+    expect(moved.orphaned.length,
+      'panels that no longer fit the face must be named, not silently moved off it')
+      .toBeGreaterThan(0);
+    expect(moved.moved + moved.orphaned.length).toBe(panels.length);
+
+    // 🚨 EVERY panel reported as MOVED really is on the roof.
+    const byId = new Map(moved.panels.map(p => [p.id, p]));
+    const orphans = new Set(moved.orphaned);
+    for (const p of panels) {
+      if (orphans.has(p.id)) {
+        // An orphan comes back untouched rather than mangled.
+        expect(byId.get(p.id)).toEqual(p);
+      } else {
+        expect(Math.abs(standoffM(byId.get(p.id)!, after)), `panel ${p.id}`).toBeLessThan(0.5);
+      }
+    }
+  });
+});
+
+describe('🚨 the fields the renderer actually reads', () => {
+  it('panel.pitch is NEGATIVE RADIANS, not degrees', () => {
+    // Everything that produces a panel writes `-(tiltDeg * PI / 180)`, and
+    // addPanelEntity feeds it straight into HeadingPitchRoll. A first version
+    // assigned the plane's DEGREES: below ~1.67 the renderer's own sanity
+    // guard passes it through, so a 1.0° roof drew its panels 57.3° nose-up.
+    const planes = houseAsPlanes();
+    const faceId = sectionFaceId('sec-main', 'slopeA');
+    const panels = panelsOn(planes.find(p => p.id === faceId)!);
+
+    const edited = applySectionEdit(planes, 'sec-main', { pitchDeg: 40 });
+    const after = edited.planes.find(p => p.id === faceId)!;
+    const moved = repositionPanelsForPlanes(panels, planes, edited.planes);
+
+    for (const p of moved.panels) {
+      expect(p.pitch!, `panel ${p.id}`).toBeLessThan(0);                 // negative
+      expect(Math.abs(p.pitch!), `panel ${p.id}`).toBeLessThan(Math.PI); // radians
+      expect(Math.abs(p.pitch!) / DEG, `panel ${p.id}`).toBeCloseTo(after.pitch, 3);
+      // …and it agrees with the degrees field beside it.
+      expect(p.tilt).toBeCloseTo(after.pitch, 3);
+    }
+    // 🚨 THE 1 DEGREE CASE, WHICH IS THE ONE THAT SLIPPED THE GUARD.
+    const flat = applySectionEdit(planes, 'sec-main', { pitchDeg: 1 });
+    const flatMoved = repositionPanelsForPlanes(panels, planes, flat.planes);
+    for (const p of flatMoved.panels) {
+      expect(Math.abs(p.pitch!), 'a 1° roof must not produce a 1 RADIAN panel')
+        .toBeLessThan(0.05);
+    }
+  });
+
+  it('🚨 ecefNx / ecefUx follow the new face — they are what the renderer uses', () => {
+    // addPanelEntity builds each module's rotation from these, renderRoofRails
+    // takes the whole array's rail plane from the first panel's, and the
+    // grab/snap tools resolve against them. A first version wrote an
+    // `ecefFrame3D` object instead — a field PlacedPanel does not have — so
+    // every consumer went on using the OLD normal, measured 10.0° stale.
+    const planes = houseAsPlanes();
+    const faceId = sectionFaceId('sec-main', 'slopeA');
+    const panels = panelsOn(planes.find(p => p.id === faceId)!);
+
+    const edited = applySectionEdit(planes, 'sec-main', { pitchDeg: 40 });
+    const after = edited.planes.find(p => p.id === faceId)!;
+    const moved = repositionPanelsForPlanes(panels, planes, edited.planes);
+
+    const n = after.ecefFrame3D!.n;
+    for (const p of moved.panels) {
+      const dot = p.ecefNx! * n.x + p.ecefNy! * n.y + p.ecefNz! * n.z;
+      expect(Math.acos(Math.min(1, Math.abs(dot))) / DEG, `panel ${p.id} normal`)
+        .toBeLessThan(0.01);
+    }
+    // A 30° → 40° change really is a 10° rotation, so the probe is not vacuous.
+    const oldN = planes.find(p => p.id === faceId)!.ecefFrame3D!.n;
+    const drift = Math.acos(Math.min(1, Math.abs(oldN.x * n.x + oldN.y * n.y + oldN.z * n.z))) / DEG;
+    expect(drift).toBeGreaterThan(9);
+  });
+});

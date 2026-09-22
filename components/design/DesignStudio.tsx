@@ -2109,7 +2109,10 @@ export default function DesignStudio({ project, onSave }: Props) {
           // the branch at all (proving less). Mirroring the production rule
           // here keeps "this is genuinely the custom fallback path" a real
           // assertion about the application.
-          if (d.roofPlanes.some(p => !!p.section)) site.setNativeDisposition('custom');
+          if (d.roofPlanes.some(p => !!p.section)) {
+            site.setNativeDisposition('custom', activeSiteKeyRef.current
+              || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
+          }
           setRoofPlanes(d.roofPlanes);
         }
         if (d.obstructions) setPlacedObstructions(d.obstructions);
@@ -4933,7 +4936,22 @@ export default function DesignStudio({ project, onSave }: Props) {
                 // Recorded from the act itself rather than inferred later from
                 // "there are some manual planes", which is the kind of guess
                 // this whole module exists to replace.
-                if (enrichedPlane.section) site.setNativeDisposition('custom');
+                // 🚨 THE SAME KEY THE PLANE IS STAMPED WITH. Filing against the
+                // active site would drop the decision whenever ownership has not
+                // resolved yet, and an earlier attempt to park it filed it against
+                // whichever property resolved NEXT — the neighbour.
+                if (enrichedPlane.section) site.setNativeDisposition('custom', enrichedPlane.siteKey);
+                // 🚨 EVERY WRITER PUSHES, OR UNDO SKIPS OVER THE OTHERS.
+                //
+                // `recordGeometry` had exactly ONE producer — the section-edit
+                // channel — while `roofPlanes` has many writers. An adversary
+                // measured the consequence: set an eave (one entry, snapshot of
+                // 8 planes), trace a porch (9 planes, no push), set the eave
+                // again, and Undo restores the 8-plane snapshot — silently
+                // DELETING the porch the user had just traced. A history that
+                // records one route's edits and replays over another's is worse
+                // than no history.
+                site.recordGeometry('Add roof face');
                 setRoofPlanes(prev => [...prev, enrichedPlane]);
                 console.log('[DesignStudio] 3D plane added:', enrichedPlane.id,
                   `az=${enrichedPlane.azimuth.toFixed(1)}° tilt=${enrichedPlane.pitch.toFixed(1)}°`);
@@ -5027,6 +5045,10 @@ export default function DesignStudio({ project, onSave }: Props) {
               redoGeometryLabel={site.redoGeometryLabel}
               onRoofPlanesStitched={(updates) => {
                 if (E2E_ENABLED) setE2EStitchedCorners(updates);
+                // Square Up, Stitch, the flat-trace rebuild and the standalone
+                // face nudge all arrive here, and all reshape stored geometry.
+                // See the note at onRoofPlaneCreated for why each one pushes.
+                site.recordGeometry('Reshape roof');
                 // v64: Stitch wrote averaged/connected corners + the stitched plane
                 // frame back. Replace each plane's vertices AND localFrame3D with the
                 // stitched geometry so panel placement (Auto Layout) lays its grid on
@@ -6275,7 +6297,15 @@ export default function DesignStudio({ project, onSave }: Props) {
                               // a decision about a PROPERTY. It outlives the geometry it was
                               // a decision about, so it is stored by siteKey, not inferred
                               // from an empty array.
-                              site.setNativeDisposition('rejected');
+                              // 🚨 NAME THE PROPERTY. Before this, a rejection made in the
+                              // first moments of a session — when activeSiteKey is still the
+                              // empty string — was dropped by withDisposition, and a later
+                              // attempt to park it filed 'rejected' against the NEXT property
+                              // to resolve. Marking a neighbour's house as
+                              // not-governed-by-Google is worse than losing the decision, so
+                              // the coordinates on screen name it.
+                              site.setNativeDisposition('rejected', activeSiteKeyRef.current
+                                || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
                               setRoofPlanes([]);
                               setSolarApiStatus('idle');
                               setDrawingMode('draw_roof');

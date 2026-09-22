@@ -320,8 +320,15 @@ export function SectionInspector({
             onCommit={v => onEdit({ eaveHeightM: ft2m(v) }, 'Set eave height', `eave:${s.sectionId}`)}
             onStep={v => onEdit({ eaveHeightM: ft2m(v) }, 'Set eave height', `eave:${s.sectionId}`)}
           />
+          {/* 🚨 ONE DECIMAL, NOT ZERO. `decimals={0}` printed a 22.5° roof as
+                 "23" — a half-degree lie in the number that drives the ridge
+                 height, the array tilt PVWatts reads and the pitch on the
+                 permit drawing (22.5° is 4.65:12; 23° is 5.09:12). Worse, the
+                 stepper then sent `hidden 22.5 + 1` = 23.5, which printed as
+                 "24", so the user could not even predict what a press would
+                 do. A field that rounds is a field that lies. */}
           <NumberField
-            label="Roof pitch" unit="°" step={1} decimals={0}
+            label="Roof pitch" unit="°" step={1} decimals={1}
             testId="inspector-pitch"
             value={s.pitchDeg} disabled={disabled}
             onCommit={v => onEdit({ pitchDeg: v }, 'Set roof pitch', `pitch:${s.sectionId}`)}

@@ -340,6 +340,55 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
     await expect.poll(() => fieldValue(page, 'inspector-pitch'), { timeout: T }).toBe('25');
   });
 
+  test('🚨 EVERY PRESS LANDS, AND THE FIELD SHOWS THE BUILDING — not the press before', async ({ page }) => {
+    // 🚨 THE DEFECT THIS EXISTS FOR, FOUND BY TWO INDEPENDENT ADVERSARIES.
+    //
+    // `inspectorState` was computed during render from `roofPlanesRef.current`,
+    // a ref written by an effect AFTER that render. So the panel displayed the
+    // PREVIOUS state of the building, and the stepper — which computes its next
+    // target as `shown + 1 ft` — asked for a height the model already had.
+    // Measured: five presses raised the roof 3 ft, and the field read 11.5
+    // against a model at 12.51.
+    //
+    // That is "press, compensate, press again" and "the UI reports a height the
+    // geometry does not represent" — the exact failure this whole subsystem was
+    // written to close, re-entering through a different door.
+    //
+    // The inspector's own unit test could not see it: it mounts a hand-built
+    // InspectorState that never changes between presses. Only the real wiring
+    // shows it, which is why this assertion lives here.
+    await openStudio(page);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    await clickFace(page, 'sec-main::slopeA');
+    await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
+    expect(await fieldValue(page, 'inspector-eave')).toBe('9.5');
+
+    const plus = page.locator('[data-testid="inspector-eave"]')
+      .locator('xpath=following-sibling::button[1]');
+
+    for (let i = 1; i <= 5; i++) {
+      await plus.click();
+      const wantM = 2.9 + i * 0.3048;
+      // THE MODEL moved, on THIS press — not on the next one.
+      await expect
+        .poll(() => state(page).then(s => ofSection(s, 'sec-main')[0].eave),
+          { message: `press ${i} did not reach the model`, timeout: T })
+        .toBeCloseTo(wantM, 4);
+      // …and THE FIELD shows what the model now is.
+      await expect
+        .poll(() => fieldValue(page, 'inspector-eave'),
+          { message: `the field lagged after press ${i}`, timeout: T })
+        .toBe((wantM * 3.280839895013123).toFixed(1));
+    }
+
+    // Five feet asked for, five feet delivered.
+    const st = await state(page);
+    expect(ofSection(st, 'sec-main')[0].eave).toBeCloseTo(2.9 + 5 * 0.3048, 4);
+  });
+
   test('🚨 STEP 4-5 — moving and raising ONE section leaves the others untouched', async ({ page }) => {
     await openStudio(page);
     await nameTheProperty(page);

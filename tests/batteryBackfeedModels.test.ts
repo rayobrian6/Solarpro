@@ -72,10 +72,34 @@ describe('ONE aggregation model, and it is the authority', () => {
   it('3 × 5P resolves once, to one number, from one place', () => {
     const r = resolveBatteryBranch(FIVE_P, 3);
     expect(r.resolved).toBe(true);
-    // The conservative aggregation, deliberately identical to what the
-    // calculation engine already produced by summing per unit — adopting the
-    // authority moved no existing design's 705.12(B) result.
-    expect(r.busbarContributionA).toBe(60);
+
+    // 🚨 THIS TEST ASSERTED 60 A, AND ITS JUSTIFICATION WAS FACTUALLY WRONG.
+    //
+    // It said "deliberately identical to what the calculation engine already
+    // produced by summing per unit — adopting the authority moved no existing
+    // design's 705.12(B) result". The shim every legacy caller used was
+    // `calcBatteryBackfeedAmps`, and it read:
+    //
+    //     if (b.requiresGateway) return b.backfeedBreakerA;
+    //
+    // The 5P carries `requiresGateway: true, gatewayModel: 'Enphase IQ System
+    // Controller 3'`, so that path returned 20 A for ANY count. Adopting 60
+    // moved the result for 5 of 6 catalogue batteries at counts >= 2, and an
+    // adversarial audit measured a 2-unit Powerwall 3 job on a 200 A busbar
+    // behind a 150 A main flipping from PASS to FAIL with nothing about the
+    // design having changed.
+    //
+    // 20 A is also the physically defensible stand-in. Three 5P units sit
+    // behind ONE System Controller, which is the point of connection to the
+    // dwelling's busbar; what that controller backfeeds through is a FEEDER
+    // OCPD this catalogue does not carry. So the single branch OCPD stands in
+    // and `busbarBasis` says the feeder layer is unverified — exactly what the
+    // documented-architecture path above already does with
+    // 'branch-ocpd-pending-feeder-data'. Summing three branch breakers models
+    // a topology the manufacturer does not publish.
+    expect(r.busbarContributionA).toBe(20);
+    expect(r.busbarBasis).toBe('catalogue-scalar-shared-gateway');
+    expect(r.source).toMatch(/ONE point of connection/);
   });
 
   it('🚨 and for a step-function product the fleet answer is NOT perUnit × count', () => {

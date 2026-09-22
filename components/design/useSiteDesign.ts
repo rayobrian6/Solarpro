@@ -140,8 +140,15 @@ export interface UseSiteDesign {
    *  scheduled. */
   nativeDisposition: NativeGeometryDisposition;
   nativeDispositionRef: React.MutableRefObject<NativeGeometryDisposition>;
-  /** Record a decision about the ACTIVE property. */
-  setNativeDisposition: (d: NativeGeometryDisposition) => void;
+  /** Record a decision about a property.
+   *
+   *  🚨 PASS THE SITE KEY. `activeSiteKey` is the empty string until hydration
+   *  resolves ownership, and a decision filed against an empty key is dropped
+   *  by `withDisposition`. The caller knows which house is on screen —
+   *  DesignStudio computes `siteKeyFromCoords(mapCenter)` to stamp the plane
+   *  and passes the same key here. Omitting it falls back to the active site
+   *  and REFUSES OUT LOUD when there is none. */
+  setNativeDisposition: (d: NativeGeometryDisposition, siteKey?: string) => void;
 
   // ── Canonical geometry undo ───────────────────────────────────────────────
   /** Record the roof as it stands BEFORE a mutation. Call, then mutate.
@@ -177,8 +184,6 @@ export function useSiteDesign(): UseSiteDesign {
   const activeSiteKeyRef = useRef<string>(UNRESOLVED_SITE_KEY);
   const stateRef = useRef<SiteDesignState>(emptyState());
   const nativeDispositionRef = useRef<NativeGeometryDisposition>('undecided');
-  /** A decision recorded before the property had a name. See setActiveKey. */
-  const pendingDispositionRef = useRef<NativeGeometryDisposition | null>(null);
   const epochRef = useRef(0);
 
   /** One setter factory. The ref is written first and synchronously, so any
@@ -297,29 +302,22 @@ export function useSiteDesign(): UseSiteDesign {
   const setActiveKey = useCallback((k: string) => {
     activeSiteKeyRef.current = k;
     setActiveSiteKeyState(k);
-    // 🚨 A DECISION MADE BEFORE THE PROPERTY WAS NAMED IS NOT DISCARDED.
+    // 🚨 NO DECISION IS FLUSHED HERE, AND THAT IS DELIBERATE.
     //
-    // `withDisposition` returns the map unchanged for an empty site key — "an
-    // unresolved site owns no decision" — which is right about STORAGE and
-    // wrong as the whole behaviour: the write was silently dropped and nobody
-    // was told. Measured live: opening the studio through the quick-design
-    // entry leaves `activeSiteKey` as the empty string, so building a section
-    // right away recorded 'custom' into nothing and the app went on believing
-    // native geometry was still permitted for that property.
+    // A first version parked a disposition recorded before the property had a
+    // name and filed it the moment `setActiveKey` ran. Two independent audits
+    // measured it doing the wrong thing twice over: the parked value was
+    // overwritten by the memo below on the very next tick (so it was inert),
+    // and when it did flush it carried NO SITE IDENTITY — pressing "Draw
+    // Manually Instead" at an unnamed property and then changing the address
+    // filed 'rejected' against the NEIGHBOUR, permanently marking a house the
+    // installer had never looked at.
     //
-    // The decision is now held until the property has a name, then filed
-    // against it. Held in a ref, not state, because the very next thing that
-    // reads it is the Lane A gate firing from inside a resolved promise.
-    if (k && pendingDispositionRef.current) {
-      const d = pendingDispositionRef.current;
-      pendingDispositionRef.current = null;
-      stateRef.current = {
-        ...stateRef.current,
-        nativeGeometry: withDisposition(stateRef.current.nativeGeometry, k, d),
-      };
-      nativeDispositionRef.current = d;
-      setArchiveTick(t => t + 1);
-    }
+    // `switchToSite` and `hydrateFromStored` both bump the epoch and both call
+    // this, so nothing here can tell "the site on screen finally resolved" from
+    // "we moved to a different house". The caller can: it knows the
+    // coordinates. `setNativeDisposition` now takes the site key the decision
+    // is ABOUT, and DesignStudio passes the same key it stamps on the plane.
   }, []);
 
   const switchToSite = useCallback<UseSiteDesign['switchToSite']>((toKey, opts) => {
@@ -428,9 +426,26 @@ export function useSiteDesign(): UseSiteDesign {
     return d;
   }, [archiveTick, activeSiteKey]);
 
-  const setNativeDisposition = useCallback((d: NativeGeometryDisposition) => {
+  const setNativeDisposition = useCallback((d: NativeGeometryDisposition, siteKey?: string) => {
     // 🚨 KEYED BY SITE, like ownership. A judgement is about a PROPERTY, so
-    // going to the neighbour's house and back must not lose it.
+    // going to the neighbour's house and back must not lose it — and must not
+    // land on the neighbour.
+    //
+    // The caller may name the property explicitly. It is the one that knows:
+    // DesignStudio computes `siteKeyFromCoords(mapCenter)` to stamp the plane
+    // and passes the same key here, so the decision and the geometry it is
+    // about are filed against one property even before `activeSiteKey` has
+    // resolved.
+    const key = siteKey || activeSiteKeyRef.current || stateRef.current.activeSiteKey;
+    if (!key) {
+      // 🚨 REFUSED OUT LOUD, NOT DROPPED IN SILENCE. `withDisposition` returns
+      // the map unchanged for an empty key, so this used to vanish and the app
+      // went on believing native acquisition was permitted for a house somebody
+      // had just modelled by hand.
+      console.warn('[useSiteDesign] native-geometry decision "' + d +
+        '" could not be recorded: no property is named yet. The caller must pass a site key.');
+      return;
+    }
     stateRef.current = {
       ...stateRef.current,
       // 🚨 THE SAME FALLBACK THE PLANE STAMP USES. activeSiteKeyRef holds the
@@ -439,20 +454,8 @@ export function useSiteDesign(): UseSiteDesign {
       // moments of a session would vanish silently. Falls back to the site the
       // state believes is active, which is what every other ownership write
       // here does.
-      nativeGeometry: withDisposition(
-        stateRef.current.nativeGeometry,
-        activeSiteKeyRef.current || stateRef.current.activeSiteKey,
-        d,
-      ),
+      nativeGeometry: withDisposition(stateRef.current.nativeGeometry, key, d),
     };
-    // 🚨 AND IF THERE WAS NO PROPERTY TO FILE IT AGAINST, HOLD IT.
-    // Both keys are the empty string until hydration resolves ownership, and
-    // `withDisposition` drops a write against an empty key. `setActiveKey`
-    // flushes this the moment the property is named. Without it the decision
-    // vanished in silence — see the note there.
-    if (!(activeSiteKeyRef.current || stateRef.current.activeSiteKey)) {
-      pendingDispositionRef.current = d;
-    }
     nativeDispositionRef.current = d;
     // Moves `archivesSignature`, so the autosave actually writes it. Without
     // the tick the decision would live in a ref nothing re-reads.

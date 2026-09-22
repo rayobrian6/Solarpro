@@ -311,31 +311,35 @@ describe('positive controls', () => {
   });
 });
 
-describe('🚨 a decision made before the property was named is held, not dropped', () => {
-  it('setNativeDisposition parks it and setActiveKey flushes it', () => {
-    // Measured in a real browser: opening the studio through the quick-design
-    // entry leaves `activeSiteKey` as the empty string, so building a section
-    // right away called `withDisposition(map, '', 'custom')`, which returns the
-    // map unchanged — "an unresolved site owns no decision". The write vanished
-    // and nothing said so, and the app went on believing native acquisition was
-    // still permitted for that property.
-    expect(SITE).toMatch(/pendingDispositionRef/);
+describe('🚨 a decision names the property it is about', () => {
+  it('setNativeDisposition takes a site key, and refuses out loud without one', () => {
+    // Three versions of this, each worse than the last, all measured:
+    //
+    //   1. filed against `activeSiteKey`, which is '' when the studio opens, so
+    //      `withDisposition` dropped it and the app went on believing native
+    //      acquisition was permitted for a house somebody had just hand-built;
+    //   2. PARKED and flushed on the next `setActiveKey` — inert, because the
+    //      memo recomputed and overwrote the ref on the same tick;
+    //   3. and when it did flush it carried NO SITE IDENTITY, so pressing
+    //      "Draw Manually Instead" and then changing address filed 'rejected'
+    //      against the NEIGHBOUR. Marking a house the installer never looked at
+    //      is worse than losing the decision.
+    //
+    // The caller knows which house is on screen. It passes the key.
+    expect(SITE).toContain('setNativeDisposition = useCallback((d: NativeGeometryDisposition, siteKey?: string)');
+    expect(SITE).toContain('const key = siteKey || activeSiteKeyRef.current || stateRef.current.activeSiteKey');
+    expect(SITE).toContain('if (!key) {');
+    expect(SITE).toContain('console.warn(');
 
-    const setter = SITE.slice(
-      SITE.indexOf('const setNativeDisposition = useCallback'),
-      SITE.indexOf('return {', SITE.indexOf('const setNativeDisposition = useCallback')),
-    );
-    expect(setter).toMatch(/if \(!\(activeSiteKeyRef\.current \|\| stateRef\.current\.activeSiteKey\)\)/);
-    expect(setter).toMatch(/pendingDispositionRef\.current = d/);
+    // The parking is gone, in both halves.
+    expect(SITE).not.toContain('pendingDispositionRef');
 
-    const flush = SITE.slice(
-      SITE.indexOf('const setActiveKey = useCallback'),
-      SITE.indexOf('const setNativeDisposition = useCallback'),
-    );
-    expect(flush, 'setActiveKey must flush the parked decision').toMatch(/pendingDispositionRef\.current/);
-    expect(flush).toMatch(/withDisposition\(stateRef\.current\.nativeGeometry, k, d\)/);
-    // It must clear the park, or every later key change would refile it.
-    expect(flush).toMatch(/pendingDispositionRef\.current = null/);
+    // …and every caller names the property.
+    const calls = STUDIO.match(/setNativeDisposition\(/g) ?? [];
+    expect(calls.length, 'expected three call sites').toBe(3);
+    expect(STUDIO).toContain("setNativeDisposition('custom', enrichedPlane.siteKey)");
+    expect((STUDIO.match(/setNativeDisposition\('(custom|rejected)', activeSiteKeyRef\.current/g) ?? []).length,
+      'both remaining call sites must name the property').toBe(2);
   });
 
   it('🚨 the Undo chip is not buried under the other panels', () => {

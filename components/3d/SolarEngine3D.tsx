@@ -12696,13 +12696,35 @@ function SolarEngine3D({
   //
   // Everything below is derived from canonical geometry on every render. There
   // is no stored number here for a control to drift away from.
+  // 🚨 THE PROP, NOT THE REF. THIS IS A RENDER, AND THE REF LAGS A RENDER.
+  //
+  // `roofPlanesRef.current` is written by `useEffect(..., [roofPlanes])` at
+  // :2267 — AFTER the render that received the new array. Reading it here meant
+  // the inspector displayed the PREVIOUS state of the building, and nothing
+  // scheduled a second render to catch up. Two independent adversarial audits
+  // measured the same thing:
+  //
+  //     press +1 ft five times  →  the roof rose 3 ft, not 5 ft,
+  //                                and the field read 11.5 against a model
+  //                                that was at 12.51
+  //
+  // EVERY SECOND PRESS WAS A NO-OP, because the stepper computes its next
+  // target as `shown + 1 ft` from the stale number, which is the value the
+  // model already holds. That is "press, compensate, press again" and "the UI
+  // reports a height the geometry does not represent" — the exact defect this
+  // whole subsystem was written to kill, re-entering through a different door.
+  //
+  // The inspector's own unit test could not see it: it mounts a hand-built
+  // `InspectorState` that never changes between presses. A behavioural test of
+  // a component that is fed a constant proves the component, not the wiring.
+  const inspectorPlanes = roofPlanes ?? [];
   const selectedSectionId = activeFaceId ? sectionIdOfFaceId(activeFaceId) : null;
   const selectedFaceSectionId = activeFaceId
-    ? ((roofPlanesRef.current ?? []).find(p => p.id === activeFaceId)?.sectionId || selectedSectionId)
+    ? (inspectorPlanes.find(p => p.id === activeFaceId)?.sectionId || selectedSectionId)
     : null;
 
   const inspectorState: InspectorState = (() => {
-    const planes = roofPlanesRef.current ?? [];
+    const planes = inspectorPlanes;
     const all = listSections(planes);
     const standalone = planes.filter(p => !(p.sectionId || sectionIdOfFaceId(p.id))).length;
 

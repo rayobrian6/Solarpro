@@ -160,6 +160,18 @@ export function sectionFromPlanes(
     sawFace = true;
     out.faceIds.push(p.id);
     if (!p.section) continue;
+    // 🚨 THE RECORD MUST BE THE RECORD FOR THE SECTION ASKED FOR.
+    //
+    // Faces are selected by `p.sectionId || sectionIdOfFaceId(p.id)`, and the
+    // first `p.section` met was then adopted as canonical without ever
+    // comparing its OWN id to the one requested. A stale persisted row, a
+    // hand-edited layout or a bundle copied between sites can carry a record
+    // naming a different section — and editing 'sec-main' would then rebuild
+    // it from the GARAGE's footprint, under sec-main's face ids.
+    if (p.section.id && p.section.id !== sectionId) {
+      out.conflicted = true;
+      continue;
+    }
     const json = JSON.stringify(sectionRecord(p.section));
     if (!record) { record = sectionRecord(p.section); recordJson = json; }
     else if (json !== recordJson) out.conflicted = true;
@@ -614,6 +626,59 @@ export function measureFaceVertical(
  * them. They are returned untouched and named in `orphaned` so the caller can
  * say so.
  */
+/**
+ * Is (u, v) — a position in a face's own axes — inside that face's outline?
+ *
+ * The outline comes from `polygon3D`, projected into the same axes, so the test
+ * is in the surface's own plane and no approximation of "up" enters it. Ray
+ * casting, with a small outward tolerance: a panel exactly on the eave line is
+ * on the roof, and floating-point should not decide otherwise.
+ */
+function pointOnFace(
+  u: number, v: number,
+  plane: RoofPlane,
+  origin: { x: number; y: number; z: number },
+  frame: { u: Cart3; v: Cart3; n: Cart3 },
+): boolean {
+  const poly = (plane.polygon3D ?? []) as Cart3[];
+  if (poly.length < 3) return true;          // nothing to test against
+  const ring = poly.map(q => {
+    const d = { x: q.x - origin.x, y: q.y - origin.y, z: q.z - origin.z };
+    return {
+      u: d.x * frame.u.x + d.y * frame.u.y + d.z * frame.u.z,
+      v: d.x * frame.v.x + d.y * frame.v.y + d.z * frame.v.z,
+    };
+  });
+
+  // A panel half off the edge is still on the roof as far as this question
+  // goes; one whose centre is metres away is not.
+  const TOL = 0.35;
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+  for (const r of ring) {
+    if (r.u < minU) minU = r.u; if (r.u > maxU) maxU = r.u;
+    if (r.v < minV) minV = r.v; if (r.v > maxV) maxV = r.v;
+  }
+  if (u < minU - TOL || u > maxU + TOL || v < minV - TOL || v > maxV + TOL) return false;
+
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if ((a.v > v) !== (b.v > v)
+      && u < ((b.u - a.u) * (v - a.v)) / ((b.v - a.v) || 1e-12) + a.u) inside = !inside;
+  }
+  if (inside) return true;
+
+  // Outside the ring but within TOL of an edge counts as on the roof.
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    const du = b.u - a.u, dv = b.v - a.v;
+    const len2 = du * du + dv * dv;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((u - a.u) * du + (v - a.v) * dv) / len2)) : 0;
+    if (Math.hypot(u - (a.u + t * du), v - (a.v + t * dv)) <= TOL) return true;
+  }
+  return false;
+}
+
 export interface PanelRepositionOutcome {
   /** 🚨 Uniform shape — see SectionLookup. */
   panels: PlacedPanel[];
@@ -689,6 +754,21 @@ export function repositionPanelsForPlanes(
     const g = ecefToLatLng(p);
     if (!isFinite(g.lat) || !isFinite(g.lng) || !isFinite(g.height)) return panel;
 
+    // 🚨 A RIGID MAP IS ONLY VALID IF THE PANEL LANDS ON THE NEW FACE.
+    //
+    // Most edits — eave, pad, a small pitch change, a translation — deform the
+    // face gently and the array travels with it. Some do not. Switching a
+    // gable's ridge from the long axis to the short one REPLACES a 14.0 x 5.2 m
+    // face with a 9.1 x 8.1 m face at right angles to it, under the SAME id. An
+    // adversarial audit measured a rigid map putting 8 of 22 panels clean off
+    // that roof — and reporting "22 moved, 0 orphaned", which is the
+    // reports-success-while-wrong class this whole pass exists to remove.
+    //
+    // So containment is checked, in the new face's own (u, v). A panel whose
+    // centre is not on the new surface is returned UNTOUCHED and named, exactly
+    // like one whose face was deleted.
+    if (!pointOnFace(u, v, newPlane, nA, nF)) { out.orphaned.push(panel.id); return panel; }
+
     out.moved += 1;
     return {
       ...panel,
@@ -697,8 +777,29 @@ export function repositionPanelsForPlanes(
       // these behind is how a roof and its array come to quote two pitches.
       tilt: isFinite(newPlane.pitch) ? newPlane.pitch : panel.tilt,
       azimuth: isFinite(newPlane.azimuth) ? newPlane.azimuth : panel.azimuth,
-      pitch: isFinite(newPlane.pitch) ? newPlane.pitch : panel.pitch,
-      ecefFrame3D: { u: { ...nF.u }, v: { ...nF.v }, n: { ...nF.n } },
+
+      // 🚨 `panel.pitch` IS NEGATIVE RADIANS, NOT DEGREES.
+      //
+      // Everything that produces one writes `-(tiltDeg * PI / 180)`, and
+      // `addPanelEntity` feeds it straight into `new C.HeadingPitchRoll(...)`.
+      // A first version assigned `newPlane.pitch` — degrees, positive — and an
+      // adversarial audit measured the consequence: below about 1.67 the
+      // renderer's own sanity guard passes it through, so a 1.0 degree roof
+      // drew its panels at 57.3 degrees nose-up.
+      pitch: isFinite(newPlane.pitch) ? -(newPlane.pitch * DEG) : panel.pitch,
+      heading: isFinite(newPlane.azimuth) ? newPlane.azimuth * DEG : panel.heading,
+
+      // 🚨 AND THESE ARE THE FIELDS THE RENDERER ACTUALLY READS.
+      //
+      // `addPanelEntity` builds each module's rotation from `ecefNx/ecefUx`,
+      // `renderRoofRails` takes the whole array's rail plane from the first
+      // panel's, and the grab/snap tools resolve against them. A first version
+      // wrote an `ecefFrame3D` object instead — a field `PlacedPanel` does not
+      // have — so the panel was translated onto the new surface while every
+      // consumer went on using the OLD normal. Measured 10.0 degrees stale
+      // after a 30 -> 40 degree pitch change.
+      ecefNx: nF.n.x, ecefNy: nF.n.y, ecefNz: nF.n.z,
+      ecefUx: nF.u.x, ecefUy: nF.u.y, ecefUz: nF.u.z,
     } as PlacedPanel;
   });
 

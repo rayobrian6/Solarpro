@@ -4359,6 +4359,9 @@ export interface BatteryBranchResolution {
     | 'battery-branch-ocpd'              // the branch lands on the main panel
     | 'branch-ocpd-pending-feeder-data'  // stand-in; feeder layer unverified
     | 'catalogue-scalar-sum'
+    // 🚨 One gateway, one point of connection — the contribution does NOT
+    // scale with the unit count. See the scalar branch of resolveBatteryBranch.
+    | 'catalogue-scalar-shared-gateway'
     | 'dc-coupled-none'                  // inverter backfeed already counts it
     | 'unresolved';
   /** Rated continuous output current for ONE unit, where published. */
@@ -4488,7 +4491,7 @@ export function resolveBatteryBranch(
     };
   }
 
-  // ── No architecture: the legacy scalar, aggregated conservatively ──────
+  // ── No architecture: the legacy scalar ─────────────────────────────────
   const scalar = battery.backfeedBreakerA;
   if (typeof scalar !== 'number' || scalar <= 0) {
     return refuseBatteryBranch(id, unitCount, {
@@ -4496,17 +4499,37 @@ export function resolveBatteryBranch(
       message: `${battery.manufacturer} ${battery.model}: catalogue row carries no branch architecture and no usable backfeedBreakerA. The NEC 705.12(B) conclusion, conductor sizing and OCPD selection are BLOCKED — not 0, not a typical value.`,
     });
   }
+
+  // 🚨 A SHARED GATEWAY IS ONE POINT OF CONNECTION, NOT N OF THEM.
+  //
+  // `calcBatteryBackfeedAmps` carried this rule as
+  // `if (b.requiresGateway) return b.backfeedBreakerA;` — units behind a single
+  // gateway backfeed the busbar through that gateway's one breaker, so the
+  // contribution does not scale with the unit count. Folding that helper into
+  // this authority dropped it, and an adversarial audit measured the cost: for
+  // 5 of 6 catalogue batteries the NEC 705.12(B) contribution changed at counts
+  // >= 2. Tesla Powerwall 3 x3 went 50 A to 150 A, and a 2-unit job on a 200 A
+  // busbar behind a 150 A main flipped from PASS to FAIL with nothing about the
+  // design having changed.
+  //
+  // The rule is the SAFE direction here only by coincidence; what makes it
+  // correct is that it is the topology the manufacturer publishes. Moving a
+  // conclusion without a reason is the defect, whichever way it moves.
+  const gatewayShared = battery.requiresGateway === true;
+  const contribution = gatewayShared ? scalar : scalar * unitCount;
   return {
     resolved: true, batteryId: id, unitCount, basis: 'catalogue-scalar',
     branchOcpdA: scalar,
     minConductorAwg: null,
     pcsRequired: false, pcsMode: null, pcsLabelRequirement: null,
-    busbarContributionA: scalar * unitCount,
-    busbarBasis: 'catalogue-scalar-sum',
+    busbarContributionA: contribution,
+    busbarBasis: gatewayShared ? 'catalogue-scalar-shared-gateway' : 'catalogue-scalar-sum',
     ratedOutputCurrentA, aggregateUsableKwh,
     permitModelNumber: battery.permitModelNumber ?? null,
     requiresDeviceId: null,
-    source: `SolarPro catalogue scalar backfeedBreakerA=${scalar} A, summed over ${unitCount} unit(s). NOT manufacturer-architecture verified.`,
+    source: gatewayShared
+      ? `SolarPro catalogue scalar backfeedBreakerA=${scalar} A. ${battery.manufacturer} ${battery.model} requires ${battery.gatewayModel ?? 'a gateway'}, and all ${unitCount} unit(s) backfeed through it as ONE point of connection. NOT manufacturer-architecture verified.`
+      : `SolarPro catalogue scalar backfeedBreakerA=${scalar} A, summed over ${unitCount} unit(s). NOT manufacturer-architecture verified.`,
     refusal: null,
   };
 }

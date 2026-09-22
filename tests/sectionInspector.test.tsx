@@ -82,7 +82,10 @@ describe('a selected section shows its own physical dimensions', () => {
 
   it('pitch and pad elevation are the section’s own', () => {
     mount(sectionState());
-    expect((screen.getByTestId('inspector-pitch') as HTMLInputElement).value).toBe('30');
+    // One decimal, not zero: `decimals={0}` printed a 22.5 deg roof as "23",
+    // a half-degree lie in the number that drives the ridge height, the array
+    // tilt PVWatts reads and the pitch on the permit drawing.
+    expect((screen.getByTestId('inspector-pitch') as HTMLInputElement).value).toBe('30.0');
     expect((screen.getByTestId('inspector-ground') as HTMLInputElement).value)
       .toBe((GROUND_MAIN_M * FT_PER_M).toFixed(1));
   });

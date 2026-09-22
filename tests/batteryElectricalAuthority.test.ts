@@ -29,6 +29,7 @@ import {
   getBatteryById,
   BATTERIES,
 } from '@/lib/equipment-db';
+import { calcBatteryBackfeedAmps } from '@/lib/engineering-helpers';
 import { runElectricalCalc, type ElectricalCalcInput } from '@/lib/electrical-calc';
 import { ecStringInput } from './goldens/wave0-fixtures';
 
@@ -254,15 +255,21 @@ describe('unknown never becomes a number', () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe('scalar products still answer, and say that they are not architecture-verified', () => {
-  it('the 5P resolves from the catalogue scalar, conservatively aggregated', () => {
+  it('the 5P resolves from the catalogue scalar, through its shared gateway', () => {
     const r = resolveBatteryBranch(FIVE_P, 3);
     expect(r.resolved).toBe(true);
     expect(r.basis).toBe('catalogue-scalar');
-    expect(r.busbarBasis).toBe('catalogue-scalar-sum');
-    // 20 A scalar × 3 units. Deliberately the SAME number the calculation
-    // engine already produced by summing per unit, so adopting the authority
-    // does not move any existing design's 705.12(B) result.
-    expect(r.busbarContributionA).toBe(60);
+
+    // 🚨 THIS ASSERTED 60 A AND ITS STATED REASON WAS WRONG — see the sibling
+    // in tests/batteryBackfeedModels.test.ts for the full account. The shim
+    // every legacy caller used returned `b.backfeedBreakerA` unmultiplied for a
+    // `requiresGateway` product, and the 5P is one: three units sit behind ONE
+    // IQ System Controller 3, which is the point of connection to the busbar.
+    // Summing three BRANCH breakers models a topology Enphase does not publish.
+    expect(r.busbarBasis).toBe('catalogue-scalar-shared-gateway');
+    expect(r.busbarContributionA).toBe(20);
+    // The per-unit branch OCPD is unchanged — it is the FLEET figure that was
+    // wrong, not the branch one.
     expect(r.branchOcpdA).toBe(20);
     // No manufacturer conductor or PCS rule has been transcribed for it.
     expect(r.minConductorAwg).toBeNull();
@@ -383,5 +390,72 @@ describe('computeBatteryBusImpact — the legacy entry point now delegates', () 
     // This signature cannot express "unresolved". It is kept only for callers
     // that have not migrated; new code calls the authority directly.
     expect(computeBatteryBusImpact('no-such-battery')).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A SHARED GATEWAY IS ONE POINT OF CONNECTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 the shared-gateway rule survived being folded into the authority', () => {
+  it('a gateway-fed battery does NOT scale its busbar contribution with unit count', () => {
+    // `calcBatteryBackfeedAmps` carried this as
+    // `if (b.requiresGateway) return b.backfeedBreakerA;`. Folding it into
+    // `resolveBatteryBranch` dropped it, and an adversarial audit measured the
+    // cost: 5 of 6 catalogue batteries changed their NEC 705.12(B) contribution
+    // at counts >= 2, and a 2-unit Powerwall 3 job on a 200 A busbar behind a
+    // 150 A main flipped from PASS to FAIL with nothing about the design
+    // having changed.
+    const gatewayFed = BATTERIES.filter(
+      b => b.requiresGateway === true
+        && !b.branchArchitecture
+        && b.subcategory !== 'dc_coupled'
+        && typeof b.backfeedBreakerA === 'number' && b.backfeedBreakerA > 0,
+    );
+    expect(gatewayFed.length, 'no gateway-fed scalar battery to test — the guard is vacuous')
+      .toBeGreaterThan(0);
+
+    for (const b of gatewayFed) {
+      const one = resolveBatteryBranch(b.id, 1);
+      const three = resolveBatteryBranch(b.id, 3);
+      expect(one.resolved, b.id).toBe(true);
+      expect(three.resolved, b.id).toBe(true);
+      expect(three.busbarContributionA, `${b.id} x3 must not triple`)
+        .toBe(one.busbarContributionA);
+      expect(three.busbarContributionA, b.id).toBe(b.backfeedBreakerA);
+      expect(three.busbarBasis).toBe('catalogue-scalar-shared-gateway');
+      // The reason is printed, not implied.
+      expect(three.source).toMatch(/ONE point of connection/);
+    }
+  });
+
+  it('…and a battery with NO gateway still sums, so the rule is not applied blindly', () => {
+    const standalone = BATTERIES.filter(
+      b => b.requiresGateway !== true
+        && !b.branchArchitecture
+        && b.subcategory !== 'dc_coupled'
+        && typeof b.backfeedBreakerA === 'number' && b.backfeedBreakerA > 0,
+    );
+    expect(standalone.length, 'no standalone scalar battery — the control is vacuous')
+      .toBeGreaterThan(0);
+    for (const b of standalone) {
+      const three = resolveBatteryBranch(b.id, 3);
+      expect(three.busbarContributionA, b.id).toBe(b.backfeedBreakerA! * 3);
+      expect(three.busbarBasis).toBe('catalogue-scalar-sum');
+    }
+  });
+
+  it('🚨 calcBatteryBackfeedAmps still answers what it answered before the refactor', () => {
+    // The shim is what every legacy caller uses. Its numbers must not have
+    // moved for any catalogue battery at any plausible count.
+    for (const b of BATTERIES) {
+      if (b.branchArchitecture) continue;           // step function, deliberately new
+      if (b.subcategory === 'dc_coupled') continue; // 0 before and after
+      if (!(typeof b.backfeedBreakerA === 'number' && b.backfeedBreakerA > 0)) continue;
+      for (const n of [1, 2, 3]) {
+        const legacy = b.requiresGateway ? b.backfeedBreakerA : b.backfeedBreakerA * n;
+        expect(calcBatteryBackfeedAmps(b.id, n), `${b.id} x${n}`).toBe(legacy);
+      }
+    }
   });
 });

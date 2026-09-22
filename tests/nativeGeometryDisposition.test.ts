@@ -252,7 +252,7 @@ describe('🚨 THE DECISION IS REACHABLE IN PRODUCTION — it is not decoration'
     // that phrase also appears in a COMMENT 5,000 lines earlier — so the slice
     // came out empty and the assertions below would have passed vacuously had
     // the positive control not caught it.
-    const at = STUDIO.indexOf("site.setNativeDisposition('rejected')");
+    const at = STUDIO.indexOf("site.setNativeDisposition('rejected',");
     expect(at, 'positive control: the write was not found at all').toBeGreaterThan(-1);
     const btn = STUDIO.slice(at, at + 1200);
     expect(btn, 'the rejection must clear the planes too').toMatch(/setRoofPlanes\(\[\]\)/);
@@ -261,7 +261,13 @@ describe('🚨 THE DECISION IS REACHABLE IN PRODUCTION — it is not decoration'
   });
 
   it('LEG 1b — building a section records that a hand-built model governs', () => {
-    expect(STUDIO).toMatch(/if \(enrichedPlane\.section\) site\.setNativeDisposition\('custom'\)/);
+    // 🚨 THE KEY IS PASSED EXPLICITLY — the same one the plane is stamped with.
+    // Filing against the active site dropped the decision whenever ownership
+    // had not resolved, and an attempt to park it filed 'custom' against
+    // whichever property resolved NEXT. The caller knows which house is on
+    // screen; it says so.
+    expect(STUDIO).toContain(
+      "if (enrichedPlane.section) site.setNativeDisposition('custom', enrichedPlane.siteKey)");
   });
 
   it('LEG 2 — the GATE reads it, on the path that runs Lane A', () => {
