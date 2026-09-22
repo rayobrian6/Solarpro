@@ -31,7 +31,8 @@ import { SLD_SYMBOL_MAP } from './sld-symbols';
 import { emitBrandEmblem } from './sld-brand-emblems';
 import { resolveDeviceIllustration } from './sld-device-illustrations';
 import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
-import { resolveHybridAcCollection, type HybridAcCollectionPlan } from '@/lib/equipment/integratedBos';
+import { getBosDevice, resolveHybridAcCollection, type HybridAcCollectionPlan } from '@/lib/equipment/integratedBos';
+import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const W = 2304;
@@ -419,6 +420,36 @@ export interface SLDProfessionalInput {
    * single-lane drawing honoured, on the same project.
    */
   selectedCombinerId?:     string | null;
+  /**
+   * 🚨 PER-SUBSYSTEM recorded selections, keyed by lane ('roof'|'ground'|'fence')
+   * — `selected_equipment.subSystems[key]`, which already exists.
+   *
+   * One project-level id above cannot answer a hybrid: the lanes need not share
+   * an inverter brand, and stamping the single answer onto all of them labelled
+   * an APsystems fence lane with the Enphase combiner. This is the per-lane
+   * answer where one was recorded; laneSelectedCombinerId brand-checks the
+   * project-level one for the lanes it does not cover.
+   */
+  selectedCombinerIdByLane?: Record<string, string | null> | null;
+  /**
+   * 🚨 DID A HUMAN CHOOSE THE COMBINER THE FOUR FIELDS ABOVE NAME?
+   * (`sldCombinerFields().combinerSelectionIsDecided` — the shared adapter both
+   * the SVG and PDF SLD routes already call.)
+   *
+   * `false` means the device was DERIVED: from the inverter's declared pairing,
+   * or from the last-resort literal that once put an IQ Combiner 6C on a 5C job.
+   * The adapter computed this and nothing read it, so the schedule row and the
+   * diagram nameplate asserted a derived device with exactly the confidence of a
+   * recorded installer selection — the repo's rule is that absence of a decision
+   * may never look like a decision, and a permit reviewer had no way to tell.
+   *
+   * TRI-STATE ON PURPOSE. `undefined` = the caller has not answered this
+   * question, and the sheet renders exactly as it did before the field existed
+   * (the same contract `hasProductionMeter` states above: the flag ADDS a
+   * statement, it never removes one). Only an explicit `false` qualifies, so a
+   * builder that has not been wired cannot be read as asserting "not chosen".
+   */
+  combinerSelectionIsDecided?: boolean;
   ocpdPerString?:          number;
   dcAcRatio?:              number;
   stringConfigWarnings?:   string[];
@@ -1471,6 +1502,40 @@ function runLines(run: RunSegment|undefined, fallback: string[]): {lines:string[
   return {lines, cnt, oa};
 }
 
+// ── The combiner nobody chose ────────────────────────────────────────────────
+//
+// 🚨 A DEVICE IS STILL DRAWN — WHAT CHANGES IS WHETHER THE SHEET CLAIMS IT.
+// `sldCombinerFields().combinerSelectionIsDecided` (and, per lane, the hybrid
+// plan's `combinerBasis`) says whether a human picked this box or whether it was
+// derived from a compatibility declaration or from the last-resort literal that
+// put an IQ Combiner 6C on a 5C job. Both artefacts computed it and nothing read
+// it, so a permit reviewer saw "Enphase IQ Combiner 6C" with the same authority
+// either way.
+//
+// The marker is the vocabulary these sheets already use for an answer the design
+// does not have: '⚠ INVERTER NOT SELECTED — PV-<KEY>' (INVERTER_UNSELECTED,
+// lib/permit/utils/helpers.ts), '⚠ ESS CAPACITY UNRESOLVED', 'BATT — SIZE
+// UNRESOLVED' — a ⚠ + plain words + the same red. No new severity vocabulary,
+// and the device's own name is NOT replaced: it is qualified, because the box
+// still has to be buildable and the reviewer still has to see which one was
+// assumed.
+export const COMBINER_NOT_SELECTED = '⚠ NOT SELECTED';
+/** The red the other fail-loud markers on these sheets use (see the inverter
+ *  nameplate and the ESS capacity cell). */
+const UNRESOLVED_RED = '#C62828';
+
+/**
+ * A schedule cell for a combiner, qualified when the device was not chosen.
+ *
+ * TRI-STATE: only an explicit `false` qualifies. `undefined` means the caller has
+ * not answered the question and the cell reads exactly as it did before this
+ * field existed — a builder that has not been wired must not be read as
+ * asserting "nobody chose it".
+ */
+export function combinerScheduleCell(label: string, isDecided?: boolean): string {
+  return isDecided === false ? `${label}  ${COMBINER_NOT_SELECTED}` : label;
+}
+
 // ── AC Combiner Panel (internal structure) ───────────────────────────────────
 function renderCombiner(
   cx: number, cy: number,
@@ -1480,7 +1545,11 @@ function renderCombiner(
           /** Per-branch OCPDs in branch order (B1..Bn) from the shared branch
            *  plan — a plane-contained 12-micro branch runs 25A while its
            *  siblings run 20A, so one uniform `branchOcpd` mislabels it. */
-          branchOcpds?: number[]},
+          branchOcpds?: number[];
+          /** True ⇔ this device was DERIVED, not chosen — draw the qualifier
+           *  under the nameplate. Undefined ⇒ the caller did not answer and the
+           *  symbol is drawn exactly as before. */
+          selectionUnresolved?: boolean},
 ): {svg:string; lx:number; rx:number; ty:number; by:number;
     feederOutX:number; feederOutY:number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['ac-combiner'] = 180×160
@@ -1539,6 +1608,13 @@ function renderCombiner(
   // Labels below box
   let _lblY = by2+H2+10;
   p.push(txt(cx, _lblY, esc(label), {sz:F.tiny, anc:'middle', italic:true})); _lblY += 9;
+  // The qualifier rides directly under the nameplate it qualifies, so the model
+  // and "nobody chose this" can never be read apart. Red + ⚠, same as the
+  // unselected-inverter nameplate two symbols away on the same sheet.
+  if (opts?.selectionUnresolved) {
+    p.push(txt(cx, _lblY, `${COMBINER_NOT_SELECTED} — DERIVED, NOT AN INSTALLER DECISION`,
+      {sz:F.tiny, anc:'middle', bold:true, fill:UNRESOLVED_RED})); _lblY += 9;
+  }
   p.push(txt(cx, _lblY, `${nBranches} branch inputs`, {sz:F.tiny, anc:'middle'})); _lblY += 9;
   if (opts?.integratedGateway) { p.push(txt(cx, _lblY, 'INTEGRATED GATEWAY / MONITORING', {sz:F.tiny, anc:'middle', fill:'#2b5c9c'})); _lblY += 9; }
   if (opts?.providesDisconnect) { p.push(txt(cx, _lblY, 'INTEGRAL AC DISCONNECT (LOAD-BREAK)', {sz:F.tiny, anc:'middle'})); _lblY += 9; }
@@ -2216,7 +2292,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const clabel = input.combinerModel ?? input.combinerLabel ?? `${input.inverterManufacturer} IQ Combiner`;
     const cr = renderCombiner(xComb, BUS_Y, nb, bocpd, clabel, 3,
       {integratedGateway: input.combinerHasIntegratedGateway, providesDisconnect: input.combinerProvidesAcDisconnect,
-       branchOcpds: input.microBranches?.map(b => b.ocpdAmps)});
+       branchOcpds: input.microBranches?.map(b => b.ocpdAmps),
+       // `=== false` and not `!input...`: undefined is "the builder did not
+       // answer", which must draw as before, not as "nobody chose it".
+       selectionUnresolved: input.combinerSelectionIsDecided === false});
     parts.push(cr.svg);
     node3RX = cr.feederOutX;  // Use feeder output terminal X as the right-side connection point
     parts.push(txt(xComb, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
@@ -3092,7 +3171,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Inverter Mfr.',esc(input.inverterManufacturer)],
     ['Inverter Model',esc(input.inverterModel)],
     ['Inverter Output',`${Number(input.acOutputKw).toFixed(2)} kW AC`],
-    ['AC Combiner',esc(input.combinerLabel??'IQ Combiner')],
+    // 🚨 THE SCHEDULE ROW A PERMIT READER TAKES AS THE ANSWER. The fallback
+    // string 'IQ Combiner' and a recorded installer selection used to print
+    // identically; combinerScheduleCell appends '⚠ NOT SELECTED' when the
+    // adapter says the device was derived rather than chosen.
+    ['AC Combiner',combinerScheduleCell(esc(input.combinerLabel??'IQ Combiner'), input.combinerSelectionIsDecided)],
     ['AC Disconnect',`${resolvedAcOCPD}A ${isSupplySide ? 'Fused (Tap OCPD)' : 'Non-Fused'}`],
     ['Main Panel',`${input.mainPanelAmps} A`],
     ['Utility',esc(input.utilityName)],
@@ -3110,6 +3193,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Total Modules',`${input.totalModules}`],
     ['Strings',`${input.totalStrings} × ${pp2} panels`],
     ['MPPT Channels',input.mpptAllocation??`${input.mpptChannels??1} ch`],
+    // NOT qualified, deliberately: on a string system this cell is 'Direct' /
+    // a DC combiner box, not the brand BOS combiner `combinerSelectionIsDecided`
+    // describes. 'Direct' is a resolved answer — there is no device — and
+    // stamping '⚠ NOT SELECTED' on it would invent a missing decision.
     ['Combiner',esc(input.combinerLabel??(input.combinerType??'Direct'))],
     ['Inverter Mfr.',esc(input.inverterManufacturer)],
     ['Inverter Model',esc(input.inverterModel)],
@@ -3467,12 +3554,63 @@ function laneBackfeedA(b: SLDSourceBranch): number {
  * disagree with the diagram about the shared panel, its busbar rating, or the
  * single disconnect. Map lanes → HybridSourceInput here and nowhere else.
  */
+/**
+ * Which recorded selection, if any, applies to THIS lane.
+ *
+ * 🚨 THE SELECTION USED TO BE STAMPED ONTO EVERY MICRO LANE REGARDLESS OF BRAND.
+ * `selectedCombinerId` is ONE project-level answer; a hybrid job has one lane per
+ * array, and they need not share an inverter brand. An Enphase roof + an
+ * APsystems fence meant the fence lane's combiner was resolved from the Enphase
+ * id — and `resolveIntegratedEquipment` honours a selection BEFORE it checks the
+ * ecosystem, so it came back with the Enphase device and the sheet labelled the
+ * APsystems fence lane "Enphase IQ Combiner 5C". That is a box that is not on
+ * that wall, on a drawing that goes to a permit office and a BOM.
+ *
+ * The rule, in order:
+ *   1. the lane's OWN recorded selection (per-subsystem equipment) — the answer
+ *      for this array, and the only one that can be right for every lane;
+ *   2. the project-level selection, but ONLY when the selected device's brand is
+ *      the lane's inverter brand. A lane that is not that brand has no answer,
+ *      and says so rather than borrowing another lane's;
+ *   3. nothing — the lane falls to its own declared pairing, and where that is
+ *      absent too its basis is `unresolved-default` and the drawing qualifies it.
+ *
+ * An UNRESOLVABLE selected id has no brand to compare, so it is passed through
+ * rather than dropped: `resolveIntegratedEquipment` renders it as a visible
+ * empty plan ("selected device unavailable"), which is what the single-lane
+ * sheet already does. Silently withholding it would be the one outcome worse
+ * than the defect — a broken selection that nobody can see.
+ */
+function laneSelectedCombinerId(
+  lane: SLDSourceBranch,
+  projectSelectedId: string | null | undefined,
+  perLane: Record<string, string | null | undefined> | null | undefined,
+): string | null {
+  const own = String(perLane?.[lane.key] ?? '').trim();
+  if (own) return own;
+  const sel = String(projectSelectedId ?? '').trim();
+  if (!sel) return null;
+  const device = getBosDevice(sel);
+  if (!device) return sel;                       // unresolvable — stays visible on every lane
+  const laneBrand = String(lane.inverterManufacturer ?? '').trim().toLowerCase();
+  const selBrand = String(device.brand ?? '').trim().toLowerCase();
+  // An unknown lane brand cannot be shown to match, so it does not claim the
+  // device either. "No answer for this lane" is a reportable state; a wrong
+  // nameplate is not.
+  return laneBrand && laneBrand === selBrand ? sel : null;
+}
+
 export function acCollectionFromLanes(
   lanes: SLDSourceBranch[],
   /** The project's recorded combiner selection, when the caller has one. It
    *  applies to the MICRO lanes (only they take a brand combiner) and outranks
-   *  the per-lane pairing below — one project, one installed device. */
+   *  the per-lane pairing below — but ONLY on a lane of the same brand; see
+   *  laneSelectedCombinerId. */
   selectedCombinerId?: string | null,
+  /** Per-subsystem recorded selections, keyed by lane ('roof' | 'ground' |
+   *  'fence') — `selected_equipment.subSystems[key]`. Highest authority for the
+   *  lane it names, because it is an answer about THAT array. */
+  selectedCombinerIdByLane?: Record<string, string | null | undefined> | null,
 ): HybridAcCollectionPlan {
   return resolveHybridAcCollection(lanes.map(b => ({
     key: b.key,
@@ -3489,8 +3627,9 @@ export function acCollectionFromLanes(
     compatibleCombinerIds: combinerCompatibilityFor(b.inverterManufacturer, b.inverterModel),
     // ...and the same place the installer's ANSWER attaches. Compatibility says
     // what CAN be used; this says what IS being installed, and the resolver
-    // ranks it above the line before it.
-    selectedCombinerId: selectedCombinerId ?? null,
+    // ranks it above the line before it. Resolved PER LANE — one project-level
+    // id is not automatically this lane's answer.
+    selectedCombinerId: laneSelectedCombinerId(b, selectedCombinerId, selectedCombinerIdByLane),
   })));
 }
 
@@ -3663,7 +3802,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   //    combiner PER LANE and never looks at input.combinerModel, so without it
   //    a hybrid E-1 named a recommendation while the single-lane E-1 for the
   //    same project named the installer's choice.
-  const acCollection = acCollectionFromLanes(lanes, input.selectedCombinerId ?? null);
+  //    ...and it rides PER LANE: a hybrid's lanes need not share a brand, so one
+  //    project-level id is not automatically every lane's answer (see
+  //    laneSelectedCombinerId — an APsystems fence lane was being labelled with
+  //    the Enphase combiner).
+  const acCollection = acCollectionFromLanes(
+    lanes, input.selectedCombinerId ?? null, input.selectedCombinerIdByLane ?? null);
   const totalModules = input.totalModules || lanes.reduce((s, b) => s + (b.totalModules ?? 0), 0);
   // MULTI-LANE total AC = Σ of the lanes THIS sheet draws. input.acOutputKw is
   // the legacy single-system figure and on Stowell it lagged the design
@@ -3879,10 +4023,22 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       })();
       const _brCur = b.microBranches?.length
         ? Math.max(...b.microBranches.map(x => x.branchCurrentA)) : bocpd / 1.25;
-      const _laneCombiner = acCollection.perSource.find(s => s.key === b.key)?.combiner;
+      // 🚨 PER-LANE, AND THE BASIS COMES WITH IT. A lane's combiner is resolved
+      // against that lane's brand and that lane's recorded answer; a lane the
+      // project selection does not cover now has NO device rather than the other
+      // lane's, and falls back to a generic descriptive label. `_laneDecided`
+      // false ⇒ whatever is printed was derived, so it is qualified on the
+      // drawing — a fence lane reading "APsystems AC Combiner" must not look
+      // like somebody chose it.
+      const _laneCollect = acCollection.perSource.find(s => s.key === b.key);
+      const _laneCombiner = _laneCollect?.combiner;
+      const _laneDecided = _laneCollect?.combinerBasis
+        ? combinerBasisIsDecided(_laneCollect.combinerBasis)
+        : undefined;
       const clabel = _laneCombiner ? `${_laneCombiner.brand} ${_laneCombiner.model}` : (b.combinerLabel ?? `${invMfr || 'PV'} AC Combiner`);
       const cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN,
-        {branchOcpds: b.microBranches?.map(x => x.ocpdAmps)});
+        {branchOcpds: b.microBranches?.map(x => x.ocpdAmps),
+         selectionUnresolved: _laneDecided === false});
       parts.push(cr.svg);
       parts.push(txt(g.xMid1, cr.ty-8, clabel.toUpperCase(), {sz:F.hdr, bold:true, anc:'middle'}));
       // ── AC junction / transition box (Enphase SOP): the AC trunk runs

@@ -723,10 +723,12 @@ test.describe('Building mode routes clicks differently — recorded, not endorse
     expect(await selectedFaceId(page), 'Building OFF disagreed with Building ON').toBeNull();
   });
 
-  test('a WALL click does not select the wall — it resolves to a roof face', async ({ page }) => {
-    // pickBuildingFaceAtScreen matches only [BUILD3D-ROOF], so a wall click
-    // misses, falls through, and the geometric roof-face test then answers with
-    // whatever face the ray reaches. Walls have no stored identity to select.
+  test('🚨 a WALL click selects the WALL, and names its owning face', async ({ page }) => {
+    // Two behaviours have been pinned here, in order. First: a wall click fell
+    // past the wall entirely and the ray test answered with whatever roof lay
+    // BEHIND it. Then: it resolved to the face that owns the wall — right
+    // building, wrong object. Now the wall itself is the selection, and the
+    // inspector measures it.
     await openStudio(page);
     const [south, north] = buildGablePlanes();
     await seedPlanes(page, [south, north]);
@@ -784,15 +786,36 @@ test.describe('Building mode routes clicks differently — recorded, not endorse
     // clicking the front of the house selected a slope on the far side of the
     // ridge and the inspector silently retargeted to a different part of the
     // building.
-    //
-    // A wall LEVEL in the selection hierarchy is still not built. What is fixed
-    // is that a wall now resolves to the face that owns it — the building the
-    // user clicked — instead of one behind it.
     if (ownerFaceId) {
+      // The face that owns the wall is still what the FACE selection reports —
+      // a wall belongs to exactly one roof face and that has not changed.
       expect(sel, 'a wall click resolved to something other than its own face').toBe(ownerFaceId);
     } else {
       // The pick found no wall at that point, so this run cannot exercise it.
       expect(sel === null || sel === south.id || sel === north.id).toBe(true);
+      return;
     }
+
+    // 🚨 AND THE INSPECTOR IS ON THE WALL, NOT ON THE ROOF ABOVE IT. This is
+    // the third level the acceptance list names — "Selected: Section / Roof
+    // Face / Wall" — and it is what makes "how tall is this wall" answerable
+    // by clicking the wall.
+    await expect(page.locator('[data-testid="inspector-wall"]')).toBeVisible({ timeout: 5_000 });
+    const chip = page.locator('[data-testid="inspector-level-wall"]');
+    await expect(chip).toBeVisible();
+
+    // The panel offers measurements and NOT ONE editable field: a wall is
+    // derived from the roof face above it and the pad below it, so a box here
+    // would write nowhere. It names the controls that do the job instead.
+    const panel = page.locator('[data-testid="inspector-wall"]');
+    await expect(panel.locator('input')).toHaveCount(0);
+    await expect(panel).toContainText('Length');
+    await expect(panel.locator('[data-testid="inspector-wall-to-face"]')).toBeVisible();
+
+    // 🚨 AND CLICKING ELSEWHERE LEAVES THE WALL LEVEL. A stale wall would have
+    // the panel measuring something the user is no longer pointing at.
+    await clickFace(page, south.id);
+    await page.waitForTimeout(600);
+    await expect(page.locator('[data-testid="inspector-wall"]')).toHaveCount(0);
   });
 });

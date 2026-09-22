@@ -31,6 +31,10 @@ import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
 import { getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, resolveBatteryBranch } from './equipment-db';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { nextStandardOcpd } from './electrical/stdSizes';
+// NEC 705.12(B) total-backfeed authority — ONE formula, shared with
+// runElectricalCalc so the permit package and the engineering page cannot
+// reach different 120%-rule verdicts for the same design.
+import { totalInterconnectionBackfeedA } from './electrical-calc';
 import { NEC_705_11_C_TAP_LIMIT_FT, TAP_SPAN_PHYSICAL_SEGMENT_ID } from './electrical/tapSpan';
 import {
   CONDUCTOR_AREA_IN2 as NEC_CONDUCTOR_AREA_IN2,
@@ -461,6 +465,21 @@ export interface ComputedSystemInput {
   inverterModel: string;
   inverterAcKw: number;          // PER-UNIT AC nameplate (kW)
   inverterCount?: number;        // physical inverter units (string/optimizer/hybrid). Micro uses microDeviceCount. Default 1.
+  /**
+   * NEC 705.12(B) — the AC output current (A) of each circuit that lands on the
+   * busbar, ONE entry per interconnecting overcurrent device. Supplied by
+   * callers that hand this engine a SYNTHETIC whole-system inverter (the permit
+   * path passes the project's total AC kW as one unit, so `inverterCount` ×
+   * `inverterAcKw` cannot describe its real fleet). Absent ⇒ the list is derived
+   * from `inverterCount` / the micro fleet, which is what every legacy caller
+   * gets and is identical at one inverter.
+   *
+   * 🚨 This is a BREAKER list, not a conductor list — it never sizes the feeder
+   * (that is `acOcpdAmps`, on the aggregate current) and it never carries the
+   * battery, whose contribution comes from `resolveBatteryBranch` via
+   * `batteryIds`.
+   */
+  interconnectingCircuitAmps?: number[];
   inverterMaxDcV: number;
   inverterMpptVmin: number;
   inverterMpptVmax: number;
@@ -1389,8 +1408,52 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     ? microDeviceCount * perMicroCurrentA
     : (input.inverterAcKw * physicalInverterUnits * 1000) / systemVoltageAC;
   const acContinuousCurrentA = acOutputCurrentA * 1.25; // NEC 690.8
+  // The FEEDER OCPD — one conductor set carrying the whole AC output from the
+  // combiner/inverter to the disconnect. Correctly sized on the AGGREGATE
+  // current, and deliberately left that way.
   const acOcpdAmps = nextStandardOCPD(acContinuousCurrentA);
-  const backfeedBreakerAmps = acOcpdAmps;
+
+  // ── NEC 705.12(B) total PV backfeed — Σ of the REAL breakers ──────────────
+  //
+  // 🚨 WHAT WAS HERE: `const backfeedBreakerAmps = acOcpdAmps;` — the feeder
+  // OCPD reused as the 120% busbar term. Those are two different devices and
+  // only coincide at one physical inverter.
+  //
+  // WHAT A USER SAW: three Fronius Primo 6.0-1 (18 kW at 240 V) on a 200 A bus
+  // with a 100 A allowance. This engine said 75 A × 1.25 = 93.75 → ONE 100 A
+  // breaker → PASS, and its projection is the permit package's
+  // `compliance.electrical.busbar`. The engineering page's own Electrical tab
+  // (runElectricalCalc) summed the three real 35 A breakers → 105 A → FAIL, and
+  // the hybrid banner on that page already TOLD the operator the 120 % check
+  // "uses the summed per-inverter backfeed" while this number was not that sum.
+  // computed-multi-system.ts:153 had to hand-roll the sum for the same reason.
+  // A permit that clears a busbar the UI failed is the defect, and the permit
+  // was the permissive one.
+  //
+  // Both engines now call ONE function (lib/electrical-calc:
+  // totalInterconnectionBackfeedA), which carries the 705.12(B)(3)(2) reasoning:
+  // the code counts the ratings of the interconnecting OVERCURRENT DEVICES, so
+  // each device is rounded to its own NEC 240.6(A) size BEFORE the sum.
+  //
+  // One entry per breaker that lands on the busbar:
+  //   · micro  — the fleet sits behind ONE AC combiner circuit, so ONE entry at
+  //              the fleet's total output current (unchanged behaviour);
+  //   · string/optimizer — one entry per physical inverter;
+  //   · `interconnectingCircuitAmps` overrides both when the caller knows the
+  //     real circuit list (the permit path: it hands this engine ONE synthetic
+  //     whole-system inverter, so `inverterCount` cannot describe a mixed fleet).
+  // N = 1 is numerically identical to the old line, so single-inverter goldens
+  // do not move.
+  const perCircuitOutputAmps: number[] =
+    (input.interconnectingCircuitAmps?.length ?? 0) > 0
+      ? input.interconnectingCircuitAmps!.filter(a => Number.isFinite(a) && a > 0)
+      : isMicro
+        ? [acOutputCurrentA]
+        : Array.from({ length: physicalInverterUnits },
+            () => (input.inverterAcKw * 1000) / systemVoltageAC);
+  const backfeedBreakerAmps = perCircuitOutputAmps.length > 0
+    ? totalInterconnectionBackfeedA(perCircuitOutputAmps)
+    : acOcpdAmps;
 
   // NEC 705.12(B) — 120% rule applies ONLY to load-side connections
   // NEC 705.11 — Supply-side tap: 120% rule does NOT apply (connection before main breaker)
@@ -1420,6 +1483,23 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const _batteryCountsById = new Map<string, number>();
   for (const id of (input.batteryIds ?? [])) {
     _batteryCountsById.set(id, (_batteryCountsById.get(id) ?? 0) + 1);
+  }
+  // 🚨 2026-09-22 — TWO CALLERS, TWO MEANINGS FOR THE SAME ARRAY.
+  // The grouping above reads `batteryIds` as a UNIT list (one entry per
+  // physical battery). Every real caller instead names each PRODUCT ONCE and
+  // carries the fleet size in `batteryCount` — app/engineering/page.tsx:3046
+  // (`batteryIds: [config.batteryId]`) and the SLD route both do. A three-unit
+  // Powerwall job therefore asked the branch authority for the ONE-unit rule.
+  // `resolveBatteryBranch` is a STEP FUNCTION over the unit count, so that is
+  // not a rounding difference — it is the wrong step of a manufacturer's branch
+  // table, understating the 705.12(B) contribution while the equipment schedule
+  // beside it printed qty 3. The unit count is reconciled here, once, so both
+  // spellings mean the same fleet. (Only when the design names ONE product:
+  // with several products the list is already per-unit and `batteryCount` is
+  // ambiguous, so it is ignored rather than guessed.)
+  if (_batteryCountsById.size === 1 && (input.batteryCount ?? 0) > 1) {
+    const _onlyId = [..._batteryCountsById.keys()][0];
+    if (_batteryCountsById.get(_onlyId) === 1) _batteryCountsById.set(_onlyId, input.batteryCount!);
   }
   let batteryBusImpactFromIds = 0;
   let _batteryUnresolved = false;
@@ -2634,11 +2714,22 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   }
 
   // Battery / Generator / ATS — add to equipment schedule if configured
-  if (input.batteryIds && input.batteryIds.length > 0) {
-    input.batteryIds.forEach((batId, idx) => {
+  //
+  // 🚨 2026-09-22 — ONE ROW PER PRODUCT, NOT ONE ROW PER UNIT. `batteryIds` is a
+  // UNIT list: the 705.12(B) contribution above counts duplicates because three
+  // IQ Battery 10C on one shared 80 A branch is a different breaker from one
+  // 10C, so the list has to carry the units. This schedule, however, describes
+  // PRODUCTS — it prints `qty` itself. Iterating the raw list gave a design with
+  // three units three identical BATT-n rows EACH SAYING qty 3 (nine batteries
+  // on the schedule, three gateways for one gateway), and a permit BOM reader
+  // counting rows would have ordered them. It now iterates the same grouped
+  // product→count map the busbar arithmetic uses, so the row count, the qty and
+  // the 705.12(B) term all derive from one grouping.
+  if (_batteryCountsById.size > 0) {
+    [..._batteryCountsById.entries()].forEach(([batId, unitsOfThisProduct], idx) => {
       const bat = getBatteryById(batId);
       if (bat) {
-        const batQty = input.batteryCount && input.batteryCount > 1 ? input.batteryCount : 1;
+        const batQty = Math.max(1, unitsOfThisProduct);
         const busNote = bat.backfeedBreakerA
           ? ` · ${bat.backfeedBreakerA}A backfeed breaker (NEC 705.12B bus loading)`
           : ' · DC-coupled (no separate backfeed breaker)';

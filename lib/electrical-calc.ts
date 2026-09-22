@@ -305,6 +305,55 @@ export function sizeAcBranch(acKw: number, systemVoltage: number): AcBranchSizin
   return { acKw, acOutputAmps, continuousAmps, ocpdAmps: nextStandardOCPD(continuousAmps) };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// NEC 705.12(B) — THE ONE TOTAL-BACKFEED FORMULA (2026-09-22)
+// ───────────────────────────────────────────────────────────────────────────
+// 🚨 WHAT WAS WRONG: this repository had THREE formulas for "total PV backfeed
+// onto the busbar", and they disagreed with each other on every system with
+// more than one physical inverter:
+//
+//   · this engine (the Electrical tab / the shadow parity run) summed the
+//     PER-INVERTER rounded OCPD  — Σ nextStandardOcpd(Iᵢ × 1.25);
+//   · computed-system.ts (the engine whose projection IS the permit package's
+//     `compliance.electrical`) rounded the AGGREGATE current ONCE —
+//     nextStandardOcpd(ΣIᵢ × 1.25);
+//   · computed-multi-system.ts:153 hand-rolled the per-inverter sum a THIRD
+//     time, precisely because computeSystem's aggregate answer was unusable
+//     for a multi-lane POI.
+//
+// WHAT A USER SAW: three Fronius Primo 6.0-1 on a 240 V service, 200 A bus,
+// 100 A of headroom. The engineering page's Electrical tab said 3 × 35 A =
+// 105 A → FAIL. The PERMIT PACKAGE said 75 A × 1.25 = 93.75 → 100 A → PASS,
+// and that is the document that goes to the AHJ. One design, two verdicts, and
+// the permissive one was on the stamped sheet.
+//
+// WHY PER-DEVICE ROUNDING IS THE ANSWER: 705.12(B)(3)(2) limits the sum of the
+// ratings of the OVERCURRENT DEVICES supplying power to the busbar. An
+// overcurrent device is a real breaker with a real NEC 240.6(A) rating — three
+// 6 kW inverters are protected by three 35 A breakers, not by a fictitious
+// 93.75 A one, and 3 × 35 A of backfeed can genuinely be delivered onto that
+// bus. Rounding the aggregate BEFORE the sum discards the rounding of every
+// individual device and can only ever UNDERSTATE the total (each term loses up
+// to one full ladder step), which is the unsafe direction on the one
+// calculation that clears a design for interconnection. The sum of the real
+// breakers is also what the reviewer counts off the panel schedule.
+//
+// Rounding resolves through the canonical NEC 240.6(A) ladder
+// (lib/electrical/stdSizes — the P0-5c single source), which is identical to
+// `sizeAcBranch().ocpdAmps` for every circuit inside the table.
+//
+// Callers pass ONE entry per interconnecting overcurrent device:
+//   · one string/optimizer inverter                       → one entry;
+//   · one microinverter FLEET behind one AC combiner      → one entry, the
+//     fleet's total output current (the combiner's breaker is the device that
+//     lands on the bus, not the individual micros);
+//   · a battery's backfeed is NOT a PV circuit and is added by the caller from
+//     `resolveBatteryBranch` — never folded in here.
+// ═══════════════════════════════════════════════════════════════════════════
+export function totalInterconnectionBackfeedA(circuitOutputAmps: readonly number[]): number {
+  return circuitOutputAmps.reduce((sum, amps) => sum + nextStandardOcpd(amps * 1.25), 0);
+}
+
 /**
  * Entry-level AC kW for one InverterInput: micro entries carry per-DEVICE
  * acOutputKw and represent a fleet of deviceCount devices behind one AC
@@ -853,7 +902,15 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   // backfeed — an undercount for every N>1 system. N=1 is numerically
   // identical to the old path (both micro and string/optimizer branches).
   // Always recomputed — no legacy freeze flag (Ray ruling 2026-07-12).
-  const solarBreakerRequired = entrySizings.reduce((sum, e) => sum + e.ocpdAmps, 0);
+  //
+  // 2026-09-22 — the reduce that was here was the FIRST of three copies of this
+  // rule (see totalInterconnectionBackfeedA above). It was correct; it was just
+  // private to this engine, so the permit package's engine could and did
+  // disagree with it. The arithmetic is unchanged — `e.ocpdAmps` is
+  // nextStandardOCPD(e.acOutputAmps × 1.25) by construction — but it now comes
+  // from the shared authority, so a future change to the rule cannot land here
+  // and miss the permit.
+  const solarBreakerRequired = totalInterconnectionBackfeedA(entrySizings.map(e => e.acOutputAmps));
 
   // Battery NEC 705.12(B) bus impact — AC-coupled battery backfeed breakers add to bus loading
   // NEC 705.12(B): ALL backfeed breakers (solar + battery) count toward 120% rule

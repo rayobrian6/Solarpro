@@ -24,6 +24,10 @@ import {
   deviceMetersAnything,
   type DeviceMeteringCapability,
 } from '@/lib/equipment/currentTransformers';
+// Static declared table, zero imports of its own — this module's "no equipment-db"
+// rule is about the CATALOGUE, and reconciling the two catalogues' spellings for
+// one product is exactly the thing that may not be re-implemented per caller.
+import { canonicalCombinerId } from '@/lib/equipment/combinerIdentity';
 
 export type BosKind =
   | 'integrated_combiner'   // combiner + gateway (+/- disconnect) in one enclosure
@@ -366,13 +370,23 @@ export function listCombiners(brand?: string): BosDevice[] {
  *  one-character difference meant a compatibility list from equipment-db could
  *  never resolve here, so the auto-config silently fell through to a hardcoded
  *  device and the SLD contradicted the equipment picker on every Enphase job.
- *  Tries the id verbatim, then with/without the trailing 'C' revision letter. */
+ *
+ *  🚨 THE BRIDGE USED TO BE STRING SURGERY, AND IT IS NOW A DECLARED TABLE.
+ *  This tried the id, then `${id}c`, then the id with a trailing 'c' stripped —
+ *  which answers "probably the same product" by looking at characters. That is
+ *  the substring/suffix equipment matching this codebase has repeatedly been
+ *  bitten by, and it is only half a bridge: `judgeCombinerCompatibility` had no
+ *  equivalent, compared the raw strings, and refused every combiner selection on
+ *  every Enphase project. One reconciliation now serves both
+ *  (lib/equipment/combinerIdentity.ts), each spelling written out against the
+ *  catalogue it comes from, and an id the table does not know resolves to
+ *  NOTHING — the caller's `combinerBasis: 'unresolved-default'` then says so on
+ *  the sheet, instead of a character rule inventing a match. */
 export function resolveCompatibleCombiner(ids: string[] | undefined): BosDevice | undefined {
   for (const raw of ids ?? []) {
-    const id = String(raw).trim().toLowerCase();
-    const hit = getBosDevice(id)
-      ?? getBosDevice(`${id}c`)
-      ?? getBosDevice(id.replace(/c$/, ''));
+    const canonical = canonicalCombinerId(raw);
+    if (!canonical) continue;   // not a combiner, or a spelling nobody declared
+    const hit = getBosDevice(canonical);
     if (hit && hit.kind === 'integrated_combiner') return hit;
   }
   return undefined;
@@ -680,6 +694,17 @@ export interface HybridSourceCombining {
   combinerHasDisconnect: boolean;
   ocpdA: number;
   branchSlotWarning?: string;
+  /**
+   * 🚨 HOW THIS LANE'S COMBINER CAME TO BE NAMED — per lane, because on a hybrid
+   * the answer differs BETWEEN lanes and the single project-level basis cannot
+   * express that. A roof lane may carry the installer's recorded Enphase
+   * selection while a fence lane on another brand has no answer at all, and the
+   * sheet has to be able to say which is which: `combinerBasisIsDecided(basis)`
+   * false ⇒ the drawing must qualify the device it prints for THAT lane.
+   *
+   * Undefined on a string/hybrid lane, which takes no combiner.
+   */
+  combinerBasis?: import('@/lib/combinerSelection/types').CombinerBasis;
 }
 export interface HybridAcCollectionPlan {
   perSource: HybridSourceCombining[];
@@ -710,6 +735,10 @@ export function resolveHybridAcCollection(sources: HybridSourceInput[]): HybridA
         key: s.key, isMicro: true, combiner,
         combinerHasDisconnect: !!combiner?.integrated.disconnect,
         ocpdA: s.backfeedA, branchSlotWarning: plan.branchSlotWarning,
+        // Carried out per lane so a hybrid sheet can qualify the lane it could
+        // not answer for. It was computed here and thrown away, and the drawing
+        // then printed a derived device with the same confidence as a chosen one.
+        combinerBasis: plan.combinerBasis ?? 'unresolved-default',
       };
     }
     // String / hybrid inverter: no dedicated combiner — its OCPD is a backfed

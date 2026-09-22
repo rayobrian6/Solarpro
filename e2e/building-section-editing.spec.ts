@@ -97,9 +97,16 @@ async function openStudio(page: Page, projectId?: string): Promise<void> {
 }
 
 /** The fixture house, built through the real domain, as the tool would emit it. */
-function housePlanes() {
+function housePlanes(opts: { flatten?: string } = {}) {
   const out: any[] = [];
-  for (const s of multiSectionHouse()) {
+  for (const raw of multiSectionHouse()) {
+    // 🚨 A REAL FLAT SECTION, BUILT BY THE REAL BUILDER. The flat-deck test
+    // needs a section whose deck is horizontal by definition, and constructing
+    // it here rather than hand-writing a plane keeps it indistinguishable from
+    // one the Block tool would produce.
+    const s = raw.id === opts.flatten
+      ? { ...raw, kind: 'flat' as const, pitchDeg: 0, footprint: raw.footprint }
+      : raw;
     const built = buildSectionRoofPlanes(s);
     if (!built.ok) throw new Error(`fixture section ${s.id} refused: ${JSON.stringify(built.refusals)}`);
     out.push(...built.planes);
@@ -133,8 +140,8 @@ async function nameTheProperty(page: Page): Promise<string> {
   return page.evaluate(() => (window as any).__solarE2E.activeSiteKey);
 }
 
-async function seedHouse(page: Page): Promise<any[]> {
-  const planes = housePlanes();
+async function seedHouse(page: Page, opts: { flatten?: string } = {}): Promise<any[]> {
+  const planes = housePlanes(opts);
   await page.evaluate(ps => (window as any).__solarE2E.seedDesign({ roofPlanes: ps }), planes as any);
   await expect
     .poll(() => page.evaluate(() => (window as unknown as E2EWin).__solarE2E?.roofPlanes.length ?? 0),
@@ -689,5 +696,182 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
     expect(st.planes.every((p: any) => p.sectionSource === 'user-traced')).toBe(true);
     // No face carries a detection provenance.
     expect(st.planes.some((p: any) => p.source === 'solar_api' || p.source === 'aerial_nearmap')).toBe(false);
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // STEP 9 — "Change an individual face's pitch."
+  //
+  // The report that opened this round named it as the blocking gap: "The
+  // current UI can display pitch for a selected roof face but cannot edit that
+  // face's pitch."
+  //
+  // 🚨 THE ACCEPTANCE PROPERTY IS NOT "THE NUMBER CHANGED". It is that the
+  // partner slope keeps its own pitch AND its own eave, so there is nothing to
+  // compensate for — which is the whole complaint this round exists to answer.
+  // ═════════════════════════════════════════════════════════════════════════
+
+  test('🚨 STEP 9 — one FACE takes a new pitch, and the partner needs no compensating edit', async ({ page }) => {
+    await openStudio(page);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    const before = await state(page);
+    const aBefore = before.planes.find((p: any) => p.id === 'sec-main::slopeA');
+    const bBefore = before.planes.find((p: any) => p.id === 'sec-main::slopeB');
+    expect(aBefore.pitch).toBeCloseTo(30, 0);
+    expect(bBefore.pitch).toBeCloseTo(30, 0);
+
+    // Select the face, then drill into the Roof face level.
+    await clickFace(page, 'sec-main::slopeA');
+    await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
+    await page.locator('[data-testid="inspector-level-face"]').click();
+    await expect(page.locator('[data-testid="inspector-face"]')).toBeVisible({ timeout: T });
+
+    // 🚨 THE BOX IS AN INPUT, AND IT SHOWS WHAT THE FACE ACTUALLY IS.
+    const box = page.locator('[data-testid="inspector-face-pitch"]');
+    await expect(box).toBeVisible();
+    expect(Number(await box.inputValue())).toBeCloseTo(30, 0);
+
+    // The consequences are on screen BEFORE anything is committed.
+    await expect(page.locator('[data-testid="inspector-pitch-consequences"]')).toBeVisible();
+
+    await box.click();
+    await box.fill('45');
+    await box.press('Enter');
+    await expect
+      .poll(() => state(page).then(s => s.planes.find((p: any) => p.id === 'sec-main::slopeA').pitch),
+        { message: 'slope A never took the new pitch', timeout: T })
+      .toBeGreaterThan(40);
+
+    const after = await state(page);
+    const aAfter = after.planes.find((p: any) => p.id === 'sec-main::slopeA');
+    const bAfter = after.planes.find((p: any) => p.id === 'sec-main::slopeB');
+
+    // 🚨 THE GEOMETRY ACQUIRED THE PITCH. `plane.pitch` on a section face is
+    // read back OUT of the surface the builder fitted, never assigned — so this
+    // is the roof, not a relabelled scalar.
+    expect(aAfter.pitch, 'slope A did not take the new pitch').toBeCloseTo(45, 0);
+
+    // 🚨 AND SLOPE B DID NOT MOVE. Same pitch, same wall. Nothing to compensate.
+    expect(bAfter.pitch, 'slope B was dragged along').toBeCloseTo(bBefore.pitch, 1);
+    expect(bAfter.eave, 'slope B’s wall moved').toBeCloseTo(bBefore.eave, 6);
+
+    // The section's own default is untouched: it is what a NEW face would get.
+    expect(aAfter.sectionPitch).toBeCloseTo(30, 6);
+
+    // 🚨 NO OTHER SECTION MOVED.
+    for (const sid of ['sec-garage', 'sec-wing']) {
+      expect(JSON.stringify(ofSection(after, sid)), `${sid} moved`)
+        .toBe(JSON.stringify(ofSection(before, sid)));
+    }
+  });
+
+  test('🚨 STEP 9b — rise:run is the same number typed another way', async ({ page }) => {
+    await openStudio(page);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    await clickFace(page, 'sec-main::slopeA');
+    await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
+    await page.locator('[data-testid="inspector-level-face"]').click();
+
+    const rise = page.locator('[data-testid="inspector-face-pitch-rise"]');
+    await expect(rise).toBeVisible();
+    await rise.click();
+    await rise.fill('6');
+    await rise.press('Enter');
+
+    // 6:12 is exactly atan(6/12) = 26.565°, and the ROOF is at that angle — not
+    // a second stored "rise" field that could drift away from it.
+    await expect
+      .poll(() => state(page).then(s => s.planes.find((p: any) => p.id === 'sec-main::slopeA').pitch),
+        { message: 'the roof never reached 6:12', timeout: T })
+      .toBeLessThan(28);
+    const st = await state(page);
+    expect(st.planes.find((p: any) => p.id === 'sec-main::slopeA').pitch).toBeCloseTo(26.565, 0);
+    // And the degrees box now reads the same slope.
+    expect(Number(await fieldValue(page, 'inspector-face-pitch'))).toBeCloseTo(26.6, 0);
+  });
+
+  test('🚨 STEP 9c — a per-face pitch survives undo, redo, save and reload', async ({ page }) => {
+    test.skip(!ARMED, 'SOLARPRO_LOCAL_PG is not set — no database is attached, so nothing can be saved.');
+
+    const projectId = await createProject(page);
+    await openStudio(page, projectId);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    await clickFace(page, 'sec-main::slopeA');
+    await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
+    await page.locator('[data-testid="inspector-level-face"]').click();
+    const box = page.locator('[data-testid="inspector-face-pitch"]');
+    await box.click();
+    await box.fill('45');
+    await box.press('Enter');
+    await expect
+      .poll(() => state(page).then(s => s.planes.find((p: any) => p.id === 'sec-main::slopeA').pitch),
+        { timeout: T })
+      .toBeGreaterThan(40);
+
+    // UNDO puts the symmetric gable back...
+    await page.locator('[data-testid="geometry-undo"]').click();
+    await expect
+      .poll(() => state(page).then(s => s.planes.find((p: any) => p.id === 'sec-main::slopeA').pitch),
+        { message: 'undo did not restore the symmetric gable', timeout: T })
+      .toBeLessThan(35);
+
+    // ...and REDO puts the saltbox back, both halves.
+    await page.locator('[data-testid="geometry-redo"]').click();
+    await expect
+      .poll(() => state(page).then(s => s.planes.find((p: any) => p.id === 'sec-main::slopeA').pitch),
+        { message: 'redo did not restore the edited pitch', timeout: T })
+      .toBeGreaterThan(40);
+    const redone = await state(page);
+    expect(redone.planes.find((p: any) => p.id === 'sec-main::slopeB').pitch).toBeCloseTo(30, 0);
+
+    // 🚨 AND IT COMES BACK OFF THE DATABASE. `facePitchDeg` lives on the section
+    // record that rides on every face, so it round-trips through
+    // `layouts.roof_planes` with no new column — and a copier that dropped it
+    // would show up here as a roof that reloads symmetric.
+    await expect
+      .poll(async () => {
+        const r = await page.request.get('/api/projects/' + projectId + '/layout');
+        if (r.status() !== 200) return -1;
+        const body: any = await r.json();
+        const planes = body?.data?.roofPlanes ?? body?.roofPlanes ?? [];
+        const a = planes.find((p: any) => p.id === 'sec-main::slopeA');
+        return a?.section?.facePitchDeg?.slopeA ?? -1;
+      }, { message: 'the per-face pitch never reached the database', timeout: 60_000 })
+      .toBeGreaterThan(40);
+
+    await page.reload();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as E2EWin).__solarE2E?.roofPlanes.length ?? 0),
+        { message: 'the roof did not come back after a reload', timeout: 60_000 })
+      .toBe(8);
+
+    const reloaded = await state(page);
+    expect(reloaded.planes.find((p: any) => p.id === 'sec-main::slopeA').pitch).toBeCloseTo(45, 0);
+    expect(reloaded.planes.find((p: any) => p.id === 'sec-main::slopeB').pitch).toBeCloseTo(30, 0);
+  });
+
+  test('🚨 a control that cannot move the geometry is not offered — the flat deck', async ({ page }) => {
+    // An audit reached this from the Block tool in three clicks: type 25 into a
+    // flat section's pitch, the edit returns ok, the status bar says "every
+    // face of the section moved together", the builder builds the deck at 0°
+    // anyway, and the panel then reads "Roof pitch 25.0°" about a roof with no
+    // 25° in it. Now there is no box, and a reason in its place.
+    await openStudio(page);
+    await nameTheProperty(page);
+    await seedHouse(page, { flatten: 'sec-garage' });
+    await frameRoof(page);
+
+    await clickFace(page, 'sec-garage::deck');
+    await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
+    await expect(page.locator('[data-testid="inspector-pitch"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="inspector-pitch-locked"]')).toContainText(/Shed/);
   });
 });

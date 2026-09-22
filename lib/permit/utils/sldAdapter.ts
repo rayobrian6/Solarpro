@@ -12,6 +12,10 @@ import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/li
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { buildConductorAuthority, type ConductorAuthority, type SubSystemConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
+// THE CT / metering authority (lib/equipment/currentTransformers). The permit's
+// E-1 schedule reads it here so it carries the same Metering row the Diagram tab
+// and the exported SLD PDF already print — see the note at `meteringChannels`.
+import { resolveMeteringRequirement, meteringScheduleValue, ungroundedConductorsForService } from '@/lib/equipment/currentTransformers';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
 import { getInverterById, getMicroinverterById, SOLAR_PANELS,
          resolveBatteryBranch } from '@/lib/equipment-db';
@@ -376,6 +380,48 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     combinerModel:           _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined,
     combinerHasIntegratedGateway: _bos.hasIntegratedGateway,
     combinerProvidesAcDisconnect: _bos.providesAcDisconnect,
+    // ── 2026-09-22 — THE METERING ROW THAT WAS ONLY MISSING FROM THE PERMIT ──
+    //
+    // 🚨 WHAT WAS WRONG: the renderer prints the E-1 'Metering' row only when it
+    // is HANDED `meteringChannels` (sld-professional-renderer:3078 — an optional
+    // field it will never compose itself, deliberately: a schedule that writes
+    // its own metering wording is a second authority). The standalone SLD route
+    // and the SLD PDF export both compose it from the CT authority. This
+    // adapter — the permit package's E-1 — composed nothing, so the row simply
+    // did not exist on the sheet that goes to the AHJ.
+    //
+    // WHAT A USER SAW: the Diagram tab and the exported SLD stated, for an IQ
+    // Combiner 6C job, `PROD (INT.) · NO CONS` — production metering integral,
+    // consumption NOT provided (the 6C ships no consumption CTs). The permit's
+    // own E-1 stated nothing at all, next to a schedule naming the 6C. Silence
+    // beside a gateway reads as "metering is handled"; that is the exact
+    // inference the CT authority exists to stop, and it is how a crew arrives
+    // with a combiner that cannot measure consumption and nothing to make it
+    // work.
+    //
+    // Composed ONCE, from the authority, for the device this schedule actually
+    // names (`_bosBrains`) — never re-worded here. undefined ⇒ no metering
+    // device is modelled and the row stays absent, which is the honest answer.
+    meteringChannels: (() => {
+      const _cap = _bosBrains?.metering;
+      if (!_cap) return undefined;
+      return meteringScheduleValue(resolveMeteringRequirement({
+        capability: _cap,
+        deviceLabel: _bosBrains?.model ?? null,
+        // RAW, not the display label built above ('Load Side Tap'): the
+        // authority owns the token table and derives the LOAD_WITH_SOLAR /
+        // LOAD_ONLY mode from it. A sixth spelling is the last thing this needs.
+        interconnectionRaw: project.interconnectionMethod ?? null,
+        // 120/240 V 1Ø 3-wire is what every other statement on this sheet
+        // assumes (the meter node prints it), so the CT count follows the same
+        // assumption through the authority's explicit table — never a literal 2.
+        ungroundedConductorCount: ungroundedConductorsForService(240, 1),
+        // The claim and the purchase are one decision: a package may assert the
+        // gateway meters consumption exactly when the resolved device
+        // integrates the gateway.
+        consumptionMeteringRequired: _bos.hasIntegratedGateway,
+      }));
+    })(),
     // The four fields above are the RESOLVED single-lane answer. This is the
     // selection itself, which the MULTI-LANE renderer needs because that path
     // re-resolves per lane and never reads them — without it a hybrid planset

@@ -7,6 +7,11 @@
 // renderer performs any: a rule that lives in a route is a rule the next route
 // forgets.
 //
+// (`combinerIdentity` is the one exception to "imports nothing": it is a static
+// declared table with no imports of its own, not a catalogue reader, and the
+// alternative — every caller carrying its own id reconciliation — is the defect
+// this module exists to end.)
+//
 // THE BOUNDARY THIS KEEPS. This module does not choose a combiner. What it does
 // is REFUSE TO RECORD A CLAIM IT CANNOT JUSTIFY — a device the catalogue has
 // never heard of, or one the selected inverter's own declaration excludes with
@@ -14,6 +19,7 @@
 // down an unsupported decision.
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { canonicalCombinerId } from '@/lib/equipment/combinerIdentity';
 import type {
   CombinerBasis,
   CombinerCompatibilityAuthority,
@@ -101,6 +107,20 @@ function refuse(...refusals: CombinerSelectionRefusal[]): CombinerSelectionOutco
  * catalogue does not say", which is a fact about SolarPro, not about the roof.
  * An empty array is treated the same, because an empty list is far more likely
  * to be missing data than a manufacturer statement that nothing is compatible.
+ *
+ * 🚨 THE TWO SIDES OF THIS COMPARISON COME FROM DIFFERENT CATALOGUES, AND THEY
+ * USED TO BE COMPARED AS RAW STRINGS. `deviceId` is a BOS-catalogue id, because
+ * that is what the picker offers and what a selection is recorded under;
+ * `declaredCompatibleIds` is whatever equipment-db's `compatibleWith` says. For
+ * the one product they both carry those spellings differ by a single character
+ * ('enphase-iq-combiner-5c' vs 'enphase-iq-combiner-5'), so `declared.includes()`
+ * was false for EVERY candidate on EVERY Enphase project: the installer could
+ * not record the 5C they were fitting, nor the 6C, without citing engineering
+ * authority to admit a pairing the manufacturer already declares. Both sides are
+ * now resolved to a product identity first, through one declared table
+ * (lib/equipment/combinerIdentity.ts) that names which catalogue each spelling
+ * comes from. An id that table does not know canonicalises to null and therefore
+ * does NOT match — a refusal, never a pass, and never a suffix-matching guess.
  */
 export function judgeCombinerCompatibility(args: {
   deviceId: string;
@@ -120,12 +140,29 @@ export function judgeCombinerCompatibility(args: {
         : 'No inverter was identified, so no declared pairing could be consulted.',
     };
   }
-  const ok = declared.includes(args.deviceId);
+  // The identity of the device being judged. null ⇒ no declared table row names
+  // this spelling, so nothing below can establish that the declaration means it.
+  const wanted = canonicalCombinerId(args.deviceId);
+  // Each declared id beside the product it resolves to. Non-combiner entries
+  // ride in these arrays too ('enphase-iq-gateway', 'enphase-iq-battery-5p') and
+  // resolve to null, which is correct: they are not this device.
+  const reconciled = declared.map(id => ({ raw: String(id), canonical: canonicalCombinerId(id) }));
+  const ok = wanted != null && reconciled.some(d => d.canonical === wanted);
+  // The source line carries BOTH spellings for every entry, because the whole
+  // failure was invisible while it printed only one of them: an operator reading
+  // "[enphase-iq-combiner-5] does not name enphase-iq-combiner-5c" had no way to
+  // know those are the same box.
+  const shown = reconciled
+    .map(d => (d.canonical && d.canonical !== d.raw ? `${d.raw} (= ${d.canonical})` : d.raw))
+    .join(', ');
   return {
     inverterId: args.inverterId ?? null,
     declaredCompatibleIds: [...declared],
     declaredCompatible: ok,
-    source: `equipment-db pairing for inverter ${args.inverterId ?? '(unidentified)'}: [${declared.join(', ')}]`,
+    source: `equipment-db pairing for inverter ${args.inverterId ?? '(unidentified)'}: [${shown}]`
+      + (wanted == null
+        ? `; ${args.deviceId || '(no device)'} matches no combiner product identity, so the declaration cannot be shown to name it.`
+        : `; judged against product identity ${wanted}.`),
   };
 }
 
@@ -187,12 +224,20 @@ export function planCombinerSelection(args: {
 
   // A declaration that EXISTS and excludes this device is a real conflict. It is
   // surfaced, never silently replaced with something the software prefers.
+  //
+  // The message carries `compatibility.source` because the two sides are written
+  // in different catalogues' spellings: an operator told only that
+  // [enphase-iq-combiner-5] "does not name enphase-iq-combiner-5c" cannot see
+  // whether that is a real conflict or a vocabulary one, and for a year it was
+  // the second. The source line shows each declared id beside the product it
+  // resolves to, so a genuine exclusion reads as one.
   if (compatibility.declaredCompatibleIds && !compatibility.declaredCompatible && !ov) {
     refusals.push({
       code: 'NOT_A_CANDIDATE',
       message:
         `The selected inverter declares [${compatibility.declaredCompatibleIds.join(', ')}] and does not name ${deviceId}. ` +
-        'Selecting it anyway is permitted with stated engineering authority; it will not be substituted for something else.',
+        'Selecting it anyway is permitted with stated engineering authority; it will not be substituted for something else. ' +
+        `(${compatibility.source})`,
     });
   }
 

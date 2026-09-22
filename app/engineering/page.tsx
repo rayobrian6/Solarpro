@@ -12,6 +12,16 @@ import {
   type MultiSubSystemInput,
 } from '@/lib/computed-multi-system';
 import { systemTypeToInstallationType } from '@/lib/structural/types';
+// The ONE fold that decides an overall engineering verdict. The page is a
+// CONSUMER of it, never a second implementation: NOT EVALUATED is not PASS,
+// MISSING GOVERNING DATA is not PASS, AN ENGINE THAT DID NOT RUN is not PASS,
+// and a known failure can never be promoted back up. See runCalc (~line 6288)
+// for the re-derivation this replaced.
+import {
+  resolveOverallStatus,
+  notEvaluated,
+  type EngineOutcome,
+} from '@/lib/engineering/engineeringStatus';
 import { resolveEquipment } from '@/lib/systemEquipmentResolver';
 import { applyPanelToEngineeringConfig } from '@/lib/system/selectedEquipment';
 import AppShell from '@/components/ui/AppShell';
@@ -251,7 +261,16 @@ type InverterConfig = import('@/lib/engineering-helpers').InverterConfig;
 type ProjectConfig = import('@/lib/engineering-helpers').ProjectConfig;
 
 interface ComplianceResult {
+  /** `null` is NOT EVALUATED, and it is never silently 'PASS'. StatusBadge
+   *  already renders it as "Not calculated". */
   overallStatus: 'PASS' | 'WARNING' | 'FAIL' | null;
+  /** Which engines produced no verdict, and why — carried from
+   *  /api/engineering/calculate and re-folded with the sub-system runs. These
+   *  were previously DROPPED on the floor by the client: the page received the
+   *  route's fail-closed metadata and never declared, stored or showed it. */
+  statusNotEvaluated?: Array<{ engine: string; reason: string }>;
+  /** One-line explanation of how `overallStatus` was reached. */
+  statusBasis?: string;
   utilityName?: string;
   jurisdiction?: any;
   electrical?: any;
@@ -6010,7 +6029,40 @@ function EngineeringPageInner() {
             acBreaker:       calcData?.acSizing?.ocpdAmps ?? null,
             mainPanelBus:    config.panelBusRating ?? 200,
             backfeedBreaker: calcData?.interconnection?.backfeedAmps ?? calcData?.acSizing?.ocpdAmps ?? null,
-            interconnection: config.interconnectionMethod ?? 'SUPPLY_SIDE_TAP',
+            // 🚨 AN ABSENT TOPOLOGY IS NOT A SUPPLY-SIDE TAP.
+            //
+            // This read `?? 'SUPPLY_SIDE_TAP'` — the ONLY site in this file that
+            // defaulted that way; the other fourteen readers of the same field
+            // (the SLD payload, the BOM payload, the permit payload, the plan
+            // inputs, the busbar display) all coalesce to 'LOAD_SIDE'. So the
+            // value the page COMPUTED with and the value it RECORDED disagreed
+            // whenever config.interconnectionMethod was absent, and it is absent
+            // for any project whose stored engineering_config predates the key
+            // (page load at ~line 1456 assigns engCfg.interconnectionMethod
+            // unguarded, so a snapshot without the key blanks the 'LOAD_SIDE'
+            // default).
+            //
+            // What the user would have seen: a load-side design silently written
+            // to engineering_runs.interconnection_method = 'SUPPLY_SIDE_TAP',
+            // then hydrated back INTO the design on the next load (~line 2236
+            // patches config from run.interconnectionMethod). Supply-side and
+            // load-side are materially different permits — different NEC article
+            // (705.11 vs 705.12(B)), different conductor/OCPD story, different
+            // utility application — so this invented a topology nobody chose and
+            // then made it stick.
+            //
+            // UNRESOLVED is recorded instead of a guess, and every consumer on
+            // the round trip already carries it: save-outputs writes
+            // `elec.interconnection || null` into a NULLABLE VARCHAR(50);
+            // latest-run and run-from-file return `interconnection_method ||
+            // null`; both hydration sites here (`if (run.interconnectionMethod)`,
+            // `if (snap.interconnectionMethod)`) are truthiness-guarded, so a
+            // null leaves the live config alone instead of overwriting it; and
+            // EngineeringTab renders `|| '—'`. Engines keep coalescing to
+            // 'LOAD_SIDE' at their OWN boundary — same discipline as
+            // windExposure above, where '' means UNSTATED and only the authority
+            // record can tell the difference.
+            interconnection: config.interconnectionMethod ?? null,
           }
         : {};
 
@@ -6285,25 +6337,84 @@ function EngineeringPageInner() {
           }
         } catch (_) { /* structural display map is best-effort */ }
 
-        // v47.417 — Recompute overallStatus from the FINAL structural status the
-        // user sees. Historically the client replaced calcData.structural with a
-        // separate V3 result that could disagree with the server's V4-computed
-        // overallStatus; V3 is now retired (Step 5) so the structural source is V4
-        // throughout, but keeping this recompute is harmless and keeps overallStatus
-        // consistent with the structural errors actually rendered in the UI.
+        // v47.418 — 🚨 THE CLIENT MUST NOT PROMOTE THE SERVER'S VERDICT.
+        //
+        // This block used to THROW AWAY calcData.overallStatus and recompute it:
+        //
+        //     const elecStatus   = calcData.electrical?.status  ?? 'PASS';
+        //     const structStatus = calcData.structural?.status  ?? 'PASS';
+        //     … errors ? 'FAIL' : WARNING ? 'WARNING' : 'PASS';
+        //
+        // That is the exact `?? 'PASS'` shape /api/engineering/calculate was
+        // fixed to remove (see lib/engineering/engineeringStatus.ts, "PASS MUST
+        // NOT MEAN NOTHING OBJECTED"). Three separate ways it printed a green
+        // stamp over a verdict that was not green:
+        //
+        //   1. It could not express NOT EVALUATED. The route answers `null` when
+        //      an engine was never asked or threw, and ships `statusNotEvaluated`
+        //      saying which and why. The final `else` here overwrote that `null`
+        //      with 'PASS' on every run, so an engineering page that had evaluated
+        //      NOTHING showed a PASS badge.
+        //   2. On a HYBRID roof+fence project it read the wrong subset. A few
+        //      lines above, calcData.structural is rebuilt to display the ROOF
+        //      subset (`_subs?.roof` wins), so `.status` here is the ROOF status.
+        //      The fence subset returns status 'WARNING' with an EMPTY errors
+        //      array (lib/structural-engine-v4.ts analyzeFenceSystem — "always
+        //      ESTIMATE until PE sign-off"). Roof PASS + no errors ⇒ this wrote
+        //      'PASS'. What the user saw: a fence array that no engineer has
+        //      stamped, badged PASS on the page, while the permit path — which
+        //      reads the route's own overallStatus — carried WARNING for the same
+        //      project. Same design, two answers, and the page showed the
+        //      permissive one.
+        //   3. It was a second copy of a rule that already has exactly one owner.
+        //
+        // What holds now: the route's verdict is an INPUT to the fold, never
+        // something the client recomputes. Folded ALONGSIDE it are the per-sub-
+        // system structural runs, which the route's own aggregator does NOT see
+        // (it folds only the legacy whole-project run) — that is why the merge of
+        // sub-system errors above exists, and its intent is preserved here as real
+        // engine outcomes instead of a flattened error count. resolveOverallStatus can
+        // therefore only ESCALATE: a sub-system FAIL still outranks everything, a
+        // fence WARNING now reaches the badge, and `null` survives unless
+        // something genuinely failed. There is no path back up to PASS.
         try {
-          const elecErrors = (calcData.electrical?.errors ?? []).filter((e: any) => !e.autoFixed && e.severity !== 'info');
-          const structErrors = (calcData.structural?.errors ?? []).filter((e: any) => e?.severity === 'error');
-          const elecStatus = calcData.electrical?.status ?? 'PASS';
-          const structStatus = calcData.structural?.status ?? 'PASS';
-          if (elecErrors.length > 0 || structErrors.length > 0) {
-            calcData.overallStatus = 'FAIL';
-          } else if (elecStatus === 'WARNING' || structStatus === 'WARNING') {
-            calcData.overallStatus = 'WARNING';
-          } else {
-            calcData.overallStatus = 'PASS';
+          const _engines: Record<string, EngineOutcome> = {};
+
+          // Engines the ROUTE reported as having produced no verdict, kept with
+          // their own names and reasons so the basis string stays readable.
+          const _ne: Array<any> = Array.isArray(calcData.statusNotEvaluated) ? calcData.statusNotEvaluated : [];
+          for (const m of _ne) _engines[m?.engine || 'server'] = notEvaluated(m?.reason || 'skipped');
+
+          if (calcData.overallStatus) {
+            // A stated verdict from the route. errorCount stays 0 — the route has
+            // ALREADY folded its error lists into this status; counting them again
+            // here would be the second implementation this change removes.
+            _engines.server = { evaluated: true, status: calcData.overallStatus, errorCount: 0 };
+          } else if (_ne.length === 0) {
+            // null with no stated reason: still not a pass.
+            _engines.server = notEvaluated('skipped');
           }
-        } catch (_) { /* defensive: keep server-computed overallStatus */ }
+
+          // Per-sub-system structural runs (roof / ground / fence). On a hybrid,
+          // a ground-pile FAIL or the fence PE-sign-off WARNING reaches overall
+          // status from HERE or not at all.
+          const _subsForStatus = calcData.structural?.subSystems as Record<string, any> | undefined;
+          if (_subsForStatus) {
+            for (const [key, sub] of Object.entries(_subsForStatus)) {
+              if (!sub?.status) continue;
+              _engines[`structural:${key}`] = {
+                evaluated: true,
+                status: sub.status,
+                errorCount: ((sub.errors ?? []) as any[]).filter((e: any) => e?.severity === 'error').length,
+              };
+            }
+          }
+
+          const _folded = resolveOverallStatus(_engines);
+          calcData.overallStatus      = _folded.status;
+          calcData.statusNotEvaluated = _folded.notEvaluated;
+          calcData.statusBasis        = _folded.basis;
+        } catch (_) { /* defensive: leave the route's own overallStatus untouched */ }
 
         setCompliance(calcData);
         // Inject NEC step-by-step calculation entries into decision log

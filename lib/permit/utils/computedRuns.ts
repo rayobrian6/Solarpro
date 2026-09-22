@@ -26,6 +26,10 @@ import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/li
 import { toSubSystemKey, type SubSystemKey } from '@/lib/system/subSystemEquipment';
 import { microMaxPerBranch } from './branching';
 import { getDesignTemps } from './designTemps';
+// THE battery electrical authority — the same function the engineering page,
+// the standalone SLD and runElectricalCalc ask. Never a second arithmetic.
+import { resolveBatteryBranch } from '@/lib/equipment-db';
+import { hasRealBattery } from './helpers';
 // WS-5 — the ONE substitution of a field measurement for an estimated run
 // length, shared with the canonical run model in generatePermit.
 import { applyFieldMeasurementsToRuns } from '../snapshot/applyFieldMeasurements';
@@ -115,6 +119,96 @@ export function buildComputedRunsForPermit(
             : _dcKw * 0.77)
         : (eq.inverterAcOutputKw || _dcKw * 0.8));
 
+    // ══ 2026-09-22 — THE PERMIT'S BUSBAR VERDICT HAD THE BATTERY SET TO ZERO ══
+    //
+    // 🚨 WHAT WAS HERE: `batteryBackfeedA: 0, batteryCount: 0` — two literals,
+    // unconditional, on the input to the engine whose projection IS
+    // `compliance.electrical.busbar` (W2.1). The engineering page
+    // (app/engineering/page.tsx: `batteryIds: [config.batteryId]`) and the
+    // standalone SLD route both hand computeSystem the real battery; the PERMIT
+    // path — the only one whose output an AHJ stamps — handed it nothing.
+    //
+    // WHAT A USER SAW: 200 A bus, 175 A main (65 A of headroom), load-side, one
+    // 3.8 kW string inverter (20 A) plus one Tesla Powerwall 3. The Powerwall's
+    // documented 50 A backfeed breaker is real load on that bus: 20 + 50 = 70 A
+    // > 65 A. The page said FAIL. The permit said PASS on 20 A, because the
+    // battery was not in the sum at all. The package that goes to the AHJ was
+    // the wrong one, in the permissive direction, on the calculation that
+    // clears a design for interconnection.
+    //
+    // The identity is resolved ONCE, here, through `resolveBatteryBranch` —
+    // which owns the id-else-EXACT-manufacturer+model recovery, so a legacy
+    // design carrying only brand/model still resolves. Its resolved catalogue id
+    // is then handed to the engine, which asks the SAME authority for the
+    // busbar contribution (computed-system.ts: `_batteryCountsById`). One
+    // function, one number, no second copy of the step function here.
+    //
+    // `batteryBackfeedA` is deliberately NOT set: it is the engine's fallback
+    // for callers with no id, and it ALSO gates the BATTERY_TO_BUI / BUI_TO_MSP
+    // run segments. Those runs are a separate piece of work — this change fixes
+    // the 705.12(B) term and nothing else about the BOM.
+    const _batteryUnits = Math.max(1, Math.trunc(input.project.batteryCount ?? 0) || 1);
+    const _hasBattery = hasRealBattery(input.project);
+    const _batAuth = _hasBattery
+      ? resolveBatteryBranch(
+          { id: input.project.batteryId, brand: input.project.batteryBrand, model: input.project.batteryModel },
+          _batteryUnits,
+        )
+      : null;
+    // The id the engine will re-resolve. Resolved ⇒ the catalogue id (which may
+    // have been recovered from manufacturer+model). Unresolved ⇒ whatever the
+    // design declared, so the engine's own "this battery is UNRESOLVED and the
+    // busbar total is therefore incomplete" warning fires instead of silence.
+    const _batteryEngineId = (_batAuth?.resolved ? _batAuth.batteryId : input.project.batteryId) || '';
+    if (_hasBattery && !_batteryEngineId) {
+      console.warn('[computedRuns] battery present on this design but NO catalogue identity could be',
+        'resolved (declared:', [input.project.batteryBrand, input.project.batteryModel].filter(Boolean).join(' ') || '—',
+        ') — its NEC 705.12(B) contribution is MISSING from the permit busbar total.',
+        _batAuth?.refusal?.message ?? '');
+    }
+
+    // ══ 2026-09-22 — ONE FORMULA FOR THE 705.12(B) TOTAL PV BACKFEED ═════════
+    //
+    // This function hands computeSystem ONE SYNTHETIC inverter carrying the
+    // whole project's AC kW (`inverterAcKw: acKw` below), because that is what
+    // sizes the feeder correctly. The engine therefore cannot see how many
+    // physical inverters actually land on the busbar, and it rounded the
+    // aggregate current once: three Fronius Primo 6.0-1 = 75 A × 1.25 = 93.75 →
+    // ONE 100 A breaker → PASS against a 100 A allowance, while the engineering
+    // page counted the three real 35 A breakers → 105 A → FAIL.
+    //
+    // The real circuit list is right here on the design, so it is passed
+    // explicitly. `interconnectingCircuitAmps` is a list of BREAKERS, not
+    // conductors — the feeder stays sized on the aggregate.
+    //   · micro: the whole fleet sits behind one AC combiner breaker, which is
+    //     exactly what the engine already derives — left alone.
+    //   · a per-subsystem scoped call (opts.totalPanels) gets its own aggregate
+    //     and must never see the whole-project fleet — left alone.
+    //   · ONE circuit is left alone too. At N=1 the engine's own derivation is
+    //     already Σ-of-one, and `acKw` (the project total, which is what the
+    //     feeder is sized from) stays the single basis for the whole sheet.
+    //     Handing it inverters[0].acOutputKw instead would move every
+    //     single-inverter package whose two carriages disagree — a digest move
+    //     with no defect behind it (I-1: N=1 byte identity).
+    const _fleetCircuitAmps: number[] = (topo !== 'micro' && !hasSubset)
+      ? (input.system?.inverters ?? [])
+          .filter(inv => String(inv?.type ?? '').toLowerCase() !== 'micro')
+          .map(inv => ((inv?.acOutputKw || 0) * 1000) / 240)
+          .filter(a => a > 0)
+      : [];
+    // A fleet whose nameplates do not add up to the AC kW the rest of this
+    // sheet is derived from is a mis-shaped payload, not a calculation result.
+    // Surfaced rather than silently deciding a 120% verdict from it.
+    if (_fleetCircuitAmps.length > 1) {
+      const _fleetKw = (_fleetCircuitAmps.reduce((s, a) => s + a, 0) * 240) / 1000;
+      if (acKw > 0 && Math.abs(_fleetKw - acKw) / acKw > 0.02) {
+        console.warn('[computedRuns] inverter fleet nameplates sum to', _fleetKw.toFixed(2),
+          'kW but the system AC total is', acKw.toFixed(2),
+          'kW — the NEC 705.12(B) backfeed is Σ of the per-inverter breakers and',
+          'the feeder is sized on the system total; these two should agree.');
+      }
+    }
+
     const csInput: ComputedSystemInput = {
       topology: (topo === 'micro' ? 'micro' : topo === 'optimizer' ? 'optimizer' : 'string'),
       totalPanels,
@@ -183,8 +277,13 @@ export function buildComputedRunsForPermit(
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
       interconnectionMethod: (input.project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE'),
-      batteryBackfeedA: 0,
-      batteryCount: 0,
+      // The battery's 705.12(B) contribution, from the authority (see above).
+      // No battery on the job ⇒ the historical zeros, unchanged.
+      batteryIds: _hasBattery && _batteryEngineId ? [_batteryEngineId] : undefined,
+      batteryCount: _hasBattery ? _batteryUnits : 0,
+      // The REAL interconnecting breakers, when this design has MORE THAN ONE.
+      // One (or none) ⇒ the engine's own derivation, unchanged.
+      ...(_fleetCircuitAmps.length > 1 ? { interconnectingCircuitAmps: _fleetCircuitAmps } : {}),
       // Wave 2a pass-through (both undefined on the legacy path — I-1):
       ...(opts?.subSystemKey ? { subSystemKey: opts.subSystemKey } : {}),
       ...(opts?.emitSharedServiceRuns === false ? { emitSharedServiceRuns: false } : {}),
