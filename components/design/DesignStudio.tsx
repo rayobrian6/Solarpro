@@ -5088,6 +5088,21 @@ export default function DesignStudio({ project, onSave }: Props) {
                     // a degree, and that foreshortens the usable extent by
                     // cos²(Δ) — losing whole rows, so panel count, kW and BOM.
                     ...(u.ecefFrame3D ? { ecefFrame3D: u.ecefFrame3D } : {}),
+                    // 🚨 AND THE FACE SAYS IT IS NO LONGER PARAMETRIC.
+                    //
+                    // A section face is derived from footprint + eave + pitch and
+                    // is rebuilt from those on every section edit. The corners a
+                    // stitch produces are not expressible as any such triple, so
+                    // `plane.section` was left describing the PRE-stitch shape —
+                    // and the installer's next eave nudge rebuilt from it and
+                    // silently undid the stitch. An audit traced that whole path.
+                    //
+                    // Marking the face stops the revert: `applySectionEdit`
+                    // refuses to rebuild a section that owns a reshaped face and
+                    // says so, instead of quietly choosing one of the two
+                    // geometries. Standalone faces are unaffected — they have no
+                    // parameters to disagree with.
+                    ...(p.sectionId || p.section ? { sectionFaceReshaped: true } : {}),
                   });
                 }));
                 console.log('[DesignStudio] Stitch synced', updates.length, 'plane(s) into roofPlanes');
@@ -6415,10 +6430,23 @@ export default function DesignStudio({ project, onSave }: Props) {
                                           <span className="flex-1 text-[10px] text-slate-300 font-mono">{Math.round(plane.azimuth ?? 180)}°</span>
                                           <span className="text-[9px] text-slate-500">measured</span>
                                         </div>
+                                        {/* 🚨 THE ADVICE HAS TO NAME A CONTROL THAT EXISTS.
+                                            This used to say "change its slope on the building
+                                            section", which is no help at all for a face that
+                                            belongs to no section — every Google detection, and
+                                            every hand trace. An audit found the gate catches
+                                            100% of native faces, so removing the slider had
+                                            removed the capability outright with nowhere to send
+                                            the installer. The 3D inspector now edits any single
+                                            face's pitch — rebuilding the surface rather than
+                                            relabelling the scalar — so this points there. */}
                                         <div className="text-[9px] text-slate-500 leading-snug">
-                                          This face has real 3D geometry. Change its slope on the
-                                          building section in the 3D view — a number typed here
-                                          would move the permit and not the roof.
+                                          This face has real 3D geometry, so a number typed here would
+                                          move the permit and not the roof. Click the face in the 3D
+                                          view and set its pitch in the inspector — that rebuilds the
+                                          surface{plane.sectionId || plane.section
+                                            ? ', and every face of its building section with it'
+                                            : ' about its eave, and nothing else moves'}.
                                         </div>
                                       </div>
                                     ) : (

@@ -43,8 +43,11 @@ import type {
   SectionMeasurement,
   FaceMeasurement,
   SectionEdit,
+  FacePitchPreview,
+  PitchAnchor,
 } from '@/lib/3d/sectionEditing';
 import { FT_PER_M } from '@/lib/3d/sectionEditing';
+import { formatRise12, parsePitchInput, riseOver12 } from '@/lib/3d/pitchFormat';
 
 export type InspectorLevel = 'none' | 'section' | 'face';
 
@@ -65,6 +68,18 @@ export interface InspectorState {
   standaloneFaceCount: number;
   /** The last refusal, already phrased for a person. */
   refusal: string | null;
+  /**
+   * How many faces of the selected section Stitch or Square Up reshaped by
+   * hand. While this is non-zero the section's parametric controls would
+   * DISCARD that reshape, so they are shown disabled with the choice stated.
+   */
+  reshapedFaceCount: number;
+  /**
+   * WHAT STAYS PUT WHEN A PITCH CHANGES. UI state, owned by the engine so it
+   * survives a selection change — but it is not a stored property of any roof.
+   * See `SectionEdit.pitchAnchor`.
+   */
+  pitchAnchor: PitchAnchor;
 }
 
 export interface SectionInspectorProps {
@@ -85,6 +100,31 @@ export interface SectionInspectorProps {
   onNudgeFace: (deltaM: number) => void;
   onClearSelection: () => void;
   onDismissRefusal: () => void;
+  /**
+   * SET THE SELECTED FACE'S PITCH. Degrees — the one stored form. The rise:run
+   * box converts to degrees before it gets here, so there is exactly one value
+   * travelling and exactly one authority receiving it.
+   */
+  onSetFacePitch: (pitchDeg: number, anchor: PitchAnchor) => void;
+  onSetPitchAnchor: (anchor: PitchAnchor) => void;
+  /**
+   * WHAT WOULD HAPPEN, without doing it. Called while the installer is typing
+   * so the coupling is on screen BEFORE they commit: "the ridge rises 1 ft 4 in;
+   * Slope B keeps its own pitch." Returns null when there is nothing to preview.
+   *
+   * 🚨 IT MUST BE THE REAL AUTHORITY'S ANSWER. `previewFacePitch` applies the
+   * edit to a copy and reads the result; a closed-form guess in this component
+   * would be a second implementation of the ridge solution, free to disagree
+   * with the one that actually runs.
+   */
+  previewPitch: (pitchDeg: number, anchor: PitchAnchor) => FacePitchPreview | null;
+  /** Select a named face of the current section (the face list at section level). */
+  onSelectFace: (faceId: string) => void;
+  /**
+   * Rebuild this section from its footprint/eave/pitch, DISCARDING a hand
+   * reshape. Only ever called from the explicit button below — never inferred.
+   */
+  onRebuildFromParameters: () => void;
   /** Rendered as a disabled hint when the section has no editable record. */
   disabled?: boolean;
 }
@@ -168,8 +208,11 @@ function NumberField(props: {
   testId?: string;
   onCommit: (next: number) => void;
   onStep: (next: number) => void;
+  /** Every parseable keystroke, and null when the box is left. Used to preview
+   *  the consequences of a value BEFORE it is committed. Never an edit. */
+  onDraft?: (next: number | null) => void;
 }) {
-  const { label, value, unit, step, decimals, disabled, testId, onCommit, onStep } = props;
+  const { label, value, unit, step, decimals, disabled, testId, onCommit, onStep, onDraft } = props;
   const shown = value == null || !isFinite(value) ? '' : value.toFixed(decimals);
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -193,11 +236,18 @@ function NumberField(props: {
         data-testid={testId}
         disabled={disabled}
         value={draft ?? (unresolved ? '—' : shown)}
-        onChange={e => setDraft(e.target.value)}
+        onChange={e => {
+          setDraft(e.target.value);
+          if (onDraft) {
+            const n = parseFloat(e.target.value);
+            onDraft(isFinite(n) ? n : null);
+          }
+        }}
         onFocus={() => { if (!unresolved) setDraft(shown); }}
         onBlur={() => {
           const raw = draft;
           setDraft(null);
+          if (onDraft) onDraft(null);
           if (raw == null) return;
           const n = parseFloat(raw);
           // 🚨 AN UNPARSEABLE BOX IS NOT A ZERO. Emitting one would drop a house
@@ -222,6 +272,136 @@ function NumberField(props: {
   );
 }
 
+/**
+ * THE PITCH EDITOR. One physical quantity, two ways to type it.
+ *
+ * 🚨 DEGREES ARE THE VALUE; RISE:RUN IS A SECOND KEYBOARD ONTO IT. Both boxes
+ * commit through the SAME `onCommit(deg)`, and both re-read the model every
+ * render. There is no `riseDraft` that survives a commit and no stored rise
+ * anywhere — so the two boxes cannot drift apart, which is the entire reason
+ * the conversion lives in lib/3d/pitchFormat.ts rather than in this file.
+ *
+ * 🚨 A FACE THAT CANNOT TAKE A PITCH GETS NO EDITOR AND A REASON. Offering a
+ * box that accepts a number and changes nothing is the silent no-op this
+ * editor was rebuilt to remove.
+ */
+function PitchEditor(props: {
+  pitchDeg: number | null;
+  disabled?: boolean;
+  notEditableWhy?: string | null;
+  onCommit: (deg: number) => void;
+  onStep: (deg: number) => void;
+  onDraft?: (deg: number | null) => void;
+  idPrefix: string;
+}) {
+  const { pitchDeg, disabled, notEditableWhy, onCommit, onStep, onDraft, idPrefix } = props;
+  const [riseDraft, setRiseDraft] = useState<string | null>(null);
+  const [riseError, setRiseError] = useState<string | null>(null);
+  const riseShown = pitchDeg == null || !isFinite(pitchDeg) ? '' : riseOver12(pitchDeg).toFixed(2);
+  useEffect(() => { setRiseDraft(null); setRiseError(null); }, [riseShown]);
+
+  if (notEditableWhy) {
+    return (
+      <>
+        <Derived
+          label="Pitch"
+          value={pitchDeg == null ? '—' : `${pitchDeg.toFixed(1)}°`}
+          note="measured"
+        />
+        <div data-testid={`${idPrefix}-pitch-locked`} style={{
+          marginTop: 4, padding: '5px 7px', borderRadius: 5,
+          background: 'rgba(148,163,184,0.10)', border: '1px solid rgba(148,163,184,0.25)',
+          color: '#9aa8bd', fontSize: 9.5, lineHeight: 1.45,
+        }}>{notEditableWhy}</div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <NumberField
+        label="Pitch" unit="°" step={1} decimals={1}
+        testId={`${idPrefix}-pitch`}
+        value={pitchDeg} disabled={disabled}
+        onCommit={onCommit} onStep={onStep} onDraft={onDraft}
+      />
+      <div style={ROW}>
+        <span style={LABEL}>Rise : run</span>
+        <input
+          type="text"
+          data-no-drag
+          data-testid={`${idPrefix}-pitch-rise`}
+          disabled={disabled}
+          placeholder="6:12"
+          value={riseDraft ?? (riseShown === '' ? '—' : `${riseShown} : 12`)}
+          onChange={e => setRiseDraft(e.target.value)}
+          onFocus={() => { if (riseShown !== '') setRiseDraft(riseShown); }}
+          onBlur={() => {
+            const raw = riseDraft;
+            setRiseDraft(null);
+            if (raw == null || raw.trim() === '') { setRiseError(null); return; }
+            // A bare number in THIS box is a rise over 12, because that is what
+            // the box is labelled. The degrees box above reads a bare number as
+            // degrees. Neither one has to guess.
+            const parsed = parsePitchInput(/[:/]|\bin\b/.test(raw) ? raw : `${raw.trim()}:12`);
+            if (!parsed.ok) { setRiseError(parsed.reason); return; }
+            setRiseError(null);
+            onCommit(parsed.pitchDeg);
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            if (e.key === 'Escape') { setRiseDraft(null); setRiseError(null); (e.target as HTMLInputElement).blur(); }
+          }}
+          style={{ ...NUM_INPUT, width: 86, textAlign: 'center', opacity: disabled ? 0.5 : 1 }}
+        />
+        <span style={{ ...UNIT, flex: 1, textAlign: 'right' }}>
+          {pitchDeg == null ? '' : formatRise12(pitchDeg)}
+        </span>
+      </div>
+      {riseError ? (
+        <div data-testid={`${idPrefix}-pitch-rise-error`} style={{
+          margin: '2px 0 0 84px', color: '#ffcf7a', fontSize: 9.5, lineHeight: 1.4,
+        }}>{riseError}</div>
+      ) : null}
+    </>
+  );
+}
+
+/** Hold the eave, or hold the ridge. Named, because it is a physical choice. */
+function AnchorToggle(props: {
+  anchor: PitchAnchor;
+  disabled?: boolean;
+  onChange: (a: PitchAnchor) => void;
+}) {
+  const { anchor, disabled, onChange } = props;
+  return (
+    <div style={{ ...ROW, marginTop: 3 }}>
+      <span style={LABEL}>Changing pitch</span>
+      <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+        {([
+          ['eave', 'Holds the wall', 'The wall height stays; the ridge moves.'],
+          ['ridge', 'Holds the ridge', 'The ridge elevation stays; the wall height is re-derived.'],
+        ] as Array<[PitchAnchor, string, string]>).map(([a, text, title]) => (
+          <button
+            key={a} type="button" data-no-drag
+            data-testid={`inspector-anchor-${a}`}
+            disabled={disabled}
+            title={title}
+            onClick={() => onChange(a)}
+            style={{
+              flex: 1, padding: '2px 0', borderRadius: 4, fontSize: 9.5, fontWeight: 700,
+              cursor: disabled ? 'default' : 'pointer',
+              background: anchor === a ? 'rgba(160,140,255,0.22)' : 'rgba(255,255,255,0.05)',
+              border: `1px solid ${anchor === a ? 'rgba(160,140,255,0.55)' : 'rgba(255,255,255,0.10)'}`,
+              color: anchor === a ? '#c0b0ff' : '#9aa8bd',
+            }}
+          >{text}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const m2ft = (m: number | null | undefined): number | null =>
   m == null || !isFinite(m) ? null : m * FT_PER_M;
 const ft2m = (ft: number): number => ft / FT_PER_M;
@@ -241,10 +421,45 @@ const KIND_LABEL: Record<string, string> = {
 // ── The component ───────────────────────────────────────────────────────────
 
 export function SectionInspector({
-  state, onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal, disabled,
+  state, onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal,
+  onSetFacePitch, onSetPitchAnchor, previewPitch, onSelectFace, onRebuildFromParameters,
+  disabled,
 }: SectionInspectorProps) {
   const s = state.section;
   const f = state.face;
+
+  // ── WHAT WOULD HAPPEN, LIVE, WHILE THE NUMBER IS BEING TYPED ─────────────
+  //
+  // 🚨 THE ANSWER COMES FROM THE AUTHORITY, NOT FROM THIS COMPONENT.
+  // `previewPitch` runs `previewFacePitch`, which applies the edit to a COPY of
+  // the real planes and reports the real outcome. Nothing here re-derives a
+  // ridge height, so the sentence on screen cannot promise something the commit
+  // will not do.
+  const [pitchDraft, setPitchDraft] = useState<number | null>(null);
+  // A selection change abandons any half-typed number.
+  useEffect(() => { setPitchDraft(null); }, [f?.faceId, state.level]);
+
+  const preview = React.useMemo(() => {
+    if (state.level !== 'face' || !f || f.pitchScope === 'not-editable') return null;
+    const candidate = pitchDraft != null && isFinite(pitchDraft) ? pitchDraft : f.pitchDeg;
+    if (candidate == null || !isFinite(candidate)) return null;
+    return previewPitch(candidate, state.pitchAnchor);
+    // `previewPitch` closes over the live planes; the deps that matter are the
+    // ones that change what is asked, plus the face's own measured pitch, which
+    // moves whenever the model does.
+  }, [state.level, f?.faceId, f?.pitchDeg, f?.pitchScope, pitchDraft, state.pitchAnchor, previewPitch]);
+
+  const pitchConsequences: string[] = preview
+    ? (preview.ok ? preview.consequences : preview.refusals.map(r => r.message))
+    : [];
+  const previewIsRefusal = !!preview && !preview.ok;
+
+  // 🚨 THE SECTION'S PARAMETRIC CONTROLS GO INERT WHILE A FACE IS HAND-RESHAPED.
+  // Every one of them rebuilds the section from footprint + eave + pitch, so
+  // every one of them would discard the stitch. The authority refuses them
+  // anyway; disabling them here is what stops the installer finding that out by
+  // pressing a stepper and reading a refusal.
+  const sectionDisabled = disabled || state.reshapedFaceCount > 0;
 
   const levelChip = (level: InspectorLevel, text: string, active: boolean, enabled: boolean) => (
     <button
@@ -300,6 +515,35 @@ export function SectionInspector({
           <div style={{ fontWeight: 800, color: '#fff', fontSize: 12.5, marginBottom: 1 }}>
             {s.label}
           </div>
+
+          {/* ── HAND-RESHAPED: THE CHOICE, STATED ────────────────────────────
+                 Stitch produces corners no footprint-and-pitch pair describes.
+                 The controls below would rebuild from those parameters and
+                 throw the stitch away — which is what used to happen with no
+                 warning at all. So they are disabled, the reason is on screen,
+                 and discarding the reshape takes a deliberate press. ── */}
+          {state.reshapedFaceCount > 0 ? (
+            <div data-testid="inspector-reshaped" style={{
+              margin: '4px 0 8px', padding: '6px 8px', borderRadius: 6,
+              background: 'rgba(255,190,80,0.10)', border: '1px solid rgba(255,190,80,0.35)',
+              color: '#ffcf7a', fontSize: 9.5, lineHeight: 1.45,
+            }}>
+              {state.reshapedFaceCount} face{state.reshapedFaceCount === 1 ? '' : 's'} here{' '}
+              {state.reshapedFaceCount === 1 ? 'was' : 'were'} reshaped by hand (Stitch or Square Up),
+              so this section&apos;s footprint and pitch no longer describe{' '}
+              {state.reshapedFaceCount === 1 ? 'it' : 'them'}. Any change here rebuilds every face from
+              the original trace. Undo to step back before the reshape, or:
+              <button
+                type="button" data-no-drag data-testid="inspector-rebuild-parametric"
+                onClick={onRebuildFromParameters}
+                style={{
+                  display: 'block', marginTop: 5, width: '100%', padding: '4px 0', borderRadius: 5,
+                  background: 'rgba(255,190,80,0.16)', border: '1px solid rgba(255,190,80,0.5)',
+                  color: '#ffcf7a', fontSize: 9.5, fontWeight: 800, cursor: 'pointer',
+                }}
+              >Rebuild from the trace (discards the reshape)</button>
+            </div>
+          ) : null}
           <div style={{ color: '#7c8aa5', fontSize: 10, marginBottom: 8 }}>
             {KIND_LABEL[s.kind] ?? s.kind} roof · {s.faceCount} face{s.faceCount === 1 ? '' : 's'}
             {' · '}{fmtFt(s.planAM, 0)} × {fmtFt(s.planBM, 0)}
@@ -316,7 +560,7 @@ export function SectionInspector({
           <NumberField
             label="Wall / eave" unit="ft" step={1} decimals={1}
             testId="inspector-eave"
-            value={m2ft(s.eaveHeightM)} disabled={disabled}
+            value={m2ft(s.eaveHeightM)} disabled={sectionDisabled}
             onCommit={v => onEdit({ eaveHeightM: ft2m(v) }, 'Set eave height', `eave:${s.sectionId}`)}
             onStep={v => onEdit({ eaveHeightM: ft2m(v) }, 'Set eave height', `eave:${s.sectionId}`)}
           />
@@ -327,17 +571,41 @@ export function SectionInspector({
                  stepper then sent `hidden 22.5 + 1` = 23.5, which printed as
                  "24", so the user could not even predict what a press would
                  do. A field that rounds is a field that lies. */}
-          <NumberField
-            label="Roof pitch" unit="°" step={1} decimals={1}
-            testId="inspector-pitch"
-            value={s.pitchDeg} disabled={disabled}
-            onCommit={v => onEdit({ pitchDeg: v }, 'Set roof pitch', `pitch:${s.sectionId}`)}
-            onStep={v => onEdit({ pitchDeg: v }, 'Set roof pitch', `pitch:${s.sectionId}`)}
+          {/* 🚨 A FLAT SECTION GETS NO PITCH BOX. It is horizontal by
+                 definition and the builder hardcodes its deck to 0°, so an
+                 editable field here accepted a number, reported success and
+                 changed nothing — then displayed the number it had not used.
+                 An audit found that reachable from the Block tool in three
+                 clicks. The authority refuses it too (validateSection); this
+                 is the half that stops it being offered at all. */}
+          <PitchEditor
+            idPrefix="inspector"
+            pitchDeg={s.pitchDeg}
+            disabled={sectionDisabled}
+            notEditableWhy={s.kind === 'flat'
+              ? 'A flat section is horizontal by definition. Change its roof kind to Shed to give it a slope and a direction.'
+              : null}
+            onCommit={v => onEdit({ pitchDeg: v, pitchAnchor: state.pitchAnchor }, 'Set roof pitch', `pitch:${s.sectionId}`)}
+            onStep={v => onEdit({ pitchDeg: v, pitchAnchor: state.pitchAnchor }, 'Set roof pitch', `pitch:${s.sectionId}`)}
           />
+          {s.kind !== 'flat' ? (
+            <AnchorToggle
+              anchor={state.pitchAnchor}
+              disabled={sectionDisabled}
+              onChange={onSetPitchAnchor}
+            />
+          ) : null}
+          {s.mixedPitch ? (
+            <div data-testid="inspector-mixed-pitch" style={{
+              margin: '2px 0 2px 84px', fontSize: 9.5, color: '#c0b0ff', lineHeight: 1.4,
+            }}>
+              Faces differ — setting this returns them all to one pitch.
+            </div>
+          ) : null}
           <NumberField
             label="Pad elevation" unit="ft" step={1} decimals={1}
             testId="inspector-ground"
-            value={m2ft(s.groundElevM)} disabled={disabled}
+            value={m2ft(s.groundElevM)} disabled={sectionDisabled}
             onCommit={v => onEdit({ groundElevM: ft2m(v) }, 'Set pad elevation', `pad:${s.sectionId}`)}
             onStep={v => onEdit({ groundElevM: ft2m(v) }, 'Set pad elevation', `pad:${s.sectionId}`)}
           />
@@ -348,6 +616,40 @@ export function SectionInspector({
           <Derived label="Ridge height" value={fmtFt(s.ridgeHeightM)} note="derived" />
           <Derived label="Ridge above sea" value={fmtFt(s.ridgeElevM)} note="derived" />
 
+          {/* ── EVERY FACE AND ITS ACTUAL PITCH. "Which slope is the 4:12 one"
+                 has to be answerable without clicking each one to find out.
+                 Clicking a row selects that face, where its pitch is editable. ── */}
+          {s.facePitches.length > 1 ? (
+            <div data-testid="inspector-face-list" style={{ marginTop: 7 }}>
+              <div style={SECTION_TITLE}>Faces</div>
+              {s.facePitches.map(fp => (
+                <button
+                  key={fp.key} type="button" data-no-drag
+                  data-testid={`inspector-face-row-${fp.key}`}
+                  disabled={sectionDisabled}
+                  title={`Select ${fp.label} to edit its pitch`}
+                  onClick={() => onSelectFace(fp.faceId)}
+                  style={{
+                    display: 'flex', width: '100%', alignItems: 'center', gap: 6,
+                    padding: '3px 5px', marginBottom: 2, borderRadius: 4,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: '#cfd8e6', fontSize: 10, cursor: disabled ? 'default' : 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span style={{ flex: 1 }}>{fp.label}</span>
+                  <span style={{
+                    fontVariantNumeric: 'tabular-nums', fontWeight: 700,
+                    color: Math.abs(fp.pitchDeg - s.pitchDeg) > 0.05 ? '#c0b0ff' : '#cfe3ff',
+                  }}>
+                    {fp.pitchDeg.toFixed(1)}° · {formatRise12(fp.pitchDeg)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           {/* ── Ridge direction. A cross-gable wing is wrong 90° without it. ── */}
           {s.kind === 'gable' || s.kind === 'hip' ? (
             <div style={{ ...ROW, marginTop: 5 }}>
@@ -357,7 +659,7 @@ export function SectionInspector({
                   <button
                     key={axis} type="button" data-no-drag
                     data-testid={`inspector-ridge-${axis}`}
-                    disabled={disabled}
+                    disabled={sectionDisabled}
                     onClick={() => onEdit({ ridgeAxis: axis }, 'Set ridge direction', `ridge:${s.sectionId}`)}
                     style={{
                       flex: 1, padding: '2px 0', borderRadius: 4, fontSize: 9.5, fontWeight: 700,
@@ -389,7 +691,7 @@ export function SectionInspector({
                 <button
                   key={dir} type="button" data-no-drag
                   data-testid={`inspector-move-${dir}`}
-                  disabled={disabled}
+                  disabled={sectionDisabled}
                   title={`Move this section 1 ft ${dir}`}
                   onClick={() => onEdit(edit, 'Move section', `move:${s.sectionId}`)}
                   style={{ ...STEP_BTN, flex: 1, width: 'auto' }}
@@ -428,15 +730,52 @@ export function SectionInspector({
             note={f.groundResolved ? 'measured' : 'unresolved'}
           />
           <Derived
-            label="Pitch"
-            value={f.pitchDeg == null ? '—' : `${f.pitchDeg.toFixed(1)}°`}
-            note="measured"
-          />
-          <Derived
             label="Faces"
             value={f.azimuthDeg == null ? '—' : `${Math.round(f.azimuthDeg)}° ${compass(f.azimuthDeg)}`}
             note="measured"
           />
+
+          <div style={{ height: 1, background: 'rgba(148,163,184,0.18)', margin: '7px 0 6px' }} />
+
+          {/* ── THE FACE'S OWN PITCH, EDITABLE. This is the capability the
+                 live gauntlet named as blocking: "the current UI can display
+                 pitch for a selected roof face but cannot edit that face's
+                 pitch." ── */}
+          <PitchEditor
+            idPrefix="inspector-face"
+            pitchDeg={f.pitchDeg}
+            disabled={disabled}
+            notEditableWhy={f.pitchScope === 'not-editable' ? f.pitchNotEditableWhy : null}
+            onCommit={v => onSetFacePitch(v, state.pitchAnchor)}
+            onStep={v => onSetFacePitch(v, state.pitchAnchor)}
+            onDraft={setPitchDraft}
+          />
+          {f.pitchScope !== 'not-editable' ? (
+            <>
+              <AnchorToggle
+                anchor={state.pitchAnchor}
+                disabled={disabled}
+                onChange={onSetPitchAnchor}
+              />
+              {f.overridesSectionPitch && f.sectionPitchDeg != null ? (
+                <div data-testid="inspector-face-overrides" style={{
+                  marginTop: 5, fontSize: 9.5, color: '#c0b0ff', lineHeight: 1.45,
+                }}>
+                  This face has its own pitch. The rest of the section defaults to{' '}
+                  {f.sectionPitchDeg.toFixed(1)}° ({formatRise12(f.sectionPitchDeg)}).
+                </div>
+              ) : null}
+              {pitchConsequences.length > 0 ? (
+                <ul data-testid="inspector-pitch-consequences" style={{
+                  margin: '6px 0 0', padding: '0 0 0 14px',
+                  fontSize: 9.5, lineHeight: 1.5,
+                  color: previewIsRefusal ? '#ffcf7a' : '#9aa8bd',
+                }}>
+                  {pitchConsequences.map((c, i) => <li key={i}>{c}</li>)}
+                </ul>
+              ) : null}
+            </>
+          ) : null}
 
           {!f.groundResolved ? (
             <div data-testid="inspector-unresolved" style={{

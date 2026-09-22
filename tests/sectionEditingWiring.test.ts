@@ -111,9 +111,17 @@ describe('the engine edits sections through lib/3d/sectionEditing', () => {
   });
 
   it('🚨 `editSection` calls the authority, renders its OWN builds, and emits the whole array', () => {
-    const fn = bodyOf(ENGINE, 'function editSection(');
+    // 🚨 TWO FUNCTIONS NOW, AND THE SPLIT IS THE POINT. `editSection` asks the
+    // authority; `adoptGeometryOutcome` renders, pushes history and brings the
+    // panels. The pipeline was extracted so the new per-face pitch edit reuses
+    // it rather than growing a second, 90%-identical copy of the side effects —
+    // which is how "the panels went inside the house" shipped twice. Both are
+    // asserted here so neither half can drift out from under the other.
+    const ask = bodyOf(ENGINE, 'function editSection(');
+    const fn = bodyOf(ENGINE, 'function adoptGeometryOutcome(');
+    expect(ask).toMatch(/adoptGeometryOutcome\(/);
 
-    expect(fn).toMatch(/applySectionEdit\(roofPlanesRef\.current/);
+    expect(ask).toMatch(/applySectionEdit\(roofPlanesRef\.current/);
     // A refusal must not fall through to a render.
     expect(fn).toMatch(/if \(!outcome\.ok\)/);
     expect(fn).toMatch(/return false;/);
@@ -127,7 +135,7 @@ describe('the engine edits sections through lib/3d/sectionEditing', () => {
     // Prove the forbidden alternative is a real pattern before forbidding it.
     const REFIT = /computePlaneFromPoints3D\s*\(/;
     expect('computePlaneFromPoints3D(').toMatch(REFIT);
-    expect(fn, 'editSection must not refit a frame').not.toMatch(REFIT);
+    expect(fn, 'the adoption pipeline must not refit a frame').not.toMatch(REFIT);
 
     // Faces the section stopped owning must lose their ENTITIES, or they
     // linger as an un-pickable ghost roof.
@@ -364,7 +372,16 @@ describe('🚨 the panels come with the roof', () => {
     // tested and imported by nothing". A repositioning pass that nothing calls
     // would be the same defect: the unit tests would be green and the array
     // would still end up inside the house.
-    const fn = bodyOf(ENGINE, 'function editSection(');
+    // 🚨 ANCHORED ON `adoptGeometryOutcome`, NOT ON `editSection`.
+    // The render/history/panel pipeline was extracted so that the new
+    // per-face pitch edit goes through the SAME side effects rather than
+    // growing its own 90%-identical copy — which is how "the panels went
+    // inside the house" shipped twice. The invariant is unchanged; its
+    // home moved, and the guard below proves `editSection` still routes
+    // through it.
+    const fn = bodyOf(ENGINE, 'function adoptGeometryOutcome(');
+    expect(bodyOf(ENGINE, 'function editSection(')).toMatch(/adoptGeometryOutcome\(/);
+    expect(bodyOf(ENGINE, 'function editFacePitch(')).toMatch(/adoptGeometryOutcome\(/);
     expect(fn).toMatch(/repositionPanelsForPlanes\(/);
     expect(fn).toMatch(/panelsRef\.current/);
     expect(fn).toMatch(/onPanelsChange\(moved\.panels\)/);
@@ -384,7 +401,7 @@ describe('🚨 the panels come with the roof', () => {
     // The parent snapshots for undo when the roof arrives; panels must follow
     // that, not precede it, or an undo restores a roof whose panels were
     // already moved for the next state.
-    const fn = bodyOf(ENGINE, 'function editSection(');
+    const fn = bodyOf(ENGINE, 'function adoptGeometryOutcome(');
     const roof = fn.indexOf('onRoofGeometryReplaced?.(outcome.planes');
     const panels = fn.indexOf('repositionPanelsForPlanes(');
     expect(roof).toBeGreaterThan(-1);
@@ -463,9 +480,9 @@ describe('🚨 a control that cannot move the geometry is not offered', () => {
 
     // The read-only branch reports the MEASURED value and says where to change it.
     const i = STUDIO.indexOf('{(plane.origin3D && plane.ecefFrame3D) ? (');
-    const block = STUDIO.slice(i, i + 1_400);
+    const block = STUDIO.slice(i, i + 2_600);   // widened: the advice now carries its own rationale
     expect(block).toMatch(/measured/);
-    expect(block).toMatch(/building section in the 3D view/);
+    expect(block).toMatch(/set its pitch in the inspector/);
 
     // 🚨 AND THE SLIDER SURVIVES FOR A 2D-ONLY FACE. A "Tag This Roof Plane"
     // face has no frame, so `computeEcefFrameForLegacyPlane` derives its
@@ -497,7 +514,27 @@ describe('🚨 "Selected height" edits the block that is selected', () => {
     // be grabbed. The same defect was measured in the drag handler.
     const fn = bodyOf(ENGINE, 'function setBlockHeight(');
     expect(fn).toMatch(/Cartographic\.fromCartesian\(cur\)/);
-    expect(fn).toMatch(/Cartesian3\.fromRadians\(carto\.longitude, carto\.latitude/);
+    // Built from the handle's own lat/lng plus a height — through
+    // `safeCartesian3`, which also refuses a non-finite coordinate rather than
+    // writing a NaN position that silently removes the handle.
+    expect(fn).toMatch(/safeCartesian3\(\s*\n?\s*C, C\.Math\.toDegrees\(carto\.longitude\), C\.Math\.toDegrees\(carto\.latitude\)/);
+
+    // 🚨 AND IT PIVOTS ON THE HANDLE, NOT ON THE BLOCK. A Cesium polygon entity
+    // has no `position` at all — the creation path says so where it tags the
+    // prism with `__centroidCart` instead — so the old `if (handle &&
+    // block.position)` guard was never true and the handle never moved for ANY
+    // height change. An audit found it while looking for something smaller.
+    expect(fn).toMatch(/if \(handle\?\.position\)/);
+    expect(fn).not.toMatch(/block\.position/);
+
+    // 🚨 AND THE PREVIOUS HEIGHT IS READ BEFORE IT IS OVERWRITTEN. The read
+    // used to come after the `set`, so `prior` was always the NEW height and
+    // the arithmetic cancelled to "leave the handle where it is".
+    const readAt = fn.indexOf('blockHeightOverridesRef.current.get(blockId)');
+    const writeAt = fn.indexOf('blockHeightOverridesRef.current.set(blockId');
+    expect(readAt).toBeGreaterThan(-1);
+    expect(writeAt).toBeGreaterThan(-1);
+    expect(readAt, 'the prior height must be read before it is overwritten').toBeLessThan(writeAt);
 
     // 🚨 THE GUARD EXCLUDES `cur.z + …`, DELIBERATELY. A first version banned
     // `new C.Cartesian3(cur.x, cur.y,` outright and caught a DIFFERENT line

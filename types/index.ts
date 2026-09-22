@@ -401,6 +401,29 @@ export interface RoofSectionRecord {
   eaveHeightM: number;
   /** The pitch the installer ASKED for. Each face reports what it actually is. */
   pitchDeg: number;
+  /**
+   * PER-FACE PITCH OVERRIDES, degrees. A face with no entry uses `pitchDeg`.
+   *
+   * 🚨 A REAL HOUSE IS NOT SYMMETRIC. A saltbox, a garage whose back slope was
+   * re-framed flatter to clear a neighbour, a hip whose ends were built at a
+   * different rake — these are ordinary, and a model that can only say "the
+   * section is 6:12" cannot express them. So the section's pitch is the
+   * DEFAULT and each face may state its own.
+   *
+   * 🚨 THE RIDGE STAYS SHUT BY CONSTRUCTION. This is not a per-face free
+   * translation. When two slopes of one section disagree, the ridge is the
+   * shared unknown and `layoutSectionFaces` solves for it:
+   *
+   *     rise = span · tanA · tanB / (tanA + tanB)
+   *     dA   = rise / tanA,   dB = rise / tanB,   dA + dB = span
+   *
+   * so the ridge moves ALONG the span as well as up, both faces reach it, and
+   * the partner face keeps its own pitch and its own eave. Changing one slope
+   * therefore never requires a compensating edit on the other. When the two
+   * pitches are equal this reduces exactly to dA = dB = span/2 — the symmetric
+   * gable, unchanged.
+   */
+  facePitchDeg?: Partial<Record<RoofSectionFaceKey, number>>;
   /** Local ground elevation, metres. Never defaulted to 0 — see the domain. */
   groundElevM: number;
   /** 'shed' only: the downslope bearing. */
@@ -513,6 +536,28 @@ export interface RoofPlane {
   sectionFaceKey?: RoofSectionFaceKey;
   /** The section's own record, copied onto every face it owns. See RoofSectionRecord. */
   section?: RoofSectionRecord;
+
+  /**
+   * THIS FACE'S GEOMETRY NO LONGER COMES FROM ITS SECTION'S PARAMETERS.
+   *
+   * 🚨 SET BY STITCH AND SQUARE UP, AND IT EXISTS TO STOP A SILENT REVERT.
+   *
+   * A section face is normally DERIVED: footprint + eave + pitch, rebuilt from
+   * scratch on every edit. Stitch is a modelling tool — Ray uses it to pull a
+   * ridge onto a neighbouring peak — and the corners it produces are not
+   * expressible as any (footprint, pitch) pair. Before this flag, Stitch wrote
+   * the new corners onto the plane and left `plane.section` holding the
+   * pre-stitch footprint and pitch: two answers in one object. The next nudge
+   * of the section's eave rebuilt from the stale record and silently undid the
+   * stitch, with nothing on screen saying anything had been discarded.
+   *
+   * So a reshaped face says so, `applySectionEdit` refuses to rebuild its
+   * section, and the installer is offered the choice explicitly — rebuild from
+   * the parameters and lose the reshape, or keep the reshape and edit the faces
+   * directly. An approximation of the stitched shape as a footprint would be a
+   * third answer and is not offered.
+   */
+  sectionFaceReshaped?: boolean;
 
   // v47.128 -- ECEF frame axes (unit vectors in ECEF space, not ENU tangent space)
   // Stored alongside localFrame3D so buildSurfaceGrid can use pure ECEF arithmetic.

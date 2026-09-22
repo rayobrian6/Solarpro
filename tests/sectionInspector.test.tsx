@@ -36,6 +36,7 @@ function baseState(): InspectorState {
   return {
     level: 'none', section: null, face: null, faceSectionLabel: null,
     sectionCount: 0, standaloneFaceCount: 0, refusal: null,
+    pitchAnchor: 'eave', reshapedFaceCount: 0,
   };
 }
 
@@ -49,6 +50,13 @@ function mount(state: InspectorState, overrides: Partial<Parameters<typeof Secti
   const onNudgeFace = vi.fn();
   const onClearSelection = vi.fn();
   const onDismissRefusal = vi.fn();
+  const onSetFacePitch = vi.fn();
+  const onSetPitchAnchor = vi.fn();
+  const onSelectFace = vi.fn();
+  const onRebuildFromParameters = vi.fn();
+  // Default: no preview. Tests that care pass their own, backed by the real
+  // `previewFacePitch` so the sentence on screen is the authority's answer.
+  const previewPitch = vi.fn(() => null);
   render(
     <SectionInspector
       state={state}
@@ -57,10 +65,18 @@ function mount(state: InspectorState, overrides: Partial<Parameters<typeof Secti
       onNudgeFace={onNudgeFace}
       onClearSelection={onClearSelection}
       onDismissRefusal={onDismissRefusal}
+      onSetFacePitch={onSetFacePitch}
+      onSetPitchAnchor={onSetPitchAnchor}
+      onSelectFace={onSelectFace}
+      onRebuildFromParameters={onRebuildFromParameters}
+      previewPitch={previewPitch}
       {...overrides}
     />,
   );
-  return { onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal };
+  return {
+    onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal,
+    onSetFacePitch, onSetPitchAnchor, onSelectFace, previewPitch, onRebuildFromParameters,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -295,5 +311,186 @@ describe('the empty state and refusals', () => {
       expect((screen.getByTestId(id) as HTMLInputElement).disabled).toBe(true);
     }
     expect((screen.getByTestId('inspector-move-east') as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PER-FACE PITCH — the capability the live gauntlet named as blocking:
+// "the current UI can display pitch for a selected roof face but cannot edit
+// that face's pitch."
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 a selected roof face can have its pitch EDITED', () => {
+  function sectionFacePitchState(): InspectorState {
+    const planes = buildSectionRoofPlanes(mainSection()).planes;
+    const face = planes.find(p => p.id === sectionFaceId('sec-main', 'slopeA'))!;
+    return {
+      ...baseState(), level: 'face',
+      face: measureFaceVertical(face), faceSectionLabel: 'House',
+    };
+  }
+
+  it('the degrees box is an INPUT, not a measured readout', () => {
+    const { onSetFacePitch } = mount(sectionFacePitchState());
+    const box = screen.getByTestId('inspector-face-pitch') as HTMLInputElement;
+    expect(box.tagName).toBe('INPUT');
+    // It shows what the face actually is, to one decimal.
+    expect(parseFloat(box.value)).toBeCloseTo(30, 1);
+
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: '45' } });
+    fireEvent.blur(box);
+    expect(onSetFacePitch).toHaveBeenCalledTimes(1);
+    expect(onSetFacePitch.mock.calls[0][0]).toBeCloseTo(45, 9);
+    expect(onSetFacePitch.mock.calls[0][1]).toBe('eave');
+  });
+
+  it('🚨 rise:run is a second keyboard onto the SAME value, not a second value', () => {
+    const { onSetFacePitch } = mount(sectionFacePitchState());
+    const rise = screen.getByTestId('inspector-face-pitch-rise') as HTMLInputElement;
+    // It renders the face's real pitch as a builder's fraction.
+    expect(rise.value).toMatch(/6\.93\s*:\s*12/);  // 30 degrees is 6.93:12
+
+    fireEvent.focus(rise);
+    fireEvent.change(rise, { target: { value: '6' } });
+    fireEvent.blur(rise);
+    // 🚨 A BARE NUMBER IN THIS BOX IS A RISE, because that is what the box is
+    // labelled — and it arrives at the authority in DEGREES, the one stored
+    // form. 6:12 is exactly 26.565 degrees.
+    expect(onSetFacePitch).toHaveBeenCalledTimes(1);
+    expect(onSetFacePitch.mock.calls[0][0]).toBeCloseTo(26.5651, 3);
+  });
+
+  it('an explicit 6:12 reads the same as a bare 6 in that box', () => {
+    const { onSetFacePitch } = mount(sectionFacePitchState());
+    const rise = screen.getByTestId('inspector-face-pitch-rise');
+    fireEvent.focus(rise);
+    fireEvent.change(rise, { target: { value: '6:12' } });
+    fireEvent.blur(rise);
+    expect(onSetFacePitch.mock.calls[0][0]).toBeCloseTo(26.5651, 3);
+  });
+
+  it('an unreadable rise:run emits nothing and says why', () => {
+    const { onSetFacePitch } = mount(sectionFacePitchState());
+    const rise = screen.getByTestId('inspector-face-pitch-rise');
+    fireEvent.focus(rise);
+    fireEvent.change(rise, { target: { value: 'steep' } });
+    fireEvent.blur(rise);
+    expect(onSetFacePitch).not.toHaveBeenCalled();
+    expect(screen.getByTestId('inspector-face-pitch-rise-error').textContent)
+      .toMatch(/rise over run/i);
+  });
+
+  it('the anchor is a named physical choice, and it is passed to the edit', () => {
+    const { onSetPitchAnchor } = mount(sectionFacePitchState());
+    expect(screen.getByTestId('inspector-anchor-eave')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('inspector-anchor-ridge'));
+    expect(onSetPitchAnchor).toHaveBeenCalledWith('ridge');
+    cleanup();
+
+    // With the anchor held at 'ridge', the edit carries it.
+    const { onSetFacePitch } = mount({ ...sectionFacePitchState(), pitchAnchor: 'ridge' });
+    const box = screen.getByTestId('inspector-face-pitch');
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: '40' } });
+    fireEvent.blur(box);
+    expect(onSetFacePitch.mock.calls[0][1]).toBe('ridge');
+  });
+
+  it('🚨 the consequences are on screen BEFORE the commit, from the authority', () => {
+    // The component must not compute them. It calls back into
+    // `previewFacePitch`, which applies the edit to a copy of the real planes.
+    const preview = vi.fn(() => ({
+      ok: true, scope: 'section-face' as const, faceId: 'sec-main::slopeA',
+      sectionId: 'sec-main', faceKey: 'slopeA' as const,
+      pitchBeforeDeg: 30, pitchAfterDeg: 45,
+      ridgeHeightBeforeM: 5.5, ridgeHeightAfterM: 6.8,
+      eaveHeightBeforeM: 2.9, eaveHeightAfterM: 2.9,
+      consequences: ['Slope B keeps their own pitch.', 'No other building section moves.'],
+      refusals: [],
+    }));
+    mount(sectionFacePitchState(), { previewPitch: preview });
+    expect(preview).toHaveBeenCalled();
+    const list = screen.getByTestId('inspector-pitch-consequences');
+    expect(list.textContent).toMatch(/Slope B keeps their own pitch/);
+    expect(list.textContent).toMatch(/No other building section moves/);
+  });
+
+  it('a refused pitch shows the refusal in place of the consequences', () => {
+    const preview = vi.fn(() => ({
+      ok: false, scope: 'none' as const, faceId: 'x', sectionId: null, faceKey: null,
+      pitchBeforeDeg: null, pitchAfterDeg: NaN,
+      ridgeHeightBeforeM: null, ridgeHeightAfterM: null,
+      eaveHeightBeforeM: null, eaveHeightAfterM: null,
+      consequences: [],
+      refusals: [{ code: 'FACE_PITCH_TOO_FLAT' as const, message: 'That face never reaches the ridge.' }],
+    }));
+    mount(sectionFacePitchState(), { previewPitch: preview });
+    expect(screen.getByTestId('inspector-pitch-consequences').textContent)
+      .toMatch(/never reaches the ridge/);
+  });
+
+  it('🚨 a face whose pitch cannot be set gets NO editor and a reason', () => {
+    const flat = buildSectionRoofPlanes({
+      ...mainSection(), id: 'sec-flat', kind: 'flat', pitchDeg: 0,
+    }).planes[0];
+    mount({ ...baseState(), level: 'face', face: measureFaceVertical(flat) });
+    // No box to type a number into that nothing would use.
+    expect(screen.queryByTestId('inspector-face-pitch')).toBeNull();
+    expect(screen.queryByTestId('inspector-face-pitch-rise')).toBeNull();
+    expect(screen.getByTestId('inspector-face-pitch-locked').textContent)
+      .toMatch(/flat section has no pitch/i);
+  });
+});
+
+describe('🚨 the section lists its faces and their real pitches', () => {
+  it('each face is a row showing degrees and rise:run, and selects that face', () => {
+    const s = measureSection({ ...mainSection(), facePitchDeg: { slopeA: 45 } }, 2);
+    const { onSelectFace } = mount({ ...baseState(), level: 'section', section: s });
+
+    const rowA = screen.getByTestId('inspector-face-row-slopeA');
+    expect(rowA.textContent).toMatch(/Slope A/);
+    expect(rowA.textContent).toMatch(/45\.0°/);
+    expect(rowA.textContent).toMatch(/12:12/);      // 45 degrees is exactly 12:12
+    expect(screen.getByTestId('inspector-face-row-slopeB').textContent).toMatch(/30\.0°/);
+
+    fireEvent.click(rowA);
+    expect(onSelectFace).toHaveBeenCalledWith('sec-main::slopeA');
+
+    // And the section says its faces no longer agree, so the ridge is off-centre.
+    expect(screen.getByTestId('inspector-mixed-pitch')).toBeTruthy();
+  });
+
+  it('a section whose faces agree shows no mixed-pitch warning', () => {
+    mount(sectionState());
+    expect(screen.queryByTestId('inspector-mixed-pitch')).toBeNull();
+  });
+});
+
+describe('🚨 a hand-reshaped section says so instead of silently reverting', () => {
+  it('the parametric controls go inert and the choice is stated', () => {
+    const { onEdit, onRebuildFromParameters } =
+      mount({ ...sectionState(), reshapedFaceCount: 2 });
+
+    expect(screen.getByTestId('inspector-reshaped').textContent)
+      .toMatch(/reshaped by hand/);
+    // Every control that would rebuild from the trace is disabled...
+    expect((screen.getByTestId('inspector-eave') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByTestId('inspector-pitch') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByTestId('inspector-ground') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('inspector-move-east'));
+    expect(onEdit).not.toHaveBeenCalled();
+
+    // ...and discarding the reshape takes a deliberate press.
+    fireEvent.click(screen.getByTestId('inspector-rebuild-parametric'));
+    expect(onRebuildFromParameters).toHaveBeenCalledTimes(1);
+  });
+
+  it('an untouched section shows no such banner and its controls work', () => {
+    const { onEdit } = mount(sectionState());
+    expect(screen.queryByTestId('inspector-reshaped')).toBeNull();
+    expect((screen.getByTestId('inspector-eave') as HTMLInputElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId('inspector-move-east'));
+    expect(onEdit).toHaveBeenCalledTimes(1);
   });
 });

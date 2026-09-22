@@ -84,6 +84,7 @@ import { moduleStackHeightM } from '@/lib/roofMountDatum';
 import { evaluateGeometryMutation } from './geometryMutationPolicy';
 import {
   type BuildingSection,
+  type SectionFaceKey,
   type SectionRefusal,
   type SectionRidgeAxis,
   type SectionRoofKind,
@@ -91,12 +92,17 @@ import {
   type LatLng,
   buildSectionRoofPlanes,
   faceIdsOfSection,
+  faceKeyOfFaceId,
+  faceKeysForKind,
   layoutSectionFaces,
+  pitchForFace,
   replaceSectionFaces,
+  sectionHasMixedPitch,
   sectionIdOfFaceId,
   sectionRecord,
   validateSection,
 } from './buildingSection';
+import { roofPlaneFromFootprint } from './footprintToRoofPlane';
 
 const DEG = Math.PI / 180;
 const WGS84_A = 6378137.0;
@@ -129,6 +135,12 @@ export interface SectionLookup {
   faceIds: string[];
   /** Stored copies disagreed. NOT repaired by picking a winner — see below. */
   conflicted: boolean;
+  /**
+   * Faces of this section that Stitch or Square Up has reshaped by hand, so
+   * their geometry is no longer what the section's parameters produce. See
+   * `RoofPlane.sectionFaceReshaped`.
+   */
+  reshapedFaceIds: string[];
   refusals: SectionRefusal[];
 }
 
@@ -144,7 +156,10 @@ export function sectionFromPlanes(
   planes: ReadonlyArray<RoofPlane> | null | undefined,
   sectionId: string,
 ): SectionLookup {
-  const out: SectionLookup = { found: false, section: null, faceIds: [], conflicted: false, refusals: [] };
+  const out: SectionLookup = {
+    found: false, section: null, faceIds: [], conflicted: false,
+    reshapedFaceIds: [], refusals: [],
+  };
   if (!sectionId) {
     out.refusals.push({ code: 'SECTION_ID_REQUIRED', message: 'No section was named.' });
     return out;
@@ -159,6 +174,7 @@ export function sectionFromPlanes(
     if (sid !== sectionId) continue;
     sawFace = true;
     out.faceIds.push(p.id);
+    if (p.sectionFaceReshaped) out.reshapedFaceIds.push(p.id);
     if (!p.section) continue;
     // 🚨 THE RECORD MUST BE THE RECORD FOR THE SECTION ASKED FOR.
     //
@@ -243,8 +259,45 @@ export interface SectionEdit {
   groundElevM?: number;
   /** The wall: eave above the pad, metres. */
   eaveHeightM?: number;
-  /** Roof slope, degrees from horizontal. */
+  /**
+   * Roof slope, degrees from horizontal — the SECTION default.
+   *
+   * 🚨 SETTING THIS CLEARS EVERY PER-FACE OVERRIDE. "Set the roof to 6:12"
+   * means the roof, and leaving a face override standing would mean the
+   * installer typed 26.6 into the section's pitch box and one slope did not
+   * move, with nothing on screen saying why. Change one face with
+   * `facePitchDeg`; change the roof with this.
+   */
   pitchDeg?: number;
+  /**
+   * PER-FACE PITCH, degrees, by face key. `null` clears that face's override
+   * and returns it to the section default.
+   *
+   * The partner face KEEPS ITS OWN PITCH AND ITS OWN EAVE; the ridge moves to
+   * where both faces reach it. See `RoofSectionRecord.facePitchDeg`.
+   */
+  facePitchDeg?: Partial<Record<SectionFaceKey, number | null>>;
+  /**
+   * WHAT STAYS PUT WHEN A PITCH CHANGES. Changing a slope has to move
+   * something, and which thing it moves is a physical decision, not an
+   * implementation detail — so it is named, defaulted, and shown in the UI.
+   *
+   *   'eave'  (default) the walls are built and the roof goes on top of them.
+   *           `eaveHeightM` is untouched and the ridge rises or falls. This is
+   *           what a builder means and what an installer measuring a wall with
+   *           a tape expects.
+   *
+   *   'ridge' the ridge elevation is held and the WALL HEIGHT is re-derived —
+   *           for matching an existing roofline, or a height limit. The rise a
+   *           given pair of pitches needs across a given span is fully
+   *           determined, so this is exact: eave = ridge − rise.
+   *
+   * 🚨 IT IS NOT A THIRD PLACE TO STORE A HEIGHT. Under 'ridge' the edit
+   * WRITES a new `eaveHeightM`, which the inspector then shows changing. The
+   * alternative — remembering an anchor on the record and re-solving later — is
+   * how two stored numbers start to disagree.
+   */
+  pitchAnchor?: 'eave' | 'ridge';
   ridgeAxis?: SectionRidgeAxis;
   kind?: SectionRoofKind;
   shedAzimuthDeg?: number | null;
@@ -254,6 +307,17 @@ export interface SectionEdit {
   /** Slide the whole footprint. Metres, positive east / positive north. */
   moveEastM?: number;
   moveNorthM?: number;
+  /**
+   * PROCEED EVEN THOUGH A FACE OF THIS SECTION WAS RESHAPED BY HAND, DISCARDING
+   * THAT RESHAPE.
+   *
+   * 🚨 THE USER MUST ASK FOR THIS EXPLICITLY. Without it, editing a section
+   * whose faces Stitch has moved is refused, because rebuilding from the
+   * section's parameters throws the stitch away — which is precisely what used
+   * to happen silently. The flag is the installer saying "yes, rebuild it from
+   * the trace"; it is never defaulted true and never inferred.
+   */
+  rebuildFromParameters?: boolean;
 }
 
 export interface SectionEditOutcome {
@@ -309,6 +373,27 @@ export function applySectionEdit(
   const look = sectionFromPlanes(input, sectionId);
   if (!look.found) return fail(look.refusals);
 
+  // 🚨 A HAND-RESHAPED FACE IS NOT REBUILT BEHIND THE INSTALLER'S BACK.
+  //
+  // Stitch and Square Up move corners to shapes no (footprint, eave, pitch)
+  // triple describes. Rebuilding this section would restore the pre-reshape
+  // geometry — which is exactly what used to happen, silently, on the next eave
+  // nudge after a stitch. Renaming the section is still allowed, because a label
+  // changes no geometry.
+  const onlyLabel = Object.keys(edit).every(k => k === 'label' || k === 'rebuildFromParameters');
+  if (look.reshapedFaceIds.length > 0 && !edit.rebuildFromParameters && !onlyLabel) {
+    const n = look.reshapedFaceIds.length;
+    return fail([{
+      code: 'SECTION_FACES_RESHAPED',
+      message:
+        `${n} face${n === 1 ? '' : 's'} of this section ${n === 1 ? 'was' : 'were'} reshaped by hand ` +
+        `(Stitch or Square Up), so ${n === 1 ? 'its' : 'their'} corners no longer come from this ` +
+        `section's footprint and pitch. Any change here rebuilds every face from the original trace ` +
+        `and discards that reshape. Undo to step back before the reshape, or rebuild from the trace ` +
+        `deliberately.`,
+    }]);
+  }
+
   const before = look.section!;
   const next = sectionRecord(before);
 
@@ -337,9 +422,62 @@ export function applySectionEdit(
 
   if (edit.groundElevM !== undefined) next.groundElevM = edit.groundElevM;
   if (edit.eaveHeightM !== undefined) next.eaveHeightM = edit.eaveHeightM;
-  if (edit.pitchDeg !== undefined) next.pitchDeg = edit.pitchDeg;
+  if (edit.pitchDeg !== undefined) {
+    // 🚨 A FLAT SECTION CANNOT BE GIVEN A SLOPE BY TYPING ONE INTO IT.
+    //
+    // The deck is built horizontal by definition, so the number would be stored
+    // and never realised: the edit returned ok, nothing moved, and the panel
+    // then displayed a pitch the roof did not have. An audit reached it from
+    // the Block tool in three clicks. The kind is the thing to change, and
+    // saying so gets the installer the roof they actually asked for.
+    const kindAfter = edit.kind !== undefined ? edit.kind : next.kind;
+    if (kindAfter === 'flat' && edit.pitchDeg !== 0) {
+      return fail([{
+        code: 'PITCH_OUT_OF_RANGE',
+        message:
+          `A flat section is horizontal by definition, so it cannot be ${edit.pitchDeg}°. ` +
+          `Change its roof kind to Shed to give it a slope and a direction.`,
+      }]);
+    }
+    next.pitchDeg = edit.pitchDeg;
+    // See SectionEdit.pitchDeg: setting the roof's pitch means the roof.
+    next.facePitchDeg = undefined;
+  }
+  if (edit.facePitchDeg !== undefined) {
+    if (!edit.facePitchDeg || typeof edit.facePitchDeg !== 'object') {
+      return fail([{ code: 'EDIT_VALUE_NOT_FINITE', message: 'Per-face pitch must be given by face.' }]);
+    }
+    const merged: Partial<Record<SectionFaceKey, number>> = { ...(next.facePitchDeg ?? {}) };
+    for (const key of Object.keys(edit.facePitchDeg) as SectionFaceKey[]) {
+      const v = edit.facePitchDeg[key];
+      if (v === null) { delete merged[key]; continue; }
+      if (v === undefined) continue;
+      if (typeof v !== 'number' || !isFinite(v)) {
+        return fail([{
+          code: 'EDIT_VALUE_NOT_FINITE',
+          message: `The pitch for ${key} must be a number.`,
+        }]);
+      }
+      merged[key] = v;
+    }
+    next.facePitchDeg = Object.keys(merged).length > 0 ? merged : undefined;
+  }
   if (edit.ridgeAxis !== undefined) next.ridgeAxis = edit.ridgeAxis;
-  if (edit.kind !== undefined) next.kind = edit.kind;
+  if (edit.kind !== undefined) {
+    next.kind = edit.kind;
+    // 🚨 CHANGING THE KIND DROPS OVERRIDES FOR FACES THAT NO LONGER EXIST. A
+    // hip turned gable keeps slopeA/slopeB and loses hipEndA/hipEndB — carrying
+    // them would be refused by `validateSection` (FACE_PITCH_NOT_A_FACE) and
+    // the installer would be blocked by a face they can no longer see.
+    if (next.facePitchDeg) {
+      const owned = new Set<string>(faceKeysForKind(next.kind));
+      const kept: Partial<Record<SectionFaceKey, number>> = {};
+      for (const key of Object.keys(next.facePitchDeg) as SectionFaceKey[]) {
+        if (owned.has(key)) kept[key] = next.facePitchDeg[key];
+      }
+      next.facePitchDeg = Object.keys(kept).length > 0 ? kept : undefined;
+    }
+  }
   if (edit.shedAzimuthDeg !== undefined) next.shedAzimuthDeg = edit.shedAzimuthDeg;
   if (edit.label !== undefined) next.label = edit.label;
 
@@ -398,6 +536,57 @@ export function applySectionEdit(
     }));
   }
 
+  // ── THE PITCH ANCHOR ─────────────────────────────────────────────────────
+  //
+  // 'eave' is the default and needs no code: `eaveHeightM` was not touched, so
+  // the walls stay and the ridge lands wherever the new pitches put it.
+  //
+  // 'ridge' holds the ROOFLINE and re-derives the wall. The rise a pair of
+  // pitches needs across a given span is fully determined —
+  // rise = span·tanA·tanB/(tanA+tanB) — and does not depend on the eave at all,
+  // so laying the section out once at eave 0 reads the new rise directly. No
+  // iteration, no second stored number, and the answer is exact.
+  const changesPitch = edit.pitchDeg !== undefined || edit.facePitchDeg !== undefined;
+  if (edit.pitchAnchor === 'ridge' && changesPitch) {
+    if (edit.eaveHeightM !== undefined) {
+      return fail([{
+        code: 'EDIT_VALUE_NOT_FINITE',
+        message: 'Setting the wall height and holding the ridge in one edit asks for two ' +
+          'different walls. Change one, then the other.',
+      }]);
+    }
+    const ridgeBefore = layoutSectionFaces(before).ridgeHeightM;
+    if (ridgeBefore == null) {
+      return fail([{
+        code: 'FACE_CONSTRUCTION_FAILED',
+        message: 'This section has no ridge to hold. A flat or shed roof has only an eave.',
+      }]);
+    }
+    const ridgeElevBefore = before.groundElevM + ridgeBefore;
+    const probe = sectionRecord(next);
+    probe.eaveHeightM = 0;
+    const laidProbe = layoutSectionFaces(probe);
+    if (laidProbe.refusals.length > 0) return fail(laidProbe.refusals);
+    if (laidProbe.ridgeHeightM == null) {
+      return fail([{
+        code: 'FACE_CONSTRUCTION_FAILED',
+        message: 'That pitch leaves this section with no ridge to hold.',
+      }]);
+    }
+    const riseAfter = laidProbe.ridgeHeightM;   // eave was 0, so this IS the rise
+    const eaveAfter = (ridgeElevBefore - next.groundElevM) - riseAfter;
+    if (!(eaveAfter >= 0)) {
+      return fail([{
+        code: 'EAVE_HEIGHT_INVALID',
+        message:
+          `Holding the ridge at ${ftInStr(ridgeElevBefore - next.groundElevM)} above the pad ` +
+          `while that pitch needs ${ftInStr(riseAfter)} of rise would put the eave ` +
+          `${ftInStr(-eaveAfter)} BELOW the ground. Hold the eave instead, or lower the pitch.`,
+      }]);
+    }
+    next.eaveHeightM = eaveAfter;
+  }
+
   // Validate the WHOLE section, reporting every problem rather than the first —
   // an installer who fixes one thing and is refused again has been told half
   // the truth twice.
@@ -426,6 +615,358 @@ export function applySectionEdit(
   };
 }
 
+// ── EDITING ONE FACE'S PITCH ────────────────────────────────────────────────
+//
+// 🚨 THE LIVE GAUNTLET FAILURE THIS CLOSES: "The current UI can display pitch
+// for a selected roof face but cannot edit that face's pitch."
+//
+// Three cases, and they are genuinely different buildings, so they are three
+// code paths rather than one with flags:
+//
+//   1. A SLOPE OF A RIDGED SECTION. The pitch is an override on the section
+//      record and the whole section rebuilds. The ridge moves; the partner face
+//      keeps its own pitch and its own eave. No compensating edit.
+//
+//   2. THE DECK OF A SHED SECTION. A shed is one face, so "this face's pitch"
+//      and "the section's pitch" are the same physical quantity. It is written
+//      as the section pitch, not as an override, because storing it twice is
+//      how two numbers start to disagree.
+//
+//   3. A STANDALONE FACE — hand-traced, Google-detected, imported. It belongs
+//      to no volume, so there is nothing to keep shut and nothing to move with
+//      it. Its plan outline is preserved exactly and it is re-lifted at the new
+//      slope about whichever edge the anchor names.
+//
+// A FLAT section is refused: a flat roof with a pitch is a shed, and silently
+// converting the kind under the installer would change how many faces the
+// section has and where its ridge is.
+
+export type PitchAnchor = 'eave' | 'ridge';
+
+export interface FacePitchPreview {
+  /** 🚨 Uniform shape — see SectionLookup. */
+  ok: boolean;
+  /** How this face's pitch will be stored: which of the three cases applies. */
+  scope: 'section-face' | 'shed-deck' | 'standalone' | 'none';
+  faceId: string;
+  sectionId: string | null;
+  faceKey: SectionFaceKey | null;
+  pitchBeforeDeg: number | null;
+  pitchAfterDeg: number;
+  /** Ridge above the pad, before and after. Null when the face has no ridge. */
+  ridgeHeightBeforeM: number | null;
+  ridgeHeightAfterM: number | null;
+  /** Wall/eave above the pad, before and after. Differs only under 'ridge'. */
+  eaveHeightBeforeM: number | null;
+  eaveHeightAfterM: number | null;
+  /**
+   * WHAT ELSE MOVES, in plain words — shown BEFORE the edit is applied.
+   * The instruction was explicit: "If changing one face affects another due to
+   * a real constraint, the user must understand that before applying it."
+   */
+  consequences: string[];
+  refusals: SectionRefusal[];
+}
+
+const noPreview = (faceId: string, refusals: SectionRefusal[]): FacePitchPreview => ({
+  ok: false, scope: 'none', faceId, sectionId: null, faceKey: null,
+  pitchBeforeDeg: null, pitchAfterDeg: NaN,
+  ridgeHeightBeforeM: null, ridgeHeightAfterM: null,
+  eaveHeightBeforeM: null, eaveHeightAfterM: null,
+  consequences: [], refusals,
+});
+
+/** The plane with this id, or null. */
+function planeById(
+  planes: ReadonlyArray<RoofPlane> | null | undefined,
+  faceId: string,
+): RoofPlane | null {
+  for (const p of planes ?? []) if (p && p.id === faceId) return p;
+  return null;
+}
+
+/** Which of the three cases this face is, without applying anything. */
+function classifyFace(
+  planes: ReadonlyArray<RoofPlane> | null | undefined,
+  faceId: string,
+): { plane: RoofPlane | null; sectionId: string | null; key: SectionFaceKey | null } {
+  const plane = planeById(planes, faceId);
+  if (!plane) return { plane: null, sectionId: null, key: null };
+  const sectionId = plane.sectionId || sectionIdOfFaceId(plane.id);
+  const key = (plane.sectionFaceKey as SectionFaceKey) || faceKeyOfFaceId(plane.id);
+  return { plane, sectionId: sectionId || null, key: key || null };
+}
+
+/**
+ * What changing this face's pitch will do — WITHOUT doing it.
+ *
+ * The inspector calls this on every keystroke so the consequences are on screen
+ * before the installer commits. It applies the edit to a COPY and reads the
+ * result, so it cannot describe an outcome the real edit would not produce.
+ */
+export function previewFacePitch(
+  planes: ReadonlyArray<RoofPlane> | null | undefined,
+  faceId: string,
+  pitchDeg: number,
+  anchor: PitchAnchor = 'eave',
+): FacePitchPreview {
+  if (typeof pitchDeg !== 'number' || !isFinite(pitchDeg)) {
+    return noPreview(faceId, [{ code: 'EDIT_VALUE_NOT_FINITE', message: 'Pitch must be a number.' }]);
+  }
+  const { plane, sectionId, key } = classifyFace(planes, faceId);
+  if (!plane) {
+    return noPreview(faceId, [{ code: 'SECTION_NOT_FOUND', message: 'That roof face is not in this design.' }]);
+  }
+
+  // ── Standalone: nothing else moves, and that is the whole answer. ─────────
+  if (!sectionId) {
+    const before = measureFaceVertical(plane);
+    return {
+      ok: true, scope: 'standalone', faceId, sectionId: null, faceKey: null,
+      pitchBeforeDeg: before.pitchDeg, pitchAfterDeg: pitchDeg,
+      ridgeHeightBeforeM: null, ridgeHeightAfterM: null,
+      eaveHeightBeforeM: null, eaveHeightAfterM: null,
+      consequences: [
+        anchor === 'ridge'
+          ? 'The high edge stays where it is; the low edge moves.'
+          : 'The low edge stays where it is; the high edge moves.',
+        'This face belongs to no building section, so nothing else changes.',
+      ],
+      refusals: [],
+    };
+  }
+
+  const look = sectionFromPlanes(planes, sectionId);
+  if (!look.found) return noPreview(faceId, look.refusals);
+  const sec = look.section!;
+
+  if (sec.kind === 'flat') {
+    return noPreview(faceId, [{
+      code: 'PITCH_OUT_OF_RANGE',
+      message: 'A flat section has no pitch to set. Change its roof kind to Shed first, ' +
+        'then give it a slope and a direction.',
+    }]);
+  }
+
+  const isShedDeck = sec.kind === 'shed';
+  const edit: SectionEdit = isShedDeck
+    ? { pitchDeg, pitchAnchor: anchor }
+    : { facePitchDeg: { [key ?? 'slopeA']: pitchDeg } as Partial<Record<SectionFaceKey, number>>, pitchAnchor: anchor };
+
+  if (!isShedDeck && !key) {
+    return noPreview(faceId, [{
+      code: 'FACE_PITCH_NOT_A_FACE',
+      message: 'This face names a section but not which face of it, so its pitch cannot be ' +
+        'set on its own. Edit the section instead.',
+    }]);
+  }
+
+  const trial = applySectionEdit(planes, sectionId, edit);
+  if (!trial.ok) return noPreview(faceId, trial.refusals);
+
+  const laidBefore = layoutSectionFaces(sec);
+  const after = trial.section!;
+  const consequences: string[] = [];
+
+  if (anchor === 'ridge') {
+    consequences.push(
+      `The ridge stays at ${ftInStr(sec.groundElevM + (laidBefore.ridgeHeightM ?? 0))} above sea level; ` +
+      `the wall becomes ${ftInStr(after.eaveHeightM)}.`,
+    );
+  } else if (laidBefore.ridgeHeightM != null && trial.ridgeHeightM != null) {
+    const d = trial.ridgeHeightM - laidBefore.ridgeHeightM;
+    consequences.push(
+      Math.abs(d) < 0.005
+        ? `The wall stays at ${ftInStr(after.eaveHeightM)} and the ridge does not move.`
+        : `The wall stays at ${ftInStr(after.eaveHeightM)}; the ridge ${d > 0 ? 'rises' : 'drops'} ` +
+          `${ftInStr(Math.abs(d))} to ${ftInStr(trial.ridgeHeightM)} above the pad.`,
+    );
+  }
+
+  if (!isShedDeck) {
+    const partners = faceKeysForKind(after.kind).filter(k => k !== key);
+    const moved = partners.filter(k => Math.abs(pitchForFace(after, k) - pitchDeg) > 0.05);
+    if (moved.length > 0) {
+      consequences.push(
+        `${moved.map(prettyFaceKey).join(' and ')} keep their own pitch ` +
+        `(${moved.map(k => pitchForFace(after, k).toFixed(1) + '°').join(', ')}). ` +
+        `The ridge moves across the roof so every face still meets it.`,
+      );
+    }
+    if (sectionHasMixedPitch(after)) {
+      consequences.push('This section’s faces no longer share one pitch, so its ridge sits off-centre.');
+    }
+  }
+  consequences.push('No other building section moves.');
+
+  return {
+    ok: true,
+    scope: isShedDeck ? 'shed-deck' : 'section-face',
+    faceId, sectionId, faceKey: key,
+    pitchBeforeDeg: isShedDeck ? sec.pitchDeg : pitchForFace(sec, key!),
+    pitchAfterDeg: pitchDeg,
+    ridgeHeightBeforeM: laidBefore.ridgeHeightM,
+    ridgeHeightAfterM: trial.ridgeHeightM,
+    eaveHeightBeforeM: sec.eaveHeightM,
+    eaveHeightAfterM: after.eaveHeightM,
+    consequences,
+    refusals: [],
+  };
+}
+
+/** "Slope A" / "the north hip end" — how a face is named to a person. */
+export function prettyFaceKey(key: SectionFaceKey | null | undefined): string {
+  switch (key) {
+    case 'slopeA': return 'Slope A';
+    case 'slopeB': return 'Slope B';
+    case 'hipEndA': return 'Hip end A';
+    case 'hipEndB': return 'Hip end B';
+    case 'deck': return 'Deck';
+    default: return 'This face';
+  }
+}
+
+export interface FacePitchOutcome extends SectionEditOutcome {
+  /** Which of the three cases was taken. 'none' on refusal. */
+  scope: FacePitchPreview['scope'];
+  /** The face ids this edit rebuilt — one for a standalone face, all of a
+   *  section's faces otherwise. The renderer redraws exactly these. */
+  rebuiltFaceIds: string[];
+}
+
+/**
+ * Set ONE roof face's pitch, and rebuild whatever that physically implies.
+ *
+ * 🚨 THE GEOMETRY ACQUIRES THE PITCH — a scalar called `pitch` is never
+ * relabelled. A section face is rebuilt from corner heights by
+ * `roofPlaneFromLiftedOutline`, so the fitted pitch on the returned plane is
+ * read back OUT of the surface that was built, not written over it. This
+ * codebase has been bitten twice by the other kind of fix, where `plane.pitch`
+ * said one thing and `plane.polygon3D` described another until something
+ * re-derived it.
+ */
+export function applyFacePitchEdit(
+  planes: ReadonlyArray<RoofPlane> | null | undefined,
+  faceId: string,
+  pitchDeg: number,
+  anchor: PitchAnchor = 'eave',
+): FacePitchOutcome {
+  const input = (planes ?? []).slice();
+  const bad = (refusals: SectionRefusal[]): FacePitchOutcome => ({
+    ok: false, planes: input, section: null, ridgeHeightM: null, faceBuilds: [],
+    refusals, removedFaceIds: [], scope: 'none', rebuiltFaceIds: [],
+  });
+
+  const pre = previewFacePitch(input, faceId, pitchDeg, anchor);
+  if (!pre.ok) return bad(pre.refusals);
+
+  // ── Cases 1 and 2: the section owns it. ──────────────────────────────────
+  if (pre.scope !== 'standalone') {
+    const edit: SectionEdit = pre.scope === 'shed-deck'
+      ? { pitchDeg, pitchAnchor: anchor }
+      : { facePitchDeg: { [pre.faceKey!]: pitchDeg } as Partial<Record<SectionFaceKey, number>>, pitchAnchor: anchor };
+    const out = applySectionEdit(input, pre.sectionId!, edit);
+    return {
+      ...out,
+      scope: pre.scope,
+      rebuiltFaceIds: out.ok ? out.faceBuilds.map(b => b.faceId) : [],
+    };
+  }
+
+  // ── Case 3: a standalone face, re-lifted about its anchor edge. ──────────
+  const plane = planeById(input, faceId)!;
+  const measured = measureFaceVertical(plane);
+  const ring = (plane.vertices ?? []).map(v => ({ lat: v.lat, lng: v.lng }));
+  if (ring.length < 3) {
+    return bad([{
+      code: 'FOOTPRINT_TOO_FEW_POINTS',
+      message: 'This face has no plan outline to re-slope. Retrace it.',
+    }]);
+  }
+  if (measured.eaveElevM == null || measured.ridgeElevM == null) {
+    return bad([{
+      code: 'GROUND_ELEV_INVALID',
+      message: 'This face has no measurable elevation, so a new pitch has nothing to pivot about.',
+    }]);
+  }
+  const azimuthDeg = isFinite(plane.azimuth) ? plane.azimuth : 180;
+
+  // 🚨 THE ANCHOR IS APPLIED BY MEASURING, NOT BY ASSUMING. Build the face once
+  // about elevation 0 to find out how much rise this outline gets at this
+  // pitch — the plan extent across the slope is a property of the traced ring
+  // and is not worth re-deriving here — then place that surface so the anchored
+  // edge lands back exactly where it was.
+  const probe = roofPlaneFromFootprint(ring, {
+    pitchDeg, azimuthDeg, eaveHeightM: 0, groundElevM: 0,
+  });
+  if (!probe) {
+    return bad([{ code: 'FACE_CONSTRUCTION_FAILED', message: 'That outline could not be re-sloped.' }]);
+  }
+  const probeM = measureFaceVertical(probe.plane);
+  const riseM = (probeM.ridgeElevM ?? 0) - (probeM.eaveElevM ?? 0);
+  const baseElevM = anchor === 'ridge'
+    ? measured.ridgeElevM - riseM
+    : measured.eaveElevM;
+
+  const built = roofPlaneFromFootprint(ring, {
+    pitchDeg, azimuthDeg, eaveHeightM: 0, groundElevM: baseElevM,
+  });
+  if (!built) {
+    return bad([{ code: 'FACE_CONSTRUCTION_FAILED', message: 'That outline could not be re-sloped.' }]);
+  }
+
+  // 🚨 IDENTITY SURVIVES. `buildRoofPlane3D` mints a fresh id every call; the
+  // panels standing on this face resolve by `PlacedPanel.planeId`, so keeping
+  // the fitter's id would orphan the array on every pitch nudge.
+  const next = built.plane;
+  next.id = plane.id;
+  next.source = plane.source ?? 'manual';
+  // The slope is now what a person typed, not what was detected, so it re-enters
+  // review exactly as a hand-traced plane does.
+  next.confirmed = false;
+
+  // 🚨 A RE-SLOPE IS NOT A NEW ROOF FACE. Everything about this face that is
+  // NOT its slope must survive, or changing the pitch quietly changes something
+  // else: `orientation` decides portrait vs landscape for every panel on it,
+  // `sunshineHoursPerYear` is what the production estimate is built from, and
+  // `edgeTypes`/`adjacentPlaneIds` are what setbacks and Stitch read. Losing any
+  // of them would be a second, invisible edit riding along with the first.
+  //
+  // 🚨 `planeHeightAtCenterMeters` IS DELIBERATELY NOT CARRIED. The rebuilt
+  // plane comes out of `buildRoofPlane3D` with the 0.0 sentinel that means
+  // "my elevation is in origin3D" — the same value every other footprint-built
+  // face has. Copying the old absolute elevation over it would leave a stale
+  // number that `computeEcefFrameForLegacyPlane` would believe if this face
+  // ever lost its frame. See tests/planeHeightDatum.test.ts.
+  if (plane.siteKey) next.siteKey = plane.siteKey;
+  if (plane.orientation) next.orientation = plane.orientation;
+  if (plane.edgeTypes) next.edgeTypes = plane.edgeTypes.slice();
+  if (plane.adjacentPlaneIds) next.adjacentPlaneIds = plane.adjacentPlaneIds.slice();
+  if (plane.solarSegmentIndex !== undefined) next.solarSegmentIndex = plane.solarSegmentIndex;
+  if (plane.sunshineHoursPerYear !== undefined) next.sunshineHoursPerYear = plane.sunshineHoursPerYear;
+  (next as any).__eaveDirENU = built.eaveDirENU;
+
+  const out = input.map(p => (p.id === faceId ? next : p));
+  return {
+    ok: true,
+    planes: out,
+    section: null,
+    ridgeHeightM: null,
+    faceBuilds: [{
+      faceId: next.id,
+      key: 'deck',
+      plane: next,
+      frame: built.frame,
+      projectedPts: built.frame.projectedPts,
+      eaveDirENU: built.eaveDirENU,
+    }],
+    refusals: [],
+    removedFaceIds: [],
+    scope: 'standalone',
+    rebuiltFaceIds: [next.id],
+  };
+}
+
 // ── What the inspector is allowed to display ────────────────────────────────
 
 /**
@@ -449,7 +990,18 @@ export interface SectionMeasurement {
   ridgeHeightM: number | null;
   /** DERIVED. Absolute ridge elevation. Null for a deck. */
   ridgeElevM: number | null;
+  /** The section DEFAULT pitch. Faces may override it — see `facePitches`. */
   pitchDeg: number;
+  /**
+   * Every face this section owns and the pitch it is actually built at.
+   *
+   * 🚨 SHOWN EVEN WHEN THEY ALL AGREE. "Which face is the 4:12 one" must be
+   * answerable from the panel, or an installer editing a saltbox is back to
+   * clicking each slope to find out what they typed last time.
+   */
+  facePitches: Array<{ key: SectionFaceKey; faceId: string; label: string; pitchDeg: number }>;
+  /** True when the faces do not all share one pitch, so the ridge is off-centre. */
+  mixedPitch: boolean;
   ridgeAxis: SectionRidgeAxis;
   /** Plan dimensions of the footprint's two edge pairs, metres. */
   planAM: number;
@@ -494,6 +1046,13 @@ export function measureSection(
     ridgeHeightM,
     ridgeElevM: ridgeHeightM == null ? null : section.groundElevM + ridgeHeightM,
     pitchDeg: section.pitchDeg,
+    facePitches: faceKeysForKind(section.kind).map(key => ({
+      key,
+      faceId: `${section.id}::${key}`,
+      label: prettyFaceKey(key),
+      pitchDeg: pitchForFace(section, key),
+    })),
+    mixedPitch: sectionHasMixedPitch(section),
     ridgeAxis: section.ridgeAxis ?? 'auto',
     planAM: pairs.a,
     planBM: pairs.b,
@@ -524,6 +1083,27 @@ export interface FaceMeasurement {
   azimuthDeg: number | null;
   /** The section this face belongs to, or null when it is standalone. */
   sectionId: string | null;
+  /** Which face of that section — null when standalone or unlabelled. */
+  faceKey: SectionFaceKey | null;
+  /**
+   * CAN THIS FACE'S PITCH BE SET, AND WHAT WOULD IT MEAN?
+   *
+   * 🚨 THE UI MUST NOT OFFER A CONTROL THAT CANNOT MOVE THE GEOMETRY. A flat
+   * deck has no pitch to set, and a face naming a section but not which face of
+   * it cannot be resolved to an override. Both render the value with no editor
+   * and say why, rather than accepting a number and doing nothing — which is
+   * the class of silent no-op this editor exists to remove.
+   */
+  pitchScope: 'section-face' | 'shed-deck' | 'standalone' | 'not-editable';
+  /** Present when pitchScope is 'not-editable'. Phrased for a person. */
+  pitchNotEditableWhy: string | null;
+  /** The section's default pitch, for a face that is overriding it. Null when
+   *  the face is standalone or is not overriding anything. */
+  sectionPitchDeg: number | null;
+  /** True when this face carries a pitch of its own, different from its
+   *  section's. The inspector marks it, so "why is this one different" has an
+   *  answer on screen. */
+  overridesSectionPitch: boolean;
 }
 
 /**
@@ -543,13 +1123,49 @@ export function measureFaceVertical(
     faceId: plane?.id ?? '',
     eaveElevM: null, ridgeElevM: null, wallHeightM: null,
     groundResolved: false, pitchDeg: null, azimuthDeg: null,
-    sectionId: null,
+    sectionId: null, faceKey: null,
+    pitchScope: 'standalone', pitchNotEditableWhy: null,
+    sectionPitchDeg: null, overridesSectionPitch: false,
   };
-  if (!plane) return out;
+  if (!plane) {
+    out.pitchScope = 'not-editable';
+    out.pitchNotEditableWhy = 'Nothing is selected.';
+    return out;
+  }
 
   out.sectionId = plane.sectionId || sectionIdOfFaceId(plane.id);
+  out.faceKey = (plane.sectionFaceKey as SectionFaceKey) || faceKeyOfFaceId(plane.id);
   if (isFinite(plane.pitch)) out.pitchDeg = plane.pitch;
   if (isFinite(plane.azimuth)) out.azimuthDeg = plane.azimuth;
+
+  // ── Is this face's pitch editable, and as what? ──────────────────────────
+  const rec = plane.section && plane.section.id === (out.sectionId ?? '') ? plane.section : null;
+  if (!out.sectionId) {
+    out.pitchScope = 'standalone';
+  } else if (!rec) {
+    out.pitchScope = 'not-editable';
+    out.pitchNotEditableWhy =
+      'This face names a building section but carries no definition of it, so a pitch ' +
+      'set here would have nowhere to live. Retrace the section to edit it.';
+  } else if (rec.kind === 'flat') {
+    out.pitchScope = 'not-editable';
+    out.pitchNotEditableWhy =
+      'A flat section has no pitch. Change its roof kind to Shed to give it a slope.';
+  } else if (rec.kind === 'shed') {
+    out.pitchScope = 'shed-deck';
+    out.sectionPitchDeg = rec.pitchDeg;
+  } else if (!out.faceKey) {
+    out.pitchScope = 'not-editable';
+    out.pitchNotEditableWhy =
+      'This face belongs to a section but does not say which face it is, so its pitch ' +
+      'cannot be set on its own. Edit the whole section instead.';
+  } else {
+    out.pitchScope = 'section-face';
+    out.sectionPitchDeg = rec.pitchDeg;
+    const own = rec.facePitchDeg ? rec.facePitchDeg[out.faceKey] : undefined;
+    out.overridesSectionPitch =
+      typeof own === 'number' && isFinite(own) && Math.abs(own - rec.pitchDeg) > 1e-9;
+  }
 
   const poly = (plane.polygon3D ?? []) as Cart3[];
   if (poly.length >= 3) {

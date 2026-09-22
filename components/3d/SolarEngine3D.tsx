@@ -62,8 +62,13 @@ import { buildSectionRoofPlanes, sectionIdOfFaceId } from '@/lib/3d/buildingSect
 import {
   applySectionEdit, measureSection, measureFaceVertical, sectionFromPlanes, listSections,
   repositionPanelsForPlanes,
+  applyFacePitchEdit,
+  previewFacePitch,
   type SectionEdit,
+  type SectionEditOutcome,
+  type PitchAnchor,
 } from '@/lib/3d/sectionEditing';
+import { formatRise12 } from '@/lib/3d/pitchFormat';
 import { SectionInspector, type InspectorState } from '@/components/3d/inspector/SectionInspector';
 import {
   nativeAcquisitionPermitted,
@@ -1138,6 +1143,17 @@ function SolarEngine3D({
   const [selectionLevel, setSelectionLevel] = useState<'section' | 'face'>('section');
   /** The last refusal from the section authority, phrased for a person. */
   const [sectionRefusal, setSectionRefusal] = useState<string | null>(null);
+  /**
+   * WHAT STAYS PUT WHEN A PITCH CHANGES: the wall, or the ridge.
+   *
+   * 🚨 UI STATE, NOT A PROPERTY OF ANY ROOF. Nothing is stored on the section —
+   * an anchor remembered on the record would be a second vertical authority,
+   * able to disagree with the eave height it was used to compute. It lives here
+   * so it survives a selection change within one editing session and nowhere
+   * else. Defaults to 'eave', which is what a builder means: the walls are up
+   * and the roof goes on top of them.
+   */
+  const [pitchAnchor, setPitchAnchor] = useState<PitchAnchor>('eave');
 
   /** 🚨 THE SELECTED ROOF FACE. ONE ANSWER.
    *
@@ -5309,11 +5325,48 @@ function SolarEngine3D({
    * buildSurfaceGrid places panels from that frame.
    */
   function editSection(sectionId: string, edit: SectionEdit, label: string, coalesceKey: string): boolean {
+    if (!sectionId) return false;
+    const outcome = applySectionEdit(roofPlanesRef.current ?? [], sectionId, edit);
+    return adoptGeometryOutcome(outcome, label, coalesceKey, `edit on ${sectionId}`);
+  }
+
+  /**
+   * SET ONE ROOF FACE'S PITCH — the capability the live gauntlet named as
+   * blocking ("can display pitch for a selected roof face but cannot edit it").
+   *
+   * 🚨 IT GOES THROUGH THE SAME ADOPTION PIPELINE AS EVERY OTHER EDIT. Render,
+   * history, panel repositioning, wireframe, extrusion and setbacks are one
+   * function, not two — so a face-pitch edit cannot acquire its own subtly
+   * different set of side effects, which is how "the panels went inside the
+   * house" shipped twice from two code paths doing 90% of the same thing.
+   */
+  function editFacePitch(faceId: string, pitchDeg: number, anchor: PitchAnchor): boolean {
+    if (!faceId) return false;
+    const outcome = applyFacePitchEdit(roofPlanesRef.current ?? [], faceId, pitchDeg, anchor);
+    const how = anchor === 'ridge' ? 'holding the ridge' : 'holding the wall';
+    return adoptGeometryOutcome(
+      outcome, `Set face pitch`, `facepitch:${faceId}`,
+      `pitch ${pitchDeg.toFixed(1)}° on ${faceId}, ${how}`,
+    );
+  }
+
+  /**
+   * Adopt a canonical geometry outcome: redraw what changed, hand the whole
+   * array to the parent for history + persistence, and bring the panels with it.
+   *
+   * 🚨 A REFUSAL IS A NO-OP THAT SAYS WHY. It does not redraw, does not push
+   * history, and does not touch the panels.
+   */
+  function adoptGeometryOutcome(
+    outcome: SectionEditOutcome,
+    label: string,
+    coalesceKey: string,
+    logWhat: string,
+  ): boolean {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
-    if (!viewer || !C || !sectionId) return false;
+    if (!viewer || !C) return false;
 
-    const outcome = applySectionEdit(roofPlanesRef.current ?? [], sectionId, edit);
     if (!outcome.ok) {
       // Every refusal, not the first — see buildingSection's validateSection.
       const why = outcome.refusals.map(r => r.message).join(' ');
@@ -5407,7 +5460,7 @@ function SolarEngine3D({
     if (showSetbackZones)          { try { renderFireSetbackZones(viewer, C); } catch { /* ignore */ } }
     try { viewer.scene.requestRender(); } catch { /* ignore */ }
 
-    addLog('SECTION', `${label} on ${sectionId}`);
+    addLog('SECTION', `${label}: ${logWhat}`);
     return true;
   }
 
@@ -8845,18 +8898,54 @@ function SolarEngine3D({
     const block = blockEntitiesRef.current.find((b: any) => b.id === blockId);
     if (!C || !block?.polygon?.extrudedHeight) return;
     const clamped = Math.max(1, Math.min(30, heightM));
+
+    // 🚨 READ THE PREVIOUS HEIGHT BEFORE OVERWRITING IT.
+    //
+    // This line used to come AFTER the `set` below and read the map back, so
+    // `prior` was always `clamped` and the handle's own arithmetic cancelled to
+    // "leave it where it is". An audit measured it; the `?? clamped` fallback
+    // is what made it look deliberate.
+    const priorH = blockHeightOverridesRef.current.get(blockId);
+
     block.polygon.extrudedHeight = new C.ConstantProperty(clamped);
     blockHeightOverridesRef.current.set(blockId, clamped);
+
+    // 🚨 AND THE PIVOT IS THE HANDLE'S OWN POSITION, NOT THE BLOCK'S.
+    //
+    // The old branch was `if (handle && block.position)`. A Cesium polygon
+    // entity has no `position` — that is why the creation path tags the prism
+    // with `__centroidCart` instead (see the comment there: "PolygonGraphics
+    // doesn't have a `position` field like BoxGraphics does"). So the guard was
+    // never true and the block's grab handle never moved AT ALL: set a block to
+    // 20 ft and the handle stayed at the old height, where grabbing it snapped
+    // the block straight back.
+    //
+    // The handle is a box, it does have a position, and it was placed at
+    // groundLevel + height + HANDLE_LIFT_M — so its own coordinate is the one
+    // thing here that knows where the ground is.
+    const HANDLE_LIFT_M = 0.3;
     const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === blockId);
-    if (handle && block.position) {
-      const cur = block.position.getValue(C.JulianDate.now());
+    if (handle?.position) {
+      const cur = handle.position.getValue(C.JulianDate.now());
       if (cur) {
         const carto = C.Cartographic.fromCartesian(cur);
-        const prior = blockHeightOverridesRef.current.get(blockId) ?? clamped;
-        const groundM = carto.height - prior;
-        handle.position = new C.ConstantProperty(
-          C.Cartesian3.fromRadians(carto.longitude, carto.latitude, groundM + clamped + 0.3),
+        const before = typeof priorH === 'number' && isFinite(priorH) ? priorH : clamped;
+        const groundM = carto.height - before - HANDLE_LIFT_M;
+        const next = safeCartesian3(
+          C, C.Math.toDegrees(carto.longitude), C.Math.toDegrees(carto.latitude),
+          groundM + clamped + HANDLE_LIFT_M,
         );
+        if (next) {
+          handle.position = new C.ConstantProperty(next);
+          // Keep the prism's tagged centroid in step — the drag handler reads it
+          // to work out which block a grab belongs to and where its top is.
+          try {
+            (block as any).__centroidCart = safeCartesian3(
+              C, C.Math.toDegrees(carto.longitude), C.Math.toDegrees(carto.latitude),
+              groundM + clamped,
+            ) ?? (block as any).__centroidCart;
+          } catch { /* ignore */ }
+        }
       }
     }
     try { viewerRef.current?.scene.requestRender(); } catch { /* ignore */ }
@@ -13007,6 +13096,8 @@ function SolarEngine3D({
       level: 'none', section: null, face: null, faceSectionLabel: null,
       sectionCount: all.length, standaloneFaceCount: standalone,
       refusal: sectionRefusal,
+      reshapedFaceCount: 0,
+      pitchAnchor,
     };
     if (!activeFaceId) return base;
 
@@ -13029,8 +13120,17 @@ function SolarEngine3D({
       };
     }
     const label = look.section!.label || 'Section';
-    if (selectionLevel === 'face') return { ...base, level: 'face', face, faceSectionLabel: label };
-    return { ...base, level: 'section', section: measureSection(look.section!, look.faceIds.length) };
+    // 🚨 HOW MANY OF THIS SECTION'S FACES HAVE BEEN RESHAPED BY HAND. Non-zero
+    // means every parametric control below would rebuild from the trace and
+    // discard the stitch, so they are shown inert with the choice stated.
+    const reshapedFaceCount = look.reshapedFaceIds.length;
+    if (selectionLevel === 'face') {
+      return { ...base, level: 'face', face, faceSectionLabel: label, reshapedFaceCount };
+    }
+    return {
+      ...base, level: 'section', reshapedFaceCount,
+      section: measureSection(look.section!, look.faceIds.length),
+    };
   })();
 
   /** The inspector emits an intent; the authority decides whether it is legal. */
@@ -14973,6 +15073,34 @@ function SolarEngine3D({
               onNudgeFace={(deltaM) => { if (activeFaceId) nudgeFaceElevation(activeFaceId, deltaM); }}
               onClearSelection={() => { selectRoofFace(null); setStatusMsg('Selection cleared'); }}
               onDismissRefusal={() => setSectionRefusal(null)}
+              onSetFacePitch={(deg, anchor) => {
+                if (!activeFaceId) { setSectionRefusal('Select a roof face to set its pitch.'); return; }
+                if (editFacePitch(activeFaceId, deg, anchor)) {
+                  setStatusMsg(`📐 Pitch ${deg.toFixed(1)}° · ${formatRise12(deg)} — ` +
+                    (anchor === 'ridge' ? 'ridge held, wall re-derived' : 'wall held, ridge moved'));
+                }
+              }}
+              onSetPitchAnchor={(a) => { setPitchAnchor(a); setSectionRefusal(null); }}
+              /* 🚨 THE PREVIEW READS THE PROP, NOT THE REF. Same reason the
+                 inspector's own values do: `roofPlanesRef.current` is written by
+                 an effect AFTER the render that received the new array, so a
+                 preview taken from it would describe the PREVIOUS building —
+                 and would disagree with the commit by exactly one edit. */
+              previewPitch={(deg, anchor) =>
+                activeFaceId ? previewFacePitch(inspectorPlanes, activeFaceId, deg, anchor) : null}
+              onSelectFace={(faceId) => { selectRoofFace(faceId); setSelectionLevel('face'); }}
+              /* 🚨 THE ONLY WAY A HAND RESHAPE IS EVER DISCARDED. Never
+                 inferred, never a default — the installer presses this and the
+                 section is rebuilt from the footprint and pitch it was traced
+                 with. It is recorded as its own history step, so Undo puts the
+                 reshape back. */
+              onRebuildFromParameters={() => {
+                const sid = selectedFaceSectionId;
+                if (!sid) return;
+                if (editSection(sid, { rebuildFromParameters: true }, 'Rebuild section from trace', `rebuild:${sid}`)) {
+                  setStatusMsg('🏠 Section rebuilt from its traced footprint — the hand reshape was discarded (Undo restores it)');
+                }
+              }}
             />
           </div>
         </DraggablePanel>

@@ -76,6 +76,7 @@ import {
   roofPlaneFromFootprint,
   roofPlaneFromLiftedOutline,
 } from '@/lib/3d/footprintToRoofPlane';
+import { MAX_PITCH_DEG, MIN_RIDGED_PITCH_DEG } from '@/lib/3d/pitchFormat';
 import type { Cart3, Plane3DFrame } from '@/lib/roofPlane3D';
 
 const DEG = Math.PI / 180;
@@ -107,6 +108,15 @@ function mPerDegLng(latDeg: number): number {
 
 /** Below this, a footprint edge is a mis-click rather than a wall. */
 export const MIN_SECTION_EDGE_M = 0.5;
+
+/**
+ * tan of the flattest slope that can still meet a ridge. Below it the run
+ * needed to reach any height at all runs off the footprint, and `rise/tan`
+ * overflows — so the layout refuses instead of building a roof nobody asked
+ * for. `MIN_RIDGED_PITCH_DEG` lives in lib/3d/pitchFormat.ts with the rest of
+ * the pitch vocabulary.
+ */
+const MIN_RIDGED_TAN = Math.tan(MIN_RIDGED_PITCH_DEG * DEG);
 
 export interface LatLng { lat: number; lng: number }
 
@@ -145,6 +155,10 @@ export type SectionRefusalCode =
   | 'RIDGED_ROOF_NEEDS_FOUR_CORNERS'
   | 'FOOTPRINT_SELF_INTERSECTING'
   | 'PITCH_OUT_OF_RANGE'
+  /** A per-face pitch too flat to reach a ridge, or named for a face this
+   *  section does not own. See `pitchForFace` and `facePitchDeg`. */
+  | 'FACE_PITCH_TOO_FLAT'
+  | 'FACE_PITCH_NOT_A_FACE'
   | 'EAVE_HEIGHT_INVALID'
   | 'GROUND_ELEV_INVALID'
   | 'FACE_CONSTRUCTION_FAILED'
@@ -154,6 +168,9 @@ export type SectionRefusalCode =
   | 'SECTION_NOT_FOUND'
   | 'SECTION_RECORDS_CONFLICT'
   | 'SECTION_RECORD_MISSING'
+  /** Stitch or Square Up moved this section's faces by hand; a parametric
+   *  rebuild would discard that. See `RoofPlane.sectionFaceReshaped`. */
+  | 'SECTION_FACES_RESHAPED'
   | 'EDIT_VALUE_NOT_FINITE';
 
 export interface SectionRefusal {
@@ -245,6 +262,11 @@ function midLocal(a: LocalPt, b: LocalPt): LocalPt {
   return { e: (a.e + b.e) / 2, n: (a.n + b.n) / 2 };
 }
 
+/** Point a fraction `t` of the way from a to b. t=0.5 is `midLocal`. */
+function lerpLocal(a: LocalPt, b: LocalPt, t: number): LocalPt {
+  return { e: a.e + (b.e - a.e) * t, n: a.n + (b.n - a.n) * t };
+}
+
 function distLocal(a: LocalPt, b: LocalPt): number {
   return Math.hypot(a.e - b.e, a.n - b.n);
 }
@@ -300,6 +322,49 @@ function perpDistance(p: LocalPt, a: LocalPt, b: LocalPt): number {
  */
 export function sectionFaceId(sectionId: string, key: SectionFaceKey): string {
   return sectionId + '::' + key;
+}
+
+const FACE_KEYS: readonly SectionFaceKey[] = ['slopeA', 'slopeB', 'hipEndA', 'hipEndB', 'deck'];
+
+/** The face key encoded in a section face id, or null if there is none. */
+export function faceKeyOfFaceId(faceId: string | null | undefined): SectionFaceKey | null {
+  if (!faceId) return null;
+  const i = faceId.indexOf('::');
+  if (i <= 0) return null;
+  const key = faceId.slice(i + 2);
+  return (FACE_KEYS as readonly string[]).includes(key) ? (key as SectionFaceKey) : null;
+}
+
+/** Which faces a section of this kind owns, in build order. */
+export function faceKeysForKind(kind: SectionRoofKind): SectionFaceKey[] {
+  if (kind === 'flat' || kind === 'shed') return ['deck'];
+  if (kind === 'gable') return ['slopeA', 'slopeB'];
+  return ['slopeA', 'slopeB', 'hipEndA', 'hipEndB'];
+}
+
+/**
+ * The pitch ONE face of a section is built at.
+ *
+ * 🚨 THE SECTION'S `pitchDeg` IS A DEFAULT, NOT AN OVERRIDE. A face with an
+ * entry in `facePitchDeg` uses it; every other face uses the section value. A
+ * deck has no slope of its own to state — `flat` is horizontal by definition,
+ * and a `shed` deck IS the section pitch, because a shed is one face and the
+ * two numbers would be the same number stored twice.
+ */
+export function pitchForFace(section: BuildingSection, key: SectionFaceKey): number {
+  if (!section) return 0;
+  if (section.kind === 'flat') return 0;
+  if (key === 'deck') return clampPitch(section.pitchDeg);
+  const over = section.facePitchDeg ? section.facePitchDeg[key] : undefined;
+  return clampPitch(typeof over === 'number' && isFinite(over) ? over : section.pitchDeg);
+}
+
+/** True when this section's faces do not all share one pitch. */
+export function sectionHasMixedPitch(section: BuildingSection): boolean {
+  if (!section || section.kind === 'flat' || section.kind === 'shed') return false;
+  const keys = faceKeysForKind(section.kind);
+  const first = pitchForFace(section, keys[0]);
+  return keys.some(k => Math.abs(pitchForFace(section, k) - first) > 1e-9);
 }
 
 /** Does this plane id belong to a section, and if so which? Null when the face
@@ -382,8 +447,63 @@ export function validateSection(section: BuildingSection): SectionRefusal[] {
   }
 
   if (section.kind !== 'flat') {
-    if (!isFinite(section.pitchDeg) || section.pitchDeg < 0 || section.pitchDeg > 60) {
-      add('PITCH_OUT_OF_RANGE', 'Pitch must be between 0 and 60 degrees.');
+    if (!isFinite(section.pitchDeg) || section.pitchDeg < 0 || section.pitchDeg > MAX_PITCH_DEG) {
+      add('PITCH_OUT_OF_RANGE', `Pitch must be between 0 and ${MAX_PITCH_DEG} degrees.`);
+    }
+  }
+  // 🚨 A FLAT SECTION IS NOT VALIDATED AGAINST ITS `pitchDeg`, AND MUST NOT BE.
+  // A gable switched to flat arrives here still carrying its old 30°, and
+  // refusing that would block a legal edit. The stale value is neutralised in
+  // `sectionRecord` instead, which normalises a flat section's pitch to 0 so
+  // the stored number and the built deck can never disagree — and the one
+  // gesture that genuinely means "give this flat roof a slope" is refused where
+  // it happens, in `applySectionEdit`. See both for the audit that found it.
+
+  // ── PER-FACE PITCH OVERRIDES ─────────────────────────────────────────────
+  //
+  // 🚨 AN OVERRIDE FOR A FACE THE SECTION DOES NOT OWN IS A REFUSAL, NOT A
+  // SHRUG. `pitchForFace` would never read it, so the installer would type a
+  // pitch, see nothing change and have no idea why — the exact class of silent
+  // no-op this editor was rebuilt to remove. It usually means the section's
+  // kind was changed underneath the override (a hip turned gable still carrying
+  // hipEndA), which the caller must resolve rather than inherit.
+  if (section.facePitchDeg) {
+    const owned = new Set<string>(faceKeysForKind(section.kind));
+    for (const key of Object.keys(section.facePitchDeg)) {
+      const v = (section.facePitchDeg as Record<string, number>)[key];
+      if (v === undefined || v === null) continue;
+      if (!(FACE_KEYS as readonly string[]).includes(key) || !owned.has(key)) {
+        add('FACE_PITCH_NOT_A_FACE',
+          `This ${section.kind} section has no face called "${key}", so a pitch set for it ` +
+          `would never be built. Clear it, or change the section's roof kind.`);
+        continue;
+      }
+      // 🚨 A DECK OVERRIDE IS A SECOND COPY OF THE SECTION'S OWN PITCH, AND IT
+      // WAS BEING STORED AND THEN IGNORED. A shed is ONE face, so "this face's
+      // pitch" and "the section's pitch" are the same physical quantity;
+      // `pitchForFace` reads `section.pitchDeg` for a deck and never looks at
+      // the override. An audit measured the consequence: `{facePitchDeg:
+      // {deck: 40}}` on an 18° shed returned ok, stamped 40 onto every face's
+      // stored record, signed it into the autosave and reloaded it forever,
+      // while the roof stayed at 18°. Two answers in one object, which is the
+      // defect class this module's header is about.
+      if (key === 'deck') {
+        add('FACE_PITCH_NOT_A_FACE',
+          `A ${section.kind} section is a single face, so its pitch IS the section's pitch. ` +
+          `Set the section pitch instead of a separate one for the deck.`);
+        continue;
+      }
+      if (!isFinite(v) || v < 0 || v > MAX_PITCH_DEG) {
+        add('PITCH_OUT_OF_RANGE',
+          `The pitch for ${key} must be between 0 and ${MAX_PITCH_DEG} degrees.`);
+        continue;
+      }
+      const ridged = section.kind === 'gable' || section.kind === 'hip';
+      if (ridged && v < MIN_RIDGED_PITCH_DEG) {
+        add('FACE_PITCH_TOO_FLAT',
+          `${v}° is too flat for one face of a ${section.kind}: it never reaches the ridge. ` +
+          `Use a shed or flat section for a single horizontal plane.`);
+      }
     }
   }
   if (!isFinite(section.eaveHeightM) || section.eaveHeightM < 0) {
@@ -452,15 +572,18 @@ export function layoutSectionFaces(
   // edges are the gutters. For 'long' that is the longer pair.
   const ridgeServesPairA = axis === 'long' ? pairA >= pairB : pairA < pairB;
 
-  // Ridge ends are the midpoints of the OTHER (rake) pair.
-  const rA = ridgeServesPairA ? midLocal(p[3], p[0]) : midLocal(p[0], p[1]);
-  const rB = ridgeServesPairA ? midLocal(p[1], p[2]) : midLocal(p[2], p[3]);
+  // The CENTRELINE of the mass — the midpoints of the rake pair. It is not
+  // necessarily where the ridge ends up (see the rise solution below); it is
+  // the line the span is measured across, which is a property of the footprint
+  // alone and must not move when a pitch changes.
+  const midA = ridgeServesPairA ? midLocal(p[3], p[0]) : midLocal(p[0], p[1]);
+  const midB = ridgeServesPairA ? midLocal(p[1], p[2]) : midLocal(p[2], p[3]);
 
-  // Half-span: mean perpendicular distance from the ridge line to the eaves.
+  // Half-span: mean perpendicular distance from the centreline to the eaves.
   // For a parallelogram every corner is equidistant; for a general quad the
   // mean is the honest single number, and each face's fitted pitch then tells
   // the truth about what that produced.
-  const halfSpan = p.reduce((s, q) => s + perpDistance(q, rA, rB), 0) / p.length;
+  const halfSpan = p.reduce((s, q) => s + perpDistance(q, midA, midB), 0) / p.length;
   if (!(halfSpan > MIN_SECTION_EDGE_M / 2)) {
     return {
       faces: [],
@@ -472,8 +595,67 @@ export function layoutSectionFaces(
     };
   }
 
-  const pitch = clampPitch(section.pitchDeg);
-  const ridgeHeightM = eave + halfSpan * Math.tan(pitch * DEG);
+  // ── THE RIDGE IS THE SHARED UNKNOWN, NOT A FIXED CENTRELINE ──────────────
+  //
+  // Both slopes start at the same eave height and must arrive at the SAME
+  // ridge. Write the rise (ridge above eave) as the thing they agree on:
+  //
+  //     dA · tanA = rise = dB · tanB       and      dA + dB = span
+  //  =>  rise = span · tanA · tanB / (tanA + tanB)
+  //  =>  dA   = rise / tanA,   dB = rise / tanB
+  //
+  // With tanA = tanB this is exactly dA = dB = span/2 and rise = halfSpan·tan,
+  // which is what this function computed before per-face pitch existed, so a
+  // symmetric gable is bit-for-bit unchanged. With different pitches the ridge
+  // slides toward the STEEPER slope — which is what a saltbox is, and why the
+  // installer no longer has to raise the partner face to close the roof again.
+  const pitchA = clampPitch(pitchForFace(section, 'slopeA'));
+  const pitchB = clampPitch(pitchForFace(section, 'slopeB'));
+  const tanA = Math.tan(pitchA * DEG);
+  const tanB = Math.tan(pitchB * DEG);
+
+  const span = 2 * halfSpan;
+  // 🚨 EQUAL PITCHES ARE SOLVED WITHOUT THE GENERAL FORMULA, AT ANY SLOPE
+  // INCLUDING ZERO. A gable whose two halves match has its ridge on the
+  // centreline by symmetry, and that stays true at 0°, where the general
+  // solution divides 0 by 0. A 0° gable is a flat roof drawn as two faces —
+  // degenerate, but it is what dragging the pitch slider to the bottom has
+  // always produced here, and quietly refusing it now would be a regression
+  // (tests/buildingSection.test.ts:284 pins it).
+  const symmetric = Math.abs(pitchA - pitchB) < 1e-9;
+  let riseM: number;
+  let ridgeT: number;
+  if (symmetric) {
+    riseM = halfSpan * tanA;
+    ridgeT = 0.5;
+  } else {
+    // 🚨 A FLAT FACE CANNOT MEET A RIDGE A PITCHED ONE REACHES. Slope A stays
+    // at the eave the whole way across, so the only ridge it can share sits at
+    // eave height — which slope B reaches only if it has no width. There is no
+    // roof here to build. That is a shed with a flat deck beside it: two
+    // sections, and saying so is better than clamping to a shape the installer
+    // did not ask for and could not see was wrong.
+    if (!(tanA > MIN_RIDGED_TAN) || !(tanB > MIN_RIDGED_TAN)) {
+      return {
+        faces: [],
+        ridgeHeightM: null,
+        refusals: [{
+          code: 'FACE_PITCH_TOO_FLAT',
+          message:
+            'A ' + section.kind + ' with different slopes needs a real pitch on both sides: ' +
+            pitchA.toFixed(1) + '° and ' + pitchB.toFixed(1) + '° were given, and a face ' +
+            'flatter than ' + MIN_RIDGED_PITCH_DEG + '° never reaches the ridge the other ' +
+            'one does. Use a shed section for a single sloped plane, or a flat section for ' +
+            'a horizontal one.',
+        }],
+      };
+    }
+    riseM = span * tanA * tanB / (tanA + tanB);
+    // Where the ridge sits across the span, as a fraction from the eave-A side.
+    // Less than 0.5 when slope A is the steeper one: it needs less run.
+    ridgeT = Math.min(0.999, Math.max(0.001, (riseM / tanA) / span));
+  }
+  const ridgeHeightM = eave + riseM;
 
   // Eave corners in the order each face needs them.
   const eaveA: [LocalPt, LocalPt] = ridgeServesPairA ? [p[0], p[1]] : [p[1], p[2]];
@@ -481,6 +663,17 @@ export function layoutSectionFaces(
   // The rake edges, which a hip turns into hipped ends.
   const rakeA: [LocalPt, LocalPt] = ridgeServesPairA ? [p[3], p[0]] : [p[0], p[1]];
   const rakeB: [LocalPt, LocalPt] = ridgeServesPairA ? [p[1], p[2]] : [p[2], p[3]];
+
+  // 🚨 THE RIDGE ENDS MUST STAY ON THE RAKE EDGES. Sliding the ridge line
+  // perpendicular to itself leaves the gable-end wall behind on any footprint
+  // that is not a rectangle. Parametrising ALONG each rake instead keeps the
+  // ridge end where the two roof planes and the end wall actually meet, for any
+  // quadrilateral, and reduces to the midpoint when ridgeT is 0.5.
+  //
+  // In both `ridgeServesPairA` cases the rake's eave-A corner is rakeA[1] and
+  // rakeB[0] — the rings are traced in opposite senses around the two ends.
+  const rA = lerpLocal(rakeA[1], rakeA[0], ridgeT);
+  const rB = lerpLocal(rakeB[0], rakeB[1], ridgeT);
 
   const faces: SectionFace[] = [];
   const pushFace = (key: SectionFaceKey, pts: LocalPt[], hs: number[]) => {
@@ -500,8 +693,39 @@ export function layoutSectionFaces(
     return { faces, ridgeHeightM, refusals: [] };
   }
 
-  // ── HIP. The ridge is set back from both ends by the half-span, which is
-  // what makes the hipped end slope at the same pitch as the main faces.
+  // ── HIP. The ridge is set back from each end by exactly the run that end's
+  // own pitch needs to climb the SAME rise the main slopes climb:
+  //
+  //     setback = rise / tan(endPitch)
+  //
+  // With every pitch equal that is rise/tan = halfSpan, the value this function
+  // used before, so a plain hip is unchanged. Different end pitches give
+  // different setbacks, which is how a hip with a steeper rake is modelled
+  // rather than approximated.
+  const pitchEndA = clampPitch(pitchForFace(section, 'hipEndA'));
+  const pitchEndB = clampPitch(pitchForFace(section, 'hipEndB'));
+  const tanEndA = Math.tan(pitchEndA * DEG);
+  const tanEndB = Math.tan(pitchEndB * DEG);
+  // 🚨 A FLAT HIP IS STILL A HIP SHAPE. When the whole roof is horizontal there
+  // is no rise for a setback to serve, but the four faces must still be laid
+  // out as a hip in PLAN or they collapse to collinear slivers that cannot be
+  // built at all. The half-span is what this produced before; it keeps the
+  // shape and costs nothing, because every corner is at the eave anyway.
+  const flatHip = !(riseM > 1e-9);
+  if (!flatHip && (!(tanEndA > MIN_RIDGED_TAN) || !(tanEndB > MIN_RIDGED_TAN))) {
+    return {
+      faces: [],
+      ridgeHeightM: null,
+      refusals: [{
+        code: 'FACE_PITCH_TOO_FLAT',
+        message:
+          'A hipped end flatter than ' + MIN_RIDGED_PITCH_DEG + '° never reaches the ridge ' +
+          'the main slopes reach. Use a gable end for a vertical wall, or a shed section ' +
+          'for a single plane.',
+      }],
+    };
+  }
+
   const ridgeLen = distLocal(rA, rB);
   const ue = (rB.e - rA.e) / (ridgeLen || 1);
   const un = (rB.n - rA.n) / (ridgeLen || 1);
@@ -519,10 +743,18 @@ export function layoutSectionFaces(
   // survives as a sub-micron segment, both slopes come out as QUADS with two
   // coincident corners, and the hip ends become slivers. A ridge shorter than
   // the module's minimum edge is not a ridge — it is an apex.
-  const collapsed = ridgeLen - 2 * halfSpan < MIN_SECTION_EDGE_M;
-  const setback = collapsed ? ridgeLen / 2 : halfSpan;
-  const hA: LocalPt = { e: rA.e + ue * setback, n: rA.n + un * setback };
-  const hB: LocalPt = { e: rB.e - ue * setback, n: rB.n - un * setback };
+  const wantSetbackA = flatHip ? halfSpan : riseM / tanEndA;
+  const wantSetbackB = flatHip ? halfSpan : riseM / tanEndB;
+  const collapsed = ridgeLen - (wantSetbackA + wantSetbackB) < MIN_SECTION_EDGE_M;
+  // When they collide, share what length there is in the ratio the two end
+  // pitches asked for — equal halves when the pitches are equal, which is what
+  // this produced before. The apex is then steeper than requested at both ends,
+  // and `fittedPitchByFaceId` reports that rather than the request.
+  const wantTotal = wantSetbackA + wantSetbackB;
+  const setbackA = collapsed ? ridgeLen * (wantSetbackA / (wantTotal || 1)) : wantSetbackA;
+  const setbackB = collapsed ? ridgeLen * (wantSetbackB / (wantTotal || 1)) : wantSetbackB;
+  const hA: LocalPt = { e: rA.e + ue * setbackA, n: rA.n + un * setbackA };
+  const hB: LocalPt = { e: rB.e - ue * setbackB, n: rB.n - un * setbackB };
 
   if (collapsed) {
     const apex = midLocal(hA, hB);
@@ -665,13 +897,65 @@ export function buildSectionRoofPlanes(section: BuildingSection): SectionPlanOut
  * disagreement check below could then never fire, because the copies would be
  * the same object rather than equal objects.
  */
+/**
+ * A canonical, deep copy of the per-face pitch map — or `undefined` when there
+ * is nothing in it.
+ *
+ * 🚨 CANONICAL ORDER AND CANONICAL EMPTINESS, BECAUSE TWO RECORDS ARE COMPARED
+ * BY `JSON.stringify`. `sectionRecordsAgree` is what decides whether a
+ * section's faces are in conflict and therefore UNEDITABLE. `{slopeA, slopeB}`
+ * and `{slopeB, slopeA}` hold the same roof and stringify differently, and so
+ * do `undefined` and `{}` — either would have jammed the whole section behind
+ * "the faces carry different copies of its definition" for no physical reason.
+ * Emitting the keys in `FACE_KEYS` order, dropping non-finite entries and
+ * collapsing an empty map to `undefined` makes the comparison mean what it says.
+ */
+function copyFacePitch(
+  src: BuildingSection['facePitchDeg'],
+): BuildingSection['facePitchDeg'] {
+  if (!src || typeof src !== 'object') return undefined;
+  const out: Partial<Record<SectionFaceKey, number>> = {};
+  let any = false;
+  for (const key of FACE_KEYS) {
+    const v = src[key];
+    if (typeof v !== 'number' || !isFinite(v)) continue;
+    out[key] = v;
+    any = true;
+  }
+  return any ? out : undefined;
+}
+
 export function sectionRecord(section: BuildingSection): BuildingSection {
   return {
     id: section.id,
     kind: section.kind,
     footprint: section.footprint.map(v => ({ lat: v.lat, lng: v.lng })),
     eaveHeightM: section.eaveHeightM,
-    pitchDeg: section.pitchDeg,
+    // 🚨 A FLAT SECTION'S STORED PITCH IS 0, BECAUSE ITS DECK IS BUILT AT 0.
+    //
+    // `buildSectionRoofPlanes` hardcodes the deck horizontal —
+    //     pitchDeg: section.kind === 'flat' ? 0 : clampPitch(section.pitchDeg)
+    // — so any other value here is a number no geometry realises. An audit
+    // traced the consequence from the Block tool in three clicks: type 25 into
+    // a flat section's pitch box, the edit returns ok, the status bar says
+    // "every face of the section moved together", nothing moves, `plane.pitch`
+    // stays 0 for the permit and for PVWatts, and the inspector then reads
+    // "Roof pitch 25.0°" about a roof with no 25° anywhere. That is the 17-ft
+    // readout in a different costume.
+    //
+    // Normalising here — in the ONE copier every stored record passes through —
+    // means the number shown and the roof built are the same answer, whatever a
+    // caller hands in. A flat roof that should have a slope is a SHED, and
+    // `applySectionEdit` says so rather than accepting the number.
+    pitchDeg: section.kind === 'flat' ? 0 : section.pitchDeg,
+    // 🚨 COPIED, AND COPIED DEEP. This function is the ONE place a section
+    // record is duplicated — onto every face, into the conflict comparison, and
+    // back out of `applySectionEdit`. A field missing from it does not merely
+    // fail to round-trip: it is erased by the next edit of any OTHER field,
+    // silently, because the rebuild stamps this copy over the faces. Sharing
+    // the object instead of copying it is the other half of the same trap:
+    // `sectionRecordsAgree` would then compare an object with itself.
+    facePitchDeg: copyFacePitch(section.facePitchDeg),
     groundElevM: section.groundElevM,
     shedAzimuthDeg: section.shedAzimuthDeg ?? null,
     ridgeAxis: section.ridgeAxis ?? 'auto',
