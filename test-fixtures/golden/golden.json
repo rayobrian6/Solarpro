@@ -152,6 +152,7 @@
       "combinerLabel",
       "combinerModel",
       "combinerProvidesAcDisconnect",
+      "combinerSelectionIsDecided",
       "combinerType",
       "dcAcRatio",
       "dcConduitType",

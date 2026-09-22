@@ -216,6 +216,14 @@ export async function POST(req: NextRequest) {
       combinerModel:                _combiner.combinerModel,
       combinerHasIntegratedGateway: _combiner.combinerHasIntegratedGateway,
       combinerProvidesAcDisconnect: _combiner.combinerProvidesAcDisconnect,
+      // 🚨 AND WHETHER THAT NAME IS A DECISION OR A PLACEHOLDER.
+      //
+      // `combinerSelectionIsDecided` was computed by the adapter and read by
+      // NOTHING, so every sheet printed an unresolved default with exactly the
+      // same confidence as a recorded installer selection. Carrying it here is
+      // what lets the renderer qualify the box. Only an explicit `false`
+      // qualifies, so a builder that does not pass it renders as before.
+      combinerSelectionIsDecided: _combiner.combinerSelectionIsDecided,
       meteringChannels:             _combiner.combinerMeteringSummary,
       // The four fields above are the RESOLVED single-lane combiner. This is
       // the selection itself, and it is needed because a hybrid export attaches

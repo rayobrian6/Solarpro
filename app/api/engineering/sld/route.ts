@@ -46,6 +46,7 @@ import { sizeSystemFromBrand, type SystemSizingResult } from '@/lib/system/sizin
 import type { LayoutCandidate } from '@/lib/system/inverterCapabilities';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { parseRunId } from '@/lib/computed-multi-system';
+import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 
 // ── Wave 3.7 → Wave 5A: LEGACY FALLBACK ARMOR ────────────────────────────────
 // Since Wave 5A the primary hybrid path is `body.sources` (validated by
@@ -821,6 +822,16 @@ export async function POST(req: NextRequest) {
       combinerModel:           _bosLabel,
       combinerHasIntegratedGateway: _bosPlan.hasIntegratedGateway,
       combinerProvidesAcDisconnect: _bosPlan.providesAcDisconnect,
+      // 🚨 AND WHETHER THAT NAME IS A DECISION OR A PLACEHOLDER.
+      //
+      // `combinerSelectionIsDecided` was computed by the adapter and read by
+      // NOTHING, so every sheet printed an unresolved default with exactly the
+      // same confidence as a recorded installer selection. Carrying it here is
+      // what lets the renderer qualify the box. Only an explicit `false`
+      // qualifies, so a builder that does not pass it renders as before.
+      // This route resolves its own plan rather than going through the
+      // adapter, so it asks the same authority the adapter asks.
+      combinerSelectionIsDecided: combinerBasisIsDecided(_bosPlan.combinerBasis ?? 'unresolved-default'),
       // What this design actually MEASURES, from the CT authority. The schedule
       // could previously say "IQ Combiner 6C" and imply consumption metering the
       // job had not bought; this row states the channels instead of implying them.

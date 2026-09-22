@@ -1109,7 +1109,42 @@ function EngineeringPageInner() {
   //
   // Clearing to null is the honest reset: "nobody has chosen on this project
   // yet" — which is exactly what is true until the selector reports otherwise.
-  useEffect(() => { setProjectCombinerId(null); }, [currentProjectId]);
+  // 🚨 AND IT IS LOADED FROM THE PROJECT, NOT ONLY FROM THE PICKER.
+  //
+  // This state used to have exactly ONE writer: `CombinerSelector`, which is
+  // mounted `visible={!!computedSystem?.isMicro}`. An audit traced what that
+  // costs on a hybrid — a string/optimizer roof with a micro ground or fence
+  // sub-system has `aggregate.isMicro === false`, so the selector never
+  // renders, never fetches, and `projectCombinerId` stays null forever. The
+  // installer's recorded decision was sitting in
+  // `projects.selected_equipment.combinerSelection` and reached NO artefact:
+  // not the SLD payload, not the BOM, not the permit, and the read-only badge
+  // on the Diagram tab said "not selected" about a project that had one.
+  //
+  // The persisted answer is now read here, keyed on the project, independent of
+  // which tab is mounted and of what the aggregate topology happens to be. The
+  // selector still reports its own changes; this is the value that exists
+  // before it ever renders. A failed read leaves null — "nobody has chosen
+  // yet" — which is what is true when we could not find out.
+  useEffect(() => {
+    setProjectCombinerId(null);
+    const pid = currentProjectId;
+    if (!pid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/projects/${pid}/combiner-selection`);
+        if (!r.ok) return;
+        const body = await r.json();
+        const id = body?.selected?.combinerDeviceId;
+        // 🚨 ONLY IF IT IS STILL THIS PROJECT. The fetch resolves after a
+        // project switch as readily as before one, and applying a late answer
+        // would put one project's equipment decision on another's permit.
+        if (!cancelled && typeof id === 'string' && id) setProjectCombinerId(id);
+      } catch { /* a read that failed is not a selection */ }
+    })();
+    return () => { cancelled = true; };
+  }, [currentProjectId]);
   const [currentClientId,  setCurrentClientId]  = useState<string | null>(null);
 
   // Project selector — shown when no projectId in URL

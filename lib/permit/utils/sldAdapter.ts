@@ -27,6 +27,7 @@ import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRace
 
 // CMEI — module identity comes from THE canonical accessor.
 import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
+import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 /** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
  *  model string — the SAME records the equipment pages read. Undefined when
  *  the model can't be matched (the sheet then prints a MARKED conservative
@@ -380,6 +381,14 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     combinerModel:           _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined,
     combinerHasIntegratedGateway: _bos.hasIntegratedGateway,
     combinerProvidesAcDisconnect: _bos.providesAcDisconnect,
+    // 🚨 AND WHETHER THAT NAME IS A DECISION OR A PLACEHOLDER.
+    //
+    // `combinerSelectionIsDecided` was computed by the adapter and read by
+    // NOTHING, so every sheet printed an unresolved default with exactly the
+    // same confidence as a recorded installer selection. Carrying it here is
+    // what lets the renderer qualify the box. Only an explicit `false`
+    // qualifies, so a builder that does not pass it renders as before.
+    combinerSelectionIsDecided: combinerBasisIsDecided(_bos.combinerBasis ?? 'unresolved-default'),
     // ── 2026-09-22 — THE METERING ROW THAT WAS ONLY MISSING FROM THE PERMIT ──
     //
     // 🚨 WHAT WAS WRONG: the renderer prints the E-1 'Metering' row only when it
