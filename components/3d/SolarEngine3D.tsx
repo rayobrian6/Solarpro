@@ -58,7 +58,12 @@ import {
   type Cart3,
   type Plane3DFrame,
 } from '@/lib/roofPlane3D';
-import { buildSectionRoofPlanes } from '@/lib/3d/buildingSection';
+import { buildSectionRoofPlanes, sectionIdOfFaceId } from '@/lib/3d/buildingSection';
+import {
+  applySectionEdit, measureSection, measureFaceVertical, sectionFromPlanes, listSections,
+  type SectionEdit,
+} from '@/lib/3d/sectionEditing';
+import { SectionInspector, type InspectorState } from '@/components/3d/inspector/SectionInspector';
 import {
   nativeAcquisitionPermitted,
   type NativeGeometryDisposition,
@@ -281,12 +286,8 @@ import { getPanelById } from '@/lib/equipment-db';
 // canvas. State is local to this view; the wider surface integration
 // (dispatching actions on every primitive add/remove) is intentionally
 // staged for a follow-up commit so this slice is reversible on its own.
-import {
-  UndoRedoToolbar,
-  createHistoryStore,
-  createEmptySceneState,
-  type HistoryStore,
-} from '@/lib/state';
+// (The Save/Undo/Redo chip and its SceneState history store used to be imported
+//  here. See the note at the former `historyStoreRef` for why they are not.)
 
 // v66: Lift Roofs / Flatten Roofs quick actions for the 3D Primitives
 // (block / gable / hip entities the user draws in the canvas). Pure
@@ -526,6 +527,41 @@ interface Props {
    *  persistence use the stitched geometry, not the pre-stitch traced corners or a
    *  stale frame. One call per Stitch, all updated planes at once. */
   onRoofPlanesStitched?: (updates: RoofPlaneReshapeUpdate[]) => void;
+  /**
+   * 🚨 A WHOLE, CANONICAL ROOF — the channel a BUILDING SECTION edit uses.
+   *
+   * `onRoofPlanesStitched` carries a per-face patch of geometry fields, which is
+   * right for Stitch and Square Up and wrong here: editing a section rebuilds
+   * every face it owns AND re-stamps `plane.section` on each one, and that field
+   * is not in the patch shape. Sending a section edit through it would move the
+   * geometry and leave the canonical record behind — the exact defect the WALLS
+   * stepper had, where the record still claimed a 2.9 m eave after the roof had
+   * risen a foot.
+   *
+   * It is also the single choke point undo needs: the parent pushes a snapshot
+   * of what it holds, adopts this array, and rebuilds derived geometry from it.
+   */
+  onRoofGeometryReplaced?: (
+    planes: import('@/types').RoofPlane[],
+    meta: { label: string; coalesceKey?: string },
+  ) => void;
+  /**
+   * CANONICAL GEOMETRY UNDO, owned by the parent because the parent owns
+   * `roofPlanes`. Returns the label of the edit stepped over, or null.
+   *
+   * 🚨 THERE WAS ALREADY AN UNDO IN THIS FILE AND IT WAS INERT.
+   * `createHistoryStore(createEmptySceneState())` built a history over a
+   * `SceneState` of primitives and slider positions and wired it to a
+   * Save/Undo/Redo chip. Nothing dispatched to it — zero call sites — so the
+   * buttons did nothing, and what it modelled was render state, which is the
+   * one thing a geometry history must not restore.
+   */
+  onUndoGeometry?: () => string | null;
+  onRedoGeometry?: () => string | null;
+  canUndoGeometry?: boolean;
+  canRedoGeometry?: boolean;
+  undoGeometryLabel?: string | null;
+  redoGeometryLabel?: string | null;
   /** E2E-only diagnostics bridge. Passed only when NEXT_PUBLIC_E2E=1. */
   onE2EDiagnostics?: (diagnostics: {
     fullRebuildCount: number;
@@ -556,24 +592,21 @@ interface Props {
    *  DesignStudio uses this to keep its own `orientation` state + 2D layout in sync. */
   onOrientationChange?: (orientation: PanelOrientation) => void;
   /** CAD-derived roof planes from DesignStudio -- used by Auto Fill instead of Solar API segments */
-  roofPlanes?: Array<{
-    id: string;
-    vertices: Array<{ lat: number; lng: number }>;
-    pitch: number;
-    azimuth: number;
-    area: number;
-    usableArea: number;
-    confirmed?: boolean;
-    planeHeightAtCenterMeters?: number;
-    centroidLat?: number;   // v47.94: persistent centroid -- single coordinate origin
-    centroidLng?: number;   // v47.94: persistent centroid -- single coordinate origin
-    origin3D?:  { x: number; y: number; z: number };
-    normal3D?:  { x: number; y: number; z: number };
-    polygon3D?: Array<{ x: number; y: number; z: number }>;
-    createdFrom3D?: boolean;
-    ecefFrame3D?: { u: { x: number; y: number; z: number }; v: { x: number; y: number; z: number }; n: { x: number; y: number; z: number } };
-    localFrame3D?: { u: { x: number; y: number; z: number }; v: { x: number; y: number; z: number }; n: { x: number; y: number; z: number } };
-  }>;
+  /**
+   * 🚨 THE TYPE, NOT A COPY OF IT.
+   *
+   * This was a hand-maintained structural duplicate of `RoofPlane` listing
+   * seventeen of its fields. Every field added to the real type since — the
+   * section record, `sectionId`, `sectionFaceKey`, `siteKey`, `source` — was
+   * invisible here, so the engine could not read a plane's own section while
+   * DesignStudio (which passes `RoofPlane[]`) could. A second declaration of a
+   * shape is a second authority for it, and this one was already stale.
+   *
+   * The only caller is DesignStudio and it already passes `RoofPlane[]`. Every
+   * extra field on `RoofPlane` is optional, so nothing that satisfied the old
+   * list fails to satisfy this.
+   */
+  roofPlanes?: import('@/types').RoofPlane[];
   /** v50.11: Show irradiance heatmap overlay on the 3D roof */
   showIrradiance?: boolean;
   /** v63: Color each panel by its string assignment instead of system-type color. */
@@ -1014,6 +1047,10 @@ function SolarEngine3D({
   onMeasurementsChange,
   initialObstructions,
   onRoofPlanesStitched,
+  onRoofGeometryReplaced,
+  onUndoGeometry, onRedoGeometry,
+  canUndoGeometry = false, canRedoGeometry = false,
+  undoGeometryLabel = null, redoGeometryLabel = null,
   onE2EDiagnostics,
   selectedRoofPlaneId,
   onRoofPlaneSelect,
@@ -1055,20 +1092,51 @@ function SolarEngine3D({
   //
   // Both are VIEW state. They shape what the Building view draws, derived from
   // the traced footprint at render time, and never write back to a plane.
-  const [wallHeightM, setWallHeightM] = useState(FLAT_TRACE_EAVE_HEIGHT_M);
+  /** 🚨 A DELTA ACCUMULATOR, NOT A WALL HEIGHT, AND DELIBERATELY NOT STATE.
+   *
+   *  These were React state rendered as `WALLS {ftStr(effectiveWallM)}` and
+   *  `PITCH {effectivePitchDeg}`. Neither was ever measured from geometry, so
+   *  neither named anything in the building. They survive only as the internal
+   *  baseline `applyBuildingShape` subtracts to turn an absolute request into a
+   *  relative nudge of one standalone face — see `nudgeFaceElevation`. Being
+   *  refs rather than state is the guard: a value with no React binding cannot
+   *  be rendered by accident. */
   const wallHeightRef = useRef(FLAT_TRACE_EAVE_HEIGHT_M);
-  const [buildingPitchDeg, setBuildingPitchDeg] = useState(25);
   const buildingPitchRef = useRef(25);
-  // Per-face overrides. A face the user has selected and adjusted keeps its own
-  // pitch / wall height / azimuth; everything else follows the global controls.
-  // Ray: "it adjusts both planes" — a real roof has a porch at a shallower
-  // pitch, a dormer, an addition. One knob for the whole building is not enough.
-  type BuildingFaceOverride = { pitchDeg?: number; wallHeightM?: number; azimuthDeg?: number };
-  const [buildingOverrides, setBuildingOverrides] = useState<Map<string, BuildingFaceOverride>>(new Map());
-  const buildingOverridesRef = useRef<Map<string, BuildingFaceOverride>>(new Map());
+  /* 🚨 `buildingOverrides` WAS DELETED HERE, AND IT WAS NEVER ALIVE.
+   *
+   * It was a Map<faceId, {pitchDeg, wallHeightM, azimuthDeg}> intended to give
+   * each face its own height and pitch, and `setBuildingOverrides` was DECLARED
+   * AND NEVER CALLED — in any commit. So the map was permanently empty, and the
+   * three readers of it (`effectiveWallM`, `effectivePitchDeg`, and a status
+   * message) all fell through to the global on every render while the UI
+   * rendered a "THIS FACE" chip promising otherwise.
+   *
+   * The need it was written for is real and is now met properly: a porch at a
+   * shallower pitch, a dormer, an addition are BUILDING SECTIONS, each with its
+   * own pad, eave and pitch, edited through lib/3d/sectionEditing. A per-face
+   * override map would have been a second vertical authority beside the
+   * section record, which is the defect this whole pass exists to remove. */
   // Which face is selected for editing, by plane id. null = the whole building.
   const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
   const selectedFaceIdRef = useRef<string | null>(null);
+
+  /**
+   * 🚨 WHICH LEVEL OF THE HIERARCHY THE INSPECTOR IS EDITING.
+   *
+   * A click selects a FACE — that is what the ray hits and that is what the
+   * highlight draws. But a face cannot answer "how high is this wall" and must
+   * not move on its own: raising one half of a gable opens the ridge, and
+   * shutting it again is the compensating edit that made the editor unusable.
+   *
+   * So when the clicked face belongs to a section, the inspector opens at
+   * SECTION level and the vertical controls act on the volume. 'face' is a
+   * deliberate drill-in that offers measurements and no height controls. A
+   * standalone traced face has no section and stays at 'face'.
+   */
+  const [selectionLevel, setSelectionLevel] = useState<'section' | 'face'>('section');
+  /** The last refusal from the section authority, phrased for a person. */
+  const [sectionRefusal, setSectionRefusal] = useState<string | null>(null);
 
   /** 🚨 THE SELECTED ROOF FACE. ONE ANSWER.
    *
@@ -1095,13 +1163,27 @@ function SolarEngine3D({
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
   // v70: Aurora-parity Save/Undo/Redo ring-buffer history store.
-  // Seeded empty; the wider dispatch integration (replaceState on load,
-  // dispatch on every primitive add/remove/move) is staged for the
-  // follow-up commit. This slice proves the UI + buffer work.
-  const historyStoreRef = useRef<HistoryStore | null>(null);
-  if (historyStoreRef.current === null) {
-    historyStoreRef.current = createHistoryStore(createEmptySceneState());
-  }
+  /* 🚨 `historyStoreRef` WAS REMOVED HERE. IT WAS A SECOND UNDO, AND IT WAS
+   * NEVER CONNECTED.
+   *
+   * `createHistoryStore(createEmptySceneState())` was constructed on every
+   * mount and handed to the Save/Undo/Redo chip. The comment that stood here
+   * said "the wider dispatch integration is staged for the follow-up commit" —
+   * and it never came: the store had ZERO dispatch sites, so the buttons were
+   * decoration on an empty stack.
+   *
+   * It could not have been the answer even once connected. Its `SceneState` is
+   * `{primitives, selectedId, view:{placementMode, newBlockEaveHeightM,
+   * newRoofEaveHeightM, newRoofPitchDeg}}` — render state and slider positions.
+   * Restoring that would put the PICTURE back while `roofPlanes` kept the
+   * undone edit, and the next autosave would persist the design the user had
+   * just rejected, into the row the permit is drawn from.
+   *
+   * The canonical history lives with the canonical array, in
+   * components/design/useSiteDesign.ts, over `RoofPlane[]`, and arrives here
+   * as the `onUndoGeometry` / `onRedoGeometry` props.
+   * lib/state/historyStore.ts and Buttons.tsx are left in place for the
+   * primitive-editing slice that owns them. */
   // autoFillRunningRef: mutex to prevent Auto Fill from running more than once concurrently.
   // Set to true at the start of handleAutoRoof, cleared when done.
   const autoFillRunningRef = useRef(false);
@@ -2448,7 +2530,7 @@ function SolarEngine3D({
       try { viewer.scene.requestRender(); } catch { /* ignore */ }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showBuilding3D, showRoofTexture, simHour, roofPlanes, wallHeightM, buildingPitchDeg, buildingOverrides, selectedFaceId, stage]);
+  }, [showBuilding3D, showRoofTexture, simHour, roofPlanes, selectedFaceId, stage]);
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
   useEffect(() => { paintModeRef.current = paintMode; }, [paintMode]);
   useEffect(() => { onPanelPaintRef.current = onPanelPaint; }, [onPanelPaint]);
@@ -2537,9 +2619,6 @@ function SolarEngine3D({
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
   useEffect(() => { showRoofTextureRef.current = showRoofTexture; }, [showRoofTexture]);
-  useEffect(() => { wallHeightRef.current = wallHeightM; }, [wallHeightM]);
-  useEffect(() => { buildingPitchRef.current = buildingPitchDeg; }, [buildingPitchDeg]);
-  useEffect(() => { buildingOverridesRef.current = buildingOverrides; }, [buildingOverrides]);
   useEffect(() => { selectedFaceIdRef.current = selectedFaceId; }, [selectedFaceId]);
 
   /** 🚨 A SELECTION CANNOT OUTLIVE ITS FACE.
@@ -5150,6 +5229,108 @@ function SolarEngine3D({
     return updates.length;
   }
 
+  /**
+   * EDIT A BUILDING SECTION — the replacement for the WALLS / PITCH steppers.
+   *
+   * 🚨 WHAT THIS DOES DIFFERENTLY, AND WHY IT HAD TO.
+   *
+   * `applyBuildingShape` (above) rebuilds ONE FACE from a global counter:
+   *
+   *     groundM = lowest - prevWall      // back-solve the pad from a UI number
+   *     roofPlaneFromFootprint(outline, { eaveHeightM: wall, groundElevM: groundM })
+   *
+   * The pad cancels, so the press is a relative nudge of whichever face happens
+   * to be selected, and the number on screen is a counter that no wall is
+   * obliged to match. It reached 17 ft on a 10 ft wall in a live test, because
+   * raising an eight-face house by one foot costs eight presses and every one
+   * of them moved the counter.
+   *
+   * This routes through `lib/3d/sectionEditing`, which changes ONE NAMED
+   * PHYSICAL QUANTITY on the section's canonical record and rebuilds every face
+   * the section owns, together, through `buildSectionRoofPlanes`. So:
+   *
+   *   · the ridge stays shut, because both halves are rebuilt from one record
+   *   · neighbouring sections do not move, because `replaceSectionFaces` only
+   *     ever removes ids belonging to the section named
+   *   · `plane.section` is re-stamped, so the record and the geometry cannot
+   *     drift apart the way they did after every WALLS press
+   *   · face ids are deterministic, so panels standing on the roof survive
+   *
+   * 🚨 THE FRAMES COME FROM THE BUILD, NOT FROM A REFIT. `outcome.faceBuilds`
+   * carries the frame and the coplanar corners each plane was actually built
+   * with. Re-fitting them here would give a subtly different frame, and
+   * buildSurfaceGrid places panels from that frame.
+   */
+  function editSection(sectionId: string, edit: SectionEdit, label: string, coalesceKey: string): boolean {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C || !sectionId) return false;
+
+    const outcome = applySectionEdit(roofPlanesRef.current ?? [], sectionId, edit);
+    if (!outcome.ok) {
+      // Every refusal, not the first — see buildingSection's validateSection.
+      const why = outcome.refusals.map(r => r.message).join(' ');
+      setSectionRefusal(why || 'That change would not produce a roof.');
+      addLog('SECTION', `edit refused: ${outcome.refusals.map(r => r.code).join(',')}`);
+      return false;
+    }
+    setSectionRefusal(null);
+
+    // Faces the section no longer owns — only ever non-empty when `kind`
+    // changed, e.g. a hip becoming a gable drops its two hip ends. Their Cesium
+    // entities have to go or they linger as an un-pickable ghost roof.
+    //
+    // 🚨 THE MAP ENTRIES ARE LEFT ALONE, DELIBERATELY. A first version of this
+    // called `plane3DEntityMap.current.delete(goneId)` and friends, and
+    // tests/planeLifecycleAuthority.test.ts and tests/autosaveAdversarial.test.ts
+    // both failed it. They are right and the blanket ban is right: a
+    // "reconcile deletions" effect that pruned these maps deleted a user's
+    // traced garage, because the roofPlanes prop lags the map and ABSENCE IS
+    // NOT INTENT. "My delete is different because an explicit edit named the
+    // ids" is exactly the argument that would reintroduce it.
+    //
+    // And the prune buys nothing. `liveRenderedFaces()` takes membership from
+    // `roofPlanesRef.current`, so a face that is no longer in the design is
+    // already excluded from every authority consumer — collectRoofRenderables,
+    // stitchRoofVertices and selectableRoofFaces. What is left behind is a
+    // cache entry that decides nothing, which is precisely what that doctrine
+    // permits. If the kind changes back, the ids are deterministic and the
+    // entry is overwritten below.
+    for (const goneId of outcome.removedFaceIds) {
+      (plane3DEntityMap.current.get(goneId) ?? []).forEach((eid: string) => {
+        const e = viewer.entities.getById(eid);
+        if (e) try { viewer.entities.remove(e); } catch { /* ignore */ }
+      });
+    }
+
+    for (const b of outcome.faceBuilds) {
+      (plane3DEntityMap.current.get(b.faceId) ?? []).forEach((eid: string) => {
+        const e = viewer.entities.getById(eid);
+        if (e) try { viewer.entities.remove(e); } catch { /* ignore */ }
+      });
+      const cesiumPts = b.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
+      const newIds = renderPlane3DEntity(viewer, C, cesiumPts, b.faceId, b.frame,
+        activeFaceId === b.faceId, planeRendersOutlineOnly(b.faceId));
+      plane3DEntityMap.current.set(b.faceId, newIds);
+      plane3DFrameMap.current.set(b.faceId, b.frame);
+      plane3DCesiumPtsMap.current.set(b.faceId, cesiumPts);
+      (b.plane as any).__eaveDirENU = b.eaveDirENU;
+    }
+    plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
+
+    // 🚨 THE WHOLE ARRAY, CANONICAL. Not a per-face patch — see the prop's own
+    // comment. The parent snapshots what it holds for undo, then adopts this.
+    onRoofGeometryReplaced?.(outcome.planes, { label, coalesceKey });
+
+    if (showRoofModel)             { try { renderRoofWireframe(viewer, C); } catch { /* ignore */ } }
+    if (showBuilding3DRef.current) { try { renderBuildingExtrusion(viewer, C); } catch { /* ignore */ } }
+    if (showSetbackZones)          { try { renderFireSetbackZones(viewer, C); } catch { /* ignore */ } }
+    try { viewer.scene.requestRender(); } catch { /* ignore */ }
+
+    addLog('SECTION', `${label} on ${sectionId}`);
+    return true;
+  }
+
   function renderBuildingExtrusion(viewer: any, C: any) {
     clearBuildingExtrusion(viewer);
     const groundSeed = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
@@ -5173,9 +5354,11 @@ function SolarEngine3D({
     // applies the wall height and pitch from its own controls. Turn Building
     // off and the traced planes are untouched, byte for byte. Adjusting these
     // controls cannot corrupt a design.
-    const wallH = wallHeightRef.current;
-    const pitchDeg = buildingPitchRef.current;
-
+    // 🚨 `wallH` AND `pitchDeg` USED TO BE READ HERE AND THEN NEVER USED. They
+    // were the inputs to a render-time re-derivation that was removed when the
+    // Building view started drawing the stored geometry (see below), and they
+    // outlived it as two dead reads of a global counter — which is exactly the
+    // kind of leftover that invites somebody to "reconnect" a second authority.
     const raw = renderables.map((rp: any) => ({
       id: rp.id as string,
       polygon3D: rp.corners.map((c: any) => ({ x: c.x, y: c.y, z: c.z })) as Cart3[],
@@ -8356,9 +8539,112 @@ function SolarEngine3D({
     if (selectedFaceIdRef.current === faceId) return;
     selectedFaceIdRef.current = faceId;
     setSelectedFaceId(faceId);
+    // 🚨 A NEW CLICK OPENS AT SECTION LEVEL. Drilling into a face is a
+    // deliberate act; carrying that drill-in across to the next thing clicked
+    // would silently point the height controls at a single face again, which is
+    // the behaviour that made a gable come apart at the ridge. A stale refusal
+    // about the previous selection goes with it.
+    setSelectionLevel('section');
+    setSectionRefusal(null);
     // Report the deselection too. A parent told only about selections keeps the
     // last id for ever, and its sidebar highlight outlives the 3D one.
     onRoofPlaneSelectRef.current?.(faceId);
+  }
+
+  /**
+   * What the status bar says when a face is picked.
+   *
+   * 🚨 IT NAMES THE LEVEL THE CONTROLS NOW ACT ON. The old messages said
+   * "Walls and Pitch now apply to THIS face only", which was true of the
+   * geometry and false of the readout beside it, and encouraged exactly the
+   * per-face height editing that opens a gable at the ridge.
+   */
+  function selectionMessageFor(faceId: string): string {
+    const planes = roofPlanesRef.current ?? [];
+    const plane = planes.find(p => p.id === faceId);
+    const sid = plane?.sectionId || sectionIdOfFaceId(faceId);
+    if (!sid) {
+      return '⬡ Roof face selected — traced on its own, so it has no section. ' +
+             'The inspector shows its measured elevations.';
+    }
+    const look = sectionFromPlanes(planes, sid);
+    if (!look.found) return `⬡ Roof face selected — ${look.refusals[0]?.message ?? 'its section is unavailable.'}`;
+    const n = look.faceIds.length;
+    return `🏠 ${look.section!.label || 'Section'} selected — ${n} roof face${n === 1 ? '' : 's'}. ` +
+           'Height, pitch and pad elevation move the whole section.';
+  }
+
+  /**
+   * Move ONE standalone roof face up or down.
+   *
+   * 🚨 THIS IS THE ONLY SURVIVING RELATIVE CONTROL, AND IT IS NAMED AS MOTION.
+   *
+   * A face that belongs to no section has no pad and no wall, so there is no
+   * absolute height to set — only a nudge. The old WALLS stepper was this same
+   * operation wearing an absolute label and a global counter, which is how it
+   * came to read 17 ft about a 10 ft wall.
+   *
+   * `applyBuildingShape`'s arithmetic is `newEave = lowest - prevWall + wall`,
+   * so the pad cancels and the press is exactly `wall - prevWall`. That makes
+   * `wallHeightRef` a delta accumulator and nothing else. It is deliberately
+   * NOT React state any more: nothing may render it.
+   *
+   * 🚨 IT REFUSES A SECTION FACE. Raising one half of a gable opens the ridge,
+   * which is the compensating edit that made the editor unusable. The section
+   * is the thing that moves.
+   */
+  function nudgeFaceElevation(faceId: string, deltaM: number): boolean {
+    const viewer = viewerRef.current; const C = (window as any).Cesium;
+    if (!viewer || !C || !faceId || !isFinite(deltaM)) return false;
+
+    const plane = (roofPlanesRef.current ?? []).find(p => p.id === faceId);
+    const sid = plane?.sectionId || sectionIdOfFaceId(faceId);
+    if (sid) {
+      setSectionRefusal(
+        'That face belongs to a building section. Move the section instead, so ' +
+        'its ridge stays shut — select it and set the wall height.',
+      );
+      return false;
+    }
+
+    // 🚨 A DETECTION IS NOT A HAND TRACE, AND THIS IS THE PROTECTED PATH.
+    //
+    // "Standalone" was the wrong test on its own. A Google/solar_api face has no
+    // sectionId and a uuid with no '::', so `sectionIdOfFaceId` returns null and
+    // EVERY native face fell into exactly the branch that rebuilds geometry
+    // through the flat-trace constructor and persists it. An independent
+    // native-3D audit caught it: the ALL-FACES stepper was removed and the
+    // persistent rewrite of Google geometry moved in here instead.
+    //
+    // It is worse than a rewrite. `applyBuildingShape` re-derives azimuth via
+    // `deriveAzimuthsFromSharedEdges`, whose fallback for a face with no shared
+    // edge always returns the equator-facing normal — so nudging a lone
+    // north-facing Google face flips it to azimuth 180, moves its eave to the
+    // opposite end of the building, and persists that into the field PVWatts
+    // and the planset read.
+    //
+    // `isHandModelledFace` is the existing answer to "whose geometry is this",
+    // and this is its first call site outside the Lane A gate.
+    if (!isHandModelledFace(plane)) {
+      setSectionRefusal(
+        'This roof face came from automatic detection, not from your trace, so it ' +
+        'is not moved by hand here — a nudge would also re-derive its direction. ' +
+        'Choose "Draw Manually Instead" to model this building yourself.',
+      );
+      addLog('BUILD3D', `nudge refused: ${faceId} is a detection (source=${(plane as any)?.source ?? 'unknown'})`);
+      return false;
+    }
+
+    const prevWall = wallHeightRef.current;
+    const nextWall = prevWall + deltaM;
+    const n = applyBuildingShape(viewer, C, { wallHeightM: nextWall }, faceId);
+    // Only advance the accumulator if the rebuild actually happened, or the
+    // next nudge would be measured from a press that never landed.
+    if (n > 0) wallHeightRef.current = nextWall;
+    setStatusMsg(n > 0
+      ? `⬡ Roof face moved ${deltaM > 0 ? 'up' : 'down'} ${ftStr(Math.abs(deltaM))} · re-run Fill Roof so the panels follow`
+      : 'Nothing to move — that face could not be rebuilt');
+    return n > 0;
   }
 
   function pickBuildingFaceAtScreen(viewer: any, C: any, screenPos: any): string | null {
@@ -8426,14 +8712,7 @@ function SolarEngine3D({
           // state and the outbound notification cannot drift between the two
           // entity families that can both produce a face selection.
           selectRoofFace(toggledOff ? null : faceId);
-          const ov = buildingOverridesRef.current.get(faceId);
-          setStatusMsg(
-            toggledOff
-              ? '⬡ Face deselected — Walls and Pitch now apply to the whole building'
-              : `⬡ Face selected — Walls and Pitch now apply to THIS face only` +
-                (ov ? ` (pitch ${ov.pitchDeg ?? buildingPitchRef.current}°, walls ${ftStr(ov.wallHeightM ?? wallHeightRef.current)})` : '') +
-                ` · click it again to deselect`
-          );
+          setStatusMsg(toggledOff ? '⬡ Deselected' : selectionMessageFor(faceId));
           try { viewer.scene.requestRender(); } catch {}
           return;
         }
@@ -8461,8 +8740,8 @@ function SolarEngine3D({
           const toggledOff = selectedFaceIdRef.current === faceId;
           selectRoofFace(toggledOff ? null : faceId);
           setStatusMsg(toggledOff
-            ? '⬡ Face deselected'
-            : `⬡ Roof face selected · face-scoped controls now act on THIS face · click it again to deselect`);
+            ? '⬡ Deselected'
+            : selectionMessageFor(faceId));
           try { viewer.scene.requestRender(); } catch {}
           return;
         }
@@ -12305,44 +12584,70 @@ function SolarEngine3D({
     return dirs[Math.round(az / 22.5) % 16];
   };
 
-  // ── v66: Building controls, scoped to the selection ────────────────────────
-  // With a face selected the steppers write a per-face override; with nothing
-  // selected they move the whole building. One control set, two scopes, so
-  // there is no separate "edit face" mode to discover.
-  const effectivePitchDeg = selectedFaceId
-    ? (buildingOverrides.get(selectedFaceId)?.pitchDeg ?? buildingPitchDeg)
-    : buildingPitchDeg;
-  const effectiveWallM = selectedFaceId
-    ? (buildingOverrides.get(selectedFaceId)?.wallHeightM ?? wallHeightM)
-    : wallHeightM;
+  // ── The selection, and what may honestly be said about it ──────────────────
+  //
+  // 🚨 THIS REPLACES `effectiveWallM` / `effectivePitchDeg` / `adjustBuilding`.
+  //
+  // Those read a global `wallHeightM` React counter that started at 3.0 m and
+  // only ever moved by what had been pressed. It named no wall. It was rendered
+  // beside a chip reading THIS FACE, under a `buildingOverrides` map that
+  // `setBuildingOverrides` never wrote to — so both branches of the ternary
+  // returned the same global, and pressing the stepper with one face selected
+  // moved the whole-building number while moving one face's geometry. Eight
+  // faces, eight presses, one foot of building and eight feet of readout. The
+  // live test reported "around 17 ft" on a wall that was 10' 6".
+  //
+  // Everything below is derived from canonical geometry on every render. There
+  // is no stored number here for a control to drift away from.
+  const selectedSectionId = activeFaceId ? sectionIdOfFaceId(activeFaceId) : null;
+  const selectedFaceSectionId = activeFaceId
+    ? ((roofPlanesRef.current ?? []).find(p => p.id === activeFaceId)?.sectionId || selectedSectionId)
+    : null;
 
-  function adjustBuilding(delta: { pitch?: number; wall?: number }) {
-    const nextPitch = delta.pitch != null
-      ? Math.max(0, Math.min(60, effectivePitchDeg + delta.pitch)) : undefined;
-    const nextWall = delta.wall != null
-      ? Math.max(0.3048, +(effectiveWallM + delta.wall).toFixed(4)) : undefined;
+  const inspectorState: InspectorState = (() => {
+    const planes = roofPlanesRef.current ?? [];
+    const all = listSections(planes);
+    const standalone = planes.filter(p => !(p.sectionId || sectionIdOfFaceId(p.id))).length;
 
-    // Remember the new setting so the readout and the next nudge are consistent.
-    if (nextPitch != null) setBuildingPitchDeg(nextPitch);
-    if (nextWall != null) setWallHeightM(nextWall);
+    const base: InspectorState = {
+      level: 'none', section: null, face: null, faceSectionLabel: null,
+      sectionCount: all.length, standaloneFaceCount: standalone,
+      refusal: sectionRefusal,
+    };
+    if (!activeFaceId) return base;
 
-    // 🚨 EDIT THE REAL PLANES. These used to be render-time only, which kept
-    // traced corners safe but left the drawn roof disagreeing with where the
-    // panels actually are — they ended up inside the house. The footprint is
-    // still never touched; only the heights move, rebuilt from each face's own
-    // traced outline.
-    const v = viewerRef.current; const Cz = (window as any).Cesium;
-    if (!v || !Cz) return;
-    const n = applyBuildingShape(v, Cz,
-      { wallHeightM: nextWall, pitchDeg: nextPitch },
-      selectedFaceIdRef.current);
-    setStatusMsg(
-      n > 0
-        ? `🏚 ${selectedFaceIdRef.current ? 'This face' : `${n} face${n === 1 ? '' : 's'}`}: ` +
-          `walls ${ftStr(nextWall ?? effectiveWallM)} · pitch ${Math.round(nextPitch ?? effectivePitchDeg)}° · ` +
-          `re-run Fill Roof so the panels follow`
-        : 'Nothing to reshape — trace a roof face first'
-    );
+    const plane = planes.find(p => p.id === activeFaceId) ?? null;
+    const face = measureFaceVertical(plane, cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : null);
+    const sid = selectedFaceSectionId;
+
+    // A face with no section can only ever be inspected as a face — there is no
+    // volume to edit, and no pad, so no wall height. Reported as unresolved.
+    if (!sid) return { ...base, level: 'face', face };
+
+    const look = sectionFromPlanes(planes, sid);
+    if (!look.found) {
+      // A conflicted or record-less section. The faces still render and can
+      // still be measured; what is withheld is the section, and the refusal
+      // says why rather than leaving the panel mysteriously inert.
+      return {
+        ...base, level: 'face', face,
+        refusal: sectionRefusal ?? (look.refusals[0]?.message ?? null),
+      };
+    }
+    const label = look.section!.label || 'Section';
+    if (selectionLevel === 'face') return { ...base, level: 'face', face, faceSectionLabel: label };
+    return { ...base, level: 'section', section: measureSection(look.section!, look.faceIds.length) };
+  })();
+
+  /** The inspector emits an intent; the authority decides whether it is legal. */
+  function handleInspectorEdit(edit: SectionEdit, label: string, coalesceKey: string) {
+    const sid = selectedFaceSectionId;
+    if (!sid) { setSectionRefusal('Select a building section to change its height or pitch.'); return; }
+    const ok = editSection(sid, edit, label, coalesceKey);
+    if (ok) {
+      const m = inspectorState.section;
+      setStatusMsg(`🏠 ${label}${m ? ` · ${m.label}` : ''} — every face of the section moved together`);
+    }
   }
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
@@ -12383,12 +12688,58 @@ function SolarEngine3D({
           DraggablePanel. The user can grab the bar background to
           drag the toolbar anywhere. The Save / Undo / Redo buttons
           keep their own click semantics. */}
-      {historyStoreRef.current ? (
+      {/* 🚨 THIS CHIP USED TO DRIVE `historyStoreRef`, WHICH NOTHING EVER
+             DISPATCHED TO. `createHistoryStore(createEmptySceneState())` is
+             still constructed above and still has zero dispatch sites, so
+             Undo and Redo were decoration — and its `SceneState` is
+             primitives plus slider positions, which is render state. A
+             geometry history that restores render state puts the PICTURE
+             back and leaves the canonical array holding the undone edit, so
+             the next autosave persists the design the user just rejected.
+
+             These buttons now drive the canonical `RoofPlane[]` history owned
+             by the parent (components/design/useSiteDesign.ts). See
+             lib/3d/geometryHistory.ts. */}
+      {onUndoGeometry || onRedoGeometry ? (
         <DraggablePanel id="undo-redo-toolbar" zIndex={50}>
-        <UndoRedoToolbar
-          store={historyStoreRef.current}
-          onSave={async () => { /* persistence wiring lives outside this slice */ }}
-        />
+        <div
+          data-drag-handle
+          style={{
+            position: 'absolute', top: 12, left: 12, zIndex: 50,
+            display: 'flex', alignItems: 'center', gap: 4,
+            background: 'rgba(10,14,24,0.85)', border: '1px solid rgba(148,163,184,0.25)',
+            borderRadius: 8, padding: '4px 6px', backdropFilter: 'blur(6px)',
+            cursor: 'grab', touchAction: 'none',
+          }}
+        >
+          <span aria-label="Drag" style={{
+            color: 'rgba(255,255,255,0.4)', fontSize: 11, lineHeight: 1,
+            letterSpacing: -1, userSelect: 'none', pointerEvents: 'none', paddingRight: 2,
+          }}>⠿</span>
+          {([
+            ['undo', '↶ Undo', canUndoGeometry, undoGeometryLabel, onUndoGeometry],
+            ['redo', '↷ Redo', canRedoGeometry, redoGeometryLabel, onRedoGeometry],
+          ] as Array<[string, string, boolean, string | null, (() => string | null) | undefined]>)
+            .map(([key, text, enabled, label, fn]) => (
+              <button
+                key={key} type="button" data-no-drag
+                data-testid={`geometry-${key}`}
+                disabled={!enabled || !fn}
+                title={enabled && label ? `${text.slice(2)} — ${label}` : `Nothing to ${key}`}
+                onClick={() => {
+                  const done = fn?.();
+                  if (done) setStatusMsg(`${key === 'undo' ? '↶ Undone' : '↷ Redone'} — ${done}`);
+                }}
+                style={{
+                  background: enabled ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid rgba(255,255,255,${enabled ? 0.18 : 0.08})`,
+                  color: enabled ? '#cfd8e6' : '#4d586b',
+                  borderRadius: 6, padding: '3px 8px', fontSize: 11, fontWeight: 700,
+                  cursor: enabled ? 'pointer' : 'default',
+                }}
+              >{text}</button>
+            ))}
+        </div>
         </DraggablePanel>
       ) : null}
 
@@ -14143,47 +14494,35 @@ function SolarEngine3D({
                 🛰 Aerial{showRoofTexture ? ' ✓' : ''}
               </button>
             ) : null}
-            {/* v66: raise/lower the walls and set the roof pitch directly.
-                No detection — you can see the building, so you shape it.
-                These only affect what the Building view draws; your traced
-                planes are never modified. */}
+            {/* 🚨 THE WALLS / PITCH STEPPERS USED TO LIVE HERE. THEY LIED.
+
+                `WALLS {ftStr(effectiveWallM)}` rendered a global React counter
+                that started at 3.0 m and moved only by what had been pressed.
+                It was not measured from anything, so it named no wall — and the
+                chip beside it read THIS FACE while the stepper it labelled
+                incremented the whole-building number, because
+                `setBuildingOverrides` was declared and never called. A live
+                test reported "around 17 ft" against a 10' 6" wall, and that is
+                exactly the arithmetic: eight faces, eight presses, one foot of
+                building, eight feet of readout.
+
+                Replaced by the Selection Inspector (bottom right), which shows
+                the section's own canonical eave height, pad elevation and
+                pitch, derives the ridge, and edits the VOLUME so a gable cannot
+                be torn open at the ridge one face at a time. See
+                lib/3d/sectionEditing.ts and tests/sectionVerticalModel.test.ts,
+                which reproduces the old behaviour and asserts that it fails. */}
             {showBuilding3D ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 2 }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 800, letterSpacing: 0.3, padding: '2px 6px', borderRadius: 4,
-                  background: selectedFaceId ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.07)',
-                  color: selectedFaceId ? '#00e5ff' : '#9aa3b8',
-                  border: `1px solid ${selectedFaceId ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.12)'}`,
+              <span
+                data-testid="build3d-inspector-hint"
+                title="Height, pitch and pad elevation are edited on the Selection Inspector, scoped to the building section you click."
+                style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: 0.3, padding: '3px 7px',
+                  borderRadius: 4, color: '#9aa3b8',
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.10)',
                 }}
-                  title={selectedFaceId
-                    ? 'Editing ONE face. Click it again in the scene to deselect.'
-                    : 'Editing the whole building. Click a roof face to edit it alone.'}>
-                  {selectedFaceId ? 'THIS FACE' : 'ALL FACES'}
-                </span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                  <span style={{ fontSize: 10, color: '#9aa3b8', fontWeight: 700, letterSpacing: 0.3 }}>WALLS</span>
-                  <button data-no-drag title="Lower the walls by 1 ft"
-                    onClick={() => adjustBuilding({ wall: -0.3048 })}
-                    style={BUILD_STEP_BTN}>{'−'}</button>
-                  <span style={{ minWidth: 40, textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#e8eaf0', fontVariantNumeric: 'tabular-nums' }}>
-                    {ftStr(effectiveWallM)}
-                  </span>
-                  <button data-no-drag title="Raise the walls by 1 ft"
-                    onClick={() => adjustBuilding({ wall: 0.3048 })}
-                    style={BUILD_STEP_BTN}>+</button>
-                </span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                  <span style={{ fontSize: 10, color: '#9aa3b8', fontWeight: 700, letterSpacing: 0.3 }}>PITCH</span>
-                  <button data-no-drag title="Shallower roof"
-                    onClick={() => adjustBuilding({ pitch: -1 })}
-                    style={BUILD_STEP_BTN}>{'−'}</button>
-                  <span style={{ minWidth: 32, textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#e8eaf0', fontVariantNumeric: 'tabular-nums' }}>
-                    {effectivePitchDeg}{'°'}
-                  </span>
-                  <button data-no-drag title="Steeper roof"
-                    onClick={() => adjustBuilding({ pitch: 1 })}
-                    style={BUILD_STEP_BTN}>+</button>
-                </span>
+              >
+                {activeFaceId ? '⬡ Inspector → this section' : 'Click a roof to edit its section'}
               </span>
             ) : null}
             {/* v66: square up the trace itself. Sits next to Stitch because they
@@ -14218,6 +14557,33 @@ function SolarEngine3D({
       ) : null}
 
       {/* Stitch button moved into the top-left-dock (Roof Model + Stitch) above. */}
+
+      {/* ── THE SELECTION INSPECTOR ─────────────────────────────────────────
+          Phase A + B of the interaction model in one panel: it names the level
+          that is selected, and its controls are scoped to that level.
+
+          It mounts whenever there is a roof to inspect — not only in Building
+          view — because "how high is this wall" is a question about the model,
+          not about a visualisation toggle. Every value it shows is derived from
+          canonical geometry on each render by lib/3d/sectionEditing, so no
+          control can drift away from the building it claims to describe. */}
+      {stage === 'done' && (roofPlanes?.length ?? 0) > 0 ? (
+        <DraggablePanel id="section-inspector" zIndex={52}>
+          <div
+            data-drag-handle
+            style={{ position: 'absolute', bottom: 96, right: 12, zIndex: 52, cursor: 'grab', touchAction: 'none' }}
+          >
+            <SectionInspector
+              state={inspectorState}
+              onEdit={handleInspectorEdit}
+              onSelectLevel={(lvl) => { setSelectionLevel(lvl); setSectionRefusal(null); }}
+              onNudgeFace={(deltaM) => { if (activeFaceId) nudgeFaceElevation(activeFaceId, deltaM); }}
+              onClearSelection={() => { selectRoofFace(null); setStatusMsg('Selection cleared'); }}
+              onDismissRefusal={() => setSectionRefusal(null)}
+            />
+          </div>
+        </DraggablePanel>
+      ) : null}
 
       {/* v66 (create-design-modal): Aurora-parity "Save → Create Design" trigger.
           The parent owns the modal state and is expected to render

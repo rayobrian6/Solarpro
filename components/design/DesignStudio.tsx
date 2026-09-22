@@ -129,6 +129,18 @@ type SolarE2EState = {
    *  click needs WebGL, Google tiles and a building under the cursor — none of
    *  which is the behaviour under test. */
   pickHouse: (lat: number, lng: number, address: string) => void;
+  // ── THE CUSTOM/FALLBACK MODELLING PATH ────────────────────────────────────
+  /** What the installer has decided about this property's native (Google)
+   *  geometry: 'undecided' | 'accepted' | 'unavailable' | 'rejected' |
+   *  'custom'. Exposed so an acceptance spec can ASSERT it is genuinely on the
+   *  custom fallback branch rather than infer it from the absence of a network
+   *  call. "No false proof from the wrong branch." */
+  nativeDisposition: string;
+  /** Canonical geometry undo, from components/design/useSiteDesign.ts. A spec
+   *  must be able to tell "undo did nothing" from "undo was not offered". */
+  canUndoGeometry: boolean;
+  canRedoGeometry: boolean;
+  undoGeometryLabel: string | null;
   /** Put a design on the ACTIVE property, through the same setters the studio
    *  uses. SETUP ONLY — the behaviour under test is what happens to it when the
    *  property changes. Without it the browser spec depends on Google Solar
@@ -2081,6 +2093,10 @@ export default function DesignStudio({ project, onSave }: Props) {
        *  browser path to that click needs WebGL, Google tiles and a building
        *  under the cursor; the BEHAVIOUR being tested is what happens after. */
       pickHouse: (lat: number, lng: number, address: string) => { void handleLocationPick(lat, lng, address); },
+      nativeDisposition: site.nativeDisposition,
+      canUndoGeometry: site.canUndoGeometry,
+      canRedoGeometry: site.canRedoGeometry,
+      undoGeometryLabel: site.undoGeometryLabel,
       seedDesign: (d) => {
         if (d.panels) setPanels(d.panels);
         if (d.roofPlanes) setRoofPlanes(d.roofPlanes);
@@ -2098,6 +2114,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     return () => { delete window.__solarE2E; };
   }, [roofPlanes, panels, placedObstructions, measurements, e2eStitchedCorners, e2eDiagnostics,
       site.activeSiteKey, site.archivedSiteCount, site.archivedEntityCount, handleLocationPick,
+      site.nativeDisposition, site.canUndoGeometry, site.canRedoGeometry, site.undoGeometryLabel,
       selected3DFaceId,
       setPanels, setRoofPlanes, setPlacedObstructions, setMeasurements]);
 
@@ -4972,6 +4989,30 @@ export default function DesignStudio({ project, onSave }: Props) {
                     `az=${p.azimuth.toFixed(0)}° tilt=${p.pitch.toFixed(0)}°`).join(', '));
               }}
               onE2EDiagnostics={E2E_ENABLED ? setE2EDiagnostics : undefined}
+              onRoofGeometryReplaced={(planes, meta) => {
+                // 🚨 SNAPSHOT FIRST, THEN ADOPT. `recordGeometry` copies the
+                // roof as it stands right now; adopting before recording would
+                // store the thing the user is about to want back.
+                site.recordGeometry(meta.label, meta.coalesceKey);
+                // Same enrichment and ownership stamp as onRoofPlaneCreated —
+                // a section edit rebuilds real faces, and they have to arrive
+                // as complete as the ones the trace tool emits or the panel
+                // grid and the site-archive would treat them as strangers.
+                const owner = activeSiteKeyRef.current
+                  || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id);
+                setRoofPlanes(planes.map(p => {
+                  const e = enrichRoofPlaneWith3DFrame(enrichRoofPlaneWithLECS(p));
+                  e.siteKey = e.siteKey || owner;
+                  if (e.section) e.section.siteKey = e.siteKey;
+                  return e;
+                }));
+              }}
+              onUndoGeometry={site.undoGeometry}
+              onRedoGeometry={site.redoGeometry}
+              canUndoGeometry={site.canUndoGeometry}
+              canRedoGeometry={site.canRedoGeometry}
+              undoGeometryLabel={site.undoGeometryLabel}
+              redoGeometryLabel={site.redoGeometryLabel}
               onRoofPlanesStitched={(updates) => {
                 if (E2E_ENABLED) setE2EStitchedCorners(updates);
                 // v64: Stitch wrote averaged/connected corners + the stitched plane

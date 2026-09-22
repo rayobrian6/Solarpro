@@ -484,11 +484,7 @@ export function computePlaneFromPoints3D(pts: Cart3[], options: ComputePlaneOpti
   // `Ellipsoid.geodeticSurfaceNormal` computes. Altitude does not change the
   // direction, so this is correct for a roof as well as for a point on the
   // surface.
-  const upECEF    = normalize3({
-    x: centroid.x / (WGS84_A * WGS84_A),
-    y: centroid.y / (WGS84_A * WGS84_A),
-    z: centroid.z / (WGS84_B * WGS84_B),
-  });
+  const upECEF    = geodeticSurfaceNormal(centroid);
   const eastRaw   = { x: -centroid.y, y: centroid.x, z: 0 };
   const eastECEF  = normalize3(eastRaw);
   const northECEF = normalize3(cross3(upECEF, eastECEF));
@@ -536,6 +532,46 @@ export function computePlaneFromPoints3D(pts: Cart3[], options: ComputePlaneOpti
 const WGS84_A  = 6378137.0;
 const WGS84_B  = 6356752.314245;
 const WGS84_E2 = 1 - (WGS84_B * WGS84_B) / (WGS84_A * WGS84_A);
+
+/**
+ * WHICH WAY IS UP. One answer, exported, so there cannot be a second.
+ *
+ * 🚨 THE DIRECTION TO THE CENTRE OF THE EARTH IS NOT UP. On an oblate
+ * ellipsoid the geocentric radial `normalize(x,y,z)` differs from the true
+ * geodetic surface normal by up to **0.1924°, as sin(2·latitude)**. Every pitch
+ * and azimuth in this application is measured against this vector.
+ *
+ * It is not a uniform bias — it is a deflection in a fixed compass direction,
+ * so it ADDS to a north-facing slope and SUBTRACTS from a south-facing one. The
+ * symptom is not "every roof is 0.19° out", which nobody notices, but "the two
+ * halves of one symmetric gable disagree", which is wrong in a way an engineer
+ * has to question:
+ *
+ *     12×8 m gable at 38.6657°N built to exactly 30°
+ *     geocentric:  slope A 30.2565°   slope B 29.8813°   (0.376° apart)
+ *     geodetic:    slope A 29.9994°   slope B 29.9994°
+ *
+ * 🚨 IT IS EXPORTED BECAUSE FIXING IT ONCE WAS NOT ENOUGH. Commit 7ceab492
+ * corrected `computePlaneFromPoints3D` here and the same `origin.x / mag` was
+ * still running in `planeHPR` (lib/surfaceGeometry3D.ts), which builds the ENU
+ * frame every PANEL's stored Cesium orientation is derived from — so plane
+ * pitch was geodetic while panel orientation stayed geocentric, and a gable's
+ * two halves were rotated in opposite directions relative to the decks they sat
+ * on. An independent touch audit found it. A second hand-written copy of this
+ * arithmetic is how that happens; a call is not.
+ *
+ * The gradient of the ellipsoid equation IS the normal direction — no trig, no
+ * lat/lng round-trip — and it is what Cesium's `Ellipsoid.geodeticSurfaceNormal`
+ * computes. Altitude does not change the direction, so this is correct for a
+ * roof as well as for a point on the surface.
+ */
+export function geodeticSurfaceNormal(p: Cart3): Cart3 {
+  return normalize3({
+    x: p.x / (WGS84_A * WGS84_A),
+    y: p.y / (WGS84_A * WGS84_A),
+    z: p.z / (WGS84_B * WGS84_B),
+  });
+}
 
 export function ecefToLatLng(p: Cart3): { lat: number; lng: number; height: number } {
   const { x, y, z } = p;

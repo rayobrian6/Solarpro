@@ -39,6 +39,10 @@ import {
   withDisposition,
   type NativeGeometryDisposition,
 } from '@/lib/design/nativeGeometryDisposition';
+import {
+  emptyHistory, pushSnapshot, undo, redo, canUndo, canRedo, undoLabel, redoLabel,
+  type GeometryHistory,
+} from '@/lib/3d/geometryHistory';
 import type { PlacedPanel, RoofPlane, PlacedObstruction, LayoutMeasurement, DesignElectrical } from '@/types';
 import {
   type SiteDesignBundle,
@@ -138,6 +142,21 @@ export interface UseSiteDesign {
   /** Record a decision about the ACTIVE property. */
   setNativeDisposition: (d: NativeGeometryDisposition) => void;
 
+  // ── Canonical geometry undo ───────────────────────────────────────────────
+  /** Record the roof as it stands BEFORE a mutation. Call, then mutate.
+   *  Consecutive calls sharing a `coalesceKey` collapse to one undo step, so a
+   *  run of stepper presses returns the user to where the run began. */
+  recordGeometry: (label: string, coalesceKey?: string) => void;
+  /** Step back / forward one geometry edit. Returns the edit's label, or null
+   *  when there was nothing to do. Restores CANONICAL planes; the renderer
+   *  rebuilds from them. */
+  undoGeometry: () => string | null;
+  redoGeometry: () => string | null;
+  canUndoGeometry: boolean;
+  canRedoGeometry: boolean;
+  undoGeometryLabel: string | null;
+  redoGeometryLabel: string | null;
+
   /** Test/diagnostic view of the whole state. Not for production branching. */
   stateRef: React.MutableRefObject<SiteDesignState>;
 }
@@ -184,8 +203,56 @@ export function useSiteDesign(): UseSiteDesign {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const setMeasurements = useCallback(makeSetter(measurementsRef, rawSetMeasurements, 'measurements'), []);
 
+  // ── CANONICAL GEOMETRY UNDO ────────────────────────────────────────────────
+  //
+  // 🚨 IT LIVES HERE BECAUSE THIS HOOK OWNS `roofPlanes`.
+  //
+  // There was already an undo in the app: `createHistoryStore` in
+  // components/3d/SolarEngine3D.tsx, over a `SceneState` of primitives and
+  // slider positions, wired to a Save/Undo/Redo chip. Nothing ever dispatched
+  // to it — zero call sites — so the buttons were inert, and what it modelled
+  // was render state, which is the one thing a geometry history must not
+  // restore: putting the picture back while the canonical array keeps the
+  // undone edit means the next autosave persists the design the user rejected.
+  //
+  // So the unit of history is the `RoofPlane[]` this hook holds, the same array
+  // the autosave signs and the planset reads. `lib/3d/geometryHistory` keeps
+  // the stack; this is only the binding.
+  const [geometryHistory, setGeometryHistory] = useState<GeometryHistory>(() => emptyHistory());
+  const geometryHistoryRef = useRef<GeometryHistory>(emptyHistory());
+  const writeHistory = (h: GeometryHistory) => { geometryHistoryRef.current = h; setGeometryHistory(h); };
+
+  /** Record the state BEFORE a mutation. Call, then mutate. */
+  const recordGeometry = useCallback((label: string, coalesceKey?: string) => {
+    writeHistory(pushSnapshot(geometryHistoryRef.current, label, roofPlanesRef.current, coalesceKey));
+  }, []);
+
+  const undoGeometry = useCallback((): string | null => {
+    const step = undo(geometryHistoryRef.current, roofPlanesRef.current);
+    if (!step.ok) return null;
+    writeHistory(step.history);
+    // Adopt the canonical array; every derived thing rebuilds from it.
+    setRoofPlanes(step.planes);
+    return step.label;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const redoGeometry = useCallback((): string | null => {
+    const step = redo(geometryHistoryRef.current, roofPlanesRef.current);
+    if (!step.ok) return null;
+    writeHistory(step.history);
+    setRoofPlanes(step.planes);
+    return step.label;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** Push a bundle into component state and the mirror refs, in one step. */
   const applyBundle = useCallback((b: SiteDesignBundle) => {
+    // 🚨 HISTORY DOES NOT CROSS A SITE BOUNDARY. A bundle swap is a different
+    // property (or a reload of this one); an undo entry from the previous
+    // building would apply a roof from another address to this one.
+    geometryHistoryRef.current = emptyHistory();
+    setGeometryHistory(geometryHistoryRef.current);
     panelsRef.current = b.panels ?? [];
     roofPlanesRef.current = b.roofPlanes ?? [];
     placedObstructionsRef.current = b.obstructions ?? [];
@@ -342,6 +409,11 @@ export function useSiteDesign(): UseSiteDesign {
     persistencePayload, storedArchives,
     scope, isCurrent,
     nativeDisposition, nativeDispositionRef, setNativeDisposition,
+    recordGeometry, undoGeometry, redoGeometry,
+    canUndoGeometry: canUndo(geometryHistory),
+    canRedoGeometry: canRedo(geometryHistory),
+    undoGeometryLabel: undoLabel(geometryHistory),
+    redoGeometryLabel: redoLabel(geometryHistory),
     stateRef,
   };
 }

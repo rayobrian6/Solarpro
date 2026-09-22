@@ -147,7 +147,14 @@ export type SectionRefusalCode =
   | 'PITCH_OUT_OF_RANGE'
   | 'EAVE_HEIGHT_INVALID'
   | 'GROUND_ELEV_INVALID'
-  | 'FACE_CONSTRUCTION_FAILED';
+  | 'FACE_CONSTRUCTION_FAILED'
+  // ── Raised by lib/3d/sectionEditing.ts, which edits what this module builds.
+  // 🚨 ONE VOCABULARY. A second refusal-code union in the editing module would
+  // mean a UI switch that handles one set and silently falls through the other.
+  | 'SECTION_NOT_FOUND'
+  | 'SECTION_RECORDS_CONFLICT'
+  | 'SECTION_RECORD_MISSING'
+  | 'EDIT_VALUE_NOT_FINITE';
 
 export interface SectionRefusal {
   code: SectionRefusalCode;
@@ -762,8 +769,42 @@ export function replaceSectionFaces(
   sectionId: string,
   rebuilt: ReadonlyArray<RoofPlane>,
 ): RoofPlane[] {
-  const kept = (planes ?? []).filter(p => (p.sectionId || sectionIdOfFaceId(p.id)) !== sectionId);
-  return [...kept, ...rebuilt];
+  // 🚨 ORDER IS PRESERVED, AND THAT IS NOT COSMETIC.
+  //
+  // This used to be `[...kept, ...rebuilt]`, which moves an edited section's
+  // faces to the END of the array. Two things read the ORDER:
+  //
+  //   1. `roofPlanes[0].pitch` is the array tilt lib/pvwatts.ts uses. Editing a
+  //      section — even setting a value to what it already was — could promote
+  //      a different face to index 0 and move the production estimate.
+  //   2. `lib/roofPlanesSignature.ts` signs the list in order, so a no-op edit
+  //      changed the signature and fired an autosave that wrote nothing new.
+  //
+  // A test asserting "an identical rebuild does not move the signature" caught
+  // it. Each rebuilt face now takes the slot its predecessor held; faces the
+  // section has GAINED (a gable becoming a hip) go in after the last one it
+  // already owned, so a new face never lands at index 0 either.
+  const list = (planes ?? []);
+  const byId = new Map(rebuilt.map(p => [p.id, p]));
+  const owns = (p: RoofPlane) => (p.sectionId || sectionIdOfFaceId(p.id)) === sectionId;
+
+  const out: RoofPlane[] = [];
+  const placed = new Set<string>();
+  let lastOwnedIndex = -1;
+
+  for (const p of list) {
+    if (!owns(p)) { out.push(p); continue; }
+    const next = byId.get(p.id);
+    // A face the section no longer owns is dropped rather than kept as a
+    // duplicate; `applySectionEdit` reports it in `removedFaceIds`.
+    if (next) { out.push(next); placed.add(next.id); }
+    lastOwnedIndex = out.length;
+  }
+
+  const added = rebuilt.filter(p => !placed.has(p.id));
+  if (added.length === 0) return out;
+  if (lastOwnedIndex < 0) return [...out, ...added];   // the section is new here
+  return [...out.slice(0, lastOwnedIndex), ...added, ...out.slice(lastOwnedIndex)];
 }
 
 /** How many faces a kind produces. Stated so the UI can say "2 faces" before

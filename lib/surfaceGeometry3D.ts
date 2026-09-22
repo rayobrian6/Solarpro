@@ -29,7 +29,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { PlacedPanel, RoofPlane, SolarPanel, PlacedObstruction } from '@/types';
-import { ecefToLatLng, latLngToECEF, SURFACE_OFFSET_M } from '@/lib/roofPlane3D';
+import { ecefToLatLng, latLngToECEF, geodeticSurfaceNormal, SURFACE_OFFSET_M } from '@/lib/roofPlane3D';
 import { moduleStackHeightM } from '@/lib/roofMountDatum';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -174,9 +174,24 @@ function planeHPR(
   // Standard ENU unit vectors in ECEF space at 'origin'
   const sinLng = origin.y / Math.sqrt(origin.x*origin.x + origin.y*origin.y + 1e-30);
   const cosLng = origin.x / Math.sqrt(origin.x*origin.x + origin.y*origin.y + 1e-30);
-  const upX    = origin.x / mag;
-  const upY    = origin.y / mag;
-  const upZ    = origin.z / mag;
+  // 🚨 THIS WAS `origin.x / mag` — THE GEOCENTRIC RADIAL, i.e. the direction to
+  // the centre of the Earth, which is not up. It differs from the true geodetic
+  // normal by up to 0.1924° as sin(2·latitude), and every panel's stored
+  // `heading` / `pitch` — the quaternion `addPanelEntity` builds each module
+  // from — is derived from this frame.
+  //
+  // Commit 7ceab492 fixed exactly this in `computePlaneFromPoints3D`, so
+  // RoofPlane.pitch became geodetic while panel orientation stayed geocentric.
+  // The two halves of a gable carry opposite azimuths, so they were rotated in
+  // OPPOSITE directions relative to the decks they stand on. An independent
+  // touch audit found this; the first fix had missed it because the arithmetic
+  // was written out twice.
+  //
+  // There is now one exported answer and this calls it.
+  const up     = geodeticSurfaceNormal(origin);
+  const upX    = up.x;
+  const upY    = up.y;
+  const upZ    = up.z;
   // East = (-sinLng, cosLng, 0)
   const eX = -sinLng, eY = cosLng, eZ = 0;
   // North = cross(Up, East) — but standard is cross(Up × East) need to be careful:

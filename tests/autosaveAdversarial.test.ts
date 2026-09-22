@@ -29,6 +29,7 @@ import { siteKeyFromCoords } from '@/lib/siteIdentity';
 import { persistAndReload } from './helpers/siteRoundTrip';
 import { SITE_BOUND_ENTITY_KEYS } from '@/lib/design/siteDesignModel';
 import type { RoofPlane } from '@/types';
+import { stripComments } from './support/stripSource';
 
 const SRC = readFileSync(join(process.cwd(), 'components/design/DesignStudio.tsx'), 'utf8');
 const KEY = siteKeyFromCoords(38.89080, -89.57079, 'proj');
@@ -237,8 +238,21 @@ describe('🚨 the traced-garage deletion class', () => {
     // from the roofPlanes prop. Traced faces live in plane3DEntityMap and the
     // prop does not always list them when that effect runs, so it deleted a
     // user's traced garage. ABSENCE IS NOT INTENT.
-    const engine = readFileSync(join(process.cwd(), 'components/3d/SolarEngine3D.tsx'), 'utf8');
-    expect(engine).not.toMatch(/plane3DEntityMap\.current\.(delete|clear)\(/);
+    //
+    // 🚨 COMMENTS ARE STRIPPED FIRST, AND THAT MAKES THIS GUARD STRICTER.
+    // It read the raw file, so it fired on PROSE: a later comment in
+    // `editSection` explaining why it must not call
+    // `plane3DEntityMap.current.delete(goneId)` failed a guard about code. A
+    // structural guard that a comment can break is also one a comment can
+    // satisfy — which is the same defect facing the other way. The sibling
+    // guard in tests/planeLifecycleAuthority.test.ts already strips.
+    const engine = stripComments(
+      readFileSync(join(process.cwd(), 'components/3d/SolarEngine3D.tsx'), 'utf8'),
+    );
+    const PRUNE = /plane3DEntityMap\.current\.(delete|clear)\(/;
+    // The regex must be able to fire, or `.not.toMatch` asserts nothing.
+    expect('plane3DEntityMap.current.delete(').toMatch(PRUNE);
+    expect(engine).not.toMatch(PRUNE);
   });
 
   it('the engine has no persistence writer of its own', () => {
