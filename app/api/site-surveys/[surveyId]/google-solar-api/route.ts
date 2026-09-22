@@ -53,6 +53,7 @@ import {
 } from '@/lib/siteSurveys/googleSolarApi/cache';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
+import { isDevBypassUser } from '@/lib/dev-auth';
 
 export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
   const params = await props.params;
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ surveyId
 
     // ─── Verify survey ownership ─────────────────────────────────────────
     const survey = await getSiteSurveyById(surveyId, user.id, {
-      bypassOwnershipCheck: user.id === 'dev-user-bypass-001',
+      bypassOwnershipCheck: isDevBypassUser(user.id),
     } as GetSiteSurveyByIdOptions);
     if (!survey) {
       return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });

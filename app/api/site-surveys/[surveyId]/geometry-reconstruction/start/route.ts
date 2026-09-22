@@ -39,6 +39,7 @@ import {
 import { generateMockArtifacts } from '@/lib/siteSurveys/geometryReconstruction/mockAdapter';
 import type { GeometryReconstructionInput, SourcePhoto } from '@/lib/siteSurveys/geometryReconstruction/types';
 import { rateLimitGuard } from '@/lib/rateLimitGuard';
+import { isDevBypassUser } from '@/lib/dev-auth';
 
 export async function POST(req: NextRequest, props: { params: Promise<{ surveyId: string }> }) {
   const params = await props.params;
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ surveyId
     }
 
     const survey = await getSiteSurveyById(surveyId, user.id, {
-      bypassOwnershipCheck: user.id === 'dev-user-bypass-001',
+      bypassOwnershipCheck: isDevBypassUser(user.id),
     } as GetSiteSurveyByIdOptions);
     if (!survey) {
       return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });

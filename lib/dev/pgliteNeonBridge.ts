@@ -54,6 +54,7 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { uuid_ossp } from '@electric-sql/pglite/contrib/uuid_ossp';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { DEV_SESSION_USER } from '@/lib/dev-auth';
 
 /**
  * Identity parsers — the driver wants RAW TEXT and parses it itself (see header).
@@ -76,9 +77,28 @@ const RAW_TEXT_PARSERS: Record<number | string, (v: string) => string> =
 let db: PGlite | null = null;
 let booting: Promise<PGlite> | null = null;
 
-/** The dev-bypass user and the project the browser harness opens. Both are real
- *  rows in a real table; the layout route rejects anything that is not a UUID. */
-export const LOCAL_USER_ID    = process.env.DEV_AUTH_USER_ID ?? '11111111-1111-4111-8111-111111111111';
+/**
+ * The dev-bypass user and the project the browser harness opens. Both are real
+ * rows in a real table; the layout route rejects anything that is not a UUID.
+ *
+ * 🚨 THE ID COMES FROM `lib/dev-auth`, NOT FROM A LITERAL HERE.
+ *
+ * This file used to seed '11111111-1111-4111-8111-111111111111' — a FIFTH copy
+ * of the dev user's identity, and a different one from the four in the app.
+ * Someone had already hit the UUID problem here (hence the comment above) and
+ * worked around it by inventing a UUID for the harness instead of fixing
+ * `DEV_SESSION_USER`, which was still the string 'dev-user-bypass-001'.
+ *
+ * So the harness seeded one user and the bypass authenticated as another: the
+ * seeded project existed and was owned by somebody who never made a request,
+ * and every ownership check against it failed. An end-to-end run found it the
+ * moment `DEV_SESSION_USER.id` became a real UUID and the two ids could finally
+ * be compared at all.
+ *
+ * One identity, one declaration. `DEV_AUTH_USER_ID` still overrides it, and now
+ * it overrides BOTH sides at once, which is what an override is for.
+ */
+export const LOCAL_USER_ID    = DEV_SESSION_USER.id;
 export const LOCAL_PROJECT_ID = process.env.LOCAL_PG_PROJECT_ID ?? '4030b664-bebe-433b-a11c-cda05ead2f7d';
 
 /**

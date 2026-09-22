@@ -53,12 +53,18 @@ export async function POST(req: NextRequest) {
     // Active only when DEV_AUTH_BYPASS=true AND VERCEL_ENV !== 'production'.
     // Checked BEFORE Zod validation so 'admin' (no @) is accepted.
     {
-      const { isDevAuthAllowed, getDevMeResponse } = await import('@/lib/dev-auth');
+      const { isDevAuthAllowed, getDevMeResponse, DEV_SESSION_USER } = await import('@/lib/dev-auth');
       const rawEmail   = typeof body?.email   === 'string' ? body.email.toLowerCase().trim() : '';
       const rawPass    = typeof body?.password === 'string' ? body.password : '';
       if (isDevAuthAllowed() && rawEmail === 'admin' && rawPass === 'admin') {
         const token = await signToken({
-          id:    'dev-user-bypass-001',
+          // 🚨 THE SAME ID THE HEADER BYPASS USES, from one declaration. This
+          // was a fourth hand-written copy of the identity, so signing in
+          // through the form produced a DIFFERENT user from the header path —
+          // and a project created by one was invisible to the other. It is also
+          // why the id had to become a UUID: `projects.user_id` is a UUID
+          // column, and this string could never create one.
+          id:    DEV_SESSION_USER.id,
           email: 'admin@localhost',
           name:  'Admin (Dev Bypass)',
         } as SessionUser);

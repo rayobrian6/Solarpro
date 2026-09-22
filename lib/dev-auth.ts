@@ -64,8 +64,42 @@ import type { SessionUser } from '@/lib/auth';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /** The fixed dev session user returned when bypass is active. */
+/**
+ * THE DEV BYPASS USER'S ID, AND WHY IT IS A UUID.
+ *
+ * 🚨 IT USED TO BE THE STRING 'dev-user-bypass-001', AND THAT MADE THE BYPASS
+ * UNABLE TO DO THE ONE THING IT EXISTS FOR.
+ *
+ * `projects.user_id` is a UUID column and the route validates it, so every
+ * create through the real route came back
+ *
+ *     Invalid userId: "dev-user-bypass-001" is not a valid UUID
+ *
+ * mapped to a 503 by the transient-error handler — a bypass that authenticates
+ * successfully and then cannot create a project. An end-to-end run found it the
+ * first time one actually reached the database.
+ *
+ * The value is deterministic and obviously synthetic: all zeros but for the
+ * version and variant nibbles a UUID needs, and a trailing 1. It is not random,
+ * so a local database keeps the same dev user across runs.
+ */
+export const DEV_BYPASS_USER_ID = '00000000-0000-4000-8000-000000000001';
+
+/**
+ * Is this the dev bypass user?
+ *
+ * 🚨 ONE DEFINITION. Three routes compared `user.id === 'dev-user-bypass-001'`
+ * to grant `bypassOwnershipCheck`, so the identity was written out in four
+ * places — and anyone setting `DEV_AUTH_USER_ID` made three of them false while
+ * the fourth still authenticated. A half-working bypass is worse than none,
+ * because it fails somewhere far from the cause.
+ */
+export function isDevBypassUser(userId: string | null | undefined): boolean {
+  return !!userId && userId === DEV_SESSION_USER.id;
+}
+
 export const DEV_SESSION_USER: SessionUser = {
-  id:      process.env.DEV_AUTH_USER_ID    || 'dev-user-bypass-001',
+  id:      process.env.DEV_AUTH_USER_ID    || DEV_BYPASS_USER_ID,
   name:    process.env.DEV_AUTH_USER_NAME  || 'Dev User (Bypass)',
   email:   process.env.DEV_AUTH_USER_EMAIL || 'dev@localhost',
   company: 'SolarPro Dev',

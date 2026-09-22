@@ -8617,11 +8617,150 @@ function SolarEngine3D({
   // v48.12 audit: Only matches bare panel IDs (no __ separator).
   // Racking posts, fence posts, glass, and grid-line entities all have __ in their keys
   // and must not be treated as selectable panels.
+  /**
+   * WHICH MODULE IS UNDER THE CURSOR — computed, not asked of the GPU.
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * 🚨 WHY THIS EXISTS: ENTITY PICKING CAN BE UNAVAILABLE, AND THEN A MODULE
+   * CANNOT BE SELECTED, DELETED OR MOVED AT ALL.
+   * ─────────────────────────────────────────────────────────────────────────
+   *
+   * Measured in the E2E browser, with 44 modules and a full building drawn:
+   *
+   *     drillPick(panel centre, 32)  -> 0 hits
+   *     drillPick(canvas centre, 8)  -> 0 hits
+   *     drillPick(roof centre, 8)    -> 0 hits
+   *     scene.pick(panel centre)     -> nothing
+   *
+   * NOTHING is pickable. Roof-face selection kept working only because it has
+   * an analytic fallback — a ray tested against the stored face geometry — and
+   * modules had none, so every click on a module fell through to that fallback
+   * and selected the roof behind it. That is the failure "a panel click still
+   * selected the roof face behind the module", and it survived both a
+   * drill-depth increase (10 -> 32) and a fix to the glass/grid key filter,
+   * because neither was the cause: the hits were never there to be walked.
+   *
+   * This is not only a harness artefact. Anything that makes Cesium's pick pass
+   * fail — a software rasteriser, a lost context, a driver that will not read
+   * the pick buffer — takes module selection with it, and the user sees a
+   * module they cannot click on a roof they can.
+   *
+   * 🚨 IT MEASURES WHAT WAS DRAWN. The corners come from the ENTITY'S OWN
+   * position and orientation, the values Cesium is rendering from, not from a
+   * second derivation off `panel.ecefNx`/`heading`. A hit test that re-derives
+   * the pose is free to disagree with the picture, and then the module you can
+   * see is not the module you can click.
+   */
+  function pickPanelAnalytically(viewer: any, C: any, screenPos: any): string | null {
+    try {
+      const scene = viewer?.scene;
+      const toWindow = C?.SceneTransforms?.worldToWindowCoordinates
+                    ?? C?.SceneTransforms?.wgs84ToWindowCoordinates;
+      if (!scene || !toWindow || !screenPos) return null;
+      const now = C.JulianDate.now();
+      const camera = scene.camera?.positionWC;
+      if (!camera) return null;
+
+      let best: { id: string; d: number } | null = null;
+
+      panelMapRef.current.forEach((entity: any, key: string) => {
+        // Bare-id keys only: the frame entity carries the pose, and the glass
+        // and cell lines sit on the same box.
+        if (key.includes('__')) return;
+        const pos = entity?.position?.getValue?.(now);
+        const quat = entity?.orientation?.getValue?.(now);
+        const dims = entity?.box?.dimensions?.getValue?.(now);
+        if (!pos || !quat || !dims) return;
+
+        // The box is drawn with dimensions (ph, pw, thickness) — x is the
+        // up-slope extent, y the along-eave extent. Half-extents, in the
+        // entity's own frame, then rotated into ECEF by its own quaternion.
+        const m = C.Matrix3.fromQuaternion(quat, new C.Matrix3());
+        const hx = dims.x / 2, hy = dims.y / 2;
+        const corners: any[] = [];
+        for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as Array<[number, number]>) {
+          const local = new C.Cartesian3(sx * hx, sy * hy, 0);
+          const world = C.Matrix3.multiplyByVector(m, local, new C.Cartesian3());
+          corners.push(C.Cartesian3.add(pos, world, new C.Cartesian3()));
+        }
+
+        // 🚨 A CORNER BEHIND THE CAMERA PROJECTS TO NONSENSE. `toWindow`
+        // returns undefined for it, and treating that as (0,0) would make a
+        // module behind the viewer swallow clicks in the top-left corner.
+        const pts: Array<{ x: number; y: number }> = [];
+        for (const c of corners) {
+          const w = toWindow(scene, c);
+          if (!w || !isFinite(w.x) || !isFinite(w.y)) return;
+          pts.push({ x: w.x, y: w.y });
+        }
+
+        if (!pointInQuad(screenPos.x, screenPos.y, pts)) return;
+
+        // Front-most wins: two modules can overlap on screen from a low camera,
+        // and the one the user is pointing at is the nearer one.
+        const d = C.Cartesian3.distance(camera, pos);
+        if (!best || d < best.d) best = { id: key, d };
+      });
+
+      return best ? (best as { id: string }).id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Is (x,y) inside the convex quad `q`? Winding-agnostic: a module projects
+   *  clockwise or anticlockwise depending on which side the camera is on. */
+  function pointInQuad(x: number, y: number, q: Array<{ x: number; y: number }>): boolean {
+    if (!q || q.length !== 4) return false;
+    let pos = 0, neg = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = q[i], b = q[(i + 1) % 4];
+      const cross = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
+      if (cross > 0) pos++;
+      else if (cross < 0) neg++;
+    }
+    return pos === 0 || neg === 0;
+  }
+
   function pickPanelAtScreen(viewer: any, screenPos: any): { foundId: string | null; foundEntity: any } {
     let foundId: string | null = null;
     let foundEntity: any = null;
     // isPanelId: true only for bare UUID keys (no __ separator)
     const isPanelId = (id: string) => !id.includes('__');
+
+    /**
+     * 🚨 THE PANEL ID FROM THE ENTITY'S OWN NAME — because the surface the user
+     * clicks is NOT the entity the panel map is keyed by.
+     *
+     * A module is drawn as three families:
+     *     [PANEL] <id>         the frame box   -> panelMapRef key `<id>`
+     *     [PANEL-GLASS] <id>   the glass       -> key `<id>__glass`
+     *     [PANEL-GRID] <id> …  the cell lines  -> key `<id>__grid__<n>`
+     *
+     * and `isPanelId` rejects every key containing `__`. The glass is the top
+     * surface — it is what a click in the middle of a module actually hits —
+     * so the loop below walked straight past the panel and the Building roof
+     * behind it answered instead. That is the measured failure "a panel click
+     * still selected the roof face behind the module", which survived the drill
+     * depth going from 10 to 32 because DEPTH WAS NEVER THE CAUSE: the hit was
+     * in the list all along and was being discarded.
+     *
+     * Matching on the NAME is not a loosening of the key rule — it is the rule
+     * stated where it is true. `__fencepost__`, `__gate__` and `__fenceinfill__`
+     * keys start with the separator and belong to no module; they carry their
+     * own names and are not in the [PANEL*] families at all.
+     */
+    const PANEL_NAME = /^\[PANEL(?:-GLASS|-GRID)?\]\s+(\S+)/;
+    const panelIdFromEntity = (entity: any): string | null => {
+      const name: unknown = entity?.name;
+      if (typeof name !== 'string') return null;
+      const m = PANEL_NAME.exec(name);
+      if (!m) return null;
+      const id = m[1];
+      // The name is a claim; the map is the authority on what exists.
+      return panelMapRef.current.has(id) ? id : null;
+    };
+
     try {
       // 🚨 DRILL DEEP ENOUGH TO REACH A PANEL IN BUILDING MODE.
       //
@@ -8644,6 +8783,17 @@ function SolarEngine3D({
       for (const pickedObj of drilled) {
         if (!pickedObj || !pickedObj.id) continue;
         const entity = pickedObj.id;
+        // The name first: it resolves the glass and the cell grid to the module
+        // they belong to, which the key-based match below cannot.
+        const named = panelIdFromEntity(entity);
+        if (named) {
+          foundId = named;
+          // 🚨 THE FRAME ENTITY, NOT THE ONE THAT WAS HIT. Every caller uses
+          // `foundEntity` to highlight and to move the module; handing back the
+          // glass would leave the frame behind.
+          foundEntity = panelMapRef.current.get(named) ?? entity;
+          break;
+        }
         panelMapRef.current.forEach((ent, id) => {
           if (!foundId && isPanelId(id) && ent === entity) { foundId = id; foundEntity = entity; }
         });
@@ -8652,9 +8802,32 @@ function SolarEngine3D({
     } catch {
       const picked = viewer.scene.pick(screenPos);
       if (picked && picked.id) {
-        panelMapRef.current.forEach((ent, id) => {
-          if (!foundId && isPanelId(id) && ent === picked.id) { foundId = id; foundEntity = picked.id; }
-        });
+        const named = panelIdFromEntity(picked.id);
+        if (named) {
+          foundId = named;
+          foundEntity = panelMapRef.current.get(named) ?? picked.id;
+        } else {
+          panelMapRef.current.forEach((ent, id) => {
+            if (!foundId && isPanelId(id) && ent === picked.id) { foundId = id; foundEntity = picked.id; }
+          });
+        }
+      }
+    }
+
+    // 🚨 THE GPU IS ASKED FIRST AND IS NOT THE ONLY ANSWER.
+    //
+    // When the pick pass returns nothing — measured: zero hits anywhere on the
+    // canvas in a software rasteriser — the module is still on screen and the
+    // user is still pointing at it. `pickPanelAnalytically` computes the answer
+    // from the pose Cesium is drawing with, so selection does not depend on a
+    // GPU read-back working. It runs only on a miss, so nothing about the
+    // normal path changes.
+    if (!foundId) {
+      const C = (window as any).Cesium;
+      const analytic = C ? pickPanelAnalytically(viewer, C, screenPos) : null;
+      if (analytic) {
+        foundId = analytic;
+        foundEntity = panelMapRef.current.get(analytic) ?? null;
       }
     }
     return { foundId, foundEntity };

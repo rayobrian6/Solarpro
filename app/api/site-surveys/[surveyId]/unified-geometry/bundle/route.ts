@@ -67,6 +67,7 @@ import {
 } from '@/lib/siteSurveys/unifiedGeometry';
 import { isGoogleSolarApiConfigured } from '@/lib/siteSurveys/googleSolarApi/client';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
+import { isDevBypassUser } from '@/lib/dev-auth';
 
 // ── Bundle mode types ────────────────────────────────────────────────────────
 
@@ -241,7 +242,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ surveyId:
 
     // Verify survey ownership (dev bypass user skips ownership check)
     const survey = await getSiteSurveyById(surveyId, user.id, {
-      bypassOwnershipCheck: user.id === 'dev-user-bypass-001',
+      bypassOwnershipCheck: isDevBypassUser(user.id),
     } as GetSiteSurveyByIdOptions);
     if (!survey) {
       return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });

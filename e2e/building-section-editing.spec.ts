@@ -264,6 +264,101 @@ async function clickFace(page: Page, planeId: string): Promise<void> {
   await page.mouse.click(box!.x + pt!.x, box!.y + pt!.y);
 }
 
+
+/**
+ * A screen point on this face that is NOT covered by a module.
+ *
+ * 🚨 ONCE PANELS EXIST, THE FACE CENTROID IS UNDER ONE. A click there now
+ * selects the MODULE, which is correct and is what the selection hierarchy was
+ * fixed to do — so a test that wants the roof has to click bare roof, exactly
+ * as a person would. Setbacks keep the array off the edges, so points pulled
+ * from the centre toward each corner find uncovered deck.
+ */
+async function faceScreenPointClearOfPanels(page: Page, planeId: string) {
+  return page.evaluate((id: string) => {
+    const viewer = (window as unknown as E2EWin).__solarViewerE2E;
+    const C = (window as any).Cesium;
+    const now = C.JulianDate.now();
+    const fn = C.SceneTransforms.worldToWindowCoordinates ?? C.SceneTransforms.wgs84ToWindowCoordinates;
+    const cv = viewer.scene.canvas;
+
+    const pts: any[] = [];
+    for (const ent of viewer.entities.values) {
+      const name: string = ent?.name ?? '';
+      if (!name.startsWith('[PLANE3D-') || !name.endsWith(` ${id}`)) continue;
+      const poly = ent.polygon?.hierarchy?.getValue?.(now);
+      if (poly?.positions?.length) pts.push(...poly.positions);
+    }
+    if (pts.length < 3) return null;
+
+    // Every module's projected quad, so a candidate can be tested against them.
+    const quads: Array<Array<{ x: number; y: number }>> = [];
+    for (const ent of viewer.entities.values) {
+      if (!((ent as any)?.name ?? '').startsWith('[PANEL] ')) continue;
+      const pos = (ent as any).position?.getValue?.(now);
+      const quat = (ent as any).orientation?.getValue?.(now);
+      const dims = (ent as any).box?.dimensions?.getValue?.(now);
+      if (!pos || !quat || !dims) continue;
+      const m = C.Matrix3.fromQuaternion(quat, new C.Matrix3());
+      const q: Array<{ x: number; y: number }> = [];
+      let ok = true;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        const local = new C.Cartesian3(sx * dims.x / 2, sy * dims.y / 2, 0);
+        const world = C.Cartesian3.add(pos, C.Matrix3.multiplyByVector(m, local, new C.Cartesian3()), new C.Cartesian3());
+        const w = fn(viewer.scene, world);
+        if (!w || !isFinite(w.x)) { ok = false; break; }
+        q.push({ x: w.x, y: w.y });
+      }
+      if (ok) quads.push(q);
+    }
+    const inQuad = (x: number, y: number, q: Array<{ x: number; y: number }>) => {
+      let pos2 = 0, neg = 0;
+      for (let i = 0; i < 4; i++) {
+        const a = q[i], b = q[(i + 1) % 4];
+        const cr = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
+        if (cr > 0) pos2++; else if (cr < 0) neg++;
+      }
+      return pos2 === 0 || neg === 0;
+    };
+
+    const c = pts.reduce((a: any, p: any) => ({
+      x: a.x + p.x / pts.length, y: a.y + p.y / pts.length, z: a.z + p.z / pts.length,
+    }), { x: 0, y: 0, z: 0 });
+
+    const candidates: any[] = [];
+    for (const t of [0.92, 0.84, 0.74, 0.62, 0.5, 0]) {
+      for (const corner of pts) {
+        candidates.push(new C.Cartesian3(
+          c.x + (corner.x - c.x) * t, c.y + (corner.y - c.y) * t, c.z + (corner.z - c.z) * t));
+      }
+      if (t === 0) break;
+    }
+    for (const cand of candidates) {
+      const w = fn(viewer.scene, cand);
+      if (!w || !isFinite(w.x) || !isFinite(w.y)) continue;
+      if (w.x < 6 || w.y < 6 || w.x > cv.clientWidth - 6 || w.y > cv.clientHeight - 6) continue;
+      if (quads.some(q => inQuad(w.x, w.y, q))) continue;
+      return { x: w.x, y: w.y };
+    }
+    return null;
+  }, planeId);
+}
+
+/** Click a point on this face that no module covers. */
+async function clickBareRoof(page: Page, planeId: string): Promise<void> {
+  const box = await page.locator('canvas').first().boundingBox();
+  expect(box, 'no canvas').not.toBeNull();
+  let pt: { x: number; y: number } | null = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    pt = await faceScreenPointClearOfPanels(page, planeId);
+    if (pt) break;
+    await frameRoof(page);
+    await page.waitForTimeout(250);
+  }
+  expect(pt, `no uncovered point on ${planeId} — the whole face is under modules`).not.toBeNull();
+  await page.mouse.click(box!.x + pt!.x, box!.y + pt!.y);
+}
+
 const state = (page: Page) => page.evaluate(() => {
   const s = (window as unknown as E2EWin).__solarE2E!;
   return {
@@ -653,7 +748,12 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
     expect(onMain, 'no panel could be measured against its plane').toBeGreaterThan(0);
 
     // Now correct the building, the way a person would after looking at it.
-    await clickFace(page, 'sec-main::slopeA');
+    //
+    // 🚨 CLICK BARE ROOF, NOT THE CENTROID. The array now covers the middle of
+    // the face, and a click on a module selects the MODULE — which is the
+    // selection hierarchy working, not a regression. A person reaching for the
+    // building clicks a part of the roof they can see.
+    await clickBareRoof(page, 'sec-main::slopeA');
     await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
     const eave = page.locator('[data-testid="inspector-eave"]');
     await eave.click();
