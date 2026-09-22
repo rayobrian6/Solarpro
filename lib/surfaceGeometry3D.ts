@@ -578,7 +578,44 @@ export function computeEcefFrameForLegacyPlane(plane: RoofPlane, groundElevM = 0
   // planeHeightAtCenterMeters is RELATIVE height above ground (typically 3-10m for a roof).
   // groundElevM is the Cesium ellipsoidal height at the site (e.g. ~80m for Alexandria VA).
   // Previously groundElevM was ignored here, placing panels at sea level for any site above sea level.
-  const roofAboveGround = (plane.planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M);
+  // 🚨 `planeHeightAtCenterMeters` CARRIES A DATUM, AND THE DATUM DEPENDS ON
+  // WHO WROTE IT. This line read it as height-above-ground for everybody.
+  //
+  // Google's Solar API publishes it as ABSOLUTE elevation above sea level, and
+  // this repository already says so: lib/digitalTwin.ts:624 —
+  // "planeHeightAtCenterMeters is absolute elevation (meters above sea level)"
+  // — and that module correctly subtracts the base elevation to get a relative
+  // height. `app/api/solar/route.ts` writes the RAW absolute value onto the
+  // RoofPlane, and that route has no elevation of its own to convert with.
+  //
+  // So for a detected face this function was adding the ground TWICE. Measured,
+  // through the real resolvePlaneGeometry, with ground 128 m and a roof plane
+  // at 134 m absolute (6 m above the eaves):
+  //
+  //     placed at 263.795 m   —   129.795 m too high
+  //
+  // A face has to be enriched with its own origin3D/ecefFrame3D to escape this
+  // branch, and `enrichRoofPlaneWith3DFrame` sets only `localFrame3D` — so the
+  // Solar-API detection path reaches here every time.
+  //
+  // 🚨 ONLY THE DOCUMENTED CASE IS CONVERTED. `aerial_nearmap` also writes this
+  // field, from `heightAtCenterM`, whose own declaration
+  // (lib/siteSurveys/aerialGeometry/types.ts:40) says "Optional plane height at
+  // centre (metres)" and names NO datum. Nobody knows which it is, so it keeps
+  // the previous behaviour rather than being guessed into a second bug. That
+  // ambiguity is the real defect and it belongs in the type, not here.
+  const ABSOLUTE_ELEVATION_SOURCES = new Set(['solar_api', 'google_solar_api']);
+  const rawHeight = plane.planeHeightAtCenterMeters;
+  const absoluteDatum =
+    typeof rawHeight === 'number' && isFinite(rawHeight) && rawHeight !== 0
+    && ABSOLUTE_ELEVATION_SOURCES.has(String((plane as { source?: string }).source ?? ''));
+
+  const roofAboveGround = absoluteDatum
+    // It is already an elevation. Subtracting the ground turns it into the
+    // relative height the rest of this function expects, and the two cancel
+    // when it is added back below — which is the point: one datum, stated.
+    ? rawHeight - groundElevM
+    : (rawHeight ?? LEGACY_PLANE_HEIGHT_M);
   // groundElevM === 0 is the "unresolved" sentinel; any other value (incl.
   // NEGATIVE ellipsoidal elevations at coastal/low-lying sites) is real and must
   // be added — the old `> 0` guard dropped it and floated roofs ~25m high there.
