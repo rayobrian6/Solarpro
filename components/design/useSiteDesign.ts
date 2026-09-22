@@ -35,8 +35,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  dispositionFor,
-  withDisposition,
+  isNativeGeometryDisposition,
   type NativeGeometryDisposition,
 } from '@/lib/design/nativeGeometryDisposition';
 import {
@@ -58,6 +57,8 @@ import {
   bundleEntityCount,
   toPersistencePayload,
   resolveSiteKey,
+  dispositionForProperty,
+  withDispositionForProperty,
   UNRESOLVED_SITE_KEY,
 } from '@/lib/design/siteDesignModel';
 
@@ -232,7 +233,20 @@ export function useSiteDesign(): UseSiteDesign {
 
   /** Record the state BEFORE a mutation. Call, then mutate. */
   const recordGeometry = useCallback((label: string, coalesceKey?: string) => {
-    writeHistory(pushSnapshot(geometryHistoryRef.current, label, roofPlanesRef.current, coalesceKey));
+    // 🚨 THE PROVIDER DECISION IS PART OF THE SNAPSHOT.
+    //
+    // Every face the section tools emit carries `.section`, and DesignStudio
+    // files `custom` for the property the instant one arrives. So drawing one
+    // gable by mistake on an otherwise-Google property made it 'custom', and
+    // Undo — which restored only `RoofPlane[]` — left it that way: the roof came
+    // back empty and native acquisition stayed refused forever, through a door
+    // nothing in the app could reopen. An undo that restores half the change is
+    // the class of defect this history was written to remove, not an instance
+    // of it.
+    writeHistory(pushSnapshot(
+      geometryHistoryRef.current, label, roofPlanesRef.current, coalesceKey,
+      nativeDispositionRef.current,
+    ));
   }, []);
 
   /**
@@ -263,21 +277,46 @@ export function useSiteDesign(): UseSiteDesign {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Put the provider decision back to what it was before the undone edit.
+   *
+   * 🚨 ONLY WHEN THE STEP CARRIED ONE, AND ONLY WHEN IT DIFFERS. A step
+   * recorded before this field existed (or by a caller that passed none) has
+   * `null`, and null is not a decision: coercing it to 'undecided' would let an
+   * undo silently license re-acquisition over hand-built work, which is the
+   * same shape as the `?? 0` that turns an unknown current into zero amps.
+   */
+  const restoreDisposition = useCallback((d: string | null) => {
+    if (!d || d === nativeDispositionRef.current) return;
+    if (!isNativeGeometryDisposition(d)) return;
+    // Through the real setter, so the restored decision is filed against the
+    // property and reaches the autosave — not left in a ref that the next
+    // render recomputes away.
+    setNativeDisposition(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const undoGeometry = useCallback((): string | null => {
-    const step = undo(geometryHistoryRef.current, roofPlanesRef.current);
+    const step = undo(
+      geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
+    );
     if (!step.ok) return null;
     writeHistory(step.history);
     // Adopt the canonical array; every derived thing rebuilds from it.
     applyRestoredGeometry(step.planes);
+    restoreDisposition(step.disposition);
     return step.label;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const redoGeometry = useCallback((): string | null => {
-    const step = redo(geometryHistoryRef.current, roofPlanesRef.current);
+    const step = redo(
+      geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
+    );
     if (!step.ok) return null;
     writeHistory(step.history);
     applyRestoredGeometry(step.planes);
+    restoreDisposition(step.disposition);
     return step.label;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -419,12 +458,50 @@ export function useSiteDesign(): UseSiteDesign {
   // Derived from the state, per ACTIVE property. Recomputed when the archive
   // moves (which is when the active property changes) so switching house and
   // back shows that property's decision, not the other one's.
+  /**
+   * THE KEY THE DECISION IS FILED UNDER — one expression, used by the read and
+   * by the write.
+   *
+   * 🚨 THEY USED DIFFERENT KEYS, AND THE READ WON.
+   *
+   * The write took `siteKey || activeSiteKeyRef.current || state.activeSiteKey`,
+   * because the caller is the one that knows the property before hydration
+   * resolves it. The memo below read `dispositionFor(map, activeSiteKey)` — the
+   * React value alone — and then assigned the result to
+   * `nativeDispositionRef.current`. So on a project whose stored coordinates are
+   * absent or the placeholder pair, `activeSiteKey` is the EMPTY STRING and
+   * nothing later resolves it: the installer pressed "Draw Manually Instead",
+   * the write filed `rejected` under the camera's key and bumped `archiveTick`,
+   * and the very next render recomputed `dispositionFor(map, '')` — which is
+   * `undecided` by the module's first line — and overwrote the ref with it.
+   *
+   * The judgement was in the map, and the gate could not see it. Lane A then
+   * re-injected the Google roof the installer had just rejected, which is the
+   * exact defect the whole disposition module was written to close.
+   */
+  const dispositionKeyOf = useCallback((explicit?: string) =>
+    explicit || activeSiteKeyRef.current || stateRef.current.activeSiteKey || '', []);
+
   const nativeDisposition = useMemo(() => {
     void archiveTick;
-    const d = dispositionFor(stateRef.current.nativeGeometry, activeSiteKey);
-    nativeDispositionRef.current = d;
-    return d;
-  }, [archiveTick, activeSiteKey]);
+    void activeSiteKey;   // recompute on a property change, not just an archive move
+    const key = dispositionKeyOf();
+    // 🚨 AND IT MATCHES BY PROPERTY, NOT BY STRING. See
+    // `dispositionForProperty`: a key that drifted a few metres must still find
+    // the judgement, or an unreadable decision reads `undecided` — the state
+    // that PERMITS re-acquisition.
+    const d = dispositionForProperty(
+      stateRef.current.nativeGeometry, key,
+      [stateRef.current.activeSiteKey, ...Object.keys(stateRef.current.archives ?? {})],
+    );
+    // 🚨 AND IT NEVER CLOBBERS A KNOWN DECISION WITH "NOBODY LOOKED". While no
+    // property is named there is nothing to read, and the ref holds whatever the
+    // last explicit write put there — which is a real judgement about the house
+    // on screen. Overwriting it with the default is how the rejection above was
+    // lost between one render and the next.
+    if (key || d !== 'undecided') nativeDispositionRef.current = d;
+    return key ? d : nativeDispositionRef.current;
+  }, [archiveTick, activeSiteKey, dispositionKeyOf]);
 
   const setNativeDisposition = useCallback((d: NativeGeometryDisposition, siteKey?: string) => {
     // 🚨 KEYED BY SITE, like ownership. A judgement is about a PROPERTY, so
@@ -436,7 +513,7 @@ export function useSiteDesign(): UseSiteDesign {
     // and passes the same key here, so the decision and the geometry it is
     // about are filed against one property even before `activeSiteKey` has
     // resolved.
-    const key = siteKey || activeSiteKeyRef.current || stateRef.current.activeSiteKey;
+    const key = dispositionKeyOf(siteKey);
     if (!key) {
       // 🚨 REFUSED OUT LOUD, NOT DROPPED IN SILENCE. `withDisposition` returns
       // the map unchanged for an empty key, so this used to vanish and the app
@@ -454,7 +531,12 @@ export function useSiteDesign(): UseSiteDesign {
       // moments of a session would vanish silently. Falls back to the site the
       // state believes is active, which is what every other ownership write
       // here does.
-      nativeGeometry: withDisposition(stateRef.current.nativeGeometry, key, d),
+      // 🚨 FILED AGAINST THE PROPERTY, NOT AGAINST THIS SPELLING OF IT. If a
+      // decision already exists under a key within the property radius, it is
+      // REPLACED rather than joined by a second one — otherwise one house
+      // accumulates `rejected` under one identity and `custom` under another,
+      // and which the app reads depends on where the mouse last was.
+      nativeGeometry: withDispositionForProperty(stateRef.current.nativeGeometry, key, d),
     };
     nativeDispositionRef.current = d;
     // Moves `archivesSignature`, so the autosave actually writes it. Without

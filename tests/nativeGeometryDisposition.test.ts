@@ -239,7 +239,12 @@ describe('🚨 THE DECISION IS REACHABLE IN PRODUCTION — it is not decoration'
     // multi-line when the site key gained a fallback, and a regex pinned to the
     // argument list broke for a reason that had nothing to do with what it
     // protects — which is what an over-specified source matcher always costs.
-    expect(HOOK).toMatch(/withDisposition\(/);
+    // 🚨 THE PROPERTY-AWARE WRITER. `withDisposition` is an exact key match,
+    // and every other site-identity question in this codebase is an 8 m
+    // property match — so a decision filed under a key that drifted a few
+    // metres became a SECOND entry for the same house, and which one the app
+    // read depended on where the mouse last was.
+    expect(HOOK).toMatch(/withDispositionForProperty\(/);
     expect(HOOK).toMatch(/stateRef\.current\.nativeGeometry/);
     // 🚨 THE FALLBACK. `activeSiteKeyRef` is the EMPTY STRING until hydration
     // resolves ownership, and a write against an empty key is dropped — so a
@@ -252,7 +257,18 @@ describe('🚨 THE DECISION IS REACHABLE IN PRODUCTION — it is not decoration'
     // that phrase also appears in a COMMENT 5,000 lines earlier — so the slice
     // came out empty and the assertions below would have passed vacuously had
     // the positive control not caught it.
-    const at = STUDIO.indexOf("site.setNativeDisposition('rejected',");
+    // 🚨 ANCHORED ON THIS BUTTON, NOT ON THE FIRST REJECTION IN THE FILE.
+    // There are now two writers of 'rejected': this one, and the persistent
+    // geometry-source row added because this banner unmounts the moment the
+    // installer confirms — taking the app's only way to say "Google does not
+    // govern here" with it. Searching for the first occurrence started matching
+    // the row instead, and the assertions below would have failed for a reason
+    // that had nothing to do with what they protect.
+    // The LAST occurrence: the phrase also appears in a comment 5,000 lines
+    // earlier, which this file's own note below records.
+    const banner = STUDIO.lastIndexOf('Draw Manually Instead');
+    expect(banner, 'positive control: the button is gone').toBeGreaterThan(-1);
+    const at = STUDIO.lastIndexOf("site.setNativeDisposition('rejected',", banner);
     expect(at, 'positive control: the write was not found at all').toBeGreaterThan(-1);
     const btn = STUDIO.slice(at, at + 1200);
     expect(btn, 'the rejection must clear the planes too').toMatch(/setRoofPlanes\(\[\]\)/);

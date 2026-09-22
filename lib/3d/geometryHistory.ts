@@ -59,6 +59,24 @@ export interface GeometrySnapshot {
   planes: RoofPlane[];
   /** Set when this entry may absorb an immediately following identical edit. */
   coalesceKey: string | null;
+  /**
+   * THE PROVIDER DECISION AS IT STOOD BEFORE THE EDIT.
+   *
+   * 🚨 A GEOMETRY EDIT CAN CHANGE IT, SO AN UNDO THAT IGNORES IT IS HALF AN
+   * UNDO. Every face a section tool emits carries `.section`, and DesignStudio
+   * files `custom` for the property the moment one arrives. So: draw one gable
+   * by mistake on a property with no other planes, press Undo — the roof comes
+   * back empty and the property stays permanently 'custom'. `custom` refuses
+   * every native-acquisition door, and an audit confirmed that no control in
+   * the app could clear it; the user's first evidence was a toast, hours later,
+   * telling them to "clear that decision first".
+   *
+   * Carried as an opaque string so this module stays free of the disposition
+   * vocabulary — it records what it was told and hands it back. `null` means
+   * the caller recorded no decision with this step, and the caller then leaves
+   * whatever is current alone.
+   */
+  disposition: string | null;
 }
 
 export interface GeometryHistory {
@@ -78,6 +96,9 @@ export interface HistoryStep {
   history: GeometryHistory;
   planes: RoofPlane[];
   label: string | null;
+  /** The decision to restore alongside `planes`, or null when the step carried
+   *  none. See `GeometrySnapshot.disposition`. */
+  disposition: string | null;
 }
 
 export function emptyHistory(): GeometryHistory {
@@ -108,6 +129,9 @@ export function pushSnapshot(
   label: string,
   planesBefore: ReadonlyArray<RoofPlane> | null | undefined,
   coalesceKey?: string | null,
+  /** The provider decision as it stands NOW, before the edit. See
+   *  `GeometrySnapshot.disposition`. Omitted means "do not restore one". */
+  dispositionBefore?: string | null,
 ): GeometryHistory {
   const copy = deepCopyPlanes(planesBefore);
   if (copy === null) return history; // see deepCopyPlanes
@@ -121,7 +145,7 @@ export function pushSnapshot(
     return { past: history.past, future: [] };
   }
 
-  const past = [...history.past, { label, planes: copy, coalesceKey: key }];
+  const past = [...history.past, { label, planes: copy, coalesceKey: key, disposition: dispositionBefore ?? null }];
   while (past.length > MAX_HISTORY_DEPTH) past.shift();
   // 🚨 A NEW EDIT DESTROYS THE REDO BRANCH. Keeping it would let Redo apply a
   // geometry that was derived from a state that no longer exists.
@@ -157,16 +181,21 @@ export function redoLabel(history: GeometryHistory): string | null {
 export function undo(
   history: GeometryHistory,
   planesNow: ReadonlyArray<RoofPlane> | null | undefined,
+  /** The decision as it stands NOW. It becomes the redo target, exactly as
+   *  `planesNow` does — otherwise Redo would put the geometry forward and
+   *  leave the decision behind, which is the same half-undo in the other
+   *  direction. */
+  dispositionNow?: string | null,
 ): HistoryStep {
   const current = (planesNow ?? []).slice();
   if (!canUndo(history)) {
-    return { ok: false, history, planes: current, label: null };
+    return { ok: false, history, planes: current, label: null, disposition: null };
   }
   const past = history.past.slice();
   const entry = past.pop()!;
   const forward = deepCopyPlanes(planesNow);
   if (forward === null) {
-    return { ok: false, history, planes: current, label: null };
+    return { ok: false, history, planes: current, label: null, disposition: null };
   }
   return {
     ok: true,
@@ -174,12 +203,16 @@ export function undo(
       past,
       // The redo entry is labelled with the edit being undone, so Redo reads
       // as the same action rather than as "redo the state before it".
-      future: [...history.future, { label: entry.label, planes: forward, coalesceKey: null }],
+      future: [...history.future, {
+        label: entry.label, planes: forward, coalesceKey: null,
+        disposition: dispositionNow ?? null,
+      }],
     },
     // Hand out a fresh copy: the caller will mutate what it adopts, and the
     // entry may be reached again through Redo.
     planes: deepCopyPlanes(entry.planes) ?? [],
     label: entry.label,
+    disposition: entry.disposition ?? null,
   };
 }
 
@@ -187,25 +220,30 @@ export function undo(
 export function redo(
   history: GeometryHistory,
   planesNow: ReadonlyArray<RoofPlane> | null | undefined,
+  dispositionNow?: string | null,
 ): HistoryStep {
   const current = (planesNow ?? []).slice();
   if (!canRedo(history)) {
-    return { ok: false, history, planes: current, label: null };
+    return { ok: false, history, planes: current, label: null, disposition: null };
   }
   const future = history.future.slice();
   const entry = future.pop()!;
   const back = deepCopyPlanes(planesNow);
   if (back === null) {
-    return { ok: false, history, planes: current, label: null };
+    return { ok: false, history, planes: current, label: null, disposition: null };
   }
   return {
     ok: true,
     history: {
-      past: [...history.past, { label: entry.label, planes: back, coalesceKey: null }],
+      past: [...history.past, {
+        label: entry.label, planes: back, coalesceKey: null,
+        disposition: dispositionNow ?? null,
+      }],
       future,
     },
     planes: deepCopyPlanes(entry.planes) ?? [],
     label: entry.label,
+    disposition: entry.disposition ?? null,
   };
 }
 

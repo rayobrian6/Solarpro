@@ -245,7 +245,10 @@ describe('🚨 undo restores canonical geometry, and the inert second history is
   it('the history lives with the array it restores', () => {
     expect(SITE).toMatch(/from '@\/lib\/3d\/geometryHistory'/);
     expect(SITE).toMatch(/const recordGeometry = useCallback/);
-    expect(SITE).toMatch(/pushSnapshot\(geometryHistoryRef\.current, label, roofPlanesRef\.current, coalesceKey\)/);
+    // 🚨 THE SNAPSHOT CARRIES THE PROVIDER DECISION TOO. Every section face
+    // files `custom` for the property, so an undo that restored only the roof
+    // left the property permanently custom with nothing able to clear it.
+    expect(SITE).toMatch(/pushSnapshot\(\s*\n\s*geometryHistoryRef\.current, label, roofPlanesRef\.current, coalesceKey,\s*\n\s*nativeDispositionRef\.current,\s*\n\s*\)\)/);
     // Undo adopts CANONICAL planes. No Cesium, no entity, no frame.
     //
     // 🚨 RE-ANCHORED ON THE INDIRECTION, NOT DELETED. This asserted
@@ -335,7 +338,13 @@ describe('🚨 a decision names the property it is about', () => {
     //
     // The caller knows which house is on screen. It passes the key.
     expect(SITE).toContain('setNativeDisposition = useCallback((d: NativeGeometryDisposition, siteKey?: string)');
-    expect(SITE).toContain('const key = siteKey || activeSiteKeyRef.current || stateRef.current.activeSiteKey');
+    // 🚨 ONE KEY EXPRESSION, SHARED WITH THE READ. The write used this literal
+    // while the memo read `activeSiteKey` alone, so on a project whose
+    // coordinates never resolve the write filed the decision and the next
+    // render overwrote the ref with 'undecided'. Both now call one function.
+    expect(SITE).toContain('const dispositionKeyOf = useCallback((explicit?: string) =>');
+    expect(SITE).toContain("explicit || activeSiteKeyRef.current || stateRef.current.activeSiteKey || ''");
+    expect(SITE).toContain('const key = dispositionKeyOf(siteKey);');
     expect(SITE).toContain('if (!key) {');
     expect(SITE).toContain('console.warn(');
 
@@ -343,11 +352,30 @@ describe('🚨 a decision names the property it is about', () => {
     expect(SITE).not.toContain('pendingDispositionRef');
 
     // …and every caller names the property.
-    const calls = STUDIO.match(/setNativeDisposition\(/g) ?? [];
-    expect(calls.length, 'expected three call sites').toBe(3);
-    expect(STUDIO).toContain("setNativeDisposition('custom', enrichedPlane.siteKey)");
-    expect((STUDIO.match(/setNativeDisposition\('(custom|rejected)', activeSiteKeyRef\.current/g) ?? []).length,
-      'both remaining call sites must name the property').toBe(2);
+    //
+    // 🚨 COUNTED WITH THE COMMENTS STRIPPED. The prose around these call sites
+    // quotes the function name repeatedly, and an earlier version of this guard
+    // counted those too — a guard satisfied by a comment about itself.
+    const studioCode = STUDIO.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const calls = studioCode.match(/setNativeDisposition\(/g) ?? [];
+    // Six writers, and the audit that found this subsystem unreachable is why
+    // there are now six rather than three: 'accepted' had NO writer at all, and
+    // 'rejected' lived only inside a banner that the confirm click unmounts,
+    // taking the app's only way to say "Google does not govern this property"
+    // with it. 'undecided' is new too — it is the escape from 'custom', which
+    // one stray traced section could set and nothing could clear.
+    expect(calls.length, 'expected six call sites').toBe(6);
+    expect(studioCode).toContain("setNativeDisposition('custom', enrichedPlane.siteKey)");
+    // Every one of the other four names the property explicitly — a decision
+    // filed against an empty key is dropped, and a decision filed against the
+    // NEXT property to resolve marks the neighbour's house.
+    const named = studioCode.match(
+      /setNativeDisposition\('(custom|rejected|accepted|undecided)', activeSiteKeyRef\.current/g) ?? [];
+    expect(named.length, 'every remaining call site must name the property').toBe(5);
+    // And all five states that a human can decide have a writer.
+    for (const d of ['custom', 'rejected', 'accepted', 'undecided']) {
+      expect(studioCode, `no writer for '${d}'`).toContain(`setNativeDisposition('${d}'`);
+    }
   });
 
   it('🚨 the Undo chip is not buried under the other panels', () => {

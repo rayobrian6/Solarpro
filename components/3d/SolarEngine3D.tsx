@@ -508,6 +508,24 @@ interface Props {
    * also the correct reading for a project nobody has judged.
    */
   nativeDisposition?: NativeGeometryDisposition;
+  /**
+   * THE SAME DECISION, AS A LIVE REF — for the Lane A gate, which fires from
+   * inside a resolved promise.
+   *
+   * 🚨 A PROP IS THE VALUE AT RENDER TIME, AND THE GATE RUNS SECONDS LATER.
+   * `maybeRunLaneA` is called from `buildDigitalTwin(...).then(...)` in the
+   * effect keyed `[lat, lng]`, so the closure it captured is the one from
+   * before the fetch. Every OTHER gate field is deliberately read from a ref at
+   * fire time — lib/3d/laneA.ts states the contract in so many words — and this
+   * one was not. Concretely: the twin fetch starts while the property is
+   * 'undecided'; during the 1–5 s it takes, the installer presses "Draw
+   * Manually Instead"; the promise then resolves holding 'undecided' and
+   * re-injects the exact Google roof that was just rejected.
+   *
+   * Optional, and the prop above is the fallback, so a caller that passes
+   * neither behaves as before.
+   */
+  nativeDispositionRef?: React.MutableRefObject<NativeGeometryDisposition>;
   /** 🚨 LANE A GATE. True once DesignStudio's DB restore has RESOLVED — i.e. the
    *  stored layout is in state, or the read genuinely returned nothing. Lane A
    *  refuses to run while this is false, because detection lands in React state
@@ -1048,6 +1066,7 @@ function SolarEngine3D({
   onRoofPlaneCreated,
   onRoofPlanesDetected,
   nativeDisposition = 'undecided',
+  nativeDispositionRef,
   roofRestoreResolved = false,
   onObstructionsChange,
   onMeasurementsChange,
@@ -12240,10 +12259,18 @@ function SolarEngine3D({
       restoreResolved: roofRestoreResolvedRef.current,
       siteKey,
       lastRanSiteKey: laneARanForRef.current,
-      // 🚨 THE DECISION, READ FROM A PROP AT FIRE TIME. Without this the gate
-      // always saw 'undecided' and the refusal in shouldRunLaneA could never
-      // fire in production — the rule existed and was unreachable.
-      nativeDisposition: nativeDisposition ?? 'undecided',
+      // 🚨 THE DECISION, READ FROM A REF AT FIRE TIME.
+      //
+      // Without it at all the gate always saw 'undecided' and the refusal in
+      // shouldRunLaneA could never fire in production — the rule existed and was
+      // unreachable. Reading it from the PROP fixed that but left a narrower
+      // hole: this function is called from inside `buildDigitalTwin(...).then()`,
+      // seconds after the render whose closure it captured, so a decision the
+      // installer made DURING the fetch was invisible to it. Every other field
+      // in this object is a `.current` for exactly that reason, and lib/3d/laneA.ts
+      // states the contract: "Every one is read from a REF at fire time, never
+      // captured in a closure."
+      nativeDisposition: nativeDispositionRef?.current ?? nativeDisposition ?? 'undecided',
     };
     if (!shouldRunLaneA(gate)) {
       addLog('AUTO', `LaneA(${why}): refused — ${JSON.stringify(gate)}`);
@@ -12344,9 +12371,12 @@ function SolarEngine3D({
       // exact Google roof that had just been rejected, and the autosave
       // persisted it. One gate on native acquisition, not one gated path and
       // one ungated one.
-      if (!nativeAcquisitionPermitted(nativeDisposition ?? 'undecided')) {
-        setStatusMsg('Auto Fill did not re-detect the roof — Google 3D is marked as not governing this property. Model the roof, or change that decision first.');
-        addLog('AUTO', `handleAutoRoof: native acquisition refused (${nativeDisposition})`);
+      // The ref, for the same reason the Lane A gate uses it: this runs from a
+      // click handler whose closure may predate a decision made moments ago.
+      const decided = nativeDispositionRef?.current ?? nativeDisposition ?? 'undecided';
+      if (!nativeAcquisitionPermitted(decided)) {
+        setStatusMsg('Auto Fill did not re-detect the roof — Google 3D is marked as not governing this property. Model the roof, or change that decision in the Roof Planes panel first.');
+        addLog('AUTO', `handleAutoRoof: native acquisition refused (${decided})`);
       } else {
         const detected = detectPlanesFromTwin('handleAutoRoof');
         if (detected.length > 0) eligiblePlanes = detected;

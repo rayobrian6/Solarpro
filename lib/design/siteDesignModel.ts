@@ -71,7 +71,13 @@
 
 import type { PlacedPanel, RoofPlane, PlacedObstruction, LayoutMeasurement, DesignElectrical } from '@/types';
 import { siteKeyFromCoords, isSameSite, partitionBySite, UNRESOLVED_SITE_KEY, type SiteOwned } from '@/lib/siteIdentity';
-import { parseNativeGeometryMap, type NativeGeometryMap } from '@/lib/design/nativeGeometryDisposition';
+import {
+  parseNativeGeometryMap,
+  dispositionFor,
+  withDisposition,
+  type NativeGeometryDisposition,
+  type NativeGeometryMap,
+} from '@/lib/design/nativeGeometryDisposition';
 
 export { siteKeyFromCoords, isSameSite, UNRESOLVED_SITE_KEY };
 
@@ -320,6 +326,63 @@ export function nearestSamePropertyKey(
     if (d <= SITE_MATCH_RADIUS_M && (!best || d < best.d)) best = { key: c, d };
   }
   return best ? best.key : null;
+}
+
+// ── The provider decision is a PROPERTY question, like everything else here ──
+//
+// 🚨 `dispositionFor` IS AN EXACT STRING LOOKUP, AND EVERY OTHER SITE-IDENTITY
+// QUESTION IN THIS FILE IS AN 8 m PROPERTY MATCH.
+//
+// `sitesAreSameProperty`, `nearestSamePropertyKey`, `resolveSiteKey` and
+// hydrate's archive lookup all match by proximity, for the reason recorded
+// above: "the site key is far too precise for a mouse", and one house on Ray's
+// live row minted three identities 17–19 m apart. The disposition lookup alone
+// was exact, so a judgement filed under one of those identities became
+// unreadable from another — and an unreadable judgement reads `undecided`,
+// which is the state that PERMITS re-acquisition. The installer's "Google is
+// wrong here" would come back as "nobody has looked", and Lane A would
+// re-inject the roof they rejected.
+//
+// These two wrappers are what the app uses. The primitives in
+// nativeGeometryDisposition.ts stay exact, because a map is a map; knowing
+// which keys name one property is this module's job.
+
+/**
+ * What has been decided about the PROPERTY `siteKey` names — matching the way
+ * ownership matches, so a key that drifted a few metres still finds it.
+ *
+ * `extraCandidates` lets the caller add keys the map does not hold yet, such as
+ * the active site and the archive keys, so the nearest identity wins rather
+ * than the first spelling encountered.
+ */
+export function dispositionForProperty(
+  map: NativeGeometryMap | null | undefined,
+  siteKey: string | null | undefined,
+  extraCandidates: readonly string[] = [],
+): NativeGeometryDisposition {
+  if (!map || !siteKey) return 'undecided';
+  const matched = nearestSamePropertyKey([...Object.keys(map), ...extraCandidates], siteKey);
+  return dispositionFor(map, matched ?? siteKey);
+}
+
+/**
+ * Record a decision against the PROPERTY, reusing the identity it is already
+ * filed under when there is one.
+ *
+ * 🚨 OTHERWISE ONE HOUSE ACCUMULATES SEVERAL DECISIONS. Writing under whichever
+ * key the camera happened to mint would leave `rejected` under one spelling and
+ * `custom` under another, and which one the app read would depend on where the
+ * mouse was last. The newest judgement must replace the old one, not sit beside
+ * it.
+ */
+export function withDispositionForProperty(
+  map: NativeGeometryMap | null | undefined,
+  siteKey: string | null | undefined,
+  next: NativeGeometryDisposition,
+): NativeGeometryMap {
+  if (!siteKey) return { ...(map ?? {}) };
+  const matched = nearestSamePropertyKey(Object.keys(map ?? {}), siteKey);
+  return withDisposition(map, matched ?? siteKey, next);
 }
 
 export interface ResolvedSite {

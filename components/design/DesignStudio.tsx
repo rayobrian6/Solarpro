@@ -68,7 +68,7 @@ import { layoutSignature } from '@/lib/roofPlanesSignature';
 import { siteKeyFromCoords, isSameSite, coordKeyOf, isPlaceholderCoords, PLACEHOLDER_LAT, PLACEHOLDER_LNG } from '@/lib/siteIdentity';
 import { archivesSignature, sitesAreSameProperty } from '@/lib/design/siteDesignModel';
 import { planAerialAdoption } from '@/lib/design/aerialAdoption';
-import { nativeAcquisitionPermitted } from '@/lib/design/nativeGeometryDisposition';
+import { nativeAcquisitionPermitted, dispositionLabel, customModelGoverns } from '@/lib/design/nativeGeometryDisposition';
 import { useSiteDesign } from './useSiteDesign';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
@@ -4861,6 +4861,11 @@ export default function DesignStudio({ project, onSave }: Props) {
               roofRestoreResolved={roofRestoreResolved}
 
               nativeDisposition={site.nativeDisposition}
+              /* 🚨 AND THE LIVE REF. The Lane A gate fires from inside a
+                 resolved promise, seconds after the render that supplied the
+                 prop — so a decision the installer makes DURING the twin fetch
+                 has to reach it through a ref or it is invisible. */
+              nativeDispositionRef={site.nativeDispositionRef}
               // 🚨 THIS PROP WAS DECLARED AND NEVER PASSED. Every `[PLANE3D-*]`
               // selection-styling site in the engine compared against
               // `selectedRoofPlaneId`, which no parent has ever supplied, so all
@@ -6280,6 +6285,71 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                       ) : null}
 
+                      {/* ── WHICH GEOMETRY GOVERNS THIS PROPERTY, AND WHY ─────────
+                          🚨 THE DECISION WAS NEVER DISPLAYED ANYWHERE.
+
+                          `dispositionLabel` and `customModelGoverns` had zero
+                          callers outside their own test, so the module's claim
+                          that it is "written here so every surface says the
+                          same thing" described no surface. The consequences an
+                          audit traced:
+
+                            - 'accepted' and 'unavailable' had no writer at all,
+                              so a design built entirely on Google planes read
+                              'undecided' — indistinguishable from a property
+                              nobody had opened.
+                            - 'rejected' was writable ONLY from the unconfirmed
+                              banner, which unmounts the moment you confirm. An
+                              installer who confirmed and then spotted a bad
+                              face had no control left that could say so.
+                            - 'custom' was set by a single traced section and no
+                              control in the app could clear it. The first
+                              evidence of the decision was a toast, hours later,
+                              refusing a button and telling the user to "clear
+                              that decision first" — which nothing could do.
+
+                          This row does not unmount, it names the governing
+                          answer, and it is the escape from all three. ── */}
+                      {roofPlanes.length > 0 || site.nativeDisposition !== 'undecided' ? (
+                        <div
+                          data-testid="geometry-source-row"
+                          className="flex items-center gap-2 text-[10px] rounded px-2 py-1.5 border bg-slate-900/60 border-slate-700/40"
+                        >
+                          <span className={customModelGoverns(site.nativeDisposition) ? 'text-violet-300' : 'text-slate-400'}>
+                            {customModelGoverns(site.nativeDisposition) ? '✎' : '🛰️'}
+                          </span>
+                          <span className="flex-1 truncate text-slate-300" title={dispositionLabel(site.nativeDisposition)}>
+                            {dispositionLabel(site.nativeDisposition)}
+                          </span>
+                          {nativeAcquisitionPermitted(site.nativeDisposition) ? (
+                            <button
+                              data-testid="geometry-source-reject"
+                              onClick={() => {
+                                site.setNativeDisposition('rejected', activeSiteKeyRef.current
+                                  || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
+                                toast.success('Google 3D marked as not governing', 'Auto-detect will not replace your model on this property.');
+                              }}
+                              className="px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors flex-shrink-0"
+                            >Google 3D is wrong here</button>
+                          ) : (
+                            <button
+                              data-testid="geometry-source-reopen"
+                              onClick={() => {
+                                // 🚨 BACK TO 'undecided', NOT TO 'accepted'. Re-opening the
+                                // question is not the same as answering it, and inferring an
+                                // acceptance nobody made is the class of defect this whole
+                                // module exists to prevent. Acquisition is permitted again;
+                                // whether Google's roof is any good is still unjudged.
+                                site.setNativeDisposition('undecided', activeSiteKeyRef.current
+                                  || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
+                                toast.success('Geometry source re-opened', 'Auto-detect may run again on this property.');
+                              }}
+                              className="px-1.5 py-0.5 rounded border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 transition-colors flex-shrink-0"
+                            >Allow auto-detect</button>
+                          )}
+                        </div>
+                      ) : null}
+
                       {/* Unconfirmed banner */}
                       {roofPlanes.some(p => p.confirmed === false) ? (
                         <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs">
@@ -6290,6 +6360,23 @@ export default function DesignStudio({ project, onSave }: Props) {
                           <button
                             onClick={() => {
                               setRoofPlanes(prev => prev.map(p => ({ ...p, confirmed: true })));
+                              // 🚨 ACCEPTANCE IS A DECISION AND IS RECORDED AS ONE.
+                              //
+                              // `setNativeDisposition('accepted', …)` had NO caller anywhere
+                              // in the app, so a project whose entire design is built on
+                              // Google planes persisted `nativeGeometry: {}` and read
+                              // 'undecided' — byte-identical to a property nobody had ever
+                              // opened. Neither a reviewer nor the permit path could answer
+                              // "which geometry source is governing this project, and why".
+                              //
+                              // And this same click unmounts the banner, which used to take
+                              // the ONLY writer of 'rejected' with it: an installer who
+                              // confirmed and then noticed a bad face had no control left
+                              // anywhere that could say "Google does not govern this
+                              // property". The decision is now on the Roof Planes panel,
+                              // which does not unmount.
+                              site.setNativeDisposition('accepted', activeSiteKeyRef.current
+                                || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
                               toast.success('✅ Roof planes confirmed', `${roofPlanes.length} planes locked in for permit generation`);
                             }}
                             className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-lg text-xs transition-colors"
