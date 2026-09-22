@@ -1202,6 +1202,164 @@ export function measureFaceVertical(
   return out;
 }
 
+// ── A WALL ──────────────────────────────────────────────────────────────────
+//
+// 🚨 THE THIRD SELECTABLE OBJECT, AND UNTIL NOW A HOLE IN THE SCENE.
+//
+// Walls are drawn as `[BUILD3D-WALL] <faceId>#<edgeIndex>` and that string was
+// matched by nothing: a click on a wall fell through to a geometric ray test
+// which answered with whatever roof lay BEHIND it, so at street level clicking
+// the front of the house selected a slope on the far side of the ridge. The
+// first repair routed a wall click to the face that owns it — honest, but it
+// still could not answer the question a person clicking a wall is asking,
+// which is "how tall is THIS wall".
+//
+// A wall is DERIVED, not stored: it is one edge of one roof face, dropped to
+// the ground. So it has no record of its own and nothing here can edit it
+// directly — changing a wall means changing the section's eave or the pad it
+// stands on, and the inspector says so rather than offering a control that
+// writes nowhere.
+
+/** `${faceId}#${edgeIndex}` — the id the renderer already tags walls with. */
+export function wallId(faceId: string, edgeIndex: number): string {
+  return `${faceId}#${edgeIndex}`;
+}
+
+/** Split a wall id back into its parts, or nulls when it is not one. */
+export function parseWallId(id: string | null | undefined): { faceId: string | null; edgeIndex: number } {
+  if (!id) return { faceId: null, edgeIndex: -1 };
+  const hash = id.lastIndexOf('#');
+  if (hash <= 0) return { faceId: null, edgeIndex: -1 };
+  const tail = id.slice(hash + 1);
+  // 🚨 DIGITS, TESTED AS A STRING. `Number('')` is 0 and `Number.isInteger(0)`
+  // is true, so "face#" — a truncated or half-built tag — parsed as EDGE ZERO
+  // and the panel would have measured a real wall the user never clicked.
+  if (!/^\d+$/.test(tail)) return { faceId: null, edgeIndex: -1 };
+  return { faceId: id.slice(0, hash), edgeIndex: Number(tail) };
+}
+
+export interface WallMeasurement {
+  /** 🚨 Uniform shape — see SectionLookup. */
+  found: boolean;
+  wallId: string;
+  faceId: string | null;
+  sectionId: string | null;
+  /** Plan length of the wall, metres. Not the sloping length of its top edge. */
+  lengthM: number | null;
+  /** Absolute elevation of the ground this wall stands on. Null when unknown. */
+  baseElevM: number | null;
+  /** Absolute elevations of the two top corners, render lift removed. */
+  topLowElevM: number | null;
+  topHighElevM: number | null;
+  /** Height at each end = top − base. Null when the ground is unknown, which is
+   *  the honest answer rather than a number measured from nothing. */
+  heightLowM: number | null;
+  heightHighM: number | null;
+  /** Compass bearing the wall FACES (outward), degrees. */
+  facingDeg: number | null;
+  /** True when this is a gable/rake wall: its two ends differ by more than a
+   *  few centimetres, so "the wall height" is a range and is shown as one. */
+  raked: boolean;
+  refusals: SectionRefusal[];
+}
+
+const noWall = (id: string, refusals: SectionRefusal[]): WallMeasurement => ({
+  found: false, wallId: id, faceId: null, sectionId: null,
+  lengthM: null, baseElevM: null, topLowElevM: null, topHighElevM: null,
+  heightLowM: null, heightHighM: null, facingDeg: null, raked: false, refusals,
+});
+
+/**
+ * Measure one wall from the canonical geometry of the face it hangs from.
+ *
+ * 🚨 THE RENDER LIFT IS REMOVED FROM THE HEIGHTS AND IGNORED FOR THE LENGTH.
+ * `polygon3D` is lifted SURFACE_OFFSET_M along the face normal. Vertically that
+ * is lift·cos(tilt), which is what `measureFaceVertical` subtracts and what is
+ * subtracted here. Horizontally it shifts BOTH endpoints of an edge by the same
+ * vector, so the plan length is unaffected and must not be "corrected" twice.
+ */
+export function measureWall(
+  planes: ReadonlyArray<RoofPlane> | null | undefined,
+  id: string,
+  groundElevM?: number | null,
+): WallMeasurement {
+  const { faceId, edgeIndex } = parseWallId(id);
+  if (!faceId) {
+    return noWall(id ?? '', [{ code: 'SECTION_NOT_FOUND', message: 'That is not a wall.' }]);
+  }
+  const plane = planeById(planes, faceId);
+  if (!plane) {
+    return noWall(id, [{ code: 'SECTION_NOT_FOUND', message: 'The roof face this wall hangs from is not in this design.' }]);
+  }
+  const poly = (plane.polygon3D ?? []) as Cart3[];
+  if (poly.length < 3 || edgeIndex >= poly.length) {
+    return noWall(id, [{ code: 'FOOTPRINT_TOO_FEW_POINTS', message: 'That face has no such edge.' }]);
+  }
+
+  const out = noWall(id, []);
+  out.found = true;
+  out.faceId = faceId;
+  out.sectionId = plane.sectionId || sectionIdOfFaceId(plane.id);
+
+  const a = ecefToLatLng(poly[edgeIndex]);
+  const b = ecefToLatLng(poly[(edgeIndex + 1) % poly.length]);
+  if (!isFinite(a.lat) || !isFinite(b.lat)) {
+    return noWall(id, [{ code: 'FOOTPRINT_DEGENERATE', message: 'That wall has no usable corners.' }]);
+  }
+
+  const latRef = (a.lat + b.lat) / 2;
+  const perLat = mPerDegLat(latRef);
+  const perLng = mPerDegLng(latRef);
+  const dE = (b.lng - a.lng) * perLng;
+  const dN = (b.lat - a.lat) * perLat;
+  out.lengthM = Math.hypot(dE, dN);
+
+  const tilt = isFinite(plane.pitch) ? plane.pitch : 0;
+  const liftUp = SURFACE_OFFSET_M * Math.cos(tilt * DEG);
+  const hA = a.height - liftUp;
+  const hB = b.height - liftUp;
+  out.topLowElevM = Math.min(hA, hB);
+  out.topHighElevM = Math.max(hA, hB);
+  out.raked = Math.abs(hA - hB) > 0.03;
+
+  // 🚨 THE PAD, NOT A GUESS. A section face knows the ground it stands on; a
+  // standalone face does not, and the caller's viewer elevation is the only
+  // other candidate. With neither, the height has NO answer and is reported as
+  // none — which is the instruction: show unresolved rather than a misleading
+  // number.
+  const fromSection = plane.section && isFinite(plane.section.groundElevM)
+    ? plane.section.groundElevM : null;
+  const ground = fromSection != null
+    ? fromSection
+    : (typeof groundElevM === 'number' && isFinite(groundElevM) ? groundElevM : null);
+  if (ground != null) {
+    out.baseElevM = ground;
+    out.heightLowM = out.topLowElevM - ground;
+    out.heightHighM = out.topHighElevM - ground;
+  }
+
+  // Which way it faces: perpendicular to the run, pointing AWAY from the face's
+  // centroid, because the wall is on the outside of the building.
+  if (out.lengthM > 1e-6) {
+    const ue = dE / out.lengthM, un = dN / out.lengthM;
+    let cE = 0, cN = 0;
+    for (const p of poly) {
+      const q = ecefToLatLng(p);
+      cE += (q.lng - a.lng) * perLng;
+      cN += (q.lat - a.lat) * perLat;
+    }
+    cE /= poly.length; cN /= poly.length;
+    // Midpoint of the edge, in the same local frame.
+    const mE = dE / 2, mN = dN / 2;
+    // Left-hand perpendicular, then flipped if it points at the centroid.
+    let pE = -un, pN = ue;
+    if ((cE - mE) * pE + (cN - mN) * pN > 0) { pE = -pE; pN = -pN; }
+    out.facingDeg = ((Math.atan2(pE, pN) / DEG) % 360 + 360) % 360;
+  }
+
+  return out;
+}
+
 // ── Panels follow the roof they stand on ────────────────────────────────────
 
 /**

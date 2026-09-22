@@ -42,6 +42,7 @@ import React, { useEffect, useState } from 'react';
 import type {
   SectionMeasurement,
   FaceMeasurement,
+  WallMeasurement,
   SectionEdit,
   FacePitchPreview,
   PitchAnchor,
@@ -49,7 +50,7 @@ import type {
 import { FT_PER_M } from '@/lib/3d/sectionEditing';
 import { formatRise12, parsePitchInput, riseOver12 } from '@/lib/3d/pitchFormat';
 
-export type InspectorLevel = 'none' | 'section' | 'face';
+export type InspectorLevel = 'none' | 'section' | 'face' | 'wall';
 
 /**
  * 🚨 A UNIFORM SHAPE, NOT A DISCRIMINATED UNION — `strict: false` and no
@@ -61,6 +62,16 @@ export interface InspectorState {
   section: SectionMeasurement | null;
   /** Present at level 'face'. */
   face: FaceMeasurement | null;
+  /**
+   * Present at level 'wall'.
+   *
+   * 🚨 A WALL IS DERIVED, SO THIS LEVEL MEASURES AND DOES NOT EDIT. A wall is
+   * one edge of one roof face dropped to the ground; it has no record of its
+   * own, and the way to change it is the section's eave or its pad. Offering a
+   * control here that writes nowhere is the silent no-op this panel exists to
+   * remove — so the panel says which control does the job and sends you there.
+   */
+  wall: WallMeasurement | null;
   /** The label of the section a selected FACE belongs to, when it has one. */
   faceSectionLabel: string | null;
   /** For the empty state: how much building there is to select. */
@@ -86,8 +97,8 @@ export interface SectionInspectorProps {
   state: InspectorState;
   /** Emit an intent. The authority decides whether it is legal. */
   onEdit: (edit: SectionEdit, label: string, coalesceKey: string) => void;
-  /** Move between Section and Roof Face for the current selection. */
-  onSelectLevel: (level: 'section' | 'face') => void;
+  /** Move between Section, Roof Face and Wall for the current selection. */
+  onSelectLevel: (level: 'section' | 'face' | 'wall') => void;
   /**
    * Move ONE standalone face up or down by this many metres.
    *
@@ -427,6 +438,7 @@ export function SectionInspector({
 }: SectionInspectorProps) {
   const s = state.section;
   const f = state.face;
+  const w = state.wall;
 
   // ── WHAT WOULD HAPPEN, LIVE, WHILE THE NUMBER IS BEING TYPED ─────────────
   //
@@ -468,7 +480,9 @@ export function SectionInspector({
       data-no-drag
       data-testid={`inspector-level-${level}`}
       disabled={!enabled}
-      onClick={() => { if (level === 'section' || level === 'face') onSelectLevel(level); }}
+      onClick={() => {
+        if (level === 'section' || level === 'face' || level === 'wall') onSelectLevel(level);
+      }}
       style={{
         flex: 1, padding: '3px 0', borderRadius: 5, fontSize: 9.5, fontWeight: 800,
         letterSpacing: 0.4, textTransform: 'uppercase',
@@ -487,8 +501,12 @@ export function SectionInspector({
              Wall, and the controls must change to that object's scope. ── */}
       <div style={SECTION_TITLE}>Selected</div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-        {levelChip('section', 'Section', state.level === 'section', !!s || !!f)}
-        {levelChip('face', 'Roof face', state.level === 'face', !!f || !!s)}
+        {levelChip('section', 'Section', state.level === 'section', !!s || !!f || !!w)}
+        {levelChip('face', 'Roof face', state.level === 'face', !!f || !!s || !!w)}
+        {/* 🚨 THE WALL CHIP IS ONLY LIT WHEN A WALL IS SELECTED. There is no
+               "the wall of this face" — a face has several — so this level is
+               reached by clicking one, not by switching to it. */}
+        {levelChip('wall', 'Wall', state.level === 'wall', !!w)}
       </div>
 
       {/* ── NOTHING SELECTED ────────────────────────────────────────────── */}
@@ -827,6 +845,90 @@ export function SectionInspector({
               </div>
             </>
           )}
+        </div>
+      ) : null}
+
+      {/* ── A WALL: measured, and honest about having no controls ───────── */}
+      {state.level === 'wall' && w ? (
+        <div data-testid="inspector-wall">
+          <div style={{ fontWeight: 800, color: '#fff', fontSize: 12.5, marginBottom: 1 }}>
+            Wall
+          </div>
+          <div style={{ color: '#7c8aa5', fontSize: 10, marginBottom: 8 }}>
+            {state.faceSectionLabel
+              ? <>under <span style={{ color: '#cfe3ff' }}>{state.faceSectionLabel}</span></>
+              : 'under a roof face that belongs to no section'}
+          </div>
+
+          {/* 🚨 EVERY ROW IS MEASURED FROM THE FACE'S OWN GEOMETRY, with the
+                 render lift removed vertically and ignored horizontally — it
+                 shifts both ends of an edge by the same vector, so the plan
+                 length must not be "corrected" twice. */}
+          <Derived label="Length" value={fmtFt(w.lengthM)} note="measured" />
+          {w.raked ? (
+            <>
+              {/* A gable end is a triangle: "the wall height" is a range, and
+                  printing one number for it would be a lie at both ends. */}
+              <Derived label="Height (low)" value={fmtFt(w.heightLowM)}
+                       note={w.baseElevM == null ? 'unresolved' : 'measured'} />
+              <Derived label="Height (high)" value={fmtFt(w.heightHighM)}
+                       note={w.baseElevM == null ? 'unresolved' : 'measured'} />
+            </>
+          ) : (
+            <Derived label="Height" value={fmtFt(w.heightHighM)}
+                     note={w.baseElevM == null ? 'unresolved' : 'measured'} />
+          )}
+          <Derived label="Top above sea" value={fmtFt(w.topHighElevM)} note="measured" />
+          <Derived label="Base above sea" value={fmtFt(w.baseElevM)}
+                   note={w.baseElevM == null ? 'unresolved' : 'measured'} />
+          <Derived
+            label="Faces"
+            value={w.facingDeg == null ? '—' : `${Math.round(w.facingDeg)}° ${compass(w.facingDeg)}`}
+            note="measured"
+          />
+
+          {w.baseElevM == null ? (
+            <div data-testid="inspector-wall-unresolved" style={{
+              marginTop: 7, padding: '5px 7px', borderRadius: 5,
+              background: 'rgba(255,190,80,0.10)', border: '1px solid rgba(255,190,80,0.3)',
+              color: '#ffcf7a', fontSize: 9.5, lineHeight: 1.45,
+            }}>
+              No ground elevation is known here, so this wall&apos;s height has no answer.
+              The elevations above are still real.
+            </div>
+          ) : null}
+
+          {/* 🚨 NO CONTROLS, AND A REASON. A wall is one edge of a roof face
+                 dropped to the ground — it is derived, it has no record, and
+                 nothing written here could reach it. The things that DO move it
+                 are named, and the button goes to them. */}
+          <div style={{ marginTop: 7, fontSize: 9.5, color: '#7c8aa5', lineHeight: 1.45 }}>
+            A wall is derived from the roof face above it and the pad below it.
+            Change its height with the section&apos;s <b>Wall / eave</b>, or its base
+            with <b>Pad elevation</b>.
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+            {w.sectionId ? (
+              <button
+                type="button" data-no-drag data-testid="inspector-wall-to-section"
+                onClick={() => onSelectLevel('section')}
+                style={{
+                  flex: 1, padding: '5px 0', borderRadius: 6,
+                  background: 'rgba(0,229,255,0.14)', border: '1px solid rgba(0,229,255,0.45)',
+                  color: '#00e5ff', fontSize: 10.5, fontWeight: 800, cursor: 'pointer',
+                }}
+              >Edit the section</button>
+            ) : null}
+            <button
+              type="button" data-no-drag data-testid="inspector-wall-to-face"
+              onClick={() => onSelectLevel('face')}
+              style={{
+                flex: 1, padding: '5px 0', borderRadius: 6,
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.16)',
+                color: '#cfd8e6', fontSize: 10.5, fontWeight: 800, cursor: 'pointer',
+              }}
+            >The roof above it</button>
+          </div>
         </div>
       ) : null}
 

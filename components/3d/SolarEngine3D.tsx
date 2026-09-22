@@ -64,6 +64,7 @@ import {
   repositionPanelsForPlanes,
   applyFacePitchEdit,
   previewFacePitch,
+  measureWall,
   type SectionEdit,
   type SectionEditOutcome,
   type PitchAnchor,
@@ -1159,7 +1160,18 @@ function SolarEngine3D({
    * deliberate drill-in that offers measurements and no height controls. A
    * standalone traced face has no section and stays at 'face'.
    */
-  const [selectionLevel, setSelectionLevel] = useState<'section' | 'face'>('section');
+  const [selectionLevel, setSelectionLevel] = useState<'section' | 'face' | 'wall'>('section');
+  /**
+   * THE WALL THE LAST BUILDING PICK LANDED ON — `faceId#edgeIndex`, or null.
+   *
+   * 🚨 A REF, WRITTEN BY THE PICK, READ BY THE CLICK HANDLER THAT CALLED IT.
+   * The pick already knows; threading it back through the return type would
+   * change a signature four call sites rely on, and a second pick to ask "was
+   * that a wall?" could answer about a different frame.
+   */
+  const hitWallIdRef = useRef<string | null>(null);
+  /** The wall currently selected, when the selection level is 'wall'. */
+  const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
   /** The last refusal from the section authority, phrased for a person. */
   const [sectionRefusal, setSectionRefusal] = useState<string | null>(null);
   /**
@@ -8736,6 +8748,10 @@ function SolarEngine3D({
     // the behaviour that made a gable come apart at the ridge. A stale refusal
     // about the previous selection goes with it.
     setSelectionLevel('section');
+    // 🚨 AND THE WALL GOES WITH IT. A wall belongs to one face; keeping the
+    // previous one selected while the face changes would leave the panel
+    // measuring a wall on a different building.
+    setSelectedWallId(null);
     setSectionRefusal(null);
     // Report the deselection too. A parent told only about selections keeps the
     // last id for ever, and its sidebar highlight outlives the 3D one.
@@ -8971,6 +8987,9 @@ function SolarEngine3D({
   }
 
   function pickBuildingFaceAtScreen(viewer: any, C: any, screenPos: any): string | null {
+    // Every call answers for THIS click. A stale tag would put the inspector on
+    // a wall the user is no longer pointing at.
+    hitWallIdRef.current = null;
     try {
       const hits = viewer.scene.drillPick(screenPos, 8) ?? [];
       for (const h of hits) {
@@ -8997,7 +9016,15 @@ function SolarEngine3D({
         if (name.startsWith('[BUILD3D-WALL] ')) {
           const tag = name.slice('[BUILD3D-WALL] '.length);
           const faceId = tag.split('#')[0];
-          if (faceId) return faceId;
+          // 🚨 AND THE WALL ITSELF IS REMEMBERED, not only the face it hangs
+          // from. The first repair resolved a wall to its owning face, which
+          // stopped the click falling through to a roof BEHIND the wall — but
+          // it still could not answer the question a person clicking a wall is
+          // asking, which is "how tall is THIS wall". `hitWallIdRef` carries
+          // the `faceId#edgeIndex` tag out of the pick so the caller can select
+          // the wall level; it is cleared on every pick that is not a wall, so
+          // it can never describe a previous click.
+          if (faceId) { hitWallIdRef.current = tag; return faceId; }
         }
       }
     } catch { /* pick can throw mid-frame; treat as no hit */ }
@@ -9073,8 +9100,27 @@ function SolarEngine3D({
           // Through the same setter as the [PLANE3D-*] path, so the ref, the
           // state and the outbound notification cannot drift between the two
           // entity families that can both produce a face selection.
+          // 🚨 A WALL CLICK SELECTS THE WALL. `pickBuildingFaceAtScreen` writes
+          // the `faceId#edgeIndex` tag into `hitWallIdRef` when the hit was a
+          // wall, and this is the only place that reads it — captured BEFORE
+          // `selectRoofFace`, which resets the level to 'section'.
+          //
+          // Clicking a wall used to select the roof face that owns it, which
+          // was better than selecting a roof BEHIND the wall (what it did
+          // before that) but still could not answer "how tall is this wall".
+          const wallHit = hitWallIdRef.current;
           selectRoofFace(toggledOff ? null : faceId);
-          setStatusMsg(toggledOff ? '⬡ Deselected' : selectionMessageFor(faceId));
+          if (!toggledOff && wallHit) {
+            setSelectedWallId(wallHit);
+            setSelectionLevel('wall');
+          } else {
+            setSelectedWallId(null);
+          }
+          setStatusMsg(
+            toggledOff ? '⬡ Deselected'
+              : (wallHit ? '🧱 Wall selected — its height comes from the section above and the pad below'
+                         : selectionMessageFor(faceId)),
+          );
           try { viewer.scene.requestRender(); } catch {}
           return;
         }
@@ -13123,7 +13169,7 @@ function SolarEngine3D({
     const standalone = planes.filter(p => !(p.sectionId || sectionIdOfFaceId(p.id))).length;
 
     const base: InspectorState = {
-      level: 'none', section: null, face: null, faceSectionLabel: null,
+      level: 'none', section: null, face: null, wall: null, faceSectionLabel: null,
       sectionCount: all.length, standaloneFaceCount: standalone,
       refusal: sectionRefusal,
       reshapedFaceCount: 0,
@@ -13137,7 +13183,16 @@ function SolarEngine3D({
 
     // A face with no section can only ever be inspected as a face — there is no
     // volume to edit, and no pad, so no wall height. Reported as unresolved.
-    if (!sid) return { ...base, level: 'face', face };
+    // Its WALLS are still real edges and can still be measured; what has no
+    // answer is their height, which the panel says rather than invents.
+    if (!sid) {
+      if (selectionLevel === 'wall' && selectedWallId) {
+        const w = measureWall(planes, selectedWallId,
+          cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : null);
+        if (w.found) return { ...base, level: 'wall', wall: w, face };
+      }
+      return { ...base, level: 'face', face };
+    }
 
     const look = sectionFromPlanes(planes, sid);
     if (!look.found) {
@@ -13150,6 +13205,15 @@ function SolarEngine3D({
       };
     }
     const label = look.section!.label || 'Section';
+    // A wall measured from the face it hangs from and the pad it stands on.
+    // Null whenever no wall is selected, so the level cannot render stale.
+    const wall = selectionLevel === 'wall' && selectedWallId
+      ? measureWall(planes, selectedWallId,
+          cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : null)
+      : null;
+    if (selectionLevel === 'wall' && wall && wall.found) {
+      return { ...base, level: 'wall', wall, face, faceSectionLabel: label };
+    }
     // 🚨 HOW MANY OF THIS SECTION'S FACES HAVE BEEN RESHAPED BY HAND. Non-zero
     // means every parametric control below would rebuild from the trace and
     // discard the stitch, so they are shown inert with the choice stated.

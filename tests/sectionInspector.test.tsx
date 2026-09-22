@@ -34,7 +34,7 @@ const FT_PER_M = 3.280839895013123;
 
 function baseState(): InspectorState {
   return {
-    level: 'none', section: null, face: null, faceSectionLabel: null,
+    level: 'none', section: null, face: null, wall: null, faceSectionLabel: null,
     sectionCount: 0, standaloneFaceCount: 0, refusal: null,
     pitchAnchor: 'eave', reshapedFaceCount: 0,
   };
