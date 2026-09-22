@@ -16,6 +16,7 @@ import { resolveEquipment } from '@/lib/systemEquipmentResolver';
 import { applyPanelToEngineeringConfig } from '@/lib/system/selectedEquipment';
 import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
+import CombinerSelector from '@/components/engineering/CombinerSelector';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
   Zap, Download, Printer, Plus, Trash2, Settings,
@@ -1068,6 +1069,10 @@ function EngineeringPageInner() {
   const [projectAutoLoaded, setProjectAutoLoaded] = useState(false);
   const [autoLoadBanner, setAutoLoadBanner] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  // 🚨 THE PROJECT'S RECORDED COMBINER SELECTION — the installer's answer, read
+  // from projects.selected_equipment. It is sent with every drawing/BOM payload
+  // so downstream CONSUMES it instead of re-deriving a device from compatibility.
+  const [projectCombinerId, setProjectCombinerId] = useState<string | null>(null);
   const [currentClientId,  setCurrentClientId]  = useState<string | null>(null);
 
   // Project selector — shown when no projectId in URL
@@ -6437,6 +6442,9 @@ function EngineeringPageInner() {
           // decide which combiner the installer is fitting. Compatibility is
           // not selection, and the selection authority is a separate build.
           inverterId:     firstInv?.inverterId || undefined,
+          // The installer's recorded choice. Highest authority the resolver has;
+          // compatibility below only ever answers when this is absent.
+          selectedCombinerId: projectCombinerId || undefined,
           // Operator combiner override -> resolveIntegratedEquipment's
           // overrideDeviceIds path. Empty string means auto-resolve.
           combinerId:     config.combinerId || undefined,
@@ -11249,7 +11257,18 @@ function EngineeringPageInner() {
                       <h3 className="text-sm font-extrabold text-slate-100 mb-3 flex items-center gap-2 tracking-tight">
                         <Settings size={14} className="text-amber-400" /> System Configuration
                       </h3>
+                      {/* 🚨 THE INSTALLER'S EQUIPMENT DECISION, ON THE PROJECT.
+                          Writes projects.selected_equipment.combinerSelection —
+                          the canonical store every downstream consumer reads —
+                          NOT engineering_config, which is this page's private
+                          workspace and is why a corrected drawing could still
+                          ship a BOM naming a different device. */}
                       <div className="grid grid-cols-2 gap-2.5">
+                        <CombinerSelector
+                          projectId={currentProjectId}
+                          visible={!!computedSystem?.isMicro}
+                          onSelectionChanged={(id) => { setProjectCombinerId(id); setSldSvg(''); }}
+                        />
                         <div>
                           <label className="eng-label">System Type</label>
                           {subSystemCounts.isHybrid ? (
@@ -13355,6 +13374,10 @@ function EngineeringPageInner() {
                                 interconnectionType: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,
+                                // The installer's recorded choice travels with
+                                // the EXPORT too. The exported sheet is the one
+                                // that reaches the permit package.
+                                selectedCombinerId: projectCombinerId || undefined,
                                 // Same five-branch resolution `fetchSLDSvg` already
                                 // uses. The old two-branch micro/string test drew
                                 // every SolarEdge and Tigo job as a plain string
@@ -15349,6 +15372,10 @@ function EngineeringPageInner() {
                                 interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,
+                                // The installer's recorded choice travels with
+                                // the EXPORT too. The exported sheet is the one
+                                // that reaches the permit package.
+                                selectedCombinerId: projectCombinerId || undefined,
                                 batteryBrand: config.batteryBrand, batteryModel: config.batteryModel,
                                 batteryCount: config.batteryCount, batteryKwh: config.batteryKwh,
                                 batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),

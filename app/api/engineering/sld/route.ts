@@ -528,6 +528,12 @@ export async function POST(req: NextRequest) {
       compatibleCombinerIds: combinerCompatibilityFor(
         inverterManufacturer, inverterModel,
         body.inverterId ? String(body.inverterId) : undefined),
+      // 🚨 AND THE PROJECT'S RECORDED SELECTION OUTRANKS ALL OF THAT.
+      // Compatibility answers "what CAN be used". This answers "what the
+      // installer IS installing", and once it is present the resolver may not
+      // substitute anything else. It is the reason the drawing stopped being
+      // able to name a device nobody chose.
+      selectedCombinerId: body.selectedCombinerId ? String(body.selectedCombinerId) : null,
     });
     const _bosBrains = _bosPlan.brains ?? _bosPlan.devices[0];
     const _bosLabel  = _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined;

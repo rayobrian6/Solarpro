@@ -1,0 +1,292 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// PROJECT-SELECTED COMBINER: THE TRANSITIONS.
+//
+// PURE. No DB, no network, no clock — every transition takes the catalogue
+// lookup, the current store and an instant, and returns the next store or a list
+// of named refusals. The API route performs no validation of its own and no
+// renderer performs any: a rule that lives in a route is a rule the next route
+// forgets.
+//
+// THE BOUNDARY THIS KEEPS. This module does not choose a combiner. What it does
+// is REFUSE TO RECORD A CLAIM IT CANNOT JUSTIFY — a device the catalogue has
+// never heard of, or one the selected inverter's own declaration excludes with
+// nothing stated to admit it. That is not selecting; it is declining to write
+// down an unsupported decision.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import type {
+  CombinerBasis,
+  CombinerCompatibilityAuthority,
+  CombinerCompatibilityOverride,
+  CombinerSelectionOutcome,
+  CombinerSelectionRecord,
+  CombinerSelectionRefusal,
+  CombinerSelectionStore,
+} from './types';
+
+export type {
+  CombinerBasis,
+  CombinerCompatibilityAuthority,
+  CombinerCompatibilityOverride,
+  CombinerSelectionOutcome,
+  CombinerSelectionRecord,
+  CombinerSelectionRefusal,
+  CombinerSelectionStore,
+} from './types';
+
+/** The key the selection occupies inside `projects.selected_equipment`. */
+export const COMBINER_SELECTION_KEY = 'combinerSelection';
+
+/** What the caller must be able to tell us about a candidate device. */
+export interface CombinerDeviceFacts {
+  id: string;
+  manufacturer: string;
+  model: string;
+  /** The permitting model number, when the catalogue carries one. Never invented. */
+  modelNumber?: string | null;
+}
+
+/**
+ * Read the selection out of a `selected_equipment` record.
+ *
+ * Returns `null` — never an empty store — when the key is absent, so "no
+ * combiner selection has ever been made here" stays distinguishable from "one
+ * was made and then cleared". Nothing is inferred from a bare id string
+ * elsewhere in the record: a selection without an actor and a basis is not one
+ * this module will vouch for, and `engineering_config.combinerId` is session
+ * workspace, not an authority.
+ */
+export function readCombinerSelection(
+  selectedEquipment: Record<string, unknown> | null | undefined,
+): CombinerSelectionStore | null {
+  const raw = selectedEquipment?.[COMBINER_SELECTION_KEY];
+  if (!raw || typeof raw !== 'object') return null;
+  const s = raw as Partial<CombinerSelectionStore>;
+  return {
+    active: (s.active as CombinerSelectionRecord | null) ?? null,
+    superseded: Array.isArray(s.superseded) ? (s.superseded as CombinerSelectionRecord[]) : [],
+  };
+}
+
+/**
+ * The device id the project has actually selected, or null.
+ *
+ * This is the one function every downstream consumer should call. It returns
+ * null rather than a default on purpose: the caller must decide what to do with
+ * "nobody has chosen yet", and that decision must be visible in its output.
+ */
+export function selectedCombinerDeviceId(
+  store: CombinerSelectionStore | null | undefined,
+): string | null {
+  return store?.active?.combinerDeviceId ?? null;
+}
+
+/** The merge-patch to hand `upsertSelectedEquipment`. `selected_equipment` is
+ *  JSONB with an existing `||` merge writer, so this is the whole persistence
+ *  story and no migration is involved. */
+export function combinerSelectionPatch(store: CombinerSelectionStore): Record<string, unknown> {
+  return { [COMBINER_SELECTION_KEY]: store };
+}
+
+function refuse(...refusals: CombinerSelectionRefusal[]): CombinerSelectionOutcome {
+  return { ok: false, next: null, refusals };
+}
+
+/**
+ * Judge a candidate against the inverter's declared pairing.
+ *
+ * 🚨 `declaredCompatibleIds` NULL OR EMPTY IS NOT INCOMPATIBILITY. The catalogue's
+ * pairings are known to be incomplete — Enphase documents identical IQ6/IQ7/IQ8
+ * support on both the 5/5C and the 6C — so an absent declaration means "the
+ * catalogue does not say", which is a fact about SolarPro, not about the roof.
+ * An empty array is treated the same, because an empty list is far more likely
+ * to be missing data than a manufacturer statement that nothing is compatible.
+ */
+export function judgeCombinerCompatibility(args: {
+  deviceId: string;
+  inverterId: string | null;
+  declaredCompatibleIds: string[] | null | undefined;
+}): CombinerCompatibilityAuthority {
+  const declared = Array.isArray(args.declaredCompatibleIds) && args.declaredCompatibleIds.length > 0
+    ? args.declaredCompatibleIds
+    : null;
+  if (!declared) {
+    return {
+      inverterId: args.inverterId ?? null,
+      declaredCompatibleIds: null,
+      declaredCompatible: false,
+      source: args.inverterId
+        ? `equipment-db declares no combiner pairing for inverter ${args.inverterId}; the catalogue's pairings are known to be incomplete, so this is "not stated", not "not compatible".`
+        : 'No inverter was identified, so no declared pairing could be consulted.',
+    };
+  }
+  const ok = declared.includes(args.deviceId);
+  return {
+    inverterId: args.inverterId ?? null,
+    declaredCompatibleIds: [...declared],
+    declaredCompatible: ok,
+    source: `equipment-db pairing for inverter ${args.inverterId ?? '(unidentified)'}: [${declared.join(', ')}]`,
+  };
+}
+
+/**
+ * Select a combiner for the project.
+ *
+ * `lookupDevice` is the caller's catalogue reader — this module does not import
+ * the BOS catalogue, so it stays pure and cycle-free and can be tested against a
+ * fixture rather than against whatever the catalogue happens to contain today.
+ */
+export function planCombinerSelection(args: {
+  deviceId: string;
+  lookupDevice: (id: string) => CombinerDeviceFacts | null | undefined;
+  inverterId: string | null;
+  declaredCompatibleIds: string[] | null | undefined;
+  actor: { id: string; kind: 'user' | 'service' } | null;
+  atIso: string;
+  basis: string;
+  compatibilityOverride?: CombinerCompatibilityOverride | null;
+  current: CombinerSelectionStore | null;
+}): CombinerSelectionOutcome {
+  const refusals: CombinerSelectionRefusal[] = [];
+
+  const deviceId = (args.deviceId ?? '').trim();
+  if (!deviceId) {
+    refusals.push({ code: 'DEVICE_REQUIRED', message: 'No combiner was chosen.' });
+  }
+  if (!args.actor?.id?.trim()) {
+    refusals.push({ code: 'ACTOR_REQUIRED', message: 'A combiner selection must name the person or service that made it.' });
+  }
+  if (!args.basis?.trim()) {
+    refusals.push({
+      code: 'BASIS_REQUIRED',
+      message: 'A combiner selection must state why. This device is named on the permit package.',
+    });
+  }
+
+  const ov = args.compatibilityOverride ?? null;
+  if (ov && (!ov.reason?.trim() || !ov.authority?.trim())) {
+    refusals.push({
+      code: 'OVERRIDE_INCOMPLETE',
+      message: 'An override must state both a reason and the authority that admits the pairing. An override that cannot name its authority is indistinguishable from a mistake.',
+    });
+  }
+
+  const device = deviceId ? args.lookupDevice(deviceId) : null;
+  if (deviceId && !device) {
+    refusals.push({
+      code: 'UNKNOWN_DEVICE',
+      message: `${deviceId} is not in the BOS catalogue, so nothing is known about what it is or what it provides.`,
+    });
+  }
+
+  const compatibility = judgeCombinerCompatibility({
+    deviceId,
+    inverterId: args.inverterId,
+    declaredCompatibleIds: args.declaredCompatibleIds,
+  });
+
+  // A declaration that EXISTS and excludes this device is a real conflict. It is
+  // surfaced, never silently replaced with something the software prefers.
+  if (compatibility.declaredCompatibleIds && !compatibility.declaredCompatible && !ov) {
+    refusals.push({
+      code: 'NOT_A_CANDIDATE',
+      message:
+        `The selected inverter declares [${compatibility.declaredCompatibleIds.join(', ')}] and does not name ${deviceId}. ` +
+        'Selecting it anyway is permitted with stated engineering authority; it will not be substituted for something else.',
+    });
+  }
+
+  if (refusals.length > 0) return refuse(...refusals);
+
+  const record: CombinerSelectionRecord = {
+    schemaVersion: 1,
+    combinerDeviceId: deviceId,
+    manufacturer: device!.manufacturer,
+    model: device!.model,
+    modelNumber: device!.modelNumber ?? null,
+    inverterId: args.inverterId ?? null,
+    selectedBy: args.actor!.id,
+    selectedByKind: args.actor!.kind,
+    selectedAtIso: args.atIso,
+    basis: args.basis.trim(),
+    compatibility,
+    compatibilityOverride: ov,
+  };
+
+  const cur = args.current ?? { active: null, superseded: [] };
+  // Supersession, never overwrite: the package has to be able to say what was
+  // selected before and why it stopped being the answer.
+  const superseded = cur.active
+    ? [...cur.superseded, {
+        ...cur.active,
+        supersededAtIso: args.atIso,
+        supersededBy: args.actor!.id,
+        supersededReason: `Replaced by ${deviceId}.`,
+      }]
+    : [...cur.superseded];
+
+  return { ok: true, next: { active: record, superseded }, refusals: [] };
+}
+
+/**
+ * Clear the selection — the combiner becomes an open question again.
+ *
+ * It does NOT revert to a recommendation. Downstream consumers see "nothing is
+ * selected" and must report that, which is the whole point: an unanswered
+ * question must look unanswered.
+ */
+export function planCombinerClear(args: {
+  actor: { id: string; kind: 'user' | 'service' } | null;
+  atIso: string;
+  reason: string;
+  current: CombinerSelectionStore | null;
+}): CombinerSelectionOutcome {
+  const refusals: CombinerSelectionRefusal[] = [];
+  if (!args.actor?.id?.trim()) {
+    refusals.push({ code: 'ACTOR_REQUIRED', message: 'Clearing the combiner selection must name who did it.' });
+  }
+  if (!args.current?.active) {
+    refusals.push({ code: 'NO_ACTIVE_SELECTION', message: 'No combiner is selected on this project.' });
+  }
+  if (refusals.length > 0) return refuse(...refusals);
+
+  return {
+    ok: true,
+    next: {
+      active: null,
+      superseded: [...args.current!.superseded, {
+        ...args.current!.active!,
+        supersededAtIso: args.atIso,
+        supersededBy: args.actor!.id,
+        supersededReason: args.reason?.trim() || 'Selection cleared.',
+      }],
+    },
+    refusals: [],
+  };
+}
+
+/**
+ * Which basis a consumer should report, given what it was handed.
+ *
+ * Kept here rather than repeated at each consumer so that "how did we come to
+ * name this device" has one answer. The ordering IS the authority rule: a
+ * project selection outranks a session override outranks a catalogue
+ * recommendation outranks nothing at all.
+ */
+export function combinerBasisFor(args: {
+  projectSelectedId: string | null | undefined;
+  sessionOverrideId: string | null | undefined;
+  declaredCompatibleIds: string[] | null | undefined;
+}): CombinerBasis {
+  if (args.projectSelectedId) return 'project-selected';
+  if (args.sessionOverrideId) return 'session-override';
+  if (Array.isArray(args.declaredCompatibleIds) && args.declaredCompatibleIds.length > 0) {
+    return 'declared-compatibility';
+  }
+  return 'unresolved-default';
+}
+
+/** Is this basis one a permit package may assert without qualification? */
+export function combinerBasisIsDecided(basis: CombinerBasis): boolean {
+  return basis === 'project-selected' || basis === 'session-override';
+}

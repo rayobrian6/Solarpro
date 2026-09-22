@@ -54,6 +54,18 @@ export type { BOMLineItemV4, BOMStageId, BOMSystemType } from './bom-types-v4';
 export interface BOMGenerationInputV4 {
   // Equipment selection
   inverterId: string;
+  /**
+   * 🚨 THE PROJECT'S RECORDED COMBINER SELECTION — what the installer told us
+   * they are installing (projects.selected_equipment.combinerSelection).
+   *
+   * The BOM used to ship a different combiner from the drawings. The
+   * COMPATIBILITY half of that was repaired by passing `compatibleCombinerIds`
+   * at both call sites below; the SELECTION half was not, so a project that had
+   * explicitly chosen a device still got whatever the pairing recommended. The
+   * 5C and 6C differ on `providesAcDisconnect`, which is a code statement, so a
+   * BOM and a drawing disagreeing about them is a package contradicting itself.
+   */
+  selectedCombinerId?: string | null;
   optimizerId?: string;
   rackingId?: string;
   batteryId?: string;
@@ -1344,6 +1356,8 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // 690.13 integral-disconnect statement.
     compatibleCombinerIds: combinerCompatibilityFor(
       inverterEntry?.manufacturer, inverterEntry?.model, (inverterEntry as any)?.id),
+    // And the installer's own answer outranks that pairing.
+    selectedCombinerId: input.selectedCombinerId ?? null,
   });
   const _bosEmitted = new Set<string>();
   // An integrated combiner (e.g. IQ Combiner 6C) HOUSES the gateway — don't also
@@ -2728,6 +2742,11 @@ function generateBOMV4PerSubSystem(
       hasBattery: group.some(s => !!s.eq.batteryId || (s.eq.batteryCount ?? 0) > 0),
       // Same pairing the drawings resolve — see the note on the other call site.
       compatibleCombinerIds: combinerCompatibilityFor(group[0].brand, group[0].model),
+      // 🚨 AND THE SAME SELECTION. On a hybrid job this per-sub emission is the
+      // authoritative one — the permit BOM wrapper only overwrites the combiner
+      // line when the design is NOT per-sub hybrid — so omitting the selection
+      // here meant a hybrid package could still name a device nobody chose.
+      selectedCombinerId: input.selectedCombinerId ?? null,
     });
     if (plan.branchSlotWarning) warnings.push(plan.branchSlotWarning);
     const emitted = new Set<string>();

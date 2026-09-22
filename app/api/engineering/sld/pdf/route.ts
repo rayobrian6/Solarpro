@@ -6,6 +6,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { sldCombinerFields } from '@/lib/equipment/sldCombinerFields';
 import { getUserFromRequest } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
@@ -167,6 +168,29 @@ export async function POST(req: NextRequest) {
     const backfeedAmps = Number(buildInput.backfeedAmps || buildInput.acOCPD) || acOCPD;
     const acWireLength = Number(buildInput.acWireLength || buildInput.wireLength) || 60;
 
+    // 🚨 THE EXPORTED SHEET RESOLVES THE COMBINER THE SAME WAY THE DIAGRAM DOES.
+    // This route used to resolve nothing: it accepted `combinerId` from the
+    // client and dropped it on the floor, so the renderer fell back to the
+    // literal 'IQ Combiner' and — because `combinerProvidesAcDisconnect` arrived
+    // undefined — the PDF silently withheld the NEC integral-disconnect
+    // statement that the on-screen diagram asserted for the same project.
+    const _topo = String(buildInput.topologyType ?? 'STRING_INVERTER');
+    const _isMicro = /MICRO/i.test(_topo);
+    const _combiner = sldCombinerFields({
+      inverterManufacturer: String(buildInput.inverterManufacturer ?? ''),
+      inverterModel: String(buildInput.inverterModel ?? ''),
+      inverterId: buildInput.inverterId ? String(buildInput.inverterId) : null,
+      isMicro: _isMicro,
+      totalDevices: Number(buildInput.deviceCount ?? buildInput.totalModules) || 0,
+      branchCount: Array.isArray(buildInput.microBranches) ? buildInput.microBranches.length : 0,
+      hasBattery: !!(buildInput.hasBattery || buildInput.batteryModel || buildInput.batteryKwh
+        || (buildInput.batteryCount && Number(buildInput.batteryCount) > 0)),
+      overrideDeviceIds: Array.isArray(buildInput.bosDeviceIds)
+        ? buildInput.bosDeviceIds.map(String)
+        : (buildInput.combinerId ? [String(buildInput.combinerId)] : undefined),
+      selectedCombinerId: buildInput.selectedCombinerId ? String(buildInput.selectedCombinerId) : null,
+    });
+
     const input: SLDProfessionalInput = {
       projectName:             String(buildInput.projectName             ?? 'Solar PV System'),
       clientName:              String(buildInput.clientName              ?? 'Homeowner'),
@@ -176,6 +200,10 @@ export async function POST(req: NextRequest) {
       drawingNumber:           String(buildInput.drawingNumber           ?? 'SLD-001'),
       revision:                String(buildInput.revision                ?? 'A'),
       topologyType:            String(buildInput.topologyType            ?? 'STRING_INVERTER'),
+      combinerLabel:                _combiner.combinerLabel,
+      combinerModel:                _combiner.combinerModel,
+      combinerHasIntegratedGateway: _combiner.combinerHasIntegratedGateway,
+      combinerProvidesAcDisconnect: _combiner.combinerProvidesAcDisconnect,
       totalModules:            Number(buildInput.totalModules)           || 20,
       totalStrings:            Number(buildInput.totalStrings)           || 2,
       panelModel:              String(buildInput.panelModel ?? (firstPanelSpec ? `${firstPanelSpec.manufacturer} ${firstPanelSpec.model}` : 'Q.PEAK DUO BLK ML-G10+ 400W')),

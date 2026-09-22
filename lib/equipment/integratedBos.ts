@@ -264,8 +264,24 @@ export interface SystemBosContext {
    *
    *  These are equipment-db ids and may not match this module's ids verbatim
    *  (e.g. `enphase-iq-combiner-5` there vs `enphase-iq-combiner-5c` here);
-   *  see resolveCompatibleCombiner for the bridge. */
+   *  see resolveCompatibleCombiner for the bridge.
+   *
+   *  🚨 THIS IS A RECOMMENDATION, NOT A DECISION. It answers "what CAN be used",
+   *  and the catalogue's pairings are known to be incomplete — Enphase documents
+   *  identical IQ6/IQ7/IQ8 support on both the 5/5C and the 6C. It must never
+   *  outrank `selectedCombinerId`. */
   compatibleCombinerIds?: string[];
+  /**
+   * 🚨 WHAT THE INSTALLER IS ACTUALLY INSTALLING — the project's recorded
+   * selection (`projects.selected_equipment.combinerSelection`), and the highest
+   * authority this function knows.
+   *
+   * "The SLD is currently showing an IQ Combiner 6C. I am still installing IQ
+   * Combiner 5C." Nobody had chosen the 6C; a lookup missed and a last-resort
+   * literal named a product. Once this is set, nothing below may substitute
+   * anything else: compatibility validates a selection, it does not make one.
+   */
+  selectedCombinerId?: string | null;
 }
 
 export interface ResolvedBosDevice extends BosDevice {
@@ -288,6 +304,22 @@ export interface IntegratedEquipmentPlan {
   /** Set when the branch count exceeds the device's slot capacity. */
   branchSlotWarning?: string;
   source: 'override' | 'auto' | 'none';
+  /**
+   * 🚨 HOW THIS COMBINER CAME TO BE NAMED — and the reason this field exists at
+   * all is `unresolved-default`.
+   *
+   * `source` above says which BRANCH of this function answered; it cannot say
+   * whether a human decided. A plan built from a last-resort literal and a plan
+   * built from the installer's recorded selection both used to read `'auto'`,
+   * so every downstream artefact asserted a product with equal confidence in
+   * both cases — which is how a 6C reached a drawing for a 5C job.
+   *
+   * Consumers that PRINT the device must check
+   * `combinerBasisIsDecided(combinerBasis)` and qualify the output when it is
+   * false. Unknown stays unknown: it does not become the newest product, and it
+   * does not become the 5C either.
+   */
+  combinerBasis?: import('@/lib/combinerSelection/types').CombinerBasis;
 }
 
 const GEN4_MICRO = /iq8/i;
@@ -325,6 +357,41 @@ const emptyPlan = (brand: string | null): IntegratedEquipmentPlan => ({
  * brands fall through to an empty plan until their devices are added.
  */
 export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEquipmentPlan {
+  // 🚨 THE PROJECT'S RECORDED SELECTION OUTRANKS EVERYTHING BELOW.
+  //
+  // This is what the installer told us they are installing. It is not a hint, a
+  // preference or a default — it is the answer, and every branch below this one
+  // exists only for a project that has not answered yet. Routed through the same
+  // override machinery so the resolved device carries the same role summary,
+  // gateway and disconnect facts as any other; only the BASIS differs, and the
+  // basis is what lets a drawing say "selected" rather than merely name a box.
+  const selectedId = ctx.selectedCombinerId?.trim();
+  if (selectedId) {
+    // 🚨 RESOLVE THE DEVICE BEFORE DELEGATING, NOT AFTER.
+    //
+    // A first version recursed with `overrideDeviceIds: [selectedId]` and then
+    // checked whether the result had devices. For an id the catalogue does not
+    // know, the override branch's `.filter(Boolean)` emptied the list, the
+    // recursion fell THROUGH to the auto path, and a recommendation came back —
+    // which the outer call then stamped `project-selected`. That is worse than
+    // the bug this whole module replaces: it would assert a product nobody chose
+    // AND claim the installer chose it.
+    const device = getBosDevice(selectedId);
+    if (!device) {
+      // A selection we cannot honour stays visible as one. No devices, no
+      // brains, no disconnect claim — and the basis still says a human decided,
+      // so a consumer can report "selected device unavailable" rather than
+      // quietly printing something else.
+      return { ...emptyPlan(/enphase/i.test(ctx.inverterManufacturer) ? 'Enphase' : null), combinerBasis: 'project-selected' };
+    }
+    const plan = resolveIntegratedEquipment({
+      ...ctx,
+      selectedCombinerId: null,
+      overrideDeviceIds: [selectedId],
+    });
+    return { ...plan, combinerBasis: 'project-selected' };
+  }
+
   // Explicit user override wins.
   if (ctx.overrideDeviceIds?.length) {
     const devices = ctx.overrideDeviceIds.map(getBosDevice).filter(Boolean) as BosDevice[];
@@ -343,6 +410,7 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
           ? `${ctx.branchCount} AC branches exceed the ${combiner.model} ${combiner.branchSlots}-position limit — a second combiner or subpanel is required.`
           : undefined,
         source: 'override',
+        combinerBasis: 'session-override',
       };
     }
   }
@@ -366,8 +434,15 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
   //
   // Order: the inverter's declared compatibility, then the current-gen 6C as the
   // last resort for an inverter that declares nothing.
-  const combiner = resolveCompatibleCombiner(ctx.compatibleCombinerIds)
-    ?? getBosDevice('enphase-iq-combiner-6c')!;
+  //
+  // 🚨 AND THE LAST RESORT MUST SAY THAT IT IS ONE. `resolveCompatibleCombiner`
+  // returning undefined means the inverter declared nothing this catalogue
+  // recognises — nobody has chosen. The device below keeps the plan buildable,
+  // but `combinerBasis: 'unresolved-default'` is what stops a drawing asserting
+  // it as though someone had. That is the whole difference between "the 6C" and
+  // "a 6C, because nothing said otherwise".
+  const declared = resolveCompatibleCombiner(ctx.compatibleCombinerIds);
+  const combiner = declared ?? getBosDevice('enphase-iq-combiner-6c')!;
   // Branch capacity comes from the RESOLVED device, not from the 6C. The 6C PV
   // busbar takes 4 two-pole branches (5 with a quadplex); the 5C/4C take 4 with
   // no quadplex position. Leaving this pinned at 5 would under-report an overflow
@@ -388,6 +463,7 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
       ? `${ctx.branchCount} AC branches exceed the ${combiner.model} PV busbar (${combiner.branchSlots ?? 4} breakers${pvBranchMax > (combiner.branchSlots ?? 4) ? ', 5 with a quadplex' : ''}) — route the balance onto the DER busbar or a subpanel.`
       : undefined,
     source: 'auto',
+    combinerBasis: declared ? 'declared-compatibility' : 'unresolved-default',
   };
 }
 
