@@ -47,6 +47,8 @@ type E2EWin = Window & {
     undoGeometryLabel: string | null;
     engineRoofPlaneCount: number;
     seedDesign: (d: any) => void;
+    placedObstructions: any[];
+    placementMode: string;
   };
   __solarViewerE2E?: any;
 };
@@ -1257,5 +1259,149 @@ test.describe('the armed tool survives being armed', () => {
 
     await pickTool(page, 'Tools', 'Measure');
     await expect.poll(() => armed(page), { timeout: T }).toBe('measure');
+  });
+});
+
+
+// ===========================================================================
+// 🚨 A CLICK PLACES THE OBJECT -- THROUGH THE REAL CANVAS, IN A REAL BROWSER
+//
+//   "Tree -> click ground -> NO TREE APPEARS."
+//   "I also attempted to place a Chimney. It appears that Chimney may also not
+//    be wired end-to-end."
+//
+// Five handlers resolved their click with a bare `scene.pickPosition`, a
+// DEPTH-BUFFER read. It answers only where something has already been drawn and
+// only where the depth texture exists.
+//
+// 🚨 THIS SUITE RUNS ON chromium-software-webgl WITH NO GOOGLE MESH, which is
+// the exact condition that produced the failure. A unit test cannot reach it and
+// the tool-state tests did not: the tool WAS armed, and the click still built
+// nothing. So these click the canvas and read the canonical array.
+// ===========================================================================
+
+test.describe('placing a site object', () => {
+  const objects = (page: Page) =>
+    page.evaluate(() => (window as unknown as E2EWin).__solarE2E?.placedObstructions ?? []);
+
+  /** Open the tool group, press the tool, then choose the object type. */
+  async function armObject(page: Page, tool: string, presetId: string) {
+    await page.locator('button:has-text("Tools")').first().click();
+    await page.locator(`button:has-text("${tool}")`).last().click();
+    await page.locator(`[data-testid="obstruction-preset-${presetId}"]`).click();
+    await page.waitForTimeout(400);
+  }
+
+  test('🚨 a chimney lands on the roof face that was clicked', async ({ page }) => {
+    await openStudio(page);
+    await nameTheProperty(page);
+    const planes = await seedHouse(page);
+    await frameRoof(page);
+
+    await armObject(page, 'Obstruct', 'chimney');
+
+    const target = planes[0].id;
+    const pt = await faceScreenPoint(page, target);
+    expect(pt, 'the face never projected into the canvas').toBeTruthy();
+    await page.mouse.click(pt.x, pt.y);
+
+    // 🚨 THE ASSERTION THE OWNER ASKED FOR: not "the tool was armed", but that
+    // a canonical object now exists.
+    await expect
+      .poll(async () => (await objects(page)).length,
+            { message: 'clicking the roof with Chimney armed placed nothing', timeout: T })
+      .toBe(1);
+
+    const [obs] = await objects(page);
+    expect(obs.type, 'the wrong object was built').toBe('chimney');
+    expect(obs.space).toBe('roof');
+    // 🚨 THE FACE IT WAS DROPPED ON, not the face that happened to be selected.
+    expect(obs.planeId, 'the chimney bound to the wrong roof face').toBe(target);
+    expect(obs.heightM).toBeGreaterThan(0.5);
+  });
+
+  test('🚨 a tree lands on the ground, at its full size', async ({ page }) => {
+    await openStudio(page);
+    await nameTheProperty(page);
+    const planes = await seedHouse(page);
+    await frameRoof(page);
+
+    await armObject(page, 'Tree', 'tree');
+    await expect.poll(
+      () => page.evaluate(() => (window as unknown as E2EWin).__solarE2E?.placementMode ?? ''),
+      { message: 'the Tree tool did not stay armed', timeout: T },
+    ).toBe('tree');
+
+    // Well clear of the house: the ground, where nothing at all is drawn. This
+    // is precisely where the depth buffer had nothing to report.
+    const roof = await faceScreenPoint(page, planes[0].id);
+    const away = { x: Math.max(30, roof.x - 220), y: Math.min(roof.y + 190, 700) };
+    await page.mouse.click(away.x, away.y);
+
+    await expect
+      .poll(async () => (await objects(page)).length,
+            { message: 'clicking the ground with Tree armed placed nothing', timeout: T })
+      .toBe(1);
+
+    const [tree] = await objects(page);
+    expect(tree.type).toBe('tree');
+    expect(tree.space, 'the tree was filed as a roof object').toBe('site');
+    // 🚨 FULL SIZE. The global clamp used to cut this to 3.0 x 3.0 x 5.0, which
+    // is the "not a useful tree" the owner saw -- and because the canopy radius
+    // is derived from the footprint, shade ran on half a tree.
+    expect(tree.widthM, 'the tree was clamped to half its canopy').toBeCloseTo(6.0, 5);
+    expect(tree.heightM, 'the tree was clamped in height').toBeCloseTo(8.0, 5);
+    expect(tree.canopyRadiusM).toBeCloseTo(3.0, 5);
+    // A site object does not belong to a roof face.
+    expect(tree.planeId ?? null).toBeNull();
+  });
+
+  test('a roof object refuses open ground rather than floating there', async ({ page }) => {
+    await openStudio(page);
+    await nameTheProperty(page);
+    const planes = await seedHouse(page);
+    await frameRoof(page);
+
+    await armObject(page, 'Obstruct', 'chimney');
+
+    const roof = await faceScreenPoint(page, planes[0].id);
+    await page.mouse.click(Math.max(30, roof.x - 240), Math.min(roof.y + 200, 700));
+
+    // Building a chimney in the garden is worse than refusing: Auto Layout would
+    // then have to route panels around a prism nobody meant to place.
+    await page.waitForTimeout(1_200);
+    expect(await objects(page), 'a chimney was built off the roof').toHaveLength(0);
+  });
+
+  test('🚨 a placed tree survives a reload', async ({ page }) => {
+    test.skip(!ARMED, 'persistence needs a real database');
+    await openStudio(page);
+    await nameTheProperty(page);
+    const planes = await seedHouse(page);
+    await frameRoof(page);
+
+    await armObject(page, 'Tree', 'tree');
+    const roof = await faceScreenPoint(page, planes[0].id);
+    await page.mouse.click(Math.max(30, roof.x - 220), Math.min(roof.y + 190, 700));
+    await expect.poll(async () => (await objects(page)).length, { timeout: T }).toBe(1);
+    const before = (await objects(page))[0];
+
+    await page.waitForTimeout(5_000);   // clear the autosave debounce
+    await page.reload();
+    await expect
+      .poll(() => page.evaluate(() => Boolean((window as any).__solarE2E?.seedDesign)), { timeout: T })
+      .toBe(true);
+
+    await expect
+      .poll(async () => (await objects(page)).length,
+            { message: 'the tree did not survive the reload', timeout: T })
+      .toBe(1);
+    const after = (await objects(page))[0];
+    expect(after.type).toBe('tree');
+    // 🚨 THE SIZE MUST SURVIVE TOO. A tree that reloads at a different size is
+    // a different tree, and shade would disagree with itself across a refresh.
+    expect(after.widthM).toBeCloseTo(before.widthM, 5);
+    expect(after.heightM).toBeCloseTo(before.heightM, 5);
+    expect(after.canopyRadiusM).toBeCloseTo(before.canopyRadiusM, 5);
   });
 });

@@ -54,6 +54,8 @@ import {
   tombstonesFor,
   authorizationFor,
   makeAuthorization,
+  authorizationForLedgerDelta,
+  narrowAuthorizationToLedger,
   withTombstones,
   withoutTombstones,
   lifecycleFor,
@@ -475,11 +477,24 @@ export function useSiteDesign(): UseSiteDesign {
     restoreSiteEntities(step.obstructions, step.measurements);
     restoreDisposition(step.disposition);
     restoreLedger(step.deletions);
+    // 🚨 AN UNDO TAKES THE PERMISSION BACK.
+    //
+    // An authorization is permission for the server to accept a loss. Once the
+    // undo has put the geometry back, that permission describes a removal that
+    // did not happen -- and it would let a genuine bug wipe exactly those ids
+    // with the guard raising no objection. The standing rule is that the guard
+    // must keep telling unexplained loss apart from explicit deletion, and a
+    // stale authorization erodes precisely that distinction.
+    pendingDestructiveRef.current = narrowAuthorizationToLedger(
+      pendingDestructiveRef.current, step.deletions as DeletionLedger, ledgerKeyOf(),
+    );
     return step.label;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const redoGeometry = useCallback((): string | null => {
+    // Captured before `restoreLedger` overwrites it -- the delta is the point.
+    const beforeLedger = deletionLedgerRef.current;
     const step = redo(
       geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
       deletionLedgerRef.current, panelsRef.current,
@@ -491,7 +506,29 @@ export function useSiteDesign(): UseSiteDesign {
     applyRestoredGeometry(step.planes, verbatim);
     restoreSiteEntities(step.obstructions, step.measurements);
     restoreDisposition(step.disposition);
+    // 🚨 A REDO RE-PERFORMS A DELETION, SO IT MUST RE-AUTHORISE IT.
+    //
+    // Every other path that removes geometry mints an authorization, because the
+    // save guard refuses a payload that has lost faces it cannot account for.
+    // Redo did not. So: delete a face -> undo -> redo re-applied the tombstone,
+    // the next payload legitimately carried fewer faces, nothing explained the
+    // shortfall, and the server refused the save. Not once -- FOR EVER, because
+    // the ledger keeps the tombstone and every later autosave repeats the same
+    // unexplained loss. The design could not be saved again, and on reload the
+    // face was back. It was the one destructive path in the app that never said
+    // it was destructive.
+    //
+    // Computed from the LEDGER DELTA rather than from the step's label, so it
+    // covers exactly what this step removed and nothing else.
+    const redoAuth = authorizationForLedgerDelta(
+      beforeLedger, step.deletions as DeletionLedger, ledgerKeyOf(), panelsRef.current, Date.now(),
+    );
     restoreLedger(step.deletions);
+    if (redoAuth) {
+      // Merged, never assigned: two deletions inside one autosave debounce must
+      // both reach the save. See `mergeAuthorization`.
+      pendingDestructiveRef.current = mergeAuthorization(pendingDestructiveRef.current, redoAuth);
+    }
     return step.label;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

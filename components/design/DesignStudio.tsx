@@ -2034,6 +2034,32 @@ export default function DesignStudio({ project, onSave }: Props) {
         );
         return;
       }
+      // 🚨 AND THE LIFECYCLE, WHICH THIS DOOR WAS NOT ASKING.
+      //
+      // The disposition says whether a machine MAY supply geometry here. The
+      // lifecycle says whether the person has just deliberately emptied the
+      // property. They are different facts and both have to hold: after Start
+      // Over the disposition is untouched -- 'accepted' or 'undecided' for any
+      // Google/aerial property -- so this door said yes and wrote a machine roof
+      // straight back onto the design the owner had just cleared.
+      //
+      // The tombstone ledger cannot catch it either: an aerial detection mints
+      // FRESH UUIDs, so there is no id for the ledger to refuse. The lifecycle
+      // is the only authority that can answer, which is exactly why it exists
+      // (`existingPlaneCount` could not tell "never modelled" from "emptied on
+      // purpose" -- both are zero).
+      //
+      // The button's own enabled-state already consults it (the Roof Planes
+      // section reads `site.geometryLifecycle !== 'cleared'`). The door did not,
+      // and a door is not protected by the shape of the handle.
+      if (site.geometryLifecycleRef?.current === 'cleared' || site.geometryLifecycle === 'cleared') {
+        setSolarApiStatus('idle');
+        toast.info(
+          'Aerial detect did not run',
+          'You cleared this property’s geometry. Re-detecting would put a machine-built roof back on a design you emptied on purpose — press “Use Google 3D here” first if that is what you want.',
+        );
+        return;
+      }
       const adoption = planAerialAdoption({
         existing: roofPlanesRef.current,
         incoming: data.planes as RoofPlane[],
@@ -6761,7 +6787,27 @@ export default function DesignStudio({ project, onSave }: Props) {
                               // the coordinates on screen name it.
                               site.setNativeDisposition('rejected', activeSiteKeyRef.current
                                 || siteKeyFromCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id));
-                              setRoofPlanes([]);
+                              // 🚨 A RAW setRoofPlanes([]) IS NOT A DELETION.
+                              //
+                              // It emptied the array and nothing else: no
+                              // tombstones, so a provider retry or Lane A put the
+                              // faces straight back; no authorization, so the very
+                              // next autosave looked like an unexplained wipe and
+                              // was refused; and no history entry, so there was no
+                              // undo. Everything the deletion authority exists to
+                              // guarantee was bypassed by one line.
+                              //
+                              // It is worse than it sounds, because this banner
+                              // renders for HAND-TRACED geometry too: a section the
+                              // installer drew is stamped `confirmed === false`, and
+                              // the banner's condition is `some(p => p.confirmed ===
+                              // false)`. So their own work sat under the headline
+                              // "We found your roof sections" beside a button that
+                              // silently threw it away.
+                              //
+                              // Routed through the authority now, which also means
+                              // the confirm step lists exactly what is about to go.
+                              requestDeletion('design');
                               setSolarApiStatus('idle');
                               setDrawingMode('draw_roof');
                               toast.info(

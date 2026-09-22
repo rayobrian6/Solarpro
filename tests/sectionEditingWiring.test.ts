@@ -489,12 +489,18 @@ describe('🚨 undo brings the panels back too', () => {
 
     // Both directions go through it. Redo has exactly the same obligation.
     for (const which of ['undoGeometry', 'redoGeometry']) {
-      // 1400, not 500: the body grew when undo took on the ledger, the panels
-      // a deletion removed, and the obstructions and measurements that made
-      // "Undo restores it" true. A window that no longer covers the function is
-      // a test that passes because it cannot see the code — which is why the
-      // assertion below checks that it reaches the end.
-      const body = SITE.slice(SITE.indexOf(`const ${which} = useCallback`), SITE.indexOf(`const ${which} = useCallback`) + 1400);
+      // 🚨 THE WINDOW ENDS WHERE THE FUNCTION DOES, NOT AT A MAGIC NUMBER.
+      //
+      // It was 500, then 1400, and it needed raising again the moment undo and
+      // redo took on the destructive authorization — each time because the body
+      // grew, and each time the failure looked like a regression in behaviour
+      // rather than in the ruler. A slice that ends at the next declaration
+      // cannot rot that way, and the coverage assertion below still proves the
+      // window reaches the end rather than trusting that it does.
+      const start = SITE.indexOf(`const ${which} = useCallback`);
+      expect(start, `${which} is gone`).toBeGreaterThan(-1);
+      const nextDecl = SITE.indexOf('\n  const ', start + 40);
+      const body = SITE.slice(start, nextDecl > start ? nextDecl : start + 4000);
       expect(body, `the ${which} window does not cover the function`).toMatch(/return step\.label;/);
       // 🚨 THE SECOND ARGUMENT IS NOT COSMETIC. A DELETE step has already put
       // the exact panels back — repositioning them would map modules onto a

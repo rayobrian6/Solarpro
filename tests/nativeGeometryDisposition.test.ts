@@ -270,8 +270,35 @@ describe('🚨 THE DECISION IS REACHABLE IN PRODUCTION — it is not decoration'
     expect(banner, 'positive control: the button is gone').toBeGreaterThan(-1);
     const at = STUDIO.lastIndexOf("site.setNativeDisposition('rejected',", banner);
     expect(at, 'positive control: the write was not found at all').toBeGreaterThan(-1);
-    const btn = STUDIO.slice(at, at + 1200);
-    expect(btn, 'the rejection must clear the planes too').toMatch(/setRoofPlanes\(\[\]\)/);
+    // The slice runs to the button's own label, so it covers the handler and
+    // cannot silently shrink when the code between them grows.
+    const btn = STUDIO.slice(at, banner + 'Draw Manually Instead'.length);
+    expect(btn.length, 'the window collapsed').toBeGreaterThan(200);
+    // 🚨 THIS ASSERTED `setRoofPlanes([])` AND IS CORRECTED, NOT DELETED.
+    //
+    // It was right that the rejection must clear the planes, and wrong about
+    // what clearing means. A raw `setRoofPlanes([])` emptied the array and
+    // nothing else: no tombstones, so a provider retry or Lane A put the faces
+    // straight back; no authorization, so the next autosave read as an
+    // unexplained wipe and was refused; no history, so no undo. The test was
+    // pinning the bypass in place.
+    //
+    // Worse, this banner renders for HAND-TRACED geometry too — a section the
+    // installer drew is stamped `confirmed === false`, which is the banner's own
+    // condition — so their work sat under "We found your roof sections" beside a
+    // button that silently threw it away.
+    // 🚨 THE NEGATIVE ASSERTION READS CODE, NOT COMMENTARY.
+    //
+    // `STUDIO` is the raw file, and the comment that now explains why the raw
+    // wipe was removed contains the words `setRoofPlanes([])`. So the first
+    // version of this check failed on the prose describing the fix — a guard
+    // defeated by a sentence about the thing it guards. A positive assertion
+    // survives that; a negative one must not read comments at all.
+    const code = btn.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    expect(code.length, 'the code window collapsed to comments').toBeGreaterThan(120);
+    expect(btn, 'the rejection must clear the planes through the authority')
+      .toMatch(/requestDeletion\('design'\)/);
+    expect(code, 'the raw wipe is back').not.toMatch(/setRoofPlanes\(\[\]\)/);
     expect(btn, 'positive control: this really is that button')
       .toMatch(/Draw Manually Instead/);
   });

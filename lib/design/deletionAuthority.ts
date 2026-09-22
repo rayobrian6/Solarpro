@@ -468,6 +468,121 @@ export function makeAuthorization(
   };
 }
 
+/**
+ * 🚨 AN UNDO/REDO STEP IS A DESTRUCTIVE OPERATION TOO, AND IT WAS THE ONLY ONE
+ * THAT NEVER SAID SO.
+ *
+ * Every other path that removes geometry mints an authorization, because the
+ * save guard refuses a payload that has lost faces it cannot account for. Redo
+ * did not. So:
+ *
+ *     delete a roof face -> undo -> redo
+ *
+ * re-applied the tombstone, the next payload legitimately carried fewer faces,
+ * nothing explained why, and the server refused it with a data-loss error. Not
+ * once -- FOR EVER, because the ledger keeps the tombstone and every subsequent
+ * autosave carries the same unexplained shortfall. The design could not be saved
+ * again, and on reload the face came back.
+ *
+ * This computes what a step actually removed: everything tombstoned in `next`
+ * that was not tombstoned in `prev`, at one property.
+ *
+ * Returns null when the step removed nothing, so an ordinary undo mints nothing.
+ */
+export function authorizationForLedgerDelta(
+  prev: DeletionLedger | null | undefined,
+  next: DeletionLedger | null | undefined,
+  siteKey: string,
+  panels: ReadonlyArray<{ id?: string; systemType?: string; planeId?: string }>,
+  at: number,
+): DestructiveAuthorization | null {
+  const before = ledgerSite(prev, siteKey);
+  const after = ledgerSite(next, siteKey);
+
+  const added = (b: string[], a: string[]) => {
+    const had = new Set(b);
+    return a.filter(id => id && !had.has(id));
+  };
+  const faceIds = added(before.faceIds, after.faceIds);
+  const sectionIds = added(before.sectionIds, after.sectionIds);
+  const obstructionIds = added(before.obstructionIds, after.obstructionIds);
+  const newlyCleared = !before.clearedAt && !!after.clearedAt;
+
+  if (!faceIds.length && !sectionIds.length && !obstructionIds.length && !newlyCleared) {
+    return null;
+  }
+
+  // 🚨 THE PANELS THAT STOOD ON THOSE FACES GO WITH THEM. The save guard
+  // checks `panelSystemTypes`, not face ids, so an authorization that named the
+  // faces but not the panels would still read as an unexplained loss of every
+  // module on them.
+  const gone = new Set(faceIds);
+  // `panels` arrives straight off a ref that is null on a design nobody has
+  // laid out yet, and this must not throw on the very first deletion.
+  const live = Array.isArray(panels) ? panels : [];
+  const doomed = newlyCleared
+    ? live.filter(Boolean)
+    : live.filter(pp => pp && pp.planeId && gone.has(pp.planeId));
+
+  return makeAuthorization(
+    newlyCleared ? 'design' : 'face',
+    siteKey,
+    {
+      faceIds,
+      sectionIds,
+      obstructionIds,
+      panelIds: doomed.map(pp => pp.id).filter(Boolean) as string[],
+      panelSystemTypes: doomed.map(pp => pp.systemType ?? 'roof'),
+    },
+    at,
+  );
+}
+
+/**
+ * 🚨 AN UNDO MUST TAKE ITS PERMISSION BACK.
+ *
+ * An authorization is permission to lose something. After an undo the thing is
+ * no longer lost, so the permission is a claim about a removal that did not
+ * happen -- and it would let a genuine bug wipe exactly those ids without the
+ * guard objecting. The owner's rule is that the guard must still distinguish
+ * unexplained loss from explicit deletion; a stale authorization erodes exactly
+ * that distinction.
+ *
+ * Only ids the ledger no longer tombstones are dropped. Panel-scope
+ * authorizations carry no ledger representation and are left alone, and an
+ * authorization emptied of every id is discarded.
+ */
+export function narrowAuthorizationToLedger(
+  auth: DestructiveAuthorization | null | undefined,
+  ledger: DeletionLedger | null | undefined,
+  siteKey: string,
+): DestructiveAuthorization | null {
+  if (!auth) return null;
+  if (auth.op === 'panels') return auth;
+
+  const site = ledgerSite(ledger, siteKey);
+  const stillFace = new Set(site.faceIds);
+  const stillSection = new Set(site.sectionIds);
+  const stillObstruction = new Set(site.obstructionIds);
+
+  const faceIds = auth.faceIds.filter(id => stillFace.has(id));
+  const sectionIds = auth.sectionIds.filter(id => stillSection.has(id));
+  const obstructionIds = auth.obstructionIds.filter(id => stillObstruction.has(id));
+
+  // A whole-design clear that is still recorded keeps its authorization intact:
+  // it names no ids because it removed everything.
+  if (site.clearedAt && auth.op === 'design') return auth;
+
+  if (!faceIds.length && !sectionIds.length && !obstructionIds.length) return null;
+
+  return {
+    ...auth,
+    faceIds,
+    sectionIds,
+    obstructionIds,
+  };
+}
+
 export function parseAuthorization(raw: unknown): DestructiveAuthorization | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;

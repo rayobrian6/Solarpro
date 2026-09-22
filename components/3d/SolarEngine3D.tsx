@@ -2490,6 +2490,44 @@ function SolarEngine3D({
     appliedObstructionsRef.current = initialObstructions ?? [];
     obstructionsRef.current = incoming;
     setObstructions(incoming);
+
+    // 🚨 AND DRAW THEM. THE RECORD WAS RESTORED AND THE PICTURE WAS NOT.
+    //
+    // This effect adopted the array and drew nothing, and `drawObstructionEntity`
+    // had exactly two callers -- placement and the inspector -- so an obstruction
+    // was drawn only in the session that created it. Reload the project and
+    // every marked vent, chimney and tree became an INVISIBLE KEEP-OUT: still
+    // fed to placePanelsControlled, so it still removed panels, while being
+    // impossible to see, select, resize or delete. The user sees a hole in the
+    // array with nothing in it.
+    //
+    // It is the same effect for an undo: `restoreSiteEntities` puts the record
+    // back into `placedObstructions`, which arrives here as `initialObstructions`,
+    // so "Undo restores it" was visually false too.
+    //
+    // Redrawn from scratch rather than diffed: the incoming array is the whole
+    // truth for this property, and an entity left over from another one must not
+    // survive a property switch.
+    const v = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (v && C) {
+      try {
+        const live = (appliedObstructionsRef.current ?? []).map(o => o?.id).filter(Boolean) as string[];
+        const stale = (v.entities.values ?? [])
+          .filter((e: any) => typeof e?.name === 'string' && e.name.startsWith('[OBS] '))
+          .map((e: any) => e.id)
+          .filter((id: string) => !live.includes(id));
+        if (stale.length) removeObstructionEntities(v, stale);
+        for (const o of incoming) {
+          if (!o?.id) continue;
+          try { removeObstructionEntities(v, [o.id]); } catch { /* not drawn yet */ }
+          drawObstructionEntity(v, C, o);
+        }
+        v.scene.requestRender();
+      } catch (e: unknown) {
+        addLog('WARN', 'obstruction restore draw: ' + (e as Error).message);
+      }
+    }
   }, [initialObstructions]);
 
   // ── Lane A state ─────────────────────────────────────────────────────────
@@ -13712,6 +13750,8 @@ function SolarEngine3D({
           lat: gp.lat, lng: gp.lng, height: gp.height,
           tilt: pitchDeg, azimuth: azDeg, systemType: 'roof',
           heading, pitch: -(pitchDeg * Math.PI / 180), roll: 0, orientation: gpOrient,
+          // The automatic fill OWNS these, so Auto Layout may replace them.
+          layoutSource: 'AUTO',
         });
         panels.push(panel);
         placed++;
@@ -13819,6 +13859,8 @@ function SolarEngine3D({
           lat: pLat, lng: pLng, height: pHeight,
           tilt: pitchDeg, azimuth: azDeg, systemType: 'roof',
           heading, pitch: -(pitchDeg * Math.PI / 180), roll: 0, orientation: orient,
+          // The automatic fill OWNS these, so Auto Layout may replace them.
+          layoutSource: 'AUTO',
         });
         panels.push(panel);
         // NOTE: Do NOT call addPanelEntity here.
@@ -13932,6 +13974,24 @@ function SolarEngine3D({
     heading: number; pitch: number; roll: number;
     orientation?: PanelOrientation;
     planeId?: string;  // v47.152: explicit planeId; undefined = free-click (no plane)
+    /**
+     * 🚨 WHO PUT THIS PANEL HERE. Auto Layout replaces the panels it owns and
+     * preserves the ones a person placed (`panelsAutoRoofOwns`), and it decides
+     * by this field -- so a panel without it is AUTO-OWNED AND DESTROYED.
+     *
+     * `createPanel` never set it. Every panel placed with the Roof tool
+     * therefore carried `layoutSource === undefined`, and pressing Auto Fill
+     * deleted the lot: an installer hand-places twelve modules on a dormer
+     * Cesium fills badly, then fills the main roof, and the dormer work is gone.
+     * Panels from the Snap tool survived, because that one path stamped
+     * 'MANUAL' -- so the product destroyed hand-placed work inconsistently,
+     * which is worse than doing it always.
+     *
+     * DEFAULTS TO 'MANUAL' ON PURPOSE. A call site that forgets to say should
+     * cost a stale panel, never a destroyed one. The automatic fill says 'AUTO'
+     * explicitly.
+     */
+    layoutSource?: 'MANUAL' | 'AUTO';
   }): PlacedPanel {
     const p: any = {
       id: `panel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -13951,6 +14011,8 @@ function SolarEngine3D({
       systemType: opts.systemType,
       orientation: opts.orientation ?? panelOrientationRef.current,
       planeId: opts.planeId,  // v47.152: undefined for free-click, planeId string for plane-bound
+      // 🚨 FAIL SAFE: absent means a person put it there. See the opts doc.
+      layoutSource: opts.layoutSource ?? 'MANUAL',
     };
     return p;
   }
