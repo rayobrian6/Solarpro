@@ -958,12 +958,25 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
     expect(reloaded.planes.find((p: any) => p.id === 'sec-main::slopeB').pitch).toBeCloseTo(30, 0);
   });
 
-  test('🚨 a control that cannot move the geometry is not offered — the flat deck', async ({ page }) => {
-    // An audit reached this from the Block tool in three clicks: type 25 into a
-    // flat section's pitch, the edit returns ok, the status bar says "every
-    // face of the section moved together", the builder builds the deck at 0°
-    // anyway, and the panel then reads "Roof pitch 25.0°" about a roof with no
-    // 25° in it. Now there is no box, and a reason in its place.
+  test('🚨 THE PORCH: a flat deck takes a pitch through the real inspector, and the geometry follows', async ({ page }) => {
+    // ─────────────────────────────────────────────────────────────────────
+    // THIS SPEC ASSERTED THE OPPOSITE UNTIL THE OWNER USED IT.
+    //
+    // It required NO pitch box and a reason saying "change its roof kind to
+    // Shed". That refusal was written for a real defect — typing 25 into a flat
+    // section returned ok, built the deck horizontal anyway, and then reported
+    // "Roof pitch 25.0°" about a roof with no 25° in it — and refusing beat
+    // lying. It was still the wrong cure:
+    //
+    //   "I created my porch using the Flat building tool. SolarPro then treats
+    //    Flat = permanently 0°. That is too restrictive... I should NOT have to
+    //    delete it and redraw it using a completely different internal object
+    //    simply because the porch has a 1/12, 2/12, 3/12 slope."
+    //
+    // `flat` and `shed` are one topology here, so the box is offered and the
+    // section CONVERTS in place. The half the old spec was protecting — that
+    // the number typed is the number built — is what this now asserts.
+    // ─────────────────────────────────────────────────────────────────────
     await openStudio(page);
     await nameTheProperty(page);
     await seedHouse(page, { flatten: 'sec-garage' });
@@ -971,8 +984,38 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
 
     await clickFace(page, 'sec-garage::deck');
     await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
-    await expect(page.locator('[data-testid="inspector-pitch"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="inspector-pitch-locked"]')).toContainText(/Shed/);
+
+    // The deck starts flat, and the box is there.
+    await expect(page.locator('[data-testid="inspector-pitch-locked"]')).toHaveCount(0);
+    const pitch = page.locator('[data-testid="inspector-pitch"]');
+    await expect(pitch).toHaveCount(1);
+    expect(await pitch.inputValue()).toBe('0.0');
+
+    // A single plane is offered a slope DIRECTION and no eave/ridge anchor —
+    // it has no ridge to hold.
+    await expect(page.locator('[data-testid="inspector-slope-direction"]')).toBeVisible({ timeout: T });
+    await expect(page.locator('[data-testid="inspector-anchor-eave"]')).toHaveCount(0);
+    await page.locator('[data-testid="inspector-slope-S"]').click();
+
+    // 2 in 12.
+    const TWO_IN_TWELVE = Math.atan2(2, 12) * 180 / Math.PI;   // 9.4623°
+    await pitch.click();
+    await pitch.fill(TWO_IN_TWELVE.toFixed(1));
+    await pitch.press('Enter');
+
+    // 🚨 THE GEOMETRY TOOK IT. Not the displayed scalar — the built face.
+    await expect
+      .poll(() => state(page).then(st => ofSection(st, 'sec-garage')[0]?.pitch ?? -1),
+        { message: 'the deck did not take the pitch', timeout: T })
+      .toBeCloseTo(TWO_IN_TWELVE, 1);
+
+    // Still ONE face: a porch does not sprout a ridge.
+    expect(ofSection(await state(page), 'sec-garage')).toHaveLength(1);
+
+    // …and the other sections did not move.
+    const after = await state(page);
+    expect(ofSection(after, 'sec-main')).toHaveLength(2);
+    expect(ofSection(after, 'sec-wing')).toHaveLength(2);
   });
 });
 

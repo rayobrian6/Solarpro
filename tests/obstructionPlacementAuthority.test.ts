@@ -341,3 +341,57 @@ describe('🚨 the type a user picks is the type that gets stored', () => {
     expect(ENGINE).toMatch(/canopyRadiusM: preset\.space === 'site'/);
   });
 });
+
+describe('🚨 a placed object can be edited, which is what makes it a tree', () => {
+  it('the selected object gets an inspector with its physical numbers', () => {
+    // 🚨 PLACING WAS ONLY HALF A WORKFLOW. Even once the Tree tool placed a
+    // canonical object, nothing could CHANGE it — no height, no canopy, no
+    // dimensions at all after the click. A tree you cannot size is a marker,
+    // and those are precisely the two numbers Shade reads.
+    expect(ENGINE).toMatch(/data-testid="obstruction-inspector"/);
+    // The fields are built by one `num()` helper, so their ids are arguments
+    // rather than literal attributes — assert the ids that reach it.
+    for (const id of ['obstruction-height', 'obstruction-canopy', 'obstruction-width',
+                      'obstruction-depth', 'obstruction-clearance']) {
+      expect(ENGINE, `${id} is not offered`).toContain(`'${id}'`);
+    }
+    expect(ENGINE).toMatch(/data-testid=\{testId\}/);
+  });
+
+  it('a TREE is offered a canopy; a roof object is offered width, depth and clearance', () => {
+    // They differ in their numbers, not in the act of editing them, so it is
+    // one panel that shows only the fields that mean something.
+    const at = ENGINE.indexOf('data-testid="obstruction-inspector"');
+    const block = ENGINE.slice(at, at + 4200);
+    expect(block).toContain('isTree');
+    expect(block).toMatch(/num\('Canopy width'/);
+    expect(block).toMatch(/num\('Clearance'/);
+  });
+
+  it('editing redraws from the SAME function placement uses', () => {
+    // One picture from one record. Placement used to build the prism inline
+    // from the slider values, so there was no way to draw an object that
+    // already existed — which is why nothing could be resized.
+    expect(ENGINE).toMatch(/function drawObstructionEntity/);
+    expect(ENGINE).toMatch(/drawObstructionEntity\(viewerRef\.current, \(window as any\)\.Cesium, merged\)/);
+  });
+
+  it('and the delete is right there, through the canonical path', () => {
+    expect(ENGINE).toMatch(/data-testid="obstruction-delete"/);
+    expect(ENGINE).toMatch(/onRequestDelete\?\.\('obstruction', obs\.id\)/);
+  });
+});
+
+describe('🚨 the Tree tool places the object Shade can actually use', () => {
+  it('choosing Tree arms the canonical obstruction, not the decorative sphere', () => {
+    // `handleTreeClick` added two Cesium entities with hardcoded dimensions,
+    // wrote nothing to any canonical array, appeared in no Layout, survived no
+    // reload, and its own tooltip said "No effect on solar production". Two
+    // controls called Tree with the same emoji, one a placebo, is worse than
+    // either alone.
+    expect(ENGINE).toMatch(/if \(mode === 'tree'\) \{/);
+    expect(ENGINE).toMatch(/obstructionPresetRef\.current = 'tree'/);
+    expect(ENGINE).toMatch(/onPlacementModeChange\('obstruction'\)/);
+    expect(ENGINE).not.toMatch(/No effect on solar production/);
+  });
+});

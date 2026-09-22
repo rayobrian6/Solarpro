@@ -11317,6 +11317,52 @@ function SolarEngine3D({
 
   /** Drop the prism and label for these obstructions. The entity id IS the
    *  obstruction id (see the placement path), and the name carries it too. */
+  /**
+   * Draw one obstruction from its canonical record.
+   *
+   * 🚨 ONE PICTURE FROM ONE RECORD. Placement used to build the prism inline
+   * from the slider values, so there was no way to draw an obstruction that
+   * already existed — which is why nothing could be resized after the click.
+   * Editing and placing now go through the same function, so the thing on
+   * screen cannot drift from the thing that is saved.
+   */
+  function drawObstructionEntity(viewer: any, C: any, obs: import('@/types').PlacedObstruction): void {
+    if (!viewer || !C || !obs) return;
+    const widthM = Number.isFinite(obs.widthM) && obs.widthM > 0 ? obs.widthM : (obs.radiusM ?? 0.3) * 2;
+    const depthM = Number.isFinite(obs.depthM) && obs.depthM > 0 ? obs.depthM : widthM;
+    const prismHeightM = Number.isFinite(obs.heightM) && obs.heightM > 0 ? obs.heightM : 1.0;
+    const footprint = buildObstructionFootprint(obs.lat, obs.lng, widthM, depthM);
+    const polyPositions = [footprint.sw, footprint.se, footprint.ne, footprint.nw]
+      .map(c => safeCartesian3(C, c.lng, c.lat, obs.height))
+      .filter((q): q is any => q != null);
+    if (polyPositions.length < 4) return;
+    const isTree = (obs as { space?: string }).space === 'site' || obs.type === 'tree';
+    try {
+      viewer.entities.add({
+        id: obs.id,
+        name: `[OBS] ${obs.id}`,
+        polygon: {
+          hierarchy: new C.PolygonHierarchy(polyPositions),
+          perPositionHeight: true,
+          height: 0,
+          extrudedHeight: prismHeightM,
+          // A tree reads as a tree. It is the same primitive; only the colour
+          // says which of the two kinds of object it is.
+          material: C.Color.fromCssColorString(isTree ? '#4a8a3a' : '#f5f5f5')
+            .withAlpha(isTree ? 0.75 : 0.92),
+          outline: true,
+          outlineColor: C.Color.fromCssColorString(isTree ? '#2f5f25' : '#2a2a2a'),
+          outlineWidth: 2,
+          closeTop: true,
+          closeBottom: false,
+        },
+      });
+      viewer.scene.requestRender();
+    } catch (e: unknown) {
+      addLog('WARN', `Obstruction entity: ${(e as Error).message}`);
+    }
+  }
+
   /** Which marked obstruction is under the cursor? Reads the `[OBS] <id>` name
    *  the placement path writes, so the entity id and the canonical id are the
    *  same fact read one way. */
@@ -15959,6 +16005,105 @@ function SolarEngine3D({
           not about a visualisation toggle. Every value it shows is derived from
           canonical geometry on each render by lib/3d/sectionEditing, so no
           control can drift away from the building it claims to describe. */}
+      {/* ── THE SELECTED SITE OBJECT ──────────────────────────────────────
+             🚨 PLACING A TREE WAS ONLY HALF A WORKFLOW. "I tried the Tree
+             button. It does not visibly give me a useful tree." Even once the
+             tool placed a canonical object, nothing could CHANGE it: no height,
+             no canopy, no dimensions at all after the click. A tree you cannot
+             size is not a tree, it is a marker — and Shade reads exactly those
+             two numbers.
+
+             It is the same panel for every roof object, because a vent, a
+             chimney and a tree differ in their numbers and not in the act of
+             editing them. Only the fields that mean something are shown. */}
+      {stage === 'done' && selectedObstructionId ? (
+        <DraggablePanel id="obstruction-inspector" zIndex={53}>
+          <div
+            data-testid="obstruction-inspector"
+            style={{
+              position: 'absolute', right: 12, top: 96, width: 232,
+              background: 'rgba(10,14,24,0.94)', border: '1px solid rgba(148,163,184,0.3)',
+              borderRadius: 10, padding: '10px 11px', color: '#e2e8f0', fontSize: 11,
+              boxShadow: '0 8px 26px rgba(0,0,0,0.45)', cursor: 'grab', touchAction: 'none',
+            }}
+          >
+            {(() => {
+              const obs = (obstructionsRef.current ?? []).find(o => o?.id === selectedObstructionId);
+              if (!obs) return <div style={{ color: '#9aa8bd' }}>That object is no longer here.</div>;
+              const pr = presetFor(obs.type);
+              const isTree = (obs as { space?: string }).space === 'site' || obs.type === 'tree';
+              const patch = (next: Partial<typeof obs>) => {
+                const merged = { ...obs, ...next };
+                setObstructions(prev => prev.map(o => (o.id === obs.id ? merged : o)));
+                // Redraw it where it now stands, at its new size.
+                const v = viewerRef.current;
+                if (v) { try { removeObstructionEntities(v, [obs.id]); } catch { /* ignore */ } }
+                drawObstructionEntity(viewerRef.current, (window as any).Cesium, merged);
+              };
+              const num = (
+                label: string, unit: string, value: number, testId: string,
+                min: number, max: number, onSet: (v: number) => void,
+              ) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
+                  <span style={{ color: '#cfd8e6', fontSize: 10.5, minWidth: 92 }}>{label}</span>
+                  <input
+                    type="number" data-no-drag data-testid={testId}
+                    step={0.1} min={min} max={max}
+                    value={Number.isFinite(value) ? Number(value.toFixed(2)) : 0}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      if (isFinite(v)) onSet(Math.max(min, Math.min(max, v)));
+                    }}
+                    style={{
+                      width: 64, background: 'rgba(0,0,0,0.42)', color: '#fff',
+                      border: '1px solid rgba(255,255,255,0.18)', borderRadius: 5,
+                      padding: '2px 5px', fontSize: 11, fontWeight: 700, textAlign: 'right',
+                    }}
+                  />
+                  <span style={{ color: '#7c8aa5', fontSize: 10 }}>{unit}</span>
+                </div>
+              );
+              return (
+                <>
+                  <div style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 1 }}>
+                    {pr.icon} {pr.label}
+                  </div>
+                  <div style={{ color: '#9aa8bd', fontSize: 10, marginBottom: 4 }}>
+                    {isTree ? 'Stands on the ground. It shades; it takes no roof area.'
+                            : 'On the roof. Panels keep clear of it.'}
+                  </div>
+                  {num('Height', 'm', obs.heightM ?? pr.heightM, 'obstruction-height', 0.05, 30,
+                    v => patch({ heightM: v }))}
+                  {isTree
+                    ? num('Canopy width', 'm', (obs.canopyRadiusM ?? 2) * 2, 'obstruction-canopy', 0.5, 30,
+                        v => patch({ canopyRadiusM: v / 2, widthM: v, depthM: v,
+                          radiusM: legacyRadiusFor(v, v) }))
+                    : (
+                      <>
+                        {num('Width', 'm', obs.widthM ?? pr.widthM, 'obstruction-width', 0.05, 12,
+                          v => patch({ widthM: v, radiusM: legacyRadiusFor(v, obs.depthM ?? pr.depthM) }))}
+                        {num('Depth', 'm', obs.depthM ?? pr.depthM, 'obstruction-depth', 0.05, 12,
+                          v => patch({ depthM: v, radiusM: legacyRadiusFor(obs.widthM ?? pr.widthM, v) }))}
+                        {num('Clearance', 'm', obs.clearanceM ?? (DEFAULT_CLEARANCE_M[obs.type] ?? 0.15),
+                          'obstruction-clearance', 0, 3, v => patch({ clearanceM: v }))}
+                      </>
+                    )}
+                  <button
+                    type="button" data-no-drag data-testid="obstruction-delete"
+                    onClick={() => onRequestDelete?.('obstruction', obs.id)}
+                    style={{
+                      marginTop: 9, width: '100%', padding: '5px 0', borderRadius: 6,
+                      background: 'rgba(255,90,90,0.12)', border: '1px solid rgba(255,90,90,0.40)',
+                      color: '#ffb3b3', fontSize: 10.5, fontWeight: 800, cursor: 'pointer',
+                    }}
+                  >🗑 Delete this {pr.label.toLowerCase()}</button>
+                </>
+              );
+            })()}
+          </div>
+        </DraggablePanel>
+      ) : null}
+
       {stage === 'done' && (roofPlanes?.length ?? 0) > 0 ? (
         <DraggablePanel id="section-inspector" zIndex={52}>
           <div
