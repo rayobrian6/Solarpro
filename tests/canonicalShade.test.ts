@@ -356,6 +356,59 @@ describe('the analysis is unchanged for every existing caller', () => {
   });
 });
 
+
+describe('🚨 the tree the user SIZES is the tree that shades', () => {
+  // The owner's own sweep: short tree, tall tree, narrow canopy, wide canopy.
+  // The two numbers the inspector edits are exactly the two the scene reads, so
+  // a change to either has to move the answer or the editor is decoration.
+  const sceneWith = (over: Record<string, unknown>) =>
+    buildShadeScene({ ...SCENE_INPUT, obstructions: [chimney, vent, skylight, { ...tree, ...over }] });
+  const treeIn = (over: Record<string, unknown>) =>
+    (profileForPanel(panelA, sceneWith(over), GROUND).nearbyObstruction ?? [])
+      .find(o => o.sourceId === 'tree-1');
+
+  it('a TALLER tree blocks a higher angle', () => {
+    const short = treeIn({ heightM: 4 });
+    const tall = treeIn({ heightM: 14 });
+    expect(short, 'a 4 m tree vanished entirely').toBeTruthy();
+    expect(tall.heightM).toBeGreaterThan(short.heightM);
+    // The blocking elevation angle is atan(rise / distance) — same distance,
+    // so more rise is strictly more block.
+    const angle = (o: { heightM: number; distanceM: number }) => Math.atan2(o.heightM, o.distanceM);
+    expect(angle(tall)).toBeGreaterThan(angle(short));
+  });
+
+  it('a tree shorter than the roof it would shade drops out of the horizon', () => {
+    // Its top is below the module, so there is nothing between it and the sun.
+    expect(treeIn({ heightM: 1.5 })).toBeFalsy();
+  });
+
+  it('a WIDER canopy blocks a wider arc', () => {
+    const narrow = treeIn({ canopyRadiusM: 1 });
+    const wide = treeIn({ canopyRadiusM: 6 });
+    expect(wide.arcDeg).toBeGreaterThan(narrow.arcDeg);
+    // …at the same distance and the same height, so only the arc moved.
+    expect(wide.heightM).toBeCloseTo(narrow.heightM, 6);
+    expect(wide.distanceM).toBeCloseTo(narrow.distanceM, 6);
+  });
+
+  it('🚨 and each of those changes the ANNUAL NUMBER, not only the profile', () => {
+    const panels: PanelShadeInput[] = [
+      { id: 'pA', tilt: 30, azimuth: 180, row: 0, col: 0, lat: panelA.lat, lng: panelA.lng },
+    ];
+    const factor = (over: Record<string, unknown>) => computeShadeAnalysis(
+      panels, LAT, LNG, () => profileForPanel(panelA, sceneWith(over), GROUND), 1.5, 1.134, 2026,
+    ).panelShadeFactors.pA;
+
+    // Taller shades more.
+    expect(factor({ heightM: 16 })).toBeLessThan(factor({ heightM: 5 }));
+    // Wider shades more.
+    expect(factor({ canopyRadiusM: 8 })).toBeLessThan(factor({ canopyRadiusM: 0.6 }));
+    // Nearer shades more than the same tree far away.
+    expect(factor({})).toBeLessThan(factor({ lat: north(-60), lng: east(-55) }));
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // THE WIRING — a shade study that reaches nothing is a picture
 // ═══════════════════════════════════════════════════════════════════════════
