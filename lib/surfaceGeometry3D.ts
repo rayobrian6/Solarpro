@@ -765,6 +765,29 @@ export function assignRoofPlane(
   maxDistM = 50,
 ): RoofPlane | null {
   if (planes.length === 0) return null;
+
+  // 🚨 A FACE THE CLICK IS ACTUALLY ON BEATS A NEARER CENTROID.
+  //
+  // This resolved purely by distance to each plane's CENTROID, with no
+  // containment test at all — so on an ordinary 14 x 7 m slope carrying a
+  // 2.5 m shed dormer, an audit measured 34 of 72 sampled clicks that land on
+  // the MAIN slope resolving to the dormer: 47% of the main roof unreachable by
+  // Extend Row and Add Row, and a panel appended to a 5 degree face instead of
+  // the 22 degree one the cursor was over. `handleSurfaceSelectClick` 350 lines
+  // away already does polygon-first assignment; this path never learned.
+  //
+  // Containment first, then the old nearest-centroid rule as the fallback for a
+  // click that is genuinely off every face (dragging past the eave, which is
+  // what `maxDistM` is for). When a click is inside more than one outline —
+  // overlapping sections, a dormer drawn over its parent — the SMALLEST wins,
+  // because that is the one the user can see and is pointing at.
+  const containing = planes.filter(p =>
+    (p.vertices?.length ?? 0) >= 3 && pointInPolygonLatLng(clickLat, clickLng, p.vertices));
+  if (containing.length === 1) return containing[0];
+  if (containing.length > 1) {
+    return containing.reduce((a, b) => ((b.area ?? Infinity) < (a.area ?? Infinity) ? b : a));
+  }
+
   const cosLat = Math.cos(clickLat * DEG);
   let bestPlane: RoofPlane | null = null;
   let bestDist = Infinity;

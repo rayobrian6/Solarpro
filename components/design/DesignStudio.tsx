@@ -6382,7 +6382,46 @@ export default function DesignStudio({ project, onSave }: Props) {
                                         ✓ Confirm This Plane
                                       </button>
                                     ) : null}
-                                    {/* Slope slider */}
+                                    {/* 🚨 SLOPE AND DIRECTION ARE READ-ONLY FOR A FACE WITH REAL
+                                        3D GEOMETRY, BECAUSE THE SLIDER COULD NOT MOVE IT.
+
+                                        Both controls wrote `plane.pitch` / `plane.azimuth` and
+                                        nothing else. For a face carrying `origin3D` +
+                                        `ecefFrame3D` — every face traced in 3D, and every
+                                        building-section face — `resolvePlaneGeometry` takes the
+                                        FRAME ahead of those scalars, so the roof, the deck, the
+                                        panel grid and the shading all kept the old slope while
+                                        the permit, the structural engine and the drawings read
+                                        the new number.
+
+                                        An audit measured a 22° → 45° drag producing a
+                                        byte-identical 24-panel layout while the scalar read 45
+                                        and the true face tilt stayed 22.243°. The engine's own
+                                        log printed `tilt: 45` next to `sharedPitch` still at
+                                        22.1°, so even the log echoed the lie.
+
+                                        A 2D-only face ("Tag This Roof Plane") has no frame, so
+                                        the scalar IS its geometry and the control is honest
+                                        there. That is the only case it is offered. */}
+                                    {(plane.origin3D && plane.ecefFrame3D) ? (
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] text-slate-500 w-10 flex-shrink-0">Slope</span>
+                                          <span className="flex-1 text-[10px] text-slate-300 font-mono">{(plane.pitch ?? 0).toFixed(1)}°</span>
+                                          <span className="text-[9px] text-slate-500">measured</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] text-slate-500 w-10 flex-shrink-0">Faces</span>
+                                          <span className="flex-1 text-[10px] text-slate-300 font-mono">{Math.round(plane.azimuth ?? 180)}°</span>
+                                          <span className="text-[9px] text-slate-500">measured</span>
+                                        </div>
+                                        <div className="text-[9px] text-slate-500 leading-snug">
+                                          This face has real 3D geometry. Change its slope on the
+                                          building section in the 3D view — a number typed here
+                                          would move the permit and not the roof.
+                                        </div>
+                                      </div>
+                                    ) : (
                                     <div className="flex items-center gap-2">
                                       <span className="text-[10px] text-slate-500 w-10 flex-shrink-0">Slope</span>
                                       <input
@@ -6393,7 +6432,9 @@ export default function DesignStudio({ project, onSave }: Props) {
                                       />
                                       <span className="text-amber-400 font-mono text-[10px] w-5 text-right">{(plane.pitch ?? 0).toFixed(0)}°</span>
                                     </div>
-                                    {/* Direction */}
+                                    )}
+                                    {/* Direction — same rule as Slope above. */}
+                                    {(plane.origin3D && plane.ecefFrame3D) ? null : (
                                     <div>
                                       <div className="text-[10px] text-slate-500 mb-1">Direction this face points</div>
                                       <div className="grid grid-cols-8 gap-0.5">
@@ -6408,6 +6449,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                                         })}
                                       </div>
                                     </div>
+                                    )}
                                     {/* v50.23: Per-plane orientation override */}
                                     <div>
                                       <div className="text-[10px] text-slate-500 mb-1">Panel orientation for this plane</div>

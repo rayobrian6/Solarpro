@@ -446,3 +446,32 @@ describe('🚨 undo brings the panels back too', () => {
     }
   });
 });
+
+describe('🚨 a control that cannot move the geometry is not offered', () => {
+  it('the sidebar Slope slider and Direction buttons are read-only for a 3D-backed face', () => {
+    // Both wrote `plane.pitch` / `plane.azimuth` and nothing else. For a face
+    // carrying origin3D + ecefFrame3D — every face traced in 3D, and every
+    // building-section face — `resolvePlaneGeometry` takes the FRAME ahead of
+    // those scalars, so the roof, the deck, the panel grid and the shading kept
+    // the old slope while the permit, the structural engine and the drawings
+    // read the new number.
+    //
+    // An audit measured a 22° → 45° drag producing a byte-identical 24-panel
+    // layout while the scalar read 45 and the true tilt stayed 22.243°.
+    expect(STUDIO).toContain('{(plane.origin3D && plane.ecefFrame3D) ? (');
+    expect(STUDIO).toContain('{(plane.origin3D && plane.ecefFrame3D) ? null : (');
+
+    // The read-only branch reports the MEASURED value and says where to change it.
+    const i = STUDIO.indexOf('{(plane.origin3D && plane.ecefFrame3D) ? (');
+    const block = STUDIO.slice(i, i + 1_400);
+    expect(block).toMatch(/measured/);
+    expect(block).toMatch(/building section in the 3D view/);
+
+    // 🚨 AND THE SLIDER SURVIVES FOR A 2D-ONLY FACE. A "Tag This Roof Plane"
+    // face has no frame, so `computeEcefFrameForLegacyPlane` derives its
+    // geometry FROM the scalar — the control is honest there, and removing it
+    // outright would take away the only way to set that face's pitch.
+    expect(STUDIO).toContain('type="range" min={0} max={45} step={1}');
+    expect(STUDIO).toContain("p.id === plane.id ? { ...p, pitch: Number(e.target.value) } : p");
+  });
+});
