@@ -20,6 +20,7 @@ import { generateBOMV4, bomToMarkdown, bomToCSV, BOMGenerationInputV4 } from '@/
 import { deriveStructuralBOMForSubsystems, type BOMSystemType, type StructuralBOMItem, type SubSystemPanelCounts } from '@/lib/bom-system-profiles';
 import type { BOMGenerationResultV4, BOMLineItemV4, BOMStageResult, BOMStageId } from '@/lib/bom-engine-v4';
 import { validateBOMInputs } from '@/lib/bom-validation';
+import { readProductionMeterFlag } from '@/lib/equipment/currentTransformers';
 import { deriveEcoFlowBOM, MICRO_ONLY_CATEGORIES } from '@/lib/ecoflow-bom';
 import { isEcoFlowInverter } from '@/lib/ecoflow-system';
 import { requireAuth } from '@/lib/security';
@@ -350,7 +351,12 @@ export async function POST(req: NextRequest) {
       acOCPD:             Number(body.acOCPD)             || 0,   // FIX: was 40A hardcoded default — frontend now sends correct value
       dcOCPD:             Number(body.dcOCPD)             || 20,
       jurisdiction:       body.jurisdiction,
-      requiresProductionMeter: body.requiresProductionMeter ?? false,
+      // 🚨 THE OTHER HALF OF THE INERT TOGGLE. The engineering page posts
+      // `productionMeter`; this read `body.requiresProductionMeter`, which the
+      // page has never sent, so `?? false` was FALSE on every request — the same
+      // control the SLD route hard-wired to TRUE. The two routes disagreed about
+      // the same switch and neither was listening to it. ONE key name now.
+      requiresProductionMeter: readProductionMeterFlag(body, false),
       requiresACDisconnect:    body.requiresACDisconnect    ?? true,
       requiresDCDisconnect:    body.requiresDCDisconnect    ?? true,
       requiresRapidShutdown:   body.requiresRapidShutdown   ?? true,

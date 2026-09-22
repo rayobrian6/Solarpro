@@ -7,14 +7,14 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { renderSLDProfessional, normalizeSourceBranches, acCollectionFromLanes, type SLDProfessionalInput, type SLDSourceBranch } from '@/lib/sld-professional-renderer';
 import type { HybridAcCollectionPlan } from '@/lib/equipment/integratedBos';
-import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery, unselectedInverterLabel, isInverterUnselectedMarker } from './helpers';
+import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery, unselectedInverterLabel, isInverterUnselectedMarker, resolveBatteryCapacity } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { buildConductorAuthority, type ConductorAuthority, type SubSystemConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
 import { getInverterById, getMicroinverterById, SOLAR_PANELS,
-         resolveBatteryBranch, findBatteryByExactModel } from '@/lib/equipment-db';
+         resolveBatteryBranch } from '@/lib/equipment-db';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
@@ -194,26 +194,27 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // per unit and a flat 20 A per unit. Both are now the authority's answer or
   // nothing at all. `resolveBatteryBranch` is the single decider; an
   // unresolved answer stays unresolved rather than becoming a typical value.
+  // Identity resolution (id, else EXACT manufacturer+model) lives INSIDE the
+  // authority now — it was written out inline here and in generatePermit, and
+  // nowhere else, so the calculation engine had no recovery at all.
   const _batAuth = hasBattery
     ? resolveBatteryBranch(
-        project.batteryId ?? findBatteryByExactModel(project.batteryBrand, project.batteryModel)?.id,
+        { id: project.batteryId, brand: project.batteryBrand, model: project.batteryModel },
         batteryUnits,
       )
     : null;
   const _batteryAuthorityBackfeedA = _batAuth?.resolved
     ? (_batAuth.busbarContributionA ?? undefined)
     : undefined;
-  // Per-unit usable kWh: the project's own figure wins (it came from the
-  // design), then the authority. No `?? 5.0` — that number described one
-  // product and was printed for every product.
-  const _batKwhPerAuthority = _batAuth?.resolved && _batAuth.aggregateUsableKwh != null
-    ? _batAuth.aggregateUsableKwh / batteryUnits
-    : undefined;
-  const batteryKwhPer   = project.batteryKwh ?? _batKwhPerAuthority ?? 0;
-  const batteryKwhTotal = hasBattery ? batteryUnits * batteryKwhPer : 0;
-  const batteryKwhLabel = hasBattery && batteryUnits > 1
-    ? `${batteryKwhTotal} kWh (${batteryUnits} × ${batteryKwhPer})`
-    : `${batteryKwhTotal} kWh`;
+  // 🚨 CAPACITY COMES FROM THE ONE PERMIT-WIDE AUTHORITY, not from a local
+  // `?? 0`. The `?? 0` that was here reached the renderer, which gates the
+  // 'Battery Capacity' row on `input.batteryKwh` being TRUTHY — so an
+  // unresolved battery deleted the row from the equipment schedule while PV-1
+  // printed 5.0 kWh and PV-5 printed 10.0 for the same design. The label now
+  // carries the fail-loud marker and the row always prints.
+  const _batCap         = resolveBatteryCapacity(project);
+  const batteryKwhTotal = _batCap.totalKwh ?? 0;
+  const batteryKwhLabel = hasBattery ? _batCap.label : '';
 
   // ── Micro-specific ──
   const deviceCount = isMicro ? totalPanels : undefined;

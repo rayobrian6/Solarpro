@@ -235,6 +235,15 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     impact: { safety: false, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
     justification: '',
   },
+  // The ESS capacity every sheet prints is not established. NFPA 855 / IRC R328
+  // state their ESS limits in kWh, so an unstated capacity is an unreviewable
+  // installation (safety + acceptance); the battery cannot be ordered
+  // (procurement); and the 705.12(B) backfeed comes from the same unidentified
+  // product (code + engineering).
+  'BATTERY-CAPACITY-UNRESOLVED': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
   // Module catalog dimensions absent: footprints/layout cannot be built and the
   // ordered module identity is not pinned.
   'MODULE-DIMENSIONS-UNVERIFIED': {

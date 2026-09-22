@@ -4,7 +4,7 @@
 // Permit-grade solar PV calculations
 // ============================================================
 
-import { getConductorByGauge } from './equipment-db';
+import { getConductorByGauge, resolveBatteryBranch } from './equipment-db';
 import { resolveOCPD, OCPDResolutionResult } from './ocpd-resolver';
 import { autoSizeACWire, autoSizeDCWire, WireAutoSizerResult, DCWireAutoSizerResult } from './wire-autosizer';
 import {
@@ -144,8 +144,13 @@ export interface ElectricalCalcInput {
   batteryBackfeedA?: number;        // A — battery backfeed breaker amps (from equipment-db)
   batteryCount?: number;            // qty of battery units
   batteryContinuousOutputA?: number; // A — battery continuous output current
-  batteryModel?: string;            // for display in NEC calc steps
-  batteryManufacturer?: string;     // for display in NEC calc steps
+  // 🚨 batteryId / batteryManufacturer / batteryModel are the IDENTITY this
+  // engine falls back to when no caller pre-resolved batteryBackfeedA. They
+  // are no longer display-only: they are what makes an unresolved battery
+  // RECOVERABLE instead of a dead-end interconnection failure.
+  batteryId?: string;               // catalogue id, when the design stored one
+  batteryModel?: string;            // exact catalogue model, or free text
+  batteryManufacturer?: string;     // exact catalogue manufacturer, or free text
 
   // Generator — NEC 702 Optional Standby Systems
   generatorKw?: number;             // kW — generator rated output
@@ -859,9 +864,31 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   // to pass — the permissive direction, on the one calculation that clears a
   // design for interconnection. An unknown backfeed now blocks the conclusion
   // instead of flattering it. (docs/BATTERY-ELECTRICAL-AUTHORITY.md §6.)
+  //
+  // 🚨 …BUT THE REFUSAL MUST BE RECOVERABLE. Blocking on an unresolved battery
+  // is right; blocking on a battery that this repository CAN resolve is not.
+  // A legacy or free-text design carries `batteryBrand`/`batteryModel` and no
+  // catalogue id (app/engineering/page.tsx: the two carriages populate
+  // different fields), its caller's pre-resolved scalar is therefore 0, and 0
+  // is falsy — so designs that passed yesterday hard-failed interconnection
+  // for a reason the installer could not act on. Before refusing, ASK THE
+  // AUTHORITY with whatever identity the design actually carries.
+  // `findBatteryByExactModel` inside it is deliberately NOT a substring
+  // matcher, so this recovers an identity, it does not guess one.
   const _batteryPresent = (input.batteryCount ?? 0) > 0;
-  const _batteryBackfeedKnown = typeof input.batteryBackfeedA === 'number' && input.batteryBackfeedA > 0;
-  const batteryBackfeedA = input.batteryBackfeedA ?? 0;
+  const _batteryBackfeedGiven = typeof input.batteryBackfeedA === 'number' && input.batteryBackfeedA > 0;
+  const _batteryRecovery = (_batteryPresent && !_batteryBackfeedGiven)
+    ? resolveBatteryBranch(
+        { id: input.batteryId, brand: input.batteryManufacturer, model: input.batteryModel },
+        input.batteryCount,
+      )
+    : null;
+  // A RESOLVED answer of 0 A is knowledge (a DC-coupled battery's backfeed is
+  // already inside the inverter's), which a bare scalar input can never say.
+  const _batteryBackfeedKnown = _batteryBackfeedGiven || _batteryRecovery?.resolved === true;
+  const batteryBackfeedA = _batteryBackfeedGiven
+    ? input.batteryBackfeedA
+    : (_batteryRecovery?.resolved ? (_batteryRecovery.busbarContributionA ?? 0) : 0);
   const batteryBackfeedUnresolved = _batteryPresent && !_batteryBackfeedKnown;
   const totalBackfeedWithBattery = solarBreakerRequired + batteryBackfeedA;
 
@@ -998,13 +1025,21 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   // supply-side taps are exempt because the 120% rule does not apply to them,
   // so a missing backfeed term changes nothing there.
   if (batteryBackfeedUnresolved && icMethod !== 'SUPPLY_SIDE_TAP') {
+    const _batIdent = [input.batteryManufacturer, input.batteryModel]
+      .map(s => (s ?? '').trim()).filter(Boolean).join(' ');
+    const _batteryIdentityText = _batIdent ? `Design names '${_batIdent}'. ` : '';
     const _batBlock: CalcIssue = {
       code: 'E-BATTERY-BACKFEED-UNRESOLVED',
       severity: 'error',
-      message: `NEC 705.12(B) cannot be concluded: ${input.batteryCount} battery unit(s) are on this design but no authoritative backfeed breaker was resolved for them. The busbar total (${icSolarBreaker}A) omits the battery contribution. Resolve the battery against the equipment catalogue (lib/equipment-db.ts → resolveBatteryBranch) — do not substitute a typical value.`,
+      // WHAT WAS TRIED and WHAT THE INSTALLER MUST DO. The previous message
+      // named an internal function path and a source file — nothing a person
+      // holding the design can act on.
+      message: `NEC 705.12(B) cannot be concluded: ${input.batteryCount} battery unit(s) are on this design but no authoritative backfeed breaker was resolved for them. The busbar total (${icSolarBreaker}A) omits the battery contribution. ${_batteryIdentityText}${_batteryRecovery?.refusal?.message ?? 'No battery identity (id, manufacturer or model) was supplied with the design.'}`,
       value: icSolarBreaker,
       necReference: 'NEC 705.12(B)',
-      suggestion: 'Select the battery model in the design so its documented branch OCPD can be resolved, or record the manufacturer-stated backfeed breaker.',
+      suggestion: _batteryIdentityText
+        ? `Re-select this battery from the equipment picker so the design stores its catalogue id, or correct the manufacturer/model to the exact catalogue spelling. If the product is not in the catalogue, record its manufacturer-stated backfeed breaker before this design can be interconnected.`
+        : 'Select the battery model in the design so its documented branch OCPD can be resolved, or record the manufacturer-stated backfeed breaker.',
     };
     interconnectionIssues.push(_batBlock);
     allErrors.push(_batBlock);

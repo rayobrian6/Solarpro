@@ -4375,6 +4375,34 @@ export interface BatteryBranchResolution {
   /** The document(s) behind the numbers above. */
   source: string | null;
   refusal: BatteryBranchRefusal | null;
+  /**
+   * HOW the product was identified before any electrical figure was read.
+   *
+   * 🚨 'exact-model-match' is a RECOVERY, not a relaxation. A legacy or
+   * free-text project carries `batteryBrand`/`batteryModel` and no catalogue
+   * id (app/engineering/page.tsx documents the two carriages populating
+   * different fields). Refusing such a design outright is unrecoverable for
+   * the installer, so the identity is re-derived through
+   * `findBatteryByExactModel` — which is deliberately NOT a substring matcher.
+   * No match is still UNRESOLVED.
+   */
+  identityBasis: BatteryIdentityBasis;
+}
+
+/** How a battery was identified. See `BatteryBranchResolution.identityBasis`. */
+export type BatteryIdentityBasis = 'catalogue-id' | 'exact-model-match' | 'unresolved';
+
+/**
+ * Whatever a project actually carries about its battery. A design saved by the
+ * equipment picker has `id`; a legacy/free-text one has only `brand` + `model`.
+ */
+export interface BatteryIdentity {
+  /** catalogue id — the authoritative identity when present. */
+  id?: string | null;
+  /** manufacturer as the project stored it. */
+  brand?: string | null;
+  /** model as the project stored it. */
+  model?: string | null;
 }
 
 /**
@@ -4388,6 +4416,7 @@ function refuseBatteryBranch(
   batteryId: string,
   unitCount: number,
   refusal: BatteryBranchRefusal,
+  identityBasis: BatteryIdentityBasis = 'unresolved',
 ): BatteryBranchResolution {
   return {
     resolved: false, batteryId, unitCount, basis: 'unresolved',
@@ -4396,37 +4425,66 @@ function refuseBatteryBranch(
     busbarContributionA: null, busbarBasis: 'unresolved',
     ratedOutputCurrentA: null, aggregateUsableKwh: null,
     permitModelNumber: null, requiresDeviceId: null,
-    source: null, refusal,
+    source: null, refusal, identityBasis,
   };
 }
 
 /**
  * resolveBatteryBranch — THE single answer for battery electrical quantities.
  *
- * @param batteryId  catalogue id. Identity is the id, never a model substring.
+ * @param battery    catalogue id, or whatever identity the project carries
+ *                   ({ id, brand, model }). Identity is the id or an EXACT
+ *                   manufacturer+model match — NEVER a model substring.
  * @param unitCount  how many units are installed.
  */
 export function resolveBatteryBranch(
-  batteryId: string | undefined | null,
+  battery_: string | BatteryIdentity | undefined | null,
   unitCount: number,
 ): BatteryBranchResolution {
-  const id = batteryId ?? '';
-  const battery = id ? getBatteryById(id) : undefined;
+  // ── IDENTITY, resolved ONCE and here ──────────────────────────────────────
+  //
+  // 🚨 `project.batteryId ?? findBatteryByExactModel(brand, model)?.id` was
+  // written out inline at two permit call sites and nowhere else, so the
+  // calculation engine — the one consumer that BLOCKS on a refusal — had no
+  // recovery at all. The recovery belongs to the authority, not to whichever
+  // consumer happened to remember it.
+  const ident: BatteryIdentity = typeof battery_ === 'string'
+    ? { id: battery_ }
+    : (battery_ ?? { id: '' });
+  const declaredId = (ident.id ?? '').trim();
+  const brand = (ident.brand ?? '').trim();
+  const model = (ident.model ?? '').trim();
+
+  let battery = declaredId ? getBatteryById(declaredId) : undefined;
+  let identityBasis: BatteryIdentityBasis = battery ? 'catalogue-id' : 'unresolved';
+  if (!battery && (brand || model)) {
+    const byText = findBatteryByExactModel(brand, model);
+    if (byText) { battery = byText; identityBasis = 'exact-model-match'; }
+  }
+  const id = battery?.id ?? declaredId;
 
   if (!battery) {
+    // WHAT THE INSTALLER MUST DO — named, because "unresolved" with no action
+    // is a dead end on a saved design that passed yesterday.
+    const _action =
+      'ACTION: re-select this battery in the design so its catalogue id is stored, '
+      + 'or add the product to lib/equipment-db.ts from its datasheet (model number, '
+      + 'usable kWh, branch OCPD). Do not substitute a typical value.';
     return refuseBatteryBranch(id, unitCount, {
       code: 'UNKNOWN_BATTERY',
-      message: id
-        ? `No catalogue row for battery id '${id}'. Its electrical characteristics are UNRESOLVED — do not substitute a typical value.`
-        : 'No battery id supplied. Electrical characteristics are UNRESOLVED.',
+      message: declaredId
+        ? `No catalogue row for battery id '${declaredId}'${brand || model ? `, and '${[brand, model].filter(Boolean).join(' ')}' is not an exact catalogue manufacturer+model match either` : ''}. Its electrical characteristics are UNRESOLVED. ${_action}`
+        : (brand || model)
+          ? `'${[brand, model].filter(Boolean).join(' ')}' is not an exact match for any catalogue battery (identity is the catalogue id or an EXACT manufacturer+model match — a model substring is never accepted, which is how 'IQ Battery 10' would pick the 10C). Electrical characteristics are UNRESOLVED. ${_action}`
+          : `No battery id, manufacturer or model supplied. Electrical characteristics are UNRESOLVED. ${_action}`,
     });
   }
 
   if (!Number.isInteger(unitCount) || unitCount < 1) {
     return refuseBatteryBranch(id, unitCount, {
       code: 'UNIT_COUNT_INVALID',
-      message: `Unit count must be a positive integer; received ${unitCount}. A branch OCPD is a step function over the unit count and cannot be resolved without it.`,
-    });
+      message: `Unit count must be a positive integer; received ${unitCount}. A branch OCPD is a step function over the unit count and cannot be resolved without it. ACTION: record how many ${battery.manufacturer} ${battery.model} units this design installs.`,
+    }, identityBasis);
   }
 
   const aggregateUsableKwh =
@@ -4446,7 +4504,7 @@ export function resolveBatteryBranch(
       permitModelNumber: battery.permitModelNumber ?? null,
       requiresDeviceId: null,
       source: 'DC-coupled: inverter backfeed already carries this battery (NEC 705.12(B)).',
-      refusal: null,
+      refusal: null, identityBasis,
     };
   }
 
@@ -4457,15 +4515,15 @@ export function resolveBatteryBranch(
     if (unitCount > arch.maxUnitsDocumented) {
       return refuseBatteryBranch(id, unitCount, {
         code: 'EXCEEDS_DOCUMENTED_MAXIMUM',
-        message: `${battery.manufacturer} ${battery.model}: ${unitCount} units exceeds the documented maximum of ${arch.maxUnitsDocumented}. There is no published rule at that count — this is UNRESOLVED, not an extension of the last rule.`,
-      });
+        message: `${battery.manufacturer} ${battery.model}: ${unitCount} units exceeds the documented maximum of ${arch.maxUnitsDocumented}. There is no published rule at that count — this is UNRESOLVED, not an extension of the last rule. ACTION: confirm the installed unit count, or obtain the manufacturer's published rule for that count.`,
+      }, identityBasis);
     }
     const rule = arch.rules.find(r => unitCount >= r.minUnits && unitCount <= r.maxUnits);
     if (!rule) {
       return refuseBatteryBranch(id, unitCount, {
         code: 'NO_BRANCH_RULE',
-        message: `${battery.manufacturer} ${battery.model}: no published branch rule covers ${unitCount} unit(s).`,
-      });
+        message: `${battery.manufacturer} ${battery.model}: no published branch rule covers ${unitCount} unit(s). ACTION: confirm the installed unit count against the manufacturer's branch-circuit table.`,
+      }, identityBasis);
     }
     return {
       resolved: true, batteryId: id, unitCount, basis: 'documented-architecture',
@@ -4487,7 +4545,7 @@ export function resolveBatteryBranch(
       permitModelNumber: battery.permitModelNumber ?? null,
       requiresDeviceId: arch.requiresDeviceId,
       source: rule.source,
-      refusal: null,
+      refusal: null, identityBasis,
     };
   }
 
@@ -4496,8 +4554,8 @@ export function resolveBatteryBranch(
   if (typeof scalar !== 'number' || scalar <= 0) {
     return refuseBatteryBranch(id, unitCount, {
       code: 'NO_ELECTRICAL_DATA',
-      message: `${battery.manufacturer} ${battery.model}: catalogue row carries no branch architecture and no usable backfeedBreakerA. The NEC 705.12(B) conclusion, conductor sizing and OCPD selection are BLOCKED — not 0, not a typical value.`,
-    });
+      message: `${battery.manufacturer} ${battery.model}: catalogue row carries no branch architecture and no usable backfeedBreakerA. The NEC 705.12(B) conclusion, conductor sizing and OCPD selection are BLOCKED — not 0, not a typical value. ACTION: record the manufacturer-stated branch OCPD for this product in lib/equipment-db.ts.`,
+    }, identityBasis);
   }
 
   // 🚨 A SHARED GATEWAY IS ONE POINT OF CONNECTION, NOT N OF THEM.
@@ -4530,7 +4588,7 @@ export function resolveBatteryBranch(
     source: gatewayShared
       ? `SolarPro catalogue scalar backfeedBreakerA=${scalar} A. ${battery.manufacturer} ${battery.model} requires ${battery.gatewayModel ?? 'a gateway'}, and all ${unitCount} unit(s) backfeed through it as ONE point of connection. NOT manufacturer-architecture verified.`
       : `SolarPro catalogue scalar backfeedBreakerA=${scalar} A, summed over ${unitCount} unit(s). NOT manufacturer-architecture verified.`,
-    refusal: null,
+    refusal: null, identityBasis,
   };
 }
 

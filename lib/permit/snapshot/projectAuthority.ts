@@ -56,6 +56,9 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'FEEDER-RACEWAY-AUTHORITY': 'electrical',
   'RACEWAY-BONDING-AUTHORITY': 'electrical',
   'EQUIPMENT-IDENTITY-CONFLICT': 'equipment',
+  // The ESS product of record is not established: no usable capacity on the
+  // design and no catalogue identity. An equipment gap, not an electrical one.
+  'BATTERY-CAPACITY-UNRESOLVED': 'equipment',
   'CODE-AUTHORITY-INCOMPLETE': 'code',
   'CODE-AUTHORITY-CONFLICT': 'code',
   'PROJECT-AUTHORITY-UNVERIFIED': 'document',

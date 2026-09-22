@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type { PermitInput, ResolvedEquipment } from '../types';
-import { SOLAR_PANELS, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+import { SOLAR_PANELS, getInverterById, getMicroinverterById, resolveBatteryBranch } from '@/lib/equipment-db';
 import { effectiveInverterSubKey } from './subSystems';
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 
@@ -32,6 +32,108 @@ export function unselectedInverterLabel(key?: string | null): string {
  *  variant), so display layers can detect + colorize it. */
 export function isInverterUnselectedMarker(model?: string | null): boolean {
   return !!model && model.includes('INVERTER NOT SELECTED');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// THE ONE BATTERY (ESS) CAPACITY THE PLANSET PRINTS
+// ───────────────────────────────────────────────────────────────
+// 🚨 WHAT THIS REPLACED: three sheets of ONE planset printed three different
+// capacities for the same unresolved battery.
+//
+//   lib/permit/sections/sitePlan.ts        `project.batteryKwh ?? 5.0`  → "5.0 kWh"
+//   lib/permit/sections/compliancePages.ts `project.batteryKwh ?? 5.0`  → "10.0 kWh" (×2 units)
+//   lib/permit/utils/sldAdapter.ts         `project.batteryKwh ?? 0`    → the
+//        'Battery Capacity' row DISAPPEARED, because the renderer gates it on
+//        `input.batteryKwh` being truthy.
+//
+// 5.0 kWh was a fabricated number that described one product and was printed
+// for every product; generatePermit stopped writing it and nothing downstream
+// was told. A blank row is not better than a wrong one — it is the same defect
+// made quieter. NFPA 855 / IRC R328 thresholds are stated in kWh, so a
+// reviewer who cannot see the capacity cannot review the ESS at all.
+//
+// One function answers for every sheet, and when it cannot answer it says so
+// in a marker a reviewer can see and `BATTERY-CAPACITY-UNRESOLVED` blocks
+// release on (lib/permit/snapshot/build.ts + releaseGates.ts).
+// ═══════════════════════════════════════════════════════════════
+export const BATTERY_CAPACITY_UNRESOLVED = '⚠ ESS CAPACITY UNRESOLVED';
+
+/** True when a capacity string is the fail-loud unresolved-capacity marker. */
+export function isBatteryCapacityUnresolvedMarker(s?: string | null): boolean {
+  return !!s && s.includes('ESS CAPACITY UNRESOLVED');
+}
+
+export interface BatteryCapacityPresentation {
+  /** `hasRealBattery` — a count alone is a phantom battery. */
+  hasBattery: boolean;
+  /** false ⇔ every figure below is null and the labels carry the marker. */
+  resolved: boolean;
+  units: number;
+  perUnitKwh: number | null;
+  totalKwh: number | null;
+  /** 'project-record' | 'catalogue' | 'unresolved' — where the number came from. */
+  basis: 'project-record' | 'catalogue' | 'unresolved';
+  /** Fleet total, e.g. '20.0 kWh (2 × 10.0)'. The marker when unresolved. */
+  label: string;
+  /** One unit, e.g. '10.0 kWh'. The marker when unresolved. */
+  perUnitLabel: string;
+  /** Why it could not be resolved — printed in the release registry, not on a sheet. */
+  unresolvedReason: string | null;
+}
+
+/**
+ * THE battery capacity every sheet prints. Precedence:
+ *   1. `project.batteryKwh` — the design's own per-unit figure, when > 0.
+ *   2. `resolveBatteryBranch` — the catalogue, by id or EXACT manufacturer+model.
+ *   3. UNRESOLVED. Never 5.0, never 0, never blank.
+ */
+export function resolveBatteryCapacity(project: {
+  batteryCount?: number; batteryKwh?: number;
+  batteryId?: string; batteryBrand?: string; batteryModel?: string;
+} | null | undefined): BatteryCapacityPresentation {
+  const units = Math.max(1, Math.trunc(project?.batteryCount ?? 0) || 1);
+  if (!hasRealBattery(project)) {
+    return {
+      hasBattery: false, resolved: false, units: 0,
+      perUnitKwh: null, totalKwh: null, basis: 'unresolved',
+      label: '', perUnitLabel: '', unresolvedReason: null,
+    };
+  }
+
+  const fmt = (n: number) => `${n.toFixed(1)} kWh`;
+  const present = (perUnit: number, basis: 'project-record' | 'catalogue'): BatteryCapacityPresentation => {
+    const total = perUnit * units;
+    return {
+      hasBattery: true, resolved: true, units,
+      perUnitKwh: perUnit, totalKwh: total, basis,
+      label: units > 1 ? `${fmt(total)} (${units} × ${perUnit.toFixed(1)})` : fmt(total),
+      perUnitLabel: fmt(perUnit),
+      unresolvedReason: null,
+    };
+  };
+
+  // 1. the design's own per-unit figure
+  const recorded = project?.batteryKwh;
+  if (typeof recorded === 'number' && recorded > 0) return present(recorded, 'project-record');
+
+  // 2. the catalogue, through the single battery authority
+  const auth = resolveBatteryBranch(
+    { id: project?.batteryId, brand: project?.batteryBrand, model: project?.batteryModel },
+    units,
+  );
+  if (auth.resolved && auth.aggregateUsableKwh != null && auth.aggregateUsableKwh > 0) {
+    return present(auth.aggregateUsableKwh / units, 'catalogue');
+  }
+
+  // 3. UNRESOLVED — visible, identical on every sheet.
+  return {
+    hasBattery: true, resolved: false, units,
+    perUnitKwh: null, totalKwh: null, basis: 'unresolved',
+    label: BATTERY_CAPACITY_UNRESOLVED,
+    perUnitLabel: BATTERY_CAPACITY_UNRESOLVED,
+    unresolvedReason: auth.refusal?.message
+      ?? 'The design records no usable capacity for this battery and the catalogue could not identify it.',
+  };
 }
 
 

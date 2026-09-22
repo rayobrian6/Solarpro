@@ -21,6 +21,11 @@
 import { resolveIntegratedEquipment, type IntegratedEquipmentPlan } from '@/lib/equipment/integratedBos';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
+import {
+  resolveMeteringRequirement,
+  meteringScheduleValue,
+  type MeteringResolution,
+} from '@/lib/equipment/currentTransformers';
 
 export interface SldCombinerInputs {
   inverterManufacturer: string;
@@ -37,6 +42,13 @@ export interface SldCombinerInputs {
   overrideDeviceIds?: string[];
   /** The project's RECORDED selection. Outranks everything above. */
   selectedCombinerId?: string | null;
+  /** The design's recorded interconnection, in whatever spelling it uses. Absent
+   *  ⇒ the consumption metering MODE is INDETERMINATE and the schedule says so
+   *  rather than picking one. */
+  interconnectionRaw?: string | null;
+  /** Ungrounded conductors at the consumption measurement point. Absent ⇒ the CT
+   *  quantity is UNRESOLVED (it is not assumed to be a split-phase pair). */
+  ungroundedConductorCount?: number | null;
 }
 
 export interface SldCombinerFields {
@@ -52,6 +64,16 @@ export interface SldCombinerFields {
    * belongs on a permit unqualified.
    */
   combinerSelectionIsDecided: boolean;
+  /**
+   * 🚨 WHAT THIS DESIGN ACTUALLY MEASURES — the CT authority's answer, resolved
+   * once here so the diagram, the export and the schedule cannot disagree about
+   * it the way they disagreed about the combiner. undefined ⇒ no metering device
+   * is modelled and NOTHING is asserted.
+   */
+  combinerMeteringSummary: string | undefined;
+  /** The full metering resolution, for callers that need the BOM lines or the
+   *  blocking requirement. null ⇒ nothing is modelled. */
+  metering: MeteringResolution | null;
   /** The full plan, for callers that need slots, warnings or the device list. */
   plan: IntegratedEquipmentPlan;
 }
@@ -77,6 +99,21 @@ export function sldCombinerFields(inputs: SldCombinerInputs): SldCombinerFields 
   const brains = plan.brains ?? plan.devices[0];
   const label = brains ? `${brains.brand} ${brains.model}` : undefined;
 
+  // 🚨 THE CLAIM AND THE PURCHASE ARE THE SAME DECISION.
+  // A package asserts "the integrated gateway provides production/consumption
+  // metering" exactly when the resolved device integrates the gateway — so that
+  // is exactly when the consumption CTs are required. Tying the two to one
+  // predicate is what stops a sheet claiming a measurement the job never bought.
+  const metering = brains?.metering
+    ? resolveMeteringRequirement({
+        capability: brains.metering,
+        deviceLabel: brains.model,
+        interconnectionRaw: inputs.interconnectionRaw,
+        ungroundedConductorCount: inputs.ungroundedConductorCount ?? null,
+        consumptionMeteringRequired: plan.hasIntegratedGateway,
+      })
+    : null;
+
   return {
     // The micro fallback string is kept because the renderer needs SOMETHING in
     // the schedule cell; what changed is that `combinerSelectionIsDecided` now
@@ -86,6 +123,8 @@ export function sldCombinerFields(inputs: SldCombinerInputs): SldCombinerFields 
     combinerHasIntegratedGateway: plan.hasIntegratedGateway,
     combinerProvidesAcDisconnect: plan.providesAcDisconnect,
     combinerSelectionIsDecided: combinerBasisIsDecided(plan.combinerBasis ?? 'unresolved-default'),
+    combinerMeteringSummary: metering ? meteringScheduleValue(metering) : undefined,
+    metering,
     plan,
   };
 }

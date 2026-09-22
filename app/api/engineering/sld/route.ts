@@ -22,6 +22,12 @@ import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professio
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
 import { resolveIntegratedEquipment } from '@/lib/equipment/integratedBos';
+import {
+  readProductionMeterFlag,
+  resolveMeteringRequirement,
+  meteringScheduleValue,
+  ungroundedConductorsForService,
+} from '@/lib/equipment/currentTransformers';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
 import {
@@ -149,7 +155,12 @@ export async function POST(req: NextRequest) {
           utilityName:             String(body.utilityName ?? body.utilityCompany ?? body.utility ?? 'Local Utility'),
           interconnection:         String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'LOAD_SIDE'),
           rapidShutdownIntegrated: !!(body.rapidShutdownIntegrated || body.rapidShutdown),
-          hasProductionMeter:      body.hasProductionMeter !== false,
+          // 🚨 THE UI CONTROL REACHED NOTHING. The engineering page posts
+          // `productionMeter`; this read `body.hasProductionMeter`, which was
+          // never sent, so `undefined !== false` was TRUE on every request —
+          // the toggle was inert and the answer was hard-wired. ONE key name
+          // now, read through the metering authority.
+          hasProductionMeter:      readProductionMeterFlag(body, true),
           hasBattery:              !!(body.hasBattery || body.batteryModel || body.batteryKwh || body.batteryBrand),
           batteryModel:            String(body.batteryModel || body.batteryBrand || ''),
           batteryKwh:              Number(body.batteryKwh) || 0,
@@ -751,7 +762,8 @@ export async function POST(req: NextRequest) {
         return raw;
       })(),
       rapidShutdownIntegrated: !!(body.rapidShutdownIntegrated || body.rapidShutdown),
-      hasProductionMeter:      body.hasProductionMeter !== false,
+      // Same inert toggle as the multi-lane branch above — see that note.
+      hasProductionMeter:      readProductionMeterFlag(body, true),
       hasBattery:              !!(body.hasBattery || body.batteryModel || body.batteryKwh || body.batteryBrand || (body.batteryCount && Number(body.batteryCount) > 0)),
       batteryModel:            String(body.batteryModel || body.batteryBrand || ''),
       batteryKwh:              Number(body.batteryKwh)             || 0,
@@ -809,6 +821,20 @@ export async function POST(req: NextRequest) {
       combinerModel:           _bosLabel,
       combinerHasIntegratedGateway: _bosPlan.hasIntegratedGateway,
       combinerProvidesAcDisconnect: _bosPlan.providesAcDisconnect,
+      // What this design actually MEASURES, from the CT authority. The schedule
+      // could previously say "IQ Combiner 6C" and imply consumption metering the
+      // job had not bought; this row states the channels instead of implying them.
+      meteringChannels:        (() => {
+        const _cap = _bosPlan.brains?.metering;
+        if (!_cap) return undefined;
+        return meteringScheduleValue(resolveMeteringRequirement({
+          capability: _cap,
+          deviceLabel: _bosPlan.brains?.model ?? null,
+          interconnectionRaw: body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? null,
+          ungroundedConductorCount: ungroundedConductorsForService(Number(body.systemVoltage) || 240, 1),
+          consumptionMeteringRequired: _bosPlan.hasIntegratedGateway,
+        }));
+      })(),
       ocpdPerString:           isMicro ? 0 : (systemModel?.stringOcpdAmps ?? stringResult?.ocpdPerString),
       dcAcRatio:               isMicro ? undefined : (stringResult ? calcDcAcRatio(stringResult.totalDcPower / 1000, acOutputKw) : undefined),
       stringConfigWarnings:    stringResult?.warnings,

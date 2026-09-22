@@ -24,6 +24,7 @@ import { formatInDocumentTimezone, documentIssueContextOf } from '../utils/docum
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { resolveMeteringRequirement, ungroundedConductorsForService } from '@/lib/equipment/currentTransformers';
 // TAC WS-18 — reader-facing cross-sheet pointers resolve against the ACTIVE index.
 import { activeSheetIds, sheetRef } from '../utils/sheetRef';
 import { SUB_LABEL } from './subSystemSheets';
@@ -856,13 +857,53 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           _pv4aEq.inverterModel, _pv4aEq.inverterManufacturer, input,
         );
         const _pv4aBos = buildIntegratedEquipment(input, cad);
+        // ═══════════════════════════════════════════════════════════════════
+        // 🚨 THIS SHEET USED TO ASSERT CONSUMPTION METERING THE JOB NEVER BOUGHT.
+        //
+        // The line below read, unconditionally on `hasIntegratedGateway`:
+        //   "The integrated gateway provides production/consumption metering and
+        //    monitoring per NEC 690.4."
+        // The IQ Combiner 6C integrates PRODUCTION metering and ships NO
+        // consumption CTs, and no code path emitted a CT line item — so the
+        // sentence was false on every 6C job and the crew had nothing to make it
+        // true. The gateway fact (`hasIntegratedGateway`) is about COMMS; it was
+        // never evidence about consumption measurement.
+        //
+        // The metering claim now comes from the CT authority, which is the same
+        // resolution the BOM buys from. The sheet cannot claim a measurement the
+        // BOM did not purchase, because both read one object.
+        // ═══════════════════════════════════════════════════════════════════
+        const _pv4aMetering = _pv4aBos.brains?.metering
+          ? resolveMeteringRequirement({
+              capability: _pv4aBos.brains.metering,
+              deviceLabel: _pv4aBos.brains.model,
+              // EXACT mapping from the canonical snapshot rule (705.11 vs
+              // 705.12) that `resolveInterconnection` already decided — this
+              // sheet does not re-resolve the interconnection, and it does not
+              // hand the authority a free-text label to pattern-match.
+              interconnectionRaw: _ic.isSupplySide ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE',
+              // The package states 120/240 V 1Ø 3W on every sheet that states a
+              // service; the CT count follows from the authority's table, not
+              // from a literal written here.
+              ungroundedConductorCount: ungroundedConductorsForService(240, 1),
+              consumptionMeteringRequired: _pv4aBos.hasIntegratedGateway,
+            })
+          : null;
+        const _meteringNote = _pv4aMetering
+          ? `<strong>METERING (NEC 690.4):</strong> ${_pv4aMetering.disclosure}`
+            + (_pv4aMetering.blockerMessage
+              ? ` <span style="color:#cc6600;font-weight:700;">REQUIRED ACTION — ${_pv4aMetering.blockerMessage}</span>`
+              : '')
+            + ' '
+          : '';
         const _bosNote = _pv4aBos.brains
           ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#f0f4f8;">` +
             `<strong>AC AGGREGATION — ${_pv4aBos.brains.brand.toUpperCase()} ${_pv4aBos.brains.model.toUpperCase()}:</strong> ` +
             `The AC branch circuits terminate at the ${_pv4aBos.brains.model}, a single integrated device providing ${_pv4aBos.brains.roleSummary.toLowerCase()}` +
             `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots}-position)` : ''}. ` +
             `${_pv4aBos.providesAcDisconnect ? 'Its integral load-break serves as the PV-system AC disconnecting means per NEC 690.13; a separate exterior AC disconnect is provided only where required by the AHJ/utility. ' : ''}` +
-            `${_pv4aBos.hasIntegratedGateway ? 'The integrated gateway provides production/consumption metering and monitoring per NEC 690.4. ' : ''}` +
+            `${_pv4aBos.hasIntegratedGateway ? 'The integrated gateway provides system monitoring and communications per NEC 690.4. ' : ''}` +
+            _meteringNote +
             `Output feeds the point of interconnection per NEC 705.10.` +
             `${_pv4aBos.branchSlotWarning ? ` <span style="color:#cc6600;font-weight:700;">${_pv4aBos.branchSlotWarning}</span>` : ''}` +
             `</div>`

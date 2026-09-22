@@ -494,6 +494,21 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       + 'reconcileEquipmentIdentity (reconcile.ts:77) already performs it and is never called from the permit path. It stays '
       + 'OPERATOR_CONFIRMATION ONLY when two genuinely EXPLICIT user selections disagree.',
   },
+  // The ESS product of record is not established. Every automatic step has
+  // already been taken by the time this fires (helpers.resolveBatteryCapacity:
+  // the design's own kWh, then the catalogue by id, then by EXACT
+  // manufacturer+model), so the residual is genuinely an operator action.
+  'BATTERY-CAPACITY-UNRESOLVED': {
+    sheetLine: 'ESS CAPACITY UNRESOLVED — Select the battery or record its usable kWh.',
+    gateId: 'RG-2', findingType: 'PENDING_SELECTION',
+    title: 'Energy-storage capacity not established for the battery on this design',
+    resolutionMode: 'OPERATOR_CONFIRMATION',
+    modeBasis: 'The capacity authority (permit/utils/helpers.resolveBatteryCapacity) has already tried the '
+      + 'design record and the catalogue — by id and by EXACT manufacturer+model — before this code is emitted. '
+      + 'An exact-match miss is not an ambiguity an engine may break: the operator re-selects the product or '
+      + 'records its manufacturer-stated usable kWh. Substituting a typical value is the defect this replaces '
+      + '(a hard-coded 5.0 kWh per unit printed on PV-1 and PV-5 for every product).',
+  },
   // The on-file document is a family/range page — the exact-wattage source is
   // absent. A missing DOCUMENT, not a failed value.
   'MODULE-EXACT-DATASHEET-PENDING': {

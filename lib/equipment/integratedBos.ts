@@ -20,6 +20,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
+import {
+  deviceMetersAnything,
+  type DeviceMeteringCapability,
+} from '@/lib/equipment/currentTransformers';
 
 export type BosKind =
   | 'integrated_combiner'   // combiner + gateway (+/- disconnect) in one enclosure
@@ -33,7 +37,27 @@ export interface IntegratedFunctions {
   aggregation?: boolean;     // combines the AC branch circuits (busbar + breakers)
   disconnect?: boolean;      // serves as the PV-system AC disconnecting means (load-break)
   monitoring?: boolean;      // production/consumption monitoring + comms (the gateway)
-  metering?: boolean;        // revenue-grade / production metering (CTs)
+  /**
+   * 🚨 DERIVED — DO NOT DECLARE THIS ON A ROW THAT CARRIES `metering`.
+   *
+   * "Does this device meter anything at all", generated from
+   * `BosDevice.metering` (the structured DeviceMeteringCapability) so the two
+   * can never disagree. It was previously DECLARED, and as a lone boolean it
+   * could not distinguish production from consumption metering — the exact axis
+   * Enphase's documentation is built around. The 6C, the 5C and a bare IQ
+   * Gateway all read `metering: true` here and differ materially: the 6C ships
+   * NO consumption CTs, the 5C ships two, the Gateway ships a production CT that
+   * is field-installed. An IQ Combiner 6C permit therefore asserted consumption
+   * metering the design had never bought.
+   *
+   * Rows with no structured capability yet (IQ Meter Collar, Tesla Backup
+   * Switch, the generic AC combiner panels) keep their declared value — see
+   * `withDerivedMeteringFlag`.
+   *
+   * Consumers that need to know WHAT is measured must read `BosDevice.metering`
+   * and `lib/equipment/currentTransformers`, never this flag.
+   */
+  metering?: boolean;
   rapidShutdown?: boolean;   // hosts/initiates the PV rapid-shutdown function
   backup?: boolean;          // microgrid interconnect / backup control
 }
@@ -47,6 +71,17 @@ export interface BosDevice {
   generation?: 'gen1' | 'gen2' | 'gen3' | 'gen4';  // Enphase ecosystem generation (6C=gen4, 5C=gen3, 4C=gen2, 3C=gen1)
   /** The roles this one device performs. */
   integrated: IntegratedFunctions;
+  /**
+   * 🚨 WHAT THIS DEVICE ACTUALLY MEASURES, per channel — the authority that
+   * replaces `integrated.metering`. Production and consumption are separate
+   * channels with separate realisations, and "integrates production metering"
+   * does not imply "can measure consumption": the IQ Combiner 6C integrates the
+   * first and ships nothing for the second.
+   *
+   * Absent ⇒ this device's metering has not been modelled yet and
+   * `integrated.metering` keeps its declared value. Absent is NOT "no metering".
+   */
+  metering?: DeviceMeteringCapability;
   /** True when this device is the system controller / "brains". */
   isBrains?: boolean;
   /** AC branch (2-pole PV) breaker positions. IQ Combiner 3C/4C/5C/6C all take 4 (6C: 5 with a quadplex). */
@@ -73,7 +108,7 @@ export interface BosDevice {
 // the PV AC disconnecting means (outdoors) — the 4C/5C are main-lug only and need
 // a separate external AC disconnect. The 6C is the current, easiest-install pick
 // (one box = combiner + IQ Gateway + integral disconnect + RSD initiator).
-export const BOS_DEVICES: BosDevice[] = [
+const BOS_DEVICES_RAW: BosDevice[] = [
   {
     id: 'enphase-iq-combiner-6c',
     brand: 'Enphase',
@@ -81,7 +116,31 @@ export const BOS_DEVICES: BosDevice[] = [
     partNumber: 'X-IQ-AM1-240-6C',
     kind: 'integrated_combiner',
     generation: 'gen4',
-    integrated: { aggregation: true, disconnect: true, monitoring: true, metering: true, rapidShutdown: true },
+    integrated: { aggregation: true, disconnect: true, monitoring: true, rapidShutdown: true },
+    // 🚨 THE ROW THIS WHOLE MODULE WAS WRONG ABOUT. The 6C's production metering
+    // is factory-integrated and pre-wired ("does not require field wiring"), and
+    // it ships NO consumption CTs at all — they are a separate purchase. As a
+    // lone `metering: true` that read identically to the 5C, which ships two.
+    metering: {
+      production: {
+        channel: 'production', realisation: 'factory-integrated', boundary: 'pv-output-circuit',
+        ctsIncluded: null, requiredCtId: null, accuracyClass: 'ANSI C12.20 class 0.5 (±0.5%)',
+        note: 'Factory-installed, pre-wired solid-core production CT. No field CT wiring for PV.',
+      },
+      consumption: {
+        channel: 'consumption', realisation: 'separate-purchase-field-installed', boundary: 'unresolved',
+        ctsIncluded: 0, requiredCtId: 'enphase-ct-200-split', accuracyClass: '±2.5% (consumption)',
+        note: 'NO consumption CTs ship with the 6C. Where they clamp is a DESIGN fact — the '
+            + 'device does not fix it — so the boundary is unresolved until the design records it.',
+      },
+      storage: {
+        channel: 'storage', realisation: 'factory-integrated', boundary: 'storage-circuit',
+        ctsIncluded: 2, requiredCtId: null, accuracyClass: '±0.5%',
+        note: '2 factory battery CTs (±0.5%), plus 2 backfeed CTs (±2.5%) and 2 load-controller CTs (±0.5%).',
+      },
+      citation: 'lib/data/equipment/bos-devices-research.json → enphase-iq-combiner-6c'
+        + '.integratedMeteringCTNote; primary source Enphase IQ Combiner 6C data sheet DSH-00585-3.0.',
+    },
     isBrains: true,
     branchSlots: 4,          // 4 two-pole 20A PV branches (5 with a quadplex breaker); + 200A DER busbar
     maxContinuousA: 80,      // total PV continuous
@@ -101,7 +160,30 @@ export const BOS_DEVICES: BosDevice[] = [
     partNumber: 'X-IQ-AM1-240-5C',
     kind: 'integrated_combiner',
     generation: 'gen3',
-    integrated: { aggregation: true, monitoring: true, metering: true },  // main-lug only → NO integral PV disconnect
+    integrated: { aggregation: true, monitoring: true },  // main-lug only → NO integral PV disconnect
+    // The 5C ships TWO consumption clamp CTs in the box. That is the material
+    // difference from the 6C, and the boolean could not express it.
+    metering: {
+      production: {
+        channel: 'production', realisation: 'factory-integrated', boundary: 'pv-output-circuit',
+        ctsIncluded: null, requiredCtId: null, accuracyClass: 'ANSI C12.20 class 0.5 (±0.5%)',
+        note: 'Pre-wired solid-core production CT on the combiner output.',
+      },
+      consumption: {
+        channel: 'consumption', realisation: 'ships-with-device', boundary: 'unresolved',
+        ctsIncluded: 2, requiredCtId: 'enphase-ct-200-clamp', accuracyClass: '±2.5% (consumption)',
+        note: 'Two consumption clamp CTs ship in the box. The installer decides where they '
+            + 'clamp, so the boundary — and therefore the mode — is a design fact, not a device fact.',
+      },
+      storage: {
+        channel: 'storage', realisation: 'ships-with-device', boundary: 'storage-circuit',
+        ctsIncluded: 1, requiredCtId: null, accuracyClass: '±2.5%',
+        note: 'One IQ Battery clamp CT ships in the box.',
+      },
+      citation: 'lib/data/equipment/bos-devices-research.json → enphase-iq-combiner-5c'
+        + '.integratedMeteringCTNote; primary source Enphase IQ Combiner 5/5C data sheet '
+        + 'IQC-5-5C-DSH-00007-1.0.',
+    },
     isBrains: true,
     branchSlots: 4,
     maxContinuousA: 64,      // 80A PV total on a 125A busbar
@@ -119,7 +201,21 @@ export const BOS_DEVICES: BosDevice[] = [
     partNumber: 'X-IQ-AM1-240-4C',  // registry's ENV-IQ-C4C-240 was fabricated
     kind: 'integrated_combiner',
     generation: 'gen2',
-    integrated: { aggregation: true, monitoring: true, metering: true },
+    integrated: { aggregation: true, monitoring: true },
+    metering: {
+      production: {
+        channel: 'production', realisation: 'factory-integrated', boundary: 'pv-output-circuit',
+        ctsIncluded: null, requiredCtId: null, accuracyClass: 'ANSI C12.20 class 0.5 (±0.5%)',
+        note: 'Pre-wired 200 A solid-core production CT.',
+      },
+      consumption: {
+        channel: 'consumption', realisation: 'separate-purchase-field-installed', boundary: 'unresolved',
+        ctsIncluded: 0, requiredCtId: 'enphase-ct-200-split', accuracyClass: '±2.5% (consumption)',
+        note: 'Consumption is a separate purchase on the 4/4C — a CT-200-SPLIT pair.',
+      },
+      citation: 'lib/data/equipment/bos-devices-research.json → enphase-iq-combiner-4c'
+        + '.integratedMeteringCTNote; primary source Enphase IQ Combiner 4/4C data sheet (2022-02-14).',
+    },
     isBrains: true,
     branchSlots: 4,
     maxContinuousA: 64,
@@ -137,7 +233,27 @@ export const BOS_DEVICES: BosDevice[] = [
     partNumber: 'ENV-IQ-AM1-240',   // ENV2-IQ-AM1-240 = current (IEEE 2030.5). Formerly IQ Envoy / Envoy-S Metered
     kind: 'gateway',
     generation: undefined,
-    integrated: { monitoring: true, metering: true, rapidShutdown: true },
+    integrated: { monitoring: true, rapidShutdown: true },
+    // A bare IQ Gateway ships ONE production CT that the installer field-installs
+    // on the PV output circuit — it is not factory-integrated, and consumption is
+    // a separate purchase. Third distinct shape under the same old boolean.
+    metering: {
+      production: {
+        channel: 'production', realisation: 'ships-with-device', boundary: 'pv-output-circuit',
+        ctsIncluded: 1, requiredCtId: 'enphase-ct-200-solid', accuracyClass: 'ANSI C12.20 class 0.5 (±0.5%)',
+        note: 'One CT-200-SOLID production CT ships with the gateway and is field-installed. '
+            + 'Solid-core: the PV output conductor must be disconnected to pass it through. '
+            + 'Distributor "metered" variants bundle the consumption CTs; non-metered do not.',
+      },
+      consumption: {
+        channel: 'consumption', realisation: 'separate-purchase-field-installed', boundary: 'unresolved',
+        ctsIncluded: 0, requiredCtId: 'enphase-ct-200-split', accuracyClass: '±2.5% (consumption)',
+        note: 'Up to two consumption CTs, ordered separately. The gateway metering ports are '
+            + 'the hard limit: two consumption CTs, one production CT, one battery CT.',
+      },
+      citation: 'lib/data/equipment/bos-devices-research.json → enphase-iq-gateway'
+        + '.integratedMeteringCTNote; primary source Enphase IQ Gateway data sheet DSH-00111-6.0.',
+    },
     isBrains: true,
     mounting: 'indoor',      // DIN-rail, IP30
     necRefs: ['NEC 690.4'],
@@ -207,6 +323,24 @@ export const BOS_DEVICES: BosDevice[] = [
     installComplexity: 2, active: true,
   },
 ];
+
+/**
+ * 🚨 ONE AUTHORITY FOR "DOES IT METER", NOT TWO.
+ *
+ * A row that declares a structured `metering` capability does NOT also declare
+ * `integrated.metering` — the boolean is generated from the capability here, so
+ * a future edit to one cannot leave the other stale. Rows that have not been
+ * converted (IQ Meter Collar, Tesla Backup Switch, the generic AC combiner
+ * panels) keep whatever they declared: their metering is real but is not yet
+ * modelled per channel, and silently flipping them to false would strip
+ * "Metering" from their role summaries on live sheets.
+ */
+function withDerivedMeteringFlag(d: BosDevice): BosDevice {
+  if (!d.metering) return d;
+  return { ...d, integrated: { ...d.integrated, metering: deviceMetersAnything(d.metering) } };
+}
+
+export const BOS_DEVICES: BosDevice[] = BOS_DEVICES_RAW.map(withDerivedMeteringFlag);
 
 export function getBosDevice(id: string | undefined): BosDevice | undefined {
   if (!id) return undefined;

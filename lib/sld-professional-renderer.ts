@@ -19,7 +19,7 @@
 
 import type { RunSegment, MicroBranch } from './computed-system';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
-import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker } from '@/lib/permit/utils/helpers';
+import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker, BATTERY_CAPACITY_UNRESOLVED } from '@/lib/permit/utils/helpers';
 import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { getEGCSize } from '@/lib/manufacturer-specs';
@@ -333,7 +333,21 @@ export interface SLDProfessionalInput {
   utilityName:             string;
   interconnection:         string;
   rapidShutdownIntegrated: boolean;
+  /**
+   * 🚨 DECLARED SINCE THE FILE EXISTED AND NEVER READ. Five call sites wrote it;
+   * nothing consumed it, so rendering the same design with it true and with it
+   * false produced a byte-identical SVG containing zero occurrences of "CT" or
+   * "current transformer". It is read now — see the EQUIPMENT SCHEDULE rows.
+   */
   hasProductionMeter:      boolean;
+  /**
+   * The metering channels this design actually has, from the CT authority
+   * (`lib/equipment/currentTransformers`, `meteringScheduleValue`). Optional:
+   * absent ⇒ the row is not drawn and nothing is asserted, which is what a
+   * caller that has not resolved metering must produce. NEVER composed here —
+   * a schedule that writes its own metering wording is a second authority.
+   */
+  meteringChannels?:       string;
   hasBattery:              boolean;
   batteryModel:            string;
   batteryKwh:              number;
@@ -678,6 +692,24 @@ function getAnchorPoint(
 // Drawn as a stack of cells (IEC 60617 battery symbol) with AC connection
 // Terminal BAT_AC_OUT: bottom center — AC output lug connecting to BUI BATTERY port
 // Battery Storage Symbol v3 — embeds sld-symbols.ts hybrid realism emblem
+/**
+ * THE equipment-schedule / symbol capacity cell.
+ *
+ * 🚨 EVERY CAPACITY GATE HERE USED TO BE `input.batteryKwh` BEING TRUTHY, so
+ * an unresolved battery DELETED the 'Battery Capacity' row from the schedule
+ * and blanked the label under the drawn battery — while PV-1 printed a
+ * fabricated 5.0 kWh and PV-5 printed 10.0 for the same design. A row that
+ * silently disappears is the same defect as a wrong one, made quieter.
+ * The single permit-wide authority is helpers.resolveBatteryCapacity; this
+ * renderer prints the label it produced and never re-decides.
+ */
+function batteryCapacityCell(kwh?: number | null, kwhLabel?: string | null): string {
+  const label = (kwhLabel ?? '').trim();
+  if (label) return label;
+  if (typeof kwh === 'number' && kwh > 0) return `${kwh} kWh`;
+  return BATTERY_CAPACITY_UNRESOLVED;
+}
+
 function renderBattery(
   cx: number, cy: number,
   model: string, kwh: number, backfeedA: number, calloutN: number,
@@ -739,7 +771,9 @@ function renderBattery(
 
   // Labels below
   p.push(txt(cx, by2 + H2 + 16, model ? model.substring(0, 22) : 'BATTERY STORAGE', {sz: F.tiny, anc: 'middle', italic: true}));
-  p.push(txt(cx, by2 + H2 + 25, kwh > 0 ? (kwhLabel || `${kwh} kWh`) : '', {sz: F.tiny, anc: 'middle', bold: true, fill: BAT_HDR}));
+  // The label is NEVER blank for a battery that is on the drawing.
+  const _capCell = batteryCapacityCell(kwh, kwhLabel);
+  p.push(txt(cx, by2 + H2 + 25, _capCell, {sz: F.tiny, anc: 'middle', bold: true, fill: _capCell === BATTERY_CAPACITY_UNRESOLVED ? '#C62828' : BAT_HDR}));
   if (backfeedA > 0) {
     p.push(txt(cx, by2 + H2 + 34, `${backfeedA}A BACKFEED — NEC 705.12(B)`, {sz: F.tiny, anc: 'middle', fill: BAT_HDR}));
   }
@@ -3035,6 +3069,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   });
 
   // Panel 3: Equipment schedule
+  //
+  // 🚨 `hasProductionMeter` IS READ HERE, AND UNTIL NOW IT WAS READ NOWHERE.
+  // Both rows are conditional, so a design that answers neither question renders
+  // exactly as it always has — the flag adds a statement, it never removes one.
+  const meteringRows = (i: SLDProfessionalInput): [string, string][] => [
+    ...(i.hasProductionMeter ? [['Production Meter', 'REVENUE-GRADE — NEC 690.4'] as [string, string]] : []),
+    ...(i.meteringChannels ? [['Metering', esc(i.meteringChannels)] as [string, string]] : []),
+  ];
   const PX3 = _cbStack ? DX : DX + (PCW + 4) * 2;
   parts.push(rect(PX3, PY3, PCW, PCH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(rect(PX3, PY3, PCW, 14, {fill:BLK, sw:0}));
@@ -3056,8 +3098,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Utility',esc(input.utilityName)],
     ['Interconnection',esc(input.interconnection)],
     ['Rapid Shutdown',input.rapidShutdownIntegrated?'INTEGRATED':'EXTERNAL'],
+    ...meteringRows(input),
     ['Battery Storage',input.hasBattery?esc(input.batteryModel):'NONE'],
-    ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity', input.batteryKwhLabel || `${input.batteryKwh} kWh`] as [string,string]] : []),
+    ...(input.hasBattery ? [['Battery Capacity', batteryCapacityCell(input.batteryKwh, input.batteryKwhLabel)] as [string,string]] : []),
     ...(input.batteryBackfeedA ? [['Batt. Backfeed',`${input.batteryBackfeedA}A — NEC 705.12(B)`] as [string,string]] : []),
     ...((input.generatorKw ?? 0) > 0 ? [['Generator',`${input.generatorBrand??''} ${input.generatorKw}kW`] as [string,string]] : []),
     ...(input.atsAmpRating ? [['ATS',`${input.atsBrand??''} ${input.atsAmpRating}A`] as [string,string]] : []),
@@ -3077,8 +3120,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Utility',esc(input.utilityName)],
     ['Interconnection',esc(input.interconnection)],
     ['Rapid Shutdown',input.rapidShutdownIntegrated?'INTEGRATED':'EXTERNAL'],
+    ...meteringRows(input),
     ['Battery Storage',input.hasBattery?esc(input.batteryModel):'NONE'],
-    ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity', input.batteryKwhLabel || `${input.batteryKwh} kWh`] as [string,string]] : []),
+    ...(input.hasBattery ? [['Battery Capacity', batteryCapacityCell(input.batteryKwh, input.batteryKwhLabel)] as [string,string]] : []),
     ...(input.batteryBackfeedA ? [['Batt. Backfeed',`${input.batteryBackfeedA}A — NEC 705.12(B)`] as [string,string]] : []),
     ...((input.generatorKw ?? 0) > 0 ? [['Generator',`${input.generatorBrand??''} ${input.generatorKw}kW`] as [string,string]] : []),
     ...(input.atsAmpRating ? [['ATS',`${input.atsBrand??''} ${input.atsAmpRating}A`] as [string,string]] : []),
@@ -4415,7 +4459,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     ['Utility', esc(input.utilityName)],
     ['Interconnection', esc(input.interconnection)],
     ['Battery Storage', input.hasBattery ? esc(input.batteryModel || input.batteryBrand || 'YES') : 'NONE'],
-    ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity', input.batteryKwhLabel || (input.batteryKwh + ' kWh')]] : []),
+    ...(input.hasBattery ? [['Battery Capacity', batteryCapacityCell(input.batteryKwh, input.batteryKwhLabel)]] : []),
   ];
   const _eqY = BAND_TOP + T3A_H + BGAP + T3B_H + BGAP;
   const _eqH = BAND_BOT - _eqY;

@@ -132,6 +132,16 @@ export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
   'TIGO-RSS-TRANSMITTER-UNVERIFIED': 'generic',
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': 'qcable-grounding-authority',
   // ── electrical ────────────────────────────────────────────────────────────
+  // 🚨 A NEW RELEASE GATE MUST BE DECLARED HERE TOO, and this one was not.
+  // `BATTERY-CAPACITY-UNRESOLVED` was added to releaseGates, severityPolicy,
+  // projectAuthority and build — four of the five registrations — and the fifth
+  // was missed, so `payloadSchemaFor` fell to its `?? 'generic'` default and
+  // the requirement would have rendered with no schema-keyed component at all.
+  // tests/planset/release-gate-rendering-rgm.test.ts holds that line: "the
+  // payload-schema table stays in lockstep with the requirement declarations".
+  // Generic is the right schema — the fact is a single unresolved capacity, not
+  // a structured deficit — but it has to be SAID.
+  'BATTERY-CAPACITY-UNRESOLVED': 'generic',
   'ROUTE-LENGTH-ESTIMATE': 'generic',
   'FEEDER-RACEWAY-AUTHORITY': 'generic',
   'BRANCH-RACEWAY-AUTHORITY': 'generic',

@@ -37,7 +37,9 @@ import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } f
 import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
-import { utilityDisplayName } from '../utils/helpers';   // §15(b) — human utility name, never a slug
+import { utilityDisplayName, resolveBatteryCapacity } from '../utils/helpers';   // §15(b) — human utility name, never a slug
+// resolveBatteryCapacity is THE permit-wide ESS capacity authority — the same
+// function PV-1, PV-5 and the SLD equipment schedule print from.
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { planMicroBranches, microMaxPerBranch, microBranchMaxOcpdA, type BranchPlanPanel } from '../utils/branching';
 import { getDesignTemps } from '../utils/designTemps';
@@ -2092,6 +2094,10 @@ export function buildPermitDesignSnapshot(
     const META: Record<string, { severity: 'blocking' | 'warning'; authorityPath: string; sheets: string[]; resolution: string }> = {
       'ROUTE-LENGTH-ESTIMATE': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].lengthSource', sheets: ['PV-1', 'PV-4B', 'E-1', 'SCHED'], resolution: 'Provide CAD-routed geometry or field-measured run lengths (no estimate as authority).' },
       'EQUIPMENT-IDENTITY-CONFLICT': { severity: 'blocking', authorityPath: 'project.subSystems[*].panelId vs equipment.modules[0]', sheets: ['SCHED', 'APP-A', 'DS-1'], resolution: 'Operator must reconcile the stored panelId with the fleet module (migration 110) — never auto-resolved.' },
+      // The ESS capacity three sheets used to disagree about. PV-1 printed a
+      // fabricated 5.0 kWh per unit, PV-5 printed 10.0 for the same design, and
+      // the SLD equipment schedule dropped the row entirely.
+      'BATTERY-CAPACITY-UNRESOLVED': { severity: 'blocking', authorityPath: 'project.batteryKwh / equipment catalogue (resolveBatteryBranch)', sheets: ['PV-1', 'PV-5', 'E-1', 'SCHED'], resolution: 'Re-select the battery from the equipment picker so the design stores its catalogue id, or record the manufacturer-stated usable capacity (kWh per unit). A typical value may not be substituted.' },
       'FEEDER-RACEWAY-AUTHORITY': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit', sheets: ['PV-4B', 'E-1', 'SCHED'], resolution: 'Resolve the feeder raceway/conduit type + bonding authority on the canonical feeder segment.' },
       'BRANCH-RACEWAY-AUTHORITY': { severity: 'blocking', authorityPath: 'electrical.physicalRaceways[branch home-run]', sheets: ['PV-4A', 'PV-4B', 'E-1', 'SCHED'], resolution: 'Model the branch route as explicit sections (open-air Q-Cable + shared home-run raceway); the shared jbox→combiner raceway must carry documented shared-circuit count + fill (NEC Ch.9, Table 1).' },
       'RACEWAY-SEGMENT-CONFLICT': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].raceway', sheets: ['PV-1', 'PV-4B', 'E-1', 'SCHED'], resolution: 'A single physical segment id resolves to more than one raceway type/size — reconcile to ONE raceway per physical run (gate 3).' },
@@ -2303,6 +2309,31 @@ export function buildPermitDesignSnapshot(
     // W10b: this conflict was NEVER reconciled — it must stay VISIBLE (first-class
     // registry entry), never hidden by a renderer ternary.
     for (const c of equipmentIdentityConflicts) push('EQUIPMENT-IDENTITY-CONFLICT', c);
+    // ── THE ESS CAPACITY EVERY SHEET PRINTS ────────────────────────────────
+    // Emitted by THE capacity authority, not re-decided here. It fires only
+    // after the design record and the catalogue (by id, then by EXACT
+    // manufacturer+model) have both failed — so the sheets are already
+    // printing the visible '⚠ ESS CAPACITY UNRESOLVED' marker, and this is
+    // what stops that marker shipping on a released package.
+    {
+      const _essCap = resolveBatteryCapacity(proj as never);
+      if (_essCap.hasBattery && !_essCap.resolved) {
+        push('BATTERY-CAPACITY-UNRESOLVED',
+          `Energy-storage capacity is UNRESOLVED for ${_essCap.units} battery unit(s) on this design. `
+          + `${_essCap.unresolvedReason ?? ''} `
+          + 'Every sheet prints the unresolved marker rather than a substituted capacity; NFPA 855 / IRC R328 '
+          + 'state their energy-storage limits in kWh, so the installation cannot be reviewed without it.',
+          {
+            payload: {
+              batteryUnits: _essCap.units,
+              batteryId: (proj.batteryId ?? null) as string | null,
+              batteryBrand: (proj.batteryBrand ?? null) as string | null,
+              batteryModel: (proj.batteryModel ?? null) as string | null,
+              recordedKwhPerUnit: (proj.batteryKwh ?? null) as number | null,
+            },
+          });
+      }
+    }
     // §14 carry-forward: missing feeder raceway/conduit type authority stays
     // visible and blocking (never weakened by W3).
     if (cs && !_feederRacewayResolved) {

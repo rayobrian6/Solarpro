@@ -8,7 +8,7 @@ import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { PERMIT_LABELS_SHEET_TITLE } from '../sheetManifest';
 import { escapeH } from '../utils/drawing';
-import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } from '../utils/helpers';
+import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection, resolveBatteryCapacity } from '../utils/helpers';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { selectFieldLabels, type FieldLabel } from '../utils/fieldLabels';
 import { getThermalDesignBasis } from '../utils/designTemps';
@@ -398,7 +398,10 @@ export function pageWarningLabels(
   // placard carries the structured source directory only.)
   const hasBatteryW = hasRealBattery(project);
   const mainAW = project.mainPanelAmps || 200;
-  const battKwhW = hasBatteryW ? (project.batteryCount || 1) * (project.batteryKwh ?? 5.0) : 0;
+  // ONE capacity authority. The `?? 5.0` here fabricated a per-unit capacity
+  // and multiplied it, so this placard printed 10.0 kWh for the same battery
+  // PV-1 called 5.0 and the SLD schedule did not print at all.
+  const _battCapW = resolveBatteryCapacity(project);
   interface SrcRow { name: string; rating: string; disco: string; }
   const srcRows: SrcRow[] = [{
     name: 'UTILITY GRID SERVICE',
@@ -424,7 +427,7 @@ export function pageWarningLabels(
   if (hasBatteryW) {
     srcRows.push({
       name: 'ENERGY STORAGE SYSTEM (ESS)',
-      rating: `${battKwhW.toFixed(1)} kWh${project.batteryBrand ? ` &middot; ${project.batteryBrand}` : ''}`,
+      rating: `${_battCapW.label}${project.batteryBrand ? ` &middot; ${project.batteryBrand}` : ''}`,
       disco: 'ESS disconnect &mdash; at the battery / ESS enclosure',
     });
   }
@@ -720,7 +723,8 @@ export function pageDisconnectDirectory(
   // A real numbered directory: every disconnect + PV equipment, its rating/ID,
   // and where it is. No invented building drawing — locations reference PV-1.
   interface Disco { name: string; rating: string; loc: string; }
-  const battKwh = hasBattery ? (project.batteryCount || 1) * (project.batteryKwh ?? 5.0) : 0;
+  // ONE capacity authority — see the placard above.
+  const _battCap = resolveBatteryCapacity(project);
   // Brand-integrated BOS device ("the brains" — e.g. Enphase IQ Combiner 6C:
   // combiner + gateway + AC disconnect in one box). Single-sourced.
   const bos = buildIntegratedEquipment(input, cad);
@@ -811,7 +815,7 @@ export function pageDisconnectDirectory(
         : `Per NEC ${_rsd.initiationDeviceSection}`,
     });
   }
-  if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${battKwh.toFixed(1)} kWh · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });
+  if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${_battCap.label} · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });
 
   // ── Emergency shutdown steps (adapt to what's present) ────────
   const steps: string[] = ['OPEN MAIN SERVICE / UTILITY DISCONNECT'];

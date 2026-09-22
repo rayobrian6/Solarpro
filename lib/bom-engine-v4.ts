@@ -20,7 +20,13 @@ import {
   TopologyManagerContext,
   BOMStageDefinition,
 } from './topology-manager';
-import { resolveIntegratedEquipment } from './equipment/integratedBos';
+import { resolveIntegratedEquipment, type IntegratedEquipmentPlan } from './equipment/integratedBos';
+import {
+  resolveMeteringRequirement,
+  ungroundedConductorsForService,
+  type MeteringResolution,
+  type MeteringCtLine,
+} from './equipment/currentTransformers';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { getMountingSystemById } from './mounting-hardware-db';
 import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
@@ -1336,6 +1342,22 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       quantity: ft, derivedFrom: 'generatorWireLength', formula: `${input.generatorWireLength} × 1.15`, necReference: 'NEC 702.4, NEC 215' });
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE TIGO FAILURE MODE, REPEATING ON METERING.
+  //
+  // An IQ Combiner 6C integrates production metering and ships NO consumption
+  // CTs. Permit sheet PV-4A printed "the integrated gateway provides
+  // production/consumption metering and monitoring per NEC 690.4" and no code
+  // path anywhere emitted a CT line, so the crew arrived with a combiner that
+  // cannot measure consumption and nothing to make it work — exactly as 22 of
+  // 48 string inverters shipped TS4-A-F modules with zero driver hardware.
+  //
+  // The resolution comes from the CT authority, which owns which conductors
+  // each CT encircles and refuses to state a metering mode it cannot derive.
+  // The QUANTITY survives that refusal (one CT per ungrounded conductor is
+  // true wherever they clamp), so the crew gets the parts even while the
+  // drawings decline to state a mode.
+  // ═══════════════════════════════════════════════════════════════════════
   // Brand-integrated combiner/gateway ("the brains") — single-sourced from
   // lib/equipment/integratedBos so the BOM matches the SLD + permit sheets and
   // gets the real SKU (the registry accessory strings had a fabricated 4C and
@@ -1371,6 +1393,17 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos', '1', true));
     log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
       quantity: 1, derivedFrom: 'integrated-bos resolver', formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
+  }
+  // The metering hardware that device needs and does not contain.
+  {
+    const _ct = resolveBomMetering(_bosPlan, input.acVoltage, input.interconnectionMethod);
+    for (const line of _ct.lines) {
+      items.push(meteringCtItem(line));
+      log.push({ stageId: 'monitoring', category: 'metering_ct', item: line.model,
+        quantity: line.quantity, derivedFrom: line.derivedFrom, formula: line.formula,
+        necReference: line.necReference });
+    }
+    if (_ct.blockerMessage) warnings.push(_ct.blockerMessage);
   }
 
   // Gateway (optimizer or microinverter topology)
@@ -1826,7 +1859,9 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   // Production Meter
   if (input.requiresProductionMeter) {
     items.push(addItem('ac', 'meter', 'Itron', 'Production Meter',
-      'ITRON-PROD-1', 'Revenue-grade production meter', 1, 'ea', 'NEC 690.4', 'perSystem', '1', false));
+      ITRON_PRODUCTION_METER_PART_NUMBER, 'Revenue-grade production meter', 1, 'ea',
+      'NEC 690.4', 'perSystem', '1', false,
+      undefined, undefined, undefined, undefined, ITRON_PRODUCTION_METER_ORDERABILITY));
   }
 
   // ── STAGE 5: STRUCTURAL ──────────────────────────────────────────────────────
@@ -2760,6 +2795,19 @@ function generateBOMV4PerSubSystem(
       log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
         quantity: 1, derivedFrom: `integrated-bos resolver (${group[0].brand} group, ${branchCount} branches)`, formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
     }
+    // Same metering hardware question, per brand group. On a hybrid job this
+    // per-sub emission is the authoritative one, so omitting it here would ship
+    // the identical gap on exactly the designs that are hardest to check.
+    {
+      const _ct = resolveBomMetering(plan, input.acVoltage, input.interconnectionMethod);
+      for (const line of _ct.lines) {
+        push(stamp, meteringCtItem(line, stamp));
+        log.push({ stageId: 'monitoring', category: 'metering_ct', item: line.model,
+          quantity: line.quantity, derivedFrom: line.derivedFrom, formula: line.formula,
+          necReference: line.necReference });
+      }
+      if (_ct.blockerMessage) warnings.push(_ct.blockerMessage);
+    }
     // Fallbacks from the group's inverter accessories when nothing integrated.
     const entry0 = group[0].entry;
     if (!emitted.has('gateway')) {
@@ -3096,7 +3144,9 @@ function generateBOMV4PerSubSystem(
 
   if (input.requiresProductionMeter) {
     push(undefined, addItem('ac', 'meter', 'Itron', 'Production Meter',
-      'ITRON-PROD-1', 'Revenue-grade production meter', 1, 'ea', 'NEC 690.4', 'perSystem', '1', false));
+      ITRON_PRODUCTION_METER_PART_NUMBER, 'Revenue-grade production meter', 1, 'ea',
+      'NEC 690.4', 'perSystem', '1', false,
+      undefined, undefined, undefined, undefined, ITRON_PRODUCTION_METER_ORDERABILITY));
   }
 
   // ═══ Stage 5 — structural (roof racking from the ROOF sub's mountingId) ════
@@ -3381,6 +3431,92 @@ function generateBOMV4PerSubSystem(
 }
 
 // ─── Helper: Add Item ─────────────────────────────────────────────────────────
+
+/**
+ * 🚨 THIS GATE WAS UNREACHABLE, AND CONNECTING THE UI CONTROL MADE IT REACHABLE.
+ *
+ * `requiresProductionMeter` was read off a key no caller ever sent, so this row
+ * was never emitted and nobody had to look at its part number. `ITRON-PROD-1`
+ * appears in exactly two places in this repo — the two emitters below — and in
+ * no research file, no data sheet and no distributor record. It is not a
+ * verifiable Itron ordering SKU.
+ *
+ * Wiring the toggle up would otherwise have shipped that string into live BOMs
+ * as an orderable product on every design whose Production Meter control is on
+ * (which is the UI default). The row is emitted — the requirement is real, the
+ * utility datum that drives it is real — but the SELECTION is not established,
+ * so it is a candidate: visible, excluded from the authoritative procurement
+ * total and from every export, and blocking until a real meter is specified.
+ */
+const ITRON_PRODUCTION_METER_PART_NUMBER = 'ITRON-PROD-1';
+const ITRON_PRODUCTION_METER_ORDERABILITY = {
+  authorityStateHint: 'CANDIDATE_NON_ORDERABLE' as ProcurementAuthorityState,
+  authorityStateHintReason:
+    `CANDIDATE — "${ITRON_PRODUCTION_METER_PART_NUMBER}" is not a verifiable Itron ordering SKU; it `
+    + 'appears in no data sheet, research record or distributor listing held in this repo. The '
+    + 'production-meter requirement is real (the utility datum drives it) but no meter has been '
+    + 'SELECTED. Specify the meter the utility will accept — many utilities supply it themselves. '
+    + 'Excluded from the authoritative procurement total and from every export.',
+};
+
+/**
+ * The metering hardware a resolved BOS plan needs and does not contain.
+ *
+ * ONE derivation for both emission sites — the single-lane path and the per-
+ * brand-group hybrid path. Writing it twice is how the BOM came to ship a 6C
+ * while the drawings printed a 5C, and it is not being done again here.
+ *
+ * `consumptionMeteringRequired` is `hasIntegratedGateway` because that is the
+ * exact condition under which the permit sheets assert gateway metering. The
+ * claim and the purchase are one decision: PV-4A reads the same resolution, so
+ * a sheet cannot assert a measurement this BOM did not buy.
+ */
+function resolveBomMetering(
+  plan: IntegratedEquipmentPlan,
+  acVoltage: number | undefined,
+  interconnectionMethod: string | undefined,
+): MeteringResolution {
+  const cap = plan.brains?.metering;
+  if (!cap) {
+    return resolveMeteringRequirement({
+      capability: null, deviceLabel: null, interconnectionRaw: interconnectionMethod,
+      ungroundedConductorCount: null, consumptionMeteringRequired: false,
+    });
+  }
+  return resolveMeteringRequirement({
+    capability: cap,
+    deviceLabel: plan.brains?.model ?? null,
+    interconnectionRaw: interconnectionMethod,
+    // `input.acVoltage ?? 240` is this engine's own established service datum —
+    // the same one the continuous-current calculation sizes real conductors and
+    // OCPDs from. The conductor COUNT comes from the CT authority's explicit
+    // table, not from a literal 2 written here.
+    //
+    // 🚨 THE CITATION HERE USED TO READ "NEC 705.60". It is not that rule, and
+    // lib/nec/citations.ts exists to say so: 705.60 is "Primary Power Source
+    // Connection" in the Microgrid article, while the continuous-load
+    // multiplier is 690.8(B) for PV and 215.2/210.19 generally.
+    // tests/planset/nec-citation-authority.test.ts scans for that exact
+    // pairing — a wrong citation in a comment is how a wrong citation reaches
+    // a drawing.
+    ungroundedConductorCount: ungroundedConductorsForService(acVoltage ?? 240, 1),
+    consumptionMeteringRequired: plan.hasIntegratedGateway,
+  });
+}
+
+/** One CT line → one BOM row. The producer's procurement state travels with it:
+ *  an unverified part number is never presented as a selected product. */
+function meteringCtItem(line: MeteringCtLine, subSystem?: BOMSystemType): BOMLineItemV4 {
+  return addItem('monitoring', 'metering_ct', line.manufacturer, line.model,
+    line.partNumber, line.description, line.quantity, line.unit as BOMLineItemV4['unit'],
+    line.necReference, line.derivedFrom, line.formula, true,
+    undefined, undefined, undefined, subSystem,
+    {
+      quantitySource: line.quantitySource,
+      authorityStateHint: line.authorityStateHint,
+      authorityStateHintReason: line.authorityStateHintReason,
+    });
+}
 
 function addItem(
   stageId: BOMStageId,

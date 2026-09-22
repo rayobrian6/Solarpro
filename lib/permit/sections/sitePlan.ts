@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
-import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
+import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir, resolveBatteryCapacity } from '../utils/helpers';
 import { buildSchemSVG, escapeH } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
 import { nearmapConfigured, fetchNearmapStaticAerial, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
@@ -43,6 +43,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const invMfr    = (firstInv?.manufacturer || 'ENPHASE').toUpperCase();
   const invModel  = (firstInv?.model || 'IQ8').toUpperCase();
   const hasBatt   = (project.batteryCount ?? 0) > 0;
+  const _batCap   = resolveBatteryCapacity(project);
   const hasAcDisc = project.acDisconnect !== false;
 
   interface EItem { label: string; desc: string; tag: string; }
@@ -62,7 +63,10 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     ...(hasBatt ? [
       { tag: 'SC',  label: `(N) ${invMfr} SYSTEM CONTROLLER`,   desc: 'ESS / MICROGRID INTERCONNECT DEVICE' },
       { tag: 'BLP', label: '(N) BACKUP LOAD PANEL',             desc: 'CRITICAL LOADS SUB-PANEL' },
-      { tag: 'BAT', label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'}${(project.batteryKwh ?? 5.0) > 0 ? ' — ' + (project.batteryKwh ?? 5.0).toFixed(1) + ' kWh' : ''}` },
+      // ONE capacity authority (helpers.resolveBatteryCapacity). The `?? 5.0`
+      // that was here printed a fabricated 5.0 kWh per unit while PV-5 printed
+      // 10.0 and the SLD schedule printed nothing.
+      { tag: 'BAT', label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'} — ${_batCap.perUnitLabel}` },
       { tag: 'AC2', label: '(N) 60A NON-FUSED AC DISCONNECT',   desc: 'ADJACENT TO UTILITY METER' },
     ] : []),
   ];

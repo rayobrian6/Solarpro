@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { sldCombinerFields } from '@/lib/equipment/sldCombinerFields';
+import { readProductionMeterFlag, ungroundedConductorsForService } from '@/lib/equipment/currentTransformers';
 import { getUserFromRequest } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
@@ -189,6 +190,17 @@ export async function POST(req: NextRequest) {
         ? buildInput.bosDeviceIds.map(String)
         : (buildInput.combinerId ? [String(buildInput.combinerId)] : undefined),
       selectedCombinerId: buildInput.selectedCombinerId ? String(buildInput.selectedCombinerId) : null,
+      // The CT authority needs the interconnection to derive the metering mode.
+      // It is NOT normalised here — the authority owns the token table, and a
+      // sixth spelling of the interconnection is the last thing this repo needs.
+      interconnectionRaw: buildInput.interconnection ?? buildInput.interconnectionType
+        ?? buildInput.interconnectionMethod ?? null,
+      // 240 V split-phase 3-wire is what every other statement on this sheet
+      // assumes (the meter node prints '120/240V, 1Ø, 3W'), so the CT count
+      // follows the same assumption from the same place, via the authority's
+      // explicit table — not a literal 2.
+      ungroundedConductorCount: ungroundedConductorsForService(
+        Number(buildInput.systemVoltage) || 240, 1),
     });
 
     const input: SLDProfessionalInput = {
@@ -204,6 +216,7 @@ export async function POST(req: NextRequest) {
       combinerModel:                _combiner.combinerModel,
       combinerHasIntegratedGateway: _combiner.combinerHasIntegratedGateway,
       combinerProvidesAcDisconnect: _combiner.combinerProvidesAcDisconnect,
+      meteringChannels:             _combiner.combinerMeteringSummary,
       // The four fields above are the RESOLVED single-lane combiner. This is
       // the selection itself, and it is needed because a hybrid export attaches
       // `input.sources` below and switches to the multi-lane renderer, which
@@ -242,7 +255,11 @@ export async function POST(req: NextRequest) {
         return raw;
       })(),
       rapidShutdownIntegrated: !!(buildInput.rapidShutdownIntegrated || buildInput.rapidShutdown),
-      hasProductionMeter:      buildInput.hasProductionMeter !== false,
+      // The EXPORT path had the same inert toggle: the page posts
+      // `buildInput.productionMeter`, this read `hasProductionMeter`. The
+      // exported sheet is the one that reaches the permit package, so it is the
+      // one that most needed to be listening. ONE key name.
+      hasProductionMeter:      readProductionMeterFlag(buildInput, true),
       hasBattery:              !!(buildInput.hasBattery || buildInput.batteryModel || buildInput.batteryKwh),
       batteryModel:            String(buildInput.batteryModel            ?? ''),
       batteryKwh:              Number(buildInput.batteryKwh)             || 0,

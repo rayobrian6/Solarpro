@@ -37,7 +37,7 @@ import { necNextStandardOcpd } from './utils/helpers';
 import { classifyPanel, isSubSystemKey } from './utils/subSystems';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById,
-         resolveBatteryBranch, findBatteryByExactModel } from '@/lib/equipment-db';
+         resolveBatteryBranch } from '@/lib/equipment-db';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import { buildStructuralInputForPermit, buildSubSystemStructuralInputs } from './utils/structuralInput';
 import type { ElectricalCompliance } from './types';
@@ -366,8 +366,12 @@ export function generatePermitHTML(
     // LEFT UNSET and an audit warning is raised. An unset field is visibly
     // missing downstream; a fabricated one is not.
     if (project.batteryCount && project.batteryCount > 0) {
+      // Identity resolution (id, else EXACT manufacturer+model) now lives
+      // INSIDE the authority — it was written out inline here and in
+      // sldAdapter, and nowhere else, so the calculation engine had no
+      // recovery at all. One recovery, one place.
       const _batResolved = resolveBatteryBranch(
-        project.batteryId ?? findBatteryByExactModel(project.batteryBrand, project.batteryModel)?.id,
+        { id: project.batteryId, brand: project.batteryBrand, model: project.batteryModel },
         project.batteryCount,
       );
 
@@ -987,6 +991,10 @@ export function generatePermitHTML(
         batteryBackfeedA:        input.project.batteryBackfeedA ?? 0,
         batteryCount:            input.project.batteryCount ?? 0,
         batteryContinuousOutputA: 0,
+        // IDENTITY, not display. When batteryBackfeedA is absent (the
+        // authority refused above, or a legacy design never carried one) the
+        // engine re-resolves from these three through resolveBatteryBranch.
+        batteryId:               input.project.batteryId,
         batteryModel:            input.project.batteryModel,
         batteryManufacturer:     input.project.batteryBrand,
         // Generator fields
