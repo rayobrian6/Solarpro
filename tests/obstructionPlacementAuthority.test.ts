@@ -276,3 +276,68 @@ describe('🚨 a site object shades but does not occupy', () => {
     expect(panelHitsKeepOut({ id: 'p', lat: LAT, lng: LNG, ...MODULE }, vent)).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MARKING A VENT SHOULD NOT BE A CAD SESSION
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { OBSTRUCTION_PRESETS, presetFor, legacyRadiusFor, DEFAULT_OBSTRUCTION_PRESET } from '@/lib/3d/obstructionPresets';
+
+describe('🚨 the type a user picks is the type that gets stored', () => {
+  it('EVERY obstruction used to be stamped "chimney", whatever it was', () => {
+    // Harmless as a label; not harmless once the type decides the clearance.
+    // A vent pipe was given a chimney's 450 mm keep-out, and a tree would have
+    // been given one it should never have had.
+    expect(ENGINE).not.toMatch(/type:\s+'chimney',\s*\n\s*\};/);
+    expect(ENGINE).toMatch(/const preset = presetFor\(obstructionPresetRef\.current\)/);
+    expect(ENGINE).toMatch(/type:\s+preset\.id,/);
+    expect(ENGINE).toMatch(/space:\s+preset\.space,/);
+  });
+
+  it('the field workflow is pick-a-noun-then-click, not three sliders', () => {
+    expect(ENGINE).toMatch(/OBSTRUCTION_PRESETS\.map\(pr =>/);
+    expect(ENGINE).toMatch(/data-testid=\{`obstruction-preset-\$\{pr\.id\}`\}/);
+    // Choosing the noun fills the dimensions, so the common case needs no typing.
+    expect(ENGINE).toMatch(/setNewObstructionWidthM\(pr\.widthM\)/);
+    expect(ENGINE).toMatch(/setNewObstructionHeightM\(pr\.heightM\)/);
+  });
+
+  it('…and the clearance it will get is on screen BEFORE the click', () => {
+    expect(ENGINE).toMatch(/Panels keep \{\(DEFAULT_CLEARANCE_M\[obstructionPresetId\]/);
+  });
+
+  it('every preset names a real canonical type with a real clearance', () => {
+    for (const pr of OBSTRUCTION_PRESETS) {
+      expect(DEFAULT_CLEARANCE_M[pr.id], `${pr.id} has no clearance entry`).toBeDefined();
+      expect(pr.widthM).toBeGreaterThan(0);
+      expect(pr.heightM).toBeGreaterThan(0);
+      expect(pr.hint.length).toBeGreaterThan(10);
+    }
+    expect(presetFor(DEFAULT_OBSTRUCTION_PRESET).id).toBe(DEFAULT_OBSTRUCTION_PRESET);
+    expect(presetFor('nonsense').id).toBe(OBSTRUCTION_PRESETS[0].id);
+  });
+
+  it('a tree is the only SITE object, and it shades rather than occupies', () => {
+    const site = OBSTRUCTION_PRESETS.filter(p => p.space === 'site');
+    expect(site.map(p => p.id)).toEqual(['tree']);
+    expect(DEFAULT_CLEARANCE_M.tree).toBe(0);
+  });
+
+  it('a flush skylight is genuinely flush, so it cannot pretend to shade', () => {
+    expect(presetFor('skylight').heightM).toBeLessThan(0.2);
+    // …while a chimney is tall enough to matter.
+    expect(presetFor('chimney').heightM).toBeGreaterThan(1);
+  });
+
+  it('the legacy radius is still written, so no older path loses its keep-out', () => {
+    expect(legacyRadiusFor(0.9, 0.6)).toBeCloseTo(Math.sqrt(0.81 + 0.36) / 2, 9);
+    expect(ENGINE).toMatch(/legacyRadiusFor\(widthM, depthM\)/);
+  });
+
+  it('a roof object records the face it was marked on; a site object does not', () => {
+    // Surface-local ownership: the object belongs to a face, not to a world
+    // coordinate, so the face can move and take it along.
+    expect(ENGINE).toMatch(/planeId: preset\.space === 'roof' \? \(selectedFaceIdRef\.current \?\? undefined\) : undefined/);
+    expect(ENGINE).toMatch(/canopyRadiusM: preset\.space === 'site'/);
+  });
+});

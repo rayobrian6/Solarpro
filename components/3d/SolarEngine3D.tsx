@@ -21,6 +21,11 @@ import { MapSourcePicker, DEFAULT_PICKER_STATE, type MapPickerState } from '@/co
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { autoLayoutScope, panelsAutoRoofOwns, mergeAutoRoofPanels } from '@/lib/3d/autoLayoutScope';
+import {
+  OBSTRUCTION_PRESETS, DEFAULT_OBSTRUCTION_PRESET, presetFor, legacyRadiusFor,
+  type ObstructionPresetId,
+} from '@/lib/3d/obstructionPresets';
+import { DEFAULT_CLEARANCE_M } from '@/lib/3d/panelKeepOut';
 import { getSunPosition, getPanelShadingFactor } from '@/lib/solarMath';
 import { siteKeyFromCoords } from '@/lib/siteIdentity';
 import {
@@ -1230,6 +1235,11 @@ function SolarEngine3D({
    *  and neither was reachable by any gesture. */
   const [selectedObstructionId, setSelectedObstructionId] = useState<string | null>(null);
   const selectedObstructionIdRef = useRef<string | null>(null);
+  /** WHICH NOUN THE NEXT CLICK PLACES. Every obstruction used to be stamped
+   *  `type: 'chimney'` whatever it was, which stopped being cosmetic the moment
+   *  the type started deciding the keep-out clearance. */
+  const [obstructionPresetId, setObstructionPresetId] = useState<ObstructionPresetId>(DEFAULT_OBSTRUCTION_PRESET);
+  const obstructionPresetRef = useRef<ObstructionPresetId>(DEFAULT_OBSTRUCTION_PRESET);
   /** The last refusal from the section authority, phrased for a person. */
   const [sectionRefusal, setSectionRefusal] = useState<string | null>(null);
   /**
@@ -12276,7 +12286,13 @@ function SolarEngine3D({
       // Placed-obstruction record. widthM/depthM/heightM drive the new
       // rectangular keep-out in removeObstructedPanels; radiusM stays
       // set to the diagonal-half as a safe legacy fallback.
-      const legacyRadiusM = Math.sqrt(widthM * widthM + depthM * depthM) / 2;
+      const legacyRadiusM = legacyRadiusFor(widthM, depthM);
+      // 🚨 THE NOUN THE USER CHOSE, not 'chimney' for everything. It decides
+      // the keep-out clearance (lib/3d/panelKeepOut.ts) and whether the object
+      // occupies roof area at all or only shades it, so stamping one type on
+      // every object gave a vent pipe a chimney's 450 mm clearance and gave a
+      // tree one it should never have had.
+      const preset = presetFor(obstructionPresetRef.current);
       const newObs: PlacedObstruction = {
         id:      `obs-${Date.now()}`,
         lat:     obsLat,
@@ -12286,7 +12302,13 @@ function SolarEngine3D({
         widthM,
         depthM,
         heightM: prismHeightM,
-        type:    'chimney',
+        type:    preset.id,
+        space:   preset.space,
+        // A tree's canopy is not its keep-out. It is what shades.
+        canopyRadiusM: preset.space === 'site' ? Math.max(widthM, depthM) / 2 : undefined,
+        // Which face it was marked on, so it belongs to a surface rather than
+        // floating at a world coordinate when that surface moves.
+        planeId: preset.space === 'roof' ? (selectedFaceIdRef.current ?? undefined) : undefined,
       };
 
       // Visual: a small white extruded polygon (per-position height so the
@@ -15044,9 +15066,39 @@ function SolarEngine3D({
                   }}>
                     Add Obstruction
                   </div>
+                  {/* ── PICK THE NOUN, THEN CLICK ─────────────────────────
+                       The preset carries the dimensions a person would
+                       otherwise type, so the common case needs no typing at
+                       all — and the sliders below stay live, because a preset
+                       is a starting point, not a claim about this roof. */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                    {OBSTRUCTION_PRESETS.map(pr => (
+                      <button
+                        key={pr.id}
+                        data-no-drag
+                        data-testid={`obstruction-preset-${pr.id}`}
+                        onClick={() => {
+                          obstructionPresetRef.current = pr.id;
+                          setObstructionPresetId(pr.id);
+                          setNewObstructionWidthM(pr.widthM);
+                          setNewObstructionDepthM(pr.depthM);
+                          setNewObstructionHeightM(pr.heightM);
+                        }}
+                        style={{
+                          padding: '3px 7px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                          cursor: 'pointer',
+                          background: obstructionPresetId === pr.id
+                            ? 'linear-gradient(135deg,#ff8c00,#ffd700)' : 'rgba(255,255,255,0.07)',
+                          color: obstructionPresetId === pr.id ? '#000' : '#cfd8e6',
+                          border: '1px solid ' + (obstructionPresetId === pr.id
+                            ? 'rgba(255,180,0,0.6)' : 'rgba(255,255,255,0.14)'),
+                        }}
+                      >{pr.icon} {pr.label}</button>
+                    ))}
+                  </div>
                   <div style={{ color: '#bbb', fontSize: 10, lineHeight: 1.35 }}>
-                    Click the roof to drop a chimney-class prism.
-                    Default 0.6m × 0.6m × 1.0m.
+                    {presetFor(obstructionPresetId).hint}
+                    {' '}Panels keep {(DEFAULT_CLEARANCE_M[obstructionPresetId] ?? 0.15).toFixed(2)} m clear of it.
                   </div>
                   {/* Width (east-west) */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

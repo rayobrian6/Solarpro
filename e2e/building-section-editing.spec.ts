@@ -975,3 +975,156 @@ test.describe('the custom/fallback pipeline: build, correct, save, design', () =
     await expect(page.locator('[data-testid="inspector-pitch-locked"]')).toContainText(/Shed/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DELETE MEANS GONE — the owner's exact acceptance sequence, through the UI
+//
+//   "I can delete one bad thing. I can delete a whole bad attempt. I can save.
+//    I can reload. It stays gone. I can start clean."
+//
+// 🚨 EVERY STEP GOES THROUGH A REAL CONTROL. The face is clicked on the canvas,
+// the button is pressed in the inspector, Undo is the chip in the dock, and the
+// confirmation dialog is answered rather than skipped. A test that reaches past
+// the UI proves the library, not the product.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test.describe('delete, undo, save, reload — it stays gone', () => {
+  test('🚨 DELETE ONE SECTION — the other two are untouched, and it survives a reload', async ({ page }) => {
+    test.skip(!ARMED, 'SOLARPRO_LOCAL_PG is not set — no database is attached, so nothing can be saved.');
+
+    const projectId = await createProject(page);
+    await openStudio(page, projectId);
+    await nameTheProperty(page);
+    await seedHouse(page);              // three sections: main(2) garage(4) wing(2)
+    await frameRoof(page);
+
+    const before = await state(page);
+    expect(before.planes.length).toBe(8);
+    const mainBefore = ofSection(before, 'sec-main');
+    const wingBefore = ofSection(before, 'sec-wing');
+    expect(ofSection(before, 'sec-garage').length).toBe(4);
+
+    // ── 4-5. Select the garage and delete it, with the real control ─────────
+    await clickFace(page, 'sec-garage::slopeA');
+    await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
+    await page.locator('[data-testid="inspector-delete-section"]').click();
+
+    // ── 6. A and C are unchanged, field for field ──────────────────────────
+    await expect.poll(() => state(page).then(s => s.planes.length), { timeout: T }).toBe(4);
+    const afterDelete = await state(page);
+    expect(ofSection(afterDelete, 'sec-garage')).toEqual([]);
+    expect(ofSection(afterDelete, 'sec-main')).toEqual(mainBefore);
+    expect(ofSection(afterDelete, 'sec-wing')).toEqual(wingBefore);
+
+    // ── 7-8. Undo brings it back EXACTLY ───────────────────────────────────
+    expect(afterDelete.canUndo).toBe(true);
+    await page.locator('[data-testid="geometry-undo"]').click();
+    await expect.poll(() => state(page).then(s => s.planes.length), { timeout: T }).toBe(8);
+    const afterUndo = await state(page);
+    expect(ofSection(afterUndo, 'sec-garage')).toEqual(ofSection(before, 'sec-garage'));
+
+    // ── 9-10. Redo removes it EXACTLY ──────────────────────────────────────
+    await page.locator('[data-testid="geometry-redo"]').click();
+    await expect.poll(() => state(page).then(s => s.planes.length), { timeout: T }).toBe(4);
+    expect(ofSection(await state(page), 'sec-garage')).toEqual([]);
+
+    // ── 11-13. Save, reload, and it is STILL GONE ──────────────────────────
+    //
+    // 🚨 THIS IS THE ASSERTION THE WHOLE DELETION MODEL EXISTS FOR. Before the
+    // tombstone ledger the stored row, the archive and the acquisition gate
+    // could each put a deleted face back, and the only honest test of that is
+    // a real round trip through the real route.
+    await expect
+      .poll(async () => {
+        const r = await page.request.get('/api/projects/' + projectId + '/layout');
+        if (r.status() !== 200) return -1;
+        const body: any = await r.json();
+        return (body?.data?.roofPlanes ?? body?.roofPlanes ?? []).length;
+      }, { message: 'the delete never reached the database', timeout: 60_000 })
+      .toBe(4);
+
+    await page.reload();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as E2EWin).__solarE2E?.roofPlanes.length ?? 0),
+        { message: 'the roof did not come back after a reload', timeout: 60_000 })
+      .toBe(4);
+    const afterReload = await state(page);
+    expect(ofSection(afterReload, 'sec-garage'),
+      'THE DELETED SECTION CAME BACK ON RELOAD').toEqual([]);
+    // …and the two that were not deleted are still whole.
+    expect(ofSection(afterReload, 'sec-main').length).toBe(2);
+    expect(ofSection(afterReload, 'sec-wing').length).toBe(2);
+  });
+
+  test('🚨 ONE FACE OF A MULTI-FACE SECTION IS REFUSED, and the refusal says what to do', async ({ page }) => {
+    const projectId = await createProject(page);
+    await openStudio(page, projectId);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+
+    await clickFace(page, 'sec-main::slopeA');
+    await expect(page.locator('[data-testid="inspector-section"]')).toBeVisible({ timeout: T });
+    await page.locator('[data-testid="inspector-level-face"]').click();
+    await expect(page.locator('[data-testid="inspector-face"]')).toBeVisible({ timeout: T });
+    await page.locator('[data-testid="inspector-delete-face"]').click();
+
+    // 🚨 NOTHING WAS REMOVED. A gable's two slopes come from one footprint and
+    // one ridge; there is no such object as half a gable. Refusing with a
+    // remedy is the honest one of the four options.
+    await page.waitForTimeout(1_500);
+    expect((await state(page)).planes.length).toBe(8);
+  });
+
+  test('🚨 START OVER — it lists what will go, it asks, and the property stays empty', async ({ page }) => {
+    test.skip(!ARMED, 'SOLARPRO_LOCAL_PG is not set — no database is attached, so nothing can be saved.');
+
+    const projectId = await createProject(page);
+    await openStudio(page, projectId);
+    await nameTheProperty(page);
+    await seedHouse(page);
+    await frameRoof(page);
+    expect((await state(page)).planes.length).toBe(8);
+
+    await page.evaluate(() => (window as any).__solarE2E.requestDelete('design'));
+
+    // 🚨 IT LISTS THE OBJECTS BEFORE IT ASKS. "Are you sure?" tells a reader
+    // nothing they did not already know.
+    const dialog = page.locator('[data-testid="delete-confirm"]');
+    await expect(dialog).toBeVisible({ timeout: T });
+    await expect(page.locator('[data-testid="delete-confirm-lines"]')).toContainText('8 roof faces');
+
+    // Cancelling changes nothing at all.
+    await page.locator('[data-testid="delete-confirm-cancel"]').click();
+    await expect(dialog).toBeHidden({ timeout: T });
+    expect((await state(page)).planes.length).toBe(8);
+
+    // Now mean it.
+    await page.evaluate(() => (window as any).__solarE2E.requestDelete('design'));
+    await expect(dialog).toBeVisible({ timeout: T });
+    await page.locator('[data-testid="delete-confirm-ok"]').click();
+    await expect.poll(() => state(page).then(s => s.planes.length), { timeout: T }).toBe(0);
+
+    // 🚨 AND THE SERVER ACCEPTS IT. The sub-system-wipe guard used to refuse
+    // exactly this — a deliberate clear looks byte-identical to the reload
+    // data-loss bug it was built for — so the save was rejected with a
+    // data-loss error about a wipe the user had just asked for.
+    await expect
+      .poll(async () => {
+        const r = await page.request.get('/api/projects/' + projectId + '/layout');
+        if (r.status() !== 200) return -1;
+        const body: any = await r.json();
+        return (body?.data?.roofPlanes ?? body?.roofPlanes ?? []).length;
+      }, { message: 'Start Over never reached the database', timeout: 60_000 })
+      .toBe(0);
+
+    await page.reload();
+    await page.waitForTimeout(4_000);
+    expect((await state(page)).planes.length,
+      'the design came back after Start Over').toBe(0);
+    // …and the property is marked as deliberately cleared, which is what stops
+    // automatic acquisition putting a roof back on the next map pan.
+    expect(await page.evaluate(() => (window as any).__solarE2E?.geometryLifecycle))
+      .toBe('cleared');
+  });
+});

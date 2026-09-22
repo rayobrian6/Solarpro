@@ -135,6 +135,9 @@ type SolarE2EState = {
    *  click needs WebGL, Google tiles and a building under the cursor — none of
    *  which is the behaviour under test. */
   pickHouse: (lat: number, lng: number, address: string) => void;
+  requestDelete: (scope: string, targetId?: string) => void;
+  deletionLedger: unknown;
+  geometryLifecycle: string;
   // ── THE CUSTOM/FALLBACK MODELLING PATH ────────────────────────────────────
   /** What the installer has decided about this property's native (Google)
    *  geometry: 'undecided' | 'accepted' | 'unavailable' | 'rejected' |
@@ -2146,6 +2149,14 @@ export default function DesignStudio({ project, onSave }: Props) {
        *  browser path to that click needs WebGL, Google tiles and a building
        *  under the cursor; the BEHAVIOUR being tested is what happens after. */
       pickHouse: (lat: number, lng: number, address: string) => { void handleLocationPick(lat, lng, address); },
+      /** Ask for a deletion exactly as a control does. The workspace-scope
+       *  controls live in the 3D tool spine, whose buttons render their icon as
+       *  their own text and are not reliably targetable from a browser test;
+       *  the BEHAVIOUR under test is what happens after the request, including
+       *  the confirmation dialog, which this deliberately does not skip. */
+      requestDelete: (scope: string, targetId?: string) => { requestDeletion(scope, targetId); },
+      deletionLedger: site.deletionLedger,
+      geometryLifecycle: site.geometryLifecycle,
       nativeDisposition: site.nativeDisposition,
       canUndoGeometry: site.canUndoGeometry,
       canRedoGeometry: site.canRedoGeometry,
