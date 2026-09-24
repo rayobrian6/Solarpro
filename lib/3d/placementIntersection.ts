@@ -380,3 +380,64 @@ export function intersectRayWithGeocentricSphere(
 
   return add(rayOrigin, scale(dir, t));
 }
+
+/**
+ * Nearest intersection of a ray with a sphere at an arbitrary centre.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * 🚨 WHY SELECTION NEEDS THIS AND CANNOT JUST ASK THE GPU
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Clicking a placed object is resolved with `viewer.scene.drillPick`, which is
+ * a GPU read. Measured on `chromium-software-webgl` — the configuration the
+ * acceptance suite runs in, and the one a machine with no usable GPU falls back
+ * to — it returns ZERO hits for a tree standing in plain view. The object is
+ * drawn, it is on screen, and nothing can select it.
+ *
+ * That is the same lesson as `resolvePlacementPoint`: a physical question
+ * ("which object is under the cursor?") must not depend on something having
+ * been successfully rasterised. The canonical record knows where the object is
+ * and how big it is, and a ray knows where the user pointed. That is enough.
+ *
+ * So this is the fallback: a bounding sphere per object, tested against the
+ * pick ray. It is deliberately a sphere rather than the exact solid — a canopy
+ * IS a spheroid, and for a chimney a bounding sphere is a slightly generous
+ * target, which is the right way to be wrong about a click.
+ *
+ * @param centre world-space centre of the sphere
+ * @param radius metres; a non-positive radius can never be hit
+ * @returns the nearest hit in FRONT of the origin, or null
+ */
+export function intersectRayWithSphere(
+  rayOrigin: Vec3,
+  rayDirection: Vec3,
+  centre: Vec3,
+  radius: number,
+): { point: Vec3; distanceAlongRay: number } | null {
+  if (!(radius > 0) || !Number.isFinite(radius)) return null;
+  const d = normalize(rayDirection);
+  if (!d) return null;
+
+  const ox = rayOrigin.x - centre.x;
+  const oy = rayOrigin.y - centre.y;
+  const oz = rayOrigin.z - centre.z;
+  if (!Number.isFinite(ox) || !Number.isFinite(oy) || !Number.isFinite(oz)) return null;
+
+  // |o + t·d|² = r², with d normalised so the t² coefficient is 1.
+  const b = 2 * (ox * d.x + oy * d.y + oz * d.z);
+  const c = ox * ox + oy * oy + oz * oz - radius * radius;
+  const disc = b * b - 4 * c;
+  if (disc < 0) return null;
+
+  const root = Math.sqrt(disc);
+  // The near root first; if the camera is INSIDE the sphere that is negative,
+  // so fall through to the far one rather than refusing the click.
+  let t = (-b - root) / 2;
+  if (t < DEFAULT_MIN_DISTANCE_M) t = (-b + root) / 2;
+  if (!Number.isFinite(t) || t < DEFAULT_MIN_DISTANCE_M) return null;
+
+  return {
+    point: { x: rayOrigin.x + d.x * t, y: rayOrigin.y + d.y * t, z: rayOrigin.z + d.z * t },
+    distanceAlongRay: t,
+  };
+}

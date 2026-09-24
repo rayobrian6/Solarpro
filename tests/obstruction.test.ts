@@ -177,13 +177,47 @@ describe('obstruction — buildObstructionFootprint', () => {
     expect(() => buildObstructionFootprint(ALEX_LAT, Infinity, 0.6, 0.6)).toThrow(RangeError);
   });
 
-  it('respects out-of-range dimensions by clamping (defensive — caller should already clamp)', () => {
-    // Even if a caller passes a 99m width, we still produce a valid (clamped) rectangle
+  it('🚨 draws the footprint it was given — it does not resize the object', () => {
+    // 🚨 THIS TEST USED TO ASSERT THE OPPOSITE, and its own name conceded the
+    // problem: "by clamping (defensive — caller should already clamp)".
+    //
+    // `buildObstructionFootprint` ran its inputs through the global
+    // [0.2, 3.0] m clamp, so the drawn rectangle was not the stored one. A vent
+    // pipe saved at 0.10 m was DRAWN at 0.20 m — twice its own size, and
+    // indistinguishable from a plumbing stack saved at 0.15 m. The same clamp
+    // ran inside `pointInObstructionFootprint`, so the panel keep-out was not
+    // the object either. One object, three sizes.
+    //
+    // Bounding what a user may ENTER is a real job, and `clampToPreset` does it
+    // per object, against that object's own limits, at the moment of placement.
+    // By the time a record reaches geometry that decision is made; re-deciding
+    // it here is what produced the disagreement.
     const fp = buildObstructionFootprint(ALEX_LAT, ALEX_LNG, 99, 0.6);
-    // The footprint's lng span is now capped at 3.0m (MAX_OBSTRUCTION_FOOTPRINT_M)
     const dLng = Math.abs(fp.ne.lng - fp.sw.lng);
-    // 3.0 m / metersPerDegLng(ALEX_LAT) ≈ 3.0 / 86772 ≈ 3.457e-5
-    expect(dLng).toBeLessThan(4e-5);
+    const metresPerDegLng = 111_320 * Math.cos((ALEX_LAT * Math.PI) / 180);
+    expect(dLng * metresPerDegLng, 'the footprint was resized behind the caller')
+      .toBeCloseTo(99, 3);
+
+    // And the small end, which is the one that actually shipped wrong.
+    const vent = buildObstructionFootprint(ALEX_LAT, ALEX_LNG, 0.10, 0.10);
+    expect(Math.abs(vent.ne.lng - vent.sw.lng) * metresPerDegLng,
+      'a 100 mm vent pipe is drawn at some other size')
+      .toBeCloseTo(0.10, 4);
+  });
+
+  it('still refuses to build a degenerate polygon', () => {
+    // What remains is arithmetic safety, not product sizing: a zero or
+    // non-finite edge would produce a polygon Cesium cannot triangulate.
+    const metresPerDegLng = 111_320 * Math.cos((ALEX_LAT * Math.PI) / 180);
+    for (const bad of [0, -5, NaN, Infinity]) {
+      const fp = buildObstructionFootprint(ALEX_LAT, ALEX_LNG, bad as number, 0.6);
+      const w = Math.abs(fp.ne.lng - fp.sw.lng) * metresPerDegLng;
+      expect(Number.isFinite(w), `width ${bad} produced a non-finite edge`).toBe(true);
+      expect(w, `width ${bad} produced a zero-area polygon`).toBeGreaterThan(0);
+      // …and the fallback is far below any real object, so it can never be
+      // mistaken for a resize.
+      expect(w).toBeLessThan(0.05);
+    }
   });
 });
 

@@ -265,7 +265,19 @@ describe('🚨 an obstruction can be selected, and therefore deleted', () => {
     // freshly placed tree looked like a vent until the page was reloaded, which
     // is part of "it does not visibly give me a useful tree". One writer now,
     // which is what makes this assertion worth having.
-    expect(ENGINE).toMatch(/name:\s+`\[OBS\] \$\{obs\.id\}`/);
+    //
+    // 🚨 AND NOW EVERY PART OF THE OBJECT CARRIES IT. A tree is drawn as a
+    // trunk and a canopy, not one box, so the name is hoisted to `partName` and
+    // stamped on each part — clicking a tree's canopy must select the TREE.
+    // The invariant is "the name is `[OBS] ` + the canonical id", not the
+    // spelling of one literal.
+    expect(ENGINE, 'the entity name is no longer built from the canonical id')
+      .toMatch(/const partName = `\[OBS\] \$\{obs\.id\}`/);
+    expect(ENGINE, 'a drawn part does not carry the object name, so it cannot be picked')
+      .toMatch(/name: partName/);
+    // Sub-parts must be distinct ENTITIES but the same OBJECT.
+    expect(ENGINE, 'the parts of one object share an entity id and will collide')
+      .toMatch(/\$\{obs\.id\}::\$\{part\.role\}/);
     expect(ENGINE, 'placement builds its own entity again')
       .not.toMatch(/name:\s+`\[OBS\] \$\{obsId\}`/);
   });

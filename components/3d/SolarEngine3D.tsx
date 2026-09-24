@@ -28,6 +28,7 @@ import {
 } from '@/lib/3d/obstructionPresets';
 import { DEFAULT_CLEARANCE_M } from '@/lib/3d/panelKeepOut';
 import { OVERLAY_Z } from '@/lib/3d/overlayLayers';
+import { buildObstructionGeometry, canopyRadiusFor } from '@/lib/3d/obstructionGeometry';
 /**
  * How far from the site a placement click may land, metres.
  *
@@ -48,6 +49,7 @@ const PLACEMENT_RADIUS_M = 1_000;
 
 import {
   nearestFaceAlongRay,
+  intersectRayWithSphere,
   intersectRayWithGeocentricSphere,
   type PlanarFace as IntersectFace,
 } from '@/lib/3d/placementIntersection';
@@ -11807,32 +11809,94 @@ function SolarEngine3D({
     const widthM = Number.isFinite(obs.widthM) && obs.widthM > 0 ? obs.widthM : (obs.radiusM ?? 0.3) * 2;
     const depthM = Number.isFinite(obs.depthM) && obs.depthM > 0 ? obs.depthM : widthM;
     const prismHeightM = Number.isFinite(obs.heightM) && obs.heightM > 0 ? obs.heightM : 1.0;
-    const footprint = buildObstructionFootprint(obs.lat, obs.lng, widthM, depthM);
-    const polyPositions = [footprint.sw, footprint.se, footprint.ne, footprint.nw]
-      .map(c => safeCartesian3(C, c.lng, c.lat, obs.height))
-      .filter((q): q is any => q != null);
-    if (polyPositions.length < 4) return;
-    const isTree = (obs as { space?: string }).space === 'site' || obs.type === 'tree';
+    // 🚨 THE SHAPE COMES FROM THE OBJECT, NOT FROM ONE PRIMITIVE FOR EVERYTHING.
+    //
+    // This drew a single extruded rectangle for every type, and said so:
+    // "It is the same primitive; only the colour says which of the two kinds of
+    // object it is." A tree was therefore a GREEN BOX — no trunk, no canopy —
+    // and no amount of placement, persistence or shade metadata made it one.
+    //
+    // `buildObstructionGeometry` is pure and has no Cesium in it, so a 35 ft
+    // tree with a 20 ft canopy is proven by arithmetic in
+    // tests/obstructionGeometry.test.ts rather than by looking at a screenshot.
+    // Every number below is derived from this record's own fields.
+    const geo = buildObstructionGeometry({
+      widthM, depthM, heightM: prismHeightM,
+      // 🚨 `obs.height` IS AN ALTITUDE — the point the ray hit, ground for a
+      // tree and roof deck for a chimney. It is the object's BASE, and the
+      // whole extrusion-datum bug was treating a height as one of these.
+      baseAltitudeM: obs.height,
+      type: obs.type, space: (obs as { space?: 'roof' | 'site' }).space,
+    });
+    const isTree = obs.type === 'tree';
     try {
-      viewer.entities.add({
-        id: obs.id,
-        name: `[OBS] ${obs.id}`,
-        polygon: {
-          hierarchy: new C.PolygonHierarchy(polyPositions),
-          perPositionHeight: true,
-          height: 0,
-          extrudedHeight: prismHeightM,
-          // A tree reads as a tree. It is the same primitive; only the colour
-          // says which of the two kinds of object it is.
-          material: C.Color.fromCssColorString(isTree ? '#4a8a3a' : '#f5f5f5')
-            .withAlpha(isTree ? 0.75 : 0.92),
-          outline: true,
-          outlineColor: C.Color.fromCssColorString(isTree ? '#2f5f25' : '#2a2a2a'),
-          outlineWidth: 2,
-          closeTop: true,
-          closeBottom: false,
-        },
+      // Sub-parts carry the SAME `[OBS] <id>` name as the body, so clicking a
+      // tree's canopy selects the tree — `pickObstructionAtScreen` reads that
+      // name and does not care which part was hit.
+      const partName = `[OBS] ${obs.id}`;
+      geo.parts.forEach((part, i) => {
+        const entityId = i === 0 ? obs.id : `${obs.id}::${part.role}`;
+        if (part.kind === 'prism') {
+          const footprint = buildObstructionFootprint(obs.lat, obs.lng, part.widthM, part.depthM);
+          const polyPositions = [footprint.sw, footprint.se, footprint.ne, footprint.nw]
+            .map(c => safeCartesian3(C, c.lng, c.lat, part.bottomAltitudeM))
+            .filter((q): q is any => q != null);
+          if (polyPositions.length < 4) return;
+          viewer.entities.add({
+            id: entityId,
+            name: partName,
+            polygon: {
+              hierarchy: new C.PolygonHierarchy(polyPositions),
+              perPositionHeight: true,
+              // 🚨 AN ALTITUDE, NOT A HEIGHT. Measured in real Cesium: with the
+              // corners at 150 m and `extrudedHeight: 8` the solid rendered
+              // from 8 m to 150 m — 142 m tall. `extrudedHeight` is the
+              // ALTITUDE OF THE TOP FACE. The old code passed the object's own
+              // height here, so every object at a property with a real
+              // elevation was a spike running from near the ellipsoid up to the
+              // ground. It looked right in the browser gate only because the
+              // ground elevation is unresolved there and reads 0, where the
+              // correct and the broken datum give the same number.
+              extrudedHeight: part.topAltitudeM,
+              material: C.Color.fromCssColorString('#f5f5f5').withAlpha(0.92),
+              outline: true,
+              outlineColor: C.Color.fromCssColorString('#2a2a2a'),
+              outlineWidth: 2,
+              closeTop: true,
+              closeBottom: false,
+            },
+          });
+        } else if (part.kind === 'cylinder') {
+          const pos = safeCartesian3(C, obs.lng, obs.lat, part.centreAltitudeM);
+          if (!pos) return;
+          viewer.entities.add({
+            id: entityId, name: partName, position: pos,
+            cylinder: {
+              length: part.lengthM,
+              topRadius: part.radiusM * 0.85,
+              bottomRadius: part.radiusM,
+              material: C.Color.fromCssColorString('#5a3a1a'),
+              outline: true,
+              outlineColor: C.Color.fromCssColorString('#2a1a08'),
+            },
+          });
+        } else {
+          const pos = safeCartesian3(C, obs.lng, obs.lat, part.centreAltitudeM);
+          if (!pos) return;
+          viewer.entities.add({
+            id: entityId, name: partName, position: pos,
+            ellipsoid: {
+              radii: new C.Cartesian3(part.radiusXM, part.radiusYM, part.radiusZM),
+              material: C.Color.fromCssColorString('#4a8a3a').withAlpha(0.85),
+              outline: true,
+              outlineColor: C.Color.fromCssColorString('#1a3a0a'),
+            },
+          });
+        }
       });
+      if (isTree) {
+        addLog('OBS', `Tree drawn: ${geo.totalHeightM.toFixed(1)}m tall, ${geo.maxWidthM.toFixed(1)}m canopy, base ${obs.height.toFixed(1)}m`);
+      }
       viewer.scene.requestRender();
     } catch (e: unknown) {
       addLog('WARN', `Obstruction entity: ${(e as Error).message}`);
@@ -11851,6 +11915,48 @@ function SolarEngine3D({
         const eid: string = h?.id?.id ?? '';
         if (typeof eid === 'string' && (obstructionsRef.current ?? []).some(o => o?.id === eid)) return eid;
       }
+    } catch { /* ignore */ }
+
+    // 🚨 THE GPU IS NOT THE ONLY THING THAT KNOWS WHERE AN OBJECT IS.
+    //
+    // `drillPick` is a GPU read, and measured on chromium-software-webgl — the
+    // configuration the acceptance suite runs in, and what any machine without
+    // a usable GPU falls back to — it returns ZERO hits for a tree standing in
+    // plain view. The tree is drawn, it is on screen, and nothing could select
+    // it, so its inspector was unreachable and it could not be resized or
+    // deleted.
+    //
+    // This is the selection half of the ruling that produced
+    // `resolvePlacementPoint`: do not require something to have been
+    // successfully rasterised in order to answer a physical question. The
+    // canonical record says where each object is and how big it is; the ray
+    // says where the user pointed. Nearest bounding sphere along the ray wins.
+    try {
+      const C = (window as any).Cesium;
+      const ray = viewer.camera.getPickRay(screenPos);
+      if (!ray) return null;
+      const origin = { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z };
+      const dir = { x: ray.direction.x, y: ray.direction.y, z: ray.direction.z };
+      let bestId: string | null = null;
+      let bestT = Infinity;
+      for (const o of obstructionsRef.current ?? []) {
+        if (!o || !Number.isFinite(o.lat) || !Number.isFinite(o.lng)) continue;
+        const w = Number.isFinite(o.widthM) && o.widthM! > 0 ? o.widthM! : 0.6;
+        const d = Number.isFinite(o.depthM) && o.depthM! > 0 ? o.depthM! : w;
+        const h = Number.isFinite(o.heightM) && o.heightM! > 0 ? o.heightM! : 1.0;
+        // The sphere is centred on the object's middle, not its base, or a
+        // click on a tall tree's canopy would miss it entirely.
+        const centreCart = safeCartesian3(C, o.lng, o.lat, (o.height ?? 0) + h / 2);
+        if (!centreCart) continue;
+        const radius = Math.max(Math.max(w, d) / 2, h / 2);
+        const hit = intersectRayWithSphere(
+          origin, dir,
+          { x: centreCart.x, y: centreCart.y, z: centreCart.z },
+          radius,
+        );
+        if (hit && hit.distanceAlongRay < bestT) { bestT = hit.distanceAlongRay; bestId = o.id; }
+      }
+      return bestId;
     } catch { /* ignore */ }
     return null;
   }
@@ -12944,7 +13050,10 @@ function SolarEngine3D({
         type:    preset.id,
         space:   preset.space,
         // A tree's canopy is not its keep-out. It is what shades.
-        canopyRadiusM: preset.space === 'site' ? Math.max(widthM, depthM) / 2 : undefined,
+        // 🚨 THE SAME RADIUS THE RENDERER DRAWS. `canopyRadiusFor` is exported
+        // beside the geometry builder so a drawn tree and a shading tree cannot
+        // become different trees.
+        canopyRadiusM: preset.space === 'site' ? canopyRadiusFor(widthM, depthM) : undefined,
         // Which face it was marked on, so it belongs to a surface rather than
         // floating at a world coordinate when that surface moves.
         //
@@ -15034,6 +15143,14 @@ function SolarEngine3D({
                   onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Select: click panels. SHIFT+click = multi-select.', x: r.left + r.width / 2, y: r.top - 8 }); }}
                   onMouseLeave={() => setTooltipInfo(null)}
                   onClick={() => activateTool('select')}
+                  // 🚨 A CONTROL WHOSE ONLY NAME IS A HOVER TOOLTIP HAS NO NAME.
+                  // Its text is an arrow glyph, so a screen reader announces
+                  // "button" and a test cannot find it at all. The group buttons
+                  // were given a name and a test id for exactly this reason and
+                  // this one — the DEFAULT tool — was missed.
+                  aria-label="Select"
+                  title="Select: click panels. SHIFT+click = multi-select."
+                  data-testid="tool-select"
                   style={{
                     ...btnBase,
                     background: placementMode === 'select' ? 'linear-gradient(135deg,#ff8c00,#ffd700)' : 'rgba(255,255,255,0.07)',
@@ -16679,6 +16796,23 @@ function SolarEngine3D({
               const isTree = (obs as { space?: string }).space === 'site' || obs.type === 'tree';
               const patch = (next: Partial<typeof obs>) => {
                 const merged = { ...obs, ...next };
+                // 🚨 THE REF IS WRITTEN FIRST, AND SYNCHRONOUSLY.
+                //
+                // This function reads its `obs` from `obstructionsRef.current`,
+                // and the only two writers of that ref were placement and the
+                // parent-sync effect. So an edit reached the ref only after a
+                // full round trip — setObstructions → publish to DesignStudio →
+                // prop back → adopt effect — and two edits made before that
+                // completed both merged onto the SAME stale object, so the
+                // first one was silently thrown away.
+                //
+                // Measured: setting a tree's height and then its canopy width
+                // left the canopy at its placed size, with the field showing
+                // the value that had just been discarded. Writing the ref here
+                // is the same discipline `makeSetter` uses in useSiteDesign for
+                // exactly this reason.
+                obstructionsRef.current = (obstructionsRef.current ?? [])
+                  .map(o => (o.id === obs.id ? merged : o));
                 setObstructions(prev => prev.map(o => (o.id === obs.id ? merged : o)));
                 // Redraw it where it now stands, at its new size.
                 const v = viewerRef.current;

@@ -101,6 +101,42 @@ export function clampObstructionFootprint(
 }
 
 /**
+ * 🚨 GEOMETRY DESCRIBES THE OBJECT THAT WAS RECORDED.
+ *
+ * The four measurement helpers below used to run their inputs through
+ * `clampObstructionFootprint`, which bounds a footprint to [0.2, 3.0] m. That
+ * range was chosen when "Add Obstruction" meant one generic 0.6 x 0.6 block,
+ * and once there were nine real objects it silently made the picture disagree
+ * with the record:
+ *
+ *   · a vent pipe stored at 0.10 m was DRAWN at 0.20 m — twice its own size,
+ *     and identical to a plumbing stack stored at 0.15 m;
+ *   · `pointInObstructionFootprint` excluded modules over that same doubled
+ *     rectangle, so the keep-out was not the object either.
+ *
+ * So the object had two sizes: the one it was saved with and the one it was
+ * shown and measured at. Bounding what a user may ENTER is a legitimate job,
+ * and `clampToPreset` in lib/3d/obstructionPresets.ts does it per object at the
+ * moment of placement — against that object's own limits, not one global band.
+ * By the time a record reaches geometry the decision has been made, and
+ * re-deciding it here is how the two sizes came about.
+ *
+ * What remains is arithmetic safety only: a non-finite or non-positive edge
+ * would produce a degenerate polygon, so it falls back to something drawable.
+ * This is deliberately far below any real object, so it can never resize one.
+ */
+export const DEGENERATE_EDGE_FLOOR_M = 0.01;
+
+export function sanitizeFootprint(
+  widthM: number,
+  depthM: number,
+): { widthM: number; depthM: number } {
+  const safe = (v: number) =>
+    Number.isFinite(v) && v > DEGENERATE_EDGE_FLOOR_M ? v : DEGENERATE_EDGE_FLOOR_M;
+  return { widthM: safe(widthM), depthM: safe(depthM) };
+}
+
+/**
  * Clamp a height to the safe range. Pure, no I/O.
  */
 export function clampObstructionHeight(heightM: number): number {
@@ -149,7 +185,7 @@ export function buildObstructionFootprint(
       `buildObstructionFootprint: center must be finite (got ${centerLat}, ${centerLng})`,
     );
   }
-  const { widthM: w, depthM: d } = clampObstructionFootprint(widthM, depthM);
+  const { widthM: w, depthM: d } = sanitizeFootprint(widthM, depthM);
   const halfW = w / 2;
   const halfD = d / 2;
   const dLat = halfD / METERS_PER_DEG_LAT;
@@ -170,7 +206,7 @@ export function obstructionFootprintAreaM2(
   widthM: number,
   depthM: number,
 ): number {
-  const { widthM: w, depthM: d } = clampObstructionFootprint(widthM, depthM);
+  const { widthM: w, depthM: d } = sanitizeFootprint(widthM, depthM);
   return w * d;
 }
 
@@ -182,7 +218,7 @@ export function obstructionFootprintDiagonalM(
   widthM: number,
   depthM: number,
 ): number {
-  const { widthM: w, depthM: d } = clampObstructionFootprint(widthM, depthM);
+  const { widthM: w, depthM: d } = sanitizeFootprint(widthM, depthM);
   return Math.sqrt(w * w + d * d);
 }
 
@@ -212,7 +248,7 @@ export function pointInsideObstructionRectangle(
   ) {
     return false;
   }
-  const { widthM: w, depthM: d } = clampObstructionFootprint(widthM, depthM);
+  const { widthM: w, depthM: d } = sanitizeFootprint(widthM, depthM);
   const cosLat = Math.cos((centerLat * Math.PI) / 180);
   const dxM = (pointLng - centerLng) * METERS_PER_DEG_LAT * cosLat;
   const dyM = (pointLat - centerLat) * METERS_PER_DEG_LAT;

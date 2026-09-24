@@ -38,6 +38,7 @@ import {
   normalize,
   type PlanarFace,
   type Vec3,
+  intersectRayWithSphere,
 } from '@/lib/3d/placementIntersection';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -571,5 +572,65 @@ describe('🚨 a padded hit yields to a true one, unless the true one is hidden'
     const garage = rect('garage', v(0, 9, 3), v(1, 0, 0), v(0, 1, 0), 12, 10);
     const hit = nearestFaceAlongRay(v(0, 6, 40), v(0, 0, -1), [garage, upper]);
     expect(hit!.faceId).toBe('upper');
+  });
+});
+
+describe('🚨 intersectRayWithSphere — selection without a GPU', () => {
+  // Measured on chromium-software-webgl: `drillPick` returns ZERO hits for a
+  // tree standing in plain view, so nothing could select it, its inspector was
+  // unreachable, and it could not be resized or deleted. Selection is a
+  // physical question and must not depend on successful rasterisation.
+  const O = { x: 0, y: 0, z: 0 };
+
+  it('hits a sphere straight ahead, at its NEAR face', () => {
+    const hit = intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, 2);
+    expect(hit).not.toBeNull();
+    expect(hit!.distanceAlongRay).toBeCloseTo(8, 9);
+    expect(hit!.point.x).toBeCloseTo(8, 9);
+  });
+
+  it('misses a sphere the ray passes beside', () => {
+    expect(intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 10, y: 5, z: 0 }, 2)).toBeNull();
+  });
+
+  it('🚨 does not hit a sphere BEHIND the camera', () => {
+    // Otherwise clicking the sky selects the tree behind you.
+    expect(intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: -10, y: 0, z: 0 }, 2)).toBeNull();
+  });
+
+  it('still answers when the camera is inside the sphere', () => {
+    // Zoomed into a canopy, the near root is behind the origin; refusing there
+    // would make the object unselectable exactly when it fills the screen.
+    const hit = intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, 5);
+    expect(hit).not.toBeNull();
+    expect(hit!.distanceAlongRay).toBeCloseTo(5, 9);
+  });
+
+  it('grazes tangentially without throwing', () => {
+    const hit = intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 10, y: 2, z: 0 }, 2);
+    if (hit) expect(Number.isFinite(hit.distanceAlongRay)).toBe(true);
+  });
+
+  it('refuses a zero or negative radius rather than hitting everything', () => {
+    expect(intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, 0)).toBeNull();
+    expect(intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, -3)).toBeNull();
+    expect(intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, NaN)).toBeNull();
+  });
+
+  it('refuses a degenerate direction', () => {
+    expect(intersectRayWithSphere(O, { x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, 2)).toBeNull();
+  });
+
+  it('🚨 the NEARER of two objects on the same ray wins', () => {
+    // A tree in front of a chimney must select the tree.
+    const near = intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, 2);
+    const far = intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 30, y: 0, z: 0 }, 2);
+    expect(near!.distanceAlongRay).toBeLessThan(far!.distanceAlongRay);
+  });
+
+  it('does not require a normalised direction', () => {
+    const a = intersectRayWithSphere(O, { x: 1, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, 2);
+    const b = intersectRayWithSphere(O, { x: 7, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, 2);
+    expect(b!.distanceAlongRay).toBeCloseTo(a!.distanceAlongRay, 9);
   });
 });
