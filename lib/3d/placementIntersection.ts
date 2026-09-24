@@ -96,6 +96,18 @@ const PARALLEL_EPS = 1e-6;
 
 const DEFAULT_MIN_DISTANCE_M = 0.01;
 
+/**
+ * How much nearer a PADDED hit must be before it outranks a TRUE one.
+ *
+ * A padded hit lies at most `padM` (0.25 m) outside its own face, so along any
+ * reasonable viewing ray it falls within about a metre of the real surface it
+ * belongs to — the measured ridge case is 0.47 m. A padded hit that is nearer
+ * by MORE than this is not a near-miss on the same roof; it is a visible surface
+ * standing in front of a hidden one, and the visible surface is what the user
+ * pointed at. The measured occlusion case is 5.6 m.
+ */
+const PAD_YIELDS_WITHIN_M = 1.0;
+
 // ── vector helpers ──────────────────────────────────────────────────────────
 // Local, so this module depends on nothing. They take the interface, not a class.
 
@@ -269,6 +281,26 @@ export function nearestFaceAlongRay(
     if (!bestPadded || padded.distanceAlongRay < bestPadded.distanceAlongRay) bestPadded = padded;
   }
 
+  // 🚨 A TRUE HIT WINS A TIE, NOT A RACE.
+  //
+  // Preferring TRUE unconditionally fixed the ridge and broke occlusion: on a
+  // two-storey house a click 5 cm off the upper eave found a TRUE hit on the
+  // garage deck BEHIND and UNDER the upper roof — invisible from the camera —
+  // and placed the object 5.6 m from where the user pointed. An adversary
+  // measured both cases:
+  //
+  //   ridge   near face PADDED at 56.10 m, far face TRUE at 56.57 m   → 0.47 m
+  //   garage  upper roof PADDED at ~28 m,  garage TRUE at ~34 m       → 5.6 m
+  //
+  // Those are different situations and distance tells them apart. A padded hit
+  // sits at most `padM` outside its face, so along any reasonable ray it lands
+  // within about a metre of the true surface it belongs to. Beyond that, a
+  // nearer padded hit means the true hit is behind something the camera cannot
+  // see through — and the visible surface is the one the user pointed at.
+  if (bestTrue && bestPadded
+      && bestPadded.distanceAlongRay < bestTrue.distanceAlongRay - PAD_YIELDS_WITHIN_M) {
+    return bestPadded;
+  }
   return bestTrue ?? bestPadded;
 }
 

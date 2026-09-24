@@ -27,6 +27,7 @@ import {
   clampToPreset,
 } from '@/lib/3d/obstructionPresets';
 import { DEFAULT_CLEARANCE_M } from '@/lib/3d/panelKeepOut';
+import { OVERLAY_Z } from '@/lib/3d/overlayLayers';
 /**
  * How far from the site a placement click may land, metres.
  *
@@ -36,10 +37,14 @@ import { DEFAULT_CLEARANCE_M } from '@/lib/3d/panelKeepOut';
  * range-checks degrees. The object was created, in a field, off screen, and the
  * only symptom was that nothing appeared where the user clicked.
  *
- * Generous on purpose -- a detached shop or a tree at the back of a large lot
- * must still be placeable -- but far inside "somewhere else entirely".
+ * 🚨 IT WAS 250 m AND THAT REFUSED REAL CLICKS. The failure it exists to catch
+ * -- a click on the sky taking `pickEllipsoid`'s grazing intersection -- lands
+ * KILOMETRES away, so the bound only has to be smaller than that. 250 m is
+ * smaller than a rural parcel, a ground-mount array, or a tree at the back of a
+ * long lot, and it silently refused them. A bound that rejects the work is worse
+ * than the failure it prevents.
  */
-const PLACEMENT_RADIUS_M = 250;
+const PLACEMENT_RADIUS_M = 1_000;
 
 import {
   nearestFaceAlongRay,
@@ -1341,6 +1346,19 @@ function SolarEngine3D({
   const roofPlanesRef = useRef<Props['roofPlanes']>(roofPlanes ?? []);
   // selectedPanelRef: always current copy of the selectedPanel prop
   const selectedPanelRef = useRef<Props['selectedPanel']>(selectedPanel);
+  // 🚨 SAME REASON AS `selectedPanelRef`, FOR THE SETBACKS.
+  //
+  // Every function that lays panels out — fillRoofSegmentWithPanels,
+  // finalizePlane3D, handleSurfaceSelectClick, handleAutoRoof — is reached from
+  // the Cesium click handler registered once at mount, so the `fireSetbacks`
+  // PROP they could see is the one that existed when the 3D view opened.
+  // Moving the Edge Setback slider, or applying an AHJ's real ridge/eave
+  // figures, changed the right-hand panel and nothing else: the next plane was
+  // still filled to the old numbers. A setback is a fire-code clearance, so the
+  // quiet version of this failure is an array that does not meet the
+  // jurisdiction the package will be submitted to.
+  const fireSetbacksRef = useRef<Props['fireSetbacks']>(fireSetbacks);
+  useEffect(() => { fireSetbacksRef.current = fireSetbacks; }, [fireSetbacks]);
   // mountingSystemIdRef: always current mounting system ID — read inside closures without stale prop
   const mountingSystemIdRef = useRef<string>(mountingSystemId);
   // v63: string-coloring + equipment-overlay state, read inside render closures.
@@ -2090,6 +2108,8 @@ function SolarEngine3D({
   const [tooltipInfo, setTooltipInfo] = useState<{ text: string; x: number; y: number } | null>(null);
   // Which toolbar group is currently expanded (null = all collapsed)
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  /** So the relative-datum warning is logged once, not on every click. */
+  const warnedUnresolvedGroundRef = useRef(false);
   // v48.12: Ground mount racking visibility toggle
   const [showRacking, setShowRacking] = useState<boolean>(true);
   const showRackingRef = useRef<boolean>(true);
@@ -2144,6 +2164,26 @@ function SolarEngine3D({
   const [lastPlacedBlockId, setLastPlacedBlockId] = useState<string | null>(null);
   // Default eave for gable/hip roofs (height of the wall below the eave line)
   const [newRoofEaveHeightM, setNewRoofEaveHeightM] = useState<number>(6);
+
+  // 🚨 THE PITCH AND EAVE SLIDERS WERE INERT, AND NOTHING SAID SO.
+  //
+  // `finalizeRoofSection` reads these two to build a traced gable or hip, and it
+  // is reached only from `handleGableClick` / `handleHipClick` — both dispatched
+  // by the Cesium LEFT_CLICK handler that `setupClickHandler` registers once at
+  // mount. So the values it could see were the mount defaults, 22° and 6 m, and
+  // no movement of either slider ever reached a roof for the life of the page.
+  //
+  // The status line made it look wired: it is rendered in render scope, so
+  // tracing with the slider at 40° printed "Pitch 40°" while the section was
+  // built at 22°. And this is not recoverable later — `buildSectionRoofPlanes`
+  // stamps `pitchDeg` and the eave-derived elevation onto the RoofPlanes that go
+  // to DesignStudio and are persisted, so a 9:12 hip the user dialled in is
+  // saved as 4.7:12 and every panel placed on it sits on the wrong deck. That is
+  // the vertical-datum class of error the building-section work exists to end.
+  const roofPitchDegRef = useRef<number>(22);
+  const newRoofEaveHeightMRef = useRef<number>(6);
+  useEffect(() => { roofPitchDegRef.current = roofPitchDeg; }, [roofPitchDeg]);
+  useEffect(() => { newRoofEaveHeightMRef.current = newRoofEaveHeightM; }, [newRoofEaveHeightM]);
   // v64: Gable roof primitive — click 2 eave corners, render 2 sloped faces meeting at ridge.
   // The eave is a rectangle in lat/lng; ridge runs along the long edge at the centroid.
   const gablePtsRef = useRef<Array<{ lat: number; lng: number }>>([]);
@@ -2187,6 +2227,42 @@ function SolarEngine3D({
   const [newObstructionWidthM,  setNewObstructionWidthM]  = useState<number>(DEFAULT_OBSTRUCTION_FOOTPRINT_W_M);
   const [newObstructionDepthM,  setNewObstructionDepthM]  = useState<number>(DEFAULT_OBSTRUCTION_FOOTPRINT_D_M);
   const [newObstructionHeightM, setNewObstructionHeightM] = useState<number>(DEFAULT_OBSTRUCTION_HEIGHT_M);
+
+  // 🚨 THE CLICK HANDLER IS REGISTERED ONCE AND NEVER AGAIN, SO IT CANNOT READ
+  // REACT STATE.
+  //
+  // `setupClickHandler` is called a single time from the viewer-init effect, so
+  // the arrow function it hands to Cesium's `setInputAction` closes over the
+  // MOUNT render for the life of the page. Every other value the placement path
+  // needs — the armed preset, the plane list, the panel list — is already a ref
+  // for exactly this reason. These three were left as plain state.
+  //
+  // Measured: arming the Tree tool sets the state to 6.0 x 6.0 x 8.0 and the
+  // panel sliders show 6.0, but the click read the mount values (0.6 x 0.6 x
+  // 1.0) and `clampToPreset` raised the 0.6 to the tree's 1.0 m minimum
+  // footprint. So a tree WAS placed, at 1 m across instead of 6 — and since
+  // `canopyRadiusM` is half the footprint, every shade result was computed on a
+  // sixth of a tree. The sliders and the object disagreed, and the sliders were
+  // the ones telling the truth.
+  //
+  // Mirrored by an effect rather than at each setter, so a path added later
+  // (a new slider, a preset, a restore) cannot reintroduce the split.
+  // 🚨 One name for "a placement panel is open", because it decides both what
+  // renders AND what is clickable. See the note on `top-right-stack`.
+  const isPlacingObject = placementMode === 'obstruction' || placementMode === 'tree';
+
+  const obstructionSizeRef = useRef<{ widthM: number; depthM: number; heightM: number }>({
+    widthM:  DEFAULT_OBSTRUCTION_FOOTPRINT_W_M,
+    depthM:  DEFAULT_OBSTRUCTION_FOOTPRINT_D_M,
+    heightM: DEFAULT_OBSTRUCTION_HEIGHT_M,
+  });
+  useEffect(() => {
+    obstructionSizeRef.current = {
+      widthM:  newObstructionWidthM,
+      depthM:  newObstructionDepthM,
+      heightM: newObstructionHeightM,
+    };
+  }, [newObstructionWidthM, newObstructionDepthM, newObstructionHeightM]);
   const ghostEntityRef = useRef<any>(null);
   const [statusMsg, setStatusMsg]       = useState('');
   const [fps, setFps]                   = useState(60);
@@ -4323,7 +4399,11 @@ function SolarEngine3D({
           // Only shown when placementMode === 'auto_roof' (Auto Fill active).
           if (modeRef.current === 'auto_roof') {
             try {
-              const SETBACK_M = Math.max(fireSetbacks?.edgeSetbackM ?? 0.457, fireSetbacks?.ridgeSetbackM ?? 0.457); // matches fillRoofSegmentWithPanels
+              // 🚨 The ref, for the reason in `fireSetbacksRef` — and here the
+              // comment is the argument: this must MATCH what
+              // `fillRoofSegmentWithPanels` uses, and that now reads the ref.
+              // Leaving this on the prop would draw one setback and obey another.
+              const SETBACK_M = Math.max(fireSetbacksRef.current?.edgeSetbackM ?? 0.457, fireSetbacksRef.current?.ridgeSetbackM ?? 0.457); // matches fillRoofSegmentWithPanels
               // Use convexHull or polygon as the roof boundary
               const roofPoly: Array<{ lat: number; lng: number }> =
                 (seg.convexHull && seg.convexHull.length >= 3) ? seg.convexHull :
@@ -5074,9 +5154,10 @@ function SolarEngine3D({
   function renderFireSetbackZones(viewer: any, C: any) {
     clearFireSetbackZones(viewer);
     setbackBandCentroidsRef.current = []; // reset centroids for fresh render
-    const ridgeSB = fireSetbacks?.ridgeSetbackM ?? 0.457;
-    const eaveSB  = fireSetbacks?.eaveSetbackM  ?? 0;
-    const edgeSB  = fireSetbacks?.edgeSetbackM  ?? 0.457;
+    // 🚨 Through the ref — see `fireSetbacksRef`.
+    const ridgeSB = fireSetbacksRef.current?.ridgeSetbackM ?? 0.457;
+    const eaveSB  = fireSetbacksRef.current?.eaveSetbackM  ?? 0;
+    const edgeSB  = fireSetbacksRef.current?.edgeSetbackM  ?? 0.457;
     const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
 
     const renderables = collectRoofRenderables(C, groundElev);
@@ -7031,6 +7112,36 @@ function SolarEngine3D({
           if (dims) finalHeightM = dims.z;
         }
         blockHeightOverridesRef.current.set(r.blockEntity.id, finalHeightM);
+
+        // 🚨 AND THE ANCHOR MOVES WITH THE BLOCK, OR THE NEXT DRAG IS THE LAST.
+        //
+        // `__centroidCart` is written once at creation, at ground + the eave
+        // height the block was built with, and `blockResizeMove` recovers the
+        // ground from it as `carto.height - startHeightM`. That identity only
+        // holds while the anchor still describes the CURRENT top, and nothing
+        // here used to update it — only `setBlockHeight` did.
+        //
+        // So the second drag mis-placed the handle by exactly the height the
+        // first drag added: a block taken from 6 m to 20 m put its knob 14 m
+        // BELOW its own roof, inside the building. The block stayed the right
+        // height (`startYWorld` and `u` share the stale anchor, so the delta
+        // cancels) — the only visible effect was the grab handle burying
+        // itself. After that `blockResizeDown` can never arm again, because it
+        // only arms on a `block-handle-` pick and the handle is no longer up
+        // there: the height could not be dragged again without a reload. The
+        // status line below has been promising "drag handle again to adjust"
+        // the whole time.
+        try {
+          const carto = C.Cartographic.fromCartesian(r.centroidCart);
+          if (carto && isFinite(carto.height)) {
+            const groundM = carto.height - r.startHeightM;
+            (r.blockEntity as any).__centroidCart =
+              C.Cartesian3.fromRadians(carto.longitude, carto.latitude, groundM + finalHeightM);
+          }
+        } catch (e: unknown) {
+          addLog('WARN', `block resize: anchor not re-synced — ${(e as Error).message}`);
+        }
+
         suppressClickRef.current = true; // consume the trailing LEFT_CLICK
         setStatusMsg(`🧱 Block height set to ${finalHeightM.toFixed(1)}m — drag handle again to adjust`);
       } catch (err: unknown) { addLog('ERROR', `block resize LEFT_UP: ${(err as Error).message}`); }
@@ -7526,7 +7637,13 @@ function SolarEngine3D({
     C: any,
     screenPos: any,
     space: 'roof' | 'site',
-  ): { lat: number; lng: number; height: number; cartesian: any; planeId: string | null; method: string } | null {
+    // 🚨 THE TRAIL COMES BACK WITH THE ANSWER, not only with a total refusal.
+    // A roof object that resolves a POINT but binds no FACE is refused by the
+    // caller, and until now that refusal could not say why: the diagnostic was
+    // logged only when every strategy failed. Measured cost: a browser session
+    // spent proving that "clicked off every roof face" did not mean the ray
+    // missed the roof.
+  ): { lat: number; lng: number; height: number; cartesian: any; planeId: string | null; method: string; trail: string[] } | null {
     // 🚨 AN UNRESOLVED GROUND DATUM IS NOT ZERO.
     //
     // This read `resolved ? elev : 0`, and 0 is the ellipsoid -- about 140 m
@@ -7539,24 +7656,67 @@ function SolarEngine3D({
     // A site object has no meaning without the ground, so it refuses and the
     // existing `!spot` message tells the user. A roof object may still proceed:
     // its answer comes from the canonical faces, which carry their own datum.
+    // 🚨 AN UNRESOLVED DATUM IS NOT A REASON TO REFUSE, AND REFUSING BROKE
+    // THE ONE CASE THIS TOOL EXISTS FOR.
+    //
+    // A first version returned null here when `cesiumGroundElevResolvedRef` was
+    // false, to stop a tree being planted at the ellipsoid ~140 m underground.
+    // The reasoning was wrong and the browser gate proved it: the datum resolves
+    // ONLY from the Google Solar API (see the boot and fly paths), so at a
+    // property with no Google coverage -- precisely the properties the custom
+    // pipeline was built for -- it is unresolved for ever and the Tree tool
+    // could never place anything. That is the owner's original report,
+    // reintroduced while fixing something else.
+    //
+    // The scenario it guarded against cannot occur. It required the buildings to
+    // sit at a true elevation while the tree got 0 -- but every consumer reads
+    // this same ref in the same instant, so when it is unresolved the WHOLE
+    // design shares the 0 datum and the tree is consistent with the roof it must
+    // shade. A shade calculation cares about the difference between the tree top
+    // and the panels, and that difference is preserved either way.
+    //
+    // So it warns, once, and places. A tool that silently refuses is worse than
+    // a tool working on a relative datum.
     const groundResolved = cesiumGroundElevResolvedRef.current;
     const groundElevM = groundResolved ? cesiumGroundElevRef.current : 0;
-    if (space === 'site' && !groundResolved) {
-      addLog('WARN', 'placement: refusing a site object while the ground elevation is unresolved');
-      return null;
+    if (space === 'site' && !groundResolved && !warnedUnresolvedGroundRef.current) {
+      warnedUnresolvedGroundRef.current = true;
+      addLog('WARN', 'placement: the ground elevation is unresolved; site objects use the design’s relative datum');
     }
 
     // The engine's own site-centre props, bound here so `finish` can compare
     // against them without shadowing its local hit coordinates.
-    const siteLat = lat;
-    const siteLng = lng;
+    // 🚨 THE BOUND MEASURES FROM WHERE THE CAMERA IS LOOKING, NOT FROM A PROP.
+    //
+    // It used to measure from the engine's `lat`/`lng` props -- the project's
+    // stored address -- and those do not move when the user picks a different
+    // house. Measured live: after picking a property the camera sat over
+    // 38.70615,-90.04625 while the props still read 38.66570,-90.22660, so every
+    // click was "16286 m from the site" and Tree placement was impossible. The
+    // reference point was wrong, not the distance.
+    //
+    // The camera's own sub-point needs no stored coordinate and cannot go stale:
+    // a person places things near what they are looking at. The failure this
+    // guards -- a click on the sky taking `pickEllipsoid`'s grazing intersection
+    // -- is characterised by landing tens of kilometres away while the camera is
+    // a couple of hundred metres up, so the allowance scales with altitude.
+    let nadirLat = NaN, nadirLng = NaN, allowM = PLACEMENT_RADIUS_M;
+    try {
+      const cc = C.Cartographic.fromCartesian(viewer.camera.positionWC ?? viewer.camera.position);
+      if (cc) {
+        nadirLat = C.Math.toDegrees(cc.latitude);
+        nadirLng = C.Math.toDegrees(cc.longitude);
+        const aboveGroundM = Math.max(0, (Number.isFinite(cc.height) ? cc.height : 0) - groundElevM);
+        allowM = Math.max(PLACEMENT_RADIUS_M, aboveGroundM * 10);
+      }
+    } catch { /* fall back to the flat bound below */ }
 
     const finish = (cart: any, planeId: string | null, method: string) => {
       const carto = C.Cartographic.fromCartesian(cart);
-      if (!carto) return null;
+      if (!carto) { trail.push(method + ': fromCartesian gave nothing'); return null; }
       const lat = C.Math.toDegrees(carto.latitude);
       const lng = C.Math.toDegrees(carto.longitude);
-      if (!isValidCoord(lat, lng)) return null;
+      if (!isValidCoord(lat, lng)) { trail.push(`${method}: invalid coord ${lat},${lng}`); return null; }
       // 🚨 AND IT HAS TO BE ON THIS PROPERTY.
       //
       // `isValidCoord` only range-checks degrees. A click on the sky just above
@@ -7565,21 +7725,33 @@ function SolarEngine3D({
       // away -- which the site branch then snapped to ground elevation and
       // reported as a successful placement. The object existed, in a field, off
       // screen, and the only clue was that nothing appeared.
-      if (Number.isFinite(siteLat) && Number.isFinite(siteLng)) {
-        const dLat = (lat - siteLat) * 111_320;
-        const dLng = (lng - siteLng) * 111_320 * Math.cos((siteLat * Math.PI) / 180);
+      if (Number.isFinite(nadirLat) && Number.isFinite(nadirLng)) {
+        const dLat = (lat - nadirLat) * 111_320;
+        const dLng = (lng - nadirLng) * 111_320 * Math.cos((nadirLat * Math.PI) / 180);
         const awayM = Math.hypot(dLat, dLng);
-        if (awayM > PLACEMENT_RADIUS_M) {
-          addLog('WARN', `placement: ${Math.round(awayM)} m from the site — refused`);
+        if (awayM > allowM) {
+          trail.push(`${method}: ${Math.round(awayM)} m from the camera — beyond the ${Math.round(allowM)} m bound`);
           return null;
         }
       }
       const height = isFinite(carto.height) ? carto.height : groundElevM;
-      return { lat, lng, height, cartesian: cart, planeId, method };
+      return { lat, lng, height, cartesian: cart, planeId, method, trail };
     };
 
+    // 🚨 A REFUSAL THAT CANNOT SAY WHY IS A DEAD END FOR EVERYONE.
+    //
+    // Debugging one live "Could not place tree here" took a browser session and
+    // a dozen probes, because every branch fails the same silent way. The trail
+    // is recorded as it goes and logged once at the end, so the next person --
+    // or the next adversary -- reads the answer instead of reconstructing it.
+    const trail: string[] = [];
+    trail.push(`space=${space} groundResolved=${groundResolved} groundElevM=${Number(groundElevM).toFixed(2)}`);
+    trail.push(`screenPos=${screenPos ? `${Math.round(screenPos.x)},${Math.round(screenPos.y)}` : 'MISSING'}`);
+    trail.push(`nadir=${Number(nadirLat).toFixed(5)},${Number(nadirLng).toFixed(5)} allow=${Math.round(allowM)}m`);
+
     let ray: any = null;
-    try { ray = viewer.camera.getPickRay(screenPos); } catch { ray = null; }
+    try { ray = viewer.camera.getPickRay(screenPos); } catch (e: unknown) { ray = null; trail.push('getPickRay threw: ' + (e as Error).message); }
+    trail.push('ray=' + (ray ? 'ok' : 'null'));
 
     // -- ROOF: the design's own faces answer first ---------------------------
     //
@@ -7598,18 +7770,27 @@ function SolarEngine3D({
         // pad can never let one face steal a click from its neighbour across a
         // ridge -- see the note there.
         const rhit = nearestFaceAlongRay(ray.origin, ray.direction, faces, { padM: 0.25 });
+        // 🚨 SAY HOW MANY FACES WERE EVEN CONSIDERED. "clicked off every roof
+        // face" is compatible with three different failures -- no faces were
+        // collected, the ray missed them, or the hit was rejected by the
+        // distance bound -- and they need different fixes.
+        trail.push(`canonical faces=${faces.length} hit=${rhit ? rhit.faceId : 'none'}`);
         if (rhit) {
           const cart = new C.Cartesian3(rhit.point.x, rhit.point.y, rhit.point.z);
           const out = finish(cart, rhit.faceId, 'canonical-face');
           if (out) return out;
         }
-      } catch (e: unknown) { addLog('WARN', 'placement: canonical face pick - ' + (e as Error).message); }
+      } catch (e: unknown) {
+        trail.push('canonical face pick threw: ' + (e as Error).message);
+        addLog('WARN', 'placement: canonical face pick - ' + (e as Error).message);
+      }
     }
 
     // -- The depth-buffer chain, as a fallback -------------------------------
     // getWorldPosition is 3dtiles -> terrain -> ellipsoid@ground, and unlike the
     // bare pickPosition it always answers when the camera is over the earth.
     const whit = getWorldPosition(viewer, C, screenPos);
+    trail.push('getWorldPosition=' + (whit && whit.cartesian ? whit.pickMethod : 'null'));
     if (whit && whit.cartesian) {
       if (space === 'site') {
         // 🚨 A TREE STANDS ON THE GROUND. A 3D-tiles pick that landed on a
@@ -7621,7 +7802,20 @@ function SolarEngine3D({
           const lng = C.Math.toDegrees(carto.longitude);
           if (isValidCoord(lat, lng)) {
             const onGround = safeCartesian3(C, lng, lat, groundElevM);
-            if (onGround) return finish(onGround, null, whit.pickMethod + '@ground');
+            // 🚨 `return finish(...)` ABORTED THE WHOLE FUNCTION ON A NULL.
+            //
+            // Every other branch here is `if (out) return out;` so a rejected
+            // candidate falls through to the next strategy. This one returned
+            // `finish(...)` directly, so when the ground point failed validation
+            // the function returned null immediately -- skipping BOTH remaining
+            // fallbacks and the diagnostic log that would have said why. The
+            // live symptom was "Could not place tree here" with a single
+            // unexplained line in the console, which took a browser session and
+            // a dozen probes to corner.
+            if (onGround) {
+              const out = finish(onGround, null, whit.pickMethod + '@ground');
+              if (out) return out;
+            }
           }
         }
       }
@@ -7656,13 +7850,15 @@ function SolarEngine3D({
         const gp = isFinite(radius)
           ? intersectRayWithGeocentricSphere(ray.origin, ray.direction, radius)
           : null;
+        trail.push(`ray@ground radius=${isFinite(radius) ? Math.round(radius) : 'NaN'} hit=${gp ? 'ok' : 'null'}`);
         if (gp) {
           const out = finish(new C.Cartesian3(gp.x, gp.y, gp.z), null, 'ray@ground');
           if (out) return out;
         }
-      } catch (e: unknown) { addLog('WARN', 'placement: ground ray - ' + (e as Error).message); }
+      } catch (e: unknown) { trail.push('ground ray threw: ' + (e as Error).message); }
     }
 
+    addLog('WARN', 'placement refused — ' + trail.join(' | '));
     return null;
   }
 
@@ -11070,8 +11266,11 @@ function SolarEngine3D({
         id: sectionId,
         kind,
         footprint: footprint.map(p => ({ lat: p.lat, lng: p.lng })),
-        eaveHeightM: newRoofEaveHeightM,
-        pitchDeg: roofPitchDeg,
+        // 🚨 FROM THE REFS — see their declaration. Reading the state here is
+        // what made both sliders inert: this runs inside a handler registered
+        // once at mount.
+        eaveHeightM: newRoofEaveHeightMRef.current,
+        pitchDeg: roofPitchDegRef.current,
         groundElevM,
         ridgeAxis: 'auto',
         label: kind === 'gable' ? 'Gable section' : 'Hip section',
@@ -11131,10 +11330,10 @@ function SolarEngine3D({
       }
 
       const ridge = outcome.ridgeHeightM;
-      addLog('SECTION', `${kind} ${sectionId}: ${outcome.planes.length} faces, ridge ${ridge?.toFixed(2)}m, pitch ${roofPitchDeg}°`);
+      addLog('SECTION', `${kind} ${sectionId}: ${outcome.planes.length} faces, ridge ${ridge?.toFixed(2)}m, pitch ${roofPitchDegRef.current}°`);
       setStatusMsg(
         `🏠 ${kind === 'gable' ? 'Gable' : 'Hip'} section placed — ${outcome.planes.length} roof faces, ` +
-        `eave ${newRoofEaveHeightM.toFixed(1)}m, ridge ${ridge != null ? ridge.toFixed(1) : '?'}m. ` +
+        `eave ${newRoofEaveHeightMRef.current.toFixed(1)}m, ridge ${ridge != null ? ridge.toFixed(1) : '?'}m. ` +
         'They are real roof faces: place panels on them, and they save with the design.',
       );
       if (showRoofModel)    { try { renderRoofWireframe(viewer, C); } catch {} }
@@ -11196,8 +11395,11 @@ function SolarEngine3D({
       } else {
         setStatusMsg(
           `🏠 Gable — corner ${gablePtsRef.current.length} of 4. Click the footprint corners IN ORDER `
-          + `around the building, not diagonally. Pitch ${roofPitchDeg}°, eave `
-          + `${newRoofEaveHeightM.toFixed(1)}m. Esc to cancel.`,
+          // 🚨 The refs, so the prompt quotes the pitch the section will
+          // actually be built at. Printing the state here while the geometry
+          // read the ref would be the same lie pointing the other way.
+          + `around the building, not diagonally. Pitch ${roofPitchDegRef.current}°, eave `
+          + `${newRoofEaveHeightMRef.current.toFixed(1)}m. Esc to cancel.`,
         );
       }
       try { viewer.scene.requestRender(); } catch {}
@@ -11245,8 +11447,11 @@ function SolarEngine3D({
       } else {
         setStatusMsg(
           `🏗 Hip — corner ${hipPtsRef.current.length} of 4. Click the footprint corners IN ORDER `
-          + `around the building, not diagonally. Pitch ${roofPitchDeg}°, eave `
-          + `${newRoofEaveHeightM.toFixed(1)}m. Esc to cancel.`,
+          // 🚨 The refs, so the prompt quotes the pitch the section will
+          // actually be built at. Printing the state here while the geometry
+          // read the ref would be the same lie pointing the other way.
+          + `around the building, not diagonally. Pitch ${roofPitchDegRef.current}°, eave `
+          + `${newRoofEaveHeightMRef.current.toFixed(1)}m. Esc to cancel.`,
         );
       }
       try { viewer.scene.requestRender(); } catch {}
@@ -12105,9 +12310,11 @@ function SolarEngine3D({
       // v48.7: Immediately auto-fill via control layer (plane3d mode)
       const groundElev    = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       const orient        = panelOrientationRef.current ?? 'portrait';
-      const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
-      const ridgeSetbackM = fireSetbacks?.ridgeSetbackM ?? 0.457;
-      const eaveSetbackM  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
+      // 🚨 Through the ref — see `fireSetbacksRef`. The prop here is whatever
+      // was configured when the 3D view mounted.
+      const edgeSetbackM  = fireSetbacksRef.current?.edgeSetbackM  ?? 0.457;
+      const ridgeSetbackM = fireSetbacksRef.current?.ridgeSetbackM ?? 0.457;
+      const eaveSetbackM  = fireSetbacksRef.current?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
       const layoutId      = `plane3d-${plane.id}`;
 
       const clResult = placePanelsControlled({
@@ -12290,9 +12497,11 @@ function SolarEngine3D({
       const groundElev    = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       // v48.7: orientation is now resolved once here and passed explicitly — no ref fallback chain
       const orient        = panelOrientationRef.current ?? 'portrait';
-      const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
-      const ridgeSetbackM = fireSetbacks?.ridgeSetbackM ?? 0.457;
-      const eaveSetbackM  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
+      // 🚨 Through the ref — see `fireSetbacksRef`. The prop here is whatever
+      // was configured when the 3D view mounted.
+      const edgeSetbackM  = fireSetbacksRef.current?.edgeSetbackM  ?? 0.457;
+      const ridgeSetbackM = fireSetbacksRef.current?.ridgeSetbackM ?? 0.457;
+      const eaveSetbackM  = fireSetbacksRef.current?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
       const layoutId      = `surface-${plane.id}`;
 
       // v48.7: Route through control layer (surface_select mode)
@@ -12668,7 +12877,10 @@ function SolarEngine3D({
       // reason rather than failing silently.
       if (preset.space === 'roof' && !spot.planeId) {
         setStatusMsg(`${preset.label} needs a roof — click on a roof face`);
-        addLog('WARN', `obstruction placement: ${preset.id} clicked off every roof face`);
+        // 🚨 AND THE LOG SAYS WHICH OF THE THREE THINGS WENT WRONG. A point was
+        // resolved here; only the FACE binding failed. Without the trail that is
+        // indistinguishable from the ray missing the house.
+        addLog('WARN', `obstruction placement: ${preset.id} clicked off every roof face — ${(spot.trail ?? []).join(' | ')}`);
         return;
       }
 
@@ -12689,7 +12901,13 @@ function SolarEngine3D({
       // every shade result was computed on half a tree -- so this was never
       // cosmetic. The right-hand panel already offered a canopy up to 30 m, so
       // the placement clamp and the editor had been contradicting each other.
-      const sized = clampToPreset(preset, newObstructionWidthM, newObstructionDepthM, newObstructionHeightM);
+      //
+      // 🚨 FROM THE REF, NOT FROM STATE — see `obstructionSizeRef`. Reading the
+      // state variables here is what made the tree 1 m wide: this function is
+      // reached only through a Cesium handler registered at mount, so the state
+      // it can see is the state that existed before the user chose anything.
+      const armedSize = obstructionSizeRef.current;
+      const sized = clampToPreset(preset, armedSize.widthM, armedSize.depthM, armedSize.heightM);
       const widthM = sized.widthM;
       const depthM = sized.depthM;
       const prismHeightM = sized.heightM;
@@ -13480,9 +13698,10 @@ function SolarEngine3D({
     const orient      = (orientRaw === 'hybrid' ? 'portrait' : orientRaw) as 'portrait' | 'landscape';
     const isHybrid    = orientRaw === 'hybrid';
     const groundElev  = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-    const edgeSetback  = fireSetbacks?.edgeSetbackM  ?? 0.457;
-    const ridgeSetback = fireSetbacks?.ridgeSetbackM ?? 0.457;
-    const eaveSetback  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
+    // 🚨 Through the ref — see `fireSetbacksRef`.
+    const edgeSetback  = fireSetbacksRef.current?.edgeSetbackM  ?? 0.457;
+    const ridgeSetback = fireSetbacksRef.current?.ridgeSetbackM ?? 0.457;
+    const eaveSetback  = fireSetbacksRef.current?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
     const wattage     = selectedPanelRef.current?.wattage ?? 400;
 
     const newPanels: PlacedPanel[] = [];
@@ -13700,8 +13919,9 @@ function SolarEngine3D({
 
     // ── Clip polygon with setback ───────────────────────────────────────────────────────
     // Use actual fire setback values from UI config (passed as prop), fallback to IFC defaults
-    const edgeSetbackM  = (fireSetbacks?.edgeSetbackM  ?? 0.457); // 18 inches default
-    const ridgeSetbackM = (fireSetbacks?.ridgeSetbackM ?? 0.457); // 18 inches default
+    // 🚨 Through the ref — see `fireSetbacksRef`.
+    const edgeSetbackM  = (fireSetbacksRef.current?.edgeSetbackM  ?? 0.457); // 18 inches default
+    const ridgeSetbackM = (fireSetbacksRef.current?.ridgeSetbackM ?? 0.457); // 18 inches default
     // Use the larger of edge/ridge for uniform polygon shrink (conservative, safe)
     const SETBACK_M_FILL = Math.max(edgeSetbackM, ridgeSetbackM);
     addLog('FILL', `seg ${seg?.id}: setbacks edge=${(edgeSetbackM*39.37).toFixed(0)}" ridge=${(ridgeSetbackM*39.37).toFixed(0)}" effective=${(SETBACK_M_FILL*39.37).toFixed(0)}"`);
@@ -14058,9 +14278,25 @@ function SolarEngine3D({
       // P0-6: fence panels ALWAYS stamp the equipment-db fence record (Ray's
       // ruling 2026-07-19 — PS-MNB108(HCBF)-440W only); other system types
       // stamp the studio-selected panel (the placement-time equipment authority).
+      //
+      // 🚨 FROM THE REF. `createPanel` is reached from `handleRoofClick`, which
+      // is reached only from the Cesium LEFT_CLICK handler registered once at
+      // mount — so the `selectedPanel` PROP visible here is the module that was
+      // selected when the 3D view opened, for the life of the page. Every other
+      // wattage stamp in this file already reads `selectedPanelRef.current`
+      // (the row, fence, snap, paste and auto-fill paths); this was the one
+      // outlier, and it is the one the Roof tool uses.
+      //
+      // The effect was silent and self-contradicting: the HUD's kW readout is
+      // evaluated in render scope, so it showed the NEW module and agreed with
+      // the picker, while the panels it was counting carried the OLD wattage.
+      // The same design then disagreed with itself by tool — an auto-filled
+      // main roof at 440 W beside a hand-placed dormer at 400 W — and the
+      // falsified per-panel wattage persists with the layout, where
+      // `lib/pricingEngine.ts` sums it for system price and price-per-watt.
       wattage: opts.systemType === 'fence'
-        ? (getPanelById(FENCE_PANEL_EQUIPMENT_ID)?.watts ?? selectedPanel?.wattage ?? 400)
-        : (selectedPanel?.wattage ?? 400),
+        ? (getPanelById(FENCE_PANEL_EQUIPMENT_ID)?.watts ?? selectedPanelRef.current?.wattage ?? 400)
+        : (selectedPanelRef.current?.wattage ?? 400),
       bifacialGain: opts.systemType === 'fence' ? 1.15 : 1.0,
       row: 0, col: 0,
       height: opts.height, heading: opts.heading,
@@ -14343,7 +14579,7 @@ function SolarEngine3D({
           the Google source picker) to drag the whole top-bar around.
           Clicking the Details / LiDAR / Street View / Google buttons
           keeps their own click semantics. */}
-      <DraggablePanel id="map-source-picker" zIndex={25}>
+      <DraggablePanel id="map-source-picker" zIndex={OVERLAY_Z.BASEMAP}>
       <MapSourcePicker
         state={mapPickerState}
         onChange={setMapPickerState}
@@ -14381,11 +14617,24 @@ function SolarEngine3D({
           Nobody had noticed because the buttons it replaced did nothing at
           all, so being unreachable changed no outcome. */}
       {onUndoGeometry || onRedoGeometry ? (
-        <DraggablePanel id="undo-redo-toolbar" zIndex={62}>
+        <DraggablePanel id="undo-redo-toolbar" zIndex={OVERLAY_Z.ACTION}>
         <div
           data-drag-handle
           style={{
-            position: 'absolute', bottom: 12, left: 12, zIndex: 62,
+            // 🚨 ABOVE THE "REPORT A BUG" BUTTON, WHICH SHARES THIS CORNER.
+            //
+            // That button is `fixed bottom-4 left-4 z-[60]` in DesignStudio, so
+            // it occupies the bottom 52 px of this same corner. The two have
+            // been fighting: the chip used to sit at z-index 62 and covered the
+            // right two-thirds of the bug button, and when the chip moved onto
+            // the shared layer scale the bug button covered the CHIP instead —
+            // Playwright reported "<button …Report a bug…> intercepts pointer
+            // events" and Undo could not be clicked at all.
+            //
+            // Re-ordering only chooses which of the two is broken. 64 px clears
+            // the bug button entirely, so both are clickable, and it stays clear
+            // of `canvas-controls`, which is at left: 200.
+            position: 'absolute', bottom: 64, left: 12, zIndex: OVERLAY_Z.ACTION,
             display: 'flex', alignItems: 'center', gap: 4,
             background: 'rgba(10,14,24,0.85)', border: '1px solid rgba(148,163,184,0.25)',
             borderRadius: 8, padding: '4px 6px', backdropFilter: 'blur(6px)',
@@ -14452,7 +14701,7 @@ function SolarEngine3D({
           or the header text to move. The whole legend (strings +
           equipment) moves as one. */}
       {(colorByString || showEquipment) && ((stringLegend && stringLegend.length > 0) || showEquipment) ? (
-        <DraggablePanel id="legend-strings" zIndex={20}>
+        <DraggablePanel id="legend-strings" zIndex={OVERLAY_Z.REFERENCE}>
         <div style={{
           position: 'absolute', top: 12, right: 12, zIndex: 20,
           maxHeight: '46%', overflowY: 'auto',
@@ -14723,7 +14972,7 @@ function SolarEngine3D({
             id: 'tools', icon: '\u{1F4CF}', label: 'Tools',
             tools: [
               { mode: 'measure'       as PlacementMode, icon: '\u{1F4CF}', label: 'Measure',   tip: 'Click two points to measure distance on terrain' },
-              { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruction', tip: 'Add Obstruction (Aurora parity): click the roof to drop a chimney-class prism. Default 0.6m × 0.6m × 1.0m, configurable via the right panel. Removes panels inside the footprint.' },
+              { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruction', tip: 'Mark something on the roof: vent, pipe, stack, skylight, chimney, hatch or rooftop unit. Pick the type in the right-hand panel — each one places at its own real size and keeps its own clearance. Panels under it are removed, and Undo brings them back.' },
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
               { mode: 'tree'         as PlacementMode, icon: '\u{1F333}', label: 'Tree', tip: 'Place a tree that SHADES. Click the ground at the trunk, then set its height and canopy width. It is saved with the design, it is deleted like anything else, and Shade uses it.' },
@@ -14740,11 +14989,36 @@ function SolarEngine3D({
                 tool spine and move the whole tool column. The spine
                 (first child) is the drag handle. The flyout opens to
                 the right of the spine and follows when dragged. */}
-            <DraggablePanel id="tool-spine" zIndex={50}>
+            {/* 🚨 AN OPEN FLYOUT IS ON TOP, OR ITS BUTTONS ARE NOT BUTTONS.
+                 *
+                 * The spine sat at z-index 50 while `lidar-properties` is 60 and
+                 * `undo-redo-toolbar` is 62, and both overlap the flyout's
+                 * column. Measured in the browser with `elementFromPoint` at
+                 * each button's own centre: of the five tools in the Tools
+                 * group, only the BOTTOM one — Tree — returned itself. Measure,
+                 * Obstruction, Direction and Origin all returned a panel
+                 * stacked above them, so a click on any of them went to that
+                 * panel and the tool was never armed.
+                 *
+                 * That is the owner's chimney report, and it was never about
+                 * chimneys: Chimney is a type inside the Obstruction tool, and
+                 * the Obstruction BUTTON could not be pressed. It also explains
+                 * why Tree behaved differently from everything else — it was
+                 * the one entry nothing covered. A browser test reproduced it
+                 * only because it clicks real coordinates; `force: true` does
+                 * not help, because the event still lands on whatever is on top.
+                 *
+                 * Raised only WHILE A GROUP IS OPEN. The resting spine is
+                 * persistent chrome and has no claim to outrank a panel the
+                 * user is working in; an open flyout is a transient, focused
+                 * surface and does. Below the confirm overlays (100) and the
+                 * tooltip (99999), which must still win.
+                 */}
+            <DraggablePanel id="tool-spine" zIndex={openGroup ? OVERLAY_Z.MENU : OVERLAY_Z.DOCK}>
             <div style={{
               position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
               display: 'flex', flexDirection: 'row', alignItems: 'flex-start',
-              gap: 0, zIndex: 50, pointerEvents: 'none',
+              gap: 0, zIndex: openGroup ? 70 : 50, pointerEvents: 'none',
             }}>
 
               {/* ── Spine: always-visible icon column ── */}
@@ -14782,6 +15056,10 @@ function SolarEngine3D({
                         onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: grp.label + ' \u2014 click to expand', x: r.left + r.width / 2, y: r.top - 8 }); }}
                         onMouseLeave={() => setTooltipInfo(null)}
                         onClick={() => setOpenGroup(isOpen ? null : grp.id)}
+                        aria-label={grp.label}
+                        aria-expanded={isOpen}
+                        title={grp.label}
+                        data-testid={`toolgroup-${grp.id}`}
                         style={{
                           ...btnBase,
                           background: hasActive
@@ -14869,6 +15147,8 @@ function SolarEngine3D({
                         onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:label+': '+tip,x:r.left+r.width/2,y:r.top-8}); }}
                         onMouseLeave={() => setTooltipInfo(null)}
                         onClick={() => activateTool(mode)}
+                        aria-label={label}
+                        data-testid={`tool-${mode}`}
                         style={{
                           width: 'max-content', minWidth: 86, maxWidth: 130, height: 34, borderRadius: 8, fontSize: 12,
                           display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px',
@@ -14901,11 +15181,35 @@ function SolarEngine3D({
                 badge + ground/plane/obstruction context controls).
                 The stats row is the first child so it becomes the
                 drag handle. */}
-            <DraggablePanel id="top-right-stack" zIndex={50}>
+            {/* 🚨 THE PLACEMENT PANEL IS WHERE YOU PICK A CHIMNEY, SO IT HAS TO
+                 * BE ON TOP WHILE YOU ARE PLACING ONE.
+                 *
+                 * This stack holds the object-type chips and the width/depth/
+                 * height sliders. It rendered at z-index 50; `instructions-panel`
+                 * (the help text) is ALSO 50 and comes later in the DOM, so it
+                 * won. Measured in the browser at 1280x720: the canvas is
+                 * [56,116,904,604], so the help panel's `right: 8` resolves to
+                 * x = 672 and it occupies [672,236,280,81] — directly on top of
+                 * the chips at x 639..870. `elementFromPoint` at each chip's own
+                 * centre returned the help panel for EVERY roof type: vent pipe,
+                 * plumbing stack, vent, skylight, CHIMNEY, roof hatch, HVAC.
+                 *
+                 * So "Chimney may also not be wired end-to-end" was, at this
+                 * layer too, a control that could not be pressed. The chip click
+                 * went to the help text, the armed type stayed on the default
+                 * vent pipe, and the roof click then refused — with a message
+                 * about roof faces that described none of this.
+                 *
+                 * Raised only WHILE a placement panel is showing, for the same
+                 * reason as the tool spine: a transient control surface outranks
+                 * passive text, a resting one does not. Above `lidar-properties`
+                 * (60) and `undo-redo-toolbar` (62), below the tool flyout (70).
+                 */}
+            <DraggablePanel id="top-right-stack" zIndex={isPlacingObject ? OVERLAY_Z.PLACEMENT : OVERLAY_Z.DOCK}>
             <div style={{
               position: 'absolute', top: 12, right: 12,
               display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
-              zIndex: 50,
+              zIndex: isPlacingObject ? 65 : 50,
             }}>
               {/* Stats + orientation row */}
               {/* Stats + orientation row */}
@@ -15645,17 +15949,27 @@ function SolarEngine3D({
                   {/* Quick-action row: revert to Aurora defaults */}
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                     <button
+                      // 🚨 RESET TO WHAT THIS OBJECT IS, NOT TO ONE GLOBAL SIZE.
+                      //
+                      // The label read "Reset to 0.6x0.6x1.0m" and the handler
+                      // wrote those three literals whatever was armed. So with
+                      // the Tree tool selected -- panel showing 6 x 6 x 8 m --
+                      // a button plainly offering to restore the default turned
+                      // the tree into a 600 mm shrub. A control that names one
+                      // size while nine objects share it can only be right for
+                      // one of them.
                       onClick={() => {
-                        setNewObstructionWidthM(DEFAULT_OBSTRUCTION_FOOTPRINT_W_M);
-                        setNewObstructionDepthM(DEFAULT_OBSTRUCTION_FOOTPRINT_D_M);
-                        setNewObstructionHeightM(DEFAULT_OBSTRUCTION_HEIGHT_M);
-                        setStatusMsg('Obstruction dimensions reset to 0.6×0.6×1.0m');
+                        const pr = presetFor(obstructionPresetId);
+                        setNewObstructionWidthM(pr.widthM);
+                        setNewObstructionDepthM(pr.depthM);
+                        setNewObstructionHeightM(pr.heightM);
+                        setStatusMsg(`${pr.label} reset to ${pr.widthM}×${pr.depthM}×${pr.heightM} m`);
                       }}
-                      title="Reset to Aurora defaults (0.6m × 0.6m × 1.0m)"
+                      title={`Reset to the standard size for a ${presetFor(obstructionPresetId).label.toLowerCase()}`}
                       style={{ flex: 1, padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
                         background: 'rgba(255,170,0,0.12)', color: '#ffaa00',
                         border: '1px solid rgba(255,170,0,0.3)' }}>
-                      Reset to 0.6×0.6×1.0m
+                      Reset {presetFor(obstructionPresetId).label} size
                     </button>
                     <button
                       // 🚨 IT USED TO BE A RAW SETTER, AND IT SITS NEXT TO
@@ -15829,7 +16143,7 @@ function SolarEngine3D({
           Click any button or text in the panel — those are NOT the drag
           handle and remain clickable. */}
       {stage === 'done' ? (
-        <DraggablePanel id="instructions-panel" zIndex={50}>
+        <DraggablePanel id="instructions-panel" zIndex={OVERLAY_Z.REFERENCE}>
           <div
             data-testid="help-panel-mount"
             style={{
@@ -15878,7 +16192,7 @@ function SolarEngine3D({
           v69: wrapped in DraggablePanel. Drag the wrapper padding to
           move; clicks on the actual buttons (compass / zoom +/-) still
           trigger their own actions, not drag. */}
-      <DraggablePanel id="canvas-controls" zIndex={50}>
+      <DraggablePanel id="canvas-controls" zIndex={OVERLAY_Z.DOCK_OVER}>
         <CanvasControls
           viewer={viewerRef.current}
           ready={stage === 'done'}
@@ -15928,7 +16242,7 @@ function SolarEngine3D({
           to move; clicks on the actual toggle buttons (Parcel / Roof
           Segs / Shade / Heatmap) still trigger their own actions. */}
       {stage === 'done' ? (
-        <DraggablePanel id="layer-toggles" zIndex={50}>
+        <DraggablePanel id="layer-toggles" zIndex={OVERLAY_Z.DOCK}>
           <div style={{
             position: 'absolute', left: 260, bottom: 12,
           display: 'flex', flexDirection: 'row', gap: 6,
@@ -15977,7 +16291,7 @@ function SolarEngine3D({
           translate(dx,dy) on top, so the layout is unchanged until
           the user drags. */}
       {stage === 'done' ? (
-        <DraggablePanel id="sun-simulator" zIndex={50}>
+        <DraggablePanel id="sun-simulator" zIndex={OVERLAY_Z.DOCK}>
           <div style={{
             position: 'absolute', bottom: 40, left: '50%', transform: 'translateX(-50%)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
@@ -16072,7 +16386,7 @@ function SolarEngine3D({
 
       {/* v48.13: Rotating compass rose — needle always points to true North */}
       {stage === 'done' ? (
-        <DraggablePanel id="compass-rose" zIndex={50}>
+        <DraggablePanel id="compass-rose" zIndex={OVERLAY_Z.READOUT}>
         <div style={{
           position: 'absolute', bottom: 120, right: 12, width: 72, height: 72, zIndex: 50,
           background: 'rgba(10,12,24,0.88)', borderRadius: '50%',
@@ -16169,7 +16483,7 @@ function SolarEngine3D({
 
       {/* Status bar - v70: draggable. Grab the bar to move. */}
       {stage === 'done' && statusMsg ? (
-        <DraggablePanel id="status-bar" zIndex={50}>
+        <DraggablePanel id="status-bar" zIndex={OVERLAY_Z.READOUT}>
           <div style={{
             position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
             background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(4px)',
@@ -16186,7 +16500,7 @@ function SolarEngine3D({
           A small grip handle (⠿) on the left is the drag handle;
           the buttons keep their own click semantics. */}
       {stage === 'done' ? (
-        <DraggablePanel id="top-left-dock" zIndex={51}>
+        <DraggablePanel id="top-left-dock" zIndex={OVERLAY_Z.DOCK}>
           <div
             data-drag-handle
             style={{
@@ -16348,7 +16662,7 @@ function SolarEngine3D({
              chimney and a tree differ in their numbers and not in the act of
              editing them. Only the fields that mean something are shown. */}
       {stage === 'done' && selectedObstructionId ? (
-        <DraggablePanel id="obstruction-inspector" zIndex={53}>
+        <DraggablePanel id="obstruction-inspector" zIndex={OVERLAY_Z.INSPECTOR}>
           <div
             data-testid="obstruction-inspector"
             style={{
@@ -16436,7 +16750,7 @@ function SolarEngine3D({
       ) : null}
 
       {stage === 'done' && (roofPlanes?.length ?? 0) > 0 ? (
-        <DraggablePanel id="section-inspector" zIndex={52}>
+        <DraggablePanel id="section-inspector" zIndex={OVERLAY_Z.INSPECTOR}>
           <div
             data-drag-handle
             style={{ position: 'absolute', bottom: 96, right: 12, zIndex: 52, cursor: 'grab', touchAction: 'none' }}
@@ -16517,7 +16831,7 @@ function SolarEngine3D({
           The trigger is visible without occluding the 12:00 Solar
           widget or the right-side tool panel column. */}
             {stage === 'done' && onCreateDesign ? (
-        <DraggablePanel id="save-create-design" zIndex={51}>
+        <DraggablePanel id="save-create-design" zIndex={OVERLAY_Z.ACTION}>
           <div
             data-drag-handle
             style={{
@@ -16558,7 +16872,7 @@ function SolarEngine3D({
 
       {/* v62: Roof-model edge legend - v70: draggable. */}
       {stage === 'done' && showRoofModel ? (
-        <DraggablePanel id="roof-edges-legend" zIndex={50}>
+        <DraggablePanel id="roof-edges-legend" zIndex={OVERLAY_Z.READOUT}>
           <div style={{
             position: 'absolute', top: 46, left: 12, zIndex: 50,
             background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
@@ -16578,7 +16892,7 @@ function SolarEngine3D({
 
       {/* v62: Fire setback legend - v70: draggable. */}
       {stage === 'done' && showSetbackZones && !showRoofModel ? (
-        <DraggablePanel id="fire-setbacks-legend" zIndex={50}>
+        <DraggablePanel id="fire-setbacks-legend" zIndex={OVERLAY_Z.READOUT}>
           <div style={{
             position: 'absolute', top: 54, left: 12, zIndex: 50,
             background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
@@ -16598,7 +16912,7 @@ function SolarEngine3D({
 
       {/* Coordinates bar - v70: draggable. Grab the bar to move. */}
       {stage === 'done' ? (
-        <DraggablePanel id="coordinates-bar" zIndex={50}>
+        <DraggablePanel id="coordinates-bar" zIndex={OVERLAY_Z.READOUT}>
           <div style={{
             position: 'absolute', bottom: 8, left: 8,
             background: 'rgba(0,0,0,0.6)', borderRadius: 6, padding: '3px 8px',
@@ -16618,7 +16932,7 @@ function SolarEngine3D({
 
       {/* Last log - v70: draggable. Grab the bar to move. */}
       {stage === 'done' && lastLog ? (
-        <DraggablePanel id="last-log" zIndex={50}>
+        <DraggablePanel id="last-log" zIndex={OVERLAY_Z.READOUT}>
           <div style={{
             position: 'absolute', bottom: 8, right: 8,
             background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 8px',
@@ -16640,7 +16954,7 @@ function SolarEngine3D({
           to localStorage so the layout survives reloads. */}
       {stage === 'done' ? (
         <>
-          <DraggablePanel id="lidar-properties" zIndex={60}>
+          <DraggablePanel id="lidar-properties" zIndex={OVERLAY_Z.DATA}>
             <LiDARPropertiesPanel
               state={lidar.state}
               onStyleChange={lidar.setStyle}

@@ -534,6 +534,11 @@ export function useSiteDesign(): UseSiteDesign {
     // covers exactly what this step removed and nothing else.
     const redoAuth = authorizationForLedgerDelta(
       beforeLedger, step.deletions as DeletionLedger, ledgerKeyOf(), panelsBefore, Date.now(),
+      // 🚨 AND THE PANELS THE STEP LEFT BEHIND. A panel carries no tombstone,
+      // so a redo of Clear Panels produced an EMPTY ledger delta and minted
+      // nothing at all -- the deadlock this was written to close, still open on
+      // the commonest destructive action there is.
+      step.panels as ReadonlyArray<{ id?: string }>,
     );
     restoreLedger(step.deletions);
     if (redoAuth) {

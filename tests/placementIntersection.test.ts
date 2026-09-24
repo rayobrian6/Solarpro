@@ -519,3 +519,57 @@ describe('the ring test itself', () => {
     expect(pointInRing2D(3.5, 0, ring)).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 a padded hit yields to a true one, unless the true one is hidden', () => {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Preferring TRUE unconditionally fixed the ridge and broke occlusion. An
+  // adversary measured both, and the two are told apart by distance:
+  //
+  //   ridge   near face PADDED at 56.10 m, far face TRUE at 56.57 m   → 0.47 m
+  //   garage  upper roof PADDED at ~28 m,  garage TRUE at ~34 m       → 5.6 m
+  //
+  // A padded hit sits at most padM outside its own face, so it lands within
+  // about a metre of the surface it belongs to. Nearer than that by a lot means
+  // the true hit is behind something opaque.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('🚨 a click just off an upper eave does NOT fall through to the deck behind it', () => {
+    // A two-storey house: the upper roof at z=6 spanning y 2..10, and a garage
+    // deck at z=3 spanning y 4..14 — behind and under it, invisible from a
+    // camera to the south.
+    const upper = rect('upper', v(0, 6, 6), v(1, 0, 0), v(0, 1, 0), 12, 8);
+    const garage = rect('garage', v(0, 9, 3), v(1, 0, 0), v(0, 1, 0), 12, 10);
+
+    // Aim 0.1 m outside the upper roof's near eave (y = 2), from the engine's
+    // own default -45° camera to the south.
+    const target = v(0, 1.9, 6);
+    const camera = add(target, v(0, -20, 20));
+    const hit = nearestFaceAlongRay(camera, sub(target, camera), [upper, garage], { padM: 0.25 });
+
+    expect(hit, 'nothing was hit').not.toBeNull();
+    expect(hit!.faceId, 'the click fell through to the hidden deck behind').toBe('upper');
+  });
+
+  it('…and the ridge case still resolves to the far slope', () => {
+    // The same fixture as the gable test above: the difference is under a metre,
+    // so the TRUE hit keeps it.
+    const ridge = v(0, 0, 9);
+    const slope = Math.hypot(5, 2.5);
+    const vFar = unit(v(0, 5, -2.5));
+    const vNear = unit(v(0, -5, -2.5));
+    const far = rect('far', add(ridge, mul(vFar, slope / 2)), v(1, 0, 0), vFar, 12, slope);
+    const near = rect('near', add(ridge, mul(vNear, slope / 2)), v(1, 0, 0), vNear, 12, slope);
+    const target = add(ridge, mul(vFar, 0.6));
+    const camera = add(target, v(0, -40, 40));
+    const hit = nearestFaceAlongRay(camera, sub(target, camera), [near, far], { padM: 0.25 });
+    expect(hit!.faceId).toBe('far');
+  });
+
+  it('with no pad the behaviour is plain nearest-wins', () => {
+    const upper = rect('upper', v(0, 6, 6), v(1, 0, 0), v(0, 1, 0), 12, 8);
+    const garage = rect('garage', v(0, 9, 3), v(1, 0, 0), v(0, 1, 0), 12, 10);
+    const hit = nearestFaceAlongRay(v(0, 6, 40), v(0, 0, -1), [garage, upper]);
+    expect(hit!.faceId).toBe('upper');
+  });
+});

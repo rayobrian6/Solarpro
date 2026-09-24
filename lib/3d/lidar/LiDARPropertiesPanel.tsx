@@ -21,7 +21,24 @@ export interface LiDARPropertiesPanelProps {
 
 const PANEL_STYLE: React.CSSProperties = {
   position: 'absolute',
-  top: 12,
+  // 🚨 BELOW THE TOP-LEFT DOCK, NOT ON TOP OF IT.
+  //
+  // This panel sat at top: 12, left: 12 — the same corner as the view-toggle
+  // dock, which occupies y 12..45 across the full width of this panel. With
+  // this panel painted above, the dock's "Roof Model" and "Building" toggles
+  // were 100% unclickable, and `setShowBuilding3D` has exactly one call site
+  // in the whole engine, so the solid-building view had no reachable entry
+  // point at all. Re-ordering the two only swapped the casualty: with the dock
+  // above, this panel's "×" unload control went under it, and
+  // `lidar.setDataset(null)` likewise has exactly one call site — a loaded .las
+  // could never be unloaded.
+  //
+  // Two panels anchored to the same corner cannot both be clickable whatever
+  // their z-index, so this one moves clear of the dock's 33 px band. Its layer
+  // is now `OVERLAY_Z.DATA`, set on the DraggablePanel wrapper in
+  // SolarEngine3D.tsx; the value here is inert (the wrapper owns the stacking
+  // context) and is kept only so the panel still reads sanely in isolation.
+  top: 56,
   left: 12,
   zIndex: 60,
   background: 'rgba(15,15,30,0.92)',

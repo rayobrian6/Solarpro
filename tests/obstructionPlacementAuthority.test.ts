@@ -516,7 +516,19 @@ describe('🚨 an object is placed at the size it says it is', () => {
   it('🚨 placement asks the object, not the global band', () => {
     expect(ENGINE, 'placement is back on the one-size-fits-all clamp')
       .not.toMatch(/const \{ widthM, depthM \} = clampObstructionFootprint\(\s*newObstructionWidthM/);
-    expect(ENGINE).toMatch(/clampToPreset\(preset, newObstructionWidthM, newObstructionDepthM, newObstructionHeightM\)/);
+    // 🚨 AND IT ASKS THE REF, NOT THE STATE. This used to pin the three
+    // `newObstruction*M` state variables by name, which is exactly the read
+    // that made a placed tree 1 m across instead of 6: `handleObstructionClick`
+    // is reached only from a Cesium handler registered once at mount, so the
+    // state it can see is the state from before the user chose anything, and
+    // `clampToPreset` then raised the 0.6 m block default to the tree's 1.0 m
+    // minimum footprint. The guard was pinning the defect in place.
+    //
+    // The live value now comes from `obstructionSizeRef`, mirrored by an effect.
+    // See tests/mountFrozenClosure.test.ts for the full account.
+    expect(ENGINE, 'placement reads React state again — see tests/mountFrozenClosure.test.ts')
+      .not.toMatch(/clampToPreset\(preset, newObstructionWidthM/);
+    expect(ENGINE).toMatch(/clampToPreset\(preset, armedSize\.widthM, armedSize\.depthM, armedSize\.heightM\)/);
   });
 });
 

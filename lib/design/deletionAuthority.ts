@@ -495,6 +495,22 @@ export function authorizationForLedgerDelta(
   siteKey: string,
   panels: ReadonlyArray<{ id?: string; systemType?: string; planeId?: string }>,
   at: number,
+  /**
+   * 🚨 THE PANELS THE STEP LEFT BEHIND. Without it a redo of Clear Panels
+   * authorises NOTHING.
+   *
+   * A panel is not tombstoned -- only faces, sections and obstructions are --
+   * so `Clear Panels` produces an EMPTY ledger delta and the whole function
+   * returned null. Delete 12 modules, undo, redo: the ledger says nothing
+   * changed, no authorization is minted, and the save guard sees 12 modules
+   * vanish with nothing to explain them. The permanent 409 deadlock this
+   * function exists to close, still open on the commonest destructive action
+   * in the product.
+   *
+   * When given, panels present in `panels` and absent here were removed by the
+   * step and are authorised on that basis alone.
+   */
+  panelsAfter?: ReadonlyArray<{ id?: string }> | null,
 ): DestructiveAuthorization | null {
   const before = ledgerSite(prev, siteKey);
   const after = ledgerSite(next, siteKey);
@@ -508,7 +524,16 @@ export function authorizationForLedgerDelta(
   const obstructionIds = added(before.obstructionIds, after.obstructionIds);
   const newlyCleared = !before.clearedAt && !!after.clearedAt;
 
-  if (!faceIds.length && !sectionIds.length && !obstructionIds.length && !newlyCleared) {
+  // Panels removed by the step, independent of any tombstone.
+  const live = Array.isArray(panels) ? panels : [];
+  let lostPanels: Array<{ id?: string; systemType?: string }> = [];
+  if (panelsAfter) {
+    const kept = new Set((panelsAfter ?? []).map(pp => pp?.id).filter(Boolean) as string[]);
+    lostPanels = live.filter(pp => pp && pp.id && !kept.has(pp.id));
+  }
+
+  if (!faceIds.length && !sectionIds.length && !obstructionIds.length
+      && !newlyCleared && !lostPanels.length) {
     return null;
   }
 
@@ -517,15 +542,24 @@ export function authorizationForLedgerDelta(
   // faces but not the panels would still read as an unexplained loss of every
   // module on them.
   const gone = new Set(faceIds);
-  // `panels` arrives straight off a ref that is null on a design nobody has
-  // laid out yet, and this must not throw on the very first deletion.
-  const live = Array.isArray(panels) ? panels : [];
-  const doomed = newlyCleared
+  const byFace = newlyCleared
     ? live.filter(Boolean)
     : live.filter(pp => pp && pp.planeId && gone.has(pp.planeId));
+  // Union: modules that went with a deleted face, plus modules the step removed
+  // on their own. A panels-only clear reaches this through the second list.
+  const seen = new Set<string>();
+  const doomed = [...byFace, ...lostPanels].filter(pp => {
+    const id = pp?.id;
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 
+  const op: DeletionScope = newlyCleared
+    ? 'design'
+    : (faceIds.length || sectionIds.length ? 'face' : 'panels');
   return makeAuthorization(
-    newlyCleared ? 'design' : 'face',
+    op,
     siteKey,
     {
       faceIds,

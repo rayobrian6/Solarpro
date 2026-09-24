@@ -97,10 +97,18 @@ describe('HelpPanel — Aurora parity bar (HANDOFF_2026-08-25_AURORA_ANALYSIS.md
     expect(t).toMatch(/4|four/);
   });
 
-  it('"tree" mode text mentions clicking to place and the canopy preview (Aurora frame 115)', () => {
+  it('"tree" mode text names the object, the gesture and the canopy', () => {
+    // 🚨 IT USED TO REQUIRE A "canopy preview". There was never a preview after
+    // the decorative tree was removed -- the text promised a blue sphere that no
+    // longer existed, which is the label-contradicts-effect pattern this round
+    // has been closing everywhere. What the help must do is name the object, the
+    // gesture, and the two numbers Shade actually reads.
     const t = HELP_TEXT_BY_MODE.tree.toLowerCase();
     expect(t).toContain('click');
     expect(t).toContain('tree');
+    expect(t).toContain('ground');
+    expect(t).toContain('canopy');
+    expect(t, 'the help promises a preview that does not exist').not.toContain('preview');
   });
 
   it('"wizard_mark" mode text matches Aurora wizard step-1 text verbatim-ish', () => {

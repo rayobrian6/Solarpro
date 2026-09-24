@@ -86,8 +86,12 @@ export const HELP_TEXT_BY_MODE: Record<HelpMode, string> = {
     'Click the two eave corners. The ridge runs along the long edge.',
   roof_hip:
     'Click the four eave corners in order (counter-clockwise preferred).',
+  // 🚨 THERE IS NO BLUE PREVIEW. That described `handleTreeClick`, the
+  // decorative implementation that drew a sphere and a trunk and recorded
+  // nothing. Nothing routes there any more; a tree is a canonical site object
+  // that persists, deletes, undoes and shades.
   tree:
-    'Click to place a tree. The tree canopy is shown as a blue preview.',
+    'Click the ground at the tree’s trunk. Set its height and canopy width after — Shade uses both.',
   wizard_mark:
     'Click to add vertices. Press Enter to finish, or click the ✓ button.',
   wizard_analyze:

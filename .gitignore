@@ -137,6 +137,9 @@ tests/__scratch*
 tests/_zz_*
 tests/_lane*
 tests/_probe*
+_lane*_probe/
+_probe_*
+_scratch_*
 .e2e-*.log
 .build-*.log
 .suite-*.log

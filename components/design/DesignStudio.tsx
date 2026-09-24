@@ -1049,6 +1049,10 @@ export default function DesignStudio({ project, onSave }: Props) {
    *  first save that succeeds. */
   const lastRefusalRef = useRef<string | null>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // 🚨 The E2E bridge's `requestDelete` calls through this rather than closing
+  // over `requestDeletion`, which is declared much further down the file. It is
+  // re-pointed by an effect that sits beside that declaration.
+  const requestDeletionRef = useRef<((scope: string, targetId?: string) => void) | null>(null);
   // Data-loss guard (task #3 root cause, 2026-07-16): NO save path may run
   // before the DB restore has resolved. The autosave timer armed on MOUNT and
   // fired 3s later — on a slow restore (cold Neon) it saved the EMPTY initial
@@ -2189,7 +2193,15 @@ export default function DesignStudio({ project, onSave }: Props) {
        *  their own text and are not reliably targetable from a browser test;
        *  the BEHAVIOUR under test is what happens after the request, including
        *  the confirmation dialog, which this deliberately does not skip. */
-      requestDelete: (scope: string, targetId?: string) => { requestDeletion(scope, targetId); },
+      //
+      //  🚨 THROUGH A REF, BECAUSE `requestDeletion` IS DECLARED BELOW THIS
+      //  EFFECT. Naming it as a dependency here is a use-before-declaration —
+      //  a dependency array is evaluated where it is written, not where the
+      //  effect runs — and it threw at module scope. But it cannot simply be
+      //  left out either: it is a `useCallback` over `site.planDelete` and
+      //  `commitDeletion`, so its identity changes and the bridge would go on
+      //  calling a superseded one. The ref is re-pointed by its own effect.
+      requestDelete: (scope: string, targetId?: string) => { requestDeletionRef.current?.(scope, targetId); },
       placementMode: placementMode3D,
       deletionLedger: site.deletionLedger,
       geometryLifecycle: site.geometryLifecycle,
@@ -2227,10 +2239,22 @@ export default function DesignStudio({ project, onSave }: Props) {
     // that cannot tell "nothing happened" from "the app is gone" proves nothing,
     // which is the same failure as a guard wrapped in `if (panels.length > 0)`.
     return () => { delete window.__solarE2E; };
+    // 🚨 EVERY FIELD THIS EXPOSES MUST BE A DEPENDENCY, OR THE BRIDGE LIES.
+    //
+    // `placementMode3D`, `site.deletionLedger` and `site.geometryLifecycle` were
+    // read into the object and left out of this list, so the bridge kept
+    // whatever they were when some OTHER dependency last changed. Measured live:
+    // the palette correctly showed the Measure tool armed while the bridge still
+    // reported `select`, permanently.
+    //
+    // A test harness that reports stale state is an instrument that lies, and it
+    // cost a full debugging session: three browser specs were chasing a tool
+    // that WAS armed, and the failure was indistinguishable from the product
+    // being broken.
   }, [roofPlanes, panels, placedObstructions, measurements, e2eStitchedCorners, e2eDiagnostics,
       site.activeSiteKey, site.archivedSiteCount, site.archivedEntityCount, handleLocationPick,
       site.nativeDisposition, site.canUndoGeometry, site.canRedoGeometry, site.undoGeometryLabel,
-      selected3DFaceId,
+      selected3DFaceId, placementMode3D, site.deletionLedger, site.geometryLifecycle,
       setPanels, setRoofPlanes, setPlacedObstructions, setMeasurements]);
 
   // ── Resolve location on load ─────────────────────────────────────────
@@ -4676,6 +4700,15 @@ export default function DesignStudio({ project, onSave }: Props) {
    * the user had just asked for), and every face left drawn in the viewer
    * because nothing told the renderer.
    */
+  // 🚨 THE BRIDGE MUST REACH THE CURRENT ONE. `requestDeletion` is a
+  // `useCallback` over `site.planDelete` and `commitDeletion`, so its identity
+  // changes; the E2E bridge is published by an effect declared above this line
+  // and cannot name it as a dependency without a use-before-declaration. This
+  // re-points the ref every time the callback is rebuilt, so `requestDelete`
+  // never calls a superseded one — the same failure mode as a browser harness
+  // reporting a tool that is no longer armed.
+  useEffect(() => { requestDeletionRef.current = requestDeletion; }, [requestDeletion]);
+
   const clearAll = useCallback(() => { requestDeletion('design'); }, [requestDeletion]);
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -4728,8 +4761,14 @@ export default function DesignStudio({ project, onSave }: Props) {
       (panelId) => {
         const p = byId.get(panelId);
         if (!p) return null;
+        // 🚨 THE PANEL'S SECTION TRAVELS WITH IT, or the same-building guard in
+        // `profileForPanel` can never fire and a house shades itself.
+        const face = planes.find(pl => pl.id === p.planeId);
         return profileForPanel(
-          { id: p.id, lat: p.lat, lng: p.lng, height: p.height, planeId: p.planeId },
+          {
+            id: p.id, lat: p.lat, lng: p.lng, height: p.height, planeId: p.planeId,
+            sectionId: (face as { sectionId?: string })?.sectionId,
+          },
           scene, groundElevM,
         );
       },

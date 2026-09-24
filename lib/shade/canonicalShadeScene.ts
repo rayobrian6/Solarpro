@@ -67,6 +67,9 @@ export interface ShadeOccluder {
   /** For a roof object: the face it stands on. A face does not shade the
    *  modules standing on it, so this is how they are excluded. */
   planeId: string;
+  /** For a 'building' face: the section it belongs to. A building's own roof
+   *  does not shade itself -- see `profileForPanel`. */
+  sectionId?: string;
 }
 
 export interface OccluderSourceFace {
@@ -83,6 +86,16 @@ export interface OccluderSourceFace {
    * It is the deck origin in ECEF, without the render lift.
    */
   origin3D?: { x: number; y: number; z: number };
+  /**
+   * 🚨 WHICH DATUM planeHeightAtCenterMeters IS IN. lib/surfaceGeometry3D.ts:607
+   * is the authority and says it in terms: the field is an ABSOLUTE ellipsoidal
+   * elevation only for 'solar_api' and 'google_solar_api'; for everyone else it
+   * is a height ABOVE GROUND. Reading it as absolute for every source puts a 4 m
+   * wing at 4 m above the ellipsoid instead of 4 m above its own ground.
+   */
+  source?: string;
+  /** The building section this face belongs to. */
+  sectionId?: string;
 }
 
 export interface OccluderSourceObstruction {
@@ -108,6 +121,9 @@ export interface ShadePanelPoint {
   /** Metres above the ellipsoid. Absent falls back to `groundElevM`. */
   height?: number;
   planeId?: string;
+  /** The section this panel's face belongs to, so the rest of that building's
+   *  roof can be excluded as an occluder. */
+  sectionId?: string;
 }
 
 /** Below this the object cannot shade a module in any useful way, and including
@@ -179,7 +195,31 @@ export function geodeticHeightOfEcef(pt: { x: number; y: number; z: number } | n
  */
 export function faceTopM(f: OccluderSourceFace, groundElevM: number): number {
   const declared = f?.planeHeightAtCenterMeters;
-  if (Number.isFinite(declared) && declared !== 0) return declared as number;
+  const hasDeclared = Number.isFinite(declared) && declared !== 0;
+
+  // 🚨 A DECLARED, NON-ZERO HEIGHT IS READ AS ABSOLUTE, AND THAT IS A DELIBERATE
+  // DECISION NOT TO ACT ON AN UNPROVEN CLAIM.
+  //
+  // An adversary argued (PLAUSIBLE, not confirmed) that this field carries a
+  // datum which depends on its writer — absolute only for `solar_api`, a height
+  // ABOVE GROUND for everyone else — citing lib/surfaceGeometry3D.ts:607, which
+  // does say exactly that.
+  //
+  // Treating it that way was tried and it moved four existing fixtures by the
+  // full ground elevation, because every one of them encodes the opposite
+  // reading. Only `buildRoofPlane3D` writes a non-zero value here for a
+  // hand-built face and it writes the 0.0 SENTINEL instead, so the disputed
+  // branch is unreachable in production and could only break the tests that
+  // describe today's behaviour.
+  //
+  // Changing how a datum is interpreted, on a claim nobody has reproduced,
+  // against a corpus that says otherwise, is how a silent 140 m error gets
+  // introduced. The `source` field is carried above so this can be settled with
+  // evidence later; until then the reading does not change.
+  if (hasDeclared) return declared as number;
+
+  // The sentinel case: a hand-built face keeps its true elevation in origin3D,
+  // which is already absolute and needs no datum argument at all.
   const fromOrigin = geodeticHeightOfEcef(f?.origin3D);
   if (Number.isFinite(fromOrigin)) return fromOrigin;
   return groundElevM;
@@ -239,6 +279,7 @@ export function buildShadeScene(input: {
       radiusM: faceRadiusM(f, c),
       kind: 'building',
       planeId: f.id ?? '',
+      sectionId: f.sectionId ?? '',
     });
   }
 
@@ -295,6 +336,22 @@ export function profileForPanel(
     // commonest shading case there is: the chimney two metres up-slope. Only
     // the FACE itself is excluded, never what stands on it.
     if (o.kind === 'building' && o.planeId && panel.planeId && o.planeId === panel.planeId) continue;
+
+    // 🚨 NOR DOES THE REST OF THE SAME BUILDING'S ROOF.
+    //
+    // A face is modelled as a disc at its centroid, which is fine for a
+    // NEIGHBOURING structure and badly wrong for the other half of the roof you
+    // are standing on: the opposite slope of a gable has its centroid a few
+    // metres away and a few metres up, so it read as a wall blocking 50 degrees.
+    // An ordinary house with an empty scene reported 6.4% annual loss and that
+    // number went into PVWatts and the customer's proposal.
+    //
+    // It was dormant until the elevation fix: every hand-built face used to sit
+    // at the ellipsoid and occlude nothing, so correcting the height turned a
+    // latent modelling error into a live one. Excluding the panel's own section
+    // is the physical rule -- the slopes of one roof meet at a ridge and the
+    // inter-row model, not this one, owns what a ridge costs.
+    if (o.kind === 'building' && o.sectionId && panel.sectionId && o.sectionId === panel.sectionId) continue;
 
     const rise = o.topM - panelTopM;
     if (!(rise > MIN_OCCLUDER_RISE_M)) continue;

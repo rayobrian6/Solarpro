@@ -27,6 +27,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './support/stripSource';
+import { OVERLAY_Z } from '@/lib/3d/overlayLayers';
 
 /** Point this at an older checkout to prove the guards can fail. */
 const ROOT = process.env.SECTION_WIRING_SRC_DIR || join(__dirname, '..');
@@ -408,11 +409,39 @@ describe('🚨 a decision names the property it is about', () => {
     // it replaced did nothing at all.
     const i = ENGINE.indexOf('<DraggablePanel id="undo-redo-toolbar"');
     expect(i, 'the undo toolbar is not mounted').toBeGreaterThan(-1);
-    const block = ENGINE.slice(i, i + 900);
-    expect(block).toMatch(/zIndex=\{62\}/);
-    expect(block).toMatch(/zIndex: 62/);
+    // Wide enough to reach the style object past the note that explains why
+    // the chip sits where it does — the window used to be 900 and the
+    // explanation pushed the anchor out of it.
+    const block = ENGINE.slice(i, i + 2400);
+    // 🚨 THE INVARIANT, NOT THE NUMBER. This used to pin `zIndex={62}` and
+    // `zIndex: 62` literally. Those numbers were right when they were written
+    // and said nothing about WHY: a later audit found eighteen more controls
+    // buried the same way, and the order is now declared once, by role, in
+    // `lib/3d/overlayLayers.ts`. Pinning a literal would have forced that file
+    // to keep 62 for ever or this guard to be deleted — and the guard is the
+    // point. So it asserts the thing the chip needs: a named layer that
+    // outranks the two docks that buried it.
+    expect(block, 'the undo chip picked a bare number instead of a named layer')
+      .toMatch(/zIndex=\{OVERLAY_Z\.[A-Z_]+\}/);
+    expect(OVERLAY_Z.ACTION, 'the undo chip no longer outranks the docks that buried it')
+      .toBeGreaterThan(OVERLAY_Z.DOCK);
+    expect(OVERLAY_Z.ACTION, 'the undo chip is under the LiDAR panel again')
+      .toBeGreaterThan(OVERLAY_Z.DATA);
+    expect(block, 'the undo chip is no longer on OVERLAY_Z.ACTION')
+      .toMatch(/id="undo-redo-toolbar"\s+zIndex=\{OVERLAY_Z\.ACTION\}/);
     // And it is no longer in the corner the two docks occupy.
     expect(block).not.toMatch(/top: 12, left: 12/);
+    // 🚨 NOR ON TOP OF THE "REPORT A BUG" BUTTON. That button is
+    // `fixed bottom-4 left-4 z-[60]` in DesignStudio and owns the bottom ~52 px
+    // of this corner. At `bottom: 12` the two overlap, and whichever wins the
+    // other is unclickable — measured both ways round. Clearing it vertically
+    // is the only outcome where both work.
+    expect(block, 'the undo chip is back on top of the Report a Bug button')
+      .not.toMatch(/bottom: 12, left: 12/);
+    const bottom = /bottom: (\d+), left: 12/.exec(block);
+    expect(bottom, 'the undo chip is no longer anchored bottom-left').toBeTruthy();
+    expect(Number(bottom![1]), 'the undo chip overlaps the Report a Bug button again')
+      .toBeGreaterThanOrEqual(56);
   });
 });
 

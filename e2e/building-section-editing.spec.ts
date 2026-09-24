@@ -232,6 +232,37 @@ async function faceScreenPoint(page: Page, planeId: string) {
 }
 
 /**
+ * 🚨 A CESIUM SCREEN POINT IS CANVAS-RELATIVE; `page.mouse` IS PAGE-RELATIVE.
+ *
+ * `faceScreenPoint` returns what `SceneTransforms.worldToWindowCoordinates`
+ * gives, which is measured from the CANVAS origin. `page.mouse.click` measures
+ * from the page origin. `clickFace` below has always added the canvas box —
+ * `box.x + pt.x` — and the four specs that clicked a point directly did not.
+ *
+ * Measured: the canvas sits at [56, 116], so every one of those clicks landed
+ * 56 px left and 116 px above where it was aimed. The engine's own trail said
+ * so plainly once it was asked — `screenPos=353,209` for a click issued at
+ * (408.8, 324.5) — and reported `canonical faces=8 hit=none`: eight faces were
+ * offered to the ray and the ray was simply pointed off the roof.
+ *
+ * That cost a debugging session chasing a placement bug that did not exist,
+ * which is the same failure as the stale E2E bridge: a harness that mis-reports
+ * does not merely fail to catch bugs, it manufactures them. Every canvas click
+ * goes through here now, so the offset cannot be forgotten one spec at a time.
+ */
+async function clickCanvas(page: Page, pt: { x: number; y: number }): Promise<void> {
+  const box = await page.locator('canvas').first().boundingBox();
+  expect(box, 'no canvas').not.toBeNull();
+  const x = box!.x + pt.x;
+  const y = box!.y + pt.y;
+  expect(pt.x >= 0 && pt.x <= box!.width && pt.y >= 0 && pt.y <= box!.height,
+    `the point (${Math.round(pt.x)}, ${Math.round(pt.y)}) is outside the canvas ` +
+    `(${Math.round(box!.width)}x${Math.round(box!.height)}) — clicking it would hit ` +
+    `the sidebar, and the engine would never see a canvas click at all`).toBe(true);
+  await page.mouse.click(x, y);
+}
+
+/**
  * Click a face on the canvas — a real mouse event at a real screen position.
  *
  * 🚨 IT RE-FRAMES BEFORE GIVING UP, BECAUSE THE CAMERA MOVES UNDER IT.
@@ -1187,18 +1218,44 @@ test.describe('delete, undo, save, reload — it stays gone', () => {
 // and read the ARMED TOOL from the studio that owns it.
 // ═══════════════════════════════════════════════════════════════════════════
 
+
+/**
+ * Open a tool group, then press a tool inside it.
+ *
+ * 🚨 BY TEST ID, BECAUSE THE SPINE BUTTONS HAVE NO TEXT AT ALL.
+ *
+ * A first version matched `button:has-text("Tools")`. The spine button renders
+ * only its emoji and a chevron -- its label lives exclusively in a hover
+ * tooltip -- so the selector matched nothing and all seven specs timed out at
+ * 24 s. The comment above it even said the buttons carry their icon as their
+ * text, and the selector ignored that.
+ *
+ * The product was changed rather than the selector made cleverer: a control
+ * whose only name is a hover tooltip is unreachable by a screen reader too.
+ * Both the group and the tool now carry `aria-label` and a test id.
+ */
+async function pickTool(page: Page, group: string, mode: string) {
+  await page.locator(`[data-testid="toolgroup-${group}"]`).click();
+  const tool = page.locator(`[data-testid="tool-${mode}"]`);
+  // 🚨 VISIBILITY IS ASSERTED; STABILITY IS NOT WAITED FOR.
+  //
+  // The flyout enters with a 0.13 s CSS animation and the studio re-renders
+  // continuously behind it (a live log panel, the Cesium frame counter), so
+  // Playwright's actionability check can spend its whole 20 s reporting
+  // "element is not stable" on a button a person clicks without difficulty --
+  // proven by the sibling spec above, which clicks the same control and
+  // passes. Asserting visible-and-enabled keeps the parts of actionability
+  // that describe the user's experience and drops the one that describes the
+  // animation.
+  await expect(tool).toBeVisible({ timeout: T });
+  await expect(tool).toBeEnabled({ timeout: T });
+  await tool.click({ force: true });
+}
+
 test.describe('the armed tool survives being armed', () => {
   const armed = (page: Page) =>
     page.evaluate(() => (window as any).__solarE2E?.placementMode ?? '');
 
-  /** Open the tool group whose label matches, then press the tool by its label. */
-  async function pickTool(page: Page, group: string, tool: string) {
-    // The spine buttons carry their icon as their own text and publish their
-    // label through a hover tooltip, so the group is opened by its aria/title
-    // and the tool row is found by the visible label inside the flyout.
-    await page.locator(`button:has-text("${group}")`).first().click();
-    await page.locator(`button:has-text("${tool}")`).last().click();
-  }
 
   test('🚨 clicking Tree leaves Tree armed — it does not revert to Obstruction', async ({ page }) => {
     await openStudio(page);
@@ -1206,7 +1263,7 @@ test.describe('the armed tool survives being armed', () => {
     await seedHouse(page);
     await frameRoof(page);
 
-    await pickTool(page, 'Tools', 'Tree');
+    await pickTool(page, 'tools', 'tree');
 
     // 🚨 THE ASSERTION THE OWNER ASKED FOR. Not "a tree was created" — the tool
     // state itself, before any map click.
@@ -1229,7 +1286,7 @@ test.describe('the armed tool survives being armed', () => {
     await seedHouse(page);
     await frameRoof(page);
 
-    await pickTool(page, 'Tools', 'Obstruction');
+    await pickTool(page, 'tools', 'obstruction');
     await expect.poll(() => armed(page), { timeout: T }).toBe('obstruction');
 
     // Each type is chosen in the placement panel, and the armed TOOL follows
@@ -1254,10 +1311,10 @@ test.describe('the armed tool survives being armed', () => {
     await seedHouse(page);
     await frameRoof(page);
 
-    await pickTool(page, 'Tools', 'Tree');
+    await pickTool(page, 'tools', 'tree');
     await expect.poll(() => armed(page), { timeout: T }).toBe('tree');
 
-    await pickTool(page, 'Tools', 'Measure');
+    await pickTool(page, 'tools', 'measure');
     await expect.poll(() => armed(page), { timeout: T }).toBe('measure');
   });
 });
@@ -1285,10 +1342,11 @@ test.describe('placing a site object', () => {
     page.evaluate(() => (window as unknown as E2EWin).__solarE2E?.placedObstructions ?? []);
 
   /** Open the tool group, press the tool, then choose the object type. */
-  async function armObject(page: Page, tool: string, presetId: string) {
-    await page.locator('button:has-text("Tools")').first().click();
-    await page.locator(`button:has-text("${tool}")`).last().click();
-    await page.locator(`[data-testid="obstruction-preset-${presetId}"]`).click();
+  async function armObject(page: Page, mode: string, presetId: string) {
+    await pickTool(page, 'tools', mode);
+    const chip = page.locator(`[data-testid="obstruction-preset-${presetId}"]`);
+    await expect(chip).toBeVisible({ timeout: T });
+    await chip.click({ force: true });
     await page.waitForTimeout(400);
   }
 
@@ -1298,12 +1356,12 @@ test.describe('placing a site object', () => {
     const planes = await seedHouse(page);
     await frameRoof(page);
 
-    await armObject(page, 'Obstruct', 'chimney');
+    await armObject(page, 'obstruction', 'chimney');
 
     const target = planes[0].id;
     const pt = await faceScreenPoint(page, target);
     expect(pt, 'the face never projected into the canvas').toBeTruthy();
-    await page.mouse.click(pt.x, pt.y);
+    await clickCanvas(page, pt);
 
     // 🚨 THE ASSERTION THE OWNER ASKED FOR: not "the tool was armed", but that
     // a canonical object now exists.
@@ -1326,7 +1384,7 @@ test.describe('placing a site object', () => {
     const planes = await seedHouse(page);
     await frameRoof(page);
 
-    await armObject(page, 'Tree', 'tree');
+    await armObject(page, 'tree', 'tree');
     await expect.poll(
       () => page.evaluate(() => (window as unknown as E2EWin).__solarE2E?.placementMode ?? ''),
       { message: 'the Tree tool did not stay armed', timeout: T },
@@ -1335,8 +1393,8 @@ test.describe('placing a site object', () => {
     // Well clear of the house: the ground, where nothing at all is drawn. This
     // is precisely where the depth buffer had nothing to report.
     const roof = await faceScreenPoint(page, planes[0].id);
-    const away = { x: Math.max(30, roof.x - 220), y: Math.min(roof.y + 190, 700) };
-    await page.mouse.click(away.x, away.y);
+    const away = { x: Math.max(30, roof.x - 220), y: Math.min(roof.y + 190, 560) };
+    await clickCanvas(page, away);
 
     await expect
       .poll(async () => (await objects(page)).length,
@@ -1362,10 +1420,10 @@ test.describe('placing a site object', () => {
     const planes = await seedHouse(page);
     await frameRoof(page);
 
-    await armObject(page, 'Obstruct', 'chimney');
+    await armObject(page, 'obstruction', 'chimney');
 
     const roof = await faceScreenPoint(page, planes[0].id);
-    await page.mouse.click(Math.max(30, roof.x - 240), Math.min(roof.y + 200, 700));
+    await clickCanvas(page, { x: Math.max(30, roof.x - 240), y: Math.min(roof.y + 200, 560) });
 
     // Building a chimney in the garden is worse than refusing: Auto Layout would
     // then have to route panels around a prism nobody meant to place.
@@ -1375,14 +1433,29 @@ test.describe('placing a site object', () => {
 
   test('🚨 a placed tree survives a reload', async ({ page }) => {
     test.skip(!ARMED, 'persistence needs a real database');
-    await openStudio(page);
+    // 🚨 A REAL PROJECT, NOT THE QUICK-DESIGN ENTRY — see `createProject`.
+    //
+    // This spec used `openStudio(page)`, which goes to `?e2eQuickDesign=1`, and
+    // `makeDemoProject` builds `id: 'demo-' + Date.now()`. Measured: the page
+    // was project `demo-1790283161900` before the reload and
+    // `demo-1790283186360` after it. The tree was looked for in a project that
+    // had never existed when it was placed, so it could not have survived
+    // however well persistence worked — and the failure read exactly like
+    // "obstructions are not saved".
+    //
+    // The comment on `createProject` has warned about this since it was
+    // written, for the roof, and this spec walked past it. That is the same
+    // class as the canvas-offset clicks above: the harness manufacturing a
+    // defect and then being believed.
+    const projectId = await createProject(page);
+    await openStudio(page, projectId);
     await nameTheProperty(page);
     const planes = await seedHouse(page);
     await frameRoof(page);
 
-    await armObject(page, 'Tree', 'tree');
+    await armObject(page, 'tree', 'tree');
     const roof = await faceScreenPoint(page, planes[0].id);
-    await page.mouse.click(Math.max(30, roof.x - 220), Math.min(roof.y + 190, 700));
+    await clickCanvas(page, { x: Math.max(30, roof.x - 220), y: Math.min(roof.y + 190, 560) });
     await expect.poll(async () => (await objects(page)).length, { timeout: T }).toBe(1);
     const before = (await objects(page))[0];
 

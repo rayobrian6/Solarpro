@@ -290,3 +290,72 @@ describe('🚨 the two machine-write doors', () => {
     expect(gateAt, 'the roof is adopted before the lifecycle is consulted').toBeLessThan(adoptAt);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 a panels-only clear is a deletion too, and redo must authorise it', () => {
+  // ─────────────────────────────────────────────────────────────────────────
+  // 🚨 THE FIRST FIX WAS A HALF-FIX, AND AN ADVERSARY PROVED IT.
+  //
+  // `authorizationForLedgerDelta` computed everything from the TOMBSTONE ledger,
+  // and a panel is never tombstoned — only faces, sections and obstructions
+  // are. So `Clear Panels` produced an empty delta and the function returned
+  // null: delete 12 modules, undo, redo, and the save guard sees 12 modules
+  // vanish with nothing to explain them. The permanent 409 deadlock the
+  // previous commit's headline claimed to have closed, still open on the
+  // commonest destructive action in the product.
+  //
+  // The step's own panel arrays answer it without any tombstone at all.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const twelve = Array.from({ length: 12 }, (_, i) => ({
+    id: `m${i}`, systemType: 'roof', planeId: 'f1',
+  }));
+
+  it('redo of Clear Panels authorises every module it removed', () => {
+    const unchanged = ledgerWith([]);       // a panels clear writes no tombstone
+    const auth = authorizationForLedgerDelta(
+      unchanged, unchanged, KEY, twelve, 1000, [],
+    );
+    expect(auth, 'a panels-only redo minted nothing — the deadlock is open').not.toBeNull();
+    expect(auth!.op).toBe('panels');
+    expect(auth!.panelIds).toHaveLength(12);
+    // 🚨 THE GUARD CHECKS SYSTEM TYPES, NOT IDS. An authorization naming the
+    // modules but not their types still reads as an unexplained loss.
+    expect(auth!.panelSystemTypes).toEqual(['roof']);
+  });
+
+  it('a partial clear authorises only what went', () => {
+    const unchanged = ledgerWith([]);
+    const kept = twelve.slice(0, 5);
+    const auth = authorizationForLedgerDelta(unchanged, unchanged, KEY, twelve, 1, kept);
+    expect(auth!.panelIds).toHaveLength(7);
+    expect(auth!.panelIds).not.toContain('m0');
+    expect(auth!.panelIds).toContain('m11');
+  });
+
+  it('a step that removed no panels and no geometry still mints nothing', () => {
+    const unchanged = ledgerWith([]);
+    expect(authorizationForLedgerDelta(unchanged, unchanged, KEY, twelve, 1, twelve)).toBeNull();
+  });
+
+  it('a face deletion still authorises its panels AND keeps the face scope', () => {
+    // The two sources are unioned, not swapped: deleting a face removes the
+    // modules on it, and the op must still say 'face'.
+    const auth = authorizationForLedgerDelta(
+      ledgerWith([]), ledgerWith(['f1']), KEY, twelve, 1, [],
+    );
+    expect(auth!.op).toBe('face');
+    expect(auth!.faceIds).toEqual(['f1']);
+    expect(auth!.panelIds).toHaveLength(12);
+  });
+
+  it('omitting panelsAfter keeps the old ledger-only behaviour', () => {
+    // Every existing caller passes nothing, and must be unaffected.
+    const unchanged = ledgerWith([]);
+    expect(authorizationForLedgerDelta(unchanged, unchanged, KEY, twelve, 1)).toBeNull();
+  });
+
+  it('redoGeometry hands it the step\u2019s own panels', () => {
+    expect(HOOK).toMatch(/step\.panels as ReadonlyArray<\{ id\?: string \}>/);
+  });
+});
