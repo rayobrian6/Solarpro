@@ -283,7 +283,20 @@ describe('a drag must not strand the click suppression flag', () => {
     // documentation is a defect class this repo has been bitten by repeatedly.
     const anchor = SRC.indexOf('if (dragRef.current) dragRef.current = null;');
     expect(anchor, 'the tool-change reset was not found').toBeGreaterThan(-1);
-    const reset = SRC.slice(anchor, anchor + 900);  // stripComments keeps blanked lines as whitespace
+    // 🚨 SLICED TO A REAL END TOKEN, NOT A CHARACTER COUNT.
+    //
+    // This read `slice(anchor, anchor + 900)` and broke the moment another
+    // gesture added its own `cancel…()` line to this reset block — the
+    // additions pushed `releasePointer()` past the 900th character and the
+    // guard failed on correct source. The comment three lines above warns
+    // against anchoring on documentation; a fixed LENGTH is the same mistake in
+    // a different dimension, because `stripComments` blanks comments to
+    // whitespace and every comment added inside the block consumes the window.
+    //
+    // `selectedPlaneRef` is the statement that ends this reset in the engine.
+    const resetEnd = SRC.indexOf('selectedPlaneRef.current = null;', anchor);
+    expect(resetEnd, 'the end of the tool-change reset was not found').toBeGreaterThan(anchor);
+    const reset = SRC.slice(anchor, resetEnd);
     expect(reset, 'an abandoned block drag must be cleared on tool change')
       .toMatch(/blockResizeRef\.current = null/);
     // 🚨 THE CAMERA IS HANDED BACK THROUGH THE AUTHORITY NOW, not by assigning
