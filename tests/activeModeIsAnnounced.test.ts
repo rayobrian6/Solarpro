@@ -31,11 +31,22 @@ const SRC_PATH = join(__dirname, '..', 'components', '3d', 'SolarEngine3D.tsx');
 const RAW = readFileSync(SRC_PATH, 'utf8');
 const SRC = stripComments(RAW);
 
-/** The banner's JSX, from its testid to the end of the guarded block. */
+/**
+ * The banner's JSX, from its testid to the end of the guarded block.
+ *
+ * 🚨 SLICED TO A REAL ANCHOR, NOT A CHARACTER COUNT. A fixed slice is a guess
+ * at the block's length, and `stripComments` blanks comments to whitespace
+ * rather than deleting them — so adding a comment inside the banner pushes
+ * real code out of the window and fails the guard for a reason that has
+ * nothing to do with what it guards. That happened here, and in
+ * screenSpaceHandlerRegistration, on the same day.
+ */
 function banner(): string {
   const i = SRC.indexOf('data-testid="active-mode-banner"');
   expect(i, 'the active-mode banner was not found').toBeGreaterThan(-1);
-  return SRC.slice(i, i + 3_500);
+  const end = SRC.indexOf('})()) : null}', i);
+  expect(end, 'the end of the banner block was not found').toBeGreaterThan(i);
+  return SRC.slice(i, end);
 }
 
 describe('the armed tool is announced in words', () => {
@@ -111,16 +122,31 @@ describe('the banner cannot be lost or occluded', () => {
     expect(b).toMatch(/pointerEvents: 'auto'/);
   });
 
-  it('it sits at top-centre, where no other overlay lives', () => {
+  it('it sits top-centre, and STACKS with the roof wizard instead of on it', () => {
     const b = banner();
-    expect(b).toMatch(/top: 10/);
     expect(b).toMatch(/left: '50%'/);
-    // The other centred overlays are bottom-anchored; a collision here would
-    // put the exit under something else.
-    const centred = [...SRC.matchAll(/position: 'absolute', (top|bottom): (\d+), left: '50%'/g)]
-      .map(m => m[1] + ':' + m[2]);
-    expect(centred.filter(c => c.startsWith('top:')),
-      'another top-centred absolute overlay would collide with the banner').toEqual(['top:10']);
+    // 🚨 The offset is not a constant. At a fixed 54 this banner sat on the
+    // wizard's step 1, and at 10 it buried Street View and LiDAR — both
+    // caught by e2e/mode-banner-acceptance.spec.ts, which hit-tests every
+    // control. The vertical position must therefore depend on whether the
+    // other top-centre strip is showing.
+    expect(b, 'the banner must move when the wizard is up')
+      .toMatch(/top: isRoofDrawMode\(placementMode\) \? \d+ : \d+/);
+
+    // And it must key off the SAME predicate the wizard mounts on, or the two
+    // can disagree about whether the wizard is on screen.
+    const m = b.match(/top: isRoofDrawMode\(placementMode\) \? (\d+) : (\d+)/);
+    expect(m).toBeTruthy();
+    const [withWizard, alone] = [Number(m![1]), Number(m![2])];
+    expect(withWizard, 'the wizard is above it, so the offset must be larger')
+      .toBeGreaterThan(alone);
+    expect(alone, 'it must clear the map-source toolbar band, measured at 44')
+      .toBeGreaterThan(44);
+  });
+
+  it('the wizard predicate is imported, not re-implemented', () => {
+    expect(SRC, 'a local copy of isRoofDrawMode would drift from the wizard')
+      .toMatch(/import \{ RoofWizard, isRoofDrawMode \} from '\.\/wizard'/);
   });
 });
 

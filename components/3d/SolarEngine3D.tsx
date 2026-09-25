@@ -219,7 +219,7 @@ import {
 // (HANDOFF_2026-08-25 §2). HUD stepper that appears during any
 // roof-draw mode. UI + state machine live in components/3d/wizard/.
 // See DESIGN.md for the spec.
-import { RoofWizard } from './wizard';
+import { RoofWizard, isRoofDrawMode } from './wizard';
 
 // v66 (create-design-modal): Aurora-parity "Save → Create Design" trigger.
 // The modal itself lives in components/3d/designs/CreateDesignModal.tsx; the
@@ -421,6 +421,50 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
 }
 
 export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip' | 'tree' | 'measurements' | 'ruler';
+/**
+ * SINGLE-KEY TOOL SHORTCUTS — one map, read by the keyboard AND by the buttons.
+ *
+ * This editor had no letter shortcuts at all: every tool cost a click to open
+ * a group plus a click to pick, every time, and the most repeated actions on a
+ * roof (obstruction, tree) are the ones you do fifteen times in a row.
+ *
+ * Aurora prints the accelerator on the tool row itself — "SmartRoof R",
+ * "Draw Roof Face F", "Draw Tree T" — and repeats it inside the tooltip
+ * ("FILL WITH MODULES (F)"). That is why its shortcuts get learned: they are
+ * never hidden behind a separate cheatsheet nobody opens. T for Tree here is
+ * deliberately the same key Aurora uses; a roofer who knows one should not
+ * have to unlearn it.
+ *
+ * 🚨 ONE MAP, BOTH CONSUMERS. The palette derives the letter it prints from
+ * this object, and the keydown handler derives the tool it arms from the same
+ * object. A separate display list would drift from the live binding, and a
+ * button that advertises the wrong key is worse than a button with no key.
+ *
+ * Only the high-frequency tools get one on purpose — the point is fewer things
+ * to learn, not a letter for all 24 modes. Letters are free here: the keyboard
+ * handler otherwise binds only Delete/Backspace, the arrows, comma, period,
+ * Enter and Escape.
+ */
+export const TOOL_SHORTCUTS: Readonly<Record<string, PlacementMode>> = {
+  r: 'roof',
+  f: 'auto_roof',        // "fill" — Aurora's F, same verb
+  s: 'surface_select',
+  b: 'block',
+  g: 'roof_gable',
+  h: 'roof_hip',
+  o: 'obstruction',
+  t: 'tree',             // Aurora's T
+  m: 'measure',
+};
+
+/** The letter that arms this tool, for printing on the button. */
+export function shortcutForMode(mode: PlacementMode): string | null {
+  for (const k of Object.keys(TOOL_SHORTCUTS)) {
+    if (TOOL_SHORTCUTS[k] === mode) return k.toUpperCase();
+  }
+  return null;
+}
+
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -2257,6 +2301,18 @@ function SolarEngine3D({
   // renders AND what is clickable. See the note on `top-right-stack`.
   const isPlacingObject = placementMode === 'obstruction' || placementMode === 'tree';
 
+  // 🚨 THE KEYBOARD MUST ARM A TOOL THE SAME WAY THE BUTTON DOES.
+  // `activateTool` is defined inside the render (it closes over the tool
+  // catalogue) and does real work beyond setting the mode: picking Tree sets
+  // the obstruction PRESET to tree, and leaving Tree for the generic
+  // Obstruction tool resets it, or a vent gets placed as a tree. A shortcut
+  // that called `onPlacementModeChange` directly would skip all of that and
+  // silently place the wrong object.
+  //
+  // `setupKeyboardHandler` is installed once at viewer init, so it cannot see
+  // a render-scoped function — hence a ref the render refreshes. Same pattern
+  // as `obstructionSizeRef` below, and for the same mount-frozen reason.
+  const activateToolRef = useRef<((mode: PlacementMode) => void) | null>(null);
   const obstructionSizeRef = useRef<{ widthM: number; depthM: number; heightM: number }>({
     widthM:  DEFAULT_OBSTRUCTION_FOOTPRINT_W_M,
     depthM:  DEFAULT_OBSTRUCTION_FOOTPRINT_D_M,
@@ -10593,6 +10649,24 @@ function SolarEngine3D({
   function setupKeyboardHandler() {
     const onKey = (e: KeyboardEvent) => {
       if (keyEventIsTyping(e)) return;
+
+      // ── SINGLE-KEY TOOL SHORTCUTS ──────────────────────────────────────
+      // Bare letters only: Ctrl/Cmd/Alt combinations belong to the browser and
+      // to copy/paste, and stealing them is how a text editor breaks someone's
+      // muscle memory. Shift is excluded too, so the array-rotate binding on
+      // '<' and '>' keeps working.
+      //
+      // Routed through `activateToolRef`, which is the SAME function the tool
+      // buttons call — pressing T must set the tree preset, not just the mode,
+      // or the next click plants a vent shaped like a tree.
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !e.repeat) {
+        const shortcutMode = TOOL_SHORTCUTS[e.key.toLowerCase()];
+        if (shortcutMode) {
+          e.preventDefault();
+          activateToolRef.current?.(shortcutMode);
+          return;
+        }
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && modeRef.current === 'select'
           && (selectedPanelIdRef.current || selectedPanelIdsRef.current.size > 0)) {
         e.preventDefault();
@@ -15048,6 +15122,11 @@ function SolarEngine3D({
           // getWorldPosition() works at any angle (same as 3D plane tool).
         };
 
+        // Hand the live function to the mount-frozen keyboard handler, so a
+        // shortcut and a button press are the SAME operation rather than two
+        // implementations that drift. See `activateToolRef` for why.
+        activateToolRef.current = activateTool;
+
         type ToolDef  = { mode: PlacementMode; icon: string; label: string; tip: string };
         type GroupDef = { id: string; icon: string; label: string; tools: ToolDef[] };
 
@@ -15284,9 +15363,14 @@ function SolarEngine3D({
                       fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', paddingBottom: 2,
                     }}>{grp.label}</div>
                     {/* Tool rows */}
-                    {grp.tools.map(({ mode, icon, label, tip }) => (
+                    {grp.tools.map(({ mode, icon, label, tip }) => {
+                      // Printed on the row AND repeated in the tooltip — the
+                      // two places a person actually looks. A shortcut nobody
+                      // is shown is a shortcut nobody uses.
+                      const key = shortcutForMode(mode);
+                      return (
                       <button key={mode}
-                        onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:label+': '+tip,x:r.left+r.width/2,y:r.top-8}); }}
+                        onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:label+(key?' ('+key+')':'')+': '+tip,x:r.left+r.width/2,y:r.top-8}); }}
                         onMouseLeave={() => setTooltipInfo(null)}
                         onClick={() => activateTool(mode)}
                         aria-label={label}
@@ -15305,8 +15389,19 @@ function SolarEngine3D({
                       >
                         <span style={{ fontSize: 15, flexShrink: 0 }}>{icon}</span>
                         <span style={{ fontSize: 10, whiteSpace: 'nowrap' }}>{label}</span>
+                        {key ? (
+                          <span
+                            data-testid={`tool-key-${mode}`}
+                            style={{
+                              marginLeft: 'auto', paddingLeft: 6, fontSize: 9, fontWeight: 700,
+                              opacity: placementMode === mode ? 0.75 : 0.55,
+                              color: placementMode === mode ? '#000' : '#ffc46b',
+                            }}
+                          >{key}</span>
+                        ) : null}
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 );
               })()) : null}
@@ -15355,7 +15450,29 @@ function SolarEngine3D({
                   data-testid="active-mode-banner"
                   data-mode={placementMode}
                   style={{
-                    position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+                    // 🚨 BELOW THE MAP-SOURCE TOOLBAR, MEASURED NOT GUESSED.
+                    // At top:10 this banner sat exactly on that toolbar and
+                    // made `map-source-tab-streetView` and
+                    // `map-source-tab-lidar` unclickable for as long as any
+                    // tool was armed — the same "control the user cannot
+                    // press" defect lib/3d/overlayLayers.ts was written after.
+                    // Measured with elementFromPoint: the toolbar band ends at
+                    // +44 and the next control down the centre column (the
+                    // obstruction presets) starts at +126.
+                    // e2e/mode-banner-acceptance.spec.ts fails if this banner
+                    // covers ANY interactive control, so a future layout change
+                    // reports itself instead of silently burying a button.
+                    //
+                    // 🚨 AND IT STACKS WITH THE ROOF WIZARD RATHER THAN FIGHTING
+                    // IT. The wizard is the other top-centre "what am I doing"
+                    // strip, and at a fixed 54 this banner sat on its step 1.
+                    // Both are announcements; two of them overlapping is worse
+                    // than either alone. Its visibility is not guessed — it is
+                    // the SAME `isRoofDrawMode` predicate the wizard mounts on,
+                    // so the two cannot disagree about whether it is showing.
+                    position: 'absolute',
+                    top: isRoofDrawMode(placementMode) ? 108 : 54,
+                    left: '50%', transform: 'translateX(-50%)',
                     zIndex: OVERLAY_Z.PLACEMENT, pointerEvents: 'auto',
                     display: 'flex', alignItems: 'center', gap: 10,
                     padding: '5px 8px 5px 10px', borderRadius: 8,
