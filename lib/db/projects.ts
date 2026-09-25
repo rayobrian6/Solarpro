@@ -21,7 +21,18 @@ import type { SubSystemEquipmentMap, SubSystemKey } from '@/lib/system/subSystem
 import { isSubSystemKey } from '@/lib/system/subSystemEquipment';
 import { computeNameplateKw } from '@/lib/system/nameplate';
 import { getPanelById } from '@/lib/equipment-db';
-import { parseAuthorization, authorizesSubsystemRemoval } from '@/lib/design/deletionAuthority';
+import {
+  parseAuthorization,
+  authorizesSubsystemRemoval,
+  parseDeletionLedger,
+  ledgerHasAuthority,
+  ledgerCovers,
+  type DeletionLedger,
+} from '@/lib/design/deletionAuthority';
+// 🚨 THE ONE DEFINITION OF "SAME PROPERTY", used on the server for the same
+// reason it is used in the studio: a site key is a rounded coordinate, and one
+// house routinely mints two or three spellings of itself metres apart.
+import { sitesAreSameProperty } from '@/lib/design/siteDesignModel';
 
 // ============================================================
 // PROJECTS
@@ -908,6 +919,130 @@ export function __resetSiteArchivesProbeForTests(): void {
   _siteArchivesColumnPresent = false;
 }
 
+// ── THE DELETION AUTHORITY HAS TO SURVIVE THE SAVE THAT CARRIES IT ──────────
+//
+// 🚨 A DESTRUCTIVE SAVE MAY NOT REPORT SUCCESS UNLESS THE LEDGER PERSISTED.
+//
+// The tombstone ledger has no column of its own. It rides inside
+// `site_archives`, which `applyDesignEntities` writes in a SEPARATE statement
+// from the one that removes the geometry — and that statement's only error
+// handler was a `console.warn`. So the two halves of one decision came apart:
+//
+//     UPDATE layouts SET panels = '[]', roof_planes = '[]'   -- committed
+//     UPDATE layouts SET site_archives = …                   -- threw, swallowed
+//     upsertLayout returned normally, the route answered 200, the studio said
+//     "Saved", and the row was left with no geometry and no record of why.
+//
+// That last state is not merely lossy, it is ACTIVELY WRONG: `lifecycleFor`
+// reads a property with no faces and no tombstones as `untouched`, which is the
+// one lifecycle that PERMITS automatic re-acquisition. Lane A then re-injected
+// the roof the installer had deliberately deleted — the exact resurrection the
+// whole deletion model exists to close, reached through the save that was
+// supposed to record the decision.
+//
+// The pre-check that already guards this column (`LAYOUT_ARCHIVE_UNSTORABLE`)
+// did not cover it. It inspected `sites[*].{panels,roofPlanes,obstructions,
+// measurements}` only, on the stated grounds that "an archive with no entities
+// round-trips identically whether it is stored or not" — TRUE of entity
+// bundles, FALSE of the ledger, which sits at the top of the same object beside
+// `sites` and is typically the ONLY thing a single-property project puts there.
+
+/** The tombstones this save is carrying, normalized. Never null. */
+function incomingLedger(data: UpsertLayoutData): DeletionLedger {
+  return parseDeletionLedger(
+    (data.siteArchives as { deletions?: unknown } | null | undefined)?.deletions,
+  );
+}
+
+function ledgerDetail(led: DeletionLedger): string {
+  return Object.entries(led.sites).map(([k, s]) => {
+    const parts: string[] = [];
+    if (s.faceIds?.length) parts.push(`${s.faceIds.length} deleted roof face(s)`);
+    if (s.sectionIds?.length) parts.push(`${s.sectionIds.length} deleted section(s)`);
+    if (s.obstructionIds?.length) parts.push(`${s.obstructionIds.length} deleted obstruction(s)`);
+    if (s.clearedAt) parts.push('a cleared property');
+    return `${k} (${parts.join(', ')})`;
+  }).join('; ');
+}
+
+/**
+ * Refuse, before anything is written, a save whose deletion record cannot be
+ * stored at all.
+ *
+ * Fails CLOSED and fails EARLY: on a deployment that has not run migration 123
+ * the column does not exist, so no ordering of statements can make this save
+ * honest. Nothing is written, the route answers 409, and the studio shows its
+ * permanent refusal badge with the operator's next action in it.
+ */
+async function assertDeletionLedgerStorable(sql: any, data: UpsertLayoutData): Promise<void> {
+  const led = incomingLedger(data);
+  if (!ledgerHasAuthority(led)) return;   // nothing to lose
+  if (await layoutsHasSiteArchives(sql)) return;
+  const detail = ledgerDetail(led);
+  console.error('[LAYOUT_ARCHIVE_UNSTORABLE]', { projectId: data.projectId, deletions: detail });
+  throw new Error(
+    `LAYOUT_ARCHIVE_UNSTORABLE: this save carries a deletion record — ${detail} — and the ` +
+    `layouts.site_archives column does not exist, so what you deleted would be removed from the ` +
+    `design with no record that you meant it, and put back automatically on the next load. ` +
+    `Run migration 123 (Admin → System Tools → Migrations). Nothing has been written.`,
+  );
+}
+
+/**
+ * Write the ledger FIRST and prove it landed, before the statement that
+ * removes the geometry it explains.
+ *
+ * 🚨 ORDER IS THE DIFFERENCE BETWEEN A FAILED SAVE AND A DESTROYED DESIGN.
+ * Reporting the failure afterwards is necessary but not sufficient: by then the
+ * faces are already gone from the row with nothing to say why, so a user who
+ * closes the tab on the error message still loses the argument with Lane A on
+ * the next load. Written here, a ledger that cannot be stored costs nothing —
+ * the geometry is still on disk and the user is told to retry.
+ *
+ * It is deliberately placed AFTER the sub-system-wipe guard, which reads
+ * `site_archives ->> 'activeSiteKey'` out of the row to recognise a property
+ * change. Writing the column before that read would answer the guard's question
+ * with this save's own claim and disarm it.
+ *
+ * `RETURNING` is what makes this a proof rather than an assumption: an UPDATE
+ * that matches no row raises nothing and reports success.
+ */
+async function persistDeletionLedgerFirst(sql: any, data: UpsertLayoutData): Promise<void> {
+  const led = incomingLedger(data);
+  if (!ledgerHasAuthority(led)) return;
+  let stored: DeletionLedger | null = null;
+  try {
+    const rows = await sql`
+      UPDATE layouts
+      SET site_archives = ${JSON.stringify(data.siteArchives)}::jsonb
+      WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+      RETURNING site_archives -> 'deletions' AS deletions
+    `;
+    // No row yet (this save creates the layout) is not a failure — there is no
+    // geometry to protect, and `applyDesignEntities` writes the column after the
+    // INSERT, where the verification below catches anything that goes wrong.
+    if (rows.length === 0) return;
+    stored = parseDeletionLedger(rows[0]?.deletions);
+  } catch (e) {
+    console.error('[LAYOUT_ARCHIVE_UNSTORABLE] deletion ledger write failed before the layout write:',
+      (e as Error)?.message);
+    throw new Error(
+      `LAYOUT_ARCHIVE_UNSTORABLE: the record of what you deleted could not be written ` +
+      `(${(e as Error)?.message}), so this save was stopped before it removed anything. ` +
+      `Nothing has been written — your design is unchanged. Try again.`,
+    );
+  }
+  if (!ledgerCovers(stored, led)) {
+    console.error('[LAYOUT_ARCHIVE_UNSTORABLE] deletion ledger did not read back:',
+      { projectId: data.projectId, sent: ledgerDetail(led) });
+    throw new Error(
+      `LAYOUT_ARCHIVE_UNSTORABLE: the record of what you deleted did not survive the write, ` +
+      `so this save was stopped before it removed anything. Nothing has been written — ` +
+      `your design is unchanged. Try again.`,
+    );
+  }
+}
+
 export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   assertUUID(data.projectId, 'projectId');
   assertUUID(data.userId, 'userId');
@@ -961,6 +1096,11 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       );
     }
   }
+  // 🚨 AND THE SAME QUESTION FOR THE DELETION LEDGER, which the check above
+  // cannot answer. It counts ENTITIES in archived bundles; the ledger is a
+  // DECISION at the top of the same column, and a project can carry every
+  // tombstone it owns with `sites: {}`. See `assertDeletionLedgerStorable`.
+  await assertDeletionLedgerStorable(sql, data);
   // Nameplate authority (P0-7): map-carrying projects get the equipment-db kW.
   const nameplateKw = await resolveNameplateSizeKw(sql, data);
   const sizeKw = nameplateKw ?? data.systemSizeKw ?? 0;
@@ -1102,10 +1242,16 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       // length of one request.
       const auth = parseAuthorization(data.destructive);
       const authSiteKey = (data.siteArchives as { activeSiteKey?: string } | null | undefined)?.activeSiteKey ?? '';
+      // 🚨 MATCHED BY PROPERTY, NOT BY SPELLING. The authorization names the key
+      // the LEDGER is filed under and the payload names `state.activeSiteKey`;
+      // after A → B → A those are two spellings of one house, metres apart, and
+      // an exact comparison deadlocked the deliberate deletion for ever. The
+      // binding is not weakened — the house next door is 15 m away and is still
+      // refused. See `authorizesSubsystemRemoval`.
       const authorised = allWiped.filter((r: { st: string | null }) =>
-        authorizesSubsystemRemoval(auth, authSiteKey, r.st ?? 'roof'));
+        authorizesSubsystemRemoval(auth, authSiteKey, r.st ?? 'roof', sitesAreSameProperty));
       const wiped = allWiped.filter((r: { st: string | null }) =>
-        !authorizesSubsystemRemoval(auth, authSiteKey, r.st ?? 'roof'));
+        !authorizesSubsystemRemoval(auth, authSiteKey, r.st ?? 'roof', sitesAreSameProperty));
       if (authorised.length > 0) {
         console.warn('[LAYOUT_SUBSYSTEM_WIPE_AUTHORISED]', {
           projectId: data.projectId,
@@ -1130,6 +1276,10 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       // census query failure must never block a legit save
       console.warn('[LAYOUT_SUBSYSTEM_WIPE_GUARD] census failed, skipping guard:', (e as Error)?.message);
     }
+    // 🚨 THE DELETION RECORD GOES DOWN BEFORE THE STATEMENT THAT REMOVES THE
+    // GEOMETRY IT EXPLAINS — and after the guard above, which reads the stored
+    // `activeSiteKey` out of this very column. See `persistDeletionLedgerFirst`.
+    await persistDeletionLedgerFirst(sql, data);
     // UPDATE existing layout
     // 🚨 roof_planes AND map_center USE COALESCE: `undefined` MEANS KEEP STORED,
     // exactly as it does for obstructions, measurements and site_archives.
@@ -1299,15 +1449,48 @@ async function applyDesignEntities(
     // 🚨 An EMPTY archive is a statement — "this project is down to one
     // property" — and has to be expressible, so `{sites:{}}` is written, not
     // skipped. Only `undefined` means keep what is stored.
+    //
+    // 🚨 …EXCEPT WHEN IT CARRIES A DELETION RECORD, WHICH MAY NOT BE SKIPPED.
+    //
+    // "The layout still saves, the archives simply are not stored yet" is a
+    // reasonable trade for a bundle of entities that is also sitting in the
+    // active columns. It is not a reasonable trade for the tombstone ledger:
+    // the geometry the ledger explains has ALREADY been removed by the write
+    // above, so swallowing this error leaves a property with no faces and no
+    // record of why — which `lifecycleFor` reads as `untouched`, the one state
+    // that lets Lane A put the deleted roof straight back. The user was told
+    // "Saved". A destructive save that cannot record the decision is a failed
+    // save, and it has to say so.
+    //
+    // `RETURNING` rather than a bare UPDATE because an UPDATE that matched no
+    // row raises nothing: "the statement did not throw" is not the same fact as
+    // "the decision is on disk".
     if (data.siteArchives !== undefined) {
+      const led = incomingLedger(data);
+      const mustPersist = ledgerHasAuthority(led);
       try {
-        await sql`
+        const rows = await sql`
           UPDATE layouts
           SET site_archives = ${JSON.stringify(data.siteArchives)}::jsonb
           WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+          RETURNING site_archives -> 'deletions' AS deletions
         `;
+        if (mustPersist && !ledgerCovers(parseDeletionLedger(rows[0]?.deletions), led)) {
+          throw new Error(rows.length === 0
+            ? 'the layout row could not be found'
+            : 'the deletion record did not read back');
+        }
         saved.siteArchives = data.siteArchives;
       } catch (e) {
+        if (mustPersist) {
+          console.error('[LAYOUT_ARCHIVE_UNSTORABLE] deletion ledger not persisted:',
+            { projectId: data.projectId, sent: ledgerDetail(led), reason: (e as Error)?.message });
+          throw new Error(
+            `LAYOUT_ARCHIVE_UNSTORABLE: the record of what you deleted could not be saved ` +
+            `(${(e as Error)?.message}). The deletion is NOT recorded, so it has not been saved — ` +
+            `do not close this design until a save succeeds.`,
+          );
+        }
         console.warn('[upsertLayout] site_archives not persisted (run migration 123):', (e as Error)?.message);
       }
     }
@@ -1328,6 +1511,12 @@ async function applyDesignEntities(
       saved.measurements = data.measurements;
     }
   } catch (e) {
+    // 🚨 A DELIBERATE REFUSAL IS NOT A MISSING COLUMN, and this catch is wide
+    // enough to swallow one. Same rule the sub-system-wipe guard already
+    // follows: re-throw the refusal, absorb everything else. Without this line
+    // the throw above would land here and become a warning — the very shape of
+    // the defect it exists to close.
+    if (e instanceof Error && e.message.startsWith('LAYOUT_')) throw e;
     console.warn('[upsertLayout] obstructions/measurements not persisted (run migration 122):', (e as Error)?.message);
   }
   return saved;

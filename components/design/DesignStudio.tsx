@@ -1439,7 +1439,23 @@ export default function DesignStudio({ project, onSave }: Props) {
   // panel afterwards. The v66 comment directly above describes exactly this
   // failure mode for roofPlanes ("They were persisted but could not TRIGGER")
   // and the same trap was walked into again two migrations later.
-  }, [panels, roofPlanes, placedObstructions, measurements, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, saveLayoutToDB]);
+  //
+  // 🚨 AND `site.deletionLedger` BELONGS HERE FOR THE THIRD TIME, because the
+  // ledger is the one piece of design state that can change ON ITS OWN.
+  //
+  // Every deletion also moves an entity array, so `applyDelete` schedules a
+  // save through `panels`/`roofPlanes` and the ledger looked covered. The
+  // REVERSE gesture is not: "Use Google 3D here" calls `forgetDeletions`, which
+  // clears the tombstones at this property and touches nothing else. Nothing in
+  // this list changed, so no timer started — while the toast said "Auto-detect
+  // may run again on this property, including faces you deleted here." The
+  // decision lived in memory, the row kept the tombstones, and on the next
+  // reload `admitFaces` refused the very faces the user had just asked back.
+  //
+  // `archivesSignature` already SIGNS the ledger, which is why this looked
+  // finished. Signing only suppresses a redundant POST once something else has
+  // scheduled one; it cannot schedule one — exactly the note above.
+  }, [panels, roofPlanes, placedObstructions, measurements, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, site.deletionLedger, saveLayoutToDB]);
 
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {

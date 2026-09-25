@@ -282,6 +282,62 @@ export function parseDeletionLedger(raw: unknown): DeletionLedger {
   return out;
 }
 
+/**
+ * DOES THIS LEDGER CARRY A DECISION THAT HAS TO REACH THE DATABASE?
+ *
+ * 🚨 AN EMPTY LEDGER AND AN ABSENT ONE ARE ONE STATE; A NON-EMPTY ONE IS NOT.
+ *
+ * The archive pre-check in lib/db/projects.ts let an archive through whenever
+ * it held no ENTITIES, on the stated grounds that "an archive with no entities
+ * round-trips identically whether it is stored or not". That is true of entity
+ * bundles and FALSE of this: the ledger lives at the top of the same column,
+ * beside `sites`, and a project can have every tombstone it owns and not one
+ * archived bundle — which is the ordinary shape of a single-property design
+ * whose owner deleted a face.
+ *
+ * So the persistence guards ask THIS, not `Object.keys(sites).length`.
+ */
+export function ledgerHasAuthority(ledger: DeletionLedger | null | undefined): boolean {
+  const sites = ledger?.sites ?? {};
+  for (const k of Object.keys(sites)) {
+    const s = ledgerSite(ledger, k);
+    if (s.faceIds.length || s.sectionIds.length || s.obstructionIds.length || s.clearedAt) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Is every tombstone in `incoming` actually present in `stored`?
+ *
+ * 🚨 THIS IS ASKED OF WHAT THE DATABASE RETURNED, not of what was sent. A write
+ * that threw is only the loudest way to lose a ledger; an UPDATE that matched
+ * no row throws nothing at all and reports a perfectly ordinary empty result.
+ * "The statement did not raise" is not the same fact as "the decision is on
+ * disk", and only one of them is the invariant.
+ *
+ * ONE-DIRECTIONAL on purpose. The stored ledger may legitimately hold MORE than
+ * the payload — another property's tombstones, or a concurrent save's — and
+ * demanding equality would refuse saves for a difference that loses nothing.
+ */
+export function ledgerCovers(
+  stored: DeletionLedger | null | undefined,
+  incoming: DeletionLedger | null | undefined,
+): boolean {
+  const sites = incoming?.sites ?? {};
+  for (const key of Object.keys(sites)) {
+    const want = ledgerSite(incoming, key);
+    const have = ledgerSite(stored, key);
+    const hasAll = (a: string[], b: string[]) => a.every(id => b.includes(id));
+    if (!hasAll(want.faceIds, have.faceIds)) return false;
+    if (!hasAll(want.sectionIds, have.sectionIds)) return false;
+    if (!hasAll(want.obstructionIds, have.obstructionIds)) return false;
+    if (want.clearedAt > 0 && !(have.clearedAt > 0)) return false;
+  }
+  return true;
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // THE ONE CANONICAL QUESTION
 // ───────────────────────────────────────────────────────────────────────────
@@ -648,18 +704,43 @@ export function parseAuthorization(raw: unknown): DestructiveAuthorization | nul
  *     the array at 5 Melvin two clicks later;
  *   • it must name THIS sub-system — clearing the roof array does not authorise
  *     losing the ground mount that was never mentioned.
+ *
+ * 🚨 "THIS PROPERTY" IS A PROPERTY QUESTION, NOT A STRING COMPARISON — and this
+ * was the last place in the deletion model still asking it with `!==`.
+ *
+ * The two sides are minted by different expressions. `applyDelete` names the
+ * key the LEDGER is filed under (`ledgerKeyOf` → `resolveLedgerKey`, an 8 m
+ * property match, because one house routinely mints two or three keys metres
+ * apart). `toPersistencePayload` sends `state.activeSiteKey` — the RAW key,
+ * which `switchSite` sets to whatever `toKey` it was handed. After A → B → A
+ * they are two spellings of one house: the ledger still says KA while the
+ * payload says KA', 3 m away.
+ *
+ * Compared with `!==` that authorization was rejected, the wipe guard refused
+ * the deliberate deletion, and the refusal is PERMANENT — the ledger keeps the
+ * tombstone, so every later autosave repeats the same unexplained shortfall.
+ * Nothing was ever written, tombstones included, and the whole deletion came
+ * back on reload. Exactly the deadlock `authorizationForLedgerDelta` was
+ * written to close, one level down.
+ *
+ * The matcher is injected for the same reason `resolveLedgerKey` injects it:
+ * this module stays dependency-free and usable on the server. Callers pass
+ * `sitesAreSameProperty`. Without it the behaviour is byte-identical to the old
+ * exact comparison, so a caller that has no matcher is no worse off.
  */
 export function authorizesSubsystemRemoval(
   auth: DestructiveAuthorization | null | undefined,
   siteKey: string | null | undefined,
   systemType: string | null | undefined,
+  sameProperty?: (a: string, b: string) => boolean,
 ): boolean {
   if (!auth) return false;
   // An unresolved site key on either side cannot be matched; refusing is the
   // safe direction, and the studio always knows the key by the time a person
   // can click a delete control.
   if (!auth.siteKey || !siteKey) return false;
-  if (auth.siteKey !== siteKey) return false;
+  if (auth.siteKey !== siteKey
+      && !(sameProperty && sameProperty(auth.siteKey, siteKey))) return false;
   return auth.panelSystemTypes.includes(systemType || 'roof');
 }
 
