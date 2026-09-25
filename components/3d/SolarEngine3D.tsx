@@ -2318,6 +2318,9 @@ function SolarEngine3D({
   // a render-scoped function — hence a ref the render refreshes. Same pattern
   // as `obstructionSizeRef` below, and for the same mount-frozen reason.
   const activateToolRef = useRef<((mode: PlacementMode) => void) | null>(null);
+  /** Same mount-frozen reason as `activateToolRef`: the keyboard handler is
+   *  installed once at viewer init and cannot see a later render's closure. */
+  const duplicateSelectedObstructionRef = useRef<(() => void) | null>(null);
   const obstructionSizeRef = useRef<{ widthM: number; depthM: number; heightM: number }>({
     widthM:  DEFAULT_OBSTRUCTION_FOOTPRINT_W_M,
     depthM:  DEFAULT_OBSTRUCTION_FOOTPRINT_D_M,
@@ -10749,6 +10752,18 @@ function SolarEngine3D({
     const onKey = (e: KeyboardEvent) => {
       if (keyEventIsTyping(e)) return;
 
+      // ── DUPLICATE THE SELECTED SITE OBJECT (Ctrl+D) ──────────────────
+      // Ctrl+D rather than Aurora's Ctrl+C / Ctrl+V: there is one thing to do
+      // here and no clipboard to hold, so a two-key round trip would be
+      // ceremony. Reads the ref, not state — this handler is installed once at
+      // viewer init and a state read here is frozen at the mount render.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey
+          && e.key.toLowerCase() === 'd' && selectedObstructionIdRef.current) {
+        e.preventDefault();
+        duplicateSelectedObstructionRef.current?.();
+        return;
+      }
+
       // ── SINGLE-KEY TOOL SHORTCUTS ──────────────────────────────────────
       // Bare letters only: Ctrl/Cmd/Alt combinations belong to the browser and
       // to copy/paste, and stealing them is how a text editor breaks someone's
@@ -13155,6 +13170,121 @@ function SolarEngine3D({
    * `components/3d/obstruction/dimensions.ts` and is unit-tested in
    * `tests/obstruction.test.ts`.
    */
+  /**
+   * Put a finished site object into the world. ONE path, whatever created it.
+   *
+   * 🚨 THIS IS AN EXTRACTION, NOT A NEW ROUTE. It was the tail of
+   * `handleObstructionClick`, and Duplicate needed every line of it: draw
+   * through `drawObstructionEntity` (the same one a reload and an undo use —
+   * a second draw path is how a tree once looked like a vent until reload),
+   * append to the ref AND the state, cull the panels underneath, and snapshot
+   * BEFORE culling or a mis-placed vent costs the array for good.
+   *
+   * Copying those thirty lines into a duplicate handler would have created a
+   * second commit path that drifts — the exact failure this file has recorded
+   * against itself twice. Returns how many panels were culled.
+   */
+  function commitPlacedObstruction(
+    viewer: any, C: any, obs: PlacedObstruction, preset: ReturnType<typeof presetFor>,
+    verb: string = 'placed',
+  ): number {
+    drawObstructionEntity(viewer, C, obs);
+
+    const updatedObs = [...obstructionsRef.current, obs];
+    obstructionsRef.current = updatedObs;
+    setObstructions(updatedObs);
+
+    // Remove panels inside the new rectangular footprint (Aurora parity)
+    // or, for legacy obstructions, inside the radiusM circle.
+    const filtered = removeObstructedPanels(panelsRef.current, [obs]);
+    const removed  = panelsRef.current.length - filtered.length;
+
+    if (removed > 0) {
+      // 🚨 SNAPSHOT FIRST. See `onPanelsAboutToBeCulled`: without this a
+      // mis-placed vent cost the array for good.
+      onPanelsAboutToBeCulled?.(`Mark ${preset.label.toLowerCase()}`);
+      // Remove Cesium entities for culled panels
+      panelsRef.current.filter(p => !filtered.find(f => f.id === p.id)).forEach(p => {
+        removePanelEntities(viewer, p.id); // v47.159
+      });
+      lastRenderedPanelsRef.current = filtered;
+      panelsRef.current = filtered;
+      onPanelsChange(filtered);
+      setPanelCount(filtered.length);
+      setStatusMsg(`${preset.icon} ${preset.label} ${verb} — ${removed} panel(s) removed from under it. Undo brings them back.`);
+    } else {
+      // 🚨 SAY WHAT WAS BUILT AND WHERE. "Obstruction placed at 0.6x0.6x1.0m"
+      // does not tell a person whether the thing they asked for exists.
+      const where = obs.planeId ? 'on the roof face you clicked' : 'on the site';
+      setStatusMsg(`${preset.icon} ${preset.label} ${verb} ${where} — ${(obs.widthM ?? 0).toFixed(1)}×${(obs.depthM ?? 0).toFixed(1)}m, ${(obs.heightM ?? 0).toFixed(1)}m tall. Select it to adjust.`);
+    }
+
+    try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    return removed;
+  }
+
+  /**
+   * DUPLICATE THE SELECTED SITE OBJECT.
+   *
+   * A roof has fourteen identical vents and a yard has three identical trees.
+   * Placing each one meant re-arming the tool, re-aiming, and re-typing the
+   * dimensions — every time, for something the installer has already fully
+   * described once.
+   *
+   * Both competitors solved this and converged: OpenSolar puts a Duplicate
+   * button on the selected object ("there's a couple of them there, so I'm
+   * just going to click the duplicate button"), Aurora uses Ctrl+C / Ctrl+V on
+   * one it has already traced. SolarPro had neither.
+   *
+   * 🚨 IT COPIES THE RECORD, NOT THE SCREEN. Every canonical field comes from
+   * the source object — type, all three dimensions, canopy radius, the face it
+   * is bound to — so the copy is the same OBJECT, not a similar-looking one.
+   * Only the id and the position change.
+   *
+   * The offset is one-and-a-bit footprints east, so the copy lands visibly
+   * beside the original instead of exactly on top of it, where it would look
+   * like nothing happened and would be impossible to pick apart.
+   */
+  function duplicateSelectedObstruction(): void {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    const id = selectedObstructionIdRef.current;
+    if (!viewer || !C || !id) return;
+
+    const src = (obstructionsRef.current ?? []).find(o => o.id === id);
+    if (!src) return;
+
+    const preset = presetFor((src.type as string) ?? DEFAULT_OBSTRUCTION_PRESET);
+
+    // East by 1.4 footprints, converted through the local metres-per-degree at
+    // this latitude. A fixed degree offset would be a different distance in
+    // Illinois than in Arizona.
+    const stepM = Math.max(1.0, (src.widthM ?? 1) * 1.4);
+    const mPerDegLng = 111_320 * Math.cos((src.lat * Math.PI) / 180);
+    const dLng = mPerDegLng > 1 ? stepM / mPerDegLng : 0;
+
+    const copy: PlacedObstruction = {
+      ...src,
+      id: `obs-${Date.now()}`,
+      lng: src.lng + dLng,
+    };
+
+    commitPlacedObstruction(viewer, C, copy, preset, 'duplicated');
+
+    // 🚨 SELECT THE COPY, NOT THE ORIGINAL. The next thing a person does after
+    // duplicating is move or resize the new one; leaving the old one selected
+    // means the following edit changes the wrong object. Both the ref and the
+    // state are written, exactly as the click path at `pickObstructionAtScreen`
+    // does — the ref because the mount-frozen handlers read it, the state
+    // because the inspector renders from it.
+    selectedObstructionIdRef.current = copy.id;
+    setSelectedObstructionId(copy.id);
+    addLog('OBS', `Duplicated ${preset.id} ${src.id} -> ${copy.id} (+${stepM.toFixed(1)}m E)`);
+  }
+
+  // Hand the live function to the mount-frozen keyboard handler.
+  duplicateSelectedObstructionRef.current = duplicateSelectedObstruction;
+
   function handleObstructionClick(viewer: any, C: any, screenPos: any) {
     try {
       // 🚨 THE ARMED TYPE IS READ FIRST, BECAUSE IT DECIDES WHERE THE CLICK
@@ -13267,40 +13397,8 @@ function SolarEngine3D({
       // green. So a tree looked like a vent until the page was reloaded, and the
       // owner's "it does not visibly give me a useful tree" was partly this:
       // the object WAS there, wearing the wrong thing.
-      drawObstructionEntity(viewer, C, newObs);
-
-      // Update obstruction list
-      const updatedObs = [...obstructionsRef.current, newObs];
-      obstructionsRef.current = updatedObs;
-      setObstructions(updatedObs);
-
-      // Remove panels inside the new rectangular footprint (Aurora parity)
-      // or, for legacy obstructions, inside the radiusM circle.
-      const filtered = removeObstructedPanels(panelsRef.current, [newObs]);
-      const removed  = panelsRef.current.length - filtered.length;
-
-      if (removed > 0) {
-        // 🚨 SNAPSHOT FIRST. See `onPanelsAboutToBeCulled`: without this a
-        // mis-placed vent cost the array for good.
-        onPanelsAboutToBeCulled?.(`Mark ${preset.label.toLowerCase()}`);
-        // Remove Cesium entities for culled panels
-        panelsRef.current.filter(p => !filtered.find(f => f.id === p.id)).forEach(p => {
-          removePanelEntities(viewer, p.id); // v47.159
-        });
-        lastRenderedPanelsRef.current = filtered;
-        panelsRef.current = filtered;
-        onPanelsChange(filtered);
-        setPanelCount(filtered.length);
-        setStatusMsg(`${preset.icon} ${preset.label} placed — ${removed} panel(s) removed from under it. Undo brings them back.`);
-      } else {
-        // 🚨 SAY WHAT WAS BUILT AND WHERE. "Obstruction placed at 0.6x0.6x1.0m"
-        // does not tell a person whether the thing they asked for exists.
-        const where = newObs.planeId ? 'on the roof face you clicked' : 'on the site';
-        setStatusMsg(`${preset.icon} ${preset.label} placed ${where} — ${widthM.toFixed(1)}×${depthM.toFixed(1)}m, ${prismHeightM.toFixed(1)}m tall. Select it to adjust.`);
-      }
-
+      const removed = commitPlacedObstruction(viewer, C, newObs, preset);
       addLog('OBS', `Placed obstruction at ${obsLat.toFixed(5)}, ${obsLng.toFixed(5)} — ${widthM.toFixed(2)}×${depthM.toFixed(2)}×${prismHeightM.toFixed(2)}m, ${removed} panels removed`);
-      try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleObstructionClick: ${(err as Error).message}`);
     }
@@ -17261,6 +17359,25 @@ function SolarEngine3D({
                           'obstruction-clearance', 0, 3, v => patch({ clearanceM: v }))}
                       </>
                     )}
+                  {/* 🚨 A ROOF HAS FOURTEEN IDENTICAL VENTS.
+                    *  Placing each one meant re-arming the tool, re-aiming and
+                    *  re-typing the dimensions, every time, for something the
+                    *  installer had already fully described once. Both
+                    *  competitors solved this and converged: OpenSolar puts a
+                    *  Duplicate button on the selected object, Aurora uses
+                    *  Ctrl+C / Ctrl+V on one it has already traced.
+                    *  Above Delete, because the destructive control should not
+                    *  be the one your hand goes to by muscle memory. */}
+                  <button
+                    type="button" data-no-drag data-testid="obstruction-duplicate"
+                    onClick={() => duplicateSelectedObstruction()}
+                    title={`Place another ${pr.label.toLowerCase()} of exactly these dimensions (Ctrl+D)`}
+                    style={{
+                      marginTop: 9, width: '100%', padding: '5px 0', borderRadius: 6,
+                      background: 'rgba(255,180,0,0.12)', border: '1px solid rgba(255,180,0,0.40)',
+                      color: '#ffd68a', fontSize: 10.5, fontWeight: 800, cursor: 'pointer',
+                    }}
+                  >⧉ Duplicate &nbsp;<span style={{ opacity: 0.7, fontWeight: 600 }}>Ctrl+D</span></button>
                   <button
                     type="button" data-no-drag data-testid="obstruction-delete"
                     onClick={() => onRequestDelete?.('obstruction', obs.id)}
