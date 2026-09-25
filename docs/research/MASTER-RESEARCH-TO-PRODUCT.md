@@ -100,14 +100,16 @@ Ranked by real-world harm, then by value-over-risk. Verified only.
 
 | # | What | Harm | Scope | Authority touched | Status |
 |---|---|---|---|---|---|
-| 1 | **A repealed 30% residential ITC reaches stored cost estimates and a customer-visible payback.** `?? 30` defaults make the existing guard unreachable; the inline DDL defaults the column to 30, so 30% is the default state of every database, while `/admin/pricing` displays 0%. | Customers quoted savings that do not exist | MED | pricing | **NEXT** |
-| 2 | Hand-placed obstructions never reached the permit drawing | Stamped sheet contradicts the design | MED | permit snapshot | **SHIPPED** |
-| 3 | A deleted roof can come back — the tombstone ledger write can fail while the API reports success | Silent data loss | MED | deletion authority | IN FLIGHT |
-| 4 | **Two ASHRAE cold-temperature datasets.** 50 of 51 states disagree; 11.5% of module×state combinations flip the max series string length; in IL three modules flip 13→12. **Zero digest impact**, and the sanctioned single basis already exists in-code. | Wrong string length on a stamped design | SMALL | thermal basis | QUEUED |
-| 5 | **A second string-sizing authority** — the `String Sizing (NEC 690.7)` box on the engineering page is a page-local recompute that contradicts the engine on both thermal basis and optimizer topology | Designer reads a number the engine disagrees with | SMALL | string sizing | QUEUED |
-| 6 | **`plane.area` is stale after every reshape** — nothing recomputes it, and survey enrichment picks the primary plane *by area* | Wrong primary plane downstream | SMALL | roof geometry | QUEUED |
-| 7 | Proposal integrity: no terminal-state guard on snapshot refresh, share, status PATCH or bulk; the guarded signing route is orphaned and the unguarded one is live | A signed document changes after signing | MED | proposal snapshot | QUEUED |
-| 8 | Move vertex — the 90/10 correction gap | Redraw-the-whole-roof | LARGE | roof geometry | ARCHITECTED |
+| 1 | **A repealed 30% residential ITC reaches stored cost estimates and a customer-visible payback.** `?? 30` defaults make the existing guard unreachable; the inline DDL defaults the column to 30, so 30% is the default state of every database. | Customers quoted savings that do not exist | MED | pricing | ✅ **SHIPPED** `b6006387` |
+| 2 | Hand-placed obstructions never reached the permit drawing | Stamped sheet contradicts the design | MED | permit snapshot | ✅ **SHIPPED** `31289978` |
+| 3 | A deleted roof can come back — the tombstone ledger write can fail while the API reports success | Silent data loss | MED | deletion authority | ✅ **SHIPPED** `6acb46dd` |
+| 4 | **Two ASHRAE cold-temperature datasets.** 50 of 51 states disagree; 11.5% of module×state combinations flip the max series string length; in IL three modules flip 13→12. Zero digest impact. | Wrong string length on a stamped design | SMALL | thermal basis | ✅ **SHIPPED** `c3df7c77` |
+| 5 | **A second string-sizing authority** — the engineering page's readout recomputed inline and applied Voc×N to OPTIMIZER systems, where the bus is regulated and the brand cap governs. Its Auto button *applied* that layout — the 10/10/10/6 the engine was fixed to stop producing. | A designer clicks Auto and gets a layout that blows the MPPT current budget | SMALL | string sizing | ✅ **SHIPPED** |
+| 6 | **`plane.area` is stale after every reshape** — nothing recomputed it, and survey enrichment picks the primary plane *by area* | Wrong primary plane downstream | SMALL | roof geometry | ✅ **SHIPPED** `ffb9de9a` |
+| 7 | Proposal integrity: no terminal-state guard on snapshot refresh, share, status PATCH or bulk; the guarded signing route is orphaned and the unguarded one is live | A signed document changes after signing | MED | proposal snapshot | IN FLIGHT |
+| 8 | **Survey readiness is computed and delivered too late** — a 9-zone capture plan exists and is imported only by an admin page | A second site visit | MED | survey evidence | IN FLIGHT |
+| 9 | **The portal never showed the install date** — 18.6% of support contacts, written all along, never selected | The homeowner phones to ask | SMALL | — | ✅ **SHIPPED** |
+| 10 | Move vertex — the 90/10 correction gap | Redraw-the-whole-roof | LARGE | roof geometry | ARCHITECTED |
 
 ---
 
