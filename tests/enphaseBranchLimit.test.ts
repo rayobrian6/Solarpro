@@ -11,9 +11,24 @@
 // 20 A branch and a 20 A maximum branch OCPD, so both numbers were illegal.
 // ============================================================================
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { computeSystem } from '../lib/computed-system';
 import { csMicroInput } from './goldens/wave0-fixtures';
+
+// SLD route dependencies that are not under test (auth / rate limit / DB).
+vi.mock('@/lib/security', () => ({
+  requireAuth: vi.fn(async () => ({ user: { id: 'test-user' }, response: null })),
+}));
+vi.mock('@/lib/rateLimiter', () => ({
+  checkRateLimit: vi.fn(async () => ({ allowed: true })),
+  getClientIp: vi.fn(() => '127.0.0.1'),
+}));
+vi.mock('@/lib/db-neon', () => ({
+  getDbReady: vi.fn(async () => { throw new Error('no db in tests'); }),
+  handleRouteDbError: (_tag: string, err: unknown) => {
+    throw err instanceof Error ? err : new Error(String(err));
+  },
+}));
 
 // The engineering page's exact shape for an IQ8+ job (app/engineering/page.tsx
 // buildCsInputFor): model 'IQ8+', acKw 0.290, and the 16 fallback.
@@ -98,5 +113,47 @@ describe('Enphase branch limit — manufacturer authority, never the 16 fallback
     }) as any);
     expect(cs30.microBranches.map(b => b.deviceCount)).toEqual([6, 6, 6, 6, 6]);
     expect(cs30.microBranches.every(b => b.ocpdAmps === 30)).toBe(true);
+  });
+});
+
+describe('the drawn SLD — what Ray actually looks at', () => {
+  // The engineering page's request: its own computeSystem's microBranches plus
+  // the 16 fallback it still sends as inverterBranchLimit (app/engineering/
+  // page.tsx fetchSLD). The route re-runs computeSystem from that body too.
+  const postSld = async (body: Record<string, unknown>) => {
+    const { POST } = await import('@/app/api/engineering/sld/route');
+    const req = new Request('http://localhost/api/engineering/sld', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const res = await POST(req as never);
+    expect(res.status).toBe(200);
+    const ct = res.headers.get('content-type') || '';
+    return ct.includes('svg') || ct.includes('xml')
+      ? await res.text()
+      : ((await res.json()) as any).svg as string;
+  };
+
+  it('32 × IQ8+ draws "3 branches (11/11/10)" at 20 A — never 16/16', async () => {
+    const cs = computeSystem(pageInput(32) as any);
+    const svg = await postSld({
+      format: 'svg',
+      projectName: 'ENPHASE-32', clientName: 'Ray', address: '1 Test St, Pocahontas IL 62275',
+      topologyType: 'MICROINVERTER', selectedBrand: 'enphase', systemType: 'roof',
+      totalModules: 32, deviceCount: 32, totalStrings: 0,
+      inverterManufacturer: 'Enphase', inverterModel: 'IQ8+',
+      inverterAcKwPerDevice: 0.29, inverterAcCurrentMax: 1.21,
+      acOutputKw: 32 * 0.29,
+      panelModel: 'TSP-420', panelWatts: 420, panelVoc: 40.92, panelIsc: 13.03,
+      mainPanelAmps: 200, panelBusRating: 200, interconnection: 'LOAD_SIDE',
+      microBranches: cs.microBranches,
+      inverterModulesPerDevice: 1,
+      inverterBranchLimit: 16,
+    });
+    expect(svg).toContain('3 branches (11/11/10)');
+    expect(svg).toContain('20A OCPD ea.');
+    expect(svg).not.toContain('16/16');
+    expect(svg).not.toContain('30A OCPD');
   });
 });
