@@ -246,7 +246,29 @@ export async function POST(req: NextRequest) {
       permit_approved:  'permit_approved',
       install_scheduled:'install_scheduled',
       installation:     'install_started',
-      inspection:       'inspection_passed',
+      /**
+       * 🚨 `inspection` DELIBERATELY MAPS TO NOTHING. It used to map to
+       * `inspection_passed`.
+       *
+       * Every other entry records something that HAS happened on entering the
+       * stage: entering `installation` means the install started, entering
+       * `pto` means PTO was submitted. Entering `inspection` means an
+       * inspection is PENDING — it does not mean it passed, and roughly the
+       * whole point of an inspection is that it can fail.
+       *
+       * `writeMicroStage` also forward-syncs `homeowner_stage`, and the
+       * homeowner portal renders micro-stages as milestones. So the moment this
+       * route is wired up — which is the recommended next step, since it
+       * currently has ZERO callers — every project entering inspection would
+       * have told its homeowner the inspection had passed. That is a lie the
+       * customer acts on, and it would have arrived as a side effect of fixing
+       * something else.
+       *
+       * There is no `inspection_scheduled` in the 34-value vocabulary, and
+       * inventing one is a vocabulary decision rather than a bug fix. Writing
+       * nothing is the honest option: a stage entry is not an outcome, and
+       * `inspection_passed` remains available to whatever observes a real pass.
+       */
       pto:              'pto_submitted',
       complete:         'system_live',
     };
