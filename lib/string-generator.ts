@@ -181,6 +181,100 @@ function nextStandardOCPD(amps: number): number {
 
 // ─── Main generator ──────────────────────────────────────────────────────────
 
+/**
+ * HOW LONG MAY A STRING BE — one answer, for everyone who asks.
+ *
+ * 🚨 THE ENGINEERING PAGE WAS ASKING ITSELF. Its "String Sizing (NEC 690.7)"
+ * readout recomputed max/min/recommended inline from
+ * `floor(maxDcVoltage / vocCorrected)`, excluding only `micro` topology. So on
+ * an OPTIMIZER system it applied Voc x N — which is inapplicable there, because
+ * each module has its own DC-DC converter and the inverter actively holds the
+ * bus voltage regardless of panel count.
+ *
+ * That is not a display defect. The box carries an "Auto" button that APPLIES
+ * what it shows, so a designer clicking it on a SolarEdge system got roughly
+ * 10-13 panels per string instead of the brand ceiling of 25 — which is exactly
+ * the 10/10/10/6 layout the note above records as blowing the per-MPPT current
+ * budget and producing a spurious MPPT_CURRENT_EXCEEDED on every optimizer
+ * system over ~10 panels. The engine was fixed in v47.412; the page went on
+ * reproducing it.
+ *
+ * It also resolved its own design temperature with a third `?? -10` fallback,
+ * so it could disagree with the canonical thermal basis as well.
+ *
+ * This function is the arithmetic `generateStringConfig` already performed,
+ * lifted out unchanged so the page can call the SAME code rather than a copy of
+ * it. It is deliberately pure and takes no registry lookups: the two callers
+ * resolve specs differently, and the thing that must not differ is the answer.
+ */
+export interface StringSizingBounds {
+  /** Corrected open-circuit voltage at the design low temperature. */
+  vocCorrected: number;
+  /** Vmp at the hot-cell worst case, which sets the MPPT lower bound. */
+  vmpHot: number;
+  maxPanelsPerString: number;
+  minPanelsPerString: number;
+  /** Clamped into [min, max]. For optimizers this is the brand ceiling. */
+  recommendedPanelsPerString: number;
+  /** True when Voc x N was bypassed because the topology regulates the bus. */
+  optimizerBypass: boolean;
+}
+
+/** Hot cell temperature for the MPPT lower bound — matches layoutCandidateGenerator. */
+const HOT_CELL_TEMP_C = 75;
+/** SolarEdge datasheet maximum; the brand profile may lower it, never raise it. */
+const OPTIMIZER_DEFAULT_MAX_PPS = 25;
+
+export function stringSizingBounds(args: {
+  moduleVoc: number;
+  moduleVmp: number;
+  tempCoeffVoc: number;            // %/degC, negative
+  tempCoeffVmp?: number | null;
+  inverterMaxDcVoltage: number;
+  mpptVoltageMin: number;
+  mpptVoltageMax: number;
+  /** Brand ceiling for optimizer topology, when the registry knows one. */
+  inverterMaxPanelsPerString?: number | null;
+  designTempMinC: number;
+  topology?: string | null;
+}): StringSizingBounds {
+  const deltaT = args.designTempMinC - 25;
+  const vocCorrected = args.moduleVoc * (1 + (args.tempCoeffVoc / 100) * deltaT);
+  const tempCoeffVmp = args.tempCoeffVmp ?? args.tempCoeffVoc;
+  const vmpHot = args.moduleVmp * (1 + (tempCoeffVmp / 100) * (HOT_CELL_TEMP_C - 25));
+
+  const isOptimizer = args.topology === 'optimizer';
+
+  const maxPanelsPerString = isOptimizer
+    ? 200  // high numeric ceiling; brand profile enforces the real cap downstream
+    : Math.floor(args.inverterMaxDcVoltage / vocCorrected);
+
+  const minPanelsPerString = isOptimizer
+    ? 1
+    : Math.ceil(args.mpptVoltageMin / vmpHot);
+
+  const mpptCenter = (args.mpptVoltageMin + args.mpptVoltageMax) / 2;
+  const mpptRecommended = Math.round(mpptCenter / args.moduleVmp);
+  const optimizerRecommended = Math.min(
+    args.inverterMaxPanelsPerString ?? OPTIMIZER_DEFAULT_MAX_PPS,
+    OPTIMIZER_DEFAULT_MAX_PPS,
+  );
+
+  const recommendedPanelsPerString = Math.max(
+    minPanelsPerString,
+    Math.min(maxPanelsPerString, isOptimizer ? optimizerRecommended : mpptRecommended),
+  );
+
+  return {
+    vocCorrected,
+    vmpHot,
+    maxPanelsPerString,
+    minPanelsPerString,
+    recommendedPanelsPerString,
+    optimizerBypass: isOptimizer,
+  };
+}
+
 export function generateStringConfig(input: StringGeneratorInput): StringGeneratorResult {
   const {
     totalModules,
@@ -240,48 +334,29 @@ export function generateStringConfig(input: StringGeneratorInput): StringGenerat
   // producing a spurious MPPT_CURRENT_EXCEEDED on every optimizer system
   // with more than ~10 panels. The correct 2 × 18 layout — well within
   // SolarEdge's 25-panel/string ceiling — now flows through.
+  // 🚨 THROUGH `stringSizingBounds` — the SAME function the engineering page's
+  // readout calls. The arithmetic below used to live here inline, and the page
+  // had its own copy of it that had drifted: it applied Voc x N to optimizer
+  // systems (see the note on `stringSizingBounds`) and its "Auto" button
+  // applied the result. Two implementations of "how long may a string be" is
+  // one too many when one of them writes a layout.
   const isOptimizer = input.topology === 'optimizer';
-
-  // Max panels: inverter max DC voltage / corrected Voc (NEC 690.7)
-  //   — bypassed for optimizer topology (Voc×N inapplicable)
-  const maxPanelsPerString = isOptimizer
-    ? 200  // high numeric ceiling; brand profile enforces real cap downstream
-    : Math.floor(inverterSpecs.maxDcVoltage / vocCorrected);
-
-  // Min panels: MPPT minimum voltage / HOT Vmp (worst case — see vmpHot above)
-  //   — bypassed for optimizer topology (bus is actively regulated)
-  const minPanelsPerString = isOptimizer
-    ? 1
-    : Math.ceil(inverterSpecs.mpptVoltageMin / vmpHot);
-
-  // Recommended: target MPPT center voltage
-  const mpptCenter = (inverterSpecs.mpptVoltageMin + inverterSpecs.mpptVoltageMax) / 2;
-  const recommendedPanelsPerString = Math.round(mpptCenter / moduleSpecs.vmp);
-
-  // v47.420 — For optimizer topology the MPPT center voltage is irrelevant:
-  // the optimizer regulates each module independently; string Voc/Vmp at the
-  // inverter is fixed regardless of panel count. Using mpptCenter/Vmp gives a
-  // tiny recommended length (e.g. round(340/65.8)=5 for a 75.6V-Voc panel on
-  // a 200-480V MPPT inverter), which triggers slot-overflow and forces short
-  // strings that blow the per-MPPT current cap.
-  //
-  // Fix: for optimizer topology, set recommended = brand maxPanelsPerString.
-  // This mirrors the feasibility evaluator's "start at effectiveMax and descend"
-  // strategy, producing long-string layouts that minimize string count and stay
-  // within the MPPT current cap. Falls back to 25 (SolarEdge datasheet max).
-  const OPTIMIZER_DEFAULT_MAX_PPS = 25;
-  const optimizerRecommended = isOptimizer
-    ? Math.min(
-        inverterSpecs.maxPanelsPerString ?? OPTIMIZER_DEFAULT_MAX_PPS,
-        OPTIMIZER_DEFAULT_MAX_PPS
-      )
-    : recommendedPanelsPerString;
-
-  // Clamp recommended to valid range
-  const clampedRecommended = Math.max(
-    minPanelsPerString,
-    Math.min(maxPanelsPerString, isOptimizer ? optimizerRecommended : recommendedPanelsPerString)
-  );
+  const _bounds = stringSizingBounds({
+    moduleVoc: moduleSpecs.voc,
+    moduleVmp: moduleSpecs.vmp,
+    tempCoeffVoc: moduleSpecs.tempCoeffVoc,
+    tempCoeffVmp: moduleSpecs.tempCoeffVmp,
+    inverterMaxDcVoltage: inverterSpecs.maxDcVoltage,
+    mpptVoltageMin: inverterSpecs.mpptVoltageMin,
+    mpptVoltageMax: inverterSpecs.mpptVoltageMax,
+    inverterMaxPanelsPerString: inverterSpecs.maxPanelsPerString,
+    designTempMinC: designTempMin,
+    topology: input.topology,
+  });
+  const maxPanelsPerString = _bounds.maxPanelsPerString;
+  const minPanelsPerString = _bounds.minPanelsPerString;
+  const recommendedPanelsPerString = _bounds.recommendedPanelsPerString;
+  const clampedRecommended = _bounds.recommendedPanelsPerString;
 
   // Validate
   if (maxPanelsPerString < minPanelsPerString) {

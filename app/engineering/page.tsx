@@ -166,6 +166,10 @@ import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
 import { downloadFilenameFor } from '@/lib/http/contentDisposition';
 import { formatRise12 } from '@/lib/3d/pitchFormat';
 import { projectObstructionsForPermit } from '@/lib/obstruction/permitProjection';
+// ONE answer to "how long may a string be", shared with lib/string-generator.ts
+// and therefore with the stamped plan set. See `stringSizingBounds`.
+import { stringSizingBounds } from '@/lib/string-generator';
+import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -2968,7 +2972,11 @@ function EngineeringPageInner() {
       inverterBranchLimit: branchLimit,
       manufacturerMaxPerBranch20A: (invData as any)?.maxPerBranch20A ?? undefined,
       manufacturerMaxPerBranch30A: (invData as any)?.maxPerBranch30A ?? undefined,
-      designTempMin: (compliance.autoDetected as any)?.designTempMin ?? -10,
+      // The AUTHORITY for this project's state, not a literal. A hardcoded -10
+      // here was a third cold-temperature basis, disagreeing with both the
+      // engine and the stamped plan set — see `getThermalDesignBasis`.
+      designTempMin: (compliance.autoDetected as any)?.designTempMin
+        ?? getThermalDesignBasis({ state: config.state || null }).minDesignTempC,
       // Cap ambientTempC at 40°C — NEC 310.15 standard design ambient.
       // compliance.autoDetected.designTempMax is the CONDUCTOR temp (air + rooftop adder),
       // NOT the air ambient. autoSizeWire() applies its own rooftopTempAdderC separately.
@@ -10895,14 +10903,45 @@ function EngineeringPageInner() {
                                           if (inv.type === 'micro') return null;
                                           const firstStrPanel = getPanelById(inv.strings[0]?.panelId) as any;
                                           if (!firstStrPanel || !invData.maxDcVoltage) return null;
-                                          const designTemp = compliance.autoDetected?.designTempMin ?? cs.designTempMin ?? -10;
-                                          const tCoeff = firstStrPanel.tempCoeffVoc ?? -0.27;
-                                          const vocCorr = firstStrPanel.voc * (1 + (tCoeff / 100) * (designTemp - 25));
-                                          const vmpCorr = firstStrPanel.vmp * (1 + (tCoeff / 100) * (designTemp - 25));
-                                          const maxPPS = Math.floor((invData.maxDcVoltage || 600) / vocCorr);
-                                          const minPPS = Math.ceil((invData.mpptVoltageMin || 100) / vmpCorr);
-                                          const recPPS = Math.round(((invData.mpptVoltageMin || 100) + (invData.mpptVoltageMax || 600)) / 2 / (firstStrPanel.vmp || 41.8));
-                                          const clampedRec = Math.max(minPPS, Math.min(maxPPS, recPPS));
+                                          // 🚨 THE ENGINE'S ANSWER, NOT THIS PAGE'S OWN.
+                                          //
+                                          // This block used to recompute max/min/recommended inline:
+                                          // floor(maxDcVoltage / vocCorrected), excluding only `micro`.
+                                          // On an OPTIMIZER system that applies Voc x N, which is
+                                          // inapplicable — each module has its own DC-DC converter and
+                                          // the inverter holds the bus voltage regardless of panel
+                                          // count. The readout carries an Auto button that APPLIES what
+                                          // it shows, so a designer clicking it on a SolarEdge system
+                                          // got ~10-13 panels per string instead of the brand ceiling of
+                                          // 25 — the exact 10/10/10/6 layout lib/string-generator.ts
+                                          // records as blowing the per-MPPT current budget and firing a
+                                          // spurious MPPT_CURRENT_EXCEEDED. The engine was fixed in
+                                          // v47.412; this page went on reproducing it.
+                                          //
+                                          // It also resolved its own design temperature with a third
+                                          // hardcoded fallback of its own, so it could disagree with the canonical
+                                          // thermal basis that /api/engineering/calculate and the
+                                          // stamped plan set now share.
+                                          // The last resort is the AUTHORITY for this project's state,
+                                          // not a literal. A hardcoded -10 here was a third basis.
+                                          const designTemp = compliance.autoDetected?.designTempMin
+                                            ?? cs.designTempMin
+                                            ?? getThermalDesignBasis({ state: config.state || null }).minDesignTempC;
+                                          const _sz = stringSizingBounds({
+                                            moduleVoc: firstStrPanel.voc,
+                                            moduleVmp: firstStrPanel.vmp || 41.8,
+                                            tempCoeffVoc: firstStrPanel.tempCoeffVoc ?? -0.27,
+                                            tempCoeffVmp: firstStrPanel.tempCoeffVmp,
+                                            inverterMaxDcVoltage: invData.maxDcVoltage || 600,
+                                            mpptVoltageMin: invData.mpptVoltageMin || 100,
+                                            mpptVoltageMax: invData.mpptVoltageMax || 600,
+                                            inverterMaxPanelsPerString: invData.maxPanelsPerString,
+                                            designTempMinC: designTemp,
+                                            topology: topologyType,
+                                          });
+                                          const maxPPS = _sz.maxPanelsPerString;
+                                          const minPPS = _sz.minPanelsPerString;
+                                          const clampedRec = _sz.recommendedPanelsPerString;
                                           return (
                                             <div className="mt-1 pt-1 border-t border-slate-700/50">
                                               <div className="text-green-400 font-semibold mb-0.5">String Sizing (NEC 690.7 @ {designTemp}°C)</div>
