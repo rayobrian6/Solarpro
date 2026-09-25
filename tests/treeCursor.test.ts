@@ -16,6 +16,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { stripComments } from './support/stripSource';
+import { presetFor } from '@/lib/3d/obstructionPresets';
 import {
   DEFAULT_TREE_CANOPY_RADIUS_M,
   MIN_TREE_CANOPY_RADIUS_M,
@@ -163,5 +167,79 @@ describe('canopy — input validation', () => {
   it('accepts the boundary values', () => {
     expect(() => canopyDiameterM(MIN_TREE_CANOPY_RADIUS_M)).not.toThrow();
     expect(() => canopyDiameterM(MAX_TREE_CANOPY_RADIUS_M)).not.toThrow();
+  });
+});
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * AND THE PREVIEW MUST BE THE SIZE OF THE TREE YOU WILL GET.
+ *
+ * 🚨 IT WAS NOT. `SolarEngine3D` passed the CONSTANT 1.8 m default while the
+ * Tree preset places a 6.0 m wide canopy — a 3.0 m radius. The circle the
+ * installer aimed with was FORTY PER CENT of the footprint that appeared, and
+ * dragging the Width slider changed the tree but not the preview of it.
+ *
+ * A preview that under-reports its own size is worse than no preview, because
+ * it is aimed with and it is believed. Aiming is the cursor's entire purpose.
+ *
+ * The second half of the defect: `TreeCursor` deliberately refused to react to
+ * `canopyRadiusM` at all, because re-creating the Cesium entity on every change
+ * was expensive. CallbackPropertys over a ref remove that trade-off — the size
+ * is live and nothing is recreated — so the prop can now be trusted.
+ * ─────────────────────────────────────────────────────────────────────────── */
+describe('the tree cursor previews the armed size, live', () => {
+  const ROOT = join(__dirname, '..');
+  const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
+  const ENGINE = stripComments(read('components/3d/SolarEngine3D.tsx'));
+  const CURSOR = stripComments(read('components/3d/tree/TreeCursor.tsx'));
+
+  it('the Tree preset really is wider than the old constant — this is the defect', () => {
+    const preset = presetFor('tree');
+    expect(preset.widthM).toBe(6);
+    // Half the width is the radius of a round site object.
+    expect(preset.widthM / 2).toBe(3);
+    expect(DEFAULT_TREE_CANOPY_RADIUS_M).toBe(1.8);
+    // The preview was 1.8 against a real 3.0 — 60% of the radius, 36% of area.
+    expect(DEFAULT_TREE_CANOPY_RADIUS_M).toBeLessThan(preset.widthM / 2);
+  });
+
+  it('the engine passes the ARMED width, not a constant', () => {
+    const i = ENGINE.indexOf('<TreeCursor');
+    expect(i, 'the TreeCursor mount was not found').toBeGreaterThan(-1);
+    const mount = ENGINE.slice(i, i + 700);
+    expect(mount, 'the preview must follow the width the user set')
+      .toMatch(/newObstructionWidthM \/ 2/);
+    // A bare constant here is the defect returning.
+    expect(mount).not.toMatch(/canopyRadiusM=\{TREE_CANOPY_RADIUS_M\}/);
+  });
+
+  it('it still has a sane fallback while the width box is mid-edit', () => {
+    const i = ENGINE.indexOf('<TreeCursor');
+    const mount = ENGINE.slice(i, i + 700);
+    expect(mount).toMatch(/isFinite\(newObstructionWidthM\) && newObstructionWidthM > 0/);
+    expect(mount).toMatch(/: TREE_CANOPY_RADIUS_M/);
+  });
+
+  it('🚨 the size is LIVE — axes are callbacks over a ref, not baked at creation', () => {
+    expect(CURSOR, 'a ref the render refreshes').toMatch(/const radiusRef = useRef<number>/);
+    expect(CURSOR).toMatch(/radiusRef\.current = isFinite\(canopyRadiusM\)/);
+    expect(CURSOR, 'semiMajorAxis must be read per frame')
+      .toMatch(/semiMajorAxis: new C\.CallbackProperty\(\(\) => axes\(\)\.semiMajorAxis, false\)/);
+    expect(CURSOR, 'semiMinorAxis must be read per frame')
+      .toMatch(/semiMinorAxis: new C\.CallbackProperty\(\(\) => axes\(\)\.semiMinorAxis, false\)/);
+  });
+
+  it('and the entity is NOT recreated on a size change', () => {
+    // Re-creating the preview on every keystroke in the width box is the cost
+    // the old code was avoiding; the callbacks are what make that unnecessary.
+    const i = CURSOR.lastIndexOf('}, [active, viewer]);');
+    expect(i, 'the effect deps changed — check the entity is still not rebuilt')
+      .toBeGreaterThan(-1);
+  });
+
+  it('the ref refuses a degenerate radius rather than passing it to Cesium', () => {
+    // canopyRadiusToEllipseAxes throws on <= 0; the ref clamps first so a
+    // half-typed width cannot take the preview down.
+    expect(CURSOR).toMatch(/canopyRadiusM > 0\s*\?\s*canopyRadiusM\s*:\s*DEFAULT_TREE_CANOPY_RADIUS_M/);
+    expect(() => canopyRadiusToEllipseAxes(0)).toThrow();
   });
 });

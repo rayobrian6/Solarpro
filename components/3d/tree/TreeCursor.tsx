@@ -80,6 +80,9 @@ type CesiumGlobal = {
   HeightReference: Record<string, number>;
   ScreenSpaceEventHandler: any;
   ScreenSpaceEventType: { MOUSE_MOVE: number };
+  /** Reads its callback every frame, so the preview can change size
+   *  without the entity being destroyed and rebuilt. */
+  CallbackProperty: new (cb: () => unknown, isConstant: boolean) => unknown;
 };
 
 /** Pull Cesium off the window. Mirrors SolarEngine3D's
@@ -100,6 +103,26 @@ export const TreeCursor: React.FC<TreeCursorProps> = ({
   const entityRef = useRef<any>(null);
   const handlerRef = useRef<any>(null);
 
+  /* 🚨 THE PREVIEW HAS TO BE THE SIZE OF THE TREE YOU WILL GET.
+   *
+   * It was not. The engine passed a CONSTANT 1.8 m while the Tree preset
+   * places a 6.0 m wide canopy — a 3.0 m radius — so the circle the installer
+   * aimed with was FORTY PER CENT of the footprint that appeared, and typing a
+   * different width into the panel changed nothing about what they saw. A
+   * preview that under-reports its own size is worse than no preview: it is
+   * aimed with, and it is believed.
+   *
+   * The radius lives in a ref that every render refreshes, and the ellipse
+   * axes are Cesium CallbackPropertys reading it per frame. That is what makes
+   * the size live WITHOUT re-creating the entity — which was the stated reason
+   * the old code refused to react to this prop at all. Nothing is recreated;
+   * `canopyRadiusM` simply stays out of the effect's dependency list, now
+   * correctly rather than as a compromise. */
+  const radiusRef = useRef<number>(canopyRadiusM);
+  radiusRef.current = isFinite(canopyRadiusM) && canopyRadiusM > 0
+    ? canopyRadiusM
+    : DEFAULT_TREE_CANOPY_RADIUS_M;
+
   useEffect(() => {
     if (!active || !viewer) {
       teardown(viewer, entityRef, handlerRef);
@@ -112,7 +135,9 @@ export const TreeCursor: React.FC<TreeCursorProps> = ({
       return;
     }
 
-    const { semiMajorAxis, semiMinorAxis } = canopyRadiusToEllipseAxes(canopyRadiusM);
+    // Read per frame from the ref, so a size change — typed into the panel, or
+    // dragged on the canvas — is visible immediately and the entity survives.
+    const axes = () => canopyRadiusToEllipseAxes(radiusRef.current);
     const fillMaterial = C.Color.fromCssColorString(CURSOR_FILL_HEX);
     const outlineMaterial = C.Color.fromCssColorString(CURSOR_OUTLINE_HEX);
 
@@ -123,8 +148,8 @@ export const TreeCursor: React.FC<TreeCursorProps> = ({
         name: 'Tree placement preview',
         position: C.Cartesian3.fromDegrees(0, 0, 0), // hidden until first mouse-move
         ellipse: {
-          semiMajorAxis,
-          semiMinorAxis,
+          semiMajorAxis: new C.CallbackProperty(() => axes().semiMajorAxis, false),
+          semiMinorAxis: new C.CallbackProperty(() => axes().semiMinorAxis, false),
           material: fillMaterial.withAlpha(CURSOR_FILL_ALPHA),
           outline: true,
           outlineColor: outlineMaterial.withAlpha(CURSOR_OUTLINE_ALPHA),
@@ -183,9 +208,10 @@ export const TreeCursor: React.FC<TreeCursorProps> = ({
     return () => {
       teardown(viewer, entityRef, handlerRef);
     };
-    // We intentionally do NOT depend on canopyRadiusM as a reactive value —
-    // changing the canopy radius mid-placement is rare and the cost of
-    // re-creating the entity on every change is high.
+    // canopyRadiusM is deliberately absent from the deps, and now correctly so:
+    // the axes are CallbackPropertys over `radiusRef`, which every render
+    // refreshes, so the size is live WITHOUT re-creating the entity. Adding it
+    // here would recreate the preview on every keystroke in the width box.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, viewer]);
 

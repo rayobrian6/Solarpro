@@ -14997,10 +14997,26 @@ function SolarEngine3D({
           unconditionally; only renders when active === true. Renders into
           the Cesium scene, so co-registers with the terrain drape and 3D
           tiles. See components/3d/tree/CURSOR.md. */}
+      {/* 🚨 THE PREVIEW SHOWS THE TREE YOU WILL ACTUALLY GET.
+        *
+        * This passed the constant TREE_CANOPY_RADIUS_M (1.8 m) while the Tree
+        * preset places a 6.0 m wide canopy — a 3.0 m radius. So the circle the
+        * installer aimed with was forty per cent of the footprint that
+        * appeared, and dragging the Width slider changed the tree but not the
+        * preview of it. Aiming is the entire purpose of the cursor.
+        *
+        * Width is the diameter of a round site object, so the radius is half
+        * of it — the same relationship `buildObstructionGeometry` uses when it
+        * actually draws the canopy. The fallback keeps a sane circle if the
+        * width box is momentarily empty mid-edit. */}
       <TreeCursor
         viewer={viewerRef.current}
         active={placementMode === 'tree'}
-        canopyRadiusM={TREE_CANOPY_RADIUS_M}
+        canopyRadiusM={
+          isFinite(newObstructionWidthM) && newObstructionWidthM > 0
+            ? newObstructionWidthM / 2
+            : TREE_CANOPY_RADIUS_M
+        }
       />
 
       {/* v63: String / equipment legend overlay.
