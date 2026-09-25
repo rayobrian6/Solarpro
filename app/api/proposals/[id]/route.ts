@@ -8,6 +8,7 @@ import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { getUserFromRequest } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { sendProposalViewedEmail, sendProposalSignedEmail } from '@/lib/email';
+import { authorizeProposalRead, type ProposalSqlExecutor } from '@/lib/proposalAccess';
 
 type RouteContext = { params: Promise<{id: string}> };
 
@@ -26,16 +27,36 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
     const proposal = rows[0];
 
-    // -- View count: only increment for public/unauthenticated requests --------
-    // Authenticated installers previewing their own proposals should NOT inflate
-    // the count. We check for a valid auth session; if none exists (homeowner
-    // following a share link), we increment.
-    // Also accept an explicit ?track=1 query param from the public view page as
-    // an additional confirmation that this is a real client view.
+    // ── SECURITY: read authorization ────────────────────────────────────────
+    // This row carries pricing, the client's name and the site address. Knowing
+    // the UUID is not access. Until this gate existed the only share-token
+    // comparison lived in the client component app/proposals/view/[id]/page.tsx,
+    // which an attacker calling the API directly never runs.
+    // Two ways in and no others: the owning installer's session, or a live share
+    // token. See lib/proposalAccess.ts.
     const user = getUserFromRequest(req);
     const { searchParams } = new URL(req.url);
-    const trackParam = searchParams.get('track');
-    const shouldTrack = !user || trackParam === '1';
+    const token = searchParams.get('token');
+
+    const access = await authorizeProposalRead({
+      sql:        sql as unknown as ProposalSqlExecutor,
+      proposalId: id,
+      row:        proposal as Record<string, unknown>,
+      user,
+      token,
+    });
+
+    if (!access.ok) {
+      console.warn(`[GET /api/proposals/[id]] denied: reason=${access.reason} authed=${!!user}`);
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+    }
+
+    // -- View count: only increment for genuine homeowner views ---------------
+    // Authenticated installers previewing their own proposals must NOT inflate
+    // the count, so the counter follows the access path rather than the caller's
+    // ?track= claim: only a share-link read counts as a client view. (Previously
+    // ?track=1 was honoured from anyone, so an installer preview inflated it.)
+    const shouldTrack = access.via === 'share-token';
 
     if (shouldTrack) {
       const dataJson = (proposal.data_json as Record<string, unknown>) || {};

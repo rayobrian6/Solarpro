@@ -89,20 +89,25 @@ function ProposalViewInner() {
 
   useEffect(() => {
     if (!id) return;
-    fetch(`/api/proposals/${id}?track=1`)
-      .then(r => r.json())
-      .then(d => {
+    // The share token must go to the SERVER — it is the API that enforces access
+    // (lib/proposalAccess.ts, via the GET handler). The checks below are only a
+    // nicer error message; they are not the gate, and were never reached by an
+    // attacker calling the API directly.
+    const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : '';
+    fetch(`/api/proposals/${id}?track=1${tokenQuery}`)
+      .then(async r => ({ status: r.status, body: await r.json() }))
+      .then(({ status, body: d }) => {
+        if (status === 403) {
+          setError('This proposal link is invalid or has expired. Please contact your solar installer for a new link.');
+          setLoading(false);
+          return;
+        }
         if (!d.success || !d.data) {
           setError('Proposal not found.');
           setLoading(false);
           return;
         }
         const raw = d.data;
-        if (raw.share_token && token && raw.share_token !== token) {
-          setError('This proposal link is invalid or has expired.');
-          setLoading(false);
-          return;
-        }
         if (raw.share_expires_at && new Date(raw.share_expires_at) < new Date()) {
           setError('This proposal link has expired. Please contact your solar installer for a new link.');
           setLoading(false);

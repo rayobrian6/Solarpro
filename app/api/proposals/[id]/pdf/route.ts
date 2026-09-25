@@ -17,8 +17,8 @@ export const revalidate = 0;
 export const maxDuration = 45;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { timingSafeEqual } from 'crypto';
 import { getUserFromRequest } from '@/lib/auth';
+import { authorizeProposalRead, type ProposalSqlExecutor } from '@/lib/proposalAccess';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
 import { resolveActualAnnualBill, resolveMonthlyUsageHistory } from '@/lib/proposal/resolveActualBill';
@@ -26,15 +26,6 @@ import { renderProposalHTML, ProposalBranding } from '@/lib/proposal/renderPropo
 import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import type { Proposal } from '@/types';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
-
-/** Constant-time string comparison to prevent timing attacks on share tokens. */
-function safeStrEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, 'utf8');
-  const bufB = Buffer.from(b, 'utf8');
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
-
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -48,26 +39,19 @@ async function loadProposal(id: string, req: NextRequest): Promise<Proposal | nu
   const row      = rows[0] as Record<string, unknown>;
   const dataJson = (row.data_json as Record<string, unknown>) || {};
 
-  const user       = getUserFromRequest(req);
-  const tokenParam = req.nextUrl.searchParams.get('token');
-
-  // Allow access when: authenticated user owns the proposal (via project ownership)
-  // OR a valid share token is supplied (unauthenticated homeowner link)
-  if (!user && !tokenParam) return null;
-
-  if (!user && tokenParam) {
-    // Public share token path — validate token (timing-safe)
-    if (!safeStrEqual(row.share_token as string, tokenParam)) return null;
-  } else if (user) {
-    // Auth path — verify ownership via projects JOIN
-    const owned = await sql`
-      SELECT p.id FROM proposals p
-      JOIN projects proj ON proj.id = p.project_id
-      WHERE p.id = ${id} AND proj.user_id = ${user.id}
-      LIMIT 1
-    `;
-    if (owned.length === 0) return null;
-  }
+  // Access: the owning installer's session, or a live share token — one shared
+  // authority with the GET handler (lib/proposalAccess.ts). The local copy this
+  // replaces threw on a proposal with a NULL share_token (Buffer.from(null)) and
+  // never looked at share_expires_at, so an expired link still rendered the full
+  // PDF.
+  const access = await authorizeProposalRead({
+    sql:        sql as unknown as ProposalSqlExecutor,
+    proposalId: id,
+    row,
+    user:       getUserFromRequest(req),
+    token:      req.nextUrl.searchParams.get('token'),
+  });
+  if (!access.ok) return null;
 
   // Reconstruct Proposal object from DB row (mirrors rowToProposal in proposals/route.ts)
   const snapshotProject = dataJson.project as Proposal['project'] | undefined;
