@@ -12,6 +12,26 @@ import { authorizeProposalRead, type ProposalSqlExecutor } from '@/lib/proposalA
 
 type RouteContext = { params: Promise<{id: string}> };
 
+// ── Issued-artifact rule ─────────────────────────────────────────────────────
+// A signed proposal is an executed contract. Its content, its pricing vintage,
+// its signature and its status are frozen from that moment — the same ruling
+// this repo already applied to issued permit packages after a GET request
+// self-healed and re-dated them.
+//
+// The in-repo idiom for it is the `signed_at IS NULL` filter that
+// app/api/cron/proposal-expiry/route.ts already uses. `status` is checked too
+// so a database that predates migration 020 (which added signed_at) is still
+// protected, and so the guard holds if only one of the two was written.
+const TERMINAL_STATUSES = new Set(['accepted', 'signed']);
+
+function isIssued(row: Record<string, unknown> | null | undefined): boolean {
+  if (!row) return false;
+  if (row.signed_at) return true;
+  return typeof row.status === 'string' && TERMINAL_STATUSES.has(row.status);
+}
+
+const ISSUED_MESSAGE = 'Proposal has already been signed.';
+
 
 export async function GET(req: NextRequest, context: RouteContext) {
   try {
@@ -208,13 +228,20 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const isSignatureSubmission = !user && tokenParam && body.signature !== undefined;
 
     if (isPublicStatusUpdate || isSignatureSubmission) {
+      // The terminal state is read alongside the token so the guards below
+      // judge the same row the token was verified against. The narrower query
+      // is the fallback for a database that predates migration 020: `status`
+      // alone is still enough to refuse an executed proposal.
       const rows = await sql`
-        SELECT id, share_token FROM proposals WHERE id = ${id} LIMIT 1
-      `;
+        SELECT id, share_token, status, signed_at FROM proposals WHERE id = ${id} LIMIT 1
+      `.catch(() => sql`
+        SELECT id, share_token, status FROM proposals WHERE id = ${id} LIMIT 1
+      `);
       if (!rows.length) return NextResponse.json({ success: false, error: 'Proposal not found' }, { status: 404 });
+      const target = rows[0] as Record<string, unknown>;
       // SECURITY: Use timingSafeEqual to prevent timing attacks on token comparison
       const { timingSafeEqual } = await import('crypto');
-      const expected = Buffer.from(rows[0].share_token as string, 'utf8');
+      const expected = Buffer.from(target.share_token as string, 'utf8');
       const actual   = Buffer.from(tokenParam, 'utf8');
       const tokenValid = expected.length === actual.length && timingSafeEqual(expected, actual);
       if (!tokenValid) {
@@ -222,6 +249,18 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       }
 
       if (isSignatureSubmission) {
+        // ── Idempotency ───────────────────────────────────────────────────
+        // Without this, anyone holding the share link could re-sign an executed
+        // proposal under a different name: the write below replaces the whole
+        // `signature` key and re-stamps signed_at, so the record of who
+        // actually signed, and when, was destroyed rather than duplicated.
+        // Matches the 409 the dedicated /sign endpoint already returns — that
+        // is now the endpoint the homeowner UI calls, and this branch remains
+        // only so the same rule covers a direct caller.
+        if (isIssued(target)) {
+          return NextResponse.json({ success: false, error: ISSUED_MESSAGE }, { status: 409 });
+        }
+
         // Digital signature submission
         // Validate fields
         const sigData    = body.signature as string;           // base64 data-URL of drawn signature
@@ -343,13 +382,24 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       }
 
       // Simple status update (viewed / accepted without signature)
+      //
+      // The homeowner view fires { status: 'viewed' } on EVERY page load, so a
+      // returning signer used to walk their own executed contract back from
+      // accepted to viewed just by opening the link. Nothing asked for a
+      // change here — the page merely loaded — so this answers 200 and says
+      // plainly that it changed nothing, rather than showing the homeowner an
+      // error for revisiting their own proposal.
+      if (isIssued(target)) {
+        return NextResponse.json({ success: true, statusChanged: false, reason: 'already-signed' });
+      }
+
       await sql`
         UPDATE proposals
         SET status = ${body.status as string},
             updated_at = NOW()
         WHERE id = ${id}
       `;
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, statusChanged: true });
     }
 
     // Authenticated path — full update
@@ -365,6 +415,18 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (body.action === 'refresh_snapshot') {
       const existing2 = await sql`SELECT * FROM proposals WHERE id = ${id} LIMIT 1`;
       if (!existing2.length) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
+
+      // The figures behind a signature are part of the signed document. Once
+      // the homeowner has executed it, re-pulling the live project would leave
+      // today's system size and production priced against the frozen
+      // pricingSnapshot this path never rewrites — a mixed-vintage contract.
+      if (isIssued(existing2[0] as Record<string, unknown>)) {
+        return NextResponse.json(
+          { success: false, error: `${ISSUED_MESSAGE} Its snapshot is frozen and cannot be refreshed.` },
+          { status: 409 },
+        );
+      }
+
       const currentData2 = (existing2[0].data_json as Record<string, unknown>) || {};
       const projectId2 = existing2[0].project_id as string;
 
@@ -432,7 +494,21 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     const existing = await sql`SELECT * FROM proposals WHERE id = ${id} LIMIT 1`;
-    const currentData = (existing[0].data_json as Record<string, unknown>) || {};
+    const currentRow = (existing[0] as Record<string, unknown>) || {};
+
+    // Owning the proposal is not an exemption. This generic merge is where an
+    // authenticated caller lands, and it spreads the whole body into data_json
+    // — so it could rewrite the signature record or walk the status back on an
+    // executed contract. Everything else about the row (its title, its notes)
+    // stays editable, because filing a signed proposal is not tampering.
+    if (isIssued(currentRow) && (body.signature !== undefined || body.status !== undefined)) {
+      return NextResponse.json(
+        { success: false, error: `${ISSUED_MESSAGE} Its signature and status are frozen.` },
+        { status: 409 },
+      );
+    }
+
+    const currentData = (currentRow.data_json as Record<string, unknown>) || {};
     const updatedDataJson = JSON.stringify({ ...currentData, ...body });
 
     const rows = await sql`

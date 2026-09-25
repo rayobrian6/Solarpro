@@ -8,6 +8,18 @@ import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { getUserFromRequest } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
+// ── Issued-artifact rule ─────────────────────────────────────────────────────
+// Mirrors app/api/proposals/[id]/route.ts. A signed proposal is an executed
+// contract; `status` is checked alongside `signed_at` so a database predating
+// migration 020 is still covered.
+const TERMINAL_STATUSES = new Set(['accepted', 'signed']);
+
+function isIssued(row: Record<string, unknown> | null | undefined): boolean {
+  if (!row) return false;
+  if (row.signed_at) return true;
+  return typeof row.status === 'string' && TERMINAL_STATUSES.has(row.status);
+}
+
 // POST /api/proposals/bulk
 // Body: { action: 'delete' | 'archive' | 'status' | 'clear_test', ids?: string[], status?: string }
 export async function POST(req: NextRequest) {
@@ -93,7 +105,26 @@ export async function POST(req: NextRequest) {
       }
       const safeStatus = JSON.stringify(status);
       let updated = 0;
+      let skipped = 0;
       for (const id of validIds) {
+        // An executed contract's status is frozen — a bulk selection must not
+        // be able to set a signed proposal back to draft. Skipped rather than
+        // failing the whole batch, so selecting one signed proposal among
+        // twenty drafts still does the useful work; the count reports it.
+        // Queried per id, matching the one-by-one shape the delete branch
+        // already uses to avoid driver trouble with large UUID arrays.
+        const guard = await sql`
+          SELECT id, status, signed_at FROM proposals
+          WHERE id = ${id} AND user_id = ${user.id} LIMIT 1
+        `.catch(() => sql`
+          SELECT id, status FROM proposals
+          WHERE id = ${id} AND user_id = ${user.id} LIMIT 1
+        `);
+        if (isIssued((guard as Array<Record<string, unknown>>)[0])) {
+          skipped++;
+          continue;
+        }
+
         const result = await sql`
           UPDATE proposals
           SET data_json = jsonb_set(data_json, '{status}', ${safeStatus}::jsonb),
@@ -103,7 +134,7 @@ export async function POST(req: NextRequest) {
         `;
         if (result.length > 0) updated++;
       }
-      return NextResponse.json({ success: true, updated });
+      return NextResponse.json({ success: true, updated, skipped });
     }
 
     return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });

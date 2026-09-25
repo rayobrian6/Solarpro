@@ -133,10 +133,26 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const proposal = rows[0];
 
   // ── Token check ───────────────────────────────────────────────────────
-  // If proposal has a share_token, require it (prevents enumeration attacks)
+  // This endpoint has no authenticated path at all, so the share token is the
+  // ONLY thing standing between a caller and executing a contract in someone
+  // else's name. It must therefore be required unconditionally.
+  //
+  // It used to read `if (shareToken && ...)` — so a proposal whose share_token
+  // was null skipped the check entirely and could be signed by anyone holding
+  // the UUID. That is not a theoretical hole: `share_token` is nullable
+  // (migration 037 added it as `TEXT DEFAULT NULL`), so every proposal created
+  // before that migration has one. The general PATCH branch this endpoint
+  // replaced never had the hole — it required `tokenParam` to be present
+  // before it would even consider an unauthenticated signature — and routing
+  // the homeowner UI here must not weaken the surface it moved off.
+  //
+  // A null share_token means the proposal was never shared, so there is no
+  // link a homeowner could have arrived from and no token they could present.
+  // Refusing is the correct answer, not a gap: signing is reachable only via
+  // a share link, and a share link always carries a token.
   const shareToken = proposal.share_token as string | null;
   const providedToken = (body.token ?? null) || (req.nextUrl?.searchParams?.get('token') ?? null);
-  if (shareToken && (!providedToken || !safeStrEqual(shareToken, providedToken))) {
+  if (!shareToken || !providedToken || !safeStrEqual(shareToken, providedToken)) {
     return NextResponse.json({ success: false, error: 'Invalid access token' }, { status: 403 });
   }
 
@@ -229,6 +245,20 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       `;
     } catch {
       // Stage advancement is best-effort
+    }
+
+    // Audit-trail event. The PATCH signature branch in
+    // app/api/proposals/[id]/route.ts wrote this and this route did not, which
+    // was the one thing the homeowner modal would have lost by moving here —
+    // so it is written here too, and the move is now lossless.
+    try {
+      await sql`
+        INSERT INTO project_micro_stages (project_id, micro_stage)
+        VALUES (${projectId}, 'contract_signed')
+        ON CONFLICT (project_id, micro_stage) DO UPDATE SET created_at = NOW()
+      `;
+    } catch {
+      // micro_stages table/constraint may not exist — non-fatal
     }
   }
 

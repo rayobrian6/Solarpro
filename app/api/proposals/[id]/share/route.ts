@@ -10,6 +10,18 @@ import { v4 as uuidv4 } from 'uuid';
 import { getBaseUrl } from '@/lib/env';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
+// ── Issued-artifact rule ─────────────────────────────────────────────────────
+// Mirrors app/api/proposals/[id]/route.ts. A signed proposal is an executed
+// contract; `status` is checked alongside `signed_at` so a database predating
+// migration 020 is still covered.
+const TERMINAL_STATUSES = new Set(['accepted', 'signed']);
+
+function isIssued(row: Record<string, unknown> | null | undefined): boolean {
+  if (!row) return false;
+  if (row.signed_at) return true;
+  return typeof row.status === 'string' && TERMINAL_STATUSES.has(row.status);
+}
+
 // POST /api/proposals/[id]/share — generate a shareable token for a proposal
 export async function POST(
   req: NextRequest,
@@ -50,32 +62,59 @@ export async function POST(
     // always gets current production/savings data even if design changed after proposal creation.
     const projectId = rows[0].project_id as string;
     let snapshotUpdate: Record<string, unknown> = {};
+    let snapshotRefreshed = false;
     if (isValidUUID(projectId)) {
       try {
-        const [freshProject, freshPricing] = await Promise.all([
-          getProjectWithDetails(projectId, user.id),
-          getPricingConfig().catch(() => null),
-        ]);
-        if (freshProject) {
-          // Merge snapshot into existing data_json (preserves title, viewCount, etc.)
-          const existingRow = await sql`SELECT data_json FROM proposals WHERE id = ${proposalId} LIMIT 1`;
-          const existingData = (existingRow[0]?.data_json as Record<string, unknown>) || {};
-          snapshotUpdate = {
-            ...existingData,
-            project: freshProject,
-            pricingSnapshot: freshPricing ?? existingData.pricingSnapshot ?? null,
-            snapshotAt: new Date().toISOString(),
-          };
-          console.log('[share] Refreshed project snapshot:', {
-            proposalId,
-            hasLayout: !!freshProject.layout,
-            hasProduction: !!freshProject.production,
-            hasPricingSnapshot: !!freshPricing,
-            panelCount: freshProject.layout?.totalPanels ?? 0,
-          });
+        // ── Issued-artifact guard ─────────────────────────────────────────
+        // This is the Send / re-share action, so it fires on an ordinary
+        // "send them the link again" — and it is the ONLY path that rewrites
+        // pricingSnapshot, the frozen financial vintage that both the
+        // homeowner view and the server PDF read as authoritative. Re-pricing
+        // an executed contract because someone resent its link is exactly the
+        // issued-artifact defect. The link is still issued; only the rewrite
+        // is refused, because resending a signed document is legitimate and
+        // changes nothing about it.
+        //
+        // Reading the terminal state inside this try is deliberate: if the
+        // columns cannot be read the catch below leaves the snapshot alone,
+        // which is the safe direction.
+        const existingRow = await sql`
+          SELECT data_json, status, signed_at FROM proposals WHERE id = ${proposalId} LIMIT 1
+        `.catch(() => sql`
+          SELECT data_json, status FROM proposals WHERE id = ${proposalId} LIMIT 1
+        `);
+        const currentRow = (existingRow[0] as Record<string, unknown>) || {};
+
+        if (isIssued(currentRow)) {
+          console.log('[share] Proposal is signed — snapshot left frozen:', proposalId);
+        } else {
+          const [freshProject, freshPricing] = await Promise.all([
+            getProjectWithDetails(projectId, user.id),
+            getPricingConfig().catch(() => null),
+          ]);
+          if (freshProject) {
+            // Merge snapshot into existing data_json (preserves title, viewCount, etc.)
+            const existingData = (currentRow.data_json as Record<string, unknown>) || {};
+            snapshotUpdate = {
+              ...existingData,
+              project: freshProject,
+              pricingSnapshot: freshPricing ?? existingData.pricingSnapshot ?? null,
+              snapshotAt: new Date().toISOString(),
+            };
+            snapshotRefreshed = true;
+            console.log('[share] Refreshed project snapshot:', {
+              proposalId,
+              hasLayout: !!freshProject.layout,
+              hasProduction: !!freshProject.production,
+              hasPricingSnapshot: !!freshPricing,
+              panelCount: freshProject.layout?.totalPanels ?? 0,
+            });
+          }
         }
       } catch (snapshotErr) {
         // Non-fatal — share URL still works, proposal view falls back to live fetch
+        snapshotUpdate = {};
+        snapshotRefreshed = false;
         console.warn('[share] Could not refresh project snapshot:', snapshotErr);
       }
     }
@@ -144,6 +183,10 @@ export async function POST(
       shareUrl,
       shareToken,
       expiresAt: expiresAt.toISOString(),
+      // False when the proposal is already signed (its snapshot is frozen), or
+      // when the refresh could not run. The caller can say so rather than
+      // implying figures were brought up to date.
+      snapshotRefreshed,
     });
   } catch (err: unknown) {
     // Previously this fabricated a fallback token that was never persisted —

@@ -7,7 +7,15 @@
  *   2. Type  — styled text signature (cursive font)
  *
  * Collects: full name (required), email (optional), drawn/typed signature.
- * On submit: POSTs to PATCH /api/proposals/[id]?token=... with { signature, signerName, signerEmail }.
+ *
+ * On submit: POST /api/proposals/[id]/sign — the dedicated, idempotent signing
+ * endpoint, which refuses a second signature on an executed proposal with 409.
+ * This modal previously submitted to the general proposal PATCH, which had no
+ * such check: a returning signer (or anyone else holding the share link) could
+ * overwrite the first signer's name, email, IP and image and re-date the
+ * signature. The guarded endpoint existed the whole time; its only other
+ * component had no callers, so the safe path was dead code and the unguarded
+ * one was live. Both are guarded now, and this is the one the homeowner uses.
  */
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { X, PenLine, Type, RotateCcw, CheckCircle, AlertTriangle, Loader } from 'lucide-react';
@@ -156,13 +164,17 @@ export default function SignatureModal({
     setSubmitting(true);
     try {
       const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-      const res = await fetch(`/api/proposals/${proposalId}${tokenQuery}`, {
-        method: 'PATCH',
+      const res = await fetch(`/api/proposals/${proposalId}/sign${tokenQuery}`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           signature:   signatureData,
           signerName:  signerName.trim(),
           signerEmail: signerEmail.trim() || undefined,
+          // The legal disclosure shown above this button IS the agreement;
+          // pressing it is the act of agreeing. The endpoint requires the flag.
+          agreedToTerms: true,
+          token:         token ?? undefined,
         }),
       });
 

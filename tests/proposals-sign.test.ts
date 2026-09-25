@@ -21,7 +21,7 @@
  *  - DB write failure + fallback success → 200
  *  - DB write failure + fallback also fails → 500
  *  - Success path → 200 with signerName + signedAt
- *  - No share_token → no token check
+ *  - No share_token → REFUSED (403): the token is the only gate this route has
  *  - Installer email errors are swallowed (non-blocking)
  *  - Signature insertion failure is swallowed (non-blocking)
  */
@@ -65,7 +65,21 @@ function makeSqlMock(...impls: Array<() => unknown>): SqlFn & ReturnType<typeof 
   return tag as unknown as SqlFn & ReturnType<typeof vi.fn>;
 }
 
-/** Minimal valid proposal row returned by the first SELECT */
+/** The share token every realistically-signable proposal carries. */
+const SHARE_TOKEN = 'share-token-for-a-shared-proposal';
+
+/**
+ * Minimal valid proposal row returned by the first SELECT.
+ *
+ * 🚨 `share_token` DEFAULTS TO A REAL TOKEN, and deliberately so. It used to
+ * default to `null`, which quietly made every success-path case in this file
+ * model a proposal that had never been shared with anybody — the one shape
+ * that must NOT be signable. With the route's old `if (shareToken && ...)`
+ * gate those cases still returned 200, so the fixture and the hole agreed with
+ * each other and neither was visible. A proposal reachable by a homeowner has
+ * been shared; the default now says so, and the null case is asserted
+ * explicitly, as a refusal, in the token-check block below.
+ */
 function makeProposal(overrides: Record<string, unknown> = {}) {
   return {
     id:          'prop-123',
@@ -73,7 +87,7 @@ function makeProposal(overrides: Record<string, unknown> = {}) {
     project_id:  'proj-456',
     data_json:   { title: 'Test Solar Proposal', clientName: 'Jane Doe' },
     signed_at:   null,
-    share_token: null,
+    share_token: SHARE_TOKEN,
     ...overrides,
   };
 }
@@ -87,10 +101,11 @@ function makeRequest(body?: Record<string, unknown>): Request {
   });
 }
 
-/** Minimal valid sign body */
+/** Minimal valid sign body — carries the token, as the homeowner's does. */
 const validBody = {
   signerName:    'Alice Smith',
   agreedToTerms: true,
+  token:         SHARE_TOKEN,
 };
 
 /** Route param object */
@@ -248,7 +263,11 @@ describe('POST /api/proposals/[id]/sign', () => {
       );
       vi.mocked(getDbReady).mockResolvedValue(sqlMock);
 
-      const res = await POST(makeRequest(validBody) as never, routeParams);
+      // 🚨 The token is stripped EXPLICITLY. `validBody` now carries one, so
+      // passing it unmodified would have tested a mismatch — which is the very
+      // next case — while still going green under the name "token is missing".
+      const { token: _omitted, ...noToken } = validBody;
+      const res = await POST(makeRequest(noToken) as never, routeParams);
       expect(res.status).toBe(403);
 
       const body = await res.json();
@@ -288,7 +307,20 @@ describe('POST /api/proposals/[id]/sign', () => {
       expect(res.status).toBe(200);
     });
 
-    it('skips token check when proposal has no share_token', async () => {
+    it('🚨 REFUSES when the proposal has no share_token — it is not signable', async () => {
+      // 🚨 THIS ASSERTION WAS INVERTED. It used to require 200 here, under the
+      // name "skips token check when proposal has no share_token" — pinning an
+      // implementation accident as though it were a requirement.
+      //
+      // This route has no authenticated path. The share token is the only gate.
+      // `share_token` is nullable (migration 037: `TEXT DEFAULT NULL`), so
+      // every proposal predating it has a null one — and under the old branch
+      // each of those could be signed by anyone holding the UUID, with no
+      // token at all. The general PATCH branch that the homeowner UI used to
+      // submit through never permitted that.
+      //
+      // A null share_token means the proposal was never shared. There is no
+      // link to have arrived from, so there is nobody legitimately signing.
       const sqlMock = makeSqlMock(
         () => Promise.resolve([makeProposal({ share_token: null })]),
         () => Promise.resolve([]),
@@ -300,8 +332,29 @@ describe('POST /api/proposals/[id]/sign', () => {
       vi.mocked(getDbReady).mockResolvedValue(sqlMock);
 
       const res = await POST(makeRequest(validBody) as never, routeParams);
-      // No token provided, proposal has no share_token → should succeed
-      expect(res.status).toBe(200);
+      expect(res.status, 'an unshared proposal was signed with the UUID alone').toBe(403);
+    });
+
+    it('🚨 and a guessed token cannot substitute for the absent one', async () => {
+      // The complement of the case above: refusing must not be satisfiable by
+      // sending *something*. With no share_token stored there is no value that
+      // can match, so every attempt is a 403 — including one that would equal
+      // the stored NULL if the comparison were sloppy about it.
+      const sqlMock = makeSqlMock(
+        () => Promise.resolve([makeProposal({ share_token: null })]),
+        () => Promise.resolve([]),
+        () => Promise.resolve([]),
+        () => Promise.resolve([]),
+        () => Promise.resolve([]),
+        () => Promise.resolve([]),
+      );
+      vi.mocked(getDbReady).mockResolvedValue(sqlMock);
+
+      const res = await POST(
+        makeRequest({ ...validBody, token: 'null' }) as never,
+        routeParams,
+      );
+      expect(res.status).toBe(403);
     });
   });
 
