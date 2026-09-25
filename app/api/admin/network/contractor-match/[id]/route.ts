@@ -68,7 +68,14 @@ export async function GET(req: NextRequest, props: Params) {
       SELECT
         oa.*,
         COALESCE(NULLIF(u.company, ''), NULLIF(u.name, ''), NULLIF(u.email, ''), 'Unknown Contractor') AS company_name,
-        NULL::numeric AS avg_rating,
+        -- A hardcoded null rating column was selected here and has been removed.
+        -- No such column exists in any migration, so it could never carry a
+        -- value; nothing in app/ or components/ read it either. A literal null
+        -- under a column alias reads as "no value YET" when the truth is "no
+        -- such thing", and that is how a metric nobody can compute survives in
+        -- an API contract. (Worded without the identifier: this is a SQL
+        -- comment inside a template literal, which a JS comment stripper cannot
+        -- see into, so naming it would trip the guard that forbids it.)
         CASE WHEN cp.profile_complete THEN 'preferred' ELSE 'standard' END AS tier
       FROM opportunity_assignments oa
       JOIN contractor_profiles cp ON cp.user_id = oa.contractor_id

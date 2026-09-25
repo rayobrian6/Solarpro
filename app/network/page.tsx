@@ -889,6 +889,33 @@ const UsLeadMap = dynamic(() => import("./UsLeadMap"), {
   ),
 });
 
+/**
+ * Stamp the first time this contractor reached out about a claimed lead.
+ *
+ * 🚨 IT MUST NOT DELAY OR BLOCK THE CALL. The click it hangs off navigates to
+ * `tel:` or `mailto:`, which on a phone hands off to another app and can unload
+ * this page immediately. So: no `await`, no preventDefault, and `keepalive` so
+ * the browser is obliged to finish the request even if the document goes away.
+ * Without `keepalive` this would work on a desktop and silently record nothing
+ * on the device contractors actually use.
+ *
+ * Failure is swallowed on purpose. The contractor's job is to call the
+ * homeowner; an analytics write that cannot complete must never surface as an
+ * error in front of that, and the server treats a repeat as a no-op anyway.
+ */
+function recordFirstContact(opportunityId: string, channel: "phone" | "email") {
+  try {
+    void fetch(`/api/network/opportunities/${opportunityId}/contact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* never let instrumentation interrupt reaching the homeowner */
+  }
+}
+
 export default function NetworkPage() {
   const [tab, setTab] = useState<Tab>("discover");
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -1553,7 +1580,10 @@ export default function NetworkPage() {
                                     {opp.homeowner_phone ? (
                                       <a
                                         href={`tel:${opp.homeowner_phone}`}
-                                        onClick={(e) => e.stopPropagation()}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          recordFirstContact(opp.id, "phone");
+                                        }}
                                         className="text-sky-300 text-xs hover:underline"
                                       >
                                         {opp.homeowner_phone}
@@ -1562,7 +1592,10 @@ export default function NetworkPage() {
                                     {opp.homeowner_email ? (
                                       <a
                                         href={`mailto:${opp.homeowner_email}`}
-                                        onClick={(e) => e.stopPropagation()}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          recordFirstContact(opp.id, "email");
+                                        }}
                                         className="text-sky-300 text-xs hover:underline"
                                       >
                                         {opp.homeowner_email}

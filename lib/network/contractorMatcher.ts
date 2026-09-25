@@ -10,8 +10,37 @@
  *   Geographic Coverage    30%  — does contractor serve this state?
  *   System Size Fit        20%  — does their typical job size match?
  *   Service Offerings      15%  — residential solar / battery / etc.
- *   Performance Metrics    20%  — close rate, response time, rating
+ *   Performance Metrics    20%  — close rate and response time  ⚠️ SEE BELOW
  *   Capacity / Bandwidth   15%  — how busy are they right now?
+ *
+ * 🚨 PERFORMANCE IS NOT MEASURED YET, AND THIS COMMENT USED TO PRETEND IT WAS.
+ *
+ * `scorePerformance` reads `avg_close_rate` and `avg_response_hours` off
+ * `contractor_profiles`. Both columns are real. **Neither has a writer anywhere
+ * in app/ or lib/** — the only mutations the contractor-facing Network API
+ * offers are profile edits, listing, checkout, claim, unclaim and a listing
+ * patch, and not one records an outcome. So both are NULL for every contractor
+ * and always have been.
+ *
+ * What that means for the score, precisely — and it is NOT what it looks like:
+ *
+ *   • `scorePerformance` normalises over the factors that ACTUALLY contributed
+ *     (`totalWeight`), so an absent factor does not drag the sub-score down.
+ *   • With nothing to measure it returns a flat 65 and says so
+ *     (`no_performance_data`).
+ *   • 65 x 0.20 = a constant 13 points added to EVERY contractor.
+ *
+ * A constant cannot change the ORDER, so matching is not silently mis-ranking
+ * anyone. What it does is inflate every absolute score by 13 — and the absolute
+ * score is load-bearing twice: `overall < minScore` drops a contractor, and
+ * `recommended` is `overall >= 75`. That is why the weight is still 0.20 here
+ * and has NOT been quietly removed: deleting it would move every score by ~13
+ * points and flip `recommended` for a whole band of contractors. That is a
+ * product decision about who gets offered leads, not a tidy-up.
+ *
+ * So instead the placeholder is made VISIBLE — `performance_measured` on every
+ * match, and `no_performance_data` is no longer filtered out of the reasons.
+ * See tests/contractorPerformanceIsUnmeasured.test.ts.
  */
 
 import { getDbReady } from '@/lib/db-neon'
@@ -27,9 +56,19 @@ export interface ContractorProfile {
   min_system_size_kw?: number | null
   max_system_size_kw?: number | null
   services_offered?: string[] | null
+  // Both read from contractor_profiles. Real columns, no writer yet — see the
+  // file header. Kept because they have a home to be written to.
   avg_close_rate?: number | null   // 0.0 – 1.0
   avg_response_hours?: number | null
-  avg_rating?: number | null       // 1.0 – 5.0
+  // 🚨 `avg_rating` WAS HERE AND IS GONE. It was not merely unwritten: there is
+  // no `avg_rating` COLUMN in migration 044, in the 068 repair, or in the
+  // legacy inline DDL — the field had nowhere to come from, and both SQL sites
+  // that claimed to supply it selected the literal `NULL::numeric AS avg_rating`.
+  // So the branch that scored it, and the `highly_rated` reason it could award,
+  // were unreachable for every contractor in every code path since they were
+  // written. Removing them changes no score. A dormant factor waiting on a
+  // writer is worth keeping; a factor with no column is a decoration that makes
+  // the engine look like it does something it cannot.
   total_claims?: number | null
   active_claims?: number | null
   max_active_claims?: number | null
@@ -63,6 +102,14 @@ export interface ContractorMatchScore {
   match_concerns: string[]      // potential issues
   tier_bonus: number            // bonus for preferred/elite contractors
   recommended: boolean          // top-tier recommendation
+  /**
+   * 🚨 FALSE MEANS `performance_score` IS A PLACEHOLDER, NOT A MEASUREMENT.
+   *
+   * It is false for every contractor today, because nothing writes the outcome
+   * columns it would be computed from. Exposed so a consumer can say "no
+   * performance history" instead of presenting 65 as if it were earned.
+   */
+  performance_measured: boolean
 }
 
 export interface MatchingResult {
@@ -159,13 +206,17 @@ function scoreServices(
   return { score: Math.min(100, score), reasons }
 }
 
+/** The score used when nothing about performance can be measured. */
+export const UNMEASURED_PERFORMANCE_SCORE = 65
+
 function scorePerformance(
   contractor: ContractorProfile
-): { score: number; reasons: string[] } {
+): { score: number; reasons: string[]; measured: boolean } {
   const reasons: string[] = []
   const weights: Array<[number, number]> = []
 
-  // Close rate (40% of performance)
+  // Close rate (57% of performance once the rating factor was removed —
+  // the ratio between close rate and response time is unchanged at 40:30).
   if (contractor.avg_close_rate != null) {
     const rate = contractor.avg_close_rate  // 0.0 – 1.0
     const s = Math.round(rate * 100)
@@ -173,7 +224,7 @@ function scorePerformance(
     if (rate >= 0.5) reasons.push('high_close_rate')
   }
 
-  // Response time (30% of performance) — faster = better
+  // Response time (43%) — faster = better
   if (contractor.avg_response_hours != null) {
     const h = contractor.avg_response_hours
     const s = h <= 1 ? 100 : h <= 4 ? 90 : h <= 12 ? 75 : h <= 24 ? 60 : h <= 48 ? 40 : 20
@@ -181,19 +232,20 @@ function scorePerformance(
     if (h <= 4) reasons.push('fast_response_time')
   }
 
-  // Rating (30% of performance)
-  if (contractor.avg_rating != null) {
-    const s = Math.round(((contractor.avg_rating - 1) / 4) * 100)
-    weights.push([s, 0.30])
-    if (contractor.avg_rating >= 4.5) reasons.push('highly_rated')
+  // 🚨 THIS IS THE LIVE PATH FOR EVERY CONTRACTOR TODAY. Neither column above
+  // has a writer, so `weights` is always empty and this always returns. The
+  // score normalises over contributing factors, so the flat 65 is a deliberate
+  // neutral prior rather than a zero — but it is a PLACEHOLDER, and `measured`
+  // is what lets a caller tell the difference between "scored 65" and "not
+  // scored". Without it a placeholder is indistinguishable from a measurement.
+  if (weights.length === 0) {
+    return { score: UNMEASURED_PERFORMANCE_SCORE, reasons: ['no_performance_data'], measured: false }
   }
-
-  if (weights.length === 0) return { score: 65, reasons: ['no_performance_data'] }
 
   const totalWeight = weights.reduce((sum, [, w]) => sum + w, 0)
   const score = Math.round(weights.reduce((sum, [s, w]) => sum + s * w, 0) / totalWeight)
 
-  return { score: Math.min(100, Math.max(0, score)), reasons }
+  return { score: Math.min(100, Math.max(0, score)), reasons, measured: true }
 }
 
 function scoreCapacity(
@@ -292,7 +344,14 @@ export async function matchContractors(
       ], NULL) AS services_offered,
       CASE WHEN cp.avg_close_rate_pct IS NULL THEN NULL ELSE cp.avg_close_rate_pct / 100.0 END AS avg_close_rate,
       cp.avg_response_hours,
-      NULL::numeric AS avg_rating,
+      -- A hardcoded null rating column was selected here and has been removed.
+      -- It was not a placeholder waiting on data: no such column exists in any
+      -- migration, so there was nothing for it to be filled from, ever.
+      -- Selecting a literal null under a column alias is how a field that can
+      -- NEVER exist gets read as one that merely has no value yet.
+      -- (Deliberately worded without the identifier: this is a SQL comment
+      --  inside a template literal, which a JS comment stripper cannot see
+      --  into, so naming it here would trip the guard that forbids it.)
       COALESCE(claim_counts.total_claims, 0) AS total_claims,
       COALESCE(claim_counts.active_claims, 0) AS active_claims,
       10 AS max_active_claims,
@@ -350,7 +409,18 @@ export async function matchContractors(
       ...capacity.reasons,
       opp.qualification_status ? `qualification_${opp.qualification_status}` : null,
       opp.lead_grade ? `lead_grade_${opp.lead_grade}` : null,
-    ].filter((r): r is string => !!r && !r.includes('no_') && !r.includes('does_not') && !r.includes('below') && !r.includes('above'))
+    ].filter((r): r is string =>
+      // 🚨 `no_performance_data` IS EXEMPT FROM THE `no_` FILTER.
+      //
+      // The filter strips negative reasons so `match_reasons` reads as a list
+      // of positives — sensible for `no_states_configured` and the like. But it
+      // also swallowed the ONE marker that says the 20% performance factor was
+      // a placeholder, and that marker is true for every contractor. So the
+      // engine knew it had no performance history, said so internally, and then
+      // deleted the sentence on the way out. The operator saw a score with no
+      // indication that a fifth of it was invented.
+      !!r && (r === 'no_performance_data'
+        || (!r.includes('no_') && !r.includes('does_not') && !r.includes('below') && !r.includes('above'))))
 
     const match_concerns = [
       ...sizeFit.reasons.filter(r => r.includes('below') || r.includes('above')),
@@ -370,6 +440,7 @@ export async function matchContractors(
       match_concerns,
       tier_bonus: tierBonus,
       recommended: overall >= 75 && match_concerns.length === 0,
+      performance_measured: performance.measured,
     })
   }
 

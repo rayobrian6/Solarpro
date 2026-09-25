@@ -43,17 +43,40 @@ export async function GET(req: NextRequest) {
     const pipelineHealth = pipelineRows[0] as Record<string, unknown>
 
     // ── Contractor Network Health ───────────────────────────────────────────
+    //
+    // 🚨 THIS BLOCK RETURNED A 500 FOR THE WHOLE ENDPOINT.
+    //
+    // It selected five columns that `contractor_profiles` has never had:
+    // `is_active`, `is_verified`, `tier`, `avg_rating` and `avg_close_rate`.
+    // None of them appears in migration 044, in the 068 repair, or in the
+    // legacy inline DDL in app/api/migrate — proven by executing 044 against
+    // real PostgreSQL and asking for the column list. Postgres stops at the
+    // first one, so the query threw `column "is_active" does not exist`, and
+    // because the whole handler is one try/catch the Admin Network Health page
+    // lost its pipeline, screening, claims and event metrics too. One dead
+    // block took down four working ones.
+    //
+    // Mapped to the columns that exist:
+    //   is_active        -> network_active   (the real "may receive opportunities" flag)
+    //   avg_close_rate   -> avg_close_rate_pct
+    //   is_verified      -> no equivalent; profile_complete is the nearest real fact
+    //   tier, avg_rating -> no column and no writer. Dropped rather than faked:
+    //                       an elite/preferred count invented here would be a
+    //                       number the operator could act on and nothing backs.
+    //
+    // `avg_close_rate_pct` is a real column that NOTHING CURRENTLY WRITES, so
+    // this reads NULL until the rollup exists. That is the honest answer and it
+    // is why the key is still reported — a missing metric should look missing,
+    // not look like zero.
     const contractorRows = await sql`
       SELECT
-        COUNT(*) FILTER (WHERE is_active = true)                AS active_contractors,
-        COUNT(*) FILTER (WHERE is_active = false)               AS inactive_contractors,
-        COUNT(*) FILTER (WHERE is_verified = true)              AS verified_contractors,
-        COUNT(*) FILTER (WHERE tier = 'elite')                  AS elite_contractors,
-        COUNT(*) FILTER (WHERE tier = 'preferred')              AS preferred_contractors,
-        AVG(avg_rating) FILTER (WHERE avg_rating IS NOT NULL)   AS avg_rating,
-        AVG(avg_close_rate) FILTER (WHERE avg_close_rate IS NOT NULL) AS avg_close_rate,
+        COUNT(*) FILTER (WHERE network_active = TRUE)           AS active_contractors,
+        COUNT(*) FILTER (WHERE network_active = FALSE)          AS inactive_contractors,
+        COUNT(*) FILTER (WHERE profile_complete = TRUE)         AS profile_complete_contractors,
+        AVG(avg_close_rate_pct) FILTER (WHERE avg_close_rate_pct IS NOT NULL) AS avg_close_rate_pct,
+        AVG(avg_response_hours) FILTER (WHERE avg_response_hours IS NOT NULL) AS avg_response_hours,
         COUNT(*) FILTER (
-          WHERE is_active = true AND array_length(service_states, 1) > 0
+          WHERE network_active = TRUE AND array_length(service_states, 1) > 0
         )                                                       AS contractors_with_states
       FROM contractor_profiles
     `

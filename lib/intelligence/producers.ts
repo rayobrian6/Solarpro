@@ -228,15 +228,47 @@ export function produceContractorPerformanceObservations(contractorId: string, a
   const lost = assignments.filter(a => a.status === 'lost' || a.close_status === 'lost').length
   const refunded = assignments.filter(a => !!a.refund_at || a.status === 'refunded').length
   const disputed = assignments.filter(a => !!a.dispute_filed_at).length
+
+  /**
+   * 🚨 WHICH OF THESE NUMBERS IS A MEASUREMENT, AND WHICH IS AN ABSENCE.
+   *
+   * `pct(n, d)` returns 0 when d is 0, and three of the fields below divide by
+   * a count that is structurally always zero. So this producer was emitting a
+   * confident "0% close rate, 0% dispute rate" for every contractor in the
+   * network — not "unknown", but the specific claim that they close nothing and
+   * are never disputed. A consumer cannot tell those apart, and one of them is
+   * defamatory while the other is merely missing.
+   *
+   * The reason they are always zero is that nothing writes the columns:
+   *   • close_status / lost_reason / first_contact_at / dispute_filed_at
+   *     have ZERO writers anywhere in app/ or lib/ — every mutation on
+   *     opportunity_assignments uses a static column list and none includes
+   *     them. They are only ever SELECTed.
+   *   • `status` never becomes 'won' or 'lost' either. Those values appear once
+   *     in the codebase, in a WHERE clause.
+   *   • `proposal_at` likewise has no writer. (`closed_at` DOES get written —
+   *     but on opportunity_SOURCES, a different table. That near-miss is
+   *     exactly how one concludes a column is populated when it is not.)
+   *
+   * `refund_at` IS written, by the race-lost auto-refund in leadPurchase. So
+   * `refund_rate` is the one real number here and is reported as such.
+   */
+  const closeOutcomes = won + lost
+  const closeRateSupported = closeOutcomes > 0
+  const proposalRateSupported = proposals > 0
+  // A dispute is only observable if something can file one. Nothing can yet, so
+  // a 0% dispute rate is an artifact of the missing write path, not a finding.
+  const disputeRateSupported = assignments.some(a => a.dispute_filed_at !== undefined && a.dispute_filed_at !== null)
+    || disputed > 0
   const batteryProjects = assignments.filter(a => (a.financing_offered ?? '').toLowerCase().includes('battery') || ((a.system_size_kw ?? 0) > 0 && JSON.stringify(a).toLowerCase().includes('battery')))
   const confidence = sampleConfidence(total)
   const base = { contractor_id: contractorId, sample_size: total, window: ctx.window ?? null }
   const ids = assignments.map(a => a.id)
 
   return [
-    createObservationDraft({ entity_type: 'contractor', entity_id: contractorId, observation_type: 'contractor_response_speed', source_system: 'contractor_performance_producer', confidence, observed_at: observedAt, correlation_id: ctx.correlation_id ?? null, idempotency_key: `producer:contractor_performance:${contractorId}:${ctx.window?.start ?? 'all'}:${ctx.window?.end ?? 'all'}:response_speed`, derivation: derivation('contractor_performance.response_speed', 'v1', base, { response_hours: responseHours, avg_response_hours: avgResponseHours, confidence_factors: { sample_size: total } }, ids), payload: { avg_response_hours: avgResponseHours, response_sample_size: responseHours.length, rating: avgResponseHours == null ? 'unknown' : avgResponseHours <= 4 ? 'fast' : avgResponseHours <= 24 ? 'normal' : 'slow' } }),
-    createObservationDraft({ entity_type: 'contractor', entity_id: contractorId, observation_type: 'contractor_close_rate', source_system: 'contractor_performance_producer', confidence, observed_at: observedAt, correlation_id: ctx.correlation_id ?? null, idempotency_key: `producer:contractor_performance:${contractorId}:${ctx.window?.start ?? 'all'}:${ctx.window?.end ?? 'all'}:close_rate`, derivation: derivation('contractor_performance.close_rate', 'v1', base, { won, lost, proposals, total, close_rate: pct(won, Math.max(1, won + lost)), confidence_factors: { sample_size: total } }, ids), payload: { won, lost, proposals, total_assignments: total, close_rate: pct(won, Math.max(1, won + lost)), proposal_acceptance_rate: pct(won, Math.max(1, proposals)) } }),
-    createObservationDraft({ entity_type: 'contractor', entity_id: contractorId, observation_type: 'contractor_cancellation_dispute_frequency', source_system: 'contractor_performance_producer', confidence, observed_at: observedAt, correlation_id: ctx.correlation_id ?? null, idempotency_key: `producer:contractor_performance:${contractorId}:${ctx.window?.start ?? 'all'}:${ctx.window?.end ?? 'all'}:cancellation_dispute`, derivation: derivation('contractor_performance.cancellation_dispute_frequency', 'v1', base, { refunded, disputed, total, confidence_factors: { sample_size: total } }, ids), payload: { refunded, disputed, refund_rate: pct(refunded, total), dispute_rate: pct(disputed, total) } }),
+    createObservationDraft({ entity_type: 'contractor', entity_id: contractorId, observation_type: 'contractor_response_speed', source_system: 'contractor_performance_producer', confidence, observed_at: observedAt, correlation_id: ctx.correlation_id ?? null, idempotency_key: `producer:contractor_performance:${contractorId}:${ctx.window?.start ?? 'all'}:${ctx.window?.end ?? 'all'}:response_speed`, derivation: derivation('contractor_performance.response_speed', 'v1', base, { response_hours: responseHours, avg_response_hours: avgResponseHours, confidence_factors: { sample_size: total } }, ids), payload: { avg_response_hours: avgResponseHours, response_sample_size: responseHours.length, supported: responseHours.length > 0, rating: avgResponseHours == null ? 'unknown' : avgResponseHours <= 4 ? 'fast' : avgResponseHours <= 24 ? 'normal' : 'slow' } }),
+    createObservationDraft({ entity_type: 'contractor', entity_id: contractorId, observation_type: 'contractor_close_rate', source_system: 'contractor_performance_producer', confidence, observed_at: observedAt, correlation_id: ctx.correlation_id ?? null, idempotency_key: `producer:contractor_performance:${contractorId}:${ctx.window?.start ?? 'all'}:${ctx.window?.end ?? 'all'}:close_rate`, derivation: derivation('contractor_performance.close_rate', 'v1', base, { won, lost, proposals, total, close_rate: pct(won, Math.max(1, won + lost)), confidence_factors: { sample_size: total } }, ids), payload: { won, lost, proposals, total_assignments: total, supported: closeRateSupported, close_rate: closeRateSupported ? pct(won, closeOutcomes) : null, proposal_acceptance_rate: proposalRateSupported ? pct(won, proposals) : null } }),
+    createObservationDraft({ entity_type: 'contractor', entity_id: contractorId, observation_type: 'contractor_cancellation_dispute_frequency', source_system: 'contractor_performance_producer', confidence, observed_at: observedAt, correlation_id: ctx.correlation_id ?? null, idempotency_key: `producer:contractor_performance:${contractorId}:${ctx.window?.start ?? 'all'}:${ctx.window?.end ?? 'all'}:cancellation_dispute`, derivation: derivation('contractor_performance.cancellation_dispute_frequency', 'v1', base, { refunded, disputed, total, confidence_factors: { sample_size: total } }, ids), payload: { refunded, disputed, refund_rate: pct(refunded, total), dispute_rate: disputeRateSupported ? pct(disputed, total) : null, dispute_rate_supported: disputeRateSupported } }),
     createObservationDraft({ entity_type: 'contractor', entity_id: contractorId, observation_type: 'contractor_battery_experience', source_system: 'contractor_performance_producer', confidence: sampleConfidence(batteryProjects.length), observed_at: observedAt, correlation_id: ctx.correlation_id ?? null, idempotency_key: `producer:contractor_performance:${contractorId}:${ctx.window?.start ?? 'all'}:${ctx.window?.end ?? 'all'}:battery_experience`, derivation: derivation('contractor_performance.battery_experience', 'v1', base, { battery_project_count: batteryProjects.length, total, confidence_factors: { sample_size: batteryProjects.length } }, batteryProjects.map(a => a.id)), payload: { battery_project_count: batteryProjects.length, battery_experience_level: batteryProjects.length >= 10 ? 'strong' : batteryProjects.length >= 3 ? 'emerging' : 'limited' } }),
   ]
 }
