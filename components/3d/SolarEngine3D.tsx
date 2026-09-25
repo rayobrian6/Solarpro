@@ -15317,6 +15317,88 @@ function SolarEngine3D({
             {/* Flyout slide-in animation */}
             <style>{'@keyframes toolFlyout { from { opacity:0; transform:translateX(-8px); } to { opacity:1; transform:translateX(0); } }'}</style>
 
+            {/* ── ACTIVE MODE BANNER ────────────────────────────────────────
+             *  🚨 WHICH TOOL AM I IN, AND HOW DO I GET OUT.
+             *
+             *  This editor has 24 armed placement modes and announced the one in use
+             *  as a GOLD ICON on a group header — inside a panel the user can
+             *  drag anywhere, with the tool's name only visible while the
+             *  flyout happens to be open. So the answer to "why did clicking
+             *  the roof just plant another chimney" was on screen, as a glyph,
+             *  somewhere. That is hidden state, and it is the mode error Ray
+             *  named: it must be impossible to be in a tool without being told
+             *  which one.
+             *
+             *  Aurora uses one grammar for every drawing mode and never varies
+             *  it: help, then the mode's NAME IN WORDS, then the exit — always
+             *  the same place, always the same key. Observed verbatim as
+             *  'Draw Roof', 'Draw Rectangular Obstruction', 'Draw Tree' and
+             *  'Edit Roof'. The exit being in the banner is what makes Escape
+             *  discoverable rather than folklore.
+             *
+             *  🚨 ONE NAMING AUTHORITY. The label and the help text are read
+             *  out of the SAME `groups` catalogue the palette buttons render
+             *  from — not a second mode->name map that would drift from the
+             *  buttons the moment anyone renamed a tool.
+             *
+             *  Not a DraggablePanel on purpose: an announcement the user can
+             *  lose behind their own layout is not an announcement. */}
+            {placementMode !== 'select' ? ((() => {
+              const activeTool = groups.flatMap(g => g.tools).find(t => t.mode === placementMode);
+              // Modes with no palette button (ground_array, measurements, ruler,
+              // plane…) are still ARMED, so they still get named. Humanising the
+              // mode id is worse than a curated label and better than silence.
+              const label = activeTool ? activeTool.label : placementMode.replace(/_/g, ' ');
+              const tip   = activeTool ? activeTool.tip : 'Press Escape to leave this tool.';
+              return (
+                <div
+                  data-testid="active-mode-banner"
+                  data-mode={placementMode}
+                  style={{
+                    position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+                    zIndex: OVERLAY_Z.PLACEMENT, pointerEvents: 'auto',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '5px 8px 5px 10px', borderRadius: 8,
+                    background: 'linear-gradient(135deg,rgba(255,140,0,0.95),rgba(255,180,0,0.95))',
+                    color: '#1a1200', boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
+                    fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+                    maxWidth: 'min(560px, 70%)',
+                  }}
+                >
+                  <span
+                    data-testid="active-mode-help"
+                    onMouseEnter={(e) => { const r = (e.currentTarget as HTMLSpanElement).getBoundingClientRect(); setTooltipInfo({ text: label + ': ' + tip, x: r.left + r.width / 2, y: r.top - 8 }); }}
+                    onMouseLeave={() => setTooltipInfo(null)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                      background: 'rgba(0,0,0,0.25)', color: '#fff', fontSize: 10, cursor: 'help',
+                    }}
+                  >?</span>
+
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {activeTool ? activeTool.icon + ' ' : ''}{label}
+                  </span>
+
+                  <button
+                    type="button"
+                    data-testid="active-mode-exit"
+                    aria-label={'Leave ' + label + ' (Escape)'}
+                    onClick={() => onPlacementModeChange('select')}
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1,
+                      border: 'none', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
+                      padding: '3px 6px', background: 'rgba(0,0,0,0.22)', color: '#1a1200',
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span style={{ fontSize: 11 }}>&#10005;</span>
+                    <span style={{ fontSize: 7, letterSpacing: 0.6, opacity: 0.85 }}>ESC</span>
+                  </button>
+                </div>
+              );
+            })()) : null}
+
             {/* ── TOP-RIGHT: stats + orientation + active tool + context controls ──
                 v70: wrapped in DraggablePanel so the user can grab the
                 stats row and move the whole stack (stats + active tool
