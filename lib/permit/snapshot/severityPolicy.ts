@@ -123,6 +123,15 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
   // is over its allowance (engineering); and an AHJ rejects it on sight
   // (permit acceptance). It is not a procurement fault — the parts are real,
   // the configuration is not legal.
+  // The fill was ESTABLISHED and it BUSTS NEC Chapter 9 Table 1. Every axis the
+  // PENDING code carries, plus it is an actual violation rather than an unknown:
+  // an over-filled raceway derates its conductors thermally (safety), fails
+  // Ch.9 T1 outright (code), and no PE or AHJ accepts a raceway schedule whose
+  // own derivation line prints a number above its own limit.
+  'CONDUIT-FILL-EXCEEDED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
   'NEC-705-12B-EXCEEDED': {
     impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
     justification: '',

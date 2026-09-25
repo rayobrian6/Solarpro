@@ -82,6 +82,7 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'TAP-CONDUCTOR-LENGTH-PENDING': 'electrical',
   'TAP-CONDUCTOR-LENGTH-EXCEEDED': 'electrical',
   'NEC-705-12B-EXCEEDED': 'electrical',
+  'CONDUIT-FILL-EXCEEDED': 'electrical',
   'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': 'electrical',
   'QCABLE-PROCUREMENT-INSUFFICIENT': 'electrical',   // §Q — procurement deficit gate
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': 'electrical',  // grounding-authority gate (2026-07-25)

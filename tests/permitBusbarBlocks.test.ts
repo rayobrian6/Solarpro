@@ -203,3 +203,83 @@ describe('🚨 a blocker code needs FIVE registrations, not one', () => {
     expect(meta, 'the blocker does not say how to resolve it').toMatch(/resolution:/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONDUIT FILL — THE SAME DEFECT, THE SAME SHAPE
+//
+// `conduitFillAuthority.ts` sets `cleared = missing.length === 0`, which asks
+// "were the inputs present?". That is a real question and it is NOT the code
+// question. A raceway with every input supplied and a computed 58 % fill
+// against the 40 % limit has `cleared === true`, `state: 'computed'` and
+// `pass: false` — and the only emitter fired on `!cleared`, so it shipped.
+//
+// 🚨 THE AUTHORITY PRINTS THE VIOLATION IN ITS OWN DERIVATION STRING:
+// "Σ conductor area ÷ raceway interior = 58.0 % (limit 40 %)". That text went
+// onto PV-4A/PV-4B beside a readiness registry that raised nothing.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 an established conduit fill that FAILS blocks the package', () => {
+  const REG: Record<string, string> = {
+    'severityPolicy.ts': 'lib/permit/snapshot/severityPolicy.ts',
+    'releaseGates.ts': 'lib/permit/snapshot/releaseGates.ts',
+    'reviewStatus.ts': 'lib/permit/sections/reviewStatus.ts',
+    'build.ts': 'lib/permit/snapshot/build.ts',
+    'projectAuthority.ts': 'lib/permit/snapshot/projectAuthority.ts',
+  };
+
+  for (const [label, rel] of Object.entries(REG)) {
+    it(`CONDUIT-FILL-EXCEEDED is registered in ${label}`, () => {
+      const src = fs.readFileSync(path.join(process.cwd(), rel), 'utf8');
+      expect(src.includes("'CONDUIT-FILL-EXCEEDED'"), `${rel} does not know the code`).toBe(true);
+    });
+  }
+
+  it('the policy rule is blocking and safety-bearing', async () => {
+    const { SEVERITY_POLICY: P, classifyBlockerSeverity: C } =
+      await import('@/lib/permit/snapshot/severityPolicy');
+    expect(P['CONDUIT-FILL-EXCEEDED']).toBeTruthy();
+    expect(C('CONDUIT-FILL-EXCEEDED').severity).toBe('blocking');
+    // An over-filled raceway derates its conductors thermally.
+    expect(P['CONDUIT-FILL-EXCEEDED'].impact.safety).toBe(true);
+    expect(P['CONDUIT-FILL-EXCEEDED'].impact.codeCompliance).toBe(true);
+  });
+
+  it('it is on the electrical gate, not the unmapped sink', async () => {
+    const { requirementToGateMap } = await import('@/lib/permit/snapshot/releaseGates');
+    expect(requirementToGateMap()['CONDUIT-FILL-EXCEEDED']?.gateId).toBe('RG-5');
+  });
+
+  it('🚨 it fires on an ESTABLISHED failing fill, not on a missing one', () => {
+    // The whole point of the split. `cleared` must still be required, or this
+    // would double-report the PENDING case; `pass === false` must be required,
+    // or a null (never computed) verdict would be called a violation.
+    const at = BUILD.indexOf("push('CONDUIT-FILL-EXCEEDED'");
+    expect(at, 'nothing raises CONDUIT-FILL-EXCEEDED').toBeGreaterThan(-1);
+    const guard = BUILD.slice(Math.max(0, at - 700), at);
+    expect(guard, 'the blocker does not require the inputs to have been established')
+      .toMatch(/conduitFillEvaluation\.cleared\s*$/m);
+    expect(guard, 'the blocker fires on anything other than an explicit false verdict')
+      .toMatch(/^\s*&& conduitFillEvaluation\.record\.pass === false\) \{$/m);
+  });
+
+  it('🚨 PENDING and EXCEEDED stay different codes', () => {
+    // "not established" and "established and failing" must never share a code,
+    // or the worse outcome reads quieter than the uncertain one — the ruling
+    // this file already records for the tap span and the busbar.
+    expect(BUILD).toContain("push('CONDUIT-FILL-PENDING'");
+    expect(BUILD).toContain("push('CONDUIT-FILL-EXCEEDED'");
+    const pendingGuard = BUILD.slice(
+      Math.max(0, BUILD.indexOf("push('CONDUIT-FILL-PENDING'") - 260),
+      BUILD.indexOf("push('CONDUIT-FILL-PENDING'"));
+    expect(pendingGuard, 'the PENDING branch now also catches established failures')
+      .toMatch(/!conduitFillEvaluation\.cleared/);
+  });
+
+  it('the message carries the numbers and a remedy', () => {
+    const at = BUILD.indexOf("push('CONDUIT-FILL-EXCEEDED'");
+    const body = BUILD.slice(at, at + 900);
+    expect(body).toMatch(/fillPct/);
+    expect(body).toMatch(/limitPct/);
+    expect(body, 'no remedy stated').toMatch(/Upsize the raceway/);
+  });
+});

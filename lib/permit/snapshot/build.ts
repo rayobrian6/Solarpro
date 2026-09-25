@@ -2106,6 +2106,7 @@ export function buildPermitDesignSnapshot(
       'CONDUIT-FILL-PENDING': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
       'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.routeSegments[DISCO_TO_METER_RUN] (viewed by serviceTopology[svc-tap-conductors])', sheets: ['PV-4B', 'E-1'], resolution: 'Constrain the span in the design — place the fused AC disconnect within 10 ft of the tap point — or record a routed/field-measured length for DISCO_TO_METER_RUN.' },
       'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].conductorGauge vs the design length bound', sheets: ['PV-4B', 'E-1', 'SCHED'], resolution: 'Upsize the conductor on the named run, or shorten the route so the one-way length is at or under the stated maximum.' },
+      'CONDUIT-FILL-EXCEEDED': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct (conduitFillAuthority verdict)', sheets: ['PV-4A', 'PV-4B'], resolution: 'Upsize the raceway trade size, reduce the current-carrying conductor count, or split the run into two raceways.' },
       'NEC-705-12B-EXCEEDED': { severity: 'blocking', authorityPath: 'electrical.poi (busbar verdict from electrical-calc)', sheets: ['E-1'], resolution: 'Change the connection method: a supply-side connection (NEC 705.11), a main-breaker derate, or a bus upgrade. The array and conductors are unaffected.' },
       'TAP-CONDUCTOR-LENGTH-EXCEEDED': { severity: 'blocking', authorityPath: 'electrical.routeSegments[DISCO_TO_METER_RUN] (viewed by serviceTopology[svc-tap-conductors])', sheets: ['PV-4B', 'E-1'], resolution: 'Relocate the fused AC disconnect (or the tap point) so the tap conductors are ≤10 ft, then re-route/re-measure the span.' },
       // GROUNDING AUTHORITY (2026-07-25) — the open-air branch grounding method is
@@ -2363,6 +2364,44 @@ export function buildPermitDesignSnapshot(
           },
           resolutionAction:
             'Supply the named raceway / conductor / code-edition input — the fill itself is COMPUTED (NEC Chapter 9, Tables 1/4/5), never field-measured.',
+        });
+    }
+    // 🚨 AND THE FILL THAT WAS ESTABLISHED AND FAILS.
+    //
+    // `cleared` above answers "were the inputs present?", which is a real and
+    // useful question — and it is NOT the code question. A raceway with every
+    // input supplied and a computed 58 % fill against the 40 % limit has
+    // `cleared === true`, `state: 'computed'` and `pass: false`, so the only
+    // emitter fired on `!cleared` and let it through.
+    //
+    // The authority even PRINTS the violation in its own derivation string:
+    // "Σ conductor area ÷ raceway interior = 58.0 % (limit 40 %)". That text
+    // shipped on PV-4A/PV-4B beside a readiness registry that raised nothing.
+    //
+    // Same ruling as the tap span and the busbar: "not established" and
+    // "established and failing" must never share a code, or the worse outcome
+    // reads quieter than the uncertain one. `pass === null` stays with the
+    // PENDING branch above — it means the fill was never computed.
+    if (cs && conduitFillEvaluation && conduitFillEvaluation.cleared
+        && conduitFillEvaluation.record.pass === false) {
+      const _r = conduitFillEvaluation.record;
+      push('CONDUIT-FILL-EXCEEDED',
+        `Feeder conduit fill EXCEEDS the NEC Chapter 9 Table 1 limit — `
+          + `${_r.fillPct != null ? _r.fillPct.toFixed(1) : '?'} % against a ${_r.limitPct} % limit `
+          + `for ${_r.conductorSet ?? 'the conductor set'} in ${_r.racewaySize ?? '?'} ${_r.racewayType ?? 'raceway'}. `
+          + 'Upsize the raceway, reduce the conductor count, or split the run.',
+        {
+          payload: {
+            fillPct: _r.fillPct,
+            limitPct: _r.limitPct,
+            racewayType: _r.racewayType,
+            racewaySize: _r.racewaySize,
+            conductorSet: _r.conductorSet,
+            codeEdition: _r.codeEdition,
+            necBasis: _r.necBasis,
+          },
+          resolutionAction:
+            'Upsize the raceway trade size, reduce the current-carrying conductor count, or split the run into two raceways — then the fill recomputes.',
         });
     }
     // §4 BRANCH-RACEWAY coverage gate. A micro design's AC branch route is TWO

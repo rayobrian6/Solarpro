@@ -844,6 +844,22 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // design lost. That is the same ruling this file already made one entry
   // below, where reporting a busted tap span as "…LENGTH-PENDING" made the
   // worse outcome read quieter than the uncertain one.
+  // A computed fill over the Ch.9 T1 limit. VERIFIED_DEFICIENCY, not PENDING:
+  // the calculation ran and the raceway lost. `CONDUIT-FILL-PENDING` keeps its
+  // own, quieter meaning — the inputs were never supplied.
+  'CONDUIT-FILL-EXCEEDED': {
+    sheetLine: 'CONDUIT FILL EXCEEDS NEC Ch.9 T1 — Upsize the raceway or split the run.',
+    gateId: 'RG-5', findingType: 'VERIFIED_DEFICIENCY',
+    title: 'Feeder raceway fill EXCEEDS the NEC Chapter 9 Table 1 limit',
+    affects:
+      'The feeder raceway as scheduled. Conductor SIZING is unaffected — the conductors fit their load, they do not '
+      + 'fit this raceway: upsize the trade size, reduce the current-carrying count, or split the run.',
+    resolutionMode: 'OPERATOR_CONFIRMATION', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: null, resolverPhase: 'delivered (conduitFillAuthority)',
+    modeBasis:
+      '2026-09-25 — raised ONLY from an established fill (state: computed) whose pass verdict is false. A null verdict '
+      + 'means the fill was never computed and belongs to CONDUIT-FILL-PENDING.',
+  },
   'NEC-705-12B-EXCEEDED': {
     sheetLine: 'BUSBAR EXCEEDS NEC 705.12(B) — Supply-side tap, main derate, or bus upgrade required.',
     gateId: 'RG-5', findingType: 'VERIFIED_DEFICIENCY',
