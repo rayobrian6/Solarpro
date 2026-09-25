@@ -6104,6 +6104,74 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <span className="font-semibold text-emerald-400">{costEstimate.roi}%</span>
                       </div>
                     </div>
+
+                    {/* ══ YOUR MARGIN ═══════════════════════════════════════════
+                        🚨 INSTALLER-ONLY. Every number above this divider is
+                        what the homeowner sees. Everything below is the
+                        installer's own business, and it must never reach a
+                        proposal, a plan set or the customer portal.
+
+                        WHY IT IS HERE. This is the gap the competitor failure
+                        hunt found, and the only one in that corpus that nobody
+                        in the category has closed. An Aurora user calls it a
+                        "half product" on camera — "There's no way for solar
+                        installers to see their profit margins using this
+                        software" — and a UK installer names the workaround:
+                        "we use a separate pricing spreadsheet and just add the
+                        manual total into Open Solar." A spreadsheet outside the
+                        product is where a design tool loses the person using it.
+
+                        NOTHING NEW IS COMPUTED. /api/production has been
+                        returning internalRevenue, internalCost, internalProfit
+                        and internalMargin all along — the pricing engine labels
+                        them "Internal" — and `costEstimate` has held them in
+                        state the whole time. This is a presentation layer over
+                        an existing authority, not a second one: change the
+                        pricing config and this moves with it, because it is the
+                        same number the proposal is priced from.
+
+                        Rendered only when the engine actually returned a cost.
+                        A margin computed against a zero cost is not a margin,
+                        it is 100%, and an installer would quote from it. */}
+                    {Number.isFinite(costEstimate.internalCost) && costEstimate.internalCost > 0 ? (
+                      <div className="mt-3 pt-3 border-t border-white/[0.06]">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                            Your margin
+                          </span>
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-600 border border-slate-700 rounded px-1 py-px">
+                            Internal only
+                          </span>
+                        </div>
+                        <div className="space-y-1 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Revenue</span>
+                            <span className="font-semibold text-white">
+                              ${Math.round(costEstimate.internalRevenue ?? 0).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Est. cost</span>
+                            <span className="font-semibold text-white">
+                              ${Math.round(costEstimate.internalCost).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Gross profit</span>
+                            <span className={`font-bold ${(costEstimate.internalProfit ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              ${Math.round(costEstimate.internalProfit ?? 0).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Margin</span>
+                            <span className={`font-bold ${(costEstimate.internalMargin ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {(costEstimate.internalMargin ?? 0).toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
                     <Link href={`/proposals?projectId=${project.id}`} className="btn-primary w-full mt-2 text-xs">
                       Generate Proposal <ArrowRight size={12} />
                     </Link>
