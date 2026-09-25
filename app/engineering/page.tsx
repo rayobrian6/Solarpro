@@ -10958,7 +10958,44 @@ function EngineeringPageInner() {
                                           const clampedRec = _sz.recommendedPanelsPerString;
                                           return (
                                             <div className="mt-1 pt-1 border-t border-slate-700/50">
-                                              <div className="text-green-400 font-semibold mb-0.5">String Sizing (NEC 690.7 @ {designTemp}°C)</div>
+                                              {/* ══ WHERE THAT TEMPERATURE CAME FROM ════════════════════
+                                                  🚨 A NUMBER A DESIGNER SIZES A STRING ON SHOULD SAY WHOSE
+                                                  IT IS. The box printed the design temperature with no
+                                                  indication of its basis — and until recently there were
+                                                  three competing bases, so "@ -23°C" was not even a stable
+                                                  fact. Now there is one, and `getThermalDesignBasis` has been
+                                                  returning its own provenance all along: the source, the
+                                                  station or state envelope it came from, and whether an AHJ
+                                                  override replaced it.
+
+                                                  HelioScope names its weather station and the distance to it,
+                                                  and the engineering research lane rated that the single most
+                                                  trust-building detail in the corpus. Output provenance is
+                                                  SolarPro's whole wedge; this costs a hover.
+
+                                                  An AHJ override is shown INLINE rather than on hover,
+                                                  because a design sized to a jurisdiction's own design-low
+                                                  instead of the ASHRAE envelope is a material fact about the
+                                                  design, not a footnote. */}
+                                              {(() => {
+                                                const basis = getThermalDesignBasis({
+                                                  state: config.state || null,
+                                                  address: config.address || null,
+                                                  designTempMinOverrideC: null,
+                                                });
+                                                const overridden = designTemp !== basis.minDesignTempC;
+                                                return (
+                                                  <div
+                                                    className="text-green-400 font-semibold mb-0.5"
+                                                    title={`Design low ${designTemp}°C — ${overridden ? 'project / AHJ design-low override' : basis.source}`}
+                                                  >
+                                                    String Sizing (NEC 690.7 @ {designTemp}°C)
+                                                    {overridden ? (
+                                                      <span className="ml-1 font-normal text-amber-400">· AHJ override</span>
+                                                    ) : null}
+                                                  </div>
+                                                );
+                                              })()}
                                               <div className="text-slate-400">Max/string: <span className="text-white font-bold">{maxPPS}</span></div>
                                               <div className="text-slate-400">Min/string: <span className="text-white font-bold">{minPPS}</span></div>
                                               <div className="text-slate-400">Rec: <span className="text-amber-400 font-bold">{clampedRec}</span></div>

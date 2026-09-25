@@ -163,6 +163,23 @@ describe('🚨 there is one implementation, and both consumers call it', () => {
     expect(PAGE).toMatch(/getThermalDesignBasis\(\{ state: config\.state \|\| null \}\)\.minDesignTempC/);
   });
 
+  it('🚨 the design temperature says whose it is', () => {
+    // A number a designer sizes a string on should name its basis. The box
+    // printed "@ -23°C" with no indication of where that came from — and until
+    // recently there were three competing bases, so it was not even a stable
+    // fact. `getThermalDesignBasis` has been returning its own provenance all
+    // along; it just was not rendered.
+    expect(PAGE).toMatch(/title=\{`Design low \$\{designTemp\}°C — /);
+    expect(PAGE, 'the basis source is not named').toMatch(/basis\.source/);
+  });
+
+  it('and an AHJ override is shown INLINE, not hidden on hover', () => {
+    // A design sized to a jurisdiction's own design-low instead of the ASHRAE
+    // envelope is a material fact about the design, not a footnote.
+    expect(PAGE).toMatch(/const overridden = designTemp !== basis\.minDesignTempC;/);
+    expect(PAGE).toMatch(/AHJ override/);
+  });
+
   it('the page passes the REAL topology, not a micro-only exclusion', () => {
     // The old code was `if (inv.type === 'micro') return null;` and nothing
     // else — which is why optimizers were treated as string inverters.
