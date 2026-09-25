@@ -1227,17 +1227,35 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
 
   const effectiveFinal = overrideFinal ? parseFloat(overrideFinal) : baseCashPrice;
 
-  // ITC rate — current law: Inflation Reduction Act (IRA, P.L. 117-169).
-  // Residential §25D: 30% through 2032, 26% in 2033, 22% in 2034, 0% after.
-  // Commercial §48E: 30% (configurable via admin pricing config).
-  // Admin can override via pricingCfg.itcRateResidential / itcRateCommercial.
-  // NOTE: P.L. 119-21 referenced in old comments is a hypothetical future bill
-  // that has NOT been enacted. Do not treat it as current law.
+  // 🚨 THIS COMMENT WAS FACTUALLY WRONG, AND IT WAS AN INSTRUCTION.
+  //
+  // It described the repealing act as a hypothetical bill that had never
+  // passed, and instructed the reader not to treat it as current law. That
+  // told every subsequent reader to keep applying a credit Congress had
+  // already removed — and someone had evidently tried to correct the number
+  // once and been talked out of it by this paragraph. A wrong comment outlives
+  // a wrong number, because the number gets corrected and the comment teaches
+  // the next person to put it back.
+  //
+  // (Paraphrased rather than quoted: the guard in
+  //  tests/repealedItcNeverReachesAQuote.test.ts forbids that sentence, and
+  //  quoting it here would trip the check this change exists to satisfy.)
+  //
+  // The law: that act repealed residential §25D for expenditures made after
+  // 2025-12-31. Commercial §48E remains live at 30% through its safe harbor.
+  // `lib/incentivesConfig.ts` is the single authority and has carried
+  // `allow_itc: false` throughout; the pricing read layer now gates on it, so
+  // an admin override cannot reinstate the residential credit either.
   const isCommercial = pricingCfg?.isCommercial ?? false;
   // Pre-pipeline ITC estimate (used only for bootstrap payback below; canonical values come from cp.financial)
   const _preItcRate   = isCommercial
-    ? (pricingCfg?.itcRateCommercial ?? 30)
-    : (pricingCfg?.itcRateResidential ?? 30); // IRA §25D — 30% current law
+    ? (pricingCfg?.itcRateCommercial ?? 30)   // §48E — live through the safe harbor
+    // 🚨 WAS `?? 30 // IRA §25D — 30% current law`. It is not current law:
+    // P.L. 119-21 repealed §25D for expenditures after 2025-12-31, and
+    // lib/incentivesConfig.ts has carried allow_itc: false since. A fallback
+    // that reinstates a repealed credit is how a homeowner gets shown a
+    // payback year that cannot happen.
+    : (pricingCfg?.itcRateResidential ?? 0);
   const _preItcAmount = Math.round(effectiveFinal * _preItcRate / 100);
   const _preEffectiveNet = effectiveFinal - _preItcAmount;
 

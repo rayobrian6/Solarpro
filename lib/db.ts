@@ -605,7 +605,23 @@ export const defaultPricing: PricingConfig = {
   equipmentCostPerWatt: 1.80,
   fixedCosts: 1500,
   profitMargin: 20,
-  taxCreditRate: 30, // §25D residential ITC — 30% through 2032 (IRA, P.L. 117-169). P.L. 119-21 has NOT been enacted; do not treat as current law.
+  /**
+   * 🚨 THE COMMENT HERE USED TO BE FACTUALLY WRONG, WHICH IS WORSE THAN THE
+   * NUMBER. It asserted that the repealing act had never been passed and
+   * instructed the reader not to treat it as current law — so it actively
+   * taught the next person to keep applying a credit Congress had removed.
+   * The act WAS passed: §25D is repealed for expenditures after 2025-12-31,
+   * and `lib/incentivesConfig.ts` has carried `allow_itc: false` for exactly
+   * that reason.
+   *
+   * (Worded without quoting the old sentence: a guard in
+   * tests/repealedItcNeverReachesAQuote.test.ts forbids that text, and an
+   * explanation that quotes it would trip the check it exists to satisfy.)
+   *
+   * The value is 0 because a residential federal credit is 0. `isItcEnabled()`
+   * is the authority; this legacy in-memory default must not disagree with it.
+   */
+  taxCreditRate: 0, // §25D repealed by P.L. 119-21 for expenditures after 2025-12-31
   utilityEscalationRate: 3.5,
   systemLifeYears: 25,
 };

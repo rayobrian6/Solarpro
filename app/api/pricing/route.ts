@@ -37,7 +37,9 @@ const DEFAULT_CONFIG = {
   // ITC
   isCommercial:         false,
   itcRateCommercial:    30,
-  itcRateResidential:   30,
+  // §25D repealed by P.L. 119-21. `isItcEnabled()` is the authority; this
+  // fallback must not contradict it. Commercial §48E above is live.
+  itcRateResidential:   0,
 };
 
 /**
@@ -113,7 +115,10 @@ export async function POST(req: NextRequest) {
         margin_percent          DOUBLE PRECISION NOT NULL DEFAULT 25,
         is_commercial           BOOLEAN          NOT NULL DEFAULT false,
         itc_rate_commercial     DOUBLE PRECISION NOT NULL DEFAULT 30,
-        itc_rate_residential    DOUBLE PRECISION NOT NULL DEFAULT 30,
+        -- §25D repealed. This DEFAULT only affects databases created from here
+        -- on; existing rows keep whatever they were born with, which is why the
+        -- READ path gates on isItcEnabled() rather than trusting the column.
+        itc_rate_residential    DOUBLE PRECISION NOT NULL DEFAULT 0,
         updated_at              TIMESTAMPTZ      NOT NULL DEFAULT NOW()
       )
     `;

@@ -8,6 +8,7 @@
 
 import { getDbReady } from './core';
 import type { DbPricingConfig, PricingMode } from './core';
+import { isItcEnabled } from '../incentivesConfig';
 
 // ============================================================
 // PRICING CONFIG — Single-row upsert pattern
@@ -42,8 +43,33 @@ function rowToPricingConfig(row: Record<string, unknown>): DbPricingConfig {
     systemLife:           (row.system_life as number) || 25,
     // ITC
     isCommercial:         (row.is_commercial as boolean) || false,
+    // §48E is LIVE at 30% through the safe-harbor deadline — this default is right.
     itcRateCommercial:    (row.itc_rate_commercial as number) ?? 30,
-    itcRateResidential:   (row.itc_rate_residential as number) ?? 30,
+    /**
+     * 🚨 RESIDENTIAL §25D IS REPEALED, AND THIS LINE WAS RE-ENABLING IT.
+     *
+     * It read `?? 30`. The column is nullable and no registered migration
+     * creates it, so for most databases the row value is null and every
+     * residential quote received a 30% federal credit that no longer exists —
+     * persisted into `costEstimate.taxCredit`/`netCost` by
+     * `app/api/production/route.ts` and shown to the customer as a payback year.
+     *
+     * The downstream guard could never fire: `lib/pricingEngine.ts` has
+     * `row.itcRateResidential ?? 0`, but by then the value is 30, not null. A
+     * defaulted-away null is the same defect class as a regex that cannot match
+     * — the protection is present, reads correctly, and is unreachable.
+     * `app/api/production/route.ts` even carries a comment stating the rate is
+     * "0 after the P.L.119-21 repeal" while reading 30.
+     *
+     * `isItcEnabled()` is now the authority, so a rate can only survive when
+     * §25D is actually allowed. That matters beyond the default: an admin
+     * typing 30 into the pricing config must not be able to reinstate a
+     * repealed credit, and before this it could.
+     *
+     * Commercial §48E is deliberately untouched — it is live, and zeroing it
+     * would be the opposite error.
+     */
+    itcRateResidential:   isItcEnabled() ? ((row.itc_rate_residential as number) ?? 0) : 0,
     updatedAt:            row.updated_at as string,
   };
 }
@@ -143,7 +169,10 @@ export async function upsertPricingConfig(data: Partial<Omit<DbPricingConfig, 'i
         ${data.marginPercent ?? 25},
         ${data.isCommercial ?? false},
         ${data.itcRateCommercial ?? 30},
-        ${data.itcRateResidential ?? 30}
+        -- Residential §25D is repealed; a new config row must not be born
+        -- carrying a credit that no longer exists. Commercial §48E above is
+        -- live and keeps its 30.
+        ${data.itcRateResidential ?? 0}
       )
       RETURNING *
     `;
