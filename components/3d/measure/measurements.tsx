@@ -190,3 +190,91 @@ export function renderRulerPreview(
     return null;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * EDGE DIMENSIONS — the number drawn ON the edge it measures.
+ *
+ * Aurora prints every edge length on the geometry itself (36.0 ft, 17.6 ft)
+ * while a structure is selected, and drops them the moment it is deselected,
+ * so the canvas declutters itself with no "show dimensions" preference for
+ * anyone to find. This is the renderer for SolarPro's equivalent.
+ *
+ * 🚨 IT IS THE SAME RENDERER, NOT A SECOND ONE. It reuses this module's line
+ * colour, label styling, lift and safety helpers, and returns the SAME
+ * MeasurementEntityBundle shape so `removeMeasurementBundle` already tears it
+ * down. A parallel label layer with its own styling and its own teardown is
+ * how a scene ends up with orphaned entities nobody can clear.
+ *
+ * 🚨 AND IT DOES NO ARITHMETIC. The caller passes a finished string, measured
+ * by `measureWall` in lib/3d/sectionEditing.ts — the authority that already
+ * knows a face's edge lengths, its rake and which ground it stands on. A
+ * length computed here would be a second answer to "how long is that edge",
+ * and the two would eventually disagree on screen.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Dimensions are drawn thinner and without endpoint dots — they annotate an
+ *  edge that is already drawn, rather than being a measurement the user made. */
+const DIM_LINE_WIDTH = 1;
+const DIM_COLOR_CSS  = '#ffd24a';
+
+export function renderEdgeDimension(
+  viewer: any,
+  C: any,
+  a: LngLatH,
+  b: LngLatH,
+  text: string,
+  tag: string,
+): MeasurementEntityBundle | null {
+  if (!viewer || !C || !text) return null;
+
+  const posA = safeCartesian3(C, a.lng, a.lat, a.h + VERTICAL_LIFT_M);
+  const posB = safeCartesian3(C, b.lng, b.lat, b.h + VERTICAL_LIFT_M);
+  if (!posA || !posB) return null;
+
+  const mid = midpoint(a, b);
+  const midPos = safeCartesian3(C, mid.lng, mid.lat, mid.h);
+  if (!midPos) return null;
+
+  let polyline: any;
+  let label: any;
+  try {
+    const colour = C.Color.fromCssColorString(DIM_COLOR_CSS).withAlpha(0.85);
+    polyline = viewer.entities.add({
+      name: `[DIM] ${tag}`,
+      polyline: {
+        positions: [posA, posB],
+        width: DIM_LINE_WIDTH,
+        material: colour,
+        clampToGround: false,
+        arcType: C.ArcType.NONE,
+      },
+    });
+    label = viewer.entities.add({
+      name: `[DIM] ${tag}`,
+      position: midPos,
+      label: {
+        text,
+        font: 'bold 12px sans-serif',
+        fillColor: C.Color.fromCssColorString(DIM_COLOR_CSS),
+        outlineColor: C.Color.BLACK,
+        outlineWidth: 2,
+        style: C.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: C.VerticalOrigin.CENTER,
+        horizontalOrigin: C.HorizontalOrigin.CENTER,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        showBackground: true,
+        backgroundColor: labelBgColor(C),
+        backgroundPadding: new C.Cartesian2(5, 3),
+        // A roof edge seen from across the site is a few pixels long; the
+        // number stops being worth drawing before it stops being drawn.
+        scaleByDistance: new C.NearFarScalar(40, 1.0, 400, 0.55),
+        translucencyByDistance: new C.NearFarScalar(250, 1.0, 600, 0.0),
+      },
+    });
+  } catch {
+    removeMeasurementBundle(viewer, { polyline, dotA: null, dotB: null, label });
+    return null;
+  }
+
+  return { polyline, dotA: null, dotB: null, label };
+}

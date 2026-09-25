@@ -98,6 +98,8 @@ import {
   applyFacePitchEdit,
   previewFacePitch,
   measureWall,
+  wallId,
+  ftStr1,
   type SectionEdit,
   type SectionEditOutcome,
   type PitchAnchor,
@@ -261,6 +263,7 @@ import {
   renderMeasurement,
   removeMeasurementBundle,
   renderRulerPreview,
+  renderEdgeDimension,
   type MeasurementEntityBundle,
 } from './measure/measurements';
 
@@ -1358,6 +1361,8 @@ function SolarEngine3D({
    *  becoming a second writer. */
   const activeFaceId: string | null = (selectedRoofPlaneId ?? selectedFaceId) || null;
   const measureOverlayRef = useRef<any[]>([]);
+  /** Edge-length labels for the SELECTED face only. See `syncFaceDimensions`. */
+  const faceDimensionsRef = useRef<MeasurementEntityBundle[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
   // v70: Aurora-parity Save/Undo/Redo ring-buffer history store.
@@ -2722,7 +2727,29 @@ function SolarEngine3D({
     if (process.env.NEXT_PUBLIC_E2E !== '1' || typeof window === 'undefined') return;
     if (stage !== 'done' || !viewerRef.current) return;
     (window as any).__solarViewerE2E = viewerRef.current;
-    return () => { try { delete (window as any).__solarViewerE2E; } catch {} };
+    /* 🚨 SELECTION IS THE ENGINE'S, SO THE HOOK MUST BE THE ENGINE'S.
+     *
+     * DesignStudio's `selected3DFaceId` is a read-only MIRROR and says so in
+     * its own comment: feeding it back down would give one fact two writers.
+     * A first attempt at this hook set that mirror and looked like it worked —
+     * the studio state changed — while the engine never learned anything and
+     * drew nothing. So the hook lives here and calls `selectRoofFace`, which
+     * is the same function the real click path reaches through
+     * `handleSelectClick`.
+     *
+     * Exposing the mount render's copy is safe: `selectRoofFace` touches only
+     * refs and setState functions, both stable for the component's life.
+     *
+     * Needed because `drillPick` returns ZERO hits under software WebGL —
+     * nothing is rasterised, so nothing is under the cursor — which would
+     * otherwise make every face-scoped behaviour unreachable from a browser
+     * spec. The harness limit is documented in
+     * e2e/object-geometry-acceptance.spec.ts. */
+    (window as any).__solarEngineE2E = { selectRoofFace };
+    return () => {
+      try { delete (window as any).__solarViewerE2E; } catch {}
+      try { delete (window as any).__solarEngineE2E; } catch {}
+    };
   }, [stage]);
 
   // ── v64: Restore 3D roof-plane outlines + wireframe on project load ──────
@@ -3054,6 +3081,19 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFaceId, selectionLevel, panelPlaneKey]);
+
+  /* Edge dimensions follow the selection, and nothing else.
+   *
+   * Keyed on `roofPlanes` as well as the selected face because an edit that
+   * changes a length — a pitch change, a nudge, Square Up — must move the
+   * number with the geometry. A label left reading the pre-edit length is
+   * worse than no label: it is a measurement the user will believe.
+   * `stage` is in here because the viewer does not exist before 'done'. */
+  useEffect(() => {
+    if (stage !== 'done') return;
+    syncFaceDimensions(activeFaceId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFaceId, roofPlanes, stage]);
 
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
@@ -9286,6 +9326,65 @@ function SolarEngine3D({
     if (!viewer) return;
     measureOverlayRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     measureOverlayRef.current = [];
+    try { viewer.scene.requestRender(); } catch {}
+  }
+
+  /* ── LIVE EDGE DIMENSIONS ON THE SELECTED FACE ───────────────────────────
+   *
+   * Aurora draws every edge length on the geometry while a structure is
+   * selected and drops them the instant it is deselected, so the canvas
+   * declutters itself and nobody has to find a "show dimensions" preference.
+   * SolarPro drew no dimension anywhere: the lengths existed, but only as
+   * numbers in a panel, for one edge at a time, after clicking that edge.
+   *
+   * 🚨 TIED TO SELECTION ON PURPOSE. Drawing every edge of every face all the
+   * time is the clutter Ray explicitly ruled out — it is also unreadable on a
+   * fourteen-face roof. Selection is the scope.
+   *
+   * 🚨 THE NUMBERS COME FROM `measureWall`, NOT FROM HERE. That is the
+   * authority that already knows a face's edge lengths, whether the edge is
+   * raked and which pad it stands on, and `ftStr1` is the rounding the
+   * inspector already prints. Computing a length in this function would be a
+   * second answer to "how long is that edge", and the panel and the canvas
+   * would eventually disagree in front of the customer.
+   */
+  function clearFaceDimensions() {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    for (const b of faceDimensionsRef.current) removeMeasurementBundle(viewer, b);
+    faceDimensionsRef.current = [];
+  }
+
+  function syncFaceDimensions(faceId: string | null) {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    clearFaceDimensions();
+    if (!viewer || !C || !faceId) { try { viewer?.scene.requestRender(); } catch {} return; }
+
+    const planes = roofPlanesRef.current ?? [];
+    const plane = planes.find((p: any) => p.id === faceId);
+    const poly = (plane?.polygon3D ?? []) as any[];
+    if (poly.length < 3) { try { viewer.scene.requestRender(); } catch {} return; }
+
+    for (let i = 0; i < poly.length; i++) {
+      const w = measureWall(planes, wallId(faceId, i), cesiumGroundElevRef.current);
+      if (!w.found || !isFinite(w.lengthM) || w.lengthM < 0.3) continue;
+
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const ca = C.Cartographic.fromCartesian(a);
+      const cb = C.Cartographic.fromCartesian(b);
+      if (!ca || !cb) continue;
+
+      const bundle = renderEdgeDimension(
+        viewer, C,
+        { lat: C.Math.toDegrees(ca.latitude), lng: C.Math.toDegrees(ca.longitude), h: ca.height },
+        { lat: C.Math.toDegrees(cb.latitude), lng: C.Math.toDegrees(cb.longitude), h: cb.height },
+        ftStr1(w.lengthM),
+        wallId(faceId, i),
+      );
+      if (bundle) faceDimensionsRef.current.push(bundle);
+    }
     try { viewer.scene.requestRender(); } catch {}
   }
 
