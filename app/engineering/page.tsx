@@ -172,6 +172,10 @@ import { stringSizingBounds } from '@/lib/string-generator';
 // What a person is told when a request fails — and what they are not. See the
 // note in that file: this page used to paste raw response bodies into toasts.
 import { userFacingServerError } from '@/lib/http/userFacingError';
+// The voltage drop the conduit schedule prints. Used to annotate the wire-gauge
+// choice with its consequence, from the SAME authority — see the note at the
+// dropdown.
+import { segmentVoltageDropPct } from '@/lib/segment-schedule';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
@@ -11127,10 +11131,48 @@ function EngineeringPageInner() {
                                                 </div>
                                                 <div>
                                                   <label className="text-xs text-slate-500 mb-0.5 block">DC Wire</label>
-                                                  <select value={str.wireGauge} onChange={e => updateString(inv.id, str.id, { wireGauge: e.target.value })}
-                                                    className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white focus:outline-none">
-                                                    {['#14 AWG', '#12 AWG', '#10 AWG', '#8 AWG', '#6 AWG'].map(g => <option key={g}>{g}</option>)}
-                                                  </select>
+                                                  {/* ══ EACH GAUGE CARRIES ITS CONSEQUENCE ═════════════════
+                                                      🚨 PICKING WIRE IS A DECISION, NOT DATA ENTRY.
+                                                      This was a bare list of five gauges, so choosing one
+                                                      meant guessing, saving, reading the conduit schedule,
+                                                      and coming back. HelioScope annotates every option with
+                                                      the voltage drop it would cause — the best single
+                                                      interaction found in the whole engineering research
+                                                      lane — and the number was already computable here.
+
+                                                      🚨 AND IT IS THE SAME NUMBER THE SCHEDULE PRINTS.
+                                                      Several voltage-drop implementations exist in this
+                                                      codebase; `segmentVoltageDropPct` is the one whose
+                                                      answer computed-system displays and the plan set is
+                                                      engineered to. Annotating from any other would show the
+                                                      designer a figure the schedule below then contradicts.
+
+                                                      Falls back to a bare list when the panel's Imp or the
+                                                      run length is unknown: a drop computed from a guessed
+                                                      current is worse than no annotation, because it looks
+                                                      like an answer. */}
+                                                  {(() => {
+                                                    const GAUGES = ['#14 AWG', '#12 AWG', '#10 AWG', '#8 AWG', '#6 AWG'];
+                                                    const sp = getPanelById(str.panelId) as any;
+                                                    const imp = Number(sp?.imp);
+                                                    const vmp = Number(sp?.vmp);
+                                                    const runFt = Number(str.wireLength);
+                                                    const stringV = vmp * Number(str.panelCount || 0);
+                                                    const canAnnotate =
+                                                      Number.isFinite(imp) && imp > 0 &&
+                                                      Number.isFinite(stringV) && stringV > 0 &&
+                                                      Number.isFinite(runFt) && runFt > 0;
+                                                    return (
+                                                      <select value={str.wireGauge} onChange={e => updateString(inv.id, str.id, { wireGauge: e.target.value })}
+                                                        className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white focus:outline-none">
+                                                        {GAUGES.map(g => {
+                                                          if (!canAnnotate) return <option key={g} value={g}>{g}</option>;
+                                                          const vd = segmentVoltageDropPct(imp, runFt, g, stringV, 2);
+                                                          return <option key={g} value={g}>{`${g} — ${vd.toFixed(2)}%`}</option>;
+                                                        })}
+                                                      </select>
+                                                    );
+                                                  })()}
                                                 </div>
                                                 <div>
                                                   <label className="text-xs text-slate-500 mb-0.5 block">Run (ft)</label>

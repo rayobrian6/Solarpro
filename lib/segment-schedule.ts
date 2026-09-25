@@ -359,6 +359,29 @@ function calcConduitSize(
 
 // ─── Voltage Drop ─────────────────────────────────────────────────────────────
 
+/**
+ * 🚨 EXPORTED SO THE UI CAN ANNOTATE A CHOICE WITH ITS CONSEQUENCE — and so it
+ * annotates with THIS number, not a seventh one.
+ *
+ * There are several voltage-drop implementations in this codebase. Only two are
+ * reachable from a user-facing path, and this is the one whose answer the
+ * engineering page and the stamped plan set both display (via computed-system).
+ * A dropdown annotated from `manufacturer-specs.calcVoltageDrop` instead would
+ * show the designer a number the conduit schedule then contradicts — which is
+ * the defect class this file's neighbours have spent a campaign closing.
+ *
+ * Exporting changes no behaviour: it is a pure function of its arguments.
+ */
+export function segmentVoltageDropPct(
+  currentA: number,
+  onewayFt: number,
+  gauge: string,
+  voltageV: number,
+  conductorCount: number = 2
+): number {
+  return calcVoltageDrop(currentA, onewayFt, gauge, voltageV, conductorCount);
+}
+
 function calcVoltageDrop(
   currentA: number,
   onewayFt: number,

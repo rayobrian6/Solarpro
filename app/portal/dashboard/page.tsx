@@ -801,44 +801,36 @@ function MonitoringFoundation({ stage, project }: { stage: HomeownerStage | null
             <ExternalLink size={12} className="ml-1 opacity-60" />
           </a>
 
-          {/* Quick stats placeholders — will be populated if monitoring API integration is added */}
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { icon: Zap,        label: 'Production',  value: '— kW',  sub: 'Live output' },
-              { icon: Battery,    label: 'Battery',     value: '—%',    sub: 'Charge level' },
-              { icon: TrendingUp, label: 'Savings',     value: '$—',    sub: 'This month' },
-            ].map((item, i) => (
-              <div key={i} className="rounded-xl bg-white/[0.02] border border-white/[0.05] px-3 py-3 text-center">
-                <item.icon size={14} className="text-slate-600 mx-auto mb-2" />
-                <p className="text-sm font-black text-slate-500">{item.value}</p>
-                <p className="text-[9px] text-slate-700 uppercase tracking-wide mt-0.5">{item.sub}</p>
-              </div>
-            ))}
-          </div>
-          <p className="text-[10px] text-slate-600 mt-3 leading-relaxed">
-            Click the button above to view live data on your {label} dashboard.
+          {/* 🚨 THREE PLACEHOLDER TILES WERE HERE, READING "— kW", "—%" AND
+              "$—", under a comment saying they would be populated "if monitoring
+              API integration is added". No such client exists — there is no
+              Enphase or SolarEdge integration anywhere in the codebase.
+
+              So they were furniture that implied live data was on its way, next
+              to a button that already works. A homeowner reads three empty
+              gauges as "my system is producing nothing" or "this is broken",
+              and the one genuinely useful control on the panel — the link to
+              the real dashboard — had to compete with them.
+
+              The same rule the rest of this campaign has applied: do not display
+              what nothing populates. The CTA stays; the theatre goes. */}
+          <p className="text-[10px] text-slate-600 mt-1 leading-relaxed">
+            Live production, battery and savings figures are shown on your {label} dashboard.
           </p>
         </>
       ) : (
         <>
-          <p className="text-sm text-slate-400 leading-relaxed mb-5">
-            Real-time energy production data, battery status, and savings tracking will appear here as your monitoring activates.
+          {/* Same removal as the branch above, and the copy corrected with it.
+              It said the figures "will appear HERE" — they will not. They appear
+              on the inverter manufacturer's own dashboard, and this panel's job
+              is to hand over the link to it once the installer has set one up. */}
+          <p className="text-sm text-slate-400 leading-relaxed mb-3">
+            Once your system is live, your installer will add a link to your monitoring
+            dashboard here. That is where your real-time production, battery status and
+            savings are shown.
           </p>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { icon: Zap,        label: 'Production',  value: '— kW',  sub: 'Live output' },
-              { icon: Battery,    label: 'Battery',     value: '—%',    sub: 'Charge level' },
-              { icon: TrendingUp, label: 'Savings',     value: '$—',    sub: 'This month' },
-            ].map((item, i) => (
-              <div key={i} className="rounded-xl bg-white/[0.02] border border-white/[0.05] px-3 py-3 text-center">
-                <item.icon size={14} className="text-slate-600 mx-auto mb-2" />
-                <p className="text-sm font-black text-slate-500">{item.value}</p>
-                <p className="text-[9px] text-slate-700 uppercase tracking-wide mt-0.5">{item.sub}</p>
-              </div>
-            ))}
-          </div>
-          <p className="text-[10px] text-slate-700 mt-4 leading-relaxed">
-            Monitoring data typically activates within 24–48 hours of your system going live.
+          <p className="text-[10px] text-slate-700 leading-relaxed">
+            Monitoring typically activates within 24–48 hours of your system going live.
           </p>
         </>
       )}

@@ -56,6 +56,21 @@ and is queued separately.
 
 ---
 
+## R4 — Milestone checkboxes that record nothing
+
+| | |
+|---|---|
+| **Severity** | MEDIUM — the product tells an operator it recorded something it did not |
+| **Where** | `components/deals/DealDecisionModal.tsx` — four toggles (`proposal_accepted`, `contract_signed_confirmed`, `engineering_approved`, `install_scheduled_confirmed`) are POSTed to `/api/projects/update-status`, which never reads them. The code comment says so out loud: *"non-breaking — update-status ignores unknown fields"*. |
+| **The harm** | An operator ticks "Engineering drawings approved" and believes it is on the record. It is not, anywhere. |
+| **Decision required** | Do these four milestones mean the same as existing micro-stages, or are they distinct facts? None of the four ids exists in the 34-value vocabulary. The nearest matches are `proposal_approved`, `contract_signed`, `engineering_completed`, `install_scheduled` — but whether "accepted" is "approved", and whether "confirmed" adds anything over the base stage, is a semantic question about your process. |
+| **Why not just map them** | Guessing would create a **fifth** status vocabulary on a row that already carries four, which a research pass explicitly rejected for that reason. |
+| **Blocked** | Persisting these four milestones. |
+| **NOT blocked** | Everything else — the stage machine, micro-stages, the portal, permits, design. |
+| **Safe default NOT applied, deliberately** | Removing the toggles would delete a feature you may want; silently mapping them would invent meaning. The interim state is a known lie and is recorded here rather than quietly changed. Say which way and it is a small change. |
+
+---
+
 ## Resolved — no longer blocking
 
 | Item | Outcome |

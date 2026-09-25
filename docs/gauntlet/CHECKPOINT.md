@@ -28,7 +28,11 @@ Last updated: 2026-09-25, after the string-sizing authority landed.
 | `6acb46dd` | A destructive save cannot report success unless the tombstone persisted |
 | `c3df7c77` | One thermal design basis per package (app == SLD == plan set) |
 | `ffb9de9a` | A reshaped roof face reports the area it actually has |
-| *pending* | One string-sizing authority — the page's readout stopped applying Voc×N to optimizers |
+| `6dedcc6d` | One string-sizing authority — the page's readout stopped applying Voc×N to optimizers, where its Auto button was *applying* a layout the engine was fixed to stop producing |
+| `d7d1b55d` | The portal shows the install date (18.6% of support contacts); an invalid micro-stage written raw; email stopped reporting success when nothing was sent |
+| `b8b6cd7f` | Survey readiness reaches the crew *before* they leave — and refuted the lane's premise rather than building a second mapping on it |
+| `5419cf69` | The installer's margin on the design screen, proven not to leak to five customer-facing surfaces; raw stack traces stopped reaching toasts |
+| *pending* | Wire-gauge dropdown annotated with the voltage drop each option would cause — from the same authority the conduit schedule prints |
 
 ---
 

@@ -100,6 +100,31 @@ describe('🚨 what the homeowner is shown is never invented', () => {
       .toMatch(/\{content\.next && !installDateLabel \?/);
   });
 
+  it('🚨 no placeholder gauge is rendered for data that does not exist', () => {
+    // Six tiles read "— kW", "—%" and "$—" under a comment saying they would be
+    // populated "if monitoring API integration is added". No such client exists
+    // anywhere in the codebase. A homeowner reads three empty gauges as "my
+    // system is producing nothing" or "this is broken", next to a button that
+    // already works.
+    //
+    // Same rule as the install date above, in the other direction: do not
+    // display what nothing populates.
+    expect(PAGE, 'a placeholder production gauge is back').not.toMatch(/'— kW'/);
+    expect(PAGE, 'a placeholder battery gauge is back').not.toMatch(/'—%'/);
+    expect(PAGE, 'a placeholder savings gauge is back').not.toMatch(/'\$—'/);
+  });
+
+  it('and the monitoring link — the one real control — is still there', () => {
+    // The subtraction must not take the useful thing with it.
+    expect(PAGE).toMatch(/href=\{project!\.monitoringUrl!\}/);
+  });
+
+  it('the copy no longer promises the figures will appear in the portal', () => {
+    // They appear on the inverter manufacturer's dashboard. Saying "here" was a
+    // promise the product has no integration to keep.
+    expect(PAGE).not.toMatch(/will appear here as your monitoring activates/);
+  });
+
   it('the formatter produces a real human date', () => {
     // The exact options the page uses, exercised directly — a formatter that
     // silently produced an empty string would pass the structural guards above.
