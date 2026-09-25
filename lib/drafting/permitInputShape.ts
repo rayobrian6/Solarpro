@@ -21,6 +21,31 @@ export interface PermitInputShape {
     ahjRidgeSetbackIn?: number;
     panelPositions?: any[];
     roofPlanes?: any[];
+    /**
+     * Obstructions the designer MARKED BY HAND in the 3D studio.
+     *
+     * 🚨 DECLARED, NOT A STOWAWAY. `roofObstructions` — the field the roof plan
+     * ultimately draws — is assembled on the server from the Nearmap AI sweep
+     * and the aerial-vision detector. Hand-placed objects reached neither, so a
+     * chimney the designer marked cleared panels in the design and was absent
+     * from the stamped drawing.
+     *
+     * They arrive separately and tagged so the two provenances stay
+     * distinguishable, and are merged in `roofCAD` — which is where every
+     * obstruction becomes local-frame geometry, so the manual ones get the same
+     * treatment rather than a bypass. Produced by
+     * `lib/obstruction/permitProjection.ts`, which takes its clearance and
+     * radius from the SAME authorities the 3D panel keep-out uses.
+     */
+    manualRoofObstructions?: Array<{
+      lat: number;
+      lng: number;
+      radiusFt: number;
+      clearanceFt: number;
+      type: string;
+      planeId?: string;
+      source?: 'manual';
+    }>;
     // Error 5u fix: lat/lng accessed in groundCAD.ts via `as any` — declare explicitly
     lat?: number;
     lng?: number;

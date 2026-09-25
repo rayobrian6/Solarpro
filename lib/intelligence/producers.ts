@@ -240,10 +240,15 @@ export function produceContractorPerformanceObservations(contractorId: string, a
    * defamatory while the other is merely missing.
    *
    * The reason they are always zero is that nothing writes the columns:
-   *   • close_status / lost_reason / first_contact_at / dispute_filed_at
-   *     have ZERO writers anywhere in app/ or lib/ — every mutation on
-   *     opportunity_assignments uses a static column list and none includes
-   *     them. They are only ever SELECTed.
+   *   • close_status / lost_reason / dispute_filed_at have ZERO writers
+   *     anywhere in app/ or lib/ — every mutation on opportunity_assignments
+   *     uses a static column list and none includes them. Only ever SELECTed.
+   *   • first_contact_at NOW HAS ONE: POST /api/network/opportunities/[id]/
+   *     contact, fired by the tel:/mailto: links on a claimed lead. So
+   *     `contractor_response_speed` becomes real as soon as a contractor
+   *     reaches out, while the close-rate and dispute fields above stay
+   *     structurally empty. That asymmetry is why `supported` is per-field
+   *     rather than one flag for the whole producer.
    *   • `status` never becomes 'won' or 'lost' either. Those values appear once
    *     in the codebase, in a WHERE clause.
    *   • `proposal_at` likewise has no writer. (`closed_at` DOES get written —

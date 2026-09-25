@@ -165,6 +165,7 @@ import { getInterconnectionProfile, getTypicalTotalTimeline, type Interconnectio
 import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
 import { downloadFilenameFor } from '@/lib/http/contentDisposition';
 import { formatRise12 } from '@/lib/3d/pitchFormat';
+import { projectObstructionsForPermit } from '@/lib/obstruction/permitProjection';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -8305,6 +8306,21 @@ function EngineeringPageInner() {
               pitch: rp.pitch, azimuth: rp.azimuth, area: rp.area,
             })),
           } : {}),
+          // 🚨 THE OBSTRUCTIONS THE DESIGNER MARKED BY HAND.
+          //
+          // Until this line the roof plan's only obstructions came from the
+          // Nearmap AI sweep and the aerial-vision detector — so a chimney
+          // marked in the studio cleared panels around itself and then did not
+          // appear on the stamped drawing. The design and the plan set
+          // disagreed about what was physically on the roof.
+          //
+          // Deliberately OUTSIDE the panels gate above: a roof can carry a
+          // chimney before it carries a single module, and the drawing still
+          // has to show it. Gating obstructions on panel count would make the
+          // sheet correct only for designs that happen to be finished.
+          ...(projectLayout?.obstructions?.length
+            ? { manualRoofObstructions: projectObstructionsForPermit(projectLayout.obstructions) }
+            : {}),
         },
         system: {
           totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw),
@@ -15610,6 +15626,13 @@ function EngineeringPageInner() {
                                     pitch: rp.pitch, azimuth: rp.azimuth, area: rp.area,
                                   })),
                                 } : {}),
+                                // Same carriage as the other permit payload builder
+                                // above — this file constructs the project twice, and
+                                // an obstruction present in one and absent from the
+                                // other would mean two plan sets of the same roof.
+                                ...(projectLayout?.obstructions?.length
+                                  ? { manualRoofObstructions: projectObstructionsForPermit(projectLayout.obstructions) }
+                                  : {}),
                               },
                               system: {
                                 totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw),

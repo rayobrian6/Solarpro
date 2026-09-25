@@ -228,6 +228,69 @@ export function roofCAD(input: PermitInputShape): CADModel {
     warnings.push(`roofCAD: ${nearmapObstructions.length} Nearmap AI obstruction(s) on-roof (${_droppedOffRoof} neighbor/off-roof dropped)`);
   }
 
+  // ── Obstructions the DESIGNER MARKED BY HAND ────────────────────────────────
+  //
+  // 🚨 THESE NEVER REACHED THE DRAWING. `project.roofObstructions` was fed by
+  // exactly two sources — the Nearmap AI sweep and the aerial-vision detector —
+  // so a chimney marked in the 3D studio correctly cleared panels around itself
+  // and then did not appear on the stamped plan set. The design and the permit
+  // described different roofs.
+  //
+  // They join HERE rather than at the adapter, so they pass through the same
+  // local-frame projection and the same downstream treatment as every other
+  // obstruction. Injecting them later would be a bypass, and a bypass is how the
+  // two lists drift apart again.
+  //
+  // Three of the Nearmap-specific filters above are deliberately NOT applied:
+  //
+  //   • the per-type RADIUS CAP exists because coarse AI polygons blow up into
+  //     dominant circles mid-sheet. A designer typed these dimensions after
+  //     looking at the roof; capping a chimney they measured would overrule a
+  //     person with a tape measure in favour of a table.
+  //   • the LINEAR-FEATURE drop is an AI-polygon artifact filter. A hand-placed
+  //     object is whatever shape the installer said it was.
+  //   • the NEIGHBOUR filter exists because the AI's ~45 m AOI covers adjacent
+  //     buildings. A hand-placed object was placed on this roof by clicking it.
+  //
+  // An object whose centroid lands on no design plane is KEPT and warned about,
+  // never silently dropped: discarding the designer's own mark is the same
+  // class of defect as never carrying it in the first place, and it would be
+  // invisible.
+  {
+    const manual = ((input.project as any)?.manualRoofObstructions ?? []) as Array<{
+      lat: number; lng: number; radiusFt: number; clearanceFt: number; type: string; planeId?: string;
+    }>;
+    let _manualOffPlane = 0;
+    const manualObstructions: SysDefObstruction[] = manual
+      .filter(o => o && isFinite(o.lat) && isFinite(o.lng) && isFinite(o.radiusFt) && o.radiusFt > 0)
+      .map((o, i) => {
+        const cXY = latLngToXY(o.lat, o.lng, originLat, originLng);
+        // Prefer the face it was marked on; fall back to a hit test only if the
+        // record predates the binding.
+        const host = o.planeId
+          ? rawPlanes.find((rp: any) => rp.id === o.planeId)
+          : rawPlanes.find((rp: any) => _ptInRing(o.lat, o.lng, rp.vertices ?? []));
+        if (!host) _manualOffPlane++;
+        return {
+          id:          `manual-obs-${i}`,
+          type:        o.type || 'other',
+          worldX:      cXY.x,
+          worldY:      cXY.y,
+          radiusM:     o.radiusFt / 3.28084,
+          heightFt:    1,
+          setbackIn:   Math.round((o.clearanceFt / 3.28084) / 0.0254),
+          confidence:  1,        // a person put it there
+          roofPlaneId: (host as any)?.id ?? null,
+          source:      'manual' as const,
+        };
+      });
+    if (manualObstructions.length > 0) {
+      sysDefObstructions.push(...manualObstructions);
+      warnings.push(`roofCAD: ${manualObstructions.length} hand-placed obstruction(s) carried to the plan set`
+        + (_manualOffPlane > 0 ? ` (${_manualOffPlane} not bound to a design plane — kept, verify placement)` : ''));
+    }
+  }
+
   // ── GPS panel lookup map ──────────────────────────────────────
   // Map each GPS panel to local XY
   const gpsPanels: Array<{
