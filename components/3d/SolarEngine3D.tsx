@@ -17466,6 +17466,28 @@ function SolarEngine3D({
           to localStorage so the layout survives reloads. */}
       {stage === 'done' ? (
         <>
+          {/* 🚨 CONTEXTUAL, NOT PERMANENT — and the loader stays reachable.
+            *
+            * This panel rendered its Point-cloud/Mesh selector, its three
+            * offset steppers and its Lift/Flatten buttons ALWAYS, including
+            * with no LiDAR dataset loaded at all: five controls that decide
+            * nothing, permanently occupying the left of the canvas, on every
+            * design whether or not the installer has a scan. Aurora's whole
+            * roof-modelling chrome is four tools and one inspector.
+            *
+            * The one thing in here that matters with no dataset is "Load .las
+            * File", and `handleLiDARLoad` has exactly ONE call site — this
+            * panel — so hiding it unconditionally would strand the loader the
+            * way `setShowBuilding3D` was once stranded (see the header of
+            * lib/3d/overlayLayers.ts). So the gate is the LiDAR TAB, which is
+            * an always-on top-bar control and is the thing a person presses
+            * when they are thinking about LiDAR. Either the tab is selected,
+            * or a dataset is already loaded and its properties must stay
+            * editable whichever tab is showing.
+            *
+            * Declared 'contextual' in OVERLAY_VISIBILITY; tests/overlayVisibilityBudget
+            * fails if that declaration and this guard disagree. */}
+          {mapPickerState.tab === 'lidar' || lidar.state.dataset ? (
           <DraggablePanel id="lidar-properties" zIndex={OVERLAY_Z.DATA}>
             <LiDARPropertiesPanel
               state={lidar.state}
@@ -17478,6 +17500,9 @@ function SolarEngine3D({
               onClear={() => lidar.setDataset(null)}
             />
           </DraggablePanel>
+          ) : null}
+          {/* The toast is NOT gated: a load started from the LiDAR tab must
+            * keep reporting progress if the user switches tab while it runs. */}
           <LiDARLoadingToast show={lidar.state.isLoading} />
         </>
       ) : null}

@@ -122,3 +122,96 @@ export const OVERLAY_Z = {
 } as const;
 
 export type OverlayLayer = keyof typeof OVERLAY_Z;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * AND ONE ANSWER TO "WHY IS THIS ON MY SCREEN".
+ *
+ * `OVERLAY_Z` gave overlay ORDER an authority. Overlay EXISTENCE had none:
+ * every panel carried its own inline ternary in the engine's JSX, and six of
+ * them repeated the identical `stage === 'done' ?` — which is not a condition,
+ * it is "always, once the map has loaded". Nothing anywhere stated how many
+ * panels are meant to be on screen at rest, so the count could only grow, one
+ * reasonable-looking addition at a time.
+ *
+ * It grew to twenty. For comparison, measured from real usage recordings:
+ * Aurora's entire roof-modelling chrome is a FOUR-item tool card plus ONE
+ * inspector region that is empty until you select something, and Solargraf's
+ * drawing tool has six controls in total.
+ *
+ * 🚨 THIS IS A BUDGET, NOT A DESCRIPTION. The test that reads it fails when a
+ * panel is added without being declared here, and fails when the number of
+ * always-on panels exceeds ALWAYS_ON_BUDGET. Raising the budget is allowed —
+ * deliberately, in a commit that says why — but it cannot happen by accident,
+ * which is the only way it happened the first time.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * When a panel is on screen.
+ *
+ *   'always'     — visible from the moment the scene is usable, unconditionally.
+ *                  This is the budgeted class. Every one of these costs the
+ *                  installer permanent screen area and permanent attention.
+ *   'contextual' — only while something specific is true: an object is
+ *                  selected, a tool is armed, a layer is on, a dataset is
+ *                  loaded, an action is available. Costs nothing at rest.
+ *   'transient'  — appears in response to something and goes away on its own
+ *                  (a status line, the last log entry).
+ */
+export type OverlayLifetime = 'always' | 'contextual' | 'transient';
+
+/**
+ * Every `<DraggablePanel id=...>` in the 3D view, and when it is on screen.
+ *
+ * Keyed by the SAME id the panel declares, so the guard can prove the two
+ * agree in both directions: a panel missing here is undeclared, and an entry
+ * with no panel is a stale claim about a surface that no longer exists.
+ */
+export const OVERLAY_VISIBILITY: Readonly<Record<string, OverlayLifetime>> = {
+  // ── Always on ────────────────────────────────────────────────────────────
+  'tool-spine':          'always',  // the tool palette itself
+  'canvas-controls':     'always',  // zoom / home / view
+  'map-source-picker':   'always',  // which imagery is under the model
+  'top-right-stack':     'always',  // live system size + orientation
+  'top-left-dock':       'always',  // view toggles (Building, Aerial)
+  'compass-rose':        'always',  // which way is north
+  'coordinates-bar':     'always',  // where the cursor is on the earth
+  'sun-simulator':       'always',  // time of day drives the shade the user sees
+  'layer-toggles':       'always',  // parcel / roof segs / shade / heatmap
+  'instructions-panel':  'always',  // how to select — see the note below
+
+  // ── Contextual ───────────────────────────────────────────────────────────
+  'section-inspector':   'contextual', // needs a roof; empty-states politely
+  'obstruction-inspector': 'contextual', // needs a selected obstruction
+  'undo-redo-toolbar':   'contextual', // needs an undoable history
+  'save-create-design':  'contextual', // needs a design to save
+  'legend-strings':      'contextual', // needs string colouring or equipment on
+  'roof-edges-legend':   'contextual', // needs the roof model shown
+  'fire-setbacks-legend': 'contextual', // needs setback zones shown
+  'lidar-properties':    'contextual', // needs the LiDAR tab, or a loaded dataset
+
+  // ── Transient ────────────────────────────────────────────────────────────
+  'status-bar':          'transient',
+  'last-log':            'transient',
+};
+
+/**
+ * How many panels may be on screen at rest.
+ *
+ * 🚨 THIS NUMBER IS TOO HIGH AND IS MEANT TO COME DOWN. It is set to today's
+ * count so the guard can be adopted without a flag day; the point of pinning it
+ * is that the next addition has to argue with it. Candidates already
+ * identified, each needing its own reachability check before it moves:
+ *
+ *   - `lidar-properties` renders its Point-cloud/Mesh selector and offset
+ *     steppers with NO dataset loaded. It should be contextual on a dataset,
+ *     with "Load .las" reachable from somewhere that is always on — but it is
+ *     currently the only path to the loader, so moving it strands the loader.
+ *   - `instructions-panel` says "Click an object to select it. Esc clears."
+ *     for ever. The active-mode banner now carries per-tool help behind its
+ *     `?`, which is where Aurora puts it, so this is a candidate to retire once
+ *     the select-mode case is covered there too.
+ *
+ * Lowering it is the work. Raising it needs a sentence in the commit saying
+ * which installer is better off for the extra permanent panel.
+ */
+export const ALWAYS_ON_BUDGET = 10;
