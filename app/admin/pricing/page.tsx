@@ -297,10 +297,29 @@ export default function PricingPage() {
             groundPricePerPanel:  c.groundPricePerPanel  ?? DEFAULTS.groundPricePerPanel,
             fencePricePerPanel:   c.fencePricePerPanel   ?? DEFAULTS.fencePricePerPanel,
             defaultPanelWattage:  c.defaultPanelWattage  ?? DEFAULTS.defaultPanelWattage,
-            roofPricePerWatt:     c.roofPricePerWatt     ?? DEFAULTS.roofPricePerWatt,
-            groundPricePerWatt:   c.groundPricePerWatt   ?? DEFAULTS.groundPricePerWatt,
-            fencePricePerWatt:    c.fencePricePerWatt    ?? DEFAULTS.fencePricePerWatt,
-            carportPricePerWatt:  c.carportPricePerWatt  ?? DEFAULTS.carportPricePerWatt,
+            /**
+             * 🚨 THE ENGINE'S FALLBACK, NOT THIS PAGE'S OWN — THIS IS MONEY.
+             *
+             * These read `?? DEFAULTS.<type>PricePerWatt`, page-local constants
+             * of 3.10 / 2.35 / 4.25 / 3.75. The pricing engine falls back
+             * differently: `row.groundPricePerWatt ?? row.pricePerWatt`
+             * (lib/pricingEngine.ts). So with the per-type column unset — which
+             * is the state of any config that has not had every field filled in
+             * — the admin read **$2.35/W for ground** while the engine priced
+             * the job at the base **$3.10/W**. Same for fence and carport.
+             *
+             * An operator setting prices was shown one rate and the customer was
+             * quoted another. A second display authority is bad anywhere; on the
+             * number a business runs on it is worse.
+             *
+             * Chained exactly as the engine chains it. The page constants remain
+             * only as a last resort for a response carrying no base rate at all,
+             * which the API's own default prevents.
+             */
+            roofPricePerWatt:     c.roofPricePerWatt     ?? c.pricePerWatt ?? DEFAULTS.roofPricePerWatt,
+            groundPricePerWatt:   c.groundPricePerWatt   ?? c.pricePerWatt ?? DEFAULTS.groundPricePerWatt,
+            fencePricePerWatt:    c.fencePricePerWatt    ?? c.pricePerWatt ?? DEFAULTS.fencePricePerWatt,
+            carportPricePerWatt:  c.carportPricePerWatt  ?? c.pricePerWatt ?? DEFAULTS.carportPricePerWatt,
             materialCostPerPanel: c.materialCostPerPanel ?? DEFAULTS.materialCostPerPanel,
             laborCostPerPanel:    c.laborCostPerPanel    ?? DEFAULTS.laborCostPerPanel,
             overheadPercent:      c.overheadPercent      ?? DEFAULTS.overheadPercent,
