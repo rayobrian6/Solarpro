@@ -20,6 +20,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
+import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
 import { resolveIntegratedEquipment } from '@/lib/equipment/integratedBos';
 import {
@@ -236,7 +237,21 @@ export async function POST(req: NextRequest) {
     const panelVmp     = Number(body.panelVmp)     || 41.8;
     const panelImp     = Number(body.panelImp)     || 9.57;
     const panelWatts   = Number(body.panelWatts)   || 400;
-    const designTempMin = Number(body.designTempMin ?? -10);
+    // ONE THERMAL BASIS PER PACKAGE. The SLD's NEC 690.7(A) cold-Voc correction
+    // now reads the same authority as /api/engineering/calculate and the stamped
+    // plan set, so the diagram cannot print a corrected Voc the sheet disagrees
+    // with. A value posted by the client is not an AHJ ruling and is not honoured
+    // here; an AHJ / project design-low arrives on designTempMinOverrideC.
+    const _sldThermal = getThermalDesignBasis({
+      lat: typeof body.lat === 'number' ? body.lat : null,
+      lng: typeof body.lng === 'number' ? body.lng : null,
+      state: typeof body.state === 'string' ? body.state : null,
+      address: typeof body.address === 'string' ? body.address : null,
+      designTempMinOverrideC: typeof body.designTempMinOverrideC === 'number'
+        ? body.designTempMinOverrideC
+        : null,
+    });
+    const designTempMin = _sldThermal.minDesignTempC;
     // Phase 7 Topology Fix: body.topologyType is the INITIAL value from the client.
     // It may be STALE (e.g. 'MICROINVERTER' from a previous APsystems project when
     // the user has since switched to SolarEdge optimizer).

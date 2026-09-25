@@ -4,7 +4,13 @@ import { runElectricalCalc, ElectricalCalcInput } from '@/lib/electrical-calc';
 import { resolveOverallStatus, notEvaluated } from '@/lib/engineering/engineeringStatus';
 import { runStructuralCalcV4, type StructuralInputV4 } from '@/lib/structural-engine-v4';
 import { buildStructuralInputV4, runSubSystemStructural } from './subSystemStructural';
-import { getJurisdictionInfo, getDesignTemperatures, getGroundSnowLoad, getDesignWindSpeed, parseStateFromAddress } from '@/lib/jurisdiction';
+import { getJurisdictionInfo, getGroundSnowLoad, getDesignWindSpeed, parseStateFromAddress } from '@/lib/jurisdiction';
+// ONE THERMAL BASIS PER PACKAGE. getThermalDesignBasis is the sanctioned single
+// source of design temperatures (NEC 690.7(A) cold-Voc, NEC 310.15 ampacity
+// derating). lib/permit/generatePermit.ts and the snapshot builder already read
+// it; routing this route through it is what makes the number the DESIGNER sees
+// and the number the STAMPED PLAN SET is engineered to the same number.
+import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 import {
   generateStringConfig,
   moduleSpecsFromRegistry,
@@ -65,7 +71,22 @@ export async function POST(req: NextRequest) {
     // Build a synthetic address for getJurisdictionInfo if we have an explicit state but no address
     const addressForJurisdiction = address || (state ? `, ${state}` : '');
     const jurisdiction = getJurisdictionInfo(addressForJurisdiction);
-    const designTemps = getDesignTemperatures(stateCode);
+    // Thermal design basis — resolved ONCE, from the sanctioned authority, and
+    // used by every consumer below. An AHJ / project design-low is the only
+    // admissible override and travels on its own explicit field so a stale
+    // client-side default can never masquerade as one.
+    const _overrideRaw = (body as { designTempMinOverrideC?: unknown }).designTempMinOverrideC
+      ?? (body as { project?: { designTempMin?: unknown } }).project?.designTempMin;
+    const designTempMinOverrideC =
+      typeof _overrideRaw === 'number' && Number.isFinite(_overrideRaw) ? _overrideRaw : null;
+    const thermalBasis = getThermalDesignBasis({
+      lat: typeof body.lat === 'number' ? body.lat : null,
+      lng: typeof body.lng === 'number' ? body.lng : null,
+      state: stateCode || null,
+      address: address || null,
+      designTempMinOverrideC,
+    });
+    const designTemps = { minTemp: thermalBasis.minDesignTempC, maxTemp: thermalBasis.maxDesignTempC };
     const groundSnowLoad = getGroundSnowLoad(stateCode);
     const windSpeed = getDesignWindSpeed(stateCode);
 
@@ -140,7 +161,11 @@ export async function POST(req: NextRequest) {
               0
             );
 
-            const designTempMinForCalc = electrical.designTempMin ?? designTemps.minTemp;
+            // The canonical basis, not whatever the client happened to post.
+            // A client-side default is not an AHJ ruling; the only admissible
+            // override arrives as designTempMinOverrideC and is already folded
+            // into thermalBasis above.
+            const designTempMinForCalc = designTemps.minTemp;
 
             // v47.408 — Optional client-supplied optimizer max output current.
             // If the client sends `optimizerMaxOutputCurrent` (e.g. derived
@@ -259,8 +284,11 @@ export async function POST(req: NextRequest) {
 
       const electricalInput: ElectricalCalcInput = {
         ...electrical,
-        designTempMin: electrical.designTempMin ?? designTemps.minTemp,
-        designTempMax: electrical.designTempMax ?? designTemps.maxTemp,
+        // Thermal basis is route-owned (see thermalBasis above). Spread-in
+        // client values are deliberately overwritten so the engine and the
+        // stamped plan set cannot run at two different temperatures.
+        designTempMin: designTemps.minTemp,
+        designTempMax: designTemps.maxTemp,
         rooftopTempAdder: electrical.rooftopTempAdder ?? 35,
         necVersion: jurisdiction.necVersion,
         // Battery NEC 705.12(B) — pass through from request body
