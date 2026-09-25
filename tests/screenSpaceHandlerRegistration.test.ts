@@ -286,8 +286,18 @@ describe('a drag must not strand the click suppression flag', () => {
     const reset = SRC.slice(anchor, anchor + 900);  // stripComments keeps blanked lines as whitespace
     expect(reset, 'an abandoned block drag must be cleared on tool change')
       .toMatch(/blockResizeRef\.current = null/);
+    // 🚨 THE CAMERA IS HANDED BACK THROUGH THE AUTHORITY NOW, not by assigning
+    // the flag here. Same subject, stronger guarantee: `releasePointer` also
+    // clears WHICH gesture held it, so a stuck freeze stays attributable. The
+    // flag itself may no longer be written outside claimPointer/releasePointer
+    // — tests/pointerGestureAuthority.test.ts fails the build if it is.
     expect(reset, 'the existing resets must still be there')
-      .toMatch(/arrayManipRef\.current = false/);
+      .toMatch(/releasePointer\(\);/);
+    // And the site-object size drag is a third gesture that can be abandoned by
+    // a tool change. It was missing from this list for exactly the reason
+    // blockResizeRef was.
+    expect(reset, 'an abandoned size drag must be cleared on tool change')
+      .toMatch(/cancelObjectSizeDrag\(\);/);
     expect(reset).toMatch(/suppressClickRef\.current = false/);
   });
 });

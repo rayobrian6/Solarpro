@@ -2155,6 +2155,51 @@ function SolarEngine3D({
   // array doesn't also pan/orbit the camera. (Cesium's built-in controller is fully
   // disabled here, so toggling its enable flags does nothing — this is the real gate.)
   const arrayManipRef = useRef<boolean>(false);
+  /**
+   * 🚨 WHO OWNS THIS POINTER DRAG. One question, one answer, one place.
+   *
+   * `null` means the camera owns it. Anything else means a TOOL owns it and the
+   * custom camera handler must not also pan or orbit.
+   *
+   * This exists because "remember to freeze the camera" has now been forgotten
+   * THREE times, and each time it shipped:
+   *
+   *   1. the panel-array grab — fixed in v62; the camera panned WHILE the array
+   *      moved, which is the "shear" the comment above refers to;
+   *   2. the block-height drag — the freeze was written but `blockResizeRef`
+   *      was never set, so the whole gesture was dead code and the omission
+   *      could not be observed;
+   *   3. the site-object size drag — shipped with no freeze at all. The map
+   *      panned under the gesture, so the ground point beneath a fixed screen
+   *      pixel MOVED between press and release, and the tree did not land where
+   *      it was aimed. Reported from live use, not by any test.
+   *
+   * The lesson of the third one is that a convention nothing enforces is not a
+   * convention. So ownership is taken and returned only through `claimPointer`
+   * and `releasePointer`, `LEFT_UP` returns it in a `finally` so no path can
+   * keep it, and tests/pointerGestureAuthority.test.ts fails the build if a new
+   * gesture assigns `arrayManipRef` directly.
+   *
+   * Cesium's own `screenSpaceCameraController` is fully disabled at boot (see
+   * the orbit block), so its enable flags are NOT the gate — this ref is.
+   */
+  const pointerOwnerRef = useRef<
+    'array-move' | 'array-rotate' | 'block-height' | 'object-size' | null
+  >(null);
+  /** A tool takes the drag. The camera stops moving until it is handed back. */
+  function claimPointer(who: NonNullable<typeof pointerOwnerRef.current>) {
+    pointerOwnerRef.current = who;
+    arrayManipRef.current = true;
+  }
+  /**
+   * Hand the drag back to the camera. Idempotent on purpose: it is called from
+   * `finally` blocks and from every reset path, and a frozen map is a worse
+   * defect than the one this whole mechanism exists to prevent.
+   */
+  function releasePointer() {
+    pointerOwnerRef.current = null;
+    arrayManipRef.current = false;
+  }
   // v48.12: Toolbar tooltip state
   const [tooltipInfo, setTooltipInfo] = useState<{ text: string; x: number; y: number } | null>(null);
   // Which toolbar group is currently expanded (null = all collapsed)
@@ -2331,11 +2376,50 @@ function SolarEngine3D({
    * The drag holds the anchor so the preview can be pinned there while the
    * radius grows out from it. `screenStart` is what distinguishes a drag from a
    * click on mouse-up. */
+  /**
+   * An in-flight "drag the object out to its real size" gesture.
+   *
+   * 🚨 `spot` IS THE WHOLE RESOLVED PLACEMENT POINT, CAPTURED ON PRESS, and it
+   * is what the object is finally built at. The release does NOT intersect the
+   * screen a second time. It used to, and that was the second half of the
+   * live defect: `screenX/screenY` name a PIXEL, and the ground under a pixel
+   * moves whenever the camera does — so the committed tree drifted away from
+   * the point the installer pressed on. Freezing the camera (see
+   * `pointerOwnerRef`) stops the camera from moving; committing at `spot` means
+   * it would not matter even if something else did.
+   *
+   * `screenX/screenY` are kept, but only as the ORIGIN the drag radius is
+   * measured from and as the fallback if the press somehow carried no spot.
+   */
   const objectSizeDragRef = useRef<
-    { lat: number; lng: number; screenX: number; screenY: number; dragged: boolean } | null
+    {
+      lat: number; lng: number;
+      spot: { lat: number; lng: number; height: number; cartesian: any; planeId: string | null; method: string; trail: string[] } | null;
+      screenX: number; screenY: number; dragged: boolean;
+    } | null
   >(null);
   /** Mirror for the pinned preview centre. State, because TreeCursor is JSX. */
   const [objectDragAnchor, setObjectDragAnchor] = useState<{ lng: number; lat: number } | null>(null);
+  /**
+   * Abandon a half-finished size drag and give the camera back.
+   *
+   * 🚨 THREE CALLERS, ON PURPOSE. A drag is ended by releasing the mouse — but
+   * it can also be abandoned by pressing Escape, by switching tool, or by a
+   * full reset, and none of those produce a LEFT_UP. Every one of those paths
+   * previously left `objectSizeDragRef` armed: the next MOUSE_MOVE in the NEW
+   * tool would still be swallowed by the size branch, the ghost stayed pinned
+   * at a stale anchor, and with the camera freeze added the map would stay
+   * frozen with no gesture left to unfreeze it.
+   *
+   * This is the same omission that was already found and fixed once for
+   * `blockResizeRef`, which is why both reset lists now name every drag.
+   */
+  function cancelObjectSizeDrag() {
+    if (objectSizeDragRef.current) {
+      objectSizeDragRef.current = null;
+      setObjectDragAnchor(null);
+    }
+  }
   const activateToolRef = useRef<((mode: PlacementMode) => void) | null>(null);
   /** Same mount-frozen reason as `activateToolRef`: the keyboard handler is
    *  installed once at viewer init and cannot see a later render's closure. */
@@ -2438,8 +2522,12 @@ function SolarEngine3D({
       // only place it is cleared is blockResizeUp's own `finally` — never
       // release. `arrayManipRef` is already reset here for exactly this reason.
       if (blockResizeRef.current) blockResizeRef.current = null;
+      // 🚨 AND THE SIZE DRAG, for exactly the reason the block drag is here.
+      // Switching tool mid-drag is one of the ways a gesture ends without a
+      // LEFT_UP.
+      cancelObjectSizeDrag();
       suppressClickRef.current = false;
-      arrayManipRef.current = false; // never leave the camera frozen on tool change
+      releasePointer(); // never leave the camera frozen on tool change
       // v47.131 Issue 2: Reset plane frame state on every tool change.
       // This prevents extend_row / add_row from using the previous plane's
       // ECEF frame when the user switches to a different plane.
@@ -2767,7 +2855,25 @@ function SolarEngine3D({
      * otherwise make every face-scoped behaviour unreachable from a browser
      * spec. The harness limit is documented in
      * e2e/object-geometry-acceptance.spec.ts. */
-    (window as any).__solarEngineE2E = { selectRoofFace };
+    (window as any).__solarEngineE2E = {
+      selectRoofFace,
+      /* 🚨 READ-ONLY, AND IT REPORTS THE REF THE PRODUCT ITSELF USES.
+       *
+       * The drag's contract is "the object is built where the press landed".
+       * There is no user-visible readout of that anchor — the size is visible
+       * (the status line and the width field both show it, and the spec reads
+       * those rather than asking here), but the anchored lat/lng is not. So the
+       * spec needs to see it to assert the contract at all.
+       *
+       * It is a getter over `objectSizeDragRef`, so it cannot become a second
+       * source of the anchor: there is nothing to write, and if the ref is null
+       * the answer is null. Exposing a COPY of the numbers rather than the ref
+       * keeps a spec from mutating engine state by accident. */
+      sizeDragAnchor: () => {
+        const sz = objectSizeDragRef.current;
+        return sz ? { lat: sz.lat, lng: sz.lng, dragged: sz.dragged } : null;
+      },
+    };
     return () => {
       try { delete (window as any).__solarViewerE2E; } catch {}
       try { delete (window as any).__solarEngineE2E; } catch {}
@@ -3146,6 +3252,35 @@ function SolarEngine3D({
   const showBuilding3DRef = useRef(false);
   useEffect(() => { showBuilding3DRef.current = showBuilding3D; }, [showBuilding3D]);
   useEffect(() => { showShadeRef.current = showShade; setShowShadeLocal(showShade); }, [showShade]);
+
+  /**
+   * 🚨 A SHADE NUMBER THAT DOES NOT MOVE WHEN THE TREE MOVES IS A LIE.
+   *
+   * The analysis used to run in exactly one place: the instant the Shade layer
+   * was switched ON. So with Shade already on, planting a tree, resizing its
+   * canopy, dragging it or deleting it changed nothing — the per-panel derate
+   * and the production estimate kept whatever values the last toggle produced,
+   * and nothing on screen said they were stale. The user's own actions were the
+   * thing least able to update the answer.
+   *
+   * That was survivable while placed objects cast no visible shadow, because
+   * nothing contradicted the numbers. It stops being survivable now they do:
+   * the picture would show a canopy lying across the array while the derate
+   * insisted the roof was clear. The rendered shadow and the computed loss come
+   * from the same canopy geometry and they have to move together, or believing
+   * either one is a coin toss.
+   *
+   * Watches obstructions ONLY. `runShadeAnalysis` writes `annualShadeFactor`
+   * back onto the panels, so watching panels here would re-trigger on its own
+   * output and spin. Placement commits once per gesture, not per frame, so this
+   * fires once per real change.
+   */
+  useEffect(() => {
+    if (!showShadeLocal) return;          // nothing is being shown; nothing to keep true
+    if (stage !== 'done') return;
+    onRunShadeAnalysis?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [obstructions, showShadeLocal, stage]);
   // v50.11: sync prop → local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
 
@@ -7170,7 +7305,7 @@ function SolarEngine3D({
           startHeightM, startYWorld, centroidCart,
         };
         suppressClickRef.current = true; // swallow the click that follows on mouse-up
-        arrayManipRef.current = true;    // freeze the camera so the drag is a clean up/down motion
+        claimPointer('block-height');    // freeze the camera so the drag is a clean up/down motion
         setSelectedBlockId(blockId);
         setStatusMsg(`↕ Dragging block height — currently ${startHeightM.toFixed(1)}m`);
       } catch (err: unknown) { addLog('ERROR', `block resize LEFT_DOWN: ${(err as Error).message}`); }
@@ -7271,7 +7406,7 @@ function SolarEngine3D({
       } catch (err: unknown) { addLog('ERROR', `block resize LEFT_UP: ${(err as Error).message}`); }
       finally {
         blockResizeRef.current = null;
-        arrayManipRef.current = false; // hand the camera back
+        releasePointer(); // hand the camera back
       }
     };
 
@@ -7410,10 +7545,19 @@ function SolarEngine3D({
           if (at) {
             objectSizeDragRef.current = {
               lat: at.lat, lng: at.lng,
+              spot: at,
               screenX: event.position.x, screenY: event.position.y,
               dragged: false,
             };
             setObjectDragAnchor({ lat: at.lat, lng: at.lng });
+            // 🚨 AND THE CAMERA STOPS. Without this the custom pan handler runs
+            // on the same press and the map slides under the gesture — which is
+            // exactly how this shipped, and exactly what was reported.
+            //
+            // Claimed INSIDE `if (at)` on purpose. A press that resolved no
+            // ground point starts no drag, so it must not freeze the camera
+            // either: there would be no matching gesture for LEFT_UP to end.
+            claimPointer('object-size');
           }
         }
         return;
@@ -7440,7 +7584,7 @@ function SolarEngine3D({
         let ang = 0;
         if (hit) { const r = C.Cartesian3.subtract(hit, cen, new C.Cartesian3()); ang = Math.atan2(C.Cartesian3.dot(r, V), C.Cartesian3.dot(r, U)); }
         dragRef.current = { mode: 'rotate', cen, N, U, V, lastAngle: ang, moved: false, armed: false, downX: screen.x, downY: screen.y };
-        arrayManipRef.current = true; // freeze the custom camera handler for this drag
+        claimPointer('array-rotate'); // freeze the custom camera handler for this drag
         return;
       }
 
@@ -7450,7 +7594,7 @@ function SolarEngine3D({
         const ray = viewer.camera.getPickRay(screen);
         const hit = ray ? C.IntersectionTests.rayPlane(ray, plane) : null;
         dragRef.current = { mode: 'move', plane, lastCart: hit, moved: false, armed: false, downX: screen.x, downY: screen.y };
-        arrayManipRef.current = true; // freeze the custom camera handler for this drag
+        claimPointer('array-move'); // freeze the custom camera handler for this drag
       }
     }, C.ScreenSpaceEventType.LEFT_DOWN);
 
@@ -7525,6 +7669,19 @@ function SolarEngine3D({
     }, C.ScreenSpaceEventType.MOUSE_MOVE);
 
     handler.setInputAction(() => {
+      // 🚨 EVERY PATH OUT OF HERE HANDS THE CAMERA BACK.
+      //
+      // The body below has five `return`s and can throw. Releasing on the happy
+      // path only — which is what the array grab used to do — means one early
+      // return leaves the camera frozen, and a frozen map is a worse defect
+      // than the drag bug this mechanism exists to fix: the user's only
+      // recourse is a reload. A press-release cycle never spans two LEFT_UPs,
+      // so unconditionally returning ownership here is always correct.
+      //
+      // The block-height drag already had this shape (`blockResizeUp` releases
+      // in its own `finally`); this extends it to the whole handler. Releasing
+      // twice is harmless — `releasePointer` is idempotent for this reason.
+      try {
       if (blockResizeRef.current) { blockResizeUp(); return; }
 
       // 🚨 COMMIT THE DRAGGED OBJECT — OR GET OUT OF THE CLICK'S WAY.
@@ -7546,7 +7703,13 @@ function SolarEngine3D({
         setObjectDragAnchor(null);
         if (sz.dragged) {
           suppressClickRef.current = true;   // swallow any trailing LEFT_CLICK
-          handleObstructionClick(viewer, C, { x: sz.screenX, y: sz.screenY });
+          // 🚨 AT THE POINT THAT WAS PRESSED, NOT AT THE PIXEL THAT WAS PRESSED.
+          // `sz.spot` was resolved on LEFT_DOWN and is passed straight through,
+          // so the release performs no second intersection and the object is
+          // built exactly where the gesture started. Re-resolving the screen
+          // point here is what let a moving camera drag the tree away from the
+          // spot the installer aimed at.
+          handleObstructionClick(viewer, C, { x: sz.screenX, y: sz.screenY }, sz.spot);
         }
         return;
       }
@@ -7554,7 +7717,6 @@ function SolarEngine3D({
       const drag = dragRef.current;
       if (!drag) return;
       dragRef.current = null;
-      arrayManipRef.current = false; // hand the camera back to the custom handler
       if (drag.moved) {
         suppressClickRef.current = true;      // ignore the trailing LEFT_CLICK
         if (ENABLE_PANEL_SNAP && drag.mode === 'move' && selectedPanelIdsRef.current.size === 1) {
@@ -7564,6 +7726,9 @@ function SolarEngine3D({
         onPanelsChange(panelsRef.current);    // commit once
         showRotateHandle(viewer, C);          // handle re-floats above the new position
         setStatusMsg(drag.mode === 'rotate' ? '↻ Array rotated — drag ⟳ again, or drag the array to move' : '✥ Moved — drag again, or drag ⟳ to rotate');
+      }
+      } finally {
+        releasePointer();
       }
     }, C.ScreenSpaceEventType.LEFT_UP);
 
@@ -7624,6 +7789,24 @@ function SolarEngine3D({
     handler.setInputAction((event: any) => {
       try {
         if (modeRef.current === 'select') return;
+        // 🚨 A LIVE GESTURE OWNS THE STATUS LINE.
+        //
+        // This is a SECOND ScreenSpaceEventHandler on the same canvas, so it
+        // fires on MOUSE_MOVE alongside the one carrying the drag — and it
+        // called setStatusMsg unconditionally. The result: while the installer
+        // dragged a tree out to size, the line meant to read
+        // "🌳 Tree — 9.2 m across. Release to place." was overwritten with a
+        // lat/lng readout on every single mouse move. The size feedback existed
+        // in the code and was invisible in the product, which is why "the
+        // dimensions do not match the gesture" was reported — there was nothing
+        // to check the gesture against.
+        //
+        // The same clobbering silently applied to the block-height drag's
+        // "🧱 Dragging block height — currently 3.2m".
+        //
+        // `pointerOwnerRef` already answers "is a tool driving this drag", so
+        // the passive readout simply yields to whoever owns the pointer.
+        if (pointerOwnerRef.current) return;
         // Use the same pick chain as placement (3D tiles → ellipsoid), NOT raw
         // globe.pick — the globe is hidden once tiles load, so globe.pick returns
         // a garbage underground height. This keeps the readout truthful and
@@ -10950,6 +11133,11 @@ function SolarEngine3D({
         const exitToolMode = () => {
           if (modeRef.current !== 'select') onPlacementModeChange('select');
         };
+        // 🚨 FIRST, BEFORE ANY OF THE EARLY RETURNS BELOW. Escape during a size
+        // drag must drop the gesture AND unfreeze the camera; several branches
+        // below return, so doing this later would miss them.
+        cancelObjectSizeDrag();
+        releasePointer();
         // Cancel ground array
         if (modeRef.current === 'ground_array' && groundArrayRowsRef.current.length > 0) {
           cancelGroundArray();
@@ -12171,6 +12359,11 @@ function SolarEngine3D({
               outlineWidth: 2,
               closeTop: true,
               closeBottom: false,
+              // 🚨 OR IT CASTS NO SHADOW. See the note in the ellipsoid below:
+              // Cesium defaults entity graphics to ShadowMode.DISABLED, so an
+              // object that shades the array in the NUMBERS was invisible in
+              // the picture.
+              shadows: C.ShadowMode.ENABLED,
             },
           });
         } else if (part.kind === 'cylinder') {
@@ -12185,6 +12378,7 @@ function SolarEngine3D({
               material: C.Color.fromCssColorString('#5a3a1a'),
               outline: true,
               outlineColor: C.Color.fromCssColorString('#2a1a08'),
+              shadows: C.ShadowMode.ENABLED,
             },
           });
         } else {
@@ -12197,6 +12391,30 @@ function SolarEngine3D({
               material: C.Color.fromCssColorString('#4a8a3a').withAlpha(0.85),
               outline: true,
               outlineColor: C.Color.fromCssColorString('#1a3a0a'),
+              /**
+               * 🚨 THE TREE CAST NO SHADOW, AND THIS ONE MISSING KEY IS WHY.
+               *
+               * Cesium's GeometryUpdater defaults `shadows` to
+               * ShadowMode.DISABLED, so an entity that does not ask to cast
+               * simply does not — silently, with no warning and no visual
+               * difference except the missing shadow itself.
+               *
+               * Everything around it was already right, which is what made it
+               * hard to see: the shadow map is switched on with Shade mode
+               * (`shadowMap.enabled = shadeOn`), the clock is driven from the
+               * same solar-time slider the numbers use, and the house walls,
+               * roof and panel frames all declare ENABLED and have been casting
+               * correctly the whole time. The tree was the only thing in the
+               * scene that shaded the array arithmetically while contributing
+               * nothing to the picture — so the numbers said 10% loss and the
+               * user saw a sunlit roof and had no reason to believe us.
+               *
+               * This does NOT fabricate a shadow. The shadow is cast by the
+               * same canopy geometry the shade analysis occludes with: both
+               * sides take their radius from `canopyRadiusFor` in
+               * lib/3d/obstructionGeometry.ts. One geometry, two consumers.
+               */
+              shadows: C.ShadowMode.ENABLED,
             },
           });
         }
@@ -12349,7 +12567,8 @@ function SolarEngine3D({
     // itself to whatever the next pointer-up happens to find.
     dragRef.current = null;
     blockResizeRef.current = null;
-    arrayManipRef.current = false;
+    cancelObjectSizeDrag();
+    releasePointer();
     suppressClickRef.current = false;
     rulerAnchorRef.current = null;
     rulerCursorRef.current = null;
@@ -13379,7 +13598,24 @@ function SolarEngine3D({
   // Hand the live function to the mount-frozen keyboard handler.
   duplicateSelectedObstructionRef.current = duplicateSelectedObstruction;
 
-  function handleObstructionClick(viewer: any, C: any, screenPos: any) {
+  /**
+   * THE ONE PLACEMENT PATH for a site/roof object.
+   *
+   * `atOverride` lets a caller that ALREADY resolved the placement point hand it
+   * in rather than have it resolved again. Only the size-drag uses it, and only
+   * because a drag's release must land on the point its PRESS resolved: a screen
+   * pixel names a different piece of ground once the camera has moved, so
+   * re-intersecting on release silently relocates the object. Everything after
+   * this line — the type, the clamping, the footprint, the keep-out, the record
+   * — is identical for both callers, which is the point: the drag decides WHERE
+   * and HOW BIG, and this function remains the only thing that decides WHAT.
+   */
+  function handleObstructionClick(
+    viewer: any,
+    C: any,
+    screenPos: any,
+    atOverride?: { lat: number; lng: number; height: number; cartesian: any; planeId: string | null; method: string; trail: string[] } | null,
+  ) {
     try {
       // 🚨 THE ARMED TYPE IS READ FIRST, BECAUSE IT DECIDES WHERE THE CLICK
       // LANDS. A tree is placed on the ground and a chimney on a roof face;
@@ -13387,7 +13623,7 @@ function SolarEngine3D({
       // being placed cannot give one right answer.
       const preset = presetFor(obstructionPresetRef.current);
 
-      const spot = resolvePlacementPoint(viewer, C, screenPos, preset.space === 'site' ? 'site' : 'roof');
+      const spot = atOverride ?? resolvePlacementPoint(viewer, C, screenPos, preset.space === 'site' ? 'site' : 'roof');
       if (!spot) {
         // 🚨 A FAILED CLICK MUST NOT LOOK LIKE A SUCCESSFUL ONE. The old
         // message blamed tiles that this property does not have and never will.
@@ -17188,7 +17424,16 @@ function SolarEngine3D({
       {/* Status bar - v70: draggable. Grab the bar to move. */}
       {stage === 'done' && statusMsg ? (
         <DraggablePanel id="status-bar" zIndex={OVERLAY_Z.READOUT}>
-          <div style={{
+          <div
+            data-testid="engine-status"
+            /* This bar is where a live gesture reports itself — the canopy
+             * diameter while a tree is being dragged out, the height while a
+             * block is resized. That makes it the surface the size promise is
+             * made on, so it is both announced to assistive tech and reachable
+             * from a spec that has to check the promise was kept. */
+            role="status"
+            aria-live="polite"
+            style={{
             position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
             background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(4px)',
             border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '4px 16px',

@@ -92,6 +92,15 @@ describe('the drag arms, grows and commits', () => {
     return H.slice(start, end);
   }
 
+  it('🚨 LEFT_DOWN takes the camera, or the map slides under the gesture', () => {
+    // The omission that made this feature fail live acceptance. The full
+    // ownership contract — one writer, released in a finally, cleared on
+    // Escape/tool-change/reset — is guarded in
+    // tests/pointerGestureAuthority.test.ts; this is the local reminder that
+    // THIS gesture is one of the claimants.
+    expect(leftDown()).toMatch(/claimPointer\('object-size'\)/);
+  });
+
   it('LEFT_DOWN arms only for a GROUND object, and only in a placing mode', () => {
     const D = leftDown();
     expect(D).toMatch(/modeRef\.current === 'tree' \|\| modeRef\.current === 'obstruction'/);
@@ -137,8 +146,22 @@ describe('the drag arms, grows and commits', () => {
   });
 
   it('🚨 LEFT_UP commits through the ONE placement path, at the anchor', () => {
+    // 🚨 THIS ASSERTION USED TO PIN THE DEFECT.
+    //
+    // It required the commit to be `handleObstructionClick(viewer, C, {x, y})`
+    // — a re-intersection of the SCREEN PIXEL that was pressed. A pixel names
+    // different ground the moment the camera moves, and the camera DID move,
+    // because this gesture shipped without freezing it. So the tree was
+    // committed away from the point the installer aimed at, and this test
+    // called that correct and would have failed the repair.
+    //
+    // The press now captures the resolved world point and hands it to the same
+    // one placement path, so nothing is intersected twice. The guard's real
+    // subject — "the drag must not build its own record" — is unchanged and is
+    // what the `sz.spot` argument preserves.
+    // See tests/pointerGestureAuthority.test.ts for the ownership half.
     expect(H, 'the drag must not build its own record')
-      .toMatch(/handleObstructionClick\(viewer, C, \{ x: sz\.screenX, y: sz\.screenY \}\)/);
+      .toMatch(/handleObstructionClick\(viewer, C, \{ x: sz\.screenX, y: sz\.screenY \}, sz\.spot\)/);
     // Only when it really was a drag; otherwise the real click does the work.
     expect(H).toMatch(/if \(sz\.dragged\) \{/);
     expect(H, 'a trailing click would place a second object')
