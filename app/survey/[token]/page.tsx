@@ -520,6 +520,7 @@ export default function SurveyPage() {
           draft={draft}
           onEditStep={handleEditStep}
           submitError={submitError}
+          surveyToken={token}
         />
       ) : null}
     </SurveyShell>

@@ -11,6 +11,7 @@
 import React from 'react';
 import type { SurveyV2Draft } from '../../lib/survey/v2/types';
 import { REQUIRED_PHOTO_CATEGORIES } from '../../lib/survey/v2/types';
+import { FieldReadinessPanel } from './FieldReadinessPanel';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -19,6 +20,8 @@ interface StepReviewProps {
   draft: SurveyV2Draft;
   onEditStep: (step: number) => void;
   submitError?: string | null;
+  /** Handoff JWT — used to run the engineering requirement registry on device. */
+  surveyToken?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +103,7 @@ function ReviewRow({ label, value, flag }: ReviewRowProps) {
 // ---------------------------------------------------------------------------
 // StepReview
 // ---------------------------------------------------------------------------
-export function StepReview({ draft, onEditStep, submitError }: StepReviewProps) {
+export function StepReview({ draft, onEditStep, submitError, surveyToken }: StepReviewProps) {
   const { siteOverview, roofConditions, electricalService, obstructions, photos } = draft;
 
   // ---- Photo completeness check ----
@@ -127,6 +130,25 @@ export function StepReview({ draft, onEditStep, submitError }: StepReviewProps) 
           <p className="text-xs text-red-500 mt-0.5">{submitError}</p>
         </div>
       ) : null}
+
+      {/* ---- Engineering requirement registry, run on device ----
+           The same engine the office page renders, delivered before the truck
+           leaves. Rendered first because it is the leave-site decision. ---- */}
+      {surveyToken ? (
+        <FieldReadinessPanel surveyToken={surveyToken} photos={photos.photos} />
+      ) : (
+        <div className="rounded-xl border border-gray-300 bg-gray-50 px-4 py-3">
+          <p className="text-xs font-bold text-gray-600 uppercase tracking-wide">
+            Engineering Requirements
+          </p>
+          <p className="text-sm font-semibold text-gray-700 mt-0.5">
+            UNKNOWN - no survey token available for the readiness check.
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Do not treat this as all-clear.
+          </p>
+        </div>
+      )}
 
       {/* ---- Flags summary ---- */}
       {(isDangerousPanel || isRoofPoor || !photosOk) ? (
@@ -344,7 +366,8 @@ export function StepReview({ draft, onEditStep, submitError }: StepReviewProps) 
       >
         {photosOk ? (
           <p className="text-sm font-semibold text-green-700">
-            Ready to submit. Tap Submit Survey below.
+            All required photos captured. Check the engineering requirements above
+            before you leave, then tap Submit Survey.
           </p>
         ) : (
           <p className="text-sm font-semibold text-orange-700">
