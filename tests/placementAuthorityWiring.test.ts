@@ -51,7 +51,12 @@ const ENGINE = strip(read('components/3d/SolarEngine3D.tsx'));
  * landmark, so a guard can never again be unable to see the code it guards.
  */
 function bodyOf(name: string): string {
-  const sig = `function ${name}(viewer: any, C: any, screenPos: any) {`;
+  // 🚨 MATCH ON THE NAME, NOT ON ONE HARD-CODED PARAMETER LIST. This used
+  // to require `(viewer: any, C: any, screenPos: any)` verbatim, so the helper
+  // silently stopped being usable for any function with a different signature
+  // — and reported it as "the function is gone", which is a very misleading
+  // thing for a guard to say about code that is right there.
+  const sig = `function ${name}(`;
   const at = ENGINE.indexOf(sig);
   expect(at, `${name} is gone or its signature changed`).toBeGreaterThan(-1);
   const next = ENGINE.indexOf('\n  function ', at + sig.length);
@@ -170,6 +175,30 @@ describe('🚨 an object binds to the face it was dropped on', () => {
     // tree looked like a vent until the page was reloaded.
     expect(body, 'placement hand-rolls its own entity again')
       .not.toMatch(/viewer\.entities\.add\(\{/);
-    expect(body).toMatch(/drawObstructionEntity\(viewer, C, newObs\)/);
+
+    // 🚨 THE DRAW MOVED ONE FUNCTION OUT, AND THE INVARIANT DID NOT.
+    // The tail of this handler was extracted into `commitPlacedObstruction` so
+    // that Duplicate and drag-to-size could not grow their own copies of it.
+    // What this guard protects is "every way of creating an object draws it
+    // through the SAME function", so it now follows the call rather than
+    // insisting the draw stay inline — which would have forced the copies it
+    // was written to prevent.
+    expect(body, 'placement must hand off to the one shared commit')
+      .toMatch(/commitPlacedObstruction\(viewer, C, newObs, preset\)/);
+    const commit = bodyOf('commitPlacedObstruction');
+    expect(commit, 'the shared commit must draw through the one path')
+      .toMatch(/drawObstructionEntity\(viewer, C, obs\)/);
+    expect(commit, 'the shared commit hand-rolls its own entity')
+      .not.toMatch(/viewer\.entities\.add\(\{/);
+  });
+
+  it('🚨 EVERY creation path goes through that one commit', () => {
+    // The guard above proves placement does. This proves nothing else has
+    // quietly grown a second route — which is exactly what happened the first
+    // time, and produced a tree that looked like a vent until reload.
+    for (const caller of ['duplicateSelectedObstruction']) {
+      expect(bodyOf(caller), `${caller} does not use the shared commit`)
+        .toMatch(/commitPlacedObstruction\(/);
+    }
   });
 });
