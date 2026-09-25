@@ -32,7 +32,9 @@ Last updated: 2026-09-25, after the string-sizing authority landed.
 | `d7d1b55d` | The portal shows the install date (18.6% of support contacts); an invalid micro-stage written raw; email stopped reporting success when nothing was sent |
 | `b8b6cd7f` | Survey readiness reaches the crew *before* they leave — and refuted the lane's premise rather than building a second mapping on it |
 | `5419cf69` | The installer's margin on the design screen, proven not to leak to five customer-facing surfaces; raw stack traces stopped reaching toasts |
-| *pending* | Wire-gauge dropdown annotated with the voltage drop each option would cause — from the same authority the conduit schedule prints |
+| `81f24c71` | Wire-gauge dropdown annotated with the voltage drop each option would cause — from the same authority the conduit schedule prints; portal placeholder gauges removed |
+| `296c78e1` | The admin pricing page shows the rate the engine will actually charge (it read $2.35/W for ground where jobs were priced at $3.10/W) |
+| `691b33ac` | Entering "inspection" no longer announces that it passed — a landmine that would have armed the moment the governed stage route was wired |
 
 ---
 

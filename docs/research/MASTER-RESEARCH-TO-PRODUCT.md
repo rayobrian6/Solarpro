@@ -109,7 +109,12 @@ Ranked by real-world harm, then by value-over-risk. Verified only.
 | 7 | Proposal integrity: no terminal-state guard on snapshot refresh, share, status PATCH or bulk; the guarded signing route is orphaned and the unguarded one is live | A signed document changes after signing | MED | proposal snapshot | IN FLIGHT |
 | 8 | **Survey readiness is computed and delivered too late** — a 9-zone capture plan exists and is imported only by an admin page | A second site visit | MED | survey evidence | IN FLIGHT |
 | 9 | **The portal never showed the install date** — 18.6% of support contacts, written all along, never selected | The homeowner phones to ask | SMALL | — | ✅ **SHIPPED** |
-| 10 | Move vertex — the 90/10 correction gap | Redraw-the-whole-roof | LARGE | roof geometry | ARCHITECTED |
+| 10 | Move vertex — the 90/10 correction gap | Redraw-the-whole-roof | LARGE | roof geometry | IN FLIGHT |
+| 11 | **Nobody in the category shows an installer their margin on the design screen.** Aurora's own user calls it a "half product" on camera; a UK installer keeps a pricing spreadsheet outside the product. SolarPro computed `grossProfit`/`marginPercent` under a heading reading "Internal" and rendered none of it. | The tool loses the person using it | SMALL | — (presentation only) | ✅ **SHIPPED** `5419cf69` |
+| 12 | **Wire gauge was data entry, not a decision** — a bare list of five, so choosing meant guessing, saving, reading the schedule and coming back. HelioScope annotates each option with the drop it causes. | Avoidable rework on every string | SMALL | voltage drop | ✅ **SHIPPED** `81f24c71` |
+| 13 | **Raw stack traces reached toasts**, and **email reported success when nothing was sent** — both found by hunting competitors' failures and finding our own | A person who sees a stack trace stops believing the screen; an installer waits on a proposal never delivered | SMALL | — | ✅ **SHIPPED** |
+| 14 | **The admin pricing page showed a rate the engine would not charge** — $2.35/W for ground where jobs priced at $3.10/W, because page and engine fell back differently | The operator sets one price, the customer is quoted another | SMALL | pricing | ✅ **SHIPPED** `296c78e1` |
+| 15 | **Entering "inspection" would have announced that it passed** — dormant in the governed stage route, armed the moment anyone wired it | A homeowner told their inspection passed when it has not happened | SMALL | micro-stage | ✅ **SHIPPED** `691b33ac` |
 
 ---
 
