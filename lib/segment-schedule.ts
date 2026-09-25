@@ -140,7 +140,8 @@ export interface SegmentScheduleInput {
   // Array
   moduleCount: number;
   // Microinverter
-  maxDevicesPerBranch: number;   // NEC 690.8(B) hard limit (e.g. 16 for Enphase IQ8)
+  maxDevicesPerBranch: number;   // manufacturer per-model max (Enphase IQ8+: 13)
+  maxBranchOcpdA?: number;       // manufacturer max branch OCPD (Enphase: 20); omitted → 30
   microAcCurrentA: number;       // A per microinverter AC output (nominal, from datasheet)
   manufacturerMaxPerBranch20A?: number; // Manufacturer-specified max per 20A branch (overrides NEC calc)
   manufacturerMaxPerBranch30A?: number; // Manufacturer-specified max per 30A branch
@@ -624,8 +625,9 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       return remainder === 0 ? 0 : 1;
     };
 
-    // ONLY 20A and 30A are valid branch breaker sizes for #10 AWG trunk cable
-    const CANDIDATE_BREAKERS = [20, 30];
+    // ONLY 20A and 30A are valid branch breaker sizes for #10 AWG trunk cable,
+    // and never above the manufacturer's max branch OCPD (Enphase: 20 A).
+    const CANDIDATE_BREAKERS = [20, 30].filter(sz => sz <= (input.maxBranchOcpdA ?? 30));
     let branchOcpd = 20;
     let maxDevPerBranch = 0;
 

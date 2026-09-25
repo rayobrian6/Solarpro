@@ -36,6 +36,7 @@ import { nextStandardOcpd } from './electrical/stdSizes';
 // reach different 120%-rule verdicts for the same design.
 import { totalInterconnectionBackfeedA } from './electrical-calc';
 import { NEC_705_11_C_TAP_LIMIT_FT, TAP_SPAN_PHYSICAL_SEGMENT_ID } from './electrical/tapSpan';
+import { enphaseBranchBasis } from './permit/utils/branching';
 import {
   CONDUCTOR_AREA_IN2 as NEC_CONDUCTOR_AREA_IN2,
   selectSmallestConduit as necSelectSmallestConduit,
@@ -1048,6 +1049,20 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const isOptimizer = input.topology === 'optimizer';
   const isString = input.topology === 'string' || isOptimizer;
 
+  // ── AC branch basis — the MANUFACTURER's, not the 16 fallback ─────────────
+  // Every caller that has no per-model figure passes 16 (the Microinverter
+  // record has no `branchLimit`), so an Enphase job arrived as 16/branch with
+  // a 30 A breaker on the table: 32 × IQ8+ → 16 + 16 @ 30 A. Enphase publishes
+  // 13 IQ8+ per branch and a 20 A max branch OCPD. Non-Enphase micros keep
+  // their caller-supplied limit and datasheet 20 A / 30 A figures.
+  const _enphaseBranch = isMicro
+    ? enphaseBranchBasis(input.inverterModel, input.inverterManufacturer)
+    : null;
+  const branchLimit = _enphaseBranch
+    ? Math.min(input.inverterBranchLimit || 16, _enphaseBranch.maxPerBranch)
+    : (input.inverterBranchLimit || 16);
+  const maxBranchOcpdA = _enphaseBranch?.maxBranchOcpdA ?? 30;
+
   const topology: TopologyType = isMicro
     ? 'MICROINVERTER'
     : isOptimizer
@@ -1095,7 +1110,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       phases: 1,
     },
     modulesPerDevice: input.inverterModulesPerDevice,
-    branchLimit: input.inverterBranchLimit,
+    branchLimit,
   };
 
   // ── Array Summary ──────────────────────────────────────────────────────────
@@ -1298,7 +1313,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const microDeviceCount = isMicro
     ? Math.ceil(input.totalPanels / input.inverterModulesPerDevice)
     : 0;
-  const branchLimit = input.inverterBranchLimit || 16; // NEC 690.8(B) hard limit
+  // branchLimit / maxBranchOcpdA — resolved once at the top of computeSystem.
 
   // Per-micro AC current: inverterAcKw × 1000 / 240V
   const perMicroCurrentA = isMicro ? (input.inverterAcKw * 1000) / 240 : 0;
@@ -1308,7 +1323,9 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // 40A+ are feeder sizes, NOT branch breaker sizes for #10 AWG.
   // Strategy: try 20A first, then 30A. Pick whichever gives most balanced distribution.
   // Manufacturer-specified limits (AP Systems DS3) take priority over NEC 125% calc.
-  const CANDIDATE_BREAKERS_CS = [20, 30]; // ONLY valid branch breaker sizes for #10 AWG
+  // ONLY valid branch breaker sizes for #10 AWG — and never above the
+  // manufacturer's max branch OCPD (Enphase: 20 A).
+  const CANDIDATE_BREAKERS_CS = [20, 30].filter(sz => sz <= maxBranchOcpdA);
 
   const maxDevForBreakerCS = (sz: number): number => {
     if (sz === 20 && input.manufacturerMaxPerBranch20A && input.manufacturerMaxPerBranch20A > 0)
@@ -2416,7 +2433,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // For DS3-S (2 panels/device): 40 panels = 20 devices
     // microDeviceCount = ceil(totalPanels / inverterModulesPerDevice)
     moduleCount: isMicro ? microDeviceCount : input.totalPanels,
-    maxDevicesPerBranch: input.inverterBranchLimit || 16,
+    maxDevicesPerBranch: branchLimit,
+    maxBranchOcpdA,
     microAcCurrentA: isMicro ? perMicroCurrentA : 0,
     manufacturerMaxPerBranch20A: input.manufacturerMaxPerBranch20A,
     manufacturerMaxPerBranch30A: input.manufacturerMaxPerBranch30A,
@@ -3020,7 +3038,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       inverterAcOutputW: input.inverterAcKw * (isMicro ? microDeviceCount : physicalInverterUnits) * 1000,
       inverterCount: isMicro ? microDeviceCount : physicalInverterUnits,
       branchCount: isMicro ? acBranchCount : 1,
-      maxMicrosPerBranch: input.inverterBranchLimit || 16,
+      maxMicrosPerBranch: branchLimit,
       ambientTempC: input.ambientTempC,
       rooftopTempAdderC: input.rooftopTempAdderC,
       conduitType: input.conduitType,

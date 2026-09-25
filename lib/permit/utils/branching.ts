@@ -101,6 +101,29 @@ export function microBranchMaxOcpdA(inverterModel?: string | null, manufacturer?
 }
 
 /**
+ * Enphase branch basis for computeSystem — the per-model max units AND the
+ * 20 A max branch OCPD — or null when the micro is not Enphase (APsystems'
+ * datasheet 30 A figures stay with the caller). Ray, 2026-09-25: 32 × IQ8+
+ * drew 16 + 16 on a 30 A breaker because the engine only ever saw the 16
+ * fallback and was free to buy an even split with a bigger breaker.
+ */
+export function enphaseBranchBasis(
+  inverterModel?: string | null,
+  manufacturer?: string | null,
+): { maxPerBranch: number; maxBranchOcpdA: number } | null {
+  const mfr = String(manufacturer ?? '').trim().toLowerCase();
+  const m = _norm(String(inverterModel ?? ''));
+  const isEnphase = mfr
+    ? mfr.includes('enphase')
+    : ENPHASE_CAPABILITY_PROFILES.some(p => { const k = _norm(p.modelName); return !!k && m.includes(k); });
+  if (!isEnphase) return null;
+  return {
+    maxPerBranch: microMaxPerBranch(inverterModel, 'Enphase'),
+    maxBranchOcpdA: microBranchMaxOcpdA(inverterModel, 'Enphase'),
+  };
+}
+
+/**
  * Balanced branch sizes — first (total % n) branches get one extra module.
  * 53 modules / 6 branches → [9, 9, 9, 9, 9, 8], never [14, 14, 14, 11].
  */
