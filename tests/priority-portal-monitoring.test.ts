@@ -193,8 +193,23 @@ describe('Portal MonitoringFoundation: shows monitoring link', () => {
     expect(src).toContain('<MonitoringFoundation stage={stage} project={activeProject} />');
   });
 
-  it('shows fallback placeholder when no monitoring link', () => {
-    expect(src).toContain('Monitoring data typically activates within 24');
+  it('tells the homeowner when monitoring will activate, when there is no link yet', () => {
+    // 🚨 PINS THE REQUIREMENT, NOT THE SENTENCE. This asserted the exact string
+    // "Monitoring data typically activates within 24" and failed when the copy
+    // was reworded to drop one word — on a change that did not touch what this
+    // test is actually about. An over-specified guard makes correct edits look
+    // like regressions, and the usual response is to weaken it.
+    //
+    // What matters: the no-link branch still tells the homeowner roughly when
+    // monitoring becomes available, rather than leaving the panel silent.
+    expect(src).toMatch(/Monitoring[^\n]*typically activates within 24/);
+  });
+
+  it('🚨 and does NOT render placeholder gauges for data it cannot fetch', () => {
+    // Six tiles read "— kW", "—%" and "$—" under a comment saying they would be
+    // populated "if monitoring API integration is added". No such client exists.
+    // A homeowner reads three empty gauges as "my system is producing nothing".
+    expect(src, 'a placeholder gauge is back').not.toMatch(/'— kW'|'—%'|'\$—'/);
   });
 });
 

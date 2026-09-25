@@ -69,8 +69,23 @@ Last updated: 2026-09-25, after the string-sizing authority landed.
    on every legitimately fresh design. The right fix adds an explicit UNKNOWN
    state to the lifecycle and refuses on it — which touches the deletion-authority
    enum that was just hardened, so it gets its own pass rather than being
-   squeezed in beside unrelated work. **Not yet verified that the ref can in fact
-   be unpopulated at fire time; that is step one.**
+   squeezed in beside unrelated work.
+
+   **Refined since:** the ref is `useRef<DesignGeometryLifecycle>('untouched')` in
+   `useSiteDesign.ts` and its type is a non-optional union, so `.current` is
+   never undefined — and `DesignStudio` always passes the prop. The `??` never
+   fires. So this is **not** a missing-value bug; it is a **timing window**. The
+   ref *starts* at `'untouched'` and is assigned the real value when the design
+   hydrates. `shouldRunLaneA` additionally requires `existingPlaneCount === 0`,
+   which a cleared design satisfies. So a cleared design loaded fresh, if Lane A
+   can fire before the ledger hydrates, reads `'untouched'` with zero planes and
+   is granted acquisition.
+
+   **Step one is now an ordering question, not a null check:** can Lane A fire
+   before `geometryLifecycleRef` is assigned from the loaded ledger? If it
+   cannot, this is closed and should be written down as closed. If it can, the
+   fix is an explicit `'unknown'` initial state that refuses, distinct from a
+   hydrated `'untouched'` that permits.
 4. **`switchingProperty` key drift** — a same-property key drift reads as a property change and *relaxes* the wipe guard. Narrow, deliberately untouched rather than risk the guard.
 5. **Disposition-only write schedules no save** — same class as the ledger/autosave dependency bug, but it is the provider decision rather than deletion authority.
 6. **Homeowner: render the install date.** Two live writers exist (`operations/route.ts`, `ScheduleInstallModal`); the portal route selects neither. This is the single most-asked support question and it is pure surfacing.
