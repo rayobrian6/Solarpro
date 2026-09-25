@@ -520,6 +520,22 @@ export async function POST(req: NextRequest) {
       // request body, never on the Layout record: it authorises one save and
       // is not persisted. See lib/design/deletionAuthority.ts.
       destructive:       body.destructive,
+      // 🚨 WHICH VERSION OF THE DESIGN THIS SAVE WAS COMPUTED AGAINST.
+      //
+      // The Save button lands HERE, so this is one of the two studio writers to
+      // the single (project_id, user_id) row, and until `upsertLayout` learned
+      // to refuse a stale write every one of them was last-write-wins: two
+      // tabs, a laptop and a phone, or a tab waking from sleep each replaced
+      // the other's work and both were told "Saved".
+      //
+      // Read off the layout the client sent, because that is the record it
+      // actually read — and a field missing from THIS line is dropped with no
+      // error, exactly like the four above it were. A dropped precondition
+      // reads as "no precondition", which silently restores last-write-wins.
+      // Absent (older clients, the ephemeral and system-definition shapes)
+      // keeps today's behaviour exactly. See lib/db/projects.ts.
+      expectedUpdatedAt: (rawLayout as { expectedUpdatedAt?: string | number | Date | null })
+        ?.expectedUpdatedAt ?? body.expectedUpdatedAt,
     });
 
     const productionData = await calculateProduction(savedLayout, client);

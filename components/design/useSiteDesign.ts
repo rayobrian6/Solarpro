@@ -85,6 +85,30 @@ import {
 
 type Updater<T> = T | ((prev: T) => T);
 
+/**
+ * Normalise the stored design's version token.
+ *
+ * `timestamptz` reaches this file two ways — as a JS `Date` when the layout is
+ * read through the database driver, and as an ISO string when it comes back
+ * through JSON — and both have to produce the SAME token, or the server-side
+ * precondition is a guard that can never match and every save is refused.
+ *
+ * Anything unreadable becomes null, which means "no precondition". That is the
+ * honest answer: the server REFUSES a token it cannot parse (deliberately — see
+ * `requestedVersion` in lib/db/projects.ts), so sending rubbish would fail every
+ * save, while sending nothing simply leaves this tab where it was before any of
+ * this existed.
+ *
+ * Module scope, not the hook body: it is pure, and a function re-created each
+ * render inside a `useCallback` with empty deps is a question nobody should
+ * have to answer.
+ */
+function asVersion(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null;
+  const d = v instanceof Date ? v : new Date(v as string | number);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
 /** A token naming the site that was active when an async request was issued. */
 export interface SiteScope {
   siteKey: string;
@@ -144,6 +168,40 @@ export interface UseSiteDesign {
    *  This is what makes "pick my house again" return the design left there
    *  rather than an empty roof beside it. */
   resolveKeyFor: (lat: number, lng: number, projectId?: string | null) => ReturnType<typeof resolveSiteKey>;
+
+  /**
+   * WHICH VERSION OF THE STORED DESIGN THIS TAB IS EDITING.
+   *
+   * 🚨 THE DESIGN IS ONE ROW AND EVERY SAVE WAS LAST-WRITE-WINS.
+   *
+   * `layouts` holds one row per (project_id, user_id). Nothing a save sent said
+   * which state of that row the edit was computed against, so two tabs, a
+   * laptop and a phone, or this tab waking from sleep each wrote the whole row
+   * over the other's work — and every one of them was told "Saved".
+   *
+   * This hook is where the answer belongs, because this hook is what READ the
+   * row: `hydrateFromStored` is handed the stored layout, so it is the one
+   * place that knows, without guessing, which version the entities on screen
+   * came from. Send it back as `expectedUpdatedAt` on the save and the server
+   * refuses a stale write with `LAYOUT_STALE_WRITE` instead of silently
+   * overwriting somebody. See `expectedUpdatedAt` in lib/db/projects.ts.
+   *
+   * Null means "this tab has not read a stored row" — a brand-new project, or
+   * a Quick Design session with no row at all. A save then carries no
+   * precondition and behaves exactly as it always has, which is correct: there
+   * is no other version to conflict with.
+   */
+  storedVersion: () => string | null;
+  /**
+   * The design was just written and this is the version it now has.
+   *
+   * 🚨 CALL IT ON EVERY SUCCESSFUL SAVE, or the next autosave sends the version
+   * from before this one and is refused as stale — by this tab's own previous
+   * save. The value is `data.updatedAt` from the save response (or a fresh GET
+   * of the layout); passing null forgets the version, which returns this tab to
+   * unconditional saves and must therefore be deliberate.
+   */
+  noteSavedVersion: (updatedAt: string | number | Date | null | undefined) => void;
 
   /** Everything the save paths need: the ACTIVE entities for their own columns
    *  plus the archives for `layouts.site_archives`. */
@@ -633,7 +691,28 @@ export function useSiteDesign(): UseSiteDesign {
     };
   }, [applyBundle, setActiveKey]);
 
+  // 🚨 A REF, NOT STATE. Every save path in DesignStudio — the autosave timer,
+  // the Save button and the beforeunload beacon — reads what it sends out of
+  // refs, for the reason given at the top of this file: a value that lags the
+  // state it mirrors gets sent by a save firing in that window. A version token
+  // that lags is worse than none, because it names a version that is no longer
+  // the one on screen.
+  const storedVersionRef = useRef<string | null>(null);
+
+  const storedVersion = useCallback<UseSiteDesign['storedVersion']>(
+    () => storedVersionRef.current, [],
+  );
+  const noteSavedVersion = useCallback<UseSiteDesign['noteSavedVersion']>((updatedAt) => {
+    storedVersionRef.current = asVersion(updatedAt);
+  }, []);
+
   const hydrateFromStored = useCallback<UseSiteDesign['hydrateFromStored']>((stored, siteKeyNow) => {
+    // The version the entities about to go on screen came from. Read here and
+    // nowhere else — this is the only moment at which the row and the design
+    // are known to correspond. `StoredLayoutForHydration` does not declare the
+    // field because hydration has no use for it; the layout row the caller
+    // passes does carry it (`Layout.updatedAt`, via rowToLayout).
+    storedVersionRef.current = asVersion((stored as { updatedAt?: unknown } | null)?.updatedAt);
     const res = hydrate(stored, siteKeyNow);
     stateRef.current = res.state;
     deletionLedgerRef.current = res.state.deletions ?? emptyLedger();
@@ -1021,6 +1100,7 @@ export function useSiteDesign(): UseSiteDesign {
     activeSiteKey, activeSiteKeyRef,
     archivedSiteCount, archivedEntityCount,
     switchToSite, hydrateFromStored, resolveKeyFor,
+    storedVersion, noteSavedVersion,
     persistencePayload, storedArchives,
     scope, isCurrent,
     nativeDisposition, nativeDispositionRef, setNativeDisposition,

@@ -123,6 +123,21 @@ export const LAYOUT_REFUSAL_CODES = [
   'LAYOUT_COORDS_MISMATCH',
   'LAYOUT_COORDS_UNPLACED',
   'LAYOUT_RESTORE_UNPLACEABLE',
+  // 🚨 SOMEBODY ELSE SAVED THIS DESIGN WHILE YOU HAD IT OPEN.
+  //
+  // The design is ONE row keyed (project_id, user_id), and until this code
+  // existed every write to it was last-write-wins: two tabs, a laptop and a
+  // phone, or one tab waking from sleep each replaced the other's work and both
+  // were told "Saved". `upsertLayout` now refuses — BEFORE it writes anything —
+  // when the caller states which version it read and the stored row has moved
+  // past it. See `expectedUpdatedAt` in lib/db/projects.ts.
+  //
+  // It belongs in THIS list, not at a call site, for exactly the reason the
+  // note above gives: eight call sites reach `upsertLayout`, and a refusal that
+  // only one of them recognises is a 503 "try again in a moment" everywhere
+  // else — advice that is wrong, because retrying a stale write is precisely
+  // what must not happen.
+  'LAYOUT_STALE_WRITE',
 ] as const;
 
 export type LayoutRefusalCode = (typeof LAYOUT_REFUSAL_CODES)[number];

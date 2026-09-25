@@ -733,6 +733,35 @@ export interface UpsertLayoutData {
    * before this it could not.
    */
   destructive?: unknown;
+  /**
+   * THE VERSION OF THE ROW THIS EDIT WAS COMPUTED AGAINST.
+   *
+   * 🚨 THE DESIGN IS ONE ROW AND EVERY WRITE USED TO BE LAST-WRITE-WINS.
+   *
+   * `layouts` holds one row per (project_id, user_id) — the CODE makes it one
+   * row; migration 001 declares only two separate indexes, no UNIQUE
+   * constraint. Nothing in a save said which state of that row the edit was
+   * based on, so two tabs, a laptop and a phone, or one tab waking from sleep
+   * each wrote the whole row over the other's work, and both were told "Saved".
+   *
+   * Send the `updatedAt` you read (`Layout.updatedAt`, which every read path
+   * already returns) and this save is refused with `LAYOUT_STALE_WRITE` — a
+   * 409 with a refusal badge, via `handleRouteDbError` — if the stored row has
+   * moved on. The refusal happens BEFORE the first write, so nothing of the
+   * losing edit reaches the database and nothing of the winner's is disturbed.
+   *
+   * 🚨 OPT-IN, DELIBERATELY. Omit it and the behaviour is byte-for-byte what it
+   * was. Four of the eight callers — the admin repair tools,
+   * /api/engineering/preliminary and the version-restore route — have no
+   * client-held version to state, and making this mandatory would refuse saves
+   * nobody could fix. Turning it on for a caller is a decision made at that
+   * caller, and `tests/layoutConcurrency.postgres.test.ts` pins both halves.
+   *
+   * An UNREADABLE value is refused, never ignored: silently dropping a token a
+   * client meant to send would return the whole product to last-write-wins
+   * while everything reported that concurrency control was on.
+   */
+  expectedUpdatedAt?: string | number | Date | null;
 }
 
 // ── Coordinate-integrity guard (Ray, 2026-06-30) ────────────────────────────
@@ -1007,23 +1036,46 @@ async function assertDeletionLedgerStorable(sql: any, data: UpsertLayoutData): P
  * `RETURNING` is what makes this a proof rather than an assumption: an UPDATE
  * that matches no row raises nothing and reports success.
  */
-async function persistDeletionLedgerFirst(sql: any, data: UpsertLayoutData): Promise<void> {
+async function persistDeletionLedgerFirst(
+  sql: any,
+  data: UpsertLayoutData,
+  /** The row version this request owns, from `claimLayoutForWrite`. Null when
+   *  the caller opted out of concurrency control. */
+  version: string | null,
+): Promise<void> {
   const led = incomingLedger(data);
   if (!ledgerHasAuthority(led)) return;
   let stored: DeletionLedger | null = null;
   try {
+    // 🚨 THE PRECONDITION RIDES ON THIS STATEMENT TOO, and it has to.
+    //
+    // This is the FIRST thing a destructive save writes. A stale save that got
+    // this far would stamp ITS archive — including its deletion ledger — onto
+    // the row belonging to whoever won, and then be refused by the main write.
+    // A refusal that still mutates the winner's row is just a quieter way of
+    // losing their work. Conditioning it means the stale save writes nothing
+    // at all and is refused here instead.
     const rows = await sql`
       UPDATE layouts
       SET site_archives = ${JSON.stringify(data.siteArchives)}::jsonb
       WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
-      RETURNING site_archives -> 'deletions' AS deletions
+        AND (${version}::timestamptz IS NULL
+             OR date_trunc('milliseconds', updated_at)
+                = date_trunc('milliseconds', ${version}::timestamptz))
+      RETURNING site_archives -> 'deletions' AS deletions, updated_at
     `;
     // No row yet (this save creates the layout) is not a failure — there is no
     // geometry to protect, and `applyDesignEntities` writes the column after the
     // INSERT, where the verification below catches anything that goes wrong.
-    if (rows.length === 0) return;
+    // With a version in hand it means something else entirely: the caller is in
+    // the UPDATE branch, so the row exists, so the precondition is what failed.
+    if (rows.length === 0) {
+      if (version !== null) await refuseStaleWrite(sql, data, version);
+      return;
+    }
     stored = parseDeletionLedger(rows[0]?.deletions);
   } catch (e) {
+    if (e instanceof Error && e.message.startsWith('LAYOUT_')) throw e;
     console.error('[LAYOUT_ARCHIVE_UNSTORABLE] deletion ledger write failed before the layout write:',
       (e as Error)?.message);
     throw new Error(
@@ -1043,9 +1095,197 @@ async function persistDeletionLedgerFirst(sql: any, data: UpsertLayoutData): Pro
   }
 }
 
+// ── OPTIMISTIC CONCURRENCY ──────────────────────────────────────────────────
+//
+// 🚨 TWO TABS, ONE ROW, AND THE SECOND ONE USED TO WIN SILENTLY.
+//
+// The whole design is one row keyed (project_id, user_id) — the code makes it
+// one row; migration 001 declares two ordinary indexes and no UNIQUE
+// constraint. Every write was `UPDATE layouts SET … WHERE project_id = … AND
+// user_id = …`, with nothing stating which version of the row the edit was
+// computed against. Two tabs, a laptop and a phone, or one tab waking from
+// sleep each replaced the other's work, and both were told "Saved".
+//
+// THE TOKEN IS `updated_at`, and it is free: a BEFORE UPDATE trigger
+// (`update_layouts_updated_at`, migration 001) already advances it on every
+// write, `rowToLayout` already returns it as `Layout.updatedAt`, and every read
+// path already hands it to the client. No column, no migration, nothing for an
+// operator to run before this works.
+//
+// 🚨 …AND THAT TRIGGER IS ALSO THE TRAP. ONE logical save issues up to SIX
+// UPDATE statements against this row — the ledger pre-write, the main write,
+// design_electrical, site_archives, obstructions, measurements — and the
+// trigger bumps `updated_at` on every one. A precondition pinned to the
+// CLIENT's token on each statement conflicts with the save's own earlier
+// statement and refuses every save in the product, for ever, with a full green
+// test suite. So the client's token is checked exactly ONCE, by a CLAIM, and
+// each later statement is conditioned on what the previous one RETURNED.
+//
+// 🚨 MILLISECOND GRANULARITY, ON PURPOSE. `timestamptz` keeps microseconds;
+// the value that reaches a browser has been through a JS `Date`, which keeps
+// milliseconds. Comparing the raw values would be a guard that can never match
+// — every save refused, always. Both sides are truncated to milliseconds so the
+// round trip is lossless whatever the driver does with the column.
+
+/** The token as a comparable ISO string, or null for "no token supplied". */
+function normalizeVersion(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const d = value instanceof Date ? value : new Date(value as string | number);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+/**
+ * The version this save states it was computed against.
+ *
+ * 🚨 AN UNREADABLE TOKEN IS A REFUSAL, NEVER A SHRUG. Dropping a value the
+ * caller meant as a precondition would return the product to last-write-wins
+ * while every log line said concurrency control was on — the exact shape of a
+ * guard that cannot fire. Absent is absent; present-but-unreadable is refused.
+ */
+function requestedVersion(data: UpsertLayoutData): string | null {
+  const raw = data.expectedUpdatedAt;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const v = normalizeVersion(raw);
+  if (v === null) {
+    console.error('[LAYOUT_STALE_WRITE] unreadable version token', { projectId: data.projectId, token: String(raw) });
+    throw new Error(
+      `LAYOUT_STALE_WRITE: this save states the design version it was based on, but that ` +
+      `value is not a readable timestamp, so it is impossible to tell whether it would ` +
+      `overwrite someone else's work. Nothing has been written. Reload the design and try again.`,
+    );
+  }
+  return v;
+}
+
+/** How many panels this save carries, phrased for a human. */
+function incomingPanelPhrase(data: UpsertLayoutData): string {
+  if (data.panels == null) return 'does not restate the panels';
+  return `carries ${data.panels.length} panel(s)`;
+}
+
+/**
+ * Refuse, and say enough that the user can decide what to do.
+ *
+ * 🚨 A REFUSAL MUST NEVER READ LIKE A DATA LOSS. Nothing has been written when
+ * this fires — the claim is the first write of the save and it is conditional —
+ * so BOTH copies still exist: the stored one on the server, the user's in the
+ * tab (and in localStorage, which DesignStudio writes before it POSTs). The
+ * message says so, states what each one holds so the user can judge which they
+ * want, and names the way out. A 409 that just says "conflict" is how somebody
+ * closes the tab and loses the only copy of their edit.
+ */
+async function refuseStaleWrite(sql: any, data: UpsertLayoutData, expected: string): Promise<never> {
+  let storedPanels = 'an unknown number of';
+  let storedAt = 'a later time';
+  try {
+    const rows = await sql`
+      SELECT jsonb_array_length(coalesce(panels, '[]'::jsonb)) AS n, updated_at
+      FROM layouts WHERE project_id = ${data.projectId} AND user_id = ${data.userId} LIMIT 1
+    `;
+    if (rows.length === 0) {
+      console.error('[LAYOUT_STALE_WRITE] the row this save was based on no longer exists',
+        { projectId: data.projectId, expected });
+      throw new Error(
+        `LAYOUT_STALE_WRITE: the saved design this edit was based on no longer exists — it was ` +
+        `deleted or reset while you had it open. This save ${incomingPanelPhrase(data)} and would ` +
+        `re-create it without that decision. Nothing has been written, and your edits are still ` +
+        `in this tab. Reload the project to see its current state before saving again.`,
+      );
+    }
+    storedPanels = String(rows[0].n ?? 0);
+    storedAt = normalizeVersion(rows[0].updated_at) ?? storedAt;
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('LAYOUT_')) throw e;
+    console.warn('[LAYOUT_STALE_WRITE] could not describe the stored version:', (e as Error)?.message);
+  }
+  console.error('[LAYOUT_STALE_WRITE]', { projectId: data.projectId, expected, storedAt, storedPanels });
+  throw new Error(
+    `LAYOUT_STALE_WRITE: this design was saved somewhere else — another tab, another device, or ` +
+    `an older copy of this page — while you had it open. The saved design has ${storedPanels} ` +
+    `panel(s) and was last written at ${storedAt}; this save ${incomingPanelPhrase(data)} and was ` +
+    `based on the version from ${expected}. Nothing has been written, so neither copy is lost: ` +
+    `the saved design is untouched and your edits are still in this tab. Reload the design to see ` +
+    `what was saved, then re-apply your change.`,
+  );
+}
+
+/**
+ * Take ownership of the row, atomically, before anything is written.
+ *
+ * 🚨 READ-THEN-WRITE IS NOT A CONCURRENCY CHECK. Comparing a SELECT to the
+ * token and then writing leaves the whole gap between them open — which is the
+ * exact window the defect lives in. This is one statement: Postgres locks the
+ * row, re-evaluates the WHERE against the committed value, and at most one of
+ * two racing writers matches. The loser sees zero rows and is refused.
+ *
+ * The statement changes no data. Its only effect is the trigger's bump of
+ * `updated_at`, which is what makes the winner's claim exclusive: any other
+ * writer holding the same token now fails its own claim. It is placed AFTER
+ * every read-only guard so a save refused for a coordinate mismatch or a
+ * sub-system wipe does not move the version and force an innocent second tab
+ * to reload for nothing.
+ */
+async function claimLayoutForWrite(
+  sql: any,
+  data: UpsertLayoutData,
+  expected: string,
+): Promise<string> {
+  const rows = await sql`
+    UPDATE layouts
+    SET updated_at = NOW()
+    WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+      AND date_trunc('milliseconds', updated_at)
+          = date_trunc('milliseconds', ${expected}::timestamptz)
+    RETURNING updated_at
+  `;
+  if (rows.length === 0) await refuseStaleWrite(sql, data, expected);
+  // The trigger sets NEW.updated_at = NOW() whatever the statement asks for, so
+  // this is the value on disk — and the version every later statement in this
+  // save must match, not the one the client sent.
+  return normalizeVersion(rows[0]?.updated_at) ?? expected;
+}
+
+/**
+ * Tell the caller the version the row ACTUALLY ended up with.
+ *
+ * 🚨 THE RETURNED `updatedAt` WAS A MID-SAVE VALUE, AND IT WOULD HAVE WEDGED
+ * THE STUDIO ON ITS SECOND AUTOSAVE.
+ *
+ * `upsertLayout` builds its return value from the main UPDATE's `RETURNING *`,
+ * and then `applyDesignElectrical` and `applyDesignEntities` write the row up
+ * to four more times — design_electrical, site_archives, obstructions,
+ * measurements — each bumping `updated_at` through the trigger. So the value
+ * handed back named an instant the row had already left behind.
+ *
+ * That was harmless while nobody read it. It stops being harmless the moment a
+ * client uses it as its next precondition, which is the obvious thing to do
+ * (take the new version out of the save response rather than re-fetching): the
+ * very next save would be refused as stale, by this save. Correcting it here
+ * means one truth about the row instead of two, for every caller.
+ */
+async function withCurrentVersion(sql: any, data: UpsertLayoutData, saved: Layout): Promise<Layout> {
+  try {
+    const rows = await sql`
+      SELECT updated_at FROM layouts
+      WHERE project_id = ${data.projectId} AND user_id = ${data.userId} LIMIT 1
+    `;
+    const v = rows[0]?.updated_at;
+    if (v) saved.updatedAt = (v instanceof Date ? v.toISOString() : String(v)) as Layout['updatedAt'];
+  } catch (e) {
+    // Never fail a save that already succeeded over reporting its version. The
+    // caller keeps the mid-save value, which is exactly what it had before.
+    console.warn('[upsertLayout] could not re-read the saved version:', (e as Error)?.message);
+  }
+  return saved;
+}
+
 export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   assertUUID(data.projectId, 'projectId');
   assertUUID(data.userId, 'userId');
+  // The version this save states it was computed against, if any. Validated
+  // before a connection is opened — an unreadable token is a client bug and
+  // there is nothing useful to do with the database until it is fixed.
+  const expectedVersion = requestedVersion(data);
   const sql = await getDbReady();
   // Block cross-project coordinate contamination before any write (see helper above).
   await assertLayoutCoordsMatchProject(sql, data);
@@ -1121,12 +1361,31 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   const mapCenterJson = data.mapCenter ? JSON.stringify(data.mapCenter) : null;
 
   // Check if layout exists for this project
+  // 🚨 `updated_at` comes back with it, because that is the version token. It
+  // costs nothing here and it is what lets a stale save be named as stale
+  // BEFORE the sub-system-wipe guard runs — a stale wipe is a stale save, and
+  // telling the user their tab is out of date is the actionable diagnosis.
   const existing = await sql`
-    SELECT id FROM layouts
+    SELECT id, updated_at FROM layouts
     WHERE project_id = ${data.projectId}
       AND user_id = ${data.userId}
     LIMIT 1
   `;
+
+  // 🚨 THE CHEAP HALF OF THE CONCURRENCY CHECK, and it is only half.
+  //
+  // This read cannot be the mechanism — the row can move between this SELECT
+  // and the write, which is the very race being closed — but it is free (the
+  // SELECT was already happening), it fires before the guards do any work, and
+  // it produces the honest refusal rather than a wipe refusal for a save whose
+  // real problem is that the tab is out of date. The atomic CLAIM below is what
+  // actually makes it safe.
+  if (expectedVersion !== null) {
+    const storedVersion = normalizeVersion(existing[0]?.updated_at);
+    if (existing.length === 0 || storedVersion !== expectedVersion) {
+      await refuseStaleWrite(sql, data, expectedVersion);
+    }
+  }
 
   if (existing.length > 0) {
     // ── Subsystem-wipe guard (2026-07-16) ─────────────────────────────────────
@@ -1276,10 +1535,45 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       // census query failure must never block a legit save
       console.warn('[LAYOUT_SUBSYSTEM_WIPE_GUARD] census failed, skipping guard:', (e as Error)?.message);
     }
+    // 🚨 CLAIM THE ROW BEFORE THE FIRST WRITE, NOT AFTER IT.
+    //
+    // Every guard above this line is read-only, so a save refused by any of
+    // them has written nothing and has not moved the version — an innocent
+    // second tab is not forced to reload because someone else's save was
+    // rejected. Everything BELOW this line writes, so the claim goes exactly
+    // here: it is the last moment at which "nothing has been written" is still
+    // true, and the first at which it would stop being true.
+    //
+    // `version` is what this request now OWNS — the value the claim's own write
+    // left on the row, never the client's token. The distinction is the whole
+    // difference between working and refusing every save for ever: this save is
+    // about to write the row several more times, and the client's token is
+    // already out of date by the line below. See `claimLayoutForWrite`.
+    const version: string | null = expectedVersion === null
+      ? null
+      : await claimLayoutForWrite(sql, data, expectedVersion);
     // 🚨 THE DELETION RECORD GOES DOWN BEFORE THE STATEMENT THAT REMOVES THE
     // GEOMETRY IT EXPLAINS — and after the guard above, which reads the stored
     // `activeSiteKey` out of this very column. See `persistDeletionLedgerFirst`.
-    await persistDeletionLedgerFirst(sql, data);
+    await persistDeletionLedgerFirst(sql, data, version);
+    //
+    // 🚨 AND THE WRITES FROM HERE ON ARE DELIBERATELY UNCONDITIONAL.
+    //
+    // The obvious next move — pin the main write to what the ledger returned —
+    // is WRONG, and quietly so. The ledger has already been written by then, so
+    // a refusal at the main write would leave the row holding TOMBSTONES FOR
+    // FACES THAT ARE STILL THERE. `admitAfterHydrate` filters the active bundle
+    // against that ledger on the next load, so those faces would vanish from
+    // the user's screen — a refusal causing exactly the data loss the refusal
+    // exists to prevent, and a subtler one, because nothing reports it.
+    //
+    // The claim is the mechanism and it has already done its job: no other
+    // writer holding a version token can be in flight, because their claim
+    // would have failed against the version this one advanced. What remains is
+    // an opt-out writer (the admin repair tools, /api/engineering/preliminary,
+    // the version-restore route) landing in the microseconds between the two
+    // statements — and against those, this save winning is exactly today's
+    // behaviour, with the ledger and the geometry still in step.
     // UPDATE existing layout
     // 🚨 roof_planes AND map_center USE COALESCE: `undefined` MEANS KEEP STORED,
     // exactly as it does for obstructions, measurements and site_archives.
@@ -1343,9 +1637,16 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         AND user_id = ${data.userId}
       RETURNING *
     `;
-    return await applyDesignElectrical(sql, data, rowToLayout(rows[0]));
+    return await withCurrentVersion(sql, data,
+      await applyDesignElectrical(sql, data, rowToLayout(rows[0])));
   } else {
-    // INSERT new layout
+    // INSERT new layout.
+    //
+    // 🚨 A VERSION TOKEN CANNOT REACH HERE. `expectedVersion` means "I read a
+    // row and this was its version"; no row exists, so the row it read is gone
+    // and the pre-check above has already refused with LAYOUT_STALE_WRITE
+    // rather than quietly re-creating what someone deleted. A first-ever save
+    // sends no token and lands here exactly as it always did.
     const rows = await sql`
       INSERT INTO layouts (
         project_id, user_id, system_type, panels, roof_planes,
@@ -1374,7 +1675,8 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       )
       RETURNING *
     `;
-    return await applyDesignElectrical(sql, data, rowToLayout(rows[0]));
+    return await withCurrentVersion(sql, data,
+      await applyDesignElectrical(sql, data, rowToLayout(rows[0])));
   }
 }
 
