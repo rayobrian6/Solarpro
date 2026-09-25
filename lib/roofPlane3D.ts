@@ -604,7 +604,13 @@ export function latLngToECEF(lat: number, lng: number, height = 0): Cart3 {
 
 // ─── Area ────────────────────────────────────────────────────────────────────
 
-export function projectToPlaneUV(pts: Cart3[], frame: Plane3DFrame): { u: number; v: number }[] {
+/** The part of a plane frame that a UV projection actually reads. Widened from
+ *  `Plane3DFrame` so a plane's STORED `ecefFrame3D` (which carries u/v/n and no
+ *  tilt/azimuth/projectedPts) can be measured by the same function — a full
+ *  `Plane3DFrame` still satisfies it. */
+export type PlaneUVBasis = { origin: Cart3; u: Cart3; v: Cart3 };
+
+export function projectToPlaneUV(pts: Cart3[], frame: PlaneUVBasis): { u: number; v: number }[] {
   return pts.map(p => {
     const d = sub3(p, frame.origin);
     return { u: dot3(d, frame.u), v: dot3(d, frame.v) };
@@ -620,6 +626,63 @@ function polygonArea2D(pts: { u: number; v: number }[]): number {
     area -= pts[j].u * pts[i].v;
   }
   return Math.abs(area) / 2;
+}
+
+/**
+ * 🚨 ONE MEASUREMENT OF A ROOF FACE'S AREA, AND THIS IS IT.
+ *
+ * A face's outline in ECEF, projected onto that face's own u/v axes and closed
+ * by the shoelace. Because the axes lie IN the plane, this is true plane-of-roof
+ * (slope) area — footprint ÷ cos(pitch) — not the plan-view footprint. Those two
+ * differ by 12% at 6:12 and 30% at 12:12, and everything downstream that sizes a
+ * system off area would be wrong by that much if the plan number were used.
+ *
+ * `buildRoofPlane3D` calls this for a newly built face, and
+ * `enrichRoofPlaneWithLECS` (lib/roofGeometry.ts) calls it again for a RESHAPED
+ * one, so a face that was squared up, stitched, re-sloped or nudged reports the
+ * area it now has instead of the one it was born with. Two callers, one formula.
+ */
+export function planeOfRoofAreaM2(pts: ReadonlyArray<Cart3>, frame: PlaneUVBasis): number {
+  return polygonArea2D(projectToPlaneUV(pts as Cart3[], frame));
+}
+
+/**
+ * The fraction of a roof face treated as usable once setbacks are taken off,
+ * when nothing better is known. Every producer of a RoofPlane already used this
+ * number (here, lib/aerial/nearmapToRoofPlane.ts,
+ * lib/siteSurveys/aerialGeometry/designPlaneAdapter.ts, DesignStudio) — named
+ * here so a re-measured face agrees with a newly built one by construction.
+ */
+export const USABLE_AREA_FRACTION = 0.75;
+
+/**
+ * Re-measure a stored plane from the 3D geometry it currently carries.
+ *
+ * Returns null — meaning "I cannot answer, leave the stored value alone" —
+ * unless the plane has a complete, finite 3D record. That refusal is what keeps
+ * this off the faces whose area comes from somewhere else entirely: a 2D traced
+ * plane before its frame is attached, and a Nearmap face whose area is the
+ * vendor's reported measurement. For a face built by `buildRoofPlane3D` and not
+ * since reshaped it returns exactly the number already stored, so re-enriching
+ * an untouched design moves nothing.
+ */
+export function measureRoofPlaneAreas(
+  plane: Pick<RoofPlane, 'polygon3D' | 'origin3D' | 'ecefFrame3D'>,
+): { area: number; usableArea: number } | null {
+  const pts    = plane.polygon3D;
+  const origin = plane.origin3D;
+  const frame  = plane.ecefFrame3D;
+  if (!pts || pts.length < 3 || !origin || !frame?.u || !frame?.v) return null;
+
+  const finite = (c: Cart3 | undefined) =>
+    !!c && Number.isFinite(c.x) && Number.isFinite(c.y) && Number.isFinite(c.z);
+  if (!finite(origin) || !finite(frame.u) || !finite(frame.v)) return null;
+  if (!pts.every(finite)) return null;
+
+  const area = planeOfRoofAreaM2(pts, { origin, u: frame.u, v: frame.v });
+  if (!Number.isFinite(area) || area <= 0) return null;
+
+  return { area, usableArea: area * USABLE_AREA_FRACTION };
 }
 
 /**
@@ -871,9 +934,8 @@ export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = 
   const centroidCart = centroid3(planPts);
   const { lat: centroidLat, lng: centroidLng, height: centroidHeight } = ecefToLatLng(centroidCart);
 
-  // Area (m²)
-  const uvPts   = projectToPlaneUV(projPts, frame);
-  const areaMSq = polygonArea2D(uvPts);
+  // Area (m²) — the one measurement, shared with the re-measure path.
+  const areaMSq = planeOfRoofAreaM2(projPts, frame);
 
   const azimuth = ((frame.azimuthDeg % 360) + 360) % 360;
   const pitch   = Math.max(0, Math.min(60, frame.tiltDeg));
@@ -886,7 +948,7 @@ export function buildRoofPlane3D(pts3D: Cart3[], options: ComputePlaneOptions = 
     pitch,
     azimuth,
     area:        areaMSq,
-    usableArea:  areaMSq * 0.75,
+    usableArea:  areaMSq * USABLE_AREA_FRACTION,
     centroidLat,
     centroidLng,
     source:      'manual',

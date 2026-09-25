@@ -35,6 +35,10 @@ import {
   type LocalFeetPoint,
   type LatLngPoint,
 } from './localProjection';
+// The single authority on what a roof face's area is — see the note in
+// enrichRoofPlaneWithLECS. roofPlane3D imports only `@/types` and uuid, so this
+// is a leaf dependency and cannot cycle back.
+import { measureRoofPlaneAreas } from './roofPlane3D';
 
 // ─── Re-export projection helpers for callers that imported from roofGeometry ─
 // (backwards compatibility — callers may import latLngToLocal etc.)
@@ -814,10 +818,12 @@ export function computeRoofAreas(
 
 /**
  * Compute and attach LECS (feet) local coordinates to a RoofPlane.
- * Call once when a plane is created.  Stores:
+ * Call when a plane is created — and again whenever it is RESHAPED, which is
+ * what DesignStudio's stitched-plane handler does.  Stores:
  *   - centroidLat / centroidLng (persistent origin)
  *   - verticesLocal  (feet relative to centroid)
  *   - centroidLocal  (always {0,0} — stored for explicitness)
+ *   - area / usableArea, re-measured from the face's own 3D outline
  */
 export function enrichRoofPlaneWithLECS(plane: RoofPlane): RoofPlane {
   const centroid = polygonCentroidLatLng(plane.vertices);
@@ -827,8 +833,34 @@ export function enrichRoofPlaneWithLECS(plane: RoofPlane): RoofPlane {
   // v47.118: Compute primary axis (longest edge bearing) ONCE at plane creation.
   // Stored on the plane so generatePanelGridCAD can use it when alignToEdge=true.
   const roofEdgeAngleDeg = longestEdgeBearing(plane.vertices);
+
+  // 🚨 AND THE AREA, BECAUSE A RESHAPE CHANGES IT AND NOTHING WAS RE-MEASURING.
+  //
+  // Square Up, Stitch, the flat-trace rebuild and the standalone face nudge all
+  // emit a RoofPlaneReshapeUpdate — new outline, new polygon3D, new ECEF frame,
+  // new pitch, new azimuth — and DesignStudio merges it onto the stored plane
+  // with a spread, then calls this function. `area` and `usableArea` are not in
+  // that shape and were not recomputed here, so a face halved on screen went on
+  // reporting its pre-reshape area for ever, on the design that ships.
+  //
+  // That number is load-bearing: lib/siteSurvey/enrichSurvey.ts picks the
+  // PRIMARY roof plane by `p.area` (so a stale value nominates the wrong face)
+  // and derives `totalAreaSqFt` and the usable-area estimate from it, which
+  // become `cad.roof.planes[].areaSqM`; lib/3d/footprintToRoofPlane.ts reports
+  // it as `slopeAreaM2`.
+  //
+  // `measureRoofPlaneAreas` is the SAME measurement `buildRoofPlane3D` uses —
+  // not a second formula, and deliberately not a plan-view shoelace over
+  // `vertices`, which would hand back footprint area and lose the ÷cos(pitch).
+  // It returns null for a face with no complete 3D record (a 2D trace before
+  // its frame is attached, a Nearmap face carrying the vendor's measurement),
+  // and for an unreshaped face it returns the number already stored — so this
+  // corrects reshapes and moves nothing else.
+  const areas = measureRoofPlaneAreas(plane);
+
   return {
     ...plane,
+    ...(areas ?? {}),
     centroidLat:       centroid.lat,
     centroidLng:       centroid.lng,
     verticesLocal,
