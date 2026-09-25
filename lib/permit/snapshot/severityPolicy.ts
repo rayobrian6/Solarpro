@@ -102,6 +102,31 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
     justification: '',
   },
+  // 🚨 THE BUSBAR RULE WAS COMPUTED, PRINTED, AND NEVER ALLOWED TO BLOCK.
+  //
+  // `lib/electrical-calc.ts` evaluates NEC 705.12(B) carefully — one total
+  // backfeed formula, per-inverter OCPD rounding before summation per
+  // 705.12(B)(3)(2), battery backfeed included — and on a violation it emits a
+  // blocker coded `E-BUSBAR-120` with the full arithmetic in its message.
+  //
+  // That code appears in exactly ONE place in the repository: the line that
+  // raises it. Nothing consumes it. This policy — the authority that decides
+  // what stops a permit package — held 44 rules covering structure, racking,
+  // documents and authority, the 705.11(C) tap-length pair and conduit fill,
+  // and NOTHING for 705.12(B). So a design whose own snapshot records
+  // `poi.rulePasses = false` could reach `designComplete` and be issued: the
+  // cover sheet declares the violation and the readiness registry never hears
+  // about it.
+  //
+  // Every axis applies. An overloaded busbar is a fire risk (safety); it is a
+  // straightforward 705.12(B) violation (code); no PE signs a service whose bus
+  // is over its allowance (engineering); and an AHJ rejects it on sight
+  // (permit acceptance). It is not a procurement fault — the parts are real,
+  // the configuration is not legal.
+  'NEC-705-12B-EXCEEDED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
   // Missing exact selected-module electrical/mechanical datasheet: a family/range
   // page is not the exact source — the exact module drives conductor sizing /
   // structural load inputs (code + engineering), fixes procurement identity, and

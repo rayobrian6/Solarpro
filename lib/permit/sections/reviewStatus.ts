@@ -149,6 +149,7 @@ export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
   'CONDUIT-FILL-PENDING': 'generic',
   'TAP-CONDUCTOR-LENGTH-PENDING': 'generic',
   'TAP-CONDUCTOR-LENGTH-EXCEEDED': 'generic',
+  'NEC-705-12B-EXCEEDED': 'generic',
   'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': 'generic',
   // ── structural (structuralAuthority.blockers) ─────────────────────────────
   'FRAMING-AUTHORITY-UNVERIFIED': 'generic',

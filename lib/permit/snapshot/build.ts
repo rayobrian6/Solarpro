@@ -2106,6 +2106,7 @@ export function buildPermitDesignSnapshot(
       'CONDUIT-FILL-PENDING': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
       'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.routeSegments[DISCO_TO_METER_RUN] (viewed by serviceTopology[svc-tap-conductors])', sheets: ['PV-4B', 'E-1'], resolution: 'Constrain the span in the design — place the fused AC disconnect within 10 ft of the tap point — or record a routed/field-measured length for DISCO_TO_METER_RUN.' },
       'ROUTE-LENGTH-EXCEEDS-DESIGN-BOUND': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].conductorGauge vs the design length bound', sheets: ['PV-4B', 'E-1', 'SCHED'], resolution: 'Upsize the conductor on the named run, or shorten the route so the one-way length is at or under the stated maximum.' },
+      'NEC-705-12B-EXCEEDED': { severity: 'blocking', authorityPath: 'electrical.poi (busbar verdict from electrical-calc)', sheets: ['E-1'], resolution: 'Change the connection method: a supply-side connection (NEC 705.11), a main-breaker derate, or a bus upgrade. The array and conductors are unaffected.' },
       'TAP-CONDUCTOR-LENGTH-EXCEEDED': { severity: 'blocking', authorityPath: 'electrical.routeSegments[DISCO_TO_METER_RUN] (viewed by serviceTopology[svc-tap-conductors])', sheets: ['PV-4B', 'E-1'], resolution: 'Relocate the fused AC disconnect (or the tap point) so the tap conductors are ≤10 ft, then re-route/re-measure the span.' },
       // GROUNDING AUTHORITY (2026-07-25) — the open-air branch grounding method is
       // not established by any verified, exactly-applicable manufacturer document.
@@ -2565,6 +2566,44 @@ export function buildPermitDesignSnapshot(
     // site geometry, PENDING-RACKING-ASSEMBLY-SELECTION). Honest blockers are
     // the correct Braidon outcome.
     for (const sb of structAuth.blockers) push(sb.code, sb.message, { provenance: { source: 'structuralAuthority', ref: null } });
+
+    // 🚨 AND THE ELECTRICAL VERDICT, WHICH WAS COMPUTED AND THEN IGNORED.
+    //
+    // `electrical-calc.ts` evaluates NEC 705.12(B) properly and this snapshot
+    // already records the answer a few hundred lines below, as
+    // `electrical.poi.rulePasses`. It was PRINTED and nothing more: the
+    // readiness registry had 44 structural/document/authority rules and no
+    // busbar rule at all, so a design whose own cover sheet declares a 120%
+    // violation could still reach `designComplete` and be issued.
+    //
+    // The competitor this product is aimed at prints the arithmetic on the
+    // single-line diagram — "(200A bus x 120%) - 200A main = 40A max" — as an
+    // auditable block. Printing a verdict we decline to enforce is strictly
+    // worse than printing nothing, because it looks like a check.
+    //
+    // Read from the SAME place the snapshot reports, so the blocker and the
+    // sheet can never disagree. `null` means the rule was not evaluated (no
+    // interconnection data) and is deliberately NOT a violation — an unknown is
+    // a different fact from a failure, and the tap-length pair above models it
+    // that way with its own PENDING code.
+    const _busbar = elec?.busbar as { passes?: boolean | null } | undefined;
+    if (_busbar?.passes === false) {
+      const _bus = proj.panelBusRating ?? proj.mainPanelAmps ?? null;
+      const _main = proj.mainPanelAmps ?? null;
+      const _back = (cs as { backfeedBreakerAmps?: number } | undefined)?.backfeedBreakerAmps
+        ?? proj.backfeedBreakerA ?? null;
+      const _max = (typeof _bus === 'number' && typeof _main === 'number')
+        ? Math.round(_bus * 1.2 - _main) : null;
+      // The message carries the arithmetic, not just the conclusion, so the
+      // reviewer can check it without opening the engine.
+      const _formula = (_max != null)
+        ? ` Total backfeed ${_back ?? '?'}A exceeds the maximum ${_max}A allowed: (${_bus}A bus x 120%) - ${_main}A main = ${_max}A.`
+        : '';
+      push('NEC-705-12B-EXCEEDED',
+        `NEC 705.12(B): the load-side interconnection exceeds the busbar allowance.${_formula}`
+        + ' Resolve with a supply-side connection (NEC 705.11), a main-breaker derate, or a bus upgrade.',
+        { provenance: { source: 'electricalCalc.busbar', ref: null } });
+    }
     // §4 (W3.1): promote BLOCKING racking-capacity structural-authority gaps
     // (RT-MINI capacity provenance: RACKING-CAPACITY-SOURCE-NOT-ARCHIVED +
     // RACKING-CAPACITY-APPLICABILITY-GAP) into the readiness registry. Enforced by V32.

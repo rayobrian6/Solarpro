@@ -825,6 +825,39 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   // authority (routed geometry or a field measurement) and that number exceeds
   // the 10-ft limit, the design is wrong — reporting that as "…LENGTH-PENDING"
   // made the worse outcome read quieter than the uncertain one.
+  // 🚨 THE BUSBAR VERDICT, WHICH HAD NO GATE AT ALL.
+  //
+  // `electrical-calc.ts` evaluates NEC 705.12(B) and the snapshot records the
+  // answer as `electrical.poi.rulePasses`. E-1 PRINTS it — "EXCEEDS 120% —
+  // SUPPLY-SIDE TAP OR PANEL UPGRADE REQUIRED" — and until now nothing else
+  // read it: the readiness registry had no busbar code, so a package whose own
+  // sheet declared the violation still derived ISSUED FOR PERMIT.
+  //
+  // Mapped to RG-5 rather than a new gate. RG-5 is ELECTRICAL FIELD &
+  // CALCULATION CLOSURE and its own description already claims "computed
+  // electrical inputs"; a busbar allowance is exactly that. Without a
+  // declaration the code would still BLOCK — RG-UNMAPPED fails closed on every
+  // axis — but it would present to a reviewer as "UNMAPPED RELEASE
+  // REQUIREMENT", which tells them nothing about what is wrong.
+  //
+  // VERIFIED_DEFICIENCY, not PENDING_AUTHORITY: the calculation RAN and the
+  // design lost. That is the same ruling this file already made one entry
+  // below, where reporting a busted tap span as "…LENGTH-PENDING" made the
+  // worse outcome read quieter than the uncertain one.
+  'NEC-705-12B-EXCEEDED': {
+    sheetLine: 'BUSBAR EXCEEDS NEC 705.12(B) — Supply-side tap, main derate, or bus upgrade required.',
+    gateId: 'RG-5', findingType: 'VERIFIED_DEFICIENCY',
+    title: 'Load-side interconnection EXCEEDS the NEC 705.12(B) busbar allowance',
+    affects:
+      'The point of interconnection as designed. The array, conductors and OCPD sizing are unaffected — the busbar '
+      + 'cannot legally carry this backfeed, so the CONNECTION METHOD has to change: a supply-side connection '
+      + '(NEC 705.11), a main-breaker derate, or a bus upgrade.',
+    resolutionMode: 'OPERATOR_CONFIRMATION', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: null, resolverPhase: 'delivered (electrical-calc busbar)',
+    modeBasis:
+      '2026-09-25 — raised ONLY from an explicit `false` verdict on the canonical busbar calculation. A null verdict '
+      + 'means the rule was never evaluated, which is a different fact and must not be reported as a violation.',
+  },
   'TAP-CONDUCTOR-LENGTH-EXCEEDED': {
     sheetLine: 'TAP SPAN EXCEEDS 10 FT — Relocate the disconnect or the tap point.',
     gateId: 'RG-5', findingType: 'VERIFIED_DEFICIENCY',
