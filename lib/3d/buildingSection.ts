@@ -233,7 +233,9 @@ export interface SectionPlanOutcome {
 
 // ── Local tangent-plane helpers ─────────────────────────────────────────────
 
-interface LocalPt { e: number; n: number }
+/** A point in a flat local metre basis. Exported with `segmentsCross` and
+ *  `ringIsSimple`, which name it in their signatures. */
+export interface LocalPt { e: number; n: number }
 
 interface LocalFrame {
   cLat: number;
@@ -276,8 +278,15 @@ function distLocal(a: LocalPt, b: LocalPt): number {
 }
 
 /** Do the open segments a-b and c-d cross? Endpoint contact does not count —
- *  adjacent edges of a ring always share one. */
-function segmentsCross(a: LocalPt, b: LocalPt, c: LocalPt, d: LocalPt): boolean {
+ *  adjacent edges of a ring always share one.
+ *
+ *  🚨 EXPORTED SO THERE IS ONE SELF-INTERSECTION TEST, NOT THREE. The vertex
+ *  move gesture needs exactly this question in the roof face's own (u,v) basis,
+ *  and the touching case below is the half that a freshly written copy always
+ *  omits — four self-intersecting footprints shipped past the strict-crossing
+ *  version of this same function. Callers outside this module should prefer
+ *  `ringIsSimple`, which is the whole-ring form and owns the adjacency rules. */
+export function segmentsCross(a: LocalPt, b: LocalPt, c: LocalPt, d: LocalPt): boolean {
   const cross = (p: LocalPt, q: LocalPt, r: LocalPt) =>
     (q.e - p.e) * (r.n - p.n) - (q.n - p.n) * (r.e - p.e);
   const d1 = cross(c, d, a), d2 = cross(c, d, b);
@@ -305,6 +314,32 @@ function segmentsCross(a: LocalPt, b: LocalPt, c: LocalPt, d: LocalPt): boolean 
 const TOUCH_EPS_M = 0.01;
 /** The cross-product form of the same tolerance, for the collinearity test. */
 const TOUCH_EPS_M2 = 0.01;
+
+/**
+ * Is a closed ring simple — no edge crossing or touching any non-adjacent edge?
+ *
+ * 🚨 THE ADJACENCY RULE IS THE EASY HALF TO GET WRONG, so it lives here once
+ * rather than at each caller. Edge `i` runs from point `i` to point `i+1`
+ * (wrapping), so edges `i` and `i+1` legitimately share a point, and so do the
+ * first and the last. Every OTHER pair must be disjoint. `validateSection` has
+ * carried this loop inline since the bow-tie footprint defect; the vertex-move
+ * gesture asks the same question about the same kind of ring, and a second copy
+ * of a subtle loop is how the two answers drift apart.
+ *
+ * Fewer than three points cannot enclose anything, and is reported as not simple
+ * rather than vacuously true — a caller asking this question wants a usable ring.
+ */
+export function ringIsSimple(ring: ReadonlyArray<LocalPt>): boolean {
+  const n = ring.length;
+  if (n < 3) return false;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;   // adjacent through the wrap
+      if (segmentsCross(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])) return false;
+    }
+  }
+  return true;
+}
 
 /** Perpendicular distance from point `p` to the infinite line through a and b. */
 function perpDistance(p: LocalPt, a: LocalPt, b: LocalPt): number {

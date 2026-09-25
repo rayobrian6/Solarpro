@@ -93,6 +93,21 @@ import {
 } from '@/lib/roofPlane3D';
 import { buildSectionRoofPlanes, sectionIdOfFaceId } from '@/lib/3d/buildingSection';
 import {
+  classifyPanelsAgainstRing,
+  faceUVToEcef,
+  handleRadiusM,
+  inPlaneTarget,
+  movedPlanVertices,
+  nearestVertexAlongRay,
+  projectIntoFace,
+  resolveVertexMove,
+  ringMoved,
+  ringToFaceUV,
+  type FaceBasis,
+} from '@/lib/3d/vertexMove';
+import { createVertexHandleOverlay, type VertexHandleOverlay } from '@/lib/3d/vertexHandleOverlay';
+import { evaluateGeometryMutation } from '@/lib/3d/geometryMutationPolicy';
+import {
   applySectionEdit, measureSection, measureFaceVertical, sectionFromPlanes, listSections,
   repositionPanelsForPlanes,
   applyFacePitchEdit,
@@ -126,6 +141,16 @@ import {
   PANEL_OFFSET_M as PLANE_ENGINE_PANEL_OFFSET_M,
 } from '@/lib/planeEngine';
 import { latLngToECEF as engLatLngToECEF, projectOutlineOntoPlane } from '@/lib/roofPlane3D';
+// 🚨 ONE FUNCTION FROM `vertexHandlesMath`, AND ONLY ONE. `dimensionReadoutFt`
+// is pure unit formatting with no geometry in it, so it is reusable as-is.
+// NOTHING ELSE IN THAT MODULE IS: `pickRayToLatLng` stands the Earth in as a
+// sphere of the EQUATORIAL radius (~146 m of horizontal error at one degree off
+// nadir at this latitude, and exact only at the equator, which is where its own
+// tests check it); `validateVertexMove` describes Block/Gable/Hip/Tree
+// primitives in lat/lng and has no self-intersection test; the gable and hip
+// rebuilders are proven defective by tests/buildingSectionMutation.test.ts. The
+// corner gesture uses `lib/3d/vertexMove.ts` for all of that.
+import { dimensionReadoutFt } from '@/lib/3d/vertexHandlesMath';
 
 // ─── v48.7: Control Layer ────────────────────────────────────────────────────
 // All panel placement is now routed through placePanelsControlled().
@@ -423,7 +448,12 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip' | 'tree' | 'measurements' | 'ruler';
+// 🚨 'vertex' IS ITS OWN MODE AND NOT PART OF 'select'. Select mode already
+// owns click-to-select, the panel-array grab, the rotate knob and the block
+// handle on ONE LEFT_DOWN. Adding a fifth consumer to that press is how
+// gestures start stealing each other's clicks, and the corner dots would also
+// have to be drawn permanently in the mode people spend all their time in.
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip' | 'tree' | 'measurements' | 'ruler' | 'vertex';
 /**
  * SINGLE-KEY TOOL SHORTCUTS — one map, read by the keyboard AND by the buttons.
  *
@@ -458,6 +488,7 @@ export const TOOL_SHORTCUTS: Readonly<Record<string, PlacementMode>> = {
   o: 'obstruction',
   t: 'tree',             // Aurora's T
   m: 'measure',
+  v: 'vertex',           // move a roof corner
 };
 
 /** The letter that arms this tool, for printing on the button. */
@@ -539,6 +570,25 @@ export interface RoofPlaneReshapeUpdate {
       v: { x: number; y: number; z: number };
       n: { x: number; y: number; z: number };
     };
+    /** 🚨 THE RESHAPED AREA — a pre-existing hole this contract had.
+     *
+     *  Nothing on the receiving side recomputes it: the handler does not, and
+     *  `enrichRoofPlaneWithLECS` returns the centroid, the local vertices and
+     *  the edge angle, and nothing else. So after ANY reshape on this channel
+     *  — Square Up and Stitch included — `plane.area` and `plane.usableArea`
+     *  keep their PRE-reshape values. Shrink a face by a third and its stored
+     *  area does not move at all.
+     *
+     *  That is not cosmetic. `enrichSurvey` picks the PRIMARY plane by
+     *  `p.area`, falls back to an area-based usable-area estimate when no
+     *  polygon is available, and `footprintToRoofPlane` reports `slopeAreaM2`
+     *  from it. `buildRoofPlane3D` already computes it correctly — a shoelace
+     *  in the plane's own UV basis — so the fix is to carry it.
+     *
+     *  Optional so the existing emitters stay valid; a reshape that knows its
+     *  new area should send it. */
+    area?: number;
+    usableArea?: number;
 }
 
 interface Props {
@@ -2184,7 +2234,7 @@ function SolarEngine3D({
    * the orbit block), so its enable flags are NOT the gate — this ref is.
    */
   const pointerOwnerRef = useRef<
-    'array-move' | 'array-rotate' | 'block-height' | 'object-size' | null
+    'array-move' | 'array-rotate' | 'block-height' | 'object-size' | 'vertex-move' | null
   >(null);
   /** A tool takes the drag. The camera stops moving until it is handed back. */
   function claimPointer(who: NonNullable<typeof pointerOwnerRef.current>) {
@@ -2420,6 +2470,92 @@ function SolarEngine3D({
       setObjectDragAnchor(null);
     }
   }
+
+  // ─── MOVE A ROOF CORNER ─────────────────────────────────────────────────────
+  /**
+   * The corner-dot overlay. A factory held in a ref, created once at viewer
+   * init — the segment-arrow shape, not a React component. See
+   * `lib/3d/vertexHandleOverlay.ts` for why it draws but never picks.
+   */
+  const vertexOverlayRef = useRef<VertexHandleOverlay | null>(null);
+  /**
+   * Re-draw the corner dots for the currently editable face. Mount-frozen for
+   * the same reason `activateToolRef` is: the live function is declared inside
+   * `setupClickHandler`, which runs once at viewer init, and the effects that
+   * need to call it render later.
+   */
+  const refreshVertexHandlesRef = useRef<(() => void) | null>(null);
+  /** Put every corner dot back on a known ring. */
+  function restoreVertexHandles(ring: ReadonlyArray<Cart3>) {
+    try {
+      for (let i = 0; i < ring.length; i++) vertexOverlayRef.current?.moveHandle(i, ring[i]);
+    } catch { /* ignore */ }
+  }
+  /** Drop the preview and put the dots back — the render half of an abandon. */
+  function cancelVertexDragRender(ring: ReadonlyArray<Cart3>) {
+    try { vertexOverlayRef.current?.setPreview(null); } catch { /* ignore */ }
+    try { vertexOverlayRef.current?.setActive(null); } catch { /* ignore */ }
+    restoreVertexHandles(ring);
+  }
+  /**
+   * The live corner drag. A ref, not state: a drag must cause no React render,
+   * and the pointer handlers are installed once at viewer init so a state read
+   * inside them would be frozen at the mount render anyway.
+   *
+   * `ring0` is the pre-drag ECEF ring, kept for two jobs that both turn out to
+   * matter. It restores the render on Escape — the component this replaces
+   * stored the same thing and then never read it, so its Escape did nothing —
+   * and it answers "did the ring actually move?" at release, so a click that
+   * happens to land on a dot cannot put a no-op on the undo stack.
+   */
+  const vertexDragRef = useRef<{
+    faceId: string;
+    index: number;
+    ring0: Cart3[];
+    /** The plan-view ring as it stood at the press, so unmoved corners can be
+     *  preserved byte-for-byte. See `movedPlanVertices` for why that matters. */
+    vertices0: Array<{ lat: number; lng: number }>;
+    basis: FaceBasis;
+    cesiumPlane: any;
+    ringUV0: Array<{ e: number; n: number }>;
+    /** The last position the validator ACCEPTED, in the face's own (u,v). */
+    lastValidUV: { e: number; n: number };
+    /**
+     * Where the cursor was when the drag ARMED, in the face's own (u,v), so the
+     * corner follows a DELTA rather than snapping to the cursor. Null until the
+     * 6 px threshold is crossed. Without it a corner jumps to the exact pixel
+     * the press landed on, which is never the pixel the user meant.
+     */
+    anchorUV: { e: number; n: number } | null;
+    armed: boolean;
+    moved: boolean;
+    downX: number;
+    downY: number;
+  } | null>(null);
+
+  /**
+   * Abandon a half-finished corner drag and put the roof back the way it was.
+   *
+   * 🚨 THREE CALLERS, FOR THE REASON `cancelObjectSizeDrag` HAS THREE. A drag
+   * normally ends on LEFT_UP, but it can also be abandoned by Escape, by
+   * switching tool, or by a full reset — and none of those produce a LEFT_UP.
+   * Leaving the ref armed would swallow MOUSE_MOVE in the next tool and, with
+   * the camera freeze, strand the map frozen with no gesture left to end.
+   *
+   * Restoring the RENDER, not just nulling the ref, is the other half. The drag
+   * preview is renderer-only by design, so an abandoned drag that cleared only
+   * its state would leave the roof drawn in a shape the data model does not
+   * have — a lie that survives until the next full re-render.
+   */
+  function cancelVertexDrag() {
+    const drag = vertexDragRef.current;
+    vertexDragRef.current = null;
+    try { vertexOverlayRef.current?.setPreview(null); } catch { /* ignore */ }
+    try { vertexOverlayRef.current?.setActive(null); } catch { /* ignore */ }
+    if (!drag) return;
+    // Put every handle back where it was before the drag started.
+    restoreVertexHandles(drag.ring0);
+  }
   const activateToolRef = useRef<((mode: PlacementMode) => void) | null>(null);
   /** Same mount-frozen reason as `activateToolRef`: the keyboard handler is
    *  installed once at viewer init and cannot see a later render's closure. */
@@ -2526,6 +2662,11 @@ function SolarEngine3D({
       // Switching tool mid-drag is one of the ways a gesture ends without a
       // LEFT_UP.
       cancelObjectSizeDrag();
+      // 🚨 AND THE CORNER DRAG, for exactly the same reason. Leaving 'vertex'
+      // mode also drops the corner dots, which otherwise stay on a face that is
+      // no longer being edited and invite a press the new tool will not answer.
+      cancelVertexDrag();
+      if (placementMode !== 'vertex') { try { vertexOverlayRef.current?.clear(); } catch { /* ignore */ } }
       suppressClickRef.current = false;
       releasePointer(); // never leave the camera frozen on tool change
       // v47.131 Issue 2: Reset plane frame state on every tool change.
@@ -3227,6 +3368,19 @@ function SolarEngine3D({
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
   useEffect(() => { showRoofTextureRef.current = showRoofTexture; }, [showRoofTexture]);
   useEffect(() => { selectedFaceIdRef.current = selectedFaceId; }, [selectedFaceId]);
+  /**
+   * The corner dots follow the mode, the selected face and the roof geometry.
+   *
+   * Driven from an effect rather than drawn once, because all three can change
+   * without a pointer event: selecting a different face, a Stitch or Square Up
+   * that rebuilds the ring, or an Undo that restores an older one. A handle left
+   * on a stale ring is worse than no handle — it is an invitation to grab a
+   * corner that is not there any more.
+   */
+  useEffect(() => {
+    if (!viewerRef.current) return;
+    try { refreshVertexHandlesRef.current?.(); } catch { /* ignore */ }
+  }, [placementMode, selectedFaceId, roofPlanes]);
   // 🚨 REFS, because the keyboard handler is installed once and closes over the
   // first render's values. Reading state there would delete whatever was
   // selected when the listener was attached, which is usually nothing and
@@ -3677,6 +3831,13 @@ function SolarEngine3D({
       const viewer = new C.Viewer(cesiumRef.current, viewerOptions);
       viewer.resize();
       viewerRef.current = viewer;
+
+      // The corner-handle overlay, once per viewer. Same factory shape as the
+      // segment arrows below: it draws and it is cleared, and it registers no
+      // input handler of its own — the corner gesture lives in this engine's
+      // own LEFT_DOWN / MOUSE_MOVE / LEFT_UP.
+      try { vertexOverlayRef.current = createVertexHandleOverlay(viewer, C); }
+      catch (e: unknown) { addLog('WARN', `vertex overlay: ${(e as Error).message}`); }
 
       // v68: create the segment-arrow overlay factory once per viewer.
       // The factory exposes update/clear/onPick; the call sites in
@@ -7410,6 +7571,419 @@ function SolarEngine3D({
       }
     };
 
+    // ─── MOVE ONE ROOF CORNER ───────────────────────────────────────────────
+    //
+    // 🚨 THREE PLAIN FUNCTIONS, CALLED FROM THE EXISTING LEFT_DOWN / MOUSE_MOVE
+    // / LEFT_UP REGISTRATIONS BELOW. Not a new handler, and not a new mounted
+    // component. Both of those alternatives are already known to be wrong here:
+    //
+    //   - `setInputAction` is an overwrite on ONE handler, but a second
+    //     `ScreenSpaceEventHandler` on the same canvas does not replace the
+    //     engine's registrations — both fire. A corner press would then also run
+    //     the select, panel-array and block-height logic in the same event.
+    //     Registering the same trio twice on one handler is the inverse of the
+    //     same lesson: it silently killed the block-height drag, and the fix was
+    //     to make those three plain functions called from the surviving
+    //     registrations. This is that shape.
+    //   - the pointer-authority guard is scoped by LOCATION on purpose. A drag
+    //     written in a sibling component is invisible to its counts and is only
+    //     caught by a separate mounted-component tripwire, which is a backstop
+    //     rather than a home. `claimPointer` is reachable here; there, it is a
+    //     prop somebody has to remember to pass.
+    //
+    // The design of record is docs/research/VERTEX-MOVE-ARCHITECTURE.md, and the
+    // maths is lib/3d/vertexMove.ts, where it can be proved without a viewer.
+
+    /**
+     * Is this face one whose corner can be moved at all — and if not, WHY NOT,
+     * in words for the status line?
+     *
+     * 🚨 A SECTION-OWNED FACE IS REFUSED, AND THAT IS THE FEATURE, NOT A GAP.
+     *
+     * A face carrying `sectionId` or `section` is DERIVED from a footprint, an
+     * eave height and a pitch. Its corners are not independently addressable:
+     * an eave corner is a FOOTPRINT corner shared with the opposite slope, so
+     * moving it is a two-face edit; and a ridge corner is not stored at all —
+     * it is solved from the span and the two pitches. "Move this corner" has no
+     * expression in that model, so a drag there would be a silent defection
+     * from the parametric record, chosen by accident by a mouse.
+     *
+     * Refusing keeps "rebuild one section, keep the rest" true, which is a
+     * capability neither Aurora nor Solargraf has. Saying so out loud is the
+     * other half: a tool that does nothing and explains nothing reads as broken.
+     */
+    function vertexEditableFace(faceId: string | null) {
+      if (!faceId) {
+        return { ok: false as const, message: 'Click a roof face first, then drag one of its corners.' };
+      }
+      const plane = (roofPlanesRef.current ?? []).find(p => p.id === faceId);
+      if (!plane) return { ok: false as const, message: null };
+      if (plane.sectionId || plane.section) {
+        return {
+          ok: false as const,
+          message: '🏠 This face belongs to a building section — edit the section, or detach it first.',
+        };
+      }
+      const ring = plane.polygon3D;
+      if (!plane.origin3D || !plane.ecefFrame3D || !ring || ring.length < 3) {
+        return { ok: false as const, message: 'This face has no 3D outline to edit yet.' };
+      }
+      const basis: FaceBasis = {
+        origin: plane.origin3D,
+        u: plane.ecefFrame3D.u,
+        v: plane.ecefFrame3D.v,
+        n: plane.ecefFrame3D.n,
+      };
+      return { ok: true as const, plane, basis, ring: ring as Cart3[] };
+    }
+
+    /** Re-draw the corner dots for whichever face is currently editable. */
+    function refreshVertexHandles() {
+      const ov = vertexOverlayRef.current;
+      if (!ov) return;
+      if (modeRef.current !== 'vertex') { ov.clear(); return; }
+      const face = vertexEditableFace(selectedFaceIdRef.current);
+      if (!face.ok) { ov.clear(); return; }
+      // 🚨 THE DOTS ARE DRAWN ON `polygon3D`, THE RECORD THE COMMIT WRITES —
+      // not on the render cache. The grab spheres are centred on the same
+      // points, so the dot you aim at, the sphere that is hit and the corner
+      // that moves are one thing and cannot drift apart.
+      ov.show(face.ring, null);
+    }
+    refreshVertexHandlesRef.current = refreshVertexHandles;
+
+    /**
+     * PRESS — which corner did the user grab?
+     *
+     * 🚨 GEOMETRY, NOT A GPU READ. `scene.pick` / `drillPick` return ZERO hits
+     * under software WebGL — the configuration the acceptance suite runs in, and
+     * the one any machine without a usable GPU falls back to. A handle picked by
+     * rasterisation is unreachable from any browser spec and unreachable for
+     * some real users. One handle-sized sphere per corner, at its known ECEF
+     * position, tested against the pick ray, needs nothing to have been drawn.
+     */
+    function vertexDragDown(event: any): void {
+      if (vertexDragRef.current) return;
+      if (modeRef.current !== 'vertex') return;
+
+      const faceId = selectedFaceIdRef.current;
+      const face = vertexEditableFace(faceId);
+      if (!face.ok) {
+        if (face.message) setStatusMsg(face.message);
+        return;                       // ← and claim NOTHING
+      }
+
+      // Ray's 2026-09-21 ruling, applied where the gesture is rather than
+      // quoted in a comment. The verdict's reason is the audit record the
+      // policy module exists to produce.
+      const verdict = evaluateGeometryMutation({
+        operation: 'move roof corner',
+        authorship: 'user-authored',
+        effect: 'moves-footprint',
+      });
+      if (!verdict.allowed) {
+        setStatusMsg(verdict.reason);
+        addLog('WARN', `vertex move refused — ${verdict.reason}`);
+        return;
+      }
+
+      const ray = viewer.camera.getPickRay(event.position);
+      if (!ray) return;
+
+      // The grab sphere is the size of the drawn dot at this distance, so the
+      // target does not shrink to nothing when the camera pulls back.
+      let radius = 0.5;
+      try {
+        const camPos = viewer.camera.positionWC;
+        const nearest = face.ring.reduce((best: number, p: Cart3) => {
+          const d = Math.hypot(p.x - camPos.x, p.y - camPos.y, p.z - camPos.z);
+          return d < best ? d : best;
+        }, Infinity);
+        const h = viewer.scene.canvas?.clientHeight ?? 800;
+        const fovy = viewer.camera.frustum?.fovy ?? (Math.PI / 3);
+        radius = handleRadiusM(nearest, h, fovy);
+      } catch { /* the default above is a usable fallback */ }
+
+      const grabbed = nearestVertexAlongRay(ray.origin, ray.direction, face.ring, radius);
+      if (!grabbed) return;           // ← pressed the roof, not a corner: claim NOTHING
+
+      const ringUV0 = ringToFaceUV(face.ring, face.basis);
+      vertexDragRef.current = {
+        faceId: faceId!,
+        index: grabbed.index,
+        ring0: face.ring.map((p: Cart3) => ({ ...p })),
+        vertices0: (face.plane.vertices ?? []).map(v => ({ lat: v.lat, lng: v.lng })),
+        basis: face.basis,
+        cesiumPlane: C.Plane.fromPointNormal(
+          new C.Cartesian3(face.basis.origin.x, face.basis.origin.y, face.basis.origin.z),
+          new C.Cartesian3(face.basis.n.x, face.basis.n.y, face.basis.n.z),
+        ),
+        ringUV0,
+        lastValidUV: { ...ringUV0[grabbed.index] },
+        anchorUV: null,
+        armed: false,
+        moved: false,
+        downX: event.position.x,
+        downY: event.position.y,
+      };
+      vertexOverlayRef.current?.setActive(grabbed.index);
+      // 🚨 THE CAMERA STOPS — AND ONLY NOW. Claimed INSIDE the resolved-grab
+      // guard: a press that grabbed no corner starts no drag, so freezing the
+      // map there would strand it with no gesture for LEFT_UP to end and no
+      // recovery but a reload.
+      claimPointer('vertex-move');
+    }
+
+    /**
+     * DRAG — where is the corner now?
+     *
+     * 🚨 `resolvePlacementPoint(..., 'roof')` IS THE WRONG TOOL HERE, and the
+     * reason is specific rather than stylistic: its roof branch ends in
+     * `pointInRing2D`, so it is BOUNDED BY THE FACE'S CURRENT OUTLINE. Dragging
+     * a corner outward — half of every vertex edit anyone will ever perform —
+     * leaves the ring and gets null. That bound is what makes it correct for
+     * "which face did the user point at"; it is simply a different question.
+     *
+     * The right target is the ray against the face's INFINITE plane, which is
+     * exact ECEF arithmetic with no ellipsoid, no metres-per-degree and no
+     * latitude dependence — the same thing the panel-array grab does.
+     */
+    function vertexDragMove(event: any): void {
+      const drag = vertexDragRef.current;
+      if (!drag) return;
+      const ray = viewer.camera.getPickRay(event.endPosition);
+      if (!ray) return;
+      const hit = C.IntersectionTests.rayPlane(ray, drag.cesiumPlane);
+      if (!hit) return;
+
+      const atUV = projectIntoFace(hit, drag.basis);
+
+      // Same 6 px gate the array grab uses, and it re-baselines at the moment it
+      // arms so the corner does not jump to the cursor. Without it a CLICK on a
+      // corner dot moves that corner, which is one of the four things wrong with
+      // the component this replaces.
+      if (!drag.armed) {
+        const ddx = event.endPosition.x - drag.downX;
+        const ddy = event.endPosition.y - drag.downY;
+        if (Math.hypot(ddx, ddy) < 6) return;
+        drag.armed = true;
+        drag.anchorUV = { e: atUV.u, n: atUV.v };
+        return;
+      }
+      if (!drag.anchorUV) { drag.anchorUV = { e: atUV.u, n: atUV.v }; return; }
+
+      const home = drag.ringUV0[drag.index];
+      const desired = {
+        e: home.e + (atUV.u - drag.anchorUV.e),
+        n: home.n + (atUV.v - drag.anchorUV.n),
+      };
+
+      const res = resolveVertexMove(drag.ringUV0, drag.index, desired);
+      if (res.status === 'refused') {
+        // Hold the corner at its last valid position and SAY why. The standard
+        // direct-manipulation feedback: the tool resists, it does not vanish.
+        setStatusMsg(`⚠ ${res.message}`);
+        vertexOverlayRef.current?.setPreview(
+          drag.ringUV0.map((p, i) => faceUVToEcef(
+            { u: i === drag.index ? drag.lastValidUV.e : p.e, v: i === drag.index ? drag.lastValidUV.n : p.n },
+            drag.basis)),
+          false,
+        );
+        return;
+      }
+
+      drag.lastValidUV = { ...res.point };
+      drag.moved = true;
+
+      // 🚨 RENDERER-ONLY UNTIL RELEASE. Nothing canonical is written here.
+      // Emitting per frame would call the undo recorder at pointer-move rate and
+      // put hundreds of entries on the stack for one drag, each deep-copying the
+      // whole roof. Renderer-only DURING the drag is correct; renderer-only AT
+      // THE DROP is the defect, and the commit in `vertexDragUp` is the half
+      // that makes the split honest.
+      const previewRing = res.ring.map(p => faceUVToEcef({ u: p.e, v: p.n }, drag.basis));
+      vertexOverlayRef.current?.moveHandle(drag.index, previewRing[drag.index]);
+      vertexOverlayRef.current?.setPreview(previewRing, true);
+
+      const along = Math.abs(res.point.e - home.e);
+      const upSlope = Math.abs(res.point.n - home.n);
+      setStatusMsg(
+        `📐 Corner ${drag.index + 1} · ${dimensionReadoutFt(along)} along the eave · ` +
+        `${dimensionReadoutFt(upSlope)} up-slope${res.clamped ? ' · held at the minimum edge' : ''} · ` +
+        'this face only',
+      );
+    }
+
+    /**
+     * RELEASE — the one canonical write, and the only one.
+     *
+     * Returns true when it consumed the release, so the LEFT_UP handler can stop
+     * and the panel-array branch below does not also run.
+     */
+    function vertexDragUp(): boolean {
+      const drag = vertexDragRef.current;
+      if (!drag) return false;
+      vertexDragRef.current = null;
+      vertexOverlayRef.current?.setPreview(null);
+      vertexOverlayRef.current?.setActive(null);
+
+      if (!drag.armed || !drag.moved) { cancelVertexDragRender(drag.ring0); return true; }
+
+      const newRing: Cart3[] = drag.ring0.map((p, i) =>
+        i === drag.index
+          ? faceUVToEcef({ u: drag.lastValidUV.e, v: drag.lastValidUV.n }, drag.basis)
+          : p);
+
+      // 🚨 A NO-OP DRAG MUST NOT REACH THE UNDO STACK. The same reason marking
+      // unmoved faces as reshaped was a defect: an edit that changed nothing
+      // still costs the user an Undo press to get back past.
+      if (!ringMoved(drag.ring0, newRing)) { cancelVertexDragRender(drag.ring0); return true; }
+
+      try {
+        // 🚨 `surfaceOffsetM: 0` IS NOT OPTIONAL. These points are ALREADY
+        // lifted by a previous fit, and the lift is applied unconditionally, so
+        // re-fitting without it raises the face — and every panel on it — 12 cm
+        // PER RELEASE. Stitch shipped exactly that ratchet, and it presents as
+        // a roof that slowly floats with no obvious cause.
+        const built = buildRoofPlane3D(newRing, { surfaceOffsetM: 0 });
+        // 🚨 AND THE ID IS THE FACE'S OWN. `buildRoofPlane3D` mints a fresh
+        // uuid; adopting it would orphan every panel on this face (they carry
+        // `planeId`), break section-face id determinism and blind the deletion
+        // ledger. This single line is the easiest way to destroy a design with
+        // this feature.
+        built.id = drag.faceId;
+
+        const frame = computePlaneFromPoints3D(newRing, { surfaceOffsetM: 0 });
+        const cesiumPts = frame.projectedPts.map((pp: Cart3) => new C.Cartesian3(pp.x, pp.y, pp.z));
+        (plane3DEntityMap.current.get(drag.faceId) ?? []).forEach((eid: string) => {
+          const e = viewer.entities.getById(eid);
+          if (e) try { viewer.entities.remove(e); } catch { /* ignore */ }
+        });
+        const newIds = renderPlane3DEntity(viewer, C, cesiumPts, drag.faceId, frame,
+          faceIsInSelection(drag.faceId), planeRendersOutlineOnly(drag.faceId));
+        plane3DEntityMap.current.set(drag.faceId, newIds);
+        plane3DFrameMap.current.set(drag.faceId, frame);
+        plane3DCesiumPtsMap.current.set(drag.faceId, cesiumPts);
+        plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
+
+        // ── PANEL POLICY: CULL ──────────────────────────────────────────────
+        //
+        // 🚨 NOT `repositionPanelsForPlanes`. That is a RIGID map anchored on
+        // the ring centroid — right for a section that translates or changes
+        // height, and wrong here, because moving ONE corner moves the centroid,
+        // so every panel on the face would slide sideways by that delta. Nobody
+        // asked for the array to move.
+        //
+        // 🚨 AND NOT A RE-LAYOUT. That is a BIGGER edit than the one the user
+        // performed: a 20 cm corner nudge must not re-shuffle an array somebody
+        // spent ten minutes positioning, and rearranging design panels to tidy
+        // a drawing is forbidden outright.
+        //
+        // Because the drag was constrained to the face's own plane, the plane
+        // did not move, so a surviving panel is still exactly on the deck at its
+        // old lat/lng/height. The whole policy is one ring test per panel.
+        const newBasis: FaceBasis = {
+          origin: built.origin3D!,
+          u: built.ecefFrame3D!.u,
+          v: built.ecefFrame3D!.v,
+          n: built.ecefFrame3D!.n,
+        };
+        const newRingUV = ringToFaceUV(built.polygon3D as Cart3[], newBasis);
+        const onFace = (panelsRef.current ?? []).filter(p => p.planeId === drag.faceId);
+        // 🚨 THE STORED POSITION IS USED AS-IS, AND THE MOUNT STACK NEEDS NO
+        // CORRECTION. A panel floats above the deck along the face NORMAL, and
+        // (u,v,n) is orthonormal, so that offset contributes exactly zero to u
+        // and to v. Dropping each panel onto the plane first — which an earlier
+        // version of this did — projects along local up, which is NOT the face
+        // normal, and so displaces the test point by stack*tan(tilt) instead.
+        const points = onFace.map(p => ({
+          id: p.id,
+          point: engLatLngToECEF(p.lat, p.lng, p.height ?? 0),
+        }));
+        const { culled } = classifyPanelsAgainstRing(points, newRingUV, newBasis);
+
+        let culledCount = 0;
+        if (culled.length > 0) {
+          // 🚨 SNAPSHOT FIRST, THEN REMOVE. A cull with no history step is the
+          // defect, not the cull: marking a vent culled modules with nothing to
+          // undo, and deleting the vent did not bring them back.
+          onPanelsAboutToBeCulled?.('Move roof corner');
+          const gone = new Set(culled);
+          culledCount = culled.length;
+          onPanelsChange((panelsRef.current ?? []).filter(p => !gone.has(p.id)));
+        }
+
+        // ── THE ONE CANONICAL EMIT ──────────────────────────────────────────
+        // `onRoofPlanesStitched` is the only undoable geometry channel out of
+        // this engine, and its consumer records the undo step BEFORE adopting.
+        // One update, once, on release.
+        // 🚨 THE PLAN RECORD IS NOT `built.vertices`, AND THIS IS NOT A NIT.
+        //
+        // `surfaceOffsetM` sets both how far the fit LIFTS and how far
+        // `buildRoofPlane3D` UN-LIFTS to take the plan record. Re-fitting an
+        // already-lifted ring needs 0 for the first (or the roof ratchets 12 cm
+        // per release) and the full offset for the second (or the plan record is
+        // taken from lifted points). One number cannot say both, so
+        // `built.vertices` here are the LIFTED ring's lat/lng — slid down-slope
+        // by offset*sin(tilt), 5.4 cm at 6:12, on ALL FOUR corners including the
+        // three the user never touched. That lands on the permit site plan, and
+        // on a gable it splits the shared ridge by twice that.
+        //
+        // `movedPlanVertices` keeps every unmoved corner's stored lat/lng
+        // byte-for-byte and derives only the moved one, measuring the face's own
+        // lift convention from its own record rather than assuming it — Stitch
+        // and `buildRoofPlane3D` disagree about that convention on purpose.
+        const planVertices = movedPlanVertices(
+          drag.vertices0, drag.ring0, newRing, drag.index, built.normal3D!,
+        ) ?? built.vertices;
+
+        const updates: RoofPlaneReshapeUpdate[] = [];
+        if (built.localFrame3D) {
+          updates.push({
+            id: drag.faceId,
+            vertices: planVertices,
+            localFrame3D: built.localFrame3D,
+            polygon3D: built.polygon3D,
+            origin3D: built.origin3D,
+            normal3D: built.normal3D,
+            // Unchanged by construction on an in-plane move — carried anyway,
+            // because the contract is that every reshape states them rather
+            // than leaving a consumer to assume.
+            pitch: built.pitch,
+            azimuth: built.azimuth,
+            ecefFrame3D: built.ecefFrame3D,
+            // 🚨 THE AREA. `enrichRoofPlaneWithLECS` does not recompute it and
+            // the other reshape paths do not send it, so `plane.area` keeps its
+            // PRE-reshape value — shrink a face by a third and the stored area
+            // does not move. The primary-plane pick and the usable-area
+            // estimate both read it. A gesture whose entire purpose is to change
+            // the outline must not add to that.
+            area: built.area,
+            usableArea: built.usableArea,
+          });
+        }
+        if (updates.length > 0) onRoofPlanesStitched?.(updates);
+
+        suppressClickRef.current = true;   // swallow any trailing LEFT_CLICK
+        refreshVertexHandles();
+        try { viewer.scene.requestRender(); } catch { /* ignore */ }
+
+        // 🚨 SAY WHAT HAPPENED TO THE PANELS. Silence is the failure mode.
+        const shade = onFace.some(p => typeof p.annualShadeFactor === 'number');
+        setStatusMsg(
+          `📐 Corner moved · this face only` +
+          (culledCount > 0 ? ` · ${culledCount} module${culledCount === 1 ? '' : 's'} removed (Undo to restore)` : '') +
+          (shade ? ' · shade is now out of date — re-run the shade analysis' : ''),
+        );
+        addLog('BUILD3D', `Moved corner ${drag.index} of ${drag.faceId}; ${culledCount} panel(s) culled`);
+      } catch (err: unknown) {
+        addLog('ERROR', `vertex move commit: ${(err as Error).message}`);
+        cancelVertexDragRender(drag.ring0);
+        setStatusMsg('⚠ That corner move could not be applied — the roof is unchanged.');
+      }
+      return true;
+    }
+
     handler.setInputAction((event: any) => {
       try {
         // v62: swallow the click that trails a grab-drag (move/rotate) so it doesn't
@@ -7533,6 +8107,13 @@ function SolarEngine3D({
       blockResizeDown(event);
       if (blockResizeRef.current) return;
 
+      // 🚨 MOVE A ROOF CORNER. Its own mode, so this is checked before the
+      // select-only guard below and cannot compete with the panel-array grab on
+      // the same press. It claims the pointer ONLY if a corner actually
+      // resolved — see `vertexDragDown`.
+      vertexDragDown(event);
+      if (vertexDragRef.current) return;
+
       // 🚨 SIZE-BY-DRAG FOR A SITE OBJECT. Checked before the select-only
       // guard below, because this arms in 'tree'/'obstruction' mode, not in
       // 'select'. It only claims the press for objects placed on the GROUND
@@ -7600,6 +8181,7 @@ function SolarEngine3D({
 
     handler.setInputAction((event: any) => {
       if (blockResizeRef.current) { blockResizeMove(event); return; }
+      if (vertexDragRef.current) { vertexDragMove(event); return; }
 
       // 🚨 GROW THE SITE OBJECT WITH THE DRAG. The radius is the ground
       // distance from the anchor to the cursor, so the circle the installer
@@ -7683,6 +8265,9 @@ function SolarEngine3D({
       // twice is harmless — `releasePointer` is idempotent for this reason.
       try {
       if (blockResizeRef.current) { blockResizeUp(); return; }
+      // The corner commit rides the enclosing `finally` below for its release,
+      // which is why it needs no release of its own and cannot leak one.
+      if (vertexDragUp()) return;
 
       // 🚨 COMMIT THE DRAGGED OBJECT — OR GET OUT OF THE CLICK'S WAY.
       //
@@ -11137,6 +11722,11 @@ function SolarEngine3D({
         // drag must drop the gesture AND unfreeze the camera; several branches
         // below return, so doing this later would miss them.
         cancelObjectSizeDrag();
+        // 🚨 AND THE CORNER DRAG. Escape must put the roof back, not just stop
+        // the gesture: the drag preview is renderer-only by design, so an
+        // Escape that cleared state alone would leave the face drawn in a shape
+        // the data model does not have.
+        cancelVertexDrag();
         releasePointer();
         // Cancel ground array
         if (modeRef.current === 'ground_array' && groundArrayRowsRef.current.length > 0) {
@@ -12568,6 +13158,8 @@ function SolarEngine3D({
     dragRef.current = null;
     blockResizeRef.current = null;
     cancelObjectSizeDrag();
+    cancelVertexDrag();
+    try { vertexOverlayRef.current?.clear(); } catch { /* ignore */ }
     releasePointer();
     suppressClickRef.current = false;
     rulerAnchorRef.current = null;
@@ -15765,6 +16357,7 @@ function SolarEngine3D({
               { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
               { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
               { mode: 'tree'         as PlacementMode, icon: '\u{1F333}', label: 'Tree', tip: 'Place a tree that SHADES. Click the ground at the trunk, then set its height and canopy width. It is saved with the design, it is deleted like anything else, and Shade uses it.' },
+              { mode: 'vertex'       as PlacementMode, icon: '◇', label: 'Move Corner', tip: 'Fix one corner of a traced roof face. Click the face, then drag a white dot. The corner slides IN the face, so the pitch and the azimuth cannot change and the panels that are still on the face do not move. Modules that end up off the face are removed and Undo brings them back. Faces that belong to a Gable, Hip or Block section are built from their footprint and pitch — edit the section instead.' },
             ],
           },
         ];

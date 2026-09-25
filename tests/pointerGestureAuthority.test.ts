@@ -179,6 +179,60 @@ describe('every drag gesture claims the pointer', () => {
     expect(ENGINE).toMatch(/claimPointer\('object-size'\)/);
   });
 
+  it('🚨 the move-corner drag claims it', () => {
+    // The fourth gesture to need the camera. Added with this case rather than
+    // after a report, which is the whole point of the three above it.
+    expect(ENGINE).toMatch(/claimPointer\('vertex-move'\)/);
+  });
+
+  it('the corner drag claims ONLY when a corner actually resolved', () => {
+    // Same shape as the size drag below, and for the same reason: a press that
+    // landed on bare roof rather than on a handle starts no drag, so it must
+    // not freeze the camera. There would be no gesture for LEFT_UP to end and
+    // the user's only recovery would be a reload.
+    //
+    // Anchored on the grab call and closed on the end of the function, not on a
+    // fixed slice length — see the tool-change case for why a fixed window is
+    // not safe in this file.
+    const i = ENGINE.indexOf('const grabbed = nearestVertexAlongRay(');
+    expect(i, 'the geometric grab is gone — if this became a scene.pick, read the architecture doc first')
+      .toBeGreaterThan(-1);
+    const end = ENGINE.indexOf('\n    }', i);
+    expect(end).toBeGreaterThan(i);
+    const region = ENGINE.slice(i, end);
+
+    const guard = region.indexOf('if (!grabbed) return;');
+    const claim = region.indexOf("claimPointer('vertex-move')");
+    expect(guard, 'the resolved-grab guard is gone').toBeGreaterThan(-1);
+    expect(claim, 'the corner drag no longer claims the pointer').toBeGreaterThan(-1);
+    expect(claim, 'the claim escaped the resolved-grab guard — a press on bare roof would freeze the map')
+      .toBeGreaterThan(guard);
+  });
+
+  it('🚨 the corner grab is geometric, because a GPU pick returns nothing here', () => {
+    // `scene.pick` / `drillPick` are GPU reads and return ZERO hits under
+    // software WebGL — the configuration the acceptance suite runs in. A handle
+    // picked by rasterisation is unreachable from any browser spec and from any
+    // machine without a usable GPU. If someone "fixes" the grab by reaching for
+    // the picker, this is where it is caught.
+    const i = ENGINE.indexOf('function vertexDragDown(');
+    expect(i, 'vertexDragDown is gone — renamed or deleted').toBeGreaterThan(-1);
+    const end = ENGINE.indexOf('\n    }', i);
+    const body = ENGINE.slice(i, end);
+    expect(body).toMatch(/nearestVertexAlongRay\(/);
+    expect(body, 'the corner grab started using the GPU picker — it returns zero hits under software WebGL')
+      .not.toMatch(/scene\.pick|drillPick/);
+    // And the drag target is the face's INFINITE plane, not the ring-bounded
+    // placement resolver, whose roof branch returns null the instant the corner
+    // leaves the current outline — which is half of every vertex edit.
+    const mv = ENGINE.indexOf('function vertexDragMove(');
+    expect(mv).toBeGreaterThan(-1);
+    const mvBody = ENGINE.slice(mv, ENGINE.indexOf('\n    }', mv));
+    expect(mvBody).toMatch(/IntersectionTests\.rayPlane\(/);
+    expect(mvBody, "the drag started using resolvePlacementPoint — its roof branch is bounded by the face's own ring")
+      .not.toMatch(/resolvePlacementPoint\(/);
+  });
+
   it('the size drag claims ONLY when a ground point actually resolved', () => {
     // A press that resolved nothing starts no drag. Freezing the camera there
     // would strand it: there is no gesture for LEFT_UP to end, and the user's
@@ -227,9 +281,17 @@ describe('🚨 and every gesture gives it back', () => {
   });
 
   it('a tool change clears it — a gesture can end without a LEFT_UP', () => {
+    // 🚨 ANCHORED ON A REAL END TOKEN, NOT ON A FIXED LENGTH. This case used to
+    // read `slice(i, i + 600)` and went red the moment a fourth drag was added
+    // to the same reset list: `stripComments` blanks comments to WHITESPACE
+    // rather than deleting them, so every comment above the thing being
+    // asserted pushes real code out of a fixed window. The block ends at the
+    // line that hands the camera back, so end there.
     const i = ENGINE.indexOf('if (blockResizeRef.current) blockResizeRef.current = null;');
     expect(i).toBeGreaterThan(-1);
-    const region = ENGINE.slice(i, i + 600);
+    const end = ENGINE.indexOf('selectedPlaneRef.current = null;', i);
+    expect(end, 'the tool-change reset block moved — re-anchor this guard').toBeGreaterThan(i);
+    const region = ENGINE.slice(i, end);
     expect(region).toMatch(/cancelObjectSizeDrag\(\);/);
     expect(region).toMatch(/releasePointer\(\);/);
   });
@@ -238,6 +300,41 @@ describe('🚨 and every gesture gives it back', () => {
     const i = ENGINE.indexOf('blockResizeRef.current = null;\n    cancelObjectSizeDrag();');
     expect(i, 'the reset list no longer names the size drag').toBeGreaterThan(-1);
     expect(ENGINE.slice(i, i + 200)).toMatch(/releasePointer\(\);/);
+  });
+
+  it('🚨 all three abandon sites name the corner drag too', () => {
+    // 🚨 WITHOUT THIS CASE THE GUARD IS BLIND TO THIS GESTURE. Every assertion
+    // above names a gesture by STRING, so a corner drag that skipped the
+    // tool-change, Escape and reset lists would not fail the build — it would
+    // simply survive a tool change, keep swallowing MOUSE_MOVE in the next
+    // tool, and, because its only other clear is LEFT_UP, hold the camera
+    // frozen with no gesture left to unfreeze it.
+    const tool = ENGINE.indexOf('if (blockResizeRef.current) blockResizeRef.current = null;');
+    expect(tool).toBeGreaterThan(-1);
+    expect(ENGINE.slice(tool, ENGINE.indexOf('selectedPlaneRef.current = null;', tool)),
+      'a tool change leaves the corner drag armed').toMatch(/cancelVertexDrag\(\);/);
+
+    const esc = ENGINE.indexOf("if (e.key === 'Escape') {");
+    expect(esc).toBeGreaterThan(-1);
+    expect(ENGINE.slice(esc, ENGINE.indexOf('clearPanelSelection();', esc)),
+      'Escape leaves the corner drag armed').toMatch(/cancelVertexDrag\(\);/);
+
+    const reset = ENGINE.indexOf('blockResizeRef.current = null;\n    cancelObjectSizeDrag();');
+    expect(reset, 'the reset list no longer names the size drag').toBeGreaterThan(-1);
+    expect(ENGINE.slice(reset, ENGINE.indexOf('suppressClickRef.current = false;', reset)),
+      'a full reset leaves the corner drag armed').toMatch(/cancelVertexDrag\(\);/);
+  });
+
+  it('cancelVertexDrag puts the ROOF back, not just the state', () => {
+    // The drag preview is renderer-only by design. A cancel that cleared the
+    // ref alone would leave the face drawn in a shape the data model does not
+    // have — a lie that survives until the next full re-render. The component
+    // this gesture replaces stored the pre-drag position and then never read
+    // it, which is exactly how its Escape came to do nothing.
+    const b = bodyOf('cancelVertexDrag');
+    expect(b).toMatch(/vertexDragRef\.current = null;/);
+    expect(b, 'the abandoned drag leaves its preview on screen').toMatch(/setPreview\(null\)/);
+    expect(b, 'the handles are not put back on the pre-drag ring').toMatch(/restoreVertexHandles\(drag\.ring0\)/);
   });
 
   it('cancelObjectSizeDrag drops the pinned ghost as well as the state', () => {

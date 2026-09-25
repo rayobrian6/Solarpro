@@ -5,9 +5,10 @@
  *
  * THE DEFECT
  * ----------
- * Four controls reshape a roof face and emit the result through
- * `onRoofPlanesStitched`: Square Up, Stitch, the flat-trace rebuild, and the
- * Building pitch/wall sliders. That update shape carried `vertices`,
+ * Five controls reshape a roof face and emit the result through
+ * `onRoofPlanesStitched`: Square Up, Stitch, the flat-trace rebuild, the
+ * Building pitch/wall sliders, and — added 2026-09-25 — the MOVE-CORNER drag.
+ * That update shape carried `vertices`,
  * `localFrame3D`, `polygon3D`, `origin3D` and `normal3D` — but NOT `pitch` or
  * `azimuth`.
  *
@@ -100,15 +101,26 @@ describe('the emit carries the reshaped values', () => {
 
     // And nothing may re-declare the shape inline again.
     expect(ENGINE).not.toMatch(/updates: Array<\{/);
-    // Four arrays feed the channel and every one of them is the shared type.
-    expect(ENGINE.match(/RoofPlaneReshapeUpdate\[\] = \[\];/g) ?? []).toHaveLength(4);
+    // 🚨 FIVE arrays feed the channel, and every one of them is the shared type.
+    // Raised from four on 2026-09-25 by the MOVE-CORNER drag (`vertexDragUp` in
+    // SolarEngine3D). Changing this number is the point of the assertion: it is
+    // how a new reshape path is forced to be looked at rather than absorbed.
+    expect(ENGINE.match(/RoofPlaneReshapeUpdate\[\] = \[\];/g) ?? []).toHaveLength(5);
   });
 
   it('EVERY reshape site emits them — discovered from the emit channel, not by name', () => {
-    // Square Up, the flat-trace rebuild, applyBuildingShape and STITCH. If a
-    // fifth reshape path is added and forgets, plane.pitch silently drifts again.
+    // Square Up, the flat-trace rebuild, applyBuildingShape, STITCH and the
+    // MOVE-CORNER drag. If a sixth reshape path is added and forgets,
+    // plane.pitch silently drifts again.
+    //
+    // 🚨 THE CORNER DRAG CANNOT CHANGE THE PITCH — and it still has to send it.
+    // Its move is constrained to the face's own plane, so the Newell fit
+    // recovers the identical normal by construction. It emits `pitch` and
+    // `azimuth` anyway, because the contract is that a reshape STATES the shape
+    // it produced. A consumer must never have to know which emitter it is
+    // reading in order to know whether a field can be trusted.
     const pushes = reshapeEmitBlocks(ENGINE);
-    expect(pushes.length).toBe(4);
+    expect(pushes.length).toBe(5);
     for (const push of pushes) {
       expect(push, `a reshape push omits pitch:\n${push}`).toMatch(/pitch:/);
       expect(push, `a reshape push omits azimuth:\n${push}`).toMatch(/azimuth:/);

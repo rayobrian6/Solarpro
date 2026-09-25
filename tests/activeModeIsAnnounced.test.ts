@@ -3,7 +3,7 @@
  *
  * YOU MUST NEVER BE IN A TOOL WITHOUT BEING TOLD WHICH ONE.
  *
- * SolarEngine3D has 24 armed placement modes. It announced the armed one as a GOLD
+ * SolarEngine3D has 25 armed placement modes. It announced the armed one as a GOLD
  * ICON on a collapsible group header, inside a panel the user can drag
  * anywhere, with the tool's NAME visible only while that group's flyout
  * happened to be open. So "why did clicking the roof just plant another
@@ -160,10 +160,17 @@ describe('every armed mode can be named', () => {
     expect(modes).toContain('obstruction');
     // If this count moves, a new mode was added — check it is either in the
     // palette catalogue or still readable through the humanised fallback.
-    // 25 total = the idle mode 'select' plus 24 that can be ARMED.
-    expect(modes.length, 'a placement mode was added or removed').toBe(25);
+    // 26 total = the idle mode 'select' plus 25 that can be ARMED.
+    //
+    // Raised from 25 on 2026-09-25 by 'vertex' (Move Corner). It IS in the
+    // palette catalogue, in the Tools group, so the banner names it from the
+    // same `groups` list the buttons render from rather than falling back to
+    // the humanised spelling — which is what this count exists to make
+    // somebody check.
+    expect(modes).toContain('vertex');
+    expect(modes.length, 'a placement mode was added or removed').toBe(26);
     expect(modes.filter(x => x !== 'select').length,
-      'every one of these must be nameable by the banner').toBe(24);
+      'every one of these must be nameable by the banner').toBe(25);
   });
 
   it('the humanised fallback produces something readable for every mode', () => {
