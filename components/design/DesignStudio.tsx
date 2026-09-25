@@ -1309,6 +1309,16 @@ export default function DesignStudio({ project, onSave }: Props) {
       // empty. Minted only by `applyDelete`; cleared only after the save it
       // authorised has actually succeeded. See lib/design/deletionAuthority.ts.
       destructive: site.pendingDestructive() ?? undefined,
+      // 🚨 THE VERSION THIS EDIT WAS BASED ON. The server turns it into an
+      // atomic claim and refuses the save outright if the row has moved on —
+      // another tab, another device, or the same person in two windows. Before
+      // this, the second save simply won and the first person's work was gone
+      // with nothing to notice it by.
+      //
+      // Read from the hook rather than kept as a local copy: `storedVersion()`
+      // is updated both on hydrate and on every successful save, and a
+      // studio-local shadow of it is exactly how the two drift apart.
+      expectedUpdatedAt: site.storedVersion() ?? undefined,
     };
     // STEP 1 -- LAYOUT SAVE LOGGING
     // Report what is actually WRITTEN for the ACTIVE property, and separately
@@ -1352,6 +1362,22 @@ export default function DesignStudio({ project, onSave }: Props) {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
+        // 🚨 ADOPT THE VERSION THIS SAVE PRODUCED, or the next one is refused
+        // by this one. The row's `updated_at` moves on every write, so the
+        // token this tab holds is stale the instant its own save lands. Without
+        // this line the first autosave succeeds, the second is told the design
+        // was saved somewhere else, and the studio wedges behind a permanent
+        // refusal badge — with the concurrency control working exactly as
+        // designed, against its own author.
+        try {
+          const saved = await res.clone().json() as { data?: { updatedAt?: unknown } };
+          site.noteSavedVersion(saved?.data?.updatedAt as string | undefined);
+        } catch {
+          // A success whose body will not parse leaves the token alone. The
+          // next save then states the version it genuinely last knew about,
+          // which is refused rather than allowed to overwrite blindly — the
+          // safe direction for an unreadable answer.
+        }
         // 🚨 CONSUMED ON SUCCESS, NOT ON SEND. An authorization cleared when the
         // request left would be gone by the time a failed save is retried, and
         // the retry would then be refused for the very deletion the user
@@ -1509,6 +1535,16 @@ export default function DesignStudio({ project, onSave }: Props) {
         // tombstones included — and the whole design was back on reopen. The
         // user never saw the refusal, because the page was gone.
         destructive: site.pendingDestructive() ?? undefined,
+        // 🚨 THE BEACON STATES ITS VERSION TOO, and the trade-off is deliberate.
+        //
+        // There is no UI left to report a refusal to and nothing retries, so a
+        // stale beacon loses whatever this tab changed since its last autosave —
+        // seconds, because the autosave runs continuously. Omitting the token
+        // instead would make page-close the one write that silently overwrites
+        // another tab's entire design, and it would do it on the path nobody
+        // can see. Losing the tail of one tab beats destroying the whole of
+        // another.
+        expectedUpdatedAt: site.storedVersion() ?? undefined,
         ...designParams,
       });
       navigator.sendBeacon(
@@ -1616,6 +1652,10 @@ export default function DesignStudio({ project, onSave }: Props) {
           measurements: restoredParams.measurements,
           designElectrical: (data.data?.designElectrical as DesignElectrical | undefined) ?? null,
           siteArchives: data.data?.siteArchives,
+          // The version of the row this tab is now editing. Every later save
+          // states it, so a save built on a design somebody else has since
+          // replaced is refused instead of silently overwriting them.
+          updatedAt: data.data?.updatedAt,
         }, siteKeyNow);
         const restoredPanels = hydrated.state.active.panels;
         const restoredPlanes = hydrated.state.active.roofPlanes;

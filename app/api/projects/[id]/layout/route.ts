@@ -103,6 +103,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
       userId:     user.id,
       systemType: resolvedSysType,
       panels,
+      // The version this edit was based on, when the client states one. Absent
+      // is absent — four callers have no version to send and behave exactly as
+      // before — but present means `upsertLayout` turns it into an atomic claim
+      // and refuses a stale save with LAYOUT_STALE_WRITE before writing
+      // anything. NOT `?? existingLayout?.…`: a precondition is never inherited
+      // from the stored row, because reading the current version and then
+      // asserting you were based on it is not a precondition at all.
+      expectedUpdatedAt: body.expectedUpdatedAt,
       roofPlanes:         roofPlanes         ?? existingLayout?.roofPlanes,
       // Same `?? existing` rule: undefined KEEPS what is stored, so an empty
       // array is how "the user deleted the last one" is expressed.
@@ -313,6 +321,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
         panelCount:   totalPanels,
         systemSizeKw,
         savedAt:      new Date().toISOString(),
+        // 🚨 THE VERSION THE ROW ACTUALLY ENDED UP WITH, and the client must
+        // adopt it. Without this the studio keeps the token it loaded with, so
+        // its FIRST autosave succeeds and its SECOND is refused as stale — by
+        // its own previous save. `savedLayout.updatedAt` is the value on disk
+        // after every statement in the save, not the mid-save one: one logical
+        // save issues several UPDATEs and a BEFORE UPDATE trigger re-stamps the
+        // row on each of them.
+        updatedAt:    savedLayout.updatedAt,
         pipeline:     pipelineResult ? {
           wasRebuilt:       pipelineResult.wasRebuilt,
           artifactsWritten: pipelineResult.artifactsWritten,

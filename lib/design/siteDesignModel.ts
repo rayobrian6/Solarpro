@@ -730,6 +730,18 @@ export interface StoredLayoutForHydration {
   measurements?: LayoutMeasurement[] | null;
   designElectrical?: DesignElectrical | null;
   siteArchives?: unknown;
+  /**
+   * The stored row's version, carried through hydration so the tab can state
+   * which design its later saves were based on.
+   *
+   * `useSiteDesign` was already reading this off the object through a cast, so
+   * the field was in use and merely undeclared — which meant a caller trying to
+   * pass it got a type error while the code consuming it worked fine. Declared
+   * `unknown` because it arrives as whatever JSON carried it (a string here, a
+   * `Date` when read straight from the driver) and `normalizeVersion` in
+   * lib/db/projects.ts is the one place that decides what it means.
+   */
+  updatedAt?: unknown;
 }
 
 export interface HydrateResult {
