@@ -898,6 +898,22 @@ function isPanelInsideObstruction(panel: PlacedPanel, obs: PlacedObstruction): b
   return Math.sqrt(dxM * dxM + dyM * dyM) < obs.radiusM;
 }
 
+/**
+ * ⚠️ SUPERSEDED — DO NOT WIRE THIS INTO A PLACEMENT PATH.
+ *
+ * Use `filterPanelsByKeepOut` from lib/3d/panelKeepOut.ts instead.
+ *
+ * This asks whether a panel's CENTRE sits inside the object's bare footprint.
+ * It ignores the module's own size and the object's clearance, so for a
+ * 0.9 x 0.6 m chimney it protects 0.54 m² where the module plus its required
+ * 0.45 m clearance actually occupies about 9.45 m². Every placement path in
+ * SolarEngine3D used to call this, and the result was modules mounted across
+ * chimney flues on roofs the tool had told the installer were clear.
+ *
+ * Kept only because it still has direct tests (tests/obstruction.test.ts) that
+ * document the old behaviour. It has no callers in the product.
+ * tests/panelKeepOutIsTheOneFilter.test.ts fails the build if one reappears.
+ */
 export function removeObstructedPanels(
   panels: PlacedPanel[],
   obstructions: PlacedObstruction[],

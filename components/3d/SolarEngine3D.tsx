@@ -26,7 +26,7 @@ import {
   type ObstructionPresetId,
   clampToPreset,
 } from '@/lib/3d/obstructionPresets';
-import { DEFAULT_CLEARANCE_M } from '@/lib/3d/panelKeepOut';
+import { DEFAULT_CLEARANCE_M, filterPanelsByKeepOut } from '@/lib/3d/panelKeepOut';
 import { OVERLAY_Z } from '@/lib/3d/overlayLayers';
 import { buildObstructionGeometry, canopyRadiusFor } from '@/lib/3d/obstructionGeometry';
 /**
@@ -12993,7 +12993,12 @@ function SolarEngine3D({
       setActivePlane3DId(plane.id);
 
       if (newPanels.length > 0) {
-        const filtered = removeObstructedPanels(newPanels, obstructionsRef.current);
+        // 🚨 THE CLEARANCE-AWARE FILTER, NOT THE CENTRE TEST. See
+        // `commitPlacedObstruction` for the full account: the old call asked
+        // whether the panel's CENTRE sat inside the bare footprint, which for a
+        // 0.9 x 0.6 m chimney is a 0.54 m² target against the 9.45 m² a module
+        // plus its 0.45 m clearance actually occupies.
+        const filtered = filterPanelsByKeepOut(newPanels, obstructionsRef.current).panels;
         const merged   = [...panelsRef.current, ...filtered];
         // v48.7: pre-compute skipGrid from final merged count — consistent for all panels in batch
         const skipGridBatch3D = merged.length > 12;
@@ -13175,8 +13180,8 @@ function SolarEngine3D({
         return;
       }
 
-      // Apply obstruction filter
-      const filtered = removeObstructedPanels(newPanels, obstructionsRef.current);
+      // Apply obstruction filter — clearance-aware, footprint against footprint.
+      const filtered = filterPanelsByKeepOut(newPanels, obstructionsRef.current).panels;
 
       // Merge with existing panels (remove old panels from same plane, add new)
       const existingOtherPlanes = panelsRef.current.filter(p => p.planeId !== plane.id);
@@ -13507,10 +13512,37 @@ function SolarEngine3D({
     obstructionsRef.current = updatedObs;
     setObstructions(updatedObs);
 
-    // Remove panels inside the new rectangular footprint (Aurora parity)
-    // or, for legacy obstructions, inside the radiusM circle.
-    const filtered = removeObstructedPanels(panelsRef.current, [obs]);
-    const removed  = panelsRef.current.length - filtered.length;
+    // 🚨 THE REAL KEEP-OUT AUTHORITY, NOT THE CENTRE TEST.
+    //
+    // There are two implementations of "does this panel conflict with this
+    // object", and the placement path was calling the weaker one:
+    //
+    //   removeObstructedPanels -> isPanelInsideObstruction
+    //       is the panel's CENTRE inside the bare footprint? (1 mm slack,
+    //       panel dimensions ignored, clearance ignored)
+    //
+    //   filterPanelsByKeepOut  -> panelHitsKeepOut
+    //       does the panel's FOOTPRINT overlap the footprint GROWN BY ITS
+    //       CLEARANCE? (0.45 m for a chimney)
+    //
+    // For a 0.9 x 0.6 m chimney the first accepts a module anywhere its centre
+    // avoids 0.54 m²; the second protects the 9.45 m² a module plus clearance
+    // really needs — about seventeen times the area. So marking a chimney on a
+    // finished array removed nought or one module where it should have removed
+    // about four, and left panels lying across the flue. The tool's own hint,
+    // one line above the click, promises "Panels keep 0.45 m clear of it".
+    //
+    // panelKeepOut's header describes this exact failure ("a vent removed a
+    // panel roughly one time in five and the other four times the layout put a
+    // module straight through it") and its filter is documented as THE ONE
+    // FILTER that every placement path calls. Three paths in this file did not.
+    // They do now.
+    //
+    // Site objects are unaffected: both implementations return early on
+    // `space === 'site'`, because a tree shades and does not occupy.
+    const keepOut  = filterPanelsByKeepOut(panelsRef.current, [obs]);
+    const filtered = keepOut.panels;
+    const removed  = keepOut.removed.length;
 
     if (removed > 0) {
       // 🚨 SNAPSHOT FIRST. See `onPanelsAboutToBeCulled`: without this a

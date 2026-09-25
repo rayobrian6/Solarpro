@@ -37,7 +37,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './support/stripSource';
 
@@ -45,6 +45,27 @@ const ROOT = join(__dirname, '..');
 const ENGINE = stripComments(
   readFileSync(join(ROOT, 'components', '3d', 'SolarEngine3D.tsx'), 'utf8'),
 );
+
+/**
+ * 🚨 EVERY OTHER 3D COMPONENT, BECAUSE THE GUARD CAN BE WALKED AROUND.
+ *
+ * The assertions below read SolarEngine3D. A drag gesture written in a SIBLING
+ * component would be invisible to them and could ship the same P0 a fourth time
+ * with a green suite — and that is not hypothetical: `VertexHandles.tsx` is a
+ * component that already installs its own `ScreenSpaceEventHandler`, takes no
+ * pointer ownership, and is imported by the engine but never rendered. If it or
+ * anything like it is ever mounted, the camera fight comes back.
+ *
+ * So the rule is enforced by LOCATION, not just by spelling: a pointer drag
+ * belongs in the engine's own handlers, where `claimPointer` is reachable and
+ * where the counts above can see it.
+ */
+const OTHER_3D = readdirSync(join(ROOT, 'components', '3d'), { recursive: true } as any)
+  .filter((f: any) => typeof f === 'string' && /\.tsx?$/.test(f) && !String(f).endsWith('SolarEngine3D.tsx'))
+  .map((f: any) => ({
+    file: String(f),
+    src: stripComments(readFileSync(join(ROOT, 'components', '3d', String(f)), 'utf8')),
+  }));
 
 /**
  * Body of a named function declaration, to its closing brace at column 2.
@@ -93,6 +114,54 @@ describe('🚨 the camera flag has exactly one writer each way', () => {
   it('the camera handler is still the only reader', () => {
     const reads = count(/if \(arrayManipRef\.current\) return;/g);
     expect(reads, 'the camera gate moved or was duplicated').toBe(1);
+  });
+});
+
+describe('🚨 the rule cannot be walked around by moving the gesture', () => {
+  /** Components that legitimately own a drag today, and take the camera. */
+  const ALLOWED_DRAG_OWNERS = new Set<string>([]);
+
+  it('no sibling 3D component runs a MOUNTED pointer drag of its own', () => {
+    // A component that registers LEFT_DOWN/MOUSE_MOVE and is actually RENDERED
+    // is a second gesture the camera knows nothing about. The engine's own
+    // handlers are where a drag belongs, because that is where `claimPointer`
+    // is reachable and where the counts in this file can see it.
+    const offenders: string[] = [];
+    for (const { file, src } of OTHER_3D) {
+      // 🚨 LEFT_DOWN IS WHAT MAKES IT A DRAG. Matching MOUSE_MOVE as well was
+      // too broad and flagged TreeCursor, which registers MOUSE_MOVE alone to
+      // float the placement ghost under the cursor. That is a HOVER: it owns no
+      // press, competes with no camera pan, and correctly pins itself to the
+      // anchor once a real drag is under way. A component only competes for the
+      // drag if it takes the press.
+      const drags = /ScreenSpaceEventType\.LEFT_DOWN/.test(src);
+      if (!drags) continue;
+      if (ALLOWED_DRAG_OWNERS.has(file)) continue;
+      // Only a component that is actually mounted can fight the camera. An
+      // unmounted one is dead code — a latent hazard, not a live defect.
+      const name = file.replace(/.*[\\/]/, '').replace(/\.tsx?$/, '');
+      const mounted = OTHER_3D.some(o => o.src.includes(`<${name}`))
+        || ENGINE.includes(`<${name}`);
+      if (mounted) offenders.push(`${file} (mounted, drags, outside the authority)`);
+    }
+    expect(offenders,
+      'a mounted 3D component drives its own pointer drag — it must claim the pointer through the engine, or the map will slide under it')
+      .toEqual([]);
+  });
+
+  it('VertexHandles specifically is still NOT mounted', () => {
+    // It installs its own handler, takes no ownership, and its pick maths
+    // intersects a sphere of the equatorial radius rather than the ellipsoid —
+    // about 146 m of horizontal error at 1 degree off nadir here. Mounting it
+    // as-is would reintroduce the camera fight AND place vertices in the wrong
+    // place. If this test fails, that work was done: delete this case and add
+    // the component to ALLOWED_DRAG_OWNERS, having first moved its gesture into
+    // the engine's handlers.
+    const mountedAnywhere = ENGINE.includes('<VertexHandles')
+      || OTHER_3D.some(o => o.src.includes('<VertexHandles'));
+    expect(mountedAnywhere,
+      'VertexHandles was mounted — see docs/research/VERTEX-EDITING-FEASIBILITY.md before shipping it')
+      .toBe(false);
   });
 });
 

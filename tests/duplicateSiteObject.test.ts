@@ -52,7 +52,11 @@ describe('🚨 there is ONE commit path for a site object', () => {
       .toMatch(/obstructionsRef\.current = updatedObs/);
     expect(commit, 'the state is what the inspector renders from')
       .toMatch(/setObstructions\(updatedObs\)/);
-    expect(commit).toMatch(/removeObstructedPanels\(panelsRef\.current, \[obs\]\)/);
+    // 🚨 THE CLEARANCE-AWARE AUTHORITY. This asserted
+    // `removeObstructedPanels` — the centre-point test — which accepted any
+    // module whose centre cleared the bare footprint by 1 mm and so left panels
+    // lying across a chimney flue. See tests/panelKeepOutIsTheOneFilter.test.ts.
+    expect(commit).toMatch(/filterPanelsByKeepOut\(panelsRef\.current, \[obs\]\)/);
   });
 
   it('🚨 it snapshots BEFORE culling panels, or the array is lost for good', () => {
@@ -67,7 +71,7 @@ describe('🚨 there is ONE commit path for a site object', () => {
     expect(place).toMatch(/commitPlacedObstruction\(viewer, C, newObs, preset\)/);
     // The extracted lines must be GONE from the caller, or there are two paths.
     expect(place, 'the commit was copied, not extracted')
-      .not.toMatch(/removeObstructedPanels\(panelsRef\.current/);
+      .not.toMatch(/filterPanelsByKeepOut\(panelsRef\.current/);
     expect(place).not.toMatch(/setObstructions\(updatedObs\)/);
   });
 
