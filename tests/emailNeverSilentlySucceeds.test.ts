@@ -39,6 +39,11 @@ beforeEach(() => {
 });
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
+  // 🚨 `vi.stubEnv`, NOT `process.env.NODE_ENV = ...`. NODE_ENV is typed
+  // read-only, so the direct assignment passed at runtime (vitest does not
+  // typecheck) while failing `tsc --noEmit` — a test that is green and breaks
+  // the build is the worst of both.
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -49,7 +54,7 @@ async function loadEmail() {
 
 describe('🚨 an unconfigured production deploy does not claim to have sent mail', () => {
   it('refuses, and says why, when the key is missing in production', async () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     delete process.env.RESEND_API_KEY;
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -64,8 +69,8 @@ describe('🚨 an unconfigured production deploy does not claim to have sent mai
   it('refuses on the PLACEHOLDER key too — that is the likelier mistake', async () => {
     // A deploy that copied .env.example forward has the placeholder, not an
     // empty value, and it looks configured at a glance.
-    process.env.NODE_ENV = 'production';
-    process.env.RESEND_API_KEY = 're_YOUR_RESEND_API_KEY_HERE';
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('RESEND_API_KEY', 're_YOUR_RESEND_API_KEY_HERE');
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const { sendEmail } = await loadEmail();
@@ -74,7 +79,7 @@ describe('🚨 an unconfigured production deploy does not claim to have sent mai
   });
 
   it('and it logs the refusal, so the deploy is diagnosable', async () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     delete process.env.RESEND_API_KEY;
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -91,7 +96,7 @@ describe('development keeps its console fallback', () => {
     // development would mean every contributor needs a Resend account before
     // they can click anything — which is how a fallback like this gets
     // reintroduced without the production gate.
-    process.env.NODE_ENV = 'development';
+    vi.stubEnv('NODE_ENV', 'development');
     delete process.env.RESEND_API_KEY;
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -103,7 +108,7 @@ describe('development keeps its console fallback', () => {
   it('the dev log still redacts the recipient and the body', async () => {
     // The fallback prints to a shared console; it must not become a PII leak
     // just because it is development.
-    process.env.NODE_ENV = 'development';
+    vi.stubEnv('NODE_ENV', 'development');
     delete process.env.RESEND_API_KEY;
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
