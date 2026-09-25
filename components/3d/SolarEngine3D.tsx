@@ -2317,6 +2317,25 @@ function SolarEngine3D({
   // `setupKeyboardHandler` is installed once at viewer init, so it cannot see
   // a render-scoped function — hence a ref the render refreshes. Same pattern
   // as `obstructionSizeRef` below, and for the same mount-frozen reason.
+  /* ── DRAG A SITE OBJECT TO ITS REAL SIZE ─────────────────────────
+   *
+   * Aurora's tree flow is one gesture: "place your cursor on the center of the
+   * tree, then click, hold and drag until the circle is approximately the same
+   * size as the tree in the satellite imagery." The installer never types a
+   * dimension — they match what they can see, and the size is right by
+   * construction because it was traced off the photograph.
+   *
+   * SolarPro made them type width, depth and height into a panel FIRST, then
+   * click, i.e. guess the number before looking at the thing.
+   *
+   * The drag holds the anchor so the preview can be pinned there while the
+   * radius grows out from it. `screenStart` is what distinguishes a drag from a
+   * click on mouse-up. */
+  const objectSizeDragRef = useRef<
+    { lat: number; lng: number; screenX: number; screenY: number; dragged: boolean } | null
+  >(null);
+  /** Mirror for the pinned preview centre. State, because TreeCursor is JSX. */
+  const [objectDragAnchor, setObjectDragAnchor] = useState<{ lng: number; lat: number } | null>(null);
   const activateToolRef = useRef<((mode: PlacementMode) => void) | null>(null);
   /** Same mount-frozen reason as `activateToolRef`: the keyboard handler is
    *  installed once at viewer init and cannot see a later render's closure. */
@@ -7378,6 +7397,28 @@ function SolarEngine3D({
       // grab must not also arm on the same press.
       blockResizeDown(event);
       if (blockResizeRef.current) return;
+
+      // 🚨 SIZE-BY-DRAG FOR A SITE OBJECT. Checked before the select-only
+      // guard below, because this arms in 'tree'/'obstruction' mode, not in
+      // 'select'. It only claims the press for objects placed on the GROUND
+      // (`space: 'site'`) — a roof object is sized against a face, which is a
+      // different gesture and is not being changed here.
+      if (modeRef.current === 'tree' || modeRef.current === 'obstruction') {
+        const pre = presetFor(obstructionPresetRef.current);
+        if (pre.space === 'site') {
+          const at = resolvePlacementPoint(viewer, C, event.position, 'site');
+          if (at) {
+            objectSizeDragRef.current = {
+              lat: at.lat, lng: at.lng,
+              screenX: event.position.x, screenY: event.position.y,
+              dragged: false,
+            };
+            setObjectDragAnchor({ lat: at.lat, lng: at.lng });
+          }
+        }
+        return;
+      }
+
       if (modeRef.current !== 'select') return;
       const ids = selectedPanelIdsRef.current;
       if (ids.size === 0) return;
@@ -7415,6 +7456,34 @@ function SolarEngine3D({
 
     handler.setInputAction((event: any) => {
       if (blockResizeRef.current) { blockResizeMove(event); return; }
+
+      // 🚨 GROW THE SITE OBJECT WITH THE DRAG. The radius is the ground
+      // distance from the anchor to the cursor, so the circle the installer
+      // drags out IS the canopy they will get — matched against the imagery
+      // rather than remembered. Writing `newObstructionWidthM` is what makes
+      // the preview grow: TreeCursor reads the armed width through a
+      // CallbackProperty, so there is no second size to keep in step, and the
+      // number in the panel and the circle on the photo cannot disagree.
+      const sz = objectSizeDragRef.current;
+      if (sz) {
+        const dx = event.endPosition.x - sz.screenX, dy = event.endPosition.y - sz.screenY;
+        // Same 6 px threshold the array drag uses: below it this is a click.
+        if (!sz.dragged && Math.hypot(dx, dy) < 6) return;
+        sz.dragged = true;
+        const at = resolvePlacementPoint(viewer, C, event.endPosition, 'site');
+        if (!at) return;
+        const mPerDegLat = 111_132;
+        const mPerDegLng = 111_320 * Math.cos((sz.lat * Math.PI) / 180);
+        const radiusM = Math.hypot((at.lat - sz.lat) * mPerDegLat, (at.lng - sz.lng) * mPerDegLng);
+        const pre = presetFor(obstructionPresetRef.current);
+        // The preset's own admissible range — not a new rule invented here.
+        const wM = Math.min(pre.maxFootprintM ?? 30, Math.max(pre.minFootprintM ?? 0.5, radiusM * 2));
+        setNewObstructionWidthM(wM);
+        setNewObstructionDepthM(wM);
+        setStatusMsg(`${pre.icon} ${pre.label} — ${(wM).toFixed(1)} m across. Release to place.`);
+        return;
+      }
+
       const drag = dragRef.current;
       if (!drag) return;
       const ray = viewer.camera.getPickRay(event.endPosition);
@@ -7457,6 +7526,31 @@ function SolarEngine3D({
 
     handler.setInputAction(() => {
       if (blockResizeRef.current) { blockResizeUp(); return; }
+
+      // 🚨 COMMIT THE DRAGGED OBJECT — OR GET OUT OF THE CLICK'S WAY.
+      //
+      // Cesium only synthesises a LEFT_CLICK when the pointer moved no more
+      // than its 5 px click tolerance. So a short press still becomes an
+      // ordinary click and goes down the existing placement path at the armed
+      // size (unchanged behaviour, and the reason this degrades gracefully),
+      // while a real drag produces NO click and must be committed here or the
+      // gesture would silently do nothing.
+      //
+      // Placement goes through `handleObstructionClick` at the ANCHOR's screen
+      // point — the same function the click path calls, reading the same armed
+      // size the drag just wrote. There is no second placement path: the drag
+      // sets a number, and the one placement authority reads it.
+      const sz = objectSizeDragRef.current;
+      if (sz) {
+        objectSizeDragRef.current = null;
+        setObjectDragAnchor(null);
+        if (sz.dragged) {
+          suppressClickRef.current = true;   // swallow any trailing LEFT_CLICK
+          handleObstructionClick(viewer, C, { x: sz.screenX, y: sz.screenY });
+        }
+        return;
+      }
+
       const drag = dragRef.current;
       if (!drag) return;
       dragRef.current = null;
@@ -15115,6 +15209,7 @@ function SolarEngine3D({
             ? newObstructionWidthM / 2
             : TREE_CANOPY_RADIUS_M
         }
+        anchorLngLat={objectDragAnchor}
       />
 
       {/* v63: String / equipment legend overlay.

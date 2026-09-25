@@ -67,6 +67,12 @@ export interface TreeCursorProps {
    *  tree species / obstruction primitives can override without changing
    *  this component. */
   canopyRadiusM?: number;
+  /** Pin the preview here instead of letting it follow the cursor.
+   *  Set while the user is DRAGGING to size the object: the circle must
+   *  stay centred on the point they first pressed and grow outward, the
+   *  way a radius is drawn. A circle that both follows the pointer and
+   *  grows is not a radius, it is a rumour. */
+  anchorLngLat?: { lng: number; lat: number } | null;
 }
 
 // Type shim for the bits of Cesium we touch. Keeps this file self-contained
@@ -99,6 +105,7 @@ export const TreeCursor: React.FC<TreeCursorProps> = ({
   viewer,
   active,
   canopyRadiusM = DEFAULT_TREE_CANOPY_RADIUS_M,
+  anchorLngLat = null,
 }) => {
   const entityRef = useRef<any>(null);
   const handlerRef = useRef<any>(null);
@@ -118,6 +125,8 @@ export const TreeCursor: React.FC<TreeCursorProps> = ({
    * the old code refused to react to this prop at all. Nothing is recreated;
    * `canopyRadiusM` simply stays out of the effect's dependency list, now
    * correctly rather than as a compromise. */
+  const anchorRef = useRef<{ lng: number; lat: number } | null>(anchorLngLat);
+  anchorRef.current = anchorLngLat;
   const radiusRef = useRef<number>(canopyRadiusM);
   radiusRef.current = isFinite(canopyRadiusM) && canopyRadiusM > 0
     ? canopyRadiusM
@@ -192,7 +201,13 @@ export const TreeCursor: React.FC<TreeCursorProps> = ({
         }
 
         // Mutate the entity in place — NO setState, NO React re-render.
-        entityRef.current.position = C.Cartesian3.fromDegrees(lng, lat, 0);
+        // While an anchor is set the preview is PINNED: the user is dragging a
+        // radius out from the point they pressed, so the centre must not chase
+        // the pointer. Read from a ref, because this handler is created once.
+        const a = anchorRef.current;
+        entityRef.current.position = a
+          ? C.Cartesian3.fromDegrees(a.lng, a.lat, 0)
+          : C.Cartesian3.fromDegrees(lng, lat, 0);
         entityRef.current.show = true;
         try { viewer.scene.requestRender(); } catch { /* scene may be gone */ }
       }, C.ScreenSpaceEventType.MOUSE_MOVE);
