@@ -57,6 +57,25 @@ export async function GET(req: NextRequest) {
         p.address,
         p.system_size_kw,
         p.homeowner_stage,
+        -- THE SINGLE MOST-ASKED QUESTION, AND THIS ROUTE DID NOT SELECT IT.
+        -- "When is my installation scheduled?" is 18.6% of a solar installer's
+        -- inbound support contacts, the largest single category. The data has
+        -- been written all along; this query simply never asked for it, so the
+        -- portal showed one static sentence for the whole permit-to-PTO window
+        -- and the homeowner phoned in to ask.
+        --
+        -- WHY THIS COLUMN, and not project_schedule.date. Two places hold an
+        -- install date and they can disagree, so the choice is recorded here
+        -- rather than left to the next reader:
+        --   * projects.install_date is written by BOTH paths, the operations
+        --     PATCH and ScheduleInstallModal (which updates it before filing a
+        --     schedule item). It is one value, and it is UPDATED.
+        --   * project_schedule is written by one path and has no UPDATE or
+        --     DELETE route at all, so a reschedule APPENDS a row and "the
+        --     latest one" is an inference rather than a fact.
+        -- A homeowner given the wrong install date is worse off than one given
+        -- none, so the portal reads the value every writer maintains.
+        p.install_date,
         p.monitoring_platform AS "monitoringPlatform",
         p.monitoring_url      AS "monitoringUrl",
         p.updated_at,

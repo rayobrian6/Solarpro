@@ -28,6 +28,34 @@ export async function sendEmail(opts: SendEmailOptions): Promise<{ success: bool
   const resend = getResendClient();
 
   if (!resend) {
+    /**
+     * 🚨 IN PRODUCTION THIS IS A FAILURE, AND IT USED TO REPORT SUCCESS.
+     *
+     * The console fallback exists so local development works with no email
+     * setup, and that is right. But it returned `{ success: true }`
+     * UNCONDITIONALLY — with no NODE_ENV gate — so a production deploy whose
+     * RESEND_API_KEY was missing, or still the placeholder, silently "sent"
+     * every email. Callers believe that: the proposal route writes `sent_at`
+     * and the UI tells the installer the homeowner has it.
+     *
+     * So the failure mode was an installer waiting on a reply to a proposal
+     * that was never delivered, with the product showing it as sent. A silent
+     * success is worse than an error, because nobody goes looking.
+     *
+     * Development keeps the fallback. Production refuses and says why, so the
+     * caller can decline to stamp `sent_at`.
+     */
+    const isProd = process.env.NODE_ENV === 'production';
+    if (isProd) {
+      console.error(
+        '[sendEmail] REFUSED: RESEND_API_KEY is missing or is still the placeholder, '
+        + 'and this is a production build. Nothing was sent. Subject: ' + opts.subject,
+      );
+      return {
+        success: false,
+        error: 'Email is not configured on this deployment — RESEND_API_KEY is unset or a placeholder.',
+      };
+    }
     // Dev fallback — log to console (redacted to prevent PII leakage)
     console.log('\n========== EMAIL (dev fallback — RESEND_API_KEY not set) ==========');
     console.log(`To:      [redacted]`);

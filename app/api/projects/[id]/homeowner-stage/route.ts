@@ -15,6 +15,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+// The canonical micro-stage vocabulary. Imported as a TYPE so a misspelling in
+// STAGE_MICRO_MAP below is a compile error — the column is TEXT with no CHECK,
+// so nothing downstream would have caught it.
+import type { MicroStage } from '@/lib/microStage';
 
 const HOMEOWNER_STAGES = [
   'lead_submitted',
@@ -154,10 +158,33 @@ export async function PATCH(
 
     // Write micro-stage event (stage_advanced for generic stage changes)
     // Also write specific milestone micro-stages for meaningful transitions
-    const STAGE_MICRO_MAP: Partial<Record<HomeownerStage, string>> = {
+    /**
+     * 🚨 TYPED AS `MicroStage`, BECAUSE IT WAS TYPED AS `string` AND WRONG.
+     *
+     * The `completed` entry read `installation_complete` — which is a
+     * DealDecisionAction name, not one of the 34 micro-stages. The real value
+     * is `install_completed` (lib/microStage.ts). Three things conspired to
+     * make that invisible:
+     *
+     *   - the map's value type was `string`, so tsc had nothing to check it
+     *     against;
+     *   - the INSERT below is raw, bypassing `writeMicroStage`'s typed
+     *     signature;
+     *   - `project_micro_stages.micro_stage` is TEXT with no CHECK constraint,
+     *     so the database accepted it too.
+     *
+     * And `ON CONFLICT ... DO UPDATE` means the junk row, once written, is
+     * permanent for that project. So every project that reached `completed`
+     * through this route carries a micro-stage no consumer recognises, and the
+     * completion milestone it was meant to record never appeared.
+     *
+     * Typing the map is the part that stops it coming back: a misspelling is
+     * now a compile error rather than a row.
+     */
+    const STAGE_MICRO_MAP: Partial<Record<HomeownerStage, MicroStage>> = {
       proposal:      'proposal_sent',
       installation:  'contract_signed',
-      completed:     'installation_complete',
+      completed:     'install_completed',
     };
     const microKey = STAGE_MICRO_MAP[stage];
     if (microKey) {

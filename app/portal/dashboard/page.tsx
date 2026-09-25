@@ -9,7 +9,7 @@ import {
   TrendingUp, Home, ExternalLink, PenLine,
   Info, CheckCircle, ChevronRight, Star,
   Activity, Leaf, Battery, BarChart3, User, Sparkles,
-  FileText, Download, Gift, Copy, Link2,
+  FileText, Download, Gift, Copy, Link2, CalendarDays,
 } from 'lucide-react';
 import {
   getInterconnectionProfile,
@@ -44,6 +44,14 @@ interface Project {
   monitoringPlatform?: string | null;
   /** v62: Full URL to homeowner monitoring dashboard */
   monitoringUrl?: string | null;
+  /**
+   * The confirmed installation date, when one has been set.
+   *
+   * Read from `projects.install_date` — the value every writer maintains. See
+   * the note in app/api/portal/dashboard/route.ts for why that column and not
+   * `project_schedule.date`.
+   */
+  install_date?: string | null;
 }
 
 interface StageHistory {
@@ -988,6 +996,23 @@ export default function PortalDashboard() {
   const pct              = calcWeightedProgress(stage);
   const firstName        = client ? getFirstName(client.name) : 'there';
   const greeting         = getGreeting();
+  /**
+   * The confirmed install date, formatted — or null when there is genuinely
+   * none to show.
+   *
+   * 🚨 AN UNPARSEABLE DATE RENDERS NOTHING, NOT "Invalid Date". A homeowner
+   * books time off work around this line; the failure mode has to be silence,
+   * never a placeholder that looks like information.
+   */
+  const installDateLabel = (() => {
+    const raw = p?.install_date;
+    if (!raw) return null;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleDateString(undefined, {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    });
+  })();
   const projectMicros    = microStages.filter(m => p && m.project_id === p.id);
   const projectProposals = proposals.filter(pr => p && pr.project_id === p.id);
   const projectHistory   = history.filter(h => p && h.project_id === p.id);
@@ -1133,9 +1158,39 @@ export default function PortalDashboard() {
                 </div>
                 <h2 className="text-2xl sm:text-3xl font-black text-white leading-snug mb-3">{content.headline}</h2>
                 <p className="text-sm text-slate-300 leading-relaxed max-w-xl">{content.body}</p>
+
+                {/* ══ THE CONFIRMED INSTALL DATE ══════════════════════════════
+                    🚨 "When is my installation scheduled?" is the single
+                    largest category of inbound support contact for a solar
+                    installer — 18.6%. The date has been written all along by
+                    both the operations PATCH and the schedule modal; the portal
+                    simply never selected it, so this card showed the same
+                    static "you'll receive a confirmed date soon" for the whole
+                    permit-to-PTO window and the homeowner phoned in to ask.
+
+                    Rendered only when a date actually exists. An empty or
+                    invented date here would be worse than the silence it
+                    replaces, because a homeowner books time off around it. */}
+                {installDateLabel ? (
+                  <div className="mt-5 flex items-start gap-2.5 rounded-xl px-4 py-3 border bg-emerald-500/[0.07] border-emerald-500/[0.16]">
+                    <CalendarDays size={15} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500/70">
+                        Installation scheduled
+                      </p>
+                      <p className="text-sm font-semibold text-emerald-200">{installDateLabel}</p>
+                    </div>
+                  </div>
+                ) : null}
+
                 <MilestoneChips stage={stage} microStages={projectMicros} />
                 <div className="mt-5 space-y-2.5">
-                  {content.next ? (
+                  {/* 🚨 The stage copy promises "we'll reach out to confirm your
+                      installation date". Once a date IS confirmed that sentence
+                      is false, and telling someone you will call about a thing
+                      you have already decided is how a portal loses trust. It
+                      yields to the date above. */}
+                  {content.next && !installDateLabel ? (
                     <div className="flex items-start gap-2.5">
                       <ChevronRight size={14} className="text-slate-600 mt-0.5 flex-shrink-0" />
                       <p className="text-sm text-slate-400">{content.next}</p>
