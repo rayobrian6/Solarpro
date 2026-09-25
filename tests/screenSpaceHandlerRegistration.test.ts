@@ -337,9 +337,19 @@ describe('exactly one selection is live at a time, in BOTH directions', () => {
 
   it('Escape clears the face selection too', () => {
     // Anchored on the cancel-everything block's own code, not on its comments.
+    //
+    // 🚨 This used to slice a fixed 1,400 characters, which is not the block —
+    // it is a guess at the block's length. `stripComments` blanks comments to
+    // whitespace rather than deleting them, so ADDING A COMMENT inside the
+    // handler pushes real code out of the window and fails the guard for a
+    // reason that has nothing to do with what it guards. It did exactly that.
+    // Slice to the real end of the handler instead; that is also strictly
+    // tighter, since 1,400 could overrun the block and match code after it.
     const esc = SRC.indexOf("e.key === 'Escape'");
     expect(esc, 'the Escape handler was not found').toBeGreaterThan(-1);
-    const body = SRC.slice(esc, esc + 1_400);
+    const end = SRC.indexOf("window.addEventListener('keydown', onKey)", esc);
+    expect(end, 'the end of the keydown handler was not found').toBeGreaterThan(esc);
+    const body = SRC.slice(esc, end);
     expect(body).toMatch(/clearPanelSelection\(\)/);
     expect(body, 'Escape must also drop the roof-face selection').toMatch(/selectRoofFace\(null\)/);
   });
@@ -350,5 +360,73 @@ describe('exactly one selection is live at a time, in BOTH directions', () => {
     // while re-selecting panels. The name would then lie about its scope.
     const fn = functionBody(SRC, 'clearPanelSelection');
     expect(fn).not.toMatch(/selectRoofFace/);
+  });
+});
+
+/**
+ * ESCAPE MUST ALSO DROP THE TOOL.
+ *
+ * Escape cleared every selection and every in-progress trace and then left the
+ * user ARMED: `placementMode` stayed 'tree' or 'obstruction', so the next click
+ * on the roof planted another one. The exit path already existed —
+ * `onPlacementModeChange('select')` is called from eight other places — the
+ * cancel-everything key simply never called it.
+ *
+ * Aurora states the contract out loud in its own tutorial ("hit escape on your
+ * keyboard to escape tree mode"). One rule, no hidden state: after Escape the
+ * mode is ALWAYS 'select'.
+ *
+ * The guard is a COUNT, not a substring. The handler has early `return`s for a
+ * half-traced gable and hip, so "it calls exitToolMode somewhere" is satisfied
+ * by code that still strands the user on two of its three paths. Every exit
+ * from the block must go through it.
+ */
+describe('Escape returns the tool to select on EVERY path', () => {
+  const SRC = stripComments(readFileSync(SRC_PATH, 'utf8'));
+
+  /** The Escape branch only, from its key test to the listener registration. */
+  function escapeBlock(): string {
+    const start = SRC.indexOf("e.key === 'Escape'");
+    expect(start, 'the Escape handler was not found').toBeGreaterThan(-1);
+    const end = SRC.indexOf("window.addEventListener('keydown', onKey)", start);
+    expect(end, 'the end of the keydown handler was not found').toBeGreaterThan(start);
+    const slice = SRC.slice(start, end);
+    // Positive control: the slice really is the cancel-everything block.
+    expect(slice).toMatch(/clearGhostPanel\(\)/);
+    // And it must NOT have swallowed the Enter branch above it, or the
+    // return-count arithmetic below would be measuring the wrong thing.
+    expect(slice).not.toMatch(/finalizeGroundArray\(\)/);
+    return slice;
+  }
+
+  it('exitToolMode is a real exit — it reads the ref and writes select', () => {
+    const block = escapeBlock();
+    // Reading `modeRef.current` and not `placementMode`: this handler is
+    // installed once at viewer init, so a state read here is frozen forever.
+    expect(block, 'exitToolMode must guard on the LIVE mode ref')
+      .toMatch(/const exitToolMode = \(\) => \{\s*if \(modeRef\.current !== 'select'\) onPlacementModeChange\('select'\);/);
+  });
+
+  it('every exit from the Escape block goes through exitToolMode', () => {
+    const block = escapeBlock();
+    const calls   = (block.match(/exitToolMode\(\);/g)  || []).length;
+    const returns = (block.match(/\breturn;/g)          || []).length;
+    expect(returns, 'the early returns for a half-traced gable/hip are gone — re-check this guard')
+      .toBe(2);
+    expect(calls, `each of the ${returns} early returns needs its own exitToolMode(), plus one at the end`)
+      .toBe(returns + 1);
+    // Each early return must be IMMEDIATELY preceded by the call, not merely
+    // have one somewhere in the block.
+    for (const m of block.matchAll(/\breturn;/g)) {
+      const before = block.slice(Math.max(0, m.index - 60), m.index);
+      expect(before, 'an early return escapes without dropping the tool')
+        .toMatch(/exitToolMode\(\);\s*$/);
+    }
+  });
+
+  it('the block still ends by dropping the tool', () => {
+    const block = escapeBlock();
+    expect(block, 'the fall-through path must drop the tool last')
+      .toMatch(/clearGhostPanel\(\);\s*exitToolMode\(\);/);
   });
 });

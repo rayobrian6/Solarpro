@@ -132,3 +132,32 @@ export function parsePitchInput(raw: string): ParsedPitch {
 
   return FAIL('Type a pitch as degrees (26.6) or as rise over run (6:12).');
 }
+
+/**
+ * Read what was typed into a box LABELLED rise:run.
+ *
+ * 🚨 THIS IS THE OTHER HALF OF THE AMBIGUITY `parsePitchInput` documents.
+ * There, a bare "6" is 6° because that box is labelled in degrees. In a box
+ * labelled "Rise : run" the same keystroke means 6:12 — four and a half times
+ * steeper. Both readings are correct FOR THEIR BOX, and which box you are in
+ * is the only thing that disambiguates them.
+ *
+ * That rule used to live inline in one component, as a regex inside an onBlur
+ * handler. A second pitch box anywhere in the product would have had to
+ * re-derive it from reading that handler, and the two would eventually disagree
+ * about what "6" means — which is not a formatting difference, it is a
+ * different roof. So the rule lives here, next to the arithmetic it qualifies,
+ * and every rise box calls this.
+ *
+ * Explicit notation still wins: "26.6°" typed into a rise box is degrees,
+ * because the user said so. Only a BARE number is reinterpreted.
+ */
+export function parseRiseOver12Input(raw: string): ParsedPitch {
+  if (typeof raw !== 'string') return FAIL('Type a pitch.');
+  const s = raw.trim();
+  if (!s) return FAIL('Type a pitch.');
+  // Anything carrying its own notation — a colon, a slash, "in", or a degree
+  // mark — is passed through untouched and read as written.
+  const hasNotation = /[:/°]|\bin\b|deg/i.test(s);
+  return parsePitchInput(hasNotation ? s : `${s}:${PITCH_RUN}`);
+}

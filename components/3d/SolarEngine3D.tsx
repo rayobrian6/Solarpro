@@ -102,7 +102,7 @@ import {
   type SectionEditOutcome,
   type PitchAnchor,
 } from '@/lib/3d/sectionEditing';
-import { formatRise12 } from '@/lib/3d/pitchFormat';
+import { formatRise12, parseRiseOver12Input, riseOver12 } from '@/lib/3d/pitchFormat';
 import { SectionInspector, type InspectorState } from '@/components/3d/inspector/SectionInspector';
 import {
   nativeAcquisitionPermitted,
@@ -2163,6 +2163,10 @@ function SolarEngine3D({
   // updates the most-recently-placed block's extrudedHeight in real-time.
   const [newBlockEaveHeightM, setNewBlockEaveHeightM] = useState<number>(DEFAULT_BLOCK_HEIGHT_M);
   const [roofPitchDeg, setRoofPitchDeg] = useState<number>(22);
+  // Draft text for the rise:run box beside it. Held as a string so a
+  // half-typed "6:" is not parsed into a roof on every keystroke.
+  const [newRoofRiseDraft, setNewRoofRiseDraft] = useState<string | null>(null);
+  const [newRoofRiseError, setNewRoofRiseError] = useState<string | null>(null);
   const [lastPlacedBlockId, setLastPlacedBlockId] = useState<string | null>(null);
   // Default eave for gable/hip roofs (height of the wall below the eave line)
   const [newRoofEaveHeightM, setNewRoofEaveHeightM] = useState<number>(6);
@@ -10646,6 +10650,24 @@ function SolarEngine3D({
         }
       }
       if (e.key === 'Escape') {
+        // 🚨 AND THE TOOL ITSELF. Escape cleared every selection and every
+        // in-progress trace and then left the user ARMED: still in 'tree' or
+        // 'obstruction' mode, so the next click on the roof planted another
+        // one. That is the mode error — the user believes Escape got them out.
+        //
+        // Aurora states the contract out loud ("hit escape on your keyboard to
+        // escape tree mode") and SolarPro already owns the exit path; the
+        // cancel-everything key simply never called it. One rule, no hidden
+        // state: after Escape the mode is ALWAYS 'select'.
+        //
+        // Safe from the mount-frozen closure that bites the rest of this file:
+        // `setupKeyboardHandler` is installed once at viewer init, but
+        // DesignStudio passes `onPlacementModeChange={setPlacementMode3D}` — a
+        // useState setter, which React keeps referentially stable for the life
+        // of the component. `modeRef` is a ref, so the READ is live too.
+        const exitToolMode = () => {
+          if (modeRef.current !== 'select') onPlacementModeChange('select');
+        };
         // Cancel ground array
         if (modeRef.current === 'ground_array' && groundArrayRowsRef.current.length > 0) {
           cancelGroundArray();
@@ -10667,10 +10689,12 @@ function SolarEngine3D({
         // tolerable at two clicks, stranding at four.
         if (modeRef.current === 'roof_gable' && gablePtsRef.current.length > 0) {
           cancelSectionTrace('gable');
+          exitToolMode();
           return;
         }
         if (modeRef.current === 'roof_hip' && hipPtsRef.current.length > 0) {
           cancelSectionTrace('hip');
+          exitToolMode();
           return;
         }
         if (modeRef.current === 'block' && blockPtsRef.current.length > 0) {
@@ -10690,6 +10714,7 @@ function SolarEngine3D({
           setStatusMsg('🧱 Block cancelled');
         }
         clearGhostPanel();
+        exitToolMode();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -15878,6 +15903,61 @@ function SolarEngine3D({
                         />
                         <span style={{ color: '#aaa', fontSize: 10 }}>°</span>
                       </div>
+                      {/* 🚨 THE SAME PITCH, THE WAY A ROOFER SAYS IT.
+                       *  This is the control an installer touches BEFORE
+                       *  drawing the roof — the moment they are looking at a
+                       *  house thinking "that's a six twelve". It offered
+                       *  degrees only, so the one number they actually know had
+                       *  to be converted in their head first.
+                       *
+                       *  Degrees stay canonical: this box does not store a rise,
+                       *  it parses one into `roofPitchDeg` through the same
+                       *  authority the section inspector uses. A bare "6" here
+                       *  is 6:12 because the box says "Rise : run" — the rule is
+                       *  `parseRiseOver12Input`, not a regex copied to a second
+                       *  place that can drift from the first. */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: '#e0e0e0', fontSize: 11, minWidth: 100 }}>Rise : run</span>
+                        <input
+                          type="text"
+                          data-no-drag
+                          data-testid="new-roof-pitch-rise"
+                          placeholder="6:12"
+                          value={newRoofRiseDraft ?? formatRise12(roofPitchDeg)}
+                          onChange={e => { setNewRoofRiseDraft(e.target.value); }}
+                          onFocus={() => setNewRoofRiseDraft(riseOver12(roofPitchDeg).toFixed(2))}
+                          onBlur={() => {
+                            const raw = newRoofRiseDraft;
+                            setNewRoofRiseDraft(null);
+                            if (raw == null || raw.trim() === '') { setNewRoofRiseError(null); return; }
+                            const parsed = parseRiseOver12Input(raw);
+                            if (!parsed.ok) { setNewRoofRiseError(parsed.reason); return; }
+                            setNewRoofRiseError(null);
+                            // Same clamp as the degrees box beside it — one
+                            // control, so one admissible range.
+                            setRoofPitchDeg(Math.max(5, Math.min(60, parsed.pitchDeg)));
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                            if (e.key === 'Escape') {
+                              // Abandon the draft without letting Escape reach
+                              // the canvas handler and drop the whole tool.
+                              e.stopPropagation();
+                              setNewRoofRiseDraft(null); setNewRoofRiseError(null);
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                          style={{ flex: 1, minWidth: 0, fontSize: 11, padding: '2px 4px', textAlign: 'center', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4 }}
+                        />
+                        <span style={{ color: '#aaa', fontSize: 10, minWidth: 56, textAlign: 'right' }}>
+                          {formatRise12(roofPitchDeg)}
+                        </span>
+                      </div>
+                      {newRoofRiseError ? (
+                        <div data-testid="new-roof-pitch-rise-error" style={{
+                          margin: '-2px 0 0 106px', color: '#ffcf7a', fontSize: 9.5, lineHeight: 1.4,
+                        }}>{newRoofRiseError}</div>
+                      ) : null}
                     </>
                   ) : null}
                   {/* v66: Lift Roofs / Flatten Roofs for 3D Primitives (block / gable / hip).

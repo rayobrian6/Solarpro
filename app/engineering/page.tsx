@@ -164,6 +164,7 @@ import { getUtilityPrograms, getPacePrograms, getLowIncomeProgramsByState, type 
 import { getInterconnectionProfile, getTypicalTotalTimeline, type InterconnectionProfile } from '@/lib/utilityInterconnection';
 import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
 import { downloadFilenameFor } from '@/lib/http/contentDisposition';
+import { formatRise12 } from '@/lib/3d/pitchFormat';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -8567,7 +8568,16 @@ function EngineeringPageInner() {
       key: 'roofPitch',
       label: 'Roof Pitch',
       ok: !!(config.roofPitch && config.roofPitch > 0),
-      value: config.roofPitch ? `${Math.round(config.roofPitch * 12 / 90 * 12)}:12 (${config.roofPitch}°)` : undefined,
+      // 🚨 THIS ROW USED TO PRINT A ROOF THAT DOES NOT EXIST.
+      // The formula was `deg * 12 / 90 * 12` — degrees interpolated LINEARLY
+      // onto a rise, which is not what a pitch is. Rise over 12 of run is
+      // 12·tan(θ); the two agree nowhere except zero. A true 4:12 (18.435°)
+      // printed as 29:12, and a 12:12 (45°) printed as 72:12 — a 72:12 is 80.5°,
+      // i.e. very nearly a wall. An installer reads this row off the readiness
+      // checklist, so it was not a formatting slip, it was a wrong number
+      // presented as an engineering fact.
+      // lib/3d/pitchFormat.ts is the authority and it does not snap.
+      value: config.roofPitch ? `${formatRise12(config.roofPitch)} (${config.roofPitch}°)` : undefined,
       fix: 'Set roof pitch in System Config → Structural',
       tab: 'config',
     },

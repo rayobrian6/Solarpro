@@ -88,6 +88,7 @@ import {
 import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { formatRise12 } from '@/lib/3d/pitchFormat';
 
 interface Props {
   project: Project;
@@ -5636,7 +5637,14 @@ export default function DesignStudio({ project, onSave }: Props) {
                     <div className="mb-5">
                       <div className="flex justify-between text-xs text-slate-500 mb-1">
                         <span>Roof pitch</span>
-                        <span className="text-amber-400 font-mono">{pendingPlanePitch}° ({Math.round(Math.tan(pendingPlanePitch*Math.PI/180)*12)}/12)</span>
+                        {/* 🚨 IT USED TO SNAP, AND SNAPPING MAKES THE LABEL LIE.
+                          * `Math.round(tan(θ)·12)` printed 25° as "6/12" — but a
+                          * 6:12 is 26.565°, so the readout named a different roof
+                          * from the one the slider was building, and 22° read
+                          * "5/12" when it is 4.85. lib/3d/pitchFormat.ts refuses
+                          * to snap for exactly this reason: if the installer
+                          * wants 6:12 they can type it and get 26.565° exactly. */}
+                        <span className="text-amber-400 font-mono">{pendingPlanePitch}° ({formatRise12(pendingPlanePitch)})</span>
                       </div>
                       <input
                         type="range" min={0} max={45} step={1}

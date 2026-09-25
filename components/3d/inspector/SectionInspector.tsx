@@ -48,7 +48,7 @@ import type {
   PitchAnchor,
 } from '@/lib/3d/sectionEditing';
 import { FT_PER_M } from '@/lib/3d/sectionEditing';
-import { formatRise12, parsePitchInput, riseOver12 } from '@/lib/3d/pitchFormat';
+import { formatRise12, parseRiseOver12Input, riseOver12 } from '@/lib/3d/pitchFormat';
 
 export type InspectorLevel = 'none' | 'section' | 'face' | 'wall';
 
@@ -394,7 +394,11 @@ function PitchEditor(props: {
             // A bare number in THIS box is a rise over 12, because that is what
             // the box is labelled. The degrees box above reads a bare number as
             // degrees. Neither one has to guess.
-            const parsed = parsePitchInput(/[:/]|\bin\b/.test(raw) ? raw : `${raw.trim()}:12`);
+            //
+            // The rule itself now lives in the pitch authority beside the
+            // arithmetic it qualifies, so the new-roof pitch control reads "6"
+            // exactly the same way this box does rather than re-deriving it.
+            const parsed = parseRiseOver12Input(raw);
             if (!parsed.ok) { setRiseError(parsed.reason); return; }
             setRiseError(null);
             onCommit(parsed.pitchDeg);
