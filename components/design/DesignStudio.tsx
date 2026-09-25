@@ -136,6 +136,9 @@ type SolarE2EState = {
    *  click needs WebGL, Google tiles and a building under the cursor — none of
    *  which is the behaviour under test. */
   pickHouse: (lat: number, lng: number, address: string) => void;
+  /** Run the shade study, as the Shade button does. Proves the
+   *  tree -> shade -> per-panel factor -> production chain end to end. */
+  runShadeAnalysis: () => void;
   requestDelete: (scope: string, targetId?: string) => void;
   /** THE ARMED TOOL. One authority, so a spec can assert that the button a
    *  person pressed is the tool that is still armed a moment later. */
@@ -1054,6 +1057,12 @@ export default function DesignStudio({ project, onSave }: Props) {
   // over `requestDeletion`, which is declared much further down the file. It is
   // re-pointed by an effect that sits beside that declaration.
   const requestDeletionRef = useRef<((scope: string, targetId?: string) => void) | null>(null);
+  /** Same reason as `requestDeletionRef`: the e2e bridge effect is written
+   *  ABOVE this callback's declaration, and a dependency array is evaluated
+   *  where it is written, not where the effect runs — naming it directly is a
+   *  use-before-declaration that throws at module scope. The ref is re-pointed
+   *  by its own effect below the declaration. */
+  const runShadeAnalysisRef = useRef<(() => void) | null>(null);
   // Data-loss guard (task #3 root cause, 2026-07-16): NO save path may run
   // before the DB restore has resolved. The autosave timer armed on MOUNT and
   // fired 3s later — on a slow restore (cold Neon) it saved the EMPTY initial
@@ -2189,6 +2198,18 @@ export default function DesignStudio({ project, onSave }: Props) {
        *  browser path to that click needs WebGL, Google tiles and a building
        *  under the cursor; the BEHAVIOUR being tested is what happens after. */
       pickHouse: (lat: number, lng: number, address: string) => { void handleLocationPick(lat, lng, address); },
+      /** Run the shade study, exactly as the Shade button does.
+       *
+       *  🚨 EXPOSED SO THE TREE -> PRODUCTION CHAIN CAN BE PROVEN LIVE, not
+       *  inferred from unit tests of its parts. The chain is
+       *  tree -> buildShadeScene -> profileForPanel -> per-panel
+       *  annualShadeFactor -> proposal derate, and every link of it has passed
+       *  its own tests before while the whole chain did nothing: five handlers
+       *  were once dead on custom properties that were never set, and a clear
+       *  roof once reported 26.6% loss. Only running it against real geometry
+       *  with a real tree settles it. This is the SAME callback the button
+       *  fires — it is not a test-only path. */
+      runShadeAnalysis: () => { runShadeAnalysisRef.current?.(); },
       /** Ask for a deletion exactly as a control does. The workspace-scope
        *  controls live in the 3D tool spine, whose buttons render their icon as
        *  their own text and are not reliably targetable from a browser test;
@@ -4788,6 +4809,8 @@ export default function DesignStudio({ project, onSave }: Props) {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rowSpacing, toast]);
+
+  useEffect(() => { runShadeAnalysisRef.current = runShadeAnalysis; }, [runShadeAnalysis]);
 
   const systemTypeLabel = { roof: 'Roof Mount', ground: 'Ground Mount', fence: 'Sol Fence' }[project.systemType];
   const systemTypeColor = { roof: 'text-amber-400', ground: 'text-teal-400', fence: 'text-purple-400' }[project.systemType];
