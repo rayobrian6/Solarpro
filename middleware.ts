@@ -22,6 +22,25 @@ const DEFAULT_SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
 // ── Public Paths ────────────────────────────────────────────────────
 // SECURITY AUDIT: Only truly public endpoints belong here.
 // Everything else requires a valid session cookie.
+//
+// ⚠ KNOWN: this gate is currently open for every request. ⚠
+// '/' is an entry below and the match is `pathname.startsWith(p)`, so every
+// pathname matches and the session / CSRF / session-timeout checks further down
+// this file are unreachable. The ROUTE HANDLERS are the sole auth authority
+// today (266 of 302 app/api route.ts files carry their own check).
+//
+// Not a fix-in-passing: with today's list, closing it would 401 three live
+// unauthenticated flows that are not listed here —
+//   1. the homeowner portal (/api/portal/dashboard, /verify-otp, /bill-upload)
+//      authenticates with its OWN cookie via getPortalSession(); this file only
+//      understands solarpro_session
+//   2. the homeowner proposal view (/api/proposals/[id], /sign, /pdf,
+//      /signature) is reached by share token, not by session
+//   3. /api/settings/branding?proposalId=... is an explicit public-access path
+//      the proposal view page calls
+// Closing it means auditing every unauthenticated entry point first, adding
+// them here, and making '/' an exact match rather than a prefix.
+// Pinned by tests/middleware-public-path-bypass.test.ts.
 const PUBLIC_PATHS = [
   // ── Marketing / Legal pages ──
   '/',

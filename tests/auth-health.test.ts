@@ -208,7 +208,13 @@ describe('Auth error code contract', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('Middleware PUBLIC_PATHS bypass logic', () => {
-  // Replicate the middleware bypass check for unit testing
+  // ⚠ This is a REPLICA of the matching rule, not the real list. It omits the
+  // '/' entry that middleware.ts actually carries, so the "is NOT public"
+  // assertions below describe the intended design, NOT live behaviour: in the
+  // real middleware '/' + startsWith makes every path public. That is pinned,
+  // with the reason it has not been fixed, in
+  // tests/middleware-public-path-bypass.test.ts. Do not read this block as
+  // evidence that /api/projects is protected by middleware — it is not.
   const PUBLIC_PATHS = [
     '/auth/login',
     '/auth/register',
