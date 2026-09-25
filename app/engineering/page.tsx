@@ -169,6 +169,9 @@ import { projectObstructionsForPermit } from '@/lib/obstruction/permitProjection
 // ONE answer to "how long may a string be", shared with lib/string-generator.ts
 // and therefore with the stamped plan set. See `stringSizingBounds`.
 import { stringSizingBounds } from '@/lib/string-generator';
+// What a person is told when a request fails — and what they are not. See the
+// note in that file: this page used to paste raw response bodies into toasts.
+import { userFacingServerError } from '@/lib/http/userFacingError';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
@@ -8469,8 +8472,15 @@ function EngineeringPageInner() {
           toast.error(`Permit generation failed (422): ${errData.message ?? 'Unknown error'}`);
         }
       } else {
+        // 🚨 NOT THE RAW BODY. This pasted 200 characters of the response into
+        // the toast, so an HTML error page or a stack trace landed in front of
+        // the installer. The detail is not discarded — it goes to the decision
+        // log, where it is diagnosable — but it is not what a person is handed
+        // when their permit package fails.
         const errText = await res.text().catch(() => '');
-        toast.error(`Permit generation failed (${res.status}). Please check the console for details.\n\n${errText.slice(0, 200)}`);
+        const ui = userFacingServerError(res.status, errText, 'Permit generation');
+        logDecision('Permit Package', `HTTP ${res.status}: ${ui.detail.slice(0, 500)}`, 'manual');
+        toast.error(ui.message);
       }
     } catch (e: unknown) {
       logDecision('Permit Package', `Error: ${(e as Error).message}`, 'manual');
@@ -15745,8 +15755,12 @@ function EngineeringPageInner() {
                                 toast.error(`Permit preview failed (422): ${errData.message ?? 'Unknown error'}`);
                               }
                             } else {
+                              // Same rule as the generate path above: the raw
+                              // body is logged, never shown.
                               const errText = await res.text().catch(() => '');
-                              toast.error(`Permit preview failed (${res.status}). Please check the console for details.\n\n${errText.slice(0, 200)}`);
+                              const ui = userFacingServerError(res.status, errText, 'Permit preview');
+                              logDecision('Permit Preview', `HTTP ${res.status}: ${ui.detail.slice(0, 500)}`, 'manual');
+                              toast.error(ui.message);
                             }
                           }}
                           className="btn-secondary w-full flex items-center justify-center gap-2 mt-2"
