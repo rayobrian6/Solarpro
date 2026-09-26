@@ -174,6 +174,32 @@ Two red herrings resolved rather than attributed:
    is Ray's.
 6. **`tests/laneAAcquisitionOrdering.test.tsx`'s post-commit case is vacuous** and now
    says so. If it should prove something today it needs a different formulation.
+7. **The autosave's 3-second debounce RESTARTS on every state change**, so a design
+   can be held in memory and never written while state churns. Observed once
+   (geometry reached the engine at t=109.9 s; the save 3 s later carried 0 panels and
+   no further POST followed in 45 s) and NOT reproducible on demand. The spec can no
+   longer blame persistence for it, but the product question is open: a debounce that
+   can be starved indefinitely is not a debounce.
+8. **`reactStrictMode: true` runs every restore TWICE in dev**, and the second
+   `hydrateFromStored` replaces the active bundle. Harmless in production, but it will
+   bite any future browser test that places geometry early — it already cost one.
+9. **The drawn ground-array boundary (`groundArea`) is session-only.** Verified: React
+   state in DesignStudio alone, zero references in the 3D engine, absent from the
+   persistence payload and from every output. Whether that is correct depends on
+   whether the 2D ground path is still live and on whether the GROUND ARRAY PLAN sheet
+   draws a boundary or derives extents from the modules. In the output-consistency
+   ledger as an OPEN QUESTION rather than a verdict.
+10. **Seven `components/design/*` components have no importer** (`DesignHeader`,
+   `DesignSidebar`, `DesignToolbar`, `ProductionPanel`, `RoofEditPanel`,
+   `ShadeAnalysisPanel`, `ViewOptionsMenu`) — an extraction from the 7,700-line
+   DesignStudio that was never adopted. Dead code, not a broken feature, but it makes
+   the monolith look smaller than it is.
+   🚨 A sweep for this found `components/ui/ErrorBoundary.tsx` unimported too and I
+   nearly wrote it up as a robustness gap — REFUTED: the app uses Next's own
+   per-route `error.tsx` convention (admin, auth, clients, dashboard, design,
+   engineering all have one), so the component is redundant rather than missing. And
+   the first version of that sweep reported nine false positives because it matched
+   only single-quoted imports.
 
 ---
 
