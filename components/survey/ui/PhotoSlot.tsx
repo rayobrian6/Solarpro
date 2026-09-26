@@ -26,6 +26,21 @@ export interface PhotoSlotMeta {
   label: string;
   hint: string;
   required: boolean;
+  /**
+   * 🚨 ONE SLOT PER CATEGORY MADE THE SLOT'S OWN INSTRUCTION IMPOSSIBLE TO FOLLOW.
+   *
+   * The obstruction slot's hint reads "Each obstruction, one photo per item", and
+   * the app then physically prevented it: `handleClick` returns early when `url`
+   * is set, and StepPhotos renders exactly one slot per category, so after the
+   * first obstruction photo the slot was inert — no error, no explanation,
+   * nothing happens on tap. A roof with a chimney, an HVAC unit and two vents
+   * shipped ONE obstruction photo.
+   *
+   * `repeatable` marks the categories whose instruction requires more than one
+   * photo. A repeatable category renders every photo it already has PLUS one empty
+   * "add another" slot (see `addAnother`).
+   */
+  repeatable?: boolean;
 }
 
 export const PHOTO_SLOT_META: PhotoSlotMeta[] = [
@@ -76,12 +91,14 @@ export const PHOTO_SLOT_META: PhotoSlotMeta[] = [
     label: 'Obstruction',
     hint: 'Each obstruction, one photo per item',
     required: false,
+    repeatable: true,
   },
   {
     category: 'additional',
     label: 'Additional',
     hint: 'Any other relevant site condition',
     required: false,
+    repeatable: true,
   },
 ];
 
@@ -97,6 +114,18 @@ interface PhotoSlotProps {
   onCapture: (file: File) => void;
   onRemove: () => void;
   disabled?: boolean;
+  /**
+   * Render this slot as the EMPTY "add another" tile of a repeatable category.
+   * Set by the parent for the one extra slot it renders after the filled ones.
+   * Only meaningful when `meta.repeatable` is true, and never combined with `url`.
+   */
+  addAnother?: boolean;
+  /**
+   * 1-based position of this photo within its repeatable category, used to label
+   * the filled tile ("Obstruction 2") so the crew can see which one they are
+   * looking at. Omitted for single slots.
+   */
+  index?: number;
 }
 
 export function PhotoSlot({
@@ -108,8 +137,17 @@ export function PhotoSlot({
   onCapture,
   onRemove,
   disabled,
+  addAnother,
+  index,
 }: PhotoSlotProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // A repeatable category numbers its tiles; a single slot keeps its bare label.
+  const displayLabel = meta.repeatable && typeof index === 'number'
+    ? `${meta.label} ${index}`
+    : addAnother
+      ? `Add another ${meta.label}`
+      : meta.label;
 
   function handleClick() {
     if (disabled || uploading || url) return;
@@ -132,12 +170,12 @@ export function PhotoSlot({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={url}
-          alt={meta.label}
+          alt={displayLabel}
           className="w-full h-full object-cover"
         />
         {/* Overlay label */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/50">
-          <p className="text-white text-xs font-medium truncate">{meta.label}</p>
+          <p className="text-white text-xs font-medium truncate">{displayLabel}</p>
         </div>
         {/* Required badge */}
         {meta.required ? (
@@ -152,7 +190,7 @@ export function PhotoSlot({
             onClick={onRemove}
             className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white
               flex items-center justify-center text-xs font-bold hover:bg-red-600 transition-colors"
-            aria-label={`Remove ${meta.label}`}
+            aria-label={`Remove ${displayLabel}`}
           >
             x
           </button>
@@ -168,7 +206,7 @@ export function PhotoSlot({
         flex flex-col items-center justify-center gap-2 px-3">
         {/* Spinner */}
         <div className="w-7 h-7 rounded-full border-2 border-cyan-300 border-t-cyan-600 animate-spin" />
-        <p className="text-xs font-medium text-cyan-700">{meta.label}</p>
+        <p className="text-xs font-medium text-cyan-700">{displayLabel}</p>
         {/* Progress bar */}
         <div className="w-full bg-cyan-100 rounded-full h-1.5">
           <div
@@ -198,13 +236,13 @@ export function PhotoSlot({
         ${borderClass}
         disabled:opacity-50 disabled:cursor-not-allowed
       `}
-      aria-label={`Capture ${meta.label}`}
+      aria-label={`Capture ${displayLabel}`}
     >
       {/* Camera icon (ASCII art fallback) */}
       <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-sm font-bold">
         +
       </div>
-      <p className="text-xs font-semibold text-gray-700 text-center">{meta.label}</p>
+      <p className="text-xs font-semibold text-gray-700 text-center">{displayLabel}</p>
       <p className="text-[10px] text-gray-400 text-center leading-tight">{meta.hint}</p>
       {meta.required ? (
         <span className="text-[10px] font-bold text-red-400 uppercase tracking-wide">

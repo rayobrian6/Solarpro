@@ -13,7 +13,11 @@ import {
 import { designEquipmentPatch, type SelectedEquipment } from '@/lib/system/selectedEquipment';
 import { designSubSystemBlocks } from '@/lib/system/designToEngineering';
 import { calculateProduction, calculateProductionFromDefinition } from '@/lib/pvwatts';
-import { calculateFinalPrice, calculateItemizedPrice, loadPricingConfig, type SalesOverride } from '@/lib/pricingEngine';
+import {
+  calculateFinalPrice, calculateItemizedPrice, calculateProfitMargin, loadPricingConfig,
+  type ResolvedPricingConfig,
+} from '@/lib/pricingEngine';
+import { companyPricing, toSystemTypeKey, type SystemTypeKey } from '@/lib/companyPricing';
 import { buildArraysFromLayout, buildSystemConfig, buildArrayBreakdown } from '@/lib/multiArrayEngine';
 import type { Client, Layout, SystemDefinition, LocationInput } from '@/types';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
@@ -66,7 +70,54 @@ function validateEphemeralInputs(
   return { ok: true };
 }
 
-/** Build a cost estimate from production result, panels and pricing config */
+/**
+ * 🚨 THE COST SIDE MUST KNOW WHICH SYSTEM IT IS COSTING.
+ *
+ * `ResolvedPricingConfig.equipmentCostPerWatt` is a single scalar, and both
+ * DEFAULT_CONFIG and the `pricing_config` row supply it from the ROOF_MOUNT entry
+ * of `companyPricing.equipmentCostPerWatt` — there is exactly one column for it.
+ * `calculateFinalPrice` then multiplies that one number by the wattage whatever
+ * the system type is, so a Sol Fence job was costed at 0.55 $/W equipment when
+ * the company's own table says 0.95. On 8.8 kW that overstates gross profit by
+ * ~$3,520, and it overstates it in the direction that makes an installer grant a
+ * discount they cannot afford.
+ *
+ * So the per-type table is consulted for every type except ROOF_MOUNT, where the
+ * configured scalar IS the roof number and any operator tuning of it is kept.
+ * A per-type equipment-cost column on `pricing_config` would let an operator tune
+ * the others too — reported as NEEDS-MIGRATION, deliberately not invented here.
+ *
+ * This only ever feeds the INTERNAL cost/margin card. No customer-facing number
+ * is derived from `equipmentCostPerWatt` anywhere on this route.
+ */
+function costConfigForType(
+  pricingCfg: ResolvedPricingConfig,
+  typeKey: SystemTypeKey,
+): ResolvedPricingConfig {
+  if (typeKey === 'ROOF_MOUNT') return pricingCfg;
+  const perType = companyPricing.equipmentCostPerWatt[typeKey];
+  if (typeof perType !== 'number' || !(perType > 0)) return pricingCfg;
+  return { ...pricingCfg, equipmentCostPerWatt: perType };
+}
+
+/**
+ * Build a cost estimate from production result, panels and pricing config.
+ *
+ * 🚨 `salesOverride` IS GONE FROM THIS CONTRACT, DELIBERATELY.
+ *
+ * It was accepted on the body and forwarded to `calculateFinalPrice`, where it
+ * could move `cashPrice` via `finalPrice` / `pricePerWatt` / `marginPercent`.
+ * But the CUSTOMER price on this route comes from `calculateItemizedPrice`, which
+ * has no override parameter — so an override moved the internal revenue figure
+ * and left the quoted price alone, which is the very inconsistency the margin
+ * card was built to prevent. Passing it into `calculateItemizedPrice` instead
+ * would move a customer-facing number, which this repair is forbidden to do.
+ *
+ * Nothing in the repo sends it (grepped: the only references were this route's
+ * own plumbing), so dropping it is inert today and removes a field that could
+ * only ever reintroduce the split. A sanctioned sales override belongs in the
+ * itemized price, as one number both sides read.
+ */
 function buildCostEstimate(params: {
   panels: any[];
   systemSizeKw: number;
@@ -75,12 +126,11 @@ function buildCostEstimate(params: {
   utilityRate: number;
   pricingCfg: any;
   client?: Client | null;
-  salesOverride?: SalesOverride;
   solarArrays?: any;
 }) {
   const {
     panels, systemSizeKw, layoutType, annualProductionKwh,
-    utilityRate, pricingCfg, client, salesOverride, solarArrays,
+    utilityRate, pricingCfg, client, solarArrays,
   } = params;
 
   const itemized  = calculateItemizedPrice(panels, layoutType, pricingCfg);
@@ -104,9 +154,50 @@ function buildCostEstimate(params: {
   lifetimeSavings = Math.round(lifetimeSavings);
   const roi = netCost > 0 ? parseFloat((((lifetimeSavings - netCost) / netCost) * 100).toFixed(1)) : 0;
 
+  // `pricingAlt` is kept for the COST side ONLY — `estimatedCost` is the one
+  // figure on it this route consumes. Its `revenue` / `grossProfit` /
+  // `marginPercent` are computed from ITS OWN price model (price-per-watt), which
+  // is not the price the customer is quoted, and reading them was the defect.
+  const typeKey    = toSystemTypeKey(layoutType);
   const pricingAlt = client
-    ? calculateFinalPrice(systemSizeKw, layoutType, annualProductionKwh, client, salesOverride, pricingCfg)
+    ? calculateFinalPrice(
+        systemSizeKw, layoutType, annualProductionKwh, client, undefined,
+        costConfigForType(pricingCfg, typeKey),
+      )
     : null;
+
+  // 🚨 THE MARGIN CARD MUST BE COMPUTED FROM THE PRICE THE CUSTOMER IS QUOTED.
+  //
+  // These four fields feed DesignStudio's "Your margin - Internal only" panel,
+  // whose own comment asserts it is "the same number the proposal is priced
+  // from". It was not. `internalRevenue` was `pricingAlt.revenue` — the
+  // price-per-watt method — while the customer is quoted
+  // `calculateItemizedPrice(...).totalCashPrice`, the per-panel method plus fixed
+  // costs. Two different price models, one labelled as the other.
+  //
+  // Measured on shipped defaults (roof $1,364/panel, $3.10/W, $2,000 fixed):
+  //   20 x 440 W -> customer pays $29,280; the card showed Revenue $27,280 and
+  //   Margin 42.3% against a true 46.3% — profit understated by exactly the
+  //   $2,000 fixed cost, which the per-watt method never adds.
+  //   20 x 500 W -> the SIGN FLIPS: Revenue $31,000, Margin 43.2% against a true
+  //   39.9% — overstated, because per-panel pricing does not follow wattage and
+  //   per-watt pricing does. Overstated is the dangerous direction: it is the one
+  //   that makes an installer discount a job into a loss.
+  //
+  // `cashPrice` here IS `itemized.totalCashPrice`, i.e. `grossCost` /
+  // `totalBeforeCredit` / `cashPrice` — the same number the customer sees and the
+  // proposal reads back. Revenue is now that, and profit and margin are derived
+  // from it against the cost side, so the card and the quote can no longer
+  // disagree.
+  //
+  // When there is no client `pricingAlt` is null and the cost is genuinely not
+  // computed, so all four stay 0 — and DesignStudio renders the card only when
+  // `internalCost > 0`, so the zero reads as "not computed" and nothing is shown.
+  // That is why a zero is admissible HERE and only here.
+  const internalCost    = pricingAlt?.estimatedCost ?? 0;
+  const internalRevenue = pricingAlt ? cashPrice : 0;
+  const internalProfit  = pricingAlt ? cashPrice - internalCost : 0;
+  const internalMargin  = pricingAlt ? calculateProfitMargin(cashPrice, internalCost) : 0;
 
   let arrayBreakdown: any[] | undefined;
   if (solarArrays) {
@@ -133,10 +224,10 @@ function buildCostEstimate(params: {
       : 0,
     cashPrice,
     costAfterIncentives: netCost,
-    internalRevenue: pricingAlt?.revenue       ?? 0,
-    internalCost:    pricingAlt?.estimatedCost ?? 0,
-    internalProfit:  pricingAlt?.grossProfit   ?? 0,
-    internalMargin:  pricingAlt?.marginPercent ?? 0,
+    internalRevenue,
+    internalCost,
+    internalProfit,
+    internalMargin,
     arrayBreakdown,
   };
 }
@@ -225,11 +316,16 @@ function buildLayoutFromDefinition(
 // POST /api/production
 //
 // Shape A — Ephemeral (no projectId):
-//   { systemDefinition, location, salesOverride? }
+//   { systemDefinition, location }
 //
 // Shape B — Project-backed (projectId present, backward-compatible):
-//   { projectId, layout, salesOverride? }
-//   OR: { projectId, systemDefinition, location, salesOverride? }
+//   { projectId, layout }
+//   OR: { projectId, systemDefinition, location }
+//
+// 🚨 `salesOverride` was removed from all three shapes. It could only move the
+// INTERNAL revenue figure and never the quoted price, which is exactly the split
+// the margin card exists to prevent — see the note on `buildCostEstimate`. It is
+// ignored if sent; nothing in the repo sends it.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
@@ -293,7 +389,6 @@ export async function POST(req: NextRequest) {
         utilityRate,
         pricingCfg,
         client:        null,
-        salesOverride: body.salesOverride,
       });
 
       console.log(
@@ -355,7 +450,6 @@ export async function POST(req: NextRequest) {
           annualProductionKwh: production.annualProductionKwh,
           utilityRate, pricingCfg,
           client: null,
-          salesOverride: body.salesOverride,
         });
         return NextResponse.json({
           success: true,
@@ -462,7 +556,6 @@ export async function POST(req: NextRequest) {
         utilityRate:         syntheticLocation.utilityRate!,
         pricingCfg,
         client:              null,
-        salesOverride:       body.salesOverride,
       });
 
       await updateProject(projectId, user.id, { status: 'design', systemSizeKw: savedLayout.systemSizeKw });
@@ -592,7 +685,6 @@ export async function POST(req: NextRequest) {
       utilityRate:         client.utilityRate || 0.13,
       pricingCfg,
       client,
-      salesOverride:       body.salesOverride,
       solarArrays,
     });
 

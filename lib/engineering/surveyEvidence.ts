@@ -299,6 +299,57 @@ export function collectEngineeringSurveyEvidence(
 }
 
 
+/**
+ * 🚨 `obstructions[0]` ATTRIBUTED A PHOTO TO THE WRONG OBSTRUCTION.
+ *
+ * Both mappers below read `survey.geometry.obstructions[0]?.type` for every
+ * obstruction photo, so a roof with a chimney, an HVAC unit and two vents had all
+ * of its obstruction evidence labelled with whatever type happened to sit first
+ * in the Step-4 list. That is not a missing label, it is a CONFIDENT WRONG one:
+ * an engineer reading the plan set sees "chimney" against a photo of a vent and
+ * has no way to tell.
+ *
+ * The rule now:
+ *   - a photo that CARRIES a link to one obstruction is labelled with that
+ *     obstruction's type (see the `obstructionId` handoff note below);
+ *   - a survey with EXACTLY ONE obstruction is unambiguous, so that one is used;
+ *   - otherwise nothing is emitted. `obstructionCount` on the extracted summary
+ *     already tells a reader how many there are; guessing which one this photo
+ *     shows adds no information and can only mislead.
+ *
+ * HANDOFF, THREE FILES, because the link does not exist yet:
+ *   1. `SurveyPhoto`    (lib/survey/v2/types.ts)   — add `obstructionId?: string | null`
+ *   2. `SurveyPhotoRef` (lib/siteSurvey/types.ts)  — add the same field
+ *   3. `normalizeSurvey` (lib/siteSurvey/normalizeSurvey.ts, the `photos.push({…})`
+ *      at ~:652) — carry it through. That mapper is an explicit WHITELIST of
+ *      slotKey/url/category/capturedAt/notes, so a field added to the types alone
+ *      is silently dropped in normalisation and never reaches here. Measured:
+ *      tests/obstructionEvidenceIsNotMisattributed.test.tsx first asserted the
+ *      link end-to-end and failed for exactly this reason.
+ * Until those land, the "exactly one obstruction" rule is the only path that can
+ * label a photo, which is correct but conservative.
+ *
+ * Exported so the link rule is provable NOW, ahead of the wiring above.
+ */
+export function resolveObstructionType(
+  survey: EnrichedSiteSurvey,
+  linkedObstructionId: string | null | undefined,
+): string | undefined {
+  const obstructions = survey.geometry.obstructions ?? [];
+  if (linkedObstructionId) {
+    const linked = obstructions.find((o) => o.id === linkedObstructionId);
+    // A link that does not resolve is a data error, not a licence to guess.
+    return linked?.type;
+  }
+  if (obstructions.length === 1) return obstructions[0]?.type;
+  return undefined;
+}
+
+/** The obstruction link, read defensively so adding the field needs no change here. */
+function linkedObstructionId(source: unknown): string | null | undefined {
+  return (source as { obstructionId?: string | null } | null | undefined)?.obstructionId;
+}
+
 function mapCanonicalManifestEvidence(
   item: SurveyEvidenceItem,
   survey: EnrichedSiteSurvey,
@@ -324,7 +375,8 @@ function mapCanonicalManifestEvidence(
   }
 
   if (item.category === 'obstructions') {
-    extracted.obstructionType = survey.geometry.obstructions[0]?.type;
+    const type = resolveObstructionType(survey, linkedObstructionId(item));
+    if (type) extracted.obstructionType = type;
   }
 
   return {
@@ -386,7 +438,9 @@ function mapPhotoEvidence(
   }
 
   if (category === 'obstructions') {
-    extracted.obstructionType = survey.geometry.obstructions[0]?.type;
+    // Same rule as the canonical mapper — see resolveObstructionType.
+    const type = resolveObstructionType(survey, linkedObstructionId(photo));
+    if (type) extracted.obstructionType = type;
   }
 
   return {

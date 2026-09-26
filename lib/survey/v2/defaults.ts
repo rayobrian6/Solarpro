@@ -163,7 +163,26 @@ export function buildInitialDraft(claims: HandoffClaims): SurveyV2Draft {
     photos: blankPhotos(),
     currentStep: 1,
     completedSteps: [],
-    lastSavedAt: new Date().toISOString(),
+    // 🚨 NOTHING HAS BEEN SAVED YET, SO THIS SAYS NOTHING.
+    //
+    // This was `new Date().toISOString()` — the moment the surveyor OPENED the
+    // link. `lastSavedAt` is read by exactly one consumer, the SurveyShell header
+    // ("Saved HH:MM"), and `saveDraft` never wrote back into React state, so the
+    // header displayed the open time for the entire survey. A crew could work for
+    // forty minutes across five steps and have no way to tell whether their last
+    // ten minutes of answers had persisted.
+    //
+    // Worse, on a device where localStorage throws — Safari private browsing,
+    // storage full, site data blocked — the header still read "Saved 09:14" while
+    // NOTHING had ever been written. Backgrounding the app reloaded the tab,
+    // `loadDraft` returned null, and the survey restarted from blank having
+    // reported success the whole time.
+    //
+    // Empty string is falsy, and the header renders the "Saved" span only when
+    // `lastSavedAt` is truthy, so a fresh draft now claims nothing until a write
+    // has actually succeeded. A RESUMED draft carries the real timestamp
+    // `saveDraft` persisted, so resume still shows a true last-write time.
+    lastSavedAt: '',
   };
 }
 
@@ -177,22 +196,79 @@ export function draftStorageKey(jti: string): string {
 // ---------------------------------------------------------------------------
 // saveDraft / loadDraft / clearDraft
 // ---------------------------------------------------------------------------
-export function saveDraft(draft: SurveyV2Draft): void {
-  if (typeof window === 'undefined') return;
+/**
+ * The outcome of one `saveDraft` call. A caller must commit `savedAt` into state
+ * on success and surface `saved === false` to the surveyor — see the note in
+ * `saveDraft`.
+ */
+export interface DraftSaveResult {
+  /** TRUE only when the draft is now in localStorage. */
+  saved: boolean;
+  /** The timestamp that was actually persisted. `null` when nothing was written. */
+  savedAt: string | null;
+  /** Why no write happened. Set only when `saved` is false. */
+  reason?: 'no_window' | 'storage_threw';
+  /** The thrown error's message, when there was one. */
+  error?: string;
+}
+
+/**
+ * Persist the draft to localStorage.
+ *
+ * 🚨 THIS RETURNED `void`, SO A FAILED WRITE WAS INDISTINGUISHABLE FROM A GOOD ONE.
+ *
+ * The `catch {}` below swallowed every storage failure — the exact failure modes
+ * a field device hits: Safari private browsing, a full quota, site data blocked
+ * by policy. The caller had no way to know, and the header went on reporting
+ * "Saved", so a surveyor was told their work was safe by the one indicator that
+ * could not possibly know. Two things had to change together: the write has to
+ * report its outcome, and the caller has to render the outcome rather than a
+ * timestamp it minted itself.
+ *
+ * The timestamp is generated ONCE, before the write, and the same value is both
+ * stored and returned — so the caller's header cannot drift from what is on disk.
+ * Every localStorage touch in this module is inside a try/catch: in a browser with
+ * site data blocked, reading the `localStorage` PROPERTY itself throws, not just
+ * the method call, so the access must be inside the guarded block and not hoisted
+ * out of it.
+ *
+ * No read-back verification: a `setItem` that returns without throwing has
+ * written, and re-reading a multi-hundred-KB draft on every 800ms autosave would
+ * cost more than it proves. The failure this guards is the throw.
+ */
+export function saveDraft(draft: SurveyV2Draft): DraftSaveResult {
+  if (typeof window === 'undefined') return { saved: false, savedAt: null, reason: 'no_window' };
   // Key on the JWT jti, the same key loadDraft/clearDraft use. draft.token is
   // the FULL handoff JWT, so keying on it here meant the autosave wrote to a key
   // the resume path (draftStorageKey(claims.jti)) could never read — silently
   // losing all in-progress field data on reload.
   const keyId = decodeTokenClaims(draft.token)?.jti || draft.token || draft.projectId;
   const key = draftStorageKey(keyId);
-  const updated = { ...draft, lastSavedAt: new Date().toISOString() };
+  const savedAt = new Date().toISOString();
+  const updated = { ...draft, lastSavedAt: savedAt };
   try {
     localStorage.setItem(key, JSON.stringify(updated));
-  } catch {
-    // localStorage full or unavailable - silent fail
+    return { saved: true, savedAt };
+  } catch (err) {
+    return {
+      saved: false,
+      savedAt: null,
+      reason: 'storage_threw',
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
+/**
+ * Read the draft back. The localStorage access is INSIDE the try for the same
+ * reason as in `saveDraft`: with site data blocked, touching the property throws.
+ *
+ * `null` means "nothing usable to resume", which covers both no stored draft and
+ * a stored draft that will not parse. That collapse is acceptable only because
+ * the caller's fallback is `buildInitialDraft`, which no longer claims to have
+ * saved anything — so a corrupt draft now presents as a blank survey with NO
+ * "Saved" indicator, instead of a blank survey reporting a successful save.
+ */
 export function loadDraft(jti: string): SurveyV2Draft | null {
   if (typeof window === 'undefined') return null;
   try {

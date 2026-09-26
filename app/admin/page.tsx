@@ -125,7 +125,13 @@ export default function AdminDashboard() {
         <StatCard label="Total Users"       value={u.total ?? 0}    sub={`${u.last30 ?? 0} in last 30 days`}   icon={Users}       color="amber" />
         <StatCard label="Total Projects"    value={p.total ?? 0}    sub={`${p.last30 ?? 0} in last 30 days`}   icon={FolderOpen}  color="blue" />
         <StatCard label="Proposals"         value={pr.total ?? 0}   sub={`${pr.last30 ?? 0} in last 30 days`}  icon={FileText}    color="purple" />
-        <StatCard label="Engineering Runs"  value={l.total ?? 0}    sub={`${l.last30 ?? 0} in last 30 days`}   icon={Cpu}         color="amber" />
+        {/* 🚨 LABELLED FOR WHAT IT COUNTS. /api/admin/stats reads `layouts`, which
+            is upserted one row per (project_id, user_id) — so this is saved
+            layouts, never a count of engineering runs. `last30` now has a writer
+            (see the note on the layouts query in app/api/admin/stats/route.ts);
+            before that it was absent from the response and this sub-line read
+            "0 in last 30 days" forever beside a non-zero total. */}
+        <StatCard label="Saved Layouts"     value={l.total ?? 0}    sub={`${l.last30 ?? 0} in last 30 days`}   icon={Cpu}         color="amber" />
         <StatCard label="Files Stored"      value={f.total ?? 0}    sub={`${((f.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB total`} icon={HardDrive} color="slate" />
         <StatCard label="New Users (30d)"   value={u.last30 ?? 0}   sub="Registered this month"                icon={TrendingUp}  color="green" />
         <StatCard label="New Projects (30d)" value={p.last30 ?? 0}  sub="Created this month"                   icon={CheckCircle} color="green" />

@@ -12,15 +12,19 @@
 //   - Whether permit artifacts exist in project_files
 //   - Whether a layout exists
 //
-// INTEGRATION TRUTH: sourced from static code analysis, NOT runtime detection.
-// The four flags (appliedToSystemDefinition, usedInCAD, usedInPermit,
-// usedInProposal) reflect what is actually called in production routes.
-// These values are hardcoded to reflect the verified repo state:
-//   - applyToSystemDefinition  → 0 callers in app/  → false
-//   - buildCADFromSurvey       → 0 callers in app/  → false
-//   - electricalFromSurvey     → 0 callers in app/  → false
-//   - permitIntegration        → 0 callers in app/  → false
-//   - project_physical_data → engineering_reports → true (4 fields)
+// 🚨 THE OLD HEADER HERE ASSERTED A CALLER COUNT THAT HAD SINCE CHANGED.
+//
+// It read "permitIntegration → 0 callers in app/ → false", and that had stopped
+// being true: app/api/engineering/permit/route.ts:1215 calls it, and the survey
+// values it returns override design values on the plan set. A comment stating a
+// grep result is a fact with an expiry date, and this one had expired while the
+// flag it justified was frozen at the literal type `false`.
+//
+// INTEGRATION TRUTH is therefore no longer asserted in prose. `usedInEngineering`
+// and `usedInPermit` are COMPUTED from rows this function already reads. The
+// remaining flags are each a named constant with its verification basis and date
+// on the field itself (see TopographyState.systemIntegration) and are typed
+// `boolean`, so wiring one is a one-line change and not a type error.
 //
 // NEVER throws — all DB errors return safe null-state.
 // NEVER writes to DB.
@@ -70,16 +74,47 @@ export interface TopographyState {
     newPipelineEnriched: boolean;
   };
 
+  // 🚨 A `false` LITERAL TYPE IS A GUARD THAT CANNOT FIRE.
+  //
+  // Four of these six were typed as the literal `false`, not `boolean`. That is
+  // not a default — it makes green UNREPRESENTABLE: the compiler would have
+  // rejected the correct value, so no amount of wiring could ever turn the node
+  // on, for any project, forever.
+  //
+  // `usedInPermit` was the expensive one. `permitIntegration` HAS a caller —
+  // app/api/engineering/permit/route.ts:1215 — and the surveyed roofType,
+  // roofPitch, rafterSize, rafterSpacing, mainPanelAmps, mainPanelBrand,
+  // utilityMeter, interconnectionMethod and panelBusRating override the design
+  // values on the generated plan set (SURVEY_WINS_FIELDS, permit/route.ts
+  // :1236-1247). So the one dashboard built to answer "did the survey reach
+  // engineering?" answered NO about the one place it demonstrably did, which both
+  // hides the real gaps and invites an engineer to distrust correct,
+  // survey-driven permit values.
+  //
+  // All four are now `boolean` and each is COMPUTED. Where a flag is still false
+  // it is false because the code path was re-verified as unreachable on this
+  // branch, and the basis is stated per field — not because the type forbids the
+  // alternative.
   systemIntegration: {
     /**
-     * applyToSystemDefinition: ZERO callers in app/ routes — NOT wired.
-     * True would require: preliminary/route.ts or generate/route.ts to call it.
+     * `applyToSystemDefinition` IS called — app/api/engineering/generate/route.ts
+     * :126 — but the `definition` it returns is consumed only by the
+     * `[SURVEY APPLIED]` console.log on the next line. `generateEngineeringReport`
+     * is handed `snapshot`, `physicalData` and `enrichedSurvey`, never the patched
+     * definition, so nothing downstream reads the override layer's output.
+     * False here means "computed, not consumed", which is what the node should
+     * say. Re-verified 2026-09-26 by following `definition` to its last use.
      */
-    appliedToSystemDefinition: false;
+    appliedToSystemDefinition: boolean;
     /**
-     * buildCADFromSurvey: ZERO callers in app/ routes — NOT wired.
+     * `buildCADFromSurvey` is reached only from `getArrayPlanFromPermit` and
+     * `getStructuralFromPermit` (lib/drafting/composers/index.ts:95,:172), and
+     * BOTH are unreachable: their only references anywhere are the re-exports in
+     * lib/drafting/index.ts. The permit array sheet calls
+     * `drawingEngine.getArrayPlanFromCAD` instead (lib/permit/sections/
+     * arrayPages.ts:471), which takes no survey. Re-verified 2026-09-26.
      */
-    usedInCAD: false;
+    usedInCAD: boolean;
     /**
      * project_physical_data IS read by generateEngineeringReport().
      * 4 fields: panel_rating_amps, rafter_spacing_in, roof_material, interconnection_point.
@@ -88,13 +123,19 @@ export interface TopographyState {
     usedInEngineering: boolean;   // true when engineering_reports row exists AND physical_data exists
     usedInEngineeringPartial: boolean; // always true when usedInEngineering (only 4/20 fields used)
     /**
-     * permitIntegration: ZERO callers in app/ routes — NOT wired.
+     * TRUE when this project has both survey data and a generated permit
+     * artifact. The permit route runs `permitIntegration(enriched)` on exactly
+     * the condition that a project_physical_data row exists, so a permit artifact
+     * plus a legacy survey row means the survey DID reach the plan set for this
+     * project. Same shape of observation as `usedInEngineering`.
      */
-    usedInPermit: false;
+    usedInPermit: boolean;
     /**
-     * No proposal route reads physical_data — NOT wired.
+     * No proposal route reads physical_data. Re-verified 2026-09-26: zero
+     * `physical_data` / `physicalData` references under app/api/proposals or
+     * lib/proposal.
      */
-    usedInProposal: false;
+    usedInProposal: boolean;
   };
 
   engineering: {
@@ -381,24 +422,47 @@ export async function getTopographyState(projectId: string): Promise<TopographyS
   // The engineering report generator reads pd.panel_rating_amps etc. when pd != null.
   const usedInEngineering = legacyExists && engineeringReportExists;
 
+  // 🚨 COMPUTED FROM OBSERVABLE STATE, NOT ASSERTED.
+  //
+  // The permit route's survey block is gated on one thing: a
+  // project_physical_data row for this project. When it finds one it normalises,
+  // enriches and calls `permitIntegration(enriched)`, then merges
+  // SURVEY_WINS_FIELDS into the permit input (app/api/engineering/permit/route.ts
+  // :1200-1247). So a project that has BOTH a legacy survey row AND a permit
+  // artifact had its survey applied to that plan set — the same inference, on the
+  // same two kinds of evidence, as `usedInEngineering` above.
+  //
+  // This is deliberately not "a permit artifact exists": without survey data
+  // permitIntegration never runs, and the node would go green on a plan set the
+  // survey never touched.
+  const usedInPermit = legacyExists && permitArtifactCount > 0;
+
+  // The remaining two are false because the code path is unreachable or its
+  // output unconsumed on this branch, re-verified 2026-09-26 — see the per-field
+  // notes on TopographyState.systemIntegration. They are typed `boolean`, so
+  // wiring either one only needs this constant replaced with the real check.
+  const appliedToSystemDefinition = false;
+  const usedInCAD = false;
+  const usedInProposal = false;
+
   if (process.env.NODE_ENV === 'development') {
     console.log('[TOPO DEBUG]', JSON.stringify({
       projectId,
       surveySource: legacyExists ? 'project_physical_data' : 'none',
       newPipeline: newPipelineExists,
       integrationFlags: {
-        appliedToSystemDefinition: false,
-        usedInCAD: false,
+        appliedToSystemDefinition,
+        usedInCAD,
         usedInEngineering,
-        usedInPermit: false,
-        usedInProposal: false,
+        usedInPermit,
+        usedInProposal,
       },
       missingConnections: [
         !usedInEngineering && 'engineering',
-        'systemDefinition (applyToSystemDefinition — not wired)',
-        'CAD (buildCADFromSurvey — not wired)',
-        'permit (permitIntegration — not wired)',
-        'proposal (no physical_data reads in proposal routes)',
+        !appliedToSystemDefinition && 'systemDefinition (applyToSystemDefinition — called, output not consumed)',
+        !usedInCAD && 'CAD (buildCADFromSurvey — composer entry points have no callers)',
+        !usedInPermit && 'permit (no survey row and/or no permit artifact for this project)',
+        !usedInProposal && 'proposal (no physical_data reads in proposal routes)',
       ].filter(Boolean),
       capturedFields: capturedCount,
       totalFields: TOTAL_FIELD_COUNT,
@@ -426,12 +490,12 @@ export async function getTopographyState(projectId: string): Promise<TopographyS
     },
 
     systemIntegration: {
-      appliedToSystemDefinition: false, // verified: 0 callers in app/
-      usedInCAD: false,                 // verified: 0 callers of buildCADFromSurvey in app/
+      appliedToSystemDefinition,
+      usedInCAD,
       usedInEngineering,
       usedInEngineeringPartial: usedInEngineering, // only 4/20 fields consumed
-      usedInPermit: false,              // verified: 0 callers of permitIntegration in app/
-      usedInProposal: false,            // verified: no physical_data reads in proposal routes
+      usedInPermit,
+      usedInProposal,
     },
 
     engineering: {
@@ -493,6 +557,9 @@ function buildEmptyState(projectId: string, errors: string[]): TopographyState {
       newPipelineEnriched: false,
     },
 
+    // NOT OBSERVED, not measured false: this helper is reached only when the DB
+    // connection itself failed, and the reason is in `errors`, which the page
+    // renders. A caller must read `errors` before reading any flag here.
     systemIntegration: {
       appliedToSystemDefinition: false,
       usedInCAD: false,

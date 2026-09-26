@@ -5,7 +5,7 @@ import {
   Activity, Database, Server, Clock, RefreshCw,
   CheckCircle, AlertTriangle, XCircle, Zap,
   HardDrive, Users, FolderOpen, FileText, Layers,
-  Cpu, Globe, Shield
+  Cpu, Globe, Shield, HelpCircle
 } from 'lucide-react';
 
 interface HealthData {
@@ -28,22 +28,65 @@ interface HealthData {
   };
 }
 
+// 🚨 A STATUS THIS PAGE DID NOT MEASURE IS NOT A STATUS.
+//
+// Four of the six cards on this page were literals: Auth Service, File Storage,
+// Engineering Engine and Incentive Engine were emitted as
+// `{ status: 'ok', latencyMs: 12 | 25 | 45 | 18 }` on every successful
+// /api/admin/health response. Nothing probed any of them. The health endpoint
+// returns a DB latency, a DB size, row counts and table sizes — and that is the
+// whole of what this page can observe.
+//
+// The invented values did not merely add noise, they SUPPRESSED the signal:
+// `overallStatus` is `services.some(error) ? error : services.some(warning) ? …`,
+// so four permanent `ok`s held the count at "6/6 services healthy" while file
+// storage was unreachable or the engineering engine was throwing. The one page
+// whose job is to say "something is wrong" could only ever report a slow Neon
+// batch or a slow round-trip.
+//
+// So the four are no longer services. They are listed as NOT MONITORED, they
+// carry no latency, and they are excluded from `overallStatus` and from the
+// "n/n healthy" count — which is now computed over exactly the two subsystems
+// this page actually measures. An operator can now tell "nothing is wrong" from
+// "nothing is measured".
+type MeasuredStatus = 'ok' | 'warning' | 'error' | 'checking';
+
 interface ServiceStatus {
   name: string;
-  status: 'ok' | 'warning' | 'error' | 'checking';
+  status: MeasuredStatus;
   latencyMs?: number;
   detail?: string;
   icon: React.ElementType;
 }
 
-function StatusBadge({ status }: { status: 'ok' | 'warning' | 'error' | 'checking' }) {
+/**
+ * Subsystems this page has no probe for. Rendered so the operator knows they
+ * exist and are UNKNOWN — never with a status, never with a latency, and never
+ * counted as healthy. Give one a real probe and move it into `services`.
+ */
+const NOT_MONITORED: Array<{ name: string; icon: React.ElementType; reason: string }> = [
+  { name: 'Auth Service',        icon: Shield,    reason: 'no probe — /api/admin/health does not verify JWT config' },
+  { name: 'File Storage',        icon: HardDrive, reason: 'no probe — the row count below is a DB count, not a storage reachability check' },
+  { name: 'Engineering Engine',  icon: Cpu,       reason: 'no probe — nothing here executes a layout or preliminary run' },
+  { name: 'Incentive Engine',    icon: Zap,       reason: 'no probe — nothing here resolves an ITC or state incentive' },
+];
+
+function StatusBadge({ status }: { status: MeasuredStatus }) {
   if (status === 'ok') return <span className="flex items-center gap-1 text-emerald-400 text-xs font-semibold"><CheckCircle className="w-3.5 h-3.5" /> Operational</span>;
   if (status === 'warning') return <span className="flex items-center gap-1 text-amber-400 text-xs font-semibold"><AlertTriangle className="w-3.5 h-3.5" /> Degraded</span>;
   if (status === 'error') return <span className="flex items-center gap-1 text-red-400 text-xs font-semibold"><XCircle className="w-3.5 h-3.5" /> Down</span>;
   return <span className="flex items-center gap-1 text-slate-400 text-xs font-semibold animate-pulse"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Checking</span>;
 }
 
-function StatusDot({ status }: { status: 'ok' | 'warning' | 'error' | 'checking' }) {
+function NotMonitoredBadge() {
+  return (
+    <span className="flex items-center gap-1 text-slate-400 text-xs font-semibold">
+      <HelpCircle className="w-3.5 h-3.5" /> Not monitored
+    </span>
+  );
+}
+
+function StatusDot({ status }: { status: MeasuredStatus }) {
   const colors = { ok: 'bg-emerald-400', warning: 'bg-amber-400', error: 'bg-red-400', checking: 'bg-slate-400' };
   return <span className={`inline-block w-2.5 h-2.5 rounded-full ${colors[status]}`} />;
 }
@@ -68,13 +111,11 @@ export default function SystemHealthPage() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [apiLatency, setApiLatency] = useState<number | null>(null);
+  // Only the two subsystems /api/admin/health actually measures. See the note
+  // on NOT_MONITORED above for the four that were literals.
   const [services, setServices] = useState<ServiceStatus[]>([
     { name: 'Database (Neon)', status: 'checking', icon: Database },
     { name: 'API Server', status: 'checking', icon: Server },
-    { name: 'Auth Service', status: 'checking', icon: Shield },
-    { name: 'File Storage', status: 'checking', icon: HardDrive },
-    { name: 'Engineering Engine', status: 'checking', icon: Cpu },
-    { name: 'Incentive Engine', status: 'checking', icon: Zap },
   ]);
 
   const fetchHealth = useCallback(async () => {
@@ -95,10 +136,6 @@ export default function SystemHealthPage() {
       setServices([
         { name: 'Database (Neon)', status: dbStatus, latencyMs: dbLatency, detail: `${dbLatency}ms response - ${json.dbSizeHuman}`, icon: Database },
         { name: 'API Server', status: elapsed < 800 ? 'ok' : elapsed < 2000 ? 'warning' : 'error', latencyMs: elapsed, detail: `${elapsed}ms round-trip`, icon: Server },
-        { name: 'Auth Service', status: 'ok', latencyMs: 12, detail: 'JWT validation active', icon: Shield },
-        { name: 'File Storage', status: 'ok', latencyMs: 25, detail: `${json.rowCounts?.project_files ?? 0} files tracked`, icon: HardDrive },
-        { name: 'Engineering Engine', status: 'ok', latencyMs: 45, detail: 'Preliminary + layout active', icon: Cpu },
-        { name: 'Incentive Engine', status: 'ok', latencyMs: 18, detail: 'ITC + state incentives loaded', icon: Zap },
       ]);
     } catch (e: unknown) {
       setError((e as Error).message);
@@ -156,24 +193,31 @@ export default function SystemHealthPage() {
           {overallStatus === 'ok' ? <CheckCircle className="w-6 h-6 text-emerald-400" /> : overallStatus === 'warning' ? <AlertTriangle className="w-6 h-6 text-amber-400" /> : <XCircle className="w-6 h-6 text-red-400" />}
         </div>
         <div className="flex-1">
+          {/* 🚨 "All Systems Operational" is a claim about systems this page does
+              not check. The banner now scopes itself to what is measured, and
+              says how many subsystems are unmonitored right underneath. */}
           <div className={`text-lg font-bold ${overallStatus === 'ok' ? 'text-emerald-400' : overallStatus === 'warning' ? 'text-amber-400' : 'text-red-400'}`}>
-            {overallStatus === 'ok' ? 'All Systems Operational' : overallStatus === 'warning' ? 'Partial Degradation Detected' : 'Service Disruption Detected'}
+            {overallStatus === 'ok' ? 'Monitored Systems Operational' : overallStatus === 'warning' ? 'Partial Degradation Detected' : 'Service Disruption Detected'}
           </div>
           <div className="text-slate-400 text-sm">
             {lastRefresh ? `Last checked: ${lastRefresh.toLocaleTimeString()}` : 'Checking services...'}
             {apiLatency !== null && ` - API latency: ${apiLatency}ms`}
           </div>
+          <div className="text-slate-500 text-xs mt-0.5">
+            {NOT_MONITORED.length} subsystem{NOT_MONITORED.length === 1 ? '' : 's'} not monitored - this banner says nothing about them
+          </div>
         </div>
         <div className="text-right">
-          <div className="text-slate-400 text-xs">{services.filter(s => s.status === 'ok').length}/{services.length} services healthy</div>
+          <div className="text-slate-400 text-xs">{services.filter(s => s.status === 'ok').length}/{services.length} monitored services healthy</div>
           <div className="flex gap-1 mt-1 justify-end">{services.map((s, i) => <StatusDot key={i} status={s.status} />)}</div>
+          <div className="text-slate-500 text-xs mt-1">{NOT_MONITORED.length} not monitored</div>
         </div>
       </div>
 
       {error ? <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400 text-sm flex items-center gap-2"><XCircle className="w-4 h-4 flex-shrink-0" />Failed to fetch health data: {error}</div> : null}
 
       <div>
-        <h2 className="text-white font-semibold mb-3 flex items-center gap-2"><Globe className="w-4 h-4 text-amber-400" />Service Status</h2>
+        <h2 className="text-white font-semibold mb-3 flex items-center gap-2"><Globe className="w-4 h-4 text-amber-400" />Service Status <span className="text-slate-500 text-xs font-normal">(measured)</span></h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {services.map((svc, i) => {
             const Icon = svc.icon;
@@ -191,6 +235,27 @@ export default function SystemHealthPage() {
               </div>
             );
           })}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
+          <HelpCircle className="w-4 h-4 text-slate-400" />Not Monitored
+          <span className="text-slate-500 text-xs font-normal">(no probe exists - status is UNKNOWN, not OK)</span>
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {NOT_MONITORED.map(({ name, icon: Icon, reason }) => (
+            <div key={name} className="bg-slate-800/30 border border-dashed border-slate-700/50 rounded-xl p-4">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-slate-700/30 flex items-center justify-center"><Icon className="w-4 h-4 text-slate-500" /></div>
+                  <span className="text-slate-300 text-sm font-medium">{name}</span>
+                </div>
+                <NotMonitoredBadge />
+              </div>
+              <p className="text-slate-500 text-xs">{reason}</p>
+            </div>
+          ))}
         </div>
       </div>
 
