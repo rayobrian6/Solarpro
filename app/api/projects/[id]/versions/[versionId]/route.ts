@@ -59,6 +59,18 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const project = await getProjectById(id, user.id);
     if (!project) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
 
+    // 🚨 A RESTORE IS A WRITE LIKE ANY OTHER, so it may state the version it was
+    // based on. Without this, a restore launched from a history panel that was
+    // left open while somebody else saved overwrites their work — and does it
+    // while the operator believes they are undoing their OWN change, which is
+    // the worst possible framing for a silent overwrite. `upsertLayout` turns
+    // the token into an atomic claim and refuses with LAYOUT_STALE_WRITE
+    // before writing anything.
+    //
+    // Optional, as everywhere else: a caller with no version to send behaves
+    // exactly as before.
+    const body = await req.json().catch(() => ({})) as { expectedUpdatedAt?: unknown };
+
     const version = await getProjectVersion(id, versionId, user.id);
     if (!version) return NextResponse.json({ success: false, error: 'Version not found' }, { status: 404 });
 
@@ -126,6 +138,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const restoredLayout = await upsertLayout({
       projectId: id,
       userId: user.id,
+      // NOT `?? something`: a precondition inherited from the row it is meant to
+      // check is not a precondition at all.
+      expectedUpdatedAt: body.expectedUpdatedAt as string | number | Date | null | undefined,
       systemType: snapshotLayout.systemType,
       panels: repair.panels,
       roofPlanes: snapshotLayout.roofPlanes,
@@ -188,6 +203,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
         restoredLayout,
         restoredFromVersion: version.versionNumber,
         message: `Successfully restored version ${version.versionNumber}`,
+        // 🚨 THE ROW'S NEW VERSION, and the caller must adopt it. A restore moves
+        // `updated_at`, so a tab still holding its previous token is refused on
+        // its very next autosave — a SUCCESSFUL restore would leave the studio
+        // unable to save, which reads as the restore having broken the design.
+        updatedAt:   restoredLayout.updatedAt,
+        panelsCount: restoredLayout.totalPanels,
       },
     });
   } catch (err: unknown) {

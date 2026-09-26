@@ -76,6 +76,7 @@ import { nativeAcquisitionPermitted, dispositionLabel, customModelGoverns } from
 import { useSiteDesign } from './useSiteDesign';
 import type { DeletionPlan, DeletionScope } from '@/lib/design/deletionAuthority';
 import DeleteConfirm from './DeleteConfirm';
+import VersionHistory from './VersionHistory';
 import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
 import {
   Layers, Zap, Sun, RotateCcw, Save, Play, ChevronDown, ChevronUp,
@@ -83,7 +84,7 @@ import {
   FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
   Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
   TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
-  Info, ChevronRight, Eye, EyeOff, Bug, Download
+  Info, ChevronRight, Eye, EyeOff, Bug, Download, History
 } from 'lucide-react';
 import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
@@ -4684,6 +4685,17 @@ export default function DesignStudio({ project, onSave }: Props) {
   // object would come back on the next reload.
   // ═══════════════════════════════════════════════════════════════════════
   const [pendingDeletion, setPendingDeletion] = useState<DeletionPlan | null>(null);
+
+  // ── Design history ────────────────────────────────────────────────────────
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  /**
+   * Only a project with a real row has snapshots. A Quick Design's id is
+   * `demo-<timestamp>`, the layout route rejects any non-UUID id with a 400
+   * before it reads the body, and the versions routes do the same — so offering
+   * History there is offering a button that can only produce an error.
+   */
+  const isRealProject =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(project.id);
   const [engineDeletion, setEngineDeletion] = useState<{
     token: number; scope: string;
     faceIds: string[]; obstructionIds: string[]; panelIds: string[];
@@ -4951,6 +4963,38 @@ export default function DesignStudio({ project, onSave }: Props) {
         onCancel={() => { afterDeletionRef.current = null; setPendingDeletion(null); }}
       />
 
+      <VersionHistory
+        open={versionHistoryOpen}
+        projectId={project.id}
+        storedVersion={site.storedVersion}
+        onClose={() => setVersionHistoryOpen(false)}
+        onRestored={(result) => {
+          // 🚨 ADOPT THE NEW VERSION FIRST, BEFORE THE RELOAD. The restore moved
+          // the row's `updated_at`. The autosave is on a timer and can fire in
+          // the window between here and the page coming back — with the token
+          // this tab loaded with, which the row no longer has. It would be
+          // refused, and DesignStudio shows a stale-write refusal as a PERMANENT
+          // badge, so a successful restore would end with a red warning saying
+          // the design is not being saved.
+          site.noteSavedVersion(result.updatedAt);
+          toast.success(
+            'Design restored',
+            `${result.panelsCount ?? 0} module(s) restored. Reloading the design…`,
+          );
+          // 🚨 AND RE-HYDRATE BY RELOADING, not by patching state here. The
+          // restore route reconstructs panel elevations from the snapshot's roof
+          // planes and carries `siteArchives` with the roof — both of them
+          // repairs for real data loss. Re-implementing hydration at this call
+          // site would be a second, thinner version of that path, and a partial
+          // restore is exactly the failure those repairs exist to prevent. The
+          // mount effect reads the design back through the real GET handler, so
+          // a reload runs the production path unchanged. The local copy written
+          // by `localSaveLayout` is never read on hydrate, so it cannot shadow
+          // what was just restored.
+          setTimeout(() => window.location.reload(), 600);
+        }}
+      />
+
       {/* ── Studio Header ── */}
       <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-900 border-b border-slate-700/50 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         <div className={`px-2.5 py-1 rounded-lg border text-xs font-semibold ${systemTypeBg} ${systemTypeColor}`}>
@@ -5144,6 +5188,21 @@ export default function DesignStudio({ project, onSave }: Props) {
           <button onClick={clearAll} className="btn-secondary btn-sm">
             <RotateCcw size={13} /> Clear
           </button>
+          {/* 🚨 THE WAY BACK, and it sits next to Save deliberately. A snapshot
+              has been written on every save for a long time and no control in
+              the product could reach one — so a bad save, or a stale-write
+              refusal that discards this tab's edit, had no recovery. Hidden
+              behind a UUID project because a Quick Design has no row to
+              snapshot. */}
+          {isRealProject ? (
+            <button
+              onClick={() => setVersionHistoryOpen(true)}
+              className="btn-secondary btn-sm"
+              title="Design history — restore an earlier saved version"
+            >
+              <History size={13} /> History
+            </button>
+          ) : null}
           <button
             onClick={handleSave}
             disabled={panels.length === 0 || saveStatus === 'saving'}

@@ -71,6 +71,47 @@ and is queued separately.
 
 ---
 
+## R5 — Two new things to try in Dev (live acceptance, not a decision)
+
+Not a blocker and nothing waits on it — but **live acceptance overrides tests**,
+so neither of these is finished until you have used it.
+
+**1. Move a roof corner.** Press `V`, or pick Move Corner in the tool palette,
+then drag one corner of a traced roof face. One vertex, one *standalone* face,
+in-plane only; a face owned by a building section refuses with a reason on
+screen, which is deliberate.
+
+What to watch for, because these are the parts no harness can reach — handles
+cannot be picked under software WebGL, so first real use is the first
+end-to-end exercise:
+
+- does the handle land under the cursor, or beside it;
+- does the corner follow the pointer smoothly, or jump on the first move;
+- press Undo afterwards. **Do the modules come back where you put them?** A
+  culled panel returning even 30 cm off is the failure mode being investigated
+  right now — `applyRestoredGeometry` uses a rigid-centroid map on undo that the
+  forward path deliberately refuses;
+- check the plan set afterwards: the three corners you did *not* drag must be
+  byte-identical in the permit record. That is guarded, but the guard is a unit
+  test and you are the roof.
+
+**2. Design history.** There is now a **History** button beside Save. A snapshot
+has been written on every save for a long time and nothing in the product could
+reach one — so a bad save had no way back. The list shows each version's module
+count and system size, not just a date, and restoring asks first.
+
+Worth trying specifically: open the design in **two tabs**, save in one, then
+save in the other. The second should now refuse with a message saying nothing was
+written and to reload — rather than silently overwriting the first, which is what
+it used to do. Then use History to get the earlier state back.
+
+| | |
+|---|---|
+| **Blocked** | Nothing. |
+| **NOT blocked** | Everything continues. |
+
+---
+
 ## Resolved — no longer blocking
 
 | Item | Outcome |
