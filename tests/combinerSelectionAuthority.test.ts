@@ -37,10 +37,29 @@ import { join } from 'node:path';
 import { resolveIntegratedEquipment, type SystemBosContext } from '@/lib/equipment/integratedBos';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { MICROINVERTERS } from '@/lib/equipment-db';
-import { stripCommentsAndStrings } from './support/stripSource';
+import { stripComments, stripCommentsAndStrings } from './support/stripSource';
 
 /** A real Enphase micro system, taken from the real catalogue. */
 const IQ8 = MICROINVERTERS.find(m => /enphase/i.test(m.manufacturer) && /IQ8/i.test(m.model))!;
+
+/**
+ * The object literal that opens at the first `{` at or after `from`, ending at
+ * its own matching brace.
+ *
+ * 🚨 NEVER A FIXED-WIDTH WINDOW. Read it from the IDENTIFIER strip, where string
+ * and template bodies are already blanked, so a brace inside a literal cannot
+ * unbalance the count.
+ */
+function balancedObject(bare: string, from: number): string {
+  const open = bare.indexOf('{', from);
+  if (open < 0) throw new Error('no object literal found at the anchor');
+  let depth = 0;
+  for (let i = open; i < bare.length; i++) {
+    if (bare[i] === '{') depth++;
+    else if (bare[i] === '}') { depth--; if (depth === 0) return bare.slice(open, i + 1); }
+  }
+  throw new Error('unbalanced braces scanning the object at the anchor');
+}
 
 function ctx(over: Partial<SystemBosContext> = {}): SystemBosContext {
   return {
@@ -219,17 +238,49 @@ describe('the INPUT CONTRACT — identity is sent as an id, not as a drawing lab
 
   it('page.tsx sends the inverter id in the SLD payload', () => {
     // Structural: the payload is built inside a ~16k-line component and cannot
-    // be driven from a unit test. Anchored on the SLD payload's own
-    // `combinerId:` line so it cannot be satisfied by an unrelated `inverterId`
-    // elsewhere in the file — there are many.
-    const src = stripCommentsAndStrings(
-      readFileSync(join(__dirname, '..', 'app', 'engineering', 'page.tsx'), 'utf8'),
-    );
-    const anchor = src.indexOf('combinerId:     config.combinerId || undefined');
-    expect(anchor, 'the SLD payload anchor was not found — re-anchor this guard').toBeGreaterThan(-1);
-    const window = src.slice(Math.max(0, anchor - 1_200), anchor);
-    expect(window, 'the SLD payload must carry inverterId, not just the display string')
-      .toMatch(/inverterId:\s*firstInv\?\.inverterId/);
+    // be driven from a unit test.
+    //
+    // 🚨 THIS USED TO BE A 1,200-BYTE WINDOW BEHIND ONE HAND-COPIED LINE, AND
+    // MEASUREMENT SAID IT WAS 91% WHITESPACE. Two separate faults: the anchor was
+    // a literal with five hard-coded spaces in it, and the window was a constant
+    // that a comment added anywhere above the payload would have pushed off the
+    // code. It happened to still cover the right line, so it passed — which is
+    // exactly how a guard goes blind without anyone noticing.
+    //
+    // Now: anchor on the ONE fetch to the SLD route (in the comment-only strip,
+    // where the URL literal is still readable), then take the BALANCED span of
+    // the object it posts, and assert on the identifier strip. Both strippers
+    // preserve byte offsets, so an offset found in one describes the same span in
+    // the other.
+    const raw  = readFileSync(join(__dirname, '..', 'app', 'engineering', 'page.tsx'), 'utf8');
+    const kept = stripComments(raw);
+    const bare = stripCommentsAndStrings(raw);
+
+    const sites: number[] = [];
+    const re = /fetch\(\s*'\/api\/engineering\/sld'/g;
+    for (let m = re.exec(kept); m; m = re.exec(kept)) sites.push(m.index);
+    expect(sites.length, 'no fetch of the SLD route found — re-anchor this guard').toBeGreaterThan(0);
+
+    for (const at of sites) {
+      // Two nested balanced spans rather than one loose search: the fetch's own
+      // options object, then the body inside it. A bare
+      // `indexOf('JSON.stringify(', at)` could walk past this call entirely and
+      // land on an unrelated request further down a 16k-line file.
+      const options = balancedObject(bare, at);
+      const js = options.indexOf('JSON.stringify(');
+      expect(js, 'the SLD fetch posts no JSON body — re-anchor this guard').toBeGreaterThan(-1);
+      const payload = balancedObject(options, js);
+      // Anti-blindness controls before the real assertion: the span must be code,
+      // and it must be the SLD payload rather than some neighbouring object.
+      expect(payload.replace(/\s/g, '').length / payload.length,
+        'the payload span came back as whitespace — this guard would prove nothing').toBeGreaterThan(0.2);
+      expect(payload, 'the span found is not the SLD payload').toMatch(/inverterModel:/);
+      expect(payload, 'the span found is not the SLD payload').toMatch(/combinerId:/);
+      // THE REQUIREMENT: the inverter's IDENTITY is sent, not only the
+      // concatenated display string the route then fails to look up.
+      expect(payload, 'the SLD payload must carry inverterId, not just the display string')
+        .toMatch(/inverterId:\s*firstInv\?\.inverterId/);
+    }
   });
 
   it('the route prefers the id over the strings when one is supplied', () => {

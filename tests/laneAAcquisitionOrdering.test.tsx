@@ -90,7 +90,7 @@ import {
   type DeletionLedger, type DesignGeometryLifecycle,
 } from '@/lib/design/deletionAuthority';
 import { siteKeyFromCoords } from '@/lib/siteIdentity';
-import { stripComments, stripCommentsAndStrings } from './support/stripSource';
+import { stripCommentsAndStrings } from './support/stripSource';
 
 const PROJECT = '4030b664-bebe-433b-a11c-cda05ead2f7d';
 const MELVIN = { lat: 38.70615257709013, lng: -90.04625419301613 };
@@ -413,24 +413,26 @@ const STUDIO_SRC = read('components/design/DesignStudio.tsx');
 const ENGINE_SRC = read('components/3d/SolarEngine3D.tsx');
 
 /**
- * 🚨 A SECOND VIEW OF THE SAME FILE, AND IT IS NOT REDUNDANT.
+ * 🚨 THE WORKAROUND THAT USED TO LIVE HERE IS GONE, AND THE HAZARD IT DODGED IS
+ *    FIXED AT SOURCE.
  *
- * `stripCommentsAndStrings` is the right stripper for identifier scans, but it
- * is NOT SAFE on a .tsx file: a lone apostrophe in JSX *text* (the possessive
- * in a sentence a user reads) opens a string it never closes on that line, and
- * everything to the next apostrophe is blanked. Measured on DesignStudio.tsx:
- * the JSX element that renders the 3D engine, and the prop that carries the
- * lifecycle ref to it, both vanish — count 1 in the raw source, 0 after that
- * stripper. A guard looking for them would have reported them absent, or worse,
- * asserted their absence and passed.
+ * This constant used to be a comment-only view of DesignStudio.tsx, because
+ * `stripCommentsAndStrings` was hand-rolled and treated every quote character as
+ * a string delimiter regardless of context. A lone apostrophe in JSX *text* — the
+ * possessive in a sentence a user reads — opened a string it never closed, and
+ * everything to the next apostrophe was blanked. Measured on this file at the
+ * time: `<SolarEngine3D` and `geometryLifecycleRef={` each went from 1 occurrence
+ * in the raw source to 0 after stripping, so the JSX guard below was reading
+ * whitespace and a guard ASSERTING THEIR ABSENCE would have passed.
  *
- * The tokens the ORDERING guards below rely on were checked the same way and
- * all survive at count 1 in both strippers, so those guards are reading real
- * code. Only the JSX-shaped question needs this comment-only view.
+ * `tests/support/stripSource.ts` is now backed by TypeScript's own parser, so JSX
+ * text is recognised as text (blanked by the identifier stripper, like any string
+ * body) and the element and attribute names around it are recognised as code. The
+ * JSX guard therefore reads STUDIO_SRC like every other guard in this file, which
+ * is the stricter of the two: a mention inside a string literal no longer counts
+ * as a render site. tests/stripSourceIsJsxSafe.test.ts pins that, on a fixture and
+ * on this component.
  */
-const STUDIO_WITH_STRINGS = stripComments(
-  fs.readFileSync(path.join(process.cwd(), 'components/design/DesignStudio.tsx'), 'utf8'),
-);
 
 /**
  * The span of a call expression: from the `(` that follows `callee` to its
@@ -536,10 +538,22 @@ describe('🚨 the restore fence opens only after the design has hydrated', () =
     // because the single render site passes the ref. Stop passing it and the
     // gate silently reverts to "nobody ever deleted anything here", at every
     // property, with no type error — the optional-prop variant of this bug.
-    const renders = offsets(STUDIO_WITH_STRINGS, /<SolarEngine3D[\s>]/);
+    //
+    // 🚨 POSITIVE CONTROL FIRST. This assertion is a COUNT, and a stripper that
+    // blanked the JSX would make it read zero — which is what it did before
+    // stripSource.ts was rebuilt on TypeScript's parser (see the note above
+    // STUDIO_SRC). The density check says the file being scanned is code, not a
+    // field of whitespace, so "exactly one render site" cannot be satisfied by
+    // there being none visible.
+    // Measured: 0.698 raw, 0.362 stripped. The floor is a catastrophe detector,
+    // set well below that so a long string added to the component cannot fail it.
+    expect(STUDIO_SRC.replace(/\s/g, '').length / STUDIO_SRC.length,
+      'the stripped studio is mostly whitespace — this guard would prove nothing')
+      .toBeGreaterThan(0.2);
+    const renders = offsets(STUDIO_SRC, /<SolarEngine3D[\s>]/);
     expect(renders).toHaveLength(1);
-    expect(STUDIO_WITH_STRINGS).toMatch(/geometryLifecycleRef\s*=\s*\{/);
-    expect(STUDIO_WITH_STRINGS).toMatch(/roofRestoreResolved\s*=\s*\{/);
+    expect(STUDIO_SRC).toMatch(/geometryLifecycleRef\s*=\s*\{/);
+    expect(STUDIO_SRC).toMatch(/roofRestoreResolved\s*=\s*\{/);
   });
 
   it('and the fence is re-armed before the layout is fetched', () => {
