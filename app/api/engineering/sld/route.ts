@@ -45,6 +45,7 @@ import type { LayoutCandidate } from '@/lib/system/inverterCapabilities';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { parseRunId } from '@/lib/computed-multi-system';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
+import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
 
 // ── Wave 3.7 → Wave 5A: LEGACY FALLBACK ARMOR ────────────────────────────────
 // Since Wave 5A the primary hybrid path is `body.sources` (validated by
@@ -94,6 +95,21 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+
+    // ── The RECORDED combiner, from the project store ─────────────────────────
+    // The page posts its own copy of the installer's pick, and its read of the
+    // store fails open — one dropped GET and it posts nothing. The permit route
+    // reads the store itself, so this drawing must too, or the two name
+    // different devices (lib/combinerSelection/storedRead). A store that cannot
+    // be read leaves the posted value: only the permit, the sealed package, refuses.
+    if (isReadableProjectId(body?.projectId)) {
+      const { getDbReady } = await import('@/lib/db-neon');
+      const _stored = await readStoredCombinerSelection(getDbReady, body.projectId);
+      if (_stored.kind === 'stored') {
+        const _id = effectiveCombinerId(body.selectedCombinerId, _stored, 'sld/POST');
+        if (_id) body.selectedCombinerId = _id; else delete body.selectedCombinerId;
+      } else effectiveCombinerId(body.selectedCombinerId, _stored, 'sld/POST');
+    }
 
     // ── Wave 5A — hybrid multi-lane path (primary at N>1) ────────────────────
     // A per-subsystem-aware client sends `sources` (built from computedMulti)

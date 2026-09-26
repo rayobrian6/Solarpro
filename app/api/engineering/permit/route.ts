@@ -84,6 +84,9 @@ import { getNearmapSurfacesCached } from '@/lib/aerial/nearmapCache';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
 import { getMicroinverterById } from '@/lib/equipment-db';
+// The project's RECORDED combiner — the one server reader every artefact route
+// uses, derived with the combiner-selection endpoint's own helpers.
+import { readStoredCombinerSelection, effectiveCombinerId, postedCombinerId } from '@/lib/combinerSelection/storedRead';
 
 // Site Survey pipeline imports — survey data enriches the permit plan set
 import { fromPhysicalData, type ProjectPhysicalDataRow } from '@/lib/siteSurvey/fromPhysicalData';
@@ -443,10 +446,65 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Missing project data' }, { status: 400 });
     }
 
+    const projectId = body.projectId || project.projectId;
+
+    // ── THE RECORDED COMBINER IS READ HERE, NOT TAKEN FROM THE BODY ────────────
+    // `project.selectedCombinerId` outranks every other combiner source in
+    // resolveIntegratedEquipment, and through buildIntegratedEquipment it names
+    // the device on E-1, SCHED/PV-6, PV-0, the BOM and the snapshot — so it is
+    // IN THE DIGEST. It used to arrive ONLY in the client payload, and the
+    // engineering page's read of the stored selection fails OPEN: it resets to
+    // null, then `if (!r.ok) return;` / `catch {}`, on a GET that shares the
+    // 'engineering' rate-limit bucket. One dropped read and the page posts
+    // `undefined`, the resolver falls back to the catalogue pairing, and the
+    // package ships a device nobody chose under a DIFFERENT digest (measured:
+    // none, i.e. the catalogue 5C → 9a83dfab…, 6C → 3aa793bd…, 4C → c2453032…)
+    // — silently, because a missing selection looks exactly like "not chosen".
+    //
+    // So the STORED answer is the authority whenever it can be read — including
+    // "nothing selected", which removes a posted id rather than letting it stand.
+    // The posted value survives only where the route cannot read a project at
+    // all: no projectId, no database configured (the DB-less harnesses and e2e),
+    // or no row for that id. A read that THROWS for a real project refuses the
+    // package: generating anyway would assert whichever device the payload
+    // happened to carry, which is the defect itself.
+    //
+    // Read before any other enrichment so an outage fails fast, not after the
+    // metered aerial calls. Keyed on the project, not the caller: the selection
+    // belongs to the PROJECT, and readProjectEquipmentStores — the combiner
+    // endpoint's reader, and the snapshot resolvers' in this same request —
+    // reads this column by id too. It goes through this handler's own
+    // `getDbReady`, like every other read here, so a harness that fakes that
+    // handle fakes this as well. `combinerId` / `bosDeviceIds` (the session
+    // override) are untouched; the resolver already ranks them below this.
+    // The read itself is the shared one (lib/combinerSelection/storedRead) — the
+    // Diagram SLD, the SLD PDF and the BOM ask the same reader, so a dropped page
+    // read cannot leave the permit and the drawings naming different devices.
+    {
+      const read = await readStoredCombinerSelection(getDbReady, projectId);
+      if (read.kind === 'unreadable') {
+        console.error('[permit/POST] COMBINER_SELECTION_UNREADABLE — refusing to generate:', read.error, { projectId });
+        return NextResponse.json({
+          success: false,
+          error: "This project's recorded combiner could not be read, so no permit package was generated. Nothing was changed. Try again in a moment.",
+          code: 'COMBINER_SELECTION_UNREADABLE',
+          projectId,
+        }, { status: 503 });
+      }
+      if (read.kind === 'stored') {
+        const storedId = effectiveCombinerId(project.selectedCombinerId, read, 'permit/POST');
+        if (storedId) project.selectedCombinerId = storedId;
+        else delete project.selectedCombinerId;
+      } else if (read.reason !== 'no-project') {
+        console.warn('[permit/POST] combiner selection —',
+          read.reason === 'no-row' ? 'no project row for this id' : 'no database configured',
+          '— the posted value stands:', postedCombinerId(project.selectedCombinerId) ?? '(none)');
+      }
+    }
+
     // ── Hub read: backfill missing fields from Client_Profile.json ────────────
     // If the caller passes a projectId we read the hub file and fill any gaps.
     // This means the permit route works even if the UI didn't send every field.
-    const projectId = body.projectId || project.projectId;
     if (projectId && isValidUUID(projectId)) {
       try {
         const sql = await getDbReady();

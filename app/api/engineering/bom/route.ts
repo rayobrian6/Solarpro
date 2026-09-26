@@ -29,6 +29,7 @@ import { sizeSystemFromBrand, type SystemSizingResult } from '@/lib/system/sizin
 import { sizingResultToBomItems, shouldStripMicroItems } from '@/lib/system/sizingToBom';
 import { applyDistributorPricing, type DistributorPriceOverride } from '@/lib/bom/distributorPricing';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
 
 // ── Helper: Inject structural items into V4 result (preserves manufacturer/model/partNumber) ──
 // This is the MASTER TASK merge: V4 owns electrical, structural profile owns structural.
@@ -163,6 +164,21 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+
+    // ── The RECORDED combiner, from the project store ─────────────────────────
+    // The page posts its own copy of the installer's pick, and its read of the
+    // store fails open — one dropped GET and it posts nothing. The permit route
+    // reads the store itself, so this drawing must too, or the two name
+    // different devices (lib/combinerSelection/storedRead). A store that cannot
+    // be read leaves the posted value: only the permit, the sealed package, refuses.
+    if (isReadableProjectId(body?.projectId)) {
+      const { getDbReady } = await import('@/lib/db-neon');
+      const _stored = await readStoredCombinerSelection(getDbReady, body.projectId);
+      if (_stored.kind === 'stored') {
+        const _id = effectiveCombinerId(body.selectedCombinerId, _stored, 'bom/POST');
+        if (_id) body.selectedCombinerId = _id; else delete body.selectedCombinerId;
+      } else effectiveCombinerId(body.selectedCombinerId, _stored, 'bom/POST');
+    }
 
     // v58.8 GUARD: if inverterId is an optimizer peripheral (e.g. 'se-p505'),
       // the frontend sent the wrong field. Resolve to correct central inverter via brand profile,

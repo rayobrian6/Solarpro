@@ -15,6 +15,7 @@ import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { generatePdfFromHtml, CanonicalFontError } from '@/lib/pdf/generatePdf';
 import { fontFaceCss, CSS_FONT_SANS_STACK } from '@/lib/permit/fonts/fontPack';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -134,6 +135,21 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const buildInput = body.buildInput ?? body;
+
+    // ── The RECORDED combiner, from the project store ─────────────────────────
+    // The page posts its own copy of the installer's pick, and its read of the
+    // store fails open — one dropped GET and it posts nothing. The permit route
+    // reads the store itself, so this drawing must too, or the two name
+    // different devices (lib/combinerSelection/storedRead). A store that cannot
+    // be read leaves the posted value: only the permit, the sealed package, refuses.
+    if (isReadableProjectId(buildInput?.projectId)) {
+      const { getDbReady } = await import('@/lib/db-neon');
+      const _stored = await readStoredCombinerSelection(getDbReady, buildInput.projectId);
+      if (_stored.kind === 'stored') {
+        const _id = effectiveCombinerId(buildInput.selectedCombinerId, _stored, 'sld/pdf/POST');
+        if (_id) buildInput.selectedCombinerId = _id; else delete buildInput.selectedCombinerId;
+      } else effectiveCombinerId(buildInput.selectedCombinerId, _stored, 'sld/pdf/POST');
+    }
 
     if (!buildInput) {
       return NextResponse.json({ success: false, error: 'Missing buildInput' }, { status: 400 });

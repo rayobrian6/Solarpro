@@ -66,8 +66,9 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
   const overrideDeviceIds = project.bosDeviceIds
     ?? (project.combinerId ? [project.combinerId] : undefined);
 
-  // 🚨 THE INSTALLER'S OWN ANSWER — projects.selected_equipment.combinerSelection,
-  // carried onto PermitInput.project by the client.
+  // 🚨 THE INSTALLER'S OWN ANSWER — projects.selected_equipment.combinerSelection.
+  // The permit POST route reads it from the store (the client's copy is used only
+  // when no project row can be read), so a dropped client read cannot swap it.
   //
   // THIS LINE IS THE PROPAGATION. Eight consumers resolve the combiner through
   // this ONE adapter — E-1 (electricalPages), SCHED/PV-6 (structuralPages), the
