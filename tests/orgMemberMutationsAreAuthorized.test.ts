@@ -39,6 +39,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from './support/stripSource';
 
 const ROOT = join(__dirname, '..');
 const ROUTE = join(ROOT, 'app', 'api', 'organizations', '[id]', 'members', '[userId]', 'route.ts');
@@ -124,5 +125,48 @@ describe('the legacy rule itself', () => {
     expect(notMember, 'a non-member is no longer rejected').toBeGreaterThan(-1);
     expect(roleCheck).toBeGreaterThan(-1);
     expect(notMember, 'the role check runs before the membership check').toBeLessThan(roleCheck);
+  });
+});
+
+describe('🚨 removing a member from ONE org does not detach them from another', () => {
+  // The route used to run, after `removeMember` had already returned:
+  //
+  //     UPDATE users SET org_id = NULL WHERE id = ${targetUserId}
+  //
+  // with no organization in the WHERE clause. Removing a user from org A cleared
+  // their org_id even when it pointed at org B.
+  //
+  // And it was not merely unscoped — it DESTROYED A CORRECT RESULT.
+  // `removeMember` clears the column scoped to this org ("if it pointed to this
+  // org") and then calls `syncLegacyOrgId` to re-point it at any other active
+  // membership. This ran afterwards and wiped that out, leaving a user removed
+  // from one of two orgs detached from both.
+  // 🚨 COMMENT-STRIPPED. The first version of this scan matched the offending
+  // SQL quoted inside the explanatory comment that replaced it — a guard satisfied
+  // by the prose describing the defect. This repo has `stripComments` precisely
+  // because that has happened before.
+  const routeSrc = () => stripComments(readFileSync(ROUTE, 'utf8'));
+
+  it('the route performs no unscoped org_id clear', () => {
+    const s = routeSrc();
+    const clears = [...s.matchAll(/UPDATE users SET org_id\s*=\s*NULL[^`]*/g)].map(m => m[0]);
+    for (const c of clears) {
+      expect(c, `an org_id clear is not scoped to an organization: ${c}`)
+        .toMatch(/org_id\s*=\s*\$\{|AND org_id/);
+    }
+    // Today there should be none at all — the library owns this.
+    expect(clears, 'the route is clearing org_id again; lib/organizations/memberships.ts owns that')
+      .toEqual([]);
+  });
+
+  it('and the library still does it, scoped, with a re-sync', () => {
+    // The control: if the library ever stops doing it, removing the route's copy
+    // would have silently dropped the behaviour entirely.
+    const lib = stripComments(readFileSync(join(ROOT, 'lib', 'organizations', 'memberships.ts'), 'utf8'));
+    expect(lib, 'the scoped clear in removeMember is gone').toMatch(
+      /UPDATE users SET org_id = NULL[\s\S]{0,120}WHERE id = \$\{userId\} AND org_id = \$\{organizationId\}/,
+    );
+    expect(lib, 'the legacy pointer is no longer re-synced to another membership')
+      .toMatch(/syncLegacyOrgId\(/);
   });
 });

@@ -336,13 +336,33 @@ export async function DELETE(
       );
     }
 
-    // Sync legacy org_id for the removed member
-    try {
-      const sql = await getDbReady();
-      await sql`UPDATE users SET org_id = NULL WHERE id = ${targetUserId}`;
-    } catch {
-      // Non-fatal — the membership record was removed, legacy sync is best-effort
-    }
+    // ══ 🚨 THE LEGACY org_id SYNC IS REMOVED HERE, NOT REPAIRED ═══════════════
+    //
+    // This block ran:
+    //
+    //     UPDATE users SET org_id = NULL WHERE id = ${targetUserId}
+    //
+    // with NO organization in the WHERE clause. Removing a user from organization
+    // A therefore cleared their `org_id` even when it pointed at organization B —
+    // a mutation in one tenant detaching a user from a different one.
+    //
+    // And it was not merely unscoped, it was DESTRUCTIVE OF A CORRECT RESULT.
+    // `removeMember` (lib/organizations/memberships.ts) already does this properly,
+    // moments earlier and under its own comment "clear users.org_id if it pointed
+    // to this org":
+    //
+    //     UPDATE users SET org_id = NULL, org_role = 'owner'
+    //      WHERE id = ${userId} AND org_id = ${organizationId}
+    //
+    // and then calls `syncLegacyOrgId`, which re-points the legacy column at any
+    // OTHER active membership the user still holds. This block ran afterwards and
+    // wiped that re-point out, so a user removed from one of two organizations was
+    // left detached from both — and the org that still had them was under-counted
+    // by every legacy query that reads `users.org_id`.
+    //
+    // There is nothing to repair: the library's version is scoped, sets org_role
+    // too, and re-syncs. The correct fix is for the route to stop second-guessing
+    // it.
 
     return NextResponse.json({ success: true });
   } catch (e) {
