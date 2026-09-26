@@ -17,7 +17,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { isValidStage, type PipelineStage } from '@/lib/operations/pipeline';
-import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
+// 🚨 The columns, the AUDIT ROW and the task generation are one operation now.
+// They were three things five callers each had to remember, and four of the five
+// forgot the audit row. See lib/operations/stageChange.ts.
+import { applyStageChange } from '@/lib/operations/stageChange';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 // 🚨 The customer-facing half of a stage change. See the block that calls these:
 // they used to be reachable ONLY from a route with no UI callers.
@@ -76,10 +79,34 @@ export async function POST(req: NextRequest) {
 
     const sql = await getDbReady();
 
-    // Verify project belongs to user
-    const existing = await sql`
-      SELECT id, user_id FROM projects WHERE id = ${projectId}
-    `;
+    // Verify project belongs to user.
+    //
+    // ══ 🚨 THE STAGE IT IS LEAVING IS READ HERE, AND PASSED ON ════════════════
+    //
+    // This SELECT already had to happen for the ownership check, and it is the
+    // only place in the request that can observe the stage the project is in
+    // BEFORE the update. So it reads it, and hands it to the writer.
+    //
+    // The alternative — each caller telling the audit trail where the project
+    // came from — is what shipped, and it produced a fabricated `from_stage`:
+    // `components/commands/EngineeringReviewModal.tsx` logged the literal
+    // `'contract_signed'` for every move into engineering, whatever stage the
+    // project was actually in. A `from_stage` that is asserted rather than
+    // observed is worse than an absent one, because it reads as evidence.
+    //
+    // `project_status` may not exist on a database built from the scanned
+    // migration set (it is created only by the locked inline DDL in
+    // app/api/migrate/route.ts), so the read degrades to the legacy column.
+    let existing: Record<string, unknown>[];
+    try {
+      existing = await sql`
+        SELECT id, user_id, status, project_status FROM projects WHERE id = ${projectId}
+      `;
+    } catch {
+      existing = await sql`
+        SELECT id, user_id, status FROM projects WHERE id = ${projectId}
+      `;
+    }
     if (existing.length === 0) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
     }
@@ -87,77 +114,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
     }
 
-    // Map the pipeline stage back to a legacy status value so the legacy
-    // `status` column stays in sync with `project_status` (rowToProject and
-    // older list/detail views still read `status`).
-    const STAGE_TO_LEGACY: Record<string, string> = {
-      lead: 'lead',
-      site_assessment: 'design',
-      design_complete: 'design',
-      proposal_sent: 'proposal',
-      contract_signed: 'approved',
-      engineering: 'approved',
-      permit_submitted: 'approved',
-      permit_approved: 'approved',
-      install_scheduled: 'approved',
-      installation: 'approved',
-      inspection: 'approved',
-      pto: 'approved',
-      complete: 'installed',
-    };
-    const legacyStatus = STAGE_TO_LEGACY[status] || 'lead';
+    const prevStage = String(existing[0].project_status || existing[0].status || 'lead');
 
-    // Update project status — try operations column first, fall back to legacy status.
-    // BUGFIX: also write the legacy `status` column so it never goes stale.
-    let usedOpsColumn = false;
-    try {
-      if (status === 'contract_signed') {
-        await sql`
-          UPDATE projects
-          SET project_status = ${status},
-              status = ${legacyStatus},
-              contract_signed_at = NOW(),
-              updated_at = NOW()
-          WHERE id = ${projectId}
-        `;
-      } else if (status === 'complete') {
-        await sql`
-          UPDATE projects
-          SET project_status = ${status},
-              status = ${legacyStatus},
-              actual_completion = NOW(),
-              updated_at = NOW()
-          WHERE id = ${projectId}
-        `;
-      } else {
-        await sql`
-          UPDATE projects
-          SET project_status = ${status},
-              status = ${legacyStatus},
-              updated_at = NOW()
-          WHERE id = ${projectId}
-        `;
-      }
-      usedOpsColumn = true;
-    } catch (opsErr) {
-      // project_status column doesn't exist — update legacy status field instead
-      console.warn('[update-status] project_status column missing, using legacy status:', opsErr);
-      await sql`
-        UPDATE projects
-        SET status = ${legacyStatus},
-            updated_at = NOW()
-        WHERE id = ${projectId}
-      `;
-    }
-
-    // Auto-generate tasks for the new stage (non-fatal)
-    let tasksGenerated = 0;
-    try {
-      const taskResult = await generateTasksForStage(projectId, status as PipelineStage);
-      tasksGenerated = taskResult.inserted;
-    } catch (taskErr) {
-      console.warn('[update-status] task generation failed:', taskErr);
-    }
+    // ══ 🚨 COLUMNS + AUDIT ROW + TASKS, IN ONE WRITER ═════════════════════════
+    //
+    // This route used to inline the column writes, carry its own second copy of
+    // the stage→legacy-status table, generate the tasks — and write NO activity
+    // row at all. The admin project timeline therefore showed nothing for the
+    // majority of stage transitions in the product, because four of the five
+    // surfaces that call this route wrote no row of their own either.
+    //
+    // `applyStageChange` is the one writer. Its `milestones` metadata carries the
+    // modal's contextual toggles, which this route previously accepted and
+    // discarded.
+    const applied = await applyStageChange({
+      projectId,
+      toStage: status as PipelineStage,
+      userId: user.id ?? null,
+      source: 'update-status',
+      prevStage,
+      extraMetadata: Array.isArray(body?.milestones) && body.milestones.length > 0
+        ? { milestones: body.milestones.filter((m: unknown) => typeof m === 'string').slice(0, 20) }
+        : undefined,
+    });
+    const tasksGenerated = applied.tasksGenerated;
 
     // ══ 🚨 THE CUSTOMER-FACING STAGE ADVANCES TOO ═════════════════════════════
     //
@@ -215,7 +195,16 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: { project, tasksGenerated },
+      // `prevStage` / `activityId` are reported so a caller can tell a recorded
+      // move from an unrecorded one instead of assuming. `activityId: null`
+      // means the audit row did not land — see applyStageChange's docblock.
+      data: {
+        project,
+        tasksGenerated,
+        prevStage: applied.prevStage,
+        newStage: applied.toStage,
+        activityId: applied.activityId,
+      },
     });
 
   } catch (error: unknown) {

@@ -33,11 +33,14 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import {
   DEAL_TRANSITIONS,
-  stageToSimpleStatus,
   type DealDecisionAction,
 } from '@/lib/deals/transitions';
 import { isValidStage } from '@/lib/operations/pipeline';
-import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
+// 🚨 ONE WRITER. This route used to carry its own copy of the column writes, the
+// activity INSERT and the task generation — the same five steps
+// `app/api/projects/update-status` carried separately, which is how the two
+// drifted apart (only one of them wrote an audit row).
+import { applyStageChange } from '@/lib/operations/stageChange';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { syncHomeownerStage } from '@/lib/homeownerStageSync';
 import { writeMicroStage } from '@/lib/microStage';
@@ -120,111 +123,59 @@ export async function POST(req: NextRequest) {
 
     const prevStage = existing[0].project_status || existing[0].status || 'lead';
     const newStage = transition.newStage;
-    const simpleStatus = stageToSimpleStatus(newStage);
 
-    // ── Apply stage transition ─────────────────────────────────────────────
-    // Try full ops columns first; fall back to legacy status only
+    if (!isValidStage(newStage)) {
+      return NextResponse.json(
+        { success: false, error: `Decision '${action}' targets a stage that is not in the pipeline: ${newStage}` },
+        { status: 500 },
+      );
+    }
+
+    // ── Apply the stage change: columns, audit row, tasks ──────────────────
+    //
+    // 🚨 THROUGH THE SHARED WRITER, not a second copy. This block used to be ~90
+    // lines duplicating `app/api/projects/update-status` — the same four UPDATE
+    // shapes, the same fallback, the same activity INSERT, the same task call.
+    // The duplication is exactly how the two drifted: update-status wrote no
+    // activity row at all, and this route (the one with no UI callers) was the
+    // only place in the product where a stage change left a trace.
+    //
+    // The DECISION vocabulary stays here — `DEAL_TRANSITIONS` decides which
+    // stage an action means, and its `activityType`/`activityTitle`/`stalls`/
+    // `terminal`/`nextAction` travel into the row's metadata. What moved is the
+    // WRITING, not the deciding.
+    const applied = await applyStageChange({
+      projectId,
+      toStage: newStage,
+      userId: user.id ?? null,
+      source: 'transition',
+      prevStage,
+      notes: notes || null,
+      installDate: action === 'schedule_install' && date ? date : null,
+      activityType: transition.activityType,
+      activityTitle: notes ? `${transition.activityTitle} — ${notes}` : transition.activityTitle,
+      extraMetadata: {
+        action,
+        stalls: transition.stalls ?? false,
+        terminal: transition.terminal ?? false,
+        next_action: transition.nextAction ?? null,
+        ...(date ? { date } : {}),
+      },
+    });
+    const activityId = applied.activityId;
+
+    // The shape this route has always returned.
     let updatedProject: any = null;
     try {
-      if (newStage === 'contract_signed') {
-        const [row] = await sql`
-          UPDATE projects
-          SET project_status  = ${newStage},
-              status          = ${simpleStatus},
-              contract_signed_at = NOW(),
-              updated_at      = NOW()
-          WHERE id = ${projectId}
-          RETURNING id, project_status, status, updated_at
-        `;
-        updatedProject = row;
-      } else if (newStage === 'complete') {
-        const [row] = await sql`
-          UPDATE projects
-          SET project_status  = ${newStage},
-              status          = ${simpleStatus},
-              actual_completion = NOW(),
-              updated_at      = NOW()
-          WHERE id = ${projectId}
-          RETURNING id, project_status, status, updated_at
-        `;
-        updatedProject = row;
-      } else if (action === 'schedule_install' && date) {
-        // Also persist install_date when scheduling
-        const [row] = await sql`
-          UPDATE projects
-          SET project_status  = ${newStage},
-              status          = ${simpleStatus},
-              install_date    = ${date},
-              updated_at      = NOW()
-          WHERE id = ${projectId}
-          RETURNING id, project_status, status, updated_at
-        `;
-        updatedProject = row;
-      } else {
-        const [row] = await sql`
-          UPDATE projects
-          SET project_status  = ${newStage},
-              status          = ${simpleStatus},
-              updated_at      = NOW()
-          WHERE id = ${projectId}
-          RETURNING id, project_status, status, updated_at
-        `;
-        updatedProject = row;
-      }
-    } catch (opsErr) {
-      // project_status column doesn't exist — update legacy status only
-      console.warn('[transition] project_status column missing, using legacy status:', opsErr);
       const [row] = await sql`
-        UPDATE projects
-        SET status     = ${simpleStatus},
-            updated_at = NOW()
-        WHERE id = ${projectId}
-        RETURNING id, status, updated_at
+        SELECT id, project_status, status, updated_at FROM projects WHERE id = ${projectId}
       `;
-      updatedProject = row;
-    }
-
-    // ── Log to project_activity ────────────────────────────────────────────
-    const activityTitle = notes
-      ? `${transition.activityTitle} — ${notes}`
-      : transition.activityTitle;
-
-    const activityMetadata = {
-      action,
-      from_stage: prevStage,
-      to_stage: newStage,
-      stalls: transition.stalls ?? false,
-      terminal: transition.terminal ?? false,
-      next_action: transition.nextAction ?? null,
-      ...(date ? { date } : {}),
-      ...(notes ? { notes } : {}),
-    };
-
-    let activityId: string | null = null;
-    try {
-      const [actRow] = await sql`
-        INSERT INTO project_activity
-          (project_id, user_id, type, title, details, metadata)
-        VALUES
-          (${projectId}, ${user.id}, ${transition.activityType},
-           ${activityTitle},
-           ${notes || null},
-           ${JSON.stringify(activityMetadata)})
-        RETURNING id
+      updatedProject = row ?? null;
+    } catch {
+      const [row] = await sql`
+        SELECT id, status, updated_at FROM projects WHERE id = ${projectId}
       `;
-      activityId = actRow?.id ?? null;
-    } catch (logErr) {
-      // Activity log failure is non-fatal — transition already persisted
-      console.warn('[transition] activity log failed:', logErr);
-    }
-
-    // ── Auto-generate tasks for new stage (non-fatal) ──────────────────────
-    if (isValidStage(newStage)) {
-      try {
-        await generateTasksForStage(projectId, newStage);
-      } catch (taskErr) {
-        console.warn('[transition] task generation failed:', taskErr);
-      }
+      updatedProject = row ?? null;
     }
 
     // ── Auto-advance homeowner_stage (non-fatal) ──────────────────────

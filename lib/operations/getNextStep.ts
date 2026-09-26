@@ -9,6 +9,15 @@
  */
 
 import type { PipelineStage } from './pipeline';
+// 🚨 "5d stalled" was computed from `projects.updated_at`, which 20+ unrelated
+// writers bump — so it was really "nothing has touched this row for 5d", printed
+// on the card as an accusation about the deal. See lib/operations/stageClock.ts.
+import {
+  resolveStageAge,
+  classifyStageAge,
+  type StageAge,
+  type StageClockSource,
+} from './stageClock';
 
 export type UrgencyLevel = 'red' | 'yellow' | 'blue' | 'green';
 
@@ -21,6 +30,13 @@ export interface NextStep {
   urgency: UrgencyLevel;
   /** Whether this is urgent (legacy compat) */
   urgent: boolean;
+  /**
+   * The clock the label and urgency came from, and what it measures.
+   * 🚨 `age.measuresStage === false` means the number is "time since anything
+   * touched this record", NOT time in stage. A caller that renders its own copy
+   * of the number must read this before calling it a stall.
+   */
+  age: StageAge;
 }
 
 /** Stage → next action mapping with smart button labels */
@@ -54,19 +70,34 @@ const URGENT_THRESHOLD_DAYS = 2;
  */
 export function getNextStep(
   stage: string | undefined | null,
-  updatedAt?: string | Date | null,
+  /**
+   * The clock. Historically this was `projects.updated_at` alone and still may
+   * be — pass the whole row instead (`{ stage_changed_at, last_stage_change_at,
+   * updated_at }`) and the number becomes a real stage clock with an honest
+   * label. A bare timestamp is still accepted and is treated as a LAST-TOUCH
+   * value, because that is what every existing caller passes.
+   */
+  updatedAt?: string | Date | StageClockSource | null,
   hasInstallDate?: boolean,
   hasCrew?: boolean,
 ): NextStep {
   const safeStage = (stage || 'lead') as PipelineStage;
   const cfg = STAGE_CONFIG[safeStage] || { action: 'Review project', button: 'Review' };
 
+  const age = resolveStageAge(toClockSource(updatedAt));
+
   if (safeStage === 'complete') {
-    return { label: 'Project complete ✓', buttonLabel: 'Done', urgency: 'green', urgent: false };
+    return { label: 'Project complete ✓', buttonLabel: 'Done', urgency: 'green', urgent: false, age };
   }
 
-  const daysInStage = getDaysInStage(updatedAt);
-  const isStalled = daysInStage >= STALL_THRESHOLD_DAYS && safeStage !== 'lead';
+  const daysInStage = age.days;
+  // 🚨 `stalled` is a claim about the STAGE and needs a stage clock. On the
+  // `updated_at` fallback `classifyStageAge` returns `quiet` instead — the
+  // weaker claim the data actually supports — so the card can say "no activity"
+  // without asserting the deal is stuck.
+  const { stalled, quiet } = classifyStageAge(age, STALL_THRESHOLD_DAYS);
+  const isStalled = stalled && safeStage !== 'lead';
+  const isQuiet = quiet && safeStage !== 'lead';
   const isPending = daysInStage >= URGENT_THRESHOLD_DAYS && safeStage !== 'lead';
 
   // Context-aware overrides
@@ -88,36 +119,42 @@ export function getNextStep(
     button = 'Assign Crew';
   }
 
-  // Urgency determination
+  // Urgency determination.
+  // A red card is the strongest signal on the board and it must not be raised by
+  // a number that does not mean what the card says. `quiet` keeps the amber
+  // "worth a look" state; only a measured stage stall goes red.
   let urgency: UrgencyLevel = 'blue';
   if (isStalled) {
     urgency = 'red';
-  } else if (isPending) {
+  } else if (isPending || isQuiet) {
     urgency = 'yellow';
   }
 
-  // Build label
+  // Build label. 🚨 THE QUALIFIER IS PART OF THE FIX. "5d stalled" on an
+  // `updated_at` number was a false statement about the deal; "5d no activity"
+  // is a true statement about the record.
   const label = isStalled
-    ? `${daysInStage}d stalled — ${action}`
-    : action;
+    ? `${daysInStage}d in stage — ${action}`
+    : isQuiet
+      ? `${daysInStage}d no activity — ${action}`
+      : action;
 
   return {
     label,
-    buttonLabel: isStalled ? 'Resolve →' : button,
+    buttonLabel: isStalled || isQuiet ? 'Resolve →' : button,
     urgency,
     urgent: isStalled,
+    age,
   };
 }
 
-/** Calculate days since a date */
-function getDaysInStage(updatedAt?: string | Date | null): number {
-  if (!updatedAt) return 0;
-  try {
-    const then = new Date(updatedAt).getTime();
-    return Math.max(0, Math.floor((Date.now() - then) / 86400000));
-  } catch {
-    return 0;
-  }
+/** Accept a bare timestamp (every existing caller) or a whole row. */
+function toClockSource(
+  v?: string | Date | StageClockSource | null,
+): StageClockSource | null {
+  if (!v) return null;
+  if (typeof v === 'string' || v instanceof Date) return { updated_at: v };
+  return v;
 }
 
 /**
@@ -133,6 +170,8 @@ export interface ActionItem {
   urgency: UrgencyLevel;
   daysInStage: number;
   stage: string;
+  /** What `daysInStage` measures. See NextStep.age. */
+  age: StageAge;
 }
 
 export function getActionItems(
@@ -142,6 +181,9 @@ export function getActionItems(
     client_name?: string;
     project_status: string;
     updated_at?: string;
+    /** Preferred clock — see ProjectForGeneration / stageClock. */
+    stage_changed_at?: string;
+    last_stage_change_at?: string;
     install_date?: string;
     crew_assigned?: string;
   }>,
@@ -152,14 +194,14 @@ export function getActionItems(
   for (const p of projects) {
     if (p.project_status === 'complete') continue;
 
+    // 🚨 THE WHOLE ROW, not just `updated_at`. Passing the row is what lets the
+    // stage clock prefer a recorded stage change over the last-touch column.
     const step = getNextStep(
       p.project_status,
-      p.updated_at,
+      p,
       !!p.install_date,
       !!p.crew_assigned,
     );
-
-    const days = getDaysInStage(p.updated_at);
 
     items.push({
       projectId: p.id,
@@ -168,8 +210,12 @@ export function getActionItems(
       action: step.label,
       buttonLabel: step.buttonLabel,
       urgency: step.urgency,
-      daysInStage: days,
+      // 🚨 ONE number, from the same resolution the label used. This used to be a
+      // SECOND, independent `getDaysInStage(p.updated_at)` call, so a card could
+      // in principle show a day count the label disagreed with.
+      daysInStage: step.age.days,
       stage: p.project_status,
+      age: step.age,
     });
   }
 

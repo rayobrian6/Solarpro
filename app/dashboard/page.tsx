@@ -31,6 +31,7 @@ import {
   STAGE_PHASES,
   PROJECT_PIPELINE,
   stageIndex,
+  isValidStage,
   type PipelineStage,
 } from '@/lib/operations/pipeline';
 import { nextStage } from '@/lib/operations/pipeline';
@@ -41,6 +42,14 @@ import {
   type UrgencyLevel,
   type ActionItem,
 } from '@/lib/operations/getNextStep';
+// 🚨 days-in-stage and stall detection used to be `now - projects.updated_at`.
+// See lib/operations/stageClock.ts for why that number was not what it claimed.
+import {
+  resolveStageAge,
+  classifyStageAge,
+  stageAgeBadge,
+  type StageAge,
+} from '@/lib/operations/stageClock';
 import { getPipelineMetrics } from '@/lib/data/getPipelineMetrics';
 import dynamic from 'next/dynamic';
 
@@ -129,15 +138,25 @@ function getUrgency(p: Project): 'high' | 'medium' | 'low' {
 // SECTION B: Dashboard Sub-Components (preserved exactly)
 // ══════════════════════════════════════════════════════════════════
 
-// PHASE 3: CommandCard supports optional onCtaClick for real API mutations.
-// When onCtaClick is provided, the CTA button fires the mutation AND navigates.
-// When not provided, the entire card is a plain Link (existing behaviour preserved).
+// ══ 🚨 THE CTA THAT OPENED A MODAL AND NAVIGATED AWAY IN THE SAME CLICK ══════
+//
+// `onCtaClick` used to be typed `() => void`. React passes the click event to an
+// `onClick` handler regardless, but a handler that cannot NAME the event cannot
+// call `preventDefault()` on it — so every one of these cards set a
+// `DealDecisionModal` into state and then let the `<Link>` navigate, throwing the
+// modal away on the same tick. Clicking "Resolve Now" on the pulsing red Critical
+// Actions card just landed the user on `/projects?status=proposal`.
+//
+// The event is now part of the contract. A handler that opens a modal calls
+// `e.preventDefault()`; a handler with nothing to open falls through to `href`,
+// which is the behaviour that makes the card still useful when there is no
+// target project. The TYPE is what makes that possible, so it is not cosmetic.
 function CommandCard({
   accentColor, icon, count, label, sub, cta, href, pulse = false, onCtaClick,
 }: {
   accentColor: string; icon: React.ReactNode; count: string | number;
   label: string; sub: string; cta: string; href: string; pulse?: boolean;
-  onCtaClick?: () => void;
+  onCtaClick?: (e: React.MouseEvent) => void;
 }) {
   const inner = (
     <div
@@ -342,8 +361,22 @@ interface PipelineProject {
   crew_assigned?: string;
   client_name?: string;
   updated_at?: string;
+  /**
+   * When the project last CHANGED STAGE. Supplied by the API when it is known —
+   * either `projects.stage_changed_at` or a value derived from the most recent
+   * stage-change record. Absent means the clock below falls back to `updated_at`
+   * and STOPS CALLING THE RESULT A STALL. See lib/operations/stageClock.ts.
+   */
+  stage_changed_at?: string;
+  last_stage_change_at?: string;
   is_stalled?: boolean;
+  /**
+   * 🚨 NOT NECESSARILY DAYS IN STAGE. Read `age.measuresStage` before saying so.
+   * The name is kept because several call sites sort on it.
+   */
   days_in_stage: number;
+  /** What `days_in_stage` actually measured. */
+  age: StageAge;
 }
 
 const STALL_THRESHOLD_DAYS = 5;
@@ -374,11 +407,11 @@ const STATUS_TO_STAGE: Record<string, PipelineStage> = {
   approved: 'contract_signed', installed: 'complete',
 };
 
-function daysSince(dateStr: string | undefined | null): number {
-  if (!dateStr) return 0;
-  try { return Math.max(0, Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)); }
-  catch { return 0; }
-}
+// 🚨 `daysSince(updated_at)` used to live here and was the pipeline's stall clock.
+// It is gone rather than left unused: it is a one-line helper with an inviting
+// name that computes the wrong number, and the next author would reach for it.
+// `resolveStageAge` (lib/operations/stageClock.ts) is the replacement and it
+// reports what the number measures alongside the number.
 function fmtDate(d: string | undefined | null): string {
   if (!d) return '';
   try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch { return ''; }
@@ -393,7 +426,26 @@ function parsePipelineProject(p: any): PipelineProject | null {
   const rawStage = safeStr(p.project_status || STATUS_TO_STAGE[p.status] || p.status, 'lead');
   const projectStatus = rawStage as PipelineStage;
   const updatedAt = p.updated_at || p.updatedAt || undefined;
-  const daysInStage = daysSince(updatedAt);
+  const stageChangedAt = p.stage_changed_at || p.stageChangedAt
+    || p.last_stage_change_at || p.lastStageChangeAt || undefined;
+
+  // ══ 🚨 THE STALL CLOCK ════════════════════════════════════════════════════
+  //
+  // This was `daysSince(updated_at)`, and `updated_at` is bumped by 20+ unrelated
+  // writers — saving a layout, editing a note, uploading a bill, the operations
+  // backfill in /api/operations/projects, the system writing to itself. So a
+  // project genuinely parked in `permit_submitted` for six weeks reported 0 days
+  // and never turned red, as long as anyone touched it in the meantime.
+  //
+  // `resolveStageAge` prefers a recorded stage change and says which source
+  // answered. `is_stalled` — the red border, the red banner, the top of the
+  // urgency sort — is now raised ONLY when the number really measures the stage.
+  // On the fallback the card says "Nd no activity" instead, which is the claim
+  // the data supports. A red STALLED banner driven by `updated_at` is an
+  // accusation about a deal built from a fact about a row.
+  const age = resolveStageAge({ stage_changed_at: stageChangedAt, updated_at: updatedAt });
+  const { stalled } = classifyStageAge(age, STALL_THRESHOLD_DAYS);
+
   return {
     id: String(p.id), name: safeStr(p.name, 'Untitled Project'),
     address: p.address || p.site_address || undefined,
@@ -402,8 +454,10 @@ function parsePipelineProject(p: any): PipelineProject | null {
     crew_assigned: p.crew_assigned || undefined,
     client_name: p.client?.name || p.client_name || undefined,
     updated_at: updatedAt,
-    is_stalled: daysInStage >= STALL_THRESHOLD_DAYS && projectStatus !== 'lead' && projectStatus !== 'complete',
-    days_in_stage: daysInStage,
+    stage_changed_at: stageChangedAt,
+    is_stalled: stalled && projectStatus !== 'lead' && projectStatus !== 'complete',
+    days_in_stage: age.days,
+    age,
   };
 }
 
@@ -454,7 +508,10 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
   const [justUpdated, setJustUpdated] = useState(false);
   const isBusy = busy === proj.id;
   const next = nextStage(proj.project_status);
-  const step = getNextStep(proj.project_status, proj.updated_at, !!proj.install_date, !!proj.crew_assigned);
+  // 🚨 THE WHOLE ROW, not just `updated_at` — that is what lets getNextStep use a
+  // recorded stage change when there is one, and label the number honestly when
+  // there is not.
+  const step = getNextStep(proj.project_status, proj, !!proj.install_date, !!proj.crew_assigned);
   const uc = URGENCY_COLORS[step.urgency];
 
   const accentHex = proj.is_stalled ? '#EF4444'
@@ -509,8 +566,16 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
           <div className="mt-2.5 rounded-lg px-2.5 py-2 flex items-start gap-2" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)' }}>
             <AlertTriangle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
             <div>
-              <div className="text-[11px] font-bold text-red-400">{proj.days_in_stage}d NO ACTIVITY</div>
-              {proj.updated_at ? <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Last update: {fmtDateFull(proj.updated_at)}</div> : null}
+              {/* 🚨 `is_stalled` is now raised only when the clock really measured
+                  the stage, so this banner may say "in stage". `stageAgeBadge`
+                  is the single place that phrase is produced — a UI string built
+                  here could drift from what the number means. */}
+              <div className="text-[11px] font-bold text-red-400 uppercase">{stageAgeBadge(proj.age)}</div>
+              {proj.age.at ? (
+                <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {proj.age.measuresStage ? 'Stage entered' : 'Last update'}: {fmtDateFull(proj.age.at)}
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -620,7 +685,12 @@ function ActionRequiredStrip({ items, onAction }: {
                 <span className="text-[12px] font-bold truncate block" style={{ color: uc.text }}>{item.action}</span>
                 <span className="text-[11px] mt-0.5 truncate block" style={{ color: 'var(--text-muted)' }}>{item.clientName || item.projectName}</span>
               </button>
+              {/* 🚨 The bare "7d" badge is qualified on hover, and the action text
+                  beside it now carries the qualifier inline ("7d no activity — …"
+                  vs "7d in stage — …") so the number is never read as a stage
+                  claim it cannot support. */}
               {item.daysInStage > 0 ? (<span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 tabular-nums"
+                title={stageAgeBadge(item.age)}
                 style={{ background: uc.bg, color: uc.text, border: `1px solid ${uc.border}` }}>{item.daysInStage}d</span>) : null}
               {/* Act button — always opens modal when onAction available */}
               {onAction ? (
@@ -670,6 +740,169 @@ const SCHED_TYPE_ICONS: Record<string, React.ReactNode> = {
   follow_up:  <Phone size={13} />,
   custom:     <Calendar size={13} />,
 };
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION E2: 🚨 THE INSPECTION COMMAND THAT SCHEDULED NOTHING
+// ══════════════════════════════════════════════════════════════════
+//
+// WHAT HAPPENED. `generateActions.ts` rule 5 creates "Schedule inspection for
+// <client>" once the install date has passed. Pressing Execute on it ran
+// `handleCompleteCommand(cmd.id)` — the command row went to 'completed', the
+// toast said "Action completed ✓", and NOTHING was scheduled: no
+// `project_schedule` row, no stage change, no activity entry. The next
+// generation pass recreated the card, so the same non-action could be
+// "completed" indefinitely and nobody ever noticed the inspection was not
+// booked.
+//
+// WHY A REAL MODAL AND NOT A DELETED RULE. The brief allowed either, on the
+// grounds that a button that lies is worse than a missing button. It is a real
+// modal because the infrastructure is already there and working:
+//
+//   • `POST /api/schedule` accepts `type: 'inspection'` with a YYYY-MM-DD date
+//     and inserts a `project_schedule` row. The dashboard already READS those
+//     rows (`fetchSchedule`) and `SCHED_TYPE_ICONS` already has an 'inspection'
+//     glyph — the read side was built and the write side was never wired up.
+//   • `inspection` is a real `PROJECT_PIPELINE` stage, so
+//     `POST /api/projects/update-status` moves it, and now also writes the audit
+//     row.
+//
+// So the honest fix was the one that books the inspection, not the one that
+// removes the prompt to book it.
+//
+// 🚨 AND THE ORDER MATTERS. The schedule row is written FIRST and its failure
+// ABORTS: the command is marked done only after something real exists. The old
+// path's whole defect was reporting success for an absent side effect, and
+// completing the command before (or regardless of) the write would reproduce it
+// exactly.
+function ScheduleInspectionModal({
+  commandId, projectId, projectName, clientName, onClose, onComplete,
+}: {
+  commandId: string; projectId: string; projectName: string;
+  clientName?: string; onClose: () => void; onComplete: () => void;
+}) {
+  const tomorrow = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  }, []);
+  const [date, setDate] = useState(tomorrow);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleConfirm = async () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { setError('Pick an inspection date.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      // 1. THE THING THE BUTTON CLAIMS TO DO. Fatal on failure.
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, type: 'inspection', date, notes: notes || null }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e?.error || `Could not book the inspection (${res.status})`);
+      }
+
+      // 2. Move the pipeline stage. Reported, not silent, but not fatal: the
+      //    inspection IS booked at this point and telling the user it is not
+      //    would be its own false statement.
+      let stageMoved = true;
+      try {
+        const s = await fetch('/api/projects/update-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, status: 'inspection' }),
+        });
+        stageMoved = s.ok;
+      } catch { stageMoved = false; }
+
+      // 3. Only now is the command actually done.
+      await fetch(`/api/commands/${commandId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'complete' }),
+      });
+
+      onComplete();
+      if (!stageMoved) {
+        // Surfaced by the caller's toast; the booking still happened.
+        console.warn('[inspection] booked, but the pipeline stage did not move');
+      }
+    } catch (e: unknown) {
+      setError((e as Error)?.message || 'Something went wrong. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(3px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="relative w-full rounded-2xl shadow-2xl"
+        style={{ maxWidth: 420, background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <div className="px-5 py-4 flex items-center justify-between gap-3"
+          style={{ borderBottom: '1px solid var(--border-color)' }}>
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              Book Inspection
+            </div>
+            <div className="text-sm font-black truncate mt-0.5" style={{ color: 'var(--text-primary)' }}>
+              {clientName || projectName}
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            className="flex-shrink-0 p-1.5 rounded-lg"
+            style={{ color: 'var(--text-muted)', background: 'var(--bg-muted)' }}>
+            <X size={14} />
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <label className="block">
+            <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+              Inspection date
+            </span>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              aria-label="Inspection date"
+              className="w-full text-sm rounded-xl px-3 py-2.5 mt-1"
+              style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none' }} />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+              Notes (optional)
+            </span>
+            <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+              aria-label="Inspection notes" placeholder="AHJ, inspector, window…"
+              className="w-full text-sm rounded-xl px-3 py-2.5 mt-1"
+              style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none' }} />
+          </label>
+          {error ? (
+            <div className="text-xs font-semibold px-3 py-2 rounded-lg"
+              style={{ background: 'rgba(239,68,68,0.1)', color: '#EF4444', border: '1px solid rgba(239,68,68,0.2)' }}>
+              {error}
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2 pt-1">
+            <button onClick={handleConfirm} disabled={saving}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
+              style={{ background: '#14B8A6', color: '#fff' }}>
+              {saving ? (<><Loader2 size={14} className="animate-spin" /> Booking…</>)
+                      : (<><Calendar size={14} /> Book Inspection</>)}
+            </button>
+            <button onClick={onClose} disabled={saving}
+              className="px-4 py-2.5 rounded-xl text-sm font-medium disabled:opacity-50"
+              style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ══════════════════════════════════════════════════════════════════
 // SECTION F: Main Command Center Page
@@ -757,6 +990,14 @@ export default function CommandCenter() {
   const [activeModal, setActiveModal] = useState<{
     type: 'follow_up' | 'schedule_install' | 'engineering_review';
     commandId?: string;
+    projectId: string;
+    projectName: string;
+    clientName?: string;
+  } | null>(null);
+
+  // 🚨 The inspection booking surface. See ScheduleInspectionModal.
+  const [inspectionModal, setInspectionModal] = useState<{
+    commandId: string;
     projectId: string;
     projectName: string;
     clientName?: string;
@@ -879,7 +1120,32 @@ export default function CommandCenter() {
     // Check both sales projects and ops projects for current stage
     const salesProj = projects.find(p => p.id === projectId);
     const opsProj = opsProjects.find(p => p.id === projectId);
-    const currentStage = opsProj?.project_status || (salesProj as any)?.project_status || salesProj?.status || 'lead';
+    const raw = opsProj?.project_status || (salesProj as any)?.project_status || salesProj?.status || 'lead';
+
+    // ══ 🚨 THE MODAL WAS OPENING ON A STAGE THAT IS NOT IN THE PIPELINE ═══════
+    //
+    // Found while repairing the CTA above, and it is what made that repair worth
+    // nothing on its own. Every surface fed from the SALES store hands this the
+    // LEGACY 5-value status ('proposal', 'design', 'approved') — `Project.status`
+    // is the legacy column — while `DealDecisionModal` indexes
+    // `PROJECT_PIPELINE`. `stageIndex('proposal')` is -1, so:
+    //
+    //   • "Move to next stage" was DISABLED (`nextStage` returns null at idx < 0)
+    //   • "Move back one stage" was DISABLED
+    //   • "Keep in current stage" posted `status: 'proposal'` to
+    //     /api/projects/update-status, which rejects it with 400 "Invalid
+    //     pipeline stage" — its own `isValidStage` guard
+    //
+    // So the one enabled path was "Choose stage manually". Making the CTA hold
+    // the modal open would have delivered the user to a modal whose primary
+    // action is greyed out.
+    //
+    // `STATUS_TO_STAGE` is the map this file already carries for exactly this
+    // translation — the same one `parsePipelineProject` uses. No new table.
+    const currentStage = isValidStage(raw)
+      ? raw
+      : (STATUS_TO_STAGE[String(raw).toLowerCase().trim()] ?? 'lead');
+
     setDecisionModal({ projectId, projectName, clientName, currentStage });
   }, [projects, opsProjects]);
 
@@ -889,12 +1155,31 @@ export default function CommandCenter() {
   }, []);
 
   const openCommandModal = (cmd: CommandAction) => {
+    // ══ 🚨 'inspection' NO LONGER FALLS INTO THE "just complete it" BRANCH ═════
+    //
+    // It used to. Execute on "Schedule inspection for <client>" marked the command
+    // completed, showed "Action completed ✓", and booked nothing — and because the
+    // generator recreates the card, the same non-action could be completed forever
+    // without anyone noticing the inspection was never booked. See
+    // ScheduleInspectionModal above for why this is a real booking and not a
+    // removed rule.
+    if (cmd.type === 'inspection') {
+      setInspectionModal({
+        commandId: cmd.id,
+        projectId: cmd.project_id,
+        projectName: cmd.project_name || 'Project',
+        clientName: cmd.client_name || undefined,
+      });
+      return;
+    }
     const modalType = cmd.type === 'follow_up' || cmd.type === 'permit_followup' ? 'follow_up'
       : cmd.type === 'schedule_install' ? 'schedule_install'
       : cmd.type === 'engineering_review' ? 'engineering_review'
       : null;
     if (!modalType) {
-      // For custom/inspection — just complete directly
+      // 'custom' only — an operator-written to-do with no side effect to perform,
+      // so marking it done IS the whole action. Every generated type now has a
+      // modal that does something.
       handleCompleteCommand(cmd.id);
       return;
     }
@@ -930,6 +1215,21 @@ export default function CommandCenter() {
   }
 
   // ——— Operations Actions ———
+  //
+  // 🚨 THE ACTIVITY ROW IS NO LONGER WRITTEN FROM HERE.
+  //
+  // This used to POST /api/activity itself with `metadata: { from, to }` — a
+  // client-side audit row, in a field shape no other writer used, on a
+  // fire-and-forget promise whose failure was swallowed. Four of the five stage
+  // surfaces wrote no row at all, and the whole point of the repair is that the
+  // row is written by the ONE writer that read the previous stage out of the row
+  // it updated (`lib/operations/stageChange.ts`, via update-status). A caller
+  // that also writes one produces two rows for one move, with two different
+  // ideas of what the metadata keys are called.
+  //
+  // NOTE: this callback is currently unreferenced — the ops card's advance button
+  // routes through `openDecisionModal` instead (see OpsProjectCard's onAdvance
+  // below). It is left in place, minus the duplicate write, rather than deleted.
   const handleAdvance = useCallback(async (projectId: string) => {
     const proj = opsProjects.find(p => p.id === projectId);
     if (!proj) return;
@@ -939,10 +1239,7 @@ export default function CommandCenter() {
     try {
       const res = await fetch('/api/projects/update-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, status: next }) });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error || `Failed (${res.status})`); }
-      setOpsProjects(prev => prev.map(p => p.id === projectId ? { ...p, project_status: next, updated_at: new Date().toISOString(), is_stalled: false, days_in_stage: 0 } : p));
-      // Log activity
-      fetch('/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, type: 'stage_change', title: `Moved to ${STAGE_LABELS[next]}`, metadata: { from: proj.project_status, to: next } }) }).catch(() => {});
+      setOpsProjects(prev => prev.map(p => p.id === projectId ? { ...p, project_status: next, updated_at: new Date().toISOString(), stage_changed_at: new Date().toISOString(), is_stalled: false, days_in_stage: 0 } : p));
       setToast({ msg: `Moved to ${STAGE_LABELS[next]}`, type: 'ok' });
     } catch (e: unknown) { setToast({ msg: (e as Error)?.message || 'Failed', type: 'err' }); }
     finally { setBusyProject(null); }
@@ -1315,28 +1612,30 @@ export default function CommandCenter() {
             <CommandCard accentColor="#EF4444" icon={<AlertTriangle size={18} />}
               count={dashLoading ? '—' : criticalCount} label="Critical Actions" sub="Needs attention now"
               cta="Resolve Now" href="/projects?status=proposal" pulse={criticalCount > 0}
-              onCtaClick={() => {
+              onCtaClick={(e) => {
                 const target = [...projects].filter(p => normalizeStatus(p.status) === 'proposal')
                   .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                // 🚨 preventDefault OR NOTHING OPENS. Without it the Link navigates
+                // and the modal we just created is discarded on the same tick.
+                if (target) { e.preventDefault(); openDecisionModal(target.id, target.name, target.client?.name); }
                 else touchProjects('proposal');
               }} />
             <CommandCard accentColor="#F59E0B" icon={<Clock size={18} />}
               count={dashLoading ? '—' : awaitingCount} label="Awaiting Design" sub="Follow-up required"
               cta="Follow Up" href="/projects?status=design"
-              onCtaClick={() => {
+              onCtaClick={(e) => {
                 const target = [...projects].filter(p => normalizeStatus(p.status) === 'design')
                   .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                if (target) { e.preventDefault(); openDecisionModal(target.id, target.name, target.client?.name); }
                 else touchProjects('design');
               }} />
             <CommandCard accentColor="#22C55E" icon={<CheckCircle size={18} />}
               count={dashLoading ? '—' : readyToAdvance} label="Ready to Advance" sub="Move forward"
               cta="Advance" href="/projects?status=design"
-              onCtaClick={() => {
+              onCtaClick={(e) => {
                 const target = [...projects].filter(p => normalizeStatus(p.status) === 'design' && !!p.layout)
                   .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                if (target) { e.preventDefault(); openDecisionModal(target.id, target.name, target.client?.name); }
                 else touchProjects('design');
               }} />
           </div>
@@ -1379,10 +1678,13 @@ export default function CommandCenter() {
               </div>
             </Link>
             <Link href="/projects?status=approved"
-              onClick={() => {
+              onClick={(e) => {
+                // 🚨 FOURTH INSTANCE of the same defect, not in the reported three:
+                // this Conversion Rate tile is a Link whose onClick opened the same
+                // modal and then navigated. Same repair.
                 const target = [...projects].filter(p => normalizeStatus(p.status) === 'approved')
                   .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                if (target) { e.preventDefault(); openDecisionModal(target.id, target.name, target.client?.name); }
                 else touchProjects('approved');
               }}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:brightness-110"
@@ -1747,6 +2049,24 @@ export default function CommandCenter() {
             loadProjects(true);
             loadClients(true);
             window.location.href = `/projects/${entities.projectId}`;
+          }}
+        />
+      ) : null}
+
+      {/* 🚨 Inspection booking — the command whose Execute used to be a no-op */}
+      {inspectionModal ? (
+        <ScheduleInspectionModal
+          commandId={inspectionModal.commandId}
+          projectId={inspectionModal.projectId}
+          projectName={inspectionModal.projectName}
+          clientName={inspectionModal.clientName}
+          onClose={() => setInspectionModal(null)}
+          onComplete={() => {
+            setInspectionModal(null);
+            setCommands(prev => prev.filter(c => c.id !== inspectionModal.commandId));
+            fetchCommands();
+            fetchSchedule();
+            setToast({ msg: 'Inspection booked ✓', type: 'ok' });
           }}
         />
       ) : null}
