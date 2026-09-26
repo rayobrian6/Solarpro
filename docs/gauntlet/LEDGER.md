@@ -53,6 +53,40 @@ ACCEPTED**; only Ray does.
 
 ---
 
+## SHIPPED — Phase 4, continued
+
+| Commit | What |
+|---|---|
+| `769a8e46` | 🚨 The migration destructive-token gate could not refuse a single token — `\b` in a template literal is U+0008. Fifth occurrence in this repo |
+| `c26a56ea` | 🚨 The forced dry-run proved nothing (success from both arms, no static refusals) **and** the route never read its verdict. Two layers of ritual before the most dangerous operation the product performs |
+| `ca3c05ce` | 🚨 The ops pipeline moved and the customer's view of it did not — `syncHomeownerStage`/`writeMicroStage` were reachable only from a route with ZERO UI callers |
+
+---
+
+## DESIGN LANE — verified on `dev`, 2026-09-26
+
+Ray's items 16 ("Auto Layout preservation") and the panels-below-the-roof report.
+
+| Spec | Result |
+|---|---|
+| `e2e/panel-above-deck.spec.ts` | **4/4.** Every Auto Layout panel is visibly above the deck Cesium draws — on a gable, on a 2D-tagged face, and after a reload. Reads the real entities, not the placement library's own arithmetic. |
+| `e2e/panel-elevation.spec.ts` | **3/3**, including *"a second Auto Layout does not lift the array — placement is idempotent"*. |
+| `e2e/building-section-editing.spec.ts` | 23 passed, 1 failed in the suite run; **that one passed in isolation in 25.8 s** after timing out at 90 s. |
+
+🚨 **The flake is evidence about the process, not the product.** The suite ran for
+9 minutes against a server the peer session was recompiling throughout — 10 files
+dirty at the time. Every layout POST in the log returned **200** and there were
+**zero** stale-write refusals, so the save path was not at fault. This is exactly
+what the memory warns reads like a product failure, and exactly the condition the
+new parallel-worktree law exists to end. **A suite run against a moving tree is not
+evidence** and is not counted as one here.
+
+**What these specs still cannot see:** with no Google Maps key there is no
+photorealistic tileset, so they measure the panel against the DRAWN DECK. They do
+not prove a panel clears Google's photogrammetry mesh, which is not planar.
+
+---
+
 ## VERIFIED — real, reproduced, not yet fixed
 
 | Item | Evidence | Why not shipped |
