@@ -1835,12 +1835,23 @@ function renderMSPLoad(
 
   // Main breaker at top
   const mbY = by2+28;
-  p.push(txt(cx, mbY-4, `${mainAmps}A MAIN BREAKER`, {sz:5.5, anc:'middle', bold:true}));
-  p.push(breakerSymbol(cx, mbY, 32, 14, mainAmps));
+  // The label sits BESIDE the breaker, right-aligned to it. Centred above, it
+  // had 7 units between the header rule and the box — less than the floored
+  // type height — so the box covered its lower half, and the symbol's own
+  // "200A" printed over it. The left side is the one nothing else uses (the CT
+  // tag and bubble go right; 'MAIN BUS' sits below the breaker line).
+  p.push(txt(cx-19, mbY-1, `${mainAmps}A MAIN`, {sz:5.5, anc:'end', bold:true}));
+  p.push(txt(cx-19, mbY+7, 'BREAKER', {sz:5.5, anc:'end', bold:true}));
+  p.push(breakerSymbol(cx, mbY, 32, 14));
 
   // Main busbar
   const busY = mbY + 20;
-  p.push(busbar(bx+8, bx+W2-8, busY, 'MAIN BUS'));
+  // Consumption CTs on the main's load side ring the short main→bus drop, and
+  // the centred 'MAIN BUS' label straddles that drop — so in that case alone the
+  // label moves over the bus's left half, clear of the breaker and the ring.
+  const ctOnMainDrop = ctLocation === 'main-breaker-load-side';
+  p.push(busbar(bx+8, bx+W2-8, busY, ctOnMainDrop ? undefined : 'MAIN BUS'));
+  if (ctOnMainDrop) p.push(txt((bx+8 + cx-16)/2, busY-5, 'MAIN BUS', {sz:5.5, anc:'middle', bold:true}));
   p.push(ln(cx, mbY+7, cx, busY, {sw:SW_MED}));
 
   // Neutral bar (left)
@@ -1876,9 +1887,16 @@ function renderMSPLoad(
 
   // Consumption CTs, where the design says they clamp.
   if (ctLocation === 'main-breaker-load-side') {
-    p.push(ctRing(cx, mbY+13, 'CT×2'));
-    p.push(ln(cx-4, mbY+13, cx-14, mbY+13, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(cx-20, mbY+13));
+    // On the main→bus drop: 13 uu between the breaker and the bus, room for the
+    // ring and nothing else. The lead runs right, clear of the breaker, and
+    // turns up into the bubble; the tag rides beside the bubble as at every
+    // other placement. (The tag used to print inside the breaker symbol and the
+    // bubble on the MAIN BUS lettering.)
+    p.push(ctRing(cx, mbY+13, '', 3.2));
+    p.push(ln(cx+3.2, mbY+13, cx+30, mbY+13, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+    p.push(ln(cx+30, mbY+10.5, cx+30, mbY+13, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+    p.push(ctBubble(cx+30, mbY+5));
+    p.push(txt(cx+38, mbY+7, 'CT×2', {sz:4.4, anc:'start', bold:true, fill:CT_CLR}));
   } else if (ctLocation === 'sec-line-side-of-main') {
     // On the service conductors leaving toward the meter; bubble ABOVE (the
     // meter feeder runs below), tag in the panel's clear top-right corner.
@@ -2003,10 +2021,14 @@ function renderMSPSupply(
     p.push(ctBubble(ctX, by2-7));
     p.push(txt(ctX-8, by2-5, 'CT×2 (L1, L2)', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
   } else if (ctLocation === 'main-breaker-load-side') {
+    // On the bus, just on the main's load side. The tag rides beside the
+    // bubble: above the ring it printed on the main's rating and, on a
+    // supply-side tap, on the SERVICE (LINE) SIDE run.
     const ctX = bx+W2-36;
-    p.push(ctRing(ctX, busY, 'CT×2'));
+    p.push(ctRing(ctX, busY, ''));
     p.push(ln(ctX, busY+4, ctX, busY+14, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
     p.push(ctBubble(ctX, busY+20));
+    p.push(txt(ctX-8, busY+22, 'CT×2', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
   } else if (ctLocation === 'sec-line-side-of-main') {
     p.push(ctRing(bx+W2+5, busY, ''));
     p.push(ln(bx+W2+5, busY-3.8, bx+W2+5, busY-10, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
