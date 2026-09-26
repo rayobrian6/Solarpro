@@ -11,6 +11,12 @@
  *      eave→ridge by row, snaking left/right each row so the string follows the
  *      physical wiring path.
  *   3. Chunk the ordered panels into strings of `modulesPerString`.
+ *      MICRO IS DIFFERENT: a micro system has no DC strings — its groups ARE
+ *      the AC branch circuits, planned by the SAME planner the plan set uses
+ *      (`planMicroBranches`, lib/permit/utils/branching.ts: per-model max,
+ *      balanced sizes, plane-contiguous walk). The studio used to chunk micros
+ *      by `modulesPerString` too (14 on an IQ8+, over its 13 max) while E-1
+ *      drew 11/11/10 (Ray, 2026-09-25).
  *   4. Assign each panel a per-module device based on topology:
  *        - 'string'    → no per-module device (none)
  *        - 'optimizer' → one optimizer under every module
@@ -24,6 +30,7 @@
  */
 
 import type { PlacedPanel } from '@/types';
+import { planMicroBranches, microMaxPerBranch, type BranchPlanPanel } from '@/lib/permit/utils/branching';
 
 export type Topology = 'string' | 'optimizer' | 'micro';
 export type PanelDeviceType = 'optimizer' | 'micro' | 'none';
@@ -75,6 +82,8 @@ export interface StringAssignmentResult {
   deviceType: PanelDeviceType;
   deviceCount: number;       // total optimizers / micros across the system
   modulesPerDevice: number;
+  /** MICRO only — the manufacturer's max micros per AC branch the groups obey. */
+  maxPerBranch?: number;
 }
 
 export interface AssignStringsOptions {
@@ -84,6 +93,11 @@ export interface AssignStringsOptions {
   modulesPerDevice?: number;
   optimizerModelId?: string;
   microModelId?: string;
+  /** MICRO — the model + manufacturer the branch planner is given (the same
+   *  pair the permit snapshot passes). An id alone is not enough for non-
+   *  Enphase micros. Falls back to `microModelId`. */
+  microModel?: string | null;
+  microManufacturer?: string | null;
   /** Manual string-painting overrides: panelId → stringIndex. Applied on top of
    *  the auto serpentine assignment, so the installer can hand-tune any panel. */
   overrides?: Record<string, number>;
@@ -143,6 +157,9 @@ export function assignStrings(
     deviceType === 'optimizer' ? opts.optimizerModelId
     : deviceType === 'micro' ? opts.microModelId
     : undefined;
+
+  // Micro groups are AC branches, planned exactly as the plan set plans them.
+  if (deviceType === 'micro') return assignMicroBranches(panels, opts, modulesPerDevice, deviceModelId);
 
   // Stable plane order = first appearance in the panel array.
   const planeOrder: string[] = [];
@@ -231,5 +248,80 @@ export function assignStrings(
     deviceType,
     deviceCount,
     modulesPerDevice: deviceType === 'none' ? 0 : modulesPerDevice,
+  };
+}
+
+/**
+ * The branch-planner view of a placed panel — EXACTLY the fields the permit
+ * payload's `panelPositions` carry (app/engineering/page.tsx), so the studio
+ * and the plan set hand the planner identical input.
+ */
+export function branchPlanPanelsOf(panels: PlacedPanel[]): BranchPlanPanel[] {
+  return panels.map(p => ({
+    id: p.id,
+    lat: (p as any).lat,
+    lng: (p as any).lng,
+    row: (p as any).row,
+    col: (p as any).col,
+    azimuth: (p as any).azimuth,
+    systemType: (p as any).systemType,
+    arrayId: (p as any).arrayId,
+    planeId: (p as any).planeId,
+  }));
+}
+
+/**
+ * MICRO — every group is an AC branch from `planMicroBranches` (D-1): count =
+ * ceil(N / per-model max), balanced sizes, plane-contiguous serpentine walk.
+ * Manual paint overrides and `modulesPerString` do not apply — the plan set
+ * cannot draw a hand-painted branch, so the studio does not offer one.
+ */
+function assignMicroBranches(
+  panels: PlacedPanel[],
+  opts: AssignStringsOptions,
+  modulesPerDevice: number,
+  deviceModelId: string | undefined,
+): StringAssignmentResult {
+  const model = opts.microModel ?? opts.microModelId ?? null;
+  const manufacturer = opts.microManufacturer ?? null;
+  const plan = planMicroBranches(branchPlanPanelsOf(panels), model, manufacturer);
+
+  const byPanelId: Record<string, PanelStringMeta> = {};
+  const positions = new Map<number, number>();
+  const planeOfBranch = new Map<number, string>();
+  for (const p of panels) {
+    const bi = plan.assign.get(String(p.id));
+    if (bi == null) continue;
+    const pos = (positions.get(bi) ?? 0) + 1;
+    positions.set(bi, pos);
+    if (!planeOfBranch.has(bi)) planeOfBranch.set(bi, groupKey(p));
+    byPanelId[p.id] = {
+      panelId: p.id,
+      stringIndex: bi,
+      stringId: `str-${bi}`,
+      stringLabel: `Branch ${bi + 1}`,
+      positionInString: pos,
+      color: stringColor(bi),
+      deviceType: 'micro',
+      deviceModelId,
+    };
+  }
+  const strings: StringSummary[] = plan.sizes.map((size, bi) => ({
+    stringIndex: bi,
+    stringId: `str-${bi}`,
+    label: `Branch ${bi + 1}`,
+    color: stringColor(bi),
+    panelCount: size,
+    planeId: planeOfBranch.get(bi) ?? 'default',
+  })).filter(s => s.panelCount > 0);
+
+  return {
+    byPanelId,
+    strings,
+    topology: 'micro',
+    deviceType: 'micro',
+    deviceCount: panels.length ? Math.ceil(panels.length / modulesPerDevice) : 0,
+    modulesPerDevice,
+    maxPerBranch: microMaxPerBranch(model, manufacturer),
   };
 }

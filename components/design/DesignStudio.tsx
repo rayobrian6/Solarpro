@@ -9,13 +9,13 @@ import { generateFenceLayout, calculateSystemSize, polygonAreaM2 } from '@/lib/p
 import { generateRoofLayoutOptimized, generateGroundLayoutOptimized, clearGridCache } from '@/lib/panelLayoutOptimized';
 import { assignStrings, type Topology } from '@/lib/stringAssignment';
 import {
-  RACKING_SYSTEMS, OPTIMIZERS, MICROINVERTERS,
+  RACKING_SYSTEMS, OPTIMIZERS,
   getMidClampGapMeters, getMidClampGapInches,
 } from '@/lib/equipment-db';
 // Wave 4A: per-subsystem design-electrical writer (contract §1.3) — pure
 // builder + stamp partitioner live in the design→engineering module so the
 // split is testable outside the component.
-import { buildDesignElectricalBlock, presentDesignSubSystemKeys } from '@/lib/system/designToEngineering';
+import { buildDesignElectricalBlock, presentDesignSubSystemKeys, resolveDesignMicro } from '@/lib/system/designToEngineering';
 import { toSubSystemKey } from '@/lib/system/subSystemEquipment';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
@@ -818,17 +818,25 @@ export default function DesignStudio({ project, onSave }: Props) {
     setPanelSpacing(getMidClampGapMeters(id));
   }, []);
 
+  // The micro this design plans its AC branches with (and records): the
+  // selected inverter when it IS a micro, else the catalogue default — never
+  // the studio's SolarEdge default (Ray, 2026-09-25).
+  const designMicro = useMemo(() => resolveDesignMicro(selectedInverter as any), [selectedInverter]);
   // v63: derive per-panel string + equipment assignment from the placed panels.
+  // MICRO: the groups are the plan set's AC branches (planMicroBranches) for
+  // this micro model, not modulesPerString chunks.
   const stringAssignment = useMemo(
     () => assignStrings(panels as any, {
       modulesPerString,
       topology,
       modulesPerDevice: 1,
       optimizerModelId: OPTIMIZERS[0]?.id,
-      microModelId: MICROINVERTERS[0]?.id,
+      microModelId: designMicro.id,
+      microModel: designMicro.model,
+      microManufacturer: designMicro.manufacturer,
       overrides: stringOverrides,
     }),
-    [panels, modulesPerString, topology, stringOverrides],
+    [panels, modulesPerString, topology, stringOverrides, designMicro],
   );
   const panelMeta = useMemo(() => {
     const m: Record<string, { color?: string; deviceType?: 'optimizer' | 'micro' | 'none'; stringLabel?: string }> = {};
@@ -885,7 +893,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       panels: panels as any,
       assignmentByPanelId,
       topology,
-      inverterBrand: topology === 'micro' ? 'Enphase' : 'SolarEdge',
+      inverterBrand: topology === 'micro' ? (designMicro.manufacturer ?? 'Enphase') : 'SolarEdge',
       modulesPerString,
       rackingId,
       panelId: (selectedPanel as any)?.id,
@@ -894,12 +902,13 @@ export default function DesignStudio({ project, onSave }: Props) {
       // engineering handoff reads this id; defaulting to IQ8+ (290W) when the design
       // uses IQ8A (349W) makes the AC output ~17% low. Fall back to the catalog
       // default only when nothing is selected.
-      microModelId: topology === 'micro' ? ((selectedInverter as any)?.id ?? MICROINVERTERS[0]?.id) : undefined,
+      // Only a catalogue MICRO is ever recorded (resolveDesignMicro).
+      microModelId: topology === 'micro' ? designMicro.id : undefined,
       overrides: Object.keys(stringOverrides).length > 0 ? stringOverrides : undefined,
       deviceCount: stringAssignment.deviceCount,
       generatedAt: new Date().toISOString(),
     });
-  }, [stringAssignment, panels, topology, modulesPerString, rackingId, selectedPanel, selectedInverter, stringOverrides]);
+  }, [stringAssignment, panels, topology, modulesPerString, rackingId, selectedPanel, selectedInverter, stringOverrides, designMicro]);
 
   // Keep the latest electrical design in a ref for the beforeunload save path.
   const designElectricalRef = useRef<DesignElectrical | null>(null);
@@ -5420,7 +5429,8 @@ export default function DesignStudio({ project, onSave }: Props) {
               panelOpacity={panelOpacity}
               panelMeta={panelMeta}
               stringLegend={stringLegend}
-              paintMode={paintMode}
+              // Micro groups are the plan set's AC branches — not hand-paintable.
+              paintMode={paintMode && topology !== 'micro'}
               onPanelPaint={handlePanelPaint}
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
@@ -6465,6 +6475,16 @@ export default function DesignStudio({ project, onSave }: Props) {
                       <option value="optimizer">String + Optimizers</option>
                       <option value="micro">Microinverters</option>
                     </select>
+                    {topology === 'micro' ? (
+                      // Micro: no DC strings. Groups are AC branches sized by the
+                      // manufacturer's per-branch max — the same plan the SLD draws.
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[11px] text-slate-400">Micros / branch</span>
+                        <span className="text-[11px] text-slate-300 font-mono" title="Manufacturer maximum per 20 A branch — branches are balanced exactly as the plan set draws them">
+                          ≤ {stringAssignment.maxPerBranch ?? '—'} · {designMicro.manufacturer} {designMicro.model}
+                        </span>
+                      </div>
+                    ) : (
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[11px] text-slate-400">Modules / string</span>
                       <input
@@ -6473,6 +6493,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                         className="w-16 bg-slate-800 border border-slate-600 rounded text-xs text-slate-200 px-2 py-1 text-right"
                       />
                     </div>
+                    )}
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => setColorByString(v => !v)}
@@ -6494,15 +6515,16 @@ export default function DesignStudio({ project, onSave }: Props) {
                     ) : null}
                     {(colorByString || showEquipment) ? (
                       <p className="text-[10px] text-slate-500 mt-1">
-                        {stringAssignment.strings.length} string{stringAssignment.strings.length !== 1 ? 's' : ''}
+                        {stringAssignment.strings.length} {topology === 'micro' ? 'branch' : 'string'}{stringAssignment.strings.length !== 1 ? (topology === 'micro' ? 'es' : 's') : ''}
                         {stringAssignment.deviceType !== 'none'
                           ? ` · ${stringAssignment.deviceCount} ${stringAssignment.deviceType === 'micro' ? 'micros' : 'optimizers'}`
                           : ''}
                       </p>
                     ) : null}
 
-                    {/* v63: Manual string painting — click panels in 3D to assign them */}
-                    {panels.length > 0 ? (
+                    {/* v63: Manual string painting — click panels in 3D to assign them.
+                        Not for micro: its groups are the plan set's AC branches. */}
+                    {panels.length > 0 && topology !== 'micro' ? (
                       <div className="mt-2 pt-2 border-t border-slate-700/40">
                         <button
                           onClick={togglePaintMode}

@@ -60,13 +60,15 @@ function designRecordedInverterId(de: DesignElectrical): string | undefined {
  * 🚨 The Design Studio defaults its inverter pick to 'se-7600h' (SolarEdge), and
  * that id rode into micro designs as the "pinned" inverter — so an Enphase job
  * came out {type:'micro', inverterId:'se-7600h'}: no Enphase branch basis, a
- * combiner card listing SolarEdge optimizers (Ray, 2026-09-25). An id of the
- * wrong kind is not a pin for this topology; it is skipped.
+ * combiner card listing SolarEdge optimizers (Ray, 2026-09-25). An id KNOWN to
+ * be the wrong kind is not a pin for this topology; it is skipped. An id the
+ * catalogues do not know is left to the caller, as before.
  */
 function fitsTopology(id: string | undefined | null, topology: DesignElectrical['topology']): boolean {
   if (!id) return false;
-  const isMicro = MICROINVERTERS.some(m => m.id === id);
-  return topology === 'micro' ? isMicro : !isMicro;
+  return topology === 'micro'
+    ? !STRING_INVERTERS.some(s => s.id === id)
+    : !MICROINVERTERS.some(m => m.id === id);
 }
 
 function inferBrand(de: DesignElectrical): string {
@@ -451,4 +453,19 @@ export function designToPermitInverters(
   } catch {
     return null;
   }
+}
+
+/**
+ * The MICROINVERTER a design plans its AC branches with and records as
+ * `microModelId`: the studio's selected inverter when it IS a catalogue micro,
+ * otherwise the catalogue default. The studio's pick defaults to a SolarEdge
+ * string inverter, which must never become a micro design's model (Ray,
+ * 2026-09-25).
+ */
+export function resolveDesignMicro(
+  selected?: { id?: string | null } | null,
+): { id: string | undefined; model: string | null; manufacturer: string | null } {
+  const byId = selected?.id ? MICROINVERTERS.find(m => m.id === selected.id) : undefined;
+  const pick = byId ?? MICROINVERTERS[0];
+  return { id: pick?.id, model: pick?.model ?? null, manufacturer: pick?.manufacturer ?? null };
 }
