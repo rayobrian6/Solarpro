@@ -25,7 +25,8 @@ import {
   RacewayType,
   currentCarryingCountOf,
 } from './segment-schedule';
-import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C } from '@/lib/nec/ampacity';
+import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C,
+  necAmbientCorrection90C, necConductorCountAdjustment } from '@/lib/nec/ampacity';
 
 import { buildSegments } from './segment-builder';
 import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
@@ -594,31 +595,11 @@ const AWG_ORDER = [
 
 // NEC 310.15(B)(2) Table — Ambient Temperature Correction Factors (NEC 2023)
 // (was 310.15(B)(2)(a) in NEC 2020)
-function getTempDerating(ambientC: number): number {
-  if (ambientC <= 10) return 1.15;
-  if (ambientC <= 15) return 1.12;
-  if (ambientC <= 20) return 1.08;
-  if (ambientC <= 25) return 1.04;
-  if (ambientC <= 30) return 1.00;
-  if (ambientC <= 35) return 0.96;
-  if (ambientC <= 40) return 0.91;
-  if (ambientC <= 45) return 0.87;
-  if (ambientC <= 50) return 0.82;
-  if (ambientC <= 55) return 0.76;
-  if (ambientC <= 60) return 0.71;
-  return 0.58;
-}
-
-// NEC 310.15(C)(1) — Conduit fill derating (current-carrying conductors)
-function getConduitDerating(conductorCount: number): number {
-  if (conductorCount <= 3) return 1.00;
-  if (conductorCount <= 6) return 0.80;
-  if (conductorCount <= 9) return 0.70;
-  if (conductorCount <= 20) return 0.50;
-  if (conductorCount <= 30) return 0.45;
-  if (conductorCount <= 40) return 0.40;
-  return 0.35;
-}
+// 🚨 DELEGATED. There were THREE copies of each of these ladders, and
+// lib/segment-builder.ts's disagreed - 0.64 at 43 °C where these return 0.87, and
+// 0.41 for any ambient outside 26-50 °C. See lib/nec/ampacity.ts.
+const getTempDerating = necAmbientCorrection90C;
+const getConduitDerating = necConductorCountAdjustment;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §4 AMPACITY SURFACE (BAR closeout 2026-07-25) — EXPOSE the existing NEC table

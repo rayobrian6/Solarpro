@@ -19,7 +19,8 @@ import {
   selectSmallestConduit as necSelectSmallestConduit,
   conduitTotalAreaIn2 as necConduitTotalAreaIn2,
 } from '@/lib/nec/chapter9';
-import { NEC_310_16_COPPER_75C } from '@/lib/nec/ampacity';
+import { NEC_310_16_COPPER_75C,
+  necAmbientCorrection90C, necConductorCountAdjustment } from '@/lib/nec/ampacity';
 
 // 🚨 DERIVED FROM THE ONE NEC TABLE, not a third transcription of it.
 // This file's sizing loop uses the legacy un-prefixed aught spellings ('1/0 AWG'),
@@ -74,60 +75,32 @@ function nextStandardOCPD(requiredAmps: number): number {
   return nextStandardOcpd(requiredAmps);
 }
 
-function getTempDerating(
-  ambientTempC: number,
-  insulation: string
-): number {
-  // NEC 310.15(B)(2)(a) — THWN-2 rated 90°C
-  const maxTempC = 90;
+// 🚨 THESE TWO DISAGREED WITH THE REST OF THE ENGINE, AND BY A LOT.
+//
+// The ambient ladder here was a per-degree map covering only 26-50 °C. It returned
+// 0.64 at 43 °C where computed-system and segment-schedule return 0.87, and it fell
+// back to 0.41 for ANY ambient outside that window - so a 20 °C design, whose correct
+// 90 °C correction is 1.08, was derated to 0.41. That is a different column, not a
+// rounding difference. The conductor-count ladder stepped to 0.45 at 13-20 conductors
+// where the code table holds 0.50.
+//
+// Nothing shipped wrong: this file's sizing output (`segments`, `segmentIssues`,
+// `segmentInterconnectionPass`) leaves computeSystem and NO sheet, route, component or
+// test reads it. It was a loaded gun - a third conductor-sizing authority, one wiring
+// change from being believed - and the ampacity table it sits beside had exactly this
+// shape and DID reach the conductor schedule.
+//
+// The insulation guard is kept: an ambient above the conductor's own rating is a real
+// error and worth throwing on. Only the FACTOR is delegated.
+function getTempDerating(ambientTempC: number, _insulation: string): number {
+  const maxTempC = 90;   // NEC 310.15(B)(2)(a) - THWN-2
   if (ambientTempC > maxTempC) {
     throw new Error(`Ambient temp ${ambientTempC}°C exceeds conductor rating ${maxTempC}°C`);
   }
-  
-  // Derating factor from NEC 310.15(B)(1) table
-  const deratingTable: Record<number, number> = {
-    26: 1.00,
-    27: 1.00,
-    28: 1.00,
-    29: 1.00,
-    30: 1.00,
-    31: 1.00,
-    32: 0.96,
-    33: 0.94,
-    34: 0.91,
-    35: 0.88,
-    36: 0.85,
-    37: 0.82,
-    38: 0.80,
-    39: 0.76,
-    40: 0.73,
-    41: 0.70,
-    42: 0.67,
-    43: 0.64,
-    44: 0.61,
-    45: 0.58,
-    46: 0.55,
-    47: 0.51,
-    48: 0.47,
-    49: 0.44,
-    50: 0.41,
-  };
-  
-  const tempRounded = Math.floor(ambientTempC);
-  return deratingTable[tempRounded] ?? 0.41;
+  return necAmbientCorrection90C(ambientTempC);
 }
 
-function getConduitDerating(currentCarryingCount: number): number {
-  // NEC 310.15(B)(3)(a)
-  if (currentCarryingCount <= 3) return 1.0;
-  if (currentCarryingCount <= 6) return 0.8;
-  if (currentCarryingCount <= 9) return 0.7;
-  if (currentCarryingCount <= 12) return 0.5;
-  if (currentCarryingCount <= 20) return 0.45;
-  if (currentCarryingCount <= 30) return 0.4;
-  if (currentCarryingCount <= 40) return 0.35;
-  return 0.3;
-}
+const getConduitDerating = necConductorCountAdjustment;
 
 function autoSizeConductor(
   requiredAmpacity: number,

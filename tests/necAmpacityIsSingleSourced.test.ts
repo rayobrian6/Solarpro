@@ -24,6 +24,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C, NEC_AWG_ORDER, necAmpacity,
+  necAmbientCorrection90C, necConductorCountAdjustment,
 } from '@/lib/nec/ampacity';
 import { ampacityTable75C, ampacityTable90C } from '@/lib/computed-system';
 
@@ -131,5 +132,80 @@ describe('🚨 the conductor the sizer picks, on the row that disagreed', () => 
     // The correction must not simply upsize everything: below the window the answer
     // is unchanged, which is what makes the case above specific.
     expect(NEC_310_16_COPPER_90C['#1 AWG'] * 0.87).toBeGreaterThan(120);
+  });
+});
+
+describe('🚨 the derating ladders, which had THREE copies and one dissenter', () => {
+  it('the ambient correction is the 90 °C column across its whole domain', () => {
+    // Spot-checks at the boundaries the code table actually steps on. The dissenting
+    // copy in lib/segment-builder.ts returned 0.64 at 43 °C and 0.41 at 20 °C.
+    const cases: Array<[number, number]> = [
+      [-10, 1.15], [10, 1.15], [15, 1.12], [20, 1.08], [25, 1.04], [30, 1.00],
+      [35, 0.96], [40, 0.91], [43, 0.87], [45, 0.87], [50, 0.82], [55, 0.76],
+      [60, 0.71],
+      // 🚨 THE TOP OF THE TABLE. Two of the four copies stopped at 60 and returned a
+      // flat 0.58 above it, which is LESS conservative than NEC from about 70 °C up —
+      // on the hot-rooftop end, where a PV conductor actually lives. The first draft of
+      // this very case asserted 0.58 at 75 °C, because it was written against the
+      // behaviour rather than against the table.
+      [65, 0.65], [70, 0.58], [75, 0.50], [80, 0.41], [85, 0.29], [95, 0.29],
+    ];
+    for (const [c, f] of cases) {
+      expect(necAmbientCorrection90C(c), `${c} °C`).toBe(f);
+    }
+  });
+
+  it('🚨 43 °C is 0.87 and 20 °C is 1.08 — the two the dissenter got wrong', () => {
+    // Named separately because these are the values that made the disagreement
+    // material rather than cosmetic: a third and a two-thirds error respectively.
+    expect(necAmbientCorrection90C(43)).toBe(0.87);
+    expect(necAmbientCorrection90C(43)).not.toBe(0.64);
+    expect(necAmbientCorrection90C(20)).toBe(1.08);
+    expect(necAmbientCorrection90C(20)).not.toBe(0.41);
+  });
+
+  it('the count adjustment holds 0.50 through TWENTY conductors', () => {
+    // The dissenter stepped to 0.45 at 13. Between 13 and 20 the two answers differ by
+    // a tenth of the conductor's ampacity.
+    for (const n of [4, 6]) expect(necConductorCountAdjustment(n), `${n}`).toBe(0.80);
+    for (const n of [7, 9]) expect(necConductorCountAdjustment(n), `${n}`).toBe(0.70);
+    for (const n of [10, 13, 20]) expect(necConductorCountAdjustment(n), `${n}`).toBe(0.50);
+    expect(necConductorCountAdjustment(3)).toBe(1.00);
+    expect(necConductorCountAdjustment(21)).toBe(0.45);
+    expect(necConductorCountAdjustment(41)).toBe(0.35);
+  });
+
+  it('both are monotonic — a hotter or more crowded raceway never derates LESS', () => {
+    // The property that makes a transcription slip visible without knowing the table:
+    // the dissenter's `?? 0.41` fallback broke it at both ends of its window.
+    for (let c = -20; c < 80; c++) {
+      expect(necAmbientCorrection90C(c + 1), `${c} → ${c + 1} °C`)
+        .toBeLessThanOrEqual(necAmbientCorrection90C(c));
+    }
+    for (let n = 1; n < 60; n++) {
+      expect(necConductorCountAdjustment(n + 1), `${n} → ${n + 1} CCC`)
+        .toBeLessThanOrEqual(necConductorCountAdjustment(n));
+    }
+  });
+
+  it('🚨 no module re-declares either ladder', () => {
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) { if (name !== 'node_modules') walk(p); continue; }
+        if (!name.endsWith('.ts') && !name.endsWith('.tsx')) continue;
+        if (p.endsWith(join('lib', 'nec', 'ampacity.ts'))) continue;
+        const src = readFileSync(p, 'utf8');
+        // The signature of a re-typed ambient ladder: two adjacent steps as literals.
+        if (/<=\s*45\)\s*return\s*0\.87/.test(src) && /<=\s*40\)\s*return\s*0\.91/.test(src)) {
+          offenders.push(p.slice(ROOT.length + 1));
+        }
+      }
+    };
+    walk(join(ROOT, 'lib'));
+    expect(offenders,
+      'an NEC derating ladder has been re-declared outside lib/nec/ampacity.ts — that is how one of the three came to disagree with the other two')
+      .toEqual([]);
   });
 });

@@ -88,6 +88,68 @@ export const NEC_310_16_COPPER_90C: Record<string, number> = {
 };
 
 /**
+ * NEC 310.15(B)(1) — AMBIENT TEMPERATURE CORRECTION, 90 °C column.
+ *
+ * 🚨 THERE WERE THREE OF THESE, AND ONE DISAGREED WITH THE OTHER TWO BY A THIRD.
+ * `lib/computed-system.ts` and `lib/segment-schedule.ts` carried identical ladders;
+ * `lib/segment-builder.ts` carried a per-degree map covering only 26–50 °C, returning
+ * 0.64 at 43 °C where the others return 0.87, and falling back to 0.41 for ANY ambient
+ * outside that window — so a 20 °C design, whose correct 90 °C factor is 1.08, got
+ * 0.41. That is not a rounding difference; it is a different column.
+ *
+ * segment-builder's sizing output is consumed by nothing today (`segments`,
+ * `segmentIssues` and `segmentInterconnectionPass` leave `computeSystem` and no sheet,
+ * route, component or test reads them), so nothing shipped wrong because of it. It was
+ * a loaded gun: a third conductor-sizing authority, one wiring change from being
+ * believed. The ampacity table two functions up had exactly this shape and DID reach
+ * the conductor schedule.
+ */
+export function necAmbientCorrection90C(ambientC: number): number {
+  if (ambientC <= 10) return 1.15;
+  if (ambientC <= 15) return 1.12;
+  if (ambientC <= 20) return 1.08;
+  if (ambientC <= 25) return 1.04;
+  if (ambientC <= 30) return 1.00;
+  if (ambientC <= 35) return 0.96;
+  if (ambientC <= 40) return 0.91;
+  if (ambientC <= 45) return 0.87;
+  if (ambientC <= 50) return 0.82;
+  if (ambientC <= 55) return 0.76;
+  if (ambientC <= 60) return 0.71;
+  // 🚨 THE TOP OF THE TABLE, WHICH TWO OF THE FOUR COPIES DID NOT HAVE.
+  //
+  // computed-system's and segment-schedule's ladders both stopped at 60 °C and returned
+  // a flat 0.58 above it. The real 90 °C column keeps falling: 0.65, 0.58, 0.50, 0.41,
+  // 0.29. So at 78 °C they applied 0.58 where the code requires 0.41 — LESS conservative
+  // than NEC, on the hot-rooftop end, which is exactly where a PV conductor lives.
+  // `lib/manufacturer-specs.ts` had these rows and was right here; it was missing the
+  // BELOW-30 rows instead and returned 1.00 where the table allows up to 1.15. Neither
+  // copy was the table. This is.
+  if (ambientC <= 65) return 0.65;
+  if (ambientC <= 70) return 0.58;
+  if (ambientC <= 75) return 0.50;
+  if (ambientC <= 80) return 0.41;
+  return 0.29;
+}
+
+/**
+ * NEC 310.15(C)(1) — ADJUSTMENT FOR MORE THAN THREE CURRENT-CARRYING CONDUCTORS.
+ *
+ * Also had three copies, and segment-builder's also disagreed: it stepped to 0.50 at
+ * ≤12 and 0.45 at ≤20, where the code table holds 0.50 through 20. Between 13 and 20
+ * conductors the two answers differ by a tenth of the conductor's ampacity.
+ */
+export function necConductorCountAdjustment(currentCarryingCount: number): number {
+  if (currentCarryingCount <= 3) return 1.00;
+  if (currentCarryingCount <= 6) return 0.80;
+  if (currentCarryingCount <= 9) return 0.70;
+  if (currentCarryingCount <= 20) return 0.50;
+  if (currentCarryingCount <= 30) return 0.45;
+  if (currentCarryingCount <= 40) return 0.40;
+  return 0.35;
+}
+
+/**
  * Look a gauge up, tolerating the `1/0 AWG` spelling some callers use for the
  * aught sizes. Returns `undefined` for a gauge outside the table rather than 0 —
  * a 0 ampacity silently fails every comparison it takes part in.

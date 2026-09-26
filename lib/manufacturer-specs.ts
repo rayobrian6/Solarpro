@@ -9,6 +9,7 @@ import {
   normalizeConduitType as necNormalizeConduitType,
   conductorAreaIn2 as necConductorAreaIn2,
 } from '@/lib/nec/chapter9';
+import { necAmbientCorrection90C, necConductorCountAdjustment } from '@/lib/nec/ampacity';
 import {
   SOLAR_PANELS,
   STRING_INVERTERS,
@@ -130,31 +131,19 @@ export function nextStandardOCPD(amps: number): number {
 // ─── Temperature Derating (NEC Table 310.15(B)(2)(a)) ────────────────────────
 // Based on 90°C rated conductors, 30°C ambient base
 
-export function getTempDeratingFactor(ambientTempC: number): number {
-  if (ambientTempC <= 30) return 1.00;
-  if (ambientTempC <= 35) return 0.96;
-  if (ambientTempC <= 40) return 0.91;
-  if (ambientTempC <= 45) return 0.87;
-  if (ambientTempC <= 50) return 0.82;
-  if (ambientTempC <= 55) return 0.76;
-  if (ambientTempC <= 60) return 0.71;
-  if (ambientTempC <= 65) return 0.65;
-  if (ambientTempC <= 70) return 0.58;
-  if (ambientTempC <= 75) return 0.50;
-  return 0.41;
-}
+// 🚨 DELEGATED - this was the FOURTH copy of NEC 310.15(B)(1), and the four
+// disagreed in two different places. This one had the rows ABOVE 60 °C, which
+// computed-system's and segment-schedule's did not (they returned a flat 0.58 where
+// the code requires 0.41 at 76-80 °C - less conservative than NEC on the hot-rooftop
+// end). It was missing the rows BELOW 30 °C instead, returning 1.00 where the table
+// allows up to 1.15. Neither was the table; lib/nec/ampacity.ts is.
+export const getTempDeratingFactor = necAmbientCorrection90C;
 
 // ─── Conduit Fill Derating (NEC 310.15(C)(1)) ────────────────────────────────
 
-export function getConduitFillDeratingFactor(currentCarryingConductors: number): number {
-  if (currentCarryingConductors <= 3) return 1.00;
-  if (currentCarryingConductors <= 6) return 0.80;
-  if (currentCarryingConductors <= 9) return 0.70;
-  if (currentCarryingConductors <= 20) return 0.50;
-  if (currentCarryingConductors <= 30) return 0.45;
-  if (currentCarryingConductors <= 40) return 0.40;
-  return 0.35;
-}
+// Delegated for the same reason - see above. This copy happened to AGREE with the
+// canonical ladder; segment-builder's did not.
+export const getConduitFillDeratingFactor = necConductorCountAdjustment;
 
 // ─── Grounding Conductor Sizing (NEC Table 250.122) ──────────────────────────
 

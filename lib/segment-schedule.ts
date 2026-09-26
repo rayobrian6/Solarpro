@@ -15,7 +15,8 @@
 // ============================================================
 
 import { nextStandardOcpd } from './electrical/stdSizes';
-import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C } from '@/lib/nec/ampacity';
+import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C,
+  necAmbientCorrection90C, necConductorCountAdjustment } from '@/lib/nec/ampacity';
 import {
   normalizeConduitType as necNormalizeConduitType,
   conductorAreaIn2 as necConductorAreaIn2,
@@ -223,31 +224,10 @@ const CONDUIT_SIZES = ['1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"',
 
 // NEC 310.15(B)(2) Table — Ambient Temperature Correction Factors (NEC 2023)
 // (was 310.15(B)(2)(a) in NEC 2020)
-function getTempDerating(ambientC: number): number {
-  if (ambientC <= 10) return 1.15;
-  if (ambientC <= 15) return 1.12;
-  if (ambientC <= 20) return 1.08;
-  if (ambientC <= 25) return 1.04;
-  if (ambientC <= 30) return 1.00;
-  if (ambientC <= 35) return 0.96;
-  if (ambientC <= 40) return 0.91;
-  if (ambientC <= 45) return 0.87;
-  if (ambientC <= 50) return 0.82;
-  if (ambientC <= 55) return 0.76;
-  if (ambientC <= 60) return 0.71;
-  return 0.58;
-}
-
-// NEC 310.15(C)(1) — Conduit fill derating
-function getConduitDerating(currentCarryingCount: number): number {
-  if (currentCarryingCount <= 3) return 1.00;
-  if (currentCarryingCount <= 6) return 0.80;
-  if (currentCarryingCount <= 9) return 0.70;
-  if (currentCarryingCount <= 20) return 0.50;
-  if (currentCarryingCount <= 30) return 0.45;
-  if (currentCarryingCount <= 40) return 0.40;
-  return 0.35;
-}
+// 🚨 DELEGATED - see lib/nec/ampacity.ts. These were byte-identical to
+// computed-system's, and a THIRD copy in lib/segment-builder.ts disagreed with both.
+const getTempDerating = necAmbientCorrection90C;
+const getConduitDerating = necConductorCountAdjustment;
 
 // NEC 240.6 — Standard OCPD sizes (feeder/service sizing). P0-5c: delegates to
 // lib/electrical/stdSizes.ts — the old local copy CLAMPED anything above 400 A
