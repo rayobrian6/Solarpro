@@ -90,8 +90,18 @@ describe('🚨 a disposition-only change schedules a save', () => {
     // A ref in a dependency array is stable for the component's whole life, so
     // the effect it is supposed to trigger never runs again. This is the shape
     // that escaped the case above.
+    //
+    // 🚨 THE WORD BOUNDARY IS A CHARACTER CLASS, NOT AN ESCAPE, AND THAT IS
+    // DELIBERATE. This line shipped with a literal BACKSPACE byte (0x08) where
+    // `\b` was meant — the regex was authored through a Python string, where a
+    // lone backslash-b IS backspace. The matcher could then never match, so the
+    // assertion was vacuously true: a guard against a dependency that can never
+    // fire, which itself could never fire. `tests/sourceControlBytes.test.ts`
+    // caught it, and it was the only control byte in 2,410 scanned files.
+    // Spelling the boundary out removes the escape that can be mangled in
+    // transit at all.
     expect(autosaveDeps(), 'the autosave depends on a ref, which can never change identity')
-      .not.toMatch(/site\.\w*Ref/);
+      .not.toMatch(/site\.[A-Za-z0-9_$]*Ref(?![A-Za-z0-9_$])/);
   });
 
   it('the ledger is still there too — this is an addition, not a swap', () => {
