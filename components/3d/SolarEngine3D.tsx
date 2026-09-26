@@ -316,6 +316,15 @@ import {
 } from './tree';
 const TREE_CANOPY_RADIUS_M = _TREE_CANOPY_R_M;
 
+// The cursor-following module preview — Aurora / OpenSolar parity, and the top
+// item on the competitor-UX ledger. Imported from the file rather than the
+// `./panel` barrel, which also re-exports RightPanel.
+//
+// 🚨 IT DRAWS A POSE, IT DOES NOT COMPUTE ONE. `resolveGhostModulePose` composes
+// the COMMIT's snapper with the RENDERER's orienter and hands the answer over.
+// See the header of components/3d/panel/ModuleGhost.tsx.
+import { ModuleGhost, type GhostModulePose } from './panel/ModuleGhost';
+
 // v66 (flat trace): DEFAULT eave height for a footprint-built roof face, metres.
 // ~10 ft — a single-storey eave. A hand trace carries no measured height, and
 // this value does NOT affect pitch, azimuth or area (see
@@ -448,12 +457,121 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
+/**
+ * HOW A MODULE LIES — the result of the one derivation, shared by the renderer
+ * and by the cursor ghost.
+ *
+ * 🚨 STRING DISCRIMINANTS, NOT A BOOLEAN OR A NULL. `strict: false` is set in
+ * this project's tsconfig, so a boolean discriminated union does NOT narrow —
+ * and the two failures are not the same failure: one is a non-finite
+ * heading/pitch, the other a quaternion that came back unusable. The renderer
+ * logs them separately (it always did) and the ghost simply hides for either, so
+ * the result has to be able to say which.
+ */
+type ModuleEntityPose =
+  | { kind: 'ok'; orientation: any; pw: number; ph: number; dimensions: any }
+  | { kind: 'bad-hpr'; heading: number; pitch: number }
+  | { kind: 'bad-quaternion' };
+
+/**
+ * WHERE A MODULE GOES AND HOW IT LIES, for one click or one cursor position.
+ *
+ * A named alias rather than an inline return type, deliberately: a multi-line
+ * object annotation on the declaration contains a closing brace at the function's
+ * own indent, which is what every source-scan guard in tests/ uses to find the
+ * END of a function body. An inline type would silently truncate those guards to
+ * the signature — and a guard that reads only a signature passes for the wrong
+ * reason. That exact failure cost a red test here.
+ */
+interface RoofModulePose {
+  /** Module centre — projected onto the face and lifted by the mount stack when
+   *  the click landed on a known roof face. */
+  lat: number;
+  lng: number;
+  height: number;
+  tilt: number;
+  azimuth: number;
+  heading: number;
+  pitch: number;
+  roll: number;
+  /** Absent on the off-face branch, on purpose — see the note there. */
+  orientation?: PanelOrientation;
+  /** The face the pose came from, or null when the pick landed on a surface the
+   *  design does not own. */
+  planeId: string | null;
+  /** That face's in-plane axis and normal, for stamping the panel's ECEF frame. */
+  ecef: { u: any; n: any } | null;
+  /** The RAW picked point, unprojected. The next-slot ghost has always been
+   *  seeded from this rather than from the projected centre. */
+  pick: { lat: number; lng: number; height: number };
+}
+
 // 🚨 'vertex' IS ITS OWN MODE AND NOT PART OF 'select'. Select mode already
 // owns click-to-select, the panel-array grab, the rotate knob and the block
 // handle on ONE LEFT_DOWN. Adding a fifth consumer to that press is how
 // gestures start stealing each other's clicks, and the corner dots would also
 // have to be drawn permanently in the mode people spend all their time in.
 export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin' | 'block' | 'roof_gable' | 'roof_hip' | 'tree' | 'measurements' | 'ruler' | 'vertex';
+
+/**
+ * WHOSE CLICK IS IT — the module's, or the site object's?
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * 🚨 THE DEFECT THIS EXISTS FOR, MEASURED
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * `pickObstructionAtScreen` ran FIRST and unconditionally in the only path that
+ * picks a module for selection, and it wins in two different ways:
+ *
+ *   • its GPU branch walks up to 12 drill hits for an `[OBS] ` name and returns
+ *     the FIRST it finds, never asking whether something is in FRONT of it — so
+ *     a tree behind a module takes the module's click;
+ *   • its analytic fallback — the branch that is live under software WebGL and on
+ *     any machine without a usable GPU — is a BOUNDING SPHERE of radius
+ *     `max(max(w,d)/2, h/2)`. For the shipped Tree preset (6.0 x 6.0 x 8.0 m)
+ *     that is 4.0 m. Every click within four metres of a trunk, in any
+ *     direction, straight through a module, selected the tree.
+ *
+ * And the winning branch calls `clearPanelSelection()`, so modules near a tree
+ * were unselectable, unmovable and undeletable — exactly where an installer most
+ * needs to nudge them.
+ *
+ * That is the same shape as the `[BUILD3D-ROOF]` defect already fixed one screen
+ * above it in `handleSelectClick` ("a panel in front of the roof wins, in both
+ * modes"), and it gets the same resolution.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE RULE
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * 🚨 PRIORITY, NOT DELETION. Nothing is removed from the pick set. A site object
+ * stays pickable: with no module under the cursor it still answers, so clicking
+ * bare canopy still selects the tree. What changed is only who wins when both
+ * answer — and that is decided by the ARMED TOOL, so an object is never
+ * unreachable from the tool that owns it.
+ *
+ * 🚨 STRING ANSWERS, NOT A BOOLEAN. `strict: false` here, so a boolean union does
+ * not narrow, and `true` at a call site would not say which way round it is.
+ *
+ * WHAT IS AND IS NOT LIVE TODAY, stated rather than implied: the only mode that
+ * currently reaches a selection pick is `'select'`, so the live effect of this is
+ * the module-first answer. `'site-object-first'` is the written contract for the
+ * site-object tools — today they only PLACE, and if either ever gains
+ * click-to-select it inherits the correct priority instead of rediscovering it.
+ */
+export type ClickTargetPriority = 'module-first' | 'site-object-first';
+
+export function clickTargetPriority(armed: PlacementMode): ClickTargetPriority {
+  // The object's own tool is armed, so the object wins outright — even with a
+  // module in front of it. That is how a tree standing inside an array stays
+  // resizable and deletable.
+  if (armed === 'tree' || armed === 'obstruction') return 'site-object-first';
+  // Everything else, including any tool added later that forgets to declare
+  // itself. Modules are the thing there are hundreds of, and a site object is
+  // still reachable by clicking a part of it no module covers — so this is the
+  // safe default, not merely the common one.
+  return 'module-first';
+}
 /**
  * SINGLE-KEY TOOL SHORTCUTS — one map, read by the keyboard AND by the buttons.
  *
@@ -6884,6 +7002,82 @@ function SolarEngine3D({
    * @param panel  - PlacedPanel data object with position, orientation, and type info
    * @returns The created Cesium Entity, or undefined if validation failed
    */
+  /**
+   * THE ORIENTER — how a module lies, and how big its box is. ONE derivation.
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * 🚨 EXTRACTED VERBATIM FROM `addPanelEntity`, BEHAVIOUR UNCHANGED.
+   * ─────────────────────────────────────────────────────────────────────────
+   *
+   * It was inline in the renderer, which was fine while the renderer was the
+   * only thing that needed it. The cursor ghost needs the same answer BEFORE
+   * anything is committed, and a preview with its own derivation is a second
+   * authority on how a module lies — the exact mistake `showGhostPanel` makes
+   * with its own flat-earth step, and the exact mistake that made the tree
+   * cursor 36% of the size of the tree it was previewing.
+   *
+   * So the renderer and the ghost both call this, and the ghost draws precisely
+   * what the commit will draw. Nothing here is new: the frameQuat branch, the
+   * stored-HPR preference, the azimuth/tilt fallback, the ±(π/2 + 0.1) sanity
+   * bound and both refusals are the original code. The refusals are RETURNED
+   * rather than logged because the two callers say different things about a
+   * failure — the renderer refuses to draw and says why, the ghost just hides.
+   *
+   * Cesium HeadingPitchRoll convention at position P (ENU local frame):
+   *   - heading: yaw around local Up (0=North, π/2=East, clockwise)
+   *   - pitch:   tilt from horizontal (0=flat, negative = tilted back)
+   *   - roll:    0
+   * For a box entity with dims (ph, pw, thickness):
+   *   default pose: y=North (pw direction), x=East (ph direction), z=Up.
+   * We need the panel face normal to be the roof plane normal, i.e.
+   *   heading = compass bearing of the plane u-axis (along-ridge),
+   *   pitch   = -(tilt of the plane from horizontal), roll = 0 —
+   * which is exactly what planeHPR() computes and stores on the panel.
+   */
+  function moduleEntityPose(C: any, panel: PlacedPanel, pos: any): ModuleEntityPose {
+    const tiltDeg = panel.tilt    ?? 0;
+    const azDeg   = panel.azimuth ?? 180;
+
+    let orientation: any;
+    const pn = panel as any;
+    if (pn.frameQuat && isFinite(pn.frameQuat.x) && isFinite(pn.frameQuat.w)) {
+      // v62: panel was in-plane-rotated by the grab tool — render its explicit
+      // world orientation verbatim (HPR can't express in-plane yaw about the normal).
+      orientation = new C.Quaternion(pn.frameQuat.x, pn.frameQuat.y, pn.frameQuat.z, pn.frameQuat.w);
+    } else {
+      // Use stored heading/pitch from planeHPR() (derived from ECEF frame, per-plane)
+      let heading: number;
+      let pitchRad: number;
+      if (isFinite(panel.heading ?? NaN) && isFinite(panel.pitch ?? NaN) &&
+          Math.abs(panel.pitch ?? 0) < Math.PI / 2 + 0.1) {
+        heading  = panel.heading!;
+        pitchRad = panel.pitch!;
+      } else {
+        // Fallback: derive from azimuth/tilt scalars
+        heading  = headingFromAzimuth(azDeg);
+        pitchRad = -tiltDeg * Math.PI / 180;
+      }
+      const rollRad = 0;
+      if (!isFinite(heading) || !isFinite(pitchRad)) {
+        return { kind: 'bad-hpr', heading, pitch: pitchRad };
+      }
+      const hpr = new C.HeadingPitchRoll(heading, pitchRad, rollRad);
+      orientation = C.Transforms.headingPitchRollQuaternion(pos, hpr);
+    }
+
+    if (!orientation || !isFinite(orientation.x) || !isFinite(orientation.y) ||
+        !isFinite(orientation.z) || !isFinite(orientation.w)) {
+      return { kind: 'bad-quaternion' };
+    }
+
+    const orient: PanelOrientation = pn.orientation ?? panelOrientationRef.current;
+    const { pw, ph } = panelDims(orient);
+    // (ph, pw, thickness) — the renderer's own axis order, packed once here so
+    // the ghost cannot get it the other way round. `PT` is the same 40 mm the
+    // frame box has always used.
+    return { kind: 'ok', orientation, pw, ph, dimensions: new C.Cartesian3(ph, pw, PT) };
+  }
+
   // v48.7: Optional skipGrid override — callers doing batch adds pass this in
   // so all panels in the batch get consistent grid-line rendering.
   // When undefined, falls back to checking panelMapRef size (entities already rendered).
@@ -6946,60 +7140,26 @@ function SolarEngine3D({
         addLog('ERROR', `Panel ${panel.id} ECEF magnitude=${mag.toFixed(0)} out of range (expected 6.3M-6.5M)`); return;
       }
 
-      let orientation: any;
-
-      // v47.144: Panel orientation via HeadingPitchRoll derived from ECEF frame.
+      // 🚨 ONE DERIVATION OF HOW A MODULE LIES, AND THE GHOST USES IT TOO.
       //
-      // Cesium HeadingPitchRoll convention at position P (ENU local frame):
-      //   - heading: yaw around local Up (0=North, π/2=East, clockwise)
-      //   - pitch:   tilt from horizontal (0=flat, negative = tilted back/nose-down)
-      //   - roll:    0
+      // The pose used to be built inline here. That was fine while the renderer
+      // was the only thing that needed it — and it stopped being fine the moment
+      // a preview had to show the module BEFORE it is committed, because a
+      // preview with its own derivation is a second answer to "how will this
+      // module lie", and the operator aims with whichever one is on screen. See
+      // `moduleEntityPose`, and components/3d/panel/ModuleGhost.tsx.
       //
-      // For a box entity with dims (ph, pw, thickness):
-      //   default pose: y=North (pw direction), x=East (ph direction), z=Up (thickness)
-      //
-      // We need: panel face normal = roof plane normal
-      //   → heading = compass bearing of plane u-axis (along-ridge)
-      //   → pitch   = -(tilt of plane from horizontal)
-      //   → roll    = 0
-      //
-      // This is EXACTLY what planeHPR() computes. heading/pitch are stored on panel.
-      // We use them directly — no matrix needed, no additional rotation.
-      //
-      // Step 3 (spec): quaternion.setFromUnitVectors((0,0,1), N) is equivalent to
-      // HeadingPitchRoll(heading, -tilt, 0) when heading and tilt are correctly derived
-      // from the ECEF normal. planeHPR() does exactly this derivation.
-
-      const pn = panel as any;
-      if (pn.frameQuat && isFinite(pn.frameQuat.x) && isFinite(pn.frameQuat.w)) {
-        // v62: panel was in-plane-rotated by the grab tool — render its explicit
-        // world orientation verbatim (HPR can't express in-plane yaw about the normal).
-        orientation = new C.Quaternion(pn.frameQuat.x, pn.frameQuat.y, pn.frameQuat.z, pn.frameQuat.w);
-      } else {
-        // Use stored heading/pitch from planeHPR() (derived from ECEF frame, per-plane)
-        let heading: number;
-        let pitchRad: number;
-        if (isFinite(panel.heading ?? NaN) && isFinite(panel.pitch ?? NaN) &&
-            Math.abs(panel.pitch ?? 0) < Math.PI / 2 + 0.1) {
-          heading  = panel.heading!;
-          pitchRad = panel.pitch!;
-        } else {
-          // Fallback: derive from azimuth/tilt scalars
-          heading  = headingFromAzimuth(azDeg);
-          pitchRad = -tiltDeg * Math.PI / 180;
-        }
-        const rollRad = 0;
-        if (!isFinite(heading) || !isFinite(pitchRad)) {
-          addLog('ERROR', `Panel ${panel.id} non-finite HPR heading=${heading} pitch=${pitchRad}`); return;
-        }
-        const hpr = new C.HeadingPitchRoll(heading, pitchRad, rollRad);
-        orientation = C.Transforms.headingPitchRollQuaternion(pos, hpr);
+      // Both failure messages below are the originals, in the original order:
+      // the extraction returns which one happened rather than logging, because
+      // the ghost's answer to either is simply to hide.
+      const posed = moduleEntityPose(C, panel, pos);
+      if (posed.kind === 'bad-hpr') {
+        addLog('ERROR', `Panel ${panel.id} non-finite HPR heading=${posed.heading} pitch=${posed.pitch}`); return;
       }
-
-      if (!orientation || !isFinite(orientation.x) || !isFinite(orientation.y) ||
-          !isFinite(orientation.z) || !isFinite(orientation.w)) {
+      if (posed.kind === 'bad-quaternion') {
         addLog('ERROR', `Panel ${panel.id} invalid quaternion`); return;
       }
+      const orientation = posed.orientation;
 
       // v47.147: Alignment guard — verify panel face normal matches stored pitch.
       // dot(panelNormal, Up_ENU) = cos(pitch) by construction.
@@ -7017,15 +7177,17 @@ function SolarEngine3D({
       }
 
       const sType  = (panel.systemType ?? 'roof') as SystemType;
-      const orient: PanelOrientation = (panel as any).orientation ?? panelOrientationRef.current;
-      const { pw, ph } = panelDims(orient);
+      // From the shared orienter — the same footprint the cursor ghost draws.
+      const { pw, ph } = posed;
 
       // ── v47.157: Realistic layered panel rendering ────────────────────────────
       // Layer 1 (bottom): Solar cell body — dark navy/black, nearly opaque
       // Layer 2 (top):    Glass sheen — very thin semi-transparent pale blue overlay
       //                   Gives the characteristic reflective glass look of real panels
       // Frame:            Silver-white outline on both layers for aluminum rail effect
-      const PANEL_THICKNESS  = 0.040; // 40mm total panel depth
+      // The frame's 40 mm depth now arrives as `posed.dimensions`, packed by the
+      // shared orienter from the module-scope `PT` — so the ghost cannot draw a
+      // differently-shaped module, and the box's axis order has one author.
       const GLASS_OFFSET     = 0.022; // glass sits 22mm above cell body center
 
       let cellMaterial: any;
@@ -7091,7 +7253,7 @@ function SolarEngine3D({
           // z-fight and flicker (badly visible once highlighted). Seam-sealing on
           // rough coastal mesh will be done with a single continuous backing surface
           // per array instead (no overlap), as a follow-up.
-          dimensions:               new C.Cartesian3(ph, pw, PANEL_THICKNESS),
+          dimensions:               posed.dimensions,
           material:                 cellMaterial,
           outline:                  true,
           outlineColor:             frameOutlineCol,
@@ -8830,58 +8992,228 @@ function SolarEngine3D({
   }
 
   // ── Roof placement ─────────────────────────────────────────────────────────
+  /**
+   * THE SNAPPER — where does the module go, and how does it lie?
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * 🚨 EXTRACTED VERBATIM FROM `handleRoofClick`, BEHAVIOUR UNCHANGED, SO THE
+   *    CURSOR GHOST AND THE COMMIT CANNOT DISAGREE.
+   * ─────────────────────────────────────────────────────────────────────────
+   *
+   * Aurora and OpenSolar float a module under the pointer, already lying on the
+   * face beneath it. SolarPro made you place -> look -> undo. The preview that
+   * kills that loop is only worth having if it is TRUE, and the only way to
+   * guarantee that is for the preview to ask this function — the one the click
+   * asks — rather than work it out again.
+   *
+   * There are two in-repo proofs that a preview with its own maths lies:
+   * `showGhostPanel` (its own flat-earth step, and it once added the mount stack
+   * twice so the ghost sat a stack above the module) and the tree cursor (a
+   * constant canopy against a sized tree, 36% of the real footprint).
+   *
+   * Every line below is the original. It resolves the surface, prefers a
+   * canonical roof face when the click is on one — projecting onto the plane and
+   * lifting by the mount stack along the plane normal, inheriting the frame from
+   * a module already on that face — and otherwise falls back to the per-click
+   * surface normal. It writes nothing: no entity, no state, no status line. That
+   * is what makes it callable 60 times a second from a hover.
+   *
+   * `pick` carries the RAW picked point, unprojected, because the next-slot
+   * ghost has always been seeded from that rather than from the plane-projected
+   * centre, and this extraction does not change it.
+   */
+  function resolveRoofModulePose(viewer: any, C: any, screenPos: any): RoofModulePose | null {
+    const hit = getWorldPosition(viewer, C, screenPos);
+    if (!hit) return null;
+    const cartesian = hit.cartesian;
+    const pickMethod = hit.pickMethod;
+
+    const carto = C.Cartographic.fromCartesian(cartesian);
+    if (!carto) return null;
+    const pLat = C.Math.toDegrees(carto.latitude);
+    const pLng = C.Math.toDegrees(carto.longitude);
+    const pHeight = carto.height;
+    if (!isValidCoord(pLat, pLng, pHeight)) return null;
+    const pick = { lat: pLat, lng: pLng, height: pHeight };
+
+    const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    const offM = moduleStackHeightM(mountingSystemIdRef.current);
+    // v62: if the click lands on a marked/CAD plane, make the panel FIRST-CLASS —
+    // stamp that plane's ECEF frame + planeId so it rotates and renders rails (the
+    // bare Roof tool used to place "stale" panels with no frame). Falls back to the
+    // per-click surface normal when the click isn't on a known plane.
+    const rp = planeRenderableAtClick(C, cartesian, groundElev);
+    if (rp) {
+      // project the click onto the plane, then lift along the normal by the mount offset
+      const d0 = C.Cartesian3.dot(C.Cartesian3.subtract(cartesian, rp.origin, new C.Cartesian3()), rp.n);
+      const onPlane = C.Cartesian3.subtract(cartesian, C.Cartesian3.multiplyByScalar(rp.n, d0, new C.Cartesian3()), new C.Cartesian3());
+      const pos = C.Cartesian3.add(onPlane, C.Cartesian3.multiplyByScalar(rp.n, offM, new C.Cartesian3()), new C.Cartesian3());
+      const pc = C.Cartographic.fromCartesian(pos);
+      if (!pc) return null;
+      const existing: any = panelsRef.current.find(p => (p as any).planeId === rp.id && isFinite((p as any).ecefNx));
+      const prop: any = (roofPlanesRef.current ?? []).find(p => p.id === rp.id);
+      const heading  = existing ? existing.heading : headingFromAzimuth(prop?.azimuth ?? azimuthRef.current);
+      const pitchRad = existing ? existing.pitch   : -((prop?.pitch ?? 0) * Math.PI / 180);
+      const tiltP    = existing ? (existing.tilt ?? 0)    : (prop?.pitch ?? 0);
+      const azP      = existing ? (existing.azimuth ?? 180) : (prop?.azimuth ?? 180);
+      return {
+        lat: C.Math.toDegrees(pc.latitude), lng: C.Math.toDegrees(pc.longitude), height: pc.height,
+        tilt: tiltP, azimuth: azP, heading, pitch: pitchRad, roll: 0,
+        orientation: panelOrientationRef.current ?? 'portrait',
+        planeId: rp.id,
+        ecef: { u: rp.u, n: rp.n },
+        pick,
+      };
+    }
+
+    const { tiltDeg, azimuthDeg } = computeSurfaceNormal(viewer, C, screenPos, cartesian, pickMethod);
+    return {
+      lat: pLat, lng: pLng, height: pHeight + offM,
+      tilt: tiltDeg, azimuth: azimuthDeg,
+      heading: headingFromAzimuth(azimuthDeg), pitch: -(tiltDeg * Math.PI / 180), roll: 0,
+      // 🚨 DELIBERATELY ABSENT, not 'portrait'. The off-face branch never passed
+      // `orientation` to `createPanel`, which defaults it to
+      // `panelOrientationRef.current` — the same value the on-face branch passes
+      // explicitly. Sending one here would be a change of behaviour dressed up
+      // as tidying.
+      planeId: null,
+      ecef: null,
+      pick,
+    };
+  }
+
+  /**
+   * The pose the CURSOR GHOST draws — the commit's snapper, then the renderer's
+   * orienter, and nothing else.
+   *
+   * 🚨 THIS FUNCTION IS THE WHOLE CONTRACT. It does no geometry of its own, and
+   * neither does ModuleGhost: this composes the two authorities and hands the
+   * result over as four opaque values. If a future change makes the ghost
+   * compute anything, tests/ghostModulePreviewAuthority.test.ts fails.
+   */
+  function resolveGhostModulePose(screenPos: { x: number; y: number }): GhostModulePose | null {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) return null;
+    /**
+     * 🚨 THE PREVIEW MUST NOT BE PICKED BY THE PICK THAT POSITIONS IT.
+     *
+     * This engine sets `scene.pickTranslucentDepth = true` at boot. Verified in
+     * the installed Cesium (1.139.1, Build/CesiumUnminified/Cesium.js):
+     * `pickPositionWorldCoordinates` reads that flag SYNCHRONOUSLY and, when it
+     * is true, calls `renderTranslucentDepthForPick`, which re-renders the
+     * translucent geometry into a depth buffer for the pick.
+     *
+     * The ghost is wholly translucent (fill and outline), it sits under the
+     * cursor, and `getWorldPosition` resolves the point with
+     * `scene.pickPosition`. So without this the preview would be picked as the
+     * surface, the mount stack would be added to its own top face, and the ghost
+     * would RATCHET toward the camera one stack per mouse move — the same shape
+     * as the 14 cm-per-reload roof-mount ratchet this repo has already paid for.
+     * A self-referential preview is the worst kind of lying preview: it drifts
+     * while you aim with it.
+     *
+     * Turning the flag off for the duration of this ONE read excludes it, and
+     * nothing else that matters: the panels' own frame boxes are opaque, so a
+     * module under the cursor still answers. What is excluded besides the ghost
+     * is the 22 mm glass sheen above a module and the 40 mm setback bands — so a
+     * click may resolve up to a few centimetres higher than the ghost showed,
+     * and over a tree canopy the ghost resolves the ROOF behind it rather than
+     * the canopy, which is the more truthful answer for a module. That bound is
+     * stated rather than hidden, and it is the only divergence between the two.
+     *
+     * It is also what makes the preview affordable, and the arithmetic is worth
+     * stating because a hover runs ~60x/s. With the flag ON, every
+     * `pickPosition` call triggers a fresh 1x1 `updateAndExecuteCommands`; with
+     * it off, each is a depth read. On the ON-FACE path — the normal one for
+     * this tool, where `planeRenderableAtClick` answers — that is ONE pick plus
+     * ONE depth read per move, the same cost as the tree cursor. Only the
+     * OFF-face path reaches `computeSurfaceNormal`, which samples eight
+     * neighbours, so the expensive case is exactly the case where the ghost is
+     * already telling the operator it is not on a face the design owns. No
+     * throttle is therefore needed; if one is ever added, it belongs here and
+     * not in the component, which must stay a renderer.
+     *
+     * Restored in a `finally`: leaving it false would silently change every
+     * other tool's placement pick for the rest of the session.
+     *
+     * The ghost is still returned by `scene.pick`, which `getWorldPosition` uses
+     * only as a gate before reading the depth — and a gate that is truthy where
+     * the depth is empty falls through to the terrain/ellipsoid branches exactly
+     * as it did before, because the `isFinite`/magnitude test rejects the empty
+     * read. So the gate needs no special case.
+     */
+    const scene = viewer.scene;
+    const pickTranslucentWas = scene?.pickTranslucentDepth;
+    try {
+      if (scene) scene.pickTranslucentDepth = false;
+      const pose = resolveRoofModulePose(viewer, C, screenPos);
+      if (!pose) return null;
+      const position = safeCartesian3(C, pose.lng, pose.lat, pose.height);
+      if (!position) return null;
+      // A panel-shaped record, carrying only the fields the orienter reads. No
+      // `createPanel` call: that mints an id, stamps wattage and layout source,
+      // and a hover must not manufacture a design record 60 times a second.
+      const asPanel: any = {
+        heading: pose.heading, pitch: pose.pitch, roll: pose.roll,
+        tilt: pose.tilt, azimuth: pose.azimuth,
+        orientation: pose.orientation,
+      };
+      const posed = moduleEntityPose(C, asPanel as PlacedPanel, position);
+      if (posed.kind !== 'ok') return null;
+      return {
+        position,
+        orientation: posed.orientation,
+        dimensions: posed.dimensions,
+        planeId: pose.planeId,
+      };
+    } catch {
+      // A hover must never throw into Cesium's event loop.
+      return null;
+    } finally {
+      if (scene) scene.pickTranslucentDepth = pickTranslucentWas;
+    }
+  }
+
   function handleRoofClick(viewer: any, C: any, screenPos: any) {
     try {
-      const hit = getWorldPosition(viewer, C, screenPos);
-      if (!hit) {
+      // 🚨 THE SAME SNAPPER THE CURSOR GHOST AIMS WITH. Not a copy of it.
+      //
+      // TWO DELIBERATE DEVIATIONS from the inline original, both on refusal
+      // paths, both stated rather than smuggled:
+      //
+      //  1. it used to return SILENTLY when `Cartographic.fromCartesian` gave
+      //     nothing or the coordinate failed `isValidCoord` — a surface was
+      //     picked, nothing was built, and the status line kept whatever it last
+      //     said. Those now reach this message. Placing nothing is unchanged;
+      //     only the silence is, and silence is the failure mode this repo keeps
+      //     paying for ("a failed click must not look like a successful one").
+      //  2. the on-face branch now null-guards the projected `Cartographic`
+      //     instead of dereferencing it. Unreachable in practice, but the snapper
+      //     is now called from a hover ~60x/s, and a throw there would be a
+      //     throw into Cesium's event loop rather than into one click handler.
+      const pose = resolveRoofModulePose(viewer, C, screenPos);
+      if (!pose) {
         setStatusMsg('❌ No surface detected — click directly on the building');
         return;
       }
-      const cartesian = hit.cartesian;
-      const pickMethod = hit.pickMethod;
+      const rp = pose.ecef;
+      const pLat = pose.pick.lat, pLng = pose.pick.lng, pHeight = pose.pick.height;
 
-      const carto = C.Cartographic.fromCartesian(cartesian);
-      if (!carto) return;
-      const pLat = C.Math.toDegrees(carto.latitude);
-      const pLng = C.Math.toDegrees(carto.longitude);
-      const pHeight = carto.height;
-      if (!isValidCoord(pLat, pLng, pHeight)) return;
-
-      const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-      const offM = moduleStackHeightM(mountingSystemIdRef.current);
-      // v62: if the click lands on a marked/CAD plane, make the panel FIRST-CLASS —
-      // stamp that plane's ECEF frame + planeId so it rotates and renders rails (the
-      // bare Roof tool used to place "stale" panels with no frame). Falls back to the
-      // per-click surface normal when the click isn't on a known plane.
-      const rp = planeRenderableAtClick(C, cartesian, groundElev);
-      let panel;
-      if (rp) {
-        // project the click onto the plane, then lift along the normal by the mount offset
-        const d0 = C.Cartesian3.dot(C.Cartesian3.subtract(cartesian, rp.origin, new C.Cartesian3()), rp.n);
-        const onPlane = C.Cartesian3.subtract(cartesian, C.Cartesian3.multiplyByScalar(rp.n, d0, new C.Cartesian3()), new C.Cartesian3());
-        const pos = C.Cartesian3.add(onPlane, C.Cartesian3.multiplyByScalar(rp.n, offM, new C.Cartesian3()), new C.Cartesian3());
-        const pc = C.Cartographic.fromCartesian(pos);
-        const existing: any = panelsRef.current.find(p => (p as any).planeId === rp.id && isFinite((p as any).ecefNx));
-        const prop: any = (roofPlanesRef.current ?? []).find(p => p.id === rp.id);
-        const heading  = existing ? existing.heading : headingFromAzimuth(prop?.azimuth ?? azimuthRef.current);
-        const pitchRad = existing ? existing.pitch   : -((prop?.pitch ?? 0) * Math.PI / 180);
-        const tiltP    = existing ? (existing.tilt ?? 0)    : (prop?.pitch ?? 0);
-        const azP      = existing ? (existing.azimuth ?? 180) : (prop?.azimuth ?? 180);
-        panel = createPanel({
-          lat: C.Math.toDegrees(pc.latitude), lng: C.Math.toDegrees(pc.longitude), height: pc.height,
-          tilt: tiltP, azimuth: azP, systemType: 'roof', heading, pitch: pitchRad, roll: 0,
-          orientation: panelOrientationRef.current ?? 'portrait',
-        });
-        (panel as any).planeId = rp.id;
+      const panel = createPanel({
+        lat: pose.lat, lng: pose.lng, height: pose.height,
+        tilt: pose.tilt, azimuth: pose.azimuth, systemType: 'roof',
+        heading: pose.heading, pitch: pose.pitch, roll: pose.roll,
+        // Spread, not `orientation: pose.orientation` — see the note in the
+        // snapper's off-face branch. Passing an explicit `undefined` would be
+        // equivalent today only because `createPanel` uses `??`; keeping the key
+        // absent keeps the two branches exactly as they shipped.
+        ...(pose.orientation ? { orientation: pose.orientation } : {}),
+      });
+      if (rp && pose.planeId) {
+        (panel as any).planeId = pose.planeId;
         (panel as any).ecefUx = rp.u.x; (panel as any).ecefUy = rp.u.y; (panel as any).ecefUz = rp.u.z;
         (panel as any).ecefNx = rp.n.x; (panel as any).ecefNy = rp.n.y; (panel as any).ecefNz = rp.n.z;
-      } else {
-        const { tiltDeg, azimuthDeg } = computeSurfaceNormal(viewer, C, screenPos, cartesian, pickMethod);
-        panel = createPanel({
-          lat: pLat, lng: pLng, height: pHeight + offM,
-          tilt: tiltDeg, azimuth: azimuthDeg, systemType: 'roof',
-          heading: headingFromAzimuth(azimuthDeg), pitch: -(tiltDeg * Math.PI / 180), roll: 0,
-        });
       }
 
       addPanelEntity(viewer, C, panel);
@@ -10920,18 +11252,37 @@ function SolarEngine3D({
       // panel is under the cursor first, and let the Building roof answer only
       // when none is. Clicking bare roof still selects the face in both modes,
       // so nothing that worked stops working.
-      // One drill-pick, read twice — `pickPanelAtScreen` walks up to ten hits
-      // and calling it again below would double that on every click.
       // ── A MARKED OBSTRUCTION IS SELECTABLE ───────────────────────────────
       //
       // 🚨 IT WAS NOT, AT ALL. A vent, a chimney or a tree could be placed and
       // never touched again: no click selected one, so "delete this one" was
       // unreachable and the only way to remove a mis-placed vent was to remove
-      // every obstruction on the roof. Checked BEFORE panels because an
-      // obstruction is small, sits on the roof surface and is usually
-      // surrounded by modules — a panel-first order makes it unclickable
-      // exactly where it matters.
-      const obsHit = pickObstructionAtScreen(viewer, screenPos);
+      // every obstruction on the roof.
+      //
+      // 🚨 AND THEN IT WON EVERY CLICK AROUND ITSELF. The fix above ran the
+      // obstruction pick FIRST and unconditionally, reasoning that "an
+      // obstruction is small, sits on the roof surface and is usually surrounded
+      // by modules — a panel-first order makes it unclickable exactly where it
+      // matters". The measured cost of that order is in `clickTargetPriority`:
+      // the analytic fallback is a 4.0 m bounding sphere for the shipped Tree
+      // preset and the GPU branch never checks what is in front, so the MODULES
+      // became unclickable exactly where it matters, and this branch then called
+      // `clearPanelSelection()` on top.
+      //
+      // The reasoning above survives, because nothing has been removed from the
+      // pick set: when no module is under the cursor the obstruction still
+      // answers, so clicking bare canopy, a vent between rows or a chimney on
+      // open deck still selects it. Only the tie changed, and the ARMED TOOL
+      // decides it — through the live ref, because this function is reached only
+      // from a Cesium handler registered once at viewer init and a `placementMode`
+      // read here would be the mode the page booted in, for ever.
+      //
+      // One drill-pick, read twice: `pickPanelAtScreen` walks up to 32 hits, so
+      // the module pick is resolved once here and reused below.
+      const picked = pickPanelAtScreen(viewer, screenPos);
+      const obsHit = (clickTargetPriority(modeRef.current) === 'site-object-first' || !picked.foundId)
+        ? pickObstructionAtScreen(viewer, screenPos)
+        : null;
       if (obsHit) {
         selectedObstructionIdRef.current = obsHit;
         setSelectedObstructionId(obsHit);
@@ -10946,7 +11297,6 @@ function SolarEngine3D({
         setSelectedObstructionId(null);
       }
 
-      const picked = pickPanelAtScreen(viewer, screenPos);
       if (showBuilding3DRef.current && !picked.foundId) {
         const faceId = pickBuildingFaceAtScreen(viewer, C, screenPos);
         if (faceId) {
@@ -16088,6 +16438,29 @@ function SolarEngine3D({
             : TREE_CANOPY_RADIUS_M
         }
         anchorLngLat={objectDragAnchor}
+      />
+
+      {/* THE MODULE THAT FOLLOWS THE CURSOR, pre-oriented to the face under it.
+        *
+        * Ray: the ghost preview is CONTRACTUAL. Aurora and OpenSolar operators
+        * aim and click; SolarPro made you place -> look -> undo, and this is the
+        * thing that kills that loop.
+        *
+        * 🚨 AIMED WITH, SO IT MUST NOT LIE. `resolveGhostModulePose` calls the
+        * SAME `resolveRoofModulePose` the commit calls and the SAME
+        * `moduleEntityPose` the renderer calls, then hands over four opaque
+        * values. ModuleGhost contains no geometry: it cannot disagree with the
+        * click, because it does not know how to work the answer out. That is the
+        * fix the tree cursor needed (7542c9b4) applied before the defect rather
+        * than after it.
+        *
+        * Armed by the Roof tool — the one mode whose click places a single
+        * module at the pointer. Mounts unconditionally and draws nothing until
+        * `active` is true, exactly as TreeCursor does. */}
+      <ModuleGhost
+        viewer={viewerRef.current}
+        active={placementMode === 'roof'}
+        resolvePose={resolveGhostModulePose}
       />
 
       {/* v63: String / equipment legend overlay.

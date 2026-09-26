@@ -24,3 +24,6 @@ export {
   designHotkeyToToolId,
   hasModifierKey,
 } from './hotkeys';
+// The cursor-following module preview. Drawn from the pose the COMMIT's own
+// snapper and orienter produce — see the header of ModuleGhost.tsx.
+export { ModuleGhost, type GhostModulePose, type ModuleGhostProps } from './ModuleGhost';

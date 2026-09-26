@@ -235,16 +235,52 @@ describe('🚨 an obstruction can be selected, and therefore deleted', () => {
     // "delete this vent" was unreachable and the only way to remove a
     // mis-placed one was to remove every obstruction on the roof.
     expect(ENGINE).toMatch(/function pickObstructionAtScreen/);
-    expect(ENGINE).toMatch(/const obsHit = pickObstructionAtScreen\(viewer, screenPos\)/);
+    expect(ENGINE).toMatch(/pickObstructionAtScreen\(viewer, screenPos\)/);
   });
 
-  it('…and it is checked BEFORE panels, or it is unclickable where it matters', () => {
-    // An obstruction is small, sits on the roof surface and is usually
-    // surrounded by modules.
-    const at = ENGINE.indexOf('const obsHit = pickObstructionAtScreen');
+  /**
+   * 🚨 THIS CASE USED TO ASSERT THE DEFECT AS CORRECT.
+   *
+   * It pinned `pickObstructionAtScreen` running BEFORE `pickPanelAtScreen` in
+   * `handleSelectClick`, on the reasoning that "an obstruction is small, sits on
+   * the roof surface and is usually surrounded by modules". The reasoning is
+   * sound and the ORDER it produced was not, because the obstruction pick wins in
+   * two ways it was never measured against:
+   *
+   *   • its GPU branch walks up to 12 drill hits for an `[OBS] ` name and returns
+   *     the first it finds, never asking what is in FRONT of it — so a tree
+   *     behind a module takes the module's click;
+   *   • its analytic fallback (the branch that is live under software WebGL and
+   *     on any machine without a usable GPU) is a BOUNDING SPHERE of radius
+   *     `max(max(w,d)/2, h/2)` — 4.0 m for the shipped Tree preset, 6x6x8 m. So
+   *     every click within four metres of a trunk, in any direction, through a
+   *     module, selected the tree, and the branch then called
+   *     `clearPanelSelection()`.
+   *
+   * Modules near a tree were therefore unselectable, unmovable and undeletable —
+   * the same defect, with the operands swapped, that was fixed one screen above
+   * for `[BUILD3D-ROOF]` ("a panel in front of the roof wins, in both modes").
+   *
+   * The resolution keeps the original reasoning intact: NOTHING is removed from
+   * the pick set, so with no module under the cursor the obstruction still
+   * answers and clicking bare canopy, a vent between rows or a chimney on open
+   * deck still selects it. Only the tie changed, and the ARMED TOOL decides it.
+   */
+  it('🚨 the module pick runs FIRST, and the obstruction pick is GATED not deleted', () => {
     const panelAt = ENGINE.indexOf('const picked = pickPanelAtScreen(viewer, screenPos);');
-    expect(at).toBeGreaterThan(-1);
-    expect(panelAt).toBeGreaterThan(at);
+    const at = ENGINE.indexOf('pickObstructionAtScreen(viewer, screenPos)');
+    expect(panelAt, 'handleSelectClick no longer resolves the module pick').toBeGreaterThan(-1);
+    expect(at, 'the obstruction pick is gone — that is not the fix; it must stay reachable')
+      .toBeGreaterThan(panelAt);
+    // And the gate is the armed tool, read live. See `clickTargetPriority`.
+    expect(ENGINE.slice(panelAt, at)).toMatch(/clickTargetPriority\(modeRef\.current\)/);
+  });
+
+  it('a site object still wins outright when its OWN tool is armed', () => {
+    // Otherwise "priority" would just be a polite word for making trees
+    // unpickable. The rule is stated once, in a pure function, and
+    // tests/ghostModulePreviewAuthority.test.ts exercises both answers.
+    expect(ENGINE).toMatch(/if \(armed === 'tree' \|\| armed === 'obstruction'\) return 'site-object-first';/);
   });
 
   it('the Delete key removes the selected one through the canonical path', () => {
