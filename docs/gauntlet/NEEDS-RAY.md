@@ -8,66 +8,22 @@ Last updated: 2026-09-25.
 
 ---
 
-## R1 — Committed Google API key needs rotation
+## Read in this order
 
-| | |
-|---|---|
-| **Severity** | HIGH — credential exposure |
-| **Where** | `components/3d/Google3DViewer.tsx:19` — a literal key as the fallback for `NEXT_PUBLIC_GOOGLE_MAPS_KEY` |
-| **Decision required** | Rotate the key in Google Cloud. Only Ray has the account. |
-| **Why code cannot fix it** | Deleting the literal does **not** un-leak it — it remains in git history. Rotation is the only remedy. |
-| **Mitigation already true** | The file has **no importers**, so it is not in any client bundle. Exposure is repo/history-scoped, not public-web-scoped. |
-| **Blocked** | Nothing in code. |
-| **NOT blocked** | Everything. Provider-protection work, 3D, permit, research all continue. |
-| **Safe default taken** | None applied — removing the literal without rotating would create a false sense of closure. Left visible on purpose. |
+| # | One line | What it blocks |
+|---|---|---|
+| **R8** | A migration file can never apply, and the batch runner stops there — so 028–123 are unreachable; a whole feature's schema sits in a directory the runner never scans | Persisting homeowner/micro-stage state; any batch migration run |
+| **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
+| **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
+| **R4** | Four milestone checkboxes are POSTed and silently discarded — the product says it recorded something it did not | Persisting those four |
+| **R3** | Two engineering repairs would move the permit digest, which retires live PE approvals | Those two only |
+| **R6** | A geocoder silently overwrites a coordinate a human deliberately set, on every studio load | Nothing |
+| **R7** | The roof has no building-elevation sheet, so modelled wall and ridge heights reach no drawing | A roof elevation sheet only |
+| **R5** | Two new things to try in Dev — not a decision, but live acceptance overrides tests | Nothing |
 
-Secondary, same file: it reads `NEXT_PUBLIC_GOOGLE_MAPS_KEY` while the engine
-reads `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` — two names for one credential, so
-setting one does not configure the other. That half **is** safe to fix in code
-and is queued separately.
-
----
-
-## R2 — Marketplace pre-claim coordinate precision
-
-| | |
-|---|---|
-| **Severity** | HIGH — homeowner privacy |
-| **Where** | `app/api/network/opportunities/route.ts` selects `no.lat, no.lng` in the **pre-claim** discovery feed |
-| **Evidence** | The sibling detail route deletes `address`/`lat`/`lng` for non-entitled callers; migration 047 comments "Full address only accessible to assigned contractor post-claim"; the column is `NUMERIC(10,7)` ≈ 1 cm |
-| **Decision required** | How approximate should an **unclaimed** lead's pin be? County centroid, ZIP centroid, ~1 km jitter, or no pin at all. |
-| **Why it is Ray's** | It trades homeowner privacy against marketplace utility — a contractor judges drive distance from that pin. Not a technical call. |
-| **Blocked** | The marketplace map/pin UX only. |
-| **NOT blocked** | CRM, proposal, engineering, delete/lifecycle, permit, survey, research — all continue. |
-| **Safe default available** | Round to 2 dp (~1.1 km) server-side for non-entitled rows, keeping the map usable while removing house-level precision. **Not applied** pending Ray, because it changes a live marketplace behaviour. |
-
----
-
-## R3 — Digest rulings for two engineering repairs
-
-| | |
-|---|---|
-| **Severity** | MEDIUM — process, not defect |
-| **Context** | Changing permit-snapshot-visible content moves the snapshot digest and **retires live PE approvals**. |
-| **Decision required** | Whether to proceed on two candidates that would move it: one resistance basis for the permit path, and org-level electrical standards. |
-| **Blocked** | Those two candidates only. |
-| **NOT blocked** | The thermal-design-basis unification — verification found it has **zero** digest impact, so it proceeds without a ruling. |
-| **Safe default** | Neither digest-moving candidate is being implemented. |
-
----
-
-## R4 — Milestone checkboxes that record nothing
-
-| | |
-|---|---|
-| **Severity** | MEDIUM — the product tells an operator it recorded something it did not |
-| **Where** | `components/deals/DealDecisionModal.tsx` — four toggles (`proposal_accepted`, `contract_signed_confirmed`, `engineering_approved`, `install_scheduled_confirmed`) are POSTed to `/api/projects/update-status`, which never reads them. The code comment says so out loud: *"non-breaking — update-status ignores unknown fields"*. |
-| **The harm** | An operator ticks "Engineering drawings approved" and believes it is on the record. It is not, anywhere. |
-| **Decision required** | Do these four milestones mean the same as existing micro-stages, or are they distinct facts? None of the four ids exists in the 34-value vocabulary. The nearest matches are `proposal_approved`, `contract_signed`, `engineering_completed`, `install_scheduled` — but whether "accepted" is "approved", and whether "confirmed" adds anything over the base stage, is a semantic question about your process. |
-| **Why not just map them** | Guessing would create a **fifth** status vocabulary on a row that already carries four, which a research pass explicitly rejected for that reason. |
-| **Blocked** | Persisting these four milestones. |
-| **NOT blocked** | Everything else — the stage machine, micro-stages, the portal, permits, design. |
-| **Safe default NOT applied, deliberately** | Removing the toggles would delete a feature you may want; silently mapping them would invent meaning. The interim state is a known lie and is recorded here rather than quietly changed. Say which way and it is a small change. |
+**R8 and R1 are the two that matter most.** R8 because a batch migration run cannot
+get past file 027 today, and R1 because rotation is the only remedy for a leak.
+Everything else has a safe default already applied or recorded.
 
 ---
 
@@ -117,18 +73,76 @@ The internal truth layer just stops recording.
 
 ---
 
-## R7 — The roof has no building-elevation sheet, so wall and ridge heights reach nothing
+---
+
+## R1 — Committed Google API key needs rotation
 
 | | |
 |---|---|
-| **Severity** | MEDIUM — a permit-package scope question, and the permit package is the wedge |
-| **How it surfaced** | A systematic sweep of your output-consistency law: every kind of thing a person can place or shape in the studio, checked for a consumer that carries it into an output. Panels, roof faces and hand-placed obstructions are all consumed (the chimney end-to-end, in a browser, today). Measurements are a ruler — two picked points and a computed distance, no user-entered value — so propagating them would be circular. Ground and fence scalars are placement inputs, and the rows they produce are what reaches the sheets. **One entry came back with no consumer and no good reason: the building-section model's wall, eave and ridge heights.** |
-| **The finding** | Not that the data is unused — that **no roof sheet draws a building elevation.** The fence gets `SOLAR FENCE ELEVATION & PLAN`. The roof gets `SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS` (top-down) and `ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION` (the mount stack on a rafter, not the building). So a person can model a 10 ft 6 wall and a ridge height, see it in 3D, and no drawing in the package shows either. |
-| **Decision required** | Does the package need a roof building-elevation sheet? Many AHJs ask for one showing the array against the building, and you know which ones you submit to — I am not going to guess an AHJ requirement. |
-| **Why it is yours, not a bug to fix** | Adding a sheet is a feature with real scope: a new sheet id in the manifest, a drawing routine, a page-fit pass, and it MOVES THE PERMIT SNAPSHOT DIGEST, which retires live PE approvals (see R3). None of that should start on my judgement of what an inspector wants. |
-| **What is already true, and cheap if you say yes** | The section model already carries the heights, and the vertical datum work is done. The missing piece is the sheet, not the data. |
-| **Blocked** | A roof elevation sheet only. |
-| **NOT blocked** | Everything else. The gap is recorded in a machine-checked ledger (`tests/outputConsistencyLedger.test.ts`), which fails if anyone wires the section into an output without promoting the entry — so it cannot rot into a hidden parallel world while it waits. |
+| **Severity** | HIGH — credential exposure |
+| **Where** | `components/3d/Google3DViewer.tsx:19` — a literal key as the fallback for `NEXT_PUBLIC_GOOGLE_MAPS_KEY` |
+| **Decision required** | Rotate the key in Google Cloud. Only Ray has the account. |
+| **Why code cannot fix it** | Deleting the literal does **not** un-leak it — it remains in git history. Rotation is the only remedy. |
+| **Mitigation already true** | The file has **no importers**, so it is not in any client bundle. Exposure is repo/history-scoped, not public-web-scoped. |
+| **Blocked** | Nothing in code. |
+| **NOT blocked** | Everything. Provider-protection work, 3D, permit, research all continue. |
+| **Safe default taken** | None applied — removing the literal without rotating would create a false sense of closure. Left visible on purpose. |
+
+Secondary, same file: it reads `NEXT_PUBLIC_GOOGLE_MAPS_KEY` while the engine
+reads `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` — two names for one credential, so
+setting one does not configure the other. That half **is** safe to fix in code
+and is queued separately.
+
+---
+
+---
+
+## R2 — Marketplace pre-claim coordinate precision
+
+| | |
+|---|---|
+| **Severity** | HIGH — homeowner privacy |
+| **Where** | `app/api/network/opportunities/route.ts` selects `no.lat, no.lng` in the **pre-claim** discovery feed |
+| **Evidence** | The sibling detail route deletes `address`/`lat`/`lng` for non-entitled callers; migration 047 comments "Full address only accessible to assigned contractor post-claim"; the column is `NUMERIC(10,7)` ≈ 1 cm |
+| **Decision required** | How approximate should an **unclaimed** lead's pin be? County centroid, ZIP centroid, ~1 km jitter, or no pin at all. |
+| **Why it is Ray's** | It trades homeowner privacy against marketplace utility — a contractor judges drive distance from that pin. Not a technical call. |
+| **Blocked** | The marketplace map/pin UX only. |
+| **NOT blocked** | CRM, proposal, engineering, delete/lifecycle, permit, survey, research — all continue. |
+| **Safe default available** | Round to 2 dp (~1.1 km) server-side for non-entitled rows, keeping the map usable while removing house-level precision. **Not applied** pending Ray, because it changes a live marketplace behaviour. |
+
+---
+
+---
+
+## R4 — Milestone checkboxes that record nothing
+
+| | |
+|---|---|
+| **Severity** | MEDIUM — the product tells an operator it recorded something it did not |
+| **Where** | `components/deals/DealDecisionModal.tsx` — four toggles (`proposal_accepted`, `contract_signed_confirmed`, `engineering_approved`, `install_scheduled_confirmed`) are POSTed to `/api/projects/update-status`, which never reads them. The code comment says so out loud: *"non-breaking — update-status ignores unknown fields"*. |
+| **The harm** | An operator ticks "Engineering drawings approved" and believes it is on the record. It is not, anywhere. |
+| **Decision required** | Do these four milestones mean the same as existing micro-stages, or are they distinct facts? None of the four ids exists in the 34-value vocabulary. The nearest matches are `proposal_approved`, `contract_signed`, `engineering_completed`, `install_scheduled` — but whether "accepted" is "approved", and whether "confirmed" adds anything over the base stage, is a semantic question about your process. |
+| **Why not just map them** | Guessing would create a **fifth** status vocabulary on a row that already carries four, which a research pass explicitly rejected for that reason. |
+| **Blocked** | Persisting these four milestones. |
+| **NOT blocked** | Everything else — the stage machine, micro-stages, the portal, permits, design. |
+| **Safe default NOT applied, deliberately** | Removing the toggles would delete a feature you may want; silently mapping them would invent meaning. The interim state is a known lie and is recorded here rather than quietly changed. Say which way and it is a small change. |
+
+---
+
+---
+
+## R3 — Digest rulings for two engineering repairs
+
+| | |
+|---|---|
+| **Severity** | MEDIUM — process, not defect |
+| **Context** | Changing permit-snapshot-visible content moves the snapshot digest and **retires live PE approvals**. |
+| **Decision required** | Whether to proceed on two candidates that would move it: one resistance basis for the permit path, and org-level electrical standards. |
+| **Blocked** | Those two candidates only. |
+| **NOT blocked** | The thermal-design-basis unification — verification found it has **zero** digest impact, so it proceeds without a ruling. |
+| **Safe default** | Neither digest-moving candidate is being implemented. |
+
+---
 
 ---
 
@@ -144,6 +158,25 @@ The internal truth layer just stops recording.
 | **Blocked** | Nothing. |
 | **NOT blocked** | Everything continues. |
 | **Safe default NOT applied, deliberately** | Adding the sibling's guard (`only geocode when there are no stored coordinates`) is a two-line change and would probably be right — but it silently changes which authority wins for every existing project, and that is a ruling, not a patch. Left visible. |
+
+---
+
+---
+
+## R7 — The roof has no building-elevation sheet, so wall and ridge heights reach nothing
+
+| | |
+|---|---|
+| **Severity** | MEDIUM — a permit-package scope question, and the permit package is the wedge |
+| **How it surfaced** | A systematic sweep of your output-consistency law: every kind of thing a person can place or shape in the studio, checked for a consumer that carries it into an output. Panels, roof faces and hand-placed obstructions are all consumed (the chimney end-to-end, in a browser, today). Measurements are a ruler — two picked points and a computed distance, no user-entered value — so propagating them would be circular. Ground and fence scalars are placement inputs, and the rows they produce are what reaches the sheets. **One entry came back with no consumer and no good reason: the building-section model's wall, eave and ridge heights.** |
+| **The finding** | Not that the data is unused — that **no roof sheet draws a building elevation.** The fence gets `SOLAR FENCE ELEVATION & PLAN`. The roof gets `SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS` (top-down) and `ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION` (the mount stack on a rafter, not the building). So a person can model a 10 ft 6 wall and a ridge height, see it in 3D, and no drawing in the package shows either. |
+| **Decision required** | Does the package need a roof building-elevation sheet? Many AHJs ask for one showing the array against the building, and you know which ones you submit to — I am not going to guess an AHJ requirement. |
+| **Why it is yours, not a bug to fix** | Adding a sheet is a feature with real scope: a new sheet id in the manifest, a drawing routine, a page-fit pass, and it MOVES THE PERMIT SNAPSHOT DIGEST, which retires live PE approvals (see R3). None of that should start on my judgement of what an inspector wants. |
+| **What is already true, and cheap if you say yes** | The section model already carries the heights, and the vertical datum work is done. The missing piece is the sheet, not the data. |
+| **Blocked** | A roof elevation sheet only. |
+| **NOT blocked** | Everything else. The gap is recorded in a machine-checked ledger (`tests/outputConsistencyLedger.test.ts`), which fails if anyone wires the section into an output without promoting the entry — so it cannot rot into a hidden parallel world while it waits. |
+
+---
 
 ---
 
@@ -185,6 +218,8 @@ it used to do. Then use History to get the earlier state back.
 |---|---|
 | **Blocked** | Nothing. |
 | **NOT blocked** | Everything continues. |
+
+---
 
 ---
 
