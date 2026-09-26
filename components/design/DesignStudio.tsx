@@ -4544,6 +4544,18 @@ export default function DesignStudio({ project, onSave }: Props) {
       });
       const data = await res.json();
       if (data.success) {
+        // 🚨 THIS ROUTE WRITES THE LAYOUTS ROW TOO, SO IT MOVED OUR VERSION.
+        //
+        // Found in a real browser: place a chimney, and the save carrying it was
+        // refused with LAYOUT_STALE_WRITE — "this design was saved somewhere else"
+        // — with nothing open anywhere else. The server did it. /api/production
+        // writes the same single row the autosave writes, a trigger re-stamps
+        // `updated_at` on every write, and this tab went on stating the version it
+        // had before. So the write that WON said nothing about obstructions and
+        // the write that was REFUSED was the one carrying the hand-placed object:
+        // the modules cleared on screen and the row kept a pruned array with no
+        // chimney in it.
+        site.noteSavedVersion(data.data.layout?.updatedAt);
         setProduction(data.data.production);
         setCostEstimate(data.data.costEstimate);
         const annualKwh = data.data.production?.annualProductionKwh ?? 0;
@@ -4642,6 +4654,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       });
       const data = await res.json();
       if (data.success) {
+        // Same obligation as the Calculate path above: this route writes the
+        // layouts row, so it moved the version this tab must state next. Without
+        // adopting it, the very next autosave is refused as somebody else's — and
+        // the refusal badge is permanent by design.
+        site.noteSavedVersion(data.data.layout?.updatedAt);
         site.clearPendingDestructive();
         setProduction(data.data.production);
         setCostEstimate(data.data.costEstimate);

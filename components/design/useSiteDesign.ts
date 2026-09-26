@@ -450,7 +450,9 @@ export function useSiteDesign(): UseSiteDesign {
    * storing both would create two records of one fact and a way for them to
    * disagree.
    */
-  const applyRestoredGeometry = useCallback((restored: RoofPlane[], panelsAlreadyExact = false) => {
+  const applyRestoredGeometry = useCallback((
+    restored: RoofPlane[], panelsAlreadyExact = false,
+  ): { orphaned: number } => {
     const held = panelsRef.current ?? [];
     const from = roofPlanesRef.current ?? [];
     setRoofPlanes(restored);
@@ -459,13 +461,48 @@ export function useSiteDesign(): UseSiteDesign {
     // did not change shape, it came back. There is nothing to compensate for,
     // and `repositionPanelsForPlanes` matching a restored face against a live
     // roof that no longer contains it would orphan the array.
-    if (panelsAlreadyExact) return;
-    if (held.length === 0) return;
+    if (panelsAlreadyExact) return { orphaned: 0 };
+    if (held.length === 0) return { orphaned: 0 };
     const moved = repositionPanelsForPlanes(held, from, restored);
     if (moved.moved > 0) setPanels(moved.panels);
-    // An orphan here means the undone edit had changed the roof KIND. The
-    // panels are left exactly as they are rather than guessed onto a
-    // neighbouring face; the caller surfaces it.
+    // An orphan here means the undone edit had changed the roof KIND. The panels
+    // are left exactly as they are rather than guessed onto a neighbouring face,
+    // which is the right call.
+    //
+    // 🚨 BUT NOTHING USED TO READ THIS. The comment here said "the caller
+    // surfaces it", and on the undo path there was no such caller — so an undo
+    // could move most of the array, leave the rest behind, and produce an array
+    // in two pieces with no log, no status line and no refusal. The forward path
+    // is held to the opposite standard: a cull reports its count and offers Undo.
+    //
+    // It is returned rather than logged, because a console line is not surfacing
+    // it either. `undoGeometry` and `redoGeometry` put the count in the label
+    // they return, which the engine renders into its status line.
+    // 🚨 `.length`. `orphaned` is the LIST OF PANEL IDS, not a count — tsc
+    // caught that, and the tests did not: `['p0'] > 0` is false, so the notice
+    // could never fire, and `${['p0']} modules` would have printed an id where
+    // a number belongs. A comparison that can never be true is the same class of
+    // defect as a regex that can never match.
+    if (moved.orphaned.length > 0) {
+      console.error('[undo] modules could not be placed on the restored roof', {
+        orphaned: moved.orphaned, repositioned: moved.moved, held: held.length,
+      });
+    }
+    return { orphaned: moved.orphaned.length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Add the unplaceable-module count to a history label, or return it unchanged.
+   *
+   * 🚨 ADDED, NEVER SUBSTITUTED. A warning that replaces the step name tells the
+   * user what went wrong and loses what they just undid, which is the one piece
+   * of information the status line existed to carry.
+   */
+  const withOrphanNotice = useCallback((label: string | null, orphaned: number): string | null => {
+    if (!label || orphaned <= 0) return label;
+    const n = orphaned === 1 ? '1 module' : `${orphaned} modules`;
+    return `${label} — ${n} could not be placed and was left where it was`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -542,8 +579,9 @@ export function useSiteDesign(): UseSiteDesign {
     // deleted ones are not back yet it repositions the survivors and the
     // deleted array never returns.
     const verbatim = restorePanelsVerbatim(step.panels);
-    // Adopt the canonical array; every derived thing rebuilds from it.
-    applyRestoredGeometry(step.planes, verbatim);
+    // Adopt the canonical array; every derived thing rebuilds from it. The
+    // orphan count comes back so the label can say a module was left behind.
+    const restore = applyRestoredGeometry(step.planes, verbatim);
     restoreSiteEntities(step.obstructions, step.measurements);
     restoreDisposition(step.disposition);
     restoreLedger(step.deletions);
@@ -558,7 +596,7 @@ export function useSiteDesign(): UseSiteDesign {
     pendingDestructiveRef.current = narrowAuthorizationToLedger(
       pendingDestructiveRef.current, step.deletions as DeletionLedger, ledgerKeyOf(),
     );
-    return step.label;
+    return withOrphanNotice(step.label, restore.orphaned);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -585,7 +623,7 @@ export function useSiteDesign(): UseSiteDesign {
     if (!step.ok) return null;
     writeHistory(step.history);
     const verbatim = restorePanelsVerbatim(step.panels);
-    applyRestoredGeometry(step.planes, verbatim);
+    const restore = applyRestoredGeometry(step.planes, verbatim);
     restoreSiteEntities(step.obstructions, step.measurements);
     restoreDisposition(step.disposition);
     // 🚨 A REDO RE-PERFORMS A DELETION, SO IT MUST RE-AUTHORISE IT.
@@ -616,7 +654,9 @@ export function useSiteDesign(): UseSiteDesign {
       // both reach the save. See `mergeAuthorization`.
       pendingDestructiveRef.current = mergeAuthorization(pendingDestructiveRef.current, redoAuth);
     }
-    return step.label;
+    // A redo repositions through the same path an undo does, so it carries the
+    // same obligation to say when a module could not be placed.
+    return withOrphanNotice(step.label, restore.orphaned);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
