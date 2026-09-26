@@ -1443,9 +1443,31 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       // {} -> 19 in three saves). The guard had disarmed itself permanently.
       //
       // A property change is identifiable: the save carries a DIFFERENT
-      // activeSiteKey than the row currently stores. Only then may archived
-      // panels count as present. A save at the same property that empties the
-      // array is an ordinary wipe and is refused exactly as before.
+      // PROPERTY than the row currently stores. Only then may archived panels
+      // count as present. A save at the same property that empties the array is
+      // an ordinary wipe and is refused exactly as before.
+      //
+      // 🚨 AND "DIFFERENT PROPERTY" IS NOT "DIFFERENT STRING". This read
+      // `storedKey !== arch.activeSiteKey`, so any change in the key counted as a
+      // property change — including a change that is not one.
+      //
+      // A site key is DERIVED FROM COORDINATES, and those coordinates drift.
+      // `nearestSamePropertyKey` in lib/design/siteDesignModel.ts exists for
+      // exactly that reason: a user returning to a property the archive
+      // genuinely held missed it, because the key had been re-derived from a
+      // slightly different coordinate. So re-picking the SAME HOUSE — a fresh
+      // geocode, a Pick House click a metre off the last one — minted a new key,
+      // and this guard read it as a property change and stood down. A
+      // `panels: []` save at the property the user was still standing on then
+      // went through, which is precisely the defect the guard exists to refuse.
+      //
+      // `sitesAreSameProperty` is the one authority on the question: identical,
+      // or within SITE_MATCH_RADIUS_M. Using it narrows the relaxation to what
+      // was always intended without touching the direction that matters more —
+      // a genuine address change must still be accepted, because refusing it
+      // means the archive never reaches the database and the NEXT save loses it
+      // for real. Both directions are pinned in
+      // tests/wipeGuardSurvivesKeyDrift.postgres.test.ts.
       let switchingProperty = false;
       if (arch && typeof arch.activeSiteKey === 'string') {
         try {
@@ -1457,7 +1479,18 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
           // No stored key yet (first archive on this row) also counts: there is
           // nothing to contradict, and refusing it would block the very first
           // property change a project ever makes.
-          switchingProperty = storedKey === null || storedKey !== arch.activeSiteKey;
+          //
+          // That branch is REDUNDANT TODAY and kept on purpose.
+          // `sitesAreSameProperty` returns false for a null argument, so the
+          // negation below already yields true — a mutation removing this
+          // clause is behaviourally identical and no test can catch it. It stays
+          // because the intent should not depend on a helper's null handling
+          // continuing to answer that way: if `sitesAreSameProperty` ever
+          // treated a missing key as "same", dropping this would silently block
+          // every project's first property change and the archive would never be
+          // stored.
+          switchingProperty =
+            storedKey === null || !sitesAreSameProperty(storedKey, arch.activeSiteKey);
         } catch {
           // Cannot tell — assume NOT switching, which keeps the guard strict.
           switchingProperty = false;
