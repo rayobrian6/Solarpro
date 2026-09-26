@@ -394,3 +394,128 @@ describe('🚨 a forced dry-run must be able to refuse', () => {
       .toMatch(/return NextResponse\.json/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. HOW MANY BLOCKERS ARE THERE, REALLY?
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 🚨 THE DECISION-RELEVANT NUMBER. Knowing the batch stops at 003 invites the
+// obvious fix — repair 003 — and that would move the halt by exactly one file if
+// 003 is not the only one. So this run does NOT stop at the first failure: it
+// applies every file in manifest order, skipping past each failure, and reports
+// EVERY file that cannot apply to a clean database.
+//
+// That is not how the runner behaves and must never be — applying out of order is
+// the thing it refuses. This is a DIAGNOSTIC, and its only job is to tell an
+// operator the full size of the problem before they start.
+describe('🚨 the COMPLETE blocker list for a clean database', () => {
+  it('reports every file that cannot apply, in order', async () => {
+    const pg = new PGlite({ extensions: { pgcrypto, uuid_ossp } });
+    const blockers: Array<{ id: string; file: string; error: string }> = [];
+    let applied = 0;
+    try {
+      for (const f of FILES) {
+        const sql = readFileSync(join(MIG_DIR, f), 'utf8');
+        try {
+          await pg.exec(`BEGIN; ${sql} ; COMMIT;`);
+          applied++;
+        } catch (e) {
+          try { await pg.exec('ROLLBACK;'); } catch { /* aborted */ }
+          blockers.push({
+            id: idOf(f), file: f,
+            error: String((e as Error)?.message ?? e).split('\n')[0].slice(0, 160),
+          });
+        }
+      }
+    } finally { await pg.close(); }
+
+    // Printed through the assertion message so the list is in the record whatever
+    // it turns out to be — this is a report, not a pin.
+    const summary = blockers.map(b => `${b.id}: ${b.error}`).join('\n  ');
+    expect(blockers.length, `MIGRATION BLOCKERS (${blockers.length} of ${FILES.length} files):\n  ${summary}\n`)
+      .toBeGreaterThan(0);
+
+    // 🚨 THE POINT: more than one. If this ever drops to 1, repairing that one
+    // file genuinely unblocks `run-pending`, and this case should be revisited.
+    expect(blockers.length,
+      `only ${blockers.length} blocker — repairing it may now unblock the batch, which changes R8's answer`)
+      .toBeGreaterThan(1);
+
+    // And the first is the one the batch actually stops at.
+    expect(blockers[0].id).toBe('003');
+    expect(applied).toBeGreaterThan(2);   // skipping failures gets much further
+  }, 600_000);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. 🚨 CORE TABLES NO SCANNED MIGRATION CREATES
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The known finding was that the homeowner-stage / micro-stage schema lives in
+// the directory the manifest does not scan. Applying every file to a clean
+// database and recording EVERY failure (not stopping at the first) shows that is
+// the small end of it: 33 of 120 files cannot apply, and most fail with
+// `relation "X" does not exist` for a table nothing creates.
+//
+// Ray's brief: "A deployment cannot depend on 'probably already migrated.'" This
+// is the measurement of how far from that the repository is. These assertions
+// state TODAY'S answer; when someone adds the missing CREATE TABLEs the relevant
+// case goes RED and must be updated downward. That is the point — a silent
+// improvement is as invisible as a silent regression.
+describe('🚨 which core tables can a fresh deployment actually build?', () => {
+  const scanned = () => FILES.map(f => readFileSync(join(MIG_DIR, f), 'utf8')).join('\n');
+  /**
+   * 🚨 NO BACKSLASHES IN THIS PATTERN, AND THAT IS NOT STYLE.
+   *
+   * The first version of this function was written with `\\s` and `\\b` inside a
+   * template literal — and the shell heredoc that wrote the file collapsed them to
+   * `\s` and `\b`. In a template literal `\s` is a literal 's' and `\b` is U+0008
+   * BACKSPACE, so the pattern became unmatchable and EVERY table looked missing.
+   *
+   * The control case below is the only reason that was caught: `projects` came
+   * back "not created by any scanned migration", which is absurd on its face and
+   * is exactly what a blanket-true detector produces. Without that case, the
+   * finding above would have read as far worse than it is, and been believed.
+   *
+   * Sixth occurrence of this bug in this repository, and the first I authored
+   * myself. Explicit character classes cannot be collapsed by an editor, a
+   * heredoc, or the next person.
+   */
+  const creates = (sql: string, table: string) => {
+    const WS = '[ \t\r\n]+';
+    const NOT_WORD = '[^A-Za-z0-9_]';
+    return new RegExp(
+      `create${WS}table${WS}(?:if${WS}not${WS}exists${WS})?(?:public[.])?${table}(?:${NOT_WORD}|$)`,
+      'i',
+    ).test(sql);
+  };
+
+  it('records the tables the scanned set CANNOT create', () => {
+    const src = scanned();
+    const missing = [
+      'proposals', 'leads', 'crews', 'site_surveys',
+      'site_survey_files', 'project_physical_data', 'utility_policies',
+    ].filter(t => !creates(src, t));
+
+    // 🚨 `proposals` is the one to look at first. Six scanned migrations
+    // REFERENCE it (020, 031, 033, 037, 040, 090) and `getProjectsByUser` selects
+    // from it — and NOTHING in this repository creates it: not the scanned set,
+    // not the unscanned `migrations/` directory, not even the now-423-Locked
+    // inline runner in app/api/migrate/route.ts. Whatever production has came
+    // from outside the migration history entirely.
+    expect(missing, 'the set of uncreatable core tables CHANGED — update this list and the R8 record')
+      .toEqual([
+        'proposals', 'leads', 'crews', 'site_surveys',
+        'site_survey_files', 'project_physical_data', 'utility_policies',
+      ]);
+  });
+
+  it('and the tables it CAN create are still creatable — this is not a blanket claim', () => {
+    // The control. If `creates()` were broken, every table would look missing and
+    // the case above would pass for the wrong reason.
+    const src = scanned();
+    for (const t of ['projects', 'users', 'crew_members']) {
+      expect(creates(src, t), `${t} should be created by a scanned migration`).toBe(true);
+    }
+  });
+});
