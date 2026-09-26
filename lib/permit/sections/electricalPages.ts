@@ -1105,7 +1105,25 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                 <td class="fw7">Branch Home-Run</td>
                 <td>Roof J-Box (${_hr.sharedCircuitCount ?? '—'} branches)</td>
                 <td>AC Combiner</td>
-                <td>${_hr.currentCarryingCount ?? '—'}×${_branch.gauge ?? '#10 AWG'} THWN-2 (shared)</td>
+                ${/* 2026-09-25 — `_hr.conductorGauge`, NOT `_branch.gauge`.
+                     Every other cell in this row is projected from `_hr`
+                     (projectSharedBranchRaceway); the gauge alone read the OPEN-AIR
+                     branch projection, whose segment is a different physical run —
+                     BRANCH_RUN is the open-air Q-Cable trunk, BRANCH_HOMERUN_RUN is
+                     this shared conduit, and computed-system keeps them deliberately
+                     distinct. `conductorGauge` even documents itself as "the gauge the
+                     SVG/E-1 must print, NEVER the legacy branch gauge", and E-1 and
+                     the SLD both read it; PV-4B was the one consumer that did not.
+                     The two are sized INDEPENDENTLY — back-population sets each run's
+                     gauge from its own segment-schedule row, and only the home-run
+                     carries the 310.15(C)(1) count adjustment for its bundle — so a
+                     fully loaded design sizes the home-run up while this cell went on
+                     printing the open-air size, with nothing to reconcile them.
+                     The `?? '#10 AWG'` fallback is gone with it: it was the very
+                     literal the comment 20 lines above condemns the old code for
+                     hardcoding, and an absent gauge must PEND like every other
+                     unestablished value on this sheet, not name a conductor. */''}
+                <td>${_hr.currentCarryingCount ?? '—'}×${_hr.conductorGauge ?? 'PENDING'} THWN-2 (shared)</td>
                 <td>—</td>
                 <td>—</td>
                 ${/* TAC WS-8 — this cell is the V-DROP % column (see the header).
