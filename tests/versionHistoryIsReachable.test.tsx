@@ -124,16 +124,52 @@ describe('🚨 it talks to the real routes', () => {
     //
     // A flag rather than only clearing the timer: a state change during the 600 ms
     // before the reload would re-arm it.
+    // 🚨 THE WINDOW ENDS AT THE ELEMENT'S OWN CLOSE, NOT AT THE RELOAD CALL. Both
+    // guards here anchored on `window.location.reload` — and the reload was then moved
+    // to the TOP of the handler, deliberately, so that an exception below it cannot
+    // skip it. That killed both anchors. Fourth time in this campaign that an anchor
+    // was destroyed by the correct change it was written to require: anchor on a
+    // construct's own delimiters, never on a statement inside it.
     const i = STUDIO.indexOf('onRestored={(result)');
     expect(i, 'the restore handler moved — this guard is blind').toBeGreaterThan(-1);
-    const end = STUDIO.indexOf('window.location.reload', i);
-    expect(end).toBeGreaterThan(i);
+    const end = STUDIO.indexOf('/>', i);
+    expect(end, 'the VersionHistory element is unterminated').toBeGreaterThan(i);
     const handler = STUDIO.slice(i, end);
 
     expect(handler,
       'a restore does not stop the pending autosave — it will write the pre-restore ' +
       'design over the restored one, and the reload will hydrate the old design')
       .toMatch(/restoreInFlightRef\.current = true/);
+
+    // 🚨 AND THE FLAG HAS A WAY BACK. It is only otherwise cleared by the reload
+    // remounting the component — so if the reload never happens, autosave and the
+    // beacon are dead for the rest of the session, SILENTLY, and the user keeps
+    // designing into a studio that no longer saves. That is strictly worse than the
+    // defect the flag fixes. Found by re-reading my own change rather than by a test.
+    //
+    // The reload is scheduled BEFORE anything that can throw, and a valve clears the
+    // flag if it has not happened — so the worst case degrades to the old behaviour
+    // instead of to no saving at all.
+    expect(STUDIO, 'nothing ever clears the restore flag — a failed reload kills autosave for the session')
+      .toMatch(/restoreInFlightRef\.current = false/);
+
+    // 🚨 AND THE RELOAD IS QUEUED BEFORE ANYTHING THAT CAN THROW, which is the whole
+    // point of moving it. A mutation deleting the reload from the top and leaving only
+    // the valve passed the assertions above — because they checked that both statements
+    // EXIST, not that they are in the order that makes them work. If the reload is
+    // scheduled after the toast, an exception in the toast skips it, and then only the
+    // 10-second valve saves the session from a studio that never writes again.
+    const reloadAt = handler.indexOf('window.location.reload');
+    const adoptAt = handler.indexOf('noteSavedVersion');
+    const toastAt = handler.indexOf('toast.success');
+    expect(reloadAt, 'the restore handler no longer reloads at all').toBeGreaterThan(-1);
+    expect(adoptAt, 'the restore handler no longer adopts the version').toBeGreaterThan(-1);
+    expect(reloadAt, 'the reload is scheduled AFTER the version adoption — an exception there skips it')
+      .toBeLessThan(adoptAt);
+    if (toastAt > -1) {
+      expect(reloadAt, 'the reload is scheduled AFTER the toast — an exception there skips it')
+        .toBeLessThan(toastAt);
+    }
     expect(handler, 'the pending autosave timer is not cleared')
       .toMatch(/clearTimeout\(autoSaveTimerRef\.current\)/);
 
@@ -159,8 +195,9 @@ describe('🚨 it talks to the real routes', () => {
 
     const i = STUDIO.indexOf('onRestored={(result)');
     expect(i, 'the restore handler moved — this guard is now blind').toBeGreaterThan(-1);
-    const end = STUDIO.indexOf('window.location.reload', i);
-    expect(end, 'the restore handler no longer re-hydrates').toBeGreaterThan(i);
+    // Same reason as above: the element's own close, not a statement inside it.
+    const end = STUDIO.indexOf('/>', i);
+    expect(end, 'the VersionHistory element is unterminated').toBeGreaterThan(i);
     expect(STUDIO.slice(i, end),
       'the restore handler does not adopt the new version — the next autosave will be refused')
       .toMatch(/noteSavedVersion\(/);

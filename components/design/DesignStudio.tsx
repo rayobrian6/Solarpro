@@ -15,7 +15,7 @@ import {
 // Wave 4A: per-subsystem design-electrical writer (contract §1.3) — pure
 // builder + stamp partitioner live in the design→engineering module so the
 // split is testable outside the component.
-import { buildDesignElectricalBlock, presentDesignSubSystemKeys, resolveDesignMicro } from '@/lib/system/designToEngineering';
+import { buildDesignElectricalBlock, presentDesignSubSystemKeys, resolveDesignMicro, resolveStudioMicros } from '@/lib/system/designToEngineering';
 import { toSubSystemKey } from '@/lib/system/subSystemEquipment';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
@@ -818,25 +818,44 @@ export default function DesignStudio({ project, onSave }: Props) {
     setPanelSpacing(getMidClampGapMeters(id));
   }, []);
 
-  // The micro this design plans its AC branches with (and records): the
-  // selected inverter when it IS a micro, else the catalogue default — never
-  // the studio's SolarEdge default (Ray, 2026-09-25).
+  // The micro this design RECORDS (microModelId): the selected inverter when it
+  // IS a micro, else the catalogue default — never the studio's SolarEdge
+  // default (Ray, 2026-09-25).
   const designMicro = useMemo(() => resolveDesignMicro(selectedInverter as any), [selectedInverter]);
+  // Wave 4A: distinct sub-system keys stamped on the placed panels (membership
+  // authority §1.1), fixed roof > ground > fence order. >1 keys = hybrid design
+  // — equipment picks then carry a per-sub scope to the canonical store.
+  const presentSubSystemKeys = useMemo(() => presentDesignSubSystemKeys(panels as any), [panels]);
+  // The micro(s) the branches are PLANNED with — per sub, the micro ENGINEERING
+  // recorded (engineering_config fleet → its §1.1 map → selected_equipment's
+  // mirror), else the studio's micro pick, else the catalogue default. E-1 and
+  // PV-2B plan with the engineered micro, per sub on a hybrid; planning with the
+  // studio's own pick painted an IQ8M job's 34 panels 12/11/11 against E-1's
+  // 9/9/8/8 (Ray, 2026-09-25).
+  const studioMicros = useMemo(
+    () => resolveStudioMicros(
+      presentSubSystemKeys.length > 0 ? presentSubSystemKeys : [toSubSystemKey(project.systemType)],
+      selectedInverter,
+      { engineeringConfig: project.engineeringConfig, selectedEquipmentSubSystems: project.selectedEquipmentSubSystems },
+    ),
+    [presentSubSystemKeys, project.systemType, selectedInverter, project.engineeringConfig, project.selectedEquipmentSubSystems],
+  );
   // v63: derive per-panel string + equipment assignment from the placed panels.
-  // MICRO: the groups are the plan set's AC branches (planMicroBranches) for
-  // this micro model, not modulesPerString chunks.
+  // MICRO: the groups are the plan set's AC branches (planMicroBranches), each
+  // sub planned with its own micro — not modulesPerString chunks.
   const stringAssignment = useMemo(
     () => assignStrings(panels as any, {
       modulesPerString,
       topology,
       modulesPerDevice: 1,
       optimizerModelId: OPTIMIZERS[0]?.id,
-      microModelId: designMicro.id,
-      microModel: designMicro.model,
-      microManufacturer: designMicro.manufacturer,
+      microModelId: studioMicros[0].id,
+      microModel: studioMicros[0].model,
+      microManufacturer: studioMicros[0].manufacturer,
+      microBySubSystem: Object.fromEntries(studioMicros.map(m => [m.key, m] as const)),
       overrides: stringOverrides,
     }),
-    [panels, modulesPerString, topology, stringOverrides, designMicro],
+    [panels, modulesPerString, topology, stringOverrides, studioMicros],
   );
   const panelMeta = useMemo(() => {
     const m: Record<string, { color?: string; deviceType?: 'optimizer' | 'micro' | 'none'; stringLabel?: string }> = {};
@@ -850,10 +869,6 @@ export default function DesignStudio({ project, onSave }: Props) {
     () => stringAssignment.strings.map(s => ({ label: s.label, color: s.color, panelCount: s.panelCount })),
     [stringAssignment],
   );
-  // Wave 4A: distinct sub-system keys stamped on the placed panels (membership
-  // authority §1.1), fixed roof > ground > fence order. >1 keys = hybrid design
-  // — equipment picks then carry a per-sub scope to the canonical store.
-  const presentSubSystemKeys = useMemo(() => presentDesignSubSystemKeys(panels as any), [panels]);
   // Turning equipment view on dims the panels so devices are visible underneath.
   const toggleEquipment = useCallback(() => {
     setShowEquipment(prev => {
@@ -902,7 +917,10 @@ export default function DesignStudio({ project, onSave }: Props) {
       // engineering handoff reads this id; defaulting to IQ8+ (290W) when the design
       // uses IQ8A (349W) makes the AC output ~17% low. Fall back to the catalog
       // default only when nothing is selected.
-      // Only a catalogue MICRO is ever recorded (resolveDesignMicro).
+      // Only a catalogue MICRO is ever recorded (resolveDesignMicro). Deliberately
+      // NOT the engineered micro the branches are planned with (studioMicros):
+      // this block seeds engineering and the permit backfill, and an engineered
+      // micro only exists where engineering_config already outranks this block.
       microModelId: topology === 'micro' ? designMicro.id : undefined,
       overrides: Object.keys(stringOverrides).length > 0 ? stringOverrides : undefined,
       deviceCount: stringAssignment.deviceCount,
@@ -5060,7 +5078,22 @@ export default function DesignStudio({ project, onSave }: Props) {
     const rows: Array<[string, string, string, number, string]> = [
       ['Panel', panelMfr, panelModel, panels.length, 'ea'],
     ];
-    if (selectedInverter) {
+    if (topology === 'micro') {
+      // A micro design's inverters ARE its micros: one per module, each sub on
+      // the micro its branches were planned with. The studio's inverter pick
+      // defaults to a SolarEdge SE7600H, which exported as this job's inverter
+      // on every micro design.
+      const microRows = new Map<string, [string, string, string, number, string]>();
+      for (const p of stringAssignment.microPlans ?? []) {
+        if (p.panelCount <= 0) continue;
+        const mfr = p.manufacturer ?? 'Unknown';
+        const model = p.model ?? 'Unknown';
+        const row = microRows.get(`${mfr}|${model}`);
+        if (row) row[3] += p.panelCount;
+        else microRows.set(`${mfr}|${model}`, ['Microinverter', mfr, model, p.panelCount, 'ea']);
+      }
+      rows.push(...microRows.values());
+    } else if (selectedInverter) {
       rows.push(['Inverter', selectedInverter.manufacturer, selectedInverter.model, 1, 'ea']);
     }
     // Racking + BOS stubs — replace with real selector values when
@@ -5086,7 +5119,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [panels, selectedPanel, selectedInverter, panelsPerRow, project]);
+  }, [panels, selectedPanel, selectedInverter, panelsPerRow, project, topology, stringAssignment]);
 
   return (
     <div className="flex flex-col h-full bg-slate-950">
@@ -5121,6 +5154,23 @@ export default function DesignStudio({ project, onSave }: Props) {
           restoreInFlightRef.current = true;
           if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
           autosaveDeadlineRef.current = null;
+          // 🚨 SCHEDULE THE RELOAD AND ITS SAFETY VALVE BEFORE ANYTHING THAT CAN
+          // THROW.
+          //
+          // The flag above is otherwise cleared only by the reload REMOUNTING this
+          // component. So if the reload never happens — an exception in the toast, in
+          // `noteSavedVersion`, anywhere below — the autosave and the unload beacon are
+          // dead for the rest of the session, SILENTLY, and the operator keeps
+          // designing into a studio that no longer saves. That is strictly worse than
+          // the defect the flag exists to fix, and it is the shape this codebase keeps
+          // being bitten by: a guard whose failure mode is worse than the bug.
+          //
+          // So: the reload is queued first, and a valve puts the flag back if the
+          // reload has not taken the page away. 10 s against a 600 ms reload means the
+          // valve never fires on the happy path; when it does fire, the worst case
+          // degrades to the OLD behaviour rather than to no saving at all.
+          setTimeout(() => window.location.reload(), 600);
+          setTimeout(() => { restoreInFlightRef.current = false; }, 10_000);
           // 🚨 ADOPT THE NEW VERSION FIRST, BEFORE THE RELOAD. The restore moved
           // the row's `updated_at`. The autosave is on a timer and can fire in
           // the window between here and the page coming back — with the token
@@ -5133,17 +5183,17 @@ export default function DesignStudio({ project, onSave }: Props) {
             'Design restored',
             `${result.panelsCount ?? 0} module(s) restored. Reloading the design…`,
           );
-          // 🚨 AND RE-HYDRATE BY RELOADING, not by patching state here. The
-          // restore route reconstructs panel elevations from the snapshot's roof
-          // planes and carries `siteArchives` with the roof — both of them
-          // repairs for real data loss. Re-implementing hydration at this call
-          // site would be a second, thinner version of that path, and a partial
-          // restore is exactly the failure those repairs exist to prevent. The
-          // mount effect reads the design back through the real GET handler, so
-          // a reload runs the production path unchanged. The local copy written
-          // by `localSaveLayout` is never read on hydrate, so it cannot shadow
-          // what was just restored.
-          setTimeout(() => window.location.reload(), 600);
+          // 🚨 THE RE-HYDRATION IS A RELOAD, not a patch of state here — and it is
+          // QUEUED ABOVE, before anything that can throw.
+          //
+          // The restore route reconstructs panel elevations from the snapshot's own
+          // roof planes and carries `siteArchives` with the roof; both are repairs for
+          // real data loss. Re-implementing hydration at this call site would be a
+          // second, thinner version of that path, and a partial restore is exactly the
+          // failure those repairs exist to prevent. The mount effect reads the design
+          // back through the real GET handler, so a reload runs the production path
+          // unchanged, and the local copy written by `localSaveLayout` is never read on
+          // hydrate so it cannot shadow what was just restored.
         }}
       />
 
@@ -6592,12 +6642,36 @@ export default function DesignStudio({ project, onSave }: Props) {
                     </select>
                     {topology === 'micro' ? (
                       // Micro: no DC strings. Groups are AC branches sized by the
-                      // manufacturer's per-branch max — the same plan the SLD draws.
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[11px] text-slate-400">Micros / branch</span>
-                        <span className="text-[11px] text-slate-300 font-mono" title="Manufacturer maximum per 20 A branch — branches are balanced exactly as the plan set draws them">
-                          ≤ {stringAssignment.maxPerBranch ?? '—'} · {designMicro.manufacturer} {designMicro.model}
-                        </span>
+                      // manufacturer's per-branch max — the same plan the SLD draws,
+                      // with the micro engineering recorded (one row per sub on a
+                      // hybrid). A catalogue default says so: read as the engineered
+                      // value it would misstate what E-1 prints.
+                      <div className="mb-1.5 space-y-0.5">
+                        {studioMicros.map(m => {
+                          const isDefault = m.source === 'catalogue-default';
+                          const max = stringAssignment.microPlans?.find(p => p.key === m.key)?.maxPerBranch
+                            ?? stringAssignment.maxPerBranch;
+                          return (
+                            <div key={m.key}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] text-slate-400">
+                                  {studioMicros.length > 1 ? `${m.key[0].toUpperCase()}${m.key.slice(1)} micros / branch` : 'Micros / branch'}
+                                </span>
+                                <span
+                                  className={`text-[11px] font-mono ${isDefault ? 'text-amber-400/90' : 'text-slate-300'}`}
+                                  title={isDefault
+                                    ? 'Catalogue default — no micro is recorded in engineering for this system, so this is not the engineered value. Manufacturer maximum per 20 A branch.'
+                                    : `${m.source === 'engineering' ? 'Engineered micro' : 'Design pick'} — manufacturer maximum per 20 A branch; branches are balanced exactly as the plan set draws them`}
+                                >
+                                  ≤ {max ?? '—'} · {m.manufacturer} {m.model}
+                                </span>
+                              </div>
+                              {isDefault ? (
+                                <p className="text-[10px] text-amber-400/80 text-right">catalogue default — not engineered</p>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
                     <div className="flex items-center justify-between mb-1.5">
