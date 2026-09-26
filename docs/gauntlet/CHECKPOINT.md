@@ -3,7 +3,9 @@
 Internal running state. Not a report — see `NEEDS-RAY.md` for anything that
 actually requires Ray.
 
-Last updated: 2026-09-25, after the parser-backed source stripper.
+Last updated: 2026-09-25, after the permit audit's seven confirmed findings were
+implemented. (43 agents, read-only; 12 further findings were KILLED by adversarial
+verification and are deliberately not acted on — that ratio is the point of the pass.)
 
 ---
 
@@ -58,6 +60,14 @@ Last updated: 2026-09-25, after the parser-backed source stripper.
 | `b90164a1` | A backspace byte where a word boundary was meant made one of my own guards vacuous |
 | `55e87dab` | A guard weakened around the stripper bug is restored, now the bug has a name |
 | `9e5f868f` | A vacuous guard says so, and announces if its own detector breaks |
+| `483f3b3b` | Ray's playwright cap kept: 1 local worker, no video (parallel SwiftShader browsers rebooted his machine twice) |
+| `d24d3044` | **A tab was refusing its OWN layout writes.** The autosave and `/api/production` in flight together stated the same version, so the server granted one and refused the other as "saved somewhere else" with nothing else open. One write queue per tab; the token is read inside the queued turn |
+| `a1963540` | 🚨 **The permit's wind analysis was hardcoded to a 15 ft building.** qz 24.46 / 27.05 / 29.93 psf at 15 / 25 / 35 ft — every multi-storey building analysed 10–22 % LOW, in the unsafe direction, on a sealed sheet. The building model was already on `PermitInput` and nothing read it (NEEDS-RAY R9) |
+| `216e546f` | 🚨 **Two NEC 310.16 tables disagreed at #1 AWG** (150 vs the correct 145) — and the wrong copy was the one that SELECTED the conductor, while the right one PRINTED the derivation. One table now, `lib/nec/ampacity.ts` |
+| `b9281e5c` | The fence and ground sheets asserted "confirmed adequate" with no gate — the same sheet could say that AND "analysis data incomplete". The gate the roof sheet uses was in the same file |
+| `1889fd24` | A log said "keeping pass-1 pagination" while assigning the pass-2 BOM. The cover index could list one set of SCHED sheets and the package carry another |
+| `df75ea85` | The engineer's own ENGINEERING NOTES reached no sheet, while the cover printed boilerplate in their place |
+| `b81527f7` | PV-4B's home-run row printed the OPEN-AIR branch's conductor gauge — a different physical run, sized independently |
 | `5cb4060d` | The design history in a real browser — written, then run: 5/5, and it found a live defect (below) |
 | `64415977` | NEEDS-RAY reordered by severity with a read-first index |
 | `a56c96b7` | Escape closes the dialogs — and does not reach the 3D tool behind them |
