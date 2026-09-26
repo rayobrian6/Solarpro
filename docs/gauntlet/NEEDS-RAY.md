@@ -172,7 +172,7 @@ the principle.
 | **NOT blocked** | Designs with no building model are **unchanged**: they still analyse at 15 ft, deliberately, so this did not silently re-price everything. What changed for them is that PV-4C now *says* the height is assumed, in the same amber the unverified-slope row uses. |
 | **Safe default applied** | A height that is an assumption reports itself as one; an out-of-range estimate is rejected with its reason rather than clamped. |
 
-### Two smaller things found alongside it, both still open
+### Two smaller things found alongside it — BOTH NOW CLOSED
 
 - ~~The operator's own Structural-tab height cannot reach the permit at all.~~
   **CLOSED (`5c11c143`).** The peer session committed its files, so the wiring
@@ -180,9 +180,11 @@ the principle.
   carry it, and the operator's entry now OUTRANKS the modelled estimate — the same
   order `rafterSpan || _geomSpanFt || NOMINAL` already used. PV-4C prints “as
   entered for this building” so a reviewer can tell an entry from a derivation.
-- **`project.stories` is printed on the cover sheet and nothing populates it.**
-  `coverSheet.ts:360` renders a STORIES row; a repo-wide search finds no writer.
-  That row has always been blank.
+- ~~`project.stories` is printed on the cover sheet and nothing populates it.~~
+  **CLOSED (`b3a0918d`).** It now falls back to the canonical building model's
+  `metadata.stories`. Correction to the original note: the row was never *blank*,
+  it was ABSENT — `infoRow` drops an empty value — which is why a missing field
+  read as no field at all.
 
 ---
 
