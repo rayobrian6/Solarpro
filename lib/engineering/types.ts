@@ -199,6 +199,11 @@ export interface ElectricalEngineering {
   stringCount: number;
   panelsPerString: number;
   stringVoc: number;
+  /** The NEC 690.7(A) cold-corrected string Voc — the number the inverter's maximum
+   *  DC input voltage is actually tested against. `stringVoc` above is the STC sum
+   *  the datasheet states; a reader checking headroom needs THIS one. Both are
+   *  carried because the report prints one and the code limits the other. */
+  stringVocCorrected: number;
   stringVmp: number;
   stringIsc: number;
   
@@ -218,11 +223,14 @@ export interface ElectricalEngineering {
   stringFuseAmps: number;
   dcDisconnectAmps: number;
   acBreakerAmps: number;
-  mainPanelBusAmps: number;
+  /** null when the service busbar rating has not been established. It is NOT
+   *  defaulted to 200 A — the 120% rule's conclusion changes the scope of work,
+   *  so an assumed service size must not produce one. See lib/nec/rule705_12.ts. */
+  mainPanelBusAmps: number | null;
   backfeedBreakerAmps: number;
-  
+
   // Interconnection
-  interconnectionType: string;  // 'supply-side' | 'load-side'
+  interconnectionType: string;  // 'supply-side' | 'load-side' | 'unresolved'
   interconnectionMethod: string;
   
   // Rapid Shutdown

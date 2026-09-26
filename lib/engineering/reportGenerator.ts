@@ -12,28 +12,52 @@ import type {
 } from './types';
 import type { EnrichedSiteSurvey } from '@/lib/siteSurvey/types';
 import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
+// ── The three authorities this file used to hand-roll ───────────────────────
+// Conduit: real NEC Chapter 9 Table 4 areas + Table 1 fill limits, by conductor
+// count — not a trade size read off an ampacity bracket.
+import { conductorAreaIn2, selectSmallestConduit } from '@/lib/nec/chapter9';
+// Interconnection: NEC 705.12(B)(2) takes the busbar AND the main breaker.
+import { resolveInterconnectionMethod } from '@/lib/nec/rule705_12';
+// Cold Voc: THE NEC 690.7(A) law — β when the module coefficient is known, the
+// blanket ×1.25 only as a documented fallback.
+import { coldVocFactor } from '@/lib/permit/utils/panelSpecs';
+import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 
-// NEC wire sizing tables (simplified)
-const DC_WIRE_SIZING: { maxAmps: number; gauge: string; conduit: string }[] = [
-  { maxAmps: 20,  gauge: '#12 AWG',  conduit: '3/4" EMT' },
-  { maxAmps: 30,  gauge: '#10 AWG',  conduit: '3/4" EMT' },
-  { maxAmps: 40,  gauge: '#8 AWG',   conduit: '1" EMT'   },
-  { maxAmps: 55,  gauge: '#6 AWG',   conduit: '1" EMT'   },
-  { maxAmps: 70,  gauge: '#4 AWG',   conduit: '1-1/4" EMT' },
-  { maxAmps: 85,  gauge: '#3 AWG',   conduit: '1-1/4" EMT' },
-  { maxAmps: 95,  gauge: '#2 AWG',   conduit: '1-1/2" EMT' },
-  { maxAmps: 130, gauge: '#1 AWG',   conduit: '1-1/2" EMT' },
-  { maxAmps: 150, gauge: '#1/0 AWG', conduit: '2" EMT'   },
+// NEC wire sizing tables (simplified).
+//
+// 🚨 THE `conduit` COLUMN IS DELETED ON PURPOSE. A conduit trade size cannot be
+// read off an ampacity bracket: NEC Chapter 9 sizes a raceway from the SUM OF THE
+// CONDUCTOR AREAS (Table 5 / Table 4) against a fill limit that depends on the
+// CONDUCTOR COUNT (Table 1 — 53 % for one, 31 % for two, 40 % for three or more).
+// None of those three inputs is a function of amps, so the column was a guess that
+// happened to be printed on an equipment schedule and bought.
+//
+// The AC side over-bought one trade size. The DC side was the unsafe one: a
+// ≥5-string design got 3/4" EMT at 43.5 % fill against the 40 % limit.
+//
+// Conduit is now computed in generateElectricalEngineering from the real bundle.
+// Do NOT reintroduce a conduit column here — a second answer to this question is
+// how the two surfaces came to disagree in the first place.
+const DC_WIRE_SIZING: { maxAmps: number; gauge: string }[] = [
+  { maxAmps: 20,  gauge: '#12 AWG'  },
+  { maxAmps: 30,  gauge: '#10 AWG'  },
+  { maxAmps: 40,  gauge: '#8 AWG'   },
+  { maxAmps: 55,  gauge: '#6 AWG'   },
+  { maxAmps: 70,  gauge: '#4 AWG'   },
+  { maxAmps: 85,  gauge: '#3 AWG'   },
+  { maxAmps: 95,  gauge: '#2 AWG'   },
+  { maxAmps: 130, gauge: '#1 AWG'   },
+  { maxAmps: 150, gauge: '#1/0 AWG' },
 ];
 
-const AC_WIRE_SIZING: { maxAmps: number; gauge: string; conduit: string }[] = [
-  { maxAmps: 20,  gauge: '#12 AWG',  conduit: '3/4" EMT' },
-  { maxAmps: 30,  gauge: '#10 AWG',  conduit: '3/4" EMT' },
-  { maxAmps: 40,  gauge: '#8 AWG',   conduit: '1" EMT'   },
-  { maxAmps: 55,  gauge: '#6 AWG',   conduit: '1" EMT'   },
-  { maxAmps: 70,  gauge: '#4 AWG',   conduit: '1-1/4" EMT' },
-  { maxAmps: 95,  gauge: '#2 AWG',   conduit: '1-1/2" EMT' },
-  { maxAmps: 130, gauge: '#1/0 AWG', conduit: '2" EMT'   },
+const AC_WIRE_SIZING: { maxAmps: number; gauge: string }[] = [
+  { maxAmps: 20,  gauge: '#12 AWG'  },
+  { maxAmps: 30,  gauge: '#10 AWG'  },
+  { maxAmps: 40,  gauge: '#8 AWG'   },
+  { maxAmps: 55,  gauge: '#6 AWG'   },
+  { maxAmps: 70,  gauge: '#4 AWG'   },
+  { maxAmps: 95,  gauge: '#2 AWG'   },
+  { maxAmps: 130, gauge: '#1/0 AWG' },
 ];
 
 // State NEC version mapping
@@ -81,13 +105,13 @@ function getNecVersion(stateCode: string): string {
   return STATE_NEC[stateCode] || 'NEC 2020';
 }
 
-function selectWire(amps: number, table: typeof DC_WIRE_SIZING): { gauge: string; conduit: string } {
+function selectWire(amps: number, table: typeof DC_WIRE_SIZING): { gauge: string } {
   // NEC 690.8: multiply by 1.25 for continuous load
   const designAmps = amps * 1.25;
   for (const entry of table) {
-    if (designAmps <= entry.maxAmps) return { gauge: entry.gauge, conduit: entry.conduit };
+    if (designAmps <= entry.maxAmps) return { gauge: entry.gauge };
   }
-  return { gauge: '#2/0 AWG', conduit: '2" EMT' };
+  return { gauge: '#2/0 AWG' };
 }
 
 // ── Main Report Generator ─────────────────────────────────────────────────────
@@ -200,6 +224,10 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
   let panelsPerString = 1;
   let stringCount = snap.panelCount;
   let stringVoc = panelVoc;
+  /** NEC 690.7(A)-corrected cold Voc for the string — the value the inverter's
+   *  maximum DC input voltage is actually tested against. Defaults to the STC sum
+   *  for micro topology, where there is no series string. */
+  let stringVocCorrected = panelVoc;
   let stringVmp = panelVmp;
   let stringIsc = panelIsc;
 
@@ -210,8 +238,37 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
     const mpptVoltageMax = inverter?.mpptVoltageMax || 550;
     const mpptChannels = inverter?.mpptChannels || 2;
 
-    // Max panels per string (NEC 690.7: Voc × 1.25 ≤ maxDcVoltage)
-    const necMaxPerString = Math.max(1, Math.min(Math.floor(maxDcVoltage / (panelVoc * 1.25)), 20));
+    // Max panels per string, NEC 690.7(A): corrected cold Voc × n ≤ maxDcVoltage.
+    //
+    // 🚨 This was `Math.floor(maxDcVoltage / (panelVoc * 1.25))` with a hard
+    // `Math.min(…, 20)`. The blanket ×1.25 is Table 690.7(A)'s most conservative
+    // row (−1 to −5 °C); it ignores the module's own temperature coefficient and
+    // the site entirely. Because this function SETS panelsPerString, stringCount,
+    // dcWireGauge, stringFuseAmps and dcDisconnectAmps on the stored engineering
+    // report, the effect is over-restrictive for warm sites: a Florida job
+    // (designTemps FL −2 °C, real factor ≈1.07) was capped as if it were at
+    // −38 °C, so the report recommended shorter strings and therefore MORE
+    // strings, more MPPT channels and sometimes another inverter than the design
+    // needs — a price the customer pays.
+    //
+    // `coldVocFactor` is the one law (lib/permit/utils/panelSpecs.ts): β-based when
+    // the coefficient resolves, the blanket ×1.25 only as a documented fallback.
+    const _thermal = getThermalDesignBasis({ state: snap.stateCode ?? null });
+    const _tempCoeffVoc = (panel as { tempCoeffVoc?: number })?.tempCoeffVoc;
+    const _coldFactor = coldVocFactor(_tempCoeffVoc, _thermal.minDesignTempC);
+    const _correctedPanelVoc = panelVoc * _coldFactor;
+
+    // The 20-panel ceiling belongs to the inverter, not to a literal. Use the
+    // record's own limit when it states one; otherwise no artificial ceiling —
+    // the voltage rule above is the real constraint.
+    const _inverterMaxPerString = Number(
+      (inverter as { maxPanelsPerString?: number })?.maxPanelsPerString,
+    ) || Infinity;
+
+    const necMaxPerString = Math.max(1, Math.min(
+      Math.floor(maxDcVoltage / _correctedPanelVoc),
+      _inverterMaxPerString,
+    ));
     panelsPerString = necMaxPerString;
 
     // Optimal: target Vmp in MPPT range
@@ -229,7 +286,13 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
     panelsPerString = Math.max(1, panelsPerString);
 
     stringCount = Math.ceil(snap.panelCount / panelsPerString);
+    // 🚨 `stringVoc` is the STC sum, and the report labels it "DC Voltage" — so a
+    // reader checking headroom against a 600 V inverter saw 496 V for a string
+    // whose real NEC 690.7(A) design maximum is 563 V. Both are now carried:
+    // `stringVoc` stays the STC value the datasheet states, and
+    // `stringVocCorrected` is the number the code limit is actually tested against.
     stringVoc = panelVoc * panelsPerString;
+    stringVocCorrected = _correctedPanelVoc * panelsPerString;
     stringVmp = panelVmp * panelsPerString;
     stringIsc = panelIsc; // parallel strings don't change Isc per string
   }
@@ -244,39 +307,101 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
   const acAmps = (acOutputKw * 1000) / acVoltage;
   const acWire = selectWire(acAmps, AC_WIRE_SIZING);
 
+  // ── Conduit trade size — NEC Chapter 9, not an ampacity bracket ────────────
+  // 🚨 `dcConduitSize`/`acConduitSize` used to come from a `conduit` column on the
+  // same wire-gauge bracket tables: no conductor area, no fill percentage, no
+  // conductor count. These two fields reach the EQUIPMENT SCHEDULE — where the
+  // trade size IS the line item's model and specs, i.e. the conduit a crew orders —
+  // the rendered SLD wire label, the saved engineering artifact, and the
+  // customer-visible Engineering tab.
+  //
+  // The AC side over-bought one trade size (cost, not safety). THE DC SIDE WAS THE
+  // UNSAFE ONE: a ≥5-string design got 3/4" EMT printed and scheduled at 43.5 %
+  // fill against Chapter 9 Table 1's 40 % limit, and nothing downstream could catch
+  // it because the number never passed through a fill calculation at all.
+  //
+  // Build the real bundle and ask the real table. DC: two current-carrying
+  // conductors per string plus one EGC. AC 1Ø240 V: two hots, a neutral and an EGC.
+  const conduitType = 'EMT';
+  const bundleArea = (gauge: string, count: number): number | null => {
+    const a = conductorAreaIn2(gauge);
+    return a === null ? null : a * count;
+  };
+  const dcConductorCount = Math.max(2, (stringCount || 1) * 2) + 1;
+  const acConductorCount = 4;
+  const dcArea = bundleArea(dcWire.gauge, dcConductorCount);
+  const acArea = bundleArea(acWire.gauge, acConductorCount);
+  const dcConduit = dcArea === null ? null : selectSmallestConduit(conduitType, dcArea, dcConductorCount);
+  const acConduit = acArea === null ? null : selectSmallestConduit(conduitType, acArea, acConductorCount);
+  // 🚨 'PENDING', never a fabricated trade size. The old print fallbacks
+  // (`?? '3/4" EMT'` / `?? '1" EMT'` in artifactBuilders and save-outputs) are
+  // arbitrary sizes, not what the surrounding logic would choose, and they drew on
+  // the SLD when the engine had produced nothing. An unestablished raceway must not
+  // be drawable as a real one.
+  const dcConduitSize = dcConduit ? `${dcConduit.tradeSize} ${conduitType}` : 'PENDING';
+  const acConduitSize = acConduit ? `${acConduit.tradeSize} ${conduitType}` : 'PENDING';
+
   // Breaker sizing (NEC 705.12: 125% of inverter output)
   const acBreakerAmps = necNextStandardOcpd(acAmps * 1.25);
   const backfeedBreakerAmps = acBreakerAmps;
 
-  // Main panel bus check (NEC 705.12(B))
-  // Use real panel rating from project_physical_data if available.
-  // Falls back to 200A (typical residential) only when no survey data exists.
-  const mainPanelBusAmps: number = pd?.panel_rating_amps ?? 200;
+  // Main panel bus check (NEC 705.12(B)).
+  // 🚨 No `?? 200`. The 120% rule needs the busbar AND the main breaker, and an
+  // invented service size used to produce a stated conclusion about the SCOPE OF
+  // WORK — see lib/nec/rule705_12.ts. `null` means not established.
+  const mainPanelBusAmps: number | null = pd?.panel_rating_amps ?? null;
+  // project_physical_data has no main-breaker column today, so this is normally
+  // null and the rule reports 'unresolved'. Read through an optional field so a
+  // survey that gains one is consumed without another edit here.
+  const mainBreakerAmps: number | null =
+    (pd as { main_breaker_amps?: number } | null)?.main_breaker_amps ?? null;
 
   // Rapid shutdown (NEC 690.12)
   const rapidShutdownRequired = snap.systemType === 'roof';
 
-  // Interconnection type
-  // If the field tech explicitly identified the interconnection point, use it.
-  // Otherwise derive from NEC 705.12(B): backfeed breaker ≤ 20% of bus rating
-  // qualifies for load-side; above that requires supply-side tap.
-  const _necCalcInterconnection = backfeedBreakerAmps <= (mainPanelBusAmps * 0.2) ? 'load-side' : 'supply-side';
-  const _surveyInterconnection  = pd?.interconnection_point;
-  const interconnectionType: 'load-side' | 'supply-side' =
-    (_surveyInterconnection === 'load_side'   || _surveyInterconnection === 'main_panel') ? 'load-side'   :
-    (_surveyInterconnection === 'supply_side' || _surveyInterconnection === 'sub_panel')  ? 'supply-side' :
-    _necCalcInterconnection;
+  // Interconnection type — ONE authority, NEC 705.12(B)(2).
+  // 🚨 This was `backfeedBreakerAmps <= mainPanelBusAmps * 0.2`, with a single
+  // field standing in for both the busbar and the main breaker, and a fabricated
+  // 200 A busbar when the survey was silent. `× 0.2` is not a rule the NEC states.
+  // And 'supply-side' is not a label: SUPPLY_SIDE_TAP deletes the backfed breaker
+  // from the BOM and adds three insulated multi-tap connectors plus a fused AC
+  // disconnect that must BE the OCPD, under a 705.11(C) ≤10 ft placement
+  // constraint. A derated-main service was being quoted and drawn for a
+  // utility-coordinated line-side tap it does not need.
+  const _interconnection = resolveInterconnectionMethod({
+    surveyedPoint: pd?.interconnection_point ?? null,
+    busRatingA: mainPanelBusAmps,
+    mainBreakerA: mainBreakerAmps,
+    backfeedBreakerA: backfeedBreakerAmps,
+  });
+  const interconnectionType = _interconnection.side;
 
   const necVersion = getNecVersion(snap.stateCode);
   const complianceNotes: string[] = [
     `NEC ${necVersion} compliance required`,
     `NEC 690.12 Rapid Shutdown: ${rapidShutdownRequired ? 'Required' : 'Not Required'}`,
-    `NEC 705.12(B) Bus Loading: ${backfeedBreakerAmps}A backfeed on ${mainPanelBusAmps}A bus`,
+    mainPanelBusAmps != null
+      ? `NEC 705.12(B) Bus Loading: ${backfeedBreakerAmps}A backfeed on ${mainPanelBusAmps}A bus`
+      : `NEC 705.12(B) Bus Loading: ${backfeedBreakerAmps}A backfeed — bus rating NOT ESTABLISHED`,
     `NEC 690.8 Wire Sizing: DC ${dcWire.gauge}, AC ${acWire.gauge}`,
+    // The interconnection conclusion, or the reason there isn't one. The report
+    // already has this channel, so an unresolved rule states itself instead of
+    // being silently replaced by a derivation from an assumed service size.
+    `NEC 705.12 Interconnection: ${_interconnection.basis}`,
+    `NEC Ch.9 Conduit: DC ${dcConduitSize} (${dcConductorCount} conductors), `
+      + `AC ${acConduitSize} (${acConductorCount} conductors)`,
   ];
 
   if (isMicro) {
     complianceNotes.push('Microinverter system: AC trunk cable sizing per NEC 690.8(B)');
+  }
+  if (interconnectionType === 'unresolved') {
+    complianceNotes.push(
+      'ACTION REQUIRED: interconnection method cannot be determined without the '
+      + 'main service panel busbar rating AND main breaker rating. Capture both on '
+      + 'the site survey — the scope of work (backfed breaker vs supply-side tap) '
+      + 'depends on it.',
+    );
   }
 
   return {
@@ -285,15 +410,18 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
     stringCount,
     panelsPerString,
     stringVoc: parseFloat(stringVoc.toFixed(1)),
+    // The NEC 690.7(A) maximum the inverter limit is tested against — what a reader
+    // checking headroom needs, and NOT the same number as the STC sum above.
+    stringVocCorrected: parseFloat(stringVocCorrected.toFixed(1)),
     stringVmp: parseFloat(stringVmp.toFixed(1)),
     stringIsc: parseFloat(stringIsc.toFixed(2)),
     acSystemSizeKw: acOutputKw,
     acVoltage,
     acFrequency: 60,
     dcWireGauge: dcWire.gauge,
-    dcConduitSize: dcWire.conduit,
+    dcConduitSize,
     acWireGauge: acWire.gauge,
-    acConduitSize: acWire.conduit,
+    acConduitSize,
     groundWireGauge: '#8 AWG',
     stringFuseAmps: necNextStandardOcpd(panelIsc * 1.56),
     dcDisconnectAmps: necNextStandardOcpd(dcDesignAmps),
@@ -301,7 +429,10 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
     mainPanelBusAmps,
     backfeedBreakerAmps,
     interconnectionType,
-    interconnectionMethod: interconnectionType === 'load-side' ? 'Backfeed Breaker' : 'Supply-Side Tap',
+    interconnectionMethod:
+      interconnectionType === 'load-side'  ? 'Backfeed Breaker' :
+      interconnectionType === 'supply-side' ? 'Supply-Side Tap'  :
+      'UNRESOLVED — survey required',
     rapidShutdownRequired,
     rapidShutdownDevice: rapidShutdownRequired ? 'Tigo TS4-A-2F' : 'N/A',
     necVersion,

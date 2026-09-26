@@ -6,6 +6,7 @@
 
 import { getConductorByGauge, resolveBatteryBranch } from './equipment-db';
 import { resolveOCPD, OCPDResolutionResult } from './ocpd-resolver';
+import { maxLoadSideBackfeedA } from './nec/rule705_12';
 import { autoSizeACWire, autoSizeDCWire, WireAutoSizerResult, DCWireAutoSizerResult } from './wire-autosizer';
 import {
   nextStandardOCPD,
@@ -970,10 +971,12 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   let recommendedMainBreaker: number | undefined;
 
   if (icMethod === 'LOAD_SIDE') {
-    // NEC 705.12(B)(2)(3)(b): maxSolarBreaker = (busRating × 1.2) − mainBreaker
+    // NEC 705.12(B)(2)(3)(b): maxSolarBreaker = (busRating × 1.2) − mainBreaker.
+    // Delegated so this rule has ONE implementation — lib/engineering/reportGenerator.ts
+    // used to carry a different expression (`busbar × 0.2`) for the same decision.
     interconnectionLabel = 'Load-Side Breaker (120% Rule)';
     interconnectionNecRef = 'NEC 705.12(B)(2)';
-    maxAllowedSolarBreaker = (icBusRating * 1.2) - icMainBreaker;
+    maxAllowedSolarBreaker = maxLoadSideBackfeedA(icBusRating, icMainBreaker);
     interconnectionPasses = icSolarBreaker <= maxAllowedSolarBreaker;
 
     if (interconnectionPasses) {
