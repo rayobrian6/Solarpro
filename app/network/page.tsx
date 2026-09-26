@@ -1012,17 +1012,118 @@ export default function NetworkPage() {
     if (!loading) loadDiscover();
   }, [filterState, filterBattery]); // eslint-disable-line
 
+  // ── Return from Stripe Checkout ──────────────────────────────────────────
+  // 🚨 DO NOT ANNOUNCE AN OUTCOME YOU HAVE NOT READ.
+  //
+  // This used to fire "Payment received — lead unlocked. See My Claims for the
+  // full address." from the mere presence of `?purchased=<id>`. A contractor who
+  // lost an exclusive claim race was charged, silently refunded, redirected
+  // here, and shown that green toast — then found My Claims empty, with no
+  // record of the refund. The support ticket is "I paid and you didn't give me
+  // the lead", and it is a fair one.
+  //
+  // The success_url now carries the Stripe checkout session id, and the outcome
+  // is READ from the assignment that payment produced. Stripe redirects the
+  // browser before it delivers the webhook, so "processing" is the normal first
+  // answer and we poll for the real one.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("purchased")) {
-      toast.success(
-        "Payment received — lead unlocked. See My Claims for the full address.",
-      );
-      window.history.replaceState({}, "", "/network");
-    } else if (params.get("canceled")) {
+    const sessionId = params.get("session");
+
+    if (params.get("canceled")) {
       toast.error("Checkout canceled — you were not charged.");
       window.history.replaceState({}, "", "/network");
+      return;
     }
+    if (!sessionId) return;
+
+    window.history.replaceState({}, "", "/network");
+    let cancelled = false;
+    const pendingToastId = toast.loading(
+      "Confirming your purchase…",
+      "Stripe has taken payment. Waiting for the lead to be assigned.",
+    );
+
+    const announce = (
+      type: "success" | "error" | "warning" | "info",
+      title: string,
+      message: string,
+    ) => {
+      toast.update(pendingToastId, { type, title, message, duration: 9000 });
+    };
+
+    (async () => {
+      // ~30s of polling: comfortably longer than a Stripe webhook round trip,
+      // and it ends in an honest "still processing" rather than a claim.
+      for (let attempt = 0; attempt < 20 && !cancelled; attempt++) {
+        let outcome: {
+          state?: string;
+          amount?: number | null;
+          refundedAmount?: number | null;
+        } | null = null;
+        try {
+          const res = await fetch(
+            `/api/network/lead-outcome?session=${encodeURIComponent(sessionId)}`,
+          );
+          if (res.ok) outcome = (await res.json()).outcome ?? null;
+        } catch {
+          /* transient — keep polling */
+        }
+        if (cancelled) return;
+
+        const state = outcome?.state;
+        if (state === "unlocked") {
+          await loadMyClaims();
+          if (cancelled) return;
+          announce(
+            "success",
+            "Lead unlocked",
+            "The homeowner's full address is in My Claims.",
+          );
+          return;
+        }
+        if (state === "refunded_lead_taken") {
+          const back =
+            outcome?.refundedAmount != null
+              ? `$${Number(outcome.refundedAmount).toFixed(2)} has been refunded`
+              : "Your payment has been refunded";
+          announce(
+            "warning",
+            "Another contractor claimed this lead first",
+            `${back} to your card. It can take 5–10 business days to appear. You do not have this lead — nothing was added to My Claims.`,
+          );
+          return;
+        }
+        if (state === "refund_pending") {
+          announce(
+            "error",
+            "Another contractor claimed this lead first — refund in progress",
+            "You do not have this lead, and your refund has NOT completed yet. Our team has been alerted and will confirm it. Contact support with this lead if you do not hear back.",
+          );
+          return;
+        }
+        if (state === "not_found") {
+          announce(
+            "info",
+            "We could not match that checkout",
+            "Check My Claims, and contact support if you were charged.",
+          );
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (!cancelled) {
+        announce(
+          "info",
+          "Still confirming your purchase",
+          "Payment went through and the lead is being assigned. Check My Claims in a minute — contact support if it does not appear.",
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []); // eslint-disable-line
 
   const confirmClaim = async () => {
@@ -1030,8 +1131,10 @@ export default function NetworkPage() {
     setClaimLoading(true);
     try {
       // Pay-to-claim: start a Stripe checkout for this lead. The claim is
-      // finalized by the Stripe webhook once payment completes, and the
-      // homeowner's address unlocks on return (?purchased=<id>).
+      // finalized by the Stripe webhook once payment completes. Stripe returns
+      // the contractor to /network?session=<checkout_session_id>, and the
+      // effect above READS the outcome for that session — it does not assume
+      // one. Paying is not the same event as winning an exclusive lead.
       const res = await fetch(
         `/api/network/opportunities/${claimTarget}/checkout`,
         { method: "POST" },
