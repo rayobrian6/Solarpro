@@ -1410,7 +1410,9 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         deviceCount: devicesOnBranch,
         branchCurrentA: +branchCurrent.toFixed(2),
         ocpdAmps: ocpd,
-        conductorCallout: `3×#${gaugeNum} THWN-2\n1×#${gaugeNum} GRN EGC`,
+        // IQ Cable / branch circuit = L1 + L2 only (two-wire; no neutral on
+        // the branch — the neutral starts at the combiner's feeder).
+        conductorCallout: `2×#${gaugeNum} THWN-2\n1×#${gaugeNum} GRN EGC`,
         necReference: 'NEC 690.8(B)',
       });
     }

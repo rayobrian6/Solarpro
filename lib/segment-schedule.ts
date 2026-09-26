@@ -72,6 +72,19 @@ export function conductorBundle(
   return { ...b, isCurrentCarrying: roleIsCurrentCarrying(b.role) };
 }
 
+/**
+ * The ONE installed-vs-grounding rule. A conductor is an installed phase or
+ * neutral conductor unless it is an EGC / GEC / bonding jumper. The callout,
+ * conduit fill and procurement counts all use it — the CCC count above is for
+ * DERATING only (an imbalance-only neutral is not current-carrying per NEC
+ * 310.15(E)(1), yet it is still pulled, filled and ordered).
+ */
+export function isGroundingConductor(b: ConductorBundle): boolean {
+  return b.role != null
+    ? (b.role === 'EQUIPMENT_GROUNDING' || b.role === 'GROUNDING_ELECTRODE' || b.role === 'BONDING')
+    : b.color === 'GRN';
+}
+
 /** Σ current-carrying conductors over a bundle set, role-derived. */
 export function currentCarryingCountOf(bundles: readonly ConductorBundle[]): number {
   return bundles.reduce((n, b) => {
@@ -441,14 +454,28 @@ export function buildConductorCallout(
   conduitType: string,
   isOpenAir: boolean
 ): string {
-  // Build permit-grade conductor callout with EGC
-  const hotBundles = bundle.filter(c => c.isCurrentCarrying && c.color !== 'GRN');
-  const egcBundles  = bundle.filter(c => c.color === 'GRN');
-  const hotCount    = hotBundles.reduce((s, c) => s + c.qty, 0);
-  const primaryGauge = hotBundles[0]?.gauge ?? '#10 AWG';
-  const gaugeNum    = primaryGauge.replace('#', '').replace(' AWG', '');
-  const insulation  = hotBundles[0]?.insulation ?? 'THWN-2';
-  const conductorDesc = `${hotCount}×#${gaugeNum} ${insulation}`;
+  // Build permit-grade conductor callout with EGC.
+  // The count is the INSTALLED phase + neutral conductors, not the CCC
+  // (derating) count: the Envoy feeder carries L1, L2 and an imbalance-only
+  // neutral, and printing "2×#8" left the neutral off the drawing while the
+  // fill and the BOM both carried it (Ray, 2026-09-25).
+  const installed  = bundle.filter(c => !isGroundingConductor(c));
+  const egcBundles = bundle.filter(c => isGroundingConductor(c));
+  const isNeutral  = (c: ConductorBundle) =>
+    c.role === 'NEUTRAL_IMBALANCE_ONLY' || c.role === 'GROUNDED_CURRENT_CARRYING';
+  // Line conductors first so the leading gauge token is the phase gauge.
+  const ordered = [...installed.filter(c => !isNeutral(c)), ...installed.filter(isNeutral)];
+  const bare = (g: string) => g.replace('#', '').replace(' AWG', '');
+  const groups: Array<{ gauge: string; insulation: string; qty: number; neutral: boolean }> = [];
+  for (const c of ordered) {
+    const g = groups.find(x => x.gauge === c.gauge && x.insulation === c.insulation);
+    if (g) { g.qty += c.qty; g.neutral = g.neutral && isNeutral(c); }
+    else groups.push({ gauge: c.gauge, insulation: c.insulation, qty: c.qty, neutral: isNeutral(c) });
+  }
+  const conductorDesc = groups.length <= 1
+    ? `${groups[0]?.qty ?? 0}×#${bare(groups[0]?.gauge ?? '#10 AWG')} ${groups[0]?.insulation ?? 'THWN-2'}`
+    // A reduced neutral prints as its own group, never folded into the phases.
+    : groups.map(g => `${g.qty}×#${bare(g.gauge)} ${g.insulation}${g.neutral ? ' (N)' : ''}`).join(' + ');
 
   // EGC line (include when present)
   const egcLine = egcBundles.length > 0
@@ -504,12 +531,8 @@ function buildSegment(
   const totalCurrentCarrying = currentCarryingCountOf(conductorBundle);
   // TAC WS-3 — physical phase+neutral conductors (everything that is not a
   // grounding/bonding conductor), for procurement + conduit fill.
-  const totalInstalledPhaseNeutral = conductorBundle.reduce((n, b) => {
-    const isGnd = b.role != null
-      ? (b.role === 'EQUIPMENT_GROUNDING' || b.role === 'GROUNDING_ELECTRODE' || b.role === 'BONDING')
-      : b.color === 'GRN';
-    return n + (isGnd ? 0 : b.qty);
-  }, 0);
+  const totalInstalledPhaseNeutral = conductorBundle.reduce(
+    (n, b) => n + (isGroundingConductor(b) ? 0 : b.qty), 0);
 
   // Conduit sizing
   let conduitSize = 'N/A';

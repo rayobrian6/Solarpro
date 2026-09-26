@@ -25,7 +25,7 @@ import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import { microBranchCount, microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { getBuildBadge } from './version';
-import type { ConductorBundle } from './segment-schedule';
+import { isGroundingConductor, type ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { SLD_SYMBOL_MAP } from './sld-symbols';
 import { emitBrandEmblem } from './sld-brand-emblems';
@@ -1293,7 +1293,10 @@ function buildWireRun(
   run: import('./computed-system').RunSegment | undefined,
   fallbackLabel: string[],
   isDC: boolean,
-  envOrOpenAir: WireEnvironment | boolean
+  envOrOpenAir: WireEnvironment | boolean,
+  /** Draw the N conductor when there is NO engine run (permit E-1 passes
+   *  none). With a run, `run.neutralRequired` decides, exactly as before. */
+  neutralWhenNoRun = false,
 ): WireRun {
   // Resolve environment
   const environment: WireEnvironment =
@@ -1320,7 +1323,7 @@ function buildWireRun(
     const ins   = run?.insulation ?? 'THWN-2';
     conductors.push({ id: `${runId}_L1`, type: 'L1', gauge, insulation: ins });
     conductors.push({ id: `${runId}_L2`, type: 'L2', gauge, insulation: ins });
-    if (run?.neutralRequired) {
+    if (run ? run.neutralRequired : neutralWhenNoRun) {
       conductors.push({ id: `${runId}_N`, type: 'N', gauge, insulation: ins });
     }
     const egc = run?.egcGauge ?? '#10 AWG';
@@ -1472,8 +1475,10 @@ function runLines(run: RunSegment|undefined, fallback: string[]): {lines:string[
   let cnt = 1;
 
   if (run.conductorBundle && run.conductorBundle.length > 0) {
-    const hot = run.conductorBundle.filter((c:ConductorBundle) => c.isCurrentCarrying);
-    const egc = run.conductorBundle.filter((c:ConductorBundle) => !c.isCurrentCarrying);
+    // Installed (phase + neutral) vs grounding — an imbalance-only neutral is
+    // not current-carrying, but it is a WHT conductor, never a "GRN EGC".
+    const hot = run.conductorBundle.filter((c:ConductorBundle) => !isGroundingConductor(c));
+    const egc = run.conductorBundle.filter((c:ConductorBundle) => isGroundingConductor(c));
     cnt = Math.min(run.conductorBundle.reduce((s:number,c:ConductorBundle)=>s+c.qty,0), 6);
     const hotStr = hot.map((c:ConductorBundle) => {
       const g = c.gauge.replace('#','').replace(' AWG','');
@@ -1549,7 +1554,11 @@ function renderCombiner(
           /** True ⇔ this device was DERIVED, not chosen — draw the qualifier
            *  under the nameplate. Undefined ⇒ the caller did not answer and the
            *  symbol is drawn exactly as before. */
-          selectionUnresolved?: boolean},
+          selectionUnresolved?: boolean;
+          /** The feeder leaving this combiner carries a neutral (the IQ
+           *  Gateway inside is powered line-to-neutral). Draws the N terminal
+           *  and the gateway's neutral reference. */
+          neutral?: boolean},
 ): {svg:string; lx:number; rx:number; ty:number; by:number;
     feederOutX:number; feederOutY:number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['ac-combiner'] = 180×160
@@ -1594,6 +1603,20 @@ function renderCombiner(
   p.push(lug(bx+W2-4, busY));
   // Output wire stub
   p.push(ln(bx+W2, busY, bx+W2+10, busY, {sw:SW_MED}));
+
+  // Neutral terminal — the feeder to the disconnect is L1, L2 AND N; the
+  // gateway's supply/metering reference lands on it (Ray, 2026-09-25).
+  if (opts?.neutral) {
+    const nY = busY + 14;
+    p.push(ln(bx+W2-44, nY, bx+W2-4, nY, {sw:SW_THIN}));
+    p.push(txt(bx+W2-48, nY+2, 'N', {sz:5, bold:true, anc:'middle'}));
+    p.push(lug(bx+W2-4, nY));
+    p.push(ln(bx+W2, nY, bx+W2+10, busY, {sw:SW_THIN}));
+    if (opts?.integratedGateway) {
+      // Gateway neutral reference (dashed): gateway → N terminal
+      p.push(ln(bx+W2-24, nY, bx+W2-24, by2+H2-30, {sw:SW_THIN, dash:'2,1.5'}));
+    }
+  }
 
   // Integrated IQ Gateway glyph (the "brains") drawn inside the enclosure when
   // the combiner integrates the monitoring gateway — so the SLD shows it's one
@@ -1640,7 +1663,10 @@ function renderCombiner(
 function renderDisco(
   cx: number, cy: number,
   ocpd: number, calloutN: number,
-  fusedTapOcpd = false
+  fusedTapOcpd = false,
+  /** The feeder through this switch carries a neutral: draw it as an
+   *  UNSWITCHED pass-through (the disconnect opens L1/L2 only). */
+  withNeutral = false,
 ): {svg:string; lx:number; rx:number;
     loadInX:number; loadInY:number; lineOutX:number; lineOutY:number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['ac-disconnect'] = 120×100
@@ -1696,6 +1722,18 @@ function renderDisco(
   // Output wire stubs: LINE side (right) → MSP
   p.push(ln(bx+W2, poleY1, bx+W2+10, cy, {sw:SW_MED}));
   p.push(ln(bx+W2, poleY2, bx+W2+10, cy, {sw:SW_MED}));
+
+  // Neutral — unswitched pass-through above the two poles (terminal to
+  // terminal, no blade). Drawn only when the feeder carries one.
+  if (withNeutral) {
+    const poleN = cy - 26;
+    p.push(lug(bx+10, poleN));
+    p.push(lug(bx+W2-10, poleN));
+    p.push(ln(bx+13, poleN, bx+W2-13, poleN, {sw:SW_THIN}));
+    p.push(txt(cx, poleN-2.5, 'N — UNSWITCHED', {sz:4.2, anc:'middle', bold:true, fill:'#333'}));
+    p.push(ln(bx-10, cy, bx, poleN, {sw:SW_THIN}));
+    p.push(ln(bx+W2, poleN, bx+W2+10, cy, {sw:SW_THIN}));
+  }
 
   // Labels below — a supply-side tap's disconnect IS the tap OCPD and must be
   // fused (NEC 705.11); load-side jobs keep the conventional non-fused disco.
@@ -2013,6 +2051,16 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ? input.acRequiresNeutral
       : (acFeederRun?.neutralRequired ?? true);
   const _acConductorCount = _acNeutral ? 3 : 2;  // 3 = L1+L2+N; 2 = L1+L2 only (pure 240V no-neutral)
+  // Does the PV AC FEEDER (combiner/inverter → disconnect) carry a neutral?
+  // From the engine's conductor set when it supplied one; with no runs (the
+  // permit E-1) a micro feeder always does — the IQ Gateway in the combiner is
+  // powered line-to-neutral (Ray, 2026-09-25). Never from `neutralRequired`
+  // alone: a string INV_TO_DISCO_RUN declares it without pulling one, and the
+  // drawing must not show a conductor the BOM does not buy.
+  const _feederHasNeutral: boolean = acFeederRun?.conductorBundle?.length
+    ? acFeederRun.conductorBundle.some((c: ConductorBundle) => !isGroundingConductor(c)
+        && (c.role === 'NEUTRAL_IMBALANCE_ONLY' || c.role === 'GROUNDED_CURRENT_CARRYING' || c.color === 'WHT'))
+    : (isMicro && _acNeutral);
   const _acWireNum = resolvedAcWire.replace('#','').replace(' AWG','');
   const resolvedDcWire      = dcStringRun?.wireGauge   ?? input.dcWireGauge   ?? '#10 AWG';
   // EGC gauge: from engine (NEC 250.122) → input.egcGauge → run data → '#10 AWG' fallback
@@ -2295,7 +2343,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
        branchOcpds: input.microBranches?.map(b => b.ocpdAmps),
        // `=== false` and not `!input...`: undefined is "the builder did not
        // answer", which must draw as before, not as "nobody chose it".
-       selectionUnresolved: input.combinerSelectionIsDecided === false});
+       selectionUnresolved: input.combinerSelectionIsDecided === false,
+       neutral: _feederHasNeutral});
     parts.push(cr.svg);
     node3RX = cr.feederOutX;  // Use feeder output terminal X as the right-side connection point
     parts.push(txt(xComb, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
@@ -2451,7 +2500,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   }
 
   // ── NODE 5: AC DISCONNECT ─────────────────────────────────────────────────
-  const discoResult = renderDisco(xDisco, BUS_Y, resolvedAcOCPD, isMicro?4:5, isSupplySide);
+  const discoResult = renderDisco(xDisco, BUS_Y, resolvedAcOCPD, isMicro?4:5, isSupplySide, _feederHasNeutral);
   parts.push(discoResult.svg);
   // BUS_Y-58 sits ABOVE the enclosure — at BUS_Y-40 this landed exactly on
   // renderDisco's internal "AC DISCONNECT" header strip and the two texts
@@ -2475,7 +2524,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _s4Y = resolveSegY(invRX, discoResult.loadInX, segY);
     console.log('[WIRE RUN CREATED] SEGMENT_4_INV_TO_ACDISCO: AC feeder');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_4_INV_TO_ACDISCO', invRX, _s4Y, discoResult.loadInX, _s4Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
+      buildWireRun('SEGMENT_4_INV_TO_ACDISCO', invRX, _s4Y, discoResult.loadInX, _s4Y, run, lines, false, 'RACEWAY', _feederHasNeutral),  // Phase 1: RACEWAY
       lines));
   }
 
@@ -2521,7 +2570,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _s5Y = resolveSegY(discoResult.lineOutX, mspResult.bkfdInX, segY);
     console.log('[WIRE RUN CREATED] SEGMENT_5_ACDISCO_TO_MSP: AC feeder');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_5_ACDISCO_TO_MSP', discoResult.lineOutX, _s5Y, mspResult.bkfdInX, _s5Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
+      buildWireRun('SEGMENT_5_ACDISCO_TO_MSP', discoResult.lineOutX, _s5Y, mspResult.bkfdInX, _s5Y, run, lines, false, 'RACEWAY', _acNeutral),  // Phase 1: RACEWAY
       lines));
   }
 
@@ -3325,15 +3374,23 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // branch rows above — never one merged multi-method branch string.
     const _homerunRow: SR[] = input.homerunConduitType ? [{
       id: 'BR-HR', from: 'ROOF J-BOX', to: 'AC COMBINER',
-      conductors: `${(input.homerunSharedCircuits ?? 1)}×[${input.branchWireGauge ?? '#10 AWG'}] THWN-2 + 1×#${homerunEgcNum} GRN`,
+      // L1 + L2 per branch circuit in the shared raceway (the wire callout on
+      // the drawing reads the same total, e.g. 6×#10 for 3 circuits).
+      conductors: `${2 * (input.homerunSharedCircuits ?? 1)}×${input.branchWireGauge ?? '#10 AWG'} THWN-2 (${input.homerunSharedCircuits ?? 1} ckt) + 1×#${homerunEgcNum} GRN`,
       conduit: `${input.homerunConduitType}${input.homerunConduitSize ? ' ' + input.homerunConduitSize : ''}`,
       fill: 0, amp: 0, ocpd: input.branchOcpdAmps ?? 20, vdrop: 0, len: 0, pass: true,
     }] : [];
+    // Installed phase + neutral count on the micro feeder (L1, L2, N): from
+    // the engine's conductor set, else the neutral rule above. The schedule
+    // must say the same "3×" the wire callout says.
+    const _feederInstalledN = acFeederRun?.conductorBundle?.length
+      ? acFeederRun.conductorBundle.filter((c: ConductorBundle) => !isGroundingConductor(c)).reduce((n: number, c: ConductorBundle) => n + c.qty, 0)
+      : _acConductorCount;
     sRows = isMicro ? [
       ..._branchRows,
       ..._homerunRow,
-      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
-      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
+      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${_feederInstalledN}×${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
+      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${_acConductorCount}×${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
     ] : [
       {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
       {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
@@ -4038,7 +4095,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       const clabel = _laneCombiner ? `${_laneCombiner.brand} ${_laneCombiner.model}` : (b.combinerLabel ?? `${invMfr || 'PV'} AC Combiner`);
       const cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN,
         {branchOcpds: b.microBranches?.map(x => x.ocpdAmps),
-         selectionUnresolved: _laneDecided === false});
+         selectionUnresolved: _laneDecided === false,
+         // The lane feeder is tagged 3(L1,L2,N): the gateway needs the neutral.
+         neutral: true});
       parts.push(cr.svg);
       parts.push(txt(g.xMid1, cr.ty-8, clabel.toUpperCase(), {sz:F.hdr, bold:true, anc:'middle'}));
       // ── AC junction / transition box (Enphase SOP): the AC trunk runs
@@ -4167,14 +4226,18 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     //    the per-source OCPD is the backfed breaker landing in the panel.
     {
       const run = laneRun(b, g.topo === 'MICRO' ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
-      const fb = [`${b.acWireGauge ?? '#8 AWG'} THWN-2 + EGC`, `${laneOcpd}A OCPD → PANEL`];
+      // A micro lane's feeder is L1, L2 AND N (the gateway's neutral) — say so
+      // when there is no engine run to print (permit hybrid E-1).
+      const fb = [g.topo === 'MICRO'
+        ? `3×${b.acWireGauge ?? '#8 AWG'} THWN-2 (L1,L2,N) + EGC`
+        : `${b.acWireGauge ?? '#8 AWG'} THWN-2 + EGC`, `${laneOcpd}A OCPD → PANEL`];
       const {lines} = runLines(run, fb);
       const pinY = panelPinY(i);
       const stepX = xPanelInX - 30;
       const y = resolveSegY(feedX, stepX, laneY);
       // main horizontal run from the lane to the panel approach, then step
       // (vertical elbow) up/down to the breaker's compact pin Y and into the panel.
-      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_PANEL`, feedX, y, stepX, y, run, lines, false, 'RACEWAY'), lines));
+      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_PANEL`, feedX, y, stepX, y, run, lines, false, 'RACEWAY', g.topo === 'MICRO'), lines));
       if (Math.abs(y - pinY) > 1) parts.push(ln(stepX, y, stepX, pinY, {sw:SW_MED}));
       parts.push(ln(stepX, pinY, xPanelInX, pinY, {sw:SW_MED}));
       panelInputs.push({ y: pinY, ocpd: laneOcpd, tag });
@@ -4234,7 +4297,8 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     // panel feeder out → the ONE system AC disconnect
     const panelOutX = xPanelInX + W_PANEL;
     parts.push(ln(xPanel, tailY, panelOutX, tailY, {sw:SW_MED}));
-    const sysDisco = renderDisco(xSingleDisco, tailY, acCollection.disconnectA, ++calloutN, isSupplySide);
+    // The system tail is tagged 3(L1,L2,N) — the neutral passes the switch.
+    const sysDisco = renderDisco(xSingleDisco, tailY, acCollection.disconnectA, ++calloutN, isSupplySide, true);
     parts.push(sysDisco.svg);
     parts.push(txt(xSingleDisco, tailY - 58, '(N) AC DISCONNECT — SYSTEM', {sz:F.hdr, bold:true, anc:'middle'}));
     parts.push(gnd(xSingleDisco, tailY + 70, '#2E7D32'));
@@ -4246,12 +4310,13 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       // field; on Stowell it printed "#10 AWG ... 200A" on the Σ190A feeder
       // (audit 2026-07-16). 200A → #3/0 Cu via wireGaugeForOcpd.
       const _tailGauge = wireGaugeForOcpd(acCollection.disconnectA);
-      const {lines:la} = runLines(run, [`${_tailGauge} THWN-2 + EGC`, `${acCollection.disconnectA}A`]);
+      // The system tail carries L1, L2, N (tagged 3(L1,L2,N) below).
+      const {lines:la} = runLines(run, [`3×${_tailGauge} THWN-2 (L1,L2,N) + EGC`, `${acCollection.disconnectA}A`]);
       const yA = resolveSegY(panelOutX, sysDisco.loadInX, tailY);
-      parts.push(renderWireRun(buildWireRun('PANEL_TO_SYSDISCO', panelOutX, yA, sysDisco.loadInX, yA, run, la, false, 'RACEWAY'), la));
-      const {lines:lb} = runLines(run, [`${_tailGauge} THWN-2 + EGC`, `${acCollection.disconnectA}A → POI`]);
+      parts.push(renderWireRun(buildWireRun('PANEL_TO_SYSDISCO', panelOutX, yA, sysDisco.loadInX, yA, run, la, false, 'RACEWAY', true), la));
+      const {lines:lb} = runLines(run, [`3×${_tailGauge} THWN-2 (L1,L2,N) + EGC`, `${acCollection.disconnectA}A → POI`]);
       const yB = resolveSegY(sysDisco.lineOutX, xPOI, tailY);
-      parts.push(renderWireRun(buildWireRun('SYSDISCO_TO_POI', sysDisco.lineOutX, yB, xPOI, yB, run, lb, false, 'RACEWAY'), lb));
+      parts.push(renderWireRun(buildWireRun('SYSDISCO_TO_POI', sysDisco.lineOutX, yB, xPOI, yB, run, lb, false, 'RACEWAY', true), lb));
       parts.push(circ(xPOI, tailY, 4, {fill:BLK, sw:0}));
       // ONE tag class for the combined tail (panel → disco → POI, same
       // conductors) — same number stamped on both segments.
@@ -4287,12 +4352,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     const run = findSharedRun('DISCO_TO_METER_RUN');
     // Same tap-OCPD sizing as the disco segments above (was the user's legacy
     // single-system gauge; "SIZED AT Σ" now reflects the true lane-sum amps).
-    const fb = [`${wireGaugeForOcpd(acCollection.disconnectA)} THWN-2 + EGC`, `IN ${input.acConduitType ?? 'EMT'}`, `SIZED AT Σ ${Math.round(totalAcKw * 1000 / 240)}A — ${acCollection.disconnectA}A TAP OCPD`];
+    const fb = [`3×${wireGaugeForOcpd(acCollection.disconnectA)} THWN-2 (L1,L2,N) + EGC`, `IN ${input.acConduitType ?? 'EMT'}`, `SIZED AT Σ ${Math.round(totalAcKw * 1000 / 240)}A — ${acCollection.disconnectA}A TAP OCPD`];
     const {lines} = runLines(run, fb);
     const y = resolveSegY(xPOI, mspResult.bkfdInX, tailY);
     // POI bus → MSP backfeed terminal (jog from bus level to terminal level)
     if (Math.abs(y - tailY) > 1) parts.push(ln(xPOI, tailY, xPOI, y, {sw:SW_MED}));
-    parts.push(renderWireRun(buildWireRun('POI_TO_MSP', xPOI, y, mspResult.bkfdInX, y, run, lines, false, 'RACEWAY'), lines));
+    parts.push(renderWireRun(buildWireRun('POI_TO_MSP', xPOI, y, mspResult.bkfdInX, y, run, lines, false, 'RACEWAY', true), lines));
   }
 
   // Battery + BUI at the POI (shared tail, exactly once — I-6)
