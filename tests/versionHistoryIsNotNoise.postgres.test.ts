@@ -278,6 +278,61 @@ describe('🚨 what a REDUNDANT save costs the history', () => {
     expect(await versionCount(), 'a duplicate was written after all').toBe(1);
   });
 
+  it('🚨 a save after a RESTORE is compared on content, not on the wrapper', async () => {
+    // 🚨 THE SNAPSHOT'S KEY SET IS NOT THE SAME FROM EVERY WRITER. The layout
+    // route writes `{projectId, projectName, layout, savedAt}`; the restore route
+    // writes the same plus `restoredFromVersion`. If the comparison looks at the
+    // whole snapshot, those two can never match — so an autosave immediately after
+    // a restore, changing nothing, would add a second version with identical
+    // content. The wrapper fields are PROVENANCE; the `layout` subtree is the
+    // content, and content is what decides whether there is anything to record.
+    const { saveProjectVersion } = await import('@/lib/db/versions');
+    const layout = { panels: TWELVE, roofPlanes: [plane()], updatedAt: '2026-01-01T00:00:00.000Z' };
+
+    await saveProjectVersion({
+      projectId: PROJECT, userId: USER_ID, panelsCount: 12, systemSizeKw: 4.8,
+      snapshot: { projectId: PROJECT, projectName: 'x', layout, savedAt: '2026-01-01T00:00:00.000Z' },
+    });
+    expect(await versionCount()).toBe(1);
+
+    // A restore's snapshot: same layout content, extra provenance key, new times.
+    await saveProjectVersion({
+      projectId: PROJECT, userId: USER_ID, panelsCount: 12, systemSizeKw: 4.8,
+      snapshot: {
+        projectId: PROJECT, projectName: 'x',
+        layout: { ...layout, updatedAt: '2026-06-06T12:00:00.000Z' },
+        restoredFromVersion: 1,
+        savedAt: '2026-06-06T12:00:00.000Z',
+      },
+    });
+
+    expect(await versionCount(),
+      'a snapshot carrying the same design but a different wrapper wrote a second version — ' +
+      'the comparison is looking at provenance instead of content')
+      .toBe(1);
+  });
+
+  it('...but a real change still records, whichever writer sends it', async () => {
+    // The complement: comparing only the layout must not make the rule so loose
+    // that a genuine edit arriving through the restore route's shape is swallowed.
+    const { saveProjectVersion } = await import('@/lib/db/versions');
+    const base = { panels: TWELVE, roofPlanes: [plane()], updatedAt: '2026-01-01T00:00:00.000Z' };
+    await saveProjectVersion({
+      projectId: PROJECT, userId: USER_ID, panelsCount: 12, systemSizeKw: 4.8,
+      snapshot: { projectId: PROJECT, projectName: 'x', layout: base, savedAt: 'a' },
+    });
+    await saveProjectVersion({
+      projectId: PROJECT, userId: USER_ID, panelsCount: 5, systemSizeKw: 2.0,
+      snapshot: {
+        projectId: PROJECT, projectName: 'x',
+        layout: { ...base, panels: TWELVE.slice(0, 5) },
+        restoredFromVersion: 1, savedAt: 'b',
+      },
+    });
+    const rows = await versionRows();
+    expect(rows.map(r => r.panels_count)).toEqual([12, 5]);
+  });
+
   it('returning to an EARLIER state is a change, not a duplicate', async () => {
     // A → B → A. The last save matches version 1 but not the newest version, and
     // it is a genuine edit: the user undid something and that is worth recording.

@@ -55,10 +55,17 @@ export async function saveProjectVersion(data: {
   //     A must record three versions. A rule that compared against any existing
   //     version would silently drop the third, which is the one that says the user
   //     undid something.
-  //   • Content only, because two volatile fields differ on every save and would
-  //     make a whole-snapshot comparison never match: `savedAt`, stamped by the
-  //     caller, and `layout.updatedAt`, re-stamped by the row's own BEFORE UPDATE
-  //     trigger. `#-` deletes a path from jsonb, and jsonb equality normalises key
+  //   • THE `layout` SUBTREE ONLY, minus its own `updatedAt`. Everything outside
+  //     `layout` is PROVENANCE rather than content, and the writers do not agree on
+  //     it: `savedAt` is stamped by the caller and differs every call, and
+  //     `restoredFromVersion` exists on the restore route's snapshot and NOT on the
+  //     layout route's — so the two have DIFFERENT KEY SETS and a whole-snapshot
+  //     comparison could never match across them. Measured before this was
+  //     narrowed: an autosave immediately after a restore, changing nothing, wrote
+  //     a second version with identical content. `layout.updatedAt` is removed too,
+  //     because the row's own BEFORE UPDATE trigger re-stamps it on every write.
+  //
+  //     `#>` extracts a path and `#-` deletes one; jsonb equality normalises key
   //     order, so this compares meaning rather than serialisation. Arrays stay
   //     order-sensitive, which is right: reordered panels are a change.
   //
@@ -83,8 +90,8 @@ export async function saveProjectVersion(data: {
         AND pv.version_number = (
           SELECT MAX(version_number) FROM project_versions WHERE project_id = ${data.projectId}
         )
-        AND (pv.snapshot #- '{savedAt}' #- '{layout,updatedAt}')
-            = (${snapshotJson}::jsonb #- '{savedAt}' #- '{layout,updatedAt}')
+        AND ((pv.snapshot #> '{layout}') #- '{updatedAt}')
+            = ((${snapshotJson}::jsonb #> '{layout}') #- '{updatedAt}')
     )
     RETURNING *
   `;
