@@ -113,10 +113,21 @@ export interface MeanRoofHeightAuthority {
   /** Sheet-safe provenance: no ids, no internal object paths. */
   sheetBasis: string;
   /** Which of the three sources answered. */
-  source: 'wall_geometry' | 'storey_count' | 'nominal';
+  source: 'operator' | 'wall_geometry' | 'storey_count' | 'nominal';
 }
 
 export interface MeanRoofHeightArgs {
+  /**
+   * The height the OPERATOR set on the Structural tab, in feet.
+   *
+   * 🚨 THIS WINS, and the order is the one this file's neighbours already use:
+   * `rafterSpFt = input.project.rafterSpan || _geomSpanFt || NOMINAL` — the operator's
+   * own field first, then geometry, then a named nominal. A person choosing "2-storey"
+   * or typing 26 is stating something about the building; `estimatedHeightM` on a wall
+   * plane calls itself an estimate. Preferring the estimate over the statement would be
+   * the placement rule inverted.
+   */
+  operatorStatedFt?: number | null;
   /** Canonical wall planes. `estimatedHeightM` is the wall's height above grade. */
   wallPlanes?: ReadonlyArray<{ id?: string; estimatedHeightM?: number | null }> | null;
   /** Building storey count, when the model classified one. */
@@ -132,6 +143,26 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 
 export function projectMeanRoofHeight(args: MeanRoofHeightArgs): MeanRoofHeightAuthority {
   const notes: string[] = [];
+
+  // ── 0. What the operator actually said ────────────────────────────────────
+  const stated = Number(args.operatorStatedFt);
+  if (Number.isFinite(stated) && stated > 0) {
+    if (stated >= MEAN_ROOF_HEIGHT_MIN_FT && stated <= MEAN_ROOF_HEIGHT_MAX_FT) {
+      const heightFt = r1(stated);
+      return {
+        heightFt,
+        established: true,
+        basis: `mean roof height ${heightFt} ft — entered by the operator on the Structural tab`,
+        sheetBasis: 'as entered for this building on the structural input (ASCE 7-22 §26.3)',
+        source: 'operator',
+      };
+    }
+    // Out of the range the control itself offers. Reported, never clamped — the same
+    // rule the geometry branch follows, for the same reason.
+    notes.push(
+      `an operator-entered height of ${r1(stated)} ft is outside the ${MEAN_ROOF_HEIGHT_MIN_FT}–${MEAN_ROOF_HEIGHT_MAX_FT} ft range and was NOT used`,
+    );
+  }
 
   // ── 1. The building's own modelled geometry ───────────────────────────────
   const wallHeightsFt = (args.wallPlanes ?? [])

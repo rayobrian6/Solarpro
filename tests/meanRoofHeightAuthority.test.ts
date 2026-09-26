@@ -19,6 +19,43 @@ import {
 
 const M = (ft: number) => ft / 3.28084;
 
+describe('mean roof height — what the operator said', () => {
+  it('🚨 the operator\'s Structural-tab entry WINS over a modelled estimate', () => {
+    const a = projectMeanRoofHeight({
+      operatorStatedFt: 26,
+      wallPlanes: [{ estimatedHeightM: M(10) }, { estimatedHeightM: M(10) }],
+      stories: 1, roofSlopeDeg: 22, roofSpanFt: 30,
+    });
+    // A person choosing "2-storey" or typing 26 is STATING something about the
+    // building; `estimatedHeightM` calls itself an estimate. Preferring the estimate
+    // would be the placement rule inverted.
+    expect(a.source).toBe('operator');
+    expect(a.heightFt).toBe(26);
+    expect(a.established).toBe(true);
+  });
+
+  it('and the sheet says the height was entered, not derived', () => {
+    const a = projectMeanRoofHeight({ operatorStatedFt: 26 });
+    expect(a.sheetBasis).toMatch(/as entered/i);
+    expect(a.basis).toMatch(/Structural tab/i);
+  });
+
+  it('🚨 an out-of-range entry is REJECTED with its reason, not clamped', () => {
+    const a = projectMeanRoofHeight({ operatorStatedFt: 250, stories: 2 });
+    expect(a.source).not.toBe('operator');
+    expect(a.heightFt).toBe(25);                 // fell through to the storey count
+    expect(a.basis).toMatch(/250 ft is outside/);
+    expect(a.basis).toMatch(/NOT used/);
+  });
+
+  it('falls through cleanly when the operator set nothing', () => {
+    for (const v of [undefined, null, 0, NaN] as const) {
+      const a = projectMeanRoofHeight({ operatorStatedFt: v as number, stories: 2 });
+      expect(a.source, `operatorStatedFt=${String(v)}`).toBe('storey_count');
+    }
+  });
+});
+
 describe('mean roof height — modelled geometry', () => {
   it('averages the eave and the ridge, per ASCE 7-22 §26.3', () => {
     // 20 ft eave, 30 ft span at 22° → rise = 15·tan22° = 6.06 ft → h = 20 + 3.03

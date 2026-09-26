@@ -178,6 +178,12 @@ export interface PermitInput {
     mountingSystem?: string;
     mountingSystemId?: string;
     roofPitch?: number;
+    /** 🚨 The mean roof height the OPERATOR set on the Structural tab (ft, 8–60, with a
+     *  storey quick-select). It did not exist on this type until 2026-09-25, so the
+     *  permit's wind analysis ran on a hardcoded 15 ft while the engineering page's own
+     *  calculation honoured the operator's number — one building, two heights, and the
+     *  sealed sheet had the wrong one. See lib/structural/meanRoofHeightAuthority.ts. */
+    meanRoofHeight?: number;
     rafterSize?: string;
     rafterSpacing?: number;
     attachmentSpacing?: number;

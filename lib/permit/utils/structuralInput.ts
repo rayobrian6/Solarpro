@@ -119,6 +119,10 @@ export function buildStructuralInputForPermit(
         metadata?: { stories?: number | null } }
     | null;
   const _height = projectMeanRoofHeight({
+    // The operator's own Structural-tab entry, which reached no sheet at all until
+    // this field was added to PermitInput. It WINS over the modelled estimate - the
+    // same order `rafterSpan || _geomSpanFt || NOMINAL` uses two dozen lines above.
+    operatorStatedFt: (input.project as { meanRoofHeight?: number }).meanRoofHeight,
     wallPlanes: _bm?.wallPlanes,
     stories: _bm?.metadata?.stories,
     // The slope and span already resolved above — one authority each, not a second

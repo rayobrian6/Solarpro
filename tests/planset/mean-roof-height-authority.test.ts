@@ -110,6 +110,24 @@ describe('🚨 the height the stamped wind analysis runs on', () => {
     expect(s.meanRoofHeightEstablished).toBe(true);
   });
 
+  it('🚨 the operator\'s own Structural-tab height reaches the permit', () => {
+    // It could not, at all, until `meanRoofHeight` was added to PermitInput['project']
+    // and both of app/engineering/page.tsx's permit payloads carried it. The page's own
+    // calculation had honoured the control all along; the sealed sheet had not.
+    const s = structuralInput(i => { i.project.meanRoofHeight = 28; });
+    expect(s.meanRoofHeight, 'the number the operator typed still does not reach the permit')
+      .toBe(28);
+    expect(s.meanRoofHeightEstablished).toBe(true);
+  });
+
+  it('and it OUTRANKS the modelled estimate', () => {
+    const s = structuralInput(i => {
+      i.project.meanRoofHeight = 28;
+      withBuilding(i, { stories: 1, wallHeightsFt: [9, 9] });
+    });
+    expect(s.meanRoofHeight).toBe(28);
+  });
+
   it('🚨 and an unmeasured building still analyses at 15 ft — deliberately', () => {
     // This repair is about what the sheet SAYS, not about silently re-pricing every
     // design with no building height on file. The number only moves when there is

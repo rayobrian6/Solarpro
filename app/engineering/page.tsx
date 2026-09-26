@@ -8410,6 +8410,11 @@ function EngineeringPageInner() {
           projectName: config.projectName, clientName: config.clientName,
           address: config.address, designer: config.designer, date: config.date,
           notes: config.notes, systemType: config.systemType,
+          // 🚨 THE HEIGHT THE OPERATOR SET ON THE STRUCTURAL TAB. Until 2026-09-25
+          // the permit hardcoded a 15 ft building, so this control - 8-60 ft with a
+          // storey quick-select, honoured by THIS page's own calc - reached the sealed
+          // wind analysis nowhere. See lib/structural/meanRoofHeightAuthority.ts.
+          meanRoofHeight: config.meanRoofHeight,
           lat: (config as any).lat || undefined,
           lng: (config as any).lng || (config as any).lon || undefined,
           mainPanelAmps: config.mainPanelAmps, mainPanelBrand: config.mainPanelBrand,
@@ -16138,6 +16143,9 @@ function EngineeringPageInner() {
                                 projectName: config.projectName, clientName: config.clientName,
                                 address: config.address, designer: config.designer, date: config.date,
                                 notes: config.notes, systemType: config.systemType,
+                                // 🚨 See the other permit payload: the operator's stated
+                                // mean roof height, which used to reach no sheet.
+                                meanRoofHeight: config.meanRoofHeight,
                                 lat: (config as any).lat || undefined,
                                 lng: (config as any).lng || (config as any).lon || undefined,
                                 mainPanelAmps: config.mainPanelAmps, mainPanelBrand: config.mainPanelBrand,
