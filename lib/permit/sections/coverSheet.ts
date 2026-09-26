@@ -358,7 +358,22 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const rafterSize    = project.rafterSize    || '';
   const rafterSpacing = project.rafterSpacing || '';
   const roofLayers    = project.roofLayers    || '';
-  const stories       = project.stories       || '';
+  // 🚨 THIS ROW HAD NEVER BEEN FILLED. `project.stories` is declared on PermitInput
+  // and rendered below as the cover's STORIES row, and a repo-wide search finds NO
+  // WRITER anywhere — so the row simply never appeared on any package this product has
+  // produced (`infoRow` drops an empty value rather than printing a blank line, which
+  // is why nobody noticed a missing field rather than an empty one).
+  // The canonical building model the permit route already attaches carries
+  // `metadata.stories`, and nothing in lib/permit read that either. The project field
+  // still wins, so an explicit value is never overridden by a classification.
+  const _bmStories = (() => {
+    const bm = ((input as { _canonicalBuildingModel?: unknown; canonicalBuildingModel?: unknown })
+      ._canonicalBuildingModel ?? (input as { canonicalBuildingModel?: unknown }).canonicalBuildingModel) as
+      { metadata?: { stories?: number | null } } | null | undefined;
+    const n = Number(bm?.metadata?.stories);
+    return Number.isFinite(n) && n >= 1 ? String(Math.floor(n)) : '';
+  })();
+  const stories       = project.stories       || _bmStories || '';
   const roofLoadPsf   = project.roofLoadPsf   || '';
   // W3 §7 — cover structural design criteria PROJECT from the single-sourced
   // snapshot env so the cover, PV-3, PV-4C, CERT and PE-1 all print the SAME

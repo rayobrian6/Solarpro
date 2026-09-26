@@ -82,3 +82,55 @@ describe('the engineer of record\'s notes reach the stamped set', () => {
       .not.toContain('<script>alert(1)</script>');
   });
 });
+
+describe('the cover\'s STORIES row', () => {
+  // 🚨 IT HAD NEVER BEEN FILLED. `project.stories` is declared on PermitInput and
+  // rendered as the cover's STORIES row, and a repo-wide search found NO WRITER — so
+  // every package this product has produced printed it blank, while the canonical
+  // building model sitting on the same input carried `metadata.stories` and nothing in
+  // lib/permit read it.
+  const build = (mutate?: (i: any) => void): string => {
+    const input: any = clone(braidonOriginalAuditFixture);
+    input.plansetProfile = 'design-review';
+    mutate?.(input);
+    const html = generatePermitHTML(input) as unknown as string;
+    const at = html.indexOf('STORIES');
+    expect(at, 'the cover has no STORIES row — this guard is blind').toBeGreaterThan(-1);
+    return html.slice(at, at + 400).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  };
+
+  it('🚨 fills from the canonical building model when the project does not say', () => {
+    const row = build(i => {
+      i._canonicalBuildingModel = {
+        schemaVersion: 'canonical_building_model_v1',
+        wallPlanes: [], metadata: { stories: 2 },
+      };
+    });
+    expect(row, 'the STORIES row is still blank on a building the model says has 2 storeys')
+      .toMatch(/STORIES\s*2\b/);
+  });
+
+  it('an explicit project value still wins over the classification', () => {
+    const row = build(i => {
+      i.project.stories = '3';
+      i._canonicalBuildingModel = {
+        schemaVersion: 'canonical_building_model_v1',
+        wallPlanes: [], metadata: { stories: 2 },
+      };
+    });
+    expect(row).toMatch(/STORIES\s*3\b/);
+  });
+
+  it('and invents nothing when neither knows — the row is omitted, not blank', () => {
+    // Measured while writing this: `infoRow` drops the row entirely for an empty
+    // value, so a package with no storey count has no STORIES line at all. That is the
+    // right behaviour and worth pinning, but it means the first draft of this case
+    // asserted against a row that does not exist.
+    const input: any = clone(braidonOriginalAuditFixture);
+    input.plansetProfile = 'design-review';
+    const html = generatePermitHTML(input) as unknown as string;
+    expect(html.indexOf('STORIES'),
+      'a package that knows no storey count should not print a STORIES row at all')
+      .toBe(-1);
+  });
+});
