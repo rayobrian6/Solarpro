@@ -60,6 +60,22 @@ export async function GET(req: NextRequest) {
           p.contract_signed_at,
           p.estimated_completion,
           p.actual_completion,
+          -- 🚨 THE STALL CLOCK MUST NOT BE updated_at. 20+ unrelated writers bump
+          -- that column, including writes the system makes to itself, so a project
+          -- genuinely parked in permit_submitted for six weeks reported 0 days and
+          -- never turned red as long as anyone saved a layout in the meantime.
+          -- lib/operations/stageClock.ts prefers a real stage clock and reports the
+          -- BASIS alongside the number; without this sub-select it can only ever
+          -- resolve to last_activity, so the repair would be inert here.
+          -- Derived from project_activity until the stage_changed_at column exists
+          -- (NEEDS RAY — a migration; see NEEDS-RAY.md). Kept in sync with
+          -- LAST_STAGE_CHANGE_SQL in stageClock.ts.
+          -- NOTE: no backticks in this comment. It lives inside a tagged template
+          -- literal, so a backtick here terminates the SQL string.
+          (SELECT MAX(a.created_at) FROM project_activity a
+             WHERE a.project_id = p.id
+               AND (a.type = 'stage_change' OR a.metadata->>'to_stage' IS NOT NULL)
+          ) AS last_stage_change_at,
           c.name AS client_name
         FROM projects p
         LEFT JOIN clients c ON c.id = p.client_id

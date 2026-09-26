@@ -133,6 +133,17 @@ export async function POST(req: NextRequest) {
       userId: user.id ?? null,
       source: 'update-status',
       prevStage,
+      // Free text and a title, when the calling surface has them. Added for
+      // components/commands/EngineeringReviewModal.tsx, which used to write its OWN
+      // second activity row carrying the engineer's note plus a FABRICATED
+      // `from_stage: 'contract_signed'` literal. Deleting that duplicate would have
+      // lost the note, so the note comes through here instead and lands on the one
+      // correct row — whose from_stage is the stage actually read under the ownership
+      // check.
+      notes: typeof body?.note === 'string' && body.note.trim() ? String(body.note).slice(0, 2000) : null,
+      activityTitle: typeof body?.activityTitle === 'string' && body.activityTitle.trim()
+        ? String(body.activityTitle).slice(0, 200)
+        : undefined,
       extraMetadata: Array.isArray(body?.milestones) && body.milestones.length > 0
         ? { milestones: body.milestones.filter((m: unknown) => typeof m === 'string').slice(0, 20) }
         : undefined,

@@ -25,21 +25,30 @@ export default function EngineeringReviewModal({
     setError('');
 
     try {
-      // 1. Advance stage → engineering
-      await postJson('/api/projects/update-status', { projectId, status: 'engineering' });
+      // 1. Advance stage → engineering.
+      // `update-status` now writes the project_activity row itself, through the ONE
+      // stage writer (lib/operations/stageChange.ts applyStageChange), deriving
+      // from_stage from the row it read under the ownership check.
+      await postJson('/api/projects/update-status', {
+        projectId,
+        status: 'engineering',
+        // Carried so the single row still records what the engineer typed.
+        note: notes || null,
+        activityTitle: 'Engineering review started',
+      });
 
-      // 2. Log activity (best-effort — never block a completed stage move on a log write)
-      try {
-        await postJson('/api/activity', {
-          project_id: projectId,
-          type: 'stage_change',
-          title: 'Engineering review started',
-          details: notes || null,
-          metadata: { from_stage: 'contract_signed', to_stage: 'engineering' },
-        });
-      } catch { /* activity log is non-critical */ }
+      // 🚨 THE SECOND ACTIVITY WRITE IS DELETED. It POSTed its own 'stage_change' row
+      // with `metadata: { from_stage: 'contract_signed' }` — a FABRICATED literal, not
+      // the stage the project was actually in. Now that update-status writes a correct
+      // row, keeping this produced TWO rows per move, one of them fiction, and the
+      // fiction is the one a reader would take as the answer to "where was this
+      // project before?". A project moved to engineering from permit_submitted or from
+      // survey recorded a contract signature it never had at that moment.
+      //
+      // The delete also removes the swallowed-failure path: the write was wrapped in a
+      // bare catch, so the audit row could silently not exist while the stage moved.
 
-      // 3. Complete the command if one exists
+      // 2. Complete the command if one exists
       if (commandId) {
         await postJson(`/api/commands/${commandId}`, { action: 'complete' }, { method: 'PATCH' });
       }
