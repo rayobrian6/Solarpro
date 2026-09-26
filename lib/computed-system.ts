@@ -27,6 +27,9 @@ import {
 } from './segment-schedule';
 import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C,
   necAmbientCorrection90C, necConductorCountAdjustment } from '@/lib/nec/ampacity';
+// THE NEC Table 250.122 EGC ladder — the full 11 rungs. This module used to carry
+// its own 8-rung copy that went flat at #2 AWG above 400 A.
+import { getEGCSize } from '@/lib/manufacturer-specs';
 
 import { buildSegments } from './segment-builder';
 import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
@@ -644,17 +647,13 @@ function nextStandardOCPD(amps: number): number {
   return nextStandardOcpd(amps);
 }
 
-// NEC 250.122 — EGC sizing
-function getEGCGauge(ocpdAmps: number): string {
-  if (ocpdAmps <= 15)  return '#14 AWG';
-  if (ocpdAmps <= 20)  return '#12 AWG';
-  if (ocpdAmps <= 60)  return '#10 AWG';
-  if (ocpdAmps <= 100) return '#8 AWG';
-  if (ocpdAmps <= 200) return '#6 AWG';
-  if (ocpdAmps <= 300) return '#4 AWG';
-  if (ocpdAmps <= 400) return '#3 AWG';
-  return '#2 AWG';
-}
+// NEC 250.122 — EGC sizing.
+// 🚨 DELEGATED. This was a SIXTH copy of Table 250.122 in the repo, and like the
+// others it went flat at the top: `return '#2 AWG'` for every OCPD above 400 A,
+// where 250.122 requires #1 AWG at 600 A and #1/0 above that. Not in the audit's
+// finding list — found while collapsing the OCPD ladders — but the same root
+// authority, so it is closed here rather than recorded as a seventh symptom.
+const getEGCGauge = getEGCSize;
 
 // NEC Chapter 9 Table 5 - re-exported from the one authority so this module and
 // segment-schedule cannot drift (they already had, at #3/0: 0.2660 here against

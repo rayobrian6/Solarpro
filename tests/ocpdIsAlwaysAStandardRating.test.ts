@@ -24,6 +24,13 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { NEC_STANDARD_OCPD, nextStandardOcpd } from '@/lib/electrical/stdSizes';
+// The old spellings, to prove they now resolve to the SAME function object rather
+// than to a second ladder that differs only by a capital letter.
+import {
+  nextStandardOCPD as msNextStandardOcpd,
+  STANDARD_OCPD_SIZES as MS_STANDARD_OCPD_SIZES,
+  getEGCSize,
+} from '@/lib/manufacturer-specs';
 import { stripComments } from './support/stripSource';
 
 const ROOT = join(__dirname, '..');
@@ -67,6 +74,103 @@ describe('🚨 the ladder never emits a non-standard rating', () => {
       const r = nextStandardOcpd(amps);
       expect(r, `${amps} A went DOWN`).toBeGreaterThanOrEqual(prev);
       prev = r;
+    }
+  });
+
+  // ── The top of the table ─────────────────────────────────────────────────
+  // 🚨 The ladder used to STOP at 1200 A and fall back to
+  // `Math.ceil(amps / 100) * 100`, which fabricated ratings: 1250 A returned 1300,
+  // and NEC 240.6(A) says the next rating above 1200 is 1600. The old comment
+  // acknowledged the gap and invited the fabrication. Reachable on any 208/480 V
+  // three-phase commercial design, and a rating that does not exist cannot be
+  // ordered — the same defect as the 55 A breaker, one decade up.
+  it('🚨 continues through the published 240.6(A) list above 1200 A', () => {
+    const rows: Array<[number, number]> = [
+      [1201, 1600], [1600, 1600],
+      [1601, 2000], [2000, 2000],
+      [2001, 2500], [2501, 3000],
+      [3001, 4000], [4001, 5000], [5001, 6000], [6000, 6000],
+    ];
+    for (const [amps, expected] of rows) {
+      expect(nextStandardOcpd(amps), `${amps} A`).toBe(expected);
+    }
+    // The specific fabrications the old tail produced.
+    for (const bad of [1300, 1400, 1500, 1700, 1800, 1900]) {
+      expect(STANDARD.has(bad), `${bad} A is not an NEC 240.6(A) rating`).toBe(false);
+    }
+    expect(nextStandardOcpd(1250), '1250 A still returns the fabricated 1300 A').not.toBe(1300);
+  });
+
+  it('every answer across the WHOLE published range is a real rating', () => {
+    // Sweep to the top of 240.6(A), not just to the residential range — the
+    // previous sweep stopped at 600 A and could not have seen the broken tail.
+    for (let amps = 1; amps <= 6000; amps += 1) {
+      const r = nextStandardOcpd(amps);
+      expect(STANDARD.has(r), `${amps} A -> ${r} A, which is not a standard rating`).toBe(true);
+      expect(r, `${amps} A -> ${r} A, which is BELOW the required current`).toBeGreaterThanOrEqual(amps);
+    }
+  });
+
+  it('above 6000 A it never returns something SMALLER than asked for', () => {
+    // 240.6(A) publishes nothing above 6000 A, so there is no right answer. The
+    // one thing that must never happen is an undersized device (NEC 240.4).
+    for (const amps of [6001, 7500, 9000]) {
+      expect(nextStandardOcpd(amps), `${amps} A`).toBeGreaterThanOrEqual(amps);
+    }
+  });
+});
+
+describe('🚨 there is ONE 240.6 ladder, not two differing by a capital letter', () => {
+  it('the manufacturer-specs spelling IS the canonical function', () => {
+    // `lib/manufacturer-specs.ts` carried a SECOND full ladder capped at 400 A with
+    // a `Math.ceil(amps / 10) * 10` tail, and lib/electrical-calc.ts imported BOTH
+    // under names differing only in letter case — so which answer a call site got
+    // depended on a capital letter. They are now the same function object.
+    expect(msNextStandardOcpd, 'manufacturer-specs re-exports a DIFFERENT function')
+      .toBe(nextStandardOcpd);
+    expect(MS_STANDARD_OCPD_SIZES).toBe(NEC_STANDARD_OCPD);
+  });
+
+  it('🚨 the old 400 A cap and its 10 A tail are gone', () => {
+    // sizeAcBranch().ocpdAmps is the AC OCPD the Electrical tab reports and the
+    // per-inverter / per-sub / POI aggregate. Above 400 A continuous (96 kW at 240 V,
+    // or any 208/480 V three-phase design) the old ladder returned 10 A steps no
+    // manufacturer lists, while totalInterconnectionBackfeedA in the SAME file
+    // rounded the same current to a real size — two numbers on one sheet.
+    for (const amps of [401, 450, 500, 640, 900, 1100]) {
+      const r = msNextStandardOcpd(amps);
+      expect(STANDARD.has(r), `${amps} A -> ${r} A via manufacturer-specs, not a rating`).toBe(true);
+      expect(r, `${amps} A was clamped at or below 400 A`).toBeGreaterThanOrEqual(amps);
+    }
+    // The exact value the /10 tail produced for a 96 kW three-phase design.
+    expect(msNextStandardOcpd(410), 'still returns the fabricated 410 A').not.toBe(410);
+    expect(msNextStandardOcpd(410)).toBe(450);
+  });
+});
+
+describe('NEC Table 250.122 — the canonical table, pinned', () => {
+  // 🚨 THIS CASE IS BLIND TO THE DEFECT IT DESCRIBES, AND IS NOT COUNTED AS PROOF
+  // OF IT. A SIXTH copy of 250.122 lived in lib/computed-system.ts as a private
+  // `getEGCGauge`: 8 rungs, `return '#2 AWG'` for every OCPD above 400 A, where the
+  // table requires #1 AWG at 600 A and #1/0 above. That copy is now
+  // `const getEGCGauge = getEGCSize`.
+  //
+  // But `getEGCGauge` is module-private, and this case exercises `getEGCSize` — the
+  // canonical function, which was ALWAYS correct. Measured: with the original bytes
+  // restored this case stays GREEN. So it pins the canonical table against future
+  // drift and nothing more; it is not evidence that the copy was removed.
+  //
+  // A discriminating test would have to drive `computeSystem` to a >400 A feeder
+  // (~100 kW at 240 V) and read the EGC off a run segment. Recorded as the honest
+  // gap rather than dressed up: the delegation is a one-line alias whose correctness
+  // is visible by inspection, and the OCPD-ladder cases above DID go red.
+  it('the canonical 250.122 ladder does not go flat above 400 A', () => {
+    expect(getEGCSize(500)).toBe('#2 AWG');
+    expect(getEGCSize(600)).toBe('#1 AWG');
+    expect(getEGCSize(800)).toBe('#1/0 AWG');
+    expect(getEGCSize(1200)).toBe('#1/0 AWG');
+    for (const ocpd of [600, 800, 1000, 1200]) {
+      expect(getEGCSize(ocpd), `${ocpd} A still gets the flat #2 AWG`).not.toBe('#2 AWG');
     }
   });
 });

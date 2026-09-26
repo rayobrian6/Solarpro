@@ -9,7 +9,6 @@ import { resolveOCPD, OCPDResolutionResult } from './ocpd-resolver';
 import { maxLoadSideBackfeedA } from './nec/rule705_12';
 import { autoSizeACWire, autoSizeDCWire, WireAutoSizerResult, DCWireAutoSizerResult } from './wire-autosizer';
 import {
-  nextStandardOCPD,
   getTempDeratingFactor,
   getConduitFillDeratingFactor,
   getEGCSize,
@@ -297,13 +296,13 @@ export interface AcBranchSizing {
   acKw: number;
   acOutputAmps: number;   // Step 1 — acKw × 1000 / systemVoltage
   continuousAmps: number; // Step 2 — × 1.25 (NEC 705.60)
-  ocpdAmps: number;       // Step 3 — nextStandardOCPD(continuousAmps) (NEC 240.6)
+  ocpdAmps: number;       // Step 3 — nextStandardOcpd(continuousAmps) (NEC 240.6)
 }
 
 export function sizeAcBranch(acKw: number, systemVoltage: number): AcBranchSizing {
   const acOutputAmps = (acKw * 1000) / systemVoltage;
   const continuousAmps = acOutputAmps * 1.25;
-  return { acKw, acOutputAmps, continuousAmps, ocpdAmps: nextStandardOCPD(continuousAmps) };
+  return { acKw, acOutputAmps, continuousAmps, ocpdAmps: nextStandardOcpd(continuousAmps) };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -372,7 +371,7 @@ export interface PerInverterAcSizing {
   acKw: number;                                // entry AC kW (micro: per-device × deviceCount)
   acOutputAmps: number;
   continuousAmps: number;
-  /** This entry's physical backfeed breaker — nextStandardOCPD(continuousAmps).
+  /** This entry's physical backfeed breaker — nextStandardOcpd(continuousAmps).
    *  705.12(B) total backfeed = Σ of THESE (round per inverter FIRST, then sum). */
   ocpdAmps: number;
   disconnectAmps: number;                      // per-inverter disconnect basis (= ocpdAmps)
@@ -676,15 +675,15 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
         autoResolutions.push({
           field: `string-${stringLabel}.ocpd`,
           type: 'OCPD_CAPPED',
-          originalValue: nextStandardOCPD(maxCurrentNEC * 1.25),
+          originalValue: nextStandardOcpd(maxCurrentNEC * 1.25),
           resolvedValue: ocpdRating,
           necReference: 'NEC 690.8(B) / Module Datasheet',
-          reason: `OCPD capped at module maxSeriesFuseRating (${str.maxSeriesFuseRating}A). Calculated: ${nextStandardOCPD(maxCurrentNEC * 1.25)}A.`,
+          reason: `OCPD capped at module maxSeriesFuseRating (${str.maxSeriesFuseRating}A). Calculated: ${nextStandardOcpd(maxCurrentNEC * 1.25)}A.`,
         });
         strIssues.push({
           code: 'I-OCPD-CAPPED',
           severity: 'info',
-          message: `String ${stringLabel}: OCPD auto-capped at ${ocpdRating}A (module maxSeriesFuseRating). Calculated would be ${nextStandardOCPD(maxCurrentNEC * 1.25)}A.`,
+          message: `String ${stringLabel}: OCPD auto-capped at ${ocpdRating}A (module maxSeriesFuseRating). Calculated would be ${nextStandardOcpd(maxCurrentNEC * 1.25)}A.`,
           necReference: 'NEC 690.8(B)',
           autoResolved: true,
           resolvedValue: ocpdRating,
@@ -895,11 +894,11 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   // Supports: LOAD_SIDE, SUPPLY_SIDE_TAP, MAIN_BREAKER_DERATE, PANEL_UPGRADE
   const isMicroSystem = input.inverters.every(inv => inv.type === 'micro');
   // Wave 2b (contract §1.7 + Addendum B ruling 2) — 705.12(B) total backfeed
-  // = Σ over each PHYSICAL inverter of nextStandardOCPD(inverterAmps × 1.25):
+  // = Σ over each PHYSICAL inverter of nextStandardOcpd(inverterAmps × 1.25):
   // round PER INVERTER FIRST, then sum, so the check matches the actual
   // breaker schedule an AHJ reviews. This DELETES the old :671–674 fork,
   // which fabricated a single average-per-inverter breaker
-  // (nextStandardOCPD((totalAmps / N) × 1.25)) as the whole system's
+  // (nextStandardOcpd((totalAmps / N) × 1.25)) as the whole system's
   // backfeed — an undercount for every N>1 system. N=1 is numerically
   // identical to the old path (both micro and string/optimizer branches).
   // Always recomputed — no legacy freeze flag (Ray ruling 2026-07-12).
@@ -908,7 +907,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   // rule (see totalInterconnectionBackfeedA above). It was correct; it was just
   // private to this engine, so the permit package's engine could and did
   // disagree with it. The arithmetic is unchanged — `e.ocpdAmps` is
-  // nextStandardOCPD(e.acOutputAmps × 1.25) by construction — but it now comes
+  // nextStandardOcpd(e.acOutputAmps × 1.25) by construction — but it now comes
   // from the shared authority, so a future change to the rule cannot land here
   // and miss the permit.
   const solarBreakerRequired = totalInterconnectionBackfeedA(entrySizings.map(e => e.acOutputAmps));
@@ -1538,7 +1537,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
 
   // Build canonical engineeringModel — single source of truth
   // Wave 2b HONESTY FIX: the old code fabricated per-inverter values as the
-  // fleet AVERAGE (totalAcKw / invCount → nextStandardOCPD(avg × 1.25)) —
+  // fleet AVERAGE (totalAcKw / invCount → nextStandardOcpd(avg × 1.25)) —
   // matching no physical inverter in a heterogeneous system. The honest
   // per-inverter data now lives in entrySizings (one record per physical
   // InverterInput, via sizeAcBranch); the legacy scalar mirrors are the

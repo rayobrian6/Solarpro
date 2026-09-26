@@ -119,14 +119,25 @@ export function getSmallestConduit(
 
 // ─── NEC Standard OCPD Sizes ─────────────────────────────────────────────────
 
-export const STANDARD_OCPD_SIZES = [
-  15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90,
-  100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400,
-];
-
-export function nextStandardOCPD(amps: number): number {
-  return STANDARD_OCPD_SIZES.find(s => s >= amps) ?? Math.ceil(amps / 10) * 10;
-}
+// 🚨 DELEGATED — this was a SECOND full NEC 240.6 ladder, capped at 400 A with a
+// `Math.ceil(amps / 10) * 10` tail. `sizeAcBranch().ocpdAmps` is the AC OCPD the
+// engineering page's Electrical tab reports and the per-inverter / per-sub / POI
+// aggregate value in lib/electrical-calc.ts, so above 400 A continuous (96 kW at
+// 240 V, or any 208/480 V three-phase commercial design — Sungrow, SolarEdge,
+// Fronius, Sol-Ark 30K-3P-208V) it returned a rating in 10 A steps that no
+// manufacturer lists, while `totalInterconnectionBackfeedA` in the very same file
+// rounded the same current to a real 240.6 size. The two then disagreed on one
+// sheet, and the drawing called out a device that cannot be bought.
+//
+// Worse, lib/electrical-calc.ts imported BOTH ladders under names differing only in
+// letter case — `nextStandardOCPD` here and `nextStandardOcpd` from stdSizes — so
+// which answer a call site got depended on a capital letter.
+//
+// Same shape as getTempDeratingFactor and getConduitFillDeratingFactor below: the
+// old name is kept as a re-export so no call site has to move, and there is now
+// exactly one ladder.
+export { NEC_STANDARD_OCPD as STANDARD_OCPD_SIZES } from './electrical/stdSizes';
+export { nextStandardOcpd as nextStandardOCPD } from './electrical/stdSizes';
 
 // ─── Temperature Derating (NEC Table 310.15(B)(2)(a)) ────────────────────────
 // Based on 90°C rated conductors, 30°C ambient base
