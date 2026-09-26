@@ -52,7 +52,9 @@
 import { PGlite, types as pgliteTypes } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { uuid_ossp } from '@electric-sql/pglite/contrib/uuid_ossp';
+import { neon } from '@neondatabase/serverless';
 import { readFileSync, readdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DEV_SESSION_USER } from '@/lib/dev-auth';
 
@@ -283,65 +285,92 @@ async function runOne(pg: PGlite, query: string, params: unknown[]) {
 }
 
 /**
- * Point the Neon driver at the in-process database. Idempotent, and a no-op
- * unless explicitly asked for.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE INTERCEPTOR, AND WHY IT IS AN ACCESSOR RATHER THAN AN ASSIGNMENT
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * 🚨 `next dev` PUTS `globalThis.fetch` BACK ON EVERY RECOMPILE. MEASURED, NOT
+ *    GUESSED — `next/dist/server/lib/router-server.js`:
+ *
+ *      let originalFetch = globalThis.fetch;            // router-server start
+ *      const resetFetch = () => {
+ *        globalThis.fetch = originalFetch;
+ *        globalThis[NEXT_PATCH_SYMBOL] = false;
+ *      };
+ *
+ *    `resetFetch` is handed to the hot reloader, which calls it from the
+ *    `done` hook whenever a server component, a CSS import or an invalidation
+ *    changes (`dist/server/dev/hot-reloader-webpack.js`, and the Turbopack
+ *    reloader does the same). It exists to drop Next's own fetch-cache patch.
+ *
+ *    `originalFetch` is captured when the ROUTER server starts, which is
+ *    strictly before `instrumentation.register()` runs — so it is the pristine
+ *    undici fetch, from before this bridge existed. The first recompile of a
+ *    session therefore threw the bridge away, permanently, and every query
+ *    after it went to the network and died on
+ *
+ *        getaddrinfo ENOTFOUND api.invalid
+ *
+ *    which reads exactly like a missing credential. That is why the harness
+ *    could log five confident success lines and still not be armed by the time
+ *    a test ran: `next dev` recompiles when ANY watched file changes, including
+ *    Playwright writing `test-results/` into the tree.
+ *
+ * A plain `globalThis.fetch = wrapper` cannot survive that. An accessor can:
+ * the getter always answers with the bridge, and the setter treats every
+ * assignment as "here is the new downstream" instead of "you are fired".
+ *
+ * WHY THE SETTER RE-WRAPS instead of just remembering the value: Next's
+ * `patchFetch` does `globalThis.fetch = patched(dedupe(globalThis.fetch))`. If
+ * the getter kept returning a bridge that delegated to that value, a non-Neon
+ * request would go bridge → patched → dedupe → bridge → patched → … forever.
+ * Re-wrapping gives the new chain a fresh bridge on top, so each call walks the
+ * chain exactly once. The chain cannot grow without bound either, because
+ * `resetFetch` always assigns the SAME pristine function, which the setter
+ * recognises and collapses back to the one-layer base bridge.
+ *
+ * Everything the original comment said about `neonConfig.fetchFunction` and
+ * `serverExternalPackages` still holds, and neither is used:
+ *
+ *   • `neonConfig` is per-bundle. Next bundles `@neondatabase/serverless` into
+ *     each server chunk separately, so the instance the instrumentation hook
+ *     writes to is not the instance a route handler reads. Setting it looks
+ *     like it works and changes nothing.
+ *   • `serverExternalPackages` would change how a core dependency is bundled in
+ *     PRODUCTION to make a local test work. That trade is the wrong way round.
+ *
+ * `globalThis` is the one object every bundle shares, and the driver identifies
+ * itself with a `Neon-Connection-String` header that nothing else sends — the
+ * header is passed in `init`, on a plain object, verified against the installed
+ * driver (`@neondatabase/serverless` 0.10.4 calls `(fetchFunction ?? fetch)(url,
+ * {method, body, headers})`), so the match is exact and every other fetch in the
+ * process is untouched.
  */
-export async function installPgliteNeonBridge(): Promise<void> {
-  if (process.env.SOLARPRO_LOCAL_PG !== '1') return;
-  if (process.env.VERCEL_ENV === 'production') {
-    console.error('[LOCAL_PG] refusing to arm on a production deployment');
-    return;
-  }
-  // 🚨 SUPPLY THE URL RATHER THAN ASKING FOR ONE.
-  //
-  // `lib/db-ready.ts` refuses to start without `DATABASE_URL`, so the harness
-  // needs one — and the first version documented a literal with an inline
-  // password, which `tests/security/secret-guard.test.ts` correctly flagged:
-  // "Connection string embeds a password ... Load it from the environment
-  // instead." The guard was right even though the password was invented, so the
-  // answer is to need no password at all rather than to carve out an exception.
-  //
-  // The host is `.invalid`, a reserved TLD that can never resolve: if the
-  // interception below ever fails, the query fails loudly instead of quietly
-  // reaching something real. Nothing authenticates — the request never leaves
-  // this process.
-  if (!process.env.DATABASE_URL) {
-    process.env.DATABASE_URL = 'postgresql://harness@pglite.invalid/neondb?sslmode=require';
-    console.log('[LOCAL_PG] DATABASE_URL was unset — pointed at the in-process database');
-  }
+export const BRIDGE_TAG = Symbol.for('solarpro.localPg.fetchBridge');
 
-  if (booting) { await booting; return; }
-  booting = boot();
-  db = await booting;
+/** Neon requests this process has actually answered from PGlite. */
+let intercepted = 0;
+/** How many times something replaced `fetch` and we climbed back on top. */
+let rearms = 0;
 
-  // 🚨 WHY `globalThis.fetch` AND NOT `neonConfig.fetchFunction`.
-  //
-  // `neonConfig` is the driver's own documented seam and it is the obvious
-  // choice — it is also useless here. Next bundles `@neondatabase/serverless`
-  // into each server chunk SEPARATELY, so the `neonConfig` the instrumentation
-  // hook writes to is a different module instance from the one every route
-  // handler reads. Setting it appears to work, logs success, and changes
-  // nothing: `/api/health` still went to the network and came back
-  //
-  //     db_error: "password authentication failed for user 'local'"
-  //
-  // — a real Postgres error from a real Neon endpoint, which is a very
-  // convincing way to look connected while being connected to the wrong thing.
-  //
-  // `globalThis.fetch` is genuinely global: one object, shared by every bundle.
-  // The driver calls it whenever `fetchFunction` is unset, and it identifies
-  // itself with a `Neon-Connection-String` header that nothing else sends, so
-  // the match is exact and every other fetch in the process is untouched.
-  //
-  // The alternative — adding the driver to `serverExternalPackages` — would
-  // change how a core dependency is bundled in PRODUCTION to make a local test
-  // work. That trade is the wrong way round.
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+type Fetch = typeof globalThis.fetch;
+
+function isBridge(f: unknown): boolean {
+  return typeof f === 'function' && (f as unknown as Record<symbol, unknown>)[BRIDGE_TAG] === true;
+}
+
+/** A fetch that answers Neon requests from PGlite and forwards everything else. */
+function makeBridge(inner: Fetch): Fetch {
+  const bridged = (async (input: unknown, init?: RequestInit) => {
     const headers = new Headers(init?.headers ?? undefined);
     if (!headers.has('neon-connection-string')) {
-      return originalFetch(input as RequestInfo, init);
+      if (process.env.LOCAL_PG_TRACE === '1') {
+        const url = typeof input === 'string' ? input : String((input as { url?: string })?.url ?? input);
+        console.log(`[LOCAL_PG_TRACE] forward ${url}`);
+      }
+      return inner(input as RequestInfo, init);
     }
+    intercepted++;
     const pg = db ?? (await booting!);
     let payload: unknown;
     try {
@@ -377,7 +406,173 @@ export async function installPgliteNeonBridge(): Promise<void> {
         severity: e?.severity ?? 'ERROR',
       }), { status: 400, headers: { 'content-type': 'application/json' } });
     }
-  }) as typeof globalThis.fetch;
+  }) as Fetch;
+  (bridged as unknown as Record<symbol, unknown>)[BRIDGE_TAG] = true;
+  return bridged;
+}
 
-  console.log('[LOCAL_PG] global fetch intercepts Neon requests — routed to in-process PGlite');
+/**
+ * Install (or re-install) the accessor that keeps the bridge on top of `fetch`.
+ *
+ * Exported for `tests/pgliteNeonBridgeFetchAccessor.test.ts`, which asserts the
+ * one property the whole harness rests on — that a later `globalThis.fetch = …`
+ * cannot unseat it. That test exists because the bug it locks down was invisible:
+ * the bridge logged success and then stopped working several seconds later.
+ */
+export function installFetchAccessor(): void {
+  const pristine = globalThis.fetch;
+  const baseBridge = makeBridge(pristine);
+  let current: Fetch = baseBridge;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    enumerable: true,
+    get(): Fetch { return current; },
+    set(next: Fetch) {
+      if (typeof next !== 'function') return;
+      if (isBridge(next)) { current = next; return; }
+      rearms++;
+      if (process.env.LOCAL_PG_TRACE === '1') {
+        console.log(`[LOCAL_PG_TRACE] fetch was replaced (${next.name || 'anonymous'}) — bridge re-armed, total ${rearms}`);
+      }
+      // `resetFetch` always hands back the SAME pristine function, so collapse
+      // to the one-layer bridge rather than stacking another wrapper on it.
+      current = next === pristine ? baseBridge : makeBridge(next);
+    },
+  });
+}
+
+/**
+ * 🚨 THE POSITIVE SELF-CHECK — "armed" IS A MEASUREMENT, NOT A LOG LINE.
+ *
+ * The failure this exists to catch is not a crash. It is a harness that prints
+ * five success lines and then quietly serves a DNS error that a reader
+ * diagnoses as a missing credential — the exact wrong conclusion the readiness
+ * ledger already had to correct once.
+ *
+ * So the claim is tested rather than asserted: build a `neon()` client the same
+ * way a route handler does, from the same package and the same `DATABASE_URL`,
+ * send it a nonce, and require BOTH that the nonce comes back AND that this
+ * module's own intercept counter moved. A nonce alone would be satisfied by any
+ * Postgres that echoed it; the counter alone would be satisfied by a request
+ * that never produced an answer. Together they can only be true if the query
+ * was answered here.
+ *
+ * What it cannot prove: that some OTHER server chunk resolves `fetch` to
+ * something other than `globalThis`. Nothing observed does — the trace shows
+ * every route's driver arriving here — and the watchdog re-runs this check for
+ * the life of the process, so a later divergence is reported rather than
+ * inferred from a 503.
+ */
+async function verifyInterception(): Promise<string | null> {
+  const before = intercepted;
+  const nonce = randomUUID();
+  try {
+    const sql = neon(process.env.DATABASE_URL as string);
+    const rows = (await sql`SELECT ${nonce}::text AS nonce`) as Array<{ nonce?: string }>;
+    if (rows?.[0]?.nonce !== nonce) return 'the nonce did not come back from the query';
+    if (intercepted === before) return 'the query was answered by something other than the in-process database';
+    return null;
+  } catch (e) {
+    return String((e as Error)?.message ?? e);
+  }
+}
+
+function shout(lines: string[]): void {
+  const bar = '━'.repeat(74);
+  console.error(`\n${bar}`);
+  for (const l of lines) console.error(l);
+  console.error(`${bar}\n`);
+}
+
+/** Re-check periodically, say so unmistakably if it ever stops being true. */
+function startWatchdog(): void {
+  const everyMs = Number(process.env.LOCAL_PG_WATCHDOG_MS ?? 15_000);
+  if (!Number.isFinite(everyMs) || everyMs <= 0) return;
+  let shouting = false;
+  const timer = setInterval(() => {
+    void (async () => {
+      let why = await verifyInterception();
+      if (!why) { shouting = false; return; }
+      // Something took `fetch` away by a route this accessor does not cover.
+      // Climb back on and re-measure before saying anything.
+      if (!isBridge(globalThis.fetch)) { installFetchAccessor(); why = await verifyInterception(); }
+      if (!why) { shouting = false; return; }
+      if (shouting) return;            // say it once per outage, not every tick
+      shouting = true;
+      shout([
+        '[LOCAL_PG] 🚨 THE HARNESS IS NOT INTERCEPTING. IT IS NOT A DATABASE',
+        '[LOCAL_PG]    CREDENTIAL PROBLEM AND RETRYING WILL NOT HELP.',
+        `[LOCAL_PG]    reason: ${why}`,
+        `[LOCAL_PG]    queries served here so far: ${intercepted}; times fetch was replaced: ${rearms}`,
+        '[LOCAL_PG]    Every query is now going to the real network, where the',
+        '[LOCAL_PG]    harness host cannot resolve — expect ENOTFOUND, not auth',
+        '[LOCAL_PG]    failures. Any test result produced from here is void.',
+        '[LOCAL_PG]    Restart the server; if it recurs, the interception seam',
+        '[LOCAL_PG]    in lib/dev/pgliteNeonBridge.ts no longer matches Next.',
+      ]);
+    })();
+  }, everyMs);
+  (timer as unknown as { unref?: () => void }).unref?.();
+}
+
+/**
+ * Point the Neon driver at the in-process database. Idempotent, and a no-op
+ * unless explicitly asked for.
+ */
+export async function installPgliteNeonBridge(): Promise<void> {
+  if (process.env.SOLARPRO_LOCAL_PG !== '1') return;
+  if (process.env.VERCEL_ENV === 'production') {
+    console.error('[LOCAL_PG] refusing to arm on a production deployment');
+    return;
+  }
+  // 🚨 SUPPLY THE URL RATHER THAN ASKING FOR ONE.
+  //
+  // `lib/db-ready.ts` refuses to start without `DATABASE_URL`, so the harness
+  // needs one — and the first version documented a literal with an inline
+  // password, which `tests/security/secret-guard.test.ts` correctly flagged:
+  // "Connection string embeds a password ... Load it from the environment
+  // instead." The guard was right even though the password was invented, so the
+  // answer is to need no password at all rather than to carve out an exception.
+  //
+  // The host is `.invalid`, a reserved TLD that can never resolve: if the
+  // interception below ever fails, the query fails loudly instead of quietly
+  // reaching something real. Nothing authenticates — the request never leaves
+  // this process.
+  if (!process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = 'postgresql://harness@pglite.invalid/neondb?sslmode=require';
+    console.log('[LOCAL_PG] DATABASE_URL was unset — pointed at the in-process database');
+  }
+
+  // 🚨 ONE DATABASE PER PROCESS, NOT ONE PER MODULE INSTANCE.
+  //
+  // `next dev` re-instantiates server modules on recompile, which resets every
+  // module-level variable in this file. Without a process-wide slot a second
+  // recompile would boot a SECOND, EMPTY PGlite and re-point the driver at it,
+  // and every row written before that moment would appear to have vanished —
+  // a data-loss symptom with a build-system cause.
+  const slot = globalThis as typeof globalThis & { __SOLARPRO_LOCAL_PG__?: Promise<PGlite> };
+  if (booting) { await booting; return; }
+  booting = slot.__SOLARPRO_LOCAL_PG__ ?? (slot.__SOLARPRO_LOCAL_PG__ = boot());
+  db = await booting;
+
+  installFetchAccessor();
+
+  const why = await verifyInterception();
+  if (why) {
+    shout([
+      '[LOCAL_PG] 🚨 THE BRIDGE DID NOT ARM. REFUSING TO PRETEND OTHERWISE.',
+      `[LOCAL_PG]    reason: ${why}`,
+      '[LOCAL_PG]    A trivial query was sent through the same driver a route',
+      '[LOCAL_PG]    handler uses and it was NOT answered by the in-process',
+      '[LOCAL_PG]    database. Nothing run against this server tests anything.',
+    ]);
+    throw new Error(`[LOCAL_PG] interception self-check failed: ${why}`);
+  }
+
+  startWatchdog();
+  console.log(
+    `[LOCAL_PG] VERIFIED — a query issued through @neondatabase/serverless was answered ` +
+    `by the in-process database (pid ${process.pid}); re-checked every ` +
+    `${process.env.LOCAL_PG_WATCHDOG_MS ?? 15_000}ms`,
+  );
 }

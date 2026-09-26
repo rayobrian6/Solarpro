@@ -46,10 +46,30 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: `DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npm run dev -- -p ${PORT}`,
+        // 🚨 ENV GOES IN `env`, NOT IN THE COMMAND STRING.
+        //
+        // This used to read `DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 npm run dev`.
+        // A leading `VAR=value` is POSIX shell syntax; Playwright spawns the
+        // command through the platform shell, so on Windows `cmd.exe` read
+        // `DEV_AUTH_BYPASS=true` as the PROGRAM to run and the server never
+        // started at all.
+        //
+        // 🚨 AND IT NEVER PASSED `SOLARPRO_LOCAL_PG`, so a suite started this
+        // way got a server with NO DATABASE ATTACHED. `e2e/persistence-join
+        // .spec.ts` skips itself when the flag is absent from the PLAYWRIGHT
+        // process — which it is not, when a runner exports it — so the suite
+        // ran its assertions against a server that had never been told to boot
+        // one. Forward it, so the flag means the same thing on both sides.
+        command: `npm run dev -- -p ${PORT}`,
+        env: {
+          DEV_AUTH_BYPASS:    'true',
+          NEXT_PUBLIC_E2E:    '1',
+          SOLARPRO_LOCAL_PG:  process.env.SOLARPRO_LOCAL_PG ?? '',
+          LOCAL_PG_PROJECT_ID: process.env.LOCAL_PG_PROJECT_ID ?? '',
+        },
         url: baseURL,
         reuseExistingServer: !process.env.CI,
-        timeout: 120_000,
+        timeout: 180_000,
         stdout: 'pipe',
         stderr: 'pipe',
       },

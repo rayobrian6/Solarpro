@@ -1333,6 +1333,95 @@ and there is nothing to exempt.
 🚨 **The `.invalid` host is load-bearing.** If the interception ever fails, the query fails loudly
 instead of quietly reaching something real.
 
+### 🚨 CORRECTION, 2026-09-25 — "LOUDLY" WAS WRONG, AND THE HARNESS ONLY EVER WORKED FOR A FEW SECONDS
+
+The claim above is the one thing in this section that was false, and it was false in the most
+expensive direction: the interception **did** fail, and the failure did not read as a failure.
+
+**What happened.** `next dev` puts `globalThis.fetch` back on every server-side recompile. Its own
+code, in `next/dist/server/lib/router-server.js`:
+
+```js
+let originalFetch = globalThis.fetch;                 // captured at ROUTER-server start
+const resetFetch = () => {
+  globalThis.fetch = originalFetch;
+  globalThis[NEXT_PATCH_SYMBOL] = false;
+};
+```
+
+`resetFetch` is handed to the hot reloader and called from its `done` hook whenever a server
+component, a CSS import or an invalidation changes (`dist/server/dev/hot-reloader-webpack.js`; the
+Turbopack reloader does the same). And `originalFetch` is captured **before**
+`instrumentation.register()` runs, so it is the pristine `undici` fetch from before the bridge
+existed. **The first recompile of a session therefore deleted the bridge, permanently.**
+
+After that, every query went to the real network and died on
+
+```
+getaddrinfo ENOTFOUND api.invalid
+[DB_TRANSIENT_ERROR] Error connecting to database: fetch failed
+```
+
+which `handleRouteDbError` reports as **503 "Service temporarily unavailable"**. A reader
+diagnoses that as a missing credential. It is not: it is the harness having been silently
+disarmed — and the harness had already printed five confident success lines by then, ending in
+*"global fetch intercepts Neon requests"*. Measured, on the run that found this: `GET /api/health`
+answered `database: "connected"` and a `POST /api/projects` answered `201` while the bridge was
+still in place, and both failed a few seconds later after `next dev` recompiled. Playwright writing
+`test-results/` into the tree is enough to trigger the recompile, so the harness reliably died
+during the suite that depended on it.
+
+**The fix.** `globalThis.fetch` is now an accessor, not an assignment
+(`lib/dev/pgliteNeonBridge.ts`). The getter always answers with the bridge; the setter treats any
+assignment as *"here is the new downstream"* and re-wraps it, so `resetFetch` and Next's own
+`patchFetch` both end up **under** the bridge instead of over it. Re-wrapping rather than
+delegating is required: `patchFetch` does
+`globalThis.fetch = patched(dedupe(globalThis.fetch))`, and a bridge that delegated to whatever was
+last assigned would call it, be called back, and loop. Because `resetFetch` always assigns the same
+pristine function, the setter recognises it and collapses the chain back to one layer, so it cannot
+grow. Measured on the verification run: `fetch` was replaced **12 times** in one suite, the bridge
+re-armed every time, and no request to the harness host escaped to the transport.
+
+Neither `neonConfig.fetchFunction` nor `serverExternalPackages` was used, for the reasons already
+recorded — the first is per-bundle and silently ineffective, the second would change how a core
+dependency is bundled in production to make a local test work.
+
+**And "armed" is now a measurement rather than a log line.** On install the bridge sends a nonce
+through a `neon()` client built exactly as a route handler builds one, and requires **both** that
+the nonce comes back and that its own intercept counter moved — a nonce alone would be satisfied by
+any Postgres that echoed it, a counter alone by a request that produced no answer. If that fails it
+**refuses to boot** with a banner saying it is not a credential problem. A watchdog re-runs the same
+check every 15 s (`LOCAL_PG_WATCHDOG_MS`), re-arms if something took `fetch` by a route the accessor
+does not cover, and says so unmistakably if it cannot. `LOCAL_PG_TRACE=1` logs every forward and
+every re-arm.
+
+The property is locked down by `tests/pgliteNeonBridgeFetchAccessor.test.ts` (7 tests), which
+performs the exact `globalThis.fetch = originalFetch` move and asserts the bridge is still there.
+
+### 🚨 THE RUN MODE IS PART OF THE RESULT
+
+A result from this harness is only meaningful if the server was started with the flag. Two things
+made that easy to get wrong, both now fixed:
+
+- **`playwright.config.ts`'s own `webServer` never passed `SOLARPRO_LOCAL_PG`**, so a suite started
+  by Playwright got a server with **no database attached** — while the spec's
+  `test.skip(!ARMED)` guard reads the flag from the *Playwright* process, which a runner that
+  exports it does satisfy. The suite would then run its assertions against a server that had never
+  been told to boot a database. The flag is now forwarded.
+- That `webServer.command` also began `DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 …`, which is POSIX
+  shell syntax. On Windows `cmd.exe` reads `DEV_AUTH_BYPASS=true` as the program name and the server
+  never starts. Environment now goes in `webServer.env`.
+
+**The supported way to run it:**
+
+```
+DEV_AUTH_BYPASS=true NEXT_PUBLIC_E2E=1 SOLARPRO_LOCAL_PG=1 npx next dev -p <port>
+E2E_BASE_URL=http://localhost:<port> SOLARPRO_LOCAL_PG=1 npx playwright test <spec> --reporter=line
+```
+
+Wait for `[LOCAL_PG] VERIFIED` before running anything. `next dev` is now a supported mode; before
+the accessor fix it was not, and nothing written down said which mode was.
+
 ### The tests
 
 `e2e/persistence-join.spec.ts` — skipped, loudly, when the harness is not armed:
@@ -2750,7 +2839,9 @@ before acceptance).** Outside Workstream 1's boundary, recorded so they are not 
 
 | Item | Why it is not closed |
 |---|---|
-| ~~The real client, against the real server, against real PostgreSQL, in a browser~~ | ✅ **CLOSED — and it was never owner-blocked.** `SOLARPRO_LOCAL_PG=1` runs PostgreSQL in WebAssembly inside the Next server; `e2e/persistence-join.spec.ts` drives the real studio through save → reload → restore and the Melvin A→B→A sequence against it. It found **WS1-029**, a P0 that was still live. |
+| ~~The real client, against the real server, against real PostgreSQL, in a browser~~ | ⚠️ **PARTIALLY CLOSED — corrected 2026-09-25, and the run mode is part of the claim.** `SOLARPRO_LOCAL_PG=1` runs PostgreSQL in WebAssembly inside the Next server; `e2e/persistence-join.spec.ts` drives the real studio against it. It found **WS1-029**, a P0 that was still live. **But this cell was recorded as fully CLOSED while the harness was disarming itself on the first `next dev` recompile** (see the correction above), so the run it was recorded from cannot be reproduced and nothing written down said which mode was required. Re-run 2026-09-25 against the fixed harness, `next dev`, `SOLARPRO_LOCAL_PG=1`: **2 of 4 pass** — the reachability guard and the Melvin A → B → A sequence through real PostgreSQL. The two reload tests fail on a **false fixture premise**, not on the product: they pin the project to `DEMO_SITE` but give it the address *1010 Franklin Ave*, and `DesignStudio`'s documented v52.1 rule ("street-level geocode always wins over stored coords") re-geocodes that address on mount, moves the active site 2.8 km away from the seeded roof, and `PUT`s the geocoded position back over the pin. The seeded roof then belongs to a site the autosave is not writing, so the row honestly records 0 panels. With no `GOOGLE_MAPS_API_KEY` the geocode falls through to live Census/Nominatim, so **the outcome of those two tests depends on whether an external service answers** — which is very likely why they were once recorded green. Fixing them means dropping the pin and using `pickHouse`, as `e2e/obstruction-survives-reload.spec.ts` does. |
+| ~~Step 3 of Ray's nine — a hand-placed object and the array it pruned survive a save and reload in a browser~~ | ✅ **CLOSED 2026-09-25, first run ever.** `e2e/obstruction-survives-reload.spec.ts` · *"the chimney AND the array it pruned both come back"* **PASSES**: a real `o` keypress, a real Chimney chip, a real click on a real Melvin roof face, 30 modules → 26, the chimney and the pruned array both read back out of PostgreSQL through the real `GET` handler, and after `page.reload()` the object comes back bound to the same `planeId`, within 0.05 m of where it was put, with its width and depth intact, and the array comes back **by id** with no survivor inside the clearance. Its third test does **not** pass — see WS1-032 below, which it found. |
+| **WS1-032 — `POST /api/production` silently invalidates the Design Studio's save token, so the next autosave is refused as someone else's** | 🚨 **OPEN, PRODUCT DEFECT, found 2026-09-25 by `e2e/obstruction-survives-reload.spec.ts`.** `app/api/production/route.ts` calls `upsertLayout` (two call sites) and passes **no version**, so it writes the `layouts` row unconditionally and re-stamps `updated_at`. The studio's optimistic-concurrency token still holds the value from its own last layout save, so its next autosave is refused **409 `LAYOUT_STALE_WRITE`** — verbatim from the run: *"this design was saved somewhere else — another tab, another device, or an older copy of this page … saved design has 26 panel(s) and was last written at 00:25:08.747Z; this save carries 26 panel(s) and was based on the version from 00:25:03.946Z"*. Nothing was open anywhere else: the server did it. **Why it matters more than a stale-token nuisance:** `buildLayoutFromDefinition` in that route does not carry `obstructions` at all, so the write that wins is the one WITHOUT the hand-placed object, and the save that carried it is the one refused. Net effect in the field — the operator places a chimney, the modules clear on screen, the row keeps the pruned array and no chimney, and the design reopens with a hole in the array that nothing explains, or is re-filled over a flue by the next Auto Layout. This is failure mode 3 in that spec's own header, *"the dangerous one"*. The second test in the file passed only because its single save happened to carry both at once — the manifestation is timing-dependent, the missing version argument is not. **Fix direction:** `/api/production` should either pass the version it read (and surface a refusal) or stop writing `layouts` at all; and any endpoint that writes that row must hand the caller the resulting version, as the layout route already deliberately does. |
 | **2D-traced planes carry `planeHeightAtCenterMeters: 0.0`** | A plane-HEIGHT question, not a mount-datum one. `computeEcefFrameForLegacyPlane` falls back to `LEGACY_PLANE_HEIGHT_M` (3.5 m), which is a guess about the building, not about the racking. Deciding it needs a real roof height source — the same input Phase 3 will supply. |
 | **Gable / Hip tools emit no roof plane** | **Owner-deferred.** Phase 3 roof UX; the instruction was explicitly *"do not start Phase 3 roof-generation algorithms yet"*. Viewport only. |
 | **The mount effect re-geocodes and overwrites `projects.lat/lng`** | **Mitigated, not removed.** WS1-002 makes the system tolerant of the drift. The code states *"street-level geocode always wins over stored coords"* as intent; reversing a stated product intent is the owner's call, and nothing now breaks because of it. |
