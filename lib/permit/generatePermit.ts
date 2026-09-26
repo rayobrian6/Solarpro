@@ -1284,7 +1284,12 @@ export function generatePermitHTML(
   // scripts/planset-evidence.mjs measures sheet agreement in the meantime.
   let _permitSnapshot: import('./snapshot/types').PermitDesignSnapshot | null = null;
   {
-    const snapshot = buildPermitDesignSnapshot(input, cad, {
+    // 🚨 A FUNCTION, because the sheet index inside the snapshot is derived from
+    // the BOM row count - and the BOM is not final until pass 2 below, which needs a
+    // snapshot to project. Building once left the frozen index describing a BOM that
+    // no longer existed. Nothing else differs between the two calls: the only input
+    // that moves is `input.bom`, which `computePlansetManifest` reads at call time.
+    const buildSnapshot = () => buildPermitDesignSnapshot(input, cad, {
       projectId: (input as { projectId?: string }).projectId ?? null,
       // W4 §8/§9/§12 — thread the async-resolved document + ledger authority into
       // the pure build (fail-soft null defaults when the route did not resolve it).
@@ -1385,6 +1390,61 @@ export function generatePermitHTML(
       // which is the correct outcome for a project nobody has measured.
       fieldRouteMeasurements: snapshotAuthority?.fieldRouteMeasurements ?? null,
     });
+    let snapshot = buildSnapshot();
+
+    // 🚨 BOM PASS 2, BEFORE THE FREEZE - AND THE INDEX REBUILT IF IT MOVES.
+    //
+    // `generateBOMForPermit` PROJECTS canonical snapshot authorities through
+    // `peekSnapshot` (the open-air grounding authority, the fastener assembly, the
+    // canonical feeder, Q-Cable procurement and topology, the supply-side tap). Pass 1
+    // ran with no snapshot at all, so every one of those rows was silently DROPPED
+    // from the rendered package - the open-air branch EGC row never reached SCHED even
+    // though E-1 and PV-4B both stated it. That is what pass 2 is for.
+    //
+    // This used to sit AFTER the freeze, and when the extra rows crossed a SCHED page
+    // boundary it logged "Keeping pass-1 pagination" and then assigned the new BOM
+    // anyway. Nothing kept pass-1 pagination: the pages render from `input.bom`
+    // (pass 2) while the cover sheet index and `activeSheetIds` read the FROZEN index
+    // (pass 1). So the cover listed one set of SCHED continuation sheets, the package
+    // carried another, every title block's "SHEET n OF N" counted the real pages, and
+    // a rendered-but-unindexed sheet was treated as absent by cross-sheet references.
+    // The only signal was a console line telling the reader a mitigation had been
+    // applied that had not.
+    //
+    // The repo already states the rule, two lines from the other manifest call in
+    // snapshot/build.ts: "the stored sheet index must be recomputed or it would
+    // disagree with the pages actually rendered." The BOM path never got it.
+    //
+    // A second build is a FIXED POINT, not a loop: the snapshot-derived rows depend on
+    // the snapshot's authorities, never on the sheet index, so re-running the BOM
+    // against the rebuilt snapshot would return the same rows. Rebuilt ONLY when the
+    // page count actually moved, so every package that was already consistent keeps
+    // its digest byte for byte.
+    try {
+      const _schedPagesBefore = schedContPageCount(input.bom ?? []);
+      // Attach provisionally so `peekSnapshot` can see it. It is replaced or frozen
+      // before this block ends; nothing outside can observe the unfrozen value.
+      (input as unknown as { _snapshot?: unknown })._snapshot = snapshot;
+      const _bomAfter = generateBOMForPermit(input, cad);
+      if (_bomAfter.length > 0) {
+        input.bom = _bomAfter;
+        input.decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
+          bomItems: input.bom,
+          decisionBundle: decisionProvenance,
+        });
+        const _schedPagesAfter = schedContPageCount(_bomAfter);
+        if (_schedPagesAfter !== _schedPagesBefore) {
+          console.warn('[generatePermitHTML] BOM pass 2 moved the SCHED continuation page '
+            + `count (${_schedPagesBefore} → ${_schedPagesAfter}) - rebuilding the snapshot so its `
+            + 'sheet index describes the pages that will actually render.');
+          snapshot = buildSnapshot();
+        }
+      }
+    } catch (bomErr2: unknown) {
+      console.warn('[generatePermitHTML] snapshot-aware BOM pass failed (non-critical):',
+        (bomErr2 as Error)?.message ?? bomErr2);
+    }
+
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);
     for (const viol of violations) {
@@ -1399,38 +1459,6 @@ export function generatePermitHTML(
     console.log(`[SNAPSHOT] ${snapshot.meta.snapshotId} schema ${snapshot.meta.schemaVersion} digest ${snapshot.meta.digest.slice(0, 16)}… — ${violations.length} finding(s), 0 blocking`);
   }
 
-  // ── BOM pass 2 — snapshot-aware (2026-07-25, grounding-authority correction) ─
-  // generateBOMForPermit PROJECTS canonical snapshot authorities through
-  // peekSnapshot (the open-air grounding authority, the fastener assembly, the
-  // canonical feeder). Pass 1 above runs BEFORE the snapshot exists because the
-  // snapshot's sheet index needs the BOM row count for SCHED pagination — so every
-  // snapshot-derived row was silently DROPPED from the rendered package (the
-  // open-air branch EGC row never reached SCHED even though E-1/PV-4B stated it).
-  // Re-running the BOM here, with the snapshot attached, is the fixed point: the
-  // snapshot-derived rows depend on the snapshot, never on the sheet index, so a
-  // third pass would be identical. If the second pass were to change the SCHED page
-  // count the manifest inside the frozen snapshot would disagree with the rendered
-  // pages, so that condition is asserted loudly rather than silently accepted.
-  try {
-    const _bomBefore = input.bom ?? [];
-    const _schedPagesBefore = schedContPageCount(_bomBefore);
-    const _bomAfter = generateBOMForPermit(input, cad);
-    if (_bomAfter.length > 0) {
-      const _schedPagesAfter = schedContPageCount(_bomAfter);
-      if (_schedPagesAfter !== _schedPagesBefore) {
-        console.error('[generatePermitHTML] BOM pass 2 changed the SCHED continuation page count '
-          + `(${_schedPagesBefore} → ${_schedPagesAfter}) — the snapshot sheet index would disagree with the `
-          + 'rendered pages. Keeping pass-1 pagination; investigate the snapshot-derived BOM rows.');
-      }
-      input.bom = _bomAfter;
-      input.decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
-        bomItems: input.bom,
-        decisionBundle: decisionProvenance,
-      });
-    }
-  } catch (bomErr2: unknown) {
-    console.warn('[generatePermitHTML] snapshot-aware BOM pass failed (non-critical):', (bomErr2 as Error)?.message ?? bomErr2);
-  }
 
   const engineeringStateRegistry = buildEngineeringStateRegistry({
     registryId: `${provenanceDocumentId}.engineering-state`,
