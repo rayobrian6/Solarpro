@@ -1482,7 +1482,18 @@ export default function DesignStudio({ project, onSave }: Props) {
   // `archivesSignature` already SIGNS the ledger, which is why this looked
   // finished. Signing only suppresses a redundant POST once something else has
   // scheduled one; it cannot schedule one — exactly the note above.
-  }, [panels, roofPlanes, placedObstructions, measurements, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, site.deletionLedger, saveLayoutToDB]);
+  // 🚨 AND `site.nativeDisposition` FOR THE SAME REASON, FOUND THE SAME WAY.
+  //
+  // The disposition is the record of a person deciding that their hand-built model
+  // governs a property and detection must not overwrite it. It rides to the
+  // database inside `siteArchives.nativeGeometry`, so a save persists it — and
+  // nothing scheduled one. A disposition-only change (say "keep my model", touch
+  // nothing else, reload) was lost, and the next hydration was then free to
+  // acquire over the work the decision existed to protect.
+  //
+  // `archivesSignature` signs the disposition too, which is exactly why this
+  // looked finished — the same trap the note above describes for the ledger.
+  }, [panels, roofPlanes, placedObstructions, measurements, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, site.deletionLedger, site.nativeDisposition, saveLayoutToDB]);
 
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {
