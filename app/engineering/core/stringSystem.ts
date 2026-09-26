@@ -1,3 +1,4 @@
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 // ============================================================
 // StringSystem — String Inverter Topology Engine
 // DC strings, Voc/Isc temperature correction, DC OCPD.
@@ -124,13 +125,16 @@ function correctIsc(isc: number, tempCoeffIsc: number, tempMax: number): number 
 
 // ── OCPD Sizing ───────────────────────────────────────────────────────────
 
-const STANDARD_BREAKER_SIZES = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125];
-
+// 🚨 DELEGATED. This was a re-typed NEC 240.6(A) ladder that stopped at 125 A
+// and then fell back to `Math.ceil(amps / 5) * 5` — the formula
+// lib/electrical/stdSizes.ts forbids in its own header, because 55, 65, 75, 85 and
+// 95 A are not standard ratings and no manufacturer makes those breakers. So every
+// current above 125 A got a fabricated rating: 130 where the code says 150.
+//
+// The canonical ladder runs to 1200 A and falls back to the next 100 A, never to a
+// multiple of five.
 function nextStandardBreaker(amps: number): number {
-  for (const size of STANDARD_BREAKER_SIZES) {
-    if (size >= amps) return size;
-  }
-  return Math.ceil(amps / 5) * 5;
+  return nextStandardOcpd(amps);
 }
 
 // ── DC Wire Sizing (NEC 310.15, USE-2/PV Wire) ────────────────────────────

@@ -23,6 +23,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 import { generateBOMV4, bomToMarkdown } from '@/lib/bom-engine-v4';
 import { renderSLDProfessional } from '@/lib/sld-professional-renderer';
 import { upsertLayout, upsertProduction, getDbReady, getProjectWithDetails , handleRouteDbError } from '@/lib/db-neon';
@@ -334,7 +335,25 @@ export async function POST(req: NextRequest) {
 
     // ── Step 3: Electrical sizing ─────────────────────────────────────────────
     const acOutputAmps = Math.round((systemKw * 1000) / 240);
-    const acOCPD       = Math.ceil(acOutputAmps * 1.25 / 5) * 5;
+    // 🚨 THE NEC 240.6(A) LADDER, NOT `Math.ceil(x / 5) * 5`.
+    //
+    // `lib/electrical/stdSizes.ts` states the rule in its own header: "DO NOT use
+    // Math.ceil(x/5)*5 — 55, 65, 75, 85, 95 A are NOT standard." This line was that
+    // formula, and here it was not a fallback — it was the ONLY OCPD computation on
+    // this route, and `backfeedAmps` is set from it directly.
+    //
+    // It then reached `renderSLDProfessional` as the "AC OCPD (125%)" row and
+    // `generateBOMV4`, which uses it for the EGC size, the GEC size, and a priced BOM
+    // line. A 10 kW preliminary therefore shipped a drawing and a quote naming a
+    // "55A 2-Pole Breaker" with Square D part number QO55-SPARE — a part that does
+    // not exist. 10 kW → 55 A where the code says 60; 14 kW → 75 where it says 80;
+    // 25 kW → 130 where it says 150.
+    //
+    // The conductor consequence is the sharp one: at 25 kW the conductor and EGC were
+    // sized for 130 A — `autoSizeGauge` picks #1 AWG — while the installer buys the
+    // real next size, 150 A, which requires #1/0. The installed conductor ends up
+    // under-protected by a breaker the drawing never named.
+    const acOCPD       = nextStandardOcpd(acOutputAmps * 1.25);
     const backfeedAmps = acOCPD;
 
     // ── Step 4: Cost estimate ─────────────────────────────────────────────────
