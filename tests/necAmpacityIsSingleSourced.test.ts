@@ -262,3 +262,36 @@ describe('🚨 NEC 250.122 — the EGC rule that was `size * 15`', () => {
       .toEqual([]);
   });
 });
+
+describe('NEC Chapter 9 Table 5 — conductor areas, which also had copies', () => {
+  it('🚨 #3/0 AWG is 0.2679 in², not 0.2660', async () => {
+    // `lib/segment-schedule.ts` kept its own copy with 0.2660 at that one row, so a
+    // raceway carrying 3/0 computed its fill percentage low — the permissive
+    // direction. computed-system's copy of the same table had been retired to
+    // lib/nec/chapter9.ts long before; this one was simply missed.
+    const { CONDUCTOR_AREA_IN2 } = await import('@/lib/nec/chapter9');
+    expect(CONDUCTOR_AREA_IN2['#3/0 AWG']).toBe(0.2679);
+  });
+
+  it('🚨 and no module keeps its own conductor-area table', () => {
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) { if (name !== 'node_modules') walk(p); continue; }
+        if (!name.endsWith('.ts')) continue;
+        if (p.endsWith(join('lib', 'nec', 'chapter9.ts'))) continue;
+        const src = readFileSync(p, 'utf8');
+        // Two adjacent Table 5 rows as literals. Named `_RETIRED_…` copies are allowed
+        // to remain as documentation of what was replaced.
+        if (/'#10 AWG':\s*0\.0211/.test(src) && /'#8 AWG':\s*0\.0366/.test(src)
+            && !/_RETIRED_CONDUCTOR_AREA_IN2/.test(src)) {
+          offenders.push(p.slice(ROOT.length + 1));
+        }
+      }
+    };
+    walk(join(ROOT, 'lib'));
+    expect(offenders, 'a NEC Chapter 9 Table 5 conductor-area table is declared outside lib/nec/chapter9.ts')
+      .toEqual([]);
+  });
+});

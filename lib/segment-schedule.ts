@@ -17,6 +17,7 @@
 import { nextStandardOcpd } from './electrical/stdSizes';
 import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C,
   necAmbientCorrection90C, necConductorCountAdjustment } from '@/lib/nec/ampacity';
+import { CONDUCTOR_AREA_IN2 as NEC_CONDUCTOR_AREA_IN2 } from '@/lib/nec/chapter9';
 import {
   normalizeConduitType as necNormalizeConduitType,
   conductorAreaIn2 as necConductorAreaIn2,
@@ -192,22 +193,13 @@ export interface SegmentScheduleInput {
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
 
-// NEC Chapter 9 Table 5 — Conductor areas (in²) for THWN-2
-const CONDUCTOR_AREA_IN2: Record<string, number> = {
-  '#14 AWG': 0.0097,
-  '#12 AWG': 0.0133,
-  '#10 AWG': 0.0211,
-  '#8 AWG':  0.0366,
-  '#6 AWG':  0.0507,
-  '#4 AWG':  0.0824,
-  '#3 AWG':  0.0973,
-  '#2 AWG':  0.1158,
-  '#1 AWG':  0.1562,
-  '#1/0 AWG': 0.1855,
-  '#2/0 AWG': 0.2223,
-  '#3/0 AWG': 0.2660,
-  '#4/0 AWG': 0.3237,
-};
+// 🚨 DELEGATED - and the copy here was WRONG at one row. It had #3/0 AWG at
+// 0.2660 in² where NEC Chapter 9 Table 5 (and lib/nec/chapter9.ts, which every other
+// consumer already reads) gives 0.2679, so a raceway carrying 3/0 computed its fill
+// percentage slightly low - the permissive direction. computed-system's copy of this
+// same table was retired to chapter9 long ago; this one was missed, which is the whole
+// argument for never keeping a second copy. It also gains the kcmil rows.
+const CONDUCTOR_AREA_IN2: Record<string, number> = NEC_CONDUCTOR_AREA_IN2;
 
 // CONDUIT_FULL_AREA was DELETED (2026-08-29). Its comment said "Conduit full
 // internal areas" and its values were the NEC 40% column, so `calcConduitSize`
