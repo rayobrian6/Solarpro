@@ -340,7 +340,20 @@ describe('buildComputedRunsForPermit — per-subsystem opts (kills the hardcoded
     expect(runs.some(r => r.id === 'MSP_TO_UTILITY_RUN')).toBe(true);
     runs.forEach(r => expect(r.subSystem).toBeUndefined());
     const roofRun = runs.find(r => r.id === 'ROOF_RUN')!;
-    expect(roofRun.tempDeratingFactor).toBe(getTempDerating(40 + 33)); // legacy 33 °C preserved
+    // 🚨 THE BASE AMBIENT IS THE FIXTURE'S, NOT A FLAT 40. This read
+    // `getTempDerating(40 + 33)` and passed for the wrong reason: the fixture's ASHRAE
+    // 2 % high is 43 °C, so the product derates at 43 + 33 = 76 °C while this asserted
+    // 73 °C — and the old ambient ladder returned a FLAT 0.58 for everything above
+    // 60 °C, so both numbers came out identical and the disagreement was invisible.
+    // Completing the table to the real NEC column (0.50 at 71–75, 0.41 at 76–80) split
+    // them apart and surfaced it.
+    //
+    // Worth keeping in view: this fixture's roof run sits at 76 °C, so it is a live
+    // example of the bug that completion fixed — those conductors were being derated at
+    // 0.58 where NEC 310.15(B)(1) requires 0.41, a 29 % overstatement of ampacity in the
+    // unsafe direction. The sibling case below already used `_fixtureAmbientC()` and
+    // says in its own comment that the flat 40 is legacy; this one was simply missed.
+    expect(roofRun.tempDeratingFactor).toBe(getTempDerating(_fixtureAmbientC() + 33)); // legacy 33 °C adder preserved
   });
 
   it('scoped call: rooftop adder from env (0 for non-roof), tail suppressed, runs stamped', () => {
