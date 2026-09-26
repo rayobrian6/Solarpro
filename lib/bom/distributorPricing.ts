@@ -759,6 +759,50 @@ function getCatalogByPartNumber(): Map<string, DistributorPriceEntry> {
   return _catalogByPartNumber;
 }
 
+// ─── Override lookup maps ─────────────────────────────────────────────────────
+
+/**
+ * Builds the two override lookup maps from a priority-ordered override list.
+ *
+ * 🚨 PRECEDENCE CONTRACT: `overrides` arrives **highest-priority-first**. The
+ * caller that feeds this from the database (`app/api/engineering/bom/route.ts`)
+ * orders `CASE WHEN user_id IS NULL THEN 1 ELSE 0 END`, so per-company rows
+ * (user_id SET ⇒ 0) sort BEFORE platform rows (user_id NULL ⇒ 1). The FIRST
+ * entry seen for a key therefore wins, and every later entry for that same key
+ * must be ignored — hence the explicit `has()` guard rather than a bare `set()`.
+ *
+ * This used to be a plain `map.set()` in a loop, which is LAST-wins: the
+ * company override was fetched, sorted first, and then silently overwritten by
+ * one of migration 015's 21 platform seed rows for the same SKU. A company whose real
+ * Powerwall 3 net was $7,100 was billed the $8,280 seed in Est. Hardware Cost
+ * and in the $/W tile, with no indication its override had been discarded.
+ * Overrides for SKUs the seed does not cover DID work, which made the failure
+ * look random rather than systematic.
+ *
+ * If you ever change the ORDER BY at a call site, change it to keep
+ * highest-priority FIRST; do not "fix" it by reversing this guard.
+ */
+function buildOverrideMaps(overrides: DistributorPriceOverride[]): {
+  overrideMap: Map<string, number>;
+  overrideCategoryMap: Map<string, number>;
+} {
+  const overrideMap = new Map<string, number>();
+  const overrideCategoryMap = new Map<string, number>();
+  for (const o of overrides) {
+    if (o.partNumber === '*') {
+      // Category-wide wildcard — first (highest-priority) row for the category wins.
+      if (o.category && !overrideCategoryMap.has(o.category)) {
+        overrideCategoryMap.set(o.category, o.unitCost);
+      }
+    } else {
+      // Exact part number — first (highest-priority) row for the SKU wins.
+      const key = o.partNumber.toUpperCase();
+      if (!overrideMap.has(key)) overrideMap.set(key, o.unitCost);
+    }
+  }
+  return { overrideMap, overrideCategoryMap };
+}
+
 // ─── Core pricing resolution ──────────────────────────────────────────────────
 
 function resolvePriceForItem(
@@ -813,22 +857,16 @@ function resolvePriceForItem(
  * @param items     BOM line items from the V4 engine (or merged result).
  * @param overrides Optional array of DB-sourced price overrides (from
  *                  `distributor_prices` table, fetched by the calling route).
+ *                  **Must be ordered highest-priority-first** — per-company rows
+ *                  before platform (user_id NULL) rows. See `buildOverrideMaps`.
  *                  When undefined/empty, only catalog + category defaults apply.
  */
 export function applyDistributorPricing(
   items: BOMLineItemV4[],
   overrides: DistributorPriceOverride[] = [],
 ): PricingApplyResult {
-  // Build override lookup maps
-  const overrideMap = new Map<string, number>();
-  const overrideCategoryMap = new Map<string, number>();
-  for (const o of overrides) {
-    if (o.partNumber === '*') {
-      if (o.category) overrideCategoryMap.set(o.category, o.unitCost);
-    } else {
-      overrideMap.set(o.partNumber.toUpperCase(), o.unitCost);
-    }
-  }
+  // Build override lookup maps — FIRST entry per key wins (see buildOverrideMaps).
+  const { overrideMap, overrideCategoryMap } = buildOverrideMaps(overrides);
 
   let catalogMatches = 0;
   let overrideMatches = 0;
@@ -890,6 +928,8 @@ export function applyDistributorPricing(
 /**
  * Returns the effective unit cost for a given part number + category,
  * applying the same resolution order as applyDistributorPricing.
+ *
+ * `overrides` must be ordered highest-priority-first (see `buildOverrideMaps`).
  */
 export function resolveUnitCost(
   partNumber: string,
@@ -910,15 +950,7 @@ export function resolveUnitCost(
     derivedFrom: '',
     required: false,
   };
-  const overrideMap = new Map<string, number>();
-  const overrideCategoryMap = new Map<string, number>();
-  for (const o of overrides) {
-    if (o.partNumber === '*') {
-      if (o.category) overrideCategoryMap.set(o.category, o.unitCost);
-    } else {
-      overrideMap.set(o.partNumber.toUpperCase(), o.unitCost);
-    }
-  }
+  const { overrideMap, overrideCategoryMap } = buildOverrideMaps(overrides);
   return resolvePriceForItem(fakeItem, overrideMap, overrideCategoryMap).unitCost;
 }
 

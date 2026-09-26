@@ -453,17 +453,48 @@ function buildEngineeringReport(p: any): string {
   return lines.join('\n');
 }
 
+/**
+ * The archived procurement document — `BOM_<project>.csv`, attached to the
+ * project in Client Files. This is the file the purchaser actually opens.
+ *
+ * 🚨 IT HAD NO PART NUMBER AND NO COSTS.
+ *
+ * The header was `Tag,Description,Manufacturer,Model,Qty,Unit,Notes`, so a row
+ * read "IronRidge / XR100 Rail System / 8 / ea" with an empty first column: no
+ * SKU, no price. `Tag` was ALWAYS empty because `BOMLineItemV4`
+ * (lib/bom-types-v4.ts) has no `tag` field — the engine had already resolved
+ * `partNumber`, `unitCost` and `totalCost` for every line and all three were
+ * dropped on the way to disk. Nothing could be ordered without looking every
+ * part number up by hand, and the priced total the estimator quoted could not be
+ * reconciled against the archive.
+ *
+ * Column names below are the real `BOMLineItemV4` fields. `stageLabel`,
+ * `necReference` and the `qty`/`mfr`/`desc` aliases are kept because this
+ * builder is also fed looser client-side item shapes.
+ */
 function buildBomCsv(items: any[]): string {
-  const header = 'Tag,Description,Manufacturer,Model,Qty,Unit,Notes';
+  const header = 'Stage,Category,Manufacturer,Model,Part Number,Qty,Unit,Unit Cost,Total Cost,NEC Ref,Notes';
+  const clean = (v: unknown) => String(v ?? '').replace(/,/g, ';').replace(/[\r\n]+/g, ' ');
+  // A cost of 0/undefined prints EMPTY, never "$0.00" — an unpriced line must
+  // not read as a free line. applyDistributorPricing leaves both undefined when
+  // it could not price a row (and always for suggested tools).
+  const money = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n.toFixed(2) : '';
+  };
   const rows = items.map((item: any) => {
-    const tag   = (item.tag   || '').replace(/,/g, ';');
-    const desc  = (item.description || item.desc || '').replace(/,/g, ';');
-    const mfr   = (item.manufacturer || item.mfr || '').replace(/,/g, ';');
-    const model = (item.model || '').replace(/,/g, ';');
-    const qty   = item.qty ?? item.quantity ?? '';
-    const unit  = (item.unit || 'EA').replace(/,/g, ';');
-    const notes = (item.notes || item.source || '').replace(/,/g, ';');
-    return `${tag},${desc},${mfr},${model},${qty},${unit},${notes}`;
+    const stage  = clean(item.stageLabel ?? item.stage);
+    const cat    = clean(item.category);
+    const mfr    = clean(item.manufacturer ?? item.mfr);
+    const model  = clean(item.model);
+    const part   = clean(item.partNumber ?? item.part_number);
+    const qty    = clean(item.quantity ?? item.qty);
+    const unit   = clean(item.unit || 'ea');
+    const uCost  = money(item.unitCost);
+    const tCost  = money(item.totalCost ?? (Number(item.unitCost) * Number(item.quantity)));
+    const nec    = clean(item.necReference ?? item.necRef);
+    const notes  = clean(item.notes ?? item.description ?? item.desc);
+    return `${stage},${cat},${mfr},${model},${part},${qty},${unit},${uCost},${tCost},${nec},${notes}`;
   });
   return [header, ...rows].join('\n');
 }

@@ -10,12 +10,16 @@
 //   ?active=true|false— filter by active status (default: true)
 //
 // POST   /api/admin/distributor-prices
-//   Body: { user_id?, part_number, category?, label?, unit_cost, source?, price_date?, notes? }
-//   Creates or updates (upsert on user_id+part_number).
+//   Body (snake_case — see the note above the parser): { id?, user_id?,
+//        part_number, category?, label?, unit_cost, source?, price_date?, notes? }
+//   Creates or updates. With `id` it updates that row; without one it keys on
+//   (user scope, UPPER(part_number)). UPDATE-then-INSERT, not ON CONFLICT —
+//   this table has no unique index. See the block comment at the write.
 //
-// DELETE /api/admin/distributor-prices
-//   Body: { id } — soft-delete (sets active=false)
-//   Body: { id, hard: true } — hard delete (removes row)
+// DELETE /api/admin/distributor-prices?id=<uuid>[&hard=true]
+//   ?id=<uuid>             — soft-delete (sets active=false)
+//   ?id=<uuid>&hard=true   — hard delete (removes row)
+//   A JSON body { id, hard? } is accepted as a fallback, but the query string wins.
 //
 // PATCH  /api/admin/distributor-prices — reactivate a soft-deleted override
 //   Body: { id }
@@ -96,7 +100,12 @@ export async function GET(req: NextRequest) {
         updatedAt:   r.updated_at,
       })),
       count: rows.length,
-      // Also include the static catalog for reference
+      // Also include the static catalog for reference.
+      // `unitCost` is the RESOLVED per-unit dollar figure the BOM engine would
+      // actually use for this SKU (for solar panels, netPrice is $/W, so the
+      // per-panel figure only exists once resolveUnitCost has multiplied it by
+      // the module wattage). The admin catalog table and the "Avg Catalog Cost"
+      // stat both read it; without it every catalog row rendered `$NaN`.
       catalog: DISTRIBUTOR_PRICE_CATALOG.map(e => ({
         partNumber: e.partNumber,
         description: e.description,
@@ -106,6 +115,7 @@ export async function GET(req: NextRequest) {
         netPrice: e.category === 'solar_panel'
           ? null // per-panel pricing handled in distributorPricing.ts
           : e.netPrice,
+        unitCost: resolveUnitCost(e.partNumber, e.category),
         source: e.source,
         asOf: e.asOf,
       })),
@@ -129,7 +139,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
   }
 
+  // 🚨 WIRE FORMAT IS snake_case — the column names, and what this file's header
+  // comment has always documented. app/admin/distributor-prices/page.tsx used to
+  // send camelCase (`partNumber`/`unitCost`), so every Add/Edit in the ONLY UI
+  // for this table failed with "part_number is required" and `distributor_prices`
+  // could never hold anything but migration 015's 21 seed rows. The page now
+  // sends snake_case; this parser is deliberately NOT tolerant of camelCase, so
+  // that a page regression fails loudly in the contract test instead of silently.
   let body: {
+    id?: string;
     user_id?: string;
     part_number?: string;
     category?: string;
@@ -165,6 +183,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Invalid user_id format.' }, { status: 400 });
   }
 
+  // ── UUID validation on optional id (edit of an existing override) ──
+  if (body.id && !isValidUUID(body.id)) {
+    return NextResponse.json({ success: false, error: 'Invalid id format.' }, { status: 400 });
+  }
+
   // ── Field length caps ──
   if (body.part_number.trim().length > 100) {
     return NextResponse.json({ success: false, error: 'part_number must be 100 characters or fewer.' }, { status: 400 });
@@ -194,40 +217,71 @@ export async function POST(req: NextRequest) {
   try {
     const sql = await getDbReady();
 
-    // Upsert: conflict on (user_id, part_number) — NULL-safe via COALESCE
-    const [row] = await sql`
-      INSERT INTO distributor_prices
-        (user_id, part_number, category, label, unit_cost, source, price_date, notes, active)
-      VALUES
-        (
-          ${userId}::uuid,
-          ${partNumber},
-          ${category},
-          ${label},
-          ${unitCost},
-          ${source},
-          ${priceDate}::date,
-          ${notes},
-          TRUE
-        )
-      ON CONFLICT (
-        COALESCE(user_id::text, '00000000-0000-0000-0000-000000000000'),
-        UPPER(part_number)
-      )
-      DO UPDATE SET
-        category   = EXCLUDED.category,
-        label      = EXCLUDED.label,
-        unit_cost  = EXCLUDED.unit_cost,
-        source     = EXCLUDED.source,
-        price_date = EXCLUDED.price_date,
-        notes      = EXCLUDED.notes,
-        active     = TRUE,
-        updated_at = now()
-      RETURNING *
-    `;
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🚨 UPDATE-THEN-INSERT, **NOT** `ON CONFLICT`.
+    //
+    // This used to be `ON CONFLICT (COALESCE(user_id::text, '000…'),
+    // UPPER(part_number)) DO UPDATE` — against an arbiter that does not exist.
+    // Migration 015 (the ONLY migration that touches this table) creates three
+    // plain `CREATE INDEX` partial indexes and no unique index or constraint at
+    // all, so Postgres rejected the statement with 42P10 ("there is no unique or
+    // exclusion constraint matching the ON CONFLICT specification"). That is a
+    // THROWN error, not a null row, so the `row ?? (plain INSERT)` fallback that
+    // sat underneath it (and the comment advertising it) was unreachable dead
+    // code and every save 500'd.
+    //
+    // Requiring the index would require a migration. Two statements need none:
+    // UPDATE every row matching the logical key (same user scope + same part
+    // number, case-insensitively) and INSERT only when nothing matched.
+    //
+    // Updating ALL matching rows is deliberate: the absence of a unique index
+    // means duplicates may already exist, and leaving them at different prices
+    // would make the reader's precedence order the thing that decides the
+    // number. After this, every duplicate of a key carries the same cost.
+    //
+    // Not atomic (the Neon HTTP driver has no interactive transaction), so two
+    // simultaneous first-time saves of the same SKU can both insert. The worst
+    // case is a duplicate row at the value both writers asked for, and the next
+    // save collapses them. A lost or incorrect price is not reachable this way.
+    // ══════════════════════════════════════════════════════════════════════════
 
-    // Fallback: if ON CONFLICT failed (no unique index yet), do a plain INSERT
-    const result = row ?? (await sql`
+    const updated = body.id
+      // Explicit edit of a known row — key on the id so renaming the part number
+      // MOVES the override instead of orphaning the old row beside a new one.
+      ? await sql`
+          UPDATE distributor_prices
+          SET part_number = ${partNumber},
+              user_id     = ${userId}::uuid,
+              category    = ${category},
+              label       = ${label},
+              unit_cost   = ${unitCost},
+              source      = ${source},
+              price_date  = ${priceDate}::date,
+              notes       = ${notes},
+              active      = TRUE,
+              updated_at  = now()
+          WHERE id = ${body.id}::uuid
+          RETURNING *
+        `
+      : await sql`
+          UPDATE distributor_prices
+          SET category   = ${category},
+              label      = ${label},
+              unit_cost  = ${unitCost},
+              source     = ${source},
+              price_date = ${priceDate}::date,
+              notes      = ${notes},
+              active     = TRUE,
+              updated_at = now()
+          WHERE UPPER(part_number) = UPPER(${partNumber})
+            AND (
+              (${userId}::uuid IS NULL AND user_id IS NULL)
+              OR user_id = ${userId}::uuid
+            )
+          RETURNING *
+        `;
+
+    const result = updated[0] ?? (await sql`
       INSERT INTO distributor_prices
         (user_id, part_number, category, label, unit_cost, source, price_date, notes, active)
       VALUES
@@ -277,42 +331,52 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
   }
 
-  let body: { id?: string; hard?: boolean };
+  // 🚨 THE ID COMES FROM THE QUERY STRING. A DELETE from fetch() carries no
+  // body unless one is explicitly supplied, and the admin page's trash button
+  // sends `?id=<uuid>` with no body at all — so `await req.json()` threw and
+  // EVERY delete returned 400 "Invalid JSON body". The JSON body is kept as an
+  // optional fallback for any caller that already sends one.
+  const { searchParams } = new URL(req.url);
+  let body: { id?: string; hard?: boolean } = {};
   try {
-    body = await req.json();
+    const parsed = await req.json();
+    if (parsed && typeof parsed === 'object') body = parsed as { id?: string; hard?: boolean };
   } catch {
-    return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
+    // No body (or not JSON) — the query string is the authority below.
   }
 
-  if (!body.id) {
+  const id   = searchParams.get('id') || body.id || null;
+  const hard = searchParams.get('hard') === 'true' || body.hard === true;
+
+  if (!id) {
     return NextResponse.json({ success: false, error: 'id is required' }, { status: 400 });
   }
 
   // ── UUID validation ──
-  if (!isValidUUID(body.id)) {
+  if (!isValidUUID(id)) {
     return NextResponse.json({ success: false, error: 'Invalid id format.' }, { status: 400 });
   }
 
   try {
     const sql = await getDbReady();
 
-    if (body.hard) {
+    if (hard) {
       // Hard delete — permanently removes row
-      await sql`DELETE FROM distributor_prices WHERE id = ${body.id}::uuid`;
-      await logAdminAction({ adminId: admin.id, action: 'distributor_price_hard_delete', metadata: { id: body.id } });
+      await sql`DELETE FROM distributor_prices WHERE id = ${id}::uuid`;
+      await logAdminAction({ adminId: admin.id, action: 'distributor_price_hard_delete', metadata: { id } });
       return NextResponse.json({ success: true, deleted: true, hard: true });
     } else {
       // Soft delete — sets active=false
       const [row] = await sql`
         UPDATE distributor_prices
         SET active = FALSE, updated_at = now()
-        WHERE id = ${body.id}::uuid
+        WHERE id = ${id}::uuid
         RETURNING id, part_number, active
       `;
       if (!row) {
         return NextResponse.json({ success: false, error: 'Price override not found' }, { status: 404 });
       }
-      await logAdminAction({ adminId: admin.id, action: 'distributor_price_soft_delete', metadata: { id: body.id, partNumber: row.part_number } });
+      await logAdminAction({ adminId: admin.id, action: 'distributor_price_soft_delete', metadata: { id, partNumber: row.part_number } });
       return NextResponse.json({ success: true, deleted: false, deactivated: true, id: row.id });
     }
 

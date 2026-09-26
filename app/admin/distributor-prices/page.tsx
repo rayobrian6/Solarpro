@@ -25,10 +25,39 @@ interface PriceEntry {
   scope?: 'global' | 'company';
 }
 
+/** Normalised page-local view of GET /api/admin/distributor-prices. */
 interface ApiResponse {
   overrides: PriceEntry[];
   catalog: PriceEntry[];
+  /** Flattened from the route's `categoryFallbacks` Record — see `load()`. */
   fallbacks: { category: string; unitCost: number }[];
+}
+
+/** The route's actual response shape. Kept explicit so the two cannot drift. */
+interface RawApiResponse {
+  overrides?: PriceEntry[];
+  catalog?: PriceEntry[];
+  /** 🚨 A RECORD, NOT AN ARRAY, and the key is `categoryFallbacks`. */
+  categoryFallbacks?: Record<string, { unitCost: number; unit?: string; source?: string }>;
+}
+
+/**
+ * 🚨 THE ROUTE SENDS `categoryFallbacks` AS A RECORD; THIS PAGE READS AN ARRAY.
+ *
+ * It used to read `data.fallbacks` directly, which the route has never sent. The
+ * stats block runs `data.fallbacks.length` unconditionally, so the moment the
+ * fetch resolved the whole screen died with "Cannot read properties of undefined
+ * (reading 'length')" — and this is the only UI for the `distributor_prices`
+ * table. Normalise once, here at the boundary, so every consumer below keeps
+ * working off one shape.
+ */
+function normaliseApiResponse(raw: RawApiResponse | null | undefined): ApiResponse {
+  return {
+    overrides: raw?.overrides ?? [],
+    catalog:   raw?.catalog   ?? [],
+    fallbacks: Object.entries(raw?.categoryFallbacks ?? {})
+      .map(([category, v]) => ({ category, unitCost: Number(v?.unitCost ?? 0) })),
+  };
 }
 
 // ─── Source badge ─────────────────────────────────────────────────────────────
@@ -182,8 +211,8 @@ export default function DistributorPricesPage() {
     try {
       const res = await fetch('/api/admin/distributor-prices');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json);
+      const json: RawApiResponse = await res.json();
+      setData(normaliseApiResponse(json));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -197,11 +226,17 @@ export default function DistributorPricesPage() {
   const handleSave = async (form: Partial<PriceEntry>) => {
     setSaving(true);
     try {
+      // 🚨 snake_case IS THE WIRE FORMAT. This used to send camelCase
+      // (`partNumber`/`unitCost`), which the route rejects with
+      // "part_number is required" — so no override could EVER be saved and
+      // `distributor_prices` was frozen at migration 015's 21 seed rows. Every
+      // BOM total, $/W figure and exported BOM CSV was therefore priced off the
+      // Q1-2025 static catalog even for an installer with a real contract price.
       const body = {
-        partNumber: form.partNumber,
-        category:   form.category,
-        unitCost:   form.unitCost,
-        source:     form.source || 'Internal',
+        part_number: form.partNumber,
+        category:    form.category,
+        unit_cost:   form.unitCost,
+        source:      form.source || 'Internal',
         ...(editEntry?.id ? { id: editEntry.id } : {}),
       };
       const res = await fetch('/api/admin/distributor-prices', {
@@ -229,8 +264,13 @@ export default function DistributorPricesPage() {
       message: `Delete override for ${partNumber}?`,
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/admin/distributor-prices?id=${id}`, { method: 'DELETE' });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          // The id travels in the QUERY STRING — a fetch DELETE has no body.
+          // The route reads searchParams first for exactly this reason.
+          const res = await fetch(`/api/admin/distributor-prices?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({} as { error?: string }));
+            throw new Error(j.error || `HTTP ${res.status}`);
+          }
           toast.success(`Override deleted`);
           await load();
         } catch (e: any) {
