@@ -683,9 +683,9 @@ function lug(cx: number, cy: number): string {
 // ── Current transformers (Ray, 2026-09-25: "there is no ct logic") ──────────
 const CT_CLR = '#6A1B9A';
 /** A CT drawn as a ring around the conductor it measures. */
-function ctRing(x: number, y: number, tag: string): string {
-  return circ(x, y, 3.8, {fill:'none', stroke:CT_CLR, sw:1.2})
-    + txt(x, y - 6, tag, {sz:4.4, anc:'middle', bold:true, fill:CT_CLR});
+function ctRing(x: number, y: number, tag: string, r = 3.8): string {
+  return circ(x, y, r, {fill:'none', stroke:CT_CLR, sw:1.2})
+    + (tag ? txt(x, y - 6, tag, {sz:4.4, anc:'middle', bold:true, fill:CT_CLR}) : '');
 }
 /** Continuation connector for the CT secondary leads — the same bubble at the
  *  CTs and at the gateway, so the lead is traceable without a line cutting
@@ -1655,8 +1655,8 @@ function renderCombiner(
     p.push(txt(bx+W2-33, gw+15, 'MONITOR/METER', {sz:3.6, anc:'middle', fill:'#2b5c9c'}));
     // Consumption-CT leads land on the gateway's CT inputs.
     if (opts?.ctLeadConnector) {
-      p.push(ln(bx+W2-66, gw+10, bx+W2-58, gw+10, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-      p.push(ctBubble(bx+W2-72, gw+10));
+      p.push(ln(bx+W2-70.5, gw+18, bx+W2-58, gw+18, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ctBubble(bx+W2-76, gw+18));
     }
   }
   // Production CT: integral (factory, on the combiner output bus) or a field CT
@@ -1880,9 +1880,12 @@ function renderMSPLoad(
     p.push(ln(cx-4, mbY+13, cx-14, mbY+13, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
     p.push(ctBubble(cx-20, mbY+13));
   } else if (ctLocation === 'sec-line-side-of-main') {
-    p.push(ctRing(bx+W2+5, busY, 'CT×2'));
-    p.push(ln(bx+W2+5, busY+4, bx+W2+5, busY+12, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(bx+W2+5, busY+18));
+    // On the service conductors leaving toward the meter; bubble ABOVE (the
+    // meter feeder runs below), tag in the panel's clear top-right corner.
+    p.push(ctRing(bx+W2+5, busY, ''));
+    p.push(ln(bx+W2+5, busY-3.8, bx+W2+5, busY-10, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+    p.push(ctBubble(bx+W2+5, busY-16));
+    p.push(txt(bx+W2-5, busY-14, 'CT×2', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
   }
 
   // Labels below
@@ -1992,19 +1995,23 @@ function renderMSPSupply(
   // Consumption CTs, where the design says they clamp. "Between the tap and
   // the main" is the drawn SERVICE (LINE) SIDE run from TAP to MAIN.
   if (ctLocation === 'between-tap-and-main' && isSupply) {
-    const ctX = bx+W2-36, ctY = busY-10;
-    p.push(ctRing(ctX, ctY, 'CT×2'));
-    p.push(ln(ctX, ctY-4, ctX, by2+4, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(ctX, by2-4));
+    // On the SERVICE (LINE) SIDE run, just before the main; the tag rides
+    // above the enclosure where the panel's own labels are not.
+    const ctX = bx+W2-33, ctY = busY-10;
+    p.push(ctRing(ctX, ctY, '', 3.2));
+    p.push(ln(ctX, ctY-3.2, ctX, by2-1, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+    p.push(ctBubble(ctX, by2-7));
+    p.push(txt(ctX-8, by2-5, 'CT×2 (L1, L2)', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
   } else if (ctLocation === 'main-breaker-load-side') {
     const ctX = bx+W2-36;
     p.push(ctRing(ctX, busY, 'CT×2'));
     p.push(ln(ctX, busY+4, ctX, busY+14, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
     p.push(ctBubble(ctX, busY+20));
   } else if (ctLocation === 'sec-line-side-of-main') {
-    p.push(ctRing(bx+W2+5, busY, 'CT×2'));
-    p.push(ln(bx+W2+5, busY+4, bx+W2+5, busY+12, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(bx+W2+5, busY+18));
+    p.push(ctRing(bx+W2+5, busY, ''));
+    p.push(ln(bx+W2+5, busY-3.8, bx+W2+5, busY-10, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+    p.push(ctBubble(bx+W2+5, busY-16));
+    p.push(txt(bx+W2-5, busY-14, 'CT×2', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
   }
 
   // Callout
