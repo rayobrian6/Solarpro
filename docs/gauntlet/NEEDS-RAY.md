@@ -71,6 +71,52 @@ and is queued separately.
 
 ---
 
+## R8 — 🚨 One migration file permanently halts the batch runner, and a whole feature's schema is unreachable
+
+**The most operationally serious thing found today.** Two separate facts, both
+verified against a real database; full detail and the exact DDL in
+`docs/gauntlet/stage-schema-reachability.md`.
+
+### (a) `lib/migrations/027` can never run, and it blocks everything after it
+
+It declares `project_id TEXT` / `user_id TEXT` while `projects.id` and `users.id`
+are `UUID`, so PostgreSQL refuses the foreign key and the file rolls back — the
+table is not created at all. I verified this myself: base schema applied in the
+manifest's own order, then 027, and `to_regclass('project_micro_stages')` comes
+back null.
+
+`runPendingMigrations` stops on the first failure — *"don't continue applying out of
+order"* — so **a batch run halts at 027 and migrations 028 to 123 are unreachable by
+that path.** That matches the pattern of recent migrations each needing a hand-built
+targeted action instead. 027 sits below the historical baseline, which is why the
+governance suite's parity check never flagged it.
+
+| | |
+|---|---|
+| **Decision required** | The disposition of 027: delete it, repair it to UUID, or baseline it. |
+| **Why it is yours** | Deleting or rewriting a migration file is a governance act on the schema ledger, and your standing rule is that you run migrations. |
+| **A real gap worth knowing** | `superseded` is the correct terminal ledger status for a file like this, and **no API action can set it.** Baselining it `NOT_APPLICABLE` writes only the baseline table, not `schema_migrations`, so 027 stays `pending` and `run-pending` still halts. So there is currently no supported way to retire it. |
+
+### (b) The homeowner-stage / micro-stage schema is in the directory the runner does not scan
+
+`projects.homeowner_stage`, `project_homeowner_stage_history` and
+`project_micro_stages.micro_stage` are created only by `migrations/019`, `021` and
+`022` — while the manifest reads only `lib/migrations`. Against a database built
+from the scanned set, running the shipped code: `resolveHomeownerStage()` throws,
+the admin project list fails entirely, `PATCH …/homeowner-stage` returns **503
+"try again in a moment"** for a permanent schema defect — and `writeMicroStage()`
+**silently records nothing**, because it catches, retries once, logs, and resolves.
+The internal truth layer just stops recording.
+
+| | |
+|---|---|
+| **Decision required** | Whether to write the two migrations. The spec is complete: `124_homeowner_stage_tables.sql` (create-table shape) and `125_projects_homeowner_stage.sql` (add-column shape) — it must be **two files**, because the static gate admits three mutually exclusive shapes and bans `ALTER` in one and `CREATE TABLE` in the other. All seven registrations are listed in the doc; missing any one makes a migration discoverable and unrunnable, which is the failure mode migration 121 already had. |
+| **Settle production READ-ONLY first** | The `generate-baseline-evidence` action introspects the live catalog. 027's own index names are the signature: table present + those indexes absent means production carries the correct shape from the now-dead inline runner, and only 125 is needed. |
+| **Blocked** | Persisting homeowner/micro-stage state on any deployment built from the scanned set. |
+| **NOT blocked** | Everything else. A named expected-failure guard (`tests/stageSchemaReachability.postgres.test.ts`) goes red the day the schema becomes reachable, so this cannot quietly persist. |
+
+---
+
 ## R7 — The roof has no building-elevation sheet, so wall and ridge heights reach nothing
 
 | | |

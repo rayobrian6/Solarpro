@@ -548,7 +548,16 @@ describe('🚨 undo brings the panels back too', () => {
       expect(start, `${which} is gone`).toBeGreaterThan(-1);
       const nextDecl = SITE.indexOf('\n  const ', start + 40);
       const body = SITE.slice(start, nextDecl > start ? nextDecl : start + 4000);
-      expect(body, `the ${which} window does not cover the function`).toMatch(/return step\.label;/);
+      // 🚨 THE PROBE PINS THE REQUIREMENT, NOT THE RETURN'S SPELLING. It asked
+      // for the literal `return step.label;`, and that is a coverage probe — its
+      // job is to prove the window reaches the end of the function, not to say
+      // what the function returns. It broke the moment the return was wrapped to
+      // carry an unplaceable-module count into the label, which is a change to
+      // what the user is told and nothing to do with this test. The requirement
+      // is that the window reaches a return of the step's label, however that
+      // label is decorated on the way out.
+      expect(body, `the ${which} window does not cover the function`)
+        .toMatch(/return [^;]*step\.label/);
       // 🚨 THE SECOND ARGUMENT IS NOT COSMETIC. A DELETE step has already put
       // the exact panels back — repositioning them would map modules onto a
       // face that did not move, and `repositionPanelsForPlanes` matching a
