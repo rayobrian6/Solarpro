@@ -58,6 +58,23 @@ Last updated: 2026-09-25, after the parser-backed source stripper.
 | `b90164a1` | A backspace byte where a word boundary was meant made one of my own guards vacuous |
 | `55e87dab` | A guard weakened around the stripper bug is restored, now the bug has a name |
 | `9e5f868f` | A vacuous guard says so, and announces if its own detector breaks |
+| `5cb4060d` | The design history in a real browser — written, then run: 5/5, and it found a live defect (below) |
+| `64415977` | NEEDS-RAY reordered by severity with a read-first index |
+| `a56c96b7` | Escape closes the dialogs — and does not reach the 3D tool behind them |
+| `f7e9d74d` | The output-consistency ledger derived from the engine's own placement modes, which found one it had missed |
+| `ef563e57` | The version dedupe compares the DESIGN, not the snapshot's wrapper (the two writers have different key sets) |
+| `10508223` | Absence reaches the writer as absence — a fabricated `false` was switching bifacial off |
+| `40016c69` | persistence-join 4/4 — the fixture raced the restore, and its address named a place 2.79 km from its pin |
+| `542de4a6` | Calculate and Save state the version they were based on, on BOTH write paths |
+| `3c02c432` | The autosave can no longer be starved, and there is a 15 s bound on how long work is held |
+| `58d474fa` | The third guard anchored on a dependency array's last member |
+| `63f010dd` | A module preview follows the cursor, pre-oriented to the face beneath it; a tree stops eating the module's click |
+| `1bd22b95` | 🚨 A restored design stopped silently undoing itself — the reload's own beacon was writing the design it replaced |
+| `483f3b3b` | 🚨 One browser at a time locally, no video — Ray's fix after the e2e suite rebooted his machine twice |
+
+**The peer session shipped alongside, in its own lane** (Envoy / CT / branch counting):
+`73404a66`, `73b2d8f5`, `a0e5e9f2`, `b63b944e`, `1f32d5eb`, `4b7a99e7`, `1a9f4c6f`,
+`3146bcb3`. Not mine; listed so the history reads honestly.
 
 ---
 
@@ -118,12 +135,41 @@ NEEDS-RAY R6.
 | Persistence fixture + production obstructions | Repair the false fixture premise in `persistence-join`; establish with real SQL whether either `/api/production` write path loses obstructions, measurements or siteArchives. |
 | Ghost module preview + pick priority | The top-ranked competitor win. A module preview on the cursor, pre-oriented to the face beneath it, calling the SAME snapper the commit calls — Ray's word is that the ghost preview is contractual. Plus site objects no longer intercepting panel picks. |
 
-⚠️ A **peer session** is mid-edit on the combiner-selection authority
-(`lib/combinerSelection/*`, `lib/equipment/combinerCompatibility.ts`, the combiner
-route, `CombinerSelector.tsx`). That is why four cases in
-`tests/combinerProjectSelection.test.ts` fail on `BASIS_REQUIRED` right now —
-confirmed not mine by stashing my own edit and getting the identical four. Its
-Enphase branch-count work is already committed (`73404a66`, `73b2d8f5`, `a0e5e9f2`).
+## 🚨 HOW TO RUN THINGS ON THIS MACHINE — read before any test command
+
+**THE FULL E2E SUITE REBOOTED THE MACHINE TWICE, both times mine.** Every spec renders a
+Cesium scene through `chromium-software-webgl` — SwiftShader, so WebGL on the CPU — and
+Playwright defaulted to half the cores' worth of workers, i.e. EIGHT software-3D browsers
+locally. Two agent sessions each running the suite pinned it at 100% until it had to be
+rebooted. `video: 'retain-on-failure'` compounded it: it RECORDS every test and only
+deletes the passing ones afterwards.
+
+Ray capped local workers at 1 and turned video off (`483f3b3b`). **Keep it. Never pass
+`--workers` or raise `PW_WORKERS`. Run SMALL TARGETED BATCHES — the one spec that answers
+the question in front of you — never the whole suite. Never start a browser run while a
+peer session might also be running one.** Memory:
+`e2e-swiftshader-freezes-the-machine`.
+
+Warm `/design` with one `curl` first, or the first compile eats a test's mount budget and
+looks like a mount failure. And a browser run needs a STILL worktree: a peer recompiling
+mid-run invalidates the chunk and reads exactly like a product failure.
+
+**Vitest has the mirror problem**: the limit is the Windows COMMIT charge, not free RAM
+(`tsc` has OOM'd at a 62 MB heap with 11 GB free). Use `--maxWorkers 1 --pool=threads`
+with `NODE_OPTIONS=--max-old-space-size=2048`; `--maxWorkers 3` dies. But
+`tests/utility-bill-attachment.test.ts` needs `--pool=forks` because it calls
+`process.chdir()`, which the thread pool does not support — **that is a pool artefact,
+not a failure.** A crash is not a failure either; both mistakes were made today.
+
+---
+
+⚠️ A **peer session** shares this worktree and is working the Envoy / CT /
+interconnection lane (`lib/permit/snapshot/build.ts`, `lib/permit/utils/sldAdapter.ts`,
+`lib/permit/utils/bomForPermit.ts`, `lib/equipment/sldCombinerFields.ts`,
+`app/api/engineering/sld/route.ts`, new `lib/permit/utils/interconnectionRule.ts`). Its
+committed work is `73404a66`, `73b2d8f5`, `a0e5e9f2`, `b63b944e`, `1f32d5eb`, `4b7a99e7`,
+`1a9f4c6f`, `3146bcb3`. **Leave its files alone and commit with explicit paths, never
+`-A`.**
 
 ---
 
