@@ -6,6 +6,17 @@ migration block of `LEDGER.md`.
 
 **VERIFIED REMAINING: 80 → 19.**
 
+> 🚨 **CORRECTION, 2026-09-26.** When I first wrote this table, three of the 61 were
+> counted as shipped and were **not**. The CRM lane built `applyStageChange` and handed
+> off two one-line caller changes that nobody applied — so signing a proposal still
+> wrote `projects.stage`, a column that does not exist, and creating one still advanced
+> only the legacy column. And Campaign Intel was credited to the marketplace lane, but
+> `analytics/route.ts` was never in that lane's file set, so it was never touched. Found
+> by verifying my own report before writing the UX changelog rather than trusting it.
+> Fixed in `3cddb98d`; the totals below are now true. **Shipped was 58 at the time of
+> writing and is 61 now.** A handoff nobody picks up is not a shipped fix, and the count
+> is the one thing in this document that must not be generous.
+
 Branch: `phase5-fixes`, worktree `../repo-phase5`, 15 commits off `ca61ad98`.
 Isolation was real: the peer session's 11 dirty files were never touched, and this
 branch was built in its own worktree with `node_modules` junctioned.
