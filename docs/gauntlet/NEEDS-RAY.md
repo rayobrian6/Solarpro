@@ -174,14 +174,12 @@ the principle.
 
 ### Two smaller things found alongside it, both still open
 
-- **The operator's own Structural-tab height cannot reach the permit at all.**
-  `app/engineering/page.tsx` has a mean-roof-height control (8–60 ft, with a
-  storey quick-select) and `meanRoofHeight` does not exist anywhere on
-  `PermitInput['project']`. Wiring it means editing
-  `app/api/engineering/permit/route.ts`, **which a peer session has uncommitted
-  changes in**, so I have left it alone. Until then the permit uses the modelled
-  building, not the number the operator typed — better than a literal, but still
-  not what they entered.
+- ~~The operator's own Structural-tab height cannot reach the permit at all.~~
+  **CLOSED (`5c11c143`).** The peer session committed its files, so the wiring
+  landed: `meanRoofHeight` is on `PermitInput['project']`, both permit payloads
+  carry it, and the operator's entry now OUTRANKS the modelled estimate — the same
+  order `rafterSpan || _geomSpanFt || NOMINAL` already used. PV-4C prints “as
+  entered for this building” so a reviewer can tell an entry from a derivation.
 - **`project.stories` is printed on the cover sheet and nothing populates it.**
   `coverSheet.ts:360` renders a STORIES row; a repo-wide search finds no writer.
   That row has always been blank.
