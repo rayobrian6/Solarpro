@@ -369,6 +369,75 @@ export function ungroundedConductorsForService(
   return null;
 }
 
+// ── Where the consumption CTs physically clamp ───────────────────────────────
+//
+// Ray, 2026-09-25: "there is no ct logic whatsoever." The authority above could
+// always derive a mode — nothing ever told it WHERE the CTs clamp, so every
+// Enphase job printed "CONS (MODE TBD)" forever. A location is now recorded (or
+// defaulted from the interconnection the designer already chose, and labelled
+// as a default), and turned into a boundary HERE — the one table.
+//
+// 🚨 A PHYSICAL LOCATION, NOT "UPSTREAM/DOWNSTREAM OF PV". A recorded location
+// must not silently change meaning when the interconnection changes: the same
+// clamp position is re-derived against the new side, and a combination that has
+// no valid mode (a "between the tap and the main" record on a job that has no
+// tap) resolves to 'unresolved' and refuses, exactly as before.
+
+/** Where the consumption CTs clamp, physically. */
+export type ConsumptionCtLocation =
+  /** service-entrance conductors, line side of the main breaker (meter → main). */
+  | 'sec-line-side-of-main'
+  /** supply-side tap jobs: on L1/L2 between the NEC 705.11 tap and the main. */
+  | 'between-tap-and-main'
+  /** on the main breaker's LOAD side (main → bus). */
+  | 'main-breaker-load-side';
+
+export const CONSUMPTION_CT_LOCATIONS: readonly ConsumptionCtLocation[] =
+  ['sec-line-side-of-main', 'between-tap-and-main', 'main-breaker-load-side'];
+
+/** Exact token match, never a substring. Unknown ⇒ null (not recorded). */
+export function parseConsumptionCtLocation(raw: unknown): ConsumptionCtLocation | null {
+  const t = typeof raw === 'string' ? raw.trim() : '';
+  return (CONSUMPTION_CT_LOCATIONS as readonly string[]).includes(t) ? (t as ConsumptionCtLocation) : null;
+}
+
+/**
+ * The documented Enphase placement for the interconnection already chosen
+ * (docs/ENPHASE-CT-TOPOLOGY-REPORT.md §1.3-1.4):
+ *   load-side (backfed breaker / derate / panel upgrade) → service-entrance
+ *     conductors ahead of the main — the gateway meter type is Net ("Load with
+ *     Solar");
+ *   supply-side (705.11 tap) → L1/L2 between the tap and the main — a
+ *     line-side-connected array is metered Total ("Load only").
+ * Every sheet that prints a defaulted location says it is a default.
+ */
+export function defaultConsumptionCtLocation(side: PvConnectionSide): ConsumptionCtLocation | null {
+  if (side === 'load-side') return 'sec-line-side-of-main';
+  if (side === 'supply-side') return 'between-tap-and-main';
+  return null;
+}
+
+/** The measurement boundary a physical location has, for this PV side. */
+export function consumptionCtBoundaryFor(
+  loc: ConsumptionCtLocation | null | undefined,
+  side: PvConnectionSide,
+): MeasurementBoundary {
+  if (!loc || side === 'unresolved') return 'unresolved';
+  switch (loc) {
+    case 'sec-line-side-of-main':
+      // Load-side PV lands on the bus, downstream: the CTs see net current.
+      // Supply-side PV lands on this same span — the table above refuses it.
+      return 'service-entrance-upstream-of-pv';
+    case 'between-tap-and-main':
+      // Only a supply-side tap has a "between the tap and the main". A record
+      // of it on a load-side job is stale, and refuses.
+      return side === 'supply-side' ? 'load-side-downstream-of-pv' : 'unresolved';
+    case 'main-breaker-load-side':
+      return side === 'load-side' ? 'service-entrance-upstream-of-pv' : 'load-side-downstream-of-pv';
+  }
+  return 'unresolved';
+}
+
 // ── The resolution ───────────────────────────────────────────────────────────
 
 export type MeteringBlockerCode =
@@ -655,7 +724,7 @@ export function meteringScheduleValue(r: MeteringResolution): string {
   if (!r.consumptionMeteringProvided) return `${prod} · NO CONS`;
   const mode =
     r.consumptionMode === 'LOAD_WITH_SOLAR' ? 'NET'
-    : r.consumptionMode === 'LOAD_ONLY' ? 'GROSS'
+    : r.consumptionMode === 'LOAD_ONLY' ? 'TOTAL'   // Enphase's own term (meter type 'Total')
     : 'MODE TBD';
   return `${prod} · CONS (${mode})`;
 }

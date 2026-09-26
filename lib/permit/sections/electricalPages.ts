@@ -24,7 +24,7 @@ import { formatInDocumentTimezone, documentIssueContextOf } from '../utils/docum
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
-import { resolveMeteringRequirement, ungroundedConductorsForService } from '@/lib/equipment/currentTransformers';
+import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 // TAC WS-18 — reader-facing cross-sheet pointers resolve against the ACTIVE index.
 import { activeSheetIds, sheetRef } from '../utils/sheetRef';
 import { SUB_LABEL } from './subSystemSheets';
@@ -873,26 +873,25 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         // resolution the BOM buys from. The sheet cannot claim a measurement the
         // BOM did not purchase, because both read one object.
         // ═══════════════════════════════════════════════════════════════════
-        const _pv4aMetering = _pv4aBos.brains?.metering
-          ? resolveMeteringRequirement({
-              capability: _pv4aBos.brains.metering,
-              deviceLabel: _pv4aBos.brains.model,
-              // EXACT mapping from the canonical snapshot rule (705.11 vs
-              // 705.12) that `resolveInterconnection` already decided — this
-              // sheet does not re-resolve the interconnection, and it does not
-              // hand the authority a free-text label to pattern-match.
-              interconnectionRaw: _ic.isSupplySide ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE',
-              // The package states 120/240 V 1Ø 3W on every sheet that states a
-              // service; the CT count follows from the authority's table, not
-              // from a literal written here.
-              ungroundedConductorCount: ungroundedConductorsForService(240, 1),
-              consumptionMeteringRequired: _pv4aBos.hasIntegratedGateway,
-            })
-          : null;
+        // EXACT mapping from the canonical snapshot rule (705.11 vs 705.12)
+        // that `resolveInterconnection` already decided — this sheet does not
+        // re-resolve the interconnection. The ONE composer: the same placement
+        // and mode the E-1 draws and the BOM buys from.
+        const _pv4aMet = resolveDesignMetering({
+          plan: _pv4aBos,
+          interconnectionRaw: _ic.isSupplySide ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE',
+          consumptionCtLocation: input.project.consumptionCtLocation ?? null,
+          systemVoltage: 240,
+        });
+        const _pv4aMetering = _pv4aMet.resolution;
         const _meteringNote = _pv4aMetering
           ? `<strong>METERING (NEC 690.4):</strong> ${_pv4aMetering.disclosure}`
+            + (_pv4aMet.placementNote ? ` ${_pv4aMet.placementNote}` : '')
             + (_pv4aMetering.blockerMessage
               ? ` <span style="color:#cc6600;font-weight:700;">REQUIRED ACTION — ${_pv4aMetering.blockerMessage}</span>`
+              : '')
+            + (_pv4aMet.topologyBlockerMessage
+              ? ` <span style="color:#cc6600;font-weight:700;">REQUIRED ACTION — ${_pv4aMet.topologyBlockerMessage}</span>`
               : '')
             + ' '
           : '';

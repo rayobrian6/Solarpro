@@ -821,6 +821,7 @@ export function generateBOMForPermit(
         requiresWarningLabels:   true,
         requiresProductionMeter: false,
         interconnectionMethod:   project.interconnectionMethod || 'LOAD_SIDE',
+        consumptionCtLocation:   project.consumptionCtLocation ?? undefined,
         panelBusRating:          project.panelBusRating || mainPanelA,
         systemType:              bomSystemType,
         generatorKw:             project.generatorKw,

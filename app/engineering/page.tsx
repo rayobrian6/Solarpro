@@ -44,6 +44,9 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById, resolveBatteryBranch } from '@/lib/equipment-db';
 import { listCombiners } from '@/lib/equipment/integratedBos';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
+import { sldCombinerFields } from '@/lib/equipment/sldCombinerFields';
+import { consumptionCtLocationLabel } from '@/lib/equipment/designMetering';
+import { CONSUMPTION_CT_LOCATIONS, type ConsumptionCtLocation } from '@/lib/equipment/currentTransformers';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
 // ── Wave 5A — multi-lane SLD: page-path source-branch builder + the W4B.D
 // empty-fleet synthesis helper (a present sub with an empty fleet computes
@@ -3292,6 +3295,28 @@ function EngineeringPageInner() {
   // order makes that the PRIMARY sub's run. Shared service runs stay bare.
   const csRun = (baseId: string): RunSegment | undefined =>
     cs.runs?.find((r: RunSegment) => parseRunId(String(r.id)).baseId === baseId);
+
+  // ── Metering / CT placement — the page's view of the SAME answer the SLD,
+  // PV-4A and the BOM get (sldCombinerFields → designMetering), shown beside
+  // the control that changes it (Ray, 2026-09-25: "no ct logic whatsoever").
+  const pageMetering = useMemo(() => {
+    const inv0 = config.inverters.find(i => i.type === 'micro');
+    const micro = inv0 ? getMicroinverterById(inv0.inverterId) : undefined;
+    if (!micro || !computedSystem?.isMicro || subSystemCounts.isHybrid) return null;
+    try {
+      return sldCombinerFields({
+        inverterManufacturer: micro.manufacturer, inverterModel: micro.model, inverterId: micro.id,
+        isMicro: true, totalDevices: computedSystem.microDeviceCount, branchCount: computedSystem.acBranchCount,
+        hasBattery: !!batteryEnabled,
+        overrideDeviceIds: config.combinerId ? [config.combinerId] : undefined,
+        selectedCombinerId: projectCombinerId,
+        interconnectionRaw: config.interconnectionMethod ?? 'LOAD_SIDE',
+        ungroundedConductorCount: 2,
+        consumptionCtLocation: config.consumptionCtLocation || null,
+      });
+    } catch { return null; }
+  }, [config.inverters, config.combinerId, config.interconnectionMethod, config.consumptionCtLocation,
+      computedSystem, batteryEnabled, projectCombinerId, subSystemCounts.isHybrid]);
 
   // Wave 3.7 — passthrough view for routes/payloads that expect BARE run ids
   // (SLD route fallback, BOM route, save-outputs). At N>1: the PRIMARY sub's
@@ -6732,6 +6757,8 @@ function EngineeringPageInner() {
           format:         'svg',
           // Interconnection method — drives SLD rendering (load-side tap vs backfed breaker)
           interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
+          // Where the consumption CTs clamp ('' ⇒ interconnection default).
+          consumptionCtLocation: config.consumptionCtLocation || undefined,
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // BUILD v24: Pass equipment IDs so route.ts can look up specs for NEC-sized segments
           // batteryId → getBatteryById → backfeedBreakerA, maxContinuousOutputA
@@ -7121,6 +7148,7 @@ function EngineeringPageInner() {
           spliceAtRows:     config.spliceAtRows === true,
           // Interconnection method — controls whether backfed breaker appears in BOM
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+          consumptionCtLocation: config.consumptionCtLocation || undefined,
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
           runs:             legacyRunsView(),
@@ -8281,6 +8309,7 @@ function EngineeringPageInner() {
           rafterSpecies: config.rafterSpecies || undefined,
           attachmentSpacing: config.attachmentSpacing,
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+          consumptionCtLocation: config.consumptionCtLocation || undefined,
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // The installer's recorded combiner/Envoy. This downloaded package is
           // the one that reaches the AHJ, and it was the only one of the page's
@@ -11762,6 +11791,34 @@ function EngineeringPageInner() {
                               );
                             })()}
                           </div>
+                          {/* Consumption CTs — where they clamp. Defaults from the
+                              interconnection above (Enphase's documented placement);
+                              change it with no questions asked. Same answer the SLD,
+                              PV-4A and the BOM use. */}
+                          {pageMetering?.metering ? (
+                            <div className="col-span-2">
+                              <label className="eng-label">Consumption CTs</label>
+                              <select
+                                className="eng-select"
+                                value={config.consumptionCtLocation || ''}
+                                onChange={e => updateConfig({ consumptionCtLocation: e.target.value as ProjectConfig['consumptionCtLocation'] })}
+                              >
+                                <option value="">Auto — per interconnection method</option>
+                                {CONSUMPTION_CT_LOCATIONS.map((loc: ConsumptionCtLocation) => (
+                                  <option key={loc} value={loc}
+                                    disabled={loc === 'between-tap-and-main' && config.interconnectionMethod !== 'SUPPLY_SIDE_TAP'}>
+                                    {consumptionCtLocationLabel(loc)}
+                                  </option>
+                                ))}
+                              </select>
+                              <p className={`text-[10px] mt-1 ${pageMetering.meteringDrawing?.scheduleRow ? 'text-slate-400' : 'text-rose-300'}`}>
+                                {pageMetering.meteringDrawing?.scheduleRow
+                                  ?? (pageMetering.metering.consumptionMeteringProvided
+                                    ? 'INDETERMINATE — that location gives no valid metering mode for this interconnection.'
+                                    : 'This combiner does not provide consumption metering.')}
+                              </p>
+                            </div>
+                          ) : null}
 
                       </div>
 
@@ -13789,6 +13846,7 @@ function EngineeringPageInner() {
                                 notes: config.notes,
                                 interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 interconnectionType: config.interconnectionMethod ?? 'LOAD_SIDE',
+                                consumptionCtLocation: config.consumptionCtLocation || undefined,
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,
                                 // The installer's recorded choice travels with
@@ -14490,6 +14548,20 @@ function EngineeringPageInner() {
                         </tr>
                         );
                       })}
+                      {pageMetering?.meteringDrawing?.consumption ? (() => {
+                        const c = pageMetering.meteringDrawing!.consumption!;
+                        return (
+                          <tr key="CT-1" className="bg-white">
+                            <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">CT-1</td>
+                            <td className="border border-slate-200 px-2 py-1.5">Consumption CTs ({c.supplied === 'in-box' ? `in ${pageMetering.combinerModel ?? 'combiner'} box` : 'order separately — see BOM'})</td>
+                            <td className="border border-slate-200 px-2 py-1.5">{pageMetering.plan.brains?.brand ?? ''}</td>
+                            <td className="border border-slate-200 px-2 py-1.5">Clamp CT</td>
+                            <td className="border border-slate-200 px-2 py-1.5 text-right font-bold">{c.ctCount ?? '—'}</td>
+                            <td className="border border-slate-200 px-2 py-1.5 font-bold text-amber-700">{consumptionCtLocationLabel(c.location)} · {c.mode === 'LOAD_WITH_SOLAR' ? 'Net' : c.mode === 'LOAD_ONLY' ? 'Total' : 'Mode TBD'}</td>
+                            <td className="border border-slate-200 px-2 py-1.5 text-slate-500 text-xs">NEC 690.4</td>
+                          </tr>
+                        );
+                      })() : null}
                     </tbody>
                   </table>
                 </div>
@@ -15809,6 +15881,7 @@ function EngineeringPageInner() {
                                 rafterSpacing: config.rafterSpacing,
                                 attachmentSpacing: config.attachmentSpacing,
                                 interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+                                consumptionCtLocation: config.consumptionCtLocation || undefined,
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,
                                 // The installer's recorded choice travels with

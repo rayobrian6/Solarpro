@@ -21,11 +21,8 @@
 import { resolveIntegratedEquipment, type IntegratedEquipmentPlan } from '@/lib/equipment/integratedBos';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
-import {
-  resolveMeteringRequirement,
-  meteringScheduleValue,
-  type MeteringResolution,
-} from '@/lib/equipment/currentTransformers';
+import { type MeteringResolution } from '@/lib/equipment/currentTransformers';
+import { resolveDesignMetering, type SldMeteringDrawing } from '@/lib/equipment/designMetering';
 
 export interface SldCombinerInputs {
   inverterManufacturer: string;
@@ -49,6 +46,8 @@ export interface SldCombinerInputs {
   /** Ungrounded conductors at the consumption measurement point. Absent ⇒ the CT
    *  quantity is UNRESOLVED (it is not assumed to be a split-phase pair). */
   ungroundedConductorCount?: number | null;
+  /** The designer's recorded consumption-CT location ('' ⇒ interconnection default). */
+  consumptionCtLocation?: string | null;
 }
 
 export interface SldCombinerFields {
@@ -74,6 +73,8 @@ export interface SldCombinerFields {
   /** The full metering resolution, for callers that need the BOM lines or the
    *  blocking requirement. null ⇒ nothing is modelled. */
   metering: MeteringResolution | null;
+  /** What the SLD draws for metering (CTs, lead, schedule row). */
+  meteringDrawing: SldMeteringDrawing | null;
   /** The full plan, for callers that need slots, warnings or the device list. */
   plan: IntegratedEquipmentPlan;
 }
@@ -104,15 +105,15 @@ export function sldCombinerFields(inputs: SldCombinerInputs): SldCombinerFields 
   // metering" exactly when the resolved device integrates the gateway — so that
   // is exactly when the consumption CTs are required. Tying the two to one
   // predicate is what stops a sheet claiming a measurement the job never bought.
-  const metering = brains?.metering
-    ? resolveMeteringRequirement({
-        capability: brains.metering,
-        deviceLabel: brains.model,
-        interconnectionRaw: inputs.interconnectionRaw,
-        ungroundedConductorCount: inputs.ungroundedConductorCount ?? null,
-        consumptionMeteringRequired: plan.hasIntegratedGateway,
-      })
-    : null;
+  // The one composer (lib/equipment/designMetering.ts) — the same answer the
+  // Diagram tab, the permit E-1, PV-4A and the BOM get.
+  const _met = resolveDesignMetering({
+    plan: { brains: brains ?? null, hasIntegratedGateway: plan.hasIntegratedGateway },
+    interconnectionRaw: inputs.interconnectionRaw,
+    consumptionCtLocation: inputs.consumptionCtLocation ?? null,
+    ungroundedConductorCount: inputs.ungroundedConductorCount ?? null,
+  });
+  const metering = _met.resolution;
 
   return {
     // The micro fallback string is kept because the renderer needs SOMETHING in
@@ -123,8 +124,9 @@ export function sldCombinerFields(inputs: SldCombinerInputs): SldCombinerFields 
     combinerHasIntegratedGateway: plan.hasIntegratedGateway,
     combinerProvidesAcDisconnect: plan.providesAcDisconnect,
     combinerSelectionIsDecided: combinerBasisIsDecided(plan.combinerBasis ?? 'unresolved-default'),
-    combinerMeteringSummary: metering ? meteringScheduleValue(metering) : undefined,
+    combinerMeteringSummary: _met.scheduleValue,
     metering,
+    meteringDrawing: _met.drawing,
     plan,
   };
 }

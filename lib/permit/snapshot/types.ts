@@ -1797,6 +1797,16 @@ export interface PermitDesignSnapshot {
     serviceTopology: ServiceTopologyObject[];
     poi: { method: string; busbarA: number | null; mainBreakerA: number | null;
            backfeedA: number | null; rulePasses: boolean | null };
+    /** Consumption-CT placement — present ONLY when the designer RECORDED a
+     *  location (the interconnection default is a pure function of facts
+     *  already digested). Absent ⇒ undefined, never null, so every snapshot
+     *  that has no record keeps its digest (Ray, 2026-09-25). */
+    meteringTopology?: {
+      consumptionCtLocation: string;
+      boundary: string;
+      mode: string;
+      basis: 'designer-recorded';
+    };
     parity: {                       // W2.1: canonical=computeSystem vs legacy shadow
       legacyEngine: string; legacyRan: boolean;
       checks: ParityCheck[];

@@ -22,11 +22,7 @@ import type { CADModel } from '@/lib/cad/types';
 import { roofProject } from '../../test-fixtures/roofProject';
 import { buildSLDInputFromPermit } from '@/lib/permit/utils/sldAdapter';
 import { buildIntegratedEquipment } from '@/lib/permit/utils/integratedEquipment';
-import {
-  resolveMeteringRequirement,
-  meteringScheduleValue,
-  ungroundedConductorsForService,
-} from '@/lib/equipment/currentTransformers';
+import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 
 const cad = { systemType: 'roof', totalPanels: 12, totalDcKw: 5.16 } as CADModel;
 
@@ -59,9 +55,10 @@ describe('permit E-1 carries the CT authority Metering row', () => {
     // OLD: undefined — the renderer's row was omitted entirely, so the E-1 was
     // silent next to a schedule naming the 6C.
     // NOW: production metering is integral, and the consumption CTs the 6C does
-    // NOT ship are specified with their mode still unresolved (nothing in this
-    // repo records where they clamp — that refusal is the authority's, printed).
-    expect(sld.meteringChannels).toBe('PROD (INT.) · CONS (MODE TBD)');
+    // NOT ship are specified. Since 2026-09-25 their location defaults from the
+    // interconnection (load-side ⇒ service conductors ahead of the main ⇒ Net),
+    // printed as a default — it was "MODE TBD" on every job forever before.
+    expect(sld.meteringChannels).toBe('PROD (INT.) · CONS (NET)');
   });
 
   it('a 5C job also carries a cell — both boxes state what is measured', () => {
@@ -78,13 +75,12 @@ describe('permit E-1 carries the CT authority Metering row', () => {
     const job = sixCJob();
     const plan = buildIntegratedEquipment(job, cad);
     const brains = plan.brains ?? plan.devices[0];
-    const expected = meteringScheduleValue(resolveMeteringRequirement({
-      capability: brains!.metering!,
-      deviceLabel: brains!.model,
+    const expected = resolveDesignMetering({
+      plan: { brains: brains ?? null, hasIntegratedGateway: plan.hasIntegratedGateway },
       interconnectionRaw: job.project.interconnectionMethod,
-      ungroundedConductorCount: ungroundedConductorsForService(240, 1),
-      consumptionMeteringRequired: plan.hasIntegratedGateway,
-    }));
+      consumptionCtLocation: job.project.consumptionCtLocation ?? null,
+      systemVoltage: 240,
+    }).scheduleValue;
     expect(buildSLDInputFromPermit(job, cad).meteringChannels).toBe(expected);
   });
 

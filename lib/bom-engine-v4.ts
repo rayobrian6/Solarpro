@@ -27,6 +27,7 @@ import {
   type MeteringResolution,
   type MeteringCtLine,
 } from './equipment/currentTransformers';
+import { resolveDesignMetering } from './equipment/designMetering';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { getMountingSystemById } from './mounting-hardware-db';
 import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
@@ -213,6 +214,9 @@ export interface BOMGenerationInputV4 {
   // Interconnection method — controls whether backfed breaker appears in BOM
   // 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE' | 'BACKFED_BREAKER'
   interconnectionMethod?: string;
+  /** Where the consumption CTs clamp ('' / absent ⇒ interconnection default).
+   *  Changes no quantity — only whether the metering MODE resolves. */
+  consumptionCtLocation?: string | null;
   panelBusRating?: number;  // For NEC 705.12(B) 120% rule calculation
 
   // Generator / ATS / BUI — for BOM line items
@@ -1396,7 +1400,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   }
   // The metering hardware that device needs and does not contain.
   {
-    const _ct = resolveBomMetering(_bosPlan, input.acVoltage, input.interconnectionMethod);
+    const _ct = resolveBomMetering(_bosPlan, input.acVoltage, input.interconnectionMethod, input.consumptionCtLocation);
     for (const line of _ct.lines) {
       items.push(meteringCtItem(line));
       log.push({ stageId: 'monitoring', category: 'metering_ct', item: line.model,
@@ -2799,7 +2803,7 @@ function generateBOMV4PerSubSystem(
     // per-sub emission is the authoritative one, so omitting it here would ship
     // the identical gap on exactly the designs that are hardest to check.
     {
-      const _ct = resolveBomMetering(plan, input.acVoltage, input.interconnectionMethod);
+      const _ct = resolveBomMetering(plan, input.acVoltage, input.interconnectionMethod, input.consumptionCtLocation);
       for (const line of _ct.lines) {
         push(stamp, meteringCtItem(line, stamp));
         log.push({ stageId: 'monitoring', category: 'metering_ct', item: line.model,
@@ -3475,6 +3479,7 @@ function resolveBomMetering(
   plan: IntegratedEquipmentPlan,
   acVoltage: number | undefined,
   interconnectionMethod: string | undefined,
+  consumptionCtLocation?: string | null,
 ): MeteringResolution {
   const cap = plan.brains?.metering;
   if (!cap) {
@@ -3483,10 +3488,13 @@ function resolveBomMetering(
       ungroundedConductorCount: null, consumptionMeteringRequired: false,
     });
   }
-  return resolveMeteringRequirement({
-    capability: cap,
-    deviceLabel: plan.brains?.model ?? null,
+  // The ONE composer (lib/equipment/designMetering.ts): the same CT placement
+  // and mode the drawings state — so a BOM warning and a sheet cannot disagree
+  // about whether the metering mode is resolved.
+  return resolveDesignMetering({
+    plan,
     interconnectionRaw: interconnectionMethod,
+    consumptionCtLocation: consumptionCtLocation ?? null,
     // `input.acVoltage ?? 240` is this engine's own established service datum —
     // the same one the continuous-current calculation sizes real conductors and
     // OCPDs from. The conductor COUNT comes from the CT authority's explicit
@@ -3500,8 +3508,7 @@ function resolveBomMetering(
     // pairing — a wrong citation in a comment is how a wrong citation reaches
     // a drawing.
     ungroundedConductorCount: ungroundedConductorsForService(acVoltage ?? 240, 1),
-    consumptionMeteringRequired: plan.hasIntegratedGateway,
-  });
+  }).resolution!;
 }
 
 /** One CT line → one BOM row. The producer's procurement state travels with it:

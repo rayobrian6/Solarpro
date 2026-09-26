@@ -24,12 +24,8 @@ import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
 import { resolveIntegratedEquipment } from '@/lib/equipment/integratedBos';
-import {
-  readProductionMeterFlag,
-  resolveMeteringRequirement,
-  meteringScheduleValue,
-  ungroundedConductorsForService,
-} from '@/lib/equipment/currentTransformers';
+import { readProductionMeterFlag } from '@/lib/equipment/currentTransformers';
+import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
 import {
@@ -851,16 +847,17 @@ export async function POST(req: NextRequest) {
       // What this design actually MEASURES, from the CT authority. The schedule
       // could previously say "IQ Combiner 6C" and imply consumption metering the
       // job had not bought; this row states the channels instead of implying them.
-      meteringChannels:        (() => {
-        const _cap = _bosPlan.brains?.metering;
-        if (!_cap) return undefined;
-        return meteringScheduleValue(resolveMeteringRequirement({
-          capability: _cap,
-          deviceLabel: _bosPlan.brains?.model ?? null,
+      // …and WHERE its CTs are: the one composer every consumer calls
+      // (lib/equipment/designMetering.ts), so the drawing, the schedule, PV-4A
+      // and the BOM state the same placement and mode (Ray, 2026-09-25).
+      ...(() => {
+        const _met = resolveDesignMetering({
+          plan: _bosPlan,
           interconnectionRaw: body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? null,
-          ungroundedConductorCount: ungroundedConductorsForService(Number(body.systemVoltage) || 240, 1),
-          consumptionMeteringRequired: _bosPlan.hasIntegratedGateway,
-        }));
+          consumptionCtLocation: typeof body.consumptionCtLocation === 'string' ? body.consumptionCtLocation : null,
+          systemVoltage: Number(body.systemVoltage) || 240,
+        });
+        return { meteringChannels: _met.scheduleValue, meteringDrawing: _met.drawing ?? undefined };
       })(),
       ocpdPerString:           isMicro ? 0 : (systemModel?.stringOcpdAmps ?? stringResult?.ocpdPerString),
       dcAcRatio:               isMicro ? undefined : (stringResult ? calcDcAcRatio(stringResult.totalDcPower / 1000, acOutputKw) : undefined),

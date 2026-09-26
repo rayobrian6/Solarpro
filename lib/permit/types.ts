@@ -189,6 +189,9 @@ export interface PermitInput {
     generatorBrand?: string;
     generatorKw?: number;
     interconnectionMethod?: string;
+    /** Where the consumption CTs clamp (lib/equipment/currentTransformers
+     *  ConsumptionCtLocation). Absent / '' ⇒ the interconnection default. */
+    consumptionCtLocation?: string | null;
     panelBusRating?: number;
     // User-selected brand-integrated BOS device(s) — combiner/gateway/"brains"
     // (ids from lib/equipment/integratedBos). When set, overrides the auto-config

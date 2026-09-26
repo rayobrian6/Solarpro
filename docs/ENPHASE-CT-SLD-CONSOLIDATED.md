@@ -1,6 +1,19 @@
 # CT / metering / SLD — consolidated report
 
-**Date:** 2026-09-21 · **Status:** AUDIT COMPLETE. **No CT code written.**
+**Date:** 2026-09-21 · **Status:** AUDIT COMPLETE.
+
+> **2026-09-25 — IMPLEMENTED.** The authority is `lib/equipment/currentTransformers.ts`
+> (ae0b89af) plus the consumption-CT **location** vocabulary
+> (`ConsumptionCtLocation`: `sec-line-side-of-main` · `between-tap-and-main` ·
+> `main-breaker-load-side`, `consumptionCtBoundaryFor`, `defaultConsumptionCtLocation`).
+> ONE composer, `lib/equipment/designMetering.ts` (`resolveDesignMetering`), feeds the
+> engineering SLD, the SLD PDF, the permit E-1/E-1.1, PV-4A, both BOMs and the
+> engineering page. Default placement from the interconnection: supply-side tap →
+> between the tap and the main (Total); load-side → service conductors ahead of the
+> main (Net) — printed "DEFAULT — FIELD VERIFY"; the designer can record another
+> (`ProjectConfig.consumptionCtLocation`). The snapshot records only an explicit
+> choice (`electrical.meteringTopology`), so no existing digest moves. Hybrid
+> (multi-lane) SLDs do not draw CTs yet. The text below is the pre-implementation audit.
 Supersedes `docs/ENPHASE-CT-TOPOLOGY-REPORT.md` where they differ. Six agents
 (four auditors, two adversaries); every claim below was re-verified by me
 against the source tree before being written down.

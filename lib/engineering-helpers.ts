@@ -120,6 +120,9 @@ export interface ProjectConfig {
   panelCoordinates?: Array<{ x: number; y: number; row: number; col: number; }>;
   notes: string;
   interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE';
+  /** Where the consumption CTs clamp. ''/absent ⇒ the documented default for
+   *  the interconnection (lib/equipment/currentTransformers). */
+  consumptionCtLocation?: '' | 'sec-line-side-of-main' | 'between-tap-and-main' | 'main-breaker-load-side';
   panelBusRating: number;        // Bus bar rating (may differ from mainPanelAmps)
   utilityId: string;             // e.g. 'ameren', 'comed', 'pge' — '' = auto/unknown
   ahjId: string;                 // e.g. 'il-icc', 'manual' — '' = auto

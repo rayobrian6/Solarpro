@@ -366,6 +366,7 @@ export async function POST(req: NextRequest) {
       requiresWarningLabels:   body.requiresWarningLabels   ?? true,
       // Interconnection method — controls whether backfed breaker appears in BOM
       interconnectionMethod:   body.interconnectionMethod ?? body.interconnection ?? 'LOAD_SIDE',
+      consumptionCtLocation:   typeof body.consumptionCtLocation === 'string' ? body.consumptionCtLocation : undefined,
       panelBusRating:          Number(body.panelBusRating) || Number(body.mainPanelAmps) || 200,
       runs:                    body.runs,
       // Pre-calculated quantities from ComputedSystem.bomQuantities (exact match with summary cards)

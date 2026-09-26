@@ -37,6 +37,9 @@ import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } f
 import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import {
+  parseConsumptionCtLocation, pvConnectionSide, consumptionCtBoundaryFor, deriveConsumptionMeteringMode,
+} from '@/lib/equipment/currentTransformers';
 import { utilityDisplayName, resolveBatteryCapacity } from '../utils/helpers';   // §15(b) — human utility name, never a slug
 // resolveBatteryCapacity is THE permit-wide ESS capacity authority — the same
 // function PV-1, PV-5 and the SLD equipment schedule print from.
@@ -3083,6 +3086,17 @@ export function buildPermitDesignSnapshot(
         backfeedA: cs?.backfeedBreakerAmps ?? proj.backfeedBreakerA ?? null,
         rulePasses: (elec?.busbar as any)?.passes ?? null,
       },
+      // A designer-RECORDED consumption-CT location changes what E-1 draws, so
+      // it moves THIS project's digest. With no record the key is undefined
+      // (dropped by canonicalJson) and the digest is unchanged.
+      meteringTopology: (() => {
+        const loc = parseConsumptionCtLocation(proj.consumptionCtLocation);
+        if (!loc) return undefined;
+        const side = pvConnectionSide(proj.interconnectionMethod ?? 'LOAD_SIDE');
+        const boundary = consumptionCtBoundaryFor(loc, side);
+        return { consumptionCtLocation: loc, boundary, mode: deriveConsumptionMeteringMode(boundary, side),
+                 basis: 'designer-recorded' as const };
+      })(),
       parity: { legacyEngine: 'runElectricalCalc', legacyRan, checks: parityChecks, unresolved: parityUnresolved },
       provenance: { source: 'computeSystem (canonical) + planMicroBranches(D-1 assignment)' },
       gaps: cs ? [] : ['canonical engine result missing — generation should have failed closed'],

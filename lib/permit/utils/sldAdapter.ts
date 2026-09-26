@@ -15,7 +15,7 @@ import { buildIntegratedEquipment } from './integratedEquipment';
 // THE CT / metering authority (lib/equipment/currentTransformers). The permit's
 // E-1 schedule reads it here so it carries the same Metering row the Diagram tab
 // and the exported SLD PDF already print — see the note at `meteringChannels`.
-import { resolveMeteringRequirement, meteringScheduleValue, ungroundedConductorsForService } from '@/lib/equipment/currentTransformers';
+import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
 import { getInverterById, getMicroinverterById, SOLAR_PANELS,
          resolveBatteryBranch } from '@/lib/equipment-db';
@@ -411,25 +411,19 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // Composed ONCE, from the authority, for the device this schedule actually
     // names (`_bosBrains`) — never re-worded here. undefined ⇒ no metering
     // device is modelled and the row stays absent, which is the honest answer.
-    meteringChannels: (() => {
-      const _cap = _bosBrains?.metering;
-      if (!_cap) return undefined;
-      return meteringScheduleValue(resolveMeteringRequirement({
-        capability: _cap,
-        deviceLabel: _bosBrains?.model ?? null,
-        // RAW, not the display label built above ('Load Side Tap'): the
-        // authority owns the token table and derives the LOAD_WITH_SOLAR /
-        // LOAD_ONLY mode from it. A sixth spelling is the last thing this needs.
+    // …and where its CTs clamp, from the ONE composer every consumer calls
+    // (lib/equipment/designMetering.ts). RAW interconnection, not the display
+    // label: the authority owns the token table. 120/240 V 1Ø 3W is what every
+    // other statement on this sheet assumes. The E-1 draws the CTs and lead
+    // from `meteringDrawing`; E-1.1 prints the rows.
+    ...(() => {
+      const _met = resolveDesignMetering({
+        plan: { brains: _bosBrains ?? null, hasIntegratedGateway: _bos.hasIntegratedGateway },
         interconnectionRaw: project.interconnectionMethod ?? null,
-        // 120/240 V 1Ø 3-wire is what every other statement on this sheet
-        // assumes (the meter node prints it), so the CT count follows the same
-        // assumption through the authority's explicit table — never a literal 2.
-        ungroundedConductorCount: ungroundedConductorsForService(240, 1),
-        // The claim and the purchase are one decision: a package may assert the
-        // gateway meters consumption exactly when the resolved device
-        // integrates the gateway.
-        consumptionMeteringRequired: _bos.hasIntegratedGateway,
-      }));
+        consumptionCtLocation: project.consumptionCtLocation ?? null,
+        systemVoltage: 240,
+      });
+      return { meteringChannels: _met.scheduleValue, meteringDrawing: _met.drawing ?? undefined };
     })(),
     // The four fields above are the RESOLVED single-lane answer. This is the
     // selection itself, which the MULTI-LANE renderer needs because that path

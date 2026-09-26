@@ -201,6 +201,9 @@ export async function POST(req: NextRequest) {
       // explicit table — not a literal 2.
       ungroundedConductorCount: ungroundedConductorsForService(
         Number(buildInput.systemVoltage) || 240, 1),
+      // Where the consumption CTs clamp — recorded, or '' for the default.
+      consumptionCtLocation: typeof buildInput.consumptionCtLocation === 'string'
+        ? buildInput.consumptionCtLocation : null,
     });
 
     const input: SLDProfessionalInput = {
@@ -225,6 +228,9 @@ export async function POST(req: NextRequest) {
       // qualifies, so a builder that does not pass it renders as before.
       combinerSelectionIsDecided: _combiner.combinerSelectionIsDecided,
       meteringChannels:             _combiner.combinerMeteringSummary,
+      // The CTs, the lead and the "Consumption CTs" row — same composer as
+      // the Diagram tab, so the export draws what the screen draws.
+      meteringDrawing:              _combiner.meteringDrawing ?? undefined,
       // The four fields above are the RESOLVED single-lane combiner. This is
       // the selection itself, and it is needed because a hybrid export attaches
       // `input.sources` below and switches to the multi-lane renderer, which
