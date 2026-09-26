@@ -71,6 +71,21 @@ and is queued separately.
 
 ---
 
+## R6 — A geocoder silently overwrites a coordinate a human set
+
+| | |
+|---|---|
+| **Severity** | MEDIUM–HIGH — placement authority |
+| **Where** | `components/design/DesignStudio.tsx` — `geocodeAddressForFlyTo` re-geocodes the project's address on studio mount and **unconditionally PUTs the geocoded position back over the stored coordinates.** Its sibling `geocodeAddress` guards with `if (!project.lat || !project.lng)`; this one has no guard at all. |
+| **How it surfaced** | Two `e2e/persistence-join.spec.ts` tests were failing. Not a product defect in the test's sense — the fixture pinned a coordinate and gave it a different address, the geocode won, and the seeded roof ended up 2.8 km from the active site, so autosave honestly wrote nothing. The fixture is wrong and is being repaired. But the mechanism it exposed is real. |
+| **Why it is yours** | The v52.1 rule is documented on purpose: *"street-level geocode always wins over stored coords"*, and for a project created from a typed address that is right — a geocoder beats a placeholder. But **it also beats a coordinate a person deliberately placed**, on every studio load, with no record that it happened. Your standing placement rules say where the user pointed is authoritative. These two disagree, and only you can say which wins when. |
+| **Extra fact worth knowing** | With no `GOOGLE_MAPS_API_KEY` set, the geocode falls through to live Census/Nominatim — so on a machine without that key, where a design thinks it is depends on whether an external service answers. |
+| **Blocked** | Nothing. |
+| **NOT blocked** | Everything continues. |
+| **Safe default NOT applied, deliberately** | Adding the sibling's guard (`only geocode when there are no stored coordinates`) is a two-line change and would probably be right — but it silently changes which authority wins for every existing project, and that is a ruling, not a patch. Left visible. |
+
+---
+
 ## R5 — Two new things to try in Dev (live acceptance, not a decision)
 
 Not a blocker and nothing waits on it — but **live acceptance overrides tests**,
