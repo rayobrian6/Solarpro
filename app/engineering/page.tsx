@@ -44,7 +44,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById, resolveBatteryBranch } from '@/lib/equipment-db';
 import { listCombiners, planLandingDevice } from '@/lib/equipment/integratedBos';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
-import { sldCombinerFields } from '@/lib/equipment/sldCombinerFields';
+import { sldCombinerFields, hybridLaneMetering } from '@/lib/equipment/sldCombinerFields';
 import { consumptionCtLocationLabel } from '@/lib/equipment/designMetering';
 import { CONSUMPTION_CT_LOCATIONS, parseConsumptionCtLocation, pvConnectionSide, consumptionCtBoundaryFor, deriveConsumptionMeteringMode, type ConsumptionCtLocation } from '@/lib/equipment/currentTransformers';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
@@ -2732,6 +2732,8 @@ function EngineeringPageInner() {
     // Without them a CT-location change kept the old SLD, and the calc-triggered
     // save-outputs persisted that stale sheet to Client Files.
     ct: config?.consumptionCtLocation || null, cmb: config?.combinerId || null,
+    // A hybrid's own CT record (see ctLocationForRequests) redraws its SLD too.
+    cth: (config as ProjectConfig & { consumptionCtLocationHybrid?: string })?.consumptionCtLocationHybrid || null,
     // …and the project's recorded combiner itself, WHICHEVER writer sets it: the
     // project read above, a selector pick, or the project-switch reset. Keying
     // the drop on the selector's report alone left a sheet drawn with NO
@@ -3394,6 +3396,54 @@ function EngineeringPageInner() {
     } catch { return null; }
   }, [pageMicro, config.combinerId, config.interconnectionMethod, config.consumptionCtLocation,
       computedSystem, batteryEnabled, projectCombinerId, subSystemCounts.isHybrid]);
+
+  // ── WHICH recorded CT location a request carries — scoped to the topology ──
+  // A hybrid never showed the Consumption CTs control (pageMetering is null
+  // there), so a `consumptionCtLocation` on a hybrid project can only be a
+  // record made while the project was SINGLE-LANE. Sent on as the hybrid's
+  // answer, it would give that existing project a `meteringTopology` it never
+  // had and move its permit snapshot digest from this code change alone —
+  // retiring any PE approval on it (the ruling: no digest moves for an existing
+  // project; a new snapshot key only when the designer opts in). So a hybrid
+  // reads, writes and sends its OWN key, set only by the control on the hybrid;
+  // a single-lane design keeps the key it always had. Every request below, the
+  // lane composer and the control read `ctLocationForRequests` — one value, so
+  // the Diagram SLD, the SLD PDF, the BOM and the permit agree.
+  const _hybridCtLocation = (config as ProjectConfig & { consumptionCtLocationHybrid?: ProjectConfig['consumptionCtLocation'] })
+    .consumptionCtLocationHybrid || '';
+  const ctLocationForRequests: ProjectConfig['consumptionCtLocation'] = subSystemCounts.isHybrid
+    ? _hybridCtLocation : (config.consumptionCtLocation || '');
+  const setCtLocation = (v: ProjectConfig['consumptionCtLocation']) => subSystemCounts.isHybrid
+    ? updateConfig({ consumptionCtLocationHybrid: v } as unknown as Partial<ProjectConfig>)
+    : updateConfig({ consumptionCtLocation: v });
+
+  // ── A HYBRID's CTs (Ray, 2026-09-26: "add CTs to the hybrid SLDs too") ──
+  // pageMetering stays null on a hybrid — it is the single-lane answer, and the
+  // combiner row, the SLD badge and the ENVOY row read it as such. A hybrid's
+  // CTs belong to its PRIMARY metering lane (the first lane, roof > ground >
+  // fence, whose box meters — an IQ Combiner or a standalone IQ Gateway), and
+  // this is that lane's answer from the SAME call the Diagram route makes on the
+  // SAME lanes this page posts it (hybridLaneMetering over hybridSldSources, with
+  // the recorded selection, interconnection and CT location), so the control
+  // beside it and the CT-1 row say what the multi-lane SLD draws. Null on every
+  // single-lane design, and there `pageCtMetering` IS pageMetering.
+  const pageHybridMetering = useMemo(() => {
+    if (!subSystemCounts.isHybrid || !hybridSldSources) return null;
+    try {
+      return hybridLaneMetering({
+        lanes: hybridSldSources,
+        selectedCombinerId: projectCombinerId,
+        interconnectionRaw: config.interconnectionMethod ?? 'LOAD_SIDE',
+        // The hybrid's own record (above) — never a single-lane-era one.
+        consumptionCtLocation: _hybridCtLocation || null,
+        systemVoltage: 240,
+      }).primary;
+    } catch { return null; }
+  }, [subSystemCounts.isHybrid, hybridSldSources, projectCombinerId,
+      config.interconnectionMethod, _hybridCtLocation]);
+  /** What the Consumption CTs control and the CT-1 row read: the single-lane
+   *  answer, or — on a hybrid — the primary metering lane's. */
+  const pageCtMetering = pageMetering ?? pageHybridMetering?.fields ?? null;
 
   // Wave 3.7 — passthrough view for routes/payloads that expect BARE run ids
   // (SLD route fallback, BOM route, save-outputs). At N>1: the PRIMARY sub's
@@ -6289,7 +6339,7 @@ function EngineeringPageInner() {
           // /api/engineering/save-outputs builds its OWN config_snapshot and copies
           // this one key into it (interconnectionMethod survives through its
           // structured column), so run-from-file hydration can restore it.
-          consumptionCtLocation:config.consumptionCtLocation,
+          consumptionCtLocation:ctLocationForRequests || undefined,
           rapidShutdown:        config.rapidShutdown,
           acDisconnect:         config.acDisconnect,
           dcDisconnect:         config.dcDisconnect,
@@ -6329,7 +6379,7 @@ function EngineeringPageInner() {
     } catch (e: unknown) {
       console.warn('[Engineering] saveEngineeringOutputs error:', (e as Error).message);
     }
-  }, [currentProjectId, currentClientId, config, totalKw, totalInverterKw, totalPanels, computedSystem, bom, sldSvg, activeTab, pvwattsData]);
+  }, [currentProjectId, currentClientId, config, totalKw, totalInverterKw, totalPanels, computedSystem, bom, sldSvg, activeTab, pvwattsData, ctLocationForRequests]);
 
 
   // Auto-recalculate 800ms after config changes
@@ -6871,8 +6921,9 @@ function EngineeringPageInner() {
           format:         'svg',
           // Interconnection method — drives SLD rendering (load-side tap vs backfed breaker)
           interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
-          // Where the consumption CTs clamp ('' ⇒ interconnection default).
-          consumptionCtLocation: config.consumptionCtLocation || undefined,
+          // Where the consumption CTs clamp ('' ⇒ interconnection default) —
+          // the topology's own record (ctLocationForRequests).
+          consumptionCtLocation: ctLocationForRequests || undefined,
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // BUILD v24: Pass equipment IDs so route.ts can look up specs for NEC-sized segments
           // batteryId → getBatteryById → backfeedBreakerA, maxContinuousOutputA
@@ -7277,7 +7328,7 @@ function EngineeringPageInner() {
           spliceAtRows:     config.spliceAtRows === true,
           // Interconnection method — controls whether backfed breaker appears in BOM
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
-          consumptionCtLocation: config.consumptionCtLocation || undefined,
+          consumptionCtLocation: ctLocationForRequests || undefined,
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
           runs:             legacyRunsView(),
@@ -8450,7 +8501,10 @@ function EngineeringPageInner() {
           rafterSpecies: config.rafterSpecies || undefined,
           attachmentSpacing: config.attachmentSpacing,
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
-          consumptionCtLocation: config.consumptionCtLocation || undefined,
+          // The topology's own CT record: a hybrid never inherits a
+          // single-lane-era location (its digest would move) — see
+          // ctLocationForRequests.
+          consumptionCtLocation: ctLocationForRequests || undefined,
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // The installer's recorded combiner/Envoy. This downloaded package is
           // the one that reaches the AHJ, and it was the only one of the page's
@@ -12018,14 +12072,16 @@ function EngineeringPageInner() {
                           {/* Consumption CTs — where they clamp. Defaults from the
                               interconnection above (Enphase's documented placement);
                               change it with no questions asked. Same answer the SLD,
-                              PV-4A and the BOM use. */}
-                          {pageMetering?.metering ? (
+                              PV-4A and the BOM use. On a hybrid, the primary metering
+                              lane's answer (pageCtMetering) — the lane the multi-lane
+                              SLD draws the site's consumption CTs on. */}
+                          {pageCtMetering?.metering ? (
                             <div className="col-span-2">
                               <label className="eng-label">Consumption CTs</label>
                               <select
                                 className="eng-select"
-                                value={config.consumptionCtLocation || ''}
-                                onChange={e => updateConfig({ consumptionCtLocation: e.target.value as ProjectConfig['consumptionCtLocation'] })}
+                                value={ctLocationForRequests || ''}
+                                onChange={e => setCtLocation(e.target.value as ProjectConfig['consumptionCtLocation'])}
                               >
                                 <option value="">Auto — per interconnection method</option>
                                 {CONSUMPTION_CT_LOCATIONS.map((loc: ConsumptionCtLocation) => {
@@ -12052,25 +12108,34 @@ function EngineeringPageInner() {
                                 // "… · MODE TBD", and keying the colour on the row's presence
                                 // showed that warning in neutral slate. It takes the page's
                                 // warning colour, like the no-row cases below.
-                                const _drw = pageMetering?.meteringDrawing ?? null;
+                                const _drw = pageCtMetering?.meteringDrawing ?? null;
                                 const _row = _drw?.scheduleRow ?? null;
                                 const _tbd = _drw?.consumption?.mode === 'INDETERMINATE' || (_row ?? '').includes('MODE TBD');
                                 // No combiner decided ⇒ the device these CTs belong to is the
                                 // catalogue default. Said here the way COMB-1 and CT-1 say it,
                                 // so the hint never names a box as though someone chose it.
-                                const _defaultDevice = pageMetering?.combinerSelectionIsDecided === false
-                                  ? (pageMetering.combinerModel ?? null) : null;
+                                const _defaultDevice = pageCtMetering?.combinerSelectionIsDecided === false
+                                  ? (pageCtMetering.combinerModel ?? null) : null;
                                 // A standalone IQ Gateway is a box of its own beside the PV
                                 // AC combiner panel, and its CTs belong to IT, not to the
                                 // panel. Said here from the same sldCombinerFields answer the
                                 // SLD draws (names, breaker, production CT, lead limits) —
                                 // absent on every other pick, so nothing else here changes.
-                                const _sgw = pageMetering?.standaloneGateway ?? null;
+                                const _sgw = pageCtMetering?.standaloneGateway ?? null;
                                 return (
                                   <>
+                                    {/* A hybrid has one service, so one set of consumption
+                                        CTs: named here with the lane whose box reads them.
+                                        Absent on every single-lane design. */}
+                                    {pageHybridMetering && !pageMetering ? (
+                                      <p className="text-[10px] mt-1 text-slate-400">
+                                        Hybrid: read by the {pageHybridMetering.key} array&apos;s {pageHybridMetering.fields.standaloneGateway?.label ?? pageHybridMetering.fields.combinerModel ?? 'gateway'} — one
+                                        consumption CT set per service; any other metering array records production only.
+                                      </p>
+                                    ) : null}
                                     <p className={`text-[10px] mt-1 ${_row && !_tbd ? 'text-slate-400' : 'text-rose-300'}`}>
                                       {_row
-                                        ?? (pageMetering?.metering?.consumptionMeteringProvided
+                                        ?? (pageCtMetering?.metering?.consumptionMeteringProvided
                                           ? 'INDETERMINATE — that location gives no valid metering mode for this interconnection.'
                                           : 'This combiner does not provide consumption metering.')}
                                     </p>
@@ -14128,7 +14193,7 @@ function EngineeringPageInner() {
                                 notes: config.notes,
                                 interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
                                 interconnectionType: config.interconnectionMethod ?? 'LOAD_SIDE',
-                                consumptionCtLocation: config.consumptionCtLocation || undefined,
+                                consumptionCtLocation: ctLocationForRequests || undefined,
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,
                                 // The installer's recorded choice travels with
@@ -14883,25 +14948,31 @@ function EngineeringPageInner() {
                           </React.Fragment>
                         );
                       })}
-                      {pageMetering?.meteringDrawing?.consumption ? (() => {
-                        const c = pageMetering.meteringDrawing!.consumption!;
+                      {/* On a hybrid, pageCtMetering is the PRIMARY metering lane's
+                          answer — the one lane the multi-lane SLD draws the site's
+                          consumption CTs on. On every single-lane design it IS
+                          pageMetering, so this row is unchanged there. */}
+                      {pageCtMetering?.meteringDrawing?.consumption ? (() => {
+                        const c = pageCtMetering.meteringDrawing!.consumption!;
                         // No combiner decided ⇒ the box these CTs ship in (or the
                         // gateway they are ordered for) is the catalogue default —
                         // qualified here exactly as COMB-1 qualifies it, so the two
                         // rows never disagree about whether anyone chose it.
-                        const _dflt = pageMetering.combinerSelectionIsDecided ? '' : ' — catalogue default, not selected';
+                        const _dflt = pageCtMetering.combinerSelectionIsDecided ? '' : ' — catalogue default, not selected';
                         // The device the CTs belong to: the combiner on every existing
                         // pick; on a standalone gateway, the GATEWAY (ENVOY-1) — the PV AC
                         // combiner panel neither ships nor reads them.
-                        const _ctDevice = pageMetering.standaloneGateway?.label ?? pageMetering.combinerModel;
+                        const _ctDevice = pageCtMetering.standaloneGateway?.label ?? pageCtMetering.combinerModel;
                         const _where = c.supplied === 'in-box'
                           ? `in ${_ctDevice ?? 'combiner'} box${_dflt}`
                           : `order separately — see BOM${_dflt && _ctDevice ? `; for ${_ctDevice}${_dflt}` : ''}`;
+                        // A hybrid names the array whose box reads them; absent otherwise.
+                        const _lane = pageHybridMetering && !pageMetering ? ` · ${pageHybridMetering.key} array` : '';
                         return (
                           <tr key="CT-1" className="bg-white">
                             <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">CT-1</td>
-                            <td className="border border-slate-200 px-2 py-1.5">Consumption CTs ({_where})</td>
-                            <td className="border border-slate-200 px-2 py-1.5">{pageMetering.plan.brains?.brand ?? ''}</td>
+                            <td className="border border-slate-200 px-2 py-1.5">Consumption CTs ({_where}{_lane})</td>
+                            <td className="border border-slate-200 px-2 py-1.5">{pageCtMetering.plan.brains?.brand ?? ''}</td>
                             <td className="border border-slate-200 px-2 py-1.5">Clamp CT</td>
                             <td className="border border-slate-200 px-2 py-1.5 text-right font-bold">{c.ctCount ?? '—'}</td>
                             <td className="border border-slate-200 px-2 py-1.5 font-bold text-amber-700">{consumptionCtLocationLabel(c.location)} · {c.mode === 'LOAD_WITH_SOLAR' ? 'Net' : c.mode === 'LOAD_ONLY' ? 'Total' : 'Mode TBD'}</td>
@@ -16231,7 +16302,7 @@ function EngineeringPageInner() {
                                 rafterSpacing: config.rafterSpacing,
                                 attachmentSpacing: config.attachmentSpacing,
                                 interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
-                                consumptionCtLocation: config.consumptionCtLocation || undefined,
+                                consumptionCtLocation: ctLocationForRequests || undefined,
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,
                                 // The installer's recorded choice travels with

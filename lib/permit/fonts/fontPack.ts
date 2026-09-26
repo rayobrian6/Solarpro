@@ -157,15 +157,138 @@ export function fontFaceIdentities(): FontFaceIdentity[] {
  * we have not verified would defeat the point of embedding them.
  */
 export function fontFaceCss(): string {
+  requireVerifiedPack('a planset stylesheet');
+  return EMBEDDED_FACES.map(faceRule).join('\n');
+}
+
+/** Fail closed before ANY bytes are emitted — the planset stylesheet and a
+ *  standalone SVG alike. One check, so the two cannot disagree on "verified". */
+function requireVerifiedPack(what: string): void {
   const v = verifyFontPack();
   if (!v.ok) {
     throw new Error(
-      'CANONICAL FONT PACK FAILED VERIFICATION — refusing to emit a planset stylesheet.\n'
+      `CANONICAL FONT PACK FAILED VERIFICATION — refusing to emit ${what}.\n`
       + v.failures.map(f => `  • ${f}`).join('\n')
       + '\nThe embedded font bytes do not match the manifest. Authoritative rendering is not possible.',
     );
   }
-  return EMBEDDED_FACES.map(f =>
-    `@font-face{font-family:"${f.family}";src:url("data:font/woff2;base64,${f.base64}") format("woff2");font-style:${f.style};font-weight:${f.weight};font-display:block;}`,
-  ).join('\n');
+}
+
+/** ONE serialisation of a face. fontFaceCss() and withStandaloneSvgFonts() both
+ *  use it, so the SVG a user downloads declares the face byte-for-byte as the
+ *  permit does. */
+function faceRule(f: EmbeddedFace): string {
+  return `@font-face{font-family:"${f.family}";src:url("data:font/woff2;base64,${f.base64}") format("woff2");font-style:${f.style};font-weight:${f.weight};font-display:block;}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OUTSIDE THE ARTIFACT — every place a drawing SVG is shown WITHOUT the pack.
+//
+// The permit HTML and the SLD PDF carry fontFaceCss(). Nothing else did. The
+// Diagram tab inlines the renderer's SVG into the app page, a downloaded .svg
+// opens in whatever viewer the user has, and librsvg (sharp) rasterises through
+// fontconfig. In all three, `font-family="SolarPro Sans, SolarPro Symbols"`
+// named two families that did not exist and no generic, so the browser painted
+// its DEFAULT face — a serif, with advances unlike the Liberation Sans ones every
+// label on the sheet was placed for. Ray reviews the one-line on that screen.
+//
+// 🚨 A RENDERER NEVER WRITES THE STACKS BELOW INTO A NODE ATTRIBUTE. The same
+// SLD markup is E-1 of the permit, where there is no host fallback on the
+// authoritative path (this file's header), and
+// tests/planset/d4-canonical-font-pack.test.ts fails on any Arial / Helvetica /
+// Liberation / sans-serif in an SVG text attribute. The fallbacks are applied at
+// the BOUNDARY instead, by CSS keyed on the canonical attribute value — a
+// stylesheet rule outranks an SVG presentation attribute. app/globals.css does
+// it for every SVG inlined in the app; withStandaloneSvgFonts() does it for an
+// SVG that leaves the app. The renderer's bytes, E-1 and its digest do not move.
+//
+// 🚨 WHY THE APP DOES NOT SERVE THE PACK'S .woff2 FROM /public. The README rules
+// these bytes "embedded inside the generated artifact only", and the bytes say
+// why. They are fontTools subsets that still call themselves "Liberation Sans" /
+// "Liberation Mono" (name IDs 1, 4, 6 — "Liberation" is the Reserved Font Name
+// of their SIL OFL 1.1 licence) and carry no licence text (the subsetter kept
+// name IDs 0–6 only). The OFL FAQ treats a subset as a Modified Version (§2.6)
+// and asks a web font to carry its licence in its own metadata (§2.4).
+// Publishing them at a URL needs a renamed, licence-carrying rebuild first — a
+// pack v2, not a file copy. The app aliases the canonical names to the
+// metric-compatible face the machine already has (globals.css `local()`), which
+// serves no bytes at all and puts every label in the box it has on the permit.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Installed faces with the SAME advance widths as each canonical family, in
+ * preference order. Liberation is the pack's own source; Arimo / Cousine are
+ * the Chrome OS faces Liberation 2.x was built from; Arial / Courier New are the
+ * faces Liberation was drawn to match, and Helvetica / Courier the faces THEY
+ * were drawn to match. Anything else (DejaVu Sans, Verdana, Segoe UI) spaces
+ * text differently — the reflow the pack exists to prevent — so it is not here.
+ */
+export const METRIC_COMPATIBLE_FALLBACKS = {
+  [FONT_SANS]: ['Liberation Sans', 'Arimo', 'Arial', 'Helvetica'],
+  [FONT_MONO]: ['Liberation Mono', 'Cousine', 'Courier New', 'Courier'],
+} as const;
+
+/**
+ * SVG `font-family` stacks WITH metric-compatible fallbacks, for contexts that
+ * cannot load the pack. The generic comes LAST, after a metric-compatible face,
+ * so it is reached only on a machine that has none of them. Unquoted — CSS reads
+ * a multi-word family as bare identifiers — so the same string is valid inside a
+ * double-quoted attribute and inside a CSS rule.
+ *
+ * Applied through CSS at the boundary, never as a renderer's node attribute
+ * (see the section header above).
+ */
+export const SVG_FONT_SANS_STACK =
+  [FONT_SANS, FONT_SYMBOLS, ...METRIC_COMPATIBLE_FALLBACKS[FONT_SANS], 'sans-serif'].join(', ');
+export const SVG_FONT_MONO_STACK =
+  [FONT_MONO, FONT_SYMBOLS, ...METRIC_COMPATIBLE_FALLBACKS[FONT_MONO], 'monospace'].join(', ');
+
+/**
+ * The rules that give a canonical attribute its fallbacks. No font bytes.
+ * `*=` rather than `^=` so a quoted spelling (`'SolarPro Sans'`) matches too.
+ * app/globals.css carries the same two rules for the app page;
+ * tests/sldFontsLoadEverywhere.test.ts holds them equal.
+ */
+export function svgFontFallbackCss(): string {
+  return `[font-family*="${FONT_SANS}"]{font-family:${SVG_FONT_SANS_STACK}}\n`
+    + `[font-family*="${FONT_MONO}"]{font-family:${SVG_FONT_MONO_STACK}}`;
+}
+
+/** Carried by the <style> withStandaloneSvgFonts() inserts, so a second pass is
+ *  a no-op rather than a second copy of the pack (≈290 KB of base64). */
+export const STANDALONE_SVG_FONT_MARKER = 'data-solarpro-font-pack';
+
+/**
+ * An SVG that is about to LEAVE the app — a download, a stored project file —
+ * made to render in the permit's face wherever it is opened.
+ *
+ * Inserts one <style> as the first child of the root <svg>: the verified pack
+ * faces for every canonical family the SVG names (an SLD names all three — its
+ * symbol labels, lib/sld-symbols.ts, are Mono bold — so a 78 KB sheet grows by
+ * ≈290 KB), then the fallback rules for viewers that ignore an embedded
+ * @font-face (Inkscape, librsvg). `embedFaces: false` keeps only the fallback
+ * rules — about 300 bytes — for a copy stored per project.
+ *
+ * The embedded faces are INSIDE the artifact, which is the one place the README
+ * allows these bytes to go. Throws, like fontFaceCss(), if they fail
+ * verification.
+ *
+ * 🚨 NEVER on the permit path. E-1 sits inside an HTML document that already
+ * carries fontFaceCss(), and its SVG bytes are what the planset tests pin.
+ */
+export function withStandaloneSvgFonts(svg: string, opts: { embedFaces?: boolean } = {}): string {
+  if (svg.includes(STANDALONE_SVG_FONT_MARKER)) return svg;
+  const root = /<svg\b[^>]*>/.exec(svg);
+  if (!root) return svg;
+  let faces = '';
+  if (opts.embedFaces !== false) {
+    const named = EMBEDDED_FACES.filter(f => svg.includes(f.family));
+    if (named.length) {
+      requireVerifiedPack('a standalone SVG');
+      faces = named.map(faceRule).join('\n') + '\n';
+    }
+  }
+  const style = `<style ${STANDALONE_SVG_FONT_MARKER}="${FONT_PACK_VERSION}">\n${faces}${svgFontFallbackCss()}\n</style>`;
+  const at = root.index + root[0].length;
+  return svg.slice(0, at) + style + svg.slice(at);
 }

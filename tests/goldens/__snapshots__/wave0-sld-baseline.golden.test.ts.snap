@@ -8,7 +8,7 @@ exports[`Wave 0 golden — SLD legacy MICRO baseline (structural markers) > canv
     "width": "2304",
   },
   "counts": {
-    "acCombiner": 4,
+    "acCombiner": 3,
     "externalDcDisconnect": 0,
     "mainServicePanel": 1,
     "optimizerHdr": 0,

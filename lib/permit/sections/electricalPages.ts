@@ -8,7 +8,7 @@ import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, isSupplySideInterconnection, utilityDisplayName, necNextStandardOcpd, hasRealBattery, type SysType } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
-import { generateLiveSLD } from '../utils/sldAdapter';
+import { generateLiveSLD, buildHybridPermitMetering } from '../utils/sldAdapter';
 import { microBranchCount, planMicroBranches, microMaxPerBranch, microBranchMaxOcpdA } from '../utils/branching';
 import { getSnapshot, peekSnapshot } from '../snapshot/read';
 // §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
@@ -814,7 +814,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         // entry (topology, perMicroA, OCPD from the sub's own equipment) —
         // never one 94-modules-single-branch-set claim.
         if (_auth.isHybrid) {
-          return _auth.subSystems.map(sub => {
+          const _subTables = _auth.subSystems.map(sub => {
             if (sub.isMicro) {
               // §5 — option B rating summary (no conductor/raceway column). The
               // sectioned physical schedule for this sub's branches is on the
@@ -842,6 +842,43 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         <tbody>${rows || `<tr><td colspan="7" class="center">String plan pending — see PV-4B</td></tr>`}</tbody>
       </table>`;
           }).join('');
+          // ── THE HYBRID'S METERING (Ray, 2026-09-26: "add CTs to the hybrid SLDs too") ──
+          // This path printed the circuit tables and stopped, so a hybrid whose
+          // roof lane lands in an IQ Combiner stated no metering at all while
+          // the single-lane sheet for the same combiner states it in full. It
+          // now states the SAME answer E-1 draws — buildHybridPermitMetering,
+          // the one composer run on each lane's own plan — never re-worded here:
+          // the primary metering lane's disclosure, CT placement and any
+          // required action, then each other metering lane's production CT
+          // (production only: one consumption CT set per service).
+          const _hm = buildHybridPermitMetering(input, cad, _auth);
+          const _hp = _hm?.primary;
+          const _hpRes = _hp?.metering.resolution;
+          if (!_hm || !_hp || !_hpRes) return _subTables;
+          const _hpDevice = _hm.metered.find(m => m.isPrimary)?.meteringDeviceLabel ?? 'GATEWAY';
+          const _hpGw = _hm.lanes.find(l => l.key === _hp.key)?.standaloneGateway;
+          // "Read by the primary gateway" only when that lane actually draws the
+          // consumption CTs — an impossible recorded location draws none anywhere.
+          const _hpCons = !!_hp.metering.drawing?.consumption;
+          const _hybridMeteringNote =
+            `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#f0f4f8;">`
+            + `<strong>METERING (NEC 690.4) — ${SUB_LABEL[_hp.key]} SUB-SYSTEM, ${_hpDevice.toUpperCase()}:</strong> ${_hpRes.disclosure}`
+            + (_hp.metering.placementNote ? ` ${_hp.metering.placementNote}` : '')
+            + (_hpRes.blockerMessage
+              ? ` <span style="color:#cc6600;font-weight:700;">REQUIRED ACTION — ${_hpRes.blockerMessage}</span>` : '')
+            + (_hp.metering.topologyBlockerMessage
+              ? ` <span style="color:#cc6600;font-weight:700;">REQUIRED ACTION — ${_hp.metering.topologyBlockerMessage}</span>` : '')
+            // A standalone gateway is its own box, and every CT lead lands on it.
+            + (_hpGw
+              ? ` The ${_hpGw.label}${_hpGw.partNumber ? ` (${_hpGw.partNumber})` : ''} is a separate enclosure supplied from its own `
+                + `2-pole ${_hpGw.supplyBreakerA} A breaker in the ${_hpGw.landingLabel} (${_hpGw.supplyConductor}); every CT lead lands on it.`
+              : '')
+            + _hm.metered.filter(m => !m.isPrimary && m.drawing.production).map(m =>
+                ` <strong>${SUB_LABEL[m.key]}:</strong> ${m.meteringDeviceLabel} — ${m.drawing.production!.label}; production only`
+                + (_hpCons ? ` — the site's consumption CTs are read by the ${_hpDevice} (one set per service)` : '')
+                + '.').join('')
+            + `</div>`;
+          return `${_subTables}${_hybridMeteringNote}`;
         }
         // §5 — AC branch RATING SUMMARY (option B). The device rating facts only
         // (count / operating / continuous / OCPD / mfr per-branch limit); the
