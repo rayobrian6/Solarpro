@@ -55,6 +55,29 @@ const read = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf8');
 const OUTPUT_DIRS = ['lib/cad', 'lib/permit'] as const;
 
 /**
+ * 🚨 THE LIST BELOW IS DERIVED FROM THE ENGINE'S OWN `PlacementMode` UNION, not
+ * from memory.
+ *
+ * A first version was assembled from what I remembered a person can place, and it
+ * missed one: the ground-array boundary. Enumerating the 26 modes the engine
+ * actually offers and asking "what does each one produce, and who consumes it"
+ * found it. The modes map as:
+ *
+ *   select / surface_select / pick_house / mark_plane / set_direction / set_origin
+ *                                       → aiming and selection, produce nothing
+ *   roof / plane / plane3d / roof_gable / roof_hip / auto_roof / vertex  → roofPlanes
+ *   row / add_row / extend_row / snap_panel / ground_array               → panels
+ *   obstruction / tree                                                  → obstructions
+ *   measure / measurements / ruler                                      → measurements
+ *   block                                                → RoofPlane.section (walls)
+ *   fence                                                → fenceLine + fenceHeight
+ *   ground                                               → groundArea  ← the one missed
+ *
+ * If a mode is added to that union, derive its entry the same way rather than
+ * guessing from the mode's name.
+ */
+
+/**
  * One entry per kind of thing a person can place or shape.
  *
  * `consumedBy` names a real file under an output directory that reads it, or is
@@ -111,6 +134,22 @@ const LEDGER: LedgerEntry[] = [
       'NOT a design choice — a GAP. No roof sheet draws a building elevation: the ' +
       'fence has one, the roof has a top-down plan and a mounting cross-section. ' +
       'See NEEDS-RAY R7.',
+  },
+  {
+    what: 'The ground-array boundary the user draws',
+    field: 'groundArea',
+    consumedBy: null,
+    why:
+      'OPEN QUESTION, not a settled reason. Verified: it is React state in ' +
+      'DesignStudio alone, drawn on the 2D canvas, passed as `area` to the ' +
+      'auto-layout call, referenced ZERO times in the 3D engine, absent from the ' +
+      'persistence payload and from the Layout type (which carries only the derived ' +
+      'number groundAreaMeters2), and read by no output. So it is session-only: ' +
+      'draw a boundary, save, reload, and it is gone while the panels it produced ' +
+      'remain. Whether that is correct depends on whether the 2D ground path is ' +
+      'still the live one and on whether the GROUND ARRAY PLAN sheet draws a ' +
+      'boundary or derives extents from the modules — neither of which I ' +
+      'established, so this is recorded rather than judged.',
   },
 ];
 
@@ -191,6 +230,50 @@ describe('🚨 the NOT-CONSUMED entries are still true', () => {
         }
       }
     }
+  });
+});
+
+describe('🚨 the ledger covers every mode the engine offers', () => {
+  it('every PlacementMode maps to a ledger entry or to nothing persistent', () => {
+    // 🚨 THE CHECK THAT WOULD HAVE CAUGHT THE MISSED ENTRY. The ledger was
+    // assembled from memory and left out the ground-array boundary; this derives
+    // the question from the engine's own union, so a mode added later cannot be
+    // silently uncovered.
+    const engine = read('components', '3d', 'SolarEngine3D.tsx');
+    const m = engine.match(/export type PlacementMode =([^;]+);/);
+    expect(m, 'the PlacementMode union moved — this guard is blind').toBeTruthy();
+    const modes = (m![1].match(/'([a-z_0-9]+)'/g) ?? []).map(x => x.replace(/'/g, ''));
+    expect(modes.length, 'no modes parsed out of the union').toBeGreaterThan(20);
+
+    // Modes that produce nothing persistent: aiming, selection and framing.
+    const PRODUCES_NOTHING = new Set([
+      'select', 'surface_select', 'pick_house', 'mark_plane',
+      'set_direction', 'set_origin',
+    ]);
+    // Every other mode must be accounted for by one of these ledger fields.
+    const MODE_TO_FIELD: Record<string, string> = {
+      roof: 'roofPlanes', plane: 'roofPlanes', plane3d: 'roofPlanes',
+      roof_gable: 'roofPlanes', roof_hip: 'roofPlanes', auto_roof: 'roofPlanes',
+      vertex: 'roofPlanes',
+      row: 'panels', add_row: 'panels', extend_row: 'panels',
+      snap_panel: 'panels', ground_array: 'panels',
+      obstruction: 'manualRoofObstructions', tree: 'manualRoofObstructions',
+      measure: 'measurements', measurements: 'measurements', ruler: 'measurements',
+      block: 'RoofPlane.section',
+      fence: 'groundTilt / groundAzimuth / rowSpacing / groundHeight / fenceHeight',
+      ground: 'groundArea',
+    };
+    const ledgerFields = new Set(LEDGER.map(e => e.field));
+
+    const unaccounted = modes.filter(mode =>
+      !PRODUCES_NOTHING.has(mode) &&
+      !(MODE_TO_FIELD[mode] && ledgerFields.has(MODE_TO_FIELD[mode])));
+
+    expect(unaccounted,
+      `these placement modes have no ledger entry:\n  ${unaccounted.join('\n  ')}\n` +
+      'Derive what each one produces and add an entry — either its consumer, or a ' +
+      'true reason it has none. That is what the output-consistency law requires.')
+      .toEqual([]);
   });
 });
 
