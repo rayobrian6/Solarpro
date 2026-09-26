@@ -152,6 +152,42 @@ adversarial pass is for, and it is why refutations are read rather than counted.
 
 ---
 
+## VERIFIED — the duplicated-authority sweep, 28 findings across eight families
+
+Full detail in `ENGINEERING-AUTHORITIES.md`. 100 agents, 246 copies mapped, 18
+killed. **20 of the 28 are in the UNSAFE direction.** One fixed, one escalated,
+**26 recorded and not fixed**.
+
+| Family | Copies | Confirmed | Headline |
+|---|---|---|---|
+| voltage-drop | 14 | 3 | A DC string's drop is printed as a percentage of 240 V — the AC service voltage |
+| ocpd-breaker | 38 | 5 | The `Math.ceil(amps/5)*5` rounding that `stdSizes.ts` explicitly forbids is live in 8 places, 3 of them deciding |
+| rooftop-adder | 36 | 5 | Three different adder values (33/30/35) and six contradictory applicability rules |
+| grounding | 29 | 3 | Table 250.66 has three copies that disagree **at every rung** |
+| battery-pcs | 35 | 5 | The BOM sizes the backfeed breaker from PV alone and 120 %-caps it without the battery |
+| module-inverter | 44 | 4 | DC fuse derived as Isc × 1.56 with no cap against the module's own maxSeriesFuse |
+| conduit-fill | 21 | 1 | A conduit-area table that is Table 4 for no material, keyed by material not conductor count |
+| structural | 29 | 2 | **Both handled** — see below |
+
+### Reported CLEAN, and worth as much
+
+Every circular-mils value in all three copies is correct against Ch. 9 Table 8;
+`lib/nec/chapter9.ts`'s 50 Table 4 entries are correct and re-derived from the
+published interior diameters; `lib/electrical/stdSizes.ts` matches 240.6(A) on all
+30 rows; NEC 705.11's 10-ft tap limit is one constant, one authority, correct; the
+design ambient is genuinely single-sourced. **A sweep that only reports defects
+cannot tell you what is safe.**
+
+---
+
+## SHIPPED — from the sweep
+
+| Commit | What |
+|---|---|
+| `f800c971` | 🚨 The Kz table went **FLAT at 40 ft in BOTH copies** — 4–11 % low, all unsafe-direction. Second time in two days two agreeing copies were wrong together. **My own mean-roof-height repair is what made it reachable.** |
+
+---
+
 ## ACTIVE
 
 | Lane | Shape |
