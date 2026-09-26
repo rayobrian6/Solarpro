@@ -135,6 +135,35 @@ NEEDS-RAY R6.
 | Persistence fixture + production obstructions | Repair the false fixture premise in `persistence-join`; establish with real SQL whether either `/api/production` write path loses obstructions, measurements or siteArchives. |
 | Ghost module preview + pick priority | The top-ranked competitor win. A module preview on the cursor, pre-oriented to the face beneath it, calling the SAME snapper the commit calls — Ray's word is that the ghost preview is contractual. Plus site objects no longer intercepting panel picks. |
 
+## ✅ THE FULL VITEST SUITE COMPLETED — first time in this campaign
+
+`npx vitest run --maxWorkers 1 --pool=threads`, 517 s, **no OOM and no crash**:
+
+| | |
+|---|---|
+| Test files | **703 passed**, 3 failed, 17 skipped (723) |
+| Tests | **14,479 passed**, 18 failed, 1 expected fail, 490 skipped (14,988) |
+
+**All 18 failures accounted for, and NONE is a real defect** — every one of the three
+files passes in isolation:
+
+| File | Tests | Verdict |
+|---|---|---|
+| `utility-bill-attachment` | 10 | **Pool artefact.** It calls `process.chdir()`, unsupported on `--pool=threads`. **10/10 on `--pool=forks`.** |
+| `designStudioMicroBranchesMatchPlanSet` | 7 | **A peer session's own file** (its commit `4b7a99e7`), which was mid-edit on that lane during the run. **13/13 in isolation.** |
+| `golden-path` | 1 | Transient, from the peer's in-flight SLD/metering source. **27/27 in isolation.** |
+
+The 1 expected fail is deliberate: the named `it.fails` in
+`stageSchemaReachability.postgres.test.ts`, which goes red the day the stage schema
+becomes reachable and forces whoever fixes it to promote it.
+
+🚨 **The lesson, and it cost a diagnosis cycle twice today: a full-suite run in a
+SHARED worktree measures the peers as well as the code.** Before reading any full-run red
+as a regression, re-run the file in isolation and on the other pool. Three agents reported
+a peer's mid-edit or a pool artefact as a failure today.
+
+---
+
 ## 🚨 HOW TO RUN THINGS ON THIS MACHINE — read before any test command
 
 **THE FULL E2E SUITE REBOOTED THE MACHINE TWICE, both times mine.** Every spec renders a
