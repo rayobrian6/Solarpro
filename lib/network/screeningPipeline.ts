@@ -130,10 +130,17 @@ async function runStep2(opp: ScreeningOpportunity): Promise<StepResult> {
   const data: Record<string, unknown> = {}
 
   try {
-    // Check for exact phone match in last 90 days
+    // 🚨 CANONICAL COLUMNS, AND THE SAME EXPRESSIONS THE SELECT ABOVE READS.
+    // `state` does not exist — this query threw 42703, and runStep2's catch
+    // downgraded it to status 'error', which runStep10 counts as neither a
+    // failure nor a review flag. So the duplicate check has never run: it was
+    // silently absent rather than passing. The comparisons mirror the COALESCE
+    // pairs in the opportunity SELECT, because comparing a coalesced value
+    // against a single column matches nothing for whichever writer filled the
+    // other one.
     const existingByPhone = opp.homeowner_phone ? await sql`
       SELECT id, created_at FROM network_opportunities
-      WHERE homeowner_phone = ${opp.homeowner_phone}
+      WHERE COALESCE(homeowner_phone, phone) = ${opp.homeowner_phone}
         AND id != ${opp.id}
         AND created_at > NOW() - INTERVAL '90 days'
       LIMIT 1
@@ -142,8 +149,8 @@ async function runStep2(opp: ScreeningOpportunity): Promise<StepResult> {
     // Check for same address
     const existingByAddress = opp.address ? await sql`
       SELECT id, created_at FROM network_opportunities
-      WHERE address = ${opp.address}
-        AND state = ${opp.state ?? ''}
+      WHERE COALESCE(address, address_line1) = ${opp.address}
+        AND location_state = ${opp.state ?? ''}
         AND id != ${opp.id}
         AND created_at > NOW() - INTERVAL '180 days'
       LIMIT 1
@@ -216,44 +223,69 @@ async function runStep3(opp: ScreeningOpportunity): Promise<StepResult> {
 async function runStep4(opp: ScreeningOpportunity): Promise<StepResult> {
   const data: Record<string, unknown> = {}
 
-  try {
-    // States we currently serve
-    const servedStates = new Set([
-      'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
-      'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-      'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
-      'VA','WA','WV','WI','WY','DC',
-    ])
+  // States we currently serve
+  const servedStates = new Set([
+    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+    'VA','WA','WV','WI','WY','DC',
+  ])
 
-    const stateUpper = (opp.state ?? '').toUpperCase()
-    const inServiceArea = servedStates.has(stateUpper)
+  const stateUpper = (opp.state ?? '').toUpperCase()
 
-    // Count active contractors in this state
-    const contractorCount = inServiceArea ? await sql`
-      SELECT COUNT(*)::int as count FROM contractor_profiles
-      WHERE ${stateUpper} = ANY(service_states)
-        AND is_active = true
-    ` : [{ count: 0 }]
+  // 🚨 A MISSING STATE IS NOT AN ANSWER OF "NO". The served-state lookup is a
+  // local set and cannot fail, but it can be UNANSWERABLE: with no state on the
+  // lead there is nothing to look up, and reporting `false` would be a
+  // conclusion drawn from absent data rather than from the data.
+  const stateKnown = stateUpper.length > 0
+  const inServiceArea: boolean | null = stateKnown ? servedStates.has(stateUpper) : null
 
-    const activeNearby = contractorCount[0]?.count ?? 0
-
-    data.in_service_area = inServiceArea
-    data.matched_state = stateUpper
-    data.active_contractors_nearby = activeNearby
-    data.nearest_contractor_mi = activeNearby > 0 ? 12 : null  // TODO: real geo distance
-
-    return {
-      status: inServiceArea ? 'passed' : 'failed',
-      data,
-      completed_at: new Date().toISOString(),
+  // 🚨 A COUNT IS A MEASUREMENT OR IT IS NULL — NEVER A FABRICATED ZERO.
+  // Two fabrications used to live here. The query named `is_active`, a column
+  // contractor_profiles has never had (it is `network_active`), so it threw
+  // 42703 and the old outer catch reported `in_service_area: true,
+  // note: 'service_area_check_skipped'` — asserting we serve an address on the
+  // strength of a query that had failed. And the skip branch handed back a
+  // hardcoded `[{ count: 0 }]`, so "0 active contractors nearby" was also
+  // asserted about states nobody had queried. A reader cannot tell a measured
+  // zero from an unmeasured one, and the two mean opposite things: "nobody can
+  // take this lead" versus "we do not know who can".
+  let activeNearby: number | null = null
+  let contractorsMeasured = false
+  if (inServiceArea === true) {
+    try {
+      const contractorCount = await sql`
+        SELECT COUNT(*)::int as count FROM contractor_profiles
+        WHERE ${stateUpper} = ANY(service_states)
+          AND network_active = true
+      `
+      activeNearby = Number(contractorCount[0]?.count ?? 0)
+      contractorsMeasured = true
+    } catch (err) {
+      data.note = 'contractor_count_unavailable'
+      data.error = String(err)
     }
-  } catch (err) {
-    // Service area check failure shouldn't kill the pipeline
-    return {
-      status: 'passed',  // soft pass — don't reject if query fails
-      data: { in_service_area: true, note: 'service_area_check_skipped', error: String(err) },
-      completed_at: new Date().toISOString(),
-    }
+  }
+
+  data.in_service_area = inServiceArea
+  data.matched_state = stateKnown ? stateUpper : null
+  data.active_contractors_nearby = activeNearby
+  // Never measured: there is no geo-distance source wired up yet. It used to
+  // report a literal 12 miles whenever the count was above zero.
+  data.nearest_contractor_mi = null
+  // `supported` is the step's own statement about whether it MEASURED what it
+  // reports. false means: read the nulls above as unknown, not as zero or false.
+  data.supported = inServiceArea !== null && contractorsMeasured
+
+  return {
+    // The pass/fail line is deliberately UNCHANGED for every input the old code
+    // could answer: a served state passes, anything else does not. An
+    // unavailable contractor count does not flip a served state to failed — that
+    // would let an outage start rejecting leads — and an unknown state does not
+    // auto-pass.
+    status: inServiceArea === true ? 'passed' : 'failed',
+    data,
+    completed_at: new Date().toISOString(),
   }
 }
 
@@ -581,9 +613,48 @@ async function runStep10(
 export async function runScreeningPipeline(opportunityId: string): Promise<PipelineResult> {
   const startTime = Date.now()
 
-  // Fetch the opportunity
+  // Fetch the opportunity.
+  //
+  // 🚨 THIS WAS `SELECT *`, AND THAT IS WHY EVERY LEAD FAILED.
+  // `SELECT *` looks harmless because it cannot throw, but it silently binds
+  // ScreeningOpportunity to whatever the table happens to call its columns — and
+  // this interface is written in the LEGACY vocabulary (`state`, `city`,
+  // `monthly_bill`, `utility_name`), none of which the governed migration chain
+  // creates. So `opp.state` was undefined for every row ever screened. Step 3
+  // saw no state and failed 'invalid_address'; step 4 matched no service area
+  // and failed 'outside_service_area'. A flawless Illinois address came back
+  // grade F. And since auto_decision = 'pass' is one of only two ways to open
+  // the marketplace gate, automated release was unreachable.
+  //
+  // The mapping is explicit now, so a renamed column breaks the query loudly
+  // instead of quietly emptying a field. The COALESCE pairs are not decoration:
+  // the intake pipeline writes email/phone/address_line1/zip while the
+  // contractor-shared and simulator paths write the homeowner_*/address/
+  // location_zip block, and reading only one set auto-fails the other half of
+  // the network on step 1 instead of step 3.
   const oppRows = await sql`
-    SELECT * FROM network_opportunities WHERE id = ${opportunityId} LIMIT 1
+    SELECT
+      no.id,
+      COALESCE(no.first_name, NULLIF(SPLIT_PART(COALESCE(no.homeowner_name, ''), ' ', 1), '')) AS homeowner_first_name,
+      COALESCE(no.last_name, NULLIF(BTRIM(REGEXP_REPLACE(COALESCE(no.homeowner_name, ''), '^[^[:space:]]+[[:space:]]*', '')), '')) AS homeowner_last_name,
+      no.homeowner_name,
+      COALESCE(no.homeowner_email, no.email) AS homeowner_email,
+      COALESCE(no.homeowner_phone, no.phone) AS homeowner_phone,
+      COALESCE(no.address, no.address_line1)  AS address,
+      no.location_city  AS city,
+      no.location_state AS state,
+      COALESCE(no.location_zip, no.zip) AS zip,
+      no.lat,
+      no.lng,
+      no.monthly_bill_amount AS monthly_bill,
+      no.annual_usage_kwh,
+      no.utility_provider AS utility_name,
+      no.roof_age_years,
+      no.structure_type,
+      no.source_type
+    FROM network_opportunities no
+    WHERE no.id = ${opportunityId}
+    LIMIT 1
   `
   const opp = (oppRows[0] as ScreeningOpportunity | undefined)
   if (!opp) throw new Error(`Opportunity ${opportunityId} not found`)
@@ -687,9 +758,17 @@ export async function runScreeningPipeline(opportunityId: string): Promise<Pipel
       step3_completed_at    = ${step3.completed_at},
       step3_error           = ${step3.error ?? null},
       step4_status          = ${step4.status},
-      step4_in_service_area = ${(s4.in_service_area as boolean) ?? true},
+      -- NULL MEANS UNKNOWN AND MUST REACH THE COLUMN AS NULL. These two
+      -- defaulted to true and to 0, which turned an absent measurement into a
+      -- claim on the way to the database: "we serve this address" and "no
+      -- contractor is near it". Both columns are nullable in migrations 049/063
+      -- precisely so the unknown can be stored as unknown, and step4_data
+      -- carries the supported flag that says which reading applies.
+      -- (No backticks in this comment on purpose: it lives inside a JS template
+      --  literal, and one backtick here ends the query.)
+      step4_in_service_area = ${(s4.in_service_area as boolean) ?? null},
       step4_matched_state   = ${(s4.matched_state as string) ?? null},
-      step4_active_contractors_nearby = ${(s4.active_contractors_nearby as number) ?? 0},
+      step4_active_contractors_nearby = ${(s4.active_contractors_nearby as number) ?? null},
       step4_data            = ${JSON.stringify(s4)},
       step4_completed_at    = ${step4.completed_at},
       step4_error           = ${step4.error ?? null},

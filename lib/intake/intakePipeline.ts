@@ -78,6 +78,34 @@ function makeEventId(): string {
   return `evt_${ts}_${rand}`
 }
 
+/**
+ * True ONLY for the two errors a pre-089 database can raise about the
+ * idempotency key itself:
+ *
+ *   42703 undefined_column   naming intake_idempotency_key
+ *   42P10 invalid_column_reference  — no unique index for ON CONFLICT (…)
+ *
+ * 🚨 THIS PREDICATE IS THE WHOLE POINT OF THE REPAIR. The catch it guards used
+ * to be unconditional, so ANY insert failure was announced as "idempotency
+ * column missing, plain insert" and retried against a second INSERT that shared
+ * the first one's columns. A total intake outage therefore left one trace: a
+ * console warning naming the wrong cause — and naming a migration (089) that has
+ * in fact shipped, so whoever read it went looking for a migration to run
+ * instead of for the five phantom columns. Anything that is not specifically
+ * about the key must escape this catch and be logged as DB_INSERT_FAILED.
+ */
+function isIdempotencyKeyUnavailable(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  const message = String((err as { message?: unknown } | null)?.message ?? '')
+  const namesTheKey = message.includes('intake_idempotency_key')
+  if (code === '42703') return namesTheKey
+  if (code === '42P10') return true
+  // Some drivers surface the SQLSTATE only in the message text.
+  if (namesTheKey && /does not exist|undefined[_ ]column/i.test(message)) return true
+  if (/no unique or exclusion constraint matching the ON CONFLICT/i.test(message)) return true
+  return false
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Main pipeline
 // ────────────────────────────────────────────────────────────────────────────
@@ -174,8 +202,10 @@ export async function runIntakePipeline(
   // ── Step 2.5: Idempotency pre-check — if this exact delivery was already
   // processed (same idempotency key, e.g. a webhook the provider retried),
   // return the existing lead instead of creating a duplicate. Best-effort:
-  // degrades silently if the intake_idempotency_key column isn't present yet
-  // (migration 089 pending), so it can never break lead intake.
+  // degrades silently if the intake_idempotency_key column isn't present on this
+  // database, so it can never break lead intake. (Migration 089 has shipped —
+  // lib/migrations/089_intake_idempotency_key.sql — so on any governed database
+  // this path succeeds; the guard covers an un-migrated one.)
   if (options.idempotency_key) {
     try {
       const prior = await sql`
@@ -208,40 +238,92 @@ export async function runIntakePipeline(
     const isDupFlagged = dupResult.is_flagged
     const idemKey = options.idempotency_key ?? null
 
+    // 🚨 CANONICAL COLUMNS, AND A STATUS THE CHECK CONSTRAINT ACCEPTS.
+    //
+    // Both of these INSERTs used to name columns network_opportunities has never
+    // had. They exist only in the secret-gated inline DDL at
+    // app/api/migrate/route.ts, which no file in lib/migrations/ mirrors — and
+    // lib/migrations/manifest.ts states the legacy migrations/ directory is not
+    // scanned, so that DDL is not part of the governed chain and never ran:
+    //
+    //   city                 → location_city
+    //   state                → location_state
+    //   zip                  → location_zip  (and `zip`, see below)
+    //   square_feet_living   → square_feet
+    //   is_duplicate_flagged → duplicate_flag
+    //   property_type        → no column at all; kept in intake_metadata
+    //   consent_given        → no column at all; kept in intake_metadata
+    //   notes                → no column at all; kept in intake_metadata
+    //
+    // And `status = 'new'` is not in migration 047's CHECK constraint at all.
+    // Even with every column corrected it would have failed 23514. 'intake' is
+    // that enum's documented "just received, not yet screened" value and the
+    // column default.
+    //
+    // The result was total: every Google Ads / Meta / partner-webhook lead was
+    // validated, deduped, logged as an intake event and then dropped. Paid
+    // acquisition produced no sellable inventory, and the only symptom was a
+    // console warning blaming a pending migration.
+    //
+    // 🚨 THE PAIRED COLUMNS ARE WRITTEN BOTH WAYS, ON PURPOSE. 047 and 054 left
+    // the table with two live spellings for three fields, and readers are split
+    // across them: lib/intake/duplicateDetector.ts matches on `zip` and
+    // `address_line1`, while the territory rollups and the screening pipeline
+    // read `location_zip` and `address`. Writing one spelling silently disables
+    // whichever readers use the other — that is how duplicate detection would be
+    // switched off for exactly the leads this INSERT creates. Same reasoning for
+    // the homeowner block: /api/admin/network/marketplace and
+    // /api/network/my-claims select homeowner_name / homeowner_email /
+    // homeowner_phone, so a lead written only as first_name/last_name renders
+    // nameless on the marketplace.
+    const homeownerName =
+      [payload.first_name, payload.last_name].filter(Boolean).join(' ').trim() || null
+    // Fields with no canonical column of their own are preserved here rather
+    // than dropped. Consent in particular is a legal record, not a nice-to-have.
+    const intakeMetadata = JSON.stringify({
+      consent_given: payload.consent_given,
+      consent_text: payload.consent_text,
+      consent_timestamp: payload.consent_timestamp,
+      notes: payload.notes,
+      property_type: payload.property_type,
+    })
+
     // RACE-SAFE INSERT: write the idempotency key INSIDE the insert with
-    // ON CONFLICT DO NOTHING, so the unique index (migration 089) is what
-    // serializes concurrent re-deliveries — not a non-transactional pre-check
-    // plus a post-insert UPDATE (which left a duplicate row already inserted).
-    // A NULL key never conflicts (Postgres treats NULLs as distinct), so plain
-    // keyless submissions are unaffected. Falls back to a keyless insert if the
-    // column isn't present yet (migration 089 pending) so intake never breaks.
+    // ON CONFLICT DO NOTHING, so the unique index (migration 089, shipped) is
+    // what serializes concurrent re-deliveries — not a non-transactional
+    // pre-check plus a post-insert UPDATE (which left a duplicate row already
+    // inserted). A NULL key never conflicts (Postgres treats NULLs as distinct),
+    // so plain keyless submissions are unaffected. The fallback below covers a
+    // database on which 089 has genuinely not been applied yet.
     let rows: Array<{ id?: string }>
     try {
       rows = await sql`
         INSERT INTO network_opportunities (
           first_name, last_name, email, phone,
-          address_line1, address_line2, city, state, zip, county,
+          homeowner_name, homeowner_email, homeowner_phone,
+          address, address_line1, address_line2,
+          location_city, location_state, location_zip, zip, county,
           latitude, longitude,
           monthly_bill_amount, current_electricity_rate,
-          property_type, home_ownership, roof_type, roof_shade,
-          roof_age_years, square_feet_living,
+          home_ownership, roof_type, roof_shade,
+          roof_age_years, square_feet,
           source_system, source_channel,
           utm_source, utm_medium, utm_campaign, utm_content, utm_term,
           gclid, fbclid,
-          is_duplicate_flagged, duplicate_score, duplicate_of_id,
-          consent_given,
-          notes,
+          duplicate_flag, duplicate_score, duplicate_of_id,
+          intake_metadata,
           intake_idempotency_key,
           status
         )
         VALUES (
           ${payload.first_name}, ${payload.last_name},
           ${payload.email}, ${payload.phone},
-          ${payload.address_line1}, ${payload.address_line2},
-          ${payload.city}, ${payload.state}, ${payload.zip}, ${payload.county},
+          ${homeownerName}, ${payload.email}, ${payload.phone},
+          ${payload.address_line1}, ${payload.address_line1}, ${payload.address_line2},
+          ${payload.city}, ${payload.state}, ${payload.zip}, ${payload.zip}, ${payload.county},
           ${payload.latitude}, ${payload.longitude},
           ${payload.monthly_bill_amount}, ${payload.current_electricity_rate},
-          ${payload.property_type}, ${payload.home_ownership},
+          ${payload.home_ownership},
           ${payload.roof_type}, ${payload.roof_shade},
           ${payload.roof_age_years}, ${payload.square_feet},
           ${payload.source_system}, ${payload.source_channel},
@@ -250,42 +332,49 @@ export async function runIntakePipeline(
           ${payload.gclid}, ${payload.fbclid},
           ${isDupFlagged}, ${dupResult.score},
           ${dupResult.best_match?.opportunity_id || null},
-          ${payload.consent_given},
-          ${payload.notes},
+          ${intakeMetadata},
           ${idemKey},
-          'new'
+          'intake'
         )
         ON CONFLICT (intake_idempotency_key) DO NOTHING
         RETURNING id
       `
     } catch (colErr) {
-      // intake_idempotency_key column/index not present yet (migration 089
-      // pending) — fall back to a plain keyless insert so intake never breaks.
+      // 🚨 NARROW. Only the key's own absence may be handled here — see
+      // isIdempotencyKeyUnavailable. Everything else is a real failure and has
+      // to surface, because the alternative is what shipped: a schema mismatch
+      // wearing a pending-migration costume.
+      if (!isIdempotencyKeyUnavailable(colErr)) throw colErr
+      // intake_idempotency_key column/index not present yet (migration 089 not
+      // applied on this database) — fall back to a keyless insert so intake
+      // never breaks.
       console.warn('[intakePipeline] idempotency column missing, plain insert:', (colErr as Error).message)
       rows = await sql`
         INSERT INTO network_opportunities (
           first_name, last_name, email, phone,
-          address_line1, address_line2, city, state, zip, county,
+          homeowner_name, homeowner_email, homeowner_phone,
+          address, address_line1, address_line2,
+          location_city, location_state, location_zip, zip, county,
           latitude, longitude,
           monthly_bill_amount, current_electricity_rate,
-          property_type, home_ownership, roof_type, roof_shade,
-          roof_age_years, square_feet_living,
+          home_ownership, roof_type, roof_shade,
+          roof_age_years, square_feet,
           source_system, source_channel,
           utm_source, utm_medium, utm_campaign, utm_content, utm_term,
           gclid, fbclid,
-          is_duplicate_flagged, duplicate_score, duplicate_of_id,
-          consent_given,
-          notes,
+          duplicate_flag, duplicate_score, duplicate_of_id,
+          intake_metadata,
           status
         )
         VALUES (
           ${payload.first_name}, ${payload.last_name},
           ${payload.email}, ${payload.phone},
-          ${payload.address_line1}, ${payload.address_line2},
-          ${payload.city}, ${payload.state}, ${payload.zip}, ${payload.county},
+          ${homeownerName}, ${payload.email}, ${payload.phone},
+          ${payload.address_line1}, ${payload.address_line1}, ${payload.address_line2},
+          ${payload.city}, ${payload.state}, ${payload.zip}, ${payload.zip}, ${payload.county},
           ${payload.latitude}, ${payload.longitude},
           ${payload.monthly_bill_amount}, ${payload.current_electricity_rate},
-          ${payload.property_type}, ${payload.home_ownership},
+          ${payload.home_ownership},
           ${payload.roof_type}, ${payload.roof_shade},
           ${payload.roof_age_years}, ${payload.square_feet},
           ${payload.source_system}, ${payload.source_channel},
@@ -294,9 +383,8 @@ export async function runIntakePipeline(
           ${payload.gclid}, ${payload.fbclid},
           ${isDupFlagged}, ${dupResult.score},
           ${dupResult.best_match?.opportunity_id || null},
-          ${payload.consent_given},
-          ${payload.notes},
-          'new'
+          ${intakeMetadata},
+          'intake'
         )
         RETURNING id
       `

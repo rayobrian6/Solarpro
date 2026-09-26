@@ -44,15 +44,35 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get("limit") ?? "25"), 100);
     const offset = (page - 1) * limit;
 
+    // 🚨 CANONICAL COLUMNS, ALIASED TO THE RESPONSE KEYS THE UI ALREADY BINDS TO.
+    // This SELECT used to name no.homeowner_first_name / no.city / no.state,
+    // none of which the governed migration chain creates, so it threw 42703 and
+    // the handler's single try/catch returned 500 — which
+    // app/admin/network/page.tsx renders as "Queue is empty". An operational
+    // backlog and a clean desk looked identical, and the clean desk is the one
+    // nobody investigates.
+    //
+    // The aliases matter as much as the columns: the response shape is a
+    // contract with the queue table, which reads row.state,
+    // row.homeowner_first_name and row.homeowner_last_name. Renaming the payload
+    // keys would trade a 500 for silently blank cells.
+    //
+    // 🚨 AND BOTH NAME WRITERS ARE LIVE. The intake pipeline and the admin
+    // opportunities route write first_name/last_name; the simulator and the
+    // contractor-shared path write the single homeowner_name. Reading only one
+    // of them blanks half the queue. The COALESCE/SPLIT_PART pair is the same
+    // expression /api/admin/network/intake already uses for this.
     const rows = await sql`
       SELECT
         osq.*,
-        no.homeowner_first_name,
-        no.homeowner_last_name,
-        no.homeowner_phone,
-        no.address,
-        no.city,
-        no.state,
+        COALESCE(no.first_name, NULLIF(SPLIT_PART(COALESCE(no.homeowner_name, ''), ' ', 1), '')) AS homeowner_first_name,
+        COALESCE(no.last_name, NULLIF(BTRIM(REGEXP_REPLACE(COALESCE(no.homeowner_name, ''), '^[^[:space:]]+[[:space:]]*', '')), '')) AS homeowner_last_name,
+        no.homeowner_name,
+        COALESCE(no.homeowner_phone, no.phone) AS homeowner_phone,
+        COALESCE(no.address, no.address_line1) AS address,
+        no.location_city  AS city,
+        no.location_state AS state,
+        COALESCE(no.location_zip, no.zip) AS zip,
         no.source_type,
         no.status AS opportunity_status,
         no.created_at AS opportunity_created_at,
@@ -64,8 +84,14 @@ export async function GET(req: NextRequest) {
       JOIN network_opportunities no ON no.id = osq.opportunity_id
       LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = osq.opportunity_id
       WHERE
-        (${pipelineStatus ?? null} IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ""})
-        AND (${autoDecision ?? null} IS NULL OR osq.auto_decision = ${autoDecision ?? ""})
+      -- ::text IS LOAD-BEARING. A bare parameter in "$1 IS NULL" gives Postgres
+      -- no context to infer a type from, so it refuses the whole statement with
+      -- 42P18 (could not determine data type of parameter $1) — a SECOND cause
+      -- of this endpoint's 500, independent of the phantom columns above and
+      -- hidden behind them because Postgres reports only the first failure.
+      -- /api/admin/network/intake already casts for exactly this reason.
+        (${pipelineStatus ?? null}::text IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ""})
+        AND (${autoDecision ?? null}::text IS NULL OR osq.auto_decision = ${autoDecision ?? ""})
       ORDER BY osq.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -74,17 +100,31 @@ export async function GET(req: NextRequest) {
       SELECT COUNT(*)::int as total
       FROM opportunity_screening_queue osq
       WHERE
-        (${pipelineStatus ?? null} IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ""})
-        AND (${autoDecision ?? null} IS NULL OR osq.auto_decision = ${autoDecision ?? ""})
+        (${pipelineStatus ?? null}::text IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ""})
+        AND (${autoDecision ?? null}::text IS NULL OR osq.auto_decision = ${autoDecision ?? ""})
     `;
     const countResult = countRows[0] as Record<string, unknown>;
 
+    // 🚨 ONE VOCABULARY FOR THE QUEUE, SHARED WITH /api/admin/network/health.
+    // These four counters used to be aliased `pending` / `running` / `completed`
+    // / `failed`, while the Screening Queue tiles read stats.pending_screening
+    // and stats.running_screening. Two of five tiles therefore displayed a bold
+    // 0 forever beside three that showed real numbers — and an operator reading
+    // a drained queue stops checking it.
+    //
+    // The endpoint is renamed rather than the page, for two reasons: the
+    // *_screening names are already the published vocabulary of
+    // /api/admin/network/health (pending_screening, running_screening,
+    // failed_screening), so this makes both endpoints describe the same queue
+    // with the same words; and the page is this endpoint's only consumer, so
+    // the rename needs no change there at all. All four move together — leaving
+    // two of them on the old names is how the mismatch happens again.
     const statsRows = await sql`
       SELECT
-        COUNT(*) FILTER (WHERE pipeline_status = 'pending')      AS pending,
-        COUNT(*) FILTER (WHERE pipeline_status = 'running')      AS running,
-        COUNT(*) FILTER (WHERE pipeline_status = 'completed')    AS completed,
-        COUNT(*) FILTER (WHERE pipeline_status = 'failed')       AS failed,
+        COUNT(*) FILTER (WHERE pipeline_status = 'pending')      AS pending_screening,
+        COUNT(*) FILTER (WHERE pipeline_status = 'running')      AS running_screening,
+        COUNT(*) FILTER (WHERE pipeline_status = 'completed')    AS completed_screening,
+        COUNT(*) FILTER (WHERE pipeline_status = 'failed')       AS failed_screening,
         COUNT(*) FILTER (WHERE auto_decision = 'pass')           AS auto_passed,
         COUNT(*) FILTER (WHERE auto_decision = 'fail')           AS auto_failed,
         COUNT(*) FILTER (WHERE auto_decision = 'needs_review')   AS needs_review,
@@ -204,13 +244,27 @@ async function scoreAndPersistOpportunity(
     : null;
   const networkScore = Math.round(scored.overall_score);
 
+  // 🚨 CANONICAL COLUMNS ONLY. This UPDATE used to name two columns that the
+  // governed migration chain has never created — they exist only in the
+  // secret-gated inline DDL at app/api/migrate/route.ts, which no migration
+  // file mirrors. Postgres stops at the first one (42703), so this statement
+  // always threw, and because it runs on the way to the marketplace release it
+  // took the ONLY production writer of the visibility gate down with it.
+  //
+  //   listing_price — never existed. Every reader already gets its number from
+  //                   asking_price; /api/admin/network/marketplace literally
+  //                   selects `no.asking_price AS listing_price`, so the phantom
+  //                   write was never the source of the figure anyone saw.
+  //   scoring_data  — never existed either. The full breakdown is persisted
+  //                   canonically by the opportunity_intelligence upsert
+  //                   immediately below (sub-scores, price band, rationale,
+  //                   risk flags, executive summary), so nothing is lost by
+  //                   dropping it; it had no reader anywhere in app/ or lib/.
   await sql`
     UPDATE network_opportunities SET
       opportunity_score = ${networkScore},
       opportunity_grade = ${networkOpportunityGrade},
-      listing_price = ${pricing.price},
       asking_price = COALESCE(asking_price, ${pricing.price}),
-      scoring_data = ${JSON.stringify(scored)},
       scored_at = COALESCE(scored_at, NOW()),
       updated_at = NOW()
     WHERE id = ${opportunity_id}
@@ -323,12 +377,22 @@ export async function PATCH(req: NextRequest) {
     let overrideDecision: "pass" | "fail" | "hold" | null = null;
     let eventType = "screening.override";
     let responsePayload: Record<string, unknown> = {};
+    // 🚨 SCORING IS DEFERRED PAST THE DECISION WRITES ON PURPOSE.
+    // It used to be awaited HERE, in front of them. Scoring reaches the
+    // opportunity_intelligence upsert and the whole enrichment pipeline, so any
+    // failure in any of that — an outage, a bad row, a phantom column — threw
+    // before the operator's decision was recorded, and a 500 came back. A
+    // scoring problem and a refusal became indistinguishable, and the operator's
+    // ruling was silently discarded. The decision is the operator's; the score
+    // is an enrichment of it and must never be able to veto it.
+    let needsScoring = false;
+    let scoringError: string | null = null;
 
     if (normalizedAction === "approve") {
       overrideDecision = "pass";
       screeningStatus = "approved";
       newStatus = "scored";
-      await scoreAndPersistOpportunity(sql, opportunity_id, admin.id);
+      needsScoring = true;
       responsePayload = {
         action: normalizedAction,
         screening_status: screeningStatus,
@@ -378,24 +442,15 @@ export async function PATCH(req: NextRequest) {
           { status: 409 },
         );
       }
-      const { scored, pricing, enrichment } = await scoreAndPersistOpportunity(
-        sql,
-        opportunity_id,
-        admin.id,
-      );
       overrideDecision = "pass";
       screeningStatus = "approved";
       newStatus = "live";
       eventType = "opportunity.published";
+      needsScoring = true;
       responsePayload = {
         action: normalizedAction,
         screening_status: screeningStatus,
         new_status: newStatus,
-        score: scored.overall_score,
-        grade: scored.overall_grade,
-        market_price: pricing.price,
-        enrichment_completeness: enrichment.completeness,
-        enrichment_warnings: enrichment.warnings,
       };
     }
 
@@ -421,6 +476,41 @@ export async function PATCH(req: NextRequest) {
         updated_at = NOW()
       WHERE id = ${opportunity_id}
     `;
+
+    // ── Scoring + enrichment, AFTER the decision is durable and in its own
+    //    try/catch. Two independent guards, deliberately: the ordering means a
+    //    failure cannot reach back and undo the decision, and the catch means it
+    //    cannot turn a recorded decision into a 500 the operator reads as "it
+    //    did not work" and retries.
+    //
+    // 🚨 AND THE FAILURE IS REPORTED, NOT SWALLOWED. A silently-absent score is
+    //    the same defect in a new costume: the operator would see success and a
+    //    blank grade and have no way to tell an unscorable lead from a broken
+    //    scorer. `scoring_error` on the response says which.
+    if (needsScoring) {
+      try {
+        const { scored, pricing, enrichment } = await scoreAndPersistOpportunity(
+          sql,
+          opportunity_id,
+          admin.id,
+        );
+        responsePayload = {
+          ...responsePayload,
+          score: scored.overall_score,
+          grade: scored.overall_grade,
+          market_price: pricing.price,
+          enrichment_completeness: enrichment.completeness,
+          enrichment_warnings: enrichment.warnings,
+        };
+      } catch (scoreErr) {
+        scoringError = (scoreErr as Error).message;
+        console.error(
+          "[PATCH /api/admin/network/screening] scoring/enrichment failed after the decision was recorded",
+          scoreErr,
+        );
+        responsePayload = { ...responsePayload, scoring_error: scoringError };
+      }
+    }
 
     await logNetworkEvent({
       event_type: eventType,
