@@ -117,13 +117,46 @@ Full detail in `NEEDS-RAY.md`. One line each; each blocks **only its own slice**
 
 ---
 
+## VERIFIED — the platform audit, 53 findings across nine lanes
+
+Full detail in `PLATFORM-FINDINGS.md`. 216 agents, 292 files, three adversarial
+verifiers per finding, 16 killed. **Three fixed** (below); **50 recorded, not
+fixed** — they are VERIFIED, not SHIPPED, and the distinction is deliberate.
+
+| Lane | Confirmed | Headline |
+|---|---|---|
+| CRM / Operations | 7 | The route built to keep the two stage authorities in sync has zero callers |
+| Proposal / Customer | 8 | Calculator is healthy; the surfaces around it still show an "ITC: On" badge for a repealed credit |
+| Marketplace | 6 | Nothing can legitimately enter the marketplace — the only release writer 500s before writing |
+| Homeowner | 8 | Portal bill upload discards the actual bill and files a JSON summary under its name |
+| Admin | 6 | "All Systems Operational" hardcodes 4 of 6 service statuses with invented latencies |
+| Procurement | 7 | The engineering BOM is never invalidated when equipment changes, and the stale copy is auto-filed |
+| Finance | 4 | A §48E banner gated on two frozen `true` literals ships a 30 % federal claim |
+| Survey | 3 | The integration dashboard is hardcoded to a type-level `false` and can never go green |
+| Enterprise | 4 | **Both P0s fixed** — see SHIPPED |
+
+---
+
+## SHIPPED — the P0s the audit found
+
+| Commit | What |
+|---|---|
+| `6115a285` | 🚨 **P0.** Four org member mutations ran with NO authorization: with WRITE on and AUTHORITY off, any authenticated user knowing two UUIDs could PATCH `{role:'owner'}` onto a member, or delete them. A viewer could promote themselves |
+| `db3180e5` | 🚨 **P0.** Removing a member from one organization cleared their `org_id` even when it pointed at another — and undid the library's own scoped clear and re-sync |
+
+🚨 **One verifier REFUTED the authorization finding**, correctly: the flag-conditional
+is documented architecture and the original report misquoted the route header. Both
+true, and neither disposed of the hole — the conditional is fine, the empty `else`
+was not. The refutation *improved* the fix instead of killing it. That is what the
+adversarial pass is for, and it is why refutations are read rather than counted.
+
+---
+
 ## ACTIVE
 
 | Lane | Shape |
 |---|---|
-| Platform gauntlet | CRM, proposal, marketplace, survey, homeowner, admin, procurement, finance, enterprise — read-only, adversarially verified |
-| Duplicated engineering authorities | voltage drop, conduit fill, OCPD/busbar, rooftop adder, grounding, battery/PCS, structural constants, module/inverter limits |
-| R10 status-authority trace | mapping every status notion to decide what replaces the dead fields |
+| Duplicated engineering authorities | voltage drop, conduit fill, OCPD/busbar, rooftop adder, grounding, battery/PCS, structural constants, module/inverter limits — still running |
 
 ---
 
