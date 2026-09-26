@@ -71,6 +71,21 @@ and is queued separately.
 
 ---
 
+## R7 — The roof has no building-elevation sheet, so wall and ridge heights reach nothing
+
+| | |
+|---|---|
+| **Severity** | MEDIUM — a permit-package scope question, and the permit package is the wedge |
+| **How it surfaced** | A systematic sweep of your output-consistency law: every kind of thing a person can place or shape in the studio, checked for a consumer that carries it into an output. Panels, roof faces and hand-placed obstructions are all consumed (the chimney end-to-end, in a browser, today). Measurements are a ruler — two picked points and a computed distance, no user-entered value — so propagating them would be circular. Ground and fence scalars are placement inputs, and the rows they produce are what reaches the sheets. **One entry came back with no consumer and no good reason: the building-section model's wall, eave and ridge heights.** |
+| **The finding** | Not that the data is unused — that **no roof sheet draws a building elevation.** The fence gets `SOLAR FENCE ELEVATION & PLAN`. The roof gets `SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS` (top-down) and `ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION` (the mount stack on a rafter, not the building). So a person can model a 10 ft 6 wall and a ridge height, see it in 3D, and no drawing in the package shows either. |
+| **Decision required** | Does the package need a roof building-elevation sheet? Many AHJs ask for one showing the array against the building, and you know which ones you submit to — I am not going to guess an AHJ requirement. |
+| **Why it is yours, not a bug to fix** | Adding a sheet is a feature with real scope: a new sheet id in the manifest, a drawing routine, a page-fit pass, and it MOVES THE PERMIT SNAPSHOT DIGEST, which retires live PE approvals (see R3). None of that should start on my judgement of what an inspector wants. |
+| **What is already true, and cheap if you say yes** | The section model already carries the heights, and the vertical datum work is done. The missing piece is the sheet, not the data. |
+| **Blocked** | A roof elevation sheet only. |
+| **NOT blocked** | Everything else. The gap is recorded in a machine-checked ledger (`tests/outputConsistencyLedger.test.ts`), which fails if anyone wires the section into an output without promoting the entry — so it cannot rot into a hidden parallel world while it waits. |
+
+---
+
 ## R6 — A geocoder silently overwrites a coordinate a human set
 
 | | |
