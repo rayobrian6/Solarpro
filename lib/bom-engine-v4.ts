@@ -24,10 +24,11 @@ import { resolveIntegratedEquipment, type IntegratedEquipmentPlan } from './equi
 import {
   resolveMeteringRequirement,
   ungroundedConductorsForService,
+  getCurrentTransformer,
   type MeteringResolution,
   type MeteringCtLine,
 } from './equipment/currentTransformers';
-import { resolveDesignMetering } from './equipment/designMetering';
+import { resolveDesignMetering, type SldMeteringDrawing } from './equipment/designMetering';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { getMountingSystemById } from './mounting-hardware-db';
 import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
@@ -1004,6 +1005,10 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   // ── STAGE 2: DC ─────────────────────────────────────────────────────────────
 
   const isMicro = norm === 'MICROINVERTER' || norm === 'AC_COUPLED_BATTERY';
+  // The AC branch count the trunk below settles on, kept for the integrated-BOS
+  // resolver further down: a standalone IQ Gateway's landing panel and its
+  // branch breakers are sized from it (see standaloneGatewayBom).
+  let _trunkBranchCount: number | undefined;
 
   if (isMicro) {
     // ── AC trunk/bus cable — BRAND-AGNOSTIC resolver (lib/equipment/trunkCable) ──
@@ -1039,6 +1044,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     });
 
     if (plan) {
+      _trunkBranchCount = plan.branchCount;
       const { system, cable } = plan;
       const orientLabel = cable.orientation === 'fixed' ? '' : ` (${cable.orientation})`;
       // §13 — Enphase Q-Cable / AC trunk is AC BRANCH-CIRCUIT equipment (240 V AC
@@ -1136,6 +1142,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     } else {
       // Unknown micro brand — generic AC trunk line so the wire never silently vanishes.
       const genericSections = branchCountOverride ?? Math.ceil(trunkDeviceCount / 13);
+      _trunkBranchCount = genericSections;
       items.push(addItem('ac', 'trunk_cable', microBrand, 'AC Trunk Cable (brand TBD)',
         'TRUNK-TBD', `AC trunk cable — 1 drop per micro (${trunkDeviceCount} devices, brand not in trunk catalog)`,
         trunkDeviceCount, 'ea', 'NEC 690.31', 'one drop per device', `${trunkDeviceCount}`, true));
@@ -1367,12 +1374,19 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   // gets the real SKU (the registry accessory strings had a fabricated 4C and
   // no combiner at all for IQ8H/IQ8A/IQ8AC). Falls back to the legacy
   // requiredAccessories for non-integrated ecosystems (e.g. SolarEdge gateway).
+  //
+  // The REAL branch count now, not the hardcoded 0 this call used to pass. For
+  // every IQ Combiner plan the count only feeds `branchSlotWarning`, which this
+  // path never reads, so their lines are unchanged. For a standalone IQ Gateway
+  // it is the whole answer: the landing panel is sized for one 2P breaker per
+  // branch, and a 0 sized every system's panel for no branches at all.
+  const _bosBranchCount = isMicro ? (_trunkBranchCount ?? 0) : 0;
   const _bosPlan = resolveIntegratedEquipment({
     inverterManufacturer: inverterEntry?.manufacturer ?? '',
     inverterModel: inverterEntry?.model ?? '',
     isMicro,
     totalDevices: isMicro ? (input.deviceCount ?? input.moduleCount ?? 0) : 0,
-    branchCount: 0,
+    branchCount: _bosBranchCount,
     hasBattery: !!input.batteryId || (input.batteryCount ?? 0) > 0,
     // 🚨 WITHOUT THIS THE BOM SHIPPED A DIFFERENT COMBINER FROM THE DRAWINGS.
     // The resolver falls back to the current-generation 6C when no pairing is
@@ -1386,28 +1400,51 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     selectedCombinerId: input.selectedCombinerId ?? null,
   });
   const _bosEmitted = new Set<string>();
-  // An integrated combiner (e.g. IQ Combiner 6C) HOUSES the gateway — don't also
-  // emit a separate standalone gateway line (double-count).
-  if (_bosPlan.hasIntegratedGateway) _bosEmitted.add('gateway');
-  for (const d of _bosPlan.devices) {
-    const cat = d.kind === 'gateway' ? 'gateway' : 'combiner';
-    _bosEmitted.add(cat);
-    items.push(addItem(cat === 'gateway' ? 'monitoring' : 'inverter', cat, d.brand, d.model,
-      d.partNumber ?? '—', `Integrated ${d.roleSummary}`, 1, 'ea',
-      (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos', '1', true));
-    log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
-      quantity: 1, derivedFrom: 'integrated-bos resolver', formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
-  }
-  // The metering hardware that device needs and does not contain.
-  {
-    const _ct = resolveBomMetering(_bosPlan, input.acVoltage, input.interconnectionMethod, input.consumptionCtLocation);
-    for (const line of _ct.lines) {
-      items.push(meteringCtItem(line));
-      log.push({ stageId: 'monitoring', category: 'metering_ct', item: line.model,
-        quantity: line.quantity, derivedFrom: line.derivedFrom, formula: line.formula,
-        necReference: line.necReference });
+  if (isStandaloneGatewayPlan(_bosPlan)) {
+    // A standalone IQ Gateway: the gateway, the panel its branches land in, the
+    // breakers and conductors that join them, and its CTs — every line from the
+    // ONE builder the per-brand-group path and the permit reconcile also call.
+    const _sg = standaloneGatewayBom(_bosPlan, {
+      branchCount: _bosBranchCount,
+      acVoltage: input.acVoltage,
+      interconnectionMethod: input.interconnectionMethod,
+      consumptionCtLocation: input.consumptionCtLocation,
+      requiresACDisconnect: input.requiresACDisconnect,
+    });
+    for (const it of _sg.items) {
+      items.push(it);
+      log.push(bomLogEntryOf(it));
     }
-    if (_ct.blockerMessage) warnings.push(_ct.blockerMessage);
+    // Read here for this topology only: the IQ Combiner plans above never
+    // surfaced it on this path, and they keep not doing so.
+    if (_bosPlan.branchSlotWarning) warnings.push(_bosPlan.branchSlotWarning);
+    warnings.push(..._sg.warnings);
+    _bosEmitted.add('gateway');
+    _bosEmitted.add('combiner');
+  } else {
+    // An integrated combiner (e.g. IQ Combiner 6C) HOUSES the gateway — don't also
+    // emit a separate standalone gateway line (double-count).
+    if (_bosPlan.hasIntegratedGateway) _bosEmitted.add('gateway');
+    for (const d of _bosPlan.devices) {
+      const cat = d.kind === 'gateway' ? 'gateway' : 'combiner';
+      _bosEmitted.add(cat);
+      items.push(addItem(cat === 'gateway' ? 'monitoring' : 'inverter', cat, d.brand, d.model,
+        d.partNumber ?? '—', `Integrated ${d.roleSummary}`, 1, 'ea',
+        (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos', '1', true));
+      log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
+        quantity: 1, derivedFrom: 'integrated-bos resolver', formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
+    }
+    // The metering hardware that device needs and does not contain.
+    {
+      const _ct = resolveBomMetering(_bosPlan, input.acVoltage, input.interconnectionMethod, input.consumptionCtLocation);
+      for (const line of _ct.lines) {
+        items.push(meteringCtItem(line));
+        log.push({ stageId: 'monitoring', category: 'metering_ct', item: line.model,
+          quantity: line.quantity, derivedFrom: line.derivedFrom, formula: line.formula,
+          necReference: line.necReference });
+      }
+      if (_ct.blockerMessage) warnings.push(_ct.blockerMessage);
+    }
   }
 
   // Gateway (optimizer or microinverter topology)
@@ -1428,7 +1465,14 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   // Combiner (microinverter topology) — only when no integrated BOS combiner
   // (e.g. Enphase IQ Combiner) already covers the branch aggregation.
-  if (isMicro && !_bosEmitted.has('combiner')) {
+  //
+  // 🚨 AND NEVER WHEN THE PLAN NAMES THE BOX THE BRANCHES LAND IN. On IQ8+/IQ8M
+  // this accessory is an "IQ Combiner 4C" under a fabricated SKU
+  // (ENV-IQ-C4C-240): bought beside a standalone gateway's PV panel it is a
+  // second combiner the drawing does not show. The standalone branch above
+  // already marks 'combiner' emitted; this guard says why, so a future edit to
+  // that bookkeeping cannot quietly bring the 4C back.
+  if (isMicro && !_bosEmitted.has('combiner') && !_bosPlan.aggregation) {
     const combinerAcc = inverterEntry?.requiredAccessories.find(a => a.category === 'combiner');
     if (combinerAcc) {
       items.push(addItem('inverter', 'combiner', combinerAcc.defaultManufacturer ?? 'TBD',
@@ -2789,28 +2833,49 @@ function generateBOMV4PerSubSystem(
     });
     if (plan.branchSlotWarning) warnings.push(plan.branchSlotWarning);
     const emitted = new Set<string>();
-    if (plan.hasIntegratedGateway) emitted.add('gateway');
-    for (const d of plan.devices) {
-      const cat = d.kind === 'gateway' ? 'gateway' : 'combiner';
-      emitted.add(cat);
-      push(stamp, addItem(cat === 'gateway' ? 'monitoring' : 'inverter', cat, d.brand, d.model,
-        d.partNumber ?? '—', `Integrated ${d.roleSummary} — ${group[0].brand} ecosystem (${branchCount} AC branch(es))`,
-        1, 'ea', (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos (per brand group)', `branches=${branchCount}`, true));
-      log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
-        quantity: 1, derivedFrom: `integrated-bos resolver (${group[0].brand} group, ${branchCount} branches)`, formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
-    }
-    // Same metering hardware question, per brand group. On a hybrid job this
-    // per-sub emission is the authoritative one, so omitting it here would ship
-    // the identical gap on exactly the designs that are hardest to check.
-    {
-      const _ct = resolveBomMetering(plan, input.acVoltage, input.interconnectionMethod, input.consumptionCtLocation);
-      for (const line of _ct.lines) {
-        push(stamp, meteringCtItem(line, stamp));
-        log.push({ stageId: 'monitoring', category: 'metering_ct', item: line.model,
-          quantity: line.quantity, derivedFrom: line.derivedFrom, formula: line.formula,
-          necReference: line.necReference });
+    if (isStandaloneGatewayPlan(plan)) {
+      // The same builder as the single-system path and the permit reconcile, so
+      // a hybrid's roof lane buys exactly what a roof-only job with the same
+      // branch count buys — only the sub-system stamp differs.
+      const _sg = standaloneGatewayBom(plan, {
+        branchCount,
+        acVoltage: input.acVoltage,
+        interconnectionMethod: input.interconnectionMethod,
+        consumptionCtLocation: input.consumptionCtLocation,
+        requiresACDisconnect: input.requiresACDisconnect,
+        subSystem: stamp,
+      });
+      for (const it of _sg.items) {
+        push(stamp, it);
+        log.push(bomLogEntryOf(it));
       }
-      if (_ct.blockerMessage) warnings.push(_ct.blockerMessage);
+      warnings.push(..._sg.warnings);
+      emitted.add('gateway');
+      emitted.add('combiner');
+    } else {
+      if (plan.hasIntegratedGateway) emitted.add('gateway');
+      for (const d of plan.devices) {
+        const cat = d.kind === 'gateway' ? 'gateway' : 'combiner';
+        emitted.add(cat);
+        push(stamp, addItem(cat === 'gateway' ? 'monitoring' : 'inverter', cat, d.brand, d.model,
+          d.partNumber ?? '—', `Integrated ${d.roleSummary} — ${group[0].brand} ecosystem (${branchCount} AC branch(es))`,
+          1, 'ea', (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos (per brand group)', `branches=${branchCount}`, true));
+        log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
+          quantity: 1, derivedFrom: `integrated-bos resolver (${group[0].brand} group, ${branchCount} branches)`, formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
+      }
+      // Same metering hardware question, per brand group. On a hybrid job this
+      // per-sub emission is the authoritative one, so omitting it here would ship
+      // the identical gap on exactly the designs that are hardest to check.
+      {
+        const _ct = resolveBomMetering(plan, input.acVoltage, input.interconnectionMethod, input.consumptionCtLocation);
+        for (const line of _ct.lines) {
+          push(stamp, meteringCtItem(line, stamp));
+          log.push({ stageId: 'monitoring', category: 'metering_ct', item: line.model,
+            quantity: line.quantity, derivedFrom: line.derivedFrom, formula: line.formula,
+            necReference: line.necReference });
+        }
+        if (_ct.blockerMessage) warnings.push(_ct.blockerMessage);
+      }
     }
     // Fallbacks from the group's inverter accessories when nothing integrated.
     const entry0 = group[0].entry;
@@ -2823,7 +2888,9 @@ function generateBOMV4PerSubSystem(
           acc.necReference ?? 'NEC 690.4', 'per brand group', '1', true));
       }
     }
-    if (!emitted.has('combiner')) {
+    // Never the legacy "IQ Combiner 4C" (fabricated ENV-IQ-C4C-240) beside a
+    // plan that names its own landing panel — see the single-system twin.
+    if (!emitted.has('combiner') && !plan.aggregation) {
       const acc = entry0?.requiredAccessories.find(a => a.category === 'combiner');
       if (acc) {
         push(stamp, addItem('inverter', 'combiner', acc.defaultManufacturer ?? 'TBD',
@@ -3470,10 +3537,12 @@ const ITRON_PRODUCTION_METER_ORDERABILITY = {
  * brand-group hybrid path. Writing it twice is how the BOM came to ship a 6C
  * while the drawings printed a 5C, and it is not being done again here.
  *
- * `consumptionMeteringRequired` is `hasIntegratedGateway` because that is the
- * exact condition under which the permit sheets assert gateway metering. The
- * claim and the purchase are one decision: PV-4A reads the same resolution, so
- * a sheet cannot assert a measurement this BOM did not buy.
+ * `consumptionMeteringRequired` is decided by the ONE composer
+ * (designMetering: an integrated gateway, or a standalone one — the WHOLE plan
+ * is passed, so `gatewayPlacement` reaches it), because that is the exact
+ * condition under which the permit sheets assert gateway metering. The claim
+ * and the purchase are one decision: PV-4A reads the same resolution, so a
+ * sheet cannot assert a measurement this BOM did not buy.
  */
 function resolveBomMetering(
   plan: IntegratedEquipmentPlan,
@@ -3481,17 +3550,35 @@ function resolveBomMetering(
   interconnectionMethod: string | undefined,
   consumptionCtLocation?: string | null,
 ): MeteringResolution {
+  return resolveBomDesignMetering(plan, acVoltage, interconnectionMethod, consumptionCtLocation).resolution;
+}
+
+/**
+ * The composer's WHOLE answer as the BOM reads it: the resolution it buys the
+ * CTs from, and the drawing whose facts (where the production CT goes, which
+ * leads may be extended and how long they are) any BOM prose must repeat
+ * rather than re-derive. `drawing` is null ⇔ no metering device is modelled.
+ */
+function resolveBomDesignMetering(
+  plan: IntegratedEquipmentPlan,
+  acVoltage: number | undefined,
+  interconnectionMethod: string | undefined,
+  consumptionCtLocation?: string | null,
+): { resolution: MeteringResolution; drawing: SldMeteringDrawing | null } {
   const cap = plan.brains?.metering;
   if (!cap) {
-    return resolveMeteringRequirement({
-      capability: null, deviceLabel: null, interconnectionRaw: interconnectionMethod,
-      ungroundedConductorCount: null, consumptionMeteringRequired: false,
-    });
+    return {
+      resolution: resolveMeteringRequirement({
+        capability: null, deviceLabel: null, interconnectionRaw: interconnectionMethod,
+        ungroundedConductorCount: null, consumptionMeteringRequired: false,
+      }),
+      drawing: null,
+    };
   }
   // The ONE composer (lib/equipment/designMetering.ts): the same CT placement
   // and mode the drawings state — so a BOM warning and a sheet cannot disagree
   // about whether the metering mode is resolved.
-  return resolveDesignMetering({
+  const met = resolveDesignMetering({
     plan,
     interconnectionRaw: interconnectionMethod,
     consumptionCtLocation: consumptionCtLocation ?? null,
@@ -3508,7 +3595,291 @@ function resolveBomMetering(
     // pairing — a wrong citation in a comment is how a wrong citation reaches
     // a drawing.
     ungroundedConductorCount: ungroundedConductorsForService(acVoltage ?? 240, 1),
-  }).resolution!;
+  });
+  return { resolution: met.resolution!, drawing: met.drawing };
+}
+
+
+/** A BOM row's derivation-log entry, read off the row itself. */
+function bomLogEntryOf(it: BOMLineItemV4): BOMDerivationEntry {
+  return {
+    stageId: it.stageId, category: it.category, item: it.model, quantity: it.quantity,
+    derivedFrom: it.derivedFrom, formula: it.formula ?? '', necReference: it.necReference,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE STANDALONE IQ GATEWAY — every box and wire it needs, from ONE builder.
+//
+// "Whatever Envoy I want" (Ray, 2026-09-25). A standalone IQ Gateway has no
+// busbar: the AC branch circuits land on 2-pole breakers in a PV AC combiner
+// panel, and the gateway is a separate DIN-rail box fed from its OWN breaker in
+// that panel (lib/equipment/integratedBos.ts → 'enphase-iq-gateway-standalone',
+// where every rule is cited).
+//
+// Before this, a gateway pick bought the gateway and then fell back to the
+// inverter row's legacy "IQ Combiner 4C" — a fabricated SKU on IQ8+/IQ8M,
+// nothing at all on IQ8H/IQ8A — while the permit reconcile deleted that and
+// bought NO landing box: two BOMs, two answers, and neither was the drawing.
+// No path bought a branch breaker, the gateway's supply breaker, its supply
+// conductors or the NEMA 3R box an indoor-rated gateway needs outdoors.
+//
+// The single-system path, the per-brand-group path and the permit reconcile all
+// call THIS, so none of them can describe the wall differently.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** `derivedFrom` of every row the builder emits. The permit reconcile uses it to
+ *  recognise the engine's copy of these rows and replace them from its own plan. */
+export const STANDALONE_GATEWAY_BOM_BASIS =
+  'integrated-bos resolver — standalone IQ Gateway + PV AC combiner panel';
+
+/** A standalone-gateway plan with every topology field the builder needs. */
+export type StandaloneGatewayPlan = IntegratedEquipmentPlan & Required<Pick<IntegratedEquipmentPlan,
+  'gatewayPlacement' | 'aggregation' | 'gateway' | 'gatewaySupply' | 'branchBreakerA'>>;
+
+/** True ⇔ the plan is a standalone gateway the resolver could actually build
+ *  (a catalogue that cannot build it returns an EMPTY plan — nothing to buy). */
+export function isStandaloneGatewayPlan(
+  plan: IntegratedEquipmentPlan | null | undefined,
+): plan is StandaloneGatewayPlan {
+  return !!plan && plan.gatewayPlacement === 'standalone'
+    && !!plan.aggregation && !!plan.gateway && !!plan.gatewaySupply
+    && typeof plan.branchBreakerA === 'number';
+}
+
+/** Was this row emitted by `standaloneGatewayBom`? (device, breaker, conductor
+ *  and enclosure rows — the CT rows keep the CT authority's own derivation). */
+export function isStandaloneGatewayBomLine(row: { derivedFrom?: string } | null | undefined): boolean {
+  return row?.derivedFrom === STANDALONE_GATEWAY_BOM_BASIS;
+}
+
+export interface StandaloneGatewayBomOptions {
+  /** AC branch circuits landing in the panel — one 2P breaker each. 0 ⇔ the
+   *  count is not established, and the breaker row says so instead of a 0. */
+  branchCount: number;
+  acVoltage?: number;
+  interconnectionMethod?: string;
+  consumptionCtLocation?: string | null;
+  /** The engine's own `requiresACDisconnect` (false ⇔ this design buys no AC
+   *  disconnect). The panel row says what the panel feeds, and must not name a
+   *  disconnect the same BOM does not buy. */
+  requiresACDisconnect?: boolean;
+  /** Per-brand-group emission only: the owning sub-system stamp. */
+  subSystem?: BOMSystemType;
+}
+
+/** Where the composer puts the production CT, in the words a BOM row uses. The
+ *  placement is the composer's decision (designMetering `production.where`);
+ *  this only spells it. */
+const PRODUCTION_CT_PLACEMENT_PROSE: Record<NonNullable<SldMeteringDrawing['production']>['where'], string> = {
+  'landing-panel-field': 'installed on L1 in the PV AC combiner panel',
+  'pv-output-circuit-field': 'installed on the PV output circuit',
+  'combiner-integral': 'integral to the combiner',
+};
+
+export interface StandaloneGatewayBom {
+  items: BOMLineItemV4[];
+  /** The CT authority's blocker, when it raised one. */
+  warnings: string[];
+}
+
+/** No SKU can be named for a part whose type follows a panel nobody has selected. */
+const MATCH_PANEL_REASON =
+  'MATCH THE PANEL — FIELD VERIFY. The PV AC combiner panel is a generic size class with no '
+  + 'manufacturer or SKU, so a breaker that must be listed for that panel cannot be named yet. '
+  + 'Select the panel, then the matching 2-pole breaker.';
+
+/**
+ * Every BOM row a standalone IQ Gateway topology needs, in one list.
+ *
+ *   · the PV AC combiner panel the branches land in (generic row — no SKU);
+ *   · one 2P branch breaker per AC branch circuit, and the gateway's own 2P
+ *     supply breaker, all "match panel — FIELD VERIFY";
+ *   · the IQ Gateway itself (its production CT ships in its box — no row);
+ *   · the gateway supply conductors (L1, L2, N + EGC) — a short run bounded by
+ *     the production CT's non-extendable lead, so FIELD VERIFY length;
+ *   · a NEMA 3R enclosure, only if the gateway is mounted outdoors;
+ *   · the consumption CTs, through the one metering composer.
+ *
+ * Pure apart from the row ids `addItem` assigns. Returns nothing for a plan
+ * that is not a buildable standalone gateway.
+ */
+export function standaloneGatewayBom(
+  plan: IntegratedEquipmentPlan,
+  opts: StandaloneGatewayBomOptions,
+): StandaloneGatewayBom {
+  if (!isStandaloneGatewayPlan(plan)) return { items: [], warnings: [] };
+  // No AC branches ⇒ not a micro design: a string job that still carries a
+  // standalone pick (a selection is cleared only by an explicit DELETE) buys no
+  // Enphase gateway, panel or breakers — the permit sheets are gated the same way.
+  if (!(Math.floor(opts.branchCount || 0) > 0)) return { items: [], warnings: [] };
+  const panel = plan.aggregation;
+  const gw = plan.gateway;
+  const branchA = plan.branchBreakerA;
+  const supplyA = plan.gatewaySupply.breakerA;
+  const sub = opts.subSystem;
+  const basis = STANDALONE_GATEWAY_BOM_BASIS;
+  const branches = Math.max(0, Math.floor(opts.branchCount || 0));
+  const items: BOMLineItemV4[] = [];
+
+  // ── What the ONE metering composer says about this gateway's CTs ──
+  // The same answer E-1 draws and PV-4A states: where the production CT goes
+  // and which lead may not be extended are read off ITS drawing, never
+  // re-derived from the CT catalogue here — a second derivation is how this
+  // prose would drift from the sheets the first time the composer's placement
+  // or lead rule changes. The CT rows below are bought from the same result.
+  const met = resolveBomDesignMetering(plan, opts.acVoltage, opts.interconnectionMethod, opts.consumptionCtLocation);
+  const prodDrawn = met.drawing?.production ?? null;
+  const prodLead = met.drawing?.leads?.find(l => l.channel === 'production') ?? null;
+  // The lead fixes how far the gateway may sit from the panel only when the CT
+  // is IN that panel and its lead may NOT be extended. Anything else bounds
+  // nothing, and the run length is then simply not established.
+  const pctLeadFt = prodDrawn?.where === 'landing-panel-field' && prodLead && !prodLead.extendable
+    ? prodLead.maxLengthFt
+    : null;
+  // Which CT ships in the box (the device's own capability) — named in the
+  // gateway row so the crew knows it is there. Identity only: placement and
+  // lead are the composer's, above.
+  const pc = gw.metering?.production;
+  const pct = prodDrawn?.realisation === 'ships-with-device' ? getCurrentTransformer(pc?.requiredCtId) : undefined;
+
+  // ── The panel the branches land in ──
+  // It feeds the AC disconnect only when this design buys one.
+  const feeds = opts.requiresACDisconnect === false
+    ? 'feeds the service point of interconnection (no separate AC disconnect in this design)'
+    : 'feeds the AC disconnect';
+  const breakerSumA = branchA * branches + supplyA;
+  items.push(addItem('inverter', 'combiner', panel.brand, panel.model, panel.partNumber ?? '—',
+    `PV AC combiner panel — the ${branches} AC branch circuit(s) land here on 2P ${branchA} A breakers, `
+      + `plus the ${gw.model}'s 2P ${supplyA} A supply breaker (${panel.branchSlots ?? '—'} positions, `
+      + `${panel.maxContinuousA ?? '—'} A busbar); ${feeds}. Generic size class — `
+      + 'select the panel and FIELD-VERIFY the SKU.',
+    1, 'ea', panel.necRefs?.[0] ?? 'NEC 705.12(B)', basis,
+    `2P ${branchA}A × ${branches} + 2P ${supplyA}A × 1 = ${breakerSumA} A of breakers`, true,
+    undefined, undefined, undefined, sub,
+    {
+      quantitySource: 'count-derived',
+      authorityStateHint: 'CANDIDATE_NON_ORDERABLE',
+      authorityStateHintReason:
+        'GENERIC PV AC COMBINER PANEL — the catalogue row is a size class (busbar and positions), not a '
+        + 'product: no manufacturer, no SKU. Select the panel being installed and FIELD-VERIFY it, then re-derive.',
+    }));
+
+  // ── One 2P branch breaker per AC branch circuit ──
+  items.push(addItem('inverter', 'breaker', 'Generic', `2P ${branchA}A Circuit Breaker — PV branch`, '—',
+    `2-pole ${branchA} A breaker, one per AC branch circuit landing in the PV AC combiner panel `
+      + `(the branch overcurrent device). Match the panel manufacturer and type — FIELD VERIFY.`,
+    branches, 'ea', 'NEC 690.9', basis, `1 per AC branch × ${branches}`, true,
+    undefined, undefined, undefined, sub,
+    {
+      quantitySource: 'topology-derived',
+      authorityStateHint: 'CANDIDATE_NON_ORDERABLE',
+      authorityStateHintReason: MATCH_PANEL_REASON,
+      // A zero here would read "no breakers needed", which is never the answer.
+      ...(branches === 0
+        ? { quantityState: 'pending' as const, quantityStateLabel: 'BRANCH COUNT NOT ESTABLISHED' }
+        : {}),
+    }));
+
+  // ── The gateway's OWN supply breaker (never a PV branch breaker) ──
+  items.push(addItem('inverter', 'breaker', 'Generic', `2P ${supplyA}A Circuit Breaker — ${gw.model} supply`, '—',
+    `2-pole ${supplyA} A breaker in the PV AC combiner panel feeding the ${gw.model} on its own circuit `
+      + '(Enphase: a 2-pole breaker of 20 A maximum). Match the panel manufacturer and type — FIELD VERIFY.',
+    1, 'ea', 'NEC 240.4(D)', basis, `1 per ${gw.model}`, true,
+    undefined, undefined, undefined, sub,
+    {
+      quantitySource: 'per-installation-constant',
+      authorityStateHint: 'CANDIDATE_NON_ORDERABLE',
+      authorityStateHintReason: MATCH_PANEL_REASON,
+    }));
+
+  // ── The gateway supply conductors: L1, L2, N + EGC ──
+  // The run is bounded by the production CT's lead: the composer puts the CT on
+  // L1 in the panel and says its lead may not be extended, so the gateway is
+  // within that distance of the panel. That bounds the quantity; it does not
+  // measure it. With no such bound the footage is honestly unknown.
+  const conductor = plan.gatewaySupply.conductor;
+  const gauge = /#\s*(\d+(?:\/0)?)\s*AWG/i.exec(conductor)?.[1];
+  const runLabel = pctLeadFt != null
+    ? `short run — the gateway sits within the ${pctLeadFt} ft production-CT lead of the panel; FIELD VERIFY length`
+    : 'short run — length not established; FIELD VERIFY';
+  const conductorHint = (what: string) => ({
+    quantitySource: 'per-installation-constant' as BomQuantitySource,
+    authorityStateHint: 'ESTIMATED_FIELD_VERIFY' as ProcurementAuthorityState,
+    authorityStateHintReason: pctLeadFt != null
+      ? `${what} footage is bounded by the production CT's ${pctLeadFt} ft lead, which may not be `
+        + 'extended — neither routed nor measured. Budgeting quantity; FIELD VERIFY the run.'
+      : `${what} footage is not established — no non-extendable production-CT lead in the panel bounds `
+        + 'the run, and it is neither routed nor measured. FIELD VERIFY the run.',
+    ...(pctLeadFt == null
+      ? { quantityState: 'pending' as const, quantityStateLabel: 'RUN LENGTH NOT ESTABLISHED' }
+      : {}),
+  });
+  const runFt = pctLeadFt ?? 0;
+  if (gauge) {
+    items.push(addItem('inverter', 'wire', 'Southwire', `#${gauge} AWG THWN-2`, `THWN2-${gauge}`,
+      `#${gauge} AWG Cu THWN-2 — ${gw.model} supply circuit L1, L2, N (3 conductors) from the `
+        + `2P ${supplyA} A breaker in the PV AC combiner panel; ${runLabel}.`,
+      conduitLength(runFt * 3), 'ft', 'NEC 310.15', basis,
+      `${runFt} ft × 3 conductors (L1, L2, N) × 1.15`, true,
+      undefined, undefined, undefined, sub, conductorHint('Supply conductor')));
+    items.push(addItem('inverter', 'wire', 'Southwire', `#${gauge} AWG THWN-2 Green EGC`, `THWN2-GRN-${gauge}`,
+      `#${gauge} AWG green THWN-2 equipment grounding conductor — ${gw.model} supply circuit; ${runLabel}.`,
+      conduitLength(runFt), 'ft', 'NEC 250.122', basis, `${runFt} ft × 1 × 1.15`, true,
+      undefined, undefined, undefined, sub, conductorHint('EGC')));
+  } else {
+    // A conductor callout this cannot read is carried verbatim, never guessed.
+    items.push(addItem('inverter', 'wire', 'Generic', conductor, '—',
+      `${gw.model} supply circuit conductors — ${conductor}; ${runLabel}.`,
+      0, 'ft', 'NEC 310.15', basis, 'conductor callout not parsed', true,
+      undefined, undefined, undefined, sub,
+      { quantitySource: 'unknown', quantityState: 'pending', quantityStateLabel: 'CONDUCTOR NOT ESTABLISHED' }));
+  }
+
+  // ── The gateway ──
+  // Where its CT goes and what its lead allows, both as the composer drew them.
+  const pctSaid = pct && pc && prodDrawn
+    ? ` Ships with ${pc.ctsIncluded ?? 1} × ${pct.sku ?? pct.model} production CT (in the box — no separate line), `
+      + PRODUCTION_CT_PLACEMENT_PROSE[prodDrawn.where]
+      + (prodLead?.maxLengthFt != null
+        ? ` on its ${prodLead.maxLengthFt} ft lead${prodLead.extendable ? '' : ' (do not extend)'}`
+        : '')
+      + '.'
+    : '';
+  items.push(addItem('monitoring', 'gateway', gw.brand, gw.model, gw.partNumber ?? '—',
+    `Standalone ${gw.model} — ${gw.roleSummary}. Its own enclosure beside the PV AC combiner panel, `
+      + `fed from the 2P ${supplyA} A breaker there (L1, L2, N).${pctSaid}`,
+    1, 'ea', gw.necRefs?.[0] ?? 'NEC 690.4', basis, '1', true,
+    undefined, undefined, undefined, sub));
+
+  // ── Outdoors, an indoor-rated gateway needs a NEMA 3R box ──
+  // The design does not record where the gateway mounts, so the row is a
+  // conditional candidate: visible to the crew, never counted as bought.
+  if (gw.mounting === 'indoor') {
+    items.push(addItem('monitoring', 'enclosure', 'Generic', `NEMA 3R Enclosure — ${gw.model}`, '—',
+      `IF MOUNTED OUTDOORS — FIELD VERIFY. The ${gw.model} is rated for indoor mounting (DIN rail); `
+        + 'outdoors it must be housed in a NEMA 3R enclosure. Not needed when it mounts indoors.',
+      1, 'ea', 'NEC 110.28', basis, '1 if outdoors', false,
+      undefined, undefined, undefined, sub,
+      {
+        quantitySource: 'per-installation-constant',
+        authorityStateHint: 'CANDIDATE_NON_ORDERABLE',
+        authorityStateHintReason:
+          'CONDITIONAL — required only if the gateway is mounted outdoors, and the design does not record '
+          + 'where it mounts. FIELD VERIFY the location before ordering.',
+      }));
+  }
+
+  // ── The consumption CTs — the ONE metering composer, the whole plan ──
+  // The production CT ships with the gateway and gets no row; the composer
+  // buys the consumption pair exactly as it does for every other gateway. The
+  // SAME result the placement and lead prose above were read from.
+  const warnings: string[] = [];
+  const ct = met.resolution;
+  for (const line of ct.lines) items.push(meteringCtItem(line, sub));
+  if (ct.blockerMessage) warnings.push(ct.blockerMessage);
+
+  return { items, warnings };
 }
 
 /** One CT line → one BOM row. The producer's procurement state travels with it:

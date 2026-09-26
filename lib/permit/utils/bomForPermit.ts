@@ -26,6 +26,9 @@ import { permitInterconnectionToken } from './interconnectionRule';
 import type { CADModel } from '@/lib/cad/types';
 import {
   generateBOMV4,
+  standaloneGatewayBom,
+  isStandaloneGatewayPlan,
+  isStandaloneGatewayBomLine,
   type BOMGenerationInputV4,
   type BOMLineItemV4,
 } from '@/lib/bom-engine-v4';
@@ -873,7 +876,41 @@ export function generateBOMForPermit(
   // count — running the whole-system reconciler on top would double-emit a
   // 91-device combiner. Skip it when the per-sub path handled the BOM.
   const bosPlan = buildIntegratedEquipment(input, cad);
-  if (!_isPerSubHybrid && bosPlan.devices.length) {
+  if (!_isPerSubHybrid && isStandaloneGatewayPlan(bosPlan)) {
+    // 🚨 A STANDALONE IQ GATEWAY IS A SET OF ROWS, NOT ONE DEVICE.
+    //
+    // This reconcile used to drop every combiner/gateway row and re-add each
+    // plan device as "Integrated …" — which, for a gateway pick, left the
+    // package with the gateway, NO box for the branches to land in, and none of
+    // the breakers, conductors or CTs that tie them together. The engine's own
+    // builder now emits all of it; this replaces the engine's copy with the SAME
+    // builder run on THIS plan (the one E-1, SCHED and PV-4A print), so the
+    // permit BOM cannot name a different panel, branch count or CT set from the
+    // sheets — and cannot differ from the engineering BOM for the same inputs.
+    //
+    // The CT rows are replaced too: they belong to this plan's gateway, and a
+    // plan the engine resolved differently (a session override the engine never
+    // sees) must not leave the wrong metering hardware behind.
+    merged = merged.filter(it => it.category !== 'combiner' && it.category !== 'gateway'
+      && it.category !== 'metering_ct' && !isStandaloneGatewayBomLine(it));
+    // The branch count this plan's landing panel was sized from —
+    // buildIntegratedEquipment's own sum over the micro subs, so the panel and
+    // its breakers can never be sized from two different counts.
+    const _bosBranches = _auth.subSystems
+      .filter(s => s.isMicro)
+      .reduce((n, s) => n + s.microBranches.length, 0);
+    const _sg = standaloneGatewayBom(bosPlan, {
+      branchCount: _bosBranches,
+      interconnectionMethod: permitInterconnectionToken(project.interconnectionMethod),
+      consumptionCtLocation: project.consumptionCtLocation ?? undefined,
+      // The same flag the engine call above bought (or skipped) the AC
+      // disconnect on, so the panel row never names a disconnect this BOM lacks.
+      requiresACDisconnect: project.acDisconnect !== false,
+    });
+    for (const it of _sg.items) merged.push(v4ToPermit(it));
+    log.push(`[bomForPermit] standalone gateway: ${bosPlan.gateway.model} + ${bosPlan.aggregation.model}, `
+      + `${_bosBranches} branch breaker(s), ${_sg.items.length} rows`);
+  } else if (!_isPerSubHybrid && bosPlan.devices.length) {
     merged = merged.filter(it => it.category !== 'combiner' && it.category !== 'gateway');
     for (const d of bosPlan.devices) {
       const isGw = d.kind === 'gateway';

@@ -7,7 +7,11 @@
       "Enphase IQ Combiner 6C data sheet DSH-00585-3.0 (2025-04-21)",
       "Enphase IQ Combiner 5/5C data sheet IQC-5-5C-DSH-00007-1.0 (2023-05-22)",
       "Enphase IQ Combiner 4/4C data sheet (2022-02-14)",
+      "Enphase IQ Combiner 4/4C data sheet IQC-4-4C-DSH-00217-5.0 (2025-04-01) + quick install guide 140-00233-08 (re-checked 2026-09-26)",
       "Enphase IQ Gateway data sheet DSH-00111-6.0 (2025-06-06)",
+      "Enphase IQ Gateway quick install guide 140-00210-03 (Sep 2023) (added 2026-09-26)",
+      "Enphase TEB-00021-2.0 'CT installation guidelines' (Sep 2023) (added 2026-09-26)",
+      "Enphase IQ8 series single-line diagram EN-IQ8-1PHN (drawing convention only; India 230 V) (added 2026-09-26)",
       "Tesla Backup Switch data sheet (Tesla Energy Library) + distributor listings"
     ]
   },
@@ -110,7 +114,7 @@
       "integratesGatewayNote": "Includes IQ Gateway (formerly Envoy) PCB.",
       "integratesDisconnect": false,
       "integratedMeteringCT": true,
-      "integratedMeteringCTNote": "Pre-wired 200A solid-core production CT (ANSI C12.20 +/-0.5%); consumption via CT-200-SPLIT pair (+/-2.5%).",
+      "integratedMeteringCTNote": "Pre-wired 200A solid-core production CT (ANSI C12.20 +/-0.5%); consumption via CT-200-SPLIT pair (+/-2.5%). The consumption CTs SHIP IN THE BOX: data sheet IQC-4-4C-DSH-00217-5.0 'What's in the box' lists 'Two consumption metering split core or clamp-type CTs, shipped with the box'; the 4/4C quick install guide 140-00233-08 agrees ('A pair of split-type or clamp-type CTs is provided'); TEB-00021-2.0 Table 2 lists CT-200-SPLIT as 'Included with IQ Combiner 3-ES and next generations'. (Corrected 2026-09-26 — this record previously read as a separate purchase.)",
       "mounting": "outdoor",
       "dimensionsIn": "14.75 x 19.5 x 6.63 (W x H x D); 21.06 tall with brackets",
       "weightLb": 16.5,
@@ -170,11 +174,12 @@
       "id": "enphase-iq-gateway",
       "brand": "Enphase",
       "model": "IQ Gateway (standalone) — formerly IQ Envoy / Envoy-S Metered",
-      "partNumber": "ENV-IQ-AM1-240",
+      "partNumber": "ENV2-IQ-AM1-240",
+      "partNumberNote": "ENV2-IQ-AM1-240 is 'IQ Gateway (IEEE Certified)'; the quick install guide 140-00210-03 says it 'is mandatorily required' wherever IEEE 1547:2018 has been adopted. ENV-IQ-AM1-240 is the earlier revision and is not IEEE 1547:2018 compliant. (Catalogue switched to ENV2 on 2026-09-26.)",
       "partNumberVariants": [
-        "ENV-IQ-AM1-240 (original)",
+        "ENV-IQ-AM1-240 (original; not IEEE 1547:2018 compliant)",
         "ENV2-IQ-AM1-240 (current, IEEE 2030.5 / IEEE 1547:2018 certified)",
-        "Distributor 'M'/'-M' suffix denotes the metered configuration (e.g. ENV-IQ-AM1-240 M)"
+        "UNVERIFIED: a distributor 'M'/'-M' suffix said to denote a 'metered' configuration (e.g. ENV-IQ-AM1-240 M). No Enphase document found supports it (re-checked 2026-09-26)."
       ],
       "generation": null,
       "generationNote": "The IQ Gateway is the monitoring/control brain, not a combiner generation. Same gateway PCB is embedded in the IQ Combiner 4C/5C. Enphase renamed 'Envoy' -> 'IQ Envoy' -> 'IQ Gateway'.",
@@ -186,7 +191,11 @@
       "integratesGatewayNote": "It IS the gateway.",
       "integratesDisconnect": false,
       "integratedMeteringCT": true,
-      "integratedMeteringCTNote": "Integrated revenue-grade production metering (ANSI C12.20 +/-0.5%); ships with one CT-200-SOLID production CT. Consumption (+/-2.5%) and IQ Battery 5P metering (+/-2.5%) optional via CT-200-SPLIT / CT-200-CLAMP (order separately). 'Metered' distributor variants bundle the CTs; non-metered do not.",
+      "integratedMeteringCTNote": "Integrated revenue-grade production metering (ANSI C12.20 +/-0.5%); ships with one CT-200-SOLID production CT. Consumption (+/-2.5%) and IQ Battery 5P metering (+/-2.5%) optional via CT-200-SPLIT / CT-200-CLAMP (order separately). The consumption CTs are ALWAYS a separate purchase: the quick install guide 140-00210-03 ('ensure you have two split-core consumption metering CTs (order CT-200-SPLIT or CT-200-CLAMP)') and TEB-00021-2.0 Table 2 ('CT-200-SPLIT (To be purchased separately)'). An earlier version of this note said 'metered' distributor variants bundle the consumption CTs; no Enphase document supports that and it was removed 2026-09-26.",
+      "supplyBreaker": "Its own 2-pole breaker, 20 A maximum ('Use a two-pole circuit breaker of up to 20 A (maximum) for the supply wiring'); supply wiring '12-14 AWG copper rated at 75°C or better' to terminals L1, L2 AND N (it needs a neutral). Enphase's own boxes feed it from a 2P 10 A (4/4C) or 10/15 A (5/5C) breaker, never from a PV branch breaker. Sources: QIG 140-00210-03 step 2A; data sheet DSH-00111-6.0 ('IQ Gateway breaker: 2-pole and maximum 20 A overcurrent protection required'); legacy IQ Envoy manual 141-00039 p.13. On IQ8 grid-forming systems with an IQ System Controller it must NOT be powered from the PV-side bus (IQ Combiner 4/4C QIG).",
+      "productionCtPlacement": "Standalone gateway: 'the Production CT should be placed in the subpanel used for landing the PV branches onto the PV breakers' (TEB-00021-2.0 p.4), on L1 with the arrow toward the PV breaker / away from the array (QIG step 2B). Several same-phase branch conductors may pass through the one CT.",
+      "ctLeads": "Production CT lead 5 ft: 'Do not extend the leads of the Production CT' (QIG); extending them voids revenue-grade certification (TEB-00021-2.0 p.12). Consumption CT leads 13 ft, run in conduit; may be extended to a maximum of 1.5 ohm per wire (3 ohm end to end) with twisted-pair cable (TEB-00021-2.0 p.12; legacy manual 141-00039 p.16: 18-14 AWG twisted pair). CT-200-CLAMP lead length UNVERIFIED. Enphase's line diagram EN-IQ8-1PHN draws each CT lead as a dashed line from the CT to the gateway.",
+      "standaloneTopology": "SolarPro catalogue row 'enphase-iq-gateway-standalone' (lib/equipment/integratedBos.ts): the AC branches land on 2-pole 20 A breakers in a PV AC combiner panel; the gateway is a separate enclosure fed from its own 2-pole 15 A breaker in that panel (#14 AWG Cu THWN-2, L1/L2/N + EGC); the gateway's production CT clamps L1 in that panel; the panel feeds the PV AC disconnect as an IQ Combiner would. EN-IQ8-1PHN shows the same arrangement (gateway on its own 'MCB 2P 10 A' beside the 'MCB 2P 20 A' PV branch breakers in a 'PV AC Distribution Box').",
       "mounting": "indoor",
       "mountingNote": "IP30; install indoors or in a NEMA 3R (or better) enclosure if outdoors. DIN-rail mount.",
       "dimensionsIn": "8.4 x 5 x 1.8 (W x H x D)",
@@ -198,6 +207,9 @@
       "datasheetUrl": "https://enphase.com/download/iq-gateway-data-sheet",
       "sourceUrls": [
         "https://enphase.com/download/iq-gateway-data-sheet",
+        "https://enphase.com/download/iq-gateway-quick-install-guide",
+        "https://ressupply.com/documents/enphase/CT-200-Clamp_Installation_Guidelines.pdf",
+        "https://enphase.com/en-in/download/iq8-series-microinverters-single-line-diagram-single-phase-and-three-phase",
         "https://www.solar-electric.com/enphase-env2-iq-am1-240-iq-envoy.html",
         "https://solartown.com/solar-products/accessories/enphase-env2-iq-am1-240-envoy-single-phase-metered/"
       ],

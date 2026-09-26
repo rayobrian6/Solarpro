@@ -14,6 +14,7 @@ import { nearmapConfigured, fetchNearmapStaticAerial, nearmapRoofSnapCenter, OBS
 import { getNearmapAIResultCached } from '@/lib/aerial/nearmapCache';
 import { cropToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
 import { locateEquipment } from '../utils/equipmentLocator';
+import { permitStandaloneGateway } from '../utils/integratedEquipment';
 import { computeModuleAzimuthGrid, snapModuleAzimuth } from '../utils/moduleAzimuthGrid';
 
 // Ray-casting point-in-ring (lat/lng) — used to join a panel to its roof plane
@@ -53,6 +54,12 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   // "controller" model set to the MICROINVERTER model. The AC disconnect on a
   // supply-side tap is the FUSED tap OCPD (see E-1), not non-fused.
   const _pv1SupplySide = interconnectionRuleOf(project.interconnectionMethod) === '705.11';
+  // A standalone IQ Gateway is TWO boxes on the wall: the PV AC combiner panel
+  // the branches land in, and the gateway in its own enclosure — which must sit
+  // within the production CT's 5 ft (non-extendable) lead of that panel. The
+  // same gated helper E-1, PV-4A, SCHED and the snapshot use; absent on every
+  // other design, so their legend is unchanged.
+  const _pv1Gw = permitStandaloneGateway(input, cad);
   // Legend keys use the SAME tag codes as the wall chips on the drawing —
   // numbered legend rows (1-6) that never appeared on the plan were a
   // coordination P1 an AHJ red-lines.
@@ -60,7 +67,13 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     { tag: 'UM',  label: '(E) UTILITY METER',                   desc: utility },
     { tag: 'MSP', label: '(E) MAIN SERVICE PANEL',              desc: `${project.mainPanelAmps || 200}A — ${(project.mainPanelBrand || 'EXISTING').toUpperCase()}` },
     { tag: 'AC',  label: `(N) ${hasAcDisc ? '100A' : '60A'} ${_pv1SupplySide ? 'FUSED' : 'NON-FUSED'} AC DISCONNECT`, desc: _pv1SupplySide ? 'TAP OCPD — NEC 705.11(C), 690.15' : 'WITHIN SIGHT — NEC 690.15' },
-    { tag: 'CB',  label: `(N) ${invMfr} COMBINER BOX`,          desc: 'EXTERIOR WALL — ADJACENT TO MSP (FIELD VERIFY)' },
+    ...(_pv1Gw ? [
+      { tag: 'CB', label: `(N) ${_pv1Gw.landingLabel.toUpperCase()}`, desc: 'AC BRANCHES LAND HERE (2P BREAKERS) — EXTERIOR WALL ADJACENT TO MSP (FIELD VERIFY)' },
+      { tag: 'GW', label: `(N) ${_pv1Gw.label.toUpperCase()}${_pv1Gw.partNumber ? ` (${_pv1Gw.partNumber})` : ''}`,
+        desc: `OWN ENCLOSURE (NEMA 3R IF OUTDOORS) WITHIN 5 FT PRODUCTION-CT LEAD OF CB — ${_pv1Gw.supplyBreakerA}A 2P SUPPLY IN CB` },
+    ] : [
+      { tag: 'CB',  label: `(N) ${invMfr} COMBINER BOX`,          desc: 'EXTERIOR WALL — ADJACENT TO MSP (FIELD VERIFY)' },
+    ]),
     ...(hasBatt ? [
       { tag: 'SC',  label: `(N) ${invMfr} SYSTEM CONTROLLER`,   desc: 'ESS / MICROGRID INTERCONNECT DEVICE' },
       { tag: 'BLP', label: '(N) BACKUP LOAD PANEL',             desc: 'CRITICAL LOADS SUB-PANEL' },

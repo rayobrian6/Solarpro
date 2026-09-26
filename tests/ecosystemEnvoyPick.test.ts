@@ -16,7 +16,10 @@
  * AC COMBINER with the branch breakers inside it; the BOM buys the gateway and
  * then falls back to the inverter's legacy combiner accessory. A drawing of a
  * box the BOM did not buy — so a bare gateway is NOT made selectable, and the
- * Envoy choice is which IQ Combiner (each has the IQ Gateway built in).
+ * Envoy choice is which IQ Combiner (each has the IQ Gateway built in) — OR the
+ * standalone topology ('enphase-iq-gateway-standalone', 2026-09-26): the IQ
+ * Gateway in its own enclosure PLUS the PV AC combiner panel the branches land
+ * in, resolved as two devices so nothing names the gateway as the combiner.
  *
  * This file pins the catalogue half (what is storable), the store half (a
  * non-combiner is declined by name, never by questioning the installer), and
@@ -31,6 +34,7 @@ import {
   getBosDevice,
   isSelectableCombiner,
   listCombiners,
+  planLandingDevice,
   resolveIntegratedEquipment,
 } from '@/lib/equipment/integratedBos';
 import { planCombinerSelection, type CombinerDeviceFacts } from '@/lib/combinerSelection/service';
@@ -88,13 +92,14 @@ describe('🚨 what is storable is exactly what the picker offers', () => {
     expect(isSelectableCombiner(undefined)).toBe(false);
   });
 
-  it('the Enphase Envoy choices are the IQ Combiners — each has the gateway built in', () => {
+  it('the Enphase Envoy choices are the IQ Combiners (gateway built in) and the standalone topology — never the bare gateway', () => {
     const enphase = listCombiners('enphase');
     expect(enphase.length).toBeGreaterThan(0);
     for (const d of enphase) {
-      expect(d.kind).toBe('integrated_combiner');
+      expect(['integrated_combiner', 'gateway_system']).toContain(d.kind);
       expect(d.integrated.monitoring, `${d.model} must carry the gateway`).toBe(true);
     }
+    expect(enphase.map(d => d.id)).toContain('enphase-iq-gateway-standalone');
     expect(enphase.map(d => d.id)).not.toContain(GATEWAY);
   });
 
@@ -107,6 +112,15 @@ describe('🚨 what is storable is exactly what the picker offers', () => {
     });
     for (const d of listCombiners()) {
       const plan = ctx(d.id);
+      if (d.kind === 'gateway_system') {
+        // Two boxes: the branches land in the PV AC combiner panel; the gateway
+        // is its own device. The landing rule — never the brains — names the combiner.
+        expect(plan.gatewayPlacement).toBe('standalone');
+        expect(planLandingDevice(plan)?.kind).toBe('ac_combiner');
+        expect(plan.gateway?.id).toBe(GATEWAY);
+        expect(plan.branchSlots ?? 0, d.id).toBeGreaterThan(0);
+        continue;
+      }
       expect(plan.brains?.id).toBe(d.id);
       expect(plan.brains?.kind).toBe('integrated_combiner');
       expect(plan.brains?.branchSlots ?? 0, d.id).toBeGreaterThan(0);

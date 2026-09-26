@@ -42,7 +42,7 @@ import {
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById, resolveBatteryBranch } from '@/lib/equipment-db';
-import { listCombiners } from '@/lib/equipment/integratedBos';
+import { listCombiners, planLandingDevice } from '@/lib/equipment/integratedBos';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { sldCombinerFields } from '@/lib/equipment/sldCombinerFields';
 import { consumptionCtLocationLabel } from '@/lib/equipment/designMetering';
@@ -10563,7 +10563,8 @@ function EngineeringPageInner() {
                         }
                         // 🚨 THE ENVOY THE INSTALLER PICKED, RECORDED WHERE EVERY CONSUMER READS IT.
                         // `combinerId` is a BOS combiner id — each IQ Combiner has the IQ Gateway
-                        // built in. The picker's gateway used to be dropped right here while the
+                        // built in — or the standalone IQ Gateway topology, stored under the same
+                        // key with no extra field. The picker's gateway used to be dropped right here while the
                         // banner counted it as configured. Same POST as CombinerSelector; no reason,
                         // no prompt (Ray, 2026-09-25). The picker sets it only on an explicit pick,
                         // so an apply never records a default as the installer's decision.
@@ -12059,6 +12060,12 @@ function EngineeringPageInner() {
                                 // so the hint never names a box as though someone chose it.
                                 const _defaultDevice = pageMetering?.combinerSelectionIsDecided === false
                                   ? (pageMetering.combinerModel ?? null) : null;
+                                // A standalone IQ Gateway is a box of its own beside the PV
+                                // AC combiner panel, and its CTs belong to IT, not to the
+                                // panel. Said here from the same sldCombinerFields answer the
+                                // SLD draws (names, breaker, production CT, lead limits) —
+                                // absent on every other pick, so nothing else here changes.
+                                const _sgw = pageMetering?.standaloneGateway ?? null;
                                 return (
                                   <>
                                     <p className={`text-[10px] mt-1 ${_row && !_tbd ? 'text-slate-400' : 'text-rose-300'}`}>
@@ -12070,6 +12077,15 @@ function EngineeringPageInner() {
                                     {_defaultDevice ? (
                                       <p className="text-[10px] mt-0.5 text-amber-300/80">
                                         Device: {_defaultDevice} — catalogue default, not selected.
+                                      </p>
+                                    ) : null}
+                                    {_sgw ? (
+                                      <p className="text-[10px] mt-0.5 text-slate-400">
+                                        {_sgw.label}{_sgw.partNumber ? ` (${_sgw.partNumber})` : ''}: own enclosure, fed
+                                        from a {_sgw.supplyBreakerA} A 2-pole breaker in the {_sgw.landingLabel} ({_sgw.supplyConductor}).
+                                        {_drw?.consumption ? ` Consumption CTs: ${_drw.consumption.supplied === 'in-box' ? `in the ${_sgw.label} box` : 'order separately — see BOM'}.` : ''}
+                                        {_drw?.production ? ` ${_drw.production.label}.` : ''}
+                                        {(_drw?.leads ?? []).map(l => ` ${l.label}.`).join('')}
                                       </p>
                                     ) : null}
                                   </>
@@ -14048,6 +14064,14 @@ function EngineeringPageInner() {
                         <span className={projectCombinerId ? 'font-semibold text-emerald-300' : 'font-semibold text-amber-300'}>
                           {(() => {
                             if (!projectCombinerId) return 'not selected';
+                            // 🚨 A STANDALONE GATEWAY IS TWO BOXES, and the one the
+                            // branches land in is the combiner. Named from pageMetering —
+                            // resolved from this same recorded id, which outranks every
+                            // override — so the badge prints the panel and the gateway the
+                            // SLD draws, never the topology row's catalogue name.
+                            if (pageMetering?.standaloneGateway) {
+                              return `${pageMetering.combinerModel ?? pageMetering.standaloneGateway.landingLabel} + ${pageMetering.standaloneGateway.label}`;
+                            }
                             const d = listCombiners().find(c => c.id === projectCombinerId);
                             // A selected id the catalogue does not know is shown
                             // AS THE ID rather than silently blanked — the same
@@ -14795,8 +14819,14 @@ function EngineeringPageInner() {
                             // the resolver treats as DECIDED. Reading projectCombinerId
                             // alone printed "Not selected" beside a drawing naming that
                             // override, and beside a CT-1 row naming the catalogue default.
-                            const _b = pageMetering.plan.brains ?? pageMetering.plan.devices[0];
+                            //
+                            // The box the branches LAND in (planLandingDevice — the one rule
+                            // every sheet uses): the brains on every existing plan, the PV AC
+                            // combiner panel on a standalone gateway, where the brains is the
+                            // gateway (ENVOY-1 below) and has no busbar.
+                            const _b = planLandingDevice(pageMetering.plan);
                             row = { ...row0, manufacturer: _b?.brand ?? row0.manufacturer,
+                                    ...(pageMetering.standaloneGateway ? { description: 'PV AC Combiner Panel (AC branches land here)' } : {}),
                                     model: pageMetering.combinerSelectionIsDecided
                                       // A selected id the catalogue does not know is shown AS
                                       // THE ID, as the Diagram tab's badge shows it.
@@ -14817,7 +14847,7 @@ function EngineeringPageInner() {
                                     rating: `${_d.frameA}A / 240V` };
                           }
                         }
-                        return (
+                        const _tr = (
                         <tr key={row.tag} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                           <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">{row.tag}</td>
                           <td className="border border-slate-200 px-2 py-1.5">{row.description}</td>
@@ -14828,6 +14858,30 @@ function EngineeringPageInner() {
                           <td className="border border-slate-200 px-2 py-1.5 text-slate-500 text-xs">{row.necReference}</td>
                         </tr>
                         );
+                        // 🚨 A STANDALONE GATEWAY IS A SECOND BOX ON THE WALL, so it is a
+                        // second schedule row, right under the panel it is fed from. Its
+                        // names, breaker and conductors are pageMetering's (sldCombinerFields
+                        // — what the SLD draws), never restated here. Every other pick has
+                        // no `standaloneGateway` and renders the one row it always did.
+                        // Tagged ENVOY-, not GW-: the engine already tags a battery's
+                        // backup gateway / system controller GW-n on this same table.
+                        const _sgw = /^COMB-/.test(row0.tag) ? pageMetering?.standaloneGateway : undefined;
+                        if (!_sgw) return _tr;
+                        const _gwDev = pageMetering?.plan.gateway;
+                        return (
+                          <React.Fragment key={row.tag}>
+                            {_tr}
+                            <tr key="ENVOY-1" className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                              <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">ENVOY-1</td>
+                              <td className="border border-slate-200 px-2 py-1.5">Monitoring Gateway (Envoy) — own enclosure</td>
+                              <td className="border border-slate-200 px-2 py-1.5">{_gwDev?.brand ?? ''}</td>
+                              <td className="border border-slate-200 px-2 py-1.5">{_gwDev?.model ?? _sgw.label}{_sgw.partNumber ? ` (${_sgw.partNumber})` : ''}</td>
+                              <td className="border border-slate-200 px-2 py-1.5 text-right font-bold">1</td>
+                              <td className="border border-slate-200 px-2 py-1.5 font-bold text-amber-700">{_sgw.supplyBreakerA}A 2P supply in {row.tag} · {_sgw.supplyConductor}</td>
+                              <td className="border border-slate-200 px-2 py-1.5 text-slate-500 text-xs">NEC 690.4 · 240.4(D)</td>
+                            </tr>
+                          </React.Fragment>
+                        );
                       })}
                       {pageMetering?.meteringDrawing?.consumption ? (() => {
                         const c = pageMetering.meteringDrawing!.consumption!;
@@ -14836,9 +14890,13 @@ function EngineeringPageInner() {
                         // qualified here exactly as COMB-1 qualifies it, so the two
                         // rows never disagree about whether anyone chose it.
                         const _dflt = pageMetering.combinerSelectionIsDecided ? '' : ' — catalogue default, not selected';
+                        // The device the CTs belong to: the combiner on every existing
+                        // pick; on a standalone gateway, the GATEWAY (ENVOY-1) — the PV AC
+                        // combiner panel neither ships nor reads them.
+                        const _ctDevice = pageMetering.standaloneGateway?.label ?? pageMetering.combinerModel;
                         const _where = c.supplied === 'in-box'
-                          ? `in ${pageMetering.combinerModel ?? 'combiner'} box${_dflt}`
-                          : `order separately — see BOM${_dflt && pageMetering.combinerModel ? `; for ${pageMetering.combinerModel}${_dflt}` : ''}`;
+                          ? `in ${_ctDevice ?? 'combiner'} box${_dflt}`
+                          : `order separately — see BOM${_dflt && _ctDevice ? `; for ${_ctDevice}${_dflt}` : ''}`;
                         return (
                           <tr key="CT-1" className="bg-white">
                             <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">CT-1</td>

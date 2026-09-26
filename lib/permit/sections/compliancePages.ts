@@ -16,7 +16,7 @@ import { projectMicroinverterDatasheet, type ProjectedValue } from '../snapshot/
 import { isSubSystemKey, type SubSystemKey } from '../utils/subSystems';
 import { resolvePanelSpecs, coldVocFactor, type ResolvedPanelSpecs } from '../utils/panelSpecs';
 import { hybridSheetSections } from './subSystemSheets';
-import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
@@ -771,7 +771,35 @@ export function pageDisconnectDirectory(
   }
   if (!isMicro && project.dcDisconnect !== false) discos.push({ name: 'PV DC / SYSTEM DISCONNECT', rating: `${maxDcV}`, loc: 'At the inverter' });
   // Integrated combiner / gateway — the AC aggregation + monitoring device.
+  //
+  // A standalone IQ Gateway design has TWO boxes here, and a responder reading
+  // this directory has to be able to tell them apart: the panel the branches
+  // land on (and how many), and the gateway beside it with the breaker that
+  // feeds it. The generic row printed the panel's catalogue position count as
+  // "branches" (one of those positions feeds the gateway) and put the gateway
+  // "at the point of interconnection". Only that design takes the branch below;
+  // every other directory is byte-identical. Micro only, through the one gated
+  // helper E-1 and the snapshot share: "AC branch circuits land here" is false
+  // on a string job, however the combiner selection was left.
+  const _sg = permitStandaloneGateway(input, cad, bos);
+  const _landing = planLandingDevice(bos);
   for (const d of bos.devices) {
+    if (_sg && _landing && d.id === _landing.id) {
+      discos.push({
+        name: `${d.brand.toUpperCase()} ${d.model.toUpperCase()}`,
+        rating: `${d.roleSummary}${bos.branchSlots ? ` · ${bos.branchSlots}-branch` : ''} · ${bos.branchBreakerA ?? '—'} A 2P branch + ${_sg.supplyBreakerA} A 2P gateway breakers`,
+        loc: 'AC branch circuits land here — feeds the PV AC disconnect',
+      });
+      continue;
+    }
+    if (_sg && d.id === bos.gateway?.id) {
+      discos.push({
+        name: `${_sg.label.toUpperCase()}${_sg.partNumber ? ` (${_sg.partNumber})` : ''}`,
+        rating: d.roleSummary,
+        loc: `Beside the ${_landing?.model ?? 'PV AC combiner panel'} — fed from its ${_sg.supplyBreakerA} A 2P breaker`,
+      });
+      continue;
+    }
     discos.push({
       name: `${d.brand.toUpperCase()} ${d.model.toUpperCase()}`,
       rating: `${d.roleSummary}${d.branchSlots ? ` · ${d.branchSlots}-branch` : ''}`,
@@ -1414,10 +1442,36 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               // Brand-integrated AC combiner / gateway ("the brains") — datasheet
               // required for plan review; cited by device name (no image on file).
               // NO document is on file, so it carries no positive mark at all.
+              //
+              // One row named the brains as "AC Combiner / Gateway" because on
+              // every design before the standalone IQ Gateway they were one box.
+              // On that design they are two boxes with two data sheets — the PV
+              // AC combiner panel the branches land in, and the gateway — so each
+              // gets its own row. Every other design keeps its one row, unchanged.
+              //
+              // 🚨 KEYED ON THE PLAN'S TWO BOXES, NOT ON THE MICRO GATE the other
+              // standalone wording takes. This list names DATA SHEETS; it states
+              // no branch landing. On a string job with a leftover standalone pick
+              // the plan still holds a panel and a gateway, PV-0 / SCHED / PV-6
+              // still list both, the BOM still buys both and the snapshot records
+              // the PANEL as the combiner — so falling back to the one-row form
+              // would print "AC Combiner / Gateway: Enphase IQ Gateway — integrated"
+              // here, the only artefact calling the gateway the combiner. Two
+              // boxes ⇔ the landing device is not the brains, which is true only
+              // on a standalone plan (`planLandingDevice` is `brains` on every
+              // other). The gateway is named from its own device record, exactly
+              // as `permitStandaloneGateway` labels it (brand + model, part no.).
               (() => {
-                const _d = buildIntegratedEquipment(input, cad).brains;
+                const _plan = buildIntegratedEquipment(input, cad);
+                const _d = _plan.brains;
+                const _noDoc = `<span data-ds-doc-state="PENDING_APPLICABILITY" style="background:#fdf3e3;border:1px solid #b45309;color:#8a3f04;font-weight:700;padding:0 3px;border-radius:2px;font-size:7.5px;white-space:nowrap;">NO DOCUMENT ON FILE</span>`;
+                const _landA = planLandingDevice(_plan);
+                if (_d && _landA && _landA !== _d) {
+                  return `<li><strong>AC Combiner Panel:</strong> ${_landA.brand} ${_landA.model} — ${_landA.roleSummary.toLowerCase()} · manufacturer datasheet ${_noDoc}</li>`
+                    + `<li><strong>Gateway:</strong> ${_d.brand} ${_d.model}${_d.partNumber ? ` (${_d.partNumber})` : ''} — standalone ${_d.roleSummary.toLowerCase()} · manufacturer datasheet ${_noDoc}</li>`;
+                }
                 return _d ? `<li><strong>AC Combiner / Gateway:</strong> ${_d.brand} ${_d.model} — integrated ${_d.roleSummary.toLowerCase()} · manufacturer datasheet `
-                  + `<span data-ds-doc-state="PENDING_APPLICABILITY" style="background:#fdf3e3;border:1px solid #b45309;color:#8a3f04;font-weight:700;padding:0 3px;border-radius:2px;font-size:7.5px;white-space:nowrap;">NO DOCUMENT ON FILE</span></li>` : '';
+                  + `${_noDoc}</li>` : '';
               })(),
             ].filter(Boolean);
             const fallback = `• <strong>Module:</strong> ${modMfr} — see manufacturer website<br>• <strong>Inverter:</strong> ${invMfr} — see manufacturer website<br>`;

@@ -23,6 +23,13 @@
 // catalogue device that is not one of the selectable combiners (a bare IQ
 // Gateway — the picker does not offer it either, because no consumer can draw
 // and buy it as the combiner).
+//
+// A gateway on its own IS offered (2026-09-26) — as a whole topology, the id
+// 'enphase-iq-gateway-standalone': the IQ Gateway in its own enclosure PLUS the
+// PV AC combiner panel the branches land in. It is one pick stored exactly like
+// an IQ Combiner (same `combinerDeviceId`, no new field, no question); the
+// resolver expands it into the two boxes. The id alone carries the topology, so
+// "same id ⇒ nothing changed" below stays true for it.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { canonicalCombinerId } from '@/lib/equipment/combinerIdentity';
@@ -62,7 +69,9 @@ export interface CombinerDeviceFacts {
    * generic PV AC combiner panel. Recorded as the project's combiner, a bare
    * gateway is drawn as the AC COMBINER with the branch breakers inside it while
    * the BOM buys a gateway plus a fallback combiner, so it is declined rather
-   * than stored (see `listCombiners` in lib/equipment/integratedBos.ts).
+   * than stored (see `listCombiners` in lib/equipment/integratedBos.ts). The
+   * standalone-gateway TOPOLOGY ('enphase-iq-gateway-standalone') answers true:
+   * it names the panel the branches land in as well as the gateway.
    *
    * Absent ⇔ the reader did not say, and nothing is refused on it: only an
    * explicit `false` refuses, so a reader that predates this fact behaves as it
@@ -229,13 +238,16 @@ export function planCombinerSelection(args: {
   // A device CLASS fact, not a judgement of the installer: nothing is asked and
   // no pairing is consulted. A gateway with no busbar cannot be the box the
   // branch circuits land in, and recording it as one draws what the BOM does not
-  // buy. For Enphase each IQ Combiner has the IQ Gateway built in; that is the
-  // Envoy choice. The pointer is brand-specific because the refused set is not:
-  // a Tesla Backup Switch or a generic PV AC combiner panel is declined here
-  // too, and Enphase advice is no answer to either.
+  // buy. For Enphase each IQ Combiner has the IQ Gateway built in, and a gateway
+  // on its own is offered as the standalone option, which names the panel the
+  // branches land in too — so the pointer names both ways to have the Envoy the
+  // installer wants. The pointer is brand-specific because the refused set is
+  // not: a Tesla Backup Switch or a generic PV AC combiner panel is declined
+  // here too, and Enphase advice is no answer to either.
   if (device && device.isSelectableCombiner === false) {
     const pointer = /enphase/i.test(device.manufacturer)
-      ? 'Choose the IQ Combiner being fitted — each has the IQ Gateway (Envoy) built in.'
+      ? 'Choose the IQ Combiner being fitted — each has the IQ Gateway (Envoy) built in — or, for a gateway '
+        + 'in its own enclosure, the "IQ Gateway (standalone) + PV AC combiner panel" option.'
       : 'Choose one of the offered combiners.';
     refusals.push({
       code: 'NOT_A_SELECTABLE_COMBINER',
@@ -352,4 +364,36 @@ export function combinerBasisFor(args: {
 /** Is this basis one a permit package may assert without qualification? */
 export function combinerBasisIsDecided(basis: CombinerBasis): boolean {
   return basis === 'project-selected' || basis === 'session-override';
+}
+
+/**
+ * The headings the pickers file the Envoy choices under — one table, so the
+ * System Configuration card and the ecosystem picker cannot label the same
+ * choice two ways.
+ *
+ * Two kinds of thing are selectable and they put different boxes on the wall:
+ * a combiner with the gateway built in (one box), and the standalone gateway
+ * topology (the gateway in its own enclosure plus the PV AC combiner panel the
+ * branches land in). Both are ONE pick of ONE id. The heading is a label, not a
+ * question — nothing is asked about either.
+ */
+export const COMBINER_PICK_GROUP_LABELS = {
+  integrated: 'Combiner with the gateway (Envoy) built in',
+  standalone: 'Gateway (Envoy) standalone + PV AC combiner panel',
+} as const;
+
+/**
+ * Split what a picker offers by the catalogue's device class (`BosKind` in
+ * lib/equipment/integratedBos.ts), preserving the offered order in each half.
+ * Only 'gateway_system' is the standalone half; anything else — including a
+ * choice whose kind the reader did not say — is filed as a combiner, which is
+ * what every choice was before the standalone option existed.
+ */
+export function groupCombinerChoices<T extends { kind?: string | null }>(
+  choices: readonly T[],
+): { integrated: T[]; standalone: T[] } {
+  const integrated: T[] = [];
+  const standalone: T[] = [];
+  for (const c of choices) (c.kind === 'gateway_system' ? standalone : integrated).push(c);
+  return { integrated, standalone };
 }

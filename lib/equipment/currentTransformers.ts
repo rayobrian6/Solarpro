@@ -157,8 +157,25 @@ export interface CurrentTransformerSpec {
   accuracyClass: string | null;
   /** true ⇒ one CT per ungrounded conductor measured (the split-phase pair). */
   perUngroundedConductor: boolean;
+  /**
+   * The CT's factory secondary lead back to the gateway — WHERE the gateway may
+   * sit relative to the CT, which is a drawing fact, not an install tip.
+   *
+   * Absent ⇒ not modelled. `lengthFt: null` ⇒ the manufacturer's length is not
+   * recorded in any document this repo holds; it is never borrowed from another
+   * CT. `extension: null` ⇒ the lead may NOT be extended.
+   */
+  lead?: {
+    lengthFt: number | null;
+    /** the manufacturer's extension limit, short enough for a drawing cell. */
+    extension: string | null;
+    citation: string;
+  };
   notes: string;
 }
+
+/** TEB-00021-2.0 p.12 — the consumption-CT extension rule, one spelling. */
+const CONSUMPTION_LEAD_EXTENSION = 'EXTEND ≤1.5 Ω/WIRE, TWISTED PAIR IN RACEWAY';
 
 const RESEARCH_FILE = 'lib/data/equipment/bos-devices-research.json';
 
@@ -188,6 +205,13 @@ export const CURRENT_TRANSFORMERS: CurrentTransformerSpec[] = [
     ratioProvenance: 'unverified',
     accuracyClass: '±2.5% (consumption)',
     perUngroundedConductor: true,
+    lead: {
+      lengthFt: 13,
+      extension: CONSUMPTION_LEAD_EXTENSION,
+      citation: `${RESEARCH_FILE} → enphase-iq-gateway.ctLeads; primary sources Enphase IQ Gateway `
+        + 'quick install guide 140-00210-03 (13 ft consumption leads, run in conduit) and '
+        + 'TEB-00021-2.0 p.12 ("a maximum of 1.5 Ohms per wire … twisted-pair").',
+    },
     notes:
       'Split-core: fits over an existing service conductor without disconnecting it. '
       + 'Enphase gates the physical placement — each conductor needs ≥2.0 in of accessible '
@@ -212,6 +236,15 @@ export const CURRENT_TRANSFORMERS: CurrentTransformerSpec[] = [
     ratioProvenance: 'unverified',
     accuracyClass: '±2.5% (consumption)',
     perUngroundedConductor: true,
+    // The extension rule is TEB-00021's, which is the CT-200-CLAMP installation
+    // guideline itself. The clamp's own lead LENGTH is not recorded in any
+    // document this repo holds, so it stays null — the split-core's 13 ft is a
+    // different product's number.
+    lead: {
+      lengthFt: null,
+      extension: CONSUMPTION_LEAD_EXTENSION,
+      citation: 'Enphase TEB-00021-2.0 p.12 (extension limit). Lead length UNVERIFIED.',
+    },
     notes: 'The clamp CT shipped in the IQ Combiner 5/5C box. Same channel as CT-200-SPLIT.',
   },
   {
@@ -231,6 +264,18 @@ export const CURRENT_TRANSFORMERS: CurrentTransformerSpec[] = [
     ratioProvenance: 'unverified',
     accuracyClass: 'ANSI C12.20 class 0.5 (±0.5%)',
     perUngroundedConductor: false,
+    // 🚨 THE LEAD THAT DECIDES WHERE THE GATEWAY GOES. "Do not extend the leads
+    // of the Production CT" (IQ Gateway QIG); extending them "voids the
+    // certification" of revenue-grade metering (TEB-00021-2.0 p.12). A
+    // standalone gateway therefore sits within 5 ft of the panel its branches
+    // land in — a layout constraint, not a wiring note.
+    lead: {
+      lengthFt: 5,
+      extension: null,
+      citation: `${RESEARCH_FILE} → enphase-iq-gateway.ctLeads; primary sources Enphase IQ Gateway `
+        + 'quick install guide 140-00210-03 ("Production CT leads (5 feet) … Do not extend") and '
+        + 'TEB-00021-2.0 p.12.',
+    },
     notes:
       'Solid-core: the PV output conductor must be disconnected to pass it through. '
       + 'Ships in the box with a standalone IQ Gateway; integral and pre-wired in every '
@@ -554,6 +599,22 @@ export function resolveMeteringRequirement(input: MeteringResolutionInput): Mete
   // ── The purchase ──────────────────────────────────────────────────────────
   if (input.consumptionMeteringRequired && needsPurchase) {
     const ct = getCurrentTransformer(cap.consumption.requiredCtId);
+    // What the device does for PRODUCTION, worded from its own capability. Every
+    // IQ Combiner integrates it (factory pre-wired CT) and reads exactly as it
+    // always did. A standalone IQ Gateway does NOT: it ships one CT loose in the
+    // box that the crew installs on L1 in the PV panel — a line telling them the
+    // production metering is 'integrated' is how that CT stays in the box.
+    const _prodCtSku = getCurrentTransformer(cap.production.requiredCtId)?.sku;
+    const _prodN = cap.production.ctsIncluded ?? 1;
+    // The verb is shared with the consumption clause ('… ships NO consumption
+    // CTs'), so the gateway reads '… ships one field-installed production CT
+    // (CT-200-SOLID) but NO consumption CTs', never 'ships … but ships NO'.
+    const _shipsProd = cap.production.realisation === 'ships-with-device';
+    const productionClause = _shipsProd
+      ? `ships ${_prodN === 1 ? 'one' : _prodN} field-installed production CT${_prodN === 1 ? '' : 's'}`
+        + (_prodCtSku ? ` (${_prodCtSku})` : '')
+      : 'integrates production metering';
+    const noConsumption = _shipsProd ? 'NO consumption CTs' : 'ships NO consumption CTs';
     if (ct) {
       const qty = ct.perUngroundedConductor ? input.ungroundedConductorCount : 1;
       const quantityKnown = qty != null && qty > 0;
@@ -587,7 +648,7 @@ export function resolveMeteringRequirement(input: MeteringResolutionInput): Mete
           `Consumption current transformer — ${ct.coreType}, ${ct.ratedPrimaryA ?? 'UNRESOLVED'} A, `
           + `${ct.accuracyClass ?? 'accuracy UNRESOLVED'}. `
           + `REQUIRED BY THE SELECTED DEVICE: ${input.deviceLabel ?? 'the metering device'} `
-          + 'integrates production metering but ships NO consumption CTs — they are a separate '
+          + `${productionClause} but ${noConsumption} — they are a separate `
           + 'purchase. Without them the system cannot measure consumption at all. '
           + `Ratio: ${ct.ratio ?? 'UNRESOLVED — not recorded in any document held in this repo'}.`,
         quantity: quantityKnown ? qty! : 0,
@@ -610,8 +671,8 @@ export function resolveMeteringRequirement(input: MeteringResolutionInput): Mete
         reasons.push(`the consumption CT part number ${ct.sku} is not verified against manufacturer documentation`);
       }
       blockerMessage =
-        `${input.deviceLabel ?? 'The selected metering device'} integrates production metering and ships `
-        + 'NO consumption CTs. Consumption metering is required by this design, so '
+        `${input.deviceLabel ?? 'The selected metering device'} ${productionClause} and ${noConsumption}. `
+        + 'Consumption metering is required by this design, so '
         + `${quantityKnown ? qty : 'an unresolved number of'} consumption CT(s) must be purchased `
         + 'separately or the installed system cannot measure consumption. '
         + (blockerCode === 'CT-SKU-UNVERIFIED'

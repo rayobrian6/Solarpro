@@ -18,7 +18,11 @@
 // first does", which is a rule that lives in two places and therefore in none.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { resolveIntegratedEquipment, type IntegratedEquipmentPlan } from '@/lib/equipment/integratedBos';
+import {
+  planLandingDevice,
+  resolveIntegratedEquipment,
+  type IntegratedEquipmentPlan,
+} from '@/lib/equipment/integratedBos';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 import { type MeteringResolution } from '@/lib/equipment/currentTransformers';
@@ -77,6 +81,32 @@ export interface SldCombinerFields {
   meteringDrawing: SldMeteringDrawing | null;
   /** The full plan, for callers that need slots, warnings or the device list. */
   plan: IntegratedEquipmentPlan;
+  /**
+   * The standalone IQ Gateway, drawn as its OWN enclosure beside the landing
+   * panel (`combinerLabel`) and fed from its own 2-pole breaker in it.
+   *
+   * 🚨 ABSENT on every other design — not undefined-valued. A caller that
+   * spreads these fields into renderer input must not gain a key on an existing
+   * design — the E-1 input's keys are pinned (tests/golden-path.test.ts) so
+   * that an existing project's permit output cannot drift under it.
+   */
+  standaloneGateway?: StandaloneGatewayFields;
+}
+
+/** Everything a drawing needs to show a standalone gateway. The renderer's
+ *  `SLDProfessionalInput.standaloneGateway` has this same shape. */
+export interface StandaloneGatewayFields {
+  /** e.g. "Enphase IQ Gateway". */
+  label: string;
+  /** e.g. "ENV2-IQ-AM1-240". Absent when the catalogue records none. */
+  partNumber?: string;
+  /** The gateway's 2-pole supply breaker in the landing panel (A). */
+  supplyBreakerA: number;
+  /** The supply conductors — L1, L2 AND N (+ EGC). */
+  supplyConductor: string;
+  /** The panel it is fed from and whose L1 its production CT clamps — the same
+   *  string as `combinerLabel`. */
+  landingLabel: string;
 }
 
 /** Resolve the combiner once, and map it the same way for every drawing. */
@@ -97,8 +127,16 @@ export function sldCombinerFields(inputs: SldCombinerInputs): SldCombinerFields 
     selectedCombinerId: inputs.selectedCombinerId ?? null,
   });
 
+  // 🚨 TWO DIFFERENT QUESTIONS, TWO DIFFERENT DEVICES — on one plan only.
+  // The name printed as the combiner is the box the branches LAND in; the
+  // metering belongs to the brains. On every plan but a standalone gateway they
+  // are the same device and both expressions return what this used before. On a
+  // standalone gateway the brains is the Envoy (no busbar) and the landing box is
+  // the PV AC combiner panel — naming the Envoy here is what drew the branch
+  // breakers inside it.
   const brains = plan.brains ?? plan.devices[0];
-  const label = brains ? `${brains.brand} ${brains.model}` : undefined;
+  const landing = planLandingDevice(plan);
+  const label = landing ? `${landing.brand} ${landing.model}` : undefined;
 
   // 🚨 THE CLAIM AND THE PURCHASE ARE THE SAME DECISION.
   // A package asserts "the integrated gateway provides production/consumption
@@ -109,12 +147,32 @@ export function sldCombinerFields(inputs: SldCombinerInputs): SldCombinerFields 
   // Diagram tab, the permit E-1, PV-4A and the BOM get. Micro only — no other
   // topology draws the device the CTs land in.
   const _met = resolveDesignMetering({
-    plan: inputs.isMicro ? { brains: brains ?? null, hasIntegratedGateway: plan.hasIntegratedGateway } : null,
+    plan: inputs.isMicro
+      ? {
+          brains: brains ?? null,
+          hasIntegratedGateway: plan.hasIntegratedGateway,
+          ...(plan.gatewayPlacement ? { gatewayPlacement: plan.gatewayPlacement } : {}),
+        }
+      : null,
     interconnectionRaw: inputs.interconnectionRaw,
     consumptionCtLocation: inputs.consumptionCtLocation ?? null,
     ungroundedConductorCount: inputs.ungroundedConductorCount ?? null,
   });
   const metering = _met.resolution;
+
+  // Only a micro job draws the device its branches land in (see the metering
+  // note above), so only a micro job draws a standalone gateway beside it.
+  const gw = plan.gatewayPlacement === 'standalone' ? plan.gateway : undefined;
+  const standaloneGateway: StandaloneGatewayFields | undefined =
+    inputs.isMicro && gw && plan.gatewaySupply && label
+      ? {
+          label: `${gw.brand} ${gw.model}`,
+          ...(gw.partNumber ? { partNumber: gw.partNumber } : {}),
+          supplyBreakerA: plan.gatewaySupply.breakerA,
+          supplyConductor: plan.gatewaySupply.conductor,
+          landingLabel: label,
+        }
+      : undefined;
 
   return {
     // The micro fallback string is kept because the renderer needs SOMETHING in
@@ -129,5 +187,6 @@ export function sldCombinerFields(inputs: SldCombinerInputs): SldCombinerFields 
     metering,
     meteringDrawing: _met.drawing,
     plan,
+    ...(standaloneGateway ? { standaloneGateway } : {}),
   };
 }

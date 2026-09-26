@@ -23,7 +23,7 @@ import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
-import { resolveIntegratedEquipment } from '@/lib/equipment/integratedBos';
+import { resolveIntegratedEquipment, planLandingDevice } from '@/lib/equipment/integratedBos';
 import { readProductionMeterFlag } from '@/lib/equipment/currentTransformers';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
@@ -587,8 +587,29 @@ export async function POST(req: NextRequest) {
       // able to name a device nobody chose.
       selectedCombinerId: body.selectedCombinerId ? String(body.selectedCombinerId) : null,
     });
-    const _bosBrains = _bosPlan.brains ?? _bosPlan.devices[0];
-    const _bosLabel  = _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined;
+    // The name printed as the combiner is the box the branches LAND in
+    // (planLandingDevice — the one rule). On every plan but a standalone
+    // gateway that is the brains, exactly as before; on a standalone gateway
+    // it is the PV AC combiner panel, and the gateway is drawn beside it.
+    const _bosLanding = planLandingDevice(_bosPlan);
+    const _bosLabel  = _bosLanding ? `${_bosLanding.brand} ${_bosLanding.model}` : undefined;
+    // The standalone gateway, in the shape sldCombinerFields gives the PDF
+    // route (StandaloneGatewayFields) — built from THIS route's plan the same
+    // way, because this route resolves its own plan rather than calling the
+    // adapter. Micro only, and ABSENT otherwise (never undefined-valued).
+    // 🚨 A COPY of sldCombinerFields' mapping (and of the permit helper's) —
+    // tests/sldStandaloneGatewayAndCtLeads.test.ts pins this route's printed
+    // strings to sldCombinerFields' until lib/equipment exports ONE builder.
+    const _saGwPlan = isMicro && _bosPlan.gatewayPlacement === 'standalone' ? _bosPlan.gateway : undefined;
+    const _standaloneGateway = _saGwPlan && _bosPlan.gatewaySupply && _bosLabel
+      ? {
+          label: `${_saGwPlan.brand} ${_saGwPlan.model}`,
+          ...(_saGwPlan.partNumber ? { partNumber: _saGwPlan.partNumber } : {}),
+          supplyBreakerA: _bosPlan.gatewaySupply.breakerA,
+          supplyConductor: _bosPlan.gatewaySupply.conductor,
+          landingLabel: _bosLabel,
+        }
+      : undefined;
     console.log(`[SLD BOS] isMicro=${isMicro} devices=${resolvedDeviceCount} branches=${Array.isArray(body.microBranches) ? body.microBranches.length : 0} → ${_bosLabel ?? '(none)'} (source=${_bosPlan.source})`);
 
     // SINGLE SOURCE OF TRUTH: computeSystem() → PermitSystemModel
@@ -860,6 +881,9 @@ export async function POST(req: NextRequest) {
       // This route resolves its own plan rather than going through the
       // adapter, so it asks the same authority the adapter asks.
       combinerSelectionIsDecided: combinerBasisIsDecided(_bosPlan.combinerBasis ?? 'unresolved-default'),
+      // The IQ Gateway on its own wall, fed from its own breaker in the panel
+      // named above — present only on that topology.
+      ...(_standaloneGateway ? { standaloneGateway: _standaloneGateway } : {}),
       // What this design actually MEASURES, from the CT authority. The schedule
       // could previously say "IQ Combiner 6C" and imply consumption metering the
       // job had not bought; this row states the channels instead of implying them.

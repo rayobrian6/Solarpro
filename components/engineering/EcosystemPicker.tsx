@@ -26,8 +26,12 @@
 // it as the AC COMBINER with the branches landing inside it, and the BOM would
 // buy something else (see `listCombiners` in lib/equipment/integratedBos.ts).
 // So for a brand whose BOS catalogue has integrated combiners the Envoy choice
-// is WHICH IQ Combiner — each has the IQ Gateway built in — emitted as
-// `combinerId` for the page to record in the project's combiner selection. It
+// is WHICH IQ Combiner — each has the IQ Gateway built in — or, since
+// 2026-09-26, the standalone IQ Gateway as a whole topology (the gateway in its
+// own enclosure PLUS the PV AC combiner panel the branches land in, one id:
+// 'enphase-iq-gateway-standalone'). Either is emitted as `combinerId` for the
+// page to record in the project's combiner selection — the same list, the same
+// store, the same set `isSelectableCombiner` answers for. It
 // is NEVER auto-selected: an apply must not record a default as the installer's
 // decision. Other brands' monitoring gateways are shown for reference only,
 // because nothing downstream consumes a pick of one — and so is every brand's
@@ -49,6 +53,7 @@ import {
   listCombiners,
   type BosDevice,
 } from '@/lib/equipment/integratedBos';
+import { COMBINER_PICK_GROUP_LABELS, groupCombinerChoices } from '@/lib/combinerSelection/service';
 import {
   Package,
   Battery,
@@ -71,7 +76,8 @@ export interface EcosystemApplyPayload {
     batteryId?: string;
     /**
      * 🚨 The Envoy the installer picked: a BOS combiner id (`isSelectableCombiner`
-     * is true — an IQ Combiner, IQ Gateway built in) for the page to record in
+     * is true — an IQ Combiner, IQ Gateway built in, or the standalone IQ Gateway
+     * + PV AC combiner panel topology) for the page to record in
      * `projects.selected_equipment.combinerSelection`, the store every drawing,
      * the BOM and the permit read. Set ONLY on an explicit pick; absent means
      * "leave the project's answer as it is". Replaces `gatewayId`, which carried
@@ -129,7 +135,8 @@ export default function EcosystemPicker({
   const hostRecordsEnvoy = currentCombinerId !== undefined;
 
   // The Envoy choices for this brand: its integrated combiners (Enphase: the IQ
-  // Combiners), i.e. exactly what the combiner-selection store accepts. Empty
+  // Combiners, and the standalone IQ Gateway topology), i.e. exactly what the
+  // combiner-selection store accepts — never the bare gateway. Empty
   // for a brand with none — and for a host that does not record the pick — which
   // then shows the brand's monitoring gateway for reference only.
   const combinerChoices = useMemo(
@@ -803,12 +810,15 @@ function EcosystemKitPanel(props: KitPanelProps) {
 
 // ─── Envoy row ──────────────────────────────────────────────────────────
 
-/** Which IQ Combiner — the Envoy choice. One pick, no reason, no prompt (Ray,
- *  2026-09-25); the page records it in the project's combiner selection on
- *  Apply. The empty option is "leave the project's answer as it is", and it
- *  NAMES that answer, so an apply never looks like it chose something it kept.
- *  Rendered only for a host that records the pick (see `currentCombinerId`),
- *  which is what lets the line under it make the promise it makes. */
+/** Which IQ Combiner — or the standalone IQ Gateway — the Envoy choice. One
+ *  pick, no reason, no prompt (Ray, 2026-09-25); the page records it in the
+ *  project's combiner selection on Apply. The empty option is "leave the
+ *  project's answer as it is", and it NAMES that answer, so an apply never
+ *  looks like it chose something it kept. Rendered only for a host that records
+ *  the pick (see `currentCombinerId`), which is what lets the line under it make
+ *  the promise it makes. The standalone option sits under its own heading — the
+ *  same headings the System Configuration card uses — because it puts two boxes
+ *  on the wall where an IQ Combiner puts one. */
 function EnvoyCombinerSelect({
   choices,
   value,
@@ -824,6 +834,14 @@ function EnvoyCombinerSelect({
   const keepLabel = currentCombinerId
     ? `— keep ${current ? `${current.brand} ${current.model}` : currentCombinerId} —`
     : '— leave unselected —';
+  // Headings only when there is a standalone option to set apart; a brand whose
+  // choices are all combiners renders exactly as it always did.
+  const groups = groupCombinerChoices(choices);
+  const option = (c: BosDevice) => (
+    <option key={c.id} value={c.id}>
+      {c.brand} {c.model}
+    </option>
+  );
   return (
     <>
       <select
@@ -832,14 +850,18 @@ function EnvoyCombinerSelect({
         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-400"
       >
         <option value="">{keepLabel}</option>
-        {choices.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.brand} {c.model}
-          </option>
-        ))}
+        {groups.standalone.length === 0 ? choices.map(option) : (
+          <>
+            <optgroup label={COMBINER_PICK_GROUP_LABELS.integrated}>{groups.integrated.map(option)}</optgroup>
+            <optgroup label={COMBINER_PICK_GROUP_LABELS.standalone}>{groups.standalone.map(option)}</optgroup>
+          </>
+        )}
       </select>
       <div className="text-[11px] text-slate-500 mt-1">
-        Each IQ Combiner has the IQ Gateway (Envoy) built in. Your pick becomes the
+        Each IQ Combiner has the IQ Gateway (Envoy) built in.
+        {groups.standalone.length > 0
+          ? ' The standalone IQ Gateway is its own enclosure, beside a PV AC combiner panel the branches land in.'
+          : ''} Your pick becomes the
         project&apos;s combiner on every drawing and the BOM.
       </div>
     </>

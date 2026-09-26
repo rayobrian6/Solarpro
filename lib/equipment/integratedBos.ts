@@ -32,9 +32,28 @@ import { canonicalCombinerId } from '@/lib/equipment/combinerIdentity';
 export type BosKind =
   | 'integrated_combiner'   // combiner + gateway (+/- disconnect) in one enclosure
   | 'gateway'               // standalone monitoring/metering gateway (Envoy)
+  /** A SELECTABLE TOPOLOGY, not a box: a standalone gateway plus the panel the
+   *  branches land in. It never appears in a plan's `devices` itself — the
+   *  resolver expands it into the two physical devices (see `standalone`). */
+  | 'gateway_system'
   | 'ac_combiner'           // discrete AC combiner (no gateway)
   | 'meter_socket'          // integrated meter-socket device (Tesla) — future
   | 'backup_switch';        // integrated backup/microgrid interconnect — future
+
+/**
+ * How a `gateway_system` row is built on the wall. Every number here is the
+ * manufacturer's installation rule, not a sizing preference — see the row.
+ */
+export interface StandaloneGatewaySystem {
+  /** The catalogue id of the gateway itself (the metering brains). */
+  gatewayDeviceId: string;
+  /** Each AC branch circuit lands on a 2-pole breaker of this rating. */
+  branchBreakerA: number;
+  /** The gateway's own 2-pole supply breaker in the landing panel. */
+  gatewaySupplyBreakerA: number;
+  /** The gateway supply conductors — it needs L1, L2 AND N. */
+  gatewaySupplyConductor: string;
+}
 
 /** The roles a single device performs — what lets us collapse boxes on the wall. */
 export interface IntegratedFunctions {
@@ -102,6 +121,8 @@ export interface BosDevice {
   installComplexity?: number;
   /** Devices REPLACED by this one when integrated (for topology flags on the SLD). */
   replacesSeparate?: Array<'gateway' | 'ac_disconnect'>;
+  /** Present ONLY on a `gateway_system` row: how the standalone topology is built. */
+  standalone?: StandaloneGatewaySystem;
   active?: boolean;
 }
 
@@ -212,13 +233,21 @@ const BOS_DEVICES_RAW: BosDevice[] = [
         ctsIncluded: null, requiredCtId: null, accuracyClass: 'ANSI C12.20 class 0.5 (±0.5%)',
         note: 'Pre-wired 200 A solid-core production CT.',
       },
+      // 🚨 THIS ROW SAID "SEPARATE PURCHASE", AND ENPHASE SAYS THE OPPOSITE. The
+      // 4/4C data sheet's "What's in the box" lists "Two consumption metering
+      // split core or clamp-type CTs, shipped with the box", and the 4/4C quick
+      // install guide agrees ("A pair of split-type or clamp-type CTs is
+      // provided"). Modelled as a purchase, every 4C job bought a second pair of
+      // CTs the crew already had in the box.
       consumption: {
-        channel: 'consumption', realisation: 'separate-purchase-field-installed', boundary: 'unresolved',
-        ctsIncluded: 0, requiredCtId: 'enphase-ct-200-split', accuracyClass: '±2.5% (consumption)',
-        note: 'Consumption is a separate purchase on the 4/4C — a CT-200-SPLIT pair.',
+        channel: 'consumption', realisation: 'ships-with-device', boundary: 'unresolved',
+        ctsIncluded: 2, requiredCtId: 'enphase-ct-200-split', accuracyClass: '±2.5% (consumption)',
+        note: 'Two consumption CTs (split-core or clamp-type) ship in the 4/4C box. The installer '
+            + 'decides where they clamp, so the boundary — and therefore the mode — is a design fact.',
       },
       citation: 'lib/data/equipment/bos-devices-research.json → enphase-iq-combiner-4c'
-        + '.integratedMeteringCTNote; primary source Enphase IQ Combiner 4/4C data sheet (2022-02-14).',
+        + '.integratedMeteringCTNote; primary source Enphase IQ Combiner 4/4C data sheet '
+        + 'IQC-4-4C-DSH-00217-5.0 ("What\'s in the box") and quick install guide 140-00233-08.',
     },
     isBrains: true,
     branchSlots: 4,
@@ -234,20 +263,29 @@ const BOS_DEVICES_RAW: BosDevice[] = [
     id: 'enphase-iq-gateway',
     brand: 'Enphase',
     model: 'IQ Gateway',
-    partNumber: 'ENV-IQ-AM1-240',   // ENV2-IQ-AM1-240 = current (IEEE 2030.5). Formerly IQ Envoy / Envoy-S Metered
+    // ENV2- is the IEEE 1547:2018 revision; the quick install guide (140-00210-03)
+    // says it "is mandatorily required" wherever 1547:2018 is adopted. ENV- is the
+    // earlier revision and is not what a new permit should name. Formerly IQ
+    // Envoy / Envoy-S Metered.
+    partNumber: 'ENV2-IQ-AM1-240',
     kind: 'gateway',
     generation: undefined,
     integrated: { monitoring: true, rapidShutdown: true },
     // A bare IQ Gateway ships ONE production CT that the installer field-installs
     // on the PV output circuit — it is not factory-integrated, and consumption is
     // a separate purchase. Third distinct shape under the same old boolean.
+    //
+    // A note here used to say distributor "metered" variants bundle the
+    // consumption CTs. No Enphase document supports it — the data sheet, the
+    // quick install guide and TEB-00021 Table 2 all say the consumption CTs are
+    // purchased separately — so it is gone rather than left as a hint that the
+    // BOM might not need to buy them.
     metering: {
       production: {
         channel: 'production', realisation: 'ships-with-device', boundary: 'pv-output-circuit',
         ctsIncluded: 1, requiredCtId: 'enphase-ct-200-solid', accuracyClass: 'ANSI C12.20 class 0.5 (±0.5%)',
         note: 'One CT-200-SOLID production CT ships with the gateway and is field-installed. '
-            + 'Solid-core: the PV output conductor must be disconnected to pass it through. '
-            + 'Distributor "metered" variants bundle the consumption CTs; non-metered do not.',
+            + 'Solid-core: the PV output conductor must be disconnected to pass it through.',
       },
       consumption: {
         channel: 'consumption', realisation: 'separate-purchase-field-installed', boundary: 'unresolved',
@@ -263,6 +301,47 @@ const BOS_DEVICES_RAW: BosDevice[] = [
     necRefs: ['NEC 690.4'],
     ecosystem: 'enphase-iq',
     // Standalone gateway needs a SEPARATE combiner + AC disconnect — most boxes.
+    installComplexity: 3,
+    active: true,
+  },
+  // ── "Whatever Envoy I want" — the STANDALONE gateway, as a selectable topology ──
+  //
+  // Recording the bare gateway above as the project's combiner drew the Envoy AS
+  // the combiner with the branch breakers inside it, while the BOM bought a box
+  // the drawing did not show. The gateway has no busbar: the branches must land
+  // somewhere else, and that somewhere is part of the choice. This row IS that
+  // choice — "IQ Gateway on its own, branches in a PV AC combiner panel" — and the
+  // resolver expands it into the two real devices. It is never itself in a plan.
+  //
+  // Every number is Enphase's installation rule, not a preference:
+  //   · the branches land on 2-pole 20 A breakers in "the subpanel used for landing
+  //     the PV branches onto the PV breakers" (TEB-00021-2.0 p.4) — the IQ Cable
+  //     "is usually protected by a 20 A circuit breaker" (EN-IQ8-1PHN note 5);
+  //   · the gateway gets ITS OWN breaker: "a two-pole circuit breaker of up to
+  //     20 A (maximum)", "12-14 AWG copper rated at 75°C", terminals L1, L2 and N
+  //     (IQ Gateway QIG 140-00210-03 step 2A; data sheet DSH-00111-6.0). Enphase
+  //     never draws it on a PV branch breaker, and its own boxes use 10 or 15 A
+  //     (IQ Combiner 4/4C and 5/5C data sheets) — 15 A here, #14 Cu, with N;
+  //   · the production CT that ships with the gateway goes on L1 in that same
+  //     panel (TEB-00021-2.0 p.4), on a 5 ft lead that may not be extended.
+  // The landing panel is the generic PV AC combiner row sized for the breakers
+  // it carries (resolveAcCombinerPanel), and it feeds the AC disconnect exactly
+  // as an IQ Combiner does — the electrical engine does not change.
+  // Recorded at lib/data/equipment/bos-devices-research.json → enphase-iq-gateway
+  // .standaloneTopology / .supplyBreaker / .productionCtPlacement / .ctLeads.
+  {
+    id: 'enphase-iq-gateway-standalone',
+    brand: 'Enphase',
+    model: 'IQ Gateway (standalone) + PV AC combiner panel',
+    kind: 'gateway_system',
+    integrated: { monitoring: true },
+    standalone: {
+      gatewayDeviceId: 'enphase-iq-gateway',
+      branchBreakerA: 20,
+      gatewaySupplyBreakerA: 15,
+      gatewaySupplyConductor: '#14 AWG CU THWN-2 (L1, L2, N) + #14 EGC',
+    },
+    ecosystem: 'enphase-iq',
     installComplexity: 3,
     active: true,
   },
@@ -365,13 +444,19 @@ export function getBosDevice(id: string | undefined): BosDevice | undefined {
  *  inverter's legacy combiner accessory (an IQ Combiner 4C under a fabricated SKU
  *  on the IQ8+/IQ8M rows, nothing at all on IQ8H/IQ8A). A drawing of a box the
  *  BOM did not buy. Each IQ Combiner has the IQ Gateway built in, so "whatever
- *  Envoy I want" (Ray, 2026-09-25) is a choice among THESE. A gateway-only BOS
- *  with the branches landing elsewhere is a topology no consumer models yet. */
+ *  Envoy I want" (Ray, 2026-09-25) is a choice among THESE.
+ *
+ *  …and, since 2026-09-26, the STANDALONE gateway as a whole topology
+ *  (`kind: 'gateway_system'`, 'enphase-iq-gateway-standalone'): the gateway PLUS
+ *  the panel the branches land in, which the resolver expands into both devices
+ *  so the drawing, the BOM and the metering all name the same two boxes. What
+ *  stays out is still the bare gateway on its own — a pick with nowhere for the
+ *  branches to land. */
 export function listCombiners(brand?: string): BosDevice[] {
   const want = brand?.trim().toLowerCase();
   return BOS_DEVICES.filter(d =>
     d.active !== false
-    && d.kind === 'integrated_combiner'
+    && (d.kind === 'integrated_combiner' || d.kind === 'gateway_system')
     && (!want || d.brand.toLowerCase() === want));
 }
 
@@ -379,7 +464,8 @@ export function listCombiners(brand?: string): BosDevice[] {
  *  `listCombiners()` offers, so the picker, the combiner-selection route and the
  *  ecosystem picker's Envoy row cannot disagree about what is storable. A device
  *  the catalogue knows but that is not one of these (a bare IQ Gateway, a meter
- *  collar, a generic PV AC combiner panel) answers false. */
+ *  collar, a generic PV AC combiner panel) answers false; the standalone
+ *  gateway TOPOLOGY answers true. */
 export function isSelectableCombiner(id: string | null | undefined): boolean {
   const want = id?.trim();
   return !!want && listCombiners().some(d => d.id === want);
@@ -464,10 +550,29 @@ export interface IntegratedEquipmentPlan {
   brand: string | null;
   /** All BOS devices this system uses, in reading order. */
   devices: ResolvedBosDevice[];
-  /** The primary integrated device / brains, if any. */
+  /** The primary integrated device / brains, if any. On a standalone-gateway plan
+   *  this is the GATEWAY (it carries the metering), which is NOT the box the
+   *  branches land in — ask `planLandingDevice` for that. */
   brains?: ResolvedBosDevice;
-  /** True when a single device provides the monitoring gateway (no separate Envoy on the wall). */
+  /** True when a single device provides the monitoring gateway (no separate Envoy
+   *  on the wall). FALSE on a standalone-gateway plan — the Envoy is a separate
+   *  box there, and `gatewayPlacement: 'standalone'` says so. */
   hasIntegratedGateway: boolean;
+  // ── Present ONLY on a standalone-gateway plan ('gateway_system' selection) ──
+  // Every one of these is ABSENT (not undefined-valued) on every other plan: the
+  // permit snapshot hashes what the plan feeds it, and a key that appears on an
+  // existing design — even as null — moves its digest and retires a live PE
+  // approval.
+  /** The gateway is its own enclosure, beside the panel the branches land in. */
+  gatewayPlacement?: 'standalone';
+  /** The box the AC branch circuits land in (the PV AC combiner panel). */
+  aggregation?: ResolvedBosDevice;
+  /** The standalone gateway itself (same object as `brains`). */
+  gateway?: ResolvedBosDevice;
+  /** The gateway's own 2-pole supply breaker in the landing panel, and its conductors. */
+  gatewaySupply?: { breakerA: number; conductor: string };
+  /** The 2-pole breaker each AC branch lands on in the landing panel. */
+  branchBreakerA?: number;
   /** True when the combiner IS the PV-system AC disconnecting means (no separate AC disconnect). */
   providesAcDisconnect: boolean;
   branchSlots?: number;
@@ -520,6 +625,89 @@ const emptyPlan = (brand: string | null): IntegratedEquipmentPlan => ({
 });
 
 /**
+ * 🚨 THE ONE RULE FOR "THE BOX THE BRANCHES LAND IN" — the device a drawing
+ * prints as the combiner.
+ *
+ * Every consumer used to write `plan.brains ?? plan.devices[0]`, which was the
+ * same thing only while the brains WAS the combiner. On a standalone-gateway
+ * plan the brains is the IQ Gateway — a DIN-rail box with no busbar — and that
+ * expression drew the branch breakers inside the Envoy. `aggregation` names the
+ * landing panel there, and is absent on every other plan, so for every plan that
+ * existed before it this returns exactly what those consumers used before.
+ *
+ * Metering still reads `plan.brains`: the CTs belong to the gateway, not to the
+ * panel they clamp in.
+ */
+export function planLandingDevice(
+  plan: Pick<IntegratedEquipmentPlan, 'aggregation' | 'brains' | 'devices'> | null | undefined,
+): ResolvedBosDevice | undefined {
+  if (!plan) return undefined;
+  return plan.aggregation ?? plan.brains ?? plan.devices[0];
+}
+
+/**
+ * Expand a `gateway_system` selection into the two boxes that go on the wall.
+ *
+ * The landing panel is sized for what its busbar actually carries — one
+ * `branchBreakerA` breaker per branch plus the gateway's own supply breaker — and
+ * for enough positions to hold them all (NEC 705.12(B), the same rule the hybrid
+ * shared panel uses). One of its positions feeds the gateway, so the branch
+ * capacity is one less than the panel's positions.
+ */
+function resolveStandaloneGatewayPlan(system: BosDevice, ctx: SystemBosContext): IntegratedEquipmentPlan {
+  const spec = system.standalone;
+  const gwRow = spec ? getBosDevice(spec.gatewayDeviceId) : undefined;
+  const branches = Math.max(0, Math.floor(ctx.branchCount || 0));
+  const aggregateA = spec ? spec.branchBreakerA * branches + spec.gatewaySupplyBreakerA : 0;
+  const panel = spec ? resolveAcCombinerPanel(aggregateA, branches + 1) : null;
+  const panelRow = panel ? getBosDevice(panel.id) : undefined;
+  if (!spec || !gwRow || !panel || !panelRow) {
+    // A catalogue that cannot build the topology it offers asserts nothing —
+    // no devices, no brains, no disconnect claim. The selection's basis is
+    // stamped by the caller, so the sheet can still say a choice was made.
+    return { ...emptyPlan(system.brand), source: 'override', combinerBasis: 'session-override' };
+  }
+  // The panel as a plain device, not the AcCombinerPanelPlan: that plan's
+  // `mainOcpdA` is sized from the breaker SUM, which is not this panel's output
+  // current, and no sheet may print a feeder OCPD the electrical engine did not
+  // size.
+  const landing = resolved(panelRow);
+  const positions = panel.positions;
+  const gateway = resolved(gwRow);
+  const branchSlots = Math.max(0, positions - 1);
+  const busbarA = landing.maxContinuousA ?? 0;
+  const problems: string[] = [];
+  if (branches > branchSlots) {
+    problems.push(`${branches} AC branches exceed the ${landing.model}'s ${branchSlots} branch positions `
+      + `(${positions} positions, one feeds the ${gateway.model})`);
+  }
+  if (busbarA > 0 && aggregateA > busbarA) {
+    problems.push(`${branches} × ${spec.branchBreakerA} A branch breakers plus the ${spec.gatewaySupplyBreakerA} A `
+      + `${gateway.model} breaker (${aggregateA} A) exceed its ${busbarA} A busbar`);
+  }
+  return {
+    brand: system.brand,
+    devices: [landing, gateway],
+    brains: gateway,
+    hasIntegratedGateway: false,
+    providesAcDisconnect: false,
+    branchSlots,
+    branchSlotWarning: problems.length
+      ? `${problems.join('; ')} — a larger PV panel or a second landing panel is required.`
+      : undefined,
+    source: 'override',
+    // The override path's basis; a recorded selection overwrites it with
+    // 'project-selected' exactly as it does for any other device.
+    combinerBasis: 'session-override',
+    gatewayPlacement: 'standalone',
+    aggregation: landing,
+    gateway,
+    gatewaySupply: { breakerA: spec.gatewaySupplyBreakerA, conductor: spec.gatewaySupplyConductor },
+    branchBreakerA: spec.branchBreakerA,
+  };
+}
+
+/**
  * Auto-configure (or honor an override for) the integrated BOS devices for a
  * system. Default policy: pick the best/easiest-install option — the integrated
  * Gen-4 combiner that collapses gateway + AC disconnect into one wall box —
@@ -565,6 +753,13 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
   // Explicit user override wins.
   if (ctx.overrideDeviceIds?.length) {
     const devices = ctx.overrideDeviceIds.map(getBosDevice).filter(Boolean) as BosDevice[];
+    // A standalone-gateway TOPOLOGY is not a box: it expands into the landing
+    // panel + the gateway. Only as the single choice — a recorded selection
+    // arrives here as exactly one id, and a hand-built multi-device list keeps
+    // meaning exactly what it listed.
+    if (devices.length === 1 && devices[0].kind === 'gateway_system') {
+      return resolveStandaloneGatewayPlan(devices[0], ctx);
+    }
     if (devices.length) {
       const combiner = devices.find(d => d.kind === 'integrated_combiner' || d.kind === 'ac_combiner');
       const gw = devices.find(d => d.integrated.monitoring);
@@ -752,7 +947,9 @@ export function resolveHybridAcCollection(sources: HybridSourceInput[]): HybridA
         // answer "which combiner" through the same rule rather than two.
         selectedCombinerId: s.selectedCombinerId ?? null,
       });
-      const combiner = plan.brains ?? plan.devices[0] ?? null;
+      // The lane's combiner is the box its branches land in — the landing panel
+      // on a standalone-gateway lane, the brains on every other.
+      const combiner = planLandingDevice(plan) ?? null;
       return {
         key: s.key, isMicro: true, combiner,
         combinerHasDisconnect: !!combiner?.integrated.disconnect,

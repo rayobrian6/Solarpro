@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
-import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { escapeH } from '../utils/drawing';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, hasRealBattery, resolveEquipmentBySubSystem, type SysType } from '../utils/helpers';
 import { hybridSheetSections, SUB_LABEL } from './subSystemSheets';
@@ -332,8 +332,27 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
         : '',
     ]),
     // Brand-integrated AC aggregation / monitoring device (the "brains").
-    ...buildIntegratedEquipment(input, cad).devices.map(d =>
-      tagRow('N', `${d.quantity} × ${d.brand.toUpperCase()} ${d.model.toUpperCase()} — ${d.roleSummary.toUpperCase()}`)),
+    // A standalone IQ Gateway design lists two devices here; each line then
+    // says what it is on the wall — the panel the branches land in, and the
+    // gateway on its own breaker in that panel — so the cover sheet cannot be
+    // read as two combiners. Every other design's lines are unchanged. Micro
+    // only (inside the helper, the same gate as E-1 and the snapshot): a string
+    // job with a leftover standalone pick has no AC branches to put on breakers.
+    ...(() => {
+      const _plan = buildIntegratedEquipment(input, cad);
+      const _sg = permitStandaloneGateway(input, cad, _plan);
+      const _landing = planLandingDevice(_plan);
+      return _plan.devices.map(d => {
+        const _base = `${d.quantity} × ${d.brand.toUpperCase()} ${d.model.toUpperCase()} — ${d.roleSummary.toUpperCase()}`;
+        if (_sg && _landing && d.id === _landing.id) {
+          return tagRow('N', `${_base} — AC BRANCHES ON ${_plan.branchBreakerA ?? '—'}A 2P BREAKERS`);
+        }
+        if (_sg && d.id === _plan.gateway?.id) {
+          return tagRow('N', `${_base} — STANDALONE${_sg.partNumber ? ` (${_sg.partNumber})` : ''}, ${_sg.supplyBreakerA}A 2P SUPPLY IN PV PANEL`);
+        }
+        return tagRow('N', _base);
+      });
+    })(),
     hasBattery && batteryDisplay
       ? tagRow('N', `${project.batteryCount} × ${batteryDisplay} — BATTERY STORAGE`)
       : '',

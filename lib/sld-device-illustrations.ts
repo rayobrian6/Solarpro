@@ -43,14 +43,23 @@
 //   is found, emit the illustration IN PLACE OF the generic embedSymbol().
 //   If no match, it falls back to the current generic emblem so all 22+
 //   remaining brands keep working until we fill in their illustrations.
+//   'gateway' (2026-09-26): the standalone gateway node above the chain, and
+//   the gateway drawn in miniature inside an integrated combiner.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type DeviceKind = 'inverter' | 'battery' | 'bui';
+/**
+ * 'gateway' is the monitoring/metering gateway as its OWN box (the Enphase IQ
+ * Gateway, a.k.a. Envoy) — drawn standalone beside a PV AC combiner panel, and
+ * in miniature inside an IQ Combiner, whose gateway it is. 'combiner' is the
+ * brand's integrated combiner enclosure (admin preview; the SLD draws the
+ * combiner's internals, not its door).
+ */
+export type DeviceKind = 'inverter' | 'battery' | 'bui' | 'gateway' | 'combiner';
 
 export interface DeviceIllustration {
   /** Registry key, lowercased/normalised brand. */
   brand: string;
-  /** 'inverter' or 'battery'. */
+  /** Which hardware slot the illustration fills (see DeviceKind). */
   kind: DeviceKind;
   /** Short human label shown in the admin preview. */
   label: string;
@@ -99,6 +108,34 @@ function textSvg(
                   .replace(/>/g, '&' + 'gt;');
   return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anc}">${safe}</text>`;
 }
+function pathSvg(d: string, fill: string, stroke = 'none', sw = 0.5): string {
+  return `<path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+/** Fixed-precision coordinate for hand-built path data. */
+const f1 = (n: number): string => n.toFixed(1);
+
+// ─── The printed type floor ──────────────────────────────────────────────────
+// The SLD renderer raises every font-size below 8.67 uu to 8.67 on the finished
+// sheet (applyTypeFloor, lib/sld-professional-renderer.ts — 6.5 pt printed).
+// Text authored smaller than that is NOT drawn smaller: it is drawn at 8.67 and
+// overflows whatever it was sized to fit. The older illustrations predate the
+// floor; the newer ones author at the floor and DROP a line that would not fit
+// at it, so the art looks the same in the admin preview and on the sheet.
+const PRINTED_TYPE_FLOOR_UU = 8.67;
+/** Bold advance widths (1/1000 em) of the PRINTED face. 'SolarPro Sans' is
+ *  Liberation Sans (lib/permit/fonts/font-pack.manifest.json), whose advances
+ *  are Arial's by design — capitals, digits and space, all a fitted wordmark
+ *  line uses; any other glyph counts a full em. A flat per-glyph guess cannot
+ *  be right both ways: the old 0.62 em was a monospace fallback's width, under
+ *  the real 'ENPHASE' (4.83 em, 0.69 a glyph), so it passed a wordmark that
+ *  overflowed; 0.72 would drop an 'IQ GATEWAY' (0.64 a glyph) that fits. */
+const BOLD_ADV: Readonly<Record<string, number>> = {
+  ' ': 278, A: 723, B: 723, C: 723, D: 723, E: 667, F: 611, G: 778, H: 723, I: 278, J: 557, K: 723, L: 611,
+  M: 834, N: 723, O: 778, P: 667, Q: 778, R: 723, S: 667, T: 611, U: 723, V: 667, W: 944, X: 667, Y: 667, Z: 611,
+  0: 557, 1: 557, 2: 557, 3: 557, 4: 557, 5: 557, 6: 557, 7: 557, 8: 557, 9: 557,
+};
+const fitsOneLine = (text: string, size: number, width: number): boolean =>
+  [...text].reduce((em, ch) => em + (BOLD_ADV[ch] ?? 1000) / 1000, 0) * size <= width;
 
 // ─── Tesla Powerwall 3 (battery) ─────────────────────────────────────────────
 // Proportions modelled on the published spec: ~1105 mm H × 609 mm W × 193 mm D.
@@ -550,6 +587,198 @@ function renderEnphaseIQSC3(cx: number, cy: number, slotW: number, slotH: number
     parts.push(line(vx, y + H * 0.88, vx, y + H * 0.94, '#B0B4B8', 0.3));
   }
   return `<g data-device="enphase-iq-sc3">${parts.join('')}</g>`;
+}
+
+// ----- Enphase IQ Gateway (the "Envoy") -------------------------------------
+// Front elevation from the IQ Gateway data sheet's dimensioned drawing and
+// product photo (8.4 W × 5.0 H in, 1.68 : 1): a near-black landscape body; the
+// ENPHASE wordmark upper-left; a right-hand strip behind a vertical seam that
+// carries, top to bottom, the four status LEDs — cloud connectivity, Wi-Fi AP
+// mode, PV production, PLC device comms ("From top to bottom", data sheet LED
+// row) — with the AP and device-scan buttons between them and two stacked USB-A
+// ports below; and the hinged terminal-block door across the lower half with its
+// grip bar, screw boss and ribbed vents.
+//
+// 🚨 TRADEMARK. Enphase's own photo puts its stylized orange "e" in front of the
+// wordmark. It is NOT drawn here and must never be: the "e" and CC logos are
+// Enphase trademarks third parties may not reproduce (Enphase trademark-usage
+// guidelines; this module's header). The wordmark is plain TEXT, which is a
+// nominative reference to the device the drawing names — the same treatment the
+// IQ8 / IQ Battery / IQ System Controller art above already uses.
+function renderEnphaseIQGateway(cx: number, cy: number, slotW: number, slotH: number): string {
+  const nativeW = 168;
+  const nativeH = 100;
+  const scale = Math.min(slotW / nativeW, slotH / nativeH);
+  const W = nativeW * scale;
+  const H = nativeH * scale;
+  const x = cx - W / 2;
+  const y = cy - H / 2;
+  const hair = Math.max(0.25, H * 0.006);
+  const parts: string[] = [];
+
+  // Body — brushed near-black plastic, with the moulded top rail Enphase's own
+  // schematic icon shows as "a horizontal line across the top".
+  parts.push(rect(x, y, W, H, '#1B1D20', '#050607', Math.max(0.5, H * 0.01), Math.max(1.2, H * 0.05)));
+  parts.push(line(x + W * 0.02, y + H * 0.045, x + W * 0.98, y + H * 0.045, '#3A3E43', hair));
+
+  // ── Right-hand strip: LEDs, buttons, USB ─────────────────────────────────
+  const sx = x + W * 0.875;                 // the seam
+  const sw = W - W * 0.875;                 // strip width
+  parts.push(rect(sx, y + H * 0.045, sw - W * 0.012, H * 0.91, '#23262A', '#23262A', 0.1, Math.max(0.6, H * 0.02)));
+  parts.push(line(sx, y + H * 0.06, sx, y + H * 0.94, '#4A4F55', hair * 1.4));
+  const iconX = sx + sw * 0.34;             // glyph column
+  const ledX  = sx + sw * 0.74;             // LED column
+  // Glyph half-size: the LED rows are 0.07 H apart, so a glyph taller than
+  // ~0.065 H runs into its neighbour or the button between them.
+  const s     = H * 0.032;
+  const ledR  = Math.max(0.5, H * 0.017);
+  const glyph = '#C9CDD2';
+  const gsw   = Math.max(0.25, H * 0.008);
+  const led = (ly: number) => circleSvg(ledX, ly, ledR, '#39D26B', '#0E3B1D', hair);
+
+  // Cloud connectivity (0.19 H) — a cloud.
+  {
+    const ly = y + H * 0.19;
+    const bx = iconX - s * 0.95, by = ly + s * 0.45;
+    parts.push(pathSvg(
+      `M${f1(bx)},${f1(by)} H${f1(bx + s * 1.9)} ` +
+      `A${f1(s * 0.42)},${f1(s * 0.42)} 0 0 0 ${f1(bx + s * 1.62)},${f1(by - s * 0.72)} ` +
+      `A${f1(s * 0.6)},${f1(s * 0.6)} 0 0 0 ${f1(bx + s * 0.55)},${f1(by - s * 0.62)} ` +
+      `A${f1(s * 0.4)},${f1(s * 0.4)} 0 0 0 ${f1(bx)},${f1(by)} Z`, 'none', glyph, gsw));
+    parts.push(led(ly));
+  }
+  // Wi-Fi access-point mode (0.26 H) — radiating arcs over a dot.
+  {
+    const ly = y + H * 0.265;
+    const oy = ly + s * 0.55;
+    for (const r of [s * 0.55, s * 1.0]) {
+      parts.push(pathSvg(`M${f1(iconX - r * 0.8)},${f1(oy - r * 0.6)} A${f1(r)},${f1(r)} 0 0 1 ${f1(iconX + r * 0.8)},${f1(oy - r * 0.6)}`,
+        'none', glyph, gsw));
+    }
+    parts.push(circleSvg(iconX, oy - s * 0.1, Math.max(0.25, s * 0.16), glyph, glyph, 0.1));
+    parts.push(led(ly));
+  }
+  // AP-mode button (0.33 H).
+  parts.push(circleSvg(sx + sw * 0.5, y + H * 0.335, H * 0.028, '#2B2F33', '#5A5F66', hair));
+  // PV production (0.40 H) — a lightning bolt.
+  {
+    const ly = y + H * 0.405;
+    const b = s * 0.95;
+    parts.push(pathSvg(
+      `M${f1(iconX + b * 0.3)},${f1(ly - b)} L${f1(iconX - b * 0.5)},${f1(ly + b * 0.12)} ` +
+      `L${f1(iconX)},${f1(ly + b * 0.12)} L${f1(iconX - b * 0.3)},${f1(ly + b)} ` +
+      `L${f1(iconX + b * 0.5)},${f1(ly - b * 0.12)} L${f1(iconX)},${f1(ly - b * 0.12)} Z`, glyph, 'none', 0));
+    parts.push(led(ly));
+  }
+  // PLC device communications (0.47 H) — ⇆.
+  {
+    const ly = y + H * 0.475;
+    const a = s * 0.9, h = s * 0.35;
+    parts.push(pathSvg(
+      `M${f1(iconX - a)},${f1(ly - h)} H${f1(iconX + a)} M${f1(iconX + a - h)},${f1(ly - h * 2)} L${f1(iconX + a)},${f1(ly - h)} L${f1(iconX + a - h)},${f1(ly)} ` +
+      `M${f1(iconX + a)},${f1(ly + h)} H${f1(iconX - a)} M${f1(iconX - a + h)},${f1(ly)} L${f1(iconX - a)},${f1(ly + h)} L${f1(iconX - a + h)},${f1(ly + h * 2)}`,
+      'none', glyph, gsw));
+    parts.push(led(ly));
+  }
+  // Device-scan button (0.55 H).
+  parts.push(circleSvg(sx + sw * 0.5, y + H * 0.555, H * 0.028, '#2B2F33', '#5A5F66', hair));
+  // Two stacked USB-A ports (0.65 H, 0.77 H).
+  for (const fy of [0.63, 0.75]) {
+    const px = sx + sw * 0.5 - W * 0.03;
+    parts.push(rect(px, y + H * fy, W * 0.06, H * 0.05, '#0C0D0F', '#5A5F66', hair, Math.max(0.2, H * 0.006)));
+    parts.push(rect(px + W * 0.008, y + H * (fy + 0.012), W * 0.044, H * 0.016, '#3C4148', '#3C4148', 0.1, 0));
+  }
+
+  // ── Wordmark + product name (plain text — see TRADEMARK above) ───────────
+  const faceW = W * 0.875 - W * 0.05 * 2;
+  const fWord = Math.max(PRINTED_TYPE_FLOOR_UU, H * 0.13);
+  const yWord = y + H * 0.06 + fWord * 0.92;
+  if (fitsOneLine('ENPHASE', fWord, faceW)) {
+    parts.push(textSvg(x + W * 0.05, yWord, 'ENPHASE', { size: +fWord.toFixed(2), fill: '#FFFFFF', bold: true, anchor: 'start' }));
+  }
+  const fName = Math.max(PRINTED_TYPE_FLOOR_UU, H * 0.095);
+  const yName = yWord + fName * 1.2;
+  // Only when it still fits at the floor, above the door: on a miniature (the
+  // gateway drawn inside an IQ Combiner) the host prints the name instead.
+  if (fitsOneLine('IQ GATEWAY', fName, faceW) && yName <= y + H * 0.54 - H * 0.03) {
+    parts.push(textSvg(x + W * 0.05, yName, 'IQ GATEWAY', { size: +fName.toFixed(2), fill: '#F37021', bold: true, anchor: 'start' }));
+  }
+
+  // ── Hinged terminal-block door (lower half) ──────────────────────────────
+  const dx = x + W * 0.02, dy = y + H * 0.54, dw = W * 0.81, dh = H * 0.415;
+  parts.push(rect(dx, dy, dw, dh, '#15171A', '#3A3E43', hair * 1.4, Math.max(0.6, H * 0.02)));
+  // Grip / hinge bar across its top.
+  parts.push(rect(x + W * 0.10, y + H * 0.585, W * 0.58, H * 0.045, '#2A2D31', '#4A4F55', hair, Math.max(0.4, H * 0.02)));
+  // Screw boss.
+  parts.push(circleSvg(x + W * 0.73, y + H * 0.82, H * 0.035, '#24272B', '#5A5F66', hair));
+  parts.push(line(x + W * 0.73 - H * 0.02, y + H * 0.82, x + W * 0.73 + H * 0.02, y + H * 0.82, '#5A5F66', hair));
+  // Ribbed vents near the door's top and bottom corners.
+  for (let i = 0; i < 4; i++) {
+    const vx = x + W * (0.735 + i * 0.024);
+    parts.push(line(vx, y + H * 0.595, vx, y + H * 0.675, '#44484D', hair * 1.3));
+    parts.push(line(vx, y + H * 0.875, vx, y + H * 0.93, '#44484D', hair * 1.3));
+  }
+  // Terminal-block hint under the door: the row of wire entries along its foot.
+  for (let i = 0; i < 8; i++) {
+    const tx = x + W * (0.08 + i * 0.06);
+    parts.push(rect(tx, y + H * 0.875, W * 0.03, H * 0.05, '#0C0D0F', '#3A3E43', hair, 0));
+  }
+
+  return `<g data-device="enphase-iq-gateway">${parts.join('')}</g>`;
+}
+
+// ----- Enphase IQ Combiner 4/4C · 5/5C ---------------------------------------
+// Portrait light-grey polycarbonate NEMA 3R enclosure (14.75 W × 19.5 H in on
+// the 4/4C and 5/5C data sheets, 0.756 : 1) with the "silver solar shield" over
+// the door and the ENPHASE wordmark at the shield's upper right; Enphase's own
+// schematic icon draws it as a portrait box with a small window low on the
+// right. Same TRADEMARK rule as the gateway: wordmark as text, no "e" logo.
+function renderEnphaseIQCombiner(cx: number, cy: number, slotW: number, slotH: number): string {
+  const nativeW = 74;
+  const nativeH = 98;
+  const scale = Math.min(slotW / nativeW, slotH / nativeH);
+  const W = nativeW * scale;
+  const H = nativeH * scale;
+  const x = cx - W / 2;
+  const y = cy - H / 2;
+  const hair = Math.max(0.25, H * 0.004);
+  const parts: string[] = [];
+  // Mounting tabs top and bottom.
+  for (const fy of [0.0, 0.955]) {
+    parts.push(rect(x + W * 0.3, y + H * fy, W * 0.4, H * 0.045, '#B9BEC4', '#8A9096', hair, Math.max(0.4, H * 0.01)));
+  }
+  // Enclosure body.
+  parts.push(rect(x + W * 0.02, y + H * 0.035, W * 0.96, H * 0.93, '#D7DADD', '#8A9096', Math.max(0.5, H * 0.006), Math.max(1.2, W * 0.04)));
+  // Silver solar shield over the door, with its brushed sheen.
+  const shx = x + W * 0.08, shy = y + H * 0.08, shw = W * 0.84, shh = H * 0.74;
+  parts.push(rect(shx, shy, shw, shh, '#EEF0F2', '#A6ACB2', hair * 1.5, Math.max(1, W * 0.03)));
+  for (let i = 0; i < 6; i++) {
+    const t = 0.18 + i * 0.13;
+    parts.push(line(shx + shw * t, shy + shh * 0.97, shx + shw * Math.min(0.97, t + 0.22), shy + shh * 0.45, '#FFFFFF', hair * 3));
+  }
+  // Wordmark at the shield's upper right, product name under it.
+  const fWord = Math.max(PRINTED_TYPE_FLOOR_UU, H * 0.07);
+  if (fitsOneLine('ENPHASE', fWord, shw * 0.9)) {
+    parts.push(textSvg(shx + shw * 0.94, shy + shh * 0.05 + fWord, 'ENPHASE', { size: +fWord.toFixed(2), fill: '#3A3E43', bold: true, anchor: 'end' }));
+  }
+  const fName = Math.max(PRINTED_TYPE_FLOOR_UU, H * 0.055);
+  if (fitsOneLine('IQ COMBINER', fName, shw * 0.9)) {
+    parts.push(textSvg(shx + shw * 0.94, shy + shh * 0.05 + fWord + fName * 1.25, 'IQ COMBINER', { size: +fName.toFixed(2), fill: '#F37021', bold: true, anchor: 'end' }));
+  }
+  // Latch on the door's right edge.
+  parts.push(rect(x + W * 0.9, y + H * 0.4, W * 0.035, H * 0.1, '#B9BEC4', '#8A9096', hair, Math.max(0.3, W * 0.01)));
+  // The small window low on the right (Enphase's schematic icon) — the gateway
+  // status LEDs show through it.
+  const wx = x + W * 0.58, wy = y + H * 0.845, ww = W * 0.3, wh = H * 0.08;
+  parts.push(rect(wx, wy, ww, wh, '#1B1D20', '#5A5F66', hair, Math.max(0.4, H * 0.01)));
+  for (let i = 0; i < 4; i++) {
+    parts.push(circleSvg(wx + ww * (0.2 + i * 0.2), wy + wh * 0.5, Math.max(0.4, H * 0.009), '#39D26B', '#0E3B1D', hair));
+  }
+  // Conduit knockouts along the bottom.
+  for (let i = 0; i < 3; i++) {
+    parts.push(circleSvg(x + W * (0.16 + i * 0.12), y + H * 0.9, Math.max(0.5, W * 0.03), '#C9CDD2', '#8A9096', hair));
+  }
+  return `<g data-device="enphase-iq-combiner">${parts.join('')}</g>`;
 }
 
 // ----- SolarEdge Home Hub Inverter -----------------------------------------
@@ -1360,6 +1589,24 @@ const DEVICE_REGISTRY: Record<string, DeviceIllustration> = {
     aspectH: 96,
     render: renderEnphaseIQSC3,
   },
+  'enphase::gateway': {
+    brand: 'enphase',
+    kind: 'gateway',
+    label: 'Enphase IQ Gateway (Envoy)',
+    sub: 'ENV2-IQ-AM1-240 · revenue-grade production metering · 4 status LEDs',
+    aspectW: 168,
+    aspectH: 100,
+    render: renderEnphaseIQGateway,
+  },
+  'enphase::combiner': {
+    brand: 'enphase',
+    kind: 'combiner',
+    label: 'Enphase IQ Combiner 4C / 5C',
+    sub: 'NEMA 3R · silver solar shield · IQ Gateway inside',
+    aspectW: 74,
+    aspectH: 98,
+    render: renderEnphaseIQCombiner,
+  },
   'solaredge::inverter': {
     brand: 'solaredge',
     kind: 'inverter',
@@ -1536,6 +1783,8 @@ export function brandHasDevice(manufacturer: string): boolean {
   return (
     !!DEVICE_REGISTRY[`${key}::inverter`] ||
     !!DEVICE_REGISTRY[`${key}::battery`] ||
-    !!DEVICE_REGISTRY[`${key}::bui`]
+    !!DEVICE_REGISTRY[`${key}::bui`] ||
+    !!DEVICE_REGISTRY[`${key}::gateway`] ||
+    !!DEVICE_REGISTRY[`${key}::combiner`]
   );
 }

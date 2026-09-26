@@ -72,7 +72,11 @@ export interface CombinerCompatibilityOverride {
 
 export interface CombinerSelectionRecord {
   schemaVersion: 1;
-  /** The BOS catalogue id of the device the installer is fitting. */
+  /** The BOS catalogue id of the device the installer is fitting — or, for a
+   *  gateway in its own enclosure, of the topology that names it together with
+   *  the panel the branches land in ('enphase-iq-gateway-standalone'). One id
+   *  either way: the id carries the topology, so no second field can disagree
+   *  with it. */
   combinerDeviceId: string;
   manufacturer: string;
   model: string;
@@ -114,7 +118,7 @@ export interface CombinerSelectionRefusal {
   code:
     | 'DEVICE_REQUIRED'      // nothing was chosen
     | 'UNKNOWN_DEVICE'       // not in the BOS catalogue
-    | 'NOT_A_SELECTABLE_COMBINER' // in the catalogue, but not a combiner the picker offers (a bare IQ Gateway)
+    | 'NOT_A_SELECTABLE_COMBINER' // in the catalogue, but not a combiner the picker offers (a bare IQ Gateway — the standalone TOPOLOGY is offered)
     | 'ACTOR_REQUIRED'       // nobody owns the decision
     | 'NO_ACTIVE_SELECTION'; // nothing to clear
     // (NOT_A_CANDIDATE / BASIS_REQUIRED / OVERRIDE_INCOMPLETE were removed on

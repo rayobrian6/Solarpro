@@ -45,8 +45,8 @@ describe('a segment carries its own conductors, and only its own', () => {
   const sld = sldText();
 
   it('the existing service entrance is labelled as existing', () => {
-    expect(sld).toMatch(/EXISTING SERVICE CONDUCTORS/);
-    expect(sld).toMatch(/200A SERVICE — FIELD VERIFY/);
+    expect(sld).toMatch(/\(E\) SERVICE CONDUCTORS/);
+    expect(sld).toMatch(/200A — FIELD VERIFY/);
   });
 
   it('the PV package appears on the PV segments and stops at the tap', () => {
@@ -56,12 +56,12 @@ describe('a segment carries its own conductors, and only its own', () => {
     // …and the LAST occurrence must precede the existing-service label, i.e. the
     // PV inventory does not continue past the tap point.
     const lastPv = sld.lastIndexOf('3#6 THWN-2');
-    const existing = sld.indexOf('EXISTING SERVICE CONDUCTORS');
+    const existing = sld.indexOf('(E) SERVICE CONDUCTORS');
     expect(lastPv).toBeLessThan(existing);
   });
 
   it('the drawing order is PV → tap → existing service → meter → grid', () => {
-    const order = ['AC DISCONNECT', 'SUPPLY SIDE TAP', 'EXISTING SERVICE CONDUCTORS',
+    const order = ['AC DISCONNECT', 'SUPPLY SIDE TAP', '(E) SERVICE CONDUCTORS',
       'UTILITY METER', 'UTILITY GRID'];
     let last = -1;
     for (const tok of order) {
@@ -92,9 +92,9 @@ describe('MUTATION — resize the PV conductor and the service span does not fol
     expect(spans(after).some(x => x.includes('#6'))).toBe(false);
 
     // …and the existing service is byte-identical either way
-    expect(after).toMatch(/EXISTING SERVICE CONDUCTORS/);
-    expect(after).toMatch(/200A SERVICE — FIELD VERIFY/);
-    const tail = after.slice(after.indexOf('EXISTING SERVICE CONDUCTORS'));
+    expect(after).toMatch(/\(E\) SERVICE CONDUCTORS/);
+    expect(after).toMatch(/200A — FIELD VERIFY/);
+    const tail = after.slice(after.indexOf('(E) SERVICE CONDUCTORS'));
     expect(tail.slice(0, 120)).not.toMatch(/THWN-2/);
     expect(tail.slice(0, 120)).not.toMatch(/GRN EGC/);
   });
@@ -107,7 +107,7 @@ describe('MUTATION — resize the PV conductor and the service span does not fol
     const m = src.match(/const run = mspUtilRun;[\s\S]{0,2000}?const \{lines, cnt\} = runLines/);
     expect(m, 'the MSP→meter block must exist').toBeTruthy();
     const block = m![0].replace(/\/\/.*/g, ' ');   // its comments explain the old bug
-    expect(block).toContain('EXISTING SERVICE CONDUCTORS');
+    expect(block).toContain('(E) SERVICE CONDUCTORS');
     expect(block).not.toMatch(/_acConductorCount/);
     expect(block).not.toMatch(/_acWireNum/);
   });

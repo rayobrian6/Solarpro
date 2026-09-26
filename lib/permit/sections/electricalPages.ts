@@ -23,7 +23,7 @@ import { TAP_SPAN_DESIGN_CONSTRAINT_NOTE } from '@/lib/electrical/tapSpan';
 import { formatInDocumentTimezone, documentIssueContextOf } from '../utils/documentIssueContext';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
-import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 // TAC WS-18 — reader-facing cross-sheet pointers resolve against the ACTIVE index.
 import { activeSheetIds, sheetRef } from '../utils/sheetRef';
@@ -895,11 +895,58 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
               : '')
             + ' '
           : '';
-        const _bosNote = _pv4aBos.brains
+        // ═══════════════════════════════════════════════════════════════════
+        // WHERE THE BRANCHES LAND — and, on a standalone gateway, the SECOND box.
+        //
+        // This note used to name `brains` as the device the AC branch circuits
+        // terminate at. The brains is the device that METERS; on every design
+        // before the standalone IQ Gateway it was also the combiner, so the two
+        // questions had one answer. On a standalone design the brains is the
+        // Envoy — a DIN-rail gateway with no busbar — and this sheet would have
+        // told the AHJ the branches terminate inside it. The branch landing is
+        // now `planLandingDevice` (identical to the brains on every other plan),
+        // and a standalone design says what is actually on the wall: branches on
+        // 2-pole breakers in the PV AC combiner panel, the gateway beside it on
+        // its own 2-pole breaker, and where each CT lead runs — every CT fact
+        // quoted from the ONE metering composer's drawing (`_pv4aMet.drawing`),
+        // the same object E-1 draws, never re-worded or re-derived here.
+        // ═══════════════════════════════════════════════════════════════════
+        const _pv4aLanding = planLandingDevice(_pv4aBos);
+        // Already inside `_pairIsMicro`; the helper takes the same topology test
+        // itself so this sheet, E-1 and the snapshot share one gate.
+        const _pv4aSg = permitStandaloneGateway(input, cad, _pv4aBos);
+        const _pv4aStandaloneNote = (() => {
+          if (!_pv4aSg || !_pv4aLanding) return '';
+          const _draw = _pv4aMet.drawing;
+          const _prodLead = _draw?.leads?.find(l => l.channel === 'production');
+          const _consLead = _draw?.leads?.find(l => l.channel === 'consumption');
+          return `The AC branch circuits land on 2-pole ${_pv4aBos.branchBreakerA ?? '—'} A breakers in the ${_pv4aLanding.model}` +
+            `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots} branch positions; one further position feeds the gateway)` : ''}. ` +
+            `The ${_pv4aSg.label}${_pv4aSg.partNumber ? ` (${_pv4aSg.partNumber})` : ''} is a separate enclosure — no branch circuit lands in it — ` +
+            `supplied from its own 2-pole ${_pv4aSg.supplyBreakerA} A breaker in that panel (${_pv4aSg.supplyConductor}); ` +
+            `it provides system monitoring and communications per NEC 690.4. ` +
+            (_draw?.production ? `<strong>PRODUCTION CT:</strong> ${_draw.production.label}${_prodLead ? ` · ${_prodLead.label}` : ''}. ` : '') +
+            (_draw?.consumption && _consLead ? `<strong>CONSUMPTION CT LEADS:</strong> ${_consLead.label}. ` : '') +
+            // The lead's length and its do-not-extend rule are stated ONCE, in the
+            // composer's own label printed just above — restating "5 ft, may not
+            // be extended" in this sentence put the same fact on the sheet twice,
+            // in two wordings. What is left here is the consequence for where the
+            // gateway goes, which the label does not say.
+            (_draw?.leads?.length
+              ? `Every CT lead lands on the ${_pv4aSg.label}` +
+                (_prodLead && !_prodLead.extendable && _prodLead.maxLengthFt != null
+                  ? `, which mounts within the production CT lead's reach of the panel's L1`
+                  : '') + '. '
+              : '');
+        })();
+        const _bosNote = _pv4aBos.brains && _pv4aLanding
           ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#f0f4f8;">` +
-            `<strong>AC AGGREGATION — ${_pv4aBos.brains.brand.toUpperCase()} ${_pv4aBos.brains.model.toUpperCase()}:</strong> ` +
-            `The AC branch circuits terminate at the ${_pv4aBos.brains.model}, a single integrated device providing ${_pv4aBos.brains.roleSummary.toLowerCase()}` +
-            `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots}-position)` : ''}. ` +
+            (_pv4aSg
+              ? `<strong>AC AGGREGATION — ${_pv4aLanding.brand.toUpperCase()} ${_pv4aLanding.model.toUpperCase()} + ${_pv4aSg.label.toUpperCase()} (STANDALONE GATEWAY):</strong> ` +
+                _pv4aStandaloneNote
+              : `<strong>AC AGGREGATION — ${_pv4aLanding.brand.toUpperCase()} ${_pv4aLanding.model.toUpperCase()}:</strong> ` +
+                `The AC branch circuits terminate at the ${_pv4aLanding.model}, a single integrated device providing ${_pv4aLanding.roleSummary.toLowerCase()}` +
+                `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots}-position)` : ''}. `) +
             `${_pv4aBos.providesAcDisconnect ? 'Its integral load-break serves as the PV-system AC disconnecting means per NEC 690.13; a separate exterior AC disconnect is provided only where required by the AHJ/utility. ' : ''}` +
             `${_pv4aBos.hasIntegratedGateway ? 'The integrated gateway provides system monitoring and communications per NEC 690.4. ' : ''}` +
             _meteringNote +

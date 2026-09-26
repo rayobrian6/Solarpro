@@ -21,11 +21,24 @@
 //
 // 🚨 IT DOES NOT RECOMMEND BY DEFAULT. With nothing selected the control says
 // so, in those words. An unanswered question must look unanswered.
+//
+// "WHATEVER ENVOY I WANT" INCLUDES A GATEWAY ON ITS OWN (2026-09-26). The
+// standalone IQ Gateway is offered in this same list, under its own heading, as
+// ONE option that names both boxes it puts on the wall — the gateway and the PV
+// AC combiner panel the branches land in. It is stored exactly like an IQ
+// Combiner (`combinerDeviceId: 'enphase-iq-gateway-standalone'`): no second
+// field, no follow-up question. The BARE gateway is never offered — with
+// nowhere for the branches to land it cannot be drawn or bought as the
+// combiner, and the store refuses it.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { COMBINER_PICK_GROUP_LABELS, groupCombinerChoices } from '@/lib/combinerSelection/service';
 
-interface Candidate { id: string; brand: string; model: string }
+/** `kind` is the BOS catalogue's device class, as the route sends it:
+ *  'integrated_combiner' (an IQ Combiner, gateway built in) or 'gateway_system'
+ *  (the standalone gateway + PV AC combiner panel). Absent ⇒ filed as a combiner. */
+interface Candidate { id: string; brand: string; model: string; kind?: string }
 
 interface SelectionRecord {
   combinerDeviceId: string;
@@ -365,6 +378,13 @@ export default function CombinerSelector({ projectId, visible, inverterId, onSel
         .map(c => `${c.brand} ${c.model}`)
     : [];
 
+  // Headings only when there is a standalone option to set apart; a list of
+  // combiners alone renders exactly as it always did.
+  const groups = groupCombinerChoices(candidates);
+  const option = (c: Candidate) => <option key={c.id} value={c.id}>{c.brand} {c.model}</option>;
+  // The option showing in the select — a pick still settling, or the record.
+  const showingStandalone = groups.standalone.some(c => c.id === draftId);
+
   return (
     <div className="col-span-2 rounded-lg border border-slate-700/60 bg-slate-900/40 p-3 mb-2.5">
       <div className="flex items-baseline justify-between gap-2 mb-1.5">
@@ -399,9 +419,12 @@ export default function CombinerSelector({ projectId, visible, inverterId, onSel
           onChange={e => choose(e.target.value)}
         >
           <option value="">— choose a combiner —</option>
-          {candidates.map(c => (
-            <option key={c.id} value={c.id}>{c.brand} {c.model}</option>
-          ))}
+          {groups.standalone.length === 0 ? candidates.map(option) : (
+            <>
+              <optgroup label={COMBINER_PICK_GROUP_LABELS.integrated}>{groups.integrated.map(option)}</optgroup>
+              <optgroup label={COMBINER_PICK_GROUP_LABELS.standalone}>{groups.standalone.map(option)}</optgroup>
+            </>
+          )}
         </select>
         {selected ? (
           <button className="btn-ghost btn-sm" onClick={clear} disabled={busy} title="Reopen the equipment decision">
@@ -411,11 +434,23 @@ export default function CombinerSelector({ projectId, visible, inverterId, onSel
       </div>
 
       <p className="text-[10px] text-slate-500 mt-1.5">
-        Each IQ Combiner has the IQ Gateway (Envoy) built in. Any one can be selected
+        Each IQ Combiner has the IQ Gateway (Envoy) built in.
+        {groups.standalone.length > 0
+          ? ' The standalone IQ Gateway is its own enclosure, beside a PV AC combiner panel the branches land in.'
+          : ''} Any one can be selected
         {pairedNames.length > 0 && pairing
           ? ` — the catalogue pairs ${pairing.inverterLabel} with ${pairedNames.join(', ')} (information only).`
           : '.'}
       </p>
+      {/* What the standalone pick draws and buys — said once, beside it, so a
+          pick of "one option" is visibly two boxes. A description of the
+          topology, never a condition on choosing it. */}
+      {showingStandalone ? (
+        <p className="text-[10px] text-cyan-300/80 mt-1">
+          Drawn as two boxes: the IQ Gateway in its own enclosure, fed from its own 2-pole breaker in the
+          PV AC combiner panel, which the AC branch circuits land in and which feeds the AC disconnect.
+        </p>
+      ) : null}
 
       {error ? <p className="mt-1.5 text-[11px] text-rose-300">{error}</p> : null}
     </div>

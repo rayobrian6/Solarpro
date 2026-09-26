@@ -20,6 +20,7 @@
 import type { RunSegment, MicroBranch } from './computed-system';
 import type { SldMeteringDrawing } from '@/lib/equipment/designMetering';
 import type { ConsumptionCtLocation } from '@/lib/equipment/currentTransformers';
+import type { StandaloneGatewayFields } from '@/lib/equipment/sldCombinerFields';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker, BATTERY_CAPACITY_UNRESOLVED } from '@/lib/permit/utils/helpers';
 import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
@@ -31,7 +32,7 @@ import { isGroundingConductor, type ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { SLD_SYMBOL_MAP } from './sld-symbols';
 import { emitBrandEmblem } from './sld-brand-emblems';
-import { resolveDeviceIllustration } from './sld-device-illustrations';
+import { resolveDeviceIllustration, type DeviceIllustration } from './sld-device-illustrations';
 import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
 import { getBosDevice, resolveHybridAcCollection, type HybridAcCollectionPlan } from '@/lib/equipment/integratedBos';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
@@ -457,6 +458,22 @@ export interface SLDProfessionalInput {
    * builder that has not been wired cannot be read as asserting "not chosen".
    */
   combinerSelectionIsDecided?: boolean;
+  /**
+   * 🚨 THE IQ GATEWAY ON ITS OWN WALL — "IQ Gateway (standalone) + PV AC
+   * combiner panel" (`sldCombinerFields().standaloneGateway`, one shape).
+   *
+   * Present ⇔ the branches land in a generic PV AC combiner panel and the
+   * gateway is a SEPARATE enclosure fed from its own 2-pole breaker in that
+   * panel. The combiner slot then draws the panel (no gateway art inside it),
+   * the supply breaker in it, and the gateway as its own node above the chain
+   * with its supply circuit and its CT leads. `combinerHasIntegratedGateway`
+   * cannot say this: it is false here, and false has always meant "no
+   * gateway at all".
+   *
+   * ABSENT on every other design, and absence draws exactly what it drew
+   * before. Micro single-lane path only.
+   */
+  standaloneGateway?:      StandaloneGatewayFields;
   ocpdPerString?:          number;
   dcAcRatio?:              number;
   stringConfigWarnings?:   string[];
@@ -687,9 +704,14 @@ function ctRing(x: number, y: number, tag: string, r = 3.8): string {
   return circ(x, y, r, {fill:'none', stroke:CT_CLR, sw:1.2})
     + (tag ? txt(x, y - 6, tag, {sz:4.4, anc:'middle', bold:true, fill:CT_CLR}) : '');
 }
+/** A DRAWN CT secondary lead — heavier and longer-dashed than the old 2,2
+ *  continuation stubs, as Enphase's line diagram (EN-IQ8-1PHN) draws them. */
+const CT_LEAD_SW = 1.1;
+const CT_LEAD_DASH = '4,2.5';
 /** Continuation connector for the CT secondary leads — the same bubble at the
  *  CTs and at the gateway, so the lead is traceable without a line cutting
- *  through every label on the sheet. */
+ *  through every label on the sheet. Used only where the composer states no
+ *  drawable lead (`meteringDrawing.leads` absent). */
 function ctBubble(x: number, y: number): string {
   return circ(x, y, 5.5, {fill:WHT, stroke:CT_CLR, sw:1.0})
     + txt(x, y + 2, 'CT', {sz:4.2, anc:'middle', bold:true, fill:CT_CLR});
@@ -1582,12 +1604,32 @@ function renderCombiner(
            *  and the gateway's neutral reference. */
           neutral?: boolean;
           /** Where the PRODUCTION CT is (designMetering): integral to this
-           *  combiner, or field-installed on its output circuit. */
-          productionCt?: 'combiner-integral' | 'pv-output-circuit-field';
+           *  combiner, field-installed on its output circuit, or — standalone
+           *  gateway — field-installed on L1 in THIS panel (the panel the
+           *  branches land in). The union is the composer's, never restated. */
+          productionCt?: NonNullable<SldMeteringDrawing['production']>['where'];
           /** Draw the CT-lead continuation bubble at the gateway. */
-          ctLeadConnector?: boolean},
+          ctLeadConnector?: boolean;
+          /** The CT leads are drawn as real dashed conductors
+           *  (meteringDrawing.leads): no "CT" continuation bubble here — the
+           *  caller routes the lead to `gatewayLeadIn`. */
+          drawnCtLeads?: boolean;
+          /** Front-view art for the gateway inside this combiner (the IQ
+           *  Gateway IS the gateway inside an IQ Combiner). null ⇒ a plain
+           *  labelled box. */
+          gatewayArt?: DeviceIllustration | null;
+          /** STANDALONE gateway: its 2-pole supply breaker (A) in THIS panel.
+           *  Draws the breaker on the bus and returns where its supply
+           *  conductor leaves the enclosure (`gatewaySupplyOut`). */
+          gatewaySupplyBreakerA?: number},
 ): {svg:string; lx:number; rx:number; ty:number; by:number;
-    feederOutX:number; feederOutY:number} {
+    feederOutX:number; feederOutY:number;
+    /** Top of the production-CT ring — where its lead leaves — when drawn. */
+    prodCtTop?: {x:number; y:number};
+    /** Where a drawn CT lead meets the gateway inside this combiner. */
+    gatewayLeadIn?: {x:number; y:number};
+    /** Where a standalone gateway's supply conductor leaves the enclosure. */
+    gatewaySupplyOut?: {x:number; y:number}} {
   // SOT: symbol size from SLD_SYMBOL_MAP['ac-combiner'] = 180×160
   const W2 = SLD_SYMBOL_MAP['ac-combiner'].width;   // 180
   const H2 = SLD_SYMBOL_MAP['ac-combiner'].height;  // 160
@@ -1631,6 +1673,18 @@ function renderCombiner(
   // Output wire stub
   p.push(ln(bx+W2, busY, bx+W2+10, busY, {sw:SW_MED}));
 
+  // The integrated gateway sits in the enclosure's TOP-RIGHT, above the bus —
+  // where the IQ Gateway board sits in a real IQ Combiner, and the one place a
+  // CT lead can leave the box without crossing the bus, the neutral, the
+  // nameplate labels or the feeder. (It used to sit bottom-right, where the
+  // only way out for a lead was through all four.)
+  const gwArtCX = bx+W2-38, gwArtCY = by2+44, gwArtW = 64, gwArtH = 38;   // 750–814 × 424–462 at cx 730
+  // Half the height of what is actually DRAWN there — the brand's art, or with
+  // no art a 56×20 box. The drawn lead and the neutral reference end on its
+  // edge; ending them at the art's edge would stop them 9 uu short of the box.
+  const gwHalfH = opts?.gatewayArt ? gwArtH/2 : 10;
+  const gwArtBottom = gwArtCY + gwHalfH;
+
   // Neutral terminal — the feeder to the disconnect is L1, L2 AND N; the
   // gateway's supply/metering reference lands on it (Ray, 2026-09-25).
   if (opts?.neutral) {
@@ -1640,29 +1694,70 @@ function renderCombiner(
     p.push(lug(bx+W2-4, nY));
     p.push(ln(bx+W2, nY, bx+W2+10, busY, {sw:SW_THIN}));
     if (opts?.integratedGateway) {
-      // Gateway neutral reference (dashed): gateway → N terminal
-      p.push(ln(bx+W2-24, nY, bx+W2-24, by2+H2-30, {sw:SW_THIN, dash:'2,1.5'}));
+      // Gateway neutral reference (dashed): N terminal → the gateway's terminal
+      // block (the foot of the art), crossing the bus square — clear of the
+      // PCT ring and its tag at the bus's right end.
+      p.push(ln(bx+W2-36, nY, bx+W2-36, gwArtBottom, {sw:SW_THIN, dash:'2,1.5'}));
     }
   }
 
-  // Integrated IQ Gateway glyph (the "brains") drawn inside the enclosure when
-  // the combiner integrates the monitoring gateway — so the SLD shows it's one
-  // device, not a separate wall-mounted Envoy.
+  // Integrated IQ Gateway (the "brains") drawn inside the enclosure when the
+  // combiner integrates the monitoring gateway — so the SLD shows it's one
+  // device, not a separate wall-mounted Envoy. Drawn as the gateway itself
+  // (the brand's front-view art) when the brand has one.
+  let gatewayLeadIn: {x:number; y:number} | undefined;
   if (opts?.integratedGateway) {
-    const gw = by2 + H2 - 30;
-    p.push(rect(bx+W2-58, gw, 50, 20, {fill:'#eef4fb', stroke:'#2b5c9c', sw:SW_THIN}));
-    p.push(txt(bx+W2-33, gw+8, 'IQ GATEWAY', {sz:4.4, bold:true, anc:'middle', fill:'#2b5c9c'}));
-    p.push(txt(bx+W2-33, gw+15, 'MONITOR/METER', {sz:3.6, anc:'middle', fill:'#2b5c9c'}));
-    // Consumption-CT leads land on the gateway's CT inputs.
-    if (opts?.ctLeadConnector) {
-      p.push(ln(bx+W2-70.5, gw+18, bx+W2-58, gw+18, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-      p.push(ctBubble(bx+W2-76, gw+18));
+    if (opts.gatewayArt) {
+      p.push(opts.gatewayArt.render(gwArtCX, gwArtCY, gwArtW, gwArtH));
+    } else {
+      // No art for this brand: a plain labelled box, one word at the type
+      // floor (the old two-line 'IQ GATEWAY / MONITOR/METER' overflowed its
+      // 50 uu box once the floor raised it — and 'IQ' names one brand).
+      p.push(rect(gwArtCX-28, gwArtCY-10, 56, 20, {fill:'#eef4fb', stroke:'#2b5c9c', sw:SW_THIN}));
+      p.push(txt(gwArtCX, gwArtCY+3, 'GATEWAY', {sz:MIN_TYPE_UU, bold:true, anc:'middle', fill:'#2b5c9c'}));
+    }
+    // A drawn lead arrives from above, into the LED strip at the art's right
+    // (or onto the plain box's top edge).
+    gatewayLeadIn = {x: bx+W2-12, y: gwArtCY - gwHalfH};
+    // Legacy continuation: consumption-CT leads land on the gateway's CT inputs.
+    if (opts?.ctLeadConnector && !opts.drawnCtLeads) {
+      p.push(ln(bx+W2-80.5, gwArtCY, bx+W2-70, gwArtCY, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ctBubble(bx+W2-86, gwArtCY));
     }
   }
-  // Production CT: integral (factory, on the combiner output bus) or a field CT
-  // on the output circuit just outside the enclosure.
-  if (opts?.productionCt === 'combiner-integral') p.push(ctRing(bx+W2-18, busY, 'PCT'));
-  else if (opts?.productionCt === 'pv-output-circuit-field') p.push(ctRing(bx+W2+5, busY, 'PCT'));
+
+  // STANDALONE gateway: its own 2-pole breaker on this panel's bus, in the
+  // clear quadrant between the branch taps and the PCT, its conductor rising
+  // out through the top of the enclosure to the gateway drawn above. The label
+  // sits LEFT of the breaker: above it is the conductor, right of it the PCT
+  // lead. (Enphase: "2-pole … ≤20 A", L1, L2 and N — the callout says which.)
+  let gatewaySupplyOut: {x:number; y:number} | undefined;
+  if (opts?.gatewaySupplyBreakerA && !opts.integratedGateway) {
+    const gx = cx + 40, gy = busY - 35;
+    p.push(ln(gx, busY, gx, gy+5, {sw:SW_THIN}));
+    p.push(breakerSymbol(gx, gy, 16, 10));
+    p.push(txt(gx-12, gy+3, `${opts.gatewaySupplyBreakerA}A 2P`, {sz:5.5, bold:true, anc:'end'}));
+    p.push(txt(gx-12, gy+12, 'GATEWAY', {sz:5, anc:'end'}));
+    p.push(ln(gx, gy-5, gx, by2, {sw:SW_THIN}));
+    gatewaySupplyOut = {x: gx, y: by2};
+  }
+
+  // Production CT: integral (factory, on the combiner output bus), a field CT
+  // on the output circuit just outside the enclosure, or — standalone gateway
+  // — the gateway's own CT on L1 in this panel. A standalone PCT's lead rises
+  // straight up from the ring, so its tag moves to the ring's LEFT.
+  let prodCtTop: {x:number; y:number} | undefined;
+  if (opts?.productionCt === 'combiner-integral') {
+    p.push(ctRing(bx+W2-18, busY, 'PCT'));
+    prodCtTop = {x: bx+W2-18, y: busY-3.8};
+  } else if (opts?.productionCt === 'landing-panel-field') {
+    p.push(ctRing(bx+W2-18, busY, ''));
+    p.push(txt(bx+W2-25, busY-6, 'PCT', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    prodCtTop = {x: bx+W2-18, y: busY-3.8};
+  } else if (opts?.productionCt === 'pv-output-circuit-field') {
+    p.push(ctRing(bx+W2+5, busY, 'PCT'));
+    prodCtTop = {x: bx+W2+5, y: busY-3.8};
+  }
 
   // Labels below box
   let _lblY = by2+H2+10;
@@ -1692,7 +1787,10 @@ function renderCombiner(
   console.log(`[SLD ANCHOR CONNECTED] ac-combiner.out → feederOut (${feederOutX.toFixed(1)},${feederOutY.toFixed(1)})`);
   console.log(`[SLD WIRE TYPE: AC] ac-combiner.out → ac-disconnect`);
   return {svg:p.join(''), lx:bx-10, rx:bx+W2+10, ty:by2, by:by2+H2,
-          feederOutX, feederOutY};
+          feederOutX, feederOutY,
+          ...(prodCtTop ? {prodCtTop} : {}),
+          ...(gatewayLeadIn ? {gatewayLeadIn} : {}),
+          ...(gatewaySupplyOut ? {gatewaySupplyOut} : {})};
 }
 
 // ── AC Disconnect (internal structure) ───────────────────────────────────────
@@ -1819,12 +1917,16 @@ function renderMSPLoad(
   mainAmps: number, pvAmps: number, calloutN: number,
   /** Where the consumption CTs clamp (designMetering) — drawn, never decided. */
   ctLocation: ConsumptionCtLocation | null = null,
+  ctOpts: MspCtOpts = {},
 ): {svg:string; lx:number; rx:number;
-    bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number} {
+    bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number;
+    ctLeadExit?: CtLeadExit} {
   // SOT: symbol size from SLD_SYMBOL_MAP['msp'] = 160×180
   const W2 = SLD_SYMBOL_MAP['msp'].width;   // 160
   const H2 = SLD_SYMBOL_MAP['msp'].height;  // 180
   console.log(`[SLD SYMBOL SIZE USED] msp (load-side): ${W2}×${H2}`);
+  const ctTag = ctOpts.tag ?? 'CT×2';
+  let ctLeadExit: CtLeadExit | undefined;
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
 
@@ -1846,18 +1948,25 @@ function renderMSPLoad(
 
   // Main busbar
   const busY = mbY + 20;
-  // Consumption CTs on the main's load side ring the short main→bus drop, and
-  // the centred 'MAIN BUS' label straddles that drop — so in that case alone the
-  // label moves over the bus's left half, clear of the breaker and the ring.
+  // The centred 'MAIN BUS' label straddled the main→bus drop (the drop struck
+  // through it on every load-side sheet). It sits over the bus's right half —
+  // or, when consumption CTs ring the drop and their lead runs right along it,
+  // over the left half, clear of the breaker, the drop and the ring.
   const ctOnMainDrop = ctLocation === 'main-breaker-load-side';
-  p.push(busbar(bx+8, bx+W2-8, busY, ctOnMainDrop ? undefined : 'MAIN BUS'));
-  if (ctOnMainDrop) p.push(txt((bx+8 + cx-16)/2, busY-5, 'MAIN BUS', {sz:5.5, anc:'middle', bold:true}));
+  // A DRAWN lead's service-conductor CTs ring the conductor INSIDE the wall
+  // (see below), so the bus stops short there and leaves them a conductor to
+  // ring — on the bus itself the ring would read as a CT on the busbar.
+  const ctOnSvcInside = ctLocation === 'sec-line-side-of-main' && !!ctOpts.drawnLead;
+  const busEndX = ctOnSvcInside ? bx+W2-24 : bx+W2-8;
+  p.push(busbar(bx+8, busEndX, busY));
+  p.push(txt(ctOnMainDrop ? (bx+8 + cx-16)/2 : (cx + bx+W2-8)/2, busY-5, 'MAIN BUS', {sz:5.5, anc:'middle', bold:true}));
   p.push(ln(cx, mbY+7, cx, busY, {sw:SW_MED}));
 
-  // Neutral bar (left)
+  // Neutral bar (left). Its 'N' sits beside the bar's top: under the bar, the
+  // PV input conductor (left wall → load lug) ran through it.
   const nX = bx+10;
   p.push(ln(nX, busY+8, nX, busY+38, {stroke:'#444', sw:3}));
-  p.push(txt(nX, busY+46, 'N', {sz:6, anc:'middle', bold:true, fill:'#444'}));
+  p.push(txt(nX+6, busY+16, 'N', {sz:6, anc:'start', bold:true, fill:'#444'}));
 
   // Ground bar (right)
   const gX = bx+W2-10;
@@ -1869,8 +1978,11 @@ function renderMSPLoad(
   const pvBrkX = cx+20;
   const pvBrkY = busY+28;
   p.push(ln(pvBrkX, busY, pvBrkX, pvBrkY-6, {sw:SW_THIN}));
-  p.push(breakerSymbol(pvBrkX, pvBrkY, 20, 12, pvAmps));
-  p.push(txt(pvBrkX, pvBrkY+10, 'PV', {sz:5.5, anc:'middle', bold:true, fill:LOAD_CLR}));
+  // Rating right of the breaker, 'PV' left of it: above and below it, the
+  // stem from the bus and the drop to the lug ran through both.
+  p.push(breakerSymbol(pvBrkX, pvBrkY, 20, 12));
+  p.push(txt(pvBrkX+13, pvBrkY+3, `${pvAmps}A`, {sz:5.5, anc:'start', bold:true}));
+  p.push(txt(pvBrkX-13, pvBrkY+3, 'PV', {sz:5.5, anc:'end', bold:true, fill:LOAD_CLR}));
 
   // Load lug below PV breaker
   const lugY = pvBrkY+22;
@@ -1883,7 +1995,7 @@ function renderMSPLoad(
   p.push(ln(bx, cy, pvBrkX, lugY, {sw:SW_MED}));
 
   // Output wire: from main bus right → to utility meter
-  p.push(ln(bx+W2-8, busY, bx+W2+10, busY, {sw:SW_MED}));
+  p.push(ln(busEndX, busY, bx+W2+10, busY, {sw:SW_MED}));
 
   // Consumption CTs, where the design says they clamp.
   if (ctLocation === 'main-breaker-load-side') {
@@ -1893,17 +2005,41 @@ function renderMSPLoad(
     // other placement. (The tag used to print inside the breaker symbol and the
     // bubble on the MAIN BUS lettering.)
     p.push(ctRing(cx, mbY+13, '', 3.2));
-    p.push(ln(cx+3.2, mbY+13, cx+30, mbY+13, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ln(cx+30, mbY+10.5, cx+30, mbY+13, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(cx+30, mbY+5));
-    p.push(txt(cx+38, mbY+7, 'CT×2', {sz:4.4, anc:'start', bold:true, fill:CT_CLR}));
+    if (ctOpts.drawnLead) {
+      // A drawn lead runs right along the drop and rises past the END of the
+      // panel header (a straight rise at cx+30 would cut 'MAIN SERVICE PANEL')
+      // and short of the callout bubble. The tag sits level with the breaker.
+      ctLeadExit = [[cx+3.2, mbY+13], [bx+W2-4, mbY+13]];
+      p.push(txt(cx+54, mbY+3, ctTag, {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    } else {
+      p.push(ln(cx+3.2, mbY+13, cx+30, mbY+13, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ln(cx+30, mbY+10.5, cx+30, mbY+13, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ctBubble(cx+30, mbY+5));
+      p.push(txt(cx+38, mbY+7, ctTag, {sz:4.4, anc:'start', bold:true, fill:CT_CLR}));
+    }
   } else if (ctLocation === 'sec-line-side-of-main') {
-    // On the service conductors leaving toward the meter; bubble ABOVE (the
-    // meter feeder runs below), tag in the panel's clear top-right corner.
-    p.push(ctRing(bx+W2+5, busY, ''));
-    p.push(ln(bx+W2+5, busY-3.8, bx+W2+5, busY-10, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(bx+W2+5, busY-16));
-    p.push(txt(bx+W2-5, busY-14, 'CT×2', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    if (ctOpts.drawnLead) {
+      // On the service conductor where it leaves the (shortened) bus, 16 uu
+      // inside the wall: from there a drawn lead rises straight — past the end
+      // of the panel header and short of the callout bubble. The service run's
+      // 'EXISTING SERVICE CONDUCTORS' label is centred on a span narrower than
+      // it, so in the printed face (Liberation Sans) it starts ~8 uu INSIDE
+      // this wall, 7 uu under the bus: a ring at bx+W2-4 sat on its 'E', and
+      // outside the wall on the rest of it. Here it clears the label by 4.5 uu,
+      // 'MAIN BUS' by 2.8 and the ground bar below. The tag rides outside,
+      // above that label.
+      const rX = bx+W2-16;
+      p.push(ctRing(rX, busY, ''));
+      ctLeadExit = [[rX, busY-3.8]];
+      p.push(txt(bx+W2+3, busY-7, ctTag, {sz:4.4, anc:'start', bold:true, fill:CT_CLR}));
+    } else {
+      // On the service conductors leaving toward the meter; bubble ABOVE (the
+      // meter feeder runs below), tag in the panel's clear top-right corner.
+      p.push(ctRing(bx+W2+5, busY, ''));
+      p.push(ln(bx+W2+5, busY-3.8, bx+W2+5, busY-10, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ctBubble(bx+W2+5, busY-16));
+      p.push(txt(bx+W2-5, busY-14, ctTag, {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    }
   }
 
   // Labels below
@@ -1925,8 +2061,22 @@ function renderMSPLoad(
   console.log(`[SLD ANCHOR CONNECTED] msp.load_out → busOut (${busOutX.toFixed(1)},${busOutY.toFixed(1)})`);
   console.log(`[SLD WIRE TYPE: AC] msp.load_out → utility-meter`);
   return {svg:p.join(''), lx:bx-10, rx:bx+W2+10,
-          bkfdInX, bkfdInY, busOutX, busOutY};
+          bkfdInX, bkfdInY, busOutX, busOutY,
+          ...(ctLeadExit ? {ctLeadExit} : {})};
 }
+
+/** How the MSP draws its consumption CTs. */
+interface MspCtOpts {
+  /** The tag printed at the CTs — `CT×<count>` from the composer's ctCount. */
+  tag?: string;
+  /** The CT leads are drawn as real conductors to the gateway: no "CT"
+   *  continuation bubble; the function returns where its lead leaves. */
+  drawnLead?: boolean;
+}
+/** A drawn consumption-CT lead's path inside/at the MSP, ring edge first. Its
+ *  LAST point is where the lead turns to rise vertically — the air straight
+ *  above it is clear of this panel's text and callout. */
+type CtLeadExit = Array<[number, number]>;
 
 // ── MSP Supply-Side / Backfed (internal structure) ───────────────────────────
 function renderMSPSupply(
@@ -1935,23 +2085,47 @@ function renderMSPSupply(
   isSupply: boolean, calloutN: number,
   /** Where the consumption CTs clamp (designMetering) — drawn, never decided. */
   ctLocation: ConsumptionCtLocation | null = null,
+  ctOpts: MspCtOpts = {},
 ): {svg:string; lx:number; rx:number;
-    bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number} {
+    bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number;
+    ctLeadExit?: CtLeadExit} {
   // SOT: symbol size from SLD_SYMBOL_MAP['msp'] = 160×180
   const W2 = SLD_SYMBOL_MAP['msp'].width;   // 160
   const H2 = SLD_SYMBOL_MAP['msp'].height;  // 180
   console.log(`[SLD SYMBOL SIZE USED] msp (supply-side): ${W2}×${H2}`);
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
+  const ctTag = ctOpts.tag ?? 'CT×2';
+  let ctLeadExit: CtLeadExit | undefined;
 
   // Enclosure
   p.push(rect(bx, by2, W2, H2, {fill:WHT, sw:SW_MED}));
   p.push(ln(bx, by2+14, bx+W2, by2+14, {sw:SW_THIN}));
   p.push(txt(cx, by2+10, 'MAIN SERVICE PANEL', {sz:5.5, bold:true, anc:'middle'}));
 
-  // Main busbar
-  const busY = by2+38;
-  p.push(busbar(bx+8, bx+W2-8, busY, 'MAIN BUS'));
+  // Main busbar.
+  // On a supply-side tap the 24 uu between the header rule and the bus had to
+  // hold the service run, TAP, SERVICE (LINE) SIDE, the main's line-side riser,
+  // its '200A' and MAIN BUS — at the floored type the run struck through MAIN
+  // BUS, '200A' printed over SIDE, and the tap-to-main CT ring sat on both. The
+  // bus drops 8 uu on a tap so each gets a row; the service run itself and the
+  // 'utility_in' entry (by2+55) do not move.
+  const busY = isSupply ? by2+46 : by2+38;
+  // A DRAWN lead to service-conductor CTs on a tap job: at this bus height the
+  // service run's 'EXISTING SERVICE CONDUCTORS' label (which in the printed
+  // face starts ~8 uu inside the right wall) is 2.8 uu under the conductor, so
+  // the only clear place for the ring is further in — the main steps 14 uu
+  // left to make room, and the bus stops at the main so the ring sits on the
+  // conductor it measures. (A backfed job's bus is 8 uu higher: no conflict.)
+  const ctSvcOnTap = isSupply && ctLocation === 'sec-line-side-of-main' && !!ctOpts.drawnLead;
+  const mbX = ctSvcOnTap ? bx+W2-34 : bx+W2-20;  // main breaker position
+  const busEndX = ctSvcOnTap ? mbX+10 : bx+W2-8;
+  if (isSupply) {
+    p.push(busbar(bx+8, busEndX, busY));
+    p.push(txt(bx+60, busY-5, 'MAIN BUS', {sz:5.5, anc:'middle', bold:true}));
+  } else {
+    p.push(busbar(bx+8, bx+W2-8, busY, 'MAIN BUS'));
+  }
 
   if (isSupply) {
     // Supply-side tap: lands on the SERVICE (line-side) conductors between the
@@ -1963,9 +2137,9 @@ function renderMSPSupply(
     // "MAIN SERVICE PANEL" baseline. That was already tight at the retired 4.5/5.5
     // uu type and collides outright once both are raised to the legibility floor.
     // Dropped so the label clears the panel header rule at by2+14.
-    const svcY = busY-10;              // service conductor run, above the bus
+    const svcY = by2+28;               // service conductor run, above the bus
     const pvInY = by2+55;              // 'utility_in' anchor row — PV enters here
-    const mainBkrX = bx+W2-20;         // main breaker position (drawn below)
+    const mainBkrX = mbX;              // main breaker position (drawn below)
     // Service conductors: main breaker LINE side up and across to the tap
     p.push(ln(mainBkrX, svcY, mainBkrX, busY-6, {stroke:SUPPLY_CLR, sw:SW_MED}));
     p.push(ln(tapX, svcY, mainBkrX, svcY, {stroke:SUPPLY_CLR, sw:SW_MED}));
@@ -1974,12 +2148,14 @@ function renderMSPSupply(
     p.push(ln(bx, pvInY, tapX, pvInY, {stroke:SUPPLY_CLR, sw:SW_MED}));
     p.push(ln(tapX, pvInY, tapX, svcY, {stroke:SUPPLY_CLR, sw:SW_MED}));
     p.push(circ(tapX, svcY, 3, {fill:SUPPLY_CLR, stroke:SUPPLY_CLR, sw:0}));
-    p.push(txt(tapX, svcY-8, 'TAP', {sz:5.5, anc:'middle', bold:true, fill:SUPPLY_CLR}));
+    // Beside the tap dot, not above it: above, it sat on the header rule.
+    p.push(txt(tapX-5, svcY+2, 'TAP', {sz:5.5, anc:'end', bold:true, fill:SUPPLY_CLR}));
     p.push(txt(cx, by2+H2+10, `${mainAmps}A RATED`, {sz:F.tiny, anc:'middle'}));
     p.push(txt(cx, by2+H2+19, 'SUPPLY SIDE TAP — LINE SIDE OF MAIN — NEC 705.11', {sz:F.tiny, anc:'middle', bold:true, fill:SUPPLY_CLR}));
   } else {
-    // Backfed breaker on bus
-    const brkX = cx;
+    // Backfed breaker on bus — left of centre, so its rating clears the main
+    // breaker's '200A MAIN' label below the bus.
+    const brkX = cx-24;
     const brkY = busY+26;
     p.push(ln(brkX, busY, brkX, brkY-6, {sw:SW_THIN}));
     p.push(breakerSymbol(brkX, brkY, 24, 14, backfeedAmps));
@@ -1989,10 +2165,12 @@ function renderMSPSupply(
     p.push(txt(cx, by2+H2+28, 'NEC 705.12(B)(2)', {sz:F.tiny, anc:'middle', italic:true}));
   }
 
-  // Main breaker (right side)
-  const mbX = bx+W2-20;
-  p.push(breakerSymbol(mbX, busY, 20, 12, mainAmps));
-  p.push(txt(mbX, busY+12, 'MAIN', {sz:5, anc:'middle', bold:true}));
+  // Main breaker (right side). Its rating and name print as one label BELOW
+  // the bus, left of the breaker: above it, the rating sat on a tap's service
+  // riser (and on SERVICE (LINE) SIDE), and 'MAIN' under it sat on the ground
+  // bar.
+  p.push(breakerSymbol(mbX, busY, 20, 12));
+  p.push(txt(mbX-13, busY+13, `${mainAmps}A MAIN`, {sz:5, anc:'end', bold:true}));
 
   // Neutral bar
   const nX = bx+10;
@@ -2008,32 +2186,61 @@ function renderMSPSupply(
   // Input wire stub
   p.push(ln(bx-10, cy, bx, cy, {sw:SW_MED}));
   // Output wire stub
-  p.push(ln(bx+W2-8, busY, bx+W2+10, busY, {sw:SW_MED}));
+  p.push(ln(busEndX, busY, bx+W2+10, busY, {sw:SW_MED}));
 
   // Consumption CTs, where the design says they clamp. "Between the tap and
-  // the main" is the drawn SERVICE (LINE) SIDE run from TAP to MAIN.
+  // the main" is the service conductor from the TAP to the MAIN's line side.
+  // Every drawn lead rises just inside the right wall — at x = bx+W2-4, or at
+  // the ring itself for service-conductor CTs on a tap job — past the end of
+  // the panel header and short of the callout bubble.
+  const ctRiseX = bx+W2-4;
   if (ctLocation === 'between-tap-and-main' && isSupply) {
-    // On the SERVICE (LINE) SIDE run, just before the main; the tag rides
-    // above the enclosure where the panel's own labels are not.
-    const ctX = bx+W2-33, ctY = busY-10;
+    // On the main's line-side riser — the last span of service conductor
+    // before the main, and the only one no label sits above.
+    const ctX = mbX, ctY = by2+34;
     p.push(ctRing(ctX, ctY, '', 3.2));
-    p.push(ln(ctX, ctY-3.2, ctX, by2-1, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(ctX, by2-7));
-    p.push(txt(ctX-8, by2-5, 'CT×2 (L1, L2)', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    p.push(txt(ctX-7, ctY+3, ctTag, {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    if (ctOpts.drawnLead) {
+      ctLeadExit = [[ctX+3.2, ctY], [ctRiseX, ctY]];
+    } else {
+      p.push(ln(ctX+3.2, ctY, ctRiseX, ctY, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ln(ctRiseX, ctY, ctRiseX, by2-1, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ctBubble(ctRiseX, by2-7));
+      p.push(txt(ctRiseX-8, by2-5, '(L1, L2)', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    }
   } else if (ctLocation === 'main-breaker-load-side') {
-    // On the bus, just on the main's load side. The tag rides beside the
-    // bubble: above the ring it printed on the main's rating and, on a
-    // supply-side tap, on the SERVICE (LINE) SIDE run.
-    const ctX = bx+W2-36;
+    // On the bus, just on the main's load side. The tag rides outside the
+    // panel's right wall, beside the lead's rise: above the ring it printed on
+    // the main's rating and, on a supply-side tap, on the SERVICE (LINE) SIDE
+    // run; below it, on the main's label.
+    const ctX = bx+W2-40;
     p.push(ctRing(ctX, busY, ''));
-    p.push(ln(ctX, busY+4, ctX, busY+14, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(ctX, busY+20));
-    p.push(txt(ctX-8, busY+22, 'CT×2', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    if (ctOpts.drawnLead) {
+      ctLeadExit = [[ctX, busY-3.8], [ctX, busY-13], [ctRiseX, busY-13]];
+      p.push(txt(bx+W2+4, by2+25, ctTag, {sz:4.4, anc:'start', bold:true, fill:CT_CLR}));
+    } else {
+      p.push(ln(ctX, busY+4, ctX, busY+14, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ctBubble(ctX, busY+20));
+      p.push(txt(ctX-8, busY+22, ctTag, {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    }
   } else if (ctLocation === 'sec-line-side-of-main') {
-    p.push(ctRing(bx+W2+5, busY, ''));
-    p.push(ln(bx+W2+5, busY-3.8, bx+W2+5, busY-10, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
-    p.push(ctBubble(bx+W2+5, busY-16));
-    p.push(txt(bx+W2-5, busY-14, 'CT×2', {sz:4.4, anc:'end', bold:true, fill:CT_CLR}));
+    // On the service conductors leaving toward the meter. The tag rides
+    // outside the wall: inside, a tap's line-side riser runs there.
+    if (ctOpts.drawnLead) {
+      // Just inside the wall, where the conductor leaves the bus, so the lead
+      // rises straight from the ring. Outside, the ring sat on the existing-
+      // service callout and straight under the callout bubble. On a tap job
+      // it sits further in, between the (moved) main and that label.
+      const rX = ctSvcOnTap ? bx+W2-16 : ctRiseX;
+      p.push(ctRing(rX, busY, ''));
+      ctLeadExit = [[rX, busY-3.8]];
+      p.push(txt(bx+W2+3, busY-7, ctTag, {sz:4.4, anc:'start', bold:true, fill:CT_CLR}));
+    } else {
+      p.push(ctRing(bx+W2+5, busY, ''));
+      p.push(ln(bx+W2+5, busY-3.8, bx+W2+5, busY-10, {stroke:CT_CLR, sw:0.9, dash:'2,2'}));
+      p.push(ctBubble(bx+W2+5, busY-16));
+      p.push(txt(bx+W2+10, busY-6, ctTag, {sz:4.4, anc:'start', bold:true, fill:CT_CLR}));
+    }
   }
 
   // Callout
@@ -2050,7 +2257,8 @@ function renderMSPSupply(
   console.log(`[SLD ANCHOR CONNECTED] msp.load_out → busOut (${busOutX.toFixed(1)},${busOutY.toFixed(1)})`);
   console.log(`[SLD WIRE TYPE: AC] msp.load_out → utility-meter`);
   return {svg:p.join(''), lx:bx-10, rx:bx+W2+10,
-          bkfdInX, bkfdInY, busOutX, busOutY};
+          bkfdInX, bkfdInY, busOutX, busOutY,
+          ...(ctLeadExit ? {ctLeadExit} : {})};
 }
 
 // ── Main Render ──────────────────────────────────────────────────────────────
@@ -2430,21 +2638,49 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // ── NODE 3: AC COMBINER (micro) or DC DISCONNECT (string) ─────────────────
   let node3RX: number;
+  // Where the combiner node's gateway-side connection points landed — read by
+  // the GATEWAY + CT LEADS block below, after the MSP has drawn its CTs.
+  let _combGw: {
+    prodCtTop?: {x:number; y:number};
+    gatewayLeadIn?: {x:number; y:number};
+    gatewaySupplyOut?: {x:number; y:number};
+    ty: number;
+  } | null = null;
+  // A standalone gateway is drawn only on the micro path — the one path that
+  // draws the panel its branches land in.
+  const _saGw = isMicro ? input.standaloneGateway : undefined;
+  // The CT leads are DRAWN (dashed, gateway → CT) exactly when the composer
+  // stated them (`meteringDrawing.leads`) AND this sheet draws the gateway they
+  // run to (standalone node, or inside the combiner); otherwise the legacy "CT"
+  // bubble continuation is kept, unchanged — a lead with no far end is not
+  // drawn.
+  const _drawnLeads = isMicro && !!input.meteringDrawing?.leads?.length
+    && (!!_saGw || !!input.combinerHasIntegratedGateway);
 
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
     const nb = input.microBranches?.length ?? microBranchCount(md, input.inverterModel);
     const bocpd = input.branchOcpdAmps ?? branchRun?.ocpdAmps ?? 20;
-    const clabel = input.combinerModel ?? input.combinerLabel ?? `${input.inverterManufacturer} IQ Combiner`;
+    // Standalone: the box the branches land in IS the PV AC combiner panel
+    // (landingLabel === combinerLabel by contract); the gateway is drawn apart.
+    const clabel = _saGw?.landingLabel ?? input.combinerModel ?? input.combinerLabel ?? `${input.inverterManufacturer} IQ Combiner`;
+    // The gateway inside an integrated combiner is drawn as the gateway — the
+    // combiner's brand first ('Enphase IQ Combiner 5C'), then the inverter's.
+    const _gwArt = resolveDeviceIllustration(clabel.split(/\s+/)[0] ?? '', 'gateway')
+      ?? resolveDeviceIllustration(input.inverterManufacturer ?? '', 'gateway');
     const cr = renderCombiner(xComb, BUS_Y, nb, bocpd, clabel, 3,
-      {integratedGateway: input.combinerHasIntegratedGateway, providesDisconnect: input.combinerProvidesAcDisconnect,
+      {integratedGateway: _saGw ? false : input.combinerHasIntegratedGateway, providesDisconnect: input.combinerProvidesAcDisconnect,
        branchOcpds: input.microBranches?.map(b => b.ocpdAmps),
        // `=== false` and not `!input...`: undefined is "the builder did not
        // answer", which must draw as before, not as "nobody chose it".
        selectionUnresolved: input.combinerSelectionIsDecided === false,
        neutral: _feederHasNeutral,
        productionCt: input.meteringDrawing?.production?.where,
-       ctLeadConnector: !!input.meteringDrawing?.lead});
+       ctLeadConnector: !!input.meteringDrawing?.lead,
+       drawnCtLeads: _drawnLeads,
+       gatewayArt: _gwArt,
+       gatewaySupplyBreakerA: _saGw?.supplyBreakerA});
+    _combGw = {prodCtTop: cr.prodCtTop, gatewayLeadIn: cr.gatewayLeadIn, gatewaySupplyOut: cr.gatewaySupplyOut, ty: cr.ty};
     parts.push(cr.svg);
     node3RX = cr.feederOutX;  // Use feeder output terminal X as the right-side connection point
     parts.push(txt(xComb, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
@@ -2635,11 +2871,19 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // buiResult is hoisted so the generator section (outside battery block) can access BUI terminal coords
   let buiResult: ReturnType<typeof renderBUI> | undefined;
   // mspResult holds terminal coordinates for both MSPLoad and MSPSupply (same interface)
-  let mspResult: {svg:string; lx:number; rx:number; bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number};
+  let mspResult: {svg:string; lx:number; rx:number; bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number;
+    ctLeadExit?: CtLeadExit};
+  // The tag at the consumption CTs states the composer's count — it used to be
+  // a literal 'CT×2' whatever the design's ungrounded-conductor count was.
+  const _ctCount = input.meteringDrawing?.consumption?.ctCount;
+  const _mspCt: MspCtOpts = {
+    tag: `CT×${_ctCount ?? '?'}`,
+    drawnLead: _drawnLeads && !!input.meteringDrawing?.leads?.some(l => l.channel === 'consumption'),
+  };
 
   if (isLoadSide) {
     const r = renderMSPLoad(xMSP, BUS_Y, input.mainPanelAmps, pvBreakerAmps, isMicro?5:6,
-      input.meteringDrawing?.consumption?.location ?? null);
+      input.meteringDrawing?.consumption?.location ?? null, _mspCt);
     parts.push(r.svg);
     mspRX = r.rx;
     mspResult = r;
@@ -2648,7 +2892,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     mspBusY = mbY;
   } else {
     const r = renderMSPSupply(xMSP, BUS_Y, input.mainPanelAmps, input.backfeedAmps, isSupplySide, isMicro?5:6,
-      input.meteringDrawing?.consumption?.location ?? null);
+      input.meteringDrawing?.consumption?.location ?? null, _mspCt);
     parts.push(r.svg);
     mspRX = r.rx;
     mspResult = r;
@@ -2966,9 +3210,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // A segment may not inherit the preceding segment's conductor inventory. When
     // the existing service has not been surveyed, the honest label says so - the
     // same wording the other SLD branch has always used for this span.
+    // '(E)' is the sheet's own existing-equipment notation ((E) UTILITY METER).
+    // The long form — 'EXISTING SERVICE CONDUCTORS', 145.5 uu in the printed face
+    // — was centred on this ~130 uu span, so its 'E' sat inside the MSP and the
+    // panel wall struck through it on every sheet. Both lines now fit the span.
     const fb = [
-      'EXISTING SERVICE CONDUCTORS',
-      `${input.mainPanelAmps ?? '—'}A SERVICE — FIELD VERIFY`,
+      '(E) SERVICE CONDUCTORS',
+      `${input.mainPanelAmps ?? '—'}A — FIELD VERIFY`,
     ];
     const {lines, cnt} = runLines(run, fb);
     // Source: BUI LOAD port when battery present, else MSP busOut terminal.
@@ -3026,18 +3274,138 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     'EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122 / NEC 690.43',
     {sz:F.tiny, anc:'middle', fill:GRN}));
 
+  // ── THE GATEWAY AND ITS CT LEADS ──────────────────────────────────────────
+  // Ray, 2026-09-26: "I would like to see CTs drawn from the Envoy to the MSP or
+  // wherever it is going to land." Each lead the composer states
+  // (meteringDrawing.leads) is DRAWN as Enphase's own line diagram draws it
+  // (EN-IQ8-1PHN): a heavy dashed conductor from the CT to the gateway, one
+  // per channel, labelled once with the composer's words — the production
+  // lead's "DO NOT EXTEND" and the consumption leads' extension rule are
+  // opposite rules, so each carries its own. Nothing here decides a length or
+  // a location; it draws them.
+  //
+  // ROUTING. Every lead runs in the clear band ABOVE the chain (nothing lives
+  // there but the battery, far right), leaving each panel by a rise the panel
+  // itself reports as clear of its own text and callout. Leads cross conductors
+  // only square-on, and never text.
+  //
+  // A standalone gateway is drawn here too: its own enclosure above the panel
+  // it is fed from, its supply conductor rising from its 2-pole breaker in that
+  // panel, its production CT's 5 ft lead rising beside it.
+  let _anyLeadDrawn = false;
+  const _undrawnLeadLabels: string[] = [];
+  if (isMicro && _combGw) {
+    const _leads = _drawnLeads ? (input.meteringDrawing?.leads ?? []) : [];
+    const _consLead = _leads.find(l => l.channel === 'consumption');
+    const _prodLead = _leads.find(l => l.channel === 'production');
+    const _exit = mspResult.ctLeadExit;
+    const _lead = (pts: Array<[number, number]>) =>
+      `<polyline points="${pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')}" fill="none" stroke="${CT_CLR}" stroke-width="${CT_LEAD_SW}" stroke-dasharray="${CT_LEAD_DASH}"/>`;
+    // A lead's gateway end lands on a terminal dot, so it reads as terminated.
+    const _term = (x: number, y: number) => circ(x, y, 1.8, {fill:CT_CLR, stroke:CT_CLR, sw:0});
+
+    if (_saGw) {
+      // ── Standalone gateway node ────────────────────────────────────────
+      const gwCX = xComb + 56;                     // between its supply (x+40) and its PCT lead (x+72)
+      const encW = 162, encH = 100;
+      const ex0 = gwCX - encW/2, ex1 = gwCX + encW/2;
+      const ey0 = SCH_Y + 60, ey1 = ey0 + encH;    // 130–230: the clear band, well under the fit box top
+      parts.push(rect(ex0, ey0, encW, encH, {fill:WHT, sw:SW_MED}));
+      const art = resolveDeviceIllustration(_saGw.label.split(/\s+/)[0] ?? '', 'gateway');
+      if (art) {
+        parts.push(art.render(gwCX, (ey0+ey1)/2, encW-12, encH-12));
+      } else {
+        parts.push(txt(gwCX, (ey0+ey1)/2+3, 'GATEWAY', {sz:F.hdr, bold:true, anc:'middle'}));
+      }
+      parts.push(txt(gwCX, ey0-8, '(N) MONITORING GATEWAY', {sz:F.hdr, bold:true, anc:'middle'}));
+      // Nameplate to the LEFT: below is where its conductors rise, right is
+      // where the consumption lead arrives.
+      const nlX = ex0 - 8;
+      parts.push(txt(nlX, ey0+30, esc(_saGw.label), {sz:F.tiny, anc:'end', italic:true}));
+      if (_saGw.partNumber) parts.push(txt(nlX, ey0+39, `P/N ${esc(_saGw.partNumber)}`, {sz:F.tiny, anc:'end'}));
+      parts.push(txt(nlX, ey0+(_saGw.partNumber ? 48 : 39), 'NEMA 3R ENCL. IF OUTDOORS', {sz:F.tiny, anc:'end'}));
+
+      // Its supply circuit: from its breaker in the landing panel, straight up.
+      const so = _combGw.gatewaySupplyOut;
+      if (so) {
+        parts.push(ln(so.x, so.y, so.x, ey1, {sw:SW_MED}));
+        parts.push(txt(so.x-6, ey1+66, `${_saGw.supplyBreakerA}A 2P — GATEWAY SUPPLY`, {sz:F.seg, anc:'end', bold:true}));
+        parts.push(txt(so.x-6, ey1+75, esc(_saGw.supplyConductor), {sz:F.seg, anc:'end'}));
+      }
+
+      // Production CT lead — straight up from the ring on L1 in the PV panel.
+      const pt = _combGw.prodCtTop;
+      if (_prodLead && pt && input.meteringDrawing?.production?.where === 'landing-panel-field'
+          && pt.x > ex0 + 8 && pt.x < ex1 - 8) {
+        parts.push(_lead([[pt.x, pt.y], [pt.x, ey1]]));
+        parts.push(_term(pt.x, ey1));
+        parts.push(txt(pt.x+6, ey1+70, esc(_prodLead.label), {sz:F.tiny, anc:'start', bold:true, fill:CT_CLR}));
+        _anyLeadDrawn = true;
+      } else if (_prodLead) {
+        _undrawnLeadLabels.push(_prodLead.label);
+      }
+
+      // Consumption CT leads — from the MSP's rise, along the band, into the
+      // gateway's right side near its terminal door.
+      if (_consLead && _exit?.length) {
+        const rx = _exit[_exit.length - 1][0];
+        const laneY = ey1 - 16;
+        parts.push(_lead([..._exit, [rx, laneY], [ex1, laneY]]));
+        parts.push(_term(ex1, laneY));
+        parts.push(txt((ex1 + rx)/2, laneY-6, esc(_consLead.label), {sz:F.tiny, anc:'middle', bold:true, fill:CT_CLR}));
+        _anyLeadDrawn = true;
+      } else if (_consLead) {
+        _undrawnLeadLabels.push(_consLead.label);
+      }
+    } else if (_combGw.gatewayLeadIn) {
+      // ── Integrated gateway (inside the combiner) ─────────────────────────
+      // Its production CT is factory pre-wired, so the composer states only the
+      // consumption lead. It leaves the combiner through the top, over the
+      // gateway art, and runs the band to the MSP.
+      const gi = _combGw.gatewayLeadIn;
+      if (_consLead && _exit?.length) {
+        const rx = _exit[_exit.length - 1][0];
+        const laneY = _combGw.ty - 63;
+        parts.push(_lead([..._exit, [rx, laneY], [gi.x, laneY], [gi.x, gi.y]]));
+        parts.push(_term(gi.x, gi.y));
+        parts.push(txt((gi.x + rx)/2, laneY-6, esc(_consLead.label), {sz:F.tiny, anc:'middle', bold:true, fill:CT_CLR}));
+        _anyLeadDrawn = true;
+      } else if (_consLead) {
+        _undrawnLeadLabels.push(_consLead.label);
+      }
+      // A field PCT on the output circuit of a combiner-drawn gateway has no
+      // clear route out (the callout and the feeder callout sit over it): its
+      // lead is stated in the note band instead of being drawn through them.
+      if (_prodLead) _undrawnLeadLabels.push(_prodLead.label);
+    }
+  }
+
   // ── METERING: the consumption CTs and their leads (designMetering) ───────
   // Stated in the clear band under the ground rail — the CT symbols sit where
-  // they clamp, and the two "CT" bubbles (at the CTs and at the gateway) are
-  // the continuation of the secondary leads between them.
-  if (input.meteringDrawing?.consumption) {
-    const _mc = input.meteringDrawing.consumption;
+  // they clamp. Where the leads are drawn, each carries its own label (above)
+  // and the composer's older one-line `lead` is NOT repeated here: its
+  // "EXTEND / RACEWAY PER MFR" would sit on the same sheet as the drawn lead's
+  // "EXTEND ≤1.5 Ω/WIRE", two extension rules for one lead. Where they are not
+  // drawn, the two "CT" bubbles (at the CTs and at the gateway) are the
+  // continuation of the secondary leads between them, and that line keys them.
+  {
     const _mx = (gx1 + gx2) / 2;
-    parts.push(txt(_mx, GND_Y+24, `CONSUMPTION CTs @ MSP: ${_mc.label}  ·  ${_mc.basisLabel}`,
-      {sz:F.tiny, anc:'middle', bold:true, fill:CT_CLR}));
-    if (input.meteringDrawing.lead) {
-      parts.push(txt(_mx, GND_Y+33, `(CT) = ${input.meteringDrawing.lead.label}`,
-        {sz:F.tiny, anc:'middle', fill:CT_CLR}));
+    let _ny = GND_Y+24;
+    if (input.meteringDrawing?.consumption) {
+      const _mc = input.meteringDrawing.consumption;
+      parts.push(txt(_mx, _ny, `CONSUMPTION CTs @ MSP: ${_mc.label}  ·  ${_mc.basisLabel}`,
+        {sz:F.tiny, anc:'middle', bold:true, fill:CT_CLR})); _ny += 9;
+      // `_drawnLeads` and not "a lead was drawn": in drawn-lead mode no bubble
+      // is drawn anywhere, and the consumption lead's own words are either on
+      // its drawn line or (undrawable) in the list just below.
+      if (input.meteringDrawing.lead && !_drawnLeads) {
+        parts.push(txt(_mx, _ny, `(CT) = ${input.meteringDrawing.lead.label}`,
+          {sz:F.tiny, anc:'middle', fill:CT_CLR})); _ny += 9;
+      }
+    }
+    // A stated lead that could not be drawn is still stated.
+    for (const l of _undrawnLeadLabels) {
+      parts.push(txt(_mx, _ny, l, {sz:F.tiny, anc:'middle', fill:CT_CLR})); _ny += 9;
     }
   }
 
@@ -3103,8 +3471,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ...(input.hasBattery ? [{dash:'6,3', stroke:'#1565C0', label:'Battery AC-Coupled Connection'}] : []),
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#2E7D32', label:'Generator Output Conductor'}] : []),
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#E65100', label:'ATS Transfer Conductor'}] : []),
-    // Only when the CT leads are actually drawn (gate 11: legend == drawn).
-    ...(input.meteringDrawing?.lead ? [{dash:'2,2', stroke:CT_CLR, label:'CT Secondary Leads (signal) — "CT" continuation'}] : []),
+    // Only when the CT leads are actually drawn (gate 11: legend == drawn) —
+    // and in the form they are drawn: a real lead, or the "CT" bubbles (which
+    // exist only outside drawn-lead mode).
+    ...(_anyLeadDrawn
+      ? [{dash:CT_LEAD_DASH, stroke:CT_CLR, label:'CT Secondary Leads (signal) — CT to gateway'}]
+      : input.meteringDrawing?.lead && !_drawnLeads
+        ? [{dash:'2,2', stroke:CT_CLR, label:'CT Secondary Leads (signal) — "CT" continuation'}] : []),
   ];
   const legRows = legEntries.flatMap(e =>
     wrapLegendLabel(e.label, 40, Math.max(F.tiny, MIN_TYPE_UU)).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
@@ -3345,6 +3718,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // identically; combinerScheduleCell appends '⚠ NOT SELECTED' when the
     // adapter says the device was derived rather than chosen.
     ['AC Combiner',combinerScheduleCell(esc(input.combinerLabel??'IQ Combiner'), input.combinerSelectionIsDecided)],
+    // A standalone gateway is its own piece of equipment on the diagram, so it
+    // is its own row here — the schedule lists what the drawing draws.
+    ...(input.standaloneGateway ? [['Monitoring Gateway',
+      `${esc(input.standaloneGateway.label)}${input.standaloneGateway.partNumber ? ` (${esc(input.standaloneGateway.partNumber)})` : ''} · ${input.standaloneGateway.supplyBreakerA}A 2P SUPPLY`] as [string,string]] : []),
     ['AC Disconnect',`${resolvedAcOCPD}A ${isSupplySide ? 'Fused (Tap OCPD)' : 'Non-Fused'}`],
     ['Main Panel',`${input.mainPanelAmps} A`],
     ['Utility',esc(input.utilityName)],
@@ -3518,6 +3895,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
     ];
   }
+
+  // 🚨 NO ROW HERE FOR A STANDALONE GATEWAY'S SUPPLY CIRCUIT. This band is
+  // the SLD PDF's conductor schedule; the permit package suppresses it and
+  // prints PV-4B.1, built from engine runs — and no engine run carries the
+  // gateway circuit. A GW-1 row here alone made the SLD PDF list a conductor
+  // the permit schedule does not (output consistency). The circuit is still
+  // stated wherever it is drawn: the '15A 2P — GATEWAY SUPPLY' callout with
+  // its conductor, the Monitoring Gateway equipment row, and the BOM. If it is
+  // ever scheduled, it goes into BOTH lists from one source, together.
 
   const maxRows = Math.floor((SCHED_H-30)/rH);
   sRows.slice(0, maxRows).forEach((row, ri) => {

@@ -28,7 +28,7 @@ import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escap
 import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { isHybridPlanset, primarySubKey, SUB_LABEL, inverterSubKey } from './subSystemSheets';
-import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { getMountingSystemById, effectiveMountingSystemId } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset, DOCUMENT_APPLICABILITY_CHIP } from '@/lib/manufacturer-assets-db';
 // AAC WS-9 — the ONE document-applicability seam every sheet may use.
@@ -2432,6 +2432,25 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
         ${_schedBranchAuthorityBlock}
       </div>`
     : '';
+  // Where the branch trunks terminate. "the AC combiner" is true of every design
+  // but a standalone IQ Gateway, whose branches land on 2-pole breakers in a PV
+  // AC combiner panel — the gateway beside it is not where they terminate. Only
+  // that design gets different words; every other SCHED is byte-identical.
+  // The helper is micro-gated (a string job with a leftover standalone pick has
+  // no branches to land), exactly as E-1 and the snapshot are.
+  const _schedStandaloneBos = (() => {
+    const _p = buildIntegratedEquipment(input, cad);
+    const _sg = permitStandaloneGateway(input, cad, _p);
+    const _land = planLandingDevice(_p);
+    return _sg && _land ? { plan: _p, sg: _sg, landing: _land } : null;
+  })();
+  // The gateway's own supply is NOT restated here: the STANDALONE GATEWAY note
+  // under the aggregation table on this same sheet already says how it is fed,
+  // with the conductor. Saying it twice on SCHED is the duplication the retired
+  // trunk-deficit note below was removed for, on the densest sheet in the set.
+  const _schedBranchTermination = _schedStandaloneBos
+    ? `terminating on 2-pole ${_schedStandaloneBos.plan.branchBreakerA ?? '—'} A breakers in the ${_schedStandaloneBos.landing.model}`
+    : 'terminating at the AC combiner';
   const _schedAcBranchBlock = `
       <div class="section-title">AC Branch Circuit Schedule &mdash; NEC 690.8(A) / ${_sched705}</div>
       <table class="equip-table">
@@ -2443,7 +2462,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
             whose procurement cell grows when the Q-Cable deficit fires. */''}
       <div style="padding:2px var(--xs);font-size:7.4px;line-height:1.2;border:var(--border);border-top:none;background:#fafafa;">
         <strong>WIRE SIZING INTERPRETATION (MICROINVERTER):</strong>
-        Each module pairs 1:1 with a microinverter (no DC source circuits). AC branch trunks are sized per NEC 690.8(A) &times;1.25 continuous, each protected at its calculated OCPD (see table), terminating at the AC combiner.
+        Each module pairs 1:1 with a microinverter (no DC source circuits). AC branch trunks are sized per NEC 690.8(A) &times;1.25 continuous, each protected at its calculated OCPD (see table), ${_schedBranchTermination}.
         ${_schedBranchAuthorityBlock}
       </div>`;
   return `
@@ -2525,6 +2544,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       ${(() => {
         // AC aggregation / monitoring device (the brand-integrated "brains" —
         // e.g. Enphase IQ Combiner 6C). Single-sourced with PV-6 / E-1 / BOM.
+        // A standalone IQ Gateway design lists BOTH boxes (the PV AC combiner
+        // panel and the gateway) from `devices`, and the note under the table
+        // says which one the branches land in and how the other is fed.
         const _bos = buildIntegratedEquipment(input, cad);
         if (!_bos.devices.length) return '';
         return `
@@ -2542,7 +2564,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           </tr>`).join('')}
         </tbody>
       </table>
-      ${_bos.branchSlotWarning ? `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#fff8e1;"><strong>NOTE:</strong> ${_bos.branchSlotWarning}</div>` : ''}`;
+      ${_schedStandaloneBos ? `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#f0f4f8;"><strong>STANDALONE GATEWAY:</strong> AC branches land on 2-pole ${_schedStandaloneBos.plan.branchBreakerA ?? '—'} A breakers in the ${_schedStandaloneBos.landing.model}${_schedStandaloneBos.plan.branchSlots ? ` (${_schedStandaloneBos.plan.branchSlots} branch positions + 1 gateway supply)` : ''}; the ${_schedStandaloneBos.sg.label}${_schedStandaloneBos.sg.partNumber ? ` (${_schedStandaloneBos.sg.partNumber})` : ''} is fed from its own 2-pole ${_schedStandaloneBos.sg.supplyBreakerA} A breaker in that panel &mdash; ${_schedStandaloneBos.sg.supplyConductor}.</div>` : ''}${_bos.branchSlotWarning ? `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#fff8e1;"><strong>NOTE:</strong> ${_bos.branchSlotWarning}</div>` : ''}`;
       })()}
       <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string;
            hybrid: one block PER SUB from the shared conductor authority) -->

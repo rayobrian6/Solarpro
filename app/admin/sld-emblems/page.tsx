@@ -314,8 +314,12 @@ function DeviceIllustrationCard({
   zoom: number;
   showDetails: boolean;
 }) {
-  const slotW = 130;
-  const slotH = 180;
+  // Landscape hardware (the IQ Gateway, the micro pucks) gets a landscape
+  // canvas: in the portrait 130×180 slot a 1.68 : 1 gateway filled a 130×77
+  // strip and read as a thumbnail.
+  const landscape = device.aspectW / device.aspectH > 1.3;
+  const slotW = landscape ? 200 : 130;
+  const slotH = landscape ? Math.round(200 * device.aspectH / device.aspectW) + 20 : 180;
   const svg = device.render(slotW / 2, slotH / 2, slotW, slotH);
 
   return (
@@ -339,7 +343,9 @@ function DeviceIllustrationCard({
           className={`absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full ${
             device.kind === 'inverter'
               ? 'bg-blue-500/15 text-blue-300 border border-blue-500/20'
-              : 'bg-amber-500/15 text-amber-300 border border-amber-500/20'
+              : device.kind === 'gateway' || device.kind === 'combiner'
+                ? 'bg-violet-500/15 text-violet-300 border border-violet-500/20'
+                : 'bg-amber-500/15 text-amber-300 border border-amber-500/20'
           }`}
         >
           {device.kind.toUpperCase()}
@@ -370,7 +376,11 @@ function DeviceIllustrationCard({
             </div>
             <div className="text-[9px] text-slate-600 pt-1">
               <span className="font-bold text-slate-500">Placement: </span>
-              Replaces generic IEEE emblem when this brand is selected.
+              {device.kind === 'gateway'
+                ? 'Drawn as the standalone gateway node above the chain, and in miniature inside the integrated combiner.'
+                : device.kind === 'combiner'
+                  ? 'Reference art for the integrated combiner (the SLD draws the combiner’s internals).'
+                  : 'Replaces generic IEEE emblem when this brand is selected.'}
             </div>
           </div>
         ) : null}

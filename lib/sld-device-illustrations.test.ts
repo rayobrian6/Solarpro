@@ -16,6 +16,9 @@ describe('sld-device-illustrations — registry', () => {
   it('Phase 1-3 ships 8 brands (Tesla, EcoFlow, Enphase, SolarEdge, Generac, Sol-Ark, Growatt, Solis, APsystems, Hoymiles)', () => {
     const all = listDeviceIllustrations();
     const ids = all.map(d => `${d.brand}::${d.kind}`).sort();
+    // 2026-09-26: + enphase::gateway (the IQ Gateway / Envoy, drawn as the
+    // standalone gateway node and inside the IQ Combiner) and
+    // enphase::combiner (the IQ Combiner enclosure, admin reference art).
     expect(ids).toEqual([
       'apsystems::inverter',
       'ecoflow::battery',
@@ -23,6 +26,8 @@ describe('sld-device-illustrations — registry', () => {
       'ecoflow::inverter',
       'enphase::battery',
       'enphase::bui',
+      'enphase::combiner',
+      'enphase::gateway',
       'enphase::inverter',
       'generac::battery',
       'generac::bui',
@@ -244,6 +249,74 @@ describe('sld-device-illustrations — render output', () => {
   it('EcoFlow battery carries the EF-BP-10 module label', () => {
     const bat = resolveDeviceIllustration('EcoFlow', 'battery')!;
     expect(bat.render(0, 0, 100, 140)).toContain('EF-BP-10');
+  });
+
+  describe('Enphase IQ Gateway (the Envoy)', () => {
+    const gw = () => resolveDeviceIllustration('Enphase', 'gateway')!;
+
+    it('resolves, keeps the data-sheet 8.4 × 5.0 in aspect, and names the device', () => {
+      expect(gw()).not.toBeNull();
+      expect(gw().aspectW / gw().aspectH).toBeCloseTo(8.4 / 5.0, 2);
+      expect(gw().label).toMatch(/IQ Gateway/);
+      const svg = gw().render(100, 60, 168, 100);
+      expect(svg).toMatch(/^<g data-device="enphase-iq-gateway">/);
+      expect(svg).toContain('>ENPHASE<');
+      expect(svg).toContain('>IQ GATEWAY<');
+    });
+
+    it('draws the front the data sheet shows: near-black body, four green LEDs, two buttons, two USB-A ports, the door', () => {
+      const svg = gw().render(100, 60, 168, 100);
+      expect(svg).toContain('fill="#1B1D20"');                          // body
+      expect(svg.match(/fill="#39D26B"/g)?.length).toBe(4);             // cloud · AP · production · PLC
+      expect(svg.match(/fill="#2B2F33"/g)?.length).toBe(2);             // AP + device-scan buttons
+      expect(svg.match(/fill="#0C0D0F" stroke="#5A5F66"/g)?.length).toBe(2); // USB-A ×2
+      expect(svg).toContain('fill="#15171A"');                          // hinged terminal door
+    });
+
+    it('🚨 reproduces NO logo: the brand is plain text — no image, no embedded glyph art', () => {
+      const svg = gw().render(100, 60, 168, 100);
+      expect(svg).not.toMatch(/<image|<use|href=|xlink/);
+      // The only orange is the product-name TEXT (the "e" mark is orange).
+      const orange = [...svg.matchAll(/<(\w+)[^>]*#F37021/g)].map(m => m[1]);
+      expect(orange).toEqual(['text']);
+    });
+
+    it('authors every glyph at or above the printed type floor, and drops a line that would not fit at it', () => {
+      const sizes = (s: string) => [...s.matchAll(/font-size="([\d.]+)"/g)].map(m => Number(m[1]));
+      const big = gw().render(100, 60, 168, 100);
+      const mini = gw().render(40, 25, 64, 38);    // the miniature inside an IQ Combiner
+      for (const v of [...sizes(big), ...sizes(mini)]) expect(v).toBeGreaterThanOrEqual(8.67);
+      expect(mini).toContain('>ENPHASE<');
+      // In the printed face (Liberation Sans Bold) 'IQ GATEWAY' at 8.67 uu is
+      // 55.9 uu; the miniature's face is 49.5.
+      expect(mini).not.toContain('>IQ GATEWAY<');
+    });
+
+    it('judges "fits" in the PRINTED face\'s widths, not a flat per-glyph guess', () => {
+      // 50×30: the face is 38.8 uu; 'ENPHASE' at 8.67 uu is 41.9 in Liberation
+      // Sans Bold. The old 0.62 em guess (37.6) printed it past the face.
+      expect(gw().render(0, 0, 50, 30)).not.toContain('>ENPHASE<');
+      // 80×48: the face is 62.0 uu; 'IQ GATEWAY' is 55.9 — it fits, and is
+      // kept (a flat 0.72 em, 62.4, would have dropped it).
+      expect(gw().render(0, 0, 80, 48)).toContain('>IQ GATEWAY<');
+    });
+
+    it('stays inside its slot and is deterministic', () => {
+      const cx = 200, cy = 100, slotW = 150, slotH = 88;
+      const svg = gw().render(cx, cy, slotW, slotH);
+      expect(svg).toBe(gw().render(cx, cy, slotW, slotH));
+      const xs = [...svg.matchAll(/\b(?:x|x1|x2|cx)="([\d.-]+)"/g)].map(m => parseFloat(m[1]));
+      const ys = [...svg.matchAll(/\b(?:y|y1|y2|cy)="([\d.-]+)"/g)].map(m => parseFloat(m[1]));
+      for (const v of xs) { expect(v).toBeGreaterThanOrEqual(cx - slotW / 2 - 1); expect(v).toBeLessThanOrEqual(cx + slotW / 2 + 1); }
+      for (const v of ys) { expect(v).toBeGreaterThanOrEqual(cy - slotH / 2 - 1); expect(v).toBeLessThanOrEqual(cy + slotH / 2 + 1); }
+    });
+
+    it('the IQ Combiner art is registered too, and brandHasDevice counts both new kinds', () => {
+      const cb = resolveDeviceIllustration('Enphase', 'combiner')!;
+      expect(cb.render(0, 0, 74, 98)).toMatch(/^<g data-device="enphase-iq-combiner">/);
+      expect(resolveDeviceIllustration('Tesla', 'gateway')).toBeNull();
+      expect(brandHasDevice('Enphase')).toBe(true);
+    });
   });
 
   it('fits inside the requested slot (no coordinate leaks beyond ±slotW)', () => {

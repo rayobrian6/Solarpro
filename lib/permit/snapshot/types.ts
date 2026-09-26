@@ -1699,7 +1699,7 @@ export interface PermitDesignSnapshot {
     stringInverters: EquipmentRecord<StringInverterSpec>[];
     mount: EquipmentRecord<MountSpec> | null;
     rail: EquipmentRecord<RailSpec> | null;
-    combinerLabel: string | null;   // resolved BOS brains (record upgrade in W5)
+    combinerLabel: string | null;   // resolved BOS landing device — the brains on every design but a standalone gateway (record upgrade in W5)
   };
 
   geometry: {
@@ -1806,6 +1806,24 @@ export interface PermitDesignSnapshot {
       boundary: string;
       mode: string;
       basis: 'designer-recorded';
+    };
+    /** The standalone IQ Gateway topology — present ONLY on a micro design whose
+     *  recorded combiner selection is the standalone gateway (AC branches on
+     *  2-pole breakers in a PV AC combiner panel; the gateway its own enclosure,
+     *  fed from its own 2-pole breaker in that panel). ABSENT — never null, never
+     *  an undefined-valued key — on every other design, so no existing digest
+     *  moves (Ray, 2026-09-26). `landingModel` is the panel the branches land in,
+     *  the same device `equipment.combinerLabel` names. */
+    gatewayTopology?: {
+      placement: 'standalone';
+      gatewayModel: string;
+      /** null ⇔ the catalogue records no part number for the gateway. */
+      gatewayPartNumber: string | null;
+      landingModel: string;
+      /** The gateway's 2-pole supply breaker in the landing panel (A). */
+      supplyBreakerA: number;
+      /** The 2-pole breaker each AC branch lands on in the landing panel (A). */
+      branchBreakerA: number;
     };
     parity: {                       // W2.1: canonical=computeSystem vs legacy shadow
       legacyEngine: string; legacyRan: boolean;

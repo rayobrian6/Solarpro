@@ -36,7 +36,7 @@ import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
 import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } from './framingAuthority';
 import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
-import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { interconnectionRuleOf, permitInterconnectionToken } from '../utils/interconnectionRule';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 import { utilityDisplayName, resolveBatteryCapacity } from '../utils/helpers';   // §15(b) — human utility name, never a slug
@@ -396,7 +396,13 @@ export function buildPermitDesignSnapshot(
   } : null;
 
   const bos = buildIntegratedEquipment(input, cad);
-  const bosBrains = bos.brains ?? bos.devices[0];
+  // The name recorded as the COMBINER is the box the AC branches land in. This
+  // was `bos.brains ?? bos.devices[0]`, which is exactly what `planLandingDevice`
+  // returns on every plan but a standalone IQ Gateway — so no existing design's
+  // `combinerLabel`, and therefore no existing digest, moves. On a standalone
+  // design the brains is the gateway, and recording it as the combiner would
+  // hash a design whose branches terminate inside a box with no busbar.
+  const bosLanding = planLandingDevice(bos);
 
   // ── geometry ───────────────────────────────────────────────────────────
   const positions = ((proj.panelPositions ?? []) as BranchPlanPanel[]);
@@ -2856,7 +2862,7 @@ export function buildPermitDesignSnapshot(
       batteryBrand: _paHasBattery ? (proj.batteryBrand ?? null) : null,
       batteryModel: _paHasBattery ? (proj.batteryModel ?? null) : null,
       batteryCount: _paHasBattery ? (proj.batteryCount ?? null) : null,
-      combinerLabel: bosBrains ? `${bosBrains.brand} ${bosBrains.model}` : null,
+      combinerLabel: bosLanding ? `${bosLanding.brand} ${bosLanding.model}` : null,
     },
     designer: proj.designer ?? null,          // NO default engineer name
     contractor: proj.contractor ?? proj.installerName ?? proj.installer ?? null,
@@ -2999,7 +3005,7 @@ export function buildPermitDesignSnapshot(
     },
     equipment: {
       modules, microInverters, stringInverters, mount, rail: null,
-      combinerLabel: bosBrains ? `${bosBrains.brand} ${bosBrains.model}` : null,
+      combinerLabel: bosLanding ? `${bosLanding.brand} ${bosLanding.model}` : null,
     },
     geometry: {
       roofPlanes, modules: geoModules,
@@ -3091,10 +3097,18 @@ export function buildPermitDesignSnapshot(
       // Only when E-1 actually DRAWS those CTs: a single-lane design whose
       // combiner meters, through the same composer the sheets use. A recorded
       // value on a string / hybrid / non-metering design asserts nothing.
+      // `gatewayPlacement` rides along ONLY when the plan has it: a standalone
+      // gateway is not an integrated one, and without it the composer drops the
+      // consumption CTs E-1 draws — so a recorded location would go unrecorded.
+      // Every other design hands the composer the identical slice.
       meteringTopology: (() => {
         if (auth.isHybrid || !isMicro) return undefined;
         const met = resolveDesignMetering({
-          plan: { brains: bos.brains ?? bos.devices[0] ?? null, hasIntegratedGateway: bos.hasIntegratedGateway },
+          plan: {
+            brains: bos.brains ?? bos.devices[0] ?? null,
+            hasIntegratedGateway: bos.hasIntegratedGateway,
+            ...(bos.gatewayPlacement ? { gatewayPlacement: bos.gatewayPlacement } : {}),
+          },
           interconnectionRaw: permitInterconnectionToken(proj.interconnectionMethod),
           consumptionCtLocation: proj.consumptionCtLocation ?? null,
           systemVoltage: 240,
@@ -3103,6 +3117,32 @@ export function buildPermitDesignSnapshot(
         if (met.placement.basis !== 'designer-recorded' || !c) return undefined;
         return { consumptionCtLocation: c.location, boundary: met.placement.boundary, mode: c.mode,
                  basis: 'designer-recorded' as const };
+      })(),
+      // ── The standalone IQ Gateway topology — ONLY on a design that has one ──
+      // A standalone gateway changes what is on the wall (a PV AC combiner panel
+      // AND a gateway on its own 2-pole breaker in it) and what E-1 draws, so it
+      // is part of the design this digest identifies. It is a CONDITIONAL SPREAD,
+      // never `gatewayTopology: null` or an undefined-valued key: `canonicalJson`
+      // hashes a null leaf, and a key that appeared on every existing design
+      // would move every existing digest and retire every live PE approval
+      // (memory: digest-moves-retire-pe-approvals). Micro only, through the ONE
+      // gated helper the E-1 adapter and every sheet that names the gateway
+      // call — so the digest records a standalone gateway exactly when the
+      // package prints one, never on a string job with a leftover pick.
+      ...((): { gatewayTopology?: NonNullable<PermitDesignSnapshot['electrical']['gatewayTopology']> } => {
+        if (!permitStandaloneGateway(input, cad, bos)) return {};
+        const gw = bos.gateway;
+        if (!gw || !bosLanding || !bos.gatewaySupply || bos.branchBreakerA == null) return {};
+        return {
+          gatewayTopology: {
+            placement: 'standalone',
+            gatewayModel: gw.model,
+            gatewayPartNumber: gw.partNumber ?? null,
+            landingModel: bosLanding.model,
+            supplyBreakerA: bos.gatewaySupply.breakerA,
+            branchBreakerA: bos.branchBreakerA,
+          },
+        };
       })(),
       parity: { legacyEngine: 'runElectricalCalc', legacyRan, checks: parityChecks, unresolved: parityUnresolved },
       provenance: { source: 'computeSystem (canonical) + planMicroBranches(D-1 assignment)' },

@@ -6,17 +6,91 @@
 // PV-0, APP-A, PV-4A, E-1, BOM) reads the SAME integrated combiner/gateway
 // device. Same inputs → same output, so the sheets can never disagree about the
 // "brains" of the system.
+//
+// The brains is NOT always the box the branches land in. On a standalone IQ
+// Gateway design the brains is the gateway and the branches land in a PV AC
+// combiner panel — so a sheet that NAMES THE COMBINER asks `planLandingDevice`,
+// and a sheet that names the gateway asks `permitStandaloneGateway` (below).
 // ═══════════════════════════════════════════════════════════════
 
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
-import { getEquipmentContext } from '@/lib/system';
+import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { hasRealBattery } from './helpers';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { buildConductorAuthority } from './conductorAuthority';
-import { resolveIntegratedEquipment, type IntegratedEquipmentPlan, type SystemBosContext } from '@/lib/equipment/integratedBos';
+import {
+  planLandingDevice,
+  resolveIntegratedEquipment,
+  type IntegratedEquipmentPlan,
+  type SystemBosContext,
+} from '@/lib/equipment/integratedBos';
+import type { StandaloneGatewayFields } from '@/lib/equipment/sldCombinerFields';
 
 export type { IntegratedEquipmentPlan } from '@/lib/equipment/integratedBos';
+export { planLandingDevice } from '@/lib/equipment/integratedBos';
+
+/**
+ * The standalone IQ Gateway as every permit artefact names it — or undefined on
+ * every design that does not have one (every design that existed before the
+ * standalone topology did), and on every design that is not a microinverter job.
+ *
+ * WHY ONE FUNCTION: on a standalone design the plan has TWO boxes where the
+ * sheets used to assume one. The E-1 input, PV-4A, SCHED, the disconnecting-
+ * means directory, PV-0 and the snapshot each have to name the gateway, the
+ * panel it is fed from, and that supply circuit. Written out six times, the six
+ * would drift the first time one of those strings changed — the
+ * brains-as-combiner defect this topology exposed was exactly one expression
+ * copied into six consumers. (APP-A lists data sheets, not a topology, and keys
+ * its two rows on the plan's two boxes — see compliancePages.) The shape and every string match
+ * `sldCombinerFields().standaloneGateway` (the Diagram tab and the SLD PDF), so
+ * the permit E-1 and the engineering SLD cannot describe the same gateway two ways.
+ *
+ * 🚨 WHY THE MICRO GATE LIVES HERE AND NOT AT THE CALL SITES. The plan honours a
+ * recorded selection unconditionally (see `selectedCombinerId` below), so a
+ * string or optimizer job with a leftover standalone pick still resolves a panel
+ * and a gateway — sized for ZERO branches, because it has no AC branch circuits.
+ * The E-1 and the snapshot gated on the micro topology; PV-0, SCHED and the PV-6
+ * directory did not, so that job printed "AC branches land on 2-pole 20 A
+ * breakers" on three sheets while its E-1 and its snapshot described no
+ * standalone gateway at all. A gate each caller supplies is a gate each caller
+ * can derive differently (hybrid sub-counts, project topology, section lists),
+ * which is the drift this helper exists to stop — so the micro test is taken
+ * once, here, and it is exactly the one E-1 (sldAdapter) and the snapshot
+ * (build.ts) take: the project's inverter topology. On a single-system design
+ * that is the same answer as the conductor authority's sub; a hybrid whose
+ * project topology is not micro therefore prints no standalone wording on ANY
+ * permit artefact, rather than on some.
+ *
+ * `plan` is optional so a caller that already resolved it does not resolve it
+ * twice; it must be `buildIntegratedEquipment(input, cad)`.
+ */
+export function permitStandaloneGateway(
+  input: PermitInput,
+  cad?: CADModel | null,
+  plan: IntegratedEquipmentPlan = buildIntegratedEquipment(input, cad),
+): StandaloneGatewayFields | undefined {
+  // Cheap test first: every existing design stops here without a topology read.
+  if (plan.gatewayPlacement !== 'standalone') return undefined;
+  if (topologyToLegacy(getInverterTopology(input, cad ?? undefined)) !== 'MICRO') return undefined;
+  return standaloneGatewayFieldsOf(plan);
+}
+
+/** The shape alone, ungated — private so no sheet can name a gateway the E-1
+ *  and the snapshot do not carry (see `permitStandaloneGateway`). */
+function standaloneGatewayFieldsOf(plan: IntegratedEquipmentPlan): StandaloneGatewayFields | undefined {
+  if (plan.gatewayPlacement !== 'standalone') return undefined;
+  const gw = plan.gateway;
+  const landing = planLandingDevice(plan);
+  if (!gw || !landing || !plan.gatewaySupply) return undefined;
+  return {
+    label: `${gw.brand} ${gw.model}`,
+    ...(gw.partNumber ? { partNumber: gw.partNumber } : {}),
+    supplyBreakerA: plan.gatewaySupply.breakerA,
+    supplyConductor: plan.gatewaySupply.conductor,
+    landingLabel: `${landing.brand} ${landing.model}`,
+  };
+}
 
 /**
  * Resolve the integrated BOS devices (combiner / gateway / "brains") for a

@@ -11,7 +11,7 @@ import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealB
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { buildConductorAuthority, type ConductorAuthority, type SubSystemConductorAuthority } from './conductorAuthority';
-import { buildIntegratedEquipment } from './integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from './integratedEquipment';
 // THE CT / metering authority (lib/equipment/currentTransformers). The permit's
 // E-1 schedule reads it here so it carries the same Metering row the Diagram tab
 // and the exported SLD PDF already print — see the note at `meteringChannels`.
@@ -66,7 +66,14 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const _auth = buildConductorAuthority(input, cad);
   // Brand-integrated combiner/gateway — same device PV-6/SCHED/PV-0 print.
   const _bos = buildIntegratedEquipment(input, cad);
+  // Two questions, two devices — on one topology only. The METERING belongs to
+  // the brains (the CTs are the gateway's); the name printed as the COMBINER is
+  // the box the branches land in. On a standalone IQ Gateway design those are
+  // the Envoy and the PV AC combiner panel, and printing the brains as the
+  // combiner drew the branch breakers inside a DIN-rail gateway with no busbar.
+  // On every other plan `planLandingDevice` returns exactly `brains ?? devices[0]`.
   const _bosBrains = _bos.brains ?? _bos.devices[0];
+  const _bosLanding = planLandingDevice(_bos);
 
   // ── Equipment resolution (same 4-source priority as all planset pages) ──
   const eq = getEquipmentContext(input, cad);
@@ -382,9 +389,11 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     mpptAllocation:          isMicro ? `${totalPanels} microinverters` : undefined,
     combinerType:            isMicro ? 'DIRECT' : undefined,
     // Real brand-integrated combiner ("the brains") — same device PV-6/SCHED
-    // print — not the old hardcoded 'AC Trunk Cable' label.
-    combinerLabel:           isMicro ? (_bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : 'IQ Combiner') : undefined,
-    combinerModel:           _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined,
+    // print — not the old hardcoded 'AC Trunk Cable' label. Named by the box the
+    // branches LAND in (see `_bosLanding`), which is the brains on every design
+    // but a standalone gateway.
+    combinerLabel:           isMicro ? (_bosLanding ? `${_bosLanding.brand} ${_bosLanding.model}` : 'IQ Combiner') : undefined,
+    combinerModel:           _bosLanding ? `${_bosLanding.brand} ${_bosLanding.model}` : undefined,
     combinerHasIntegratedGateway: _bos.hasIntegratedGateway,
     combinerProvidesAcDisconnect: _bos.providesAcDisconnect,
     // 🚨 AND WHETHER THAT NAME IS A DECISION OR A PLACEHOLDER.
@@ -414,8 +423,9 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // with a combiner that cannot measure consumption and nothing to make it
     // work.
     //
-    // Composed ONCE, from the authority, for the device this schedule actually
-    // names (`_bosBrains`) — never re-worded here. undefined ⇒ no metering
+    // Composed ONCE, from the authority, for the device that meters
+    // (`_bosBrains` — the combiner this schedule names, or on a standalone
+    // design the gateway beside it) — never re-worded here. undefined ⇒ no metering
     // device is modelled and the row stays absent, which is the honest answer.
     // …and where its CTs clamp, from the ONE composer every consumer calls
     // (lib/equipment/designMetering.ts). RAW interconnection, not the display
@@ -427,14 +437,42 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // used to leave E-1 "MODE TBD" while PV-4A stated TOTAL. And only a micro job
     // draws a combiner/gateway, so only a micro job draws CTs — a string job with
     // a leftover combiner pick got CT glyphs beside no gateway at all.
+    // 🚨 `gatewayPlacement` MUST RIDE ALONG. A standalone gateway is not an
+    // integrated one (`hasIntegratedGateway` is false), so a slice without it told
+    // the composer consumption metering was not required: this E-1 printed
+    // "PROD (CT) · NO CONS" with no consumption CTs while PV-4A — which hands the
+    // composer the whole plan — stated them and the BOM bought them. Spread only
+    // when present, so every other design hands the composer the identical slice.
     ...(() => {
       const _met = resolveDesignMetering({
-        plan: isMicro ? { brains: _bosBrains ?? null, hasIntegratedGateway: _bos.hasIntegratedGateway } : null,
+        plan: isMicro
+          ? {
+              brains: _bosBrains ?? null,
+              hasIntegratedGateway: _bos.hasIntegratedGateway,
+              ...(_bos.gatewayPlacement ? { gatewayPlacement: _bos.gatewayPlacement } : {}),
+            }
+          : null,
         interconnectionRaw: permitInterconnectionToken(project.interconnectionMethod),
         consumptionCtLocation: project.consumptionCtLocation ?? null,
         systemVoltage: 240,
       });
       return { meteringChannels: _met.scheduleValue, meteringDrawing: _met.drawing ?? undefined };
+    })(),
+    // ── The standalone IQ Gateway — its own enclosure beside the landing panel ──
+    // `combinerLabel` above names the PV AC combiner panel on that design; the
+    // gateway, its 2-pole supply breaker in that panel and the L1/L2/N supply
+    // conductors travel here so E-1 can draw the second box and E-1.1 can list it.
+    // Micro only, like every other combiner fact on this sheet — and through the
+    // ONE gated helper every other permit sheet and the snapshot call, so E-1
+    // cannot carry a gateway PV-0 / SCHED / PV-6 / APP-A do not name, or the
+    // reverse (its micro test is the same topology test as `isMicro` above).
+    //
+    // 🚨 CONDITIONAL SPREAD, NEVER `standaloneGateway: undefined`. The E-1 input's
+    // key set is pinned (tests/golden-path.test.ts) because a key that appears on
+    // an existing design is how an existing project's sheet starts to drift.
+    ...(() => {
+      const _sg = permitStandaloneGateway(input, cad, _bos);
+      return _sg ? { standaloneGateway: _sg } : {};
     })(),
     // The four fields above are the RESOLVED single-lane answer. This is the
     // selection itself, which the MULTI-LANE renderer needs because that path

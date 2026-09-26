@@ -247,6 +247,10 @@ export async function POST(req: NextRequest) {
       // The CTs, the lead and the "Consumption CTs" row — same composer as
       // the Diagram tab, so the export draws what the screen draws.
       meteringDrawing:              _combiner.meteringDrawing ?? undefined,
+      // The standalone IQ Gateway (its own enclosure, fed from its own 2-pole
+      // breaker in the panel named above) — the adapter states it only on that
+      // topology, and the export draws what the screen draws.
+      ...(_combiner.standaloneGateway ? { standaloneGateway: _combiner.standaloneGateway } : {}),
       // The four fields above are the RESOLVED single-lane combiner. This is
       // the selection itself, and it is needed because a hybrid export attaches
       // `input.sources` below and switches to the multi-lane renderer, which

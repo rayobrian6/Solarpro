@@ -64,7 +64,9 @@ const lookupDevice = (id: string): CombinerDeviceFacts | null => {
     // `getBosDevice` also knows the bare IQ Gateway, the meter collar and the
     // generic AC combiner panels. POSTed here they used to be stored, and a bare
     // gateway then reached the SLD as the AC COMBINER holding the branch
-    // breakers. The same set the GET offers as `candidates` — one answer.
+    // breakers. The same set the GET offers as `candidates` — one answer. That
+    // set includes 'enphase-iq-gateway-standalone' (the gateway in its own
+    // enclosure plus the PV AC combiner panel), stored like any IQ Combiner.
     isSelectableCombiner: isSelectableCombiner(d.id),
   };
 };
@@ -132,7 +134,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       declarationPresent: Array.isArray(l.declaredCompatibleIds) && l.declaredCompatibleIds.length > 0,
       // Information for a quiet note beside the picker — never a gate.
       pairing: l.pairing,
-      candidates: listCombiners().map(d => ({ id: d.id, brand: d.brand, model: d.model })),
+      // `kind` lets the picker file the standalone-gateway topology
+      // ('gateway_system') apart from the IQ Combiners ('integrated_combiner')
+      // — they put different boxes on the wall — while it stays one pick in one
+      // list. The bare IQ Gateway is not in listCombiners() and so is never offered.
+      candidates: listCombiners().map(d => ({ id: d.id, brand: d.brand, model: d.model, kind: d.kind })),
     });
   } catch (err: unknown) {
     return bad(err instanceof Error ? err.message : 'Failed to read the combiner selection.',
