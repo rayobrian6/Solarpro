@@ -21,6 +21,10 @@
 import type { PermitInput, ResolvedEquipment } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { necNextStandardOcpd, resolveEquipmentBySubSystem } from './helpers';
+// The module record — for its NEC 690.9(B) maximum series fuse rating, the hard
+// cap on a DC string OCPD. Resolved through the canonical accessor so it fails
+// closed on an ambiguous model rather than substituting a plausible default.
+import { resolvePanelSpecs } from './panelSpecs';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { balancedBranchSizes, microBranchCount, planMicroBranches, type BranchPlanPanel } from './branching';
@@ -47,9 +51,16 @@ export interface DcStringRun {
   label: string;            // 'DC 1-1'
   wireGauge: string;        // e.g. '#10 AWG'
   ampacityA: number | null; // Isc × 1.25
-  ocpdAmps: number | null;  // Isc × 1.56 → next standard
+  ocpdAmps: number | null;  // Isc × 1.56 → next standard, capped per NEC 690.9(B)
   voltageDropPct: number | null;
   lengthFt: number | null;
+  /** The module's own datasheet limit (NEC 690.9(B) / 690.8(B)). `null` means the
+   *  module record did not resolve, so NO cap could be applied — a caller must
+   *  surface that rather than assume the common 20 A. */
+  maxSeriesFuseA: number | null;
+  /** True when the module's rating reduced the Isc×1.56 result. The SCHED sheet
+   *  should print the cap note, exactly as lib/ocpd-resolver.ts's PASS_CAPPED does. */
+  ocpdWasCapped: boolean;
 }
 
 /**
@@ -203,9 +214,41 @@ function microBranchRow(index: number, deviceCount: number, perMicroA: number): 
   };
 }
 
-/** One DC string row — same derivation both paths (legacy + per-sub). */
-function dcStringRow(index: number, invIdx: number, strIdx: number, str: any): DcStringRun {
+/** One DC string row — same derivation both paths (legacy + per-sub).
+ *
+ * 🚨 THE MODULE'S OWN FUSE LIMIT IS A HARD CAP, AND THIS ROW USED TO IGNORE IT.
+ * `ocpdAmps` was `necNextStandardOcpd(isc * 1.56)` with nothing above it, so a
+ * module whose datasheet forbids anything above 20 A got a 25 A DC string fuse —
+ * printed on the stamped SCHED sheet and PURCHASED, because
+ * lib/permit/utils/bomForPermit.ts takes `dcOCPD` as the max ocpdAmps across the
+ * authority's strings. The same package reproduces that datasheet two sheets
+ * earlier (lib/permit/sections/compliancePages.ts prints "Max Series Fuse
+ * Rating ... 20 A"), so the package contradicted itself in print — a plan-review
+ * rejection on its own. Built as drawn, the module's bypass diodes and ribbon are
+ * protected 25 % above the rating they were listed at.
+ *
+ * `lib/ocpd-resolver.ts` already implements this cap correctly (step 5, with
+ * `wasCapped` and a `PASS_CAPPED` status). This row is the duplicate that dropped
+ * it, so the cap is applied here too and the flags are carried out.
+ *
+ * `maxSeriesFuseA` is null when the module record does not resolve. We do NOT
+ * substitute the common 20 A — generatePermit's `?? 20` defaults are exactly the
+ * fabricated absence this authority exists to stop. An unresolved limit is
+ * reported as unresolved, so the consumer can say so instead of asserting a
+ * datasheet number no datasheet supplied.
+ */
+function dcStringRow(
+  index: number, invIdx: number, strIdx: number, str: any,
+  maxSeriesFuseA: number | null,
+): DcStringRun {
   const isc = Number(str.isc) || 0;
+  const uncapped = isc ? necNextStandardOcpd(isc * 1.56) : (str.ocpd ?? null);
+  // A per-string override on the payload wins over the sub-level resolution, but
+  // only when it is a real number — never a `?? 20`.
+  const cap = Number.isFinite(Number(str.maxSeriesFuseRating))
+    ? Number(str.maxSeriesFuseRating)
+    : maxSeriesFuseA;
+  const capped = (uncapped != null && cap != null && uncapped > cap) ? cap : uncapped;
   return {
     index,
     invIdx,
@@ -213,9 +256,11 @@ function dcStringRow(index: number, invIdx: number, strIdx: number, str: any): D
     label: `DC ${invIdx + 1}-${strIdx + 1}`,
     wireGauge: plainGauge(str.wireGauge, '#10 AWG'),
     ampacityA: isc ? Math.ceil(isc * 1.25 * 100) / 100 : (str.ampacity ?? null),
-    ocpdAmps: isc ? necNextStandardOcpd(isc * 1.56) : (str.ocpd ?? null),
+    ocpdAmps: capped,
     voltageDropPct: str.voltageDrop != null ? Number(str.voltageDrop) : null,
     lengthFt: str.wireLength != null ? Number(str.wireLength) : null,
+    maxSeriesFuseA: cap,
+    ocpdWasCapped: capped != null && uncapped != null && capped < uncapped,
   };
 }
 
@@ -303,9 +348,12 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
     // ── DC strings (string / optimizer) ────────────────────────────
     const dcStrings: DcStringRun[] = [];
     if (!isMicro) {
+      // NEC 690.9(B) hard cap — the module's own datasheet maximum, from the
+      // canonical accessor. `null` when no record resolves; see dcStringRow.
+      const legacyFuseCap = resolvePanelSpecs(input, cad as never, 'roof').db?.maxSeriesFuseRating ?? null;
       (system?.inverters ?? []).forEach((inv: any, invIdx: number) => {
         (inv.strings ?? []).forEach((str: any, strIdx: number) => {
-          dcStrings.push(dcStringRow(dcStrings.length + 1, invIdx, strIdx, str));
+          dcStrings.push(dcStringRow(dcStrings.length + 1, invIdx, strIdx, str, legacyFuseCap));
         });
       });
     }
@@ -393,10 +441,13 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
     // string groupings, never fake AC branches).
     const dcStrings: DcStringRun[] = [];
     if (!isM) {
+      // THIS sub's module, not the project's — Invariant I-3. A ground array on a
+      // 20 A-max module and a roof array on a 25 A-max one get their own caps.
+      const subFuseCap = resolvePanelSpecs(input, cad as never, key).db?.maxSeriesFuseRating ?? null;
       inverters.forEach((inv: any, invIdx: number) => {
         if (effKey(inv) !== key) return;
         (inv.strings ?? []).forEach((str: any, strIdx: number) => {
-          dcStrings.push(dcStringRow(dcStrings.length + 1, invIdx, strIdx, str));
+          dcStrings.push(dcStringRow(dcStrings.length + 1, invIdx, strIdx, str, subFuseCap));
         });
       });
     }
