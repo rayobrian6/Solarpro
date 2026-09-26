@@ -201,7 +201,19 @@ function buildLayoutFromDefinition(
     groundHeight:      undefined,
     fenceAzimuth:      systemDef.fenceAzimuth,
     fenceHeight:       systemDef.fenceHeight,
-    bifacialOptimized: systemDef.bifacialOptimized ?? false,
+    // 🚨 AND THE SAME RULE FOR THE ONE THAT WAS LEFT OUT OF IT.
+    //
+    // This read `?? false` — the BOOLEAN spelling of the fabricated default the
+    // four lines above stopped sending. `bifacial_optimized` is COALESCE'd in
+    // upsertLayout exactly like `row_spacing` and `ground_height`, so absence
+    // keeps what is stored and `false` is a DECISION. Measured against real
+    // PostgreSQL: a design stored with the flag ON, then a read-only Calculate
+    // that never mentioned bifaciality, and the row came back OFF — which also
+    // changes the production number the next read computes, because that is
+    // taken from the row this write just altered.
+    // tests/productionRouteDesignEntities.postgres.test.ts pins it on both write
+    // paths. A genuinely new row still gets `false` from upsertLayout's INSERT.
+    bifacialOptimized: systemDef.bifacialOptimized,
     totalPanels:       systemDef.panels?.length    ?? 0,
     systemSizeKw:      systemDef.systemSizeKw      ?? (systemDef.panels?.length ?? 0) * 0.4,
     mapCenter:         undefined,
@@ -498,7 +510,13 @@ export async function POST(req: NextRequest) {
       fenceAzimuth:      rawLayout.fenceAzimuth,
       fenceHeight:       rawLayout.fenceHeight,
       fenceLine:         rawLayout.fenceLine,
-      bifacialOptimized: rawLayout.bifacialOptimized  ?? false,
+      // 🚨 ABSENCE KEEPS, for this one too. See the note in
+      // `buildLayoutFromDefinition`: `?? false` is the boolean version of the
+      // fabricated default the four lines above this block deliberately stopped
+      // sending, and it overwrote a stored `true` on every save that did not
+      // restate the flag. Measured, and pinned on both write paths by
+      // tests/productionRouteDesignEntities.postgres.test.ts.
+      bifacialOptimized: rawLayout.bifacialOptimized,
       totalPanels:       rawLayout.panels?.length     ?? 0,
       systemSizeKw:      rawLayout.systemSizeKw       ?? (rawLayout.panels?.length ?? 0) * 0.4,
       mapCenter:         rawLayout.mapCenter,
