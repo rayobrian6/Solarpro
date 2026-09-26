@@ -3,7 +3,7 @@
 Internal running state. Not a report — see `NEEDS-RAY.md` for anything that
 actually requires Ray.
 
-Last updated: 2026-09-25, after the version-history panel.
+Last updated: 2026-09-25, after the parser-backed source stripper.
 
 ---
 
@@ -49,6 +49,15 @@ Last updated: 2026-09-25, after the version-history panel.
 | `1c2bf89e` | Archiving a signed contract files it instead of erasing that it was signed — and the filing survives a reload |
 | `c81ba096` | The local-PostgreSQL harness survives `next dev`, and refuses to boot unless it is really intercepting |
 | `14703f08` | A hand-placed chimney is no longer discarded by the server's own second write; an undo stops orphaning modules in silence |
+| `6d497f1a` | Deciding "my own model governs this roof" survives a reload — a disposition-only change could not schedule a save |
+| `164ebe7c` | A save that changes nothing no longer writes a snapshot (five identical saves wrote five) |
+| `c49003e4` | The output-consistency law is machine-checked; the sweep found one real gap (NEEDS-RAY R7) |
+| `894cd4f6` | `lib/migrations/027` can never apply, and the batch runner STOPS THERE — 028–123 unreachable (NEEDS-RAY R8) |
+| `46cf12c1` | A coverage probe pinned the return's spelling, not the coverage |
+| `59389dd6` | The source stripper is parser-backed — six assertions were unfalsifiable, two passed by luck |
+| `b90164a1` | A backspace byte where a word boundary was meant made one of my own guards vacuous |
+| `55e87dab` | A guard weakened around the stripper bug is restored, now the bug has a name |
+| `9e5f868f` | A vacuous guard says so, and announces if its own detector breaks |
 
 ---
 
@@ -106,43 +115,65 @@ NEEDS-RAY R6.
 
 | Worker | Lane |
 |---|---|
-| Unsafe source stripper | `stripCommentsAndStrings` blanks real code in `.tsx` — a lone apostrophe in JSX text opens a string it never closes. Auditing which existing guards are reading whitespace and therefore prove nothing. |
-| Persistence fixture + production obstructions | Repair the false fixture premise in `persistence-join`; and establish with real SQL whether either `/api/production` write path loses obstructions, measurements or siteArchives. |
-| Migration directory split | The homeowner-stage / micro-stage schema may live in a directory the migration runner does not scan, while `lib/migrations/027` creates an incompatible table of the same name. Investigation only — no migration is to be written or run. |
+| Persistence fixture + production obstructions | Repair the false fixture premise in `persistence-join`; establish with real SQL whether either `/api/production` write path loses obstructions, measurements or siteArchives. |
+| Ghost module preview + pick priority | The top-ranked competitor win. A module preview on the cursor, pre-oriented to the face beneath it, calling the SAME snapper the commit calls — Ray's word is that the ghost preview is contractual. Plus site objects no longer intercepting panel picks. |
 
-⚠️ A **peer session** also works in this worktree; its Enphase branch-count work
-is committed (`73404a66`, `73b2d8f5`, `a0e5e9f2`). Not mine; left alone.
+⚠️ A **peer session** is mid-edit on the combiner-selection authority
+(`lib/combinerSelection/*`, `lib/equipment/combinerCompatibility.ts`, the combiner
+route, `CombinerSelector.tsx`). That is why four cases in
+`tests/combinerProjectSelection.test.ts` fail on `BASIS_REQUIRED` right now —
+confirmed not mine by stashing my own edit and getting the identical four. Its
+Enphase branch-count work is already committed (`73404a66`, `73b2d8f5`, `a0e5e9f2`).
 
-⚠️ **The machine sits near its Windows COMMIT limit**, not its RAM limit — 40 GB
-of 48 GB with the pool active, while 11 GB of RAM is free. That is why `tsc` OOM'd
-at a 62 MB heap and why PGlite suites die mid-run. `--maxWorkers 1 --pool=threads`
-survives where `--pool=forks` does not. **A crash of that kind is not a test
-failure, and reading one as the other has already cost time today.**
+---
+
+## Verification state, today
+
+A single full-suite run OOMs while the pool is active, so it was done in BATCHES
+by filename pattern and the numbers added up:
+
+| Batch | Files | Result |
+|---|---|---|
+| proposal / signature / archive | 23 | 475 passed |
+| version / layout / siteDesign / 3D / undo | 43 | 971 passed (1 real break, mine, fixed) |
+| stage / task / obstruction | 15 | 338 passed + 1 expected fail |
+| permit / planset / cad / sld / engineering | 198 | 2,788 passed |
+| remainder, three chunks | 231 | 3,837 passed, 472 skipped |
+| every `stripSource` importer | 49 | 767 passed |
+
+Two red herrings resolved rather than attributed:
+- **10 failures in `tests/utility-bill-attachment.test.ts` were MY POOL CHOICE.**
+  It calls `process.chdir()`, unsupported on `--pool=threads`. 10/10 on
+  `--pool=forks`. A pool choice is not a failure, the same way a crash is not.
+- **1 failure in `tests/sourceControlBytes.test.ts` WAS MINE** — a literal
+  backspace byte where `` was meant, making my own guard vacuously true. It was
+  the only control byte in 2,410 files. Fixed at the byte level, because a text
+  edit cannot match an invisible byte.
 
 ---
 
 ## Queue, ranked
 
-1. **Move-vertex on a real roof** — the undo interaction is fixed and proven at
-   model level, but handles cannot be picked under software WebGL, so first
-   real-browser use is still the first end-to-end exercise of the gesture.
-   NEEDS-RAY R5 says what to try.
-2. **`/api/production` should state the version it was based on, not only return
-   the new one.** It now hands the new version back and the studio adopts it, so
-   the reported defect is closed — but the route writing the row without a
-   precondition means a genuine two-tab conflict still resolves last-write-wins on
-   that path.
-3. **Disposition-only write schedules no save** — same class as the
-   ledger/autosave dependency bug, but it is the provider decision rather than
-   deletion authority.
-4. **`DealDecisionModal` posts a `milestones` array that `update-status` never
-   reads** — silently discarded on every use. Blocked on NEEDS-RAY R4.
-5. **`project_versions` has no retention policy** — snapshots are full-fidelity
-   and written on every save. The list route caps at 50; the table does not. Now
-   that the history is reachable from the UI, this will grow.
-6. **`updateStatus` in `app/proposals/page.tsx` has no callers** — its only one was
-   repointed at the bulk archive action. Corrected and guarded rather than
-   deleted, following the precedent of the zero-caller transition route.
+**My unblocked queue is drained; the two workers hold the two live lanes.**
+
+1. **Move-vertex and the history panel on a real roof** — NEEDS-RAY R5 says what to
+   try. Handles cannot be picked under software WebGL, so first real-browser use is
+   the first end-to-end exercise of the gesture.
+2. **`/api/production` should STATE the version it was based on**, not only return
+   the new one. The self-conflict is fixed (the studio adopts what comes back), but
+   that route still writes the layouts row with no precondition, so a genuine
+   two-tab conflict on that path is last-write-wins. Needs the route and the client
+   changed together, and the route is held by a worker.
+3. **Full e2e suite against the now-working harness.** The local-PostgreSQL bridge
+   was disarmed by the hot reloader all along, so several specs had never run. Held:
+   a worker currently owns the dev-server/playwright path.
+4. **`DealDecisionModal` milestones** — silently discarded on every use. Blocked on
+   NEEDS-RAY R4 (what a milestone checkbox means).
+5. **`project_versions` retention** — the non-destructive half is done (a save that
+   changes nothing writes no snapshot). How long a person's history is worth keeping
+   is Ray's.
+6. **`tests/laneAAcquisitionOrdering.test.tsx`'s post-commit case is vacuous** and now
+   says so. If it should prove something today it needs a different formulation.
 
 ---
 
