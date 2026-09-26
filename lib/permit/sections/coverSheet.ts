@@ -181,6 +181,42 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     }
   }
 
+  // ══ 2026-09-25 — THE ENGINEER'S OWN NOTES, WHICH NO SHEET READ ════════════
+  //
+  // `app/engineering/page.tsx` has a textarea headed ENGINEERING NOTES, inviting
+  // "engineering notes, special conditions, AHJ requirements, utility interconnection
+  // notes", and threads its value into `permitInput.project.notes` — inside the very
+  // payload the page's own comment calls "the one that reaches the AHJ".
+  //
+  // 🚨 NOTHING IN lib/permit, lib/drafting OR lib/cad EVER READ IT. The four buckets
+  // above are filled entirely by `buildConstructionNotes`, a fixed code-derived list of
+  // NEC/IFC/BESS prose. So an engineer typed "AHJ requires the 36in pathway on the west
+  // plane; rafters sistered bays 3-5" into the box that asks for exactly that, the text
+  // was persisted AND handed to the generator — and the stamped set carried boilerplate.
+  // They had no way to notice, because the cover DOES print a GENERAL NOTES block. It
+  // was simply somebody else's notes.
+  //
+  // Its own bucket, and FIRST, because a note a human wrote about this specific
+  // building outranks generated prose that is identical on every package. Split on
+  // newlines so a multi-line entry reads as the separate conditions it is; blank lines
+  // dropped; nothing is invented when the box is empty.
+  //
+  // 🚨 ESCAPED HERE, and only here. The note renderer interpolates each string into the
+  // page raw (`<div class="note-txt">${n}</div>`), which is correct for
+  // `buildConstructionNotes` — that prose carries deliberate entities like `&middot;`
+  // and would render as literal garbage if escaped. These notes are free text a user
+  // typed, so they are escaped at the point they enter the list. Caught by this file's
+  // own case: the first version of this block put `<script>alert(1)</script>` from the
+  // notes box straight into the rendered package.
+  const _engineerNotes = String(project.notes ?? '')
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(escapeH);
+  if (_engineerNotes.length) {
+    buckets.unshift({ title: 'PROJECT-SPECIFIC (ENGINEER OF RECORD)', notes: _engineerNotes });
+  }
+
   // ── Sheet index — W4 §3 SINGLE SOURCE ─────────────────────────────────────
   // THE actual generated sheet manifest is carried on projectAuthority (computed
   // once at snapshot build via computePlansetManifest, the SAME builder
