@@ -16,6 +16,7 @@ Last updated: 2026-09-25.
 | **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
 | **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
 | **R4** | Four milestone checkboxes are POSTed and silently discarded — the product says it recorded something it did not | Persisting those four |
+| **R10** | R4's shape on three more fields — including a five-state **Permit Status** dropdown nothing reads, while the real issue state lives elsewhere | Those three fields only |
 | **R9** | 🚨 The permit's wind analysis was hardcoded to a 15 ft building — **fixed**, but the fix raises loads 10–22 %, and prior PE approvals were granted on the lower number | Nothing — the decision is what to do about packages already approved |
 | **R3** | Two engineering repairs would move the permit digest, which retires live PE approvals | Those two only |
 | **R6** | A geocoder overwrites a coordinate a human deliberately set — **measured at 2.79 km and 28 m** — and that coordinate decides which property owns the design | Nothing, but it has been silently breaking things |
@@ -184,6 +185,35 @@ the principle.
 - **`project.stories` is printed on the cover sheet and nothing populates it.**
   `coverSheet.ts:360` renders a STORIES row; a repo-wide search finds no writer.
   That row has always been blank.
+
+---
+
+## R10 — Three engineering-page fields are persisted, reach no output, and one of them is a STATUS
+
+Same shape as **R4** (the four DealDecisionModal milestones POSTed and discarded),
+on different fields, and R4's harm statement applies verbatim: *the product tells an
+operator it recorded something it did not.* Found by enumerating all 43 fields with a
+real `updateConfig({…})` writer in `app/engineering/page.tsx` and testing each against
+the concatenated source of `lib/permit` + `lib/drafting` + `lib/cad` +
+`app/api/engineering`. Exactly three have **zero** occurrence in any of them.
+
+| Field | Where | What it looks like to the operator |
+|---|---|---|
+| `designNotes` | page.tsx:11960 | A second free-text box headed "Design Notes" — "Add design assumptions, site notes, AHJ requirements, special conditions". Written with an `as any` cast, because the field is not even in the `ProjectConfig` type. |
+| `installDays` | page.tsx:11971 | "Est. Install Days", 1–30. |
+| `permitStatus` | page.tsx:11980 | A five-state dropdown: Not Started / In Progress / Submitted / Approved / Issued. |
+
+All three are persisted, because the save writes the whole config object. None is read
+by any output, any route under `app/api/engineering`, or any status machine.
+
+| | |
+|---|---|
+| **Severity** | MEDIUM — no wrong number reaches a sheet; the harm is a false record |
+| **🚨 Why `permitStatus` is the sharp one** | An operator sets "Submitted" or "Approved" and **nothing in the product records it.** The real issue state is `projectAuthority.issueStatus`, which knows nothing about this dropdown. Two disagreeing notions of whether a permit was submitted, one of which is invisible. |
+| **Decision required** | Whether `permitStatus` should drive `projectAuthority.issueStatus`, be read-only from it, or be removed. That is a status-machine ruling, not a rendering one — which is why I have not guessed. The same question decides whether `designNotes` merges with ENGINEERING NOTES or is removed as a duplicate box. |
+| **Blocked** | These three fields only. |
+| **NOT blocked** | The **ENGINEERING NOTES** box in the same class is FIXED (`df75ea85`) — its text was threaded into the permit generator and read by no sheet, while the cover printed generated boilerplate in the place the engineer's own notes should have been. It now renders as its own first bucket, PROJECT-SPECIFIC (ENGINEER OF RECORD). |
+| **Safe default applied** | Nothing invented. The three fields keep persisting and still reach no output — unchanged, now written down. |
 
 ---
 
