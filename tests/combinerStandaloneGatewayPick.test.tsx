@@ -279,7 +279,12 @@ describe('🚨 what the engineering page prints for it is the one resolver answe
     const PAGE = stripCommentsAndStrings(readFileSync(join(__dirname, '..', 'app', 'engineering', 'page.tsx'), 'utf8'));
     expect(PAGE).toMatch(/const _b = planLandingDevice\(pageMetering\.plan\)/);
     expect(PAGE).not.toMatch(/pageMetering\.plan\.brains \?\? pageMetering\.plan\.devices\[0\]/);
-    expect(PAGE).toMatch(/const _sgw = \/\^COMB-\/\.test\(row0\.tag\) \? pageMetering\?\.standaloneGateway : undefined;\s*if \(!_sgw\) return _tr;/);
+    expect(PAGE).toMatch(/const _sgw = \/\^COMB-\/\.test\(row0\.tag\) \? pageMetering\?\.standaloneGateway : undefined;/);
+    // …and ENVOY-1 renders only under `_sgw`. The rows added beside it since
+    // 2026-09-26 are the per-gateway rows of a design that needs more than one
+    // (capacity determines the count), which are `_gwRows`.
+    expect(PAGE).toMatch(/if \(!_sgw && !_gwRows\) return _tr;/);
+    expect(PAGE).toMatch(/\{_sgw \? \(\s*<tr key=/);
     // Not GW-n: the engine tags a battery's backup gateway GW-n on the same table.
     // The key is a string literal, so the identifier scan above blanks it; strip
     // comments ONLY — a raw read would still pass with the row commented out.

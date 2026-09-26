@@ -16,7 +16,7 @@ import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } 
 // E-1 schedule reads it here so it carries the same Metering row the Diagram tab
 // and the exported SLD PDF already print — see the note at `meteringChannels`.
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
-import { hybridLaneMetering, type HybridLaneMeteringResult } from '@/lib/equipment/sldCombinerFields';
+import { hybridLaneMetering, sldGatewayFieldsOf, type HybridLaneMeteringResult } from '@/lib/equipment/sldCombinerFields';
 import { permitInterconnectionToken, interconnectionRuleOf } from './interconnectionRule';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
 import { getInverterById, getMicroinverterById, SOLAR_PANELS,
@@ -457,7 +457,12 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
         consumptionCtLocation: project.consumptionCtLocation ?? null,
         systemVoltage: 240,
       });
-      return { meteringChannels: _met.scheduleValue, meteringDrawing: _met.drawing ?? undefined };
+      // More than one IQ Combiner / Envoy (capacity decides how many — Ray,
+      // 2026-09-26): each with its branches and CTs, through the one mapping
+      // every drawing uses. ABSENT when one carries the design (keys pinned).
+      const _gws = isMicro ? sldGatewayFieldsOf(_bos, _met.drawing) : undefined;
+      return { meteringChannels: _met.scheduleValue, meteringDrawing: _met.drawing ?? undefined,
+        ...(_gws ? { gateways: _gws } : {}) };
     })(),
     // ── The standalone IQ Gateway — its own enclosure beside the landing panel ──
     // `combinerLabel` above names the PV AC combiner panel on that design; the
@@ -506,7 +511,13 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // combiners from (`selectedCombinerId` above). One lane carries the site's
     // consumption CTs. PV-4A and the snapshot read the same answer through
     // buildHybridPermitMetering, so the three cannot disagree.
-    sldInput.sources = permitHybridLaneMetering(input, _sources).lanes;
+    const _hm = permitHybridLaneMetering(input, _sources);
+    sldInput.sources = _hm.lanes;
+    // A hybrid's gateways are the collection's (pooled by topology) — the
+    // ones that are not one whole lane, with their CTs — never the single-lane
+    // answer above.
+    if (_hm.gateways.length) sldInput.gateways = _hm.gateways;
+    else delete sldInput.gateways;
     // On the hybrid multi-lane path the TOP-LEVEL inverter fields are a title-
     // block summary only — each lane renders (and fail-louds) its OWN inverter.
     // getEquipmentContext has no single project-wide winner for a hybrid, so it
@@ -521,8 +532,14 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // per-physical-inverter rounded OCPDs + battery bus impact (§1.7). The
     // stored project.backfeedBreakerA is a single-system figure and must not
     // undercount a hybrid's summed 120% panel.
+    // A collection whose gateways are not each one whole lane (two arrays share
+    // one, or one array needs several — Ray, 2026-09-26) lands each such
+    // gateway's OWN output breaker, not each array's feeder: the total is the
+    // collection's, which is what E-1's POI rows list.
+    const _coll = acCollectionFromLanes(_sources, project.selectedCombinerId ?? null);
+    const _reshaped = _coll.gateways.some(g => g.wholeLaneKey == null);
     sldInput.backfeedAmps =
-      _sources.reduce((s, b) => s + (b.backfeedAmps ?? 0), 0) +
+      (_reshaped ? _coll.aggregateBackfeedA : _sources.reduce((s, b) => s + (b.backfeedAmps ?? 0), 0)) +
       (sldInput.hasBattery ? (sldInput.batteryBackfeedA ?? 0) : 0);
   }
   return sldInput;

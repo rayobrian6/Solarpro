@@ -217,17 +217,18 @@ describe('wave 6 golden — multi-lane E-1', () => {
     expect(count(e1, 'UTILITY GRID')).toBe(1);
   });
 
-  it('Σ backfeed equals the sum of the per-lane contributions (§1.7)', () => {
+  it('Σ backfeed equals the sum of the per-source contributions (§1.7)', () => {
     const sigma = /Σ BACKFEED (\d+)A — NEC 705\.12\(B\) \(Σ PER-INVERTER OCPDs\)/.exec(e1);
     expect(sigma, 'Σ BACKFEED marker').toBeTruthy();
-    // Per-lane contributions moved from the "PV-R: 90A" note into the POI
-    // panel's "PV-R Backfeed" / "90 A" row pair (Stage-C layout) — read those.
-    const lanes = ['PV-R', 'PV-G', 'PV-F'].map(tag => {
-      const m = new RegExp(`${tag} Backfeed[\\s\\S]{0,400}?>(\\d+) A<`).exec(e1);
-      expect(m, `${tag} contribution row`).toBeTruthy();
-      return Number(m![1]);
-    });
-    expect(Number(sigma![1])).toBe(lanes[0] + lanes[1] + lanes[2]);
+    // Per-source contributions are the POI panel's "<source> Backfeed" / "N A"
+    // row pairs. The roof's 48 IQ8M plan as 5 branches — past a 5C's 4 positions
+    // — so it lands on TWO gateways (Ray, 2026-09-26: capacity determines the
+    // count), each with its own output breaker; the ground and fence lanes land
+    // as they always did.
+    const rows = [...e1.matchAll(/(PV-[RGF]|GATEWAY \d+) Backfeed<[\s\S]{0,400}?>(\d+) A</g)]
+      .map(m => [m[1], Number(m[2])] as const);
+    expect(rows.map(r => r[0])).toEqual(['GATEWAY 1', 'GATEWAY 2', 'PV-G', 'PV-F']);
+    expect(Number(sigma![1])).toBe(rows.reduce((s, r) => s + r[1], 0));
     expect(e1).toContain('Σ per-inverter rounded OCPDs');
   });
 

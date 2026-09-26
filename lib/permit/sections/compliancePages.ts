@@ -16,7 +16,8 @@ import { projectMicroinverterDatasheet, type ProjectedValue } from '../snapshot/
 import { isSubSystemKey, type SubSystemKey } from '../utils/subSystems';
 import { resolvePanelSpecs, coldVocFactor, type ResolvedPanelSpecs } from '../utils/panelSpecs';
 import { hybridSheetSections } from './subSystemSheets';
-import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitSharedGatewayPanel, permitStandaloneGateway } from '../utils/integratedEquipment';
+import { gatewayBranchesText } from '@/lib/equipment/gatewayStatements';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
@@ -728,6 +729,11 @@ export function pageDisconnectDirectory(
   // Brand-integrated BOS device ("the brains" — e.g. Enphase IQ Combiner 6C:
   // combiner + gateway + AC disconnect in one box). Single-sourced.
   const bos = buildIntegratedEquipment(input, cad);
+  // More than one IQ Combiner / Envoy (Ray, 2026-09-26: capacity determines the
+  // count): each is its own directory row, and an integral load-break then
+  // disconnects only ITS gateway — the PV-system disconnecting means is the
+  // system AC disconnect after the shared panel.
+  const _mult = bos.gatewayMultiplicity;
   // THE one rapid-shutdown authority every row/step/placard on this sheet reads.
   const _rsdEdition = projectCodeAuthorityFromInput(input).nec;
   const _rsd = projectRapidShutdownAuthority(
@@ -765,9 +771,11 @@ export function pageDisconnectDirectory(
         : 'At the supply-side tap — line side of the service disconnecting means',
     });
     if (_util) discos.push({ name: 'UTILITY-ACCESSIBLE AC DISCONNECT (LOCKABLE)', rating: `${_util.ocpdRatingA ?? acOcpd ?? '—'} A · lockable`, loc: 'Ahead of the point of interconnection — per serving-utility requirement' });
-    if (bos.providesAcDisconnect) discos.push({ name: 'PV SYSTEM AC DISCONNECT (COMBINER LOAD-BREAK)', rating: `${acOcpd ? `${acOcpd} A · ` : ''}NEC 690.13`, loc: 'Integral load-break in the AC combiner — the PV-system disconnecting means' });
+    if (bos.providesAcDisconnect && !_mult) discos.push({ name: 'PV SYSTEM AC DISCONNECT (COMBINER LOAD-BREAK)', rating: `${acOcpd ? `${acOcpd} A · ` : ''}NEC 690.13`, loc: 'Integral load-break in the AC combiner — the PV-system disconnecting means' });
   } else if (project.acDisconnect !== false) {
-    discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A` : 'PER PLAN', loc: bos.providesAcDisconnect ? 'Integral to the combiner (load-break) — exterior AC disconnect only if required by AHJ/utility' : 'Exterior, lockable — adjacent to utility meter' });
+    discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A` : 'PER PLAN', loc: bos.providesAcDisconnect && !_mult ? 'Integral to the combiner (load-break) — exterior AC disconnect only if required by AHJ/utility'
+      : _mult ? 'Exterior, lockable — after the shared PV AC combiner panel (the PV-system disconnecting means, NEC 690.13)'
+      : 'Exterior, lockable — adjacent to utility meter' });
   }
   if (!isMicro && project.dcDisconnect !== false) discos.push({ name: 'PV DC / SYSTEM DISCONNECT', rating: `${maxDcV}`, loc: 'At the inverter' });
   // Integrated combiner / gateway — the AC aggregation + monitoring device.
@@ -783,7 +791,27 @@ export function pageDisconnectDirectory(
   // on a string job, however the combiner selection was left.
   const _sg = permitStandaloneGateway(input, cad, bos);
   const _landing = planLandingDevice(bos);
-  for (const d of bos.devices) {
+  if (_mult && _landing) {
+    // One row per gateway: what it is, which branch circuits land on it, the
+    // breaker its output lands on — the solver's rows, worded once.
+    for (const g of _mult.instances) {
+      discos.push({
+        name: `${g.label} — ${_landing.brand.toUpperCase()} ${_landing.model.toUpperCase()}${_sg ? ` + ${_sg.label.toUpperCase()}` : ''}`,
+        rating: `${_landing.roleSummary} · ${gatewayBranchesText(g.branches)} (${g.deviceCount} micros) · ${g.outputOcpdA} A output breaker`
+          + (bos.providesAcDisconnect ? ' · integral load-break (this gateway only)' : ''),
+        loc: 'Its AC branch circuits land here — output to the shared PV AC combiner panel',
+      });
+    }
+    const _panel = permitSharedGatewayPanel(input, cad, bos);
+    if (_panel) {
+      discos.push({
+        name: _panel.model.toUpperCase(),
+        rating: `${_panel.busbarA} A busbar · ${_mult.instances.map(g => `${g.outputOcpdA} A`).join(' + ')} gateway breakers`,
+        loc: 'The gateways\' outputs land here — feeds the PV AC disconnect',
+      });
+    }
+  }
+  for (const d of _mult ? [] : bos.devices) {
     if (_sg && _landing && d.id === _landing.id) {
       discos.push({
         name: `${d.brand.toUpperCase()} ${d.model.toUpperCase()}`,

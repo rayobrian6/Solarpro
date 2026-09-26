@@ -35,6 +35,7 @@
 
 import {
   computeSystem,
+  gatewayFeederRun,
   nextStandardOCPD,
   type BomQuantities,
   type ComputedSystem,
@@ -47,6 +48,10 @@ import {
 } from './computed-system';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { SUB_SYSTEM_KEYS, type SubSystemKey } from './system/subSystemEquipment';
+// A hybrid's gateways are counted over every lane that shares a topology —
+// the one collection resolver the drawings and the BOM also read.
+import { resolveHybridAcCollection, type HybridAcCollectionPlan } from './equipment/integratedBos';
+import { combinerCompatibilityFor } from './equipment/combinerCompatibility';
 
 // ─── Contract types ──────────────────────────────────────────────────────────
 
@@ -292,10 +297,40 @@ export function computeMultiSystem(
       ...stripMultiFields(sub),
       subSystemKey: key,
       emitSharedServiceRuns: false,
+      // Gateways are counted across lanes below, never per lane.
+      countGatewayInstances: false,
     });
   }
   const subList = orderedKeys.map(k => ({ key: k, input: byKey.get(k)!, cs: subSystems[k]! }));
   const primary = subList[0];
+
+  // ── Gateways, counted over every lane that shares a topology ─────────────
+  // (Ray, 2026-09-26: "Multiple arrays do not automatically mean multiple
+  // gateways … One array can require multiple gateways.") The same collection
+  // the drawings and the BOM read. When every gateway is exactly one whole lane
+  // — every hybrid before this — nothing below changes: each lane's own feeder
+  // IS its gateway's output circuit. Otherwise the collection is RESHAPED: a
+  // lane pooled with another, or split across two gateways, has no feeder of
+  // its own; each such gateway gets one.
+  const collection: HybridAcCollectionPlan = resolveHybridAcCollection(subList.map(x => ({
+    key: x.key,
+    inverterManufacturer: x.input.inverterManufacturer,
+    inverterModel: x.input.inverterModel,
+    isMicro: x.cs.isMicro,
+    branchCount: x.cs.acBranchCount,
+    deviceCount: x.cs.microDeviceCount,
+    backfeedA: subBackfeedA(x.input, x.cs),
+    compatibleCombinerIds: combinerCompatibilityFor(x.input.inverterManufacturer, x.input.inverterModel),
+    selectedCombinerId: x.input.combinerSelectionId ?? null,
+  })));
+  const ownGateways = collection.gateways.filter(g => g.wholeLaneKey == null);
+  const reshaped = ownGateways.length > 0;
+  /** Lanes whose branches land on a gateway that is NOT exactly that lane. */
+  const lanesWithoutOwnFeeder = new Set<SubSystemKey>(
+    collection.perSource
+      .filter(p => p.gatewayIndexes?.some(i => ownGateways.some(g => g.index === i)))
+      .map(p => p.key as SubSystemKey),
+  );
 
   // ── POI facts ──────────────────────────────────────────────────────────────
   const mainPanelAmps = poi?.mainPanelAmps ?? primary.input.mainPanelAmps;
@@ -350,8 +385,15 @@ export function computeMultiSystem(
   );
 
   // ── Aggregate-owned NEC 705.12(B) (§1.7 / I-6) ─────────────────────────────
-  const backfeedBreakerAmps =
-    subList.reduce((s, x) => s + subBackfeedA(x.input, x.cs), 0) + poiBatteryA;
+  // Reshaped: a lane with no feeder of its own contributes its battery only;
+  // each gateway that is not one whole lane contributes its own output breaker.
+  const backfeedBreakerAmps = !reshaped
+    ? subList.reduce((s, x) => s + subBackfeedA(x.input, x.cs), 0) + poiBatteryA
+    : subList.reduce((s, x) => s + (lanesWithoutOwnFeeder.has(x.key)
+        ? Math.max(0, x.cs.backfeedBreakerAmps - x.cs.acOcpdAmps)
+        : subBackfeedA(x.input, x.cs)), 0)
+      + ownGateways.reduce((s, g) => s + g.outputOcpdA, 0)
+      + poiBatteryA;
   const methodU = String(interconnectionMethod).toUpperCase();
   const isSupplySide = methodU.includes('SUPPLY') || methodU.includes('LINE_SIDE');
   const interconnectionPass = isSupplySide
@@ -385,10 +427,25 @@ export function computeMultiSystem(
   const autoFixCount = issues.filter(i => i.autoFixed).length;
 
   // ── Runs: namespaced per-sub + shared service (once) ──────────────────────
+  // Reshaped: a lane with no feeder of its own loses its lane→panel run, and
+  // each gateway that is not one whole lane gets its own output circuit — to
+  // the shared panel, or straight to the AC disconnect when it is the site's
+  // only source. Its length is the (first) lane's own feeder length.
+  const laneFeeder = (key: SubSystemKey) => subSystems[key]?.runs.find(r => r.id === 'COMBINER_TO_DISCO_RUN');
+  const gatewayFeeders: RunSegment[] = ownGateways.map(g => gatewayFeederRun(g, {
+    to: collection.sharedPanel ? 'PV AC COMBINER PANEL' : 'AC DISCONNECT',
+    lengthFt: laneFeeder(g.laneKeys[0] as SubSystemKey)?.onewayLengthFt ?? 10,
+    conduitType: primary.input.conduitType,
+    ambientTempC: Math.max(...subList.map(x => x.input.ambientTempC)),
+    maxACVoltageDropPct: primary.input.maxACVoltageDropPct,
+  }));
   const runs: RunSegment[] = [
     ...subList.flatMap(x =>
-      x.cs.runs.map(r => ({ ...r, id: namespacedRunId(x.key, r.id) as RunSegmentId })),
+      x.cs.runs
+        .filter(r => !(lanesWithoutOwnFeeder.has(x.key) && r.id === 'COMBINER_TO_DISCO_RUN'))
+        .map(r => ({ ...r, id: namespacedRunId(x.key, r.id) as RunSegmentId })),
     ),
+    ...gatewayFeeders,
     ...sharedServiceRuns,
   ];
   const runMap = {} as Record<RunSegmentId, RunSegment>;
@@ -398,15 +455,30 @@ export function computeMultiSystem(
   const equipmentSchedule: EquipmentScheduleRow[] = subList.flatMap(x =>
     x.cs.equipmentSchedule
       .filter(row => !SHARED_EQUIPMENT_TAGS.has(row.tag))
+      // A lane with no feeder of its own has no combiner of its own either —
+      // its branches land on a gateway listed below.
+      .filter(row => !(lanesWithoutOwnFeeder.has(x.key) && row.tag === 'COMB-1'))
       .map(row => ({ ...row, tag: suffixTag(row.tag, x.key) })),
   );
+  for (const g of ownGateways) {
+    equipmentSchedule.push({
+      tag: `COMB-GW${g.index}`, description: `${g.label} — IQ Combiner / Gateway`,
+      manufacturer: g.combiner?.brand ?? '', model: g.combiner?.model ?? g.deviceLabel, qty: 1,
+      rating: `${g.outputOcpdA}A`, necReference: 'NEC 690.9',
+    });
+  }
   for (const row of primary.cs.equipmentSchedule) {
     if (SHARED_EQUIPMENT_TAGS.has(row.tag)) equipmentSchedule.push({ ...row });
   }
 
   // ── BOM quantities: merged per-sub + shared-service footage ───────────────
   const bomQuantities = mergeBomQuantities(subList.map(x => x.cs.bomQuantities));
-  addSharedServiceFootage(bomQuantities, sharedServiceRuns);
+  if (reshaped) {
+    // One combiner per gateway, not per lane.
+    bomQuantities.acCombiner = collection.gateways.length
+      + subList.filter(x => x.cs.isMicro && !collection.perSource.find(p => p.key === x.key)?.gatewayIndexes).length;
+  }
+  addSharedServiceFootage(bomQuantities, [...sharedServiceRuns, ...gatewayFeeders]);
 
   // ── String/micro facade blocks ─────────────────────────────────────────────
   const stringSubs = subList.filter(x => x.cs.isString);
@@ -451,6 +523,12 @@ export function computeMultiSystem(
     microDeviceCount: subList.reduce((s, x) => s + x.cs.microDeviceCount, 0),
     acBranchCount: subList.reduce((s, x) => s + x.cs.acBranchCount, 0),
     microBranches,
+    // Present only when the collection was reshaped (a gateway that is not one
+    // whole lane exists, so the engine sized its own output circuit). Every
+    // hybrid consumer reads the COLLECTION for the full gateway list.
+    ...(reshaped
+      ? { gatewayInstances: collection.gateways.map(({ plan: _p, combiner: _c, wholeLaneKey: _w, backfeedA: _b, ...g }) => g) }
+      : {}),
     acBranchCurrentA: firstMicro?.acBranchCurrentA ?? 0,
     acBranchOcpdAmps: firstMicro?.acBranchOcpdAmps ?? 0,
     systemVoltageAC: 240,

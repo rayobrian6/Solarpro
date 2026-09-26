@@ -121,8 +121,14 @@ const hybridInput = (): SLDProfessionalInput => ({
   acWireGauge: '#2 AWG', acConduitType: 'EMT',
   acOCPD: 150, backfeedAmps: 145, panelBusRating: 225,
   rapidShutdownIntegrated: true,
+  // 48 IQ8M on 4 branches is 66.7 A: past a paired 5C's 64 A, so since
+  // 2026-09-26 (capacity determines the count) it would be TWO gateways. The
+  // roof records a 6C (80 A, 5 positions) — one gateway, the whole lane — so
+  // this golden keeps pinning the one-gateway-per-lane layout it was written
+  // for; the pooled / split layouts are the legibility matrix's hybrid variants.
+  selectedCombinerIdByLane: { roof: 'enphase-iq-combiner-6c' },
   sources: [roofBranch(), groundBranch(), fenceBranch()],
-} as SLDProfessionalInput);
+} as unknown as SLDProfessionalInput);
 
 // ═════ 1. Legacy identity (I-1) ══════════════════════════════════════════════
 describe('wave 5a — legacy single-source path byte identity', () => {

@@ -24,6 +24,7 @@ import { formatInDocumentTimezone, documentIssueContextOf } from '../utils/docum
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
+import { gatewayCommissioningLines, gatewayLanesText, gatewayMultiplicityStatement } from '@/lib/equipment/gatewayStatements';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 // TAC WS-18 — reader-facing cross-sheet pointers resolve against the ACTIVE index.
 import { activeSheetIds, sheetRef } from '../utils/sheetRef';
@@ -855,14 +856,31 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           const _hp = _hm?.primary;
           const _hpRes = _hp?.metering.resolution;
           if (!_hm || !_hp || !_hpRes) return _subTables;
-          const _hpDevice = _hm.metered.find(m => m.isPrimary)?.meteringDeviceLabel ?? 'GATEWAY';
-          const _hpGw = _hm.lanes.find(l => l.key === _hp.key)?.standaloneGateway;
+          const _hpMetered = _hm.metered.find(m => m.isPrimary);
+          const _hpDevice = _hpMetered?.meteringDeviceLabel ?? 'GATEWAY';
+          // A gateway that is not one whole lane (two arrays sharing it, or one
+          // of an array's several — Ray, 2026-09-26) is named as a GATEWAY, with
+          // the arrays it serves; a whole-lane gateway keeps its lane's name.
+          const _hpGwFields = _hpMetered?.gatewayIndex != null
+            ? _hm.gateways.find(g => g.index === _hpMetered.gatewayIndex) : undefined;
+          const _hpHeading = _hpGwFields
+            ? `${_hpGwFields.label} (${gatewayLanesText([...new Set(_hpGwFields.branches.map(b => b.laneKey))])})`
+            : `${SUB_LABEL[_hp.key]} SUB-SYSTEM`;
+          const _hpGw = _hpGwFields?.standaloneGateway ?? _hm.lanes.find(l => l.key === _hp.key)?.standaloneGateway;
+          // How many gateways, and which branches land on each — the permit's
+          // equipment plan (the same solve E-1's collection runs).
+          const _hBos = buildIntegratedEquipment(input, cad);
+          const _hMult = _hBos.gatewayMultiplicity;
           // "Read by the primary gateway" only when that lane actually draws the
           // consumption CTs — an impossible recorded location draws none anywhere.
           const _hpCons = !!_hp.metering.drawing?.consumption;
           const _hybridMeteringNote =
             `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#f0f4f8;">`
-            + `<strong>METERING (NEC 690.4) — ${SUB_LABEL[_hp.key]} SUB-SYSTEM, ${_hpDevice.toUpperCase()}:</strong> ${_hpRes.disclosure}`
+            + (_hMult
+              ? `<strong>GATEWAYS (${_hMult.count}):</strong> ${gatewayMultiplicityStatement(_hMult, _hpCons ? (_hpMetered?.gatewayIndex ?? 1) : null)} `
+                + `<strong>COMMISSIONING:</strong> ${gatewayCommissioningLines(_hMult.instances, _hpCons ? (_hpMetered?.gatewayIndex ?? 1) : null).join(' ')} `
+              : '')
+            + `<strong>METERING (NEC 690.4) — ${_hpHeading}, ${_hpDevice.toUpperCase()}:</strong> ${_hpRes.disclosure}`
             + (_hp.metering.placementNote ? ` ${_hp.metering.placementNote}` : '')
             + (_hpRes.blockerMessage
               ? ` <span style="color:#cc6600;font-weight:700;">REQUIRED ACTION — ${_hpRes.blockerMessage}</span>` : '')
@@ -874,7 +892,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
                 + `2-pole ${_hpGw.supplyBreakerA} A breaker in the ${_hpGw.landingLabel} (${_hpGw.supplyConductor}); every CT lead lands on it.`
               : '')
             + _hm.metered.filter(m => !m.isPrimary && m.drawing.production).map(m =>
-                ` <strong>${SUB_LABEL[m.key]}:</strong> ${m.meteringDeviceLabel} — ${m.drawing.production!.label}; production only`
+                ` <strong>${m.gatewayIndex != null ? `GATEWAY ${m.gatewayIndex}` : SUB_LABEL[m.key]}:</strong> ${m.meteringDeviceLabel} — ${m.drawing.production!.label}; production only`
                 + (_hpCons ? ` — the site's consumption CTs are read by the ${_hpDevice} (one set per service)` : '')
                 + '.').join('')
             + `</div>`;
@@ -949,6 +967,18 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         // the same object E-1 draws, never re-worded or re-derived here.
         // ═══════════════════════════════════════════════════════════════════
         const _pv4aLanding = planLandingDevice(_pv4aBos);
+        // ── MORE THAN ONE GATEWAY (Ray, 2026-09-26: capacity determines the
+        //    count). The count, the branches on each, their breakers and which
+        //    one reads the site's consumption CTs — the solver's, worded once
+        //    (lib/equipment/gatewayStatements.ts), exactly as E-1 draws them.
+        const _pv4aMult = _pv4aBos.gatewayMultiplicity;
+        const _pv4aPrimary = _pv4aMult && _pv4aMet.drawing?.consumption ? 1 : null;
+        const _pv4aMultNote = _pv4aMult
+          ? `<strong>GATEWAYS (${_pv4aMult.count}):</strong> ${gatewayMultiplicityStatement(_pv4aMult, _pv4aPrimary)} `
+            + `Their outputs land on backfed breakers in one shared PV AC combiner panel, which feeds the system AC disconnect (NEC 705.12(B)). `
+            + `<strong>COMMISSIONING:</strong> ${gatewayCommissioningLines(_pv4aMult.instances, _pv4aPrimary).join(' ')} `
+          : '';
+        const _pv4aN = _pv4aMult ? `${_pv4aMult.count} × ` : '';
         // Already inside `_pairIsMicro`; the helper takes the same topology test
         // itself so this sheet, E-1 and the snapshot share one gate.
         const _pv4aSg = permitStandaloneGateway(input, cad, _pv4aBos);
@@ -957,9 +987,9 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           const _draw = _pv4aMet.drawing;
           const _prodLead = _draw?.leads?.find(l => l.channel === 'production');
           const _consLead = _draw?.leads?.find(l => l.channel === 'consumption');
-          return `The AC branch circuits land on 2-pole ${_pv4aBos.branchBreakerA ?? '—'} A breakers in the ${_pv4aLanding.model}` +
+          return `The AC branch circuits land on 2-pole ${_pv4aBos.branchBreakerA ?? '—'} A breakers in ${_pv4aMult ? `${_pv4aN}${_pv4aLanding.model} (one per gateway)` : `the ${_pv4aLanding.model}`}` +
             `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots} branch positions; one further position feeds the gateway)` : ''}. ` +
-            `The ${_pv4aSg.label}${_pv4aSg.partNumber ? ` (${_pv4aSg.partNumber})` : ''} is a separate enclosure — no branch circuit lands in it — ` +
+            `${_pv4aMult ? `Each ${_pv4aSg.label}` : `The ${_pv4aSg.label}`}${_pv4aSg.partNumber ? ` (${_pv4aSg.partNumber})` : ''} is a separate enclosure — no branch circuit lands in it — ` +
             `supplied from its own 2-pole ${_pv4aSg.supplyBreakerA} A breaker in that panel (${_pv4aSg.supplyConductor}); ` +
             `it provides system monitoring and communications per NEC 690.4. ` +
             (_draw?.production ? `<strong>PRODUCTION CT:</strong> ${_draw.production.label}${_prodLead ? ` · ${_prodLead.label}` : ''}. ` : '') +
@@ -979,13 +1009,21 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         const _bosNote = _pv4aBos.brains && _pv4aLanding
           ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#f0f4f8;">` +
             (_pv4aSg
-              ? `<strong>AC AGGREGATION — ${_pv4aLanding.brand.toUpperCase()} ${_pv4aLanding.model.toUpperCase()} + ${_pv4aSg.label.toUpperCase()} (STANDALONE GATEWAY):</strong> ` +
+              ? `<strong>AC AGGREGATION — ${_pv4aN}${_pv4aLanding.brand.toUpperCase()} ${_pv4aLanding.model.toUpperCase()} + ${_pv4aN}${_pv4aSg.label.toUpperCase()} (STANDALONE GATEWAY${_pv4aMult ? 'S' : ''}):</strong> ` +
                 _pv4aStandaloneNote
-              : `<strong>AC AGGREGATION — ${_pv4aLanding.brand.toUpperCase()} ${_pv4aLanding.model.toUpperCase()}:</strong> ` +
-                `The AC branch circuits terminate at the ${_pv4aLanding.model}, a single integrated device providing ${_pv4aLanding.roleSummary.toLowerCase()}` +
-                `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots}-position)` : ''}. `) +
-            `${_pv4aBos.providesAcDisconnect ? 'Its integral load-break serves as the PV-system AC disconnecting means per NEC 690.13; a separate exterior AC disconnect is provided only where required by the AHJ/utility. ' : ''}` +
-            `${_pv4aBos.hasIntegratedGateway ? 'The integrated gateway provides system monitoring and communications per NEC 690.4. ' : ''}` +
+              : `<strong>AC AGGREGATION — ${_pv4aN}${_pv4aLanding.brand.toUpperCase()} ${_pv4aLanding.model.toUpperCase()}:</strong> ` +
+                (_pv4aMult
+                  ? `The AC branch circuits terminate at ${_pv4aN}${_pv4aLanding.model}, each an integrated device providing ${_pv4aLanding.roleSummary.toLowerCase()}` +
+                    `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots}-position)` : ''}. `
+                  : `The AC branch circuits terminate at the ${_pv4aLanding.model}, a single integrated device providing ${_pv4aLanding.roleSummary.toLowerCase()}` +
+                    `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots}-position)` : ''}. `)) +
+            _pv4aMultNote +
+            `${_pv4aBos.providesAcDisconnect
+              ? (_pv4aMult
+                ? `Each ${_pv4aLanding.model}'s integral load-break disconnects its own gateway; the PV-system AC disconnecting means per NEC 690.13 is the system AC disconnect after the shared panel. `
+                : 'Its integral load-break serves as the PV-system AC disconnecting means per NEC 690.13; a separate exterior AC disconnect is provided only where required by the AHJ/utility. ')
+              : ''}` +
+            `${_pv4aBos.hasIntegratedGateway ? (_pv4aMult ? 'Each integrated gateway provides monitoring and communications for its own branch circuits per NEC 690.4. ' : 'The integrated gateway provides system monitoring and communications per NEC 690.4. ') : ''}` +
             _meteringNote +
             `Output feeds the point of interconnection per NEC 705.10.` +
             `${_pv4aBos.branchSlotWarning ? ` <span style="color:#cc6600;font-weight:700;">${_pv4aBos.branchSlotWarning}</span>` : ''}` +

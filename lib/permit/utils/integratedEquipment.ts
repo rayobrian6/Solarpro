@@ -21,6 +21,7 @@ import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility'
 import { buildConductorAuthority } from './conductorAuthority';
 import {
   planLandingDevice,
+  planSharedPanel,
   resolveIntegratedEquipment,
   type IntegratedEquipmentPlan,
   type SystemBosContext,
@@ -74,6 +75,23 @@ export function permitStandaloneGateway(
   if (plan.gatewayPlacement !== 'standalone') return undefined;
   if (topologyToLegacy(getInverterTopology(input, cad ?? undefined)) !== 'MICRO') return undefined;
   return standaloneGatewayFieldsOf(plan);
+}
+
+/**
+ * The shared PV AC combiner panel a SINGLE-SYSTEM design's gateways land in
+ * when it needs more than one (Ray, 2026-09-26) — the panel E-1 draws and the
+ * BOM buys. null on a design one gateway carries, and on a hybrid: a hybrid's
+ * shared panel also takes its string arrays and is the AC collection's
+ * (sldAdapter.buildHybridAcCollection), never a gateways-only panel.
+ */
+export function permitSharedGatewayPanel(
+  input: PermitInput,
+  cad?: CADModel | null,
+  plan: IntegratedEquipmentPlan = buildIntegratedEquipment(input, cad),
+) {
+  if (!plan.gatewayMultiplicity) return null;
+  if (buildConductorAuthority(input, cad ?? undefined).isHybrid) return null;
+  return planSharedPanel(plan);
 }
 
 /** The shape alone, ungated — private so no sheet can name a gateway the E-1
@@ -184,6 +202,19 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
     overrideDeviceIds,
     compatibleCombinerIds: isMicro ? combinerCompatibilityFor(inverterManufacturer, inverterModel) : undefined,
     selectedCombinerId,
+    // A hybrid's gateways are counted over each micro array's OWN branches —
+    // the loads the E-1 collection solves over — never one merged split.
+    // (Only the arrays of this plan's brand — another brand's micros never land
+    // on this gateway.)
+    ...(microSubs.length > 1 ? {
+      branchSources: microSubs.filter(s => s.equipment.inverterManufacturer === '—'
+        || s.equipment.inverterManufacturer.trim().toLowerCase() === inverterManufacturer.trim().toLowerCase()).map(s => ({
+        laneKey: s.key,
+        inverterModel: s.equipment.inverterModel !== '—' ? s.equipment.inverterModel : inverterModel,
+        deviceCount: s.deviceCount || 0,
+        branchCount: s.microBranches.length,
+      })),
+    } : {}),
   };
 
   return resolveIntegratedEquipment(ctx);

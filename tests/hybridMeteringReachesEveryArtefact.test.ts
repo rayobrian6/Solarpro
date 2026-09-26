@@ -99,6 +99,19 @@ const enphaseLane = (key: 'roof' | 'ground' | 'fence' = 'roof'): SLDSourceBranch
   microBranches: [{ branchIndex: 1, deviceCount: 12, branchCurrentA: 16.5, ocpdAmps: 20,
     conductorCallout: '#10 AWG THWN-2', necReference: 'NEC 690.8(B)' }],
 });
+/** An Enphase IQ8M array big enough to need a WHOLE 5C of its own: 44 micros on
+ *  4 branches of 11 (61.2 A of the 5C's 64 A, 4 of its 4 positions). */
+const wholeCombinerLane = (key: 'roof' | 'ground' | 'fence', devices = 44, branches = 4): SLDSourceBranch => ({
+  key, topologyType: 'MICROINVERTER', systemType: key,
+  inverterManufacturer: 'Enphase', inverterModel: 'IQ8M',
+  totalModules: devices, deviceCount: devices, panelWatts: 430,
+  acOutputKw: +(devices * 0.33).toFixed(2), acOutputAmps: +(devices * 1.39).toFixed(2), backfeedAmps: 80, acOCPD: 80,
+  microBranches: Array.from({ length: branches }, (_, i) => {
+    const n = Math.floor(devices / branches) + (i < devices % branches ? 1 : 0);
+    return { branchIndex: i + 1, deviceCount: n, branchCurrentA: +(n * 1.39).toFixed(2), ocpdAmps: 20,
+      conductorCallout: '#10 AWG THWN-2', necReference: 'NEC 690.8(B)' };
+  }),
+});
 const stringLane = (): SLDSourceBranch => ({
   key: 'ground', topologyType: 'STRING_INVERTER', systemType: 'ground',
   inverterManufacturer: 'Solis', inverterModel: 'S6-GR1P6K', inverterCount: 1,
@@ -140,10 +153,27 @@ describe('hybridLaneMetering — one composer, each lane its own plan', () => {
     expect(r.primary!.fields.combinerMeteringSummary).toBe(single.combinerMeteringSummary);
   });
 
-  it('two Enphase lanes: ONE consumption set per service — the other lane records production only', () => {
-    // Given fence-first on purpose: the primary lane is chosen by roof > ground > fence.
+  it('two SMALL Enphase arrays on one 5C share ONE gateway (Ray, 2026-09-26) — one set of CTs, on it', () => {
+    // Arrays are not gateways: 12 + 12 IQ8M is one branch each, one 5C between them.
     const r = hybridLaneMetering({ lanes: [enphaseLane('fence'), enphaseLane('roof')], selectedCombinerId: FIVE_C,
       interconnectionRaw: 'SUPPLY_SIDE_TAP', systemVoltage: 240 });
+    expect(r.gateways).toHaveLength(1);
+    expect(r.gateways[0]).toMatchObject({ index: 1, label: 'GATEWAY 1', topologyId: FIVE_C });
+    expect(r.gateways[0].branches.map(b => b.laneKey).sort()).toEqual(['fence', 'roof']);
+    expect(r.gateways[0].meteringDrawing!.consumption).toMatchObject({ ctCount: 2, supplied: 'in-box' });
+    // The CTs belong to the gateway, so neither array carries a drawing of its own.
+    expect(r.lanes.every(l => !l.meteringDrawing && !l.standaloneGateway)).toBe(true);
+    // It is keyed by its best-ranked array, whatever the order given.
+    expect(r.primary?.key).toBe('roof');
+    expect(r.metered.map(m => [m.key, m.isPrimary, m.gatewayIndex])).toEqual([['roof', true, 1]]);
+  });
+
+  it('two Enphase arrays that each need a WHOLE 5C: ONE consumption set per service — the other gateway production only', () => {
+    // Given fence-first on purpose: the primary lane is chosen by roof > ground > fence.
+    const r = hybridLaneMetering({ lanes: [wholeCombinerLane('fence'), wholeCombinerLane('roof')], selectedCombinerId: FIVE_C,
+      interconnectionRaw: 'SUPPLY_SIDE_TAP', systemVoltage: 240 });
+    // Each gateway is one whole array, so its CTs ride on that array's lane, as before.
+    expect(r.gateways).toEqual([]);
     expect(r.primary?.key).toBe('roof');
     expect(withConsumption(r.lanes)).toEqual(['roof']);
     const fence = r.lanes.find(l => l.key === 'fence')!.meteringDrawing!;
@@ -156,7 +186,8 @@ describe('hybridLaneMetering — one composer, each lane its own plan', () => {
   });
 
   it('a standalone IQ Gateway lane carries its gateway; its production lead survives on a non-primary lane', () => {
-    const lanes = [enphaseLane('roof'), enphaseLane('fence')];
+    // Two arrays too big to share one Envoy's 80 A (66.7 A each): one gateway per array.
+    const lanes = [wholeCombinerLane('roof', 48, 5), wholeCombinerLane('fence', 48, 5)];
     const r = hybridLaneMetering({ lanes, selectedCombinerId: STANDALONE, interconnectionRaw: 'LOAD_SIDE', systemVoltage: 240 });
     const plan = acCollectionFromLanes(lanes, STANDALONE).perSource[0].plan!;
     const [roof, fence] = r.lanes;
@@ -323,20 +354,22 @@ describe('PV-4A states it', () => {
     expect(html).toContain(met.placementNote);
   });
 
-  it('a second Enphase lane: E-1 draws it production only, and PV-4A says so', () => {
+  it('a second SMALL Enphase array shares the roof\'s 5C: E-1 draws ONE gateway with the site\'s CTs, and PV-4A says so', () => {
     const p = mkHybrid({ selectedCombinerId: FIVE_C });
     const roofInv = p.system.inverters[0];
     p.system.inverters[1] = { ...roofInv, subSystemKey: 'ground', strings: [{ ...roofInv.strings[0], label: 'G-1' }] };
     const cad = cadOf(p);
     const hm = buildHybridPermitMetering(p, cad)!;
-    expect(hm.metered.map(m => [m.key, m.isPrimary])).toEqual([['roof', true], ['ground', false]]);
-    const lanes = buildSLDInputFromPermit(p, cad).sources as MeteredSourceBranch[];
-    expect(withConsumption(lanes)).toEqual(['roof']);
-    expect(lanes[1].meteringDrawing).toMatchObject({ consumption: null, lead: null, scheduleRow: null });
+    expect(hm.metered.map(m => [m.key, m.isPrimary, m.gatewayIndex])).toEqual([['roof', true, 1]]);
+    const e1 = buildSLDInputFromPermit(p, cad);
+    const lanes = e1.sources as MeteredSourceBranch[];
+    expect(withConsumption(lanes)).toEqual([]);
+    expect(e1.gateways?.map(g => [g.label, g.branches.map(b => b.laneKey)])).toEqual([['GATEWAY 1', ['roof', 'ground']]]);
+    expect(e1.gateways![0].meteringDrawing!.consumption).not.toBeNull();
     p._snapshot = buildPermitDesignSnapshot(p, cad, { projectId: 'p1', designVersionId: 'v1' });
     const html = pageNECCompliance(p, cad, 1, 1);
-    expect(html).toContain('<strong>GROUND:</strong> Enphase IQ Combiner 5C — PCT (INTEGRAL) — PRODUCTION; production only'
-      + " — the site's consumption CTs are read by the Enphase IQ Combiner 5C (one set per service).");
+    expect(html).toContain('METERING (NEC 690.4) — GATEWAY 1 (ROOF + GROUND SUB-SYSTEMS), ENPHASE IQ COMBINER 5C:');
+    expect(html).toContain(hm.primary!.metering.placementNote);
   });
 });
 

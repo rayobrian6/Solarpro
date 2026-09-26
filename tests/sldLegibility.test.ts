@@ -164,6 +164,18 @@ const BASELINE: Record<string, [number, number, number, number, number]> = {
   'micro-gw-load-dflt-5br-e1': [0, 0, 0, 0, 0],
   'micro-gw-tap-dflt-5br-sheet': [0, 0, 0, 0, 0],
   'micro-gw-tap-dflt-5br-e1': [0, 0, 0, 0, 0],
+  'micro-5c-load-dflt-8br-sheet': [0, 0, 0, 0, 0],   // two gateways (Ray 2026-09-26)
+  'micro-5c-load-dflt-8br-e1': [0, 0, 0, 0, 0],
+  'micro-5c-tap-dflt-8br-sheet': [0, 0, 0, 0, 0],
+  'micro-5c-tap-dflt-8br-e1': [0, 0, 0, 0, 0],
+  'micro-6c-load-dflt-8br-sheet': [0, 0, 0, 0, 0],   // two gateways (Ray 2026-09-26)
+  'micro-6c-load-dflt-8br-e1': [0, 0, 0, 0, 0],
+  'micro-6c-tap-dflt-8br-sheet': [0, 0, 0, 0, 0],
+  'micro-6c-tap-dflt-8br-e1': [0, 0, 0, 0, 0],
+  'micro-gw-load-dflt-8br-sheet': [0, 0, 0, 0, 0],   // two gateways (Ray 2026-09-26)
+  'micro-gw-load-dflt-8br-e1': [0, 0, 0, 0, 0],
+  'micro-gw-tap-dflt-8br-sheet': [0, 0, 0, 0, 0],
+  'micro-gw-tap-dflt-8br-e1': [0, 0, 0, 0, 0],
   'micro-5c-load-dflt-3br-bat-sheet': [0, 0, 0, 0, 0],
   'micro-5c-load-dflt-3br-bat-e1': [0, 0, 0, 0, 0],
   'micro-5c-tap-dflt-3br-bat-sheet': [0, 0, 0, 0, 0],
@@ -190,12 +202,22 @@ const BASELINE: Record<string, [number, number, number, number, number]> = {
   'hybrid-2lane-paired-load-bat-e1': [0, 0, 0, 0, 0],
   'hybrid-3lane-paired-load-sheet': [0, 0, 0, 0, 0],
   'hybrid-3lane-paired-load-e1': [0, 0, 0, 0, 0],
+  'hybrid-pooled-5c-load-sheet': [0, 0, 0, 0, 0],
+  'hybrid-pooled-5c-load-e1': [0, 0, 0, 0, 0],
+  'hybrid-pooled-gw-tap-sheet': [0, 0, 0, 0, 0],
+  'hybrid-pooled-gw-tap-e1': [0, 0, 0, 0, 0],
+  'hybrid-pooledstr-5c-load-sheet': [0, 0, 0, 0, 0],
+  'hybrid-pooledstr-5c-load-e1': [0, 0, 0, 0, 0],
+  'hybrid-splitpool-5c-tap-sheet': [0, 0, 0, 0, 0],
+  'hybrid-splitpool-5c-tap-e1': [0, 0, 0, 0, 0],
   'permit-roof-5c-tap-e1': [0, 0, 0, 0, 0],
   'permit-roof-5c-tap-e11': [0, 0, 0, 0, 0],
   'permit-roof-gw-load-e1': [0, 0, 0, 0, 0],
   'permit-roof-6c-derate-e1': [0, 0, 0, 0, 0],
   'permit-ground-e1': [0, 0, 0, 0, 0],
   'permit-fence-e1': [0, 0, 0, 0, 0],
+  'permit-bigroof-5c-tap-e1': [0, 0, 0, 0, 0],               // two IQ Combiner 5Cs (Ray 2026-09-26)
+  'permit-bigroof-5c-tap-e11': [0, 0, 0, 0, 0],
 };
 
 /** The inset a table cell keeps off its rules and sides on the printed sheet

@@ -177,7 +177,6 @@ describe('the standalone plan', () => {
     [3, 'pv-ac-combiner-125', 5],
     [5, 'pv-ac-combiner-125', 5],
     [6, 'pv-ac-combiner-200', 7],
-    [8, 'pv-ac-combiner-225', 11],
   ])('%i branches land in %s with %i branch positions', (branches, panelId, slots) => {
     const plan = standalonePlan(branches);
     const sized = resolveAcCombinerPanel(20 * branches + 15, branches + 1)!;
@@ -188,10 +187,28 @@ describe('the standalone plan', () => {
     expect(plan.branchSlotWarning).toBeUndefined();
   });
 
-  it('says so when the branches outgrow the largest panel', () => {
-    expect(standalonePlan(12).branchSlotWarning).toMatch(/12 AC branches exceed .* 11 branch positions/);
-    // 11 fit the positions but 11 × 20 A + 15 A overruns a 225 A busbar.
-    expect(standalonePlan(11).branchSlotWarning).toMatch(/235 A\) exceed its 225 A busbar/);
+  it('past one Envoy\'s 80 A it is TWO gateways, each landing panel sized for its own branches (Ray, 2026-09-26)', () => {
+    // 8 branches × 10 IQ8+ = 96.8 A: 6 branches (72.6 A) on gateway 1, 2 on gateway 2.
+    const plan = standalonePlan(8);
+    expect(plan.gatewayMultiplicity?.count).toBe(2);
+    expect(plan.gatewayMultiplicity?.instances.map(i => i.branches.length)).toEqual([6, 2]);
+    // One panel model × 2, sized for the larger instance (6 × 20 A + 15 A on 7
+    // positions → the 200 A panel's 8, one feeding the gateway).
+    expect(plan.aggregation?.id).toBe('pv-ac-combiner-200');
+    expect(plan.aggregation?.quantity).toBe(2);
+    expect(plan.gateway?.quantity).toBe(2);
+    expect(plan.branchSlots).toBe(7);
+    expect(plan.branchSlotWarning).toBeUndefined();
+  });
+
+  it('never an overloaded panel: 11 and 12 branches are more gateways, not a warning', () => {
+    // These used to say "exceed the 11 branch positions" / "(235 A) exceed its 225 A busbar".
+    for (const n of [11, 12]) {
+      const plan = standalonePlan(n);
+      expect(plan.gatewayMultiplicity?.count, `${n} branches`).toBe(2);
+      expect(plan.gatewayMultiplicity!.instances.every(i => i.continuousCurrentA <= 80)).toBe(true);
+      expect(plan.branchSlotWarning).toBeUndefined();
+    }
   });
 
   it('a single session override expands the same way, under the override basis', () => {

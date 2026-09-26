@@ -29,6 +29,8 @@ import {
   standaloneGatewayBom,
   isStandaloneGatewayPlan,
   isStandaloneGatewayBomLine,
+  sharedGatewayPanelBom,
+  SHARED_GATEWAY_PANEL_BOM_BASIS,
   type BOMGenerationInputV4,
   type BOMLineItemV4,
 } from '@/lib/bom-engine-v4';
@@ -940,6 +942,16 @@ export function generateBOMForPermit(
     }
   }
 
+  // ── 5b′. More than one gateway on a SINGLE system (Ray, 2026-09-26) ──
+  // The shared PV AC combiner panel their outputs land in and one backfed
+  // breaker per gateway output — replaced from THIS plan (the one E-1, SCHED and
+  // PV-4A print), exactly as the gateway rows above are. A hybrid's shared panel
+  // is the AC collection's (5c below), never a gateways-only panel.
+  if (!_isPerSubHybrid && !_acCollection) {
+    merged = merged.filter(it => it.derivedFrom !== SHARED_GATEWAY_PANEL_BOM_BASIS);
+    for (const it of sharedGatewayPanelBom(bosPlan)) merged.push(v4ToPermit(it));
+  }
+
   // ── 5c. Shared AC combiner panel (hybrid) — Stage D ──────
   // E-1 (renderSLDMultiLane) draws every PV source landing on ONE shared AC
   // combiner panel busbar → ONE system disconnect. The BOM/SCHED were blind to
@@ -959,7 +971,7 @@ export function generateBOMForPermit(
       unit: 'ea',
       description:
         `Shared AC combiner panel — ${_sharedPanel.busbarA}A busbar / ${_sharedPanel.mainOcpdA}A main OCPD. ` +
-        `All ${_acCollection!.perSource.length} PV sources land here on backfed OCPDs → one ` +
+        `All ${_acCollection!.sources.length} PV sources land here on backfed OCPDs → one ` +
         `${_acCollection!.disconnectA}A system AC disconnect (NEC 705.12(B)).`,
       necReference: _sharedPanel.necRefs?.[0] ?? 'NEC 705.12(B)',
       derivedFrom: 'hybrid AC collection (E-1 single source)',

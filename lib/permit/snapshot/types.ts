@@ -1825,6 +1825,36 @@ export interface PermitDesignSnapshot {
       /** The 2-pole breaker each AC branch lands on in the landing panel (A). */
       branchBreakerA: number;
     };
+    /**
+     * 🚨 HOW MANY IQ COMBINERS / ENVOYS THE DESIGN NEEDS — present ONLY when that
+     * is MORE THAN ONE (Ray, 2026-09-26: "capacity determines multiplicity;
+     * topology determines assignment"). The count, why (the binding limit), and
+     * which branch circuits land on each — the solver's answer, the one E-1
+     * draws, the sheets state and the BOM buys. ABSENT — never null — on every
+     * design one gateway carries, so no such digest moves; a design that needs
+     * a second gateway moves, because its package now shows and buys it.
+     */
+    gatewayMultiplicity?: {
+      count: number;
+      deviceId: string;
+      deviceLabel: string;
+      /** 'limit:<dimension>' | 'packing' | 'oversized' | 'none'. */
+      governing: string;
+      explanation: string;
+      instances: Array<{
+        index: number;
+        label: string;
+        /** 'B1' on a single system, 'roof:B1' on a hybrid. */
+        branches: string[];
+        deviceCount: number;
+        continuousA: number;
+        outputOcpdA: number;
+      }>;
+      /** The shared PV AC combiner panel the outputs land in (single system);
+       *  null on a hybrid, whose shared panel is the AC collection's. */
+      sharedPanelModel: string | null;
+      sharedPanelBusbarA: number | null;
+    };
     parity: {                       // W2.1: canonical=computeSystem vs legacy shadow
       legacyEngine: string; legacyRan: boolean;
       checks: ParityCheck[];

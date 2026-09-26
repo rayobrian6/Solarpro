@@ -29,6 +29,7 @@ import {
   isStandaloneGatewayPlan,
   isStandaloneGatewayBomLine,
   STANDALONE_GATEWAY_BOM_BASIS,
+  SHARED_GATEWAY_PANEL_BOM_BASIS,
   type BOMGenerationInputV4,
   type BOMLineItemV4,
 } from '@/lib/bom-engine-v4';
@@ -258,9 +259,22 @@ describe('engineering BOM — the landing panel and its breakers follow the bran
     expect(r.supplyBreakers).toBe(1);
   });
 
-  it('a panel the breakers overload is reported, not silently bought', () => {
-    // 11 × 20 A + 15 A = 235 A on the largest (225 A) panel.
-    expect(at(11).warnings.join('\n')).toMatch(/235 A\) exceed its 225 A busbar/);
+  it('breakers that would overload the largest panel are a SECOND gateway topology, bought (Ray, 2026-09-26)', () => {
+    // 11 × 20 A + 15 A = 235 A overruns the largest (225 A) panel. This used to
+    // warn and buy ONE panel and ONE gateway; capacity now decides the count —
+    // two landing panels, two gateways, two supply breakers; the branch
+    // breakers stay one per branch.
+    const bom = generateBOMV4(micro({ selectedCombinerId: STANDALONE, branchCount: 11 }));
+    expect(bom.warnings.join('\n')).not.toMatch(/exceed its 225 A busbar/);
+    const panel = bom.items.find(i => i.category === 'combiner' && /PV AC Combiner Panel/.test(i.model) && i.derivedFrom === STANDALONE_GATEWAY_BOM_BASIS);
+    expect(panel?.quantity).toBe(2);
+    expect(bom.items.find(i => i.category === 'gateway')?.quantity).toBe(2);
+    const brk = bom.items.filter(i => i.category === 'breaker' && i.stageId === 'inverter');
+    expect(brk.find(b => /PV branch/.test(b.model))?.quantity).toBe(11);
+    expect(brk.find(b => /IQ Gateway supply/.test(b.model))?.quantity).toBe(2);
+    // …and the shared PV AC combiner panel the two outputs land in, with a
+    // backfed breaker per gateway output.
+    expect(bom.items.some(i => i.derivedFrom === SHARED_GATEWAY_PANEL_BOM_BASIS && i.category === 'combiner')).toBe(true);
   });
 });
 

@@ -28,6 +28,17 @@ import {
 // rule is about the CATALOGUE, and reconciling the two catalogues' spellings for
 // one product is exactly the thing that may not be re-implemented per caller.
 import { canonicalCombinerId } from '@/lib/equipment/combinerIdentity';
+// How many gateway topologies a design needs (Ray, 2026-09-26: capacity
+// determines multiplicity). The adapter imports no catalogue of its own — this
+// module hands it the device and any catalogue-derived limit.
+import {
+  resolveGatewayMultiplicity,
+  type EnphaseBranchSource,
+  type GatewayInstance,
+  type GatewayMultiplicity,
+  type GatewayTopologyDevice,
+} from '@/lib/equipment/enphaseGatewayMultiplicity';
+import type { CapacityLimit } from '@/lib/equipment/equipmentMultiplicity';
 
 export type BosKind =
   | 'integrated_combiner'   // combiner + gateway (+/- disconnect) in one enclosure
@@ -538,6 +549,14 @@ export interface SystemBosContext {
    * anything else: compatibility validates a selection, it does not make one.
    */
   selectedCombinerId?: string | null;
+  /**
+   * The design's branch circuits PER ARRAY, when the caller has them (a hybrid:
+   * one entry per micro subsystem). The gateway count is solved over exactly
+   * these — each array's own balanced branch split — which is what the hybrid
+   * AC collection (and so every drawing of it) solves over. Absent ⇒ one array
+   * of `totalDevices` on `branchCount` branches.
+   */
+  branchSources?: EnphaseBranchSource[];
 }
 
 export interface ResolvedBosDevice extends BosDevice {
@@ -575,6 +594,21 @@ export interface IntegratedEquipmentPlan {
   branchBreakerA?: number;
   /** True when the combiner IS the PV-system AC disconnecting means (no separate AC disconnect). */
   providesAcDisconnect: boolean;
+  /**
+   * 🚨 HOW MANY OF THIS GATEWAY TOPOLOGY THE DESIGN PHYSICALLY NEEDS, AND WHICH
+   * BRANCH CIRCUITS LAND ON EACH — present ONLY when that is MORE THAN ONE.
+   *
+   * Ray, 2026-09-26: "Capacity determines multiplicity. Topology determines
+   * assignment." One IQ Combiner / Envoy supports at most 80 A (and each
+   * device's own datasheet limits — 4 branch positions on a 4C/5C); a design
+   * past that needs a second instance, and every artefact must draw, state and
+   * buy the same number. The device rows above then carry `quantity` = count.
+   *
+   * ABSENT on a design one instance carries — every design that existed before
+   * this key — so their permit snapshots cannot move (see the note above).
+   * Ask `planGatewayCount(plan)` rather than reading this directly.
+   */
+  gatewayMultiplicity?: GatewayMultiplicity;
   branchSlots?: number;
   /** Set when the branch count exceeds the device's slot capacity. */
   branchSlotWarning?: string;
@@ -654,10 +688,16 @@ export function planLandingDevice(
  * shared panel uses). One of its positions feeds the gateway, so the branch
  * capacity is one less than the panel's positions.
  */
-function resolveStandaloneGatewayPlan(system: BosDevice, ctx: SystemBosContext): IntegratedEquipmentPlan {
+function resolveStandaloneGatewayPlan(
+  system: BosDevice,
+  ctx: SystemBosContext,
+  /** The branches ONE landing panel carries — the largest instance's, when the
+   *  design needs more than one gateway. Absent ⇒ every branch of the design. */
+  branchesPerLanding?: number,
+): IntegratedEquipmentPlan {
   const spec = system.standalone;
   const gwRow = spec ? getBosDevice(spec.gatewayDeviceId) : undefined;
-  const branches = Math.max(0, Math.floor(ctx.branchCount || 0));
+  const branches = Math.max(0, Math.floor((branchesPerLanding ?? ctx.branchCount) || 0));
   const aggregateA = spec ? spec.branchBreakerA * branches + spec.gatewaySupplyBreakerA : 0;
   const panel = spec ? resolveAcCombinerPanel(aggregateA, branches + 1) : null;
   const panelRow = panel ? getBosDevice(panel.id) : undefined;
@@ -715,6 +755,18 @@ function resolveStandaloneGatewayPlan(system: BosDevice, ctx: SystemBosContext):
  * brands fall through to an empty plan until their devices are added.
  */
 export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEquipmentPlan {
+  return resolvePlan(ctx, true);
+}
+
+/**
+ * `countInstances` false ⇒ the plan names the DEVICE only and never carries a
+ * multiplicity. A hybrid lane resolves that way: its gateways are counted over
+ * every lane that shares the topology (resolveHybridAcCollection), never lane
+ * by lane — an array is not a gateway.
+ */
+function resolvePlan(ctx: SystemBosContext, countInstances: boolean): IntegratedEquipmentPlan {
+  const counted = (plan: IntegratedEquipmentPlan): IntegratedEquipmentPlan =>
+    countInstances ? withSingleSystemMultiplicity(plan, ctx) : plan;
   // 🚨 THE PROJECT'S RECORDED SELECTION OUTRANKS EVERYTHING BELOW.
   //
   // This is what the installer told us they are installing. It is not a hint, a
@@ -742,11 +794,11 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
       // quietly printing something else.
       return { ...emptyPlan(/enphase/i.test(ctx.inverterManufacturer) ? 'Enphase' : null), combinerBasis: 'project-selected' };
     }
-    const plan = resolveIntegratedEquipment({
+    const plan = resolvePlan({
       ...ctx,
       selectedCombinerId: null,
       overrideDeviceIds: [selectedId],
-    });
+    }, countInstances);
     return { ...plan, combinerBasis: 'project-selected' };
   }
 
@@ -758,13 +810,13 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
     // arrives here as exactly one id, and a hand-built multi-device list keeps
     // meaning exactly what it listed.
     if (devices.length === 1 && devices[0].kind === 'gateway_system') {
-      return resolveStandaloneGatewayPlan(devices[0], ctx);
+      return counted(resolveStandaloneGatewayPlan(devices[0], ctx));
     }
     if (devices.length) {
       const combiner = devices.find(d => d.kind === 'integrated_combiner' || d.kind === 'ac_combiner');
       const gw = devices.find(d => d.integrated.monitoring);
       const brainsDev = devices.find(d => d.isBrains);
-      return {
+      return counted({
         brand: devices[0].brand,
         devices: devices.map(d => resolved(d)),
         brains: brainsDev ? resolved(brainsDev) : undefined,
@@ -776,7 +828,7 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
           : undefined,
         source: 'override',
         combinerBasis: 'session-override',
-      };
+      });
     }
   }
 
@@ -815,7 +867,7 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
   const pvBranchMax = combiner.id === 'enphase-iq-combiner-6c'
     ? 5
     : (combiner.branchSlots ?? 4);
-  return {
+  return counted({
     brand: 'Enphase',
     devices: [resolved(combiner)],
     brains: resolved(combiner),
@@ -829,7 +881,153 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
       : undefined,
     source: 'auto',
     combinerBasis: declared ? 'declared-compatibility' : 'unresolved-default',
+  });
+}
+
+// ── Gateway multiplicity (Ray, 2026-09-26) ─────────────────────────────────
+
+const STANDALONE_TOPOLOGY_ID = 'enphase-iq-gateway-standalone';
+
+/**
+ * The gateway TOPOLOGY a plan puts on the wall — what Ray's 80 A and the
+ * datasheet limits apply to — or null when the plan has none: not Enphase, no
+ * monitoring device, a hand-built list without an integrated combiner, or an
+ * empty plan. Only these plans are ever counted.
+ */
+export function planGatewayTopology(
+  plan: Pick<IntegratedEquipmentPlan, 'gatewayPlacement' | 'aggregation' | 'brains' | 'devices'> | null | undefined,
+): GatewayTopologyDevice | null {
+  if (!plan) return null;
+  if (plan.gatewayPlacement === 'standalone') {
+    const sys = getBosDevice(STANDALONE_TOPOLOGY_ID);
+    return sys ? { id: sys.id, brand: sys.brand, model: sys.model } : null;
+  }
+  const landing = planLandingDevice(plan);
+  if (!landing || landing.kind !== 'integrated_combiner' || !landing.integrated.monitoring) return null;
+  if (landing.ecosystem !== 'enphase-iq') return null;
+  return { id: landing.id, brand: landing.brand, model: landing.model, branchSlots: landing.branchSlots };
+}
+
+/** The standalone topology's landing panel is sized per instance from the
+ *  catalogue's PV AC combiner panels, so ONE instance can carry no more than
+ *  the largest of them holds: its positions less the one feeding the gateway,
+ *  and its busbar less the gateway's own breaker (NEC 705.12(B)). */
+function standaloneLandingLimits(): CapacityLimit[] {
+  const spec = getBosDevice(STANDALONE_TOPOLOGY_ID)?.standalone;
+  const panels = BOS_DEVICES.filter(d => d.id.startsWith('pv-ac-combiner-') && d.active !== false);
+  if (!spec || !panels.length) return [];
+  const big = panels.reduce((a, b) => ((b.maxContinuousA ?? 0) > (a.maxContinuousA ?? 0) ? b : a));
+  const positions = big.branchSlots ?? 0;
+  const busbar = big.maxContinuousA ?? 0;
+  const out: CapacityLimit[] = [];
+  if (positions > 1) {
+    out.push({ dimension: 'branchPositions', max: positions - 1, basis: 'manufacturer',
+      source: `${big.model}: ${positions} positions, one feeds the IQ Gateway` });
+  }
+  if (busbar > spec.gatewaySupplyBreakerA) {
+    out.push({ dimension: 'branchOcpdSumA', max: busbar - spec.gatewaySupplyBreakerA, basis: 'code',
+      source: `NEC 705.12(B): ${big.model} ${busbar} A busbar less the ${spec.gatewaySupplyBreakerA} A IQ Gateway breaker` });
+  }
+  return out;
+}
+
+/** Solve how many instances of this plan's gateway topology the given arrays
+ *  need. null ⇔ the plan has no gateway topology to count. */
+export function gatewayMultiplicityForPlan(
+  plan: IntegratedEquipmentPlan,
+  sources: readonly EnphaseBranchSource[],
+  indexOffset = 0,
+): GatewayMultiplicity | null {
+  const topology = planGatewayTopology(plan);
+  if (!topology) return null;
+  return resolveGatewayMultiplicity({
+    topology,
+    sources,
+    extraLimits: plan.gatewayPlacement === 'standalone' ? standaloneLandingLimits() : [],
+    indexOffset,
+  });
+}
+
+/**
+ * Stamp a multiplicity onto a plan: the topology's devices × count, the
+ * instances, and no overflow warning — the overflow IS the second instance,
+ * now drawn and bought. Only a circuit no instance can take on its own keeps a
+ * warning. A count ≤ 1 returns the plan untouched — the very object passed in.
+ */
+function withInstances(
+  plan: IntegratedEquipmentPlan,
+  m: GatewayMultiplicity,
+  ctx: SystemBosContext,
+): IntegratedEquipmentPlan {
+  if (m.count <= 1) return plan;
+  const warning = m.solution.oversized.length ? m.explanation : undefined;
+  if (plan.gatewayPlacement === 'standalone') {
+    // Every instance gets its own landing panel + gateway: the production CT that
+    // ships with each gateway may measure only the branches in ITS panel. Sized
+    // once, for the largest instance, so the job buys one panel model × count.
+    const sys = getBosDevice(STANDALONE_TOPOLOGY_ID);
+    const largest = Math.max(...m.instances.map(i => i.branches.length));
+    const one = sys ? resolveStandaloneGatewayPlan(sys, ctx, largest) : null;
+    if (!one?.aggregation || !one.gateway) return plan;
+    const landing: ResolvedBosDevice = { ...one.aggregation, quantity: m.count };
+    const gateway: ResolvedBosDevice = { ...one.gateway, quantity: m.count };
+    const { branchSlotWarning: _dropped, ...rest } = one;
+    return {
+      ...rest,
+      source: plan.source,
+      ...(plan.combinerBasis ? { combinerBasis: plan.combinerBasis } : {}),
+      devices: [landing, gateway],
+      brains: gateway,
+      aggregation: landing,
+      gateway,
+      gatewayMultiplicity: m,
+      ...(warning ? { branchSlotWarning: warning } : {}),
+    };
+  }
+  const landingId = planLandingDevice(plan)?.id;
+  const times = (d: ResolvedBosDevice): ResolvedBosDevice => (d.id === landingId ? { ...d, quantity: m.count } : d);
+  const { branchSlotWarning: _dropped, ...rest } = plan;
+  return {
+    ...rest,
+    devices: plan.devices.map(times),
+    ...(plan.brains ? { brains: times(plan.brains) } : {}),
+    gatewayMultiplicity: m,
+    ...(warning ? { branchSlotWarning: warning } : {}),
   };
+}
+
+/** A single-system plan with its gateway count — every branch is one array's. */
+function withSingleSystemMultiplicity(plan: IntegratedEquipmentPlan, ctx: SystemBosContext): IntegratedEquipmentPlan {
+  if (!ctx.isMicro) return plan;
+  const m = gatewayMultiplicityForPlan(plan, ctx.branchSources?.length ? ctx.branchSources : [{
+    laneKey: '', inverterModel: ctx.inverterModel, deviceCount: ctx.totalDevices, branchCount: ctx.branchCount,
+  }]);
+  return m ? withInstances(plan, m, ctx) : plan;
+}
+
+/** How many of the plan's gateway topology go on the wall (0 ⇔ none modelled). */
+export function planGatewayCount(plan: IntegratedEquipmentPlan | null | undefined): number {
+  if (!plan) return 0;
+  if (plan.gatewayMultiplicity) return plan.gatewayMultiplicity.count;
+  return planLandingDevice(plan) ? 1 : 0;
+}
+
+/** The plan's gateway instances when there is more than one; [] otherwise. */
+export function planGatewayInstances(plan: IntegratedEquipmentPlan | null | undefined): GatewayInstance[] {
+  return plan?.gatewayMultiplicity?.instances ?? [];
+}
+
+/**
+ * The shared PV AC combiner panel a single system's gateways land in — null
+ * unless the plan needs more than one. Each gateway's output is a backfed
+ * breaker on it, so its busbar covers Σ those breakers (NEC 705.12(B)): the
+ * very panel the multi-source drawing's collection sizes for the same
+ * instances, and the one the BOM buys.
+ */
+export function planSharedPanel(plan: IntegratedEquipmentPlan | null | undefined): AcCombinerPanelPlan | null {
+  const inst = planGatewayInstances(plan);
+  if (inst.length < 2) return null;
+  return resolveAcCombinerPanel(inst.reduce((s, g) => s + g.outputOcpdA, 0), inst.length);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -933,9 +1131,54 @@ export interface HybridSourceCombining {
    * second resolve that could land on another device.
    */
   plan?: IntegratedEquipmentPlan;
+  /**
+   * The site-wide indexes (`HybridGatewayInstance.index`) of the gateways this
+   * lane's branch circuits land on — one, several (an array too big for one
+   * gateway) or one shared with other lanes. ABSENT on a lane no gateway
+   * topology counts (a string lane, a non-Enphase micro lane).
+   */
+  gatewayIndexes?: number[];
 }
+
+/**
+ * One gateway topology instance on a hybrid site, with the branch circuits —
+ * from one lane, part of a lane, or several lanes — that land on it.
+ */
+export interface HybridGatewayInstance extends GatewayInstance {
+  /**
+   * The lane this instance IS — exactly one whole lane's branches, nobody
+   * else's — whose own output circuit (the engine's lane feeder, its backfeed
+   * breaker) is therefore this instance's. Absent when the instance takes part
+   * of a lane or several lanes: its output circuit is its own.
+   */
+  wholeLaneKey?: string;
+  /** The breaker its output lands on in the shared panel (A): the whole lane's
+   *  own OCPD, else next standard ≥ 125 % of its continuous current. */
+  backfeedA: number;
+  /** The topology's plan (device facts — disconnect, gateway, metering). Shared
+   *  by every instance of one topology; `quantity` = that topology's count. */
+  plan: IntegratedEquipmentPlan;
+  /** The box its branch circuits land in. */
+  combiner: ResolvedBosDevice | null;
+}
+
+/** What lands on the shared panel, in drawing order. */
+export type AcCollectionSource =
+  | { kind: 'gateway'; gatewayIndex: number; backfeedA: number }
+  | { kind: 'lane'; key: string; backfeedA: number };
+
 export interface HybridAcCollectionPlan {
   perSource: HybridSourceCombining[];
+  /**
+   * 🚨 EVERY GATEWAY TOPOLOGY INSTANCE ON THE SITE — counted over every lane that
+   * shares a topology, never lane by lane (Ray, 2026-09-26: "Multiple arrays do
+   * not automatically mean multiple gateways … One array can require multiple
+   * gateways"). Site-wide 1-based `index`, in lane order.
+   */
+  gateways: HybridGatewayInstance[];
+  /** What lands on the shared panel: each gateway instance's output, and each
+   *  lane no gateway topology collects (string / non-Enphase micro). */
+  sources: AcCollectionSource[];
   /** Shared AC combiner panel every source lands on (null when only one source). */
   sharedPanel: AcCombinerPanelPlan | null;
   /** The single system AC disconnect after the shared panel (A). */
@@ -944,42 +1187,156 @@ export interface HybridAcCollectionPlan {
   aggregateBackfeedA: number;
 }
 
-/** Resolve the full multi-source AC collection: per-source brand combiner/OCPD →
- *  shared AC combiner panel → one disconnect. */
-export function resolveHybridAcCollection(sources: HybridSourceInput[]): HybridAcCollectionPlan {
-  const perSource: HybridSourceCombining[] = sources.map(s => {
-    if (s.isMicro) {
-      const plan = resolveIntegratedEquipment({
-        inverterManufacturer: s.inverterManufacturer, inverterModel: s.inverterModel,
-        isMicro: true, totalDevices: s.deviceCount, branchCount: s.branchCount, hasBattery: false,
-        compatibleCombinerIds: s.compatibleCombinerIds,
-        // The selection outranks the pairing — the ordering is resolved inside
-        // resolveIntegratedEquipment, so a hybrid lane and a single-system job
-        // answer "which combiner" through the same rule rather than two.
-        selectedCombinerId: s.selectedCombinerId ?? null,
+/**
+ * Which recorded combiner selection applies to ONE hybrid lane — the lane's own
+ * (per-subsystem) answer, else the project-level one ONLY when the selected
+ * device is that lane's inverter brand, else none. An unresolvable id passes
+ * through (it renders as a visible "selected device unavailable").
+ *
+ * ONE rule for every hybrid collection — the drawing's (acCollectionFromLanes)
+ * and the permit conductor authority's POI — so the two resolve every lane to
+ * the same device and pool the same gateways. See the renderer's
+ * laneSelectedCombinerId note for why the brand check exists.
+ */
+export function laneCombinerSelection(
+  lane: { key: string; inverterManufacturer?: string | null },
+  projectSelectedId: string | null | undefined,
+  perLane: Record<string, string | null | undefined> | null | undefined,
+): string | null {
+  const own = String(perLane?.[lane.key] ?? '').trim();
+  if (own) return own;
+  const sel = String(projectSelectedId ?? '').trim();
+  if (!sel) return null;
+  const device = getBosDevice(sel);
+  if (!device) return sel;
+  const laneBrand = String(lane.inverterManufacturer ?? '').trim().toLowerCase();
+  const selBrand = String(device.brand ?? '').trim().toLowerCase();
+  return laneBrand && laneBrand === selBrand ? sel : null;
+}
+
+/** A lane's device context — the one way both the lane and its pool resolve. */
+function laneBosContext(s: HybridSourceInput, deviceCount = s.deviceCount, branchCount = s.branchCount): SystemBosContext {
+  return {
+    inverterManufacturer: s.inverterManufacturer, inverterModel: s.inverterModel,
+    isMicro: true, totalDevices: deviceCount, branchCount, hasBattery: false,
+    compatibleCombinerIds: s.compatibleCombinerIds,
+    // The selection outranks the pairing — the ordering is resolved inside
+    // resolvePlan, so a hybrid lane and a single-system job answer "which
+    // combiner" through the same rule rather than two.
+    selectedCombinerId: s.selectedCombinerId ?? null,
+  };
+}
+
+/**
+ * Count the gateways of every topology on the site: micro lanes whose plans
+ * name the SAME gateway topology share its instances (arrays are not
+ * gateways); lanes on different topologies (a recorded 5C roof and 6C ground)
+ * cannot. Returns the instances and, per lane index, the gateways it lands on.
+ */
+function siteGateways(
+  sources: readonly HybridSourceInput[],
+  lanePlans: ReadonlyArray<IntegratedEquipmentPlan | null>,
+): { gateways: HybridGatewayInstance[]; byLane: Map<number, number[]> } {
+  const pools: Array<{ topologyId: string; lanes: number[] }> = [];
+  lanePlans.forEach((plan, i) => {
+    const topo = plan ? planGatewayTopology(plan) : null;
+    if (!topo) return;
+    const pool = pools.find(p => p.topologyId === topo.id);
+    if (pool) pool.lanes.push(i); else pools.push({ topologyId: topo.id, lanes: [i] });
+  });
+  const gateways: HybridGatewayInstance[] = [];
+  const byLane = new Map<number, number[]>();
+  for (const pool of pools) {
+    const first = sources[pool.lanes[0]];
+    const devices = pool.lanes.reduce((n, i) => n + (sources[i].deviceCount || 0), 0);
+    const branches = pool.lanes.reduce((n, i) => n + (sources[i].branchCount || 0), 0);
+    // The topology's plan for EVERY branch it collects: one lane's plan when the
+    // pool is one lane (identical inputs ⇒ the identical plan), else the pooled
+    // one — a standalone landing panel sized for what actually lands in it.
+    const poolCtx = laneBosContext(first, devices, branches);
+    const poolPlanBase = pool.lanes.length === 1 ? lanePlans[pool.lanes[0]]! : resolvePlan(poolCtx, false);
+    const m = gatewayMultiplicityForPlan(poolPlanBase, pool.lanes.map(i => ({
+      laneKey: sources[i].key,
+      inverterModel: sources[i].inverterModel,
+      deviceCount: sources[i].deviceCount,
+      branchCount: sources[i].branchCount,
+    })), gateways.length);
+    if (!m || m.count === 0) continue;   // no branches: those lanes collect as before
+    const poolPlan = withInstances(poolPlanBase, m, poolCtx);
+    const combiner = planLandingDevice(poolPlan) ?? null;
+    for (const inst of m.instances) {
+      const only = inst.laneKeys.length === 1 ? inst.laneKeys[0] : undefined;
+      const whole = only != null && m.instances.every(o => o === inst || !o.laneKeys.includes(only)) ? only : undefined;
+      const laneIdx = whole != null ? sources.findIndex(s => s.key === whole) : -1;
+      gateways.push({
+        ...inst,
+        ...(whole != null ? { wholeLaneKey: whole } : {}),
+        backfeedA: laneIdx >= 0 ? sources[laneIdx].backfeedA : inst.outputOcpdA,
+        plan: poolPlan,
+        combiner,
       });
+      for (const key of inst.laneKeys) {
+        const li = sources.findIndex(s => s.key === key);
+        if (li < 0) continue;
+        byLane.set(li, [...(byLane.get(li) ?? []), inst.index]);
+      }
+    }
+  }
+  return { gateways, byLane };
+}
+
+/** Resolve the full multi-source AC collection: every gateway instance the
+ *  site needs (and every lane no gateway collects) → shared AC combiner panel
+ *  → one disconnect. */
+export function resolveHybridAcCollection(sources: HybridSourceInput[]): HybridAcCollectionPlan {
+  const lanePlans = sources.map(s => (s.isMicro ? resolvePlan(laneBosContext(s), false) : null));
+  const { gateways, byLane } = siteGateways(sources, lanePlans);
+  const perSource: HybridSourceCombining[] = sources.map((s, i) => {
+    if (s.isMicro) {
+      const plan = lanePlans[i]!;
+      const gatewayIndexes = byLane.get(i);
       // The lane's combiner is the box its branches land in — the landing panel
       // on a standalone-gateway lane, the brains on every other.
       const combiner = planLandingDevice(plan) ?? null;
       return {
         key: s.key, isMicro: true, combiner,
         combinerHasDisconnect: !!combiner?.integrated.disconnect,
-        ocpdA: s.backfeedA, branchSlotWarning: plan.branchSlotWarning,
+        // A lane the gateway count covers has no overflow left to warn about —
+        // its extra branches are on another instance, drawn and bought.
+        ocpdA: s.backfeedA, branchSlotWarning: gatewayIndexes ? undefined : plan.branchSlotWarning,
         // Carried out per lane so a hybrid sheet can qualify the lane it could
         // not answer for. It was computed here and thrown away, and the drawing
         // then printed a derived device with the same confidence as a chosen one.
         combinerBasis: plan.combinerBasis ?? 'unresolved-default',
         plan,
+        ...(gatewayIndexes ? { gatewayIndexes } : {}),
       };
     }
     // String / hybrid inverter: no dedicated combiner — its OCPD is a backfed
     // breaker landing directly on the shared AC combiner panel.
     return { key: s.key, isMicro: false, combiner: null, combinerHasDisconnect: false, ocpdA: s.backfeedA };
   });
-  const aggregateBackfeedA = sources.reduce((a, s) => a + (s.backfeedA || 0), 0);
-  const sharedPanel = sources.length > 1
-    ? resolveAcCombinerPanel(aggregateBackfeedA, sources.length)
+  // What lands on the shared panel, in lane order: a lane's gateways where it
+  // has them (each once — a gateway two lanes share lands once), else the lane.
+  const collected: AcCollectionSource[] = [];
+  const emitted = new Set<number>();
+  sources.forEach((s, i) => {
+    const idx = perSource[i].gatewayIndexes;
+    if (!idx?.length) { collected.push({ kind: 'lane', key: s.key, backfeedA: s.backfeedA || 0 }); return; }
+    for (const g of idx) {
+      if (emitted.has(g)) continue;
+      emitted.add(g);
+      const gw = gateways.find(x => x.index === g)!;
+      collected.push({ kind: 'gateway', gatewayIndex: g, backfeedA: gw.backfeedA || 0 });
+    }
+  });
+  // Every lane still one gateway of its own (every design before 2026-09-26
+  // that fit its combiner) collects exactly as it did: the same backfeeds, the
+  // same count, the same panel.
+  const aggregateBackfeedA = collected.reduce((a, c) => a + c.backfeedA, 0);
+  const sharedPanel = collected.length > 1
+    ? resolveAcCombinerPanel(aggregateBackfeedA, collected.length)
     : null;
   const disconnectA = nextStdRating(aggregateBackfeedA);
-  return { perSource, sharedPanel, disconnectA, aggregateBackfeedA };
+  return { perSource, gateways, sources: collected, sharedPanel, disconnectA, aggregateBackfeedA };
 }

@@ -42,6 +42,10 @@ import { nextStandardOcpd } from './electrical/stdSizes';
 import { totalInterconnectionBackfeedA } from './electrical-calc';
 import { NEC_705_11_C_TAP_LIMIT_FT, TAP_SPAN_PHYSICAL_SEGMENT_ID } from './electrical/tapSpan';
 import { enphaseBranchBasis } from './permit/utils/branching';
+// How many IQ Combiners / Envoys the design needs — the one resolver every
+// artefact asks (Ray, 2026-09-26: capacity determines multiplicity).
+import { resolveIntegratedEquipment, planGatewayInstances } from './equipment/integratedBos';
+import { combinerCompatibilityFor } from './equipment/combinerCompatibility';
 import {
   CONDUCTOR_AREA_IN2 as NEC_CONDUCTOR_AREA_IN2,
   selectSmallestConduit as necSelectSmallestConduit,
@@ -101,6 +105,10 @@ export type RunSegmentId =
   | 'ROOF_RUN'
   | 'BRANCH_RUN'
   | 'BRANCH_HOMERUN_RUN'       // §3/§4 — shared jbox→combiner conduit home-run (all branches bundled)
+  // One per IQ Combiner / Envoy instance when the design needs MORE THAN ONE:
+  // that instance's output → the shared PV AC combiner panel (or, on a hybrid
+  // whose only source it is, → the AC disconnect). Never present otherwise.
+  | `GW${number}_FEEDER_RUN`
   | 'INV_TO_DISCO_RUN'
   | 'COMBINER_TO_DISCO_RUN'
   | 'DISCO_TO_METER_RUN'
@@ -320,6 +328,12 @@ export interface ComputedSystem {
   microDeviceCount: number;   // = totalPanels (1 micro per panel for IQ8+)
   acBranchCount: number;      // ceil(microDeviceCount / branchLimit)
   microBranches: MicroBranch[];
+  /**
+   * The IQ Combiner / Envoy instances the branches land on — present ONLY when
+   * the design needs more than one (then `GW{n}_FEEDER_RUN` exists per
+   * instance). Absent on every other design, so its output is unchanged.
+   */
+  gatewayInstances?: import('./equipment/enphaseGatewayMultiplicity').GatewayInstance[];
   acBranchCurrentA: number;   // A per branch
   acBranchOcpdAmps: number;   // A — NEC 690.8
 
@@ -594,6 +608,23 @@ export interface ComputedSystemInput {
    *  also drops the matching segment-schedule rows so per-sub bomQuantities
    *  cannot double-count service wire/conduit footage. */
   emitSharedServiceRuns?: boolean;
+
+  // ── Gateway multiplicity (Ray, 2026-09-26: "capacity determines multiplicity") ──
+  /**
+   * The project's RECORDED combiner / Envoy selection — the same value every
+   * artefact resolves (projects.selected_equipment.combinerSelection). The
+   * engine names the gateway topology from it through the one resolver
+   * (resolveIntegratedEquipment), so the number of IQ Combiners / Envoys whose
+   * output circuits it sizes is the number the drawings draw and the BOM buys.
+   * Absent ⇒ the inverter's declared pairing, exactly as for every consumer.
+   */
+  combinerSelectionId?: string | null;
+  /**
+   * Default TRUE. computeMultiSystem sets FALSE on its per-lane passes: a
+   * hybrid's gateways are counted over every lane sharing a topology, never
+   * lane by lane, so a lane pass must not size instances of its own.
+   */
+  countGatewayInstances?: boolean;
 }
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
@@ -1388,6 +1419,25 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     acBranchOcpdAmps = microBranches[0]?.ocpdAmps ?? 0;
   }
 
+  // ── How many IQ Combiners / Envoys (Ray, 2026-09-26) ─────────────────────
+  // The ONE resolver, with the inputs every artefact gives it: this design's
+  // devices and branches, the inverter's declared pairing, the recorded
+  // selection. Empty unless the design needs MORE THAN ONE instance — then
+  // each instance's output circuit is sized below, and the combiner row and
+  // BOM quantity say how many.
+  const gatewayInstances = (isMicro && input.countGatewayInstances !== false)
+    ? planGatewayInstances(resolveIntegratedEquipment({
+        inverterManufacturer: input.inverterManufacturer,
+        inverterModel: input.inverterModel,
+        isMicro: true,
+        totalDevices: microDeviceCount,
+        branchCount: acBranchCount,
+        hasBattery: (input.batteryIds?.length ?? 0) > 0,
+        compatibleCombinerIds: combinerCompatibilityFor(input.inverterManufacturer, input.inverterModel),
+        selectedCombinerId: input.combinerSelectionId ?? null,
+      }))
+    : [];
+
   // ── AC Electrical ──────────────────────────────────────────────────────────
   const systemVoltageAC = 240;
   // C7 fix: AC output is the sum of ALL inverter units, not just the primary.
@@ -1840,6 +1890,26 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       conductorCallout: combToDiscoWire.conductorCallout,
       color: 'ac',
     }));
+
+    // ── More than one IQ Combiner / Envoy: each has its OWN output circuit ──
+    // The branches land on N gateway topologies, each instance's output lands on
+    // a backfed breaker in a shared PV AC combiner panel, and the panel feeds the
+    // one AC disconnect. The run above keeps the WHOLE system's current and OCPD
+    // (the MSP still sees one PV breaker) — it now leaves that panel.
+    if (gatewayInstances.length > 1) {
+      const aggregate = runs[runs.length - 1];
+      aggregate.label = 'PV AC PANEL TO AC DISCO';
+      aggregate.from = 'PV AC COMBINER PANEL';
+      for (const gw of gatewayInstances) {
+        runs.push(gatewayFeederRun(gw, {
+          to: 'PV AC COMBINER PANEL',
+          lengthFt: input.runLengths?.[`GW${gw.index}_FEEDER_RUN`] ?? defaultRunLengths.COMBINER_TO_DISCO_RUN,
+          conduitType: input.conduitType,
+          ambientTempC: input.ambientTempC,
+          maxACVoltageDropPct: input.maxACVoltageDropPct,
+        }));
+      }
+    }
 
   } else {
     // STRING INVERTER RUNS
@@ -2759,7 +2829,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     equipmentSchedule.push(
       { tag: 'PV-1', description: 'PV Modules', manufacturer: input.panelManufacturer, model: input.panelModel, qty: input.totalPanels, rating: `${input.panelWatts}W`, necReference: 'NEC 690.4' },
       { tag: 'MICRO-1', description: 'Microinverters', manufacturer: input.inverterManufacturer, model: input.inverterModel, qty: microDeviceCount, rating: `${(input.inverterAcKw * 1000).toFixed(0)}W AC`, necReference: 'NEC 690.4' },
-      { tag: 'COMB-1', description: 'AC Combiner / IQ Combiner', manufacturer: input.inverterManufacturer, model: 'IQ Combiner 4C', qty: 1, rating: `${acOcpdAmps}A`, necReference: 'NEC 690.9' },
+      { tag: 'COMB-1', description: 'AC Combiner / IQ Combiner', manufacturer: input.inverterManufacturer, model: 'IQ Combiner 4C', qty: Math.max(1, gatewayInstances.length), rating: `${acOcpdAmps}A`, necReference: 'NEC 690.9' },
+      // More than one gateway: their outputs land in ONE shared PV AC combiner panel.
+      ...(gatewayInstances.length > 1
+        ? [{ tag: 'ACP-1', description: 'PV AC Combiner Panel (shared)', manufacturer: '', model: `${gatewayInstances.length} gateway output breakers`, qty: 1, rating: `${acOcpdAmps}A / 240V`, necReference: 'NEC 705.12(B)' }]
+        : []),
       { tag: 'AC-DISC-1', description: 'AC Disconnect', manufacturer: '', model: 'Non-Fused AC Disconnect', qty: 1, rating: `${acOcpdAmps}A / 240V`, necReference: 'NEC 690.13' },
       { tag: 'METER-1', description: 'Production Meter', manufacturer: 'Utility', model: 'Revenue Grade Meter', qty: 1, rating: '240V AC', necReference: 'NEC 705.12' },
       { tag: 'MSP-1', description: 'Main Service Panel', manufacturer: input.mainPanelBrand, model: `${input.mainPanelAmps}A Panel`, qty: 1, rating: `${input.mainPanelAmps}A / 120/240V`, necReference: 'NEC 705.12(B)' },
@@ -2915,7 +2989,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     inverters: isMicro ? microDeviceCount : 1,
     inverterModel: `${input.inverterManufacturer} ${input.inverterModel}`,
     // Micro-specific
-    acCombiner: isMicro ? 1 : 0,
+    acCombiner: isMicro ? Math.max(1, gatewayInstances.length) : 0,
     trunkCable: isMicro ? Math.round(defaultRunLengths.BRANCH_RUN * acBranchCount * WASTE_FACTOR) : 0,
     trunkCableTerminators: isMicro ? acBranchCount * 2 : 0,
     acBranchOcpd: isMicro ? acBranchCount : 0,
@@ -3040,6 +3114,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     microDeviceCount,
     acBranchCount,
     microBranches,
+    ...(gatewayInstances.length > 1 ? { gatewayInstances } : {}),
     acBranchCurrentA,
     acBranchOcpdAmps,
     systemVoltageAC,
@@ -3182,6 +3257,56 @@ function currentCarryingOf(run: RunSegment): number {
   // imbalance-only case (the only neutral topology this engine emits), so it is
   // excluded. Never drops below 1.
   return Math.max(1, run.conductorCount - (run.neutralRequired && run.phase === '1Ø' ? 1 : 0));
+}
+
+/**
+ * ONE IQ Combiner / Envoy instance's output circuit — L1 + L2 + N (the micro
+ * feeder carries its neutral, Ray 2026-09-25) + EGC — sized for THAT instance's
+ * current: its branches' rated continuous output, the very figure its 80 A and
+ * datasheet capacity were checked against, on a backfed breaker of next
+ * standard ≥ 125 % (NEC 690.8(B)). The single-system engine and the hybrid
+ * aggregator both build it here, so the two cannot size it differently.
+ */
+export function gatewayFeederRun(
+  gw: import('./equipment/enphaseGatewayMultiplicity').GatewayInstance,
+  opts: { to: string; lengthFt: number; conduitType: string; ambientTempC: number; maxACVoltageDropPct: number },
+): RunSegment {
+  const conductors = 3;
+  const w = autoSizeWire(
+    gw.continuousCurrentA, opts.lengthFt, conductors, opts.conduitType,
+    opts.ambientTempC, 240, opts.maxACVoltageDropPct, false, '#10 AWG',
+  );
+  return makeRunSegment(`GW${gw.index}_FEEDER_RUN`, `${gw.label} TO ${opts.to}`,
+    `${gw.deviceLabel.toUpperCase()} (${gw.label})`, opts.to, {
+    sourceTerminal: 'OUT',
+    destTerminal: `BKR-${gw.index}`,
+    conductorCount: conductors,
+    wireGauge: w.gauge,
+    insulation: 'THWN-2',
+    egcGauge: w.egcGauge,
+    neutralRequired: true,
+    systemVoltage: 240,
+    phase: '1Ø',
+    conduitType: opts.conduitType,
+    conduitSize: w.conduitSize,
+    conduitFillPct: w.conduitFillPct,
+    onewayLengthFt: opts.lengthFt,
+    continuousCurrent: gw.continuousCurrentA,
+    requiredAmpacity: gw.continuousCurrentA * 1.25,
+    effectiveAmpacity: w.effectiveAmpacity,
+    tempDeratingFactor: w.tempDerating,
+    conduitDeratingFactor: w.conduitDerating,
+    ocpdAmps: gw.outputOcpdA,
+    voltageDropPct: w.voltageDropPct,
+    voltageDropVolts: w.voltageDropVolts,
+    ampacityPass: w.ampacityPass,
+    voltageDropPass: w.voltageDropPass,
+    conduitFillPass: w.conduitFillPct <= 40,
+    necReferences: ['NEC 690.8', 'NEC 705.12(B)', 'NEC 310.15', 'NEC 200.3'],
+    conductorCallout: w.conductorCallout,
+    color: 'ac',
+    electricalFunction: `${gw.label} output circuit (${gw.branches.length} branch${gw.branches.length === 1 ? '' : 'es'}) → ${opts.to}`,
+  });
 }
 
 function makeRunSegment(

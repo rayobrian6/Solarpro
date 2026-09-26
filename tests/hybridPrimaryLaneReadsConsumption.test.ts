@@ -70,10 +70,12 @@ describe('the primary metering lane is chosen among lanes that READ consumption 
     expect(r.primary!.fields.meteringDrawing?.consumption).toEqual(ground.consumption);
   });
 
-  it('with both lanes able to read consumption, rank decides as before: the roof', () => {
+  it('with both lanes on the same 5C they SHARE one gateway (Ray, 2026-09-26): it reads consumption, keyed by the roof', () => {
     const r = run({ roof: 'enphase-iq-combiner-5c', ground: 'enphase-iq-combiner-5c' });
     expect(r.primary?.key).toBe('roof');
-    expect(r.lanes.find(l => l.key === 'ground')!.meteringDrawing!.consumption).toBeNull();
+    expect(r.gateways).toHaveLength(1);
+    expect(r.gateways[0].meteringDrawing!.consumption).toMatchObject({ ctCount: 2 });
+    expect(r.lanes.every(l => !l.meteringDrawing)).toBe(true);
   });
 
   it('when no lane can read consumption, rank still names a primary (production only everywhere)', () => {

@@ -28,7 +28,10 @@ import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escap
 import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { isHybridPlanset, primarySubKey, SUB_LABEL, inverterSubKey } from './subSystemSheets';
-import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitSharedGatewayPanel, permitStandaloneGateway } from '../utils/integratedEquipment';
+import { resolveDesignMetering } from '@/lib/equipment/designMetering';
+import { gatewayScheduleRows } from '@/lib/equipment/gatewayStatements';
+import { permitInterconnectionToken } from '../utils/interconnectionRule';
 import { getMountingSystemById, effectiveMountingSystemId } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset, DOCUMENT_APPLICABILITY_CHIP } from '@/lib/manufacturer-assets-db';
 // AAC WS-9 — the ONE document-applicability seam every sheet may use.
@@ -2448,9 +2451,14 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // under the aggregation table on this same sheet already says how it is fed,
   // with the conductor. Saying it twice on SCHED is the duplication the retired
   // trunk-deficit note below was removed for, on the densest sheet in the set.
+  // More than one gateway (Ray, 2026-09-26): the branches land on N devices —
+  // which ones on which is the GATEWAYS table under the aggregation table.
+  const _schedMult = buildIntegratedEquipment(input, cad).gatewayMultiplicity;
   const _schedBranchTermination = _schedStandaloneBos
-    ? `terminating on 2-pole ${_schedStandaloneBos.plan.branchBreakerA ?? '—'} A breakers in the ${_schedStandaloneBos.landing.model}`
-    : 'terminating at the AC combiner';
+    ? `terminating on 2-pole ${_schedStandaloneBos.plan.branchBreakerA ?? '—'} A breakers in ${_schedMult ? `${_schedMult.count} × ${_schedStandaloneBos.landing.model} (one per gateway — see GATEWAYS)` : `the ${_schedStandaloneBos.landing.model}`}`
+    : _schedMult
+      ? `terminating at ${_schedMult.count} AC combiners (see GATEWAYS)`
+      : 'terminating at the AC combiner';
   const _schedAcBranchBlock = `
       <div class="section-title">AC Branch Circuit Schedule &mdash; NEC 690.8(A) / ${_sched705}</div>
       <table class="equip-table">
@@ -2564,6 +2572,35 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           </tr>`).join('')}
         </tbody>
       </table>
+      ${(() => {
+        // ── GATEWAYS — one row per IQ Combiner / Envoy the design needs, when
+        //    that is more than one (capacity determines the count; the solver's
+        //    rows, worded once in lib/equipment/gatewayStatements.ts), and the
+        //    shared PV AC combiner panel their outputs land in. ──
+        const _m = _bos.gatewayMultiplicity;
+        if (!_m) return '';
+        const _primary = resolveDesignMetering({ plan: _bos, interconnectionRaw: permitInterconnectionToken(input.project.interconnectionMethod),
+          consumptionCtLocation: input.project.consumptionCtLocation ?? null, systemVoltage: 240 }).drawing?.consumption ? 1 : null;
+        const _rows = gatewayScheduleRows(_m.instances, _primary);
+        const _panel = permitSharedGatewayPanel(input, cad, _bos);
+        return `
+      <div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#f0f4f8;"><strong>GATEWAYS (${_m.count}):</strong> ${_m.explanation}</div>
+      <table class="equip-table">
+        <thead><tr><th>Gateway</th><th>Branches</th><th>Devices</th><th>Cont. (A)</th><th>Output OCPD (A)</th><th>Metering</th></tr></thead>
+        <tbody>
+          ${_rows.map(r => `
+          <tr>
+            <td class="fw7">${r.label}</td><td>${r.branches}</td><td class="tr">${r.devices}</td>
+            <td class="tr">${r.continuousA.toFixed(1)}</td><td class="tr">${r.outputOcpdA}</td><td style="font-size:8px;">${r.metering}</td>
+          </tr>`).join('')}
+          ${_panel ? `
+          <tr>
+            <td class="fw7">SHARED PANEL</td><td colspan="2">${_panel.model}</td>
+            <td class="tr">${_panel.busbarA} A bus</td><td class="tr">${_rows.map(r => r.outputOcpdA).join(' + ')}</td><td style="font-size:8px;">NEC 705.12(B)</td>
+          </tr>` : ''}
+        </tbody>
+      </table>`;
+      })()}
       ${_schedStandaloneBos ? `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#f0f4f8;"><strong>STANDALONE GATEWAY:</strong> AC branches land on 2-pole ${_schedStandaloneBos.plan.branchBreakerA ?? '—'} A breakers in the ${_schedStandaloneBos.landing.model}${_schedStandaloneBos.plan.branchSlots ? ` (${_schedStandaloneBos.plan.branchSlots} branch positions + 1 gateway supply)` : ''}; the ${_schedStandaloneBos.sg.label}${_schedStandaloneBos.sg.partNumber ? ` (${_schedStandaloneBos.sg.partNumber})` : ''} is fed from its own 2-pole ${_schedStandaloneBos.sg.supplyBreakerA} A breaker in that panel &mdash; ${_schedStandaloneBos.sg.supplyConductor}.</div>` : ''}${_bos.branchSlotWarning ? `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#fff8e1;"><strong>NOTE:</strong> ${_bos.branchSlotWarning}</div>` : ''}`;
       })()}
       <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string;
