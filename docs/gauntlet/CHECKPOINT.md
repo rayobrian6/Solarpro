@@ -68,6 +68,11 @@ verification and are deliberately not acted on — that ratio is the point of th
 | `1889fd24` | A log said "keeping pass-1 pagination" while assigning the pass-2 BOM. The cover index could list one set of SCHED sheets and the package carry another |
 | `df75ea85` | The engineer's own ENGINEERING NOTES reached no sheet, while the cover printed boilerplate in their place |
 | `b81527f7` | PV-4B's home-run row printed the OPEN-AIR branch's conductor gauge — a different physical run, sized independently |
+| `5c11c143` | The operator's own Structural-tab mean roof height reaches the permit (R9's first open item) |
+| `b3a0918d` | The cover's STORIES row had no writer; the building model knew the answer (R9's second) |
+| `15de246a` | 🚨 **FOUR copies of NEC 310.15(B)(1)**, disagreeing in two directions — and the two that AGREED were both missing the top of the table, applying 0.58 where the code requires 0.41 at 76–80 °C |
+| `28e9db47` | 🚨 **An EGC rule that was `size * 15`** — every OCPD up to 210 A got a #14 AWG ground, a 100 A circuit included, published as "NEC 250.122". Plus the FIFTH copy of 310.16 |
+| `3f882c94` | A sixth NEC table copy, wrong at #3/0 AWG (0.2660 vs 0.2679 in²) — conduit fill computed low |
 | `5cb4060d` | The design history in a real browser — written, then run: 5/5, and it found a live defect (below) |
 | `64415977` | NEEDS-RAY reordered by severity with a read-first index |
 | `a56c96b7` | Escape closes the dialogs — and does not reach the 3D tool behind them |
