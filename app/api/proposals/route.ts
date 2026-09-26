@@ -36,6 +36,16 @@ function rowToProposal(row: Record<string, unknown>, project?: import('@/types')
     updatedAt:       row.updated_at as string,
     pricingSnapshot: (dj.pricingSnapshot as Record<string, unknown>) ?? null,
     snapshotAt:      (dj.snapshotAt as string) ?? undefined,
+    // 🚨 THE FILING FACT, AND IT WAS UNREADABLE. `archivedAt` is written into
+    // data_json on every archive, and nothing mapped it out — so it existed in
+    // the database and no consumer could see it. Since an executed contract now
+    // correctly keeps its `accepted` status when filed, a page filtering on
+    // status alone put every archived contract back in the active list on the
+    // next reload, which looked exactly like Archive not working.
+    //
+    // Out of data_json, not off a column: there is no `archived_at` column, the
+    // same way there is no `status` column.
+    archivedAt:      (dj.archivedAt as string) ?? undefined,
     // v48.5: read cached DB rate from data_json (set at proposal creation)
     dbUtilityRate:   typeof dj.dbUtilityRate === 'number' ? dj.dbUtilityRate : null,
     // v48.36: read cached stateCode from data_json (set at proposal creation)

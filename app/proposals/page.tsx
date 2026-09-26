@@ -26,6 +26,24 @@ import { useSubscription } from '@/hooks/useSubscription';
 import UpgradeModal from '@/components/ui/UpgradeModal';
 import { useToast } from '@/components/ui/Toast';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
+
+/**
+ * Is this proposal filed away?
+ *
+ * 🚨 ONE PREDICATE, BECAUSE THE QUESTION HAS TWO ANSWERS NOW. Archiving used to
+ * overwrite `data_json.status` with 'archived', and `rowToProposal` reads a
+ * proposal's status from that field and nowhere else — so one write was what the
+ * whole website displayed. A signed contract read "Archived" everywhere, and the
+ * status it replaced was recorded nowhere, so un-archiving was a guess.
+ *
+ * An executed contract now keeps the status it earned and carries `archivedAt`
+ * instead. So "is it archived" is no longer a question about status alone, and
+ * three separate places in this file were asking it that way. Fixing them one at
+ * a time invites missing the fourth, so the rule is here and the sites call it.
+ */
+function isProposalArchived(p: { status?: ProposalStatus; archivedAt?: string }): boolean {
+  return p.status === 'archived' || Boolean(p.archivedAt);
+}
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
 import { resolveActualAnnualBill, resolveMonthlyUsageHistory } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
@@ -166,7 +184,7 @@ function ActionMenu({
         <RefreshCw size={13} className="text-blue-400" /> Refresh Data
       </button>
       <div className="h-px bg-slate-700 my-0.5" />
-      {proposal.status !== 'archived' ? (
+      {!isProposalArchived(proposal) ? (
         <button onClick={() => { onArchive(); onClose(); }} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-700 transition-colors text-left">
           <Archive size={13} className="text-slate-400" /> Archive
         </button>
@@ -340,13 +358,30 @@ function ProposalContent() {
   };
 
   // ── API helpers ───────────────────────────────────────────────────────────
+  // 🚨 The response was never read. PATCH /api/proposals/[id] answers 409 on an
+  // executed contract (39f700cb), and this repainted the row regardless — so a
+  // signed proposal visibly took the new status and silently changed back on the
+  // next load. Nothing is painted that the server did not accept.
   const updateStatus = async (id: string, status: ProposalStatus) => {
-    await fetch(`/api/proposals/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    setProposals(prev => prev.map(p => p.id === id ? { ...p, status } : p));
+    try {
+      const res = await fetch(`/api/proposals/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok || data?.success === false) {
+        if (res.status === 409) {
+          toast.warning('This proposal is signed', String(data?.error ?? 'An executed contract keeps its status.'));
+        } else {
+          toast.error('Status update failed', String(data?.error ?? 'Could not update this proposal. Please try again.'));
+        }
+        return;
+      }
+      setProposals(prev => prev.map(p => p.id === id ? { ...p, status } : p));
+    } catch {
+      toast.error('Status update failed', 'Please check your connection and try again.');
+    }
   };
 
   const renameProposal = async (id: string, title: string) => {
@@ -396,14 +431,31 @@ function ProposalContent() {
               : activeProposal.project,
           } : activeProposal);
         }
+      } else if (res.status === 409) {
+        // 🚨 THE REFUSAL USED TO STOP HERE. `success` is false, the branch above
+        // was skipped, the spinner cleared in `finally`, and the button looked
+        // like it had worked — so the installer pressed it again and concluded
+        // the product was broken, when it was protecting a signed contract.
+        // The server's own sentence is used: it says which proposal and why, and
+        // "Something went wrong" would throw away the only useful part.
+        toast.warning('This proposal is signed', String(data.error ?? 'The figures it was signed on cannot be refreshed.'));
+      } else {
+        toast.error('Refresh failed', String(data.error ?? 'Could not refresh this proposal. Please try again.'));
       }
+    } catch {
+      toast.error('Refresh failed', 'Please check your connection and try again.');
     } finally {
       setRefreshingId(null);
     }
   };
 
+  // Archiving is FILING, so it goes to the bulk endpoint's `archive` action —
+  // the path that records `archivedAt` without rewriting an executed contract's
+  // status — rather than to the status PATCH, which correctly refuses a signed
+  // proposal with 409. Routed here so the row action and the bulk action mean
+  // the same thing.
   const archiveProposal = async (id: string) => {
-    await updateStatus(id, 'archived');
+    await bulkArchiveIds([id]);
   };
 
   const deleteProposals = async (ids: string[]) => {
@@ -453,39 +505,106 @@ function ProposalContent() {
   };
 
   const bulkArchive = async () => {
-    const ids = [...selectedIds];
+    await bulkArchiveIds([...selectedIds]);
+    setSelectedIds(new Set());
+  };
+
+  /**
+   * 🚨 THIS USED TO PAINT `status: 'archived'` OVER EVERY SELECTED ROW.
+   *
+   * The archive action no longer rewrites the status of an executed contract
+   * (app/api/proposals/bulk/route.ts) — it records `archivedAt` and leaves the
+   * signed status standing — so painting the whole selection would state
+   * something about stored data that is not true. The server reports which rows
+   * it restatused and which it deliberately did not; only the first set is
+   * painted, and the second set is explained rather than hidden.
+   */
+  const bulkArchiveIds = async (ids: string[]) => {
+    if (ids.length === 0) return;
     try {
       const chunks: string[][] = [];
       for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
+      const restatused = new Set<string>();
+      const preserved: string[] = [];
+      let preservedReason = '';
       for (const chunk of chunks) {
-        await fetch('/api/proposals/bulk', {
+        const res = await fetch('/api/proposals/bulk', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'archive', ids: chunk }),
         });
+        const data = await res.json().catch(() => ({} as Record<string, unknown>));
+        if (!res.ok || data?.success === false) {
+          toast.error('Archive failed', String(data?.error ?? 'Could not archive proposals. Please try again.'));
+          return;
+        }
+        const archivedIds        = (data.archivedIds as string[] | undefined) ?? [];
+        const statusPreservedIds = (data.statusPreservedIds as string[] | undefined) ?? [];
+        for (const id of archivedIds) {
+          if (!statusPreservedIds.includes(id)) restatused.add(id);
+        }
+        preserved.push(...statusPreservedIds);
+        if (data.statusPreservedReason) preservedReason = String(data.statusPreservedReason);
       }
-      setProposals(prev => prev.map(p => ids.includes(p.id) ? { ...p, status: 'archived' as ProposalStatus } : p));
-      setSelectedIds(new Set());
+      setProposals(prev => prev.map(p => restatused.has(p.id) ? { ...p, status: 'archived' as ProposalStatus } : p));
+      if (preserved.length > 0) {
+        toast.info(
+          `${preserved.length} signed ${preserved.length === 1 ? 'proposal' : 'proposals'} filed, status kept`,
+          preservedReason || 'An executed contract keeps its signed status.',
+        );
+      }
     } catch {
       toast.error('Archive failed', 'Could not archive proposals. Please try again.');
     }
   };
 
+  /**
+   * 🚨 THE RESPONSE WAS DISCARDED, AND THE NEW STATUS PAINTED ONTO EVERY
+   * SELECTED ROW.
+   *
+   * The server skips executed contracts and reports `{ updated, skipped }`, so a
+   * signed proposal among twenty drafts visibly became a draft and stayed that
+   * way until the next page load, at which point it silently changed back. An
+   * optimistic update the server declined is not optimism — it is a false
+   * statement about stored data, and it lasted long enough for someone to act on.
+   *
+   * Only the ids the server names are repainted, and a skip is spoken. The set
+   * comes FROM the response rather than being re-derived here: re-deciding
+   * locally which rows are signed would be a second copy of a server rule, and
+   * it would drift.
+   */
   const bulkSetStatus = async (status: ProposalStatus) => {
     const ids = [...selectedIds];
     try {
       const chunks: string[][] = [];
       for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
+      const updatedIds = new Set<string>();
+      const skippedIds: string[] = [];
+      let skippedReason = '';
       for (const chunk of chunks) {
-        await fetch('/api/proposals/bulk', {
+        const res = await fetch('/api/proposals/bulk', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'status', ids: chunk, status }),
         });
+        const data = await res.json().catch(() => ({} as Record<string, unknown>));
+        if (!res.ok || data?.success === false) {
+          toast.error('Status update failed', String(data?.error ?? 'Could not update proposal status. Please try again.'));
+          return;
+        }
+        for (const id of (data.updatedIds as string[] | undefined) ?? []) updatedIds.add(id);
+        skippedIds.push(...((data.skippedIds as string[] | undefined) ?? []));
+        if (data.skippedReason) skippedReason = String(data.skippedReason);
       }
-      setProposals(prev => prev.map(p => ids.includes(p.id) ? { ...p, status } : p));
+      setProposals(prev => prev.map(p => updatedIds.has(p.id) ? { ...p, status } : p));
       setSelectedIds(new Set());
       setBulkStatusOpen(false);
+      if (skippedIds.length > 0) {
+        toast.warning(
+          `${skippedIds.length} ${skippedIds.length === 1 ? 'proposal was' : 'proposals were'} left unchanged`,
+          skippedReason || 'Signed proposals keep their status.',
+        );
+      }
     } catch {
       toast.error('Status update failed', 'Could not update proposal status. Please try again.');
     }
@@ -530,7 +649,7 @@ function ProposalContent() {
   // ── Filter + Search + Sort ────────────────────────────────────────────────
   const filteredProposals = proposals
     .filter(p => {
-      if (!showArchived && p.status === 'archived') return false;
+      if (!showArchived && isProposalArchived(p)) return false;
       if (filterStatus !== 'all' && p.status !== filterStatus) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -887,7 +1006,7 @@ function ProposalContent() {
                     proposal.status === 'sent' ? 'bg-blue-500/10 border-blue-500/20' :
                     proposal.status === 'viewed' ? 'bg-purple-500/10 border-purple-500/20' :
                     proposal.status === 'rejected' ? 'bg-red-500/10 border-red-500/20' :
-                    proposal.status === 'archived' ? 'bg-slate-700/40 border-slate-700/60' :
+                    isProposalArchived(proposal) ? 'bg-slate-700/40 border-slate-700/60' :
                     'bg-slate-700/40 border-slate-700/60'
                   }`}>
                     <FileText size={16} className={

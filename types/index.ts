@@ -989,6 +989,21 @@ export interface Proposal {
   // v47.224: frozen snapshots — stored in data_json, extracted by rowToProposal
   pricingSnapshot?: Record<string, unknown> | null; // admin pricing config at time of generation
   snapshotAt?: string;                              // ISO timestamp when snapshot was taken
+  /**
+   * When this proposal was filed away, or absent if it has not been.
+   *
+   * 🚨 FILING IS NOT A STATUS. Archiving used to overwrite `data_json.status`
+   * with 'archived' — and since `rowToProposal` reads a proposal's status from
+   * that field and nowhere else, one write was what the whole website displayed:
+   * a signed contract read "Archived" everywhere, and the value it replaced was
+   * recorded nowhere, so un-archiving it was a guess. An executed contract now
+   * keeps the status it earned and carries this instead.
+   *
+   * Anything deciding whether a proposal is archived must consult BOTH — a
+   * filter that asks only about the status puts every archived contract straight
+   * back into the active list on the next reload.
+   */
+  archivedAt?: string;
   // v48.3: DB-fetched utility rate (utility_policies lookup, server-side only)
   dbUtilityRate?: number | null;
   // v48.36: explicit state code snapshot — avoids address regex fallback failures

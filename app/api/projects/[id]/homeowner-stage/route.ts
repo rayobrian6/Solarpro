@@ -15,10 +15,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
-// The canonical micro-stage vocabulary. Imported as a TYPE so a misspelling in
-// STAGE_MICRO_MAP below is a compile error — the column is TEXT with no CHECK,
-// so nothing downstream would have caught it.
-import type { MicroStage } from '@/lib/microStage';
+// The canonical micro-stage vocabulary. Imported as a VALUE as well as a type:
+// the type makes a misspelling in STAGE_MICRO_MAP a compile error, and the array
+// is what the write below is actually gated on at runtime. A type erases to
+// nothing, and `project_micro_stages.micro_stage` is TEXT with no CHECK, so
+// without the array there is no guard on the INSERT at all.
+import { MICRO_STAGES, type MicroStage } from '@/lib/microStage';
 
 const HOMEOWNER_STAGES = [
   'lead_submitted',
@@ -162,9 +164,9 @@ export async function PATCH(
      * 🚨 TYPED AS `MicroStage`, BECAUSE IT WAS TYPED AS `string` AND WRONG.
      *
      * The `completed` entry read `installation_complete` — which is a
-     * DealDecisionAction name, not one of the 34 micro-stages. The real value
-     * is `install_completed` (lib/microStage.ts). Three things conspired to
-     * make that invisible:
+     * DealDecisionAction name (lib/deals/transitions.ts), not a micro-stage at
+     * all. The real value is `install_completed` (lib/microStage.ts). Three
+     * things conspired to make that invisible:
      *
      *   - the map's value type was `string`, so tsc had nothing to check it
      *     against;
@@ -178,15 +180,37 @@ export async function PATCH(
      * through this route carries a micro-stage no consumer recognises, and the
      * completion milestone it was meant to record never appeared.
      *
-     * Typing the map is the part that stops it coming back: a misspelling is
-     * now a compile error rather than a row.
+     * Typing the map made a misspelling a compile error rather than a row. It is
+     * NOT a guard on the write: a type erases at build time, and the INSERT below
+     * interpolates whatever this map holds. So the value is additionally taken
+     * FROM `MICRO_STAGES` at runtime — the lookup returns an element of the
+     * canonical array or nothing, which makes a name the vocabulary does not
+     * contain unwritable rather than merely discouraged.
      */
     const STAGE_MICRO_MAP: Partial<Record<HomeownerStage, MicroStage>> = {
       proposal:      'proposal_sent',
       installation:  'contract_signed',
       completed:     'install_completed',
     };
-    const microKey = STAGE_MICRO_MAP[stage];
+    const mapped = STAGE_MICRO_MAP[stage];
+    // 🚨 The value written is the one the authority hands back, not the one this
+    // file asked for. `find` on MICRO_STAGES is deliberate rather than a boolean
+    // `includes` test: what reaches the INSERT is then literally a member of the
+    // canonical array, so there is no second variable a later edit could pass
+    // instead.
+    const microKey = mapped
+      ? MICRO_STAGES.find(candidate => candidate === mapped)
+      : undefined;
+    if (mapped && !microKey) {
+      // Unreachable while the map type-checks — which is the point. If it ever
+      // does happen it is a code defect, the stage change the installer asked
+      // for still stands, and NOTHING goes into a table whose UNIQUE constraint
+      // would make the bad row permanent.
+      console.error(
+        '[homeowner-stage] REFUSED non-canonical micro-stage: project=%s stage=%s value=%s',
+        projectId, stage, mapped
+      );
+    }
     if (microKey) {
       try {
         await sql`
