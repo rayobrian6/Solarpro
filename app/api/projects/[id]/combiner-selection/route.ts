@@ -33,7 +33,7 @@ import {
   readCombinerSelection,
   type CombinerDeviceFacts,
 } from '@/lib/combinerSelection/service';
-import { getBosDevice, listCombiners } from '@/lib/equipment/integratedBos';
+import { getBosDevice, isSelectableCombiner, listCombiners } from '@/lib/equipment/integratedBos';
 import { combinerCompatibilityFor, declaredCombinerPairing } from '@/lib/equipment/combinerCompatibility';
 import { getMicroinverterById } from '@/lib/equipment-db';
 import { readProjectEquipmentStores } from '@/lib/reconciliation/reconcile';
@@ -61,6 +61,11 @@ const lookupDevice = (id: string): CombinerDeviceFacts | null => {
     // does not currently distinguish them — so this stays null rather than
     // printing an ordering SKU on a permit under the wrong heading.
     modelNumber: null,
+    // `getBosDevice` also knows the bare IQ Gateway, the meter collar and the
+    // generic AC combiner panels. POSTed here they used to be stored, and a bare
+    // gateway then reached the SLD as the AC COMBINER holding the branch
+    // breakers. The same set the GET offers as `candidates` — one answer.
+    isSelectableCombiner: isSelectableCombiner(d.id),
   };
 };
 

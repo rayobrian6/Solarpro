@@ -305,6 +305,11 @@ export async function POST(req: NextRequest) {
         systemKw, panelCount, panelModel, inverterType, inverterModel,
         annualProductionKwh, mountType, stateCode,
         electrical, structural, compliance, permit, runs,
+        // The designer's recorded consumption-CT location — the page's
+        // run-from-file restore reads it back from here. Absent ⇒ the key is
+        // dropped and the restore keeps the interconnection default.
+        consumptionCtLocation: typeof body.configSnapshot?.consumptionCtLocation === 'string'
+          && body.configSnapshot.consumptionCtLocation ? body.configSnapshot.consumptionCtLocation : undefined,
       };
 
       // Extract structured fields

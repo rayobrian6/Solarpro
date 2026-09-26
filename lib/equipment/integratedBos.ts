@@ -354,13 +354,35 @@ export function getBosDevice(id: string | undefined): BosDevice | undefined {
 /** Every selectable integrated combiner, optionally narrowed to one brand.
  *  Backs the UI picker so the operator can override the auto-resolved device —
  *  the drawing must be able to say what is ACTUALLY going on the wall, not only
- *  what the compatibility table infers. */
+ *  what the compatibility table infers.
+ *
+ *  🚨 A BARE IQ GATEWAY (ENVOY) IS DELIBERATELY NOT HERE, though `getBosDevice`
+ *  knows it. Traced 2026-09-25: recorded as the project's combiner it resolves
+ *  to a plan with no combiner in it, and every consumer treats the brains AS the
+ *  combiner — the SLD route and `sldCombinerFields` hand "Enphase IQ Gateway" to
+ *  the renderer, which draws it as the AC COMBINER with the branch breakers
+ *  landing inside it, while the BOM buys the gateway AND falls back to the
+ *  inverter's legacy combiner accessory (an IQ Combiner 4C under a fabricated SKU
+ *  on the IQ8+/IQ8M rows, nothing at all on IQ8H/IQ8A). A drawing of a box the
+ *  BOM did not buy. Each IQ Combiner has the IQ Gateway built in, so "whatever
+ *  Envoy I want" (Ray, 2026-09-25) is a choice among THESE. A gateway-only BOS
+ *  with the branches landing elsewhere is a topology no consumer models yet. */
 export function listCombiners(brand?: string): BosDevice[] {
   const want = brand?.trim().toLowerCase();
   return BOS_DEVICES.filter(d =>
     d.active !== false
     && d.kind === 'integrated_combiner'
     && (!want || d.brand.toLowerCase() === want));
+}
+
+/** Can this id be recorded as the project's combiner? — exactly the set
+ *  `listCombiners()` offers, so the picker, the combiner-selection route and the
+ *  ecosystem picker's Envoy row cannot disagree about what is storable. A device
+ *  the catalogue knows but that is not one of these (a bare IQ Gateway, a meter
+ *  collar, a generic PV AC combiner panel) answers false. */
+export function isSelectableCombiner(id: string | null | undefined): boolean {
+  const want = id?.trim();
+  return !!want && listCombiners().some(d => d.id === want);
 }
 
 /** Resolve an equipment-db combiner id against THIS catalogue.

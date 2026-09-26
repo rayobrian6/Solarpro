@@ -46,7 +46,7 @@ import { listCombiners } from '@/lib/equipment/integratedBos';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { sldCombinerFields } from '@/lib/equipment/sldCombinerFields';
 import { consumptionCtLocationLabel } from '@/lib/equipment/designMetering';
-import { CONSUMPTION_CT_LOCATIONS, type ConsumptionCtLocation } from '@/lib/equipment/currentTransformers';
+import { CONSUMPTION_CT_LOCATIONS, parseConsumptionCtLocation, pvConnectionSide, consumptionCtBoundaryFor, deriveConsumptionMeteringMode, type ConsumptionCtLocation } from '@/lib/equipment/currentTransformers';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
 // ── Wave 5A — multi-lane SLD: page-path source-branch builder + the W4B.D
 // empty-fleet synthesis helper (a present sub with an empty fleet computes
@@ -1112,6 +1112,16 @@ function EngineeringPageInner() {
   // from projects.selected_equipment. It is sent with every drawing/BOM payload
   // so downstream CONSUMES it instead of re-deriving a device from compatibility.
   const [projectCombinerId, setProjectCombinerId] = useState<string | null>(null);
+  // The latest value, for the selector's report handler. The selector reports
+  // on EVERY load (mount, return to the tab, inverter change) as well as on a
+  // pick, so the handler has to know whether the id actually CHANGED before it
+  // drops the cached SLD — and a closure over the rendered state would compare
+  // against a stale value when two reports land before a re-render.
+  const projectCombinerIdRef = useRef<string | null>(null);
+  projectCombinerIdRef.current = projectCombinerId;
+  // The project open NOW, for async answers that must not land on another one.
+  const currentProjectIdRef = useRef<string | null>(null);
+  currentProjectIdRef.current = currentProjectId;
   // 🚨 A SELECTION BELONGS TO ONE PROJECT. DROP IT THE INSTANT THE PROJECT CHANGES.
   //
   // This state is only ever WRITTEN by CombinerSelector, which reports on load
@@ -1162,6 +1172,41 @@ function EngineeringPageInner() {
     })();
     return () => { cancelled = true; };
   }, [currentProjectId]);
+  // 🚨 A SECOND WRITER OF THE SAME RECORD — the ecosystem picker's Envoy pick
+  // (EcosystemPicker onApply) POSTs to the combiner-selection store as well.
+  // Bumping this after a successful write re-reads the store for the project
+  // that is open NOW (so a write landing after a project switch cannot put its
+  // device on the other project) and remounts CombinerSelector through its `key`,
+  // whose card would otherwise go on showing the device the pick replaced. The
+  // re-read lives here too because the selector is hidden on non-micro designs.
+  const [combinerSelectionEpoch, setCombinerSelectionEpoch] = useState(0);
+  // The epoch the re-read below last ran for. The project dependency is there only
+  // so a switch CANCELS an in-flight re-read; a switch must not START one — the
+  // loader above owns a project change, and a second read racing its null reset
+  // would wipe the SLD (including one restored from engineering_seed).
+  const lastCombinerEpochRef = useRef(0);
+  useEffect(() => {
+    if (combinerSelectionEpoch === lastCombinerEpochRef.current) return;
+    lastCombinerEpochRef.current = combinerSelectionEpoch;
+    const pid = currentProjectId;
+    if (!pid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/projects/${pid}/combiner-selection`, { cache: 'no-store' });
+        if (!r.ok) return;
+        const body = await r.json();
+        const raw = body?.selected?.combinerDeviceId;
+        const next = typeof raw === 'string' && raw ? raw : null;
+        if (cancelled) return;
+        // Same handling as the selector's report: only a DIFFERENT device makes the cached SLD stale.
+        if (next !== projectCombinerIdRef.current) setSldSvg('');
+        projectCombinerIdRef.current = next;
+        setProjectCombinerId(next);
+      } catch { /* a read that failed is not a selection */ }
+    })();
+    return () => { cancelled = true; };
+  }, [combinerSelectionEpoch, currentProjectId]);
   const [currentClientId,  setCurrentClientId]  = useState<string | null>(null);
 
   // Project selector — shown when no projectId in URL
@@ -2317,6 +2362,14 @@ function EngineeringPageInner() {
         if (snap.wireLength)            patches.wireLength            = snap.wireLength;
         if (snap.conduitType)           patches.conduitType           = snap.conduitType;
         if (snap.interconnectionMethod) patches.interconnectionMethod = snap.interconnectionMethod as ProjectConfig['interconnectionMethod'];
+        // The designer's recorded consumption-CT location travels with the
+        // interconnection it is read against. Exact-token parse: an unknown or
+        // absent value restores nothing, and the live config keeps its own
+        // (or the interconnection default) — same guard as the line above.
+        // /api/engineering/save-outputs stores it in config_snapshot; runs saved
+        // before 2026-09-25 lack it and restore nothing.
+        const _snapCt = parseConsumptionCtLocation(snap.consumptionCtLocation);
+        if (_snapCt) patches.consumptionCtLocation = _snapCt;
         if (snap.rapidShutdown  !== undefined) patches.rapidShutdown  = snap.rapidShutdown;
         if (snap.acDisconnect   !== undefined) patches.acDisconnect   = snap.acDisconnect;
         if (snap.dcDisconnect   !== undefined) patches.dcDisconnect   = snap.dcDisconnect;
@@ -2673,6 +2726,19 @@ function EngineeringPageInner() {
     sub: (config as any)?.subSystems,
     ic: config?.interconnectionMethod, bat: [config?.batteryId, config?.batteryCount],
     st: config?.systemType,
+    // The SLD draws the consumption CTs where this says, and names the device
+    // the legacy session override (`combinerId`) resolves to — so either one
+    // changing makes the cached sheet wrong, exactly as a combiner pick does.
+    // Without them a CT-location change kept the old SLD, and the calc-triggered
+    // save-outputs persisted that stale sheet to Client Files.
+    ct: config?.consumptionCtLocation || null, cmb: config?.combinerId || null,
+    // …and the project's recorded combiner itself, WHICHEVER writer sets it: the
+    // project read above, a selector pick, or the project-switch reset. Keying
+    // the drop on the selector's report alone left a sheet drawn with NO
+    // selection standing once the project read resolved first — the selector's
+    // later report then matched and dropped nothing, and save-outputs posted
+    // that sheet to Client Files.
+    pcid: projectCombinerId || null,
   });
   const _sldSigRef = useRef<string | null>(null);
   useEffect(() => {
@@ -3299,9 +3365,20 @@ function EngineeringPageInner() {
   // ── Metering / CT placement — the page's view of the SAME answer the SLD,
   // PV-4A and the BOM get (sldCombinerFields → designMetering), shown beside
   // the control that changes it (Ray, 2026-09-25: "no ct logic whatsoever").
-  const pageMetering = useMemo(() => {
+  //
+  // The micro it is resolved for takes the SAME fallback the BOM payload takes
+  // (~`_bomPayload.inverterId`): a micro entry still carrying a stale non-micro
+  // id — a legacy saved {type:'micro', inverterId:'se-7600h'} left by a
+  // topology switch — reads as the catalogue default micro. Requiring the id to
+  // resolve here hid the CT control and the CT-1 row on exactly those designs
+  // while the BOM, substituting, went on buying the CTs.
+  const pageMicro = useMemo(() => {
     const inv0 = config.inverters.find(i => i.type === 'micro');
-    const micro = inv0 ? getMicroinverterById(inv0.inverterId) : undefined;
+    if (!inv0) return undefined;
+    return getMicroinverterById(inv0.inverterId) ?? MICROINVERTERS[0];
+  }, [config.inverters]);
+  const pageMetering = useMemo(() => {
+    const micro = pageMicro;
     if (!micro || !computedSystem?.isMicro || subSystemCounts.isHybrid) return null;
     try {
       return sldCombinerFields({
@@ -3315,7 +3392,7 @@ function EngineeringPageInner() {
         consumptionCtLocation: config.consumptionCtLocation || null,
       });
     } catch { return null; }
-  }, [config.inverters, config.combinerId, config.interconnectionMethod, config.consumptionCtLocation,
+  }, [pageMicro, config.combinerId, config.interconnectionMethod, config.consumptionCtLocation,
       computedSystem, batteryEnabled, projectCombinerId, subSystemCounts.isHybrid]);
 
   // Wave 3.7 — passthrough view for routes/payloads that expect BARE run ids
@@ -5582,15 +5659,18 @@ function EngineeringPageInner() {
       ...LOCK,
     }));
   };
-  const updateString = (invId: string, strId: string, patch: Partial<StringConfig>) => {
-    console.log('🔒 [USER EDIT] updateString — engaging user lock');
+  // The one write path for string edits on ONE inverter — updateString (a single
+  // string) and updateAllStrings (every string) both land here, so both engage
+  // the user lock, the guided/manual panel lock, and reach the save-config
+  // write-back through the same setConfig.
+  const patchInverterStrings = (invId: string, match: (s: StringConfig) => boolean, patch: Partial<StringConfig>) => {
     setConfig(prev => ({
       ...prev,
       inverters: prev.inverters.map(i => {
         if (i.id !== invId) return i;
-        // Apply the patch to the target string, then rebuild through _buildStrCfg
+        // Apply the patch to the matching string(s), then rebuild through _buildStrCfg
         const newStrings = i.strings.map((s, si) => {
-          if (s.id !== strId) return s;
+          if (!match(s)) return s;
           const patched = { ...s, ...patch };
           return _buildStrCfg({
             index:          si,
@@ -5624,6 +5704,20 @@ function EngineeringPageInner() {
       setConfigLocks(prev => ({ ...prev, panel: true }));
       console.log('[v61 E5] panel field auto-locked (mode:', controlMode, ')');
     }
+  };
+  const updateString = (invId: string, strId: string, patch: Partial<StringConfig>) => {
+    console.log('🔒 [USER EDIT] updateString — engaging user lock');
+    patchInverterStrings(invId, s => s.id === strId, patch);
+  };
+  // Every string of ONE inverter, in one setConfig. A micro carries one panel
+  // GROUP per roof plane from Design Studio (e.g. 11/11/10), and the micro
+  // card's single Panel Model control used to patch strings[0] only: 21 of 32
+  // panels kept the old model, so kW / SLD / BOM / permit computed a mixed
+  // array, and the save-config write-back's dominant-panel vote (21 > 11) plus
+  // the canonical re-pin put the OLD panel back on reload.
+  const updateAllStrings = (invId: string, patch: Partial<StringConfig>) => {
+    console.log('🔒 [USER EDIT] updateAllStrings — engaging user lock');
+    patchInverterStrings(invId, () => true, patch);
   };
 
   // Topology switch: calls API to propagate ecosystem when inverter type changes
@@ -6191,6 +6285,11 @@ function EngineeringPageInner() {
           mainPanelAmps:        config.mainPanelAmps,
           panelBusRating:       config.panelBusRating,
           interconnectionMethod:config.interconnectionMethod,
+          // Recorded beside the interconnection it is read against.
+          // /api/engineering/save-outputs builds its OWN config_snapshot and copies
+          // this one key into it (interconnectionMethod survives through its
+          // structured column), so run-from-file hydration can restore it.
+          consumptionCtLocation:config.consumptionCtLocation,
           rapidShutdown:        config.rapidShutdown,
           acDisconnect:         config.acDisconnect,
           dcDisconnect:         config.dcDisconnect,
@@ -6573,7 +6672,14 @@ function EngineeringPageInner() {
     try {
       const firstInv = config.inverters[0];
       const firstStr = firstInv?.strings[0];
-      const invData = firstInv ? getInvById(firstInv.inverterId, firstInv.type) as any : null;
+      // A micro resolves through pageMicro — the catalogue-default fallback the
+      // CT control, the Equipment Schedule and the BOM payload already take. A
+      // legacy micro entry still carrying a stale string id ('se-7600h') used to
+      // miss here, post "String Inverter" as the model, and the route's resolver
+      // then drew no combiner and no CTs beside a schedule and BOM that had both.
+      const invData = firstInv
+        ? (firstInv.type === 'micro' ? (pageMicro ?? null) : getInvById(firstInv.inverterId, firstInv.type)) as any
+        : null;
       const panelData = firstStr ? getPanelById(firstStr.panelId) as any : null;
 
       // Determine V4 topology type
@@ -6648,7 +6754,15 @@ function EngineeringPageInner() {
           // is that pattern. It fixes the INPUT CONTRACT only — it does not
           // decide which combiner the installer is fitting. Compatibility is
           // not selection, and the selection authority is a separate build.
-          inverterId:     firstInv?.inverterId || undefined,
+          // A micro sends the id of the micro `invData` resolved (pageMicro), so a
+          // stale string id on a micro entry never travels as the micro's identity
+          // and the id always names the same unit as `inverterModel` above.
+          inverterId:     firstInv?.inverterId && firstInv.type !== 'micro'
+            ? firstInv.inverterId
+            : (firstInv?.type === 'micro' ? (pageMicro?.id || undefined) : undefined),
+          // The project, so the route reads the RECORDED combiner itself — the page's
+          // own copy below is the fallback when there is no store to read.
+          projectId: currentProjectId || undefined,
           // The installer's recorded choice. Highest authority the resolver has;
           // compatibility below only ever answers when this is absent.
           selectedCombinerId: projectCombinerId || undefined,
@@ -6842,7 +6956,12 @@ function EngineeringPageInner() {
     setSldLoading(true);
     setSldError(null);
     try {
+      const sigAtRequest = _sldEquipSig;
       const svgResult = await fetchSLDSvg();
+      // The inputs changed while this rendered (a combiner pick, a CT move):
+      // the sheet depicts equipment the page no longer has. Drop it — the
+      // re-armed refresh (or the next Diagram visit) draws the current one.
+      if (_sldSigRef.current !== null && _sldSigRef.current !== sigAtRequest) return;
       if (svgResult) {
         setSldSvg(svgResult);
         logDecision('Generate SLD', `Professional SLD rendered`, 'auto');
@@ -7023,7 +7142,17 @@ function EngineeringPageInner() {
           // from the client end: same page, same state, three payloads carried
           // the decision and the fourth dropped it, so the priced BOM could name
           // different hardware from the drawing beside it.
+          // The project, so the route reads the RECORDED combiner itself — the page's
+          // own copy below is the fallback when there is no store to read.
+          projectId: currentProjectId || undefined,
           selectedCombinerId: projectCombinerId || undefined,
+          // …and the legacy session override every drawing payload sends, which
+          // the resolver ranks BELOW selectedCombinerId and treats as decided —
+          // COMB-1 names it. 🚨 /api/engineering/bom does not read this yet (and
+          // bom-engine-v4 has no override input to hand it to), so until that
+          // plumbing lands the priced BOM still resolves without it. `|| undefined`
+          // sends nothing when there is none, so no other project's input changes.
+          combinerId: config.combinerId || undefined,
           // REGRESSION FIX: for micro topology, ensure we send a valid micro inverterId
           // firstInv.inverterId may be stale (e.g. 'se-7600h') if topology switch didn't update it
           inverterId: firstInv?.type === 'micro'
@@ -7345,7 +7474,10 @@ function EngineeringPageInner() {
     } finally {
       setBomLoading(false);
     }
-  }, [config, totalPanels, totalKw, compliance, sizingRecommendation, computedSystem, subSystemCounts.isHybrid]);
+  // projectCombinerId / currentProjectId: the payload sends both, and a combiner
+  // pick changes neither config nor compliance — without them the memoised
+  // callback kept posting the device the pick replaced.
+  }, [config, totalPanels, totalKw, compliance, sizingRecommendation, computedSystem, subSystemCounts.isHybrid, projectCombinerId, currentProjectId]);
 
   // ── PVWatts production estimate ──────────────────────────────
   const fetchPVWatts = useCallback(async () => {
@@ -7415,7 +7547,11 @@ function EngineeringPageInner() {
     }, 900);
     return () => { if (sldAutoRefDebounce.current) clearTimeout(sldAutoRefDebounce.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, compliance, config.inverters, config.batteryId, config.mountingId, totalPanels]);
+  // `_sldEquipSig` too: it is every input the sheet depicts (combiner pick, CT
+  // location, interconnection…). A pick reported while the tab switched to
+  // Diagram armed this timer with the PREVIOUS render's fetch, which drew the
+  // device the pick replaced, and nothing re-armed it.
+  }, [activeTab, compliance, config.inverters, config.batteryId, config.mountingId, totalPanels, _sldEquipSig]);
 
   const handlePrint = () => window.print();
 
@@ -8316,6 +8452,12 @@ function EngineeringPageInner() {
           // payloads that dropped the pick — its E-1 printed the catalogue
           // pairing as "NOT SELECTED" after the installer chose (2026-09-25).
           selectedCombinerId: projectCombinerId || undefined,
+          // …and the legacy session override, which the permit PREVIEW (the same
+          // route, draft=true) already sends. Without it a project still
+          // carrying one downloaded a package naming a different device from
+          // the preview it was reviewed on. `|| undefined` sends nothing when
+          // there is none, so a project without one produces the same input.
+          combinerId: config.combinerId || undefined,
           // BATTERY GATE (Ray, 2026-06-30): the planset shows a battery ONLY when one is
           // explicitly enabled (added in engineering, or selected in 3D design → hydrates
           // batteryEnabled). The permit's equipment legend keys off batteryCount>0, so a
@@ -8384,7 +8526,12 @@ function EngineeringPageInner() {
           dcAcRatio: calcDcAcRatio(parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw), parseFloat(totalInverterKw) || 0),
           topology: topologyType,
           inverters: config.inverters.map(inv => {
-            const invData = getInvById(inv.inverterId, inv.type) as any;
+            // A micro entry whose id is not a catalogue micro (legacy 'se-7600h')
+            // resolves to the catalogue default — as pageMetering, the Diagram SLD,
+            // the SLD PDF and the BOM already do. A valid micro id is unchanged.
+            const invData = (inv.type === 'micro'
+              ? (getMicroinverterById(inv.inverterId) ?? MICROINVERTERS[0])
+              : getInvById(inv.inverterId, inv.type)) as any;
             return {
               manufacturer: invData?.manufacturer || '', model: invData?.model || '',
               type: inv.type, acOutputKw: invData?.acOutputKw || (invData?.acOutputW/1000) || 0,
@@ -8395,7 +8542,7 @@ function EngineeringPageInner() {
               // hybrid lane resolves to '—'/0 — E-1 prints "48 × 0W · Inverter"
               // and SCHED prints 0.0A branch amps (Stowell v3 audit root cause).
               ...(inv.subSystemKey ? { subSystemKey: inv.subSystemKey } : {}),
-              inverterId: inv.inverterId,
+              inverterId: inv.type === 'micro' ? (invData?.id ?? inv.inverterId) : inv.inverterId,
               strings: inv.strings.map(str => {
                 const panel = getPanelById(str.panelId) as any;
                 return { label: str.label, panelCount: str.panelCount,
@@ -10300,6 +10447,7 @@ function EngineeringPageInner() {
                     ) : null}
                     <EcosystemPicker
                       appliedBrand={(config as any).ecosystemBrand}
+                      currentCombinerId={projectCombinerId}
                       onApply={(payload: EcosystemApplyPayload) => {
                         const updates: any = { ecosystemBrand: payload.brand };
                         if (payload.selections.inverterId) {
@@ -10408,6 +10556,51 @@ function EngineeringPageInner() {
                             config.batteryId !== payload.selections.batteryId) {
                           wouldClobber.push(`battery (currently: ${config.batteryId})`);
                         }
+                        // 🚨 THE ENVOY THE INSTALLER PICKED, RECORDED WHERE EVERY CONSUMER READS IT.
+                        // `combinerId` is a BOS combiner id — each IQ Combiner has the IQ Gateway
+                        // built in. The picker's gateway used to be dropped right here while the
+                        // banner counted it as configured. Same POST as CombinerSelector; no reason,
+                        // no prompt (Ray, 2026-09-25). The picker sets it only on an explicit pick,
+                        // so an apply never records a default as the installer's decision.
+                        const ecoCombinerPick = payload.selections.combinerId || null;
+                        const ecoCombinerProject = currentProjectId;
+                        const recordEcosystemCombiner = (onRecorded: () => void) => {
+                          if (!ecoCombinerPick) return;
+                          if (!ecoCombinerProject) {
+                            setAutoLoadBanner('Envoy / combiner not recorded: open a project first — the selection is stored on the project.');
+                            return;
+                          }
+                          void (async () => {
+                            try {
+                              const res = await fetch(`/api/projects/${ecoCombinerProject}/combiner-selection`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ combinerDeviceId: ecoCombinerPick, inverterId: payload.selections.inverterId ?? null }),
+                              });
+                              const j = await res.json();
+                              if (j?.success) {
+                                // The store's own answer, applied only while the same project is
+                                // open (a write that lands after a switch must not surface on the
+                                // other project); the epoch then re-reads and remounts the card.
+                                // Waiting on the re-read alone left the page on the replaced
+                                // device whenever that GET failed.
+                                const saved = typeof j?.selected?.combinerDeviceId === 'string' && j.selected.combinerDeviceId
+                                  ? j.selected.combinerDeviceId : null;
+                                if (ecoCombinerProject === currentProjectIdRef.current) {
+                                  if (saved !== projectCombinerIdRef.current) setSldSvg('');
+                                  projectCombinerIdRef.current = saved;
+                                  setProjectCombinerId(saved);
+                                }
+                                setCombinerSelectionEpoch(e => e + 1);
+                                onRecorded();
+                              } else {
+                                setAutoLoadBanner(`Envoy / combiner not recorded: ${j?.refusals?.[0]?.message ?? j?.error ?? 'the selection could not be saved.'}`);
+                              }
+                            } catch (e) {
+                              setAutoLoadBanner(`Envoy / combiner not recorded: ${(e as Error).message || 'the selection could not be saved.'}`);
+                            }
+                          })();
+                        };
                         const applyEcosystemAfterConfirm = () => {
                           // ── Wave 6 — HYBRID: apply the ecosystem PER SUB-SYSTEM ──────────
                           // The whole-project path below rebuilds inverters[0] and fires the
@@ -10434,6 +10627,10 @@ function EngineeringPageInner() {
                                 : `✓ Applied ${payload.brand.toUpperCase()} ecosystem. Manual dropdowns remain editable below.`
                             );
                             setTimeout(() => setAutoLoadBanner(null), 6000);
+                            recordEcosystemCombiner(() => {
+                              setAutoLoadBanner(`\u2713 ${payload.brand.toUpperCase()} Envoy / combiner recorded on the project.`);
+                              setTimeout(() => setAutoLoadBanner(null), 6000);
+                            });
                             return;
                           }
                           // Lock to prevent auto-sizing engine from overwriting ecosystem selection
@@ -10451,13 +10648,21 @@ function EngineeringPageInner() {
                             }
                           }
                           updateConfig(updates);
-                          const appliedCount = Object.values(payload.selections).filter(Boolean).length;
-                          setAutoLoadBanner(
+                          // Count what was APPLIED, not what was offered: the retired `gatewayId`
+                          // and the EV charger were counted here and applied nowhere, and a battery
+                          // is applied only when one is enabled. The Envoy counts once the store
+                          // has actually recorded it.
+                          const appliedCount = (updates.inverters ? 1 : 0) + (updates.batteryId ? 1 : 0);
+                          const ecoBanner = (n: number) =>
                             `\u2713 Applied ${payload.brand.toUpperCase()} ecosystem \u2014 ` +
-                            `${appliedCount} component${appliedCount !== 1 ? 's' : ''} configured. ` +
-                            `Manual dropdowns remain editable below.`
-                          );
+                            `${n} component${n !== 1 ? 's' : ''} configured. ` +
+                            `Manual dropdowns remain editable below.`;
+                          setAutoLoadBanner(ecoBanner(appliedCount));
                           setTimeout(() => setAutoLoadBanner(null), 6000);
+                          recordEcosystemCombiner(() => {
+                            setAutoLoadBanner(ecoBanner(appliedCount + 1));
+                            setTimeout(() => setAutoLoadBanner(null), 6000);
+                          });
                           // v61.3 P-09: ecosystem apply changes inverterId/type but leaves
                           // strings[] stale. Only AUTO may silently rebuild strings via the
                           // (whole-project) sizing recommendation — in GUIDED/MANUAL the user
@@ -11202,8 +11407,11 @@ function EngineeringPageInner() {
                                         </div>
                                         <div>
                                           <label className="eng-label">Panel Model</label>
+                                          {/* One model for the whole micro array: the pick lands on
+                                              EVERY panel group, not only strings[0]. */}
                                           <select value={inv.strings[0]?.panelId ?? 'qcells-peak-duo-400'}
-                                            onChange={e => updateString(inv.id, inv.strings[0]?.id ?? '', { panelId: e.target.value })}
+                                            onChange={e => updateAllStrings(inv.id, { panelId: e.target.value })}
+                                            title={inv.strings.length > 1 ? `Applies to all ${inv.strings.length} panel groups` : undefined}
                                             className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none">
                                             {SOLAR_PANELS.map(p => <option key={p.id} value={p.id}>{p.manufacturer} {p.model}</option>)}
                                           </select>
@@ -11685,12 +11893,22 @@ function EngineeringPageInner() {
                           ship a BOM naming a different device. */}
                       <div className="grid grid-cols-2 gap-2.5">
                         <CombinerSelector
+                          key={combinerSelectionEpoch}
                           projectId={currentProjectId}
                           visible={!!computedSystem?.isMicro || config.inverters.some(i => i.type === 'micro')}
                           // The micro this design uses — only for the catalogue-pairing
                           // note (never the Design Studio's string-inverter default).
-                          inverterId={config.inverters.find(i => i.type === 'micro' && getMicroinverterById(i.inverterId))?.inverterId ?? null}
-                          onSelectionChanged={(id) => { setProjectCombinerId(id); setSldSvg(''); }}
+                          // pageMicro: the same catalogue-default fallback the BOM and
+                          // the CT control use, so a stale id on a micro entry pairs
+                          // against the micro the BOM is actually pricing.
+                          inverterId={pageMicro?.id ?? null}
+                          onSelectionChanged={(id) => {
+                            // The selector reports on every load, not only on a pick;
+                            // only a DIFFERENT device makes the cached SLD stale.
+                            if (id !== projectCombinerIdRef.current) setSldSvg('');
+                            projectCombinerIdRef.current = id;
+                            setProjectCombinerId(id);
+                          }}
                         />
                         <div>
                           <label className="eng-label">System Type</label>
@@ -11804,19 +12022,54 @@ function EngineeringPageInner() {
                                 onChange={e => updateConfig({ consumptionCtLocation: e.target.value as ProjectConfig['consumptionCtLocation'] })}
                               >
                                 <option value="">Auto — per interconnection method</option>
-                                {CONSUMPTION_CT_LOCATIONS.map((loc: ConsumptionCtLocation) => (
-                                  <option key={loc} value={loc}
-                                    disabled={loc === 'between-tap-and-main' && config.interconnectionMethod !== 'SUPPLY_SIDE_TAP'}>
-                                    {consumptionCtLocationLabel(loc)}
-                                  </option>
-                                ))}
+                                {CONSUMPTION_CT_LOCATIONS.map((loc: ConsumptionCtLocation) => {
+                                  // Information, never a gate (Ray, 2026-09-25): on a
+                                  // supply-side tap the CT table gives this clamp no mode
+                                  // (the tap lands on the very span the CTs occupy), so the
+                                  // option says so — and stays selectable. Read from the
+                                  // same table the composer uses, not restated here.
+                                  const _side = pvConnectionSide(config.interconnectionMethod ?? 'LOAD_SIDE');
+                                  const _noMode = _side === 'supply-side'
+                                    && deriveConsumptionMeteringMode(consumptionCtBoundaryFor(loc, _side), _side) === 'INDETERMINATE';
+                                  return (
+                                    <option key={loc} value={loc}
+                                      disabled={loc === 'between-tap-and-main' && config.interconnectionMethod !== 'SUPPLY_SIDE_TAP'}>
+                                      {consumptionCtLocationLabel(loc)}{_noMode ? ' (mode indeterminate on a supply-side tap)' : ''}
+                                    </option>
+                                  );
+                                })}
                               </select>
-                              <p className={`text-[10px] mt-1 ${pageMetering.meteringDrawing?.scheduleRow ? 'text-slate-400' : 'text-rose-300'}`}>
-                                {pageMetering.meteringDrawing?.scheduleRow
-                                  ?? (pageMetering.metering.consumptionMeteringProvided
-                                    ? 'INDETERMINATE — that location gives no valid metering mode for this interconnection.'
-                                    : 'This combiner does not provide consumption metering.')}
-                              </p>
+                              {(() => {
+                                // 🚨 A SCHEDULE ROW IS NOT A RESOLVED MODE. An INDETERMINATE
+                                // placement (a supply-side tap with the CTs on the service
+                                // conductors ahead of the main) still yields a row, ending
+                                // "… · MODE TBD", and keying the colour on the row's presence
+                                // showed that warning in neutral slate. It takes the page's
+                                // warning colour, like the no-row cases below.
+                                const _drw = pageMetering?.meteringDrawing ?? null;
+                                const _row = _drw?.scheduleRow ?? null;
+                                const _tbd = _drw?.consumption?.mode === 'INDETERMINATE' || (_row ?? '').includes('MODE TBD');
+                                // No combiner decided ⇒ the device these CTs belong to is the
+                                // catalogue default. Said here the way COMB-1 and CT-1 say it,
+                                // so the hint never names a box as though someone chose it.
+                                const _defaultDevice = pageMetering?.combinerSelectionIsDecided === false
+                                  ? (pageMetering.combinerModel ?? null) : null;
+                                return (
+                                  <>
+                                    <p className={`text-[10px] mt-1 ${_row && !_tbd ? 'text-slate-400' : 'text-rose-300'}`}>
+                                      {_row
+                                        ?? (pageMetering?.metering?.consumptionMeteringProvided
+                                          ? 'INDETERMINATE — that location gives no valid metering mode for this interconnection.'
+                                          : 'This combiner does not provide consumption metering.')}
+                                    </p>
+                                    {_defaultDevice ? (
+                                      <p className="text-[10px] mt-0.5 text-amber-300/80">
+                                        Device: {_defaultDevice} — catalogue default, not selected.
+                                      </p>
+                                    ) : null}
+                                  </>
+                                );
+                              })()}
                             </div>
                           ) : null}
 
@@ -13852,6 +14105,9 @@ function EngineeringPageInner() {
                                 // The installer's recorded choice travels with
                                 // the EXPORT too. The exported sheet is the one
                                 // that reaches the permit package.
+                                // The project, so the route reads the RECORDED combiner
+                                // itself; the copy below is only the fallback.
+                                projectId: currentProjectId || undefined,
                                 selectedCombinerId: projectCombinerId || undefined,
                                 // Same five-branch resolution `fetchSLDSvg` already
                                 // uses. The old two-branch micro/string test drew
@@ -13866,8 +14122,11 @@ function EngineeringPageInner() {
                                   : 'STRING_INVERTER',
                                 totalModules: totalPanels,
                                 totalStrings: computedSystem.isMicro ? 0 : (computedSystem.strings?.length ?? 1),
-                                inverterManufacturer: (() => { const inv = config.inverters[0]; const d = getInvById(inv?.inverterId, inv?.type) as any; return d?.manufacturer || (computedSystem.isMicro ? 'Enphase' : 'SolarEdge'); })(),
-                                inverterModel: (() => { const inv = config.inverters[0]; const d = getInvById(inv?.inverterId, inv?.type) as any; return d?.model || (computedSystem.isMicro ? 'IQ8+' : 'SE7600H'); })(),
+                                // A micro resolves through pageMicro — the same unit
+                                // `fetchSLDSvg`, the CT control and the BOM use — rather
+                                // than a literal that only happens to equal it today.
+                                inverterManufacturer: (() => { const inv = config.inverters[0]; const d = (inv?.type === 'micro' ? pageMicro : getInvById(inv?.inverterId, inv?.type)) as any; return d?.manufacturer || (computedSystem.isMicro ? 'Enphase' : 'SolarEdge'); })(),
+                                inverterModel: (() => { const inv = config.inverters[0]; const d = (inv?.type === 'micro' ? pageMicro : getInvById(inv?.inverterId, inv?.type)) as any; return d?.model || (computedSystem.isMicro ? 'IQ8+' : 'SE7600H'); })(),
                                 acOutputKw: Number(totalInverterKw),
                                 acOutputAmps: Math.round(Number(totalInverterKw) * 1000 / 240),
                                 acOCPD: csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
@@ -14523,9 +14782,26 @@ function EngineeringPageInner() {
                         // (Ray, 2026-09-25).
                         let row = row0;
                         if (/^COMB-/.test(row0.tag) && /enphase/i.test(row0.manufacturer || 'enphase')) {
-                          const d = projectCombinerId ? listCombiners().find(c => c.id === projectCombinerId) : undefined;
-                          row = { ...row0, manufacturer: d?.brand ?? row0.manufacturer,
-                                  model: d ? d.model : 'Not selected — see System Configuration' };
+                          if (pageMetering) {
+                            // 🚨 THE SCHEDULE NAMES WHAT THE DRAWINGS DRAW. pageMetering is
+                            // the same sldCombinerFields answer the Diagram SLD, the SLD
+                            // PDF and the permit preview resolve — including the legacy
+                            // `config.combinerId` session override they still send, which
+                            // the resolver treats as DECIDED. Reading projectCombinerId
+                            // alone printed "Not selected" beside a drawing naming that
+                            // override, and beside a CT-1 row naming the catalogue default.
+                            const _b = pageMetering.plan.brains ?? pageMetering.plan.devices[0];
+                            row = { ...row0, manufacturer: _b?.brand ?? row0.manufacturer,
+                                    model: pageMetering.combinerSelectionIsDecided
+                                      // A selected id the catalogue does not know is shown AS
+                                      // THE ID, as the Diagram tab's badge shows it.
+                                      ? (_b ? _b.model : (projectCombinerId || 'Selected device unavailable'))
+                                      : `Not selected — see System Configuration${_b ? ` (catalogue default: ${_b.model})` : ''}` };
+                          } else {
+                            const d = projectCombinerId ? listCombiners().find(c => c.id === projectCombinerId) : undefined;
+                            row = { ...row0, manufacturer: d?.brand ?? row0.manufacturer,
+                                    model: d ? d.model : 'Not selected — see System Configuration' };
+                          }
                         } else if (/^AC-DISC-/.test(row0.tag) && !subSystemCounts.isHybrid) {
                           const _ocpd = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN')?.ocpdAmps;
                           if (_ocpd) {
@@ -14550,10 +14826,18 @@ function EngineeringPageInner() {
                       })}
                       {pageMetering?.meteringDrawing?.consumption ? (() => {
                         const c = pageMetering.meteringDrawing!.consumption!;
+                        // No combiner decided ⇒ the box these CTs ship in (or the
+                        // gateway they are ordered for) is the catalogue default —
+                        // qualified here exactly as COMB-1 qualifies it, so the two
+                        // rows never disagree about whether anyone chose it.
+                        const _dflt = pageMetering.combinerSelectionIsDecided ? '' : ' — catalogue default, not selected';
+                        const _where = c.supplied === 'in-box'
+                          ? `in ${pageMetering.combinerModel ?? 'combiner'} box${_dflt}`
+                          : `order separately — see BOM${_dflt && pageMetering.combinerModel ? `; for ${pageMetering.combinerModel}${_dflt}` : ''}`;
                         return (
                           <tr key="CT-1" className="bg-white">
                             <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">CT-1</td>
-                            <td className="border border-slate-200 px-2 py-1.5">Consumption CTs ({c.supplied === 'in-box' ? `in ${pageMetering.combinerModel ?? 'combiner'} box` : 'order separately — see BOM'})</td>
+                            <td className="border border-slate-200 px-2 py-1.5">Consumption CTs ({_where})</td>
                             <td className="border border-slate-200 px-2 py-1.5">{pageMetering.plan.brains?.brand ?? ''}</td>
                             <td className="border border-slate-200 px-2 py-1.5">Clamp CT</td>
                             <td className="border border-slate-200 px-2 py-1.5 text-right font-bold">{c.ctCount ?? '—'}</td>
@@ -15930,7 +16214,10 @@ function EngineeringPageInner() {
                                 dcAcRatio: calcDcAcRatio(parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw), parseFloat(totalInverterKw) || 0),
                                 topology: topologyType,
                                 inverters: config.inverters.map(inv => {
-                                  const invData = getInvById(inv.inverterId, inv.type) as any;
+                                  // Same stale-micro-id fallback as the downloaded package.
+                                  const invData = (inv.type === 'micro'
+                                    ? (getMicroinverterById(inv.inverterId) ?? MICROINVERTERS[0])
+                                    : getInvById(inv.inverterId, inv.type)) as any;
                                   return { manufacturer: invData?.manufacturer || '', model: invData?.model || '', type: inv.type, acOutputKw: invData?.acOutputKw || (invData?.acOutputW/1000) || 0, maxDcVoltage: invData?.maxDcVoltage || 480, efficiency: invData?.efficiency || 97, ulListing: invData?.ulListing || 'UL 1741', strings: inv.strings.map(str => { const panel = getPanelById(str.panelId) as any; return { label: str.label, panelCount: str.panelCount, panelManufacturer: panel?.manufacturer || '', panelModel: panel?.model || '', panelWatts: panel?.watts || 400, panelVoc: panel?.voc || 41.6, panelIsc: panel?.isc || 12.26, wireGauge: str.wireGauge, wireLength: str.wireLength }; }) };
                                 }),
                               },

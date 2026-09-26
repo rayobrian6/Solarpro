@@ -114,10 +114,15 @@ export interface CombinerSelectionRefusal {
   code:
     | 'DEVICE_REQUIRED'      // nothing was chosen
     | 'UNKNOWN_DEVICE'       // not in the BOS catalogue
+    | 'NOT_A_SELECTABLE_COMBINER' // in the catalogue, but not a combiner the picker offers (a bare IQ Gateway)
     | 'ACTOR_REQUIRED'       // nobody owns the decision
     | 'NO_ACTIVE_SELECTION'; // nothing to clear
     // (NOT_A_CANDIDATE / BASIS_REQUIRED / OVERRIDE_INCOMPLETE were removed on
-    //  2026-09-25: the installer's pick is not interrogated.)
+    //  2026-09-25: the installer's pick is not interrogated. NOT_A_SELECTABLE_
+    //  COMBINER is not one of those — it asks nothing of the installer and judges
+    //  no pairing; it declines to record a device class the drawings and the BOM
+    //  cannot carry as the combiner, e.g. a bare gateway the SLD would draw with
+    //  the branch breakers inside it.)
   message: string;
 }
 

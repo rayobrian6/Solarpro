@@ -18,8 +18,11 @@
 // to." ANY catalogue combiner is recorded on one pick, with no reason and no
 // authority required. Compatibility is still JUDGED and RECORDED — as
 // information on the record — and never as a gate. The only refusals left are
-// the ones that mean there is nothing to record: no device, no actor, or an id
-// the catalogue does not know (the picker only offers catalogue devices).
+// the ones that mean there is nothing to record: no device, no actor, an id
+// the catalogue does not know (the picker only offers catalogue devices), or a
+// catalogue device that is not one of the selectable combiners (a bare IQ
+// Gateway — the picker does not offer it either, because no consumer can draw
+// and buy it as the combiner).
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { canonicalCombinerId } from '@/lib/equipment/combinerIdentity';
@@ -53,6 +56,19 @@ export interface CombinerDeviceFacts {
   model: string;
   /** The permitting model number, when the catalogue carries one. Never invented. */
   modelNumber?: string | null;
+  /**
+   * 🚨 `false` ⇔ the catalogue knows this device but it is not one of the
+   * combiners the picker offers — a bare IQ Gateway (Envoy), a meter collar, a
+   * generic PV AC combiner panel. Recorded as the project's combiner, a bare
+   * gateway is drawn as the AC COMBINER with the branch breakers inside it while
+   * the BOM buys a gateway plus a fallback combiner, so it is declined rather
+   * than stored (see `listCombiners` in lib/equipment/integratedBos.ts).
+   *
+   * Absent ⇔ the reader did not say, and nothing is refused on it: only an
+   * explicit `false` refuses, so a reader that predates this fact behaves as it
+   * always did.
+   */
+  isSelectableCombiner?: boolean;
 }
 
 /**
@@ -208,6 +224,23 @@ export function planCombinerSelection(args: {
     refusals.push({
       code: 'UNKNOWN_DEVICE',
       message: `${deviceId} is not in the BOS catalogue, so nothing is known about what it is or what it provides.`,
+    });
+  }
+  // A device CLASS fact, not a judgement of the installer: nothing is asked and
+  // no pairing is consulted. A gateway with no busbar cannot be the box the
+  // branch circuits land in, and recording it as one draws what the BOM does not
+  // buy. For Enphase each IQ Combiner has the IQ Gateway built in; that is the
+  // Envoy choice. The pointer is brand-specific because the refused set is not:
+  // a Tesla Backup Switch or a generic PV AC combiner panel is declined here
+  // too, and Enphase advice is no answer to either.
+  if (device && device.isSelectableCombiner === false) {
+    const pointer = /enphase/i.test(device.manufacturer)
+      ? 'Choose the IQ Combiner being fitted — each has the IQ Gateway (Envoy) built in.'
+      : 'Choose one of the offered combiners.';
+    refusals.push({
+      code: 'NOT_A_SELECTABLE_COMBINER',
+      message: `${device.manufacturer} ${device.model} is not one of the combiners the drawings and the BOM can carry `
+        + `as this project's combiner, so it cannot be recorded as one. ${pointer}`,
     });
   }
 

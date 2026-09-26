@@ -16,6 +16,23 @@
 //   • Never writes to config directly — only calls onApply callback.
 //   • Never auto-fires — user must click Apply.
 //   • Hides itself entirely if no brand is selected.
+//
+// 🚨 THE ENVOY ROW (Ray, 2026-09-25: "whatever Envoy I want").
+// This row used to auto-select the kit's first MONITORING gateway — for Enphase
+// the bare IQ Gateway — and emit it as `gatewayId`. No design field holds that
+// id, the page applied only the inverter and the battery, and the banner
+// counted it as "configured": the installer's Envoy pick went nowhere. A bare
+// IQ Gateway cannot simply be stored as the combiner either — the SLD would draw
+// it as the AC COMBINER with the branches landing inside it, and the BOM would
+// buy something else (see `listCombiners` in lib/equipment/integratedBos.ts).
+// So for a brand whose BOS catalogue has integrated combiners the Envoy choice
+// is WHICH IQ Combiner — each has the IQ Gateway built in — emitted as
+// `combinerId` for the page to record in the project's combiner selection. It
+// is NEVER auto-selected: an apply must not record a default as the installer's
+// decision. Other brands' monitoring gateways are shown for reference only,
+// because nothing downstream consumes a pick of one — and so is every brand's
+// when the host has not declared (via `currentCombinerId`) that it records the
+// pick, so the row can never promise what the host would throw away.
 // ═══════════════════════════════════════════════════════════════════════
 
 'use client';
@@ -26,6 +43,12 @@ import {
   ECOSYSTEM_BRANDS,
   type ResolvedBrandEquipment,
 } from '@/lib/system/brandProfiles/resolveBrandEquipment';
+import {
+  getBosDevice,
+  isSelectableCombiner,
+  listCombiners,
+  type BosDevice,
+} from '@/lib/equipment/integratedBos';
 import {
   Package,
   Battery,
@@ -46,7 +69,15 @@ export interface EcosystemApplyPayload {
   selections: {
     inverterId?: string;
     batteryId?: string;
-    gatewayId?: string;
+    /**
+     * 🚨 The Envoy the installer picked: a BOS combiner id (`isSelectableCombiner`
+     * is true — an IQ Combiner, IQ Gateway built in) for the page to record in
+     * `projects.selected_equipment.combinerSelection`, the store every drawing,
+     * the BOM and the permit read. Set ONLY on an explicit pick; absent means
+     * "leave the project's answer as it is". Replaces `gatewayId`, which carried
+     * a monitoring-gateway id nothing consumed.
+     */
+    combinerId?: string;
     evChargerId?: string;
   };
 }
@@ -59,17 +90,31 @@ export interface EcosystemPickerProps {
   appliedBrand?: string;
   /** Optional: hide the picker entirely (e.g., in manual mode). */
   hidden?: boolean;
+  /** The project's recorded combiner (the Envoy it already has; null ⇔ none),
+   *  so the Envoy row can say what an apply keeps when nothing else is picked.
+   *
+   *  🚨 PASSING IT — null included — IS THE HOST'S DECLARATION THAT IT RECORDS
+   *  `selections.combinerId` in the project's combiner selection on apply (the
+   *  engineering page POSTs it to /api/projects/[id]/combiner-selection). Left
+   *  undefined, the Envoy row is reference only and an apply never carries a
+   *  combinerId: a pick handed to a host that drops it — and whose banner then
+   *  counts it as "configured" — is exactly the defect this row was rebuilt for.
+   *  A host that reads the store is the host that writes it; one prop, so the
+   *  two cannot be wired apart. */
+  currentCombinerId?: string | null;
 }
 
 export default function EcosystemPicker({
   onApply,
   appliedBrand,
   hidden,
+  currentCombinerId,
 }: EcosystemPickerProps) {
   const [expandedBrand, setExpandedBrand] = useState<string | null>(null);
   const [selectedInverter, setSelectedInverter] = useState<string>('');
   const [selectedBattery, setSelectedBattery] = useState<string>('');
-  const [selectedGateway, setSelectedGateway] = useState<string>('');
+  // No auto-selection, ever — see the header. '' ⇔ keep the project's answer.
+  const [selectedCombiner, setSelectedCombiner] = useState<string>('');
   const [selectedEvCharger, setSelectedEvCharger] = useState<string>('');
   const [includeBattery, setIncludeBattery] = useState(true);
   const [expertMode, setExpertMode] = useState(false);
@@ -79,17 +124,31 @@ export default function EcosystemPicker({
     return resolveBrandEquipment(expandedBrand);
   }, [expandedBrand]);
 
-  // Auto-select defaults whenever brand or includeBattery changes
+  // Does the host record an Envoy pick? See `currentCombinerId`. `null` is a
+  // real answer ("nothing recorded yet"); only `undefined` means "not wired".
+  const hostRecordsEnvoy = currentCombinerId !== undefined;
+
+  // The Envoy choices for this brand: its integrated combiners (Enphase: the IQ
+  // Combiners), i.e. exactly what the combiner-selection store accepts. Empty
+  // for a brand with none — and for a host that does not record the pick — which
+  // then shows the brand's monitoring gateway for reference only.
+  const combinerChoices = useMemo(
+    () => (expandedBrand && hostRecordsEnvoy ? listCombiners(expandedBrand) : []),
+    [expandedBrand, hostRecordsEnvoy],
+  );
+
+  // Auto-select defaults whenever brand or includeBattery changes. There is no
+  // Envoy default: a default recorded by an apply would read as the installer's
+  // decision on every sheet (`combinerBasis: 'project-selected'`).
   const autoSelections = useMemo(() => {
-    if (!expandedBrand || !kit) return { inverter: '', battery: '', gateway: '', evCharger: '' };
+    if (!expandedBrand || !kit) return { inverter: '', battery: '', evCharger: '' };
     const firstInv =
       kit.microinverters[0]?.id ||
       kit.stringInverters[0]?.id ||
       kit.optimizers[0]?.id ||
       '';
     const firstBattery = includeBattery ? (kit.batteries[0]?.id || '') : '';
-    const firstGateway = kit.monitoringGateways[0]?.id || '';
-    return { inverter: firstInv, battery: firstBattery, gateway: firstGateway, evCharger: '' };
+    return { inverter: firstInv, battery: firstBattery, evCharger: '' };
   }, [expandedBrand, kit, includeBattery]);
 
   // Sync selections from auto-selection when not in expert mode
@@ -97,18 +156,20 @@ export default function EcosystemPicker({
     if (!expertMode) {
       setSelectedInverter(autoSelections.inverter);
       setSelectedBattery(autoSelections.battery);
-      setSelectedGateway(autoSelections.gateway);
       setSelectedEvCharger(autoSelections.evCharger);
     }
   }, [autoSelections, expertMode]);
 
-  // Reset sub-selections whenever brand changes
+  // Reset sub-selections whenever brand changes. The Envoy pick is reset on
+  // EVERY brand change, not only on collapse: it is not part of the auto-sync
+  // above, and one brand's IQ Combiner must not ride along into another brand's
+  // apply.
   const handleBrandToggle = (brandId: string) => {
+    setSelectedCombiner('');
     if (expandedBrand === brandId) {
       setExpandedBrand(null);
       setSelectedInverter('');
       setSelectedBattery('');
-      setSelectedGateway('');
       setSelectedEvCharger('');
       return;
     }
@@ -124,7 +185,10 @@ export default function EcosystemPicker({
       selections: {
         inverterId: selectedInverter || undefined,
         batteryId: selectedBattery || undefined,
-        gatewayId: selectedGateway || undefined,
+        // Only a storable, explicitly picked device, and only to a host that
+        // records it — anything else would be dropped by the page or refused by
+        // the store, and a dropped pick is the defect this row was rebuilt for.
+        combinerId: isSelectableCombiner(selectedCombiner) && hostRecordsEnvoy ? selectedCombiner : undefined,
         evChargerId: selectedEvCharger || undefined,
       },
     });
@@ -202,8 +266,10 @@ export default function EcosystemPicker({
             setSelectedInverter={setSelectedInverter}
             selectedBattery={selectedBattery}
             setSelectedBattery={setSelectedBattery}
-            selectedGateway={selectedGateway}
-            setSelectedGateway={setSelectedGateway}
+            combinerChoices={combinerChoices}
+            selectedCombiner={selectedCombiner}
+            setSelectedCombiner={setSelectedCombiner}
+            currentCombinerId={currentCombinerId ?? null}
             selectedEvCharger={selectedEvCharger}
             setSelectedEvCharger={setSelectedEvCharger}
             onApply={handleApply}
@@ -216,6 +282,10 @@ export default function EcosystemPicker({
             includeBattery={includeBattery}
             setIncludeBattery={setIncludeBattery}
             autoSelections={autoSelections}
+            combinerChoices={combinerChoices}
+            selectedCombiner={selectedCombiner}
+            setSelectedCombiner={setSelectedCombiner}
+            currentCombinerId={currentCombinerId ?? null}
             onApply={handleApply}
             onExpertMode={() => setExpertMode(true)}
             canApply={Boolean(onApply)}
@@ -233,7 +303,11 @@ interface SimplifiedKitPanelProps {
   kit: ResolvedBrandEquipment;
   includeBattery: boolean;
   setIncludeBattery: (v: boolean) => void;
-  autoSelections: { inverter: string; battery: string; gateway: string; evCharger: string };
+  autoSelections: { inverter: string; battery: string; evCharger: string };
+  combinerChoices: BosDevice[];
+  selectedCombiner: string;
+  setSelectedCombiner: (v: string) => void;
+  currentCombinerId: string | null;
   onApply: () => void;
   onExpertMode: () => void;
   canApply: boolean;
@@ -246,6 +320,10 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
     includeBattery,
     setIncludeBattery,
     autoSelections,
+    combinerChoices,
+    selectedCombiner,
+    setSelectedCombiner,
+    currentCombinerId,
     onApply,
     onExpertMode,
     canApply,
@@ -261,11 +339,13 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
   ];
   const selectedInv = allInverters.find((i) => i.id === autoSelections.inverter);
   const selectedBat = kit.batteries.find((b) => b.id === autoSelections.battery);
-  const selectedGw = kit.monitoringGateways.find((g) => g.id === autoSelections.gateway);
+  // Reference only (a brand with no integrated combiner, or a host that does not
+  // record the pick): nothing records it.
+  const referenceGw = combinerChoices.length === 0 ? kit.monitoringGateways[0] : undefined;
 
   const isBatteryOnlyEcosystem = allInverters.length === 0;
   const hasNonInverterSelection = Boolean(
-    autoSelections.battery || autoSelections.gateway || autoSelections.evCharger
+    autoSelections.battery || selectedCombiner || autoSelections.evCharger
   );
   const canActuallyApply = isBatteryOnlyEcosystem
     ? canApply && hasNonInverterSelection
@@ -279,7 +359,7 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
         Your {brandName} System
       </div>
 
-      {/* Battery toggle — the only user decision besides brand */}
+      {/* Battery toggle — a user decision beside brand (the Envoy row below is the other) */}
       {kit.batteries.length > 0 ? (
         <label className="flex items-center gap-3 cursor-pointer group">
           <div className={`
@@ -338,16 +418,27 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
           </div>
         ) : null}
 
-        {/* Gateway */}
-        {selectedGw ? (
+        {/* Envoy — which IQ Combiner (gateway built in), recorded on the project */}
+        {combinerChoices.length > 0 ? (
+          <div className="flex items-start gap-2 text-sm text-slate-200">
+            <Wifi size={14} className="text-cyan-300 flex-shrink-0 mt-1.5" />
+            <div className="flex-1 min-w-0">
+              <EnvoyCombinerSelect
+                choices={combinerChoices}
+                value={selectedCombiner}
+                onChange={setSelectedCombiner}
+                currentCombinerId={currentCombinerId}
+              />
+            </div>
+          </div>
+        ) : referenceGw ? (
+          // Was tagged "Auto-selected" beside a green tick, and nothing applied it.
           <div className="flex items-center gap-2 text-sm text-slate-200">
             <Wifi size={14} className="text-cyan-300 flex-shrink-0" />
             <span className="flex-1">
-              {selectedGw.manufacturer} {selectedGw.model}
+              {referenceGw.manufacturer} {referenceGw.model}
             </span>
-            <span className="text-[11px] text-emerald-400/80 flex items-center gap-1">
-              <CheckCircle2 size={10} /> Auto-selected
-            </span>
+            <span className="text-[11px] text-slate-500">for reference</span>
           </div>
         ) : null}
       </div>
@@ -429,8 +520,10 @@ interface KitPanelProps {
   setSelectedInverter: (v: string) => void;
   selectedBattery: string;
   setSelectedBattery: (v: string) => void;
-  selectedGateway: string;
-  setSelectedGateway: (v: string) => void;
+  combinerChoices: BosDevice[];
+  selectedCombiner: string;
+  setSelectedCombiner: (v: string) => void;
+  currentCombinerId: string | null;
   selectedEvCharger: string;
   setSelectedEvCharger: (v: string) => void;
   onApply: () => void;
@@ -445,8 +538,10 @@ function EcosystemKitPanel(props: KitPanelProps) {
     setSelectedInverter,
     selectedBattery,
     setSelectedBattery,
-    selectedGateway,
-    setSelectedGateway,
+    combinerChoices,
+    selectedCombiner,
+    setSelectedCombiner,
+    currentCombinerId,
     selectedEvCharger,
     setSelectedEvCharger,
     onApply,
@@ -485,7 +580,7 @@ function EcosystemKitPanel(props: KitPanelProps) {
   // choice is preserved (parent handler only touches inverterId if present).
   const isBatteryOnlyEcosystem = allInverters.length === 0;
   const hasNonInverterSelection = Boolean(
-    selectedBattery || selectedGateway || selectedEvCharger
+    selectedBattery || selectedCombiner || selectedEvCharger
   );
   const canActuallyApply = isBatteryOnlyEcosystem
     ? canApply && hasNonInverterSelection
@@ -542,26 +637,37 @@ function EcosystemKitPanel(props: KitPanelProps) {
         </KitRow>
       ) : null}
 
-      {/* Monitoring Gateway */}
-      {kit.monitoringGateways.length > 0 ? (
+      {/* Envoy — which IQ Combiner (gateway built in), recorded on the project.
+          A brand with no integrated combiner, or a host that does not record
+          the pick, shows the monitoring gateway for reference only: that
+          <select> used to emit an id nothing consumed. */}
+      {combinerChoices.length > 0 ? (
         <KitRow
           icon={<Wifi size={13} className="text-cyan-300" />}
-          label="Monitoring Gateway"
-          count={kit.monitoringGateways.length}
+          label="Envoy / IQ Combiner"
+          count={combinerChoices.length}
         >
-          <select
-            value={selectedGateway}
-            onChange={(e) => setSelectedGateway(e.target.value)}
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-400"
-          >
-            <option value="">— None —</option>
-            {kit.monitoringGateways.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.manufacturer} {g.model}
-              </option>
-            ))}
-          </select>
+          <EnvoyCombinerSelect
+            choices={combinerChoices}
+            value={selectedCombiner}
+            onChange={setSelectedCombiner}
+            currentCombinerId={currentCombinerId}
+          />
         </KitRow>
+      ) : kit.monitoringGateways.length > 0 ? (
+        <div className="rounded-lg bg-slate-800/40 border border-slate-700/50 p-3">
+          <div className="flex items-center gap-2 text-xs text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
+            <Wifi size={11} className="text-cyan-300" /> Monitoring Gateway
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {kit.monitoringGateways.map((g) => (
+              <Chip key={g.id} text={`${g.manufacturer} ${g.model}`} tone="slate" />
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1.5 italic">
+            For reference — not a design selection.
+          </div>
+        </div>
       ) : null}
 
       {/* EV Charger */}
@@ -692,6 +798,51 @@ function EcosystemKitPanel(props: KitPanelProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Envoy row ──────────────────────────────────────────────────────────
+
+/** Which IQ Combiner — the Envoy choice. One pick, no reason, no prompt (Ray,
+ *  2026-09-25); the page records it in the project's combiner selection on
+ *  Apply. The empty option is "leave the project's answer as it is", and it
+ *  NAMES that answer, so an apply never looks like it chose something it kept.
+ *  Rendered only for a host that records the pick (see `currentCombinerId`),
+ *  which is what lets the line under it make the promise it makes. */
+function EnvoyCombinerSelect({
+  choices,
+  value,
+  onChange,
+  currentCombinerId,
+}: {
+  choices: BosDevice[];
+  value: string;
+  onChange: (v: string) => void;
+  currentCombinerId: string | null;
+}) {
+  const current = currentCombinerId ? getBosDevice(currentCombinerId) : undefined;
+  const keepLabel = currentCombinerId
+    ? `— keep ${current ? `${current.brand} ${current.model}` : currentCombinerId} —`
+    : '— leave unselected —';
+  return (
+    <>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-400"
+      >
+        <option value="">{keepLabel}</option>
+        {choices.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.brand} {c.model}
+          </option>
+        ))}
+      </select>
+      <div className="text-[11px] text-slate-500 mt-1">
+        Each IQ Combiner has the IQ Gateway (Envoy) built in. Your pick becomes the
+        project&apos;s combiner on every drawing and the BOM.
+      </div>
+    </>
   );
 }
 
