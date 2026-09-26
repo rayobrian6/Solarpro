@@ -182,6 +182,27 @@ describe('the live Braidon package', () => {
     const roof = (snap.electrical.routeSegments ?? []).find(r => r.segmentId === 'ROOF_RUN')!;
     expect(roof.oneWayFt).toBe(22);            // the estimate, unchanged
     expect(roof.lengthSource).toBe('cad-derived-estimate');
-    expect(roof.designMaxOneWayFt).toBe(26);   // the design limit, additional
+    // ══ RE-AIMED 2026-09-26 — THIS ASSERTION PINNED A MISCLASSIFICATION ════════
+    //
+    // It expected 26 FT. 26 is the bound at a **2 %** limit, which is
+    // `ROUTE_VD_LIMIT_PCT.branch` — the module-level AC branch target. `ROOF_RUN`
+    // is the DC lead from a PV module to its microinverter: a PV SOURCE CIRCUIT.
+    // `vdLimitPctForSegment` matched neither its BRANCH pattern nor its feeder
+    // pattern and DEFAULTED the run to `branch`, so the drawing printed a maximum
+    // length derived from the AC branch-circuit target for a DC circuit the engine
+    // sizes against `maxDCVoltageDropPct` (3 %).
+    //
+    // 39 = 26 × 3/2 exactly — the same conductor, the same current, the same
+    // voltage, graded against the limit that actually governs it. Voltage drop is
+    // linear in length, which is why the ratio is clean, and that cleanliness is
+    // what makes this a discriminating number rather than a re-typed one.
+    //
+    // The old value was not "wrong arithmetic"; it was correct arithmetic about
+    // the wrong limit, which is exactly the class this campaign keeps finding.
+    expect(roof.designMaxOneWayFt).toBe(39);   // the design limit at the 3% DC target
+    // ANTI-VACUITY: 39 is the DC target's bound, not a looser default. A run the
+    // classifier does NOT recognise must still fail closed to the tighter 2 %.
+    expect(vdLimitPctForSegment('ROOF_RUN')).toBe(ROUTE_VD_LIMIT_PCT.dcSource);
+    expect(vdLimitPctForSegment('SOME_UNCLASSIFIED_RUN')).toBe(ROUTE_VD_LIMIT_PCT.branch);
   });
 });

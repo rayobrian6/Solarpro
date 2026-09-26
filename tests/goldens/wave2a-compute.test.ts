@@ -224,15 +224,52 @@ describe('computeMultiSystem N=3 hybrid — Enphase roof 48 + Solis ground 26 + 
     expect(aggregate.segmentSchedule.filter(s => s.segmentType === 'MSP_TO_UTILITY').length).toBe(1);
   });
 
-  it('roof-only rooftop temp adder (I-7): roof runs derated at ambient+30, ground/fence at ambient', () => {
+  // ══ RE-AIMED 2026-09-26 — I-7 IS A SCOPE INVARIANT, AND IT STILL HOLDS ═══════
+  //
+  // This asserted `roofRun.tempDeratingFactor === getTempDerating(30 + 30)` — i.e.
+  // that the 30 °C rooftop adder is APPLIED to the roof sub's conductors. The
+  // invariant I-7 is about SCOPE (roof subs get the adder, ground and fence do
+  // not), and that is unchanged and still asserted below. What changed is whether
+  // the adder is applied AT ALL: NEC 310.15(B)(3)(c) was DELETED for PV circuits by
+  // NEC 2017 690.31(A) and is absent from the 2020/2023 editions, and
+  // `computeSystem` has ALWAYS known this — `_ambientStamp.rooftopAdderApplies`
+  // (computed-system.ts:990-993) gates it, and `makeRunSegment` stamped
+  // `rooftopAdderC: null` with the basis "no rooftop adder applied".
+  //
+  // 🚨 THE DEFECT THIS TEST WAS PINNING: the two sizing sums (`roofRunAmb`,
+  // `dcRunAmb`) added the adder UNCONDITIONALLY, bypassing that gate. So E-1
+  // printed an ampacity chain saying no adder applied, beside a
+  // `tempDeratingFactor` of 0.71 that could only have come from one — a published
+  // derivation that could not reproduce its own conclusion.
+  //
+  // DIRECTION: applying a deleted adder OVER-derates (0.71 vs 1.00 buys a larger
+  // conductor than the code requires). This is a cost correction, not a safety one.
+  //
+  // The re-aim is STRICTLY MORE DISCRIMINATING than the original: it pins the scope
+  // (which is what I-7 is), the gate (with no adopted edition, nothing is applied),
+  // AND that a genuinely pre-2017 edition still separates the two.
+  it('roof-only rooftop temp adder (I-7): the SCOPE still separates roof from ground/fence', () => {
     expect(roof.rooftopTempAdderC).toBe(30);
     expect(ground.rooftopTempAdderC).toBe(0);
     expect(fence.rooftopTempAdderC).toBe(0);
     const roofRun = aggregate.runMap[namespacedRunId('roof', 'ROOF_RUN') as RunSegmentId]!;
     const groundDc = aggregate.runMap[namespacedRunId('ground', 'DC_STRING_RUN') as RunSegmentId]!;
-    expect(roofRun.tempDeratingFactor).toBe(getTempDerating(30 + 30)); // 0.71
-    expect(groundDc.tempDeratingFactor).toBe(getTempDerating(30));    // 1.00
-    expect(groundDc.tempDeratingFactor).toBeGreaterThan(roofRun.tempDeratingFactor);
+    // No adopted NEC edition is supplied here, so 310.15(B)(3)(c) does not exist
+    // and NEITHER run carries an adder. Both derate at the design ambient.
+    expect(roofRun.tempDeratingFactor).toBe(getTempDerating(30));  // 1.00, not 0.71
+    expect(groundDc.tempDeratingFactor).toBe(getTempDerating(30)); // 1.00
+    // ANTI-VACUITY: prove the SCOPE is still live rather than collapsed. Under an
+    // edition that DOES contain the section, a roof run derates at ambient + adder
+    // and a non-roof run does not — which is the whole content of I-7.
+    const roofPre2017 = computeSystem({ ...csMicroInput(), rooftopTempAdderC: 30, ambientTempC: 30,
+      systemType: 'roof', necEdition: '2014' });
+    const groundPre2017 = computeSystem({ ...csMicroInput(), rooftopTempAdderC: 0, ambientTempC: 30,
+      systemType: 'ground', necEdition: '2014' });
+    const rp = roofPre2017.runMap['ROOF_RUN' as RunSegmentId]!;
+    const gp = groundPre2017.runMap['ROOF_RUN' as RunSegmentId]!;
+    expect(rp.tempDeratingFactor).toBe(getTempDerating(30 + 30)); // 0.71
+    expect(gp.tempDeratingFactor).toBe(getTempDerating(30));      // 1.00
+    expect(gp.tempDeratingFactor).toBeGreaterThan(rp.tempDeratingFactor);
   });
 
   it('runMap/facade contract: aggregate runs findable by namespaced id, stamped with their sub', () => {
@@ -353,7 +390,31 @@ describe('buildComputedRunsForPermit — per-subsystem opts (kills the hardcoded
     // 0.58 where NEC 310.15(B)(1) requires 0.41, a 29 % overstatement of ampacity in the
     // unsafe direction. The sibling case below already used `_fixtureAmbientC()` and
     // says in its own comment that the flat 40 is legacy; this one was simply missed.
-    expect(roofRun.tempDeratingFactor).toBe(getTempDerating(_fixtureAmbientC() + 33)); // legacy 33 °C adder preserved
+    // ══ RE-AIMED 2026-09-26 — THE LEGACY 33 IS STILL DERIVED, AND NOW GATED ═════
+    //
+    // This asserted `getTempDerating(_fixtureAmbientC() + 33)` — the 33 °C rooftop
+    // adder APPLIED. The adder is still derived for a roof project (the scope rule
+    // in computedRuns is unchanged), but NEC 310.15(B)(3)(c) was deleted for PV by
+    // NEC 2017 690.31(A) and this call supplies no pre-2017 adopted edition, so the
+    // engine's own gate (`_ambientStamp.rooftopAdderApplies`) does not apply it. The
+    // two sizing sums used to bypass that gate; they no longer do.
+    //
+    // The comment this replaces is worth keeping in view because it was RIGHT and
+    // is now moot on this fixture: at 43 + 33 = 76 °C the conductors were being
+    // derated at 0.58 where the completed NEC 310.15(B)(1) column requires 0.41.
+    // With the adder correctly absent, the run sits at 43 °C and derates at 0.87.
+    //
+    // What this test is actually named for — the LEGACY CALL SHAPE (service tail
+    // present, no subSystem stamps) — is asserted above and unchanged.
+    expect(roofRun.tempDeratingFactor).toBe(getTempDerating(_fixtureAmbientC()));
+    // ANTI-VACUITY: the adder is GATED, not deleted from the product. The same
+    // legacy call under a pre-2017 adopted edition still applies the legacy 33.
+    const pre2017 = buildComputedRunsForPermit(
+      { ...(input as object), compliance: { ...(input as { compliance?: object }).compliance,
+        jurisdiction: { state: 'IL', necVersion: '2014', ahj: 'test' } } } as never,
+      cad as never)!;
+    expect(pre2017.find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor)
+      .toBe(getTempDerating(_fixtureAmbientC() + 33));
   });
 
   it('scoped call: rooftop adder from env (0 for non-roof), tail suppressed, runs stamped', () => {
@@ -375,13 +436,26 @@ describe('buildComputedRunsForPermit — per-subsystem opts (kills the hardcoded
     expect(roofRun.tempDeratingFactor).toBe(getTempDerating(_amb)); // no roof bake for fence conductors
   });
 
+  // ══ RE-AIMED 2026-09-26 — same reason as the two above ══════════════════════
+  // The SCOPE DERIVATION (roof→33, fence→0) is what this test is named for and it
+  // is unchanged. Whether the derived adder is APPLIED is now the edition gate's
+  // call, and with no adopted pre-2017 edition it is not — so both scopes derate at
+  // the design ambient. The pre-2017 pair at the bottom keeps the derivation itself
+  // under test, so a regression that collapsed roof→0 would still be caught.
   it("scoped call without explicit adder derives it from systemType (roof→33, fence→0)", () => {
     const { input, cad } = mk();
     const roofScoped = buildComputedRunsForPermit(input, cad as never, { systemType: 'roof' })!;
     const fenceScoped = buildComputedRunsForPermit(input, cad as never, { systemType: 'fence' })!;
     const _amb = _fixtureAmbientC();
-    expect(roofScoped.find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(_amb + 33));
+    expect(roofScoped.find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(_amb));
     expect(fenceScoped.find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(_amb));
+    // ANTI-VACUITY — under a pre-2017 edition the derivation is visible again.
+    const pre = (st: string) => buildComputedRunsForPermit(
+      { ...(input as object), compliance: { ...(input as { compliance?: object }).compliance,
+        jurisdiction: { state: 'IL', necVersion: '2014', ahj: 'test' } } } as never,
+      cad as never, { systemType: st })!;
+    expect(pre('roof').find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(_amb + 33));
+    expect(pre('fence').find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(_amb));
   });
 
   it('panel subset: opts.totalPanels overrides the whole-project count', () => {

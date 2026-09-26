@@ -18,6 +18,12 @@ import { nextStandardOcpd } from './electrical/stdSizes';
 import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C,
   necAmbientCorrection90C, necConductorCountAdjustment } from '@/lib/nec/ampacity';
 import { CONDUCTOR_AREA_IN2 as NEC_CONDUCTOR_AREA_IN2 } from '@/lib/nec/chapter9';
+// NEC Chapter 9 Table 8 — the ONE circular-mil / DC-resistance table. The local
+// copy this replaced was byte-identical for all 13 AWG rows (so no number moves),
+// but it ended `?? 10380` — an unresolvable gauge silently became #10.
+import { circularMils as necCircularMils } from '@/lib/nec/table8';
+// NEC 310.15(B)(3)(c) — the ONE rooftop-adder gate (edition + per-segment scope).
+import { rooftopAmbientAdderC } from '@/lib/nec/rooftopAdder';
 import {
   normalizeConduitType as necNormalizeConduitType,
   conductorAreaIn2 as necConductorAreaIn2,
@@ -166,6 +172,31 @@ export interface SegmentScheduleInput {
   stringCurrentA: number;        // A — Isc × 1.25
   // Common AC
   systemVoltageAC: number;       // 240
+  // ══ 2026-09-26 — A DC STRING'S DROP WAS A PERCENTAGE OF THE AC SERVICE ══════
+  //
+  // 🚨 THERE WAS NO DC VOLTAGE ON THIS INTERFACE AT ALL. `buildSegmentSchedule`
+  // therefore handed `systemVoltageAC` (240) to the two DC segments' voltage-drop
+  // calls, and because computed-system back-populates `run.voltageDropPct` from
+  // this row, that number OVERWROTE the correct string-Vmp percentage the engine
+  // had already computed.
+  //
+  // A 200 ft #10 AWG string at 18 A drops 8.95 V. Against a 620 V string that is
+  // 1.44 % — comfortably inside the 3 % DC target. Divided by 240 it printed
+  // 3.73 %, which busted the target, set `voltageDropPass = false` and therefore
+  // `overallPass = false` on a design whose real drop is a third of the limit.
+  //
+  // 🚨 THIS IS THE STRING **Vmp**, NOT Voc. Voltage drop is an operating-point
+  // quantity: the current is the operating/short-circuit basis and the reference
+  // voltage is the maximum-power voltage the array actually runs at. Voc is the
+  // larger number, so referencing it would DIVIDE BY MORE and understate every
+  // DC percentage — the permissive direction. Vmp is also exactly what
+  // computed-system already uses for `DC_STRING_RUN.systemVoltage`
+  // (`strings[0].stringVmp`), so the two cannot disagree. Voc belongs to NEC
+  // 690.7 maximum-system-voltage work, which is a different question.
+  //
+  // REQUIRED, not optional: an omitted DC voltage is how the 240 V default
+  // happened. TypeScript now refuses a caller that does not supply one.
+  systemVoltageDC: number;       // V — string Vmp (NOT Voc); see above
   acOutputCurrentA: number;      // A — total system AC output
   mainPanelAmps: number;         // A — service panel rating (e.g. 200A) for MSP_TO_UTILITY sizing
   // Feeder sizing
@@ -186,7 +217,16 @@ export interface SegmentScheduleInput {
   };
   // Electrical environment
   ambientTempC: number;
+  /** The DECLARED rooftop-adder magnitude (°C). Whether it APPLIES is decided by
+   *  `lib/nec/rooftopAdder.ts` from the adopted edition and the segment's own
+   *  roof-ness — never by this number being non-zero. See `effectiveAmbient`. */
   rooftopTempAdderC: number;
+  /** The jurisdiction's ADOPTED NEC edition, for the rooftop-adder gate.
+   *  Absent ⇒ the gate does not invent a code requirement ⇒ adder 0. */
+  necEdition?: string | number | null;
+  /** Project system type ('roof' | 'ground' | 'fence' | …) — the scope half of
+   *  the rooftop-adder gate for segments that are not intrinsically on a roof. */
+  systemType?: string | null;
   maxACVoltageDropPct: number;
   maxDCVoltageDropPct: number;
 }
@@ -368,6 +408,43 @@ export function segmentVoltageDropPct(
   return calcVoltageDrop(currentA, onewayFt, gauge, voltageV, conductorCount);
 }
 
+/**
+ * 🚨 THE STRICT FORM — returns **null** when the gauge is not a Table 8 row.
+ *
+ * The local 13-row CMIL table this replaced was byte-identical to
+ * `lib/nec/table8.ts` for every row it had, so no computed number moves. What it
+ * also had was `?? 10380`: an unresolvable gauge silently became #10 AWG and
+ * produced a confident percentage about a conductor nobody could identify.
+ * `necCircularMils` returns null instead, and every caller below must decide what
+ * that means rather than inheriting a default.
+ *
+ * An unresolved drop must never READ AS A PASS — the same rule
+ * `lib/manufacturer-specs.calcVoltageDrop` was changed for this campaign.
+ */
+function calcVoltageDropOrNull(
+  currentA: number,
+  onewayFt: number,
+  gauge: string,
+  voltageV: number,
+  conductorCount: number = 2
+): number | null {
+  const cmil = necCircularMils(gauge);
+  if (cmil == null || !(cmil > 0)) return null;
+  if (!(voltageV > 0)) return null;
+  const resistivity = 12.9; // Ω·cmil/ft at 75°C copper
+  const resistance = (resistivity * onewayFt * conductorCount) / cmil;
+  const dropV = currentA * resistance;
+  return (dropV / voltageV) * 100;
+}
+
+/**
+ * The lenient form, kept for `segmentVoltageDropPct` (the exported UI annotator).
+ *
+ * It preserves the historical "#10 AWG fallback" for an unrecognised gauge —
+ * `tests/wireGaugeShowsItsConsequence.test.ts` asserts the UI annotation does not
+ * throw or go non-finite on one. That is a display path over a fixed gauge list;
+ * the SELECTION path uses `calcVoltageDropOrNull` and refuses.
+ */
 function calcVoltageDrop(
   currentA: number,
   onewayFt: number,
@@ -375,17 +452,9 @@ function calcVoltageDrop(
   voltageV: number,
   conductorCount: number = 2
 ): number {
-  const CMIL: Record<string, number> = {
-    '#14 AWG': 4110, '#12 AWG': 6530, '#10 AWG': 10380, '#8 AWG': 16510,
-    '#6 AWG': 26240, '#4 AWG': 41740, '#3 AWG': 52620, '#2 AWG': 66360,
-    '#1 AWG': 83690, '#1/0 AWG': 105600, '#2/0 AWG': 133100,
-    '#3/0 AWG': 167800, '#4/0 AWG': 211600,
-  };
-  const cmil = CMIL[gauge] ?? 10380;
-  const resistivity = 12.9; // Ω·cmil/ft at 75°C copper
-  const resistance = (resistivity * onewayFt * conductorCount) / cmil;
-  const dropV = currentA * resistance;
-  return (dropV / voltageV) * 100;
+  return calcVoltageDropOrNull(currentA, onewayFt, gauge, voltageV, conductorCount)
+    ?? calcVoltageDropOrNull(currentA, onewayFt, '#10 AWG', voltageV, conductorCount)
+    ?? 0;
 }
 
 // ─── Auto-size wire gauge ─────────────────────────────────────────────────────
@@ -394,18 +463,67 @@ function calcVoltageDrop(
 // It was module-private, so the only way to reach it from a test was through a full
 // segment schedule - and when its ampacity table disagreed with the one E-1 prints,
 // no test could see it. tests/necAmpacityIsSingleSourced.test.ts calls it directly.
+/**
+ * ══ 2026-09-26 — THE CONDUCTOR THAT SHIPS WAS CHOSEN WITH NO VOLTAGE-DROP CHECK ══
+ *
+ * 🚨 TWO SELECTORS, ONE SURVIVOR, AND THE SURVIVOR HAD THE WEAKER RULE.
+ * `computed-system.autoSizeWire` accepts a gauge only when
+ * `ampacityPass && vdropPass`. This function tested AMPACITY ONLY — and it is this
+ * one whose answer ships, because `computed-system.ts` back-populates
+ * `run.conductorBundle`, `run.conductorCallout`, `run.wireGauge` and
+ * `run.conduitSize` from the segment schedule. So the BOM ordered, and the sheet
+ * printed, a conductor the other selector had rejected.
+ *
+ * WORKED CASE — a 120 ft AC feeder at 32 A, 240 V, 2 % design target:
+ *   required ampacity  = 32 × 1.25 = 40 A
+ *   #8 AWG             = min(55 × 1.00 × 1.00, 50) = 50 A ≥ 40 A  → ACCEPTED
+ *   #8 voltage drop    = 32 × 12.9 × 120 × 2 / 16510 = 6.00 V = 2.50 % > 2 %
+ *   #6 AWG             = 1.57 %, and 65 A ≥ 40 A
+ * `autoSizeWire` would have returned #6. This returned #8, the BOM ordered #8, and
+ * the package then contradicted itself: the segment row carried
+ * `voltageDropPass = false → overallPass = false` (a red dot on the SLD conductor
+ * schedule) beside an E-1 conclusion that passed the same feeder. The design's
+ * stated 2 % target was unenforceable on every principal run.
+ *
+ * 🚨 WHY THE GATE WENT **HERE** AND NOT INTO THE BACK-POPULATION.
+ * The alternative repair was to stop the back-population overwriting a gauge that
+ * had been chosen against more constraints. That restores TWO surviving conductor
+ * selectors, which is the exact divergence class this campaign has spent itself
+ * closing (two NEC 310.16 tables, two Chapter 9 area tables, five copies of
+ * 310.16). One answer must reach the BOM, the SLD and the sheets — so the rule the
+ * discarded selector enforced is added to the surviving one, which STRICTLY
+ * strengthens it and leaves exactly one authority. This function is also exported
+ * and directly testable, where `autoSizeWire` is module-private.
+ *
+ * `vd` is optional so the existing direct callers
+ * (`tests/necAmpacityIsSingleSourced.test.ts`) keep working as an ampacity-only
+ * probe. EVERY call inside `buildSegmentSchedule` supplies it. An ABSENT `vd` is a
+ * caller choosing not to check; an UNRESOLVABLE drop is different, and never passes.
+ */
 export function autoSizeGauge(
   continuousCurrent: number,
   ambientC: number,
   currentCarryingCount: number,
   isDC: boolean = false,
-  startGauge: string = '#10 AWG'
-): { gauge: string; effectiveAmpacity: number; tempDerating: number; conduitDerating: number } {
+  startGauge: string = '#10 AWG',
+  vd?: {
+    /** one-way run length, ft */
+    onewayFt: number;
+    /** the circuit's OWN voltage — string Vmp on a DC run, never systemVoltageAC */
+    circuitVoltage: number;
+    /** the design target for this circuit (maxAC/maxDCVoltageDropPct) */
+    maxVDropPct: number;
+    /** conductors in the drop formula (2 for a 1Ø or DC pair) */
+    conductorCount?: number;
+  },
+): { gauge: string; effectiveAmpacity: number; tempDerating: number; conduitDerating: number;
+     voltageDropPct: number | null } {
   const requiredAmpacity = continuousCurrent * 1.25;
   const tempDerating = getTempDerating(ambientC);
   const conduitDerating = getConduitDerating(currentCarryingCount);
   const startIdx = Math.max(0, AWG_ORDER.indexOf(startGauge));
 
+  let lastVd: number | null = null;
   for (let i = startIdx; i < AWG_ORDER.length; i++) {
     const gauge = AWG_ORDER[i];
     // NEC 310.15(B)(2): For THWN-2 (90°C rated), derate from 90°C column,
@@ -415,11 +533,33 @@ export function autoSizeGauge(
     const amp75 = AMPACITY_75C[gauge] ?? 0;
     const derated = amp90 * tempDerating * conduitDerating;
     const effectiveAmpacity = isDC ? derated : Math.min(derated, amp75);
-    if (effectiveAmpacity >= requiredAmpacity) {
-      return { gauge, effectiveAmpacity, tempDerating, conduitDerating };
+    if (effectiveAmpacity < requiredAmpacity) continue;
+
+    if (!vd) return { gauge, effectiveAmpacity, tempDerating, conduitDerating, voltageDropPct: null };
+
+    const pct = calcVoltageDropOrNull(
+      continuousCurrent, vd.onewayFt, gauge, vd.circuitVoltage, vd.conductorCount ?? 2);
+    lastVd = pct;
+    // 🚨 A REFUSAL IS NOT A PASS. `null` means the conductor's circular-mil area
+    // could not be resolved, so no voltage drop has been computed — this gauge is
+    // not acceptable, and the loop moves on rather than treating "unknown" as 0.
+    if (pct == null) continue;
+    if (pct <= vd.maxVDropPct) {
+      return { gauge, effectiveAmpacity, tempDerating, conduitDerating, voltageDropPct: pct };
     }
   }
-  return { gauge: '#4/0 AWG', effectiveAmpacity: 230 * tempDerating * conduitDerating, tempDerating, conduitDerating };
+  // Nothing in the table satisfies BOTH constraints. Returning the largest
+  // tabulated conductor is the pre-existing behaviour; `buildSegment` recomputes
+  // the drop and reports `voltageDropPass: false`, so the deficiency is still
+  // stated on the row rather than hidden by the upsize.
+  return {
+    gauge: '#4/0 AWG',
+    effectiveAmpacity: 230 * tempDerating * conduitDerating,
+    tempDerating, conduitDerating,
+    voltageDropPct: vd
+      ? calcVoltageDropOrNull(continuousCurrent, vd.onewayFt, '#4/0 AWG', vd.circuitVoltage, vd.conductorCount ?? 2)
+      : lastVd,
+  };
 }
 
 // ─── Build Conductor Callout ──────────────────────────────────────────────────
@@ -521,15 +661,25 @@ function buildSegment(
     totalAreaIn2 = result.totalAreaIn2;
   }
 
-  // Voltage drop — use largest current-carrying gauge
+  // Voltage drop — use largest current-carrying gauge.
+  //
+  // `systemVoltage` is the CIRCUIT's own voltage: string Vmp on a DC segment,
+  // systemVoltageAC on an AC one. It used to be systemVoltageAC on every segment,
+  // which is what turned a 1.44 % DC string into a printed 3.73 %.
   const hotConductors = conductorBundle.filter(c => c.isCurrentCarrying && c.color !== 'GRN');
   const primaryGauge = hotConductors[0]?.gauge ?? '#10 AWG';
-  const vdropPct = calcVoltageDrop(continuousCurrent, onewayLengthFt, primaryGauge, systemVoltage, 2);
-  const vdropVolts = (vdropPct / 100) * systemVoltage;
+  const vdropPctOrNull = calcVoltageDropOrNull(continuousCurrent, onewayLengthFt, primaryGauge, systemVoltage, 2);
+  // 🚨 An unresolvable conductor has NO voltage drop, and "no voltage drop" must
+  // not read as a perfect one. `Infinity` fails every limit it meets, which is the
+  // honest verdict; 0 would have passed them all. Unreachable from
+  // `buildSegmentSchedule` today (every gauge it emits is a Table 8 row), so this
+  // guard changes no shipped number — it stops the next one.
+  const vdropPct = vdropPctOrNull ?? Number.POSITIVE_INFINITY;
+  const vdropVolts = Number.isFinite(vdropPct) ? (vdropPct / 100) * systemVoltage : Number.POSITIVE_INFINITY;
 
   const requiredAmpacity = continuousCurrent * 1.25;
   const ampacityPass = effectiveAmpacity >= requiredAmpacity;
-  const voltageDropPass = vdropPct <= maxVDropPct;
+  const voltageDropPass = vdropPctOrNull != null && vdropPct <= maxVDropPct;
   const conduitFillPass = isOpenAir || fillPercent <= 40;
 
   const conductorCallout = buildConductorCallout(conductorBundle, conduitSize, conduitType, isOpenAir);
@@ -575,8 +725,64 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
   const rl = input.runLengths;
   const conduitType = input.conduitType;
   const ambientC = input.ambientTempC;
-  const roofAmbC = input.ambientTempC + input.rooftopTempAdderC;
   const sysV = input.systemVoltageAC;
+  const dcV = input.systemVoltageDC;
+
+  // ══ 2026-09-26 — THE ROOFTOP ADDER'S SCOPE, THROUGH THE ONE GATE ═══════════
+  //
+  // 🚨 WHAT WAS HERE: `const roofAmbC = input.ambientTempC + input.rooftopTempAdderC;`
+  // — one unconditional sum, applied to the two OPEN-AIR segments (:677 micro
+  // branch, :772 DC string) and withheld from the two segments that continue IN
+  // CONDUIT off the same roof (:703, :798). That is the scope of NEC
+  // 310.15(B)(3)(c) backwards: the section was titled "Raceways and Cables
+  // Exposed to Sunlight on Rooftops" and never reached free-air single conductors.
+  //
+  // It was also UNGATED BY EDITION, which matters more. 310.15(B)(3)(c) was
+  // DELETED for PV circuits by NEC 2017 690.31(A) and is absent from the 2020 and
+  // 2023 editions; every state in `STATE_NEC` is on NEC 2020 or 2022. So on this
+  // product's own jurisdiction data the correct adder is ZERO everywhere, while
+  // computed-system's own ambient STAMP already said exactly that
+  // (`rooftopAdderBasis: 'no rooftop adder applied — … deleted by NEC 2017
+  // 690.31(A)'`) — the sheet stated no adder while this sizer applied 33 °C.
+  //
+  // 🚨 DIRECTION, stated plainly: applying a deleted adder OVER-derates. It buys a
+  // larger conductor than the code requires. This repair therefore makes some wire
+  // SMALLER (a cost correction), and is not a safety fix in the adopted editions.
+  //
+  // The decision is not re-implemented here. `lib/nec/rooftopAdder.ts` owns the
+  // edition gate and the per-segment scope; this keys it on the SEGMENT's own
+  // roof-ness rather than on which branch of the topology `if` the code sits in.
+  // Does this PROJECT have a roof surface for a conductor to sit on? The two
+  // mountings PV-4A itself names as N/A are excluded by name
+  // (lib/permit/sections/electricalPages.ts:1019/:1025 print "No rooftop
+  // temperature adder applies — ground-mounted / fence-mounted system"), and
+  // everything else — roof, carport, hybrid, and an UNRECORDED type — keeps the
+  // roof surface. An unrecorded type failing OPEN here would UNDER-derate a
+  // genuinely pre-2017 roof job, so the absent case is deliberately conservative.
+  const _mounting = String(input.systemType ?? '').trim().toLowerCase();
+  const _projectHasRoofSurface = _mounting !== 'ground' && _mounting !== 'fence';
+  /** @param segmentOnRoofSurface the SEGMENT's own property — is this raceway or
+   *  cable lying on a roof? Never "which branch of the topology `if` am I in". */
+  const effectiveAmbient = (segmentOnRoofSurface: boolean): number => {
+    const g = rooftopAmbientAdderC({
+      systemType: input.systemType ?? null,
+      necEdition: input.necEdition ?? null,
+      onRoof: segmentOnRoofSurface && _projectHasRoofSurface,
+    });
+    if (!(g.adderC > 0)) return input.ambientTempC;
+    // The gate owns WHETHER; the caller owns HOW MUCH when it declared a figure
+    // (Wave 2b `SubSystemEquipment.env.rooftopTempAdderC` is a per-subsystem env
+    // fact, not something this module may overwrite with a flat table row).
+    const declared = Number(input.rooftopTempAdderC);
+    const adderC = Number.isFinite(declared) && declared > 0 ? declared : g.adderC;
+    return input.ambientTempC + adderC;
+  };
+  // A CABLE on the roof surface (the Enphase Q-Cable AC trunk) IS within the
+  // section's scope; free-air single USE-2/PV conductors are not, and a raceway
+  // leaving the roof junction box IS.
+  const roofCableAmbC   = effectiveAmbient(true);
+  const roofRacewayAmbC = effectiveAmbient(true);
+  const freeAirDcAmbC   = effectiveAmbient(false);
 
   if (input.topology === 'micro') {
     // ── MICROINVERTER SYSTEM ──────────────────────────────────────────────────
@@ -673,8 +879,11 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       branchOcpd = Math.min(requiredOcpd, input.maxBranchOcpdA ?? 30); // cap at 30A (Enphase: 20A)
     }
 
-    // Auto-size branch conductor gauge (open air, no conduit derating)
-    const branchSizing = autoSizeGauge(branchCurrentA, roofAmbC, 2, false, '#10 AWG');
+    // Auto-size branch conductor gauge (open air, no conduit derating).
+    // The Q-Cable trunk is a CABLE on the roof surface — within 310.15(B)(3)(c)'s
+    // scope where the edition retains it (see `effectiveAmbient`).
+    const branchSizing = autoSizeGauge(branchCurrentA, roofCableAmbC, 2, false, '#10 AWG',
+      { onewayFt: rl.arrayToJbox, circuitVoltage: sysV, maxVDropPct: input.maxACVoltageDropPct });
     const branchGauge = branchSizing.gauge;
     const branchEgcGauge = getEGCGauge(branchOcpd);
 
@@ -689,7 +898,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       'ARRAY_TO_JBOX', 'PV ARRAY', 'JUNCTION BOX',
       'OPEN_AIR', seg1Bundle, rl.arrayToJbox,
       branchCurrentA, branchOcpd, conduitType,
-      roofAmbC, sysV, input.maxACVoltageDropPct,
+      roofCableAmbC, sysV, input.maxACVoltageDropPct,
       ['NEC 690.31', 'NEC 690.8(B)'],
       branchSizing.effectiveAmpacity, branchSizing.tempDerating, 1.0,
       nextSegId()
@@ -700,7 +909,10 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     // Current-carrying count for derating = branches × 2 (L1 + L2 per branch)
     const jboxCombinerCCC = branches * 2;
     const jboxCombinerDerating = getConduitDerating(jboxCombinerCCC);
-    const jboxCombinerSizing = autoSizeGauge(branchCurrentA, ambientC, jboxCombinerCCC, false, '#10 AWG');
+    // A RACEWAY leaving the roof junction box — this is what 310.15(B)(3)(c)
+    // actually covered, and it is the segment the adder used to be withheld from.
+    const jboxCombinerSizing = autoSizeGauge(branchCurrentA, roofRacewayAmbC, jboxCombinerCCC, false, '#10 AWG',
+      { onewayFt: rl.jboxToCombiner, circuitVoltage: sysV, maxVDropPct: input.maxACVoltageDropPct });
 
     const seg2Bundle: ConductorBundle[] = [
       { qty: branches, gauge: jboxCombinerSizing.gauge, color: 'BLK', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: branchCurrentA },
@@ -713,7 +925,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       _racewayEnum(conduitType),
       seg2Bundle, rl.jboxToCombiner,
       branchCurrentA, branchOcpd, conduitType,
-      ambientC, sysV, input.maxACVoltageDropPct,
+      roofRacewayAmbC, sysV, input.maxACVoltageDropPct,
       ['NEC 690.31', 'NEC 690.8(B)', 'NEC 310.15'],
       jboxCombinerSizing.effectiveAmpacity, jboxCombinerSizing.tempDerating, jboxCombinerDerating,
       nextSegId()
@@ -726,7 +938,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     // imbalance current and is required by NEC 200.3 and utility interconnection rules.
     // Lands on LOAD side of AC disconnect (combiner feeds load terminals).
     // NEC 200.3: neutral required for 120/240V split-phase; 3 current-carrying conductors (L1+L2+N)
-    const feederSizing = autoSizeGauge(totalCurrentA, ambientC, 3, false, '#10 AWG');
+    const feederSizing = autoSizeGauge(totalCurrentA, ambientC, 3, false, '#10 AWG',
+      { onewayFt: rl.combinerToDisco, circuitVoltage: sysV, maxVDropPct: input.maxACVoltageDropPct });
     const feederGauge = feederSizing.gauge;
     const feederOcpd = nextStandardOCPD(totalCurrentA * 1.25);
     const feederEgcGauge = getEGCGauge(feederOcpd);
@@ -768,8 +981,12 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     const strings = input.stringCount;
     const stringCurrentA = input.stringCurrentA; // already × 1.25 per NEC 690.8
 
-    // Auto-size string conductor gauge (open air, no conduit derating)
-    const stringSizing = autoSizeGauge(stringCurrentA, roofAmbC, 2, true, '#10 AWG');
+    // Auto-size string conductor gauge (open air, no conduit derating).
+    // FREE-AIR SINGLE CONDUCTORS (USE-2 / PV Wire) — NOT a raceway and NOT a
+    // cable, so NEC 310.15(B)(3)(c) never reached this run. And the voltage the
+    // drop is referenced to is the string's own Vmp, never the 240 V AC service.
+    const stringSizing = autoSizeGauge(stringCurrentA, freeAirDcAmbC, 2, true, '#10 AWG',
+      { onewayFt: rl.arrayToJbox, circuitVoltage: dcV, maxVDropPct: input.maxDCVoltageDropPct });
     const stringGauge = stringSizing.gauge;
     const stringOcpd = nextStandardOCPD(stringCurrentA * 1.25);
     const stringEgcGauge = getEGCGauge(stringOcpd);
@@ -785,7 +1002,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       'ARRAY_TO_JBOX', 'PV ARRAY', 'JUNCTION BOX',
       'OPEN_AIR', seg1Bundle, rl.arrayToJbox,
       stringCurrentA, stringOcpd, conduitType,
-      roofAmbC, sysV, input.maxDCVoltageDropPct,
+      freeAirDcAmbC, dcV, input.maxDCVoltageDropPct,
       ['NEC 690.31', 'NEC 690.8'],
       stringSizing.effectiveAmpacity, stringSizing.tempDerating, 1.0,
       nextSegId()
@@ -795,7 +1012,9 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     // Same bundle continues in conduit
     const jboxInvCCC = strings * 2;
     const jboxInvDerating = getConduitDerating(jboxInvCCC);
-    const jboxInvSizing = autoSizeGauge(stringCurrentA, ambientC, jboxInvCCC, true, '#10 AWG');
+    // A RACEWAY leaving the roof junction box — 310.15(B)(3)(c)'s actual scope.
+    const jboxInvSizing = autoSizeGauge(stringCurrentA, roofRacewayAmbC, jboxInvCCC, true, '#10 AWG',
+      { onewayFt: rl.jboxToInverter, circuitVoltage: dcV, maxVDropPct: input.maxDCVoltageDropPct });
 
     const seg2Bundle: ConductorBundle[] = [
       { qty: strings, gauge: jboxInvSizing.gauge, color: 'RED', insulation: 'USE-2/PV Wire', isCurrentCarrying: true, currentPerConductor: stringCurrentA },
@@ -808,7 +1027,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       _racewayEnum(conduitType),
       seg2Bundle, rl.jboxToInverter,
       stringCurrentA, stringOcpd, conduitType,
-      ambientC, sysV, input.maxDCVoltageDropPct,
+      roofRacewayAmbC, dcV, input.maxDCVoltageDropPct,
       ['NEC 690.31', 'NEC 690.8', 'NEC 310.15'],
       jboxInvSizing.effectiveAmpacity, jboxInvSizing.tempDerating, jboxInvDerating,
       nextSegId()
@@ -819,7 +1038,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     // 240V split-phase PV output: L1 (BLK) + L2 (RED) + EGC (GRN) — NO neutral
     // NEC 690.8: PV AC output circuits are ungrounded 2-wire 240V; neutral NOT required
     const acCurrentA = input.acOutputCurrentA;
-    const feederSizing = autoSizeGauge(acCurrentA, ambientC, 2, false, '#10 AWG');
+    const feederSizing = autoSizeGauge(acCurrentA, ambientC, 2, false, '#10 AWG',
+      { onewayFt: rl.inverterToDisco, circuitVoltage: sysV, maxVDropPct: input.maxACVoltageDropPct });
     const feederGauge = feederSizing.gauge;
     const feederOcpd = nextStandardOCPD(acCurrentA * 1.25);
     const feederEgcGauge = getEGCGauge(feederOcpd);
@@ -851,7 +1071,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
   const acCurrentA = input.acOutputCurrentA;
   // NEC 200.3: neutral required for 120/240V split-phase interconnection; 3 current-carrying conductors (L1+L2+N)
-  const feederSizing = autoSizeGauge(acCurrentA, ambientC, 3, false, '#10 AWG');
+  const feederSizing = autoSizeGauge(acCurrentA, ambientC, 3, false, '#10 AWG',
+    { onewayFt: rl.discoToMeter, circuitVoltage: sysV, maxVDropPct: input.maxACVoltageDropPct });
   const feederGauge = feederSizing.gauge;
   const feederOcpd = nextStandardOCPD(acCurrentA * 1.25);
   const feederEgcGauge = getEGCGauge(feederOcpd);

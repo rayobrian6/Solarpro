@@ -52,6 +52,10 @@ export const ROUTE_VD_LIMIT_PCT = {
   branch: 2,
   /** combiner→disconnect feeder and the downstream service runs */
   feeder: 3,
+  /** PV SOURCE / DC OUTPUT circuit — SolarPro's DC design target, and the same
+   *  number `maxDCVoltageDropPct` carries through the engine (3). See
+   *  `classifyVdRole` below for why a DC circuit needed its own row. */
+  dcSource: 3,
 } as const;
 
 // ══ 2026-08-29 — WHAT KIND OF LIMIT IS 2 %? ═══════════════════════
@@ -79,12 +83,71 @@ export const NEC_VD_RECOMMENDATION_PCT = {
   feeder: 3,
   /** both notes — feeder + branch combined */
   combined: 5,
+  /** 🚨 NULL, NOT 3. See `classifyVdRole`: the NEC states no voltage-drop
+   *  recommendation for a PV source circuit at all, so there is no published
+   *  figure a DC run can "exceed". A number here would be an invented code
+   *  requirement, which is the thing this whole policy block exists to stop. */
+  dcSource: null,
 } as const;
 
 export const NEC_VD_CITATION = {
   branch: 'NEC 210.19(A) Informational Note 4',
   feeder: 'NEC 215.2(A)(1) Informational Note 2',
+  /** Named as the absence it is — an AHJ reading this row must not be told a
+   *  branch-circuit note governs a PV source circuit. */
+  dcSource: 'no NEC voltage-drop requirement applies to a PV source circuit '
+    + '(NEC 210.19(A) Inf. Note 4 is a BRANCH-CIRCUIT note; 215.2(A)(1) Inf. Note 2 is a FEEDER note)',
 } as const;
+
+// ══ 2026-09-26 — A DC STRING WAS GRADED AS A 240 V AC BRANCH CIRCUIT ═══════
+//
+// 🚨 WHAT WAS HERE: `vdLimitPctForSegment` tested for a feeder id and DEFAULTED
+// everything else to `branch`. `DC_STRING_RUN`, `DC_DISCO_TO_INV_RUN` and
+// `ROOF_RUN` are PV source / DC output circuits and match neither pattern, so all
+// three were graded as module-level AC branch circuits:
+//
+//   · design target 2 %, where the engine's own DC target (`maxDCVoltageDropPct`)
+//     is 3 % — so the bound printed on the drawing was derived from one limit
+//     while the engine sized the conductor against another;
+//   · recommendation 3 % cited as **NEC 210.19(A) Informational Note 4**, a
+//     BRANCH-CIRCUIT note. A PV source circuit is not a branch circuit (NEC 690.2
+//     defines it as the conductors between modules and the inverter; Article 210
+//     governs branch circuits from the final OCPD to the outlet). The note does
+//     not reach it, so `definitiveFailure: true` from that citation asserted a
+//     violation of a code section that does not apply;
+//   · and because `compliant: false` rides on that, a DC run over 3 % produced a
+//     BLOCKING compliance failure on a stamped sheet.
+//
+// The fix is an EXPLICIT third role, not a wider default. A segment id nobody has
+// classified still falls to `branch` (the tighter limit) — fail-closed is right for
+// an unknown AC run — but a DC circuit is now named, given the DC target, and
+// carries the honest statement that the NEC recommends nothing here at all.
+export type VdRunRole = 'branch' | 'feeder' | 'dcSource';
+
+/** PV source / DC output circuits. Named explicitly — never a default. */
+const DC_SOURCE_SEGMENT_RE = /^(?:DC_STRING_RUN|DC_DISCO_TO_INV_RUN|ROOF_RUN)$/i;
+const FEEDER_SEGMENT_RE = /COMBINER_TO_DISCO|INV_TO_DISCO|DISCO_TO_|MSP_TO_|METER_TO_/i;
+
+/**
+ * Which voltage-drop role a run plays, from its segment id.
+ *
+ * Order matters: DC is tested FIRST, because `DC_DISCO_TO_INV_RUN` contains
+ * `DISCO_TO_` and would otherwise be graded as an AC feeder.
+ *
+ * NOTE (deliberately unchanged): the battery / generator / ATS segments
+ * (`BATTERY_TO_BUI_RUN`, `BUI_TO_MSP_RUN`, `GENERATOR_TO_ATS_RUN`,
+ * `ATS_TO_MSP_RUN`) are NOT classified here. `BUI_TO_MSP_RUN` and
+ * `ATS_TO_MSP_RUN` are AC and already match the feeder pattern;
+ * `BATTERY_TO_BUI_RUN` may be DC or AC depending on the product and cannot be
+ * decided from its id alone. Guessing would move those packages' digests with no
+ * finding behind it.
+ */
+export function classifyVdRole(segmentId: string): VdRunRole {
+  if (DC_SOURCE_SEGMENT_RE.test(segmentId)) return 'dcSource';
+  if (/BRANCH/i.test(segmentId)) return 'branch';
+  if (FEEDER_SEGMENT_RE.test(segmentId)) return 'feeder';
+  return 'branch';
+}
 
 export type VoltageDropPolicyState =
   /** at or under the SolarPro design target — nothing to say */
@@ -98,10 +161,14 @@ export type VoltageDropPolicyState =
 
 export interface VoltageDropPolicyGrade {
   state: VoltageDropPolicyState;
+  /** which role this run plays — `dcSource` has no NEC recommendation at all. */
+  role: VdRunRole;
   /** SolarPro's design target for this run role. */
   designTargetPct: number;
-  /** the NEC informational-note recommendation for this run role. */
-  recommendationPct: number;
+  /** the NEC informational-note recommendation for this run role, or **null**
+   *  when the NEC publishes none (a PV source circuit). Null can never be
+   *  exceeded, so a DC run's `definitiveFailure` is always false. */
+  recommendationPct: number | null;
   /** the citation for that recommendation, named as the informational note it is. */
   citation: string;
   /** true ⇔ within the published recommendation. A design target miss does NOT
@@ -120,12 +187,17 @@ export function gradeVoltageDropPolicy(
   pct: number | null | undefined,
   segmentId: string,
 ): VoltageDropPolicyGrade {
-  const isBranch = /BRANCH/i.test(segmentId)
-    || !/COMBINER_TO_DISCO|INV_TO_DISCO|DISCO_TO_|MSP_TO_|METER_TO_/i.test(segmentId);
+  const role = classifyVdRole(segmentId);
   const designTargetPct = vdLimitPctForSegment(segmentId);
-  const recommendationPct = isBranch ? NEC_VD_RECOMMENDATION_PCT.branch : NEC_VD_RECOMMENDATION_PCT.feeder;
-  const citation = isBranch ? NEC_VD_CITATION.branch : NEC_VD_CITATION.feeder;
-  const base = { designTargetPct, recommendationPct, citation };
+  const recommendationPct: number | null =
+    role === 'dcSource' ? NEC_VD_RECOMMENDATION_PCT.dcSource
+      : role === 'feeder' ? NEC_VD_RECOMMENDATION_PCT.feeder
+      : NEC_VD_RECOMMENDATION_PCT.branch;
+  const citation =
+    role === 'dcSource' ? NEC_VD_CITATION.dcSource
+      : role === 'feeder' ? NEC_VD_CITATION.feeder
+      : NEC_VD_CITATION.branch;
+  const base = { role, designTargetPct, recommendationPct, citation };
 
   if (typeof pct !== 'number' || !Number.isFinite(pct)) {
     return {
@@ -139,6 +211,17 @@ export function gradeVoltageDropPolicy(
       ...base, state: 'WITHIN_DESIGN_TARGET', compliant: true, designTargetMet: true,
       definitiveFailure: false,
       label: `WITHIN DESIGN TARGET — ${pct.toFixed(2)}% ≤ ${designTargetPct.toFixed(1)}%`,
+    };
+  }
+  // 🚨 NO PUBLISHED RECOMMENDATION ⇒ NOTHING TO EXCEED. A PV source circuit over
+  // SolarPro's own DC target is an advisory about a company target, never a code
+  // failure — the NEC states no voltage-drop requirement for it at all.
+  if (recommendationPct == null) {
+    return {
+      ...base, state: 'DESIGN_TARGET_EXCEEDED', compliant: true, designTargetMet: false,
+      definitiveFailure: false,
+      label: `CODE COMPLIANT — ${designTargetPct.toFixed(1)}% DC DESIGN TARGET EXCEEDED `
+        + `(${pct.toFixed(2)}%); ${citation}`,
     };
   }
   if (pct <= recommendationPct) {
@@ -157,11 +240,15 @@ export function gradeVoltageDropPolicy(
 }
 
 /** Which limit governs a run, from its segment id. Fail-closed to the TIGHTER
- *  limit: a bound computed against a looser limit than the schedule grades with
- *  would permit a length the run then fails at. */
+ *  limit for an UNCLASSIFIED id: a bound computed against a looser limit than the
+ *  schedule grades with would permit a length the run then fails at. A DC source
+ *  circuit is not "unclassified" — it is named (see `classifyVdRole`) and takes
+ *  the engine's own 3 % DC target, which is the limit the conductor was sized
+ *  against. */
 export function vdLimitPctForSegment(segmentId: string): number {
-  return /BRANCH/i.test(segmentId) ? ROUTE_VD_LIMIT_PCT.branch
-    : /COMBINER_TO_DISCO|INV_TO_DISCO|DISCO_TO_|MSP_TO_|METER_TO_/i.test(segmentId) ? ROUTE_VD_LIMIT_PCT.feeder
+  const role = classifyVdRole(segmentId);
+  return role === 'dcSource' ? ROUTE_VD_LIMIT_PCT.dcSource
+    : role === 'feeder' ? ROUTE_VD_LIMIT_PCT.feeder
     : ROUTE_VD_LIMIT_PCT.branch;
 }
 

@@ -572,6 +572,12 @@ export interface ComputedSystemInput {
   backupInterfaceBrand?: string;
   backupInterfaceModel?: string;
   systemType?: string;              // 'roof' | 'ground' | 'fence' — adds the mounting/racking row to the equipment schedule
+  /** The jurisdiction's ADOPTED NEC edition, e.g. '2020'. Read by the rooftop
+   *  temperature-adder gate (NEC 310.15(B)(3)(c), deleted for PV by NEC 2017
+   *  690.31(A)). It was already consumed here via an inline cast at the ambient
+   *  stamp; declaring it lets callers supply it without one. ABSENT is a real
+   *  state — an unknown edition never has a code requirement invented for it. */
+  necEdition?: string | number | null;
 
   // ── Per-subsystem compute (Wave 2a — contract §1.7, docs/ARCHITECTURE-per-subsystem-equipment.md) ──
   /** The subsystem this compute pass belongs to. RunSegments are stamped
@@ -1635,7 +1641,12 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // ROOF_RUN: DC wiring from panels to microinverters (short, low voltage)
     // Each micro has its own DC input — typically #10 AWG PV Wire
     // BUG 1 FIX: Use open-air sizing (no conduit required per NEC 690.31)
-    const roofRunAmb = input.ambientTempC + input.rooftopTempAdderC;
+    // 🚨 GATED. This was `input.ambientTempC + input.rooftopTempAdderC` — an
+    // unconditional sum, while `_ambientStamp.rooftopAdderApplies` twelve hundred
+    // lines up had ALREADY decided the adder does not apply in any post-2017
+    // edition, and `makeRunSegment` stamped `rooftopAdderC: null` accordingly. The
+    // sheet said "no rooftop adder applied"; the wire was sized at ambient + 33.
+    const roofRunAmb = input.ambientTempC + (_ambientStamp.rooftopAdderApplies ? input.rooftopTempAdderC : 0);
     const roofRunCurrent = input.panelIsc * 1.25; // NEC 690.8 per micro
     const roofWire = autoSizeOpenAirWire(
       roofRunCurrent,
@@ -1834,7 +1845,9 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // STRING INVERTER RUNS
 
     // DC_STRING_RUN: PV array to DC disconnect
-    const dcRunAmb = input.ambientTempC + input.rooftopTempAdderC;
+    // 🚨 GATED — same defect as roofRunAmb above (the stamp said no adder; the
+    // sizer applied one). `_ambientStamp.rooftopAdderApplies` is the edition gate.
+    const dcRunAmb = input.ambientTempC + (_ambientStamp.rooftopAdderApplies ? input.rooftopTempAdderC : 0);
     const dcStringCurrent = strings[0]?.stringIsc ?? (input.panelIsc * 1.25);
     const dcWire = autoSizeWire(
       dcStringCurrent,
@@ -2434,6 +2447,14 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     stringCount: isString ? stringCount : 0,
     stringCurrentA: isString ? (strings[0]?.stringIsc ?? input.panelIsc * 1.25) : 0,
     systemVoltageAC,
+    // 🚨 THE DC SEGMENTS' OWN VOLTAGE. Without this field the segment schedule
+    // divided a DC string's drop by `systemVoltageAC` (240) and back-populated
+    // that percentage over the correct one below. Same expression as
+    // DC_STRING_RUN.systemVoltage, so the two cannot disagree. Vmp, not Voc.
+    systemVoltageDC: strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
+    // The rooftop-adder gate's two inputs (lib/nec/rooftopAdder.ts).
+    necEdition: (input as { necEdition?: string | number }).necEdition ?? null,
+    systemType: input.systemType ?? null,
     acOutputCurrentA,
     mainPanelAmps: input.mainPanelAmps || 200,
     feederGauge: '#10 AWG',   // will be auto-sized inside buildSegmentSchedule
@@ -2564,6 +2585,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       run.continuousCurrent = seg.continuousCurrent;
       run.effectiveAmpacity = seg.effectiveAmpacity;
       run.voltageDropPct   = seg.voltageDropPct;
+      // 🚨 THE TWO COLUMNS COULD DISAGREE. Only the PERCENTAGE was back-populated,
+      // so a DC run shipped `voltageDropPct` from the segment schedule beside a
+      // `voltageDropVolts` still left over from this file's own (differently
+      // based) calculation. PV-4B prints both. They now come from one row.
+      run.voltageDropVolts = seg.voltageDropVolts;
       run.overallPass      = seg.overallPass;
       // Update wire gauge from primary hot conductor
       const hotConductor = seg.conductorBundle.find(c => c.isCurrentCarrying && c.color !== 'GRN');

@@ -99,11 +99,39 @@ export function buildComputedRunsForPermit(
     // Rooftop temp adder is a per-subsystem env fact, not a project-wide
     // constant: roof conductors bake at roof-surface temps; ground/fence runs
     // never do. Legacy (unscoped) callers keep the historical 33 °C.
+    //
+    // ══ 2026-09-26 — A 33 °C ROOFTOP ADDER ON GROUND- AND FENCE-MOUNT PERMITS ══
+    //
+    // 🚨 THE UNSCOPED FALLBACK WAS `33`, AND IT WAS THE PATH EVERY PERMIT TOOK.
+    // `buildComputeSystemShadow` (below) calls this function with NO opts at all,
+    // and `bomForPermit` did the same — so `opts?.systemType` was undefined and the
+    // ternary landed on the literal 33 regardless of what the project is mounted
+    // on. Meanwhile PV-4A prints, from lib/permit/sections/electricalPages.ts:1019
+    // and :1025, "No rooftop temperature adder applies — ground-mounted system
+    // (NEC 310.15(B)(3)(c) N/A)". The sheet said one thing and the conductor
+    // sizing another: a 4-string ground array at IL 33 °C ambient sized on
+    // 40 × 0.70 × 0.58 = 16.2 A (needing #8) where the un-addered
+    // 40 × 0.70 × 0.96 = 26.9 A clears on #10. One gauge too large, ordered.
+    //
+    // The scope is now RESOLVED rather than defaulted — the existing per-subsystem
+    // rule two lines down is correct, it was simply never reached. Fixed by
+    // supplying the project's own system type (the same precedence
+    // `conductorAuthority` uses: explicit scope → project → CAD), NOT by
+    // special-casing 0.
+    const _resolvedSystemType =
+      (opts?.systemType != null && opts.systemType !== '') ? opts.systemType
+        : (typeof input.project.systemType === 'string' && input.project.systemType.trim())
+          ? input.project.systemType.trim()
+          : (typeof cad?.systemType === 'string' && cad.systemType.trim() ? cad.systemType.trim() : null);
+    if (_resolvedSystemType == null) {
+      console.warn('[computedRuns] no system type on the project or the CAD — the rooftop-adder scope',
+        'cannot be resolved, so the conservative (roof) adder is applied. Conductors may be OVER-sized.');
+    }
     const rooftopTempAdderC =
       typeof opts?.rooftopTempAdderC === 'number'
         ? opts.rooftopTempAdderC
-        : (opts?.systemType != null && opts.systemType !== ''
-            ? (toSubSystemKey(opts.systemType) === 'roof' ? 33 : 0)
+        : (_resolvedSystemType != null
+            ? (toSubSystemKey(_resolvedSystemType) === 'roof' ? 33 : 0)
             : 33);
 
     // System AC kW — prefer the system total (SKIPPED when a panel subset is
@@ -245,7 +273,17 @@ export function buildComputedRunsForPermit(
       inverterBranchLimit: microMaxPerBranch(eq.inverterModel, eq.inverterManufacturer),
       ambientTempC: _temps.ashrae2pctHighC ?? 40,
       designTempMin: (input.project as { designTempMin?: number }).designTempMin ?? _temps.ashraeExtremeLowC,
-      rooftopTempAdderC, // per-subsystem env (roof adder / 0 for ground+fence); legacy unscoped = 33
+      rooftopTempAdderC, // per-subsystem env (roof adder / 0 for ground+fence); scope now RESOLVED, never an unscoped 33
+      // The ADOPTED edition, so the engine's rooftop-adder gate is not deciding
+      // from a missing input. ABSENT is a real state and stays absent: NEC
+      // 310.15(B)(3)(c) was deleted for PV by NEC 2017 690.31(A), and an
+      // unestablished edition must not have a code requirement invented for it.
+      necEdition: input.compliance?.jurisdiction?.necVersion ?? null,
+      // The SCOPE half of the same gate. Without it the engine could not tell a
+      // ground array's raceway from a roof one, so a pre-2017 jurisdiction would
+      // have UNDER-derated a roof job (the unsafe direction) to avoid over-deriving
+      // a ground one. Resolved above: explicit scope → project → CAD.
+      ...(_resolvedSystemType != null ? { systemType: _resolvedSystemType } : {}),
       // REAL lengths where geometry allowed; engine defaults elsewhere.
       runLengths: {
         ...runLengths,
