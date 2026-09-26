@@ -20,6 +20,7 @@ import type { StructuralInputV4 } from '@/lib/structural-engine-v4';
 import { resolveArrayStructuralLayout } from './arrayLayout';
 import { getMountingSystemById, resolveMountingSystemId } from '@/lib/mounting-hardware-db';
 import { projectGoverningRoofSlope } from '@/lib/structural/roofSlopeAuthority';
+import { projectMeanRoofHeight } from '@/lib/structural/meanRoofHeightAuthority';
 
 /**
  * Build the V4 structural-engine input from the permit input + CAD + canonical
@@ -93,6 +94,39 @@ export function buildStructuralInputForPermit(
   const NON_AUTHORITATIVE_NOMINAL_SPAN_FT = 12;
   const rafterSpFt = input.project.rafterSpan || _geomSpanFt || NON_AUTHORITATIVE_NOMINAL_SPAN_FT;
 
+  // ══ 2026-09-25 — THE BUILDING HEIGHT THE WIND ANALYSIS RUNS ON ═══════════
+  //
+  // This was `meanRoofHeight: 15,` — a bare literal with no fallback chain, no
+  // project read and no comment, sitting between a wind speed and an exposure
+  // category both sourced from the canonical site, and a span whose own nominal is
+  // NAMED two lines above so it cannot masquerade as authority.
+  //
+  // That 15 reached a sealed sheet: heightFt → Kz → qz → net uplift → uplift per
+  // attachment → the attachment count and spacing on PV-4C and PE-1. Measured on
+  // Exposure C at 115 mph, qz is 24.46 psf at 15 ft, 27.05 at 25 ft and 29.93 at
+  // 35 ft, so every building over one storey was analysed 10–22 % LOW — in the
+  // unsafe direction — while PV-4C printed the coefficient row as though the
+  // derivation were checkable.
+  //
+  // The building model the permit route already attaches carries the answer:
+  // `wallPlanes[].estimatedHeightM` and `metadata.stories`. Nothing in lib/permit
+  // read either one. See lib/structural/meanRoofHeightAuthority.ts for the ASCE
+  // 7-22 §26.3 derivation and, more importantly, for why a height that is an
+  // ASSUMPTION reports itself as one instead of arriving looking like a
+  // measurement.
+  const _bm = (input._canonicalBuildingModel ?? input.canonicalBuildingModel ?? null) as
+    | { wallPlanes?: Array<{ id?: string; estimatedHeightM?: number | null }>;
+        metadata?: { stories?: number | null } }
+    | null;
+  const _height = projectMeanRoofHeight({
+    wallPlanes: _bm?.wallPlanes,
+    stories: _bm?.metadata?.stories,
+    // The slope and span already resolved above — one authority each, not a second
+    // copy derived differently for the height.
+    roofSlopeDeg: roofPitchDeg,
+    roofSpanFt: rafterSpFt,
+  });
+
   // Single source for the array layout: the design's real placed modules
   // (scoped to the sub-system for hybrids — unscoped, the roof run would size
   // rails/feet for fence+ground panels too).
@@ -107,7 +141,12 @@ export function buildStructuralInputForPermit(
       return e === 'B' || e === 'D' ? e : 'C';
     })(),
     groundSnowLoad: groundSnow,
-    meanRoofHeight: 15,
+    meanRoofHeight: _height.heightFt,
+    // The height's PROVENANCE travels with it, exactly as the slope's does below, so
+    // PV-4C can disclose an assumed height rather than printing a wind pressure that
+    // looks derived. SHEET-SAFE form only — the full basis stays on the authority.
+    meanRoofHeightEstablished: _height.established,
+    meanRoofHeightBasis: _height.sheetBasis,
     roofPitch: roofPitchDeg,
     // The slope's PROVENANCE travels with it, so every consumer can say which
     // plane the analysis ran on instead of restating a bare number.

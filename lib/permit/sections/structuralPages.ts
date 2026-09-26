@@ -919,6 +919,17 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // record carries the provenance, so nothing is invented on a legacy snapshot.
   const _slopeBasis = (_wind as { roofSlopeBasis?: string | null }).roofSlopeBasis ?? null;
   const _slopeEstablished = (_wind as { roofSlopeEstablished?: boolean | null }).roofSlopeEstablished;
+  // 2026-09-25 — THE MEAN ROOF HEIGHT, AND WHETHER ANYONE MEASURED IT.
+  // The comment further down this card says the package published qz and the net
+  // uplift and "not one occurrence of Kz, Kzt, Kd, Ke or the mean roof height". The
+  // coefficient row fixed four of those five. The fifth was the one that was WRONG:
+  // the permit's structural input hardcoded 15 ft, so every building over one storey
+  // got a qz 10–22 % low, and the sheet gave a sealing engineer no way to see which
+  // height his uplift came from. Rendered only when the record carries it, so a
+  // legacy snapshot invents nothing.
+  const _mrhFt = (_wind as { meanRoofHeightFt?: number | null }).meanRoofHeightFt ?? null;
+  const _mrhBasis = (_wind as { meanRoofHeightBasis?: string | null }).meanRoofHeightBasis ?? null;
+  const _mrhEstablished = (_wind as { meanRoofHeightEstablished?: boolean | null }).meanRoofHeightEstablished;
   const _envTag      = _proj.environmentalStateTag;
   const _envTagColor = _proj.environmentalUnverified ? '#b45309' : '#000';
 
@@ -960,6 +971,14 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             ${_wind.gcpBasis ? `<tr><td>Pressure Coefficient</td><td class="cv" style="font-size:5.6px;color:${_gcpExceeded ? '#b45309' : '#000'};">${escapeH(_gcpBasis)}</td></tr>` : ''}
             ${_gcpExceeded && _gcpNote ? `<tr><td colspan="2" style="font-size:5.6px;color:#b45309;font-weight:bold;">${escapeH(_gcpNote)}</td></tr>` : ''}
             ${_slopeBasis ? `<tr><td>Roof Slope Basis</td><td class="cv" style="font-size:5.6px;color:${_slopeEstablished === false ? '#b45309' : '#000'};">${escapeH(_slopeBasis)}</td></tr>` : ''}
+            ${/* ONE row, not two. PV-4C is page-fit critical — this card's own history
+                  is a 15in sheet silently clipping under overflow:hidden — so the
+                  height and its basis share a cell: the value at normal size for a
+                  reviewer scanning for h, the provenance beneath it at the same 5.6px
+                  the slope basis uses. */ ''}
+            ${_mrhFt !== null ? `<tr><td>Mean Roof Height (h)</td><td class="cv" style="color:${_mrhEstablished === false ? '#b45309' : '#000'};">${_mrhFt.toFixed(1)} ft${_mrhEstablished === false ? ' &mdash; ASSUMED' : ''}${
+              _mrhBasis ? `<div style="font-size:5.6px;font-weight:normal;">${escapeH(_mrhBasis)}</div>` : ''
+            }</td></tr>` : ''}
           </table>
         </div>
 

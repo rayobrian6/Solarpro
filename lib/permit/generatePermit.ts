@@ -641,6 +641,15 @@ export function generatePermitHTML(
       (s.wind as Record<string, unknown>).roofSlopeEstablished     = wa.roofSlopeEstablished;
       (s.wind as Record<string, unknown>).roofSlopePlaneId         = wa.roofSlopePlaneId;
       (s.wind as Record<string, unknown>).roofSlopeBasis           = wa.roofSlopeBasis;
+      // 2026-09-25 — THE HEIGHT, ALONGSIDE THE Kz IT PRODUCED. PV-4C printed
+      // `Kz 0.85` and the qz derived from it and never the mean roof height, which
+      // is how a hardcoded 15 ft survived on every multi-storey building's sealed
+      // structural sheet. Dropping these here would leave the new disclosure row
+      // permanently blank — the same drop this block was written to fix for the
+      // slope and the pressure-coefficient basis.
+      (s.wind as Record<string, unknown>).meanRoofHeightFt          = wa.meanRoofHeightFt;
+      (s.wind as Record<string, unknown>).meanRoofHeightEstablished = wa.meanRoofHeightEstablished;
+      (s.wind as Record<string, unknown>).meanRoofHeightBasis       = wa.meanRoofHeightBasis;
       if (ml?.upliftPerMountLbs) s.wind.upliftPerAttachment = ml.upliftPerMountLbs;
       s.snow = s.snow || {};
       s.snow.groundSnowLoad      = sa.groundSnowLoadPsf;

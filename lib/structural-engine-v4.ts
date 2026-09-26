@@ -47,6 +47,15 @@ export interface StructuralInputV4 {
   windExposure: WindExposure;
   groundSnowLoad: number;      // psf
   meanRoofHeight: number;      // ft
+  /** 2026-09-25 — WHERE THE HEIGHT CAME FROM. `meanRoofHeight` sets Kz and therefore
+   *  qz, the net uplift and the whole attachment schedule, and in the permit path it
+   *  used to arrive as a hardcoded 15 — so every building over one storey was analysed
+   *  10–22 % low, in the unsafe direction, on a sheet that printed the coefficient row
+   *  as if the derivation were checkable. These two travel with it so a consumer can
+   *  state whether the height was MODELLED or ASSUMED. See
+   *  lib/structural/meanRoofHeightAuthority.ts. */
+  meanRoofHeightEstablished?: boolean;
+  meanRoofHeightBasis?: string;
   roofPitch: number;           // degrees
   /** 2026-08-29 - WHERE THE SLOPE CAME FROM. `roofPitch` decides whether ASCE
    *  7-22 Fig. 29.4-7 governs at all (slope > 7 deg) and which snow slope factor
@@ -137,6 +146,12 @@ export interface WindAnalysis {
   roofSlopeEstablished?: boolean | null;
   roofSlopePlaneId?: string | null;
   roofSlopeBasis?: string | null;
+  /** the mean roof height the analysis ran on, and whether it was MODELLED or
+   *  ASSUMED. The sheet published Kz and qz and never the height they came from —
+   *  its own comment says so — which is exactly how a hardcoded 15 ft survived. */
+  meanRoofHeightFt?: number;
+  meanRoofHeightEstablished?: boolean | null;
+  meanRoofHeightBasis?: string | null;
 }
 
 export interface SnowAnalysis {
@@ -1494,6 +1509,12 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
     roofSlopeEstablished: input.roofSlopeEstablished ?? null,
     roofSlopePlaneId: input.roofSlopePlaneId ?? null,
     roofSlopeBasis: input.roofSlopeBasis ?? null,
+    // The height Kz was read at, and whether it was measured. `exposureCoeff` above
+    // is that Kz; publishing one without the other is what let a hardcoded 15 ft
+    // reach a sealed sheet unchallenged.
+    meanRoofHeightFt: heightFt,
+    meanRoofHeightEstablished: input.meanRoofHeightEstablished ?? null,
+    meanRoofHeightBasis: input.meanRoofHeightBasis ?? null,
   };
 
   // ── 4. Snow analysis (ASCE 7-22) ────────────────────────────────────────
