@@ -400,14 +400,22 @@ describe('structural — no consumer builds a combiner context without the selec
     // It previously accepted `combinerId` from the client and dropped it, so the
     // exported sheet — the one that reaches the permit package — named a generic
     // label and withheld the disconnect statement the diagram asserted.
-    // 🚨 stripComments, NOT stripCommentsAndStrings. Measured on this exact
-    // file: the identifier-stripper returns a body in which the real
-    // `sldCombinerFields(` call is absent, so the guard failed against correct
-    // code. Whatever construct upsets it earlier in the route, a guard that
-    // cannot see the code it is guarding is worse than no guard — and comments
-    // are the only thing that needed removing here, since both anchors are
-    // identifiers rather than string literals.
-    const src = stripComments(
+    // 🚨 BACK ON stripCommentsAndStrings, AND THE "WHATEVER CONSTRUCT" IS NAMED.
+    //
+    // This was downgraded to `stripComments` with a note saying the
+    // identifier-stripper returned a body in which the real `sldCombinerFields(`
+    // call was absent, cause unknown. The cause is now known: this route's HTML
+    // escaper contains `.replace(/"/g, …)` and `.replace(/'/g, …)` — QUOTE
+    // CHARACTERS INSIDE REGEX LITERALS. The old hand-rolled stripper counted
+    // those as opening a string, so everything after them was blanked as literal
+    // text. Both tokens measured 1 -> 0 under it.
+    //
+    // `tests/support/stripSource.ts` is parser-backed now — TypeScript's own
+    // scanner knows a regex body's range — so both tokens survive. Restoring the
+    // stronger stripper makes this guard STRICTER than the comment-only version
+    // it replaces: a mention of `sldCombinerFields(` inside a string literal no
+    // longer counts, so what passes is a real call.
+    const src = stripCommentsAndStrings(
       readFileSync(join(__dirname, '..', 'app', 'api', 'engineering', 'sld', 'pdf', 'route.ts'), 'utf8'),
     );
     expect(src).toMatch(/sldCombinerFields\(/);
