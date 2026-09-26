@@ -21,6 +21,7 @@ import {
   EngineeringModel,
   validateEngineeringModel,
 } from './electrical-calc';
+import { resolveGec } from './nec/table250_66';
 import { getJurisdictionInfo, parseStateFromAddress, JurisdictionInfo } from './jurisdiction';
 import { getUtilityRules, getUtilitiesByState, UtilityRuleEntry } from './utility-rules';
 import { getRecommendedInterconnection } from './utility-rules';
@@ -282,12 +283,18 @@ function bomId(): string { return `cp-bom-${(_bomIdCounter++).toString().padStar
 // (never called) — deleted. Any future OCPD lookup here must import
 // nextStandardOcpd from '@/lib/electrical/stdSizes' (the one ladder).
 
-// ─── GEC sizing per NEC 250.66 (based on OCPD amps) ──────────────────────────
-function gecSizeForOcpd(ocpdAmps: number): string {
-  if (ocpdAmps <= 60)  return '#8 AWG';
-  if (ocpdAmps <= 100) return '#6 AWG';
-  if (ocpdAmps <= 200) return '#4 AWG';
-  return '#2 AWG';
+// ─── GEC sizing per NEC Table 250.66 ─────────────────────────────────────────
+// 🚨 This was the THIRD copy of the GEC rule, and the three DISAGREED AT EVERY
+// RUNG. This one said <=60 -> #8, <=100 -> #6, <=200 -> #4, else #2; the two in
+// bom-engine-v4 said <=60 -> #6, <=100 -> #4, else #2. All three were keyed on
+// the OCPD rating, which is not an axis of Table 250.66 — the table is indexed on
+// the largest ungrounded SERVICE-ENTRANCE conductor.
+//
+// Stage 4 here emits a 250.52(A)(5) ground rod as the electrode, so the GEC's
+// sole connection is to a rod and NEC 250.66(A) caps it at #6 Cu. One authority:
+// lib/nec/table250_66.ts.
+function gecSizeForServiceRod(serviceConductorSize?: string | null): string {
+  return resolveGec({ serviceConductorSize: serviceConductorSize ?? null, rodOnly: true }).size;
 }
 
 // ─── Conduit fitting quantity helpers ────────────────────────────────────────
@@ -519,7 +526,7 @@ function deriveBomItems(
   // ═══════════════════════════════════════════════════════════════════════════
   const hasExistingRod = opts.hasExistingGroundRod === true;
   const totalAcKwForGec = em.totalAcKw ?? (sizing.acCurrentAmps * (inputs.electricalCalcInput?.systemVoltage ?? 240) / 1000);
-  const gecSize = gecSizeForOcpd(sizing.ocpdAmps);
+  const gecSize = gecSizeForServiceRod(opts.serviceEntranceConductorSize);
   const rodQty  = (!hasExistingRod) ? (totalAcKwForGec > 10 ? 2 : 1) : 0;
 
   if (!hasExistingRod) {
@@ -871,6 +878,10 @@ export interface ComputePlanOptions {
   useCombinedDisconnect?: boolean;
   // Grounding electrode options
   hasExistingGroundRod?: boolean; // true = skip ground rod in BOM (existing rod on site)
+  /** Largest ungrounded SERVICE-ENTRANCE conductor — the axis NEC Table 250.66 is
+   *  indexed on ('#2 AWG', '4/0', '350 kcmil'). Absent ⇒ the 250.66(A) rod-only
+   *  cap of #6 Cu, which is compliant for any service. */
+  serviceEntranceConductorSize?: string | null;
   // Monitoring options
   includeConsumptionMonitoring?: boolean; // true = add CTs for home consumption monitoring
 }

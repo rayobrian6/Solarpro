@@ -31,7 +31,13 @@ import {
 import { resolveDesignMetering, type SldMeteringDrawing } from './equipment/designMetering';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { getMountingSystemById } from './mounting-hardware-db';
-import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
+import { nextStandardOcpd, prevStandardOcpd, nextEnclosure } from './electrical/stdSizes';
+// Grounding: ONE authority each. `getEGCSize` is the full 11-rung NEC 250.122
+// table (this file previously carried a 3-rung inline ternary that went FLAT at
+// #6 AWG above 100 A); `resolveGec` is NEC Table 250.66 keyed on the
+// service-entrance conductor, with the 250.66(A) rod-only cap.
+import { getEGCSize } from './manufacturer-specs';
+import { resolveGec } from './nec/table250_66';
 import { resolveAcDisconnect } from './electrical/acDisconnect';
 import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
@@ -208,6 +214,13 @@ export interface BOMGenerationInputV4 {
    *  GES). Undefined/false ⇒ no auto electrode hardware (the canonical
    *  groundingObjects record GEC as none-required). */
   requiresGroundingElectrode?: boolean;
+  /** Largest ungrounded SERVICE-ENTRANCE conductor — the one axis NEC Table
+   *  250.66 is indexed on. An AWG string ('#2 AWG', '4/0') or kcmil ('350 kcmil').
+   *  NOT `acWireGauge`: that is the PV output circuit conductor, a different
+   *  conductor and a different size. When absent, `resolveGec` falls back to the
+   *  NEC 250.66(A) rod-only cap of #6 Cu, which is compliant for any service and
+   *  can never be undersized — see lib/nec/table250_66.ts. */
+  serviceEntranceConductorSize?: string | null;
 
   // Labels (NEC 690.31, 690.54, 690.56)
   requiresWarningLabels?: boolean;
@@ -1853,12 +1866,35 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       ? input.backfeedAmps
       : ((input.acOutputKw ?? input.systemKw) * 1000 / (input.acVoltage ?? 240)) * 1.25;
     const requestedBreaker = nextStandardBreaker(derivedBackfeedAmps);
-    const backfeedAmps = Math.min(requestedBreaker, maxPVBreaker);
+    // 🚨 The cap used to be `Math.min(requestedBreaker, maxPVBreaker)` — raw
+    // arithmetic, not a rating. `maxPVBreaker` is `floor(busRating × 1.2 − mainAmps)`,
+    // which lands on a real NEC 240.6(A) size only by coincidence. A 320 A service
+    // with a 200 A main — a common commercial-residential meter-main — gave 184,
+    // and the BOM emitted the line '184A Backfeed Breaker' with Square D part
+    // number 'QO184'. No such device exists, so the installer buys the nearest
+    // one: rounding UP to 200 puts 200 + 200 = 400 A on a 384 A allowance and
+    // violates the 705.12(B)(3)(2) rule this BOM just certified; rounding DOWN
+    // silently changes the breaker the drawing calls out.
+    //
+    // `prevStandardOcpd` takes the largest REAL rating at or below the allowance,
+    // so the emitted part is always orderable and never above the 120% limit.
+    // `maxPVBreaker` stays unrounded in the warning and the compliance note, so
+    // the sheet still states the true allowance.
+    const ladderCappedMax = prevStandardOcpd(maxPVBreaker);
+    const backfeedAmps = Math.min(requestedBreaker, ladderCappedMax);
     if (requestedBreaker > maxPVBreaker) {
+      // When even the smallest standard rating (15 A) exceeds the allowance there
+      // is no compliant load-side breaker at all. `prevStandardOcpd` floors at 15,
+      // so say that plainly rather than letting the cap read as a fix.
+      const noCompliantSize = backfeedAmps > maxPVBreaker;
       warnings.push(
         `NEC 705.12(B) VIOLATION: Requested ${requestedBreaker}A backfeed exceeds 120% max (${maxPVBreaker}A) ` +
         `for ${busRating}A bus / ${mainAmps}A main. ` +
-        `BOM capped to ${backfeedAmps}A — use SUPPLY_SIDE_TAP (NEC 705.11) to use full ${requestedBreaker}A.`
+        (noCompliantSize
+          ? `NO standard NEC 240.6(A) rating fits a ${maxPVBreaker}A allowance — the smallest is 15A. `
+            + `This design cannot be interconnected load-side; use SUPPLY_SIDE_TAP (NEC 705.11) or upgrade the service.`
+          : `BOM capped to ${backfeedAmps}A (largest standard rating at or below the allowance) — `
+            + `use SUPPLY_SIDE_TAP (NEC 705.11) to use full ${requestedBreaker}A.`)
       );
     }
     items.push(addItem('ac', 'breaker', 'Square D', `${backfeedAmps}A Backfeed Breaker`,
@@ -1867,7 +1903,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       1, 'ea', 'NEC 705.12(B)', 'perSystem', '1', true));
     log.push({ stageId: 'ac', category: 'breaker', item: `${backfeedAmps}A Backfeed Breaker`,
       quantity: 1, derivedFrom: 'backfeedAmps',
-      formula: 'min(nextStandardBreaker(backfeedAmps), floor(busRating×1.2−mainPanelAmps))',
+      formula: 'min(nextStandardBreaker(backfeedAmps), prevStandardOcpd(floor(busRating×1.2−mainPanelAmps)))',
       necReference: 'NEC 705.12(B)' });
     complianceNotes.push(
       `NEC 705.12(B): Backfeed breaker ${backfeedAmps}A — 120% rule: (${busRating}A × 1.2) − ${mainAmps}A = ${maxPVBreaker}A max`
@@ -2087,11 +2123,15 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   // only covers the design-studio fallback path (no per-segment conductors).
   if (!(input.runs && input.runs.length > 0)) {
     const egcLength = conduitLength(input.acWireLength);
-    // EGC gauge: NEC 250.122 — based on OCPD size
+    // EGC gauge: NEC 250.122 — based on OCPD size.
+    // 🚨 This used to be `ocpdForEgc <= 60 ? '#10' : ocpdForEgc <= 100 ? '#8' : '#6'`
+    // — a 3-rung stand-in for an 11-rung table that went FLAT at #6 AWG above
+    // 100 A, on a line that BILLS the wire and cites 250.122 as its authority.
+    // A 300 A AC feeder shipped #6 where 250.122 requires #4.
     const ocpdForEgc = input.acOCPD > 0 ? input.acOCPD : nextStandardBreaker(
       ((input.acOutputKw ?? input.systemKw) * 1000) / (input.acVoltage ?? 240) * 1.25
     );
-    const egcGauge = ocpdForEgc <= 60 ? '#10 AWG' : ocpdForEgc <= 100 ? '#8 AWG' : '#6 AWG';
+    const egcGauge = getEGCSize(ocpdForEgc);
     items.push(addItem('structural', 'wire', 'Southwire', `${egcGauge} THWN-2 Green EGC`,
       `THWN2-GRN-${egcGauge.replace('#', '').replace(' AWG', '')}`,
       `${egcGauge} green THWN-2 equipment grounding conductor — NEC 250.122`,
@@ -2120,15 +2160,23 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       '5/8" ground rod acorn clamp — bonds GEC to ground rod per NEC 250.70',
       1, 'ea', 'NEC 250.70', 'perSystem', '1', true));
 
-    // GEC: Grounding Electrode Conductor — NEC 250.66
-    // Sized by largest service conductor or 6 AWG minimum for PV systems ≤ 200A
-    const gecOcpd = input.acOCPD > 0 ? input.acOCPD
-      : nextStandardBreaker(((input.acOutputKw ?? input.systemKw) * 1000) / (input.acVoltage ?? 240) * 1.25);
-    const gecGauge = gecOcpd <= 60 ? '#6 AWG' : gecOcpd <= 100 ? '#4 AWG' : '#2 AWG';
+    // GEC: Grounding Electrode Conductor — NEC Table 250.66 + 250.66(A).
+    // 🚨 This used to be `gecOcpd <= 60 ? '#6' : gecOcpd <= 100 ? '#4' : '#2'`,
+    // keyed on the OCPD — which is not an axis of Table 250.66 at all. The table
+    // is indexed on the largest ungrounded SERVICE-ENTRANCE conductor. On a 200 A
+    // service it billed 50 ft of #2 bare copper, four gauge steps above the #6
+    // that 250.66(A) caps a rod-only GEC at; above 350 kcmil it was undersized.
+    // The electrode this block just emitted is a 250.52(A)(5) rod and nothing
+    // else, so the GEC's sole connection is to a rod and 250.66(A) governs.
+    const gec = resolveGec({
+      serviceConductorSize: input.serviceEntranceConductorSize ?? null,
+      rodOnly: true,
+    });
+    const gecGauge = gec.size;
     const gecLength = 50; // standard 50-ft run from inverter to grounding electrode
     items.push(addItem('structural', 'wire', 'Southwire', `${gecGauge} Bare Copper GEC`,
       `BARE-CU-${gecGauge.replace('#', '').replace(' AWG', '')}`,
-      `${gecGauge} bare copper grounding electrode conductor — NEC 250.66`,
+      `${gecGauge} bare copper grounding electrode conductor — ${gec.basis}`,
       gecLength, 'ft', 'NEC 250.66', 'perSystem', '50', true));
 
     log.push({ stageId: 'structural', category: 'grounding', item: 'Grounding Electrode System',
@@ -2136,7 +2184,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       formula: '1 ground rod + 1 clamp + 50ft GEC',
       necReference: 'NEC 250.52 / 250.66 / 250.70' });
     complianceNotes.push(
-      `NEC 250.52(A)(5): 5/8"×8ft copper-clad ground rod + acorn clamp + ${gecGauge} GEC (50ft) required`
+      `NEC 250.52(A)(5): 5/8"×8ft copper-clad ground rod + acorn clamp + ${gecGauge} GEC (50ft) required — ${gec.basis}`
     );
   }
 
@@ -3181,12 +3229,35 @@ function generateBOMV4PerSubSystem(
       ? input.backfeedAmps
       : ((input.acOutputKw ?? input.systemKw) * 1000 / (input.acVoltage ?? 240)) * 1.25;
     const requestedBreaker = nextStandardBreaker(derivedBackfeedAmps);
-    const backfeedAmps = Math.min(requestedBreaker, maxPVBreaker);
+    // 🚨 The cap used to be `Math.min(requestedBreaker, maxPVBreaker)` — raw
+    // arithmetic, not a rating. `maxPVBreaker` is `floor(busRating × 1.2 − mainAmps)`,
+    // which lands on a real NEC 240.6(A) size only by coincidence. A 320 A service
+    // with a 200 A main — a common commercial-residential meter-main — gave 184,
+    // and the BOM emitted the line '184A Backfeed Breaker' with Square D part
+    // number 'QO184'. No such device exists, so the installer buys the nearest
+    // one: rounding UP to 200 puts 200 + 200 = 400 A on a 384 A allowance and
+    // violates the 705.12(B)(3)(2) rule this BOM just certified; rounding DOWN
+    // silently changes the breaker the drawing calls out.
+    //
+    // `prevStandardOcpd` takes the largest REAL rating at or below the allowance,
+    // so the emitted part is always orderable and never above the 120% limit.
+    // `maxPVBreaker` stays unrounded in the warning and the compliance note, so
+    // the sheet still states the true allowance.
+    const ladderCappedMax = prevStandardOcpd(maxPVBreaker);
+    const backfeedAmps = Math.min(requestedBreaker, ladderCappedMax);
     if (requestedBreaker > maxPVBreaker) {
+      // When even the smallest standard rating (15 A) exceeds the allowance there
+      // is no compliant load-side breaker at all. `prevStandardOcpd` floors at 15,
+      // so say that plainly rather than letting the cap read as a fix.
+      const noCompliantSize = backfeedAmps > maxPVBreaker;
       warnings.push(
         `NEC 705.12(B) VIOLATION: Requested ${requestedBreaker}A backfeed exceeds 120% max (${maxPVBreaker}A) ` +
         `for ${busRating}A bus / ${mainAmps}A main. ` +
-        `BOM capped to ${backfeedAmps}A — use SUPPLY_SIDE_TAP (NEC 705.11) to use full ${requestedBreaker}A.`
+        (noCompliantSize
+          ? `NO standard NEC 240.6(A) rating fits a ${maxPVBreaker}A allowance — the smallest is 15A. `
+            + `This design cannot be interconnected load-side; use SUPPLY_SIDE_TAP (NEC 705.11) or upgrade the service.`
+          : `BOM capped to ${backfeedAmps}A (largest standard rating at or below the allowance) — `
+            + `use SUPPLY_SIDE_TAP (NEC 705.11) to use full ${requestedBreaker}A.`)
       );
     }
     push(undefined, addItem('ac', 'breaker', 'Square D', `${backfeedAmps}A Backfeed Breaker`,
@@ -3325,7 +3396,8 @@ function generateBOMV4PerSubSystem(
     const ocpdForEgc = input.acOCPD > 0 ? input.acOCPD : nextStandardBreaker(
       ((input.acOutputKw ?? input.systemKw) * 1000) / (input.acVoltage ?? 240) * 1.25
     );
-    const egcGauge = ocpdForEgc <= 60 ? '#10 AWG' : ocpdForEgc <= 100 ? '#8 AWG' : '#6 AWG';
+    // Same 250.122 authority as the single-system emitter — see the note there.
+    const egcGauge = getEGCSize(ocpdForEgc);
     // §5 closeout — the flat acWireLength×1.15 EGC row is the design-studio
     // fallback only. When sized runs exist, emitAcConductorBom already emits the
     // per-raceway shared green EGC (NEC 250.122(C)); this line would double-bill.
@@ -3335,22 +3407,36 @@ function generateBOMV4PerSubSystem(
         `${egcGauge} green THWN-2 equipment grounding conductor — NEC 250.122`,
         egcLength, 'ft', 'NEC 690.43 / 250.122', 'acWireLength × 1.15', `${input.acWireLength} × 1.15`, true));
     }
-    push(undefined, addItem('structural', 'grounding', 'Erico/Harger', '5/8" × 8 ft Copper-Clad Ground Rod',
-      'GR-5/8-8', '5/8" × 8 ft copper-clad steel ground rod — NEC 250.52(A)(5)',
-      1, 'ea', 'NEC 250.52(A)(5)', 'perSystem', '1', true));
-    push(undefined, addItem('structural', 'grounding', 'Erico/Harger', '5/8" Ground Rod Acorn Clamp',
-      'GRC-5/8', '5/8" ground rod acorn clamp — bonds GEC to ground rod per NEC 250.70',
-      1, 'ea', 'NEC 250.70', 'perSystem', '1', true));
-    const gecOcpd = input.acOCPD > 0 ? input.acOCPD
-      : nextStandardBreaker(((input.acOutputKw ?? input.systemKw) * 1000) / (input.acVoltage ?? 240) * 1.25);
-    const gecGauge = gecOcpd <= 60 ? '#6 AWG' : gecOcpd <= 100 ? '#4 AWG' : '#2 AWG';
-    push(undefined, addItem('structural', 'wire', 'Southwire', `${gecGauge} Bare Copper GEC`,
-      `BARE-CU-${gecGauge.replace('#', '').replace(' AWG', '')}`,
-      `${gecGauge} bare copper grounding electrode conductor — NEC 250.66`,
-      50, 'ft', 'NEC 250.66', 'perSystem', '50', true));
-    complianceNotes.push(
-      `NEC 250.52(A)(5): 5/8"×8ft copper-clad ground rod + acorn clamp + ${gecGauge} GEC (50ft) required`
-    );
+
+    // 🚨 THIS GATE WAS MISSING HERE. §7 (07-22) established that a grid-tied PV
+    // interconnection bonds to the EXISTING service grounding electrode system
+    // (NEC 250.64 / 690.47) and adds NO new electrode, so the rod/clamp/GEC are
+    // emitted only when an authoritative design input asks for a new electrode.
+    // That rule was applied to the single-system emitter and left off this one,
+    // so every HYBRID project (more than one subsystem, subSystemCounts set)
+    // shipped a phantom rod + acorn + 50 ft of bare copper and printed
+    // 'NEC 250.52(A)(5): ... required' — while the permit package's own
+    // electrical sheet stated in print that no new electrode or GEC is added.
+    // One rule that existed twice and was fixed once.
+    if (input.requiresGroundingElectrode === true) {
+      push(undefined, addItem('structural', 'grounding', 'Erico/Harger', '5/8" × 8 ft Copper-Clad Ground Rod',
+        'GR-5/8-8', '5/8" × 8 ft copper-clad steel ground rod — NEC 250.52(A)(5)',
+        1, 'ea', 'NEC 250.52(A)(5)', 'perSystem', '1', true));
+      push(undefined, addItem('structural', 'grounding', 'Erico/Harger', '5/8" Ground Rod Acorn Clamp',
+        'GRC-5/8', '5/8" ground rod acorn clamp — bonds GEC to ground rod per NEC 250.70',
+        1, 'ea', 'NEC 250.70', 'perSystem', '1', true));
+      const gec = resolveGec({
+        serviceConductorSize: input.serviceEntranceConductorSize ?? null,
+        rodOnly: true,
+      });
+      push(undefined, addItem('structural', 'wire', 'Southwire', `${gec.size} Bare Copper GEC`,
+        `BARE-CU-${gec.size.replace('#', '').replace(' AWG', '')}`,
+        `${gec.size} bare copper grounding electrode conductor — ${gec.basis}`,
+        50, 'ft', 'NEC 250.66', 'perSystem', '50', true));
+      complianceNotes.push(
+        `NEC 250.52(A)(5): 5/8"×8ft copper-clad ground rod + acorn clamp + ${gec.size} GEC (50ft) required — ${gec.basis}`
+      );
+    }
   }
 
   // ═══ Stage 7 — labels (one POI ⇒ one label set) ════════════════════════════

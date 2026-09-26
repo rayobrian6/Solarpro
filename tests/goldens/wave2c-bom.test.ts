@@ -195,9 +195,28 @@ describe('Wave 2c — hybrid Enphase roof(48) + Solis ground(26) + EcoFlow fence
     expect(taps).toHaveLength(1);
     expect(taps[0].quantity).toBe(3);
     expect(bom.items.filter(i => i.category === 'breaker' && i.stageId === 'ac')).toHaveLength(0);
-    // One conduit-fitting set, one grounding electrode system.
+    // One conduit-fitting set.
     expect(bom.items.filter(i => i.category === 'conduit_fitting' && i.stageId === 'ac')).toHaveLength(4);
-    expect(bom.items.filter(i => i.partNumber === 'GR-5/8-8')).toHaveLength(1);
+
+    // 🚨 RE-AIMED. This line used to read `.toHaveLength(1)` against `bom`, i.e.
+    // against `hybridInput()`, which does NOT set requiresGroundingElectrode. It
+    // was therefore pinning a DEFECT: the hybrid emitter shipped a ground rod +
+    // acorn clamp + 50 ft of bare copper GEC on every hybrid project, and printed
+    // 'NEC 250.52(A)(5): ... required', while the permit package's own electrical
+    // sheet stated in print that no new electrode is added. The single-system
+    // emitter had the `requiresGroundingElectrode === true` gate; this one did not.
+    //
+    // The invariant I-6 is protecting is "ONE service-side set, not one PER
+    // SUB-SYSTEM". The old assertion could not distinguish "one because it is
+    // de-duplicated" from "one because the gate is missing". So it is now checked
+    // where it can actually discriminate: zero when the design does not ask for an
+    // electrode, and exactly one — not three — when it does.
+    expect(bom.items.filter(i => i.partNumber === 'GR-5/8-8'),
+      'a hybrid project shipped a phantom grounding electrode').toHaveLength(0);
+    const withElectrode = generateBOMV4(hybridInput({ requiresGroundingElectrode: true }));
+    expect(withElectrode.items.filter(i => i.partNumber === 'GR-5/8-8'),
+      'the electrode system was emitted once per sub-system instead of once per service').toHaveLength(1);
+    expect(withElectrode.items.filter(i => /Bare Copper GEC/.test(i.model))).toHaveLength(1);
     // Shared service lines (disconnect, taps, conduit fittings, service EGC) carry
     // NO subSystem stamp. §13 (07-22): a micro sub's Q-Cable / AC trunk + its
     // terminators/sealing caps are PER-SUB AC BRANCH equipment now filed in Stage 4
