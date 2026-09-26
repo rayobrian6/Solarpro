@@ -250,6 +250,25 @@ export interface LaneAGateInput {
    * Optional so every existing caller and test keeps compiling; absent is read
    * as derived-from-the-count, which is exactly the behaviour before this
    * existed.
+   *
+   * 🚨 THERE IS NO "NOT YET KNOWN" MEMBER, ON PURPOSE. It was proposed: the
+   * production caller's ref starts at `untouched` and is only assigned the real
+   * answer once the design hydrates, so a deliberately cleared property — which
+   * also has zero planes — would be granted acquisition if the gate could be
+   * evaluated in that window. It cannot be. The caller cannot open
+   * `restoreResolved` until after the ledger is installed, and the two values
+   * sit on opposite sides of React's render/effect boundary in the right order.
+   * See tests/laneAAcquisitionOrdering.test.tsx, which pins every step of that
+   * ordering.
+   *
+   * 🚨 AND ADDING ONE WOULD HAVE BEEN WORSE THAN THE BUG. Nothing consumes this
+   * union exhaustively — there is no `switch` on it anywhere. Every consumer
+   * asks `=== 'cleared'` or `!== 'cleared'` (the Auto Fill door in
+   * SolarEngine3D, the aerial-detect door and the three Roof Planes controls in
+   * DesignStudio), so a fourth member would have fallen into each `else` and
+   * been treated as PERMISSIVE, at the one door that re-acquires geometry. Only
+   * `acquisitionPermittedByLifecycle` would have refused it, and `tsc` could not
+   * have flagged any of the rest.
    */
   lifecycle?: DesignGeometryLifecycle;
   restoreResolved: boolean;

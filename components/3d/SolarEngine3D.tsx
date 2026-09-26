@@ -14873,6 +14873,24 @@ function SolarEngine3D({
       // same whether nobody has modelled this house yet or somebody modelled it
       // and deleted it, and the gate must answer those two opposite ways. Read
       // from a ref at fire time, like every other field here.
+      //
+      // 🚨 THE PERMISSIVE FALLBACK IS NOT A FAIL-OPEN DEFAULT, AND IT HAS BEEN
+      // AUDITED TWICE FOR BEING ONE. Read it before "fixing" it:
+      //   • the `??` is unreachable. The ref's type is a non-optional union
+      //     initialised in useSiteDesign, and DesignStudio always passes the
+      //     prop, so `.current` is never undefined.
+      //   • the ref's INITIAL value is the permissive one, which looks like the
+      //     resurrection bug: a deliberately cleared property also has zero
+      //     planes, so an evaluation before the ledger hydrates would be
+      //     granted acquisition. It cannot happen. `restoreResolved` below is
+      //     only ever opened AFTER `hydrateFromStored` has synchronously
+      //     installed the ledger, and it reaches this ref via an effect while
+      //     the lifecycle is assigned in a render-phase memo — so the real
+      //     answer is always already here by the time the fence is open.
+      //   • and flipping it to a refusing default would be the WRONG fix: the
+      //     permissive value is the correct answer for a property nobody has
+      //     modelled, which is every new design.
+      // tests/laneAAcquisitionOrdering.test.tsx proves the ordering and pins it.
       lifecycle: geometryLifecycleRef?.current ?? 'untouched',
       restoreResolved: roofRestoreResolvedRef.current,
       siteKey,
