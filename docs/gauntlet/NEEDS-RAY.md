@@ -16,12 +16,15 @@ Last updated: 2026-09-25.
 | **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
 | **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
 | **R4** | Four milestone checkboxes are POSTed and silently discarded — the product says it recorded something it did not | Persisting those four |
+| **R9** | 🚨 The permit's wind analysis was hardcoded to a 15 ft building — **fixed**, but the fix raises loads 10–22 %, and prior PE approvals were granted on the lower number | Nothing — the decision is what to do about packages already approved |
 | **R3** | Two engineering repairs would move the permit digest, which retires live PE approvals | Those two only |
 | **R6** | A geocoder overwrites a coordinate a human deliberately set — **measured at 2.79 km and 28 m** — and that coordinate decides which property owns the design | Nothing, but it has been silently breaking things |
 | **R7** | The roof has no building-elevation sheet, so modelled wall and ridge heights reach no drawing | A roof elevation sheet only |
 | **R5** | **Three things to try in Dev** — not a decision, but live acceptance overrides tests. The GHOST MODULE PREVIEW is first: its riskiest property could not be measured here at all | Nothing |
 
-**R8 and R1 are the two that matter most.** R8 because a batch migration run cannot
+**R9 is the one that touches a sealed engineering number**, and it is already fixed —
+what is left is what to do about packages approved on the old value. **R8 and R1 are the
+two that matter most operationally.** R8 because a batch migration run cannot
 get past file 027 today, and R1 because rotation is the only remedy for a leak.
 Everything else has a safe default already applied or recorded.
 
@@ -143,6 +146,44 @@ and is queued separately.
 | **Safe default** | Neither digest-moving candidate is being implemented. |
 
 ---
+
+---
+
+## R9 — 🚨 The permit's wind analysis was hardcoded to a 15 ft building. It is fixed — and the fix RAISES loads
+
+**This one is already implemented** (`a1963540`), because your standing
+OUTPUT-CONSISTENCY LAW rules the principle: *"if the user draws physical reality in
+SolarPro, every downstream consumer must either consume it or explicitly say why it
+does not."* A 2-storey building modelled in 3D producing a 15 ft permit calculation
+is the prohibited hidden parallel world. What needs **you** is the consequence, not
+the principle.
+
+| | |
+|---|---|
+| **Severity** | 🚨 HIGH — a stamped structural number, wrong in the UNSAFE direction |
+| **Where** | `lib/permit/utils/structuralInput.ts` carried `meanRoofHeight: 15,` — a bare literal, no fallback chain, no comment, between two canonical-site-sourced fields and a span whose own nominal is NAMED so it cannot pass for authority. |
+| **What it drove** | `heightFt → Kz → qz → net uplift → uplift per attachment → attachment count and spacing` on PV-4C and PE-1. |
+| **Measured** | Exposure C at 115 mph: qz **24.46 psf at 15 ft, 27.05 at 25 ft, 29.93 at 35 ft**. Every building over one storey was analysed **10–22 % low**. On the Braidon fixture with a 23.1 ft building, uplift per attachment goes **453 → 500 lbs**. |
+| **Why nothing caught it** | Every structural fixture in the repo pins 15 ft. And `lib/version.ts` already claims *"meanRoofHeight wired to ASCE 7-22 Kz calc (was hardcoded 15 ft)"* — true of the engineering page, false of the permit. A wrong changelog had talked the fix out of existence. |
+| **🚨 DECISION REQUIRED** | **Any PE approval already granted was granted on the lower number**, and the attachment schedule moves with it. Whether those packages are reissued, re-stamped or left alone is yours. |
+| **Also yours** | It moves the permit digest for any design that has a building model on file — the R3 question, now with a concrete case. |
+| **Blocked** | Nothing. The fix is in and the full structural/digest suite is green (271 tests). |
+| **NOT blocked** | Designs with no building model are **unchanged**: they still analyse at 15 ft, deliberately, so this did not silently re-price everything. What changed for them is that PV-4C now *says* the height is assumed, in the same amber the unverified-slope row uses. |
+| **Safe default applied** | A height that is an assumption reports itself as one; an out-of-range estimate is rejected with its reason rather than clamped. |
+
+### Two smaller things found alongside it, both still open
+
+- **The operator's own Structural-tab height cannot reach the permit at all.**
+  `app/engineering/page.tsx` has a mean-roof-height control (8–60 ft, with a
+  storey quick-select) and `meanRoofHeight` does not exist anywhere on
+  `PermitInput['project']`. Wiring it means editing
+  `app/api/engineering/permit/route.ts`, **which a peer session has uncommitted
+  changes in**, so I have left it alone. Until then the permit uses the modelled
+  building, not the number the operator typed — better than a literal, but still
+  not what they entered.
+- **`project.stories` is printed on the cover sheet and nothing populates it.**
+  `coverSheet.ts:360` renders a STORIES row; a repo-wide search finds no writer.
+  That row has always been blank.
 
 ---
 
