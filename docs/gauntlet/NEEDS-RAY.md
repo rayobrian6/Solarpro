@@ -37,24 +37,60 @@ Everything else has a safe default already applied or recorded.
 verified against a real database; full detail and the exact DDL in
 `docs/gauntlet/stage-schema-reachability.md`.
 
-### (a) `lib/migrations/027` can never run, and it blocks everything after it
+### 🚨 CORRECTION, 2026-09-26 — I NAMED THE WRONG FILE. The halt is at **003**.
+
+Everything below about 027 is still true, and the conclusion (*028–123 unreachable
+by `run-pending`*) is still true. But the **cause** was wrong, and it matters,
+because a fix aimed only at 027 would have moved the halt by exactly one file and
+looked like it worked.
+
+Executed against real PostgreSQL in-process (`tests/migrationRunnerHaltAndRecovery.postgres.test.ts`
+— PGlite, no credential, nothing run against any real database):
+
+> **Exactly TWO files apply. 001, 002. The third one stops it.**
+
+`lib/migrations/003_productions_enhancements.sql` declares
+
+```sql
+ALTER TABLE productions
+  ADD CONSTRAINT IF NOT EXISTS productions_project_id_unique UNIQUE (project_id);
+```
+
+**PostgreSQL has that form in no version** — `IF NOT EXISTS` exists for `ADD
+COLUMN`, `IF EXISTS` for `DROP CONSTRAINT`. And the file's own header comment
+asserts the opposite: *"ADD CONSTRAINT IF NOT EXISTS and ADD COLUMN IF NOT EXISTS
+(Postgres 9.1+)"*. A wrong comment is why it survived — the same way a wrong
+changelog hid the hardcoded 15 ft building height in R9. `042_utility_unique_site_aliases.sql`
+carries the same construct.
+
+So `run-pending` is not "blocked at 027 with 26 files of headroom". **It is dead
+after 002**, and every file from 003 onward — 027 included — has only ever been
+reachable through the per-identifier targeted path. That is why 107 and 113–123
+each needed their own hand-built action. **027 is never even attempted.**
+
+### (a) `lib/migrations/027` can never run either
 
 It declares `project_id TEXT` / `user_id TEXT` while `projects.id` and `users.id`
 are `UUID`, so PostgreSQL refuses the foreign key and the file rolls back — the
-table is not created at all. I verified this myself: base schema applied in the
-manifest's own order, then 027, and `to_regclass('project_micro_stages')` comes
-back null.
+table is not created at all. All four database states are now executed:
 
-`runPendingMigrations` stops on the first failure — *"don't continue applying out of
-order"* — so **a batch run halts at 027 and migrations 028 to 123 are unreachable by
-that path.** That matches the pattern of recent migrations each needing a hand-built
-targeted action instead. 027 sits below the historical baseline, which is why the
-governance suite's parity check never flagged it.
+| State | What 027 does |
+|---|---|
+| prerequisites absent | fails, creates nothing |
+| UUID keys, no table | the FK is refused; no table in any shape |
+| **the correct table already present** — what production is believed to hold | fails, and **the good table SURVIVES** (`micro_stage` intact, `stage` never added). **027 cannot corrupt an already-migrated environment.** |
+| TEXT keys | 027 **applies** — and creates `stage`/`substage`, which **no shipped query reads**. So "make 027 runnable" is not a fix; it would produce a table the product cannot use. |
+
+027 sits below the historical baseline, which is why the governance suite's parity
+check never flagged it.
 
 | | |
 |---|---|
-| **Decision required** | The disposition of 027: delete it, repair it to UUID, or baseline it. |
+| **Decision required** | The disposition of **003 first, then 027**. 003 is what actually blocks the batch. Its unique constraint can be expressed idempotently (`CREATE UNIQUE INDEX IF NOT EXISTS productions_project_id_unique ON productions(project_id)`), which `ON CONFLICT (project_id)` accepts — but see the row below. |
+| **🚨 Why I did NOT just fix 003** | Editing an applied migration changes its checksum, and `CHECKSUM_CONFLICT` then halts the batch for every environment where 003 is recorded applied — the exact "corrupting already-migrated environments" your brief rules out. There is no way to repair the file that is safe for both a fresh database and one that already ran it, without a ledger decision. That decision is yours. |
 | **Why it is yours** | Deleting or rewriting a migration file is a governance act on the schema ledger, and your standing rule is that you run migrations. |
+| **Already fixed, needing nothing from you** | The batch no longer steps over an **interrupted** migration (`f15aa257`). A crash between `markMigrationRunning` and `recordMigrationResult` leaves a row `running` for ever — nothing clears it — and `running` was excluded from `pending`, so the batch walked past the crashed file and applied later-numbered ones **on top of an indeterminate schema**. That is the out-of-order application the halt exists to prevent, through the one door the halt did not watch. It now refuses, names every stuck identifier, and applies nothing. |
+| **A second gap this exposed** | Nothing can clear a `running` row — no API action, no startup sweep. So an interrupted run is now *loudly* stuck instead of *silently* dangerous, which is the right direction, but an operator still needs a supported way to reconcile one. That is a new governed action, i.e. yours. |
 | **A real gap worth knowing** | `superseded` is the correct terminal ledger status for a file like this, and **no API action can set it.** Baselining it `NOT_APPLICABLE` writes only the baseline table, not `schema_migrations`, so 027 stays `pending` and `run-pending` still halts. So there is currently no supported way to retire it. |
 
 ### (b) The homeowner-stage / micro-stage schema is in the directory the runner does not scan
