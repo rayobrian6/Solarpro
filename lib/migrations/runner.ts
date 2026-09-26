@@ -163,6 +163,49 @@ function resolveManifestProvider(
  * @returns An object with bound inspectMigrationState, runSinglePendingMigration,
  *          and runPendingMigrations functions.
  */
+/**
+ * 🚨 THE BATCH MAY NOT STEP OVER AN INTERRUPTED MIGRATION.
+ *
+ * Returns the refusal sentence when any identifier is stuck in `running`, or null
+ * when the batch may proceed. Pure, and exported, so the decision can be tested
+ * without a database — the ledger read it depends on is not injectable.
+ *
+ * WHY IT EXISTS. `markMigrationRunning` writes `status='running'` BEFORE the DDL
+ * transaction and `recordMigrationResult` writes the terminal status after it. Kill
+ * the process in between — deploy timeout, OOM, dropped connection — and the row
+ * stays `running` for ever: the only writers of that column are those two
+ * functions, and nothing clears it.
+ *
+ * `inspectMigrationStateInternal` puts `running` into `running[]` and deliberately
+ * NOT into `pending[]` (unlike `failed`, which goes into both so it can be
+ * retried). So the batch loop never saw the crashed identifier and applied every
+ * LATER-numbered pending file on top of it — the exact out-of-order application
+ * the `if (failed > 0) break;` halt exists to prevent, arriving through the one
+ * door that halt does not watch.
+ *
+ * It is worse than an ordinary halt because the crashed migration's schema state is
+ * INDETERMINATE and the ledger cannot say which way: the DDL is one atomic
+ * transaction, so it either committed just before the process died or it did not,
+ * and the only trace either way is a `started` run-history row with no terminal
+ * partner. Applying 028 on top of "027 may or may not have happened" is not a risk
+ * worth taking to save an operator a click.
+ *
+ * Refusing applies NOTHING, so it can never corrupt an already-migrated
+ * environment — the property that matters most here. It also makes the batch agree
+ * with the single-migration path, which has always refused a `running` identifier
+ * (`ALREADY_RUNNING`); the two disagreeing is how this went unnoticed.
+ */
+export function refusalForInterruptedMigrations(running: readonly string[]): string | null {
+  if (!running || running.length === 0) return null;
+  const stuck = [...running].join(', ');
+  return `Migration(s) ${stuck} are recorded as RUNNING. A previous run was interrupted `
+    + `between starting the migration and recording its outcome, so whether their schema `
+    + `changes committed is unknown. No pending migration will be applied while that is `
+    + `true — applying later migrations on top of an indeterminate schema is exactly the `
+    + `out-of-order application this runner refuses. Reconcile the state of ${stuck} `
+    + `against the database and record its real outcome before running again.`;
+}
+
 export function createMigrationRunnerWithManifest(
   manifestProvider: MigrationManifestProvider,
 ): {
@@ -1668,6 +1711,46 @@ async function runPendingMigrationsInternal(
   let failed = 0;
   let skipped = 0;
   let conflicted = 0;
+
+  // ══ 🚨 A CRASHED MIGRATION MUST STOP THE BATCH, NOT BE WALKED PAST ═════════
+  //
+  // `markMigrationRunning` writes `status = 'running'` BEFORE the DDL transaction
+  // and `recordMigrationResult` writes the terminal status after it. Kill the
+  // process in between — a deploy timeout, an OOM, a lost connection — and the row
+  // stays `running` for ever. Nothing in this codebase ever clears it: the only
+  // writers of that column are those two functions.
+  //
+  // `inspectMigrationStateInternal` classifies `running` into `running[]` and
+  // deliberately NOT into `pending[]` (see the branch above, beside `failed`,
+  // which IS pushed to both so it can be retried). So this loop never saw the
+  // crashed identifier — and happily applied every LATER-numbered pending file on
+  // top of it. That is precisely the out-of-order application the `failed` halt
+  // three lines below exists to prevent, arriving through the one door that halt
+  // does not watch.
+  //
+  // It is worse than an ordinary halt because the crashed migration's schema state
+  // is INDETERMINATE and the ledger cannot say which: the DDL is one atomic
+  // transaction, so it either committed just before the process died or did not,
+  // and the only trace either way is a `started` run-history row with no terminal
+  // partner. Applying 028 on top of "027 may or may not have happened" is not a
+  // risk worth taking to save an operator one click.
+  //
+  // So the batch refuses, names the identifier, and stops. It applies NOTHING — a
+  // refusal can never corrupt an already-migrated environment, which is the
+  // property that matters here. This also makes the batch path agree with the
+  // single-migration path, which has always refused a `running` identifier
+  // (`ALREADY_RUNNING`); the two disagreeing is how this went unnoticed.
+  const _runningRefusal = refusalForInterruptedMigrations(state.running);
+  if (_runningRefusal) {
+    return {
+      applied: 0,
+      failed: 0,
+      skipped: state.applied.length,
+      conflicted: 0,
+      results: [],
+      fatalErrors: [_runningRefusal],
+    } as Awaited<ReturnType<typeof runPendingMigrationsInternal>>;
+  }
 
   // Apply limit if specified.
   const toRun = limit ? pendingIdentifiers.slice(0, limit) : pendingIdentifiers;
