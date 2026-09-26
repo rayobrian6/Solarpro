@@ -42,23 +42,83 @@ const DEFAULT_CONFIG = {
   itcRateResidential:   0,
 };
 
+// ── SECURITY: this route is in middleware's PUBLIC_PATHS, and must stay there ──
+// `app/proposals/view/[id]/page.tsx:178` fetches it from the HOMEOWNER share link,
+// which has no session — it is reached by share token. Requiring auth here would
+// make that fetch 401, and because the caller ends in `.catch(() => {})` the page
+// would silently fall through to hardcoded defaults and quote the customer a
+// different price. So the path stays public and the PAYLOAD is narrowed instead.
+//
+// What the share view actually reads off this config: `isCommercial`, the four
+// per-system-type sell prices, `pricePerWatt`, `loanApr`, `loanTermYears`. It never
+// reads a cost or a margin. Everything else in the config is the installer's
+// internal cost structure, and "anyone on the internet can GET /api/pricing and
+// read the labor cost, overhead percent and profit margin" is the finding.
+const PUBLIC_PRICING_FIELDS = [
+  'id',
+  'pricingMode',
+  'pricePerWatt',
+  'roofPricePerWatt',
+  'groundPricePerWatt',
+  'fencePricePerWatt',
+  'carportPricePerWatt',
+  'roofPricePerPanel',
+  'groundPricePerPanel',
+  'fencePricePerPanel',
+  'defaultPanelWattage',
+  'utilityEscalation',
+  'systemLife',
+  'isCommercial',
+  'itcRateCommercial',
+  'itcRateResidential',
+  'taxCreditRate',
+  'loanApr',
+  'loanTermYears',
+  'purchaseMode',
+  'updatedAt',
+] as const;
+
+/**
+ * Strip the installer's cost structure and margins from a config destined for an
+ * unauthenticated caller. Allowlist, not denylist: a field added to the config
+ * later is withheld by default rather than published by default.
+ */
+function toPublicPricing(config: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of PUBLIC_PRICING_FIELDS) {
+    if (key in config) out[key] = config[key];
+  }
+  return out;
+}
+
 /**
  * GET /api/pricing
  * Returns the active pricing configuration.
+ * Authenticated callers get the full config; unauthenticated callers (the
+ * homeowner share view) get the customer-facing sell prices only.
  * Falls back to defaults if DB table not yet created.
  */
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
+  // Cheap signature-only session check — no DB hit. We are deciding whether to
+  // include costs and margins, for which a validly signed session is sufficient;
+  // WRITES are separately gated on requireAdminApi below.
+  const { getUserFromRequest } = await import('@/lib/auth');
+  const viewer = getUserFromRequest(req);
+
+  const project = (config: Record<string, unknown>) =>
+    viewer ? config : toPublicPricing(config);
+
   try {
     const config = await getPricingConfig();
-    return NextResponse.json({
-      success: true,
-      data: config ?? { id: 'default', ...DEFAULT_CONFIG, updatedAt: new Date().toISOString() },
-    });
+    const resolved = (config ?? { id: 'default', ...DEFAULT_CONFIG, updatedAt: new Date().toISOString() }) as Record<string, unknown>;
+    return NextResponse.json({ success: true, data: project(resolved) });
   } catch (err) {
     console.error('[GET /api/pricing]', err);
+    // The fallback carries the same labor/overhead/margin defaults, so it needs
+    // the same projection — an error path must not become the leak.
     return NextResponse.json({
       success: true,
-      data: { id: 'default', ...DEFAULT_CONFIG, updatedAt: new Date().toISOString() },
+      data: project({ id: 'default', ...DEFAULT_CONFIG, updatedAt: new Date().toISOString() }),
     });
   }
 }

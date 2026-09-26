@@ -5,13 +5,51 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
-import { getUserFromRequest } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import db from '@/lib/db';
 import { getAllUnifiedPanels, getAllUnifiedInverters } from '@/lib/equipment-library';
 
 // Hardware/equipment data — merges engineering DB + user Equipment Library
 // GET returns unified panels (engineering specs + user pricing/dimensions)
+
+// ── SECURITY: the catalog behind POST/PUT/DELETE is PROCESS-GLOBAL ───────────
+// `lib/db.ts:915` is `const db = new Database()` at module scope, and its
+// `panels`/`inverters`/`batteries`/`mountings` Maps carry NO tenant key. GET
+// serves that one merged catalog to every organisation's Design Studio panel
+// picker, panel dimensions and per-watt pricing.
+//
+// So a mutation here is not a per-user edit — it is an edit to the catalog every
+// organisation designs with, on this server instance. Gating these three verbs on
+// a SESSION alone (the previous behaviour) meant Company B's engineer could PUT
+// `{type:'panel', id:'panel-std440', data:{width:9}}` and silently change Company
+// A's layouts and cost estimates, or DELETE the panel out of every org's picker.
+//
+// The only UI that mutates this route is `app/admin/hardware/page.tsx`; every
+// other caller (DesignSidebar, DesignStudio, DesignTab) is a GET. So requiring
+// admin costs the product nothing and is the same guard `app/api/pricing`
+// already applies to the other global row.
+//
+// 🚨 STILL OPEN, deliberately not papered over here: this makes the catalog
+// admin-only, NOT per-organisation, and `savePanel`/`updatePanel`/`deletePanel`
+// do not persist (unlike `saveProposal`, they never call `saveToFile`), so an
+// admin's change reverts at the next cold start. Durable per-owner storage means
+// moving onto the `user_equipment_*` tables from migration 005 — a schema-scoped
+// change tracked as a separate finding, not smuggled in behind a security gate.
+async function requireCatalogAdmin(req: NextRequest): Promise<NextResponse | null> {
+  const { requireAdminApi } = await import('@/lib/adminAuth');
+  const admin = await requireAdminApi(req);
+  if (!admin) {
+    return NextResponse.json(
+      { success: false, error: 'Admin role required to modify the shared equipment catalog.' },
+      { status: 403 },
+    );
+  }
+  const rl = await checkRateLimit('hardware', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+  }
+  return null;
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -38,13 +76,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = getUserFromRequest(req);
-    if (!user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
-
-    const rl = await checkRateLimit('hardware', getClientIp(req));
-    if (!rl.allowed) {
-      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
-    }
+    const denied = await requireCatalogAdmin(req);
+    if (denied) return denied;
 
     const body = await req.json();
     const { type, data } = body;
@@ -81,13 +114,8 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const user = getUserFromRequest(req);
-    if (!user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
-
-    const rl = await checkRateLimit('hardware', getClientIp(req));
-    if (!rl.allowed) {
-      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
-    }
+    const denied = await requireCatalogAdmin(req);
+    if (denied) return denied;
 
     const body = await req.json();
     const { type, id, data } = body;
@@ -126,13 +154,8 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const user = getUserFromRequest(req);
-    if (!user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
-
-    const rl = await checkRateLimit('hardware', getClientIp(req));
-    if (!rl.allowed) {
-      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
-    }
+    const denied = await requireCatalogAdmin(req);
+    if (denied) return denied;
 
     const body = await req.json();
     const { type, id } = body;
