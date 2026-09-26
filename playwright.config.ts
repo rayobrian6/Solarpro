@@ -8,6 +8,13 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 20_000 },
   fullyParallel: false,
+  // 🚨 ONE BROWSER AT A TIME ON A WORKSTATION.
+  // Every spec renders WebGL through SwiftShader — on the CPU, not the GPU —
+  // and Playwright's default is half the cores' worth of workers. On a 16-core
+  // box that was 8 software-3D browsers per run, and two agent sessions running
+  // the suite at once pinned the machine at 100% until it had to be rebooted.
+  // Override with PW_WORKERS=N when you really want more.
+  workers: process.env.CI ? undefined : Number(process.env.PW_WORKERS ?? 1),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : [['list']],
   use: {
@@ -21,7 +28,9 @@ export default defineConfig({
     extraHTTPHeaders: { 'X-Dev-Auth': 'bypass' },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    // 'retain-on-failure' still RECORDS every test (an ffmpeg per browser) and
+    // only deletes the passing ones afterwards — CI only.
+    video: process.env.CI ? 'retain-on-failure' : 'off',
     viewport: { width: 1440, height: 1000 },
     actionTimeout: 20_000,
     navigationTimeout: 45_000,
