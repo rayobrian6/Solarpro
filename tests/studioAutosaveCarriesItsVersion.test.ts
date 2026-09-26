@@ -95,16 +95,84 @@ describe('🚨 the studio holds a version and sends it back', () => {
   });
 
   it('🚨 the autosave states the version it was based on', () => {
-    // 🚨 ANCHORED TO THE AUTOSAVE'S OWN PAYLOAD. A first version of this just
+    // 🚨 ANCHORED TO THE AUTOSAVE'S OWN REQUEST. A first version of this just
     // searched the whole file, and deleting the token from the autosave left it
     // green — the unload beacon carries the same line, so the guard could not
     // tell the two writers apart and covered whichever one happened to survive.
-    const i = STUDIO.indexOf("console.log('[LAYOUT SAVE PAYLOAD]'");
-    expect(i, 'the autosave payload log moved — this guard is now blind').toBeGreaterThan(-1);
-    const start = STUDIO.lastIndexOf('destructive: site.pendingDestructive()', i);
-    expect(start).toBeGreaterThan(-1);
-    expect(STUDIO.slice(start, i), 'the studio still autosaves without saying what it was editing')
+    //
+    // It was then anchored to the payload OBJECT, between `destructive:` and the
+    // `[LAYOUT SAVE PAYLOAD]` log — and a correct change broke it. The token moved out
+    // of that object deliberately: the object is built well before the request leaves
+    // and is also what goes to localStorage, so a token stamped there was the version
+    // as it stood at BUILD time, which is how this tab came to refuse its own writes.
+    // The obligation is unchanged and the anchor now sits on the construct that
+    // actually carries it — the POST itself, which no other writer in this file
+    // shares: the beacon uses `navigator.sendBeacon` and the restore is a bare GET.
+    const i = STUDIO.indexOf('fetch(`/api/projects/${project.id}/layout`, {');
+    expect(i, 'the autosave POST moved — this guard is now blind').toBeGreaterThan(-1);
+    const end = STUDIO.indexOf('});', i);
+    expect(end, 'could not find the end of the autosave request').toBeGreaterThan(i);
+    expect(STUDIO.slice(i, end), 'the studio still autosaves without saying what it was editing')
       .toMatch(/expectedUpdatedAt:\s*site\.storedVersion\(\)/);
+  });
+
+  it('🚨 and reads that token INSIDE the queued turn, not before joining the queue', () => {
+    // 🚨 THIS IS THE WHOLE MECHANISM. Three paths in the studio write the one layouts
+    // row — the autosave, Calculate Production and the Save button — and sending two of
+    // them inside one round trip made them state the SAME version, so the server
+    // granted the first and refused the second as "saved somewhere else" with nothing
+    // else open. Queueing them fixes it only if each reads `storedVersion()` in its own
+    // turn; a token read before joining the queue is the same stale token, sent later.
+    //
+    // So: every `expectedUpdatedAt: site.storedVersion()` in this file must sit after
+    // an `enqueueLayoutWrite(` — except the unload beacon's, which cannot queue at all
+    // (`navigator.sendBeacon` is fire-and-forget at page death) and is documented as a
+    // deliberate trade-off at its call site.
+    //
+    // The behaviour itself is proven, mutation-tested, in tests/layoutWriteQueue.test.ts;
+    // this case is what notices a writer being added or unwrapped here.
+    const beacon = STUDIO.indexOf('navigator.sendBeacon(');
+    expect(beacon, 'the beacon is gone — if that is deliberate, revisit this case')
+      .toBeGreaterThan(-1);
+    const beaconPayload = STUDIO.lastIndexOf('const payload = JSON.stringify({', beacon);
+
+    // 🚨 BOTH SPELLINGS. The autosave and the Save button set the token as an object
+    // property (`expectedUpdatedAt: …`), Calculate Production assigns it onto a body it
+    // built earlier (`body.expectedUpdatedAt = …`). A needle matching only the property
+    // form silently exempted a whole writer — which is the failure this file's header
+    // is about.
+    const tokens: number[] = [];
+    const re = /expectedUpdatedAt(?::|\s*=)\s*site\.storedVersion\(\)/g;
+    for (let m = re.exec(STUDIO); m; m = re.exec(STUDIO)) {
+      // Skip the beacon's, which is between its payload and the sendBeacon call.
+      if (m.index > beaconPayload && m.index < beacon) continue;
+      tokens.push(m.index);
+    }
+    expect(tokens.length, 'fewer queued writers state a version than the three that write this row')
+      .toBeGreaterThanOrEqual(3);
+
+    for (const at of tokens) {
+      const queued = STUDIO.lastIndexOf('enqueueLayoutWrite(', at);
+      expect(queued, `a layout writer at ${at} reads its version outside the write queue`)
+        .toBeGreaterThan(-1);
+      // 🚨 AND IT IS STILL INSIDE THAT TURN. `lastIndexOf` alone would be satisfied by a
+      // token read anywhere AFTER some earlier queued block had already closed, which is
+      // exactly the hoisted-token bug wearing the right prefix. Brace depth answers it
+      // without depending on indentation: leaving the callback means the depth opened at
+      // `enqueueLayoutWrite(` has returned to zero. Comments are already stripped, and
+      // the braces inside `${…}` in a template literal balance out.
+      let depth = 0;
+      let closed = false;
+      for (const ch of STUDIO.slice(queued, at)) {
+        if (ch === '{' || ch === '(') depth += 1;
+        else if (ch === '}' || ch === ')') {
+          depth -= 1;
+          if (depth <= 0) { closed = true; break; }
+        }
+      }
+      expect(closed, `the queued turn closes before the version read at ${at} — the token is hoisted out of it`)
+        .toBe(false);
+    }
   });
 
   it('🚨 and so does the unload beacon — the one write with no UI to refuse into', () => {

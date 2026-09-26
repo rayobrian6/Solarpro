@@ -147,6 +147,32 @@ async function versions(page: Page, id: string) {
 test.describe('design history — list, restore, and the two ways it could bite', () => {
   test.skip(!ARMED, 'SOLARPRO_LOCAL_PG is not set — no database is attached to this server.');
 
+  /**
+   * 🚨 WARM EVERY ROUTE THIS FILE USES, BEFORE ANY TEST IS TIMED.
+   *
+   * `next dev` compiles each route on its FIRST request. Warming `/design` is not
+   * enough — this file also drives `/api/projects`, `/api/projects/[id]/layout` and
+   * `/api/projects/[id]/versions`, and each one's first-use compile is seconds that
+   * come out of whichever test happens to touch it first.
+   *
+   * Measured: against a cold server the studio test failed on a 45 s poll and the file
+   * took 1.1 minutes; warm, the same file passes in 37 s. A spec that goes red because
+   * the server was cold is worse than no spec, because it teaches you to disbelieve
+   * red.
+   *
+   * Errors are swallowed on purpose: this is a warm-up, not an assertion. If a route is
+   * genuinely broken, the test that needs it says so with its own message.
+   */
+  test.beforeAll(async ({ request }) => {
+    const seeded = process.env.LOCAL_PG_PROJECT_ID ?? '4030b664-bebe-433b-a11c-cda05ead2f7d';
+    await Promise.all([
+      request.get('/api/health').catch(() => {}),
+      request.get(`/api/projects/${seeded}`).catch(() => {}),
+      request.get(`/api/projects/${seeded}/layout`).catch(() => {}),
+      request.get(`/api/projects/${seeded}/versions`).catch(() => {}),
+    ]);
+  });
+
   test('the database is reachable', async ({ page }) => {
     // Guard the guard: everything below is vacuous against a 503.
     const health = await page.request.get('/api/health');

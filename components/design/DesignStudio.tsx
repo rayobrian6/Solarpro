@@ -90,6 +90,12 @@ import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatRise12 } from '@/lib/3d/pitchFormat';
+// 🚨 ONE TAB, ONE LAYOUTS-ROW WRITE AT A TIME. Three paths in this file write the same
+// row — the autosave, the Save button and Calculate Production — and each states the
+// version it was based on. Sent concurrently they state the SAME version, so the
+// server correctly refuses the second one and tells the operator their design "was
+// saved somewhere else" with nothing else open. See lib/design/layoutWriteQueue.ts.
+import { enqueueLayoutWrite } from '@/lib/design/layoutWriteQueue';
 
 interface Props {
   project: Project;
@@ -1402,16 +1408,19 @@ export default function DesignStudio({ project, onSave }: Props) {
       // empty. Minted only by `applyDelete`; cleared only after the save it
       // authorised has actually succeeded. See lib/design/deletionAuthority.ts.
       destructive: site.pendingDestructive() ?? undefined,
-      // 🚨 THE VERSION THIS EDIT WAS BASED ON. The server turns it into an
-      // atomic claim and refuses the save outright if the row has moved on —
-      // another tab, another device, or the same person in two windows. Before
-      // this, the second save simply won and the first person's work was gone
-      // with nothing to notice it by.
+      // 🚨 `expectedUpdatedAt` IS DELIBERATELY NOT HERE — see the fetch below.
       //
-      // Read from the hook rather than kept as a local copy: `storedVersion()`
-      // is updated both on hydrate and on every successful save, and a
-      // studio-local shadow of it is exactly how the two drift apart.
-      expectedUpdatedAt: site.storedVersion() ?? undefined,
+      // The version this edit was based on is what the server turns into an atomic
+      // claim, refusing the save outright if the row has moved on: another tab, another
+      // device, or the same person in two windows. Before it existed the second save
+      // simply won and the first person's work was gone with nothing to notice it by.
+      //
+      // But this object is built well before the request is sent, and it is also what
+      // goes to localStorage. A token stamped here would be the version as it stood at
+      // BUILD time, which is exactly the stale token that made this tab refuse its own
+      // writes. It is read instead inside the queued turn that sends it, from the hook
+      // rather than a local copy — `storedVersion()` is updated on hydrate and on every
+      // successful save, and a studio-local shadow of it is how the two drift apart.
     };
     // STEP 1 -- LAYOUT SAVE LOGGING
     // Report what is actually WRITTEN for the ACTIVE property, and separately
@@ -1449,28 +1458,43 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     setSaveStatus('saving');
     try {
-      const res = await fetch(`/api/projects/${project.id}/layout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      // 🚨 SEND AND ADOPT IN ONE QUEUED TURN — the adoption is INSIDE the critical
+      // section on purpose. If only the request were queued, the slot would free the
+      // instant the response arrived and the next write would read `storedVersion()`
+      // while the adoption below was still an await away: two writes, one token, and
+      // the same self-refusal the queue exists to remove. The token is likewise read
+      // here rather than in the payload above, because a token read before joining the
+      // queue is just a stale token sent later.
+      const res = await enqueueLayoutWrite(async () => {
+        const sent = await fetch(`/api/projects/${project.id}/layout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...payload,
+            expectedUpdatedAt: site.storedVersion() ?? undefined,
+          }),
+        });
+        if (sent.ok) {
+          // 🚨 ADOPT THE VERSION THIS SAVE PRODUCED, or the next one is refused
+          // by this one. The row's `updated_at` moves on every write, so the
+          // token this tab holds is stale the instant its own save lands. Without
+          // this line the first autosave succeeds, the second is told the design
+          // was saved somewhere else, and the studio wedges behind a permanent
+          // refusal badge — with the concurrency control working exactly as
+          // designed, against its own author.
+          try {
+            const saved = await sent.clone().json() as { data?: { updatedAt?: unknown } };
+            site.noteSavedVersion(saved?.data?.updatedAt as string | undefined);
+          } catch {
+            // A success whose body will not parse leaves the token alone. The
+            // next save then states the version it genuinely last knew about,
+            // which is refused rather than allowed to overwrite blindly — the
+            // safe direction for an unreadable answer.
+          }
+        }
+        return sent;
       });
       if (res.ok) {
-        // 🚨 ADOPT THE VERSION THIS SAVE PRODUCED, or the next one is refused
-        // by this one. The row's `updated_at` moves on every write, so the
-        // token this tab holds is stale the instant its own save lands. Without
-        // this line the first autosave succeeds, the second is told the design
-        // was saved somewhere else, and the studio wedges behind a permanent
-        // refusal badge — with the concurrency control working exactly as
-        // designed, against its own author.
-        try {
-          const saved = await res.clone().json() as { data?: { updatedAt?: unknown } };
-          site.noteSavedVersion(saved?.data?.updatedAt as string | undefined);
-        } catch {
-          // A success whose body will not parse leaves the token alone. The
-          // next save then states the version it genuinely last knew about,
-          // which is refused rather than allowed to overwrite blindly — the
-          // safe direction for an unreadable answer.
-        }
         // 🚨 CONSUMED ON SUCCESS, NOT ON SEND. An authorization cleared when the
         // request left would be gone by the time a failed save is retried, and
         // the retry would then be refused for the very deletion the user
@@ -4683,23 +4707,32 @@ export default function DesignStudio({ project, onSave }: Props) {
       // project hydrates it back (engineering audit C2 — was local-only/dropped).
       if (selectedInverter) body.selectedInverter = selectedInverter;
       if (selectedPanel) body.selectedPanel = selectedPanel;
-      // 🚨 THIS ROUTE WRITES THE LAYOUTS ROW, SO IT STATES ITS VERSION.
+      // 🚨 THIS ROUTE WRITES THE LAYOUTS ROW, SO IT STATES ITS VERSION — set inside the
+      // queued turn below, not here, so the token is the one that is current when the
+      // request actually leaves. `app/api/production/route.ts` passes it through to
+      // `upsertLayout`, so this path carries the same atomic claim as the autosave and a
+      // genuine two-tab collision is refused rather than last-write-wins. The refusal's
+      // own sentence reaches the operator through the `data.error` toast below.
+      // 🚨 QUEUED WITH THE AUTOSAVE, because they write the SAME ROW. This route runs a
+      // PVWatts simulation, so it is in flight for a good while, and the design change
+      // that made the operator press Calculate has already started the autosave's
+      // debounce. Both requests would state the version this tab held when they left,
+      // the server would grant the first and refuse the second, and the operator would
+      // be told their design "was saved somewhere else" with nothing else open — losing
+      // either the production result or the autosaved edit. Measured in the dev log:
+      // a 200 and a 409 from one tab, four panels either way.
       //
-      // Adopting the version it returns (below) fixes this tab conflicting with
-      // ITSELF. It does nothing about conflicting with somebody else: without a
-      // precondition the route's write is unconditional, so a genuine two-tab
-      // collision here is still last-write-wins — the behaviour the autosave path
-      // was fixed to stop. The refusal's own sentence reaches the operator through
-      // the `data.error` toast in the failure branch.
-      body.expectedUpdatedAt = site.storedVersion() ?? undefined;
-      const res = await fetch('/api/production', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (data.success) {
-        // 🚨 THIS ROUTE WRITES THE LAYOUTS ROW TOO, SO IT MOVED OUR VERSION.
+      // The token read and the adoption both sit inside the queued turn: releasing the
+      // slot before `noteSavedVersion` has run would hand the next writer the old token.
+      const data = await enqueueLayoutWrite(async () => {
+        body.expectedUpdatedAt = site.storedVersion() ?? undefined;
+        const sent = await fetch('/api/production', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const parsed = await sent.json();
+        // 🚨 ADOPT THE VERSION THIS WRITE PRODUCED, INSIDE THE QUEUED TURN.
         //
         // Found in a real browser: place a chimney, and the save carrying it was
         // refused with LAYOUT_STALE_WRITE — "this design was saved somewhere else"
@@ -4710,7 +4743,10 @@ export default function DesignStudio({ project, onSave }: Props) {
         // the write that was REFUSED was the one carrying the hand-placed object:
         // the modules cleared on screen and the row kept a pruned array with no
         // chimney in it.
-        site.noteSavedVersion(data.data.layout?.updatedAt);
+        if (parsed?.success) site.noteSavedVersion(parsed.data.layout?.updatedAt);
+        return parsed;
+      });
+      if (data.success) {
         setProduction(data.data.production);
         setCostEstimate(data.data.costEstimate);
         const annualKwh = data.data.production?.annualProductionKwh ?? 0;
@@ -4790,34 +4826,43 @@ export default function DesignStudio({ project, onSave }: Props) {
       const layout = buildLayout();
       // Save to localStorage immediately before server call
       localSaveLayout(project.id, { panels, mapCenter: mapCenterRef.current, mapZoom: zoomRef.current, systemType: project.systemType });
-      const res = await fetch('/api/production', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // Persist the inverter/panel selection with the layout. upsertProduction
-        // saves them and getProjectById hydrates them back onto the project, so
-        // engineering/permit see the choice. Without this the picks were
-        // local-only and silently discarded (engineering audit C2).
-        body: JSON.stringify({
-          projectId: project.id,
-          layout,
-          selectedInverter: selectedInverter ?? undefined,
-          selectedPanel: selectedPanel ?? undefined,
-          // The Save button lands on this route, so a confirmed deletion has to
-          // be able to authorise itself here too. See the autosave path.
-          destructive: site.pendingDestructive() ?? undefined,
-          // Same obligation as the Calculate path: this route writes the layouts
-          // row, so it says which version it was based on rather than overwriting
-          // whatever is there.
-          expectedUpdatedAt: site.storedVersion() ?? undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
+      // 🚨 QUEUED, like the autosave and Calculate — all three write the one layouts
+      // row. Pressing Save while the autosave's debounce is still running used to send
+      // two writes stating the same version, and the server granted one and refused the
+      // other as "saved somewhere else". See lib/design/layoutWriteQueue.ts.
+      const data = await enqueueLayoutWrite(async () => {
+        const sent = await fetch('/api/production', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // Persist the inverter/panel selection with the layout. upsertProduction
+          // saves them and getProjectById hydrates them back onto the project, so
+          // engineering/permit see the choice. Without this the picks were
+          // local-only and silently discarded (engineering audit C2).
+          body: JSON.stringify({
+            projectId: project.id,
+            layout,
+            selectedInverter: selectedInverter ?? undefined,
+            selectedPanel: selectedPanel ?? undefined,
+            // The Save button lands on this route, so a confirmed deletion has to
+            // be able to authorise itself here too. See the autosave path.
+            destructive: site.pendingDestructive() ?? undefined,
+            // Same obligation as the Calculate path: this route writes the layouts
+            // row, so it says which version it was based on rather than overwriting
+            // whatever is there — read HERE, inside the queued turn, so it is the
+            // version that is current when the request leaves.
+            expectedUpdatedAt: site.storedVersion() ?? undefined,
+          }),
+        });
+        const parsed = await sent.json();
         // Same obligation as the Calculate path above: this route writes the
         // layouts row, so it moved the version this tab must state next. Without
         // adopting it, the very next autosave is refused as somebody else's — and
-        // the refusal badge is permanent by design.
-        site.noteSavedVersion(data.data.layout?.updatedAt);
+        // the refusal badge is permanent by design. Inside the queued turn, so the
+        // next writer cannot read the old token while this await is pending.
+        if (parsed?.success) site.noteSavedVersion(parsed.data.layout?.updatedAt);
+        return parsed;
+      });
+      if (data.success) {
         site.clearPendingDestructive();
         setProduction(data.data.production);
         setCostEstimate(data.data.costEstimate);

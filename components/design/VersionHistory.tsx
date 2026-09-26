@@ -55,6 +55,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { History, RotateCcw, AlertTriangle, Loader, X } from 'lucide-react';
+import { enqueueLayoutWrite } from '@/lib/design/layoutWriteQueue';
 
 /** One row of the list route's response. `snapshot` is not loaded for a list. */
 interface VersionRow {
@@ -166,15 +167,24 @@ export function VersionHistory({
   const restore = useCallback(async (row: VersionRow) => {
     setBusy(true); setRefusal(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/versions/${row.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // 🚨 The precondition. Omitting it would let a restore from a stale
-          // panel overwrite a newer save silently.
-          expectedUpdatedAt: storedVersion() ?? undefined,
-        }),
-      });
+      // 🚨 QUEUED BEHIND THIS TAB'S OTHER WRITES. A restore writes the same layouts row
+      // the autosave writes, and the refusal documented below — the operator's own
+      // in-flight autosave moving the row while this panel sits open — is a race, not a
+      // conflict. Waiting for that autosave to land and then stating the version it
+      // produced turns a spurious refusal into the restore the operator actually asked
+      // for. A genuinely stale panel is unaffected: another tab's write never enters
+      // this tab's queue, so it is still refused below. See lib/design/layoutWriteQueue.
+      const res = await enqueueLayoutWrite(() => fetch(
+        `/api/projects/${projectId}/versions/${row.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            // 🚨 The precondition. Omitting it would let a restore from a stale
+            // panel overwrite a newer save silently. Read inside the queued turn so
+            // it is the version current when the request leaves.
+            expectedUpdatedAt: storedVersion() ?? undefined,
+          }),
+        }));
       const body = await res.json().catch(() => null) as
         { success?: boolean; error?: string; data?: Record<string, unknown> } | null;
 
