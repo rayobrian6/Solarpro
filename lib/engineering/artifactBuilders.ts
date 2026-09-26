@@ -3,8 +3,11 @@
 // Server-side artifact content generators.
 //
 // Used by:
-//   - /api/engineering/save-outputs  (called after runCalc)
-//   - /api/pipeline/run              (called by RUN PROJECT PIPELINE)
+//   - lib/engineering/syncPipeline.ts (layout save, bill-upload provision,
+//     GET /api/engineering/sync-pipeline, /api/pipeline/run)
+//   /api/engineering/save-outputs does NOT use these builders — it writes
+//   its own files from the engineering page's live calc, including the
+//   permit-grade SLD (see pipelineFileName for why the names must differ).
 //
 // All builders take an EngineeringReport and return plain-text /
 // CSV / SVG strings suitable for storage in project_files table.
@@ -321,6 +324,62 @@ export function buildSystemEstimateText(input: ArtifactBuildInput): string {
   ].join('\n');
 }
 
+// ── File names ────────────────────────────────────────────────
+// Sanitises a client name for the pipeline's file names, e.g. "John Smith"
+// → "John_Smith". Moved here unchanged from syncPipeline so the collision
+// guarantee below can be tested without a database.
+export function pipelineClientSlug(clientName: string): string {
+  return clientName
+    .replace(/[^a-zA-Z0-9\s_-]/g, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .substring(0, 40) || 'Client';
+}
+
+// None of the pipeline's files is the project's engineering output. The
+// engineering page's /api/engineering/save-outputs stores its live calc as
+// `Engineering_Report_${name}.txt`, `SLD_${name}.svg`, `BOM_${name}.csv`,
+// `Permit_Packet_${name}.txt` and `System_Estimate_${name}.txt` — among them
+// the permit-grade SLD (combiner, CTs, the feeder neutral, the same render as
+// the Diagram tab, SLD PDF and E-1) and the page's real BOM. The pipeline used
+// to write the same five prefixes with `_${clientSlug}`, and for an ordinary
+// client ("John Smith") both sanitisers give the same name. Both writers
+// upsert ON CONFLICT (project_id, user_id, file_name), so every layout save,
+// bill-upload provision, pipeline run and engineering-page load replaced the
+// page's files in Client Files with the pipeline's: buildSldSvgFromReport's
+// generic PV → DC DISC → INVERTER → MSP picture over the real SLD, and a BOM
+// from report.equipmentSchedule — or, with none, a fallback naming IronRidge
+// racking and a fused DC disconnect whatever the system — over the page's.
+//
+// The hyphen is the guarantee, not decoration: save-outputs and
+// /api/engineering/preliminary build their names with
+// `replace(/[^a-z0-9]/gi, '_')` (the preliminary estimate from a kW number),
+// so neither can ever produce `_Pipeline-`. Each prefix stays because
+// consumers key on it: /api/pipeline/run reports its steps from
+// `startsWith('SLD_' | 'BOM_' | 'Permit_Packet_' | 'Engineering_Report_')`, and
+// Client Files files by `includes('SLD' | 'BOM' | 'Permit_Packet' |
+// 'Engineering_Report_' | 'Estimate')`. The permit route's `LIKE 'SLD_%.svg'`
+// lookup also matches the SLD, which is inert: E-1 discards storedSldSvg
+// (pageSingleLineDiagram), and this file begins `<?xml`, which that route's
+// `<svg` check rejects.
+export type PipelineArtifactPrefix =
+  | 'Engineering_Report'
+  | 'SLD'
+  | 'BOM'
+  | 'Permit_Packet'
+  | 'System_Estimate';
+
+export function pipelineFileName(prefix: PipelineArtifactPrefix, clientSlug: string, ext: string): string {
+  return `${prefix}_Pipeline-${clientSlug}.${ext}`;
+}
+
+// The name the pipeline wrote the same file under before the rename — for an
+// ordinary client, the page's own name. syncPipeline retires the rows there
+// that still hold the pipeline's content (see ArtifactFile.retiresFileName).
+export function legacyPipelineFileName(prefix: PipelineArtifactPrefix, clientSlug: string, ext: string): string {
+  return `${prefix}_${clientSlug}.${ext}`;
+}
+
 // ── Build all 5 artifacts at once ────────────────────────────
 export interface ArtifactFile {
   fileName: string;
@@ -328,41 +387,52 @@ export interface ArtifactFile {
   mimeType: string;
   content:  string;
   notes:    string;
+  // The name this file was written under before the pipeline's names moved
+  // off the page's (see pipelineFileName). A row there still carrying `notes`
+  // is the pipeline's own stale copy — save-outputs always overwrites notes
+  // with its own — and nothing else refreshes it any more.
+  retiresFileName: string;
 }
 
 export function buildAllArtifacts(input: ArtifactBuildInput): ArtifactFile[] {
   const { clientSlug } = input;
+  // One prefix/extension pair per file, so a file's new name and the old name
+  // it retires can never disagree about which file they are.
+  const named = (prefix: PipelineArtifactPrefix, ext: string) => ({
+    fileName:        pipelineFileName(prefix, clientSlug, ext),
+    retiresFileName: legacyPipelineFileName(prefix, clientSlug, ext),
+  });
   return [
     {
-      fileName: `Engineering_Report_${clientSlug}.txt`,
+      ...named('Engineering_Report', 'txt'),
       fileType: 'engineering',
       mimeType: 'text/plain',
       content:  buildEngineeringReportText(input),
       notes:    'Engineering report — pipeline run',
     },
     {
-      fileName: `SLD_${clientSlug}.svg`,
+      ...named('SLD', 'svg'),
       fileType: 'engineering',
       mimeType: 'image/svg+xml',
       content:  buildSldSvgFromReport(input),
       notes:    'Single-line diagram — pipeline run',
     },
     {
-      fileName: `BOM_${clientSlug}.csv`,
+      ...named('BOM', 'csv'),
       fileType: 'engineering',
       mimeType: 'text/csv',
       content:  buildBomCsvFromReport(input),
       notes:    'Bill of materials — pipeline run',
     },
     {
-      fileName: `Permit_Packet_${clientSlug}.txt`,
+      ...named('Permit_Packet', 'txt'),
       fileType: 'engineering',
       mimeType: 'text/plain',
       content:  buildPermitPacketText(input),
       notes:    'Permit packet — pipeline run',
     },
     {
-      fileName: `System_Estimate_${clientSlug}.txt`,
+      ...named('System_Estimate', 'txt'),
       fileType: 'engineering',
       mimeType: 'text/plain',
       content:  buildSystemEstimateText(input),

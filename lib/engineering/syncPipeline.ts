@@ -25,7 +25,7 @@ import {
   generateReportId,
   isEngineeringReportStale,
 } from './db-engineering';
-import { buildAllArtifacts } from './artifactBuilders';
+import { buildAllArtifacts, pipelineClientSlug } from './artifactBuilders';
 import type { EngineeringReport, DesignSnapshot } from './types';
 
 // ── Return type ───────────────────────────────────────────────────────────────
@@ -516,12 +516,11 @@ export async function syncProjectPipeline(
     const clientId  = project.clientId ?? null;
     const clientName = project.client?.name ?? project.name ?? 'Client';
 
-    // Sanitize client name for filenames
-    const clientSlug = clientName
-      .replace(/[^a-zA-Z0-9\s_-]/g, '')
-      .trim()
-      .replace(/\s+/g, '_')
-      .substring(0, 40) || 'Client';
+    // Sanitize client name for filenames. Every file this writes is named by
+    // pipelineFileName so it can never land on one of the engineering page's
+    // save-outputs files — its permit-grade SLD and real BOM among them
+    // (see artifactBuilders).
+    const clientSlug = pipelineClientSlug(clientName);
 
     const reportDate = new Date().toLocaleDateString('en-US', {
       month: 'long', day: 'numeric', year: 'numeric',
@@ -554,6 +553,40 @@ export async function syncProjectPipeline(
       } else {
         console.error('[ARTIFACT_WRITE_FAILED]', { projectId, fileName: artifact.fileName });
         errors.push(`Artifact write failed: ${artifact.fileName}`);
+      }
+    }
+
+    // Retire the copies the pipeline wrote under its old names. Nothing
+    // refreshes them any more. Where the page's name is the same one, the
+    // generic copy holds the page's slot until its next save-outputs; wherever
+    // the two diverge it would sit in Client Files for ever, stale, beside the
+    // fresh `_Pipeline-` file and the page's own. They diverge more often than
+    // it looks — the sanitisers differ ("Dr. Smith" is Dr_Smith here and
+    // Dr__Smith there; "&", ",", runs of spaces and names over 40 characters
+    // likewise), the names come from different sources (project.client?.name
+    // here, the page's config.clientName there), and save-outputs skips the
+    // SLD and BOM when it has none to write.
+    //
+    // The notes guard is what makes this safe: save-outputs always overwrites
+    // `notes` with its own text, so a row still carrying a pipeline note was
+    // last written by the pipeline and holds nothing the page produced.
+    // Matching names and notes as two sets rather than as pairs is therefore
+    // harmless — no other writer sets any of these notes. Only files whose
+    // replacement was just written are retired, so a failed write never
+    // leaves one missing.
+    const retire = artifacts.filter(a => writtenFiles.includes(a.fileName));
+    if (retire.length > 0) {
+      try {
+        await sql`
+          DELETE FROM project_files
+          WHERE project_id = ${projectId}
+            AND user_id    = ${userId}
+            AND file_name  = ANY(${retire.map(a => a.retiresFileName)})
+            AND notes      = ANY(${retire.map(a => a.notes)})
+        `;
+      } catch (retireErr: unknown) {
+        // Non-fatal — the new files are written, and the next sync retries.
+        console.warn('[syncPipeline] retiring pre-rename artifacts failed:', (retireErr as Error).message);
       }
     }
 
