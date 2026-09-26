@@ -19,7 +19,7 @@ Last updated: 2026-09-25.
 | **R3** | Two engineering repairs would move the permit digest, which retires live PE approvals | Those two only |
 | **R6** | A geocoder overwrites a coordinate a human deliberately set — **measured at 2.79 km and 28 m** — and that coordinate decides which property owns the design | Nothing, but it has been silently breaking things |
 | **R7** | The roof has no building-elevation sheet, so modelled wall and ridge heights reach no drawing | A roof elevation sheet only |
-| **R5** | Two new things to try in Dev — not a decision, but live acceptance overrides tests | Nothing |
+| **R5** | **Three things to try in Dev** — not a decision, but live acceptance overrides tests. The GHOST MODULE PREVIEW is first: its riskiest property could not be measured here at all | Nothing |
 
 **R8 and R1 are the two that matter most.** R8 because a batch migration run cannot
 get past file 027 today, and R1 because rotation is the only remedy for a leak.
@@ -183,12 +183,43 @@ and is queued separately.
 
 ---
 
-## R5 — Two new things to try in Dev (live acceptance, not a decision)
+## R5 — Three things to try in Dev (live acceptance, not a decision)
 
-Not a blocker and nothing waits on it — but **live acceptance overrides tests**,
-so neither of these is finished until you have used it.
+Not a blocker and nothing waits on it — but **live acceptance overrides tests**, so none
+of these is finished until you have used it. Ordered by how likely I think they are to be
+wrong, worst first.
 
-**1. Move a roof corner.** Press `V`, or pick Move Corner in the tool palette,
+---
+
+### 🚨 1. The ghost module preview — START HERE, it has the riskiest unproven property
+
+Arm the module tool and move the cursor over a roof. A translucent module should follow
+it, already lying on the plane of the face beneath, amber-outlined when no traced face
+owns that surface.
+
+**The single thing to watch: does the ghost HOLD STILL under the cursor?** If it creeps
+toward the camera as you move the mouse — one mount-stack per move — then the fix for a
+self-referential pick did not take effect on the browser's pinned Cesium 1.114, and the
+ratchet is live. The mechanism: the engine renders the scene with translucent depth
+included in picks, so a translucent ghost is picked as the surface that positions it. The
+resolve turns that off for its one read and restores it; that was verified by reading the
+installed Cesium source, **not** by measurement, because software WebGL does not
+rasterise the scene here — screenshots come back blank and picks return nothing.
+
+Nothing about how it LOOKS is proven: not that it renders at all, not its size, pitch or
+heading on screen, not that it sits above the roof rather than inside it, and not the
+frame cost. First real use is the first end-to-end exercise.
+
+Also worth one deliberate try: **click a module that sits within about 4 m of a tree.** It
+should select the MODULE now. Before today a tree's 4.0 m bounding sphere took the click
+in any direction — even from behind a module — and the handler then cleared the
+selection, so modules near a tree were unselectable, unmovable and undeletable.
+
+---
+
+### 2. Move a roof corner
+
+Press `V`, or pick Move Corner in the tool palette,
 then drag one corner of a traced roof face. One vertex, one *standalone* face,
 in-plane only; a face owned by a building section refuses with a reason on
 screen, which is deliberate.
@@ -207,7 +238,9 @@ end-to-end exercise:
   byte-identical in the permit record. That is guarded, but the guard is a unit
   test and you are the roof.
 
-**2. Design history.** There is now a **History** button beside Save. A snapshot
+### 3. Design history
+
+There is now a **History** button beside Save. A snapshot
 has been written on every save for a long time and nothing in the product could
 reach one — so a bad save had no way back. The list shows each version's module
 count and system size, not just a date, and restoring asks first.
